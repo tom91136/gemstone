@@ -5,6 +5,13 @@
 specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~"cts/opencl/vectors/vec_align_struct*"~"cts/opencl/vectors/vec_align_packed_struct*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"cts/opencl/basic/async_*"~"cts/opencl/basic/prefetch"~"cts/opencl/basic/astype"~"cts/opencl/basic/hiloeo"~"cts/opencl/basic/explicit_s2v"~"cts/opencl/relationals/shuffle_*"~"Tests the API for sycl::handler::copy*"~"group_async_work_group_copy_core"~"*WideTypes*"']
 exclude_programs = [
   "opencl_cts_buffers",
+  "opencl_cts_cl_copy_images",
+  "opencl_cts_cl_fill_images",
+  "opencl_cts_cl_get_info",
+  "opencl_cts_cl_read_write_images",
+  "opencl_cts_image_streams",
+  "opencl_cts_kernel_image_methods",
+  "opencl_cts_samplerless_reads",
   "opencl_cts_c11_atomics",
   "opencl_cts_contractions",
   "opencl_cts_device_partition",

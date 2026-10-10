@@ -199,10 +199,12 @@ private object fixtures extends munit.Assertions {
       slices: Int = 1,
       volume: Boolean = false,
       samples: Int = 1,
-      swizzle: Option[Vec[Int]] = None
+      swizzle: Option[Vec[Int]] = None,
+      rowPitch: Option[Long] = None
   ) {
     def size: Int = ImageDescriptor.Layout.LevelTable + levels.size * ImageDescriptor.Layout.LevelBytes +
-      swizzle.fold(0)(_ => ImageDescriptor.Layout.SwizzleBytes)
+      swizzle.fold(0)(_ => ImageDescriptor.Layout.SwizzleBytes) +
+      rowPitch.fold(0)(_ => ImageDescriptor.Layout.PitchBytes)
   }
 
   /** Writes `view` and returns the relocation that points its texel pointer at `texels`. */
@@ -223,7 +225,7 @@ private object fixtures extends munit.Assertions {
     put(
       Layout.Format,
       view.format.toLong | Flags.LevelTable | (if (view.volume) Flags.Volume else 0L) |
-        (if (view.swizzle.nonEmpty) Flags.Swizzle else 0L)
+        (if (view.swizzle.nonEmpty) Flags.Swizzle else 0L) | (if (view.rowPitch.nonEmpty) Flags.Pitched else 0L)
     )
     put(Layout.TexelBytes, view.texelBytes, 8)
     put(Layout.Levels, view.levels.size.toLong)
@@ -236,6 +238,7 @@ private object fixtures extends munit.Assertions {
     }
     val table = Layout.LevelTable + view.levels.size * Layout.LevelBytes
     view.swizzle.foreach(_.zipWithIndex.foreach((component, lane) => put(table + lane * 4, component.toLong)))
+    view.rowPitch.foreach(put(table + view.swizzle.fold(0)(_ => Layout.SwizzleBytes), _, 8))
     KernelTask.PointerRelocation(
       KernelTask.RelocationSource.Memory(region),
       (offset + Layout.Texels).toLong.refine[Long >= 0].value,

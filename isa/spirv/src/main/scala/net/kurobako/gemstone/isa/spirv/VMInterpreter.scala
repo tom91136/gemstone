@@ -6,6 +6,7 @@ import VMProgram.*
 import VMShaderInterface.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -14,6 +15,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
@@ -65,28 +67,51 @@ private object VMInterpreter {
       layout: Layout,
       include: Int => Boolean
   ): Either[Fault, Map[Int, VMValue]] =
-    program.globalImages(include).flatMap(_.foldLeft[Either[Fault, Map[Int, VMValue]]](Right(Map.empty)) {
-      case (result, (variable, global, bytes)) =>
+    program.globalImages(include).flatMap { images =>
+      images.foldLeft[Either[Fault, Map[Int, VMValue]]](Right(Map.empty)) { (result, image) =>
         result.flatMap { values =>
+          val global  = image.global
           val pointee = program.pointerPointee(global.pointerType)
-          val pointer = program.globalBinding(variable) match {
+          val pointer = program.globalBinding(image.variable) match {
             case Some(binding) =>
               memory.address(binding.region, binding.offset).map(address =>
                 Pointer(address.raw, pointee, global.storageClass)
               )
-            case None => layout.append(bytes, program.typeAlignment(pointee).raw).map { address =>
+            case None => layout.append(image.bytes, program.typeAlignment(pointee).raw).map { address =>
                 val bounded = program.vulkan && global.storageClass == StorageClass.Private
                 Pointer(
                   address,
                   pointee,
                   global.storageClass,
-                  Option.when(bounded)(address -> (address + bytes.length))
+                  Option.when(bounded)(address -> (address + image.bytes.length))
                 )
               }
           }
-          pointer.map(value => values.updated(variable, VMValue.Address(global.pointerType, value)))
+          pointer.map(value => values.updated(image.variable, VMValue.Address(global.pointerType, value)))
         }
-    })
+      }.map { values =>
+        // Bound globals received their pointer words when bound.
+        for {
+          image <- images if program.globalBinding(image.variable).isEmpty
+          fixup <- image.fixups
+          case VMValue.Address(_, holder) <- values.get(image.variable)
+          case VMValue.Address(_, target) <- values.get(fixup.target)
+        } layout.patch(holder.address + fixup.offset, LittleEndian.toArray(target.address + fixup.addend, 8))
+        values
+      }
+    }
+
+  private def placeSamplers(program: VMProgram, layout: Layout): Either[Fault, Map[Int, VMValue]] =
+    program.samplerConstants.traverse { (id, typeId, words) =>
+      val bytes = Array.ofDim[Byte](words.size * 4)
+      words.zipWithIndex.foreach((word, index) => LittleEndian.write(word, bytes, index * 4, 4))
+      layout.append(bytes, 4).map(address =>
+        id -> VMValue.Address(
+          typeId,
+          Pointer(address, typeId, StorageClass.UniformConstant, Some(address -> (address + bytes.length)))
+        )
+      )
+    }.map(_.toMap)
 
   /** A builtin variable written into private storage at the start of each invocation. */
   private case class PrivateBuiltin(offset: Long >= 0, typeId: Int, builtin: Int)
@@ -100,12 +125,10 @@ private object VMInterpreter {
       workgroups: Workgroups,
       handler: Event => Either[Fault, Unit]
   ): Either[Fault, Unit] = {
-    val shader          = program.vulkanEntries.contains(dispatch.kernelName)
-    val arguments       = if (shader) argumentVariables(program, dispatch.kernelName) else Vec.empty[Int]
-    val expected        = if (shader) arguments.size else function.parameters.size
-    val globalLayout    = Layout(GlobalAperture)
-    val workgroupLayout = Layout(WorkgroupAperture)
-    val privateLayout   = Layout(PrivateAperture)
+    val shader       = program.vulkanEntries.contains(dispatch.kernelName)
+    val arguments    = if (shader) argumentVariables(program, dispatch.kernelName) else Vec.empty[Int]
+    val expected     = if (shader) arguments.size else function.parameters.size
+    val globalLayout = Layout(GlobalAperture)
     for {
       _ <- Either.cond(
         expected == dispatch.arguments.size,
@@ -114,39 +137,149 @@ private object VMInterpreter {
           s"SPIR-V entry point ${dispatch.kernelName} expects $expected arguments, received ${dispatch.arguments.size}"
         )
       )
-      initialGlobals <- placeGlobals(
+      placed <- placeGlobals(
         program,
         memory,
         globalLayout,
         storageClass => storageClass != StorageClass.Workgroup && storageClass != StorageClass.Private
       )
+      addressConstants <- program.addressConstants(placed)
+      samplers         <- placeSamplers(program, globalLayout)
+      initialGlobals = placed ++ addressConstants ++ samplers
       globalValues <-
         if (!shader) Right(initialGlobals)
         else descriptorValues(program, memory, arguments.zip(dispatch.arguments), initialGlobals)
-      privateGlobals   <- placeGlobals(program, memory, privateLayout, _ == StorageClass.Private)
-      workgroupGlobals <- placeGlobals(program, memory, workgroupLayout, _ == StorageClass.Workgroup)
-      privateBuiltins  <- privateBuiltins(program, dispatch.kernelName, shader, globalValues, privateLayout)
-      parameters       <-
+      storage  = Storage(memory, dispatch.pointerRelocations, globalLayout.result(), handler)
+      launcher = Launcher(program, memory, control, workgroups, globalValues, storage)
+      _ <- launcher.launch(function, dispatch, shader) { (workgroupLayout, privateLayout) =>
         if (shader) Right(Map.empty[Int, VMValue])
         else bindParameters(program, function, dispatch, memory, workgroupLayout, privateLayout)
-      template = program.registers(
-        globalValues ++ privateGlobals ++ workgroupGlobals ++ privateBuiltins.map(_._1) ++ parameters
-      )
-      _ <- run(
-        program,
-        function,
-        dispatch,
-        memory,
-        control,
-        workgroups,
-        globalValues,
-        template,
-        privateBuiltins.map(_._2),
-        privateLayout.result(),
-        workgroupLayout.result(),
-        Storage(memory, dispatch.pointerRelocations, globalLayout.result(), handler)
-      )
+      }
+      _ <- if (shader) Right(()) else launcher.drain()
     } yield ()
+  }
+
+  /** Launches kernels that share a dispatch's placed globals and storage: the dispatch itself, then the kernels its
+    * work-items enqueue.
+    */
+  private class Launcher(
+      program: VMProgram,
+      memory: AddressSpace,
+      control: TaskControl,
+      workgroups: Workgroups,
+      globalValues: Map[Int, VMValue],
+      storage: Storage
+  ) {
+    private lazy val entries = program.entryPoints.map(_.swap)
+
+    def launch(function: Function, dispatch: KernelTask, shader: Boolean)(
+        parameters: (Layout, Layout) => Either[Fault, Map[Int, VMValue]]
+    ): Either[Fault, Unit] = {
+      val workgroupLayout = Layout(WorkgroupAperture)
+      val privateLayout   = Layout(PrivateAperture)
+      for {
+        privateGlobals   <- placeGlobals(program, memory, privateLayout, _ == StorageClass.Private)
+        workgroupGlobals <- placeGlobals(program, memory, workgroupLayout, _ == StorageClass.Workgroup)
+        privateBuiltins  <- privateBuiltins(program, dispatch.kernelName, shader, globalValues, privateLayout)
+        bound            <- parameters(workgroupLayout, privateLayout)
+        template = program.registers(
+          globalValues ++ privateGlobals ++ workgroupGlobals ++ privateBuiltins.map(_._1) ++ bound
+        )
+        _ <- run(
+          program,
+          function,
+          dispatch,
+          memory,
+          control,
+          workgroups,
+          globalValues,
+          template,
+          privateBuiltins.map(_._2),
+          privateLayout.result(),
+          workgroupLayout.result(),
+          storage
+        )
+      } yield ()
+    }
+
+    /** Runs enqueued commands as their wait lists complete, until none remain. */
+    @tailrec final def drain(): Either[Fault, Unit] = {
+      val queue = storage.deviceQueue
+      val state = MemoryState(storage)
+      queue.next(state.write) match {
+        case Left(error)                  => Left(error)
+        case Right(None) if queue.isEmpty => Right(())
+        case Right(None)                  =>
+          Left(Fault.InvalidRequest("enqueued commands wait on events that never complete"))
+        case Right(Some(command)) =>
+          queue.begin(command)
+          val ran = command match {
+            case kernel: DeviceQueue.Command.Kernel => enqueued(kernel)
+            case _: DeviceQueue.Command.Marker      => Right(())
+          }
+          ran.flatMap(_ => queue.finish(command, state.write)) match {
+            case Left(error) => Left(error)
+            case Right(())   => drain()
+          }
+      }
+    }
+
+    private def enqueued(kernel: DeviceQueue.Command.Kernel): Either[Fault, Unit] =
+      for {
+        function <- program.functions.get(kernel.function)
+          .toRight(Fault.InvalidRequest(s"enqueued block %${kernel.function} has no function body"))
+        name <- entries.get(kernel.function)
+          .toRight(Fault.InvalidRequest(s"enqueued block %${kernel.function} is not a kernel"))
+        _ <- Either.cond(
+          function.parameters.size == kernel.locals.size + 1,
+          (),
+          Fault.InvalidRequest(s"enqueued block $name expects ${function.parameters.size - 1} local sizes")
+        )
+        task <- enqueuedTask(name, kernel.range)
+        _    <- launch(function, task, shader = false) { (workgroupLayout, privateLayout) =>
+          for {
+            literal <- privateLayout.append(kernel.literal, math.max(1, kernel.literalAlignment))
+            locals  <- kernel.locals.traverse(size => workgroupLayout.reserve(size, LocalArgumentAlignment))
+          } yield (literal +: locals).zip(function.parameters.toVector).map { case (address, (parameter, typeId)) =>
+            val storageClass = program.runtimeType(typeId) match {
+              case Some(RuntimeType.Pointer(storageClass, _)) => storageClass
+              case _                                          => StorageClass.Generic
+            }
+            parameter -> VMValue.Address(typeId, Pointer(address, program.pointerPointee(typeId), storageClass))
+          }.toMap
+        }
+      } yield ()
+
+    private def enqueuedTask(name: NonEmpty[String], range: DeviceQueue.NDRange): Either[Fault, KernelTask] = {
+      val dimensions                                     = range.dimensions
+      val group                                          = DeviceEnqueueOps.groupShape(range)
+      def extent(values: Vector[Long], index: Int): Long = if (index < dimensions) values(index) else 1L
+      def positive(value: Long): Either[Fault, Int > 0]  =
+        value.toInt.refine[Int > 0].leftMap(_ => Fault.InvalidRequest(s"enqueued ND-range extent $value is invalid"))
+      def coordinate(value: Long): Either[Fault, Int >= 0] =
+        value.toInt.refine[Int >= 0].leftMap(_ => Fault.InvalidRequest(s"enqueued ND-range offset $value is invalid"))
+      for {
+        size  <- (0 until 3).toVector.traverse(i => positive(extent(group, i)))
+        count <- (0 until 3).toVector.traverse(i =>
+          positive((extent(range.global, i) + extent(group, i) - 1L) / extent(group, i))
+        )
+        global <- (0 until 3).toVector.traverse(i =>
+          extent(range.global, i).refine[Long > 0].leftMap(_ => Fault.InvalidRequest("enqueued ND-range is empty"))
+        )
+        offset  <- (0 until 3).toVector.traverse(i => coordinate(if (i < dimensions) range.offset(i) else 0L))
+        workDim <-
+          dimensions.refine[Int in 1 ~ 3].leftMap(_ => Fault.InvalidRequest("enqueued ND-range has no dimensions"))
+        task <- KernelTask.validated(
+          name,
+          Dimensions(size(0), size(1), size(2)),
+          Dimensions(count(0), count(1), count(2)),
+          Vec.empty,
+          globalSize = Some(GlobalDimensions(global(0), global(1), global(2))),
+          workDim = workDim,
+          globalOffset = Coordinates(offset(0), offset(1), offset(2))
+        ).leftMap(detail => Fault.InvalidRequest(detail))
+      } yield task
+    }
   }
 
   /** Vulkan descriptor variables address their bound ranges; arrayed bindings collect one element per argument. */
@@ -377,9 +510,9 @@ private object VMInterpreter {
           } else
             // Deferred host reads retain a frame only when the lane actually suspends.
             resumeInvocation(program, execution, groupState, control) match {
-              case Left(error)                                            => return Left(error)
-              case Right(()) if execution.completed                       => reuse.execution = execution
-              case Right(()) if hasCollectives && execution.memoryPending =>
+              case Left(error)                      => return Left(error)
+              case Right(()) if execution.completed => reuse.execution = execution
+              case Right(()) if (hasCollectives && execution.memoryPending) || execution.preempted =>
                 executions += execution
                 reuse.execution = null
               case Right(()) =>
@@ -392,7 +525,7 @@ private object VMInterpreter {
         }
         linearLocal += 1
       }
-      if (hasCollectives) runWorkgroup(program, executions, groupState, control) else Right(())
+      if (hasCollectives || executions.nonEmpty) runWorkgroup(program, executions, groupState, control) else Right(())
     }
 
     Dispatch.forEachGroup(geometry, workgroups) { (_, group) =>
@@ -447,6 +580,7 @@ private object VMInterpreter {
 
   /** Instructions run between budget charges; the shared allowance is charged after they execute. */
   private val ChargeInterval = 1024
+  private val SliceCharges   = 64
 
   // The instruction loop exits as soon as the invocation completes, suspends, or faults. Executed instructions are
   // charged in batches so lanes do not contend on the shared allowance; a charge precedes every exit, so an exhausted
@@ -460,8 +594,10 @@ private object VMInterpreter {
   ): Either[Fault, Unit] = {
     memory.helperInvocation = execution.helperInvocation
     memory.invocation = execution.storage
+    execution.preempted = false
     val ops                           = program.ops
     var executed                      = 0
+    var slices                        = 0
     def charge(): Either[Fault, Unit] =
       if (executed == 0) InstructionCompleted
       else {
@@ -482,13 +618,19 @@ private object VMInterpreter {
       if (execution.yielded) return charge()
       if (executed == ChargeInterval) charge() match {
         case Left(fault) => return Left(fault)
-        case Right(())   => ()
+        case Right(())   =>
+          slices += 1
+          // Lanes that run on, such as spin-waits, yield so other subgroups make independent forward progress.
+          if (slices == SliceCharges) {
+            execution.preempted = true
+            return Right(())
+          }
       }
     }
     charge().flatMap(_ =>
       Left(Fault.InvalidRequest(
         s"SPIR-V function %${execution.currentFunction.id} " +
-          s"(${program.names.get(execution.currentFunction.id).fold("unnamed")(_)}) reached OpFunctionEnd without OpReturn"
+          s"(${program.names.getOrElse(execution.currentFunction.id, "unnamed")}) reached OpFunctionEnd without OpReturn"
       ))
     )
   }
@@ -530,8 +672,8 @@ private object VMInterpreter {
       // A deferred read is a transport suspension, not subgroup divergence.
       // Resume those lanes before choosing the active set at a collective.
       if (!hadPendingMemory) CollectiveOps.resolve(program, executions, memory) match {
-        case Left(error)                                                      => return Left(error)
-        case Right(0) if !hadPendingMemory && executions.exists(!_.completed) =>
+        case Left(error) => return Left(error)
+        case Right(0) if !hadPendingMemory && executions.exists(!_.completed) && !executions.exists(_.preempted) =>
           val waiting = executions.view
             .filter(!_.completed)
             .map(execution =>
@@ -606,7 +748,7 @@ private object VMInterpreter {
               case BuiltIn.SubgroupLeMask => lane <= invocation.subgroupLocal
               case _                      => lane < invocation.subgroupLocal
             }
-            if (lane < invocation.subgroupSize && selected) bits | (1L << bit) else bits
+            if (lane < invocation.maxSubgroupSize && selected) bits | (1L << bit) else bits
           }
         })
       // The Vulkan runtime exposes one physical device in each device group.

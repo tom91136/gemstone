@@ -17,13 +17,15 @@ inline constexpr uint32_t R5G6B5Unorm = 1008u;
 inline constexpr uint32_t A1R5G5B5Unorm = 1009u;
 inline constexpr uint32_t E5B9G9R9Ufloat = 1010u;
 inline constexpr uint32_t DecodedRgb32f = 1011u;
+inline constexpr uint32_t D32Sfloat = 1012u;
 } // namespace Format
 
 namespace Flags {
 inline constexpr uint32_t LevelTable = 2147483648u;
 inline constexpr uint32_t Volume = 1073741824u;
 inline constexpr uint32_t Swizzle = 536870912u;
-inline constexpr uint32_t FormatMask = 536870911u;
+inline constexpr uint32_t Pitched = 268435456u;
+inline constexpr uint32_t FormatMask = 268435455u;
 } // namespace Flags
 
 namespace SamplerWord {
@@ -58,6 +60,7 @@ inline constexpr uint32_t LevelWidth = 0u;
 inline constexpr uint32_t LevelHeight = 4u;
 inline constexpr uint32_t LevelOffset = 8u;
 inline constexpr uint32_t SwizzleBytes = 16u;
+inline constexpr uint32_t PitchBytes = 8u;
 inline constexpr uint32_t InlineHeaderBytes = 16u;
 } // namespace Layout
 

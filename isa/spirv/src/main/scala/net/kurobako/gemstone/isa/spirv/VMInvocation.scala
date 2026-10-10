@@ -171,8 +171,10 @@ private object VMInvocation {
     var subgroupReconvergence                                          = false
     var helperInvocation                                               = false
     var fragmentInvocation                                             = false
-    var fragmentKilled                                                 = false
-    var sampleMask: Option[Pointer]                                    = None
+    // The lane used its time slice and stopped where it can resume; it is runnable, not waiting.
+    var preempted                   = false
+    var fragmentKilled              = false
+    var sampleMask: Option[Pointer] = None
 
     // An OpPhi group stages its incoming values here so the group's copies take effect together.
     private var stagedBits   = Array.ofDim[Long](4)

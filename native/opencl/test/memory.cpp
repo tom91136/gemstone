@@ -148,17 +148,20 @@ struct MemoryClient {
       const auto atomic = CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
       require((flags & atomic) == atomic, "Intel USM atomics unavailable");
     }
+    require(svm & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM, "OpenCL fine-grained system SVM unavailable");
     cl_device_unified_shared_memory_capabilities_intel system{};
     check(clGetDeviceInfo(device, CL_DEVICE_SHARED_SYSTEM_MEM_CAPABILITIES_INTEL, sizeof(system), &system, nullptr));
-    require(system == 0 && !(svm & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM), "OpenCL ordinary system USM overclaimed");
+    const auto concurrentAtomic =
+        CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
+    require((system & concurrentAtomic) == concurrentAtomic, "Intel shared system memory concurrency unavailable");
     return true;
   }
 };
 } // namespace memory_patterns
 
-int main() {
+int main(int argc, char **) {
   try {
-    memory_patterns::MemoryClient backend;
+    memory_patterns::MemoryClient backend(argc > 1);
     return run(backend);
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

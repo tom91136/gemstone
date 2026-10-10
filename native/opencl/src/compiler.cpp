@@ -117,7 +117,7 @@ const std::string &compilerPath() {
   static const std::string path = [] {
     if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclCompiler); configured && configured[0] != '\0')
       return std::string(configured);
-    return discoverExecutable({"icpx", "clang++", "clang"}, {"/opt/intel/oneapi/compiler/*/bin/icpx", "/opt/rocm/llvm/bin/clang++"});
+    return discoverExecutable({"clang", "clang++"}, {"/opt/intel/oneapi/compiler/*/bin/compiler/clang", "/opt/rocm/llvm/bin/clang"});
   }();
   return path;
 }
@@ -144,13 +144,17 @@ const std::string &bitcodeLinkerPath() {
   return path;
 }
 
+// Only the SPIR-V extensions the interpreter executes.
+constexpr const char *SpirvExtensions =
+    "--spirv-ext=+SPV_KHR_subgroup_rotate,+SPV_KHR_bit_instructions,+SPV_INTEL_subgroups,+SPV_KHR_linkonce_odr";
+
 // llvm-spirv is the historical translator, but current clang and icpx embed the
 // same LLVM-to-SPIR-V backend and can consume bitcode directly. Falling back to
 // the compiler keeps the runtime portable to hosts without a standalone
 // llvm-spirv.
 bool bitcodeToSpirv(const std::string &input, const std::string &output, std::string &diagnostic) {
   if (!spirvConverterPath().empty()) {
-    const ProcessResult conversion = runProcess({spirvConverterPath(), input, "-o", output});
+    const ProcessResult conversion = runProcess({spirvConverterPath(), SpirvExtensions, input, "-o", output});
     diagnostic += conversion.output;
     return conversion.status == 0;
   }
@@ -326,7 +330,7 @@ bool readBytes(const std::string &path, std::vector<uint8_t> *bytes) {
 
 bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log) {
   if (compilerPath().empty()) {
-    log = std::string("no OpenCL compiler found (set ") + gemstone::environment::OpenclCompiler + " or install icpx/clang)";
+    log = std::string("no OpenCL compiler found (set ") + gemstone::environment::OpenclCompiler + " or install clang)";
     return false;
   }
   std::vector<std::string> optionArguments;
@@ -353,6 +357,7 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
   const bool hasVectorSwizzle = (source ^ contains_slice(".hi")) || (source ^ contains_slice(".lo")) || (source ^ contains_slice(".even"))
                                 || (source ^ contains_slice(".odd")) || hasVectorComponentSwizzle(source);
   const bool usesEnqueuedLocalSize = source ^ contains_slice("get_enqueued_local_size");
+  const bool usesIntelSubgroups = source ^ contains_slice("intel_sub_group");
   const std::string compilerSource = hasVectorSwizzle ? makeGlobalMemoryVolatile(source) : source;
   bool success = writeFile(input, compilerSource.data(), compilerSource.size());
   std::string diagnostic;
@@ -373,22 +378,15 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
                                         input,
                                         "-o",
                                         output};
-    static constexpr const char *unsupportedFeatures[] = {"__opencl_c_program_scope_global_variables",
-                                                          "__opencl_c_3d_image_writes",
-                                                          "__opencl_c_device_enqueue",
-                                                          "__opencl_c_generic_address_space",
-                                                          "__opencl_c_pipes",
-                                                          "__opencl_c_read_write_images",
-                                                          "__opencl_c_work_group_collective_functions",
-                                                          "__opencl_c_images",
-                                                          "__opencl_c_integer_dot_product_input_4x8bit",
-                                                          "__opencl_c_integer_dot_product_input_4x8bit_packed",
-                                                          "__opencl_c_ext_image_unorm_int_2_101010",
-                                                          "__IMAGE_SUPPORT__"};
+    static constexpr const char *unsupportedFeatures[] = {"__opencl_c_ext_image_unorm_int_2_101010"};
     for (const auto *feature : unsupportedFeatures) {
       command.emplace_back("-U");
       command.emplace_back(feature);
     }
+    command.insert(command.end(), {"-Xclang", "-cl-ext=+cl_intel_subgroups"});
+    // The driver's built-in declaration tables omit the Intel subgroup functions; only the full header declares them,
+    // at several times the compile cost.
+    if (usesIntelSubgroups) command.insert(command.end(), {"-cl-no-stdinc", "-Xclang", "-finclude-default-header"});
     for (const auto &argument : optionArguments)
       if (argument != "-cl-no-subgroup-ifp") command.push_back(argument);
     // Some OpenCL 3.0 CTS cases use 2.0 built-ins while the device advertises
@@ -482,7 +480,7 @@ bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode,
   bool success = writeFile(input, il.data(), il.size());
   std::string diagnostic;
   if (success) {
-    const ProcessResult conversion = runProcess({spirvConverterPath(), "-r", input, "-o", output});
+    const ProcessResult conversion = runProcess({spirvConverterPath(), "-r", SpirvExtensions, input, "-o", output});
     diagnostic = conversion.output;
     success = conversion.status == 0;
   }
@@ -532,6 +530,21 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
   if (success) {
     success = readBytes(linkedBitcode, &bitcode) && !bitcode.empty();
     if (!success) diagnostic += "cannot read linked LLVM bitcode";
+  }
+  // llvm-link drops a linkonce_odr definition that nothing linked so far references, even if a later module does;
+  // relinking only what the composite still needs restores such definitions without duplicating strong symbols.
+  const std::string relinkedBitcode = directory.file("relinked.bc");
+  for (size_t pass = 0; success && pass < modules.size(); ++pass) {
+    std::vector<std::string> command = {bitcodeLinkerPath(), "--only-needed", linkedBitcode};
+    command.insert(command.end(), inputs.begin(), inputs.end());
+    command.insert(command.end(), {"-o", relinkedBitcode});
+    const ProcessResult relinking = runProcess(command);
+    diagnostic += relinking.output;
+    std::vector<uint8_t> relinked;
+    success = relinking.status == 0 && readBytes(relinkedBitcode, &relinked) && !relinked.empty();
+    if (!success || relinked == bitcode) break;
+    bitcode = std::move(relinked);
+    success = writeFile(linkedBitcode, bitcode.data(), bitcode.size());
   }
   if (success) success = bitcodeToSpirv(linkedBitcode, output, diagnostic);
   if (success) {
@@ -705,6 +718,7 @@ std::vector<KernelArgumentInfo> sourceKernelArgumentInfo(const std::string &sour
       bool unsignedType = false;
       bool signedType = false;
       for (auto word : words) {
+        if (word.rfind("__", 0) == 0) word.erase(0, 2);
         if (word == "global") info.address = CL_KERNEL_ARG_ADDRESS_GLOBAL;
         else if (word == "local") info.address = CL_KERNEL_ARG_ADDRESS_LOCAL;
         else if (word == "constant") info.address = CL_KERNEL_ARG_ADDRESS_CONSTANT;
@@ -730,14 +744,23 @@ std::vector<KernelArgumentInfo> sourceKernelArgumentInfo(const std::string &sour
       if (unsignedType && base.rfind("u", 0) != 0) base = "u" + base;
       if (signedType && base == "") base = "int";
       info.typeName = base + (pointer ? "*" : "");
+      if (imageTypeName(info.typeName)) {
+        info.address = CL_KERNEL_ARG_ADDRESS_GLOBAL;
+        if (info.access == CL_KERNEL_ARG_ACCESS_NONE) info.access = CL_KERNEL_ARG_ACCESS_READ_ONLY;
+      }
       if (info.address == CL_KERNEL_ARG_ADDRESS_CONSTANT) info.type |= CL_KERNEL_ARG_TYPE_CONST;
-      if (!pointer) info.type = CL_KERNEL_ARG_TYPE_NONE;
+      if (!pointer) info.type &= CL_KERNEL_ARG_TYPE_PIPE;
       result.push_back(std::move(info));
     }
     if (end == parameters.size()) break;
     start = end + 1;
   }
   return result;
+}
+
+bool imageTypeName(const std::string &name) {
+  return name.size() >= 9 && name.rfind("image", 0) == 0 && name[5] >= '1' && name[5] <= '3' && name[6] == 'd'
+         && name.compare(name.size() - 2, 2, "_t") == 0;
 }
 
 std::string withoutLibraryOption(const std::string &options) {

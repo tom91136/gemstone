@@ -71,6 +71,49 @@ class ExecutionPointerSuite extends munit.FunSuite {
     assertEquals(memory.bytes(out), littleEndian(Seq(7L, 9L, 0L, 1L), 64))
   }
 
+  test("OpGenericPtrMemSemantics names the memory semantics of the pointer's storage class") {
+    val module = spv"""
+      OpCapability GenericPointer
+      $openCL
+      OpEntryPoint Kernel %main "fences" %shared
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %private_ptr = OpTypePointer Function %uint
+      %local_ptr = OpTypePointer Workgroup %uint
+      %global_ptr = OpTypePointer CrossWorkgroup %uint
+      %generic_ptr = OpTypePointer Generic %uint
+      %fn = OpTypeFunction %void %global_ptr
+      %ulong_1 = OpConstant %ulong 1
+      %ulong_2 = OpConstant %ulong 2
+      %shared = OpVariable %local_ptr Workgroup
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %global_ptr
+      %entry = OpLabel
+      %private = OpVariable %private_ptr Function
+      %global_generic = OpPtrCastToGeneric %generic_ptr %out
+      %local_generic = OpPtrCastToGeneric %generic_ptr %shared
+      %private_generic = OpPtrCastToGeneric %generic_ptr %private
+      %global_semantics = OpGenericPtrMemSemantics %uint %global_generic
+      %local_semantics = OpGenericPtrMemSemantics %uint %local_generic
+      %private_semantics = OpGenericPtrMemSemantics %uint %private_generic
+      OpStore %out %global_semantics
+      %out1 = OpPtrAccessChain %global_ptr %out %ulong_1
+      OpStore %out1 %local_semantics
+      %out2 = OpPtrAccessChain %global_ptr %out %ulong_2
+      OpStore %out2 %private_semantics
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(12L)
+    assertEquals(run(module, "fences", memory, Vec(buffer(out))), Right(()))
+    assertEquals(
+      words(memory, out, 0, 3),
+      Vec(MemorySemantics.CrossWorkgroupMemory.toLong, MemorySemantics.WorkgroupMemory.toLong, 0L)
+    )
+  }
+
   test("pointer arithmetic outside an allocation round-trips through integers") {
     val body = """%minus_one = OpISub %ulong %ulong_0 %ulong_1
                  |%before = OpPtrAccessChain %uint_ptr %first %minus_one

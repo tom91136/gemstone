@@ -16,13 +16,15 @@ object ImageDescriptor {
     inline val A1R5G5B5Unorm = 1009
     inline val E5B9G9R9Ufloat = 1010
     inline val DecodedRgb32f = 1011
+    inline val D32Sfloat = 1012
   }
 
   object Flags {
     inline val LevelTable = 2147483648L
     inline val Volume = 1073741824L
     inline val Swizzle = 536870912L
-    inline val FormatMask = 536870911L
+    inline val Pitched = 268435456L
+    inline val FormatMask = 268435455L
   }
 
   object SamplerWord {
@@ -57,6 +59,7 @@ object ImageDescriptor {
     inline val LevelHeight = 4
     inline val LevelOffset = 8
     inline val SwizzleBytes = 16
+    inline val PitchBytes = 8
     inline val InlineHeaderBytes = 16
   }
 

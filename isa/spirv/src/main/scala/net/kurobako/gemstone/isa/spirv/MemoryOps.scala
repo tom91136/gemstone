@@ -42,6 +42,7 @@ private object MemoryOps {
       castFromGeneric(site, "OpGenericCastToPtr", id(t), id(d), id(a), None)
     case Instruction.GenericCastToPtrExplicit(t, d, a, storage) =>
       castFromGeneric(site, "OpGenericCastToPtrExplicit", id(t), id(d), id(a), Some(id(storage)))
+    case Instruction.GenericPtrMemSemantics(t, d, a)      => genericSemantics(site, id(t), id(d), id(a))
     case Instruction.ConvertPtrToU(t, d, a)               => pointerToInteger(site, id(t), id(d), id(a))
     case Instruction.ConvertUToPtr(t, d, a)               => integerToPointer(site, id(t), id(d), id(a))
     case Instruction.ArrayLength(t, d, structure, member) =>
@@ -549,6 +550,31 @@ private object MemoryOps {
     }
   }
 
+  private def genericSemantics(site: Site, resultType: Int, dest: Int, source: Int): Op = {
+    val program = site.program
+    program.integerShape(resultType) match {
+      case Some((_, 1)) =>
+        step { (execution, _) =>
+          execution.values.get(source) match {
+            case Some(VMValue.Address(sourceType, pointer))
+                if program.runtimeType(sourceType).exists {
+                  case RuntimeType.Pointer(StorageClass.Generic, _) => true
+                  case _                                            => false
+                } =>
+              val semantics = storageClassOf(pointer.address) match {
+                case StorageClass.Workgroup      => MemorySemantics.WorkgroupMemory
+                case StorageClass.CrossWorkgroup => MemorySemantics.CrossWorkgroupMemory
+                case _                           => 0
+              }
+              Right(execution.values.updateScalar(dest, resultType, semantics.toLong))
+            case None    => Left(undefined(source))
+            case Some(_) => Left(Fault.InvalidRequest("OpGenericPtrMemSemantics source is not a Generic pointer"))
+          }
+        }
+      case _ => Fail(Fault.InvalidRequest("OpGenericPtrMemSemantics requires a scalar integer result"))
+    }
+  }
+
   private def pointerToInteger(site: Site, resultType: Int, dest: Int, pointer: Int): Op =
     site.program.integerShape(resultType) match {
       case Some((width, 1)) =>
@@ -800,6 +826,24 @@ private object MemoryOps {
           local.toRight(Fault.InvalidRequest("SPIR-V local parameter has no workgroup storage")).map(pointer(_))
         case KernelTask.Argument.Descriptor =>
           Left(Fault.InvalidRequest("SPIR-V parameter has an unresolved descriptor"))
+      }
+    case Some(
+          RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.Texture(_, _, _, _) | RuntimeType.Sampler |
+          RuntimeType.SampledImage(_) | RuntimeType.Pipe(_)
+        ) =>
+      argument match {
+        case KernelTask.Argument.Memory(_, _, range) =>
+          val address = LittleEndian.decode(bytes, 0, 8)
+          Right(VMValue.Address(
+            parameterType,
+            Pointer(
+              address,
+              parameterType,
+              StorageClass.UniformConstant,
+              range.map(size => address -> (address + size.raw))
+            )
+          ))
+        case other => Left(Fault.InvalidRequest(s"SPIR-V image or sampler parameter cannot bind $other"))
       }
     case Some(_) => argument match {
         case KernelTask.Argument.Scalar(_) => program.decode(parameterType, bytes)

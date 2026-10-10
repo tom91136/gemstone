@@ -29,7 +29,7 @@ set_target_properties(unified PROPERTIES
 if(CONFORMANCE_BACKEND STREQUAL "opencl")
   target_compile_definitions(unified PRIVATE UNIFIED_API_OPENCL=1)
   find_package(OpenCL REQUIRED)
-  target_sources(unified PRIVATE src/opencl/runtime.cpp src/opencl/memory.cpp)
+  target_sources(unified PRIVATE src/opencl/runtime.cpp src/opencl/features.cpp src/opencl/images.cpp src/opencl/pipes.cpp src/opencl/device_enqueue.cpp src/opencl/memory.cpp)
   target_link_libraries(unified PRIVATE OpenCL::OpenCL)
 
 elseif(CONFORMANCE_BACKEND STREQUAL "hsa")

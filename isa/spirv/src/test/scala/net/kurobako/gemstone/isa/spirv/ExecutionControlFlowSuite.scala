@@ -173,6 +173,38 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
     assertEquals(words(memory, out, 0, 9), Vec(0L) ++ Vec.from(0L until 8L))
   }
 
+  test("OpExpectKHR yields its value and OpAssumeTrueKHR has no effect") {
+    val module = spv"""
+      OpCapability ExpectAssumeKHR
+      OpExtension "SPV_KHR_expect_assume"
+      $openCL
+      OpEntryPoint Kernel %main "hints"
+      %void = OpTypeVoid
+      %bool = OpTypeBool
+      %uint = OpTypeInt 32 0
+      %out_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %out_ptr
+      %value = OpConstant %uint 41
+      %likely = OpConstant %uint 7
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %out_ptr
+      %entry = OpLabel
+      %loaded = OpLoad %uint %out
+      %expected = OpExpectKHR %uint %loaded %likely
+      %positive = OpUGreaterThan %bool %expected %likely
+      OpAssumeTrueKHR %positive
+      %result = OpIAdd %uint %expected %value
+      OpStore %out %result
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(4L)
+    writeWords(memory, out, 0, 9L)
+    assertEquals(run(module, "hints", memory, Vec(buffer(out))), Right(()))
+    assertEquals(word(memory, out, 0), 50L)
+  }
+
   test("lifetime markers around function variables accept one-word sizes only") {
     val module = spv"""
       $openCL

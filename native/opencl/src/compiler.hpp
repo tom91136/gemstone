@@ -19,6 +19,8 @@ struct KernelArgumentInfo {
   std::string name;
 };
 
+// OpenCL C image types: image1d_t through image3d_t, including array, buffer, depth and multisample forms.
+bool imageTypeName(const std::string &name);
 std::string sourceKernelText(const std::string &source, const std::string &name);
 size_t sourceStaticLocalMemory(const std::string &source);
 std::string sourceKernelAttributes(const std::string &source);

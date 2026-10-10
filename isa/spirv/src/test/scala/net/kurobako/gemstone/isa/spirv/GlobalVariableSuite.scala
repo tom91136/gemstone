@@ -1,7 +1,10 @@
 package net.kurobako.gemstone.isa.spirv
 
 import fixtures.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
@@ -106,5 +109,140 @@ class GlobalVariableSuite extends munit.FunSuite {
     assertEquals(program.bindGlobal("value", binding(first), memory), Right(()))
     assertEquals(word(memory, first, 0), 9L)
     assert(program.bindGlobal("value", binding(second), memory).isLeft)
+  }
+
+  private val programGlobals = spv"""
+    $openCL
+    OpEntryPoint Kernel %step "step"
+    OpName %counter "counter"
+    OpName %table "table"
+    OpName %pointer "pointer"
+    OpName %table_pointer "table_pointer"
+    OpName %calls "step.calls"
+    %void = OpTypeVoid
+    %uint = OpTypeInt 32 0
+    %ulong = OpTypeInt 64 0
+    %ulong_0 = OpConstant %ulong 0
+    %ulong_1 = OpConstant %ulong 1
+    %ulong_2 = OpConstant %ulong 2
+    %ulong_4 = OpConstant %ulong 4
+    %array = OpTypeArray %uint %ulong_4
+    %uint_ptr = OpTypePointer CrossWorkgroup %uint
+    %array_ptr = OpTypePointer CrossWorkgroup %array
+    %uint_ptr_ptr = OpTypePointer CrossWorkgroup %uint_ptr
+    %fn = OpTypeFunction %void %uint_ptr
+    %uint_0 = OpConstant %uint 0
+    %uint_1 = OpConstant %uint 1
+    %uint_2 = OpConstant %uint 2
+    %uint_3 = OpConstant %uint 3
+    %uint_4 = OpConstant %uint 4
+    %uint_5 = OpConstant %uint 5
+    %uint_10 = OpConstant %uint 10
+    %initial = OpConstantComposite %array %uint_1 %uint_2 %uint_3 %uint_4
+    %counter = OpVariable %uint_ptr CrossWorkgroup %uint_5
+    %table = OpVariable %array_ptr CrossWorkgroup %initial
+    %pointer = OpVariable %uint_ptr_ptr CrossWorkgroup %counter
+    %third = OpSpecConstantOp %uint_ptr PtrAccessChain %table %ulong_0 %ulong_2
+    %table_pointer = OpVariable %uint_ptr_ptr CrossWorkgroup %third
+    %calls = OpVariable %uint_ptr CrossWorkgroup %uint_0
+    %step = OpFunction %void None %fn
+    %out = OpFunctionParameter %uint_ptr
+    %entry = OpLabel
+    %target = OpLoad %uint_ptr %pointer
+    %value = OpLoad %uint %target
+    OpStore %out %value
+    %element = OpLoad %uint_ptr %table_pointer
+    %third_value = OpLoad %uint %element
+    %out1 = OpPtrAccessChain %uint_ptr %out %ulong_1
+    OpStore %out1 %third_value
+    %called = OpLoad %uint %calls
+    %out2 = OpPtrAccessChain %uint_ptr %out %ulong_2
+    OpStore %out2 %called
+    %next = OpIAdd %uint %value %uint_10
+    OpStore %target %next
+    %bumped = OpIAdd %uint %third_value %uint_1
+    OpStore %element %bumped
+    %more = OpIAdd %uint %called %uint_1
+    OpStore %calls %more
+    OpReturn
+    OpFunctionEnd
+  """
+
+  test("pointer-initialised CrossWorkgroup globals address their targets") {
+    val memory = RegionMemory()
+    val out    = memory.allocate(12L)
+    assertEquals(run(programGlobals, "step", memory, Vec(buffer(out))), Right(()))
+    assertEquals(words(memory, out, 0, 3), Vec(5L, 3L, 0L))
+  }
+
+  test("program symbols list every CrossWorkgroup global with its size") {
+    val globals = load(programGlobals).value.symbols.value.globals
+    assertEquals(
+      globals.map(global => global.name.raw -> global.size.raw).toSet,
+      Set("counter" -> 4L, "table" -> 16L, "pointer" -> 8L, "table_pointer" -> 8L, "step.calls" -> 4L)
+    )
+  }
+
+  test("bound program globals persist across dispatches and pointer initialisers address their bound storage") {
+    val program = load(programGlobals).value
+    val memory  = RegionMemory()
+    val out     = memory.allocate(12L)
+    val regions = program.symbols.value.globals.map { global =>
+      val size    = global.size.raw.unsafe[Long > 0]
+      val region  = memory.allocate(size)
+      val binding = GlobalBinding.validated(global.name, region, 0L, global.size, size).value
+      assertEquals(program.bindGlobal(global.name, binding, memory), Right(()))
+      global.name.raw -> region
+    }.toMap
+    for (launch <- 0 until 3) {
+      assertEquals(execute(program, task("step", Vec(buffer(out))), memory), Right(()))
+      assertEquals(words(memory, out, 0, 3), Vec(5L + 10L * launch, 3L + launch, launch.toLong), s"launch $launch")
+    }
+    assertEquals(word(memory, regions("counter"), 0), 35L)
+    assertEquals(words(memory, regions("table"), 0, 4), Vec(1L, 2L, 6L, 4L))
+    assertEquals(word(memory, regions("step.calls"), 0), 3L)
+    val counter = memory.address(regions("counter"), 0L).value.raw
+    val table   = memory.address(regions("table"), 0L).value.raw
+    assertEquals(LittleEndian.decode(memory.bytes(regions("pointer")), 0, 8), counter)
+    assertEquals(LittleEndian.decode(memory.bytes(regions("table_pointer")), 0, 8), table + 8L)
+  }
+
+  test("specialisation constant pointer casts of null stay null") {
+    val module = spv"""
+      OpCapability GenericPointer
+      $openCL
+      OpEntryPoint Kernel %main "null_casts"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %bool = OpTypeBool
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %generic_ptr = OpTypePointer Generic %uint
+      %slot_ptr = OpTypePointer CrossWorkgroup %uint_ptr
+      %fn = OpTypeFunction %void %uint_ptr
+      %uint_0 = OpConstant %uint 0
+      %uint_1 = OpConstant %uint 1
+      %ulong_0 = OpConstant %ulong 0
+      %null_generic = OpConstantNull %generic_ptr
+      %null_global = OpSpecConstantOp %uint_ptr GenericCastToPtr %null_generic
+      %back = OpSpecConstantOp %generic_ptr PtrCastToGeneric %null_global
+      %slot = OpVariable %slot_ptr CrossWorkgroup %null_global
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      %stored = OpLoad %uint_ptr %slot
+      %stored_address = OpConvertPtrToU %ulong %stored
+      %cast_address = OpConvertPtrToU %ulong %back
+      %both = OpIAdd %ulong %stored_address %cast_address
+      %zero = OpIEqual %bool %both %ulong_0
+      %flag = OpSelect %uint %zero %uint_1 %uint_0
+      OpStore %out %flag
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(4L)
+    assertEquals(run(module, "null_casts", memory, Vec(buffer(out))), Right(()))
+    assertEquals(word(memory, out, 0), 1L)
   }
 }

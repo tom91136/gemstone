@@ -32,7 +32,7 @@ object environment {
   val OpenclMaxMemAllocSize: String = "GEMSTONE_OPENCL_MAX_MEM_ALLOC_SIZE"
   val OpenclMaxMemAllocSizeDefault: Long > 0 = 268435456L
   val OpenclMaxWorkGroupSize: String = "GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE"
-  val OpenclMaxWorkGroupSizeDefault: Long > 0 = 64L
+  val OpenclMaxWorkGroupSizeDefault: Long > 0 = 128L
   val OpenclScanBufferPointers: String = "GEMSTONE_OPENCL_SCAN_BUFFER_POINTERS"
   val Profile: String = "GEMSTONE_PROFILE"
   val Record: String = "GEMSTONE_RECORD"

@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -26,7 +28,9 @@
 #include <aspartame/vector.hpp>
 
 #include "gemstone_execution_rpc.hpp"
+#include "gemstone_image_descriptor.hpp"
 #include "gemstone_opencl_dispatch.hpp"
+#include "gemstone_pipe_layout.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/copy_out.hpp>
 #include <gemstone/live_handles.hpp>
@@ -46,6 +50,8 @@ using namespace aspartame;
 using namespace gemstone::execution;
 
 using namespace gemstone::opencl;
+namespace descriptor = gemstone::spirv::ImageDescriptor;
+namespace pipe = gemstone::spirv::PipeLayout;
 
 gemstone::LiveHandles<Kind> liveObjects;
 
@@ -54,12 +60,20 @@ void unregisterLiveObject(const void *value) { liveObjects.erase(value); }
 
 template <class T> T *checked(T *value) { return liveObjects.contains(value, T::ObjectKind) ? value : nullptr; }
 
+// Host commands treat on-device queues as invalid; queue_t arguments and queue management accept either kind.
+_cl_command_queue *anyQueue(cl_command_queue value) { return liveObjects.contains(value, Kind::Queue) ? value : nullptr; }
+_cl_command_queue *checked(_cl_command_queue *value) {
+  auto *queue = anyQueue(value);
+  return queue && queue->deviceSize == 0 ? queue : nullptr;
+}
+
 template <class T> void retain(T *value) { value->header.references.fetch_add(1, std::memory_order_relaxed); }
 
 template <class T> bool release(T *value) { return value->header.references.fetch_sub(1, std::memory_order_acq_rel) == 1; }
 
 ClientManager remote;
 std::mutex remoteMutex;
+bool hostMemoryEnabled = false; // Guarded by remoteMutex.
 std::mutex kernelSubmissionMutex;
 std::mutex pointerRelocationsMutex;
 std::mutex allocationsMutex;
@@ -97,6 +111,9 @@ struct SchedulerShutdown {
 constexpr cl_name_version DeviceExtensionVersions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_byte_addressable_store"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_3d_image_writes"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_image2d_from_buffer"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_depth_images"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp16"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp64"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_pci_bus_info"},
@@ -106,6 +123,25 @@ constexpr cl_name_version DeviceExtensionVersions[] = {{CL_MAKE_VERSION(1, 0, 0)
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_extended_atomics"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_base_atomics"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_extended_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_extended_bit_ops"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_suggested_local_work_size"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_create_command_queue"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_device_uuid"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_spirv_queries"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_expect_assume"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_spirv_no_integer_wrap_decoration"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_spirv_linkonce_odr"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_ext_immutable_memory_objects"},
+                                                       {CL_MAKE_VERSION(2, 0, 0), "cl_khr_integer_dot_product"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroups"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_ballot"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_non_uniform_vote"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_non_uniform_arithmetic"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_shuffle"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_shuffle_relative"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_extended_types"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_clustered_reduce"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_subgroup_rotate"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_intel_subgroups"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_intel_spirv_subgroups"},
                                                        {CL_MAKE_VERSION(0, 0, 0), "cl_intel_device_attribute_query"},
@@ -209,6 +245,76 @@ size_t maxWorkGroupSize() {
 }
 
 constexpr size_t MaxSubgroupSize = 32;
+constexpr size_t Image2DMaxSize = 16384;
+constexpr size_t Image3DMaxSize = 2048;
+constexpr size_t ImageMaxArraySize = 2048;
+constexpr size_t ImageMaxBufferSize = size_t{1} << 24;
+constexpr cl_uint PipeMaxPacketSize = 1024;
+namespace spirv_capability {
+constexpr cl_uint Addresses = 4, Linkage = 5, Kernel = 6, Vector16 = 7, Float16Buffer = 8, Float16 = 9, Float64 = 10, Int64 = 11,
+                  Int64Atomics = 12, ImageBasic = 13, ImageReadWrite = 14, Pipes = 17, Groups = 18, DeviceEnqueue = 19, LiteralSampler = 20,
+                  Int16 = 22, GenericPointer = 38, Int8 = 39, Sampled1D = 43, Image1D = 44, SampledBuffer = 46, ImageBuffer = 47,
+                  SubgroupDispatch = 58, GroupNonUniform = 61, GroupNonUniformVote = 62, GroupNonUniformArithmetic = 63,
+                  GroupNonUniformBallot = 64, GroupNonUniformShuffle = 65, GroupNonUniformShuffleRelative = 66,
+                  GroupNonUniformClustered = 67, UniformDecoration = 71, SubgroupShuffleINTEL = 5568, SubgroupBufferBlockIOINTEL = 5569,
+                  SubgroupImageBlockIOINTEL = 5570, ExpectAssumeKHR = 5629, DotProductInput4x8Bit = 6017,
+                  DotProductInput4x8BitPacked = 6018, DotProduct = 6019, BitInstructions = 6025, GroupNonUniformRotateKHR = 6026;
+} // namespace spirv_capability
+
+// The SPIR-V the interpreter executes, consistent with the features and extensions above.
+constexpr const char *SpirvExtendedInstructionSets[] = {"OpenCL.std"};
+constexpr const char *SpirvExtensions[] = {
+    "SPV_KHR_expect_assume",   "SPV_KHR_bit_instructions", "SPV_KHR_integer_dot_product", "SPV_KHR_no_integer_wrap_decoration",
+    "SPV_KHR_subgroup_rotate", "SPV_INTEL_subgroups",      "SPV_KHR_linkonce_odr"};
+constexpr cl_uint SpirvCapabilities[] = {spirv_capability::Addresses,
+                                         spirv_capability::Linkage,
+                                         spirv_capability::Kernel,
+                                         spirv_capability::Vector16,
+                                         spirv_capability::Float16Buffer,
+                                         spirv_capability::Float16,
+                                         spirv_capability::Float64,
+                                         spirv_capability::Int64,
+                                         spirv_capability::Int64Atomics,
+                                         spirv_capability::ImageBasic,
+                                         spirv_capability::ImageReadWrite,
+                                         spirv_capability::Pipes,
+                                         spirv_capability::Groups,
+                                         spirv_capability::DeviceEnqueue,
+                                         spirv_capability::LiteralSampler,
+                                         spirv_capability::Int16,
+                                         spirv_capability::GenericPointer,
+                                         spirv_capability::Int8,
+                                         spirv_capability::Sampled1D,
+                                         spirv_capability::Image1D,
+                                         spirv_capability::SampledBuffer,
+                                         spirv_capability::ImageBuffer,
+                                         spirv_capability::SubgroupDispatch,
+                                         spirv_capability::GroupNonUniform,
+                                         spirv_capability::GroupNonUniformVote,
+                                         spirv_capability::GroupNonUniformArithmetic,
+                                         spirv_capability::GroupNonUniformBallot,
+                                         spirv_capability::GroupNonUniformShuffle,
+                                         spirv_capability::GroupNonUniformShuffleRelative,
+                                         spirv_capability::GroupNonUniformClustered,
+                                         spirv_capability::UniformDecoration,
+                                         spirv_capability::SubgroupShuffleINTEL,
+                                         spirv_capability::SubgroupBufferBlockIOINTEL,
+                                         spirv_capability::SubgroupImageBlockIOINTEL,
+                                         spirv_capability::ExpectAssumeKHR,
+                                         spirv_capability::DotProductInput4x8Bit,
+                                         spirv_capability::DotProductInput4x8BitPacked,
+                                         spirv_capability::DotProduct,
+                                         spirv_capability::BitInstructions,
+                                         spirv_capability::GroupNonUniformRotateKHR};
+
+constexpr cl_uint ImagePitchAlignment = 1;
+constexpr cl_uint ImageBaseAddressAlignment = 1;
+constexpr cl_uint DeviceQueuePreferredSize = 128 * 1024;
+constexpr cl_uint DeviceQueueMaxSize = 8 * 1024 * 1024;
+constexpr cl_uint MaxDeviceQueues = 4;
+constexpr cl_uint MaxDeviceEvents = 1024;
+constexpr size_t MaxGlobalVariableSize = 65536;
+constexpr size_t PreferredGlobalVariableTotalSize = 1U << 20;
 
 std::array<size_t, 3> maxWorkItemSizes() {
   const size_t maxGroup = maxWorkGroupSize();
@@ -244,7 +350,17 @@ bool validMemoryRange(const _cl_mem *mem, size_t offset, size_t size) { return m
 
 bool hostReadAllowed(const _cl_mem *mem) { return mem && (mem->flags & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) == 0; }
 
-bool hostWriteAllowed(const _cl_mem *mem) { return mem && (mem->flags & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) == 0; }
+// Immutable objects take their contents from the host at creation and are read-only to the host and device afterwards.
+bool immutable(const _cl_mem *mem) { return (mem->flags & CL_MEM_IMMUTABLE_EXT) != 0; }
+bool hostWriteAllowed(const _cl_mem *mem) {
+  return mem && (mem->flags & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) == 0 && !immutable(mem);
+}
+
+cl_int immutableFlags(cl_mem_flags flags) {
+  constexpr cl_mem_flags writable = CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY | CL_MEM_KERNEL_READ_AND_WRITE | CL_MEM_HOST_WRITE_ONLY;
+  if (!(flags & CL_MEM_IMMUTABLE_EXT)) return CL_SUCCESS;
+  return (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR)) && !(flags & writable) ? CL_SUCCESS : CL_INVALID_VALUE;
+}
 
 void invalidatePointerRelocations(const std::shared_ptr<Allocation> &allocation, size_t offset, size_t size) {
   if (!allocation || size == 0) return;
@@ -416,6 +532,20 @@ bool containsKernelName(const std::string &names, const std::string &name) {
 
 bool hasBuildOption(const char *options, std::string_view option) {
   return options && (std::string_view(options) ^ contains_slice(option));
+}
+
+bool uniformWorkGroups(const _cl_program &program) {
+  const auto &options = program.buildOptions;
+  if (options ^ contains_slice("-cl-uniform-work-group-size")) return true;
+  if (program.createdWithIL) return false;
+  const auto standard = options.rfind("-cl-std=CL");
+  return standard == std::string::npos || options.compare(standard + 10, 2, "1.") == 0;
+}
+
+size_t largestDivisor(size_t value, size_t limit) {
+  for (size_t candidate = std::min(value, limit); candidate > 1; --candidate)
+    if (value % candidate == 0) return candidate;
+  return 1;
 }
 
 constexpr uint64_t ProgramBinaryMagic = static_cast<uint64_t>(0x47454d4f434c4231);
@@ -755,6 +885,13 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
   return result;
 }
 
+// The work-group size a launch without an explicit local size uses in one dimension.
+size_t implicitGroup(const _cl_kernel &kernel, size_t index, size_t global) {
+  if (kernel.requiredWorkGroupSize != std::array<size_t, 3>{0, 0, 0}) return kernel.requiredWorkGroupSize[index];
+  if (index != 0) return 1;
+  return uniformWorkGroups(*kernel.program) ? largestDivisor(global, 32) : 32;
+}
+
 cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offset, const size_t *global, const size_t *local) {
   std::unique_lock submissionLock(kernelSubmissionMutex);
   const uint64_t started = nowNanos();
@@ -773,9 +910,7 @@ cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offs
     if (offset && offset[index] > static_cast<size_t>(std::numeric_limits<int32_t>::max())) return CL_INVALID_GLOBAL_OFFSET;
     exact[index] = global[index];
     if (offset) origin[index] = offset[index];
-    group[index] = !local ? (kernel->requiredWorkGroupSize != std::array<size_t, 3>{0, 0, 0} ? kernel->requiredWorkGroupSize[index]
-                                                                                             : (index == 0 ? 32 : 1))
-                          : local[index];
+    group[index] = local ? local[index] : implicitGroup(*kernel, index, global[index]);
     if (group[index] == 0 || group[index] > static_cast<size_t>(std::numeric_limits<int32_t>::max())) return CL_INVALID_WORK_GROUP_SIZE;
     count[index] = (global[index] + group[index] - 1) / group[index];
     if (count[index] > static_cast<size_t>(std::numeric_limits<int32_t>::max())) return CL_INVALID_GLOBAL_WORK_SIZE;
@@ -796,7 +931,13 @@ cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offs
       arguments.emplace_back(ArgumentLocal{static_cast<int64_t>(argument.offset)});
     } else if (argument.kind == ::KernelArgument::Kind::Allocation) {
       arguments.emplace_back(
-          ArgumentMemory{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
+          ArgumentMemory{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset),
+                         argument.range ? std::optional<LongPositive>{static_cast<int64_t>(*argument.range)} : std::nullopt});
+      if (argument.texels)
+        relocations.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(argument.allocation->id)}},
+                               LongPositive0{static_cast<int64_t>(descriptor::Layout::Texels)},
+                               AllocationId{static_cast<int64_t>(argument.texels->id)},
+                               LongPositive0{static_cast<int64_t>(argument.texelOffset)}});
     } else if (argument.kind == ::KernelArgument::Kind::SVM) {
       arguments.emplace_back(
           ArgumentMemory{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
@@ -814,6 +955,14 @@ cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offs
   std::string failureMessage;
   const auto relocationCount = relocations.size();
   std::unique_lock lock(remoteMutex);
+  const bool system =
+      kernel->indirectSystem || kernel->indirectTypes.contains(CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM)
+      || std::any_of(kernel->arguments.begin(), kernel->arguments.end(), [](const auto &argument) { return argument.systemPointer; });
+  // The server keeps host memory enabled for the rest of the session once a launch needs it.
+  if (system && !hostMemoryEnabled) {
+    if (!state.client()->call(EnableHostMemory{})) return CL_OUT_OF_RESOURCES;
+    hostMemoryEnabled = true;
+  }
   gemstone::execution::CompletionResult result;
   bool launched = gemstone::execution::launchAndCollect(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name,
                                                                groupSize, groupCount, globalSize, static_cast<int32_t>(workDimension),
@@ -904,7 +1053,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetPlatformInfo(cl_platform_id value, cl_platf
       return outputBytes(size, output, written, DeviceExtensionVersions, sizeof(DeviceExtensionVersions));
     }
     case CL_PLATFORM_HOST_TIMER_RESOLUTION: {
-      cl_ulong value = 0;
+      cl_ulong value = 1;
       return outputScalar(size, output, written, value);
     }
     case CL_PLATFORM_NUMERIC_VERSION: {
@@ -948,7 +1097,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
   static const auto workSizes = maxWorkItemSizes();
   // Out-of-order execution permits reordering; it does not require concurrent execution.
   static const cl_command_queue_properties queueProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
-  static const cl_device_svm_capabilities svm = CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER | CL_DEVICE_SVM_ATOMICS;
+  static const cl_device_svm_capabilities svm =
+      CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_SYSTEM | CL_DEVICE_SVM_ATOMICS;
   static const cl_device_fp_config fp = CL_FP_INF_NAN | CL_FP_ROUND_TO_NEAREST | CL_FP_DENORM;
   static const cl_device_fp_config doubleFp =
       CL_FP_FMA | CL_FP_ROUND_TO_NEAREST | CL_FP_ROUND_TO_ZERO | CL_FP_ROUND_TO_INF | CL_FP_INF_NAN | CL_FP_DENORM;
@@ -1047,27 +1197,24 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       const cl_ulong v = maxMemAllocSize();
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_MAX_READ_IMAGE_ARGS:
+    case CL_DEVICE_MAX_READ_IMAGE_ARGS: {
+      cl_uint v = 128;
+      return outputScalar(size, output, written, v);
+    }
     case CL_DEVICE_MAX_WRITE_IMAGE_ARGS:
     case CL_DEVICE_MAX_READ_WRITE_IMAGE_ARGS: {
-      cl_uint v = 0;
+      cl_uint v = 64;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_IMAGE2D_MAX_WIDTH:
-    case CL_DEVICE_IMAGE2D_MAX_HEIGHT:
+    case CL_DEVICE_IMAGE2D_MAX_HEIGHT: return outputScalar(size, output, written, Image2DMaxSize);
     case CL_DEVICE_IMAGE3D_MAX_WIDTH:
     case CL_DEVICE_IMAGE3D_MAX_HEIGHT:
-    case CL_DEVICE_IMAGE3D_MAX_DEPTH:
-    case CL_DEVICE_IMAGE_MAX_BUFFER_SIZE:
-    case CL_DEVICE_IMAGE_MAX_ARRAY_SIZE: {
-      size_t v = 0;
-      return outputScalar(size, output, written, v);
-    }
-    case CL_DEVICE_IMAGE_PITCH_ALIGNMENT:
-    case CL_DEVICE_IMAGE_BASE_ADDRESS_ALIGNMENT: {
-      cl_uint v = 0;
-      return outputScalar(size, output, written, v);
-    }
+    case CL_DEVICE_IMAGE3D_MAX_DEPTH: return outputScalar(size, output, written, Image3DMaxSize);
+    case CL_DEVICE_IMAGE_MAX_BUFFER_SIZE: return outputScalar(size, output, written, ImageMaxBufferSize);
+    case CL_DEVICE_IMAGE_MAX_ARRAY_SIZE: return outputScalar(size, output, written, ImageMaxArraySize);
+    case CL_DEVICE_IMAGE_PITCH_ALIGNMENT: return outputScalar(size, output, written, ImagePitchAlignment);
+    case CL_DEVICE_IMAGE_BASE_ADDRESS_ALIGNMENT: return outputScalar(size, output, written, ImageBaseAddressAlignment);
     case CL_DEVICE_PARTITION_MAX_SUB_DEVICES: {
       cl_uint v = 0;
       return outputScalar(size, output, written, v);
@@ -1093,7 +1240,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_IMAGE_SUPPORT: {
-      cl_bool v = CL_FALSE;
+      cl_bool v = CL_TRUE;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_MAX_PARAMETER_SIZE: {
@@ -1172,17 +1319,14 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_QUEUE_PROPERTIES: return outputScalar(size, output, written, queueProperties);
-    case CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE:
-    case CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: {
-      size_t v = 0;
-      return outputScalar(size, output, written, v);
-    }
+    case CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: return outputScalar(size, output, written, MaxGlobalVariableSize);
+    case CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: return outputScalar(size, output, written, PreferredGlobalVariableTotalSize);
     case CL_DEVICE_MAX_PIPE_ARGS:
-    case CL_DEVICE_PIPE_MAX_ACTIVE_RESERVATIONS:
-    case CL_DEVICE_PIPE_MAX_PACKET_SIZE: {
-      cl_uint v = 0;
+    case CL_DEVICE_PIPE_MAX_ACTIVE_RESERVATIONS: {
+      cl_uint v = 16;
       return outputScalar(size, output, written, v);
     }
+    case CL_DEVICE_PIPE_MAX_PACKET_SIZE: return outputScalar(size, output, written, PipeMaxPacketSize);
     case CL_DEVICE_PREFERRED_PLATFORM_ATOMIC_ALIGNMENT:
     case CL_DEVICE_PREFERRED_GLOBAL_ATOMIC_ALIGNMENT:
     case CL_DEVICE_PREFERRED_LOCAL_ATOMIC_ALIGNMENT: {
@@ -1194,7 +1338,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DRIVER_VERSION: return outputString(size, output, written, "26.22.38646.6");
     case CL_DEVICE_PROFILE: return outputString(size, output, written, "FULL_PROFILE");
     case CL_DEVICE_VERSION: return outputString(size, output, written, "OpenCL 3.0 Gemstone");
-    case CL_DEVICE_OPENCL_C_VERSION: return outputString(size, output, written, "OpenCL C 1.2 Gemstone");
+    case CL_DEVICE_OPENCL_C_VERSION: return outputString(size, output, written, "OpenCL C 2.0 Gemstone");
     case CL_DEVICE_EXTENSIONS: return outputString(size, output, written, DeviceExtensionString);
     case CL_DEVICE_NUMERIC_VERSION: {
       cl_version v = CL_MAKE_VERSION(3, 0, 0);
@@ -1219,6 +1363,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       static const cl_name_version versions[] = {{CL_MAKE_VERSION(1, 0, 0), "OpenCL C"},
                                                  {CL_MAKE_VERSION(1, 1, 0), "OpenCL C"},
                                                  {CL_MAKE_VERSION(1, 2, 0), "OpenCL C"},
+                                                 {CL_MAKE_VERSION(2, 0, 0), "OpenCL C"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "OpenCL C"}};
       return outputBytes(size, output, written, versions, sizeof(versions));
     }
@@ -1226,6 +1371,16 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       static const cl_name_version features[] = {{CL_MAKE_VERSION(3, 0, 0), "__opencl_c_int64"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_fp64"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_subgroups"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_generic_address_space"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_work_group_collective_functions"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_program_scope_global_variables"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_images"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_read_write_images"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_3d_image_writes"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_pipes"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_device_enqueue"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_integer_dot_product_input_4x8bit"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_integer_dot_product_input_4x8bit_packed"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_order_acq_rel"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_order_seq_cst"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_scope_device"},
@@ -1246,15 +1401,20 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     }
     case CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT:
     case CL_DEVICE_GENERIC_ADDRESS_SPACE_SUPPORT:
+    case CL_DEVICE_NON_UNIFORM_WORK_GROUP_SUPPORT: {
+      cl_bool v = CL_TRUE;
+      return outputScalar(size, output, written, v);
+    }
     case CL_DEVICE_SUB_GROUP_INDEPENDENT_FORWARD_PROGRESS: {
-      cl_bool v = CL_FALSE;
+      cl_bool v = CL_TRUE;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_PRINTF_BUFFER_SIZE: {
       size_t v = 1024U * 1024U;
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_LATEST_CONFORMANCE_VERSION_PASSED: return outputString(size, output, written, "v2026-07-09-00");
+    // The earliest well-formed version: no Khronos conformance submission has been made.
+    case CL_DEVICE_LATEST_CONFORMANCE_VERSION_PASSED: return outputString(size, output, written, "v0000-01-01-00");
     case CL_DEVICE_PLATFORM: {
       cl_platform_id v = reinterpret_cast<cl_platform_id>(&platform);
       return outputScalar(size, output, written, v);
@@ -1269,36 +1429,64 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       static const size_t sizes[] = {8, 16, 32};
       return outputBytes(size, output, written, sizes, sizeof(sizes));
     }
-    case CL_DEVICE_NON_UNIFORM_WORK_GROUP_SUPPORT: {
-      cl_bool v = CL_FALSE;
-      return outputScalar(size, output, written, v);
-    }
     case CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: {
       size_t v = 32;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_QUEUE_ON_DEVICE_PROPERTIES: {
-      cl_command_queue_properties v = 0;
+      cl_command_queue_properties v = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE:
-    case CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE:
-    case CL_DEVICE_MAX_ON_DEVICE_QUEUES:
-    case CL_DEVICE_MAX_ON_DEVICE_EVENTS: {
-      cl_uint v = 0;
-      return outputScalar(size, output, written, v);
-    }
+    case CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE: return outputScalar(size, output, written, DeviceQueuePreferredSize);
+    case CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE: return outputScalar(size, output, written, DeviceQueueMaxSize);
+    case CL_DEVICE_MAX_ON_DEVICE_QUEUES: return outputScalar(size, output, written, MaxDeviceQueues);
+    case CL_DEVICE_MAX_ON_DEVICE_EVENTS: return outputScalar(size, output, written, MaxDeviceEvents);
     case CL_DEVICE_DEVICE_ENQUEUE_CAPABILITIES: {
-      cl_device_device_enqueue_capabilities v = 0;
+      cl_device_device_enqueue_capabilities v = CL_DEVICE_QUEUE_SUPPORTED | CL_DEVICE_QUEUE_REPLACEABLE_DEFAULT;
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_PIPE_SUPPORT: {
+    case CL_DEVICE_INTEGER_DOT_PRODUCT_CAPABILITIES_KHR: {
+      cl_device_integer_dot_product_capabilities_khr v =
+          CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR | CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR;
+      return outputScalar(size, output, written, v);
+    }
+    case CL_DEVICE_INTEGER_DOT_PRODUCT_ACCELERATION_PROPERTIES_8BIT_KHR:
+    case CL_DEVICE_INTEGER_DOT_PRODUCT_ACCELERATION_PROPERTIES_4x8BIT_PACKED_KHR: {
+      const cl_device_integer_dot_product_acceleration_properties_khr v{};
+      return outputScalar(size, output, written, v);
+    }
+    // The Vulkan facade reports the same identity for this device.
+    case CL_DEVICE_UUID_KHR:
+    case CL_DRIVER_UUID_KHR: {
+      std::array<cl_uchar, CL_UUID_SIZE_KHR> v{};
+      for (size_t index = 0; index < v.size(); ++index)
+        v[index] = static_cast<cl_uchar>((name == CL_DEVICE_UUID_KHR ? 0x47 : 0x67) + index);
+      return outputBytes(size, output, written, v.data(), v.size());
+    }
+    case CL_DEVICE_LUID_VALID_KHR: {
       cl_bool v = CL_FALSE;
       return outputScalar(size, output, written, v);
     }
+    case CL_DEVICE_LUID_KHR: {
+      const std::array<cl_uchar, CL_LUID_SIZE_KHR> v{};
+      return outputBytes(size, output, written, v.data(), v.size());
+    }
+    case CL_DEVICE_NODE_MASK_KHR: {
+      cl_uint v = 0;
+      return outputScalar(size, output, written, v);
+    }
+    case CL_DEVICE_SPIRV_EXTENDED_INSTRUCTION_SETS_KHR:
+      return outputBytes(size, output, written, SpirvExtendedInstructionSets, sizeof(SpirvExtendedInstructionSets));
+    case CL_DEVICE_SPIRV_EXTENSIONS_KHR: return outputBytes(size, output, written, SpirvExtensions, sizeof(SpirvExtensions));
+    case CL_DEVICE_SPIRV_CAPABILITIES_KHR: return outputBytes(size, output, written, SpirvCapabilities, sizeof(SpirvCapabilities));
+    case CL_DEVICE_PIPE_SUPPORT: {
+      cl_bool v = CL_TRUE;
+      return outputScalar(size, output, written, v);
+    }
     case CL_DEVICE_SHARED_SYSTEM_MEM_CAPABILITIES_INTEL: {
-      // clSetKernelArgMemPointerINTEL requires a known SVM/USM allocation.
-      const cl_device_unified_shared_memory_capabilities_intel v = 0;
+      const cl_device_unified_shared_memory_capabilities_intel v =
+          CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL
+          | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL:
@@ -1318,14 +1506,20 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
   }
 }
 
+// Profiling timestamps come from the same host clock, so the device timer is the host timer.
 CL_API_ENTRY cl_int CL_API_CALL clGetDeviceAndHostTimer(cl_device_id value, cl_ulong *deviceTimestamp, cl_ulong *hostTimestamp) {
   if (!validDevice(value)) return CL_INVALID_DEVICE;
-  return CL_INVALID_OPERATION;
+  if (!deviceTimestamp || !hostTimestamp) return CL_INVALID_VALUE;
+  *deviceTimestamp = nowNanos();
+  *hostTimestamp = nowNanos();
+  return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetHostTimer(cl_device_id value, cl_ulong *hostTimestamp) {
   if (!validDevice(value)) return CL_INVALID_DEVICE;
-  return CL_INVALID_OPERATION;
+  if (!hostTimestamp) return CL_INVALID_VALUE;
+  *hostTimestamp = nowNanos();
+  return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_context CL_API_CALL clCreateContext(const cl_context_properties *properties, cl_uint count, const cl_device_id *devices,
@@ -1502,28 +1696,61 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context value,
   return reinterpret_cast<cl_command_queue>(queue);
 }
 
-CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context context, cl_device_id deviceValue,
+cl_command_queue createDeviceQueue(_cl_context *context, cl_command_queue_properties properties, cl_uint size, cl_int *error) {
+  if ((properties & CL_QUEUE_ON_DEVICE_DEFAULT) && context->defaultDeviceQueue) {
+    retain(context->defaultDeviceQueue);
+    if (error) *error = CL_SUCCESS;
+    return reinterpret_cast<cl_command_queue>(context->defaultDeviceQueue);
+  }
+  auto *queue = new (std::nothrow) _cl_command_queue;
+  if (!queue) {
+    if (error) *error = CL_OUT_OF_HOST_MEMORY;
+    return nullptr;
+  }
+  registerLiveObject(queue);
+  queue->dispatch = &dispatch;
+  queue->context = context;
+  queue->device = &device;
+  queue->properties = properties;
+  queue->deviceSize = size ? size : DeviceQueuePreferredSize;
+  if (properties & CL_QUEUE_ON_DEVICE_DEFAULT) context->defaultDeviceQueue = queue;
+  retain(context);
+  if (error) *error = CL_SUCCESS;
+  return reinterpret_cast<cl_command_queue>(queue);
+}
+
+CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context value, cl_device_id deviceValue,
                                                                              const cl_queue_properties *properties, cl_int *error) {
-  if (!checked(context)) {
+  auto *context = checked(value);
+  if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
   }
-  if (!validDevice(deviceValue)) {
+  if (!validDevice(deviceValue) || context->device != &device) {
     if (error) *error = CL_INVALID_DEVICE;
     return nullptr;
   }
   cl_command_queue_properties queueProperties = 0;
+  std::optional<cl_queue_properties> size;
   if (properties)
     for (size_t index = 0; properties[index] != 0; index += 2) {
-      if (properties[index] != CL_QUEUE_PROPERTIES) {
+      if (properties[index] == CL_QUEUE_PROPERTIES) queueProperties = static_cast<cl_command_queue_properties>(properties[index + 1]);
+      else if (properties[index] == CL_QUEUE_SIZE) size = properties[index + 1];
+      else {
         if (error) *error = CL_INVALID_VALUE;
         return nullptr;
       }
-      queueProperties = static_cast<cl_command_queue_properties>(properties[index + 1]);
     }
-  auto result = clCreateCommandQueue(context, deviceValue, queueProperties, error);
-  if (result && properties) {
-    auto *queue = reinterpret_cast<_cl_command_queue *>(result);
+  const bool onDevice = queueProperties & CL_QUEUE_ON_DEVICE;
+  if ((!onDevice && (size || (queueProperties & CL_QUEUE_ON_DEVICE_DEFAULT)))
+      || (onDevice && !(queueProperties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) || (size && *size > DeviceQueueMaxSize)) {
+    if (error) *error = CL_INVALID_VALUE;
+    return nullptr;
+  }
+  auto result = onDevice ? createDeviceQueue(context, queueProperties, static_cast<cl_uint>(size.value_or(0)), error)
+                         : clCreateCommandQueue(value, deviceValue, queueProperties, error);
+  auto *queue = reinterpret_cast<_cl_command_queue *>(result);
+  if (queue && properties && queue->propertiesArray.empty()) {
     try {
       for (size_t index = 0; properties[index] != 0; index += 2) {
         queue->propertiesArray.push_back(properties[index]);
@@ -1539,26 +1766,30 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
   return result;
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clSetDefaultDeviceCommandQueue(cl_context value, cl_device_id selected, cl_command_queue) {
+CL_API_ENTRY cl_int CL_API_CALL clSetDefaultDeviceCommandQueue(cl_context value, cl_device_id selected, cl_command_queue queueValue) {
   auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   if (!validDevice(selected) || context->device != &device) return CL_INVALID_DEVICE;
-  return CL_INVALID_OPERATION;
+  auto *queue = anyQueue(queueValue);
+  if (!queue || queue->deviceSize == 0 || queue->context != context) return CL_INVALID_COMMAND_QUEUE;
+  context->defaultDeviceQueue = queue;
+  return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainCommandQueue(cl_command_queue value) {
-  auto *queue = checked(value);
+  auto *queue = anyQueue(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   retain(queue);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseCommandQueue(cl_command_queue value) {
-  auto *queue = checked(value);
+  auto *queue = anyQueue(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (release(queue)) {
     auto *context = queue->context;
     unregisterLiveObject(queue);
-    scheduler().destroyStream(queue->stream);
+    if (!queue->deviceSize) scheduler().destroyStream(queue->stream);
+    else if (context->defaultDeviceQueue == queue) context->defaultDeviceQueue = nullptr;
     delete queue;
     clReleaseContext(reinterpret_cast<cl_context>(context));
   }
@@ -1570,7 +1801,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetCommandQueueProperty(cl_command_queue value
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue value, cl_command_queue_info name, size_t size, void *output,
                                                       size_t *written) {
-  auto *queue = checked(value);
+  auto *queue = anyQueue(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   switch (name) {
     case CL_QUEUE_CONTEXT: {
@@ -1588,9 +1819,9 @@ CL_API_ENTRY cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue value, cl
     case CL_QUEUE_PROPERTIES: return outputScalar(size, output, written, queue->properties);
     case CL_QUEUE_PROPERTIES_ARRAY:
       return outputBytes(size, output, written, queue->propertiesArray.data(), queue->propertiesArray.size() * sizeof(cl_queue_properties));
-    case CL_QUEUE_SIZE: return CL_INVALID_COMMAND_QUEUE;
+    case CL_QUEUE_SIZE: return queue->deviceSize ? outputScalar(size, output, written, queue->deviceSize) : CL_INVALID_COMMAND_QUEUE;
     case CL_QUEUE_DEVICE_DEFAULT: {
-      cl_command_queue v = nullptr;
+      cl_command_queue v = reinterpret_cast<cl_command_queue>(queue->context->defaultDeviceQueue);
       return outputScalar(size, output, written, v);
     }
     default: return CL_INVALID_VALUE;
@@ -1604,7 +1835,11 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateBuffer(cl_context value, cl_mem_flags fl
     return nullptr;
   }
   constexpr cl_mem_flags accessFlags = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY;
-  if ((flags & accessFlags) == 0) flags |= CL_MEM_READ_WRITE;
+  if (immutableFlags(flags) != CL_SUCCESS) {
+    if (error) *error = CL_INVALID_VALUE;
+    return nullptr;
+  }
+  if ((flags & accessFlags) == 0) flags |= flags & CL_MEM_IMMUTABLE_EXT ? CL_MEM_READ_ONLY : CL_MEM_READ_WRITE;
   if ((flags & CL_MEM_USE_HOST_PTR) && !host) {
     if (error) *error = CL_INVALID_HOST_PTR;
     return nullptr;
@@ -1674,35 +1909,558 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateBufferWithProperties(cl_context value, c
   return result;
 }
 
-CL_API_ENTRY cl_mem CL_API_CALL clCreatePipe(cl_context value, cl_mem_flags, cl_uint, cl_uint, const cl_pipe_properties *, cl_int *error) {
-  if (!checked(value)) {
-    if (error) *error = CL_INVALID_CONTEXT;
+CL_API_ENTRY cl_mem CL_API_CALL clCreatePipe(cl_context value, cl_mem_flags flags, cl_uint packetSize, cl_uint packets,
+                                             const cl_pipe_properties *properties, cl_int *error) {
+  const auto rejected = [&](cl_int status) -> cl_mem {
+    if (error) *error = status;
     return nullptr;
+  };
+  auto *context = checked(value);
+  if (!context) return rejected(CL_INVALID_CONTEXT);
+  if ((flags & ~(CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS)) != 0 || (properties && properties[0] != 0)) return rejected(CL_INVALID_VALUE);
+  const size_t bytes = pipe::Packets + size_t{packetSize} * packets;
+  if (packetSize == 0 || packetSize > PipeMaxPacketSize || packets == 0 || bytes > maxMemAllocSize()) return rejected(CL_INVALID_PIPE_SIZE);
+  cl_int status = CL_SUCCESS;
+  auto allocation = allocate(bytes, &status);
+  if (!allocation) return rejected(status);
+  const std::array<uint32_t, 4> header{0, 0, packets, packetSize};
+  if (writeAllocation(allocation, pipe::ReadIndex, header.data(), sizeof(header)) != CL_SUCCESS) {
+    releaseAllocation(allocation);
+    return rejected(CL_OUT_OF_RESOURCES);
   }
-  if (error) *error = CL_INVALID_OPERATION;
+  auto *result = new (std::nothrow) _cl_mem;
+  if (!result) {
+    releaseAllocation(allocation);
+    return rejected(CL_OUT_OF_HOST_MEMORY);
+  }
+  registerLiveObject(result);
+  result->dispatch = &dispatch;
+  result->context = context;
+  result->allocation = std::move(allocation);
+  result->flags = CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS;
+  result->size = bytes;
+  result->pipe = std::make_pair(packetSize, packets);
+  if (properties) result->properties.push_back(0);
+  retain(context);
+  if (error) *error = CL_SUCCESS;
+  return reinterpret_cast<cl_mem>(result);
+}
+
+} // extern "C"
+
+namespace {
+
+enum class Channel { Unorm, Snorm, Signed, Unsigned, Half, Float };
+
+struct ImageFormatInfo {
+  cl_channel_order order;
+  cl_channel_type type;
+  uint32_t descriptor; // A SPIR-V ImageFormat, or a private ImageDescriptor::Format code.
+  size_t channels;
+  size_t channelBytes;
+  Channel channel;
+  bool writable;
+};
+
+constexpr ImageFormatInfo ImageFormats[] = {
+    {CL_R, CL_UNORM_INT8, 15, 1, 1, Channel::Unorm, true},
+    {CL_R, CL_UNORM_INT16, 14, 1, 2, Channel::Unorm, true},
+    {CL_R, CL_SNORM_INT8, 20, 1, 1, Channel::Snorm, true},
+    {CL_R, CL_SNORM_INT16, 19, 1, 2, Channel::Snorm, true},
+    {CL_R, CL_SIGNED_INT8, 29, 1, 1, Channel::Signed, true},
+    {CL_R, CL_SIGNED_INT16, 28, 1, 2, Channel::Signed, true},
+    {CL_R, CL_SIGNED_INT32, 24, 1, 4, Channel::Signed, true},
+    {CL_R, CL_UNSIGNED_INT8, 39, 1, 1, Channel::Unsigned, true},
+    {CL_R, CL_UNSIGNED_INT16, 38, 1, 2, Channel::Unsigned, true},
+    {CL_R, CL_UNSIGNED_INT32, 33, 1, 4, Channel::Unsigned, true},
+    {CL_R, CL_HALF_FLOAT, 9, 1, 2, Channel::Half, true},
+    {CL_R, CL_FLOAT, 3, 1, 4, Channel::Float, true},
+    {CL_RG, CL_UNORM_INT8, 13, 2, 1, Channel::Unorm, true},
+    {CL_RG, CL_UNORM_INT16, 12, 2, 2, Channel::Unorm, true},
+    {CL_RG, CL_SNORM_INT8, 18, 2, 1, Channel::Snorm, true},
+    {CL_RG, CL_SNORM_INT16, 17, 2, 2, Channel::Snorm, true},
+    {CL_RG, CL_SIGNED_INT8, 27, 2, 1, Channel::Signed, true},
+    {CL_RG, CL_SIGNED_INT16, 26, 2, 2, Channel::Signed, true},
+    {CL_RG, CL_SIGNED_INT32, 25, 2, 4, Channel::Signed, true},
+    {CL_RG, CL_UNSIGNED_INT8, 37, 2, 1, Channel::Unsigned, true},
+    {CL_RG, CL_UNSIGNED_INT16, 36, 2, 2, Channel::Unsigned, true},
+    {CL_RG, CL_UNSIGNED_INT32, 35, 2, 4, Channel::Unsigned, true},
+    {CL_RG, CL_HALF_FLOAT, 7, 2, 2, Channel::Half, true},
+    {CL_RG, CL_FLOAT, 6, 2, 4, Channel::Float, true},
+    {CL_RGBA, CL_UNORM_INT8, 4, 4, 1, Channel::Unorm, true},
+    {CL_RGBA, CL_UNORM_INT16, 10, 4, 2, Channel::Unorm, true},
+    {CL_RGBA, CL_SNORM_INT8, 5, 4, 1, Channel::Snorm, true},
+    {CL_RGBA, CL_SNORM_INT16, 16, 4, 2, Channel::Snorm, true},
+    {CL_RGBA, CL_SIGNED_INT8, 23, 4, 1, Channel::Signed, true},
+    {CL_RGBA, CL_SIGNED_INT16, 22, 4, 2, Channel::Signed, true},
+    {CL_RGBA, CL_SIGNED_INT32, 21, 4, 4, Channel::Signed, true},
+    {CL_RGBA, CL_UNSIGNED_INT8, 32, 4, 1, Channel::Unsigned, true},
+    {CL_RGBA, CL_UNSIGNED_INT16, 31, 4, 2, Channel::Unsigned, true},
+    {CL_RGBA, CL_UNSIGNED_INT32, 30, 4, 4, Channel::Unsigned, true},
+    {CL_RGBA, CL_HALF_FLOAT, 2, 4, 2, Channel::Half, true},
+    {CL_RGBA, CL_FLOAT, 1, 4, 4, Channel::Float, true},
+    {CL_BGRA, CL_UNORM_INT8, descriptor::Format::Bgra8Unorm, 4, 1, Channel::Unorm, true},
+    {CL_sRGBA, CL_UNORM_INT8, descriptor::Format::Rgba8Srgb, 4, 1, Channel::Unorm, false},
+    {CL_DEPTH, CL_UNORM_INT16, descriptor::Format::D16Unorm, 1, 2, Channel::Unorm, true},
+    {CL_DEPTH, CL_FLOAT, descriptor::Format::D32Sfloat, 1, 4, Channel::Float, true},
+};
+
+// Depth images are two-dimensional, optionally arrayed.
+bool formatSupports(const ImageFormatInfo &info, cl_mem_object_type type) {
+  return info.order != CL_DEPTH || type == CL_MEM_OBJECT_IMAGE2D || type == CL_MEM_OBJECT_IMAGE2D_ARRAY;
+}
+
+constexpr cl_channel_order ChannelOrders[] = {CL_R,    CL_A,         CL_RG,        CL_RA,    CL_RGB, CL_RGBA, CL_BGRA,
+                                              CL_ARGB, CL_INTENSITY, CL_LUMINANCE, CL_Rx,    CL_RGx, CL_RGBx, CL_DEPTH,
+                                              CL_sRGB, CL_sRGBx,     CL_sRGBA,     CL_sBGRA, CL_ABGR};
+constexpr cl_channel_type ChannelTypes[] = {
+    CL_SNORM_INT8,       CL_SNORM_INT16, CL_UNORM_INT8,   CL_UNORM_INT16,  CL_UNORM_SHORT_565,   CL_UNORM_SHORT_555,
+    CL_UNORM_INT_101010, CL_SIGNED_INT8, CL_SIGNED_INT16, CL_SIGNED_INT32, CL_UNSIGNED_INT8,     CL_UNSIGNED_INT16,
+    CL_UNSIGNED_INT32,   CL_HALF_FLOAT,  CL_FLOAT,        CL_UNORM_INT24,  CL_UNORM_INT_101010_2};
+
+constexpr size_t ImageRecordBytes = descriptor::Layout::LevelTable + descriptor::Layout::LevelBytes + descriptor::Layout::PitchBytes;
+
+constexpr size_t SamplerRecordBytes = descriptor::SamplerWord::Count * 4;
+
+const ImageFormatInfo *imageFormatInfo(const cl_image_format &format) {
+  for (const auto &info : ImageFormats)
+    if (info.order == format.image_channel_order && info.type == format.image_channel_data_type) return &info;
   return nullptr;
 }
 
-CL_API_ENTRY cl_mem CL_API_CALL clCreateImage(cl_context value, cl_mem_flags, const cl_image_format *, const cl_image_desc *, void *,
-                                              cl_int *error) {
-  if (!checked(value)) {
-    if (error) *error = CL_INVALID_CONTEXT;
-    return nullptr;
+bool knownImageFormat(const cl_image_format &format) {
+  return std::find(std::begin(ChannelOrders), std::end(ChannelOrders), format.image_channel_order) != std::end(ChannelOrders)
+         && std::find(std::begin(ChannelTypes), std::end(ChannelTypes), format.image_channel_data_type) != std::end(ChannelTypes);
+}
+
+bool imageType(cl_mem_object_type type) {
+  return type == CL_MEM_OBJECT_IMAGE1D || type == CL_MEM_OBJECT_IMAGE1D_BUFFER || type == CL_MEM_OBJECT_IMAGE1D_ARRAY
+         || type == CL_MEM_OBJECT_IMAGE2D || type == CL_MEM_OBJECT_IMAGE2D_ARRAY || type == CL_MEM_OBJECT_IMAGE3D;
+}
+
+bool arrayed(cl_mem_object_type type) { return type == CL_MEM_OBJECT_IMAGE1D_ARRAY || type == CL_MEM_OBJECT_IMAGE2D_ARRAY; }
+
+size_t imageHeight(const cl_image_desc &desc) {
+  return desc.image_type == CL_MEM_OBJECT_IMAGE2D || desc.image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY
+                 || desc.image_type == CL_MEM_OBJECT_IMAGE3D
+             ? desc.image_height
+             : 1;
+}
+
+// Layers of an array, or the depth of a 3D image.
+size_t imageSlices(const cl_image_desc &desc) {
+  return desc.image_type == CL_MEM_OBJECT_IMAGE3D ? desc.image_depth : arrayed(desc.image_type) ? desc.image_array_size : 1;
+}
+
+void putWord(uint8_t *record, size_t offset, uint64_t value, size_t bytes) { std::memcpy(record + offset, &value, bytes); }
+
+std::array<uint8_t, ImageRecordBytes> imageRecord(const cl_image_desc &desc, const ImageFormatInfo &info, uintptr_t texels, size_t bytes,
+                                                  size_t rowPitch) {
+  std::array<uint8_t, ImageRecordBytes> record{};
+  const bool pitched = rowPitch != desc.image_width * info.channels * info.channelBytes;
+  const uint32_t format = info.descriptor | descriptor::Flags::LevelTable
+                          | (desc.image_type == CL_MEM_OBJECT_IMAGE3D ? descriptor::Flags::Volume : 0u)
+                          | (pitched ? descriptor::Flags::Pitched : 0u);
+  putWord(record.data(), descriptor::Layout::Width, desc.image_width, 4);
+  putWord(record.data(), descriptor::Layout::Height, imageHeight(desc), 4);
+  putWord(record.data(), descriptor::Layout::Slices, imageSlices(desc), 4);
+  putWord(record.data(), descriptor::Layout::Format, format, 4);
+  putWord(record.data(), descriptor::Layout::Texels, texels, 8);
+  putWord(record.data(), descriptor::Layout::TexelBytes, bytes, 8);
+  putWord(record.data(), descriptor::Layout::Levels, 1, 4);
+  putWord(record.data(), descriptor::Layout::LevelTable + descriptor::Layout::LevelWidth, desc.image_width, 4);
+  putWord(record.data(), descriptor::Layout::LevelTable + descriptor::Layout::LevelHeight, imageHeight(desc), 4);
+  if (pitched) putWord(record.data(), descriptor::Layout::LevelTable + descriptor::Layout::LevelBytes, rowPitch, 8);
+  return record;
+}
+
+cl_int validateImageSize(const cl_image_desc &desc) {
+  const auto within = [](size_t value, size_t limit) { return value >= 1 && value <= limit; };
+  switch (desc.image_type) {
+    case CL_MEM_OBJECT_IMAGE1D: return within(desc.image_width, Image2DMaxSize) ? CL_SUCCESS : CL_INVALID_IMAGE_SIZE;
+    case CL_MEM_OBJECT_IMAGE1D_BUFFER: return within(desc.image_width, ImageMaxBufferSize) ? CL_SUCCESS : CL_INVALID_IMAGE_SIZE;
+    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+      return within(desc.image_width, Image2DMaxSize) && within(desc.image_array_size, ImageMaxArraySize) ? CL_SUCCESS
+                                                                                                          : CL_INVALID_IMAGE_SIZE;
+    case CL_MEM_OBJECT_IMAGE2D:
+      return within(desc.image_width, Image2DMaxSize) && within(desc.image_height, Image2DMaxSize) ? CL_SUCCESS : CL_INVALID_IMAGE_SIZE;
+    case CL_MEM_OBJECT_IMAGE2D_ARRAY:
+      return within(desc.image_width, Image2DMaxSize) && within(desc.image_height, Image2DMaxSize)
+                     && within(desc.image_array_size, ImageMaxArraySize)
+                 ? CL_SUCCESS
+                 : CL_INVALID_IMAGE_SIZE;
+    case CL_MEM_OBJECT_IMAGE3D:
+      return within(desc.image_width, Image3DMaxSize) && within(desc.image_height, Image3DMaxSize)
+                     && within(desc.image_depth, Image3DMaxSize)
+                 ? CL_SUCCESS
+                 : CL_INVALID_IMAGE_SIZE;
+    default: return CL_INVALID_IMAGE_DESCRIPTOR;
   }
-  if (error) *error = CL_INVALID_OPERATION;
+}
+
+cl_mem fail(cl_int *error, cl_int status) {
+  if (error) *error = status;
   return nullptr;
 }
 
-CL_API_ENTRY cl_mem CL_API_CALL clCreateImageWithProperties(cl_context value, const cl_mem_properties *, cl_mem_flags,
-                                                            const cl_image_format *, const cl_image_desc *, void *, cl_int *error) {
-  return clCreateImage(value, 0, nullptr, nullptr, nullptr, error);
+cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_format *format, const cl_image_desc *desc, void *host,
+                   cl_int *error) {
+  if (!context) return fail(error, CL_INVALID_CONTEXT);
+  constexpr cl_mem_flags accessFlags = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY | CL_MEM_KERNEL_READ_AND_WRITE;
+  constexpr cl_mem_flags hostAccessFlags = CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS;
+  if (!format || !knownImageFormat(*format)) return fail(error, CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
+  if (!desc || !imageType(desc->image_type) || desc->num_mip_levels != 0 || desc->num_samples != 0)
+    return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+  const auto *info = imageFormatInfo(*format);
+  if (!info || !formatSupports(*info, desc->image_type)) return fail(error, CL_IMAGE_FORMAT_NOT_SUPPORTED);
+  if (const auto status = validateImageSize(*desc); status != CL_SUCCESS) return fail(error, status);
+  if (std::popcount(flags & (CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) > 1 || std::popcount(flags & hostAccessFlags) > 1
+      || ((flags & CL_MEM_USE_HOST_PTR) && (flags & CL_MEM_COPY_HOST_PTR))
+      || ((flags & CL_MEM_USE_HOST_PTR) && (flags & CL_MEM_ALLOC_HOST_PTR)))
+    return fail(error, CL_INVALID_VALUE);
+  if (immutableFlags(flags) != CL_SUCCESS) return fail(error, CL_INVALID_VALUE);
+  const bool copiesHost = (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR)) != 0;
+  if (copiesHost != (host != nullptr)) return fail(error, CL_INVALID_HOST_PTR);
+  if ((flags & accessFlags & ~CL_MEM_KERNEL_READ_AND_WRITE) == 0)
+    flags |= flags & CL_MEM_IMMUTABLE_EXT ? CL_MEM_READ_ONLY : CL_MEM_READ_WRITE;
+  if (!info->writable && (flags & (CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY | CL_MEM_KERNEL_READ_AND_WRITE)) != 0)
+    return fail(error, CL_IMAGE_FORMAT_NOT_SUPPORTED);
+
+  ImageShape shape;
+  shape.format = *format;
+  shape.desc = *desc;
+  shape.elementSize = info->channels * info->channelBytes;
+  shape.rowPitch = desc->image_width * shape.elementSize;
+  // A 2D image over a buffer or another 2D image addresses the shared texels through their row pitch.
+  auto *source = desc->buffer && desc->image_type == CL_MEM_OBJECT_IMAGE2D ? checked(desc->buffer) : nullptr;
+  if (desc->buffer && desc->image_type == CL_MEM_OBJECT_IMAGE2D) {
+    if (!source || source->context != context || source->pipe) return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+    if (host) return fail(error, CL_INVALID_HOST_PTR);
+    if (const auto &image = source->image) {
+      const auto *sourceInfo = imageFormatInfo(image->format);
+      if (!sourceInfo || sourceInfo->channels != info->channels || image->format.image_channel_data_type != format->image_channel_data_type)
+        return fail(error, CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
+      if (image->desc.image_type != CL_MEM_OBJECT_IMAGE2D || image->desc.image_width != desc->image_width
+          || image->desc.image_height != desc->image_height || (desc->image_row_pitch != 0 && desc->image_row_pitch != image->rowPitch))
+        return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+      shape.rowPitch = image->rowPitch;
+    } else {
+      const size_t pitch = desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
+      if (pitch < shape.rowPitch || pitch % (ImagePitchAlignment * shape.elementSize) != 0
+          || source->origin % (ImageBaseAddressAlignment * shape.elementSize) != 0)
+        return fail(error, CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
+      shape.rowPitch = pitch;
+    }
+  }
+  shape.slicePitch = shape.rowPitch * imageHeight(*desc);
+  const size_t bytes = shape.slicePitch * imageSlices(*desc);
+  if (bytes > maxMemAllocSize()) return fail(error, CL_INVALID_IMAGE_SIZE);
+  // Host data uses the caller's pitches; the device copy is tightly packed unless it aliases another object.
+  const size_t hostRow = source || desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
+  const size_t hostSlice = desc->image_slice_pitch != 0                      ? desc->image_slice_pitch
+                           : desc->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? hostRow
+                                                                             : hostRow * imageHeight(*desc);
+  if (!host && !desc->buffer && (desc->image_row_pitch != 0 || desc->image_slice_pitch != 0))
+    return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+  if (hostRow < shape.rowPitch || hostRow % shape.elementSize != 0) return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+  const size_t minimumSlice = desc->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? hostRow : hostRow * imageHeight(*desc);
+  if ((desc->image_type == CL_MEM_OBJECT_IMAGE3D || arrayed(desc->image_type)) && (hostSlice < minimumSlice || hostSlice % hostRow != 0))
+    return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+  shape.hostRowPitch = hostRow;
+  shape.hostSlicePitch = hostSlice;
+
+  std::shared_ptr<Allocation> texels;
+  _cl_mem *buffer = nullptr;
+  size_t origin = 0;
+  if (desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+    buffer = checked(desc->buffer);
+    if (!buffer || buffer->image || buffer->context != context) return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+    if (host) return fail(error, CL_INVALID_HOST_PTR);
+    if (bytes > buffer->size) return fail(error, CL_INVALID_IMAGE_SIZE);
+    if ((flags & accessFlags) == CL_MEM_READ_WRITE && (buffer->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) != 0)
+      flags = (flags & ~CL_MEM_READ_WRITE) | (buffer->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY));
+    if ((flags & hostAccessFlags) == 0) flags |= buffer->flags & hostAccessFlags;
+    flags |= buffer->flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR);
+    texels = buffer->allocation;
+    origin = buffer->origin;
+  } else if (source) {
+    if (bytes > source->size) return fail(error, CL_INVALID_IMAGE_SIZE);
+    if ((flags & accessFlags) == CL_MEM_READ_WRITE && (source->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) != 0)
+      flags = (flags & ~CL_MEM_READ_WRITE) | (source->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY));
+    if ((flags & hostAccessFlags) == 0) flags |= source->flags & hostAccessFlags;
+    flags |= source->flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR);
+    buffer = source;
+    texels = source->allocation;
+    origin = source->origin;
+  } else if (desc->buffer) {
+    return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
+  } else {
+    cl_int status = CL_SUCCESS;
+    texels = allocate(bytes, &status);
+    if (!texels) return fail(error, status);
+    if (host) {
+      auto *packed = static_cast<uint8_t *>(texels->data());
+      const auto *source = static_cast<const uint8_t *>(host);
+      const size_t rows = imageHeight(*desc), slices = imageSlices(*desc);
+      for (size_t z = 0; z < slices; ++z)
+        for (size_t y = 0; y < rows; ++y)
+          std::memcpy(packed + z * shape.slicePitch + y * shape.rowPitch, source + z * hostSlice + y * hostRow, shape.rowPitch);
+      if (writeAllocation(texels, 0, packed, bytes) != CL_SUCCESS) {
+        releaseAllocation(texels);
+        return fail(error, CL_OUT_OF_RESOURCES);
+      }
+    }
+  }
+  cl_int status = CL_SUCCESS;
+  shape.record = allocate(ImageRecordBytes, &status);
+  const auto record = imageRecord(*desc, *info, reinterpret_cast<uintptr_t>(texels->data()) + origin, bytes, shape.rowPitch);
+  if (!shape.record || writeAllocation(shape.record, 0, record.data(), record.size()) != CL_SUCCESS) {
+    if (shape.record) releaseAllocation(shape.record);
+    if (!buffer) releaseAllocation(texels);
+    return fail(error, shape.record ? CL_OUT_OF_RESOURCES : status);
+  }
+  auto *result = new (std::nothrow) _cl_mem;
+  if (!result) {
+    releaseAllocation(shape.record);
+    if (!buffer) releaseAllocation(texels);
+    return fail(error, CL_OUT_OF_HOST_MEMORY);
+  }
+  registerLiveObject(result);
+  result->dispatch = &dispatch;
+  result->context = context;
+  result->allocation = std::move(texels);
+  result->flags = flags;
+  result->size = bytes;
+  result->origin = origin;
+  result->hostPointer = (flags & CL_MEM_USE_HOST_PTR) != 0 ? host : nullptr;
+  result->parent = buffer;
+  result->image = std::move(shape);
+  retain(context);
+  if (buffer) retain(buffer);
+  if (error) *error = CL_SUCCESS;
+  return reinterpret_cast<cl_mem>(result);
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clGetImageInfo(cl_mem, cl_image_info, size_t, void *, size_t *) { return CL_INVALID_MEM_OBJECT; }
+uint32_t samplerAddress(cl_addressing_mode mode) {
+  switch (mode) {
+    case CL_ADDRESS_CLAMP: return descriptor::AddressMode::ClampToBorder;
+    case CL_ADDRESS_REPEAT: return descriptor::AddressMode::Repeat;
+    case CL_ADDRESS_MIRRORED_REPEAT: return descriptor::AddressMode::MirroredRepeat;
+    default: return descriptor::AddressMode::ClampToEdge;
+  }
+}
 
-CL_API_ENTRY cl_int CL_API_CALL clGetPipeInfo(cl_mem value, cl_pipe_info, size_t, void *, size_t *) {
-  if (!checked(value)) return CL_INVALID_MEM_OBJECT;
-  return CL_INVALID_MEM_OBJECT;
+cl_sampler createSampler(_cl_context *context, cl_bool normalised, cl_addressing_mode addressing, cl_filter_mode filter,
+                         std::vector<cl_sampler_properties> properties, cl_int *error) {
+  const auto rejected = [&](cl_int status) {
+    if (error) *error = status;
+    return nullptr;
+  };
+  if (!context) return rejected(CL_INVALID_CONTEXT);
+  if ((normalised != CL_TRUE && normalised != CL_FALSE)
+      || (addressing != CL_ADDRESS_NONE && addressing != CL_ADDRESS_CLAMP_TO_EDGE && addressing != CL_ADDRESS_CLAMP
+          && addressing != CL_ADDRESS_REPEAT && addressing != CL_ADDRESS_MIRRORED_REPEAT)
+      || (filter != CL_FILTER_NEAREST && filter != CL_FILTER_LINEAR))
+    return rejected(CL_INVALID_VALUE);
+  if (!normalised && (addressing == CL_ADDRESS_REPEAT || addressing == CL_ADDRESS_MIRRORED_REPEAT)) return rejected(CL_INVALID_VALUE);
+  std::array<uint32_t, descriptor::SamplerWord::Count> words{};
+  const uint32_t filtering = filter == CL_FILTER_LINEAR ? descriptor::Filter::Linear : descriptor::Filter::Nearest;
+  const float maxLod = 1000.0f;
+  words[descriptor::SamplerWord::MinFilter] = filtering;
+  words[descriptor::SamplerWord::MagFilter] = filtering;
+  words[descriptor::SamplerWord::AddressU] = samplerAddress(addressing);
+  words[descriptor::SamplerWord::AddressV] = samplerAddress(addressing);
+  words[descriptor::SamplerWord::AddressW] = samplerAddress(addressing);
+  words[descriptor::SamplerWord::Unnormalized] = normalised ? 0u : 1u;
+  words[descriptor::SamplerWord::BorderColour] = descriptor::BorderColour::FloatTransparentBlack;
+  std::memcpy(&words[descriptor::SamplerWord::MaxLod], &maxLod, sizeof(maxLod));
+  cl_int status = CL_SUCCESS;
+  auto record = allocate(SamplerRecordBytes, &status);
+  if (!record) return rejected(status);
+  if (writeAllocation(record, 0, words.data(), SamplerRecordBytes) != CL_SUCCESS) {
+    releaseAllocation(record);
+    return rejected(CL_OUT_OF_RESOURCES);
+  }
+  auto *sampler = new (std::nothrow) _cl_sampler;
+  if (!sampler) {
+    releaseAllocation(record);
+    return rejected(CL_OUT_OF_HOST_MEMORY);
+  }
+  registerLiveObject(sampler);
+  sampler->dispatch = &dispatch;
+  sampler->context = context;
+  sampler->normalised = normalised;
+  sampler->addressing = addressing;
+  sampler->filter = filter;
+  sampler->properties = std::move(properties);
+  sampler->record = std::move(record);
+  retain(context);
+  if (error) *error = CL_SUCCESS;
+  return reinterpret_cast<cl_sampler>(sampler);
+}
+
+} // namespace
+
+extern "C" {
+
+CL_API_ENTRY cl_mem CL_API_CALL clCreateImage(cl_context value, cl_mem_flags flags, const cl_image_format *format,
+                                              const cl_image_desc *desc, void *host, cl_int *error) {
+  return createImage(checked(value), flags, format, desc, host, error);
+}
+
+CL_API_ENTRY cl_mem CL_API_CALL clCreateImageWithProperties(cl_context value, const cl_mem_properties *properties, cl_mem_flags flags,
+                                                            const cl_image_format *format, const cl_image_desc *desc, void *host,
+                                                            cl_int *error) {
+  if (properties && properties[0] != 0) return fail(error, CL_INVALID_PROPERTY);
+  auto result = createImage(checked(value), flags, format, desc, host, error);
+  if (result && properties) reinterpret_cast<_cl_mem *>(result)->properties.push_back(0);
+  return result;
+}
+
+CL_API_ENTRY cl_mem CL_API_CALL clCreateImage2D(cl_context value, cl_mem_flags flags, const cl_image_format *format, size_t width,
+                                                size_t height, size_t rowPitch, void *host, cl_int *error) {
+  cl_image_desc desc{};
+  desc.image_type = CL_MEM_OBJECT_IMAGE2D;
+  desc.image_width = width;
+  desc.image_height = height;
+  desc.image_row_pitch = rowPitch;
+  return createImage(checked(value), flags, format, &desc, host, error);
+}
+
+CL_API_ENTRY cl_mem CL_API_CALL clCreateImage3D(cl_context value, cl_mem_flags flags, const cl_image_format *format, size_t width,
+                                                size_t height, size_t depth, size_t rowPitch, size_t slicePitch, void *host,
+                                                cl_int *error) {
+  cl_image_desc desc{};
+  desc.image_type = CL_MEM_OBJECT_IMAGE3D;
+  desc.image_width = width;
+  desc.image_height = height;
+  desc.image_depth = depth;
+  desc.image_row_pitch = rowPitch;
+  desc.image_slice_pitch = slicePitch;
+  return createImage(checked(value), flags, format, &desc, host, error);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clGetImageInfo(cl_mem value, cl_image_info name, size_t size, void *output, size_t *written) {
+  auto *mem = checked(value);
+  if (!mem || !mem->image) return CL_INVALID_MEM_OBJECT;
+  const auto &image = *mem->image;
+  const auto type = image.desc.image_type;
+  const auto zero = size_t{0};
+  switch (name) {
+    case CL_IMAGE_FORMAT: return outputScalar(size, output, written, image.format);
+    case CL_IMAGE_ELEMENT_SIZE: return outputScalar(size, output, written, image.elementSize);
+    case CL_IMAGE_ROW_PITCH: return outputScalar(size, output, written, image.rowPitch);
+    case CL_IMAGE_SLICE_PITCH: {
+      const size_t pitch = type == CL_MEM_OBJECT_IMAGE3D || arrayed(type) ? image.slicePitch : 0;
+      return outputScalar(size, output, written, pitch);
+    }
+    case CL_IMAGE_WIDTH: return outputScalar(size, output, written, image.desc.image_width);
+    case CL_IMAGE_HEIGHT: {
+      const size_t height = type == CL_MEM_OBJECT_IMAGE2D || type == CL_MEM_OBJECT_IMAGE2D_ARRAY || type == CL_MEM_OBJECT_IMAGE3D
+                                ? image.desc.image_height
+                                : 0;
+      return outputScalar(size, output, written, height);
+    }
+    case CL_IMAGE_DEPTH: return outputScalar(size, output, written, type == CL_MEM_OBJECT_IMAGE3D ? image.desc.image_depth : zero);
+    case CL_IMAGE_ARRAY_SIZE: return outputScalar(size, output, written, arrayed(type) ? image.desc.image_array_size : zero);
+    case CL_IMAGE_BUFFER: {
+      cl_mem buffer = mem->parent && !mem->parent->image ? reinterpret_cast<cl_mem>(mem->parent) : nullptr;
+      return outputScalar(size, output, written, buffer);
+    }
+    case CL_IMAGE_NUM_MIP_LEVELS:
+    case CL_IMAGE_NUM_SAMPLES: {
+      const cl_uint none = 0;
+      return outputScalar(size, output, written, none);
+    }
+    default: return CL_INVALID_VALUE;
+  }
+}
+
+CL_API_ENTRY cl_sampler CL_API_CALL clCreateSampler(cl_context value, cl_bool normalised, cl_addressing_mode addressing,
+                                                    cl_filter_mode filter, cl_int *error) {
+  return createSampler(checked(value), normalised, addressing, filter, {}, error);
+}
+
+CL_API_ENTRY cl_sampler CL_API_CALL clCreateSamplerWithProperties(cl_context value, const cl_sampler_properties *properties,
+                                                                  cl_int *error) {
+  cl_bool normalised = CL_TRUE;
+  cl_addressing_mode addressing = CL_ADDRESS_CLAMP;
+  cl_filter_mode filter = CL_FILTER_NEAREST;
+  std::vector<cl_sampler_properties> copied;
+  std::set<cl_sampler_properties> seen;
+  for (size_t index = 0; properties && properties[index] != 0; index += 2) {
+    const auto key = properties[index];
+    const auto setting = properties[index + 1];
+    if (!seen.insert(key).second) {
+      if (error) *error = CL_INVALID_VALUE;
+      return nullptr;
+    }
+    if (key == CL_SAMPLER_NORMALIZED_COORDS) normalised = static_cast<cl_bool>(setting);
+    else if (key == CL_SAMPLER_ADDRESSING_MODE) addressing = static_cast<cl_addressing_mode>(setting);
+    else if (key == CL_SAMPLER_FILTER_MODE) filter = static_cast<cl_filter_mode>(setting);
+    else {
+      if (error) *error = CL_INVALID_VALUE;
+      return nullptr;
+    }
+    copied.push_back(key);
+    copied.push_back(setting);
+  }
+  if (properties) copied.push_back(0);
+  return createSampler(checked(value), normalised, addressing, filter, std::move(copied), error);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clRetainSampler(cl_sampler value) {
+  auto *sampler = checked(value);
+  if (!sampler) return CL_INVALID_SAMPLER;
+  retain(sampler);
+  return CL_SUCCESS;
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clReleaseSampler(cl_sampler value) {
+  auto *sampler = checked(value);
+  if (!sampler) return CL_INVALID_SAMPLER;
+  if (release(sampler)) {
+    auto record = sampler->record;
+    auto *context = sampler->context;
+    unregisterLiveObject(sampler);
+    delete sampler;
+    releaseAllocation(record);
+    clReleaseContext(reinterpret_cast<cl_context>(context));
+  }
+  return CL_SUCCESS;
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clGetSamplerInfo(cl_sampler value, cl_sampler_info name, size_t size, void *output, size_t *written) {
+  auto *sampler = checked(value);
+  if (!sampler) return CL_INVALID_SAMPLER;
+  switch (name) {
+    case CL_SAMPLER_REFERENCE_COUNT: {
+      const cl_uint references = sampler->header.references.load();
+      return outputScalar(size, output, written, references);
+    }
+    case CL_SAMPLER_CONTEXT: {
+      const auto context = reinterpret_cast<cl_context>(sampler->context);
+      return outputScalar(size, output, written, context);
+    }
+    case CL_SAMPLER_NORMALIZED_COORDS: return outputScalar(size, output, written, sampler->normalised);
+    case CL_SAMPLER_ADDRESSING_MODE: return outputScalar(size, output, written, sampler->addressing);
+    case CL_SAMPLER_FILTER_MODE: return outputScalar(size, output, written, sampler->filter);
+    case CL_SAMPLER_PROPERTIES:
+      return outputBytes(size, output, written, sampler->properties.data(), sampler->properties.size() * sizeof(cl_sampler_properties));
+    default: return CL_INVALID_VALUE;
+  }
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clGetPipeInfo(cl_mem value, cl_pipe_info name, size_t size, void *output, size_t *written) {
+  auto *mem = checked(value);
+  if (!mem || !mem->pipe) return CL_INVALID_MEM_OBJECT;
+  switch (name) {
+    case CL_PIPE_PACKET_SIZE: return outputScalar(size, output, written, mem->pipe->first);
+    case CL_PIPE_MAX_PACKETS: return outputScalar(size, output, written, mem->pipe->second);
+    case CL_PIPE_PROPERTIES:
+      return outputBytes(size, output, written, mem->properties.data(), mem->properties.size() * sizeof(cl_pipe_properties));
+    default: return CL_INVALID_VALUE;
+  }
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainMemObject(cl_mem value) {
@@ -1718,10 +2476,12 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseMemObject(cl_mem value) {
     for (auto callback = mem->destructorCallbacks.rbegin(); callback != mem->destructorCallbacks.rend(); ++callback)
       callback->first(reinterpret_cast<cl_mem>(mem), callback->second);
     auto allocation = mem->allocation;
+    auto record = mem->image ? mem->image->record : nullptr;
     auto *context = mem->context;
     auto *parent = mem->parent;
     unregisterLiveObject(mem);
     delete mem;
+    if (record) releaseAllocation(record);
     // The root buffer owns backing storage. Sub-buffers and queued commands
     // retain that object; kernel argument/relocation metadata does not own it.
     if (!allocation->runtimeOwnsBase && !parent) releaseAllocation(allocation);
@@ -1766,7 +2526,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateSubBuffer(cl_mem value, cl_mem_flags fla
   constexpr cl_mem_flags hostAccessFlags = CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS;
   cl_mem_flags inheritedFlags = flags;
   if ((flags & accessFlags) == 0) inheritedFlags |= parent->flags & accessFlags;
-  inheritedFlags |= parent->flags & (CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR);
+  inheritedFlags |= parent->flags & (CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR | CL_MEM_IMMUTABLE_EXT);
   if ((flags & hostAccessFlags) == 0) inheritedFlags |= parent->flags & hostAccessFlags;
   result->flags = inheritedFlags;
   result->hostPointer = !parent->hostPointer ? nullptr : static_cast<uint8_t *>(parent->hostPointer) + region->origin;
@@ -1783,7 +2543,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info nam
   if (!mem) return CL_INVALID_MEM_OBJECT;
   switch (name) {
     case CL_MEM_TYPE: {
-      cl_mem_object_type v = CL_MEM_OBJECT_BUFFER;
+      cl_mem_object_type v = mem->image ? mem->image->desc.image_type : mem->pipe ? CL_MEM_OBJECT_PIPE : CL_MEM_OBJECT_BUFFER;
       return outputScalar(size, output, written, v);
     }
     case CL_MEM_FLAGS: return outputScalar(size, output, written, mem->flags);
@@ -1805,7 +2565,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info nam
       cl_mem v = reinterpret_cast<cl_mem>(mem->parent);
       return outputScalar(size, output, written, v);
     }
-    case CL_MEM_OFFSET: return outputScalar(size, output, written, mem->origin);
+    case CL_MEM_OFFSET: {
+      const size_t offset = mem->image ? 0 : mem->origin;
+      return outputScalar(size, output, written, offset);
+    }
     case CL_MEM_MAP_COUNT: {
       std::lock_guard lock(allocationsMutex);
       cl_uint v = static_cast<cl_uint>(mem->mappings.size());
@@ -1821,6 +2584,46 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info nam
 
 namespace {
 
+void unloadProgram(_cl_program *program) {
+  if (program->remoteId != 0) {
+    auto &state = remote;
+    if (state.ready()) {
+      std::lock_guard lock(remoteMutex);
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+    }
+    program->remoteId = 0;
+  }
+  for (const auto &global : program->globals)
+    (void)releaseAllocation(global);
+  program->globals.clear();
+  program->globalBytes = 0;
+}
+
+// Program-scope globals live as long as the program, so every one is bound before any launch.
+cl_int bindProgramGlobals(_cl_program *program, const std::vector<GlobalSymbol> &symbols) {
+  for (const auto &symbol : symbols) {
+    const auto bytes = static_cast<size_t>(symbol.size.value);
+    if (bytes > MaxGlobalVariableSize) {
+      program->buildLog = "program-scope global " + symbol.name.value + " has " + std::to_string(bytes)
+                          + " bytes, above CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE";
+      return CL_INVALID_BINARY;
+    }
+    if (bytes == 0) continue;
+    cl_int error = CL_SUCCESS;
+    auto allocation = allocate(bytes, &error);
+    if (!allocation) return error;
+    program->globals.push_back(allocation);
+    program->globalBytes += bytes;
+    std::lock_guard lock(remoteMutex);
+    if (!remote.client()->call(BindProgramGlobal{ProgramId{static_cast<int64_t>(program->remoteId)}, symbol.name.value,
+                                                 AllocationId{static_cast<int64_t>(allocation->id)}, LongPositive0{0}})) {
+      program->buildLog = remote.error();
+      return CL_INVALID_BINARY;
+    }
+  }
+  return CL_SUCCESS;
+}
+
 cl_int loadProgramIL(_cl_program *program) {
   if (program->remoteId != 0) return CL_SUCCESS;
   if (program->il.empty() || program->il.size() > std::numeric_limits<uint32_t>::max()) return CL_INVALID_BINARY;
@@ -1829,25 +2632,33 @@ cl_int loadProgramIL(_cl_program *program) {
     program->buildLog = remote.error();
     return CL_OUT_OF_RESOURCES;
   }
-  std::lock_guard lock(remoteMutex);
-  auto loaded = state.client()->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, program->il});
-  if (!loaded) {
-    program->buildLog = remote.error();
-    return CL_INVALID_BINARY;
+  std::vector<GlobalSymbol> globals;
+  {
+    std::lock_guard lock(remoteMutex);
+    auto loaded = state.client()->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, program->il});
+    if (!loaded) {
+      program->buildLog = remote.error();
+      return CL_INVALID_BINARY;
+    }
+    program->remoteId = static_cast<uint64_t>(loaded.value().value);
+    std::vector<std::string> kernelNames;
+    auto catalogue = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+    if (!catalogue) {
+      program->buildLog = remote.error();
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+      program->remoteId = 0;
+      return CL_INVALID_BINARY;
+    }
+    kernelNames.reserve(catalogue.value().kernels.size());
+    for (const auto &kernel : catalogue.value().kernels)
+      kernelNames.push_back(kernel.name.value);
+    program->kernelNames = kernelNames ^ mk_string(";");
+    globals = std::move(catalogue.value().globals);
   }
-  program->remoteId = static_cast<uint64_t>(loaded.value().value);
-  std::vector<std::string> kernelNames;
-  auto catalogue = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-  if (!catalogue) {
-    program->buildLog = remote.error();
-    (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-    program->remoteId = 0;
-    return CL_INVALID_BINARY;
+  if (const auto status = bindProgramGlobals(program, globals); status != CL_SUCCESS) {
+    unloadProgram(program);
+    return status;
   }
-  kernelNames.reserve(catalogue.value().kernels.size());
-  for (const auto &kernel : catalogue.value().kernels)
-    kernelNames.push_back(kernel.name.value);
-  program->kernelNames = kernelNames ^ mk_string(";");
   return CL_SUCCESS;
 }
 
@@ -1992,11 +2803,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseProgram(cl_program value) {
   auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (release(program)) {
-    auto &state = remote;
-    if (state.ready() && program->remoteId != 0) {
-      std::lock_guard lock(remoteMutex);
-      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-    }
+    unloadProgram(program);
     auto *context = program->context;
     unregisterLiveObject(program);
     delete program;
@@ -2033,14 +2840,7 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
   program->buildOptions = !options ? "" : options;
   if (program->createdWithIL) {
-    if (program->remoteId != 0) {
-      auto &state = remote;
-      if (state.ready()) {
-        std::lock_guard lock(remoteMutex);
-        (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-      }
-      program->remoteId = 0;
-    }
+    unloadProgram(program);
     std::vector<SpecializationConstant> constants;
     constants.reserve(program->specializationConstants.size());
     for (const auto &[id, bytes] : program->specializationConstants)
@@ -2067,12 +2867,7 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   }
   const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
   if (!source.empty() && program->remoteId != 0) {
-    auto &state = remote;
-    if (state.ready()) {
-      std::lock_guard lock(remoteMutex);
-      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-    }
-    program->remoteId = 0;
+    unloadProgram(program);
     program->il.clear();
     program->bitcode.clear();
   }
@@ -2144,14 +2939,7 @@ CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count
   program->buildOptions = !options ? "" : options;
   const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
   const bool compilesIL = source.empty() && !program->il.empty();
-  if (program->remoteId != 0) {
-    auto &state = remote;
-    if (state.ready()) {
-      std::lock_guard lock(remoteMutex);
-      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-    }
-  }
-  program->remoteId = 0;
+  unloadProgram(program);
   program->bitcode.clear();
   program->kernelNames.clear();
   if (compilesIL) {
@@ -2255,7 +3043,7 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
     linked->binaryType = hasBuildOption(options, "-create-library") ? CL_PROGRAM_BINARY_TYPE_LIBRARY : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
     linked->buildOptions = std::move(buildOptions);
     linked->buildLog = std::move(linkLog);
-    if (loadProgramIL(linked) != CL_SUCCESS) {
+    if (linked->binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE && loadProgramIL(linked) != CL_SUCCESS) {
       clReleaseProgram(reinterpret_cast<cl_program>(linked));
       if (error) *error = CL_BUILD_PROGRAM_FAILURE;
       return nullptr;
@@ -2285,7 +3073,7 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
     linked->binaryType = hasBuildOption(options, "-create-library") ? CL_PROGRAM_BINARY_TYPE_LIBRARY : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
     linked->buildOptions = std::move(buildOptions);
     linked->buildLog = std::move(linkLog);
-    if (loadProgramIL(linked) != CL_SUCCESS) {
+    if (linked->binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE && loadProgramIL(linked) != CL_SUCCESS) {
       clReleaseProgram(reinterpret_cast<cl_program>(linked));
       if (error) *error = CL_BUILD_PROGRAM_FAILURE;
       return nullptr;
@@ -2309,7 +3097,7 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
     linked->buildStatus = CL_BUILD_SUCCESS;
     linked->binaryType = hasBuildOption(options, "-create-library") ? CL_PROGRAM_BINARY_TYPE_LIBRARY : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
     retain(context);
-    const auto loaded = loadProgramIL(linked);
+    const auto loaded = linked->binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE ? loadProgramIL(linked) : CL_SUCCESS;
     if (loaded != CL_SUCCESS) {
       unregisterLiveObject(linked);
       delete linked;
@@ -2341,11 +3129,19 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
   return result;
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clGetSupportedImageFormats(cl_context value, cl_mem_flags, cl_mem_object_type, cl_uint entryCount,
-                                                           cl_image_format *imageFormats, cl_uint *imageFormatCount) {
+CL_API_ENTRY cl_int CL_API_CALL clGetSupportedImageFormats(cl_context value, cl_mem_flags flags, cl_mem_object_type type,
+                                                           cl_uint entryCount, cl_image_format *imageFormats, cl_uint *imageFormatCount) {
   if (!checked(value)) return CL_INVALID_CONTEXT;
   if (imageFormats && entryCount == 0) return CL_INVALID_VALUE;
-  if (imageFormatCount) *imageFormatCount = 0;
+  if (!imageType(type)) return CL_INVALID_VALUE;
+  const bool writes = (flags & (CL_MEM_WRITE_ONLY | CL_MEM_READ_WRITE | CL_MEM_KERNEL_READ_AND_WRITE)) != 0;
+  cl_uint count = 0;
+  for (const auto &info : ImageFormats) {
+    if ((writes && !info.writable) || !formatSupports(info, type)) continue;
+    if (imageFormats && count < entryCount) imageFormats[count] = {info.order, info.type};
+    ++count;
+  }
+  if (imageFormatCount) *imageFormatCount = count;
   return CL_SUCCESS;
 }
 
@@ -2414,10 +3210,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramBuildInfo(cl_program value, cl_devic
     case CL_PROGRAM_BUILD_OPTIONS: return outputString(size, output, written, program->buildOptions);
     case CL_PROGRAM_BUILD_LOG: return outputString(size, output, written, program->buildLog);
     case CL_PROGRAM_BINARY_TYPE: return outputScalar(size, output, written, program->binaryType);
-    case CL_PROGRAM_BUILD_GLOBAL_VARIABLE_TOTAL_SIZE: {
-      size_t v = 0;
-      return outputScalar(size, output, written, v);
-    }
+    case CL_PROGRAM_BUILD_GLOBAL_VARIABLE_TOTAL_SIZE: return outputScalar(size, output, written, program->globalBytes);
     default: return CL_INVALID_VALUE;
   }
 }
@@ -2539,6 +3332,7 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCloneKernel(cl_kernel value, cl_int *error)
   clone->argumentsSet = source->argumentsSet;
   clone->indirectAllocations = source->indirectAllocations;
   clone->indirectTypes = source->indirectTypes;
+  clone->indirectSystem = source->indirectSystem;
   retain(clone->program);
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_kernel>(clone);
@@ -2571,8 +3365,39 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
                  index < kernel->parameterMetadata.size() && kernel->parameterMetadata[index].local,
                  index < kernel->parameterMetadata.size() && kernel->parameterMetadata[index].pointerAggregate, !argument);
   auto &output = kernel->arguments[index];
+  output.range.reset();
+  output.texels.reset();
+  output.texelOffset = 0;
+  output.sampler = nullptr;
+  output.systemPointer = false;
   const bool pointerAggregate = index < kernel->parameterMetadata.size() && kernel->parameterMetadata[index].pointerAggregate;
   const bool localArgument = index < kernel->parameterMetadata.size() && kernel->parameterMetadata[index].local;
+  const auto *declared = index < kernel->argumentInfo.size() ? &kernel->argumentInfo[index] : nullptr;
+  if (declared && declared->typeName == "sampler_t") {
+    cl_sampler handle = nullptr;
+    if (size != sizeof(handle)) return CL_INVALID_ARG_SIZE;
+    if (argument) std::memcpy(&handle, argument, sizeof(handle));
+    if (!checked(handle)) return CL_INVALID_SAMPLER;
+  }
+  if (declared && imageTypeName(declared->typeName)) {
+    cl_mem handle = nullptr;
+    if (size != sizeof(handle)) return CL_INVALID_ARG_SIZE;
+    if (argument) std::memcpy(&handle, argument, sizeof(handle));
+    const auto *image = checked(handle);
+    if (!image || !image->image) return CL_INVALID_MEM_OBJECT;
+    const bool readOnly = (image->flags & CL_MEM_READ_ONLY) != 0, writeOnly = (image->flags & CL_MEM_WRITE_ONLY) != 0;
+    if ((declared->access == CL_KERNEL_ARG_ACCESS_READ_ONLY && writeOnly)
+        || (declared->access == CL_KERNEL_ARG_ACCESS_WRITE_ONLY && readOnly)
+        || (declared->access == CL_KERNEL_ARG_ACCESS_READ_WRITE && (readOnly || writeOnly)))
+      return CL_INVALID_ARG_VALUE;
+  }
+  if (declared && declared->typeName == "queue_t") {
+    cl_command_queue handle = nullptr;
+    if (size != sizeof(handle)) return CL_INVALID_ARG_SIZE;
+    if (argument) std::memcpy(&handle, argument, sizeof(handle));
+    const auto *queue = anyQueue(handle);
+    if (!queue || queue->deviceSize == 0) return CL_INVALID_DEVICE_QUEUE;
+  }
   if (!argument && size == sizeof(cl_mem) && !localArgument) {
     output.kind = ::KernelArgument::Kind::Scalar;
     output.allocation.reset();
@@ -2598,11 +3423,33 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
     auto *mem = checked(handle);
     if (mem) {
       if (size != sizeof(cl_mem)) return CL_INVALID_ARG_SIZE;
+      if (immutable(mem) && !mem->image && declared && declared->address != CL_KERNEL_ARG_ADDRESS_CONSTANT
+          && (declared->type & CL_KERNEL_ARG_TYPE_CONST) == 0)
+        return CL_INVALID_ARG_VALUE;
       output.kind = ::KernelArgument::Kind::Allocation;
-      output.allocation = mem->allocation;
-      output.offset = mem->origin;
+      output.allocation = mem->image ? mem->image->record : mem->allocation;
+      output.offset = mem->image ? 0 : mem->origin;
+      if (mem->image) {
+        output.range = ImageRecordBytes;
+        output.texels = mem->allocation;
+        output.texelOffset = mem->origin;
+      }
+      if (mem->pipe) output.range = mem->size;
       output.bytes.clear();
       output.memory = mem;
+      kernel->argumentsSet[index] = true;
+      return CL_SUCCESS;
+    }
+    auto *sampler = checked(reinterpret_cast<cl_sampler>(handle));
+    if (sampler) {
+      if (size != sizeof(cl_sampler)) return CL_INVALID_ARG_SIZE;
+      output.kind = ::KernelArgument::Kind::Allocation;
+      output.allocation = sampler->record;
+      output.offset = 0;
+      output.range = SamplerRecordBytes;
+      output.bytes.clear();
+      output.memory = nullptr;
+      output.sampler = sampler;
       kernel->argumentsSet[index] = true;
       return CL_SUCCESS;
     }
@@ -2646,13 +3493,9 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uin
   if (!argument) return clSetKernelArg(value, index, sizeof(void *), nullptr);
   size_t offset = 0;
   auto allocation = findPointer(argument, &offset);
-  if (!allocation) {
-    if (gemstone::traceEnabled("perf"))
-      std::fprintf(stderr, "Gemstone OpenCL SVM argument kernel=%s index=%u pointer=%p\n", kernel->name.c_str(), index, argument);
-    return CL_INVALID_ARG_VALUE;
-  }
   auto &output = kernel->arguments[index];
-  output.kind = ::KernelArgument::Kind::SVM;
+  output.systemPointer = !allocation;
+  output.kind = allocation ? ::KernelArgument::Kind::SVM : ::KernelArgument::Kind::Scalar;
   output.allocation = std::move(allocation);
   output.offset = offset;
   output.bytes.resize(sizeof(uint64_t));
@@ -2667,21 +3510,28 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_e
   if (!kernel) return CL_INVALID_KERNEL;
   if ((name == CL_KERNEL_EXEC_INFO_SVM_PTRS || name == CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL) && size == 0 && !valueData) {
     kernel->indirectAllocations.erase(name);
+    kernel->indirectSystem = false;
     return CL_SUCCESS;
   }
   if (!valueData) return CL_INVALID_VALUE;
   if (name == CL_KERNEL_EXEC_INFO_SVM_PTRS || name == CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL) {
     if (size == 0 || size % sizeof(void *) != 0) return CL_INVALID_VALUE;
     std::vector<std::shared_ptr<Allocation>> values;
+    bool system = false;
     for (size_t index = 0; index < size / sizeof(void *); ++index) {
       const auto pointer = gemstone::readNative<const void *>(valueData, index * sizeof(void *));
+      if (!pointer) return CL_INVALID_VALUE;
       size_t offset = 0;
       auto allocation = findPointer(pointer, &offset);
-      if (!allocation || allocation->svmContextIdentity != kernel->program->context->identity || offset >= allocation->size)
-        return CL_INVALID_VALUE;
+      if (!allocation) {
+        system = true;
+        continue;
+      }
+      if (allocation->svmContextIdentity != kernel->program->context->identity || offset >= allocation->size) return CL_INVALID_VALUE;
       values.push_back(std::move(allocation));
     }
     kernel->indirectAllocations[name] = std::move(values);
+    kernel->indirectSystem = system;
     return CL_SUCCESS;
   }
   if (name == CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL || name == CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL
@@ -2689,7 +3539,6 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_e
     if (size != sizeof(cl_bool)) return CL_INVALID_VALUE;
     const auto enabled = gemstone::readNative<cl_bool>(valueData);
     if (enabled != CL_TRUE && enabled != CL_FALSE) return CL_INVALID_VALUE;
-    if (name == CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM) return enabled ? CL_INVALID_OPERATION : CL_SUCCESS;
     if (enabled) kernel->indirectTypes.insert(name);
     else kernel->indirectTypes.erase(name);
     return CL_SUCCESS;
@@ -2885,7 +3734,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetEventProfilingInfo(cl_event value, cl_profi
   if (name == CL_PROFILING_COMMAND_QUEUED) return outputScalar(size, output, written, event->queued);
   if (name == CL_PROFILING_COMMAND_SUBMIT) return outputScalar(size, output, written, event->submitted);
   if (name == CL_PROFILING_COMMAND_START) return outputScalar(size, output, written, event->started);
-  if (name == CL_PROFILING_COMMAND_END) return outputScalar(size, output, written, event->ended);
+  // Child kernels run within their parent's command, so a command completes when it ends.
+  if (name == CL_PROFILING_COMMAND_END || name == CL_PROFILING_COMMAND_COMPLETE) return outputScalar(size, output, written, event->ended);
   return CL_INVALID_VALUE;
 }
 CL_API_ENTRY cl_int CL_API_CALL clFlush(cl_command_queue value) { return checked(value) ? CL_SUCCESS : CL_INVALID_COMMAND_QUEUE; }
@@ -2906,6 +3756,7 @@ cl_int enqueueBufferTransfer(_cl_command_queue *queue, _cl_mem *mem, bool readin
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
+  if (mem && (mem->image || mem->pipe)) return CL_INVALID_MEM_OBJECT;
   if (!mem || !pointer || !validMemoryRange(mem, offset, size)) return CL_INVALID_VALUE;
   if (mem->context != queue->context) return CL_INVALID_CONTEXT;
   if (reading ? !hostReadAllowed(mem) : !hostWriteAllowed(mem)) return CL_INVALID_OPERATION;
@@ -2973,7 +3824,7 @@ bool rectEnd(const size_t origin[3], const size_t region[3], size_t row, size_t 
 cl_int enqueueReadBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool blocking, const size_t bufferOrigin[3],
                              const size_t hostOrigin[3], const size_t region[3], size_t bufferRowPitch, size_t bufferSlicePitch,
                              size_t hostRowPitch, size_t hostSlicePitch, void *output, cl_uint count, const cl_event *waits,
-                             cl_event *event) {
+                             cl_event *event, cl_command_type type = CL_COMMAND_READ_BUFFER_RECT) {
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
@@ -3007,21 +3858,18 @@ cl_int enqueueReadBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool blocki
     }
     return CL_SUCCESS;
   };
-  return submitCommand(queue, CL_COMMAND_READ_BUFFER_RECT, blocking, count, waits, std::move(execute), event);
+  return submitCommand(queue, type, blocking, count, waits, std::move(execute), event);
 }
 
 cl_int enqueueWriteBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool blocking, const size_t bufferOrigin[3],
                               const size_t hostOrigin[3], const size_t region[3], size_t bufferRowPitch, size_t bufferSlicePitch,
                               size_t hostRowPitch, size_t hostSlicePitch, const void *input, cl_uint count, const cl_event *waits,
-                              cl_event *event) {
+                              cl_event *event, cl_command_type type = CL_COMMAND_WRITE_BUFFER_RECT) {
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!mem || mem->context != queue->context || !input || !bufferOrigin || !hostOrigin || !region) return CL_INVALID_VALUE;
   if (!hostWriteAllowed(mem)) return CL_INVALID_OPERATION;
-#ifdef CL_MEM_IMMUTABLE_EXT
-  if ((mem->flags & CL_MEM_IMMUTABLE_EXT) != 0) return CL_INVALID_OPERATION;
-#endif
   size_t sourceRow = 0, sourceSlice = 0, targetRow = 0, targetSlice = 0, sourceEnd = 0, targetEnd = 0;
   if (!rectPitch(bufferRowPitch, bufferSlicePitch, region, &targetRow, &targetSlice)
       || !rectPitch(hostRowPitch, hostSlicePitch, region, &sourceRow, &sourceSlice)
@@ -3050,18 +3898,20 @@ cl_int enqueueWriteBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool block
     }
     return CL_SUCCESS;
   };
-  return submitCommand(queue, CL_COMMAND_WRITE_BUFFER_RECT, blocking, count, waits, std::move(execute), event);
+  return submitCommand(queue, type, blocking, count, waits, std::move(execute), event);
 }
 
 cl_int enqueueCopyBufferRect(_cl_command_queue *queue, _cl_mem *source, _cl_mem *target, const size_t sourceOrigin[3],
                              const size_t targetOrigin[3], const size_t region[3], size_t sourceRowPitch, size_t sourceSlicePitch,
-                             size_t targetRowPitch, size_t targetSlicePitch, cl_uint count, const cl_event *waits, cl_event *event) {
+                             size_t targetRowPitch, size_t targetSlicePitch, cl_uint count, const cl_event *waits, cl_event *event,
+                             cl_command_type type = CL_COMMAND_COPY_BUFFER_RECT) {
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!source || !target || source->context != queue->context || target->context != queue->context || !sourceOrigin || !targetOrigin
       || !region)
     return CL_INVALID_VALUE;
+  if (immutable(target)) return CL_INVALID_OPERATION;
   size_t sourceRow = 0, sourceSlice = 0, targetRow = 0, targetSlice = 0, sourceEnd = 0, targetEnd = 0;
   if (!rectPitch(sourceRowPitch, sourceSlicePitch, region, &sourceRow, &sourceSlice)
       || !rectPitch(targetRowPitch, targetSlicePitch, region, &targetRow, &targetSlice)
@@ -3107,9 +3957,369 @@ cl_int enqueueCopyBufferRect(_cl_command_queue *queue, _cl_mem *source, _cl_mem 
     }
     return CL_SUCCESS;
   };
-  return submitCommand(queue, CL_COMMAND_COPY_BUFFER_RECT, false, count, waits, std::move(execute), event);
+  return submitCommand(queue, type, false, count, waits, std::move(execute), event);
 }
 
+} // namespace
+
+namespace {
+
+// A region in texels, as (x, y, z) and (width, height, depth) where z selects array layers or 3D slices.
+struct ImageBox {
+  std::array<size_t, 3> origin{};
+  std::array<size_t, 3> region{};
+};
+
+cl_int imageBox(const _cl_mem *mem, const size_t *origin, const size_t *region, ImageBox &box) {
+  if (!mem || !mem->image) return CL_INVALID_MEM_OBJECT;
+  if (!origin || !region || region[0] == 0 || region[1] == 0 || region[2] == 0) return CL_INVALID_VALUE;
+  const auto &desc = mem->image->desc;
+  switch (desc.image_type) {
+    case CL_MEM_OBJECT_IMAGE1D:
+    case CL_MEM_OBJECT_IMAGE1D_BUFFER:
+      if (origin[1] != 0 || origin[2] != 0 || region[1] != 1 || region[2] != 1) return CL_INVALID_VALUE;
+      box = {{origin[0], 0, 0}, {region[0], 1, 1}};
+      break;
+    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+      if (origin[2] != 0 || region[2] != 1) return CL_INVALID_VALUE;
+      box = {{origin[0], 0, origin[1]}, {region[0], 1, region[1]}};
+      break;
+    case CL_MEM_OBJECT_IMAGE2D:
+      if (origin[2] != 0 || region[2] != 1) return CL_INVALID_VALUE;
+      box = {{origin[0], origin[1], 0}, {region[0], region[1], 1}};
+      break;
+    default: box = {{origin[0], origin[1], origin[2]}, {region[0], region[1], region[2]}};
+  }
+  const std::array<size_t, 3> extent{desc.image_width, imageHeight(desc), imageSlices(desc)};
+  for (size_t axis = 0; axis < 3; ++axis)
+    if (box.origin[axis] > extent[axis] || box.region[axis] > extent[axis] - box.origin[axis]) return CL_INVALID_VALUE;
+  return CL_SUCCESS;
+}
+
+std::array<size_t, 3> byteOrigin(const _cl_mem *mem, const ImageBox &box) {
+  return {box.origin[0] * mem->image->elementSize, box.origin[1], box.origin[2]};
+}
+
+std::array<size_t, 3> byteRegion(const _cl_mem *mem, const ImageBox &box) {
+  return {box.region[0] * mem->image->elementSize, box.region[1], box.region[2]};
+}
+
+// The host pitch between slices of a region, which a 1D image array spends on layers.
+cl_int hostPitches(const _cl_mem *mem, const ImageBox &box, size_t rowPitch, size_t slicePitch, size_t &row, size_t &slice) {
+  const auto type = mem->image->desc.image_type;
+  row = rowPitch == 0 ? box.region[0] * mem->image->elementSize : rowPitch;
+  if (row < box.region[0] * mem->image->elementSize) return CL_INVALID_VALUE;
+  if ((type == CL_MEM_OBJECT_IMAGE1D || type == CL_MEM_OBJECT_IMAGE1D_BUFFER || type == CL_MEM_OBJECT_IMAGE2D) && slicePitch != 0)
+    return CL_INVALID_VALUE;
+  const size_t minimum = type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? row : row * box.region[1];
+  slice = slicePitch == 0 ? minimum : slicePitch;
+  return slice < minimum ? CL_INVALID_VALUE : CL_SUCCESS;
+}
+
+cl_int enqueueImageTransfer(_cl_command_queue *queue, _cl_mem *mem, bool reading, cl_bool blocking, const size_t *origin,
+                            const size_t *region, size_t rowPitch, size_t slicePitch, void *pointer, cl_uint count, const cl_event *waits,
+                            cl_event *event) {
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if (!mem || !mem->image) return CL_INVALID_MEM_OBJECT;
+  if (mem->context != queue->context) return CL_INVALID_CONTEXT;
+  ImageBox box;
+  if (const auto status = imageBox(mem, origin, region, box); status != CL_SUCCESS) return status;
+  size_t row = 0, slice = 0;
+  if (!pointer || hostPitches(mem, box, rowPitch, slicePitch, row, slice) != CL_SUCCESS) return CL_INVALID_VALUE;
+  const auto bufferOrigin = byteOrigin(mem, box), bytes = byteRegion(mem, box);
+  const size_t hostOrigin[] = {0, 0, 0};
+  return reading ? enqueueReadBufferRect(queue, mem, blocking, bufferOrigin.data(), hostOrigin, bytes.data(), mem->image->rowPitch,
+                                         mem->image->slicePitch, row, slice, pointer, count, waits, event, CL_COMMAND_READ_IMAGE)
+                 : enqueueWriteBufferRect(queue, mem, blocking, bufferOrigin.data(), hostOrigin, bytes.data(), mem->image->rowPitch,
+                                          mem->image->slicePitch, row, slice, pointer, count, waits, event, CL_COMMAND_WRITE_IMAGE);
+}
+
+bool overlaps(const ImageBox &left, const ImageBox &right) {
+  for (size_t axis = 0; axis < 3; ++axis)
+    if (left.origin[axis] + left.region[axis] <= right.origin[axis] || right.origin[axis] + right.region[axis] <= left.origin[axis])
+      return false;
+  return true;
+}
+
+uint16_t halfBits(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const uint32_t sign = (bits >> 16) & 0x8000u;
+  const int32_t exponent = static_cast<int32_t>((bits >> 23) & 0xffu) - 127 + 15;
+  uint32_t mantissa = bits & 0x7fffffu;
+  if (((bits >> 23) & 0xffu) == 0xffu) return static_cast<uint16_t>(sign | 0x7c00u | (mantissa ? 0x200u : 0u));
+  if (exponent >= 31) return static_cast<uint16_t>(sign | 0x7c00u);
+  if (exponent <= 0) {
+    if (exponent < -10) return static_cast<uint16_t>(sign);
+    mantissa |= 0x800000u;
+    const uint32_t shift = static_cast<uint32_t>(14 - exponent);
+    uint32_t half = mantissa >> shift;
+    const uint32_t rest = mantissa & ((1u << shift) - 1u), midpoint = 1u << (shift - 1);
+    if (rest > midpoint || (rest == midpoint && (half & 1u))) ++half;
+    return static_cast<uint16_t>(sign | half);
+  }
+  uint32_t half = (static_cast<uint32_t>(exponent) << 10) | (mantissa >> 13);
+  const uint32_t rest = mantissa & 0x1fffu;
+  if (rest > 0x1000u || (rest == 0x1000u && (half & 1u))) ++half;
+  return static_cast<uint16_t>(sign | half);
+}
+
+// The fill colour as one texel: float4 for normalised and floating formats, int4 or uint4 for integer formats.
+std::vector<uint8_t> fillTexel(const _cl_mem *mem, const void *colour) {
+  const auto *info = imageFormatInfo(mem->image->format);
+  std::array<float, 4> floats{};
+  std::array<int32_t, 4> signedValues{};
+  std::array<uint32_t, 4> unsignedValues{};
+  std::memcpy(floats.data(), colour, sizeof(floats));
+  std::memcpy(signedValues.data(), colour, sizeof(signedValues));
+  std::memcpy(unsignedValues.data(), colour, sizeof(unsignedValues));
+  if (info->order == CL_sRGBA)
+    for (size_t lane = 0; lane < 3; ++lane) {
+      const float linear = std::clamp(floats[lane], 0.0f, 1.0f);
+      floats[lane] = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+    }
+  const std::array<size_t, 4> lanes = info->order == CL_BGRA ? std::array<size_t, 4>{2, 1, 0, 3} : std::array<size_t, 4>{0, 1, 2, 3};
+  std::vector<uint8_t> texel(info->channels * info->channelBytes);
+  for (size_t channel = 0; channel < info->channels; ++channel) {
+    const size_t lane = lanes[channel];
+    const auto bits = static_cast<int>(info->channelBytes * 8);
+    uint64_t encoded = 0;
+    switch (info->channel) {
+      case Channel::Unorm: {
+        const double maximum = static_cast<double>((uint64_t{1} << bits) - 1);
+        encoded = static_cast<uint64_t>(std::nearbyint(std::clamp(static_cast<double>(floats[lane]), 0.0, 1.0) * maximum));
+        break;
+      }
+      case Channel::Snorm: {
+        const double maximum = static_cast<double>((uint64_t{1} << (bits - 1)) - 1);
+        encoded =
+            static_cast<uint64_t>(static_cast<int64_t>(std::nearbyint(std::clamp(static_cast<double>(floats[lane]), -1.0, 1.0) * maximum)));
+        break;
+      }
+      case Channel::Signed: {
+        const int64_t high = (int64_t{1} << (bits - 1)) - 1;
+        encoded = static_cast<uint64_t>(std::clamp<int64_t>(signedValues[lane], -high - 1, high));
+        break;
+      }
+      case Channel::Unsigned: {
+        const uint64_t high = bits == 32 ? 0xffffffffu : (uint64_t{1} << bits) - 1;
+        encoded = std::min<uint64_t>(unsignedValues[lane], high);
+        break;
+      }
+      case Channel::Half: encoded = halfBits(floats[lane]); break;
+      case Channel::Float: {
+        uint32_t word = 0;
+        std::memcpy(&word, &floats[lane], sizeof(word));
+        encoded = word;
+        break;
+      }
+    }
+    std::memcpy(texel.data() + channel * info->channelBytes, &encoded, info->channelBytes);
+  }
+  return texel;
+}
+
+// Copies the rows of an image mapping between the packed texels and the mapped pointer.
+cl_int copyMappedRows(const std::shared_ptr<_cl_mem> &mem, const BufferMapping &mapping, bool toHost) {
+  const auto &rows = *mapping.rows;
+  for (size_t z = 0; z < rows.region[2]; ++z)
+    for (size_t y = 0; y < rows.region[1]; ++y) {
+      const size_t offset = mapping.offset + z * rows.imageSlice + y * rows.imageRow;
+      auto *host = static_cast<uint8_t *>(mapping.pointer) + z * rows.hostSlice + y * rows.hostRow;
+      const auto status = toHost ? readAllocation(mem->allocation, offset, host, rows.region[0])
+                                 : writeAllocation(mem->allocation, offset, host, rows.region[0]);
+      if (status != CL_SUCCESS) return status;
+    }
+  return CL_SUCCESS;
+}
+
+} // namespace
+
+extern "C" {
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadImage(cl_command_queue queue, cl_mem image, cl_bool blocking, const size_t *origin,
+                                                   const size_t *region, size_t rowPitch, size_t slicePitch, void *output, cl_uint count,
+                                                   const cl_event *waits, cl_event *event) {
+  return enqueueImageTransfer(checked(queue), checked(image), true, blocking, origin, region, rowPitch, slicePitch, output, count, waits,
+                              event);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue queue, cl_mem image, cl_bool blocking, const size_t *origin,
+                                                    const size_t *region, size_t rowPitch, size_t slicePitch, const void *input,
+                                                    cl_uint count, const cl_event *waits, cl_event *event) {
+  return enqueueImageTransfer(checked(queue), checked(image), false, blocking, origin, region, rowPitch, slicePitch,
+                              const_cast<void *>(input), count, waits, event);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyImage(cl_command_queue queueValue, cl_mem sourceValue, cl_mem targetValue,
+                                                   const size_t *sourceOrigin, const size_t *targetOrigin, const size_t *region,
+                                                   cl_uint count, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(queueValue);
+  auto *source = checked(sourceValue);
+  auto *target = checked(targetValue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if (!source || !target || !source->image || !target->image) return CL_INVALID_MEM_OBJECT;
+  if (source->context != queue->context || target->context != queue->context) return CL_INVALID_CONTEXT;
+  if (immutable(target)) return CL_INVALID_OPERATION;
+  if (source->image->format.image_channel_order != target->image->format.image_channel_order
+      || source->image->format.image_channel_data_type != target->image->format.image_channel_data_type)
+    return CL_IMAGE_FORMAT_MISMATCH;
+  ImageBox from, to;
+  if (imageBox(source, sourceOrigin, region, from) != CL_SUCCESS || imageBox(target, targetOrigin, region, to) != CL_SUCCESS
+      || from.region != to.region)
+    return CL_INVALID_VALUE;
+  if (source == target && overlaps(from, to)) return CL_MEM_COPY_OVERLAP;
+  return enqueueCopyBufferRect(queue, source, target, byteOrigin(source, from).data(), byteOrigin(target, to).data(),
+                               byteRegion(source, from).data(), source->image->rowPitch, source->image->slicePitch, target->image->rowPitch,
+                               target->image->slicePitch, count, waits, event, CL_COMMAND_COPY_IMAGE);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyImageToBuffer(cl_command_queue queueValue, cl_mem sourceValue, cl_mem targetValue,
+                                                           const size_t *origin, const size_t *region, size_t offset, cl_uint count,
+                                                           const cl_event *waits, cl_event *event) {
+  auto *queue = checked(queueValue);
+  auto *source = checked(sourceValue);
+  auto *target = checked(targetValue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if (!source || !target || !source->image || target->image) return CL_INVALID_MEM_OBJECT;
+  if (source->context != queue->context || target->context != queue->context) return CL_INVALID_CONTEXT;
+  if (immutable(target)) return CL_INVALID_OPERATION;
+  ImageBox box;
+  if (const auto status = imageBox(source, origin, region, box); status != CL_SUCCESS) return status;
+  const auto bytes = byteRegion(source, box);
+  const size_t bufferOrigin[] = {offset, 0, 0};
+  return enqueueCopyBufferRect(queue, source, target, byteOrigin(source, box).data(), bufferOrigin, bytes.data(), source->image->rowPitch,
+                               source->image->slicePitch, bytes[0], bytes[0] * bytes[1], count, waits, event,
+                               CL_COMMAND_COPY_IMAGE_TO_BUFFER);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBufferToImage(cl_command_queue queueValue, cl_mem sourceValue, cl_mem targetValue,
+                                                           size_t offset, const size_t *origin, const size_t *region, cl_uint count,
+                                                           const cl_event *waits, cl_event *event) {
+  auto *queue = checked(queueValue);
+  auto *source = checked(sourceValue);
+  auto *target = checked(targetValue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if (!source || !target || source->image || !target->image) return CL_INVALID_MEM_OBJECT;
+  if (source->context != queue->context || target->context != queue->context) return CL_INVALID_CONTEXT;
+  if (immutable(target)) return CL_INVALID_OPERATION;
+  ImageBox box;
+  if (const auto status = imageBox(target, origin, region, box); status != CL_SUCCESS) return status;
+  const auto bytes = byteRegion(target, box);
+  const size_t bufferOrigin[] = {offset, 0, 0};
+  return enqueueCopyBufferRect(queue, source, target, bufferOrigin, byteOrigin(target, box).data(), bytes.data(), bytes[0],
+                               bytes[0] * bytes[1], target->image->rowPitch, target->image->slicePitch, count, waits, event,
+                               CL_COMMAND_COPY_BUFFER_TO_IMAGE);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillImage(cl_command_queue queueValue, cl_mem imageValue, const void *colour, const size_t *origin,
+                                                   const size_t *region, cl_uint count, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(queueValue);
+  auto *mem = checked(imageValue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if (!mem || !mem->image) return CL_INVALID_MEM_OBJECT;
+  if (mem->context != queue->context) return CL_INVALID_CONTEXT;
+  if (immutable(mem)) return CL_INVALID_OPERATION;
+  if (!colour) return CL_INVALID_VALUE;
+  if (const auto status = validateWaitList(queue, count, waits); status != CL_SUCCESS) return status;
+  ImageBox box;
+  if (const auto status = imageBox(mem, origin, region, box); status != CL_SUCCESS) return status;
+  const auto texel = fillTexel(mem, colour);
+  std::vector<uint8_t> row;
+  row.reserve(texel.size() * box.region[0]);
+  for (size_t x = 0; x < box.region[0]; ++x)
+    row.insert(row.end(), texel.begin(), texel.end());
+  auto retained = retainMemory(mem);
+  return submitCommand(
+      queue, CL_COMMAND_FILL_IMAGE, false, count, waits,
+      [=] {
+        const auto &image = *retained->image;
+        for (size_t z = 0; z < box.region[2]; ++z)
+          for (size_t y = 0; y < box.region[1]; ++y) {
+            const size_t offset = retained->origin + (box.origin[2] + z) * image.slicePitch + (box.origin[1] + y) * image.rowPitch
+                                  + box.origin[0] * image.elementSize;
+            if (const auto status = writeAllocation(retained->allocation, offset, row.data(), row.size()); status != CL_SUCCESS)
+              return status;
+          }
+        return CL_SUCCESS;
+      },
+      event);
+}
+
+CL_API_ENTRY void *CL_API_CALL clEnqueueMapImage(cl_command_queue queueValue, cl_mem imageValue, cl_bool blocking, cl_map_flags flags,
+                                                 const size_t *origin, const size_t *region, size_t *rowPitch, size_t *slicePitch,
+                                                 cl_uint count, const cl_event *waits, cl_event *event, cl_int *error) {
+  const auto rejected = [&](cl_int status) -> void * {
+    if (error) *error = status;
+    return nullptr;
+  };
+  auto *queue = checked(queueValue);
+  auto *mem = checked(imageValue);
+  if (!queue) return rejected(CL_INVALID_COMMAND_QUEUE);
+  if (!mem || !mem->image) return rejected(CL_INVALID_MEM_OBJECT);
+  if (mem->context != queue->context) return rejected(CL_INVALID_CONTEXT);
+  if (immutable(mem) && (flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))) return rejected(CL_INVALID_OPERATION);
+  if (!rowPitch || (flags & ~(CL_MAP_READ | CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION)) != 0) return rejected(CL_INVALID_VALUE);
+  const auto type = mem->image->desc.image_type;
+  if (!slicePitch && (type == CL_MEM_OBJECT_IMAGE3D || arrayed(type))) return rejected(CL_INVALID_VALUE);
+  if (((flags & CL_MAP_READ) != 0 && !hostReadAllowed(mem))
+      || ((flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION)) != 0 && !hostWriteAllowed(mem)))
+    return rejected(CL_INVALID_OPERATION);
+  if (const auto status = validateWaitList(queue, count, waits); status != CL_SUCCESS) return rejected(status);
+  ImageBox box;
+  if (const auto status = imageBox(mem, origin, region, box); status != CL_SUCCESS) return rejected(status);
+  const auto &image = *mem->image;
+  std::shared_ptr<BufferMapping> mapping;
+  try {
+    mapping = std::make_shared<BufferMapping>();
+  } catch (const std::bad_alloc &) {
+    return rejected(CL_OUT_OF_HOST_MEMORY);
+  }
+  ImageRows rows;
+  rows.region = byteRegion(mem, box);
+  rows.imageRow = image.rowPitch;
+  rows.imageSlice = image.slicePitch;
+  // A host-pointer image maps into the application's memory at its own pitches.
+  if (mem->hostPointer) {
+    rows.hostRow = image.hostRowPitch;
+    rows.hostSlice = image.hostSlicePitch;
+    mapping->pointer = static_cast<uint8_t *>(mem->hostPointer) + box.origin[2] * rows.hostSlice + box.origin[1] * rows.hostRow
+                       + box.origin[0] * image.elementSize;
+  } else {
+    rows.hostRow = rows.region[0];
+    rows.hostSlice = rows.region[0] * rows.region[1];
+    mapping->storage = std::shared_ptr<uint8_t[]>(new (std::nothrow) uint8_t[rows.hostSlice * rows.region[2]]);
+    if (!mapping->storage) return rejected(CL_OUT_OF_HOST_MEMORY);
+    mapping->pointer = mapping->storage.get();
+  }
+  mapping->offset = mem->origin + box.origin[2] * image.slicePitch + box.origin[1] * image.rowPitch + box.origin[0] * image.elementSize;
+  mapping->size = rows.hostSlice * rows.region[2];
+  mapping->rows = rows;
+  *rowPitch = rows.hostRow;
+  if (slicePitch) *slicePitch = type == CL_MEM_OBJECT_IMAGE3D || arrayed(type) ? rows.hostSlice : 0;
+  auto retained = retainMemory(mem);
+  const auto key = reinterpret_cast<uintptr_t>(mapping->pointer);
+  {
+    std::lock_guard lock(allocationsMutex);
+    mem->mappings.emplace(key, mapping);
+  }
+  const auto result = submitCommand(
+      queue, CL_COMMAND_MAP_IMAGE, blocking, count, waits,
+      [=] { return (flags & CL_MAP_WRITE_INVALIDATE_REGION) != 0 ? CL_SUCCESS : copyMappedRows(retained, *mapping, true); }, event,
+      [=](cl_int status) {
+        if (status == CL_SUCCESS) return;
+        std::lock_guard lock(allocationsMutex);
+        const auto [begin, end] = retained->mappings.equal_range(key);
+        const auto found = std::find_if(begin, end, [&](const auto &entry) { return entry.second == mapping; });
+        if (found != end) retained->mappings.erase(found);
+      });
+  if (error) *error = result;
+  return result == CL_SUCCESS ? mapping->pointer : nullptr;
+}
+
+} // extern "C"
+
+namespace {
 } // namespace
 
 extern "C" {
@@ -3152,6 +4362,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queueValue,
   if (!src || !dst || src->context != queue->context || dst->context != queue->context || !validMemoryRange(src, sourceOffset, size)
       || !validMemoryRange(dst, destinationOffset, size))
     return CL_INVALID_VALUE;
+  if (immutable(dst)) return CL_INVALID_OPERATION;
   const size_t allocationSourceOffset = allocationOffset(src, sourceOffset);
   const size_t allocationTargetOffset = allocationOffset(dst, destinationOffset);
   auto source = retainMemory(src), target = retainMemory(dst);
@@ -3179,6 +4390,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue queueValue,
   if (!mem || mem->context != queue->context || !pattern || patternSize == 0 || size % patternSize != 0
       || !validMemoryRange(mem, offset, size))
     return CL_INVALID_VALUE;
+  if (immutable(mem)) return CL_INVALID_OPERATION;
   const size_t targetOffset = allocationOffset(mem, offset);
   auto retained = retainMemory(mem);
   std::vector<uint8_t> copiedPattern(static_cast<const uint8_t *>(pattern), static_cast<const uint8_t *>(pattern) + patternSize);
@@ -3284,7 +4496,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queueVa
   auto retained = retainMemory(mem);
   return submitCommand(
       queue, CL_COMMAND_UNMAP_MEM_OBJECT, false, count, waits,
-      [=] { return writeAllocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size); }, event,
+      [=] {
+        return mapping->rows ? copyMappedRows(retained, *mapping, false)
+                             : writeAllocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size);
+      },
+      event,
       [=](cl_int status) {
         std::lock_guard lock(allocationsMutex);
         const auto [begin, end] = retained->mappings.equal_range(key);
@@ -3350,18 +4566,15 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
     }
     if (total > maxWorkGroupSize()) return CL_INVALID_WORK_GROUP_SIZE;
   }
-  if (local && global) {
+  if (local) {
+    const bool uniform = uniformWorkGroups(*kernel->program);
     for (cl_uint index = 0; index < workDimension; ++index)
-      if (local[index] == 0 || global[index] % local[index] != 0) return CL_INVALID_WORK_GROUP_SIZE;
+      if (local[index] == 0 || (uniform && global[index] % local[index] != 0)) return CL_INVALID_WORK_GROUP_SIZE;
   }
   if (local && kernel->requiredWorkGroupSize != std::array<size_t, 3>{0, 0, 0}) {
     if (workDimension != 3) return CL_INVALID_WORK_GROUP_SIZE;
     for (size_t index = 0; index < 3; ++index)
       if (local[index] != kernel->requiredWorkGroupSize[index]) return CL_INVALID_WORK_GROUP_SIZE;
-  }
-  if ((kernel->program->buildOptions ^ contains_slice("-cl-uniform-work-group-size")) && local) {
-    for (cl_uint index = 0; index < workDimension; ++index)
-      if (local[index] == 0 || !global || global[index] % local[index] != 0) return CL_INVALID_WORK_GROUP_SIZE;
   }
   if ((count != 0 && !waits) || (count == 0 && waits)) return CL_INVALID_EVENT_WAIT_LIST;
   std::vector<_cl_event *> dependencies;
@@ -3383,19 +4596,27 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
     cl_int error = CL_SUCCESS;
     auto clone = clCloneKernel(kernelValue, &error);
     if (!clone) return error;
-    for (const auto &argument : reinterpret_cast<_cl_kernel *>(clone)->arguments)
+    for (const auto &argument : reinterpret_cast<_cl_kernel *>(clone)->arguments) {
       if (argument.memory) retain(argument.memory);
+      if (argument.sampler) retain(argument.sampler);
+    }
     std::shared_ptr<_cl_kernel> snapshot(reinterpret_cast<_cl_kernel *>(clone), [](_cl_kernel *value) {
       // Drop allocation references before releasing retained memory objects.
       for (auto &argument : value->arguments)
         argument.allocation.reset();
-      for (const auto &argument : value->arguments)
+      for (auto &argument : value->arguments)
+        argument.texels.reset();
+      for (const auto &argument : value->arguments) {
         if (argument.memory) clReleaseMemObject(reinterpret_cast<cl_mem>(argument.memory));
+        if (argument.sampler) clReleaseSampler(reinterpret_cast<cl_sampler>(argument.sampler));
+      }
       clReleaseKernel(reinterpret_cast<cl_kernel>(value));
     });
     std::vector<std::shared_ptr<Allocation>> used;
-    for (const auto &argument : snapshot->arguments)
+    for (const auto &argument : snapshot->arguments) {
       if (argument.allocation) used.push_back(argument.allocation);
+      if (argument.texels) used.push_back(argument.texels);
+    }
     for (const auto &[name, values] : snapshot->indirectAllocations)
       used.insert(used.end(), values.begin(), values.end());
     {
@@ -3523,8 +4744,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueVal
   ranges.reserve(count);
   for (cl_uint index = 0; index < count; ++index) {
     size_t offset = 0;
+    if (!pointers[index]) return CL_INVALID_VALUE;
     auto allocation = findPointer(pointers[index], &offset);
-    if (!allocation || allocation->svmContextIdentity != queue->context->identity || offset == allocation->size) return CL_INVALID_VALUE;
+    // Ordinary host memory stays in place; the device reads it on demand.
+    if (!allocation) continue;
+    if (allocation->svmContextIdentity != queue->context->identity || offset == allocation->size) return CL_INVALID_VALUE;
     const size_t rangeSize = !sizes || sizes[index] == 0 ? allocation->size : sizes[index];
     const size_t rangeOffset = !sizes || sizes[index] == 0 ? 0 : offset;
     if (!validRange(allocation, rangeOffset, rangeSize)) return CL_INVALID_VALUE;
@@ -3597,16 +4821,17 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue,
   if (waited != CL_SUCCESS) return waited;
   size_t offset = 0;
   auto allocation = findPointer(pointer, &offset);
-  if (!allocation || !pattern || patternSize == 0 || size % patternSize != 0 || !validRange(allocation, offset, size))
+  if (!pointer || !pattern || patternSize == 0 || size % patternSize != 0 || (allocation && !validRange(allocation, offset, size)))
     return CL_INVALID_VALUE;
   std::vector<uint8_t> copiedPattern(static_cast<const uint8_t *>(pattern), static_cast<const uint8_t *>(pattern) + patternSize);
   return submitCommand(
       queue, CL_COMMAND_SVM_MEMFILL, false, count, waits,
       [=] {
-        auto *bytes = static_cast<uint8_t *>(allocation->data());
+        auto *bytes = allocation ? static_cast<uint8_t *>(allocation->data()) + offset : static_cast<uint8_t *>(pointer);
         for (size_t index = 0; index < size; ++index)
-          bytes[offset + index] = copiedPattern[index % patternSize];
-        auto result = writeAllocation(allocation, offset, bytes + offset, size);
+          bytes[index] = copiedPattern[index % patternSize];
+        if (!allocation) return CL_SUCCESS;
+        auto result = writeAllocation(allocation, offset, bytes, size);
         if (result != CL_SUCCESS) return result;
         return CL_SUCCESS;
       },
@@ -3620,7 +4845,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_
   if (result != CL_SUCCESS) return result;
   size_t offset = 0;
   auto allocation = findPointer(pointer, &offset);
-  if (!validRange(allocation, offset, size)) return CL_INVALID_VALUE;
+  if (!pointer || size == 0 || (allocation && !validRange(allocation, offset, size))) return CL_INVALID_VALUE;
   auto mapping = std::make_shared<BufferMapping>();
   mapping->offset = offset;
   mapping->size = size;
@@ -3631,7 +4856,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_
     if (!svmMappings.emplace(key, mapping).second) return CL_INVALID_OPERATION;
   }
   return submitCommand(
-      queue, CL_COMMAND_SVM_MAP, blocking, count, waits, [=] { return readAllocation(allocation, offset, pointer, size); }, event,
+      queue, CL_COMMAND_SVM_MAP, blocking, count, waits,
+      [=] { return allocation ? readAllocation(allocation, offset, pointer, size) : CL_SUCCESS; }, event,
       [=](cl_int status) {
         if (status == CL_SUCCESS) return;
         std::lock_guard lock(allocationsMutex);
@@ -3655,12 +4881,12 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, v
     const auto found = svmMappings.find(key);
     if (found == svmMappings.end() || found->second->unmapping) return CL_INVALID_VALUE;
     mapping = found->second;
-    if (!validRange(allocation, mapping->offset, mapping->size) || offset != mapping->offset) return CL_INVALID_VALUE;
+    if (allocation && (!validRange(allocation, mapping->offset, mapping->size) || offset != mapping->offset)) return CL_INVALID_VALUE;
     mapping->unmapping = true;
   }
   return submitCommand(
       queue, CL_COMMAND_SVM_UNMAP, false, count, waits,
-      [=] { return writeAllocation(allocation, mapping->offset, mapping->pointer, mapping->size); }, event,
+      [=] { return allocation ? writeAllocation(allocation, mapping->offset, mapping->pointer, mapping->size) : CL_SUCCESS; }, event,
       [=](cl_int status) {
         std::lock_guard lock(allocationsMutex);
         const auto found = svmMappings.find(key);
@@ -3788,6 +5014,9 @@ CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddress(const char *name) {
 #define GEMSTONE_EXTENSION(function)                                                                                                       \
   if (std::strcmp(name, #function) == 0) return reinterpret_cast<void *>(&function)
   GEMSTONE_EXTENSION(clIcdGetPlatformIDsKHR);
+  GEMSTONE_EXTENSION(clGetKernelSubGroupInfoKHR);
+  GEMSTONE_EXTENSION(clGetKernelSuggestedLocalWorkSizeKHR);
+  GEMSTONE_EXTENSION(clCreateCommandQueueWithPropertiesKHR);
   GEMSTONE_EXTENSION(clHostMemAllocINTEL);
   GEMSTONE_EXTENSION(clDeviceMemAllocINTEL);
   GEMSTONE_EXTENSION(clSharedMemAllocINTEL);
@@ -3856,6 +5085,29 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_devi
   return CL_INVALID_VALUE;
 }
 
+CL_API_ENTRY cl_int CL_API_CALL clGetKernelSuggestedLocalWorkSizeKHR(cl_command_queue queueValue, cl_kernel kernelValue,
+                                                                     cl_uint workDimension, const size_t *offset, const size_t *global,
+                                                                     size_t *suggested) {
+  auto *queue = checked(queueValue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  auto *kernel = checked(kernelValue);
+  if (!kernel) return CL_INVALID_KERNEL;
+  if (kernel->program->context != queue->context) return CL_INVALID_CONTEXT;
+  if (workDimension == 0 || workDimension > 3) return CL_INVALID_WORK_DIMENSION;
+  if (!global || std::any_of(global, global + workDimension, [](size_t size) { return size == 0; })) return CL_INVALID_GLOBAL_WORK_SIZE;
+  if (offset && std::any_of(offset, offset + workDimension, [](size_t value) { return value > std::numeric_limits<int32_t>::max(); }))
+    return CL_INVALID_GLOBAL_OFFSET;
+  if (!suggested) return CL_INVALID_VALUE;
+  if (std::find(kernel->argumentsSet.begin(), kernel->argumentsSet.end(), false) != kernel->argumentsSet.end())
+    return CL_INVALID_KERNEL_ARGS;
+  for (cl_uint index = 0; index < workDimension; ++index)
+    suggested[index] = implicitGroup(*kernel, index, global[index]);
+  return CL_SUCCESS;
+}
+CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithPropertiesKHR(cl_context context, cl_device_id device,
+                                                                                const cl_queue_properties_khr *properties, cl_int *error) {
+  return clCreateCommandQueueWithProperties(context, device, properties, error);
+}
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfoKHR(cl_kernel value, cl_device_id selected, cl_kernel_sub_group_info name,
                                                            size_t inputSize, const void *input, size_t size, void *output,
                                                            size_t *written) {

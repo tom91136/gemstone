@@ -57,7 +57,7 @@ object GenerateEnvironment {
     "GEMSTONE_OPENCL_LLVM_SPIRV"            -> "",
     "GEMSTONE_OPENCL_LOCAL_MEM_SIZE"        -> "65536",
     "GEMSTONE_OPENCL_MAX_MEM_ALLOC_SIZE"    -> "268435456",
-    "GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE"   -> "64",
+    "GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE"   -> "128",
     "GEMSTONE_OPENCL_SCAN_BUFFER_POINTERS"  -> "",
     "GEMSTONE_PROFILE"                      -> "",
     "GEMSTONE_RECORD"                       -> "",

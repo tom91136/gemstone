@@ -157,7 +157,9 @@ private object LaneOps {
     else site.program.runtimeType(typeId) match {
       case Some(VMProgram.RuntimeType.Bool | _: VMProgram.RuntimeType.Integer | _: VMProgram.RuntimeType.Floating |
           _: VMProgram.RuntimeType.VectorType | _: VMProgram.RuntimeType.MatrixType | _: VMProgram.RuntimeType.Array |
-          _: VMProgram.RuntimeType.Structure | VMProgram.RuntimeType.Event) => Typed.Data(key, typeId)
+          _: VMProgram.RuntimeType.Structure | VMProgram.RuntimeType.Event | VMProgram.RuntimeType.ReserveId |
+          VMProgram.RuntimeType.DeviceEvent | VMProgram.RuntimeType.Queue) =>
+        Typed.Data(key, typeId)
       case _ => Typed.Opaque(key, typeId)
     }
   }

@@ -45,5 +45,9 @@ private object VMLowering {
       .orElse(CollectiveOps.lower(site))
       .orElse(ExtendedOps.lower(site))
       .orElse(ImageOps.lower(site))
+      .orElse(PipeOps.lower(site))
+      .orElse(DeviceEnqueueOps.lower(site))
+      .orElse(IntegerDotOps.lower(site))
+      .orElse(IntelBlockOps.lower(site))
       .applyOrElse(instruction, other => Op.Fail(Fault.Unsupported(s"${other.opcode} execution is not implemented")))
 }

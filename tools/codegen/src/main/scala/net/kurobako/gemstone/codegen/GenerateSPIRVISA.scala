@@ -110,6 +110,7 @@ object GenerateSPIRVISA {
           base.resolve("NarrowEncoding.scala")      -> ImageFormats.narrowEncodingSource,
           base.resolve("ImageFormats.scala")        -> ImageFormats.scalaSource,
           base.resolve("ImageDescriptor.scala")     -> ImageDescriptorABI.scalaSource,
+          base.resolve("PipeLayout.scala")          -> PipeABI.scalaSource,
           base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended)
         ) ++ renderInstructions(grammar).map { case (name, content) => base.resolve(name) -> content } ++
           enumerants).toMap
@@ -118,6 +119,7 @@ object GenerateSPIRVISA {
       val nativeOutput = nativeRoot.resolve("gemstone_spirv_constants.hpp")
       val _            = GeneratedFiles.write(nativeOutput, renderNativeConstants(grammar))
       val _ = GeneratedFiles.write(nativeRoot.resolve("gemstone_image_descriptor.hpp"), ImageDescriptorABI.nativeSource)
+      val _ = GeneratedFiles.write(nativeRoot.resolve("gemstone_pipe_layout.hpp"), PipeABI.nativeSource)
       Console.out.println(
         s"generated ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
       )

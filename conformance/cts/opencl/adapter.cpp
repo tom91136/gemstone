@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <charconv>
 #include <cstdio>
 #include <cstdlib>
@@ -111,6 +112,12 @@ std::vector<std::string> cases() {
   return result;
 }
 
+bool imageCategory() {
+  constexpr std::string_view categories[] = {"cl_copy_images", "cl_fill_images",       "cl_get_info",      "cl_read_write_images",
+                                             "image_streams",  "kernel_image_methods", "samplerless_reads"};
+  return std::find(std::begin(categories), std::end(categories), std::string_view(CONFORMANCE_CTS_CATEGORY)) != std::end(categories);
+}
+
 class CaseInvoker final : public Catch::ITestInvoker {
 public:
   explicit CaseInvoker(std::string name) : name(std::move(name)) {}
@@ -133,7 +140,12 @@ public:
       arguments.emplace_back("--second-include-test-directory");
       arguments.push_back(std::string(support) + "/data/secondIncludeTestDirectory");
     }
-    if (const auto *elements = std::getenv("CONFORMANCE_OPENCL_CTS_ELEMENTS"); elements && *elements) arguments.emplace_back(elements);
+    if (imageCategory()) {
+      const auto *small = std::getenv("CONFORMANCE_OPENCL_CTS_SMALL_IMAGES");
+      if (!small || std::string_view(small) != "0") arguments.emplace_back("small_images");
+    }
+    if (const auto *elements = std::getenv("CONFORMANCE_OPENCL_CTS_ELEMENTS"); elements && *elements && !imageCategory())
+      arguments.emplace_back(elements);
     // Explicit upstream stress controls; unset or empty retains upstream defaults.
     if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "c11_atomics") {
       for (const auto &[key, option] : {std::pair{"CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "-internalIterations"},

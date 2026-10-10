@@ -21,6 +21,7 @@ private object VMCollectives {
         _: Instruction.GroupNonUniformShuffleXor |
         _: Instruction.GroupNonUniformShuffleUp |
         _: Instruction.GroupNonUniformShuffleDown |
+        _: Instruction.GroupNonUniformRotateKHR |
         _: Instruction.GroupNonUniformIAdd |
         _: Instruction.GroupNonUniformIMul |
         _: Instruction.GroupNonUniformSMin |
@@ -68,6 +69,7 @@ private object VMCollectives {
     case Broadcast
     case Ballot
     case Barrier
+    case PipeReservation
   }
 
   enum Payload {
@@ -88,6 +90,7 @@ private object VMCollectives {
         delta: Long
     )
     case Barrier(memoryScope: Int, semantics: Long)
+    case PipeReservation(resultType: Int, destination: Int, pipe: VMMemory.Pointer, packets: Long, writing: Boolean)
   }
 
   case class Request(

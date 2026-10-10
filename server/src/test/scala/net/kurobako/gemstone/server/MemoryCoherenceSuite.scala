@@ -46,7 +46,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
     workItems   <- if (atomicWidth != 0 && !fenced) List(1, 128) else List(1)
     scenario    <- if (atomicWidth != 0) List(Concurrent) ++
       (if (!fenced && workItems == 1) List(Submission, Overlap, Compare) else Nil)
-    else List(Device, Concurrent) ++ (if (api == "opencl") Nil else List(OrdinaryHost))
+    else List(Device, Concurrent, OrdinaryHost)
     if scenario != Compare || atomicWidth == 32
     allocationKind <- if (scenario == Compare) allocationKinds(api).take(1)
     else if (scenario == Concurrent || scenario.probe.nonEmpty) allocationKinds(api) else List("default")

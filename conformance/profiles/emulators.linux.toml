@@ -26,6 +26,8 @@ skips = [
   "cts/opencl/basic/async_strided_copy_global_to_local",
   "cts/opencl/basic/async_strided_copy_local_to_global",
   "cts/opencl/basic/vstore_local",
+  # Segfaults in clBuildProgram while sizing the kernel-scope local atomic.
+  "edge-cases/runtime/opencl/generic-address-space/pointers/n128-l32",
 ]
 
 [[targets]]

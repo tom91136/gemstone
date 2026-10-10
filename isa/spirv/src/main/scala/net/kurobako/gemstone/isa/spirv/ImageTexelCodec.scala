@@ -17,10 +17,10 @@ object ImageTexelCodec {
         case ImageFormat.Rgba32f                  => 16
         case ImageFormat.Rg32f | ImageDescriptor.Format.D32SfloatS8Depth | ImageDescriptor.Format.D32SfloatS8Stencil =>
           8
-        case ImageFormat.R32f                => 4
-        case ImageDescriptor.Format.D16Unorm => 2
-        case ImageDescriptor.Format.S8Uint   => 1
-        case _                               => 0
+        case ImageFormat.R32f | ImageDescriptor.Format.D32Sfloat => 4
+        case ImageDescriptor.Format.D16Unorm                     => 2
+        case ImageDescriptor.Format.S8Uint                       => 1
+        case _                                                   => 0
       }
   }
 

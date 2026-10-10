@@ -407,6 +407,68 @@ class CollectiveSuite extends munit.FunSuite {
     )
   }
 
+  test("OpenCL ballot counts and rotations span the maximum subgroup size in a partial subgroup") {
+    val module = kernel(
+      "%uint",
+      """
+        %count = OpGroupNonUniformBallotBitCount %uint %subgroup Reduce %everyone
+        %lane = OpUConvert %uint %index
+        %rotated = OpGroupNonUniformRotateKHR %uint %subgroup %lane %delta
+        %scaled = OpIMul %uint %count %thousand
+        %result = OpIAdd %uint %scaled %rotated
+      """,
+      """
+        %uint4 = OpTypeVector %uint 4
+        %all = OpConstant %uint 0xffffffff
+        %everyone = OpConstantComposite %uint4 %all %all %all %all
+        %delta = OpConstant %uint 30
+        %thousand = OpConstant %uint 1000
+      """
+    )
+    // The 8-lane partial subgroup counts 32 ballot bits; lanes rotating past it keep their own value.
+    val expected = (0 until 40).map { lane =>
+      val (base, local) = (lane / 32 * 32, lane % 32)
+      val source        = (local + 30) % 32
+      32000L + (if (lane < 32 || source < 8) base + source else lane).toLong
+    }
+    assertEquals(dispatch(module, testDimensions(40), Dimensions.One, Vec.empty, 40 * 4), littleEndian(expected, 32))
+  }
+
+  test("clustered reductions combine each aligned cluster of the subgroup separately") {
+    val module = kernel(
+      "%uint",
+      """
+        %lane = OpUConvert %uint %index
+        %result = OpGroupNonUniformIAdd %uint %subgroup ClusteredReduce %lane %cluster
+      """,
+      "%cluster = OpConstant %uint 4"
+    )
+    assertEquals(
+      dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
+      littleEndian(Seq(6L, 6L, 6L, 6L, 22L, 22L, 22L, 22L), 32)
+    )
+  }
+
+  for (
+    (
+      cluster,
+      expected
+    ) <- Seq(None -> Seq(1L, 2L, 3L, 4L, 5L, 6L, 7L, 0L), Some(4) -> Seq(1L, 2L, 3L, 0L, 5L, 6L, 7L, 4L))
+  )
+    test(s"OpGroupNonUniformRotateKHR reads the lane delta ahead within ${cluster.fold("the subgroup")(size =>
+        s"clusters of $size"
+      )}") {
+      val module = kernel(
+        "%uint",
+        s"""
+          %lane = OpUConvert %uint %index
+          %result = OpGroupNonUniformRotateKHR %uint %subgroup %lane %delta${cluster.fold("")(_ => " %cluster")}
+        """,
+        s"%delta = OpConstant %uint 1\n%cluster = OpConstant %uint ${cluster.getOrElse(1)}"
+      )
+      assertEquals(dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4), littleEndian(expected, 32))
+    }
+
   test("only functions that reach a collective are marked collective") {
     val program = load(spv"""
       $openCL

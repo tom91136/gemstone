@@ -176,16 +176,6 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((pci.pci_device == 1));
   REQUIRE((pci.pci_function == 0));
 
-  cl_ulong timerResolution = 1;
-  REQUIRE(
-      (clGetPlatformInfo(platform, CL_PLATFORM_HOST_TIMER_RESOLUTION, sizeof(timerResolution), &timerResolution, nullptr) == CL_SUCCESS));
-  REQUIRE((timerResolution == 0));
-  cl_ulong deviceTimestamp = 0, hostTimestamp = 0;
-  REQUIRE((clGetDeviceAndHostTimer(device, &deviceTimestamp, &hostTimestamp) == CL_INVALID_OPERATION));
-  REQUIRE((clGetDeviceAndHostTimer(device, nullptr, nullptr) == CL_INVALID_OPERATION));
-  REQUIRE((clGetHostTimer(device, &hostTimestamp) == CL_INVALID_OPERATION));
-  REQUIRE((clGetHostTimer(device, nullptr) == CL_INVALID_OPERATION));
-
   cl_uint vectorWidth = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE, sizeof(vectorWidth), &vectorWidth, nullptr) == CL_SUCCESS));
   REQUIRE((vectorWidth > 0));

@@ -117,6 +117,7 @@ ones, `include_programs` takes globs, exact `exclude_programs` win, `specs` filt
 | --- | --- |
 | `CONFORMANCE_OPENCL_CTS_ELEMENTS` | OpenCL input count; empty keeps the upstream default |
 | `CONFORMANCE_OPENCL_CTS_WIMPY` | Reduced OpenCL stress; `0` disables it |
+| `CONFORMANCE_OPENCL_CTS_SMALL_IMAGES` | Small image sizes in the OpenCL image programs; `0` runs the full size sweep |
 | `CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS` / `_THREADS` | OpenCL C11 atomic stress |
 | `CONFORMANCE_OPENCL_CTS_TIMEOUT` | OpenCL per-case deadline in seconds (default 600) |
 | `CONFORMANCE_VULKAN_CTS_TIMEOUT` | Vulkan per-case deadline in seconds (default 600; 7,200 in `lavapipe.linux`) |

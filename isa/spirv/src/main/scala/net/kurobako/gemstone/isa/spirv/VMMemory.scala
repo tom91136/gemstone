@@ -57,8 +57,9 @@ private object VMMemory {
   /** Lays out the dispatch-owned variables of one aperture into an initial image. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   class Layout(aperture: Long) {
-    private val image = mutable.ArrayBuilder.ofByte()
-    private var size  = 0
+    private val image   = mutable.ArrayBuilder.ofByte()
+    private val patches = mutable.ArrayBuffer.empty[(Int, Array[Byte])]
+    private var size    = 0
 
     def append(bytes: Array[Byte], alignment: Int): Either[Fault, Long] = {
       val start = aligned(size, alignment)
@@ -77,7 +78,14 @@ private object VMMemory {
         Left(Fault.InvalidRequest(s"invalid SPIR-V storage size $bytes"))
       else append(Array.ofDim[Byte](bytes.toInt), alignment)
 
-    def result(): Array[Byte] = image.result()
+    /** Overwrites bytes already appended at `address` once the image is produced. */
+    def patch(address: Long, bytes: Array[Byte]): Unit = patches += (offsetOf(address).raw.toInt -> bytes)
+
+    def result(): Array[Byte] = {
+      val bytes = image.result()
+      patches.foreach((offset, data) => Array.copy(data, 0, bytes, offset, data.length))
+      bytes
+    }
   }
 
   /** Bump-allocated private storage of one invocation. A function's variables are released when it returns. */
@@ -121,7 +129,8 @@ private object VMMemory {
       val globals: Array[Byte],
       val handler: Event => Either[Fault, Unit]
   ) {
-    val lock: ReentrantLock = ReentrantLock()
+    val lock: ReentrantLock      = ReentrantLock()
+    val deviceQueue: DeviceQueue = DeviceQueue()
 
     // Client pointers stored in allocations without native pointer bytes; a pointer store replaces its entry.
     val pointers: ConcurrentHashMap[(AllocationId, Long), (AllocationId, Long)] = {
@@ -140,6 +149,7 @@ private object VMMemory {
   class MemoryState(shared: Storage) {
     private val memory                                = shared.memory
     def handler: Event => Either[Fault, Unit]         = shared.handler
+    def deviceQueue: DeviceQueue                      = shared.deviceQueue
     def flushHostReads(): Either[Fault, Unit]         = memory.flushHostReads()
     def fence(): Either[Fault, Unit]                  = memory.fenceHostMemory()
     var helperInvocation: Boolean                     = false

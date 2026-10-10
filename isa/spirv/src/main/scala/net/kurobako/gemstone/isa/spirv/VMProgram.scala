@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import VMInvocation.*
+import VMMemory.*
 import VMProgram.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
@@ -12,6 +13,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
+import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 
@@ -27,6 +29,10 @@ private object VMProgram {
     case Pointer(storageClass: Int, pointee: Int)
     case Function(result: Int, parameters: Vec[Int])
     case Event
+    case Pipe(access: Int)
+    case ReserveId
+    case DeviceEvent
+    case Queue
     case StorageImage(
         sampledType: Int,
         format: Int,
@@ -49,7 +55,21 @@ private object VMProgram {
   enum Constant {
     case Bits(typeId: Int, lanes: Vec[Long])
     case NullPointer(typeId: Int, pointee: Int, storageClass: Int)
+
+    /** The address of a global variable, or of another address constant, through a constant access chain. */
+    case GlobalAddress(typeId: Int, base: Int, element: Option[Long], indexes: Vec[Long])
+
+    /** A composite whose `pointers` lanes hold the addresses of the given variables or address constants. */
+    case Composite(typeId: Int, lanes: Vec[Long], pointers: Vec[(Int, Int)])
+
+    /** An `OpConstantSampler`, as the words of the `ImageDescriptor.SamplerWord` ABI. */
+    case Sampler(typeId: Int, words: Vec[Long])
   }
+
+  /** A pointer word at `offset` in a global's initial image that addresses `target` plus `addend` bytes. */
+  case class Fixup(offset: Int, target: Int, addend: Long)
+
+  case class GlobalImage(variable: Int, global: Global, bytes: Array[Byte], fixups: Vec[Fixup])
 
   case class Function(id: Int, parameters: Vec[(Int, Int)], start: Int, end: Int, labels: Map[Int, Int])
 
@@ -119,7 +139,8 @@ private object VMProgram {
       def nested(child: Int) = leafCount(types, child, enclosing + typeId)
       types.get(typeId) match {
         case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
-            Some(RuntimeType.Event) | Some(RuntimeType.Pointer(_, _)) => Right(1)
+            Some(RuntimeType.Event) | Some(RuntimeType.ReserveId) | Some(RuntimeType.DeviceEvent) |
+            Some(RuntimeType.Queue) | Some(RuntimeType.Pointer(_, _)) => Right(1)
         case Some(RuntimeType.VectorType(component, count)) =>
           nested(component).flatMap(value => leafProduct(typeId, value, count.toLong.widen[Long >= 0]))
         case Some(RuntimeType.MatrixType(column, count)) =>
@@ -156,7 +177,7 @@ private object VMProgram {
     case Some(RuntimeType.Pointer(storageClass, pointee)) => Right(Constant.NullPointer(typeId, pointee, storageClass))
     case Some(_: RuntimeType.Texture | _: RuntimeType.StorageImage | _: RuntimeType.CubeTexture |
         _: RuntimeType.MultisampledTexture | _: RuntimeType.InputAttachment | _: RuntimeType.SampledImage |
-        RuntimeType.Sampler) if opcode == "OpUndef" =>
+        _: RuntimeType.Pipe | RuntimeType.Sampler) if opcode == "OpUndef" =>
       Right(Constant.NullPointer(typeId, typeId, 0))
     case _ =>
       scalarLeafCount(types, typeId) match {
@@ -284,8 +305,9 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       case Some(RuntimeType.Integer(width, _)) => width.toScalarByteWidth.widen[Int >= 0]
       case Some(RuntimeType.Floating(width))   => width.toFloatByteWidth
       case Some(_: RuntimeType.MultisampledTexture | _: RuntimeType.InputAttachment | RuntimeType.Event |
-          _: RuntimeType.StorageImage | _: RuntimeType.Texture | _: RuntimeType.CubeTexture | RuntimeType.Sampler |
-          _: RuntimeType.SampledImage | _: RuntimeType.Pointer) => 8
+          RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue | _: RuntimeType.Pipe |
+          _: RuntimeType.StorageImage | _: RuntimeType.Texture |
+          _: RuntimeType.CubeTexture | RuntimeType.Sampler | _: RuntimeType.SampledImage | _: RuntimeType.Pointer) => 8
       case Some(RuntimeType.VectorType(component, n)) =>
         typeSizeOf(component) * (if (n.raw == 3 && !vulkan) 4: Int >= 0 else n)
       case Some(RuntimeType.MatrixType(column, count)) => typeSizeOf(column) * count
@@ -402,6 +424,9 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     case Some(RuntimeType.Integer(width, _))        => width
     case Some(RuntimeType.Floating(width))          => width
     case Some(RuntimeType.Event)                    => 64
+    case Some(RuntimeType.ReserveId)                => 64
+    case Some(RuntimeType.DeviceEvent)              => 64
+    case Some(RuntimeType.Queue)                    => 64
     case Some(RuntimeType.VectorType(component, _)) => scalarWidth(component)
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not scalar or vector: $value")
   }
@@ -482,7 +507,8 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
           index += 1
         }
       case Some(RuntimeType.Bool | _: RuntimeType.Integer | _: RuntimeType.Floating | _: RuntimeType.Pointer |
-          RuntimeType.Event) => visit(base, typeId)
+          RuntimeType.Event | RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue) =>
+        visit(base, typeId)
       case value => throw IllegalArgumentException(s"SPIR-V type %$typeId has no data leaves: $value")
     }
 
@@ -596,24 +622,48 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   private val boundGlobals: TrieMap[Int, Bound] = TrieMap.empty
 
   override def global(name: NonEmpty[String]): Either[Fault, ProgramGlobal] =
-    globalImage(name).flatMap { case (_, bytes) =>
-      ProgramGlobal.validated(bytes.length.toLong.unsafe[Long >= 0], Vec.from(bytes)).left.map(Fault.InvalidRequest(_))
+    globalImage(name).flatMap { image =>
+      ProgramGlobal.validated(image.bytes.length.toLong.unsafe[Long >= 0], Vec.from(image.bytes))
+        .left.map(Fault.InvalidRequest(_))
     }
 
   override def bindGlobal(name: NonEmpty[String], binding: GlobalBinding, memory: AddressSpace): Either[Fault, Unit] =
-    globalImage(name).flatMap { case (id, initial) =>
+    globalImage(name).flatMap { image =>
       val next = Bound(binding, memory)
-      GlobalBinding.rebind(name, boundGlobals.putIfAbsent(id, next), next).flatMap { first =>
+      GlobalBinding.rebind(name, boundGlobals.putIfAbsent(image.variable, next), next).flatMap { first =>
         if (!first) Right(())
-        else memory.write(binding.region, binding.offset, Vec.from(initial)).left.map { error =>
-          val _ = boundGlobals.remove(id)
+        else (for {
+          _      <- memory.write(binding.region, binding.offset, Vec.from(image.bytes))
+          _      <- relocate(image, None)
+          images <- programImages
+          _      <- images.traverse_(holder => relocate(holder, Some(image.variable)))
+        } yield ()).left.map { error =>
+          val _ = boundGlobals.remove(image.variable)
           error
         }
       }
     }
 
+  /** Writes the pointer words of a bound global whose targets are bound, optionally only those addressing `target`. */
+  private def relocate(image: GlobalImage, target: Option[Int]): Either[Fault, Unit] =
+    boundGlobals.get(image.variable).fold[Either[Fault, Unit]](Right(())) { holder =>
+      image.fixups.filter(fixup => target.forall(_ == fixup.target)).traverse_ { fixup =>
+        boundGlobals.get(fixup.target).fold[Either[Fault, Unit]](Right(())) { bound =>
+          for {
+            from    <- shifted(bound.binding.offset, fixup.addend)
+            address <- bound.memory.address(bound.binding.region, from)
+            at      <- shifted(holder.binding.offset, fixup.offset.toLong)
+            _       <- holder.memory.write(holder.binding.region, at, LittleEndian.toVec(address.raw, 8))
+          } yield ()
+        }
+      }
+    }
+
+  private def shifted(base: Long >= 0, delta: Long): Either[Fault, Long >= 0] = (base.raw + delta).refine[Long >=
+    0].leftMap(_ => Fault.InvalidRequest("global pointer initialiser precedes its target"))
+
   override def writeGlobal(name: NonEmpty[String], offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
-    globalImage(name).flatMap { case (id, _) =>
+    globalVariable(name).flatMap { id =>
       boundGlobals.get(id).toRight(Fault.InvalidRequest(s"SPIR-V global '$name' is not bound")).flatMap { bound =>
         if (!bound.binding.contains(offset, bytes.nonNegativeSize.toLong))
           Left(Fault.InvalidRequest(s"SPIR-V global '$name' write exceeds its storage"))
@@ -622,7 +672,14 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     }
 
   override def symbols: Either[Fault, ProgramSymbols] =
-    Right(ProgramSymbols(kernelNames.map(name => KernelSymbol(name, name)), Vec.empty))
+    persistentGlobals.flatMap(_.traverse { image =>
+      GlobalSymbol.validated(
+        globalNames(image.variable).unsafe[NonEmpty[String]],
+        None,
+        image.bytes.length.toLong.unsafe[Long >= 0],
+        Vec.empty
+      ).leftMap(Fault.InvalidRequest(_))
+    }).map(globals => ProgramSymbols(kernelNames.map(name => KernelSymbol(name, name)), Vec.from(globals)))
 
   override def bindFunctionPointerNamespace(id: ProgramId): Either[Fault, Unit] =
     if (id.raw > 0xffffffffL) Left(Fault.InvalidRequest("function pointer namespace must fit a 32-bit identity"))
@@ -638,13 +695,38 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
 
   def kernelNames: Vec[NonEmpty[String]] = Vec.from(entryPoints.keys.toSeq.sorted)
 
-  private def globalImage(name: String): Either[Fault, (Int, Array[Byte])] =
-    names.collectFirst { case (id, candidate) if candidate == name && globals.contains(id) => id }
-      .toRight(Fault.NotFound(s"SPIR-V global '$name' is not present")).flatMap { id =>
-        globalImages(storageClass => storageClass != StorageClass.Workgroup && storageClass != StorageClass.Private)
-          .flatMap(_.collectFirst { case (`id`, _, bytes) => id -> bytes }
-            .toRight(Fault.Memory(s"SPIR-V global '$name' has no storage")))
-      }
+  /** Unique OpNames identify globals; other globals are named by their id. */
+  private lazy val globalNames: Map[Int, String] = {
+    val named = globals.keys.flatMap(id => names.get(id).filter(_.nonEmpty).map(id -> _)).toMap
+    val taken = named.values.groupBy(identity).view.mapValues(_.size).toMap
+    globals.keys.map(id => id -> named.get(id).filter(taken(_) == 1).getOrElse(s"%$id")).toMap
+  }
+
+  private def globalVariable(name: String): Either[Fault, Int] =
+    globalNames.collectFirst { case (id, `name`) => id }.toRight(Fault.NotFound(
+      s"SPIR-V global '$name' is not present"
+    ))
+
+  private lazy val programImages: Either[Fault, Vector[GlobalImage]] =
+    globalImages(storageClass => storageClass != StorageClass.Workgroup && storageClass != StorageClass.Private)
+
+  /** CrossWorkgroup globals, which outlive a dispatch, and the globals their initialisers address. */
+  private lazy val persistentGlobals: Either[Fault, Vector[GlobalImage]] = programImages.map { images =>
+    val targets = images.map(image => image.variable -> image.fixups.map(_.target).toSet).toMap
+    @tailrec def closure(selected: Set[Int]): Set[Int] = {
+      val next = selected ++ selected.flatMap(targets.getOrElse(_, Set.empty))
+      if (next == selected) selected else closure(next)
+    }
+    val selected = closure(images.collect {
+      case image if image.global.storageClass == StorageClass.CrossWorkgroup => image.variable
+    }.toSet)
+    images.filter(image => selected(image.variable))
+  }
+
+  private def globalImage(name: String): Either[Fault, GlobalImage] =
+    globalVariable(name).flatMap(id =>
+      programImages.flatMap(_.find(_.variable == id).toRight(Fault.Memory(s"SPIR-V global '$name' has no storage")))
+    )
 
   override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
     if (vulkanEntries.contains(name)) VMShaderInterface.metadata(this, name)
@@ -710,40 +792,120 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     width.raw.refine[Int > 0].leftMap(_ => Fault.InvalidRequest(s"SPIR-V parameter width must be positive: $width"))
       .map(KernelMetadata.Parameter(_, 0, kind, containsPointers))
 
-  // Global initialisation exits before publishing a partially materialised image.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
-  def globalImages(includeStorageClass: Int => Boolean): Either[Fault, Vector[(Int, Global, Array[Byte])]] = {
-    val images      = Vector.newBuilder[(Int, Global, Array[Byte])]
-    val entries     = globals.view.toVector
-    var globalIndex = 0
-    while (globalIndex < entries.size) {
-      val (variable, global) = entries(globalIndex)
-      if (!builtins.contains(variable) && includeStorageClass(global.storageClass)) {
-        val pointee = pointerPointee(global.pointerType)
-        val bytes   = global.initialiser match {
-          case None              => Array.ofDim[Byte](typeSize(pointee).raw)
-          case Some(initialiser) => constants.get(initialiser) match {
+  def globalImages(includeStorageClass: Int => Boolean): Either[Fault, Vector[GlobalImage]] =
+    globals.toVector.filter { case (variable, global) =>
+      !builtins.contains(variable) && includeStorageClass(global.storageClass)
+    }.traverse((variable, global) => initialImage(variable, global))
+
+  private def initialImage(variable: Int, global: Global): Either[Fault, GlobalImage] = {
+    val size = typeSize(pointerPointee(global.pointerType)).raw
+    def sized(bytes: Array[Byte], fixups: Vec[Fixup]): Either[Fault, GlobalImage] = Either.cond(
+      bytes.length == size,
+      GlobalImage(variable, global, bytes, fixups),
+      Fault.InvalidRequest(s"SPIR-V global variable %$variable initialiser has ${bytes.length} bytes, expected $size")
+    )
+    global.initialiser match {
+      case None => Right(GlobalImage(variable, global, Array.ofDim[Byte](size), Vec.empty))
+      case Some(initialiser) if addresses(initialiser) =>
+        addressOf(initialiser).flatMap((target, addend) => sized(Array.ofDim[Byte](8), Vec(Fixup(0, target, addend))))
+      case Some(initialiser) => constantData.get(initialiser) match {
+          case Some(Constant.Composite(typeId, lanes, pointers)) =>
+            for {
+              bytes   <- encode(VMValue.Bits(typeId, Vec.toArray(lanes)))
+              offsets <- leafOffsets(typeId)
+              fixups  <- pointers.traverse((lane, target) =>
+                addressOf(target).map((variable, addend) => Fixup(offsets(lane), variable, addend))
+              )
+              image <- sized(bytes, fixups)
+            } yield image
+          case _ => constants.get(initialiser) match {
               case None =>
-                return Left(
-                  Fault.InvalidRequest(s"SPIR-V global variable %$variable has undefined initialiser %$initialiser")
-                )
-              case Some(value) =>
-                val encoded = encode(value) match {
-                  case Left(error) => return Left(error)
-                  case Right(data) => data
-                }
-                if (encoded.length != typeSize(pointee).raw)
-                  return Left(Fault.InvalidRequest(
-                    s"SPIR-V global variable %$variable initialiser has ${encoded.length} bytes, expected ${typeSize(pointee).raw}"
-                  ))
-                encoded
+                Left(Fault.InvalidRequest(s"SPIR-V global variable %$variable has undefined initialiser %$initialiser"))
+              case Some(value) => encode(value).flatMap(sized(_, Vec.empty))
             }
         }
-        images += ((variable, global, bytes))
-      }
-      globalIndex += 1
     }
-    Right(images.result())
+  }
+
+  /** Whether `id` is a global variable or a constant address of one. */
+  private def addresses(id: Int): Boolean = globals.contains(id) ||
+    (constantData.get(id) match {
+      case Some(Constant.GlobalAddress(_, _, _, _)) => true
+      case _                                        => false
+    })
+
+  /** The global variable that `id` addresses and the byte offset of the address within it. */
+  def addressOf(id: Int): Either[Fault, (Int, Long)] =
+    if (globals.contains(id)) Right(id -> 0L)
+    else constantData.get(id) match {
+      case Some(Constant.GlobalAddress(_, base, element, indexes)) =>
+        for {
+          start  <- addressOf(base)
+          offset <- chainOffset(addressType(base), element, indexes)
+        } yield start._1 -> (start._2 + offset)
+      case _ => Left(Fault.InvalidRequest(s"SPIR-V value %$id is not a global address"))
+    }
+
+  private def addressType(id: Int): Int = globals.get(id).map(_.pointerType).getOrElse(constantData.get(id) match {
+    case Some(Constant.GlobalAddress(typeId, _, _, _)) => typeId
+    case _                                             => -1
+  })
+
+  private def chainOffset(pointerType: Int, element: Option[Long], indexes: Vec[Long]): Either[Fault, Long] = {
+    def stride(typeId: Int, member: Int): Long =
+      arrayStrides.get(typeId).fold(storageTypeSize(member, None).raw.toLong)(_.raw.toLong)
+    val pointee = pointerPointee(pointerType)
+    indexes.foldLeft[Either[Fault, (Long, Int)]](Right(element.fold(0L)(_ * stride(pointerType, pointee)) -> pointee)) {
+      case (Right((offset, typeId)), index) => runtimeType(typeId) match {
+          case Some(RuntimeType.Structure(members)) if index >= 0 && index < members.size =>
+            Right((offset + structMemberOffset(typeId, members, index.toInt).raw, members(index.toInt)))
+          case Some(RuntimeType.Array(member, _))         => Right((offset + index * stride(typeId, member), member))
+          case Some(RuntimeType.VectorType(component, _)) =>
+            Right((offset + index * typeSize(component).raw, component))
+          case _ => Left(Fault.InvalidRequest(s"a constant access chain cannot index SPIR-V type %$typeId"))
+        }
+      case (failure, _) => failure
+    }.map(_._1)
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def leafOffsets(typeId: Int): Either[Fault, Vec[Int]] =
+    try {
+      val offsets = Vec.newBuilder[Int]
+      visitLeaves(typeId, None, 0L)((offset, _) => offsets += offset.toIntExact.raw)
+      Right(offsets.result())
+    } catch {
+      case error: IllegalArgumentException => Left(Fault.InvalidRequest(throwables.detail(error)))
+      case error: ArithmeticException      => Left(Fault.InvalidRequest(throwables.detail(error)))
+    }
+
+  /** Literal samplers, which every dispatch places beside its globals. */
+  lazy val samplerConstants: Vector[(Int, Int, Vec[Long])] =
+    constantData.collect { case (id, Constant.Sampler(typeId, words)) => (id, typeId, words) }.toVector
+
+  private lazy val addressConstantIds: Vector[Int] = constantData.collect {
+    case (id, Constant.GlobalAddress(_, _, _, _) | Constant.Composite(_, _, _)) => id
+  }.toVector
+
+  /** Address-valued constants resolved against the globals placed for one dispatch. */
+  def addressConstants(placed: Map[Int, VMValue]): Either[Fault, Map[Int, VMValue]] = {
+    def resolve(target: Int): Either[Fault, Option[Long]] = addressOf(target).map((variable, addend) =>
+      placed.get(variable).collect { case VMValue.Address(_, pointer) => pointer.address + addend }
+    )
+    addressConstantIds.traverse { id =>
+      constantData.get(id) match {
+        case Some(Constant.GlobalAddress(typeId, _, _, _)) => resolve(id).map(_.flatMap(address =>
+            runtimeType(typeId).collect { case RuntimeType.Pointer(storageClass, pointee) =>
+              id -> VMValue.Address(typeId, Pointer(address, pointee, storageClass))
+            }
+          ))
+        case Some(Constant.Composite(typeId, lanes, pointers)) =>
+          val values = Vec.toArray(lanes)
+          pointers.traverse_((lane, target) => resolve(target).map(_.foreach(values(lane) = _)))
+            .map(_ => Some(id -> VMValue.Bits(typeId, values)))
+        case _ => Right(None)
+      }
+    }.map(_.flatten.toMap)
   }
 
   def globalBinding(variable: Int): Option[GlobalBinding] = boundGlobals.get(variable).map(_.binding)

@@ -61,9 +61,10 @@ private object ConversionOps {
           unary(site, id(t), id(d), id(a))(quantizeToF16(_))
         case _ => Fail(Fault.InvalidRequest("OpQuantizeToF16 requires matching float32 scalar or vector types"))
       }
-    case Instruction.CopyObject(t, d, a)  => copy(id(t), id(d), id(a))
-    case Instruction.CopyLogical(t, d, a) => copy(id(t), id(d), id(a))
-    case Instruction.Bitcast(t, d, a)     => bitcast(site, id(t), id(d), id(a))
+    case Instruction.CopyObject(t, d, a)   => copy(id(t), id(d), id(a))
+    case Instruction.ExpectKHR(t, d, a, _) => copy(id(t), id(d), id(a))
+    case Instruction.CopyLogical(t, d, a)  => copy(id(t), id(d), id(a))
+    case Instruction.Bitcast(t, d, a)      => bitcast(site, id(t), id(d), id(a))
   }
 
   // Quantisation retains a float32 encoding but flushes values below the smallest normal half to signed zero.

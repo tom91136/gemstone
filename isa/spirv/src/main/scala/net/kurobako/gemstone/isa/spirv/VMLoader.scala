@@ -131,7 +131,11 @@ private object VMLoader {
             case Left(error)  => return Left(error)
             case Right(value) => types.update(id(instruction.dest), value)
           }
-        case Instruction.TypeEvent(dest)                => types.update(id(dest), RuntimeType.Event)
+        case Instruction.TypeEvent(dest)        => types.update(id(dest), RuntimeType.Event)
+        case Instruction.TypeReserveId(dest)    => types.update(id(dest), RuntimeType.ReserveId)
+        case Instruction.TypeDeviceEvent(dest)  => types.update(id(dest), RuntimeType.DeviceEvent)
+        case Instruction.TypeQueue(dest)        => types.update(id(dest), RuntimeType.Queue)
+        case Instruction.TypePipe(dest, access) => types.update(id(dest), RuntimeType.Pipe(unsigned(access).toInt))
         case Instruction.ConstantTrue(resultType, dest) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(1L)))
         case Instruction.SpecConstantTrue(resultType, dest) =>
@@ -145,12 +149,31 @@ private object VMLoader {
         case Instruction.SpecConstant(resultType, dest, value) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(literalBits(types, id(resultType), value))))
         case Instruction.ConstantComposite(resultType, dest, constituents) =>
-          constantComposite(types, constants, resultType, dest, constituents) match {
+          constantComposite(types, constants, globals, resultType, dest, constituents) match {
             case Left(error)  => return Left(error)
             case Right(value) => constants.update(id(dest), value)
           }
         case Instruction.SpecConstantComposite(resultType, dest, constituents) =>
-          constantComposite(types, constants, resultType, dest, constituents) match {
+          constantComposite(types, constants, globals, resultType, dest, constituents) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => constants.update(id(dest), value)
+          }
+        case Instruction.SpecConstantOp(resultType, dest, opcode, operands)
+            if addressing(unsigned(opcode).toInt) && operands.nonEmpty &&
+              (globals.contains(id(operands.head)) || isAddress(constants.get(id(operands.head)))) =>
+          globalAddress(constants, id(resultType), unsigned(opcode).toInt, operands.map(id(_))) match {
+            case Some(value) => constants.update(id(dest), value)
+            case None        => return Left(Fault.Unsupported(
+                s"SPIR-V specialization constant operation ${unsigned(opcode)} on a global address has non-constant operands"
+              ))
+          }
+        case Instruction.SpecConstantOp(resultType, dest, opcode, Vec(operand))
+            if pointerCasts(unsigned(opcode).toInt) &&
+              (constants.get(id(operand)) match {
+                case Some(Constant.NullPointer(_, _, _)) => true
+                case _                                   => false
+              }) =>
+          zeroValue(types, id(resultType), id(dest), "OpSpecConstantOp") match {
             case Left(error)  => return Left(error)
             case Right(value) => constants.update(id(dest), value)
           }
@@ -167,6 +190,11 @@ private object VMLoader {
                 s"SPIR-V specialization constant operation ${unsigned(opcode)} is unsupported or has invalid operands"
               ))
           }
+        case Instruction.ConstantSampler(resultType, dest, addressing, normalised, filter) =>
+          constants.update(
+            id(dest),
+            literalSampler(id(resultType), unsigned(addressing), unsigned(normalised), unsigned(filter))
+          )
         case Instruction.ConstantNull(resultType, dest) =>
           zeroValue(types, id(resultType), id(dest), "OpConstantNull") match {
             case Left(error)  => return Left(error)
@@ -480,6 +508,21 @@ private object VMLoader {
         ),
         Fault.Unsupported("sampled images currently require single-sample 1D/2D/3D or texel-buffer views")
       )
+    else if (sampled == 0L && format == ImageFormat.Unknown)
+      // OpenCL images take their format from the bound image, and the kernel decides how to access them.
+      Either.cond(
+        Set[Long](Dim.Value1D, Dim.Value2D, Dim.Value3D, Dim.Buffer).contains(dim) && depth <= 1L && arrayed <= 1L &&
+          !((dim == Dim.Buffer || dim == Dim.Value3D) && arrayed != 0L) && multisampled == 0L,
+        RuntimeType.StorageImage(
+          sampledType,
+          ImageFormat.Unknown,
+          if (dim == Dim.Value3D) 3 else if (dim == Dim.Value2D) 2 else 1,
+          dim == Dim.Buffer,
+          arrayed == 1L,
+          false
+        ),
+        Fault.Unsupported("OpenCL images require single-sample 1D, 2D, 3D or buffer views")
+      )
     else {
       val floating = ImageFormats.floatingStorage(format.toInt)
       Either.cond(
@@ -548,38 +591,125 @@ private object VMLoader {
         _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR |
         _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL |
         _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL |
-        _: Instruction.GroupBroadcast | _: Instruction.ControlBarrier => true
+        _: Instruction.GroupBroadcast | _: Instruction.ControlBarrier | _: Instruction.GroupReserveReadPipePackets |
+        _: Instruction.GroupReserveWritePipePackets => true
     case Instruction.FunctionCall(_, _, called, _) => names.get(id(called)).exists(OpenCLBuiltins.collective)
     case _                                         => false
   }
 
   // Composite decoding walks constituents directly and exits on the first undefined one.
+  private val addressing = Set(
+    SPIRV.Opcode.AccessChain,
+    SPIRV.Opcode.InBoundsAccessChain,
+    SPIRV.Opcode.PtrAccessChain,
+    SPIRV.Opcode.InBoundsPtrAccessChain,
+    SPIRV.Opcode.PtrCastToGeneric,
+    SPIRV.Opcode.GenericCastToPtr,
+    SPIRV.Opcode.Bitcast
+  )
+
+  private def literalSampler(typeId: Int, addressing: Long, normalised: Long, filter: Long): Constant = {
+    import ImageDescriptor.*
+    val mode = addressing match {
+      case 2L => AddressMode.ClampToBorder
+      case 3L => AddressMode.Repeat
+      case 4L => AddressMode.MirroredRepeat
+      case _  => AddressMode.ClampToEdge
+    }
+    val filtering = if (filter == 1L) Filter.Linear else Filter.Nearest
+    val words     = Array.fill(SamplerWord.Count)(0L)
+    words(SamplerWord.MinFilter) = filtering
+    words(SamplerWord.MagFilter) = filtering
+    words(SamplerWord.AddressU) = mode
+    words(SamplerWord.AddressV) = mode
+    words(SamplerWord.AddressW) = mode
+    words(SamplerWord.Unnormalized) = if (normalised == 0L) 1L else 0L
+    words(SamplerWord.BorderColour) = BorderColour.FloatTransparentBlack
+    words(SamplerWord.MaxLod) = java.lang.Float.floatToRawIntBits(1000f).toLong
+    words(SamplerWord.MipmapMode) = MipmapMode.Nearest
+    Constant.Sampler(typeId, Vec.from(words))
+  }
+
+  private val pointerCasts = Set(SPIRV.Opcode.PtrCastToGeneric, SPIRV.Opcode.GenericCastToPtr, SPIRV.Opcode.Bitcast)
+
+  private def isAddress(constant: Option[Constant]): Boolean = constant.exists {
+    case Constant.GlobalAddress(_, _, _, _) => true
+    case _                                  => false
+  }
+
+  private def globalAddress(
+      constants: scala.collection.Map[Int, Constant],
+      resultType: Int,
+      opcode: Int,
+      operands: Vec[Int]
+  ): Option[Constant] = {
+    val indexes = operands.tail.map(operand =>
+      constants.get(operand).collect { case Constant.Bits(_, lanes) if lanes.size == 1 => lanes.head }
+    )
+    if (indexes.exists(_.isEmpty)) None
+    else {
+      val values = indexes.flatten
+      opcode match {
+        case SPIRV.Opcode.PtrAccessChain | SPIRV.Opcode.InBoundsPtrAccessChain if values.nonEmpty =>
+          Some(Constant.GlobalAddress(resultType, operands.head, Some(values.head), values.tail))
+        case SPIRV.Opcode.AccessChain | SPIRV.Opcode.InBoundsAccessChain =>
+          Some(Constant.GlobalAddress(resultType, operands.head, None, values))
+        case _ if values.isEmpty => Some(Constant.GlobalAddress(resultType, operands.head, None, Vec.empty))
+        case _                   => None
+      }
+    }
+  }
+
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def constantComposite(
       types: scala.collection.Map[Int, RuntimeType],
       constants: scala.collection.Map[Int, Constant],
+      globals: scala.collection.Map[Int, Global],
       resultType: Operand,
       destination: Operand,
       constituents: Vec[Operand]
   ): Either[Fault, Constant] = {
-    val lanes = Array.newBuilder[Long]
-    var index = 0
+    val lanes    = Array.newBuilder[Long]
+    val pointers = Vec.newBuilder[(Int, Int)]
+    var count    = 0
+    var index    = 0
     while (index < constituents.size) {
-      constants.get(id(constituents(index))) match {
-        case Some(Constant.Bits(_, values)) => lanes ++= values
+      val constituent = id(constituents(index))
+      constants.get(constituent) match {
+        case Some(Constant.Bits(_, values)) =>
+          lanes ++= values
+          count += values.size
         // Composite leaves use the same zero pointer representation as OpConstantNull aggregates.
-        case Some(Constant.NullPointer(_, _, _)) => lanes += 0L
-        case None => return Left(Fault.InvalidRequest(s"SPIR-V value %${id(constituents(index))} is undefined"))
+        case Some(Constant.NullPointer(_, _, _)) =>
+          lanes += 0L
+          count += 1
+        case Some(Constant.GlobalAddress(_, _, _, _)) =>
+          lanes += 0L
+          pointers += count -> constituent
+          count += 1
+        case Some(Constant.Composite(_, values, nested)) =>
+          lanes ++= values
+          pointers ++= nested.map((lane, target) => (count + lane) -> target)
+          count += values.size
+        case Some(Constant.Sampler(_, _)) =>
+          return Left(Fault.Unsupported(s"SPIR-V composite constant %${id(destination)} contains a sampler"))
+        case None if globals.contains(constituent) =>
+          lanes += 0L
+          pointers += count -> constituent
+          count += 1
+        case None => return Left(Fault.InvalidRequest(s"SPIR-V value %$constituent is undefined"))
       }
       index += 1
     }
-    val result = lanes.result()
+    val result    = Vec.from(lanes.result())
+    val addresses = pointers.result()
     scalarLeafCount(types, id(resultType)).flatMap(expected =>
       Either.cond(
-        result.length == expected.raw,
-        Constant.Bits(id(resultType), Vec.from(result)),
+        result.size == expected.raw,
+        if (addresses.isEmpty) Constant.Bits(id(resultType), result)
+        else Constant.Composite(id(resultType), result, addresses),
         Fault.InvalidRequest(
-          s"SPIR-V composite constant %${id(destination)} has ${result.length} scalar leaves, expected $expected"
+          s"SPIR-V composite constant %${id(destination)} has ${result.size} scalar leaves, expected $expected"
         )
       )
     )

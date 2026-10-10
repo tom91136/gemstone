@@ -1,12 +1,14 @@
 find_package(OpenCL REQUIRED)
 
-# Keep the catalogue useful without compiling the multi-day numerical, image,
-# and exhaustive conversion categories. Workloads select bounded integer, half,
-# and vector cases within the compiled categories.
+# Keep the catalogue useful without compiling the multi-day numerical and
+# exhaustive conversion categories. Workloads select bounded integer, half, and
+# vector cases within the compiled categories; image programs default to small
+# images.
 set(opencl_cts_categories
-  api atomics basic buffers c11_atomics commonfns compiler computeinfo events contractions device_partition
+  api atomics basic buffers c11_atomics commonfns compiler computeinfo events contractions device_execution device_partition
   device_timer generic_address_space geometrics half integer_ops mem_host_flags multiples
-  non_uniform_work_group pipes printf profiling relationals spirv_new subgroups svm thread_dimensions vectors workgroups)
+  non_uniform_work_group pipes printf profiling relationals spirv_new subgroups svm thread_dimensions vectors workgroups
+  cl_copy_images cl_fill_images cl_get_info cl_read_write_images image_streams kernel_image_methods samplerless_reads)
 FetchContent_MakeAvailable(opencl_cts opencl_headers opencl_spirv_headers)
 
 set(staged_source "${CMAKE_CURRENT_BINARY_DIR}/source")

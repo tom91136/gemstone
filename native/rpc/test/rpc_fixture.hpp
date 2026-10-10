@@ -168,6 +168,10 @@ public:
       encoded += ch == ' ' ? "%20" : std::string(1, ch);
     return encoded;
   }
+  bool hostMemory() {
+    std::lock_guard lock(stateMutex);
+    return hostMemoryEnabled;
+  }
   void expect(Expected expected) {
     std::lock_guard lock(stateMutex);
     GEMSTONE_RPC_REQUIRE(!active);

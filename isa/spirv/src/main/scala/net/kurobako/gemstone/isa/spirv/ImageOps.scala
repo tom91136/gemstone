@@ -143,6 +143,8 @@ private object ImageOps {
             dimensions <- program.runtimeType(image.pointee) match {
               case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
               case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((2, arrayed, true))
+              case Some(RuntimeType.StorageImage(_, ImageFormat.Unknown, dimensions, false, arrayed, false)) =>
+                Right((dimensions, arrayed, false))
               case _ => Left(Fault.InvalidRequest("image mip size query requires a sampled image"))
             }
             levels <- imageLevels(memory, image)
@@ -160,6 +162,8 @@ private object ImageOps {
             )
           )
         }
+      case Instruction.ImageQueryOrder(t, d, i)   => channelQuery(program, t, d, i, "order")(_._1)
+      case Instruction.ImageQueryFormat(t, d, i)  => channelQuery(program, t, d, i, "data type")(_._2)
       case Instruction.ImageQuerySamples(t, d, i) =>
         sampling { (_, memory, values) =>
           for {
@@ -231,7 +235,7 @@ private object ImageOps {
                 memory,
                 data.pixels,
                 data.format,
-                data.width * data.samples,
+                data.stride * data.samples,
                 x * data.samples + sample,
                 (layer * data.depth + z) * data.height + y
               )
@@ -263,9 +267,7 @@ private object ImageOps {
             for {
               _ <- Either.cond(
                 mods.forall(m =>
-                  m.words.length == 1 && (unsigned(m) == 0L || unsigned(m) == ImageOperands.SignExtend || unsigned(
-                    m
-                  ) == ImageOperands.ZeroExtend)
+                  m.words.length == 1 && hintsOnly(unsigned(m))
                 ),
                 (),
                 Fault.Unsupported("unsupported storage image read operands")
@@ -295,24 +297,35 @@ private object ImageOps {
                   }
                 } else Left(Fault.Unsupported(s"storage image format $format has no texel decoding"))
               }
-            } yield values.update(id(dest), VMValue.Bits(id(resultType), lanes))
+            } yield {
+              // read_imageh narrows the float result to binary16; depth images read a scalar.
+              val half   = program.floatingShape(id(resultType)).exists((width, _) => width.raw == 16)
+              val result = if (program.floatingShape(id(resultType)).exists(_._2 == 1)) lanes.take(1) else lanes
+              values.update(
+                id(dest),
+                VMValue.Bits(
+                  id(resultType),
+                  if (!half) result
+                  else result.map(lane => IEEE754.fromDouble(IEEE754.binary32ToFloat(Binary32.low(lane)).toDouble, 16))
+                )
+              )
+            }
         }
       case Instruction.ImageWrite(image, coordinate, texel, mods) =>
         imaging { (_, memory, values) =>
           for {
             _ <- Either.cond(
               mods.forall(m =>
-                m.words.length == 1 && (unsigned(m) == 0L || unsigned(m) == ImageOperands.SignExtend || unsigned(
-                  m
-                ) == ImageOperands.ZeroExtend)
+                m.words.length == 1 && hintsOnly(unsigned(m))
               ),
               (),
               Fault.Unsupported("unsupported storage image write operands")
             )
-            target <- imageTexel(program, memory, values, image, coordinate)
-            lanes  <- bits(values, id(texel))
-            _      <- Either.cond(lanes.length == 4, (), Fault.InvalidRequest("image texel requires four components"))
-            _      <- if (ImageFormats.integer(target._2).isDefined) {
+            target  <- imageTexel(program, memory, values, image, coordinate)
+            written <- bits(values, id(texel))
+            lanes = if (written.length == 1) Array(written(0), 0L, 0L, 0x3f800000L) else written
+            _ <- Either.cond(lanes.length == 4, (), Fault.InvalidRequest("image texel requires four components"))
+            _ <- if (ImageFormats.integer(target._2).isDefined) {
               val layout = ImageFormats.integer(target._2).get
               if (layout.packed) memory.writeScalar(target._1, layout.encodePacked(lanes), 4)
               else (0 until layout.components).foldLeft[AddressSpace.ReadResult[Unit]](Right(())) { (result, lane) =>
@@ -392,7 +405,7 @@ private object ImageOps {
               case _ => Left(Fault.InvalidRequest("image size query requires a storage image or texel buffer"))
             }
             shape <-
-              imageLevel(memory, pointer, 0, if (program.vulkan) -1 else imageType._1, imageType._3)
+              imageLevel(memory, pointer, 0, expectedFormat(program, imageType._1), imageType._3)
           } yield values.update(
             id(dest),
             VMValue.Bits(
@@ -407,6 +420,32 @@ private object ImageOps {
         }
     }: PartialFunction[Instruction, Op]
   }
+
+  private def channelQuery(program: VMProgram, resultType: Operand, dest: Operand, image: Operand, label: String)(
+      select: ((Int, Int)) => Int
+  ): Op =
+    imaging { (_, memory, values) =>
+      for {
+        pointer <- address(values, id(image))
+        format  <- program.runtimeType(pointer.pointee) match {
+          case Some(RuntimeType.StorageImage(_, declared, _, buffer, _, _)) =>
+            imageLevel(memory, pointer, 0, expectedFormat(program, declared), buffer).map(_.format)
+          case _ => Left(Fault.InvalidRequest(s"image channel $label query requires a storage image"))
+        }
+        channels <-
+          ImageChannels(format).toRight(Fault.Unsupported(s"image format $format has no OpenCL channel $label"))
+      } yield values.update(id(dest), VMValue.Bits(id(resultType), Array(select(channels).toLong)))
+    }
+
+  private val Hints = ImageOperands.SignExtend | ImageOperands.ZeroExtend | ImageOperands.Nontemporal
+
+  private def hintsOnly(mask: Long): Boolean =
+    (mask & ~Hints.toLong) == 0L &&
+      (mask & (ImageOperands.SignExtend | ImageOperands.ZeroExtend)) != (ImageOperands.SignExtend | ImageOperands.ZeroExtend)
+
+  /** Images without a declared format use the bound view's format; Vulkan validates the view against the type. */
+  private def expectedFormat(program: VMProgram, declared: Int): Int =
+    if (program.vulkan || declared == ImageFormat.Unknown) -1 else declared
 
   /** Sampling ops leave the pc in place while the lane waits for its quad's implicit derivatives. */
   private def sampling(body: (InvocationState, MemoryState, InvocationValues) => AddressSpace.ReadResult[Unit]): Op =
@@ -455,10 +494,16 @@ private object ImageOps {
       dimensions <- program.runtimeType(image.pointee) match {
         case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
         case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((3, arrayed, true))
+        case Some(RuntimeType.StorageImage(_, ImageFormat.Unknown, dimensions, false, arrayed, false)) =>
+          Right((dimensions, arrayed, false))
         case _ => Left(Fault.InvalidRequest("sampling requires an image view, not a texel buffer"))
       }
-      raw <- bits(values, id(coordinate))
-      _   <- Either.cond(
+      supplied <- bits(values, id(coordinate))
+      // OpenCL samples unnormalised integer coordinates with nearest filtering.
+      raw =
+        if (program.integerShape(program.valueType(id(coordinate))).isEmpty) supplied
+        else supplied.map(value => IEEE754.floatToBinary32(value.toInt.toFloat).raw.toLong & 0xffffffffL)
+      _ <- Either.cond(
         !projective || (!dimensions._2 && !dimensions._3 && raw.length > dimensions._1),
         (),
         Fault.InvalidRequest("projective sampling requires non-array 1D, 2D or 3D coordinates and q")
@@ -520,7 +565,8 @@ private object ImageOps {
 
   /** 32-bit words per texel of formats stored as raw words, including the depth plane of a combined format. */
   private def wordComponents(format: Int): Int =
-    if (format == ImageDescriptor.Format.D32SfloatS8Depth) 1 else ImageFormats.floatComponents(format)
+    if (format == ImageDescriptor.Format.D32SfloatS8Depth || format == ImageDescriptor.Format.D32Sfloat) 1
+    else ImageFormats.floatComponents(format)
   private def imageIsInteger(format: Int): Boolean =
     format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil || ImageFormats.integer(
       format
@@ -593,14 +639,16 @@ private object ImageOps {
         } yield { data(lane) = layout.decode(word, lane); data }
     }
 
-  private case class ImageLevel(
+  /** `stride` is the distance between rows in texels, which a row pitch may widen beyond `width`. */
+  case class ImageLevel(
       pixels: Pointer,
       width: Long,
       height: Long,
       format: Int,
       samples: Int = 1,
       layers: Long = 1,
-      depth: Long = 1
+      depth: Long = 1,
+      stride: Long
   )
 
   private def imageLevels(memory: MemoryState, image: Pointer): AddressSpace.ReadResult[Int] =
@@ -667,7 +715,7 @@ private object ImageOps {
   // Views carry a level table and a relocated pointer to shared texels.
   // Format bit 30 marks a volume: header word 2 is base-view depth, shifted by
   // the view-relative mip. Without that bit, word 2 is the constant layer count.
-  private def imageLevel(
+  def imageLevel(
       memory: MemoryState,
       image: Pointer,
       level: Int,
@@ -704,10 +752,25 @@ private object ImageOps {
       offset     <- memory.descriptor(image, table + ImageDescriptor.Layout.LevelOffset, 8)
       slices     <- memory.descriptor(image, ImageDescriptor.Layout.Slices, 4)
       rawSamples <- memory.descriptor(image, ImageDescriptor.Layout.Samples, 4)
-      layers          = if (volume) 1L else slices
-      depth           = if (volume) Math.max(1L, slices >> level) else 1L
-      samples         = if (rawSamples == 0L) 1 else rawSamples.toInt
-      bytes           = width * height * ImageTexelCodec.texelBytes(format) * samples * layers * depth
+      pitched = (rawFormat & ImageDescriptor.Flags.Pitched) != 0
+      pitchAt = ImageDescriptor.Layout.LevelTable + levels * ImageDescriptor.Layout.LevelBytes +
+        (if ((rawFormat & ImageDescriptor.Flags.Swizzle) != 0) ImageDescriptor.Layout.SwizzleBytes else 0)
+      _ <-
+        if (pitched)
+          descriptorSpan(image, pitchAt + ImageDescriptor.Layout.PitchBytes, "image row pitch exceeds descriptor")
+        else Right(())
+      pitch <- if (pitched) memory.descriptor(image, pitchAt, 8) else Right(0L)
+      texelBytes = ImageTexelCodec.texelBytes(format)
+      layers     = if (volume) 1L else slices
+      depth      = if (volume) Math.max(1L, slices >> level) else 1L
+      samples    = if (rawSamples == 0L) 1 else rawSamples.toInt
+      stride     = if (pitched) pitch / texelBytes else width
+      _ <- Either.cond(
+        !pitched || (levels == 1 && samples == 1 && pitch % texelBytes == 0 && stride >= width),
+        (),
+        Fault.InvalidRequest("image row pitch must hold a row of whole texels")
+      )
+      bytes           = stride * height * texelBytes * samples * layers * depth
       validDimensions = width > 0 && height > 0 && (
         if (texelBuffer) !volume && layers == 1 && width <= 0xffffffffL && height == 1
         else if (volume) samples == 1 && slices >= 1 && slices <= 2048 && width <= 2048 && height <= 2048
@@ -730,7 +793,8 @@ private object ImageOps {
       format,
       samples,
       layers,
-      depth
+      depth,
+      stride
     )
   private def imageTexel(
       program: VMProgram,
@@ -746,10 +810,12 @@ private object ImageOps {
           Right((sampledType, format, dimensions, texelBuffer, arrayed || cube))
         case _ => Left(Fault.InvalidRequest("image operand does not identify a storage image"))
       }
-      data   <- imageLevel(memory, source, 0, if (program.vulkan) -1 else imageType._2, imageType._4)
+      data   <- imageLevel(memory, source, 0, expectedFormat(program, imageType._2), imageType._4)
       coords <- bits(values, id(coordinate))
-      _      <- Either.cond(
-        coords.length == imageType._3 + (if (imageType._5) 1 else 0),
+      required = imageType._3 + (if (imageType._5) 1 else 0)
+      // OpenCL passes four-component coordinates to 3D and 2D array images.
+      _ <- Either.cond(
+        coords.length == required || (!program.vulkan && coords.length == 4 && required >= 3),
         (),
         Fault.InvalidRequest("image coordinate component count does not match dimensionality")
       )
@@ -762,12 +828,12 @@ private object ImageOps {
       val layer      = if (imageType._5) coords(imageType._3).toInt.toLong else 0L
       val begin      = data.pixels.address
       val texelBytes = ImageTexelCodec.texelBytes(data.format)
-      val end        = begin + width * height * data.layers * data.depth * texelBytes
+      val end        = begin + data.stride * height * data.layers * data.depth * texelBytes
       val offset     =
         if (
           x < 0 || y < 0 || x >= width || y >= height || z < 0 || z >= data.depth || layer < 0 || layer >= data.layers
         ) end
-        else begin + (((layer * data.depth + z) * height + y) * width + x) * texelBytes
+        else begin + (((layer * data.depth + z) * height + y) * data.stride + x) * texelBytes
       (
         data.pixels.copy(
           address = offset,
@@ -775,7 +841,8 @@ private object ImageOps {
           storageClass = StorageClass.Image,
           bounds = Some(begin -> end)
         ),
-        data.format
+        // OpenCL depth images store UNORM_INT16 depths as R16 texels
+        if (!program.vulkan && data.format == ImageDescriptor.Format.D16Unorm) ImageFormat.R16 else data.format
       )
     }
 
@@ -941,8 +1008,9 @@ private object ImageOps {
         (),
         Fault.InvalidRequest("cube sampling requires normalised coordinates")
       )
-      operands    = mods.map(_.words.toVector.map(_.raw).toArray).getOrElse(Array(0))
-      mask        = operands.headOption.getOrElse(-1)
+      operands = mods.map(_.words.toVector.map(_.raw).toArray).getOrElse(Array(0))
+      // Integer texels decode at their format's signedness, so the extension and temporal hints add nothing.
+      mask        = operands.headOption.fold(-1)(_ & ~Hints)
       lodMask     = mask & (ImageOperands.Bias | ImageOperands.Lod | ImageOperands.Grad)
       offsetIndex = 1 + (if (lodMask == ImageOperands.Grad) 2 else if (lodMask != 0) 1 else 0)
       _ <- Either.cond(
@@ -1074,17 +1142,16 @@ private object ImageOps {
               if (arrayed) Math.max(0L, Math.min(layerCount - 1, Math.rint(float(coords(dimensions))).toLong)) else 0L
             def layerPixels(index: Long): Pointer =
               data.pixels.copy(address =
-                data.pixels.address + index * data.width * data.height * ImageTexelCodec.texelBytes(format)
+                data.pixels.address + index * data.stride * data.height * ImageTexelCodec.texelBytes(format)
               )
-            val sx =
-              projection.fold(float(coords(0)))(_.s) * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1.0
-                                                        else data.width.toDouble) + offset(0)
-            val sy = if (dimensions == 1) 0.5
-            else projection.fold(float(coords(1)))(_.t) * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1.0
-                                                           else data.height.toDouble) + offset(1)
-            val sz = if (volume) float(coords(2)) * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1.0
-                                                     else data.depth.toDouble) + offset(2)
-            else 0.5
+            // texel-space coordinates are single precision, so x.5 boundaries match the device
+            def texelSpace(coordinate: Double, extent: Long, offset: Long): Double =
+              (coordinate.toFloat * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1f
+                                     else extent.toFloat) + offset.toFloat).toDouble
+            val sx = texelSpace(projection.fold(float(coords(0)))(_.s), data.width, offset(0))
+            val sy =
+              if (dimensions == 1) 0.5 else texelSpace(projection.fold(float(coords(1)))(_.t), data.height, offset(1))
+            val sz         = if (volume) texelSpace(float(coords(2)), data.depth, offset(2)) else 0.5
             val components =
               if (
                 format == ImageDescriptor.Format.D16Unorm || format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil
@@ -1131,7 +1198,7 @@ private object ImageOps {
                       for {
                         sum   <- result
                         value <-
-                          sampleTexel(memory, layerPixels(layer * 6 + tap.face), format, data.width, tap.x, tap.y)
+                          sampleTexel(memory, layerPixels(layer * 6 + tap.face), format, data.stride, tap.x, tap.y)
                       } yield { val v = compare(value); Array.tabulate(sum.length)(i => sum(i) + v(i) / taps.size) }
                   }
                 }
@@ -1144,7 +1211,7 @@ private object ImageOps {
                     else Some(0L)
                   ) match {
                     case (Some(ix), Some(iy), Some(iz)) =>
-                      sampleTexel(memory, layerPixels(layer), format, data.width, ix, iz * data.height + iy)
+                      sampleTexel(memory, layerPixels(layer), format, data.stride, ix, iz * data.height + iy)
                     case _ => Right(border)
                   }
                 fetched.map(compare(_))
@@ -1252,7 +1319,7 @@ private object ImageOps {
     y = Math.floor(IEEE754.binary32ToFloat(Binary32.low(py)).toDouble).toLong + coord(1).toInt
     texel <- if (x < 0 || y < 0 || x >= data.width || y >= data.height || sample < 0 || sample >= data.samples)
       Right(Array.fill(4)(0.0))
-    else sampleTexel(memory, data.pixels, data.format, data.width * data.samples, x * data.samples + sample, y)
+    else sampleTexel(memory, data.pixels, data.format, data.stride * data.samples, x * data.samples + sample, y)
   } yield
     if (imageIsInteger(data.format)) texel.map(_.toLong & 0xffffffffL)
     else texel.map(x => IEEE754.floatToBinary32(x.toFloat).raw.toLong & 0xffffffffL)

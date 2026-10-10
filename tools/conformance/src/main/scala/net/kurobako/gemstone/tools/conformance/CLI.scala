@@ -146,8 +146,8 @@ object CLI {
          |  esac
          |fi
          |toolchain="$$CONFORMANCE_SUPPORT_ROOT/opencl-toolchain"
-         |if [ -z "$$${environment.OpenclCompiler}" ] && [ -x "$$toolchain/bin/icpx" ]; then
-         |  export ${environment.OpenclCompiler}="$$toolchain/bin/icpx"
+         |if [ -z "$$${environment.OpenclCompiler}" ] && [ -x "$$toolchain/bin/compiler/clang" ]; then
+         |  export ${environment.OpenclCompiler}="$$toolchain/bin/compiler/clang"
          |fi
          |if [ -z "$$${environment.OpenclLlvmSpirv}" ] && [ -x "$$toolchain/bin/compiler/llvm-spirv" ]; then
          |  export ${environment.OpenclLlvmSpirv}="$$toolchain/bin/compiler/llvm-spirv"

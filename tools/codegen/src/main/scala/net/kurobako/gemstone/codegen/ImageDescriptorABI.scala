@@ -21,7 +21,8 @@ object ImageDescriptorABI {
         "R5G6B5Unorm"        -> 1008L,
         "A1R5G5B5Unorm"      -> 1009L,
         "E5B9G9R9Ufloat"     -> 1010L,
-        "DecodedRgb32f"      -> 1011L
+        "DecodedRgb32f"      -> 1011L,
+        "D32Sfloat"          -> 1012L
       )
     ),
     (
@@ -31,7 +32,8 @@ object ImageDescriptorABI {
         "LevelTable" -> 0x80000000L,
         "Volume"     -> 0x40000000L,
         "Swizzle"    -> 0x20000000L,
-        "FormatMask" -> 0x1fffffffL
+        "Pitched"    -> 0x10000000L,
+        "FormatMask" -> 0x0fffffffL
       )
     ),
     (
@@ -72,6 +74,7 @@ object ImageDescriptorABI {
         "LevelHeight"       -> 4L,
         "LevelOffset"       -> 8L,
         "SwizzleBytes"      -> 16L,
+        "PitchBytes"        -> 8L,
         "InlineHeaderBytes" -> 16L
       )
     )
