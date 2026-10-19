@@ -20,7 +20,7 @@ import scala.util.Using
 class MemoryCoherenceSuite extends munit.FunSuite {
   override val munitTimeout: Duration = 150.seconds
 
-  private enum Scenario {
+  private enum Scenario derives CanEqual {
     case Device, OrdinaryHost, Concurrent, Submission, Overlap, Compare
 
     def probe: Option[String] = this match {
@@ -32,6 +32,13 @@ class MemoryCoherenceSuite extends munit.FunSuite {
   }
   import Scenario.*
 
+  private val AtomicWidths   = List(0, 32, 64)
+  private val FenceModes     = List(false, true)
+  private val WorkItemCounts = List(1, 128)
+  private val Passes         = List(0, 1)
+  private val ProbeScenarios = List(Submission, Overlap, Compare)
+  private val HostScenarios  = List(Device, Concurrent, OrdinaryHost)
+
   private def allocationKinds(api: String): List[String] = api match {
     case "cuda"      => List("managed", "pinned", "registered")
     case "hip"       => List("managed", "host", "registered")
@@ -42,12 +49,12 @@ class MemoryCoherenceSuite extends munit.FunSuite {
 
   for {
     api         <- List("cuda", "hip", "hsa", "levelzero", "opencl")
-    atomicWidth <- List(0, 32, 64)
-    fenced      <- if (atomicWidth != 0) List(false, true) else List(false)
-    workItems   <- if (atomicWidth != 0 && !fenced) List(1, 128) else List(1)
+    atomicWidth <- AtomicWidths
+    fenced      <- if (atomicWidth != 0) FenceModes else List(false)
+    workItems   <- if (atomicWidth != 0 && !fenced) WorkItemCounts else List(1)
     scenario    <- if (atomicWidth != 0) List(Concurrent) ++
-      (if (!fenced && workItems == 1) List(Submission, Overlap, Compare) else Nil)
-    else List(Device, Concurrent, OrdinaryHost)
+      (if (!fenced && workItems == 1) ProbeScenarios else Nil)
+    else HostScenarios
     if scenario != Compare || atomicWidth == 32
     allocationKind <- if (scenario == Compare) allocationKinds(api).take(1)
     else if (scenario == Concurrent || scenario.probe.nonEmpty) allocationKinds(api) else List("default")
@@ -126,11 +133,11 @@ class MemoryCoherenceSuite extends munit.FunSuite {
           })
           else if (concurrent) for {
             layout <- List(0, 1, 2)
-            pass   <- List(0, 1)
+            pass   <- Passes
           } yield s"verified concurrency layout=$layout pass=$pass"
           else if (ordinary) for {
             layout <- List("contiguous", "strided", "gather", "linked")
-            pass   <- List(0, 1)
+            pass   <- Passes
           } yield s"verified $layout pass=$pass"
           else List("verified host-memory transport pass=0", "verified host-memory transport pass=1")
           assertEquals(

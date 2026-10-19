@@ -16,6 +16,7 @@ public:
   Connection(uint64_t client, uint64_t high, uint64_t low) : client(client), sessionHigh(high), sessionLow(low) {}
   Connection(const Connection &) = delete;
   Connection &operator=(const Connection &) = delete;
+  ~Connection() = default;
   bool exchange(std::string_view operation, std::string_view payload, uint32_t &status, std::vector<uint8_t> &response);
   void poison();
 

@@ -10,11 +10,12 @@
 #include <type_traits>
 #include <vector>
 
+#include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 #include <thrust/adjacent_difference.h>
 #include <thrust/binary_search.h>
 #include <thrust/copy.h>
 #include <thrust/count.h>
-#include <thrust/device_free.h>
 #include <thrust/device_malloc.h>
 #include <thrust/device_vector.h>
 #include <thrust/equal.h>
@@ -55,13 +56,18 @@
 #include <thrust/uninitialized_copy.h>
 #include <thrust/uninitialized_fill.h>
 #include <thrust/unique.h>
+#include <thrust/version.h>
 
 #include "algorithm_cases.hpp"
 #include "async_cases.hpp"
 #include "edge_cases.hpp"
 #include <fmt/format.h>
 
-#if defined(__HIPCC__)
+#if !defined(__HIPCC__) && THRUST_VERSION >= 300000
+  #include <cuda/std/functional>
+#endif
+
+#ifdef __HIPCC__
   #include <hip/hip_runtime.h>
   #include <thrust/system/hip/execution_policy.h>
 #else
@@ -87,15 +93,15 @@
   #define UNIFIED_THRUST_ASYNC_END
 #endif
 
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
   #include <rocprim/block/block_scan.hpp>
 #else
   #include <cub/block/block_scan.cuh>
 #endif
 
-#if defined(UNIFIED_API_THRUST_DEVICE_FUNCTIONS)
+#ifdef UNIFIED_API_THRUST_DEVICE_FUNCTIONS
   #include <catch2/catch_test_macros.hpp>
-  #if !defined(__HIPCC__)
+  #ifndef __HIPCC__
     #include <cuda_runtime.h>
   #endif
 #endif
@@ -120,7 +126,12 @@
 #endif
 
 namespace unified::backend::thrust_support {
-#if defined(__HIPCC__)
+#if !defined(__HIPCC__) && THRUST_VERSION >= 300000
+template <class T> using Plus = cuda::std::plus<T>;
+#else
+template <class T> using Plus = thrust::plus<T>;
+#endif
+#ifdef __HIPCC__
 using Stream = hipStream_t;
 using Event = hipEvent_t;
 inline void check(hipError_t status, const char *where) {
@@ -145,7 +156,7 @@ inline void waitEvent(Stream stream, Event event, const char *where) { check(cud
 class StreamResource {
 public:
   explicit StreamResource(const char *where) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     check(hipStreamCreate(&handle), where);
 #else
     check(cudaStreamCreate(&handle), where);
@@ -155,16 +166,16 @@ public:
   StreamResource &operator=(const StreamResource &) = delete;
   ~StreamResource() {
     if (handle) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
       (void)hipStreamDestroy(handle);
 #else
       (void)cudaStreamDestroy(handle);
 #endif
     }
   }
-  Stream get() const { return handle; }
+  [[nodiscard]] Stream get() const { return handle; }
   void close(const char *where) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     check(hipStreamDestroy(handle), where);
 #else
     check(cudaStreamDestroy(handle), where);
@@ -179,7 +190,7 @@ private:
 class EventResource {
 public:
   explicit EventResource(const char *where) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     check(hipEventCreateWithFlags(&handle, hipEventDisableTiming), where);
 #else
     check(cudaEventCreateWithFlags(&handle, cudaEventDisableTiming), where);
@@ -189,16 +200,16 @@ public:
   EventResource &operator=(const EventResource &) = delete;
   ~EventResource() {
     if (handle) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
       (void)hipEventDestroy(handle);
 #else
       (void)cudaEventDestroy(handle);
 #endif
     }
   }
-  Event get() const { return handle; }
+  [[nodiscard]] Event get() const { return handle; }
   void close(const char *where) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     check(hipEventDestroy(handle), where);
 #else
     check(cudaEventDestroy(handle), where);
@@ -218,9 +229,11 @@ template <class T> std::vector<T> host(const thrust::device_vector<T> &input) {
 } // namespace unified::backend::thrust_support
 
 namespace unified::backend {
+using thrust_support::host;
+
 class ThrustAlgorithms {
 public:
-  template <class T> bool supports(std::string_view, size_t) const { return true; }
+  template <class T> [[nodiscard]] bool supports(std::string_view, size_t) const { return true; }
 
   template <class T> std::vector<T> copy(const std::vector<T> &input) {
     const thrust::device_vector<T> source(input.begin(), input.end());
@@ -404,7 +417,7 @@ public:
   template <class T> std::vector<T> unique(const std::vector<T> &input) {
     thrust::device_vector<T> output(input.begin(), input.end());
     const auto end = thrust::unique(output.begin(), output.end());
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     thrust_support::check(hipDeviceSynchronize(), "rocThrust unique synchronise");
 #endif
     output.resize(static_cast<size_t>(end - output.begin()));
@@ -464,7 +477,7 @@ public:
     const thrust::device_vector<T> a(left.begin(), left.end());
     const thrust::device_vector<T> b(right.begin(), right.end());
     const auto result = thrust::mismatch(a.begin(), a.end(), b.begin());
-    return {static_cast<size_t>(result.first - a.begin()), static_cast<size_t>(result.second - b.begin())};
+    return {.first = static_cast<size_t>(result.first - a.begin()), .second = static_cast<size_t>(result.second - b.begin())};
   }
 
   template <class T> size_t lowerBound(const std::vector<T> &input, T value) {
@@ -485,7 +498,7 @@ public:
   template <class T> algorithms::TwoPositions equalRange(const std::vector<T> &input, T value) {
     const thrust::device_vector<T> source(input.begin(), input.end());
     const auto result = thrust::equal_range(source.begin(), source.end(), value);
-    return {static_cast<size_t>(result.first - source.begin()), static_cast<size_t>(result.second - source.begin())};
+    return {.first = static_cast<size_t>(result.first - source.begin()), .second = static_cast<size_t>(result.second - source.begin())};
   }
 
   template <class T> std::vector<T> merge(const std::vector<T> &left, const std::vector<T> &right) {
@@ -604,7 +617,7 @@ public:
   template <class T> algorithms::TwoPositions minmaxElement(const std::vector<T> &input) {
     const thrust::device_vector<T> source(input.begin(), input.end());
     const auto result = thrust::minmax_element(source.begin(), source.end());
-    return {static_cast<size_t>(result.first - source.begin()), static_cast<size_t>(result.second - source.begin())};
+    return {.first = static_cast<size_t>(result.first - source.begin()), .second = static_cast<size_t>(result.second - source.begin())};
   }
 
   template <class T> bool isSorted(const std::vector<T> &input) {
@@ -693,13 +706,6 @@ public:
   template <class T> std::vector<T> nthElement(const std::vector<T> &, size_t) { SKIP("nth-element is not a Thrust API"); }
 
   template <class T> std::vector<T> inplaceMerge(const std::vector<T> &, size_t) { SKIP("inplace-merge is not a Thrust API"); }
-
-private:
-  template <class T> static std::vector<T> host(const thrust::device_vector<T> &input) {
-    std::vector<T> result(input.size());
-    if (!input.empty()) thrust::copy(input.begin(), input.end(), result.data());
-    return result;
-  }
 };
 } // namespace unified::backend
 
@@ -710,7 +716,7 @@ namespace unified::backend {
 // the assertion.
 class ThrustAsync {
 public:
-  template <class T> bool supports(std::string_view, size_t) const { return true; }
+  template <class T> [[nodiscard]] bool supports(std::string_view, size_t) const { return true; }
 
   template <class T> std::vector<T> asyncCopy(const std::vector<T> &input) {
     thrust::device_vector<T> source(input.begin(), input.end());
@@ -728,11 +734,11 @@ public:
     // API: reduce returns a device future and get() is the completion point.
 #if UNIFIED_HAS_THRUST_ASYNC
     UNIFIED_THRUST_ASYNC_BEGIN
-    auto result = thrust::async::reduce(thrust_support::policy(stream.get()), source.begin(), source.end(), T{}, thrust::plus<T>{});
+    auto result = thrust::async::reduce(thrust_support::policy(stream.get()), source.begin(), source.end(), T{}, thrust_support::Plus<T>{});
     UNIFIED_THRUST_ASYNC_END
     return result.get();
 #else
-    return thrust::reduce(thrust_support::policy(stream.get()), source.begin(), source.end(), T{}, thrust::plus<T>{});
+    return thrust::reduce(thrust_support::policy(stream.get()), source.begin(), source.end(), T{}, thrust_support::Plus<T>{});
 #endif
   }
 
@@ -740,7 +746,7 @@ public:
     thrust::device_vector<T> source(input.begin(), input.end());
     thrust::device_vector<T> output(input.size());
     thrust_support::StreamResource stream("async scan stream create");
-    thrust::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), output.begin(), thrust::plus<T>{});
+    thrust::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), output.begin(), thrust_support::Plus<T>{});
     thrust_support::synchronise(stream.get(), "async scan synchronise");
     return thrust_support::host(output);
   }
@@ -752,11 +758,12 @@ public:
     thrust_support::StreamResource stream("HIP async inclusive counting stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
     UNIFIED_THRUST_ASYNC_BEGIN
-    auto completion = thrust::async::inclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), thrust::plus<T>{});
+    auto completion =
+        thrust::async::inclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), thrust_support::Plus<T>{});
     UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
-    thrust::inclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), thrust::plus<T>{});
+    thrust::inclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), thrust_support::Plus<T>{});
     thrust_support::synchronise(stream.get(), "HIP async inclusive counting synchronise");
 #endif
     return thrust_support::host(output);
@@ -770,11 +777,11 @@ public:
 #if UNIFIED_HAS_THRUST_ASYNC
     UNIFIED_THRUST_ASYNC_BEGIN
     auto completion =
-        thrust::async::exclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), T{}, thrust::plus<T>{});
+        thrust::async::exclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), T{}, thrust_support::Plus<T>{});
     UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
-    thrust::exclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), T{}, thrust::plus<T>{});
+    thrust::exclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), T{}, thrust_support::Plus<T>{});
     thrust_support::synchronise(stream.get(), "HIP async exclusive counting synchronise");
 #endif
     return thrust_support::host(output);
@@ -786,12 +793,12 @@ public:
 #if UNIFIED_HAS_THRUST_ASYNC
     UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(),
-                                                    thrust::make_discard_iterator(), thrust::plus<T>{});
+                                                    thrust::make_discard_iterator(), thrust_support::Plus<T>{});
     UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), thrust::make_discard_iterator(),
-                           thrust::plus<T>{});
+                           thrust_support::Plus<T>{});
     thrust_support::synchronise(stream.get(), "HIP async inclusive discard synchronise");
 #endif
   }
@@ -802,12 +809,12 @@ public:
 #if UNIFIED_HAS_THRUST_ASYNC
     UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::exclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(),
-                                                    thrust::make_discard_iterator(), T{}, thrust::plus<T>{});
+                                                    thrust::make_discard_iterator(), T{}, thrust_support::Plus<T>{});
     UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::exclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), thrust::make_discard_iterator(), T{},
-                           thrust::plus<T>{});
+                           thrust_support::Plus<T>{});
     thrust_support::synchronise(stream.get(), "HIP async exclusive discard synchronise");
 #endif
   }
@@ -896,12 +903,9 @@ public:
   }
 
   template <class T> std::vector<T> asyncInterleavedStreams(const std::vector<T> &input) {
-    std::vector<T> even;
-    std::vector<T> odd;
-    even.reserve((input.size() + 1) / 2);
-    odd.reserve(input.size() / 2);
-    for (size_t index = 0; index < input.size(); ++index)
-      (index % 2 == 0 ? even : odd).push_back(input[index]);
+    using namespace aspartame;
+    const auto even = input ^ stride(2);
+    const auto odd = input ^ drop(1) ^ stride(2);
 
     thrust::device_vector<T> evenDevice(even.begin(), even.end());
     thrust::device_vector<T> oddDevice(odd.begin(), odd.end());
@@ -914,12 +918,8 @@ public:
     thrust_support::synchronise(oddStream.get(), "async interleaved odd synchronise");
     const auto transformedEven = thrust_support::host(evenDevice);
     const auto transformedOdd = thrust_support::host(oddDevice);
-    std::vector<T> output(input.size());
-    size_t evenIndex = 0;
-    size_t oddIndex = 0;
-    for (size_t index = 0; index < output.size(); ++index)
-      output[index] = index % 2 == 0 ? transformedEven[evenIndex++] : transformedOdd[oddIndex++];
-    return output;
+    return iota(size_t{0}, input.size())
+           | map([&](size_t index) { return index % 2 == 0 ? transformedEven[index / 2] : transformedOdd[index / 2]; }) | to_vector();
   }
 };
 } // namespace unified::backend
@@ -966,12 +966,18 @@ struct DetectWrongDifference {
 class DeviceFlag {
 public:
   DeviceFlag() : pointer(thrust::device_malloc<bool>(1)) {}
-  ~DeviceFlag() { thrust::device_free(pointer); }
+  ~DeviceFlag() {
+#ifdef __HIPCC__
+    (void)hipFree(raw());
+#else
+    (void)cudaFree(raw());
+#endif
+  }
   DeviceFlag(const DeviceFlag &) = delete;
   DeviceFlag &operator=(const DeviceFlag &) = delete;
 
   auto operator*() const { return *pointer; }
-  bool *raw() const { return thrust::raw_pointer_cast(pointer); }
+  [[nodiscard]] bool *raw() const { return thrust::raw_pointer_cast(pointer); }
 
 private:
   thrust::device_ptr<bool> pointer;
@@ -983,11 +989,11 @@ template <class T> struct TupleWidePairValue {
   }
 };
 
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
 template <class T, uint32_t BlockSize> __global__ void blockScanKernel(const T *input, T *output, size_t size) {
   using Scan = rocprim::block_scan<T, BlockSize>;
   __shared__ typename Scan::storage_type storage;
-  const auto index = static_cast<size_t>(blockIdx.x) * BlockSize + threadIdx.x;
+  const auto index = (static_cast<size_t>(blockIdx.x) * BlockSize) + threadIdx.x;
   T value = index < size ? input[index] : T{};
   Scan().inclusive_scan(value, value, storage);
   if (index < size) output[index] = value;
@@ -996,7 +1002,7 @@ template <class T, uint32_t BlockSize> __global__ void blockScanKernel(const T *
 template <class T, uint32_t BlockSize> __global__ void blockScanKernel(const T *input, T *output, size_t size) {
   using Scan = cub::BlockScan<T, BlockSize>;
   __shared__ typename Scan::TempStorage storage;
-  const auto index = static_cast<size_t>(blockIdx.x) * BlockSize + threadIdx.x;
+  const auto index = (static_cast<size_t>(blockIdx.x) * BlockSize) + threadIdx.x;
   T value = index < size ? input[index] : T{};
   Scan(storage).InclusiveSum(value, value);
   if (index < size) output[index] = value;
@@ -1006,7 +1012,7 @@ template <class T, uint32_t BlockSize> __global__ void blockScanKernel(const T *
 
 class ThrustEdgeCases {
 public:
-  template <class T> bool supports(std::string_view, size_t) const { return true; }
+  template <class T> [[nodiscard]] bool supports(std::string_view, size_t) const { return true; }
 
   // These two probes are the semantic form of Thrust's
   // Test*WithBigIndexes fixtures.  They intentionally use counting
@@ -1016,11 +1022,12 @@ public:
   void forEachBigIndexes(uint32_t magnitude) {
     if (magnitude >= 63) throw std::invalid_argument("big-index magnitude must be below 63");
     const auto begin = thrust::make_counting_iterator<uint64_t>(0);
-    const auto end = begin + (1ULL << magnitude);
+    const auto end = begin + (1LL << magnitude);
     if (end - begin != (1LL << magnitude)) throw std::runtime_error("for-each big-index distance mismatch");
     thrust_edge_detail::DeviceFlag flag;
     *flag = false;
-    thrust::for_each(thrust::device, begin, end, thrust_edge_detail::SetExpectedFlagForEach{(1ULL << magnitude) - 1, flag.raw()});
+    thrust::for_each(thrust::device, begin, end,
+                     thrust_edge_detail::SetExpectedFlagForEach{.expected = (1ULL << magnitude) - 1, .flag = flag.raw()});
     const bool observed = *flag;
     if (!observed) throw std::runtime_error("for-each big-index terminal value was not visited");
   }
@@ -1043,12 +1050,13 @@ public:
     const auto reverseIndices = thrust::make_transform_iterator(indices, edge::ReverseIndex{size});
     const auto reverse = thrust::make_permutation_iterator(source, reverseIndices);
     const auto zipped = thrust::make_zip_iterator(thrust::make_tuple(reverse, source));
-    return thrust::transform_reduce(zipped, zipped + size, thrust_edge_detail::TupleWidePairValue<T>{}, int64_t{}, thrust::plus<int64_t>{});
+    return thrust::transform_reduce(zipped, zipped + size, thrust_edge_detail::TupleWidePairValue<T>{}, int64_t{},
+                                    thrust_support::Plus<int64_t>{});
   }
 
   template <class T> uint64_t biasedIndexChecksum(uint64_t base, size_t size) {
     const auto begin = thrust::make_counting_iterator<uint64_t>(base);
-    return thrust::transform_reduce(begin, begin + size, edge::BiasedHash<T>{}, uint64_t{}, edge::Xor64{});
+    return thrust::transform_reduce(begin, begin + static_cast<int64_t>(size), edge::BiasedHash<T>{}, uint64_t{}, edge::Xor64{});
   }
 
   template <class T> std::vector<T> segmentedInclusiveScan(const std::vector<int32_t> &keys, const std::vector<T> &input) {
@@ -1076,33 +1084,23 @@ public:
   template <class T> std::vector<T> dependencyDiamond(const std::vector<T> &input) {
     if (input.empty()) return {};
     const thrust::device_vector<T> source(input.begin(), input.end());
-    thrust::device_vector<T> left(input.size()), right(input.size()), output(input.size());
+    thrust::device_vector<T> left(input.size());
+    thrust::device_vector<T> right(input.size());
+    thrust::device_vector<T> output(input.size());
     thrust_edge_detail::StreamResource streamLeft("stream create left");
     thrust_edge_detail::StreamResource streamRight("stream create right");
     thrust_edge_detail::StreamResource streamJoin("stream create join");
     thrust_edge_detail::EventResource leftReady("event create left");
     thrust_edge_detail::EventResource rightReady("event create right");
-#if defined(__HIPCC__)
     thrust::transform(thrust_edge_detail::policy(streamLeft.get()), source.begin(), source.end(), left.begin(), support::Affine<T>{});
     thrust::transform(thrust_edge_detail::policy(streamRight.get()), source.begin(), source.end(), right.begin(), support::Square<T>{});
-    thrust_support::record(leftReady.get(), streamLeft.get(), "hipEventRecord left");
-    thrust_support::record(rightReady.get(), streamRight.get(), "hipEventRecord right");
-    thrust_support::waitEvent(streamJoin.get(), leftReady.get(), "hipStreamWaitEvent left");
-    thrust_support::waitEvent(streamJoin.get(), rightReady.get(), "hipStreamWaitEvent right");
+    thrust_support::record(leftReady.get(), streamLeft.get(), "event record left");
+    thrust_support::record(rightReady.get(), streamRight.get(), "event record right");
+    thrust_support::waitEvent(streamJoin.get(), leftReady.get(), "stream wait event left");
+    thrust_support::waitEvent(streamJoin.get(), rightReady.get(), "stream wait event right");
     thrust::transform(thrust_edge_detail::policy(streamJoin.get()), left.begin(), left.end(), right.begin(), output.begin(),
                       support::Combine<T>{});
-    thrust_support::synchronise(streamJoin.get(), "hipStreamSynchronize join");
-#else
-    thrust::transform(thrust_edge_detail::policy(streamLeft.get()), source.begin(), source.end(), left.begin(), support::Affine<T>{});
-    thrust::transform(thrust_edge_detail::policy(streamRight.get()), source.begin(), source.end(), right.begin(), support::Square<T>{});
-    thrust_support::record(leftReady.get(), streamLeft.get(), "cudaEventRecord left");
-    thrust_support::record(rightReady.get(), streamRight.get(), "cudaEventRecord right");
-    thrust_support::waitEvent(streamJoin.get(), leftReady.get(), "cudaStreamWaitEvent left");
-    thrust_support::waitEvent(streamJoin.get(), rightReady.get(), "cudaStreamWaitEvent right");
-    thrust::transform(thrust_edge_detail::policy(streamJoin.get()), left.begin(), left.end(), right.begin(), output.begin(),
-                      support::Combine<T>{});
-    thrust_support::synchronise(streamJoin.get(), "cudaStreamSynchronize join");
-#endif
+    thrust_support::synchronise(streamJoin.get(), "stream synchronise join");
     leftReady.close("event destroy left");
     rightReady.close("event destroy right");
     streamLeft.close("stream destroy left");
@@ -1125,7 +1123,7 @@ public:
     thrust::device_vector<T> output(input.size());
     constexpr uint32_t block = 32;
     const auto grid = static_cast<uint32_t>((input.size() + block - 1) / block);
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     hipLaunchKernelGGL((thrust_edge_detail::blockScanKernel<T, block>), dim3(grid), dim3(block), 0, 0,
                        thrust::raw_pointer_cast(source.data()), thrust::raw_pointer_cast(output.data()), input.size());
     thrust_edge_detail::check(hipGetLastError(), "rocPRIM block scan launch");
@@ -1140,7 +1138,7 @@ public:
   }
 
   template <class T> std::vector<T> runtimeErrorRecover(const std::vector<T> &input) {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
     const auto failure = hipMalloc(nullptr, sizeof(T));
     if (failure == hipSuccess) throw std::runtime_error("invalid HIP allocation unexpectedly succeeded");
     (void)hipGetLastError();
@@ -1155,10 +1153,10 @@ public:
 };
 } // namespace unified::backend
 
-#if defined(UNIFIED_API_THRUST_DEVICE_FUNCTIONS)
+#ifdef UNIFIED_API_THRUST_DEVICE_FUNCTIONS
 
 namespace unified::gpu_calls {
-  #if defined(__HIPCC__)
+  #ifdef __HIPCC__
 inline constexpr auto BackendName = "hip";
 inline constexpr auto Success = hipSuccess;
 inline auto lastError() { return hipGetLastError(); }
@@ -1172,14 +1170,14 @@ inline auto errorString(cudaError_t status) { return cudaGetErrorString(status);
 // Focused ports of GPUOcelot's direct/indirect function-call checks.
 // Copyright (c) 2015, Computer Architecture and Systems Laboratory at Georgia Tech.
 // SPDX-License-Identifier: BSD-3-Clause; see licences/gpuocelot.txt.
-__device__ __noinline__ float square(float value) { return value * value; }
-__device__ __noinline__ float twice(float value) { return value * 2; }
-__device__ __noinline__ float thrice(float value) { return value * 3; }
-__device__ __noinline__ float fourTimes(float value) { return value * 4; }
-__device__ __noinline__ float fiveTimes(float value) { return value * 5; }
+inline __device__ __noinline__ float square(float value) { return value * value; }
+inline __device__ __noinline__ float twice(float value) { return value * 2; }
+inline __device__ __noinline__ float thrice(float value) { return value * 3; }
+inline __device__ __noinline__ float fourTimes(float value) { return value * 4; }
+inline __device__ __noinline__ float fiveTimes(float value) { return value * 5; }
 
 template <bool Indirect> __global__ void applyDeviceFunction(float *values, size_t size) {
-  const size_t index = threadIdx.x + static_cast<size_t>(blockIdx.x) * blockDim.x;
+  const size_t index = threadIdx.x + (static_cast<size_t>(blockIdx.x) * blockDim.x);
   if (index >= size) return;
   const float input = values[index + 1];
   if constexpr (Indirect) {
@@ -1198,10 +1196,10 @@ template <bool Indirect> __global__ void applyDeviceFunction(float *values, size
 
 template <bool Indirect> void deviceFunction() {
   constexpr size_t size = 257;
-  constexpr float canary = -12345.0f;
+  constexpr float canary = -12345.0F;
   std::vector<float> values(size + 2, canary);
   for (size_t index = 0; index < size; ++index)
-    values[index + 1] = (static_cast<float>(index) - 128.0f) * 0.25f;
+    values[index + 1] = (static_cast<float>(index) - 128.0F) * 0.25F;
   thrust::device_vector<float> device(values);
   applyDeviceFunction<Indirect><<<3, 128>>>(thrust::raw_pointer_cast(device.data()), size);
   if (const auto error = lastError(); error != Success)
@@ -1209,7 +1207,7 @@ template <bool Indirect> void deviceFunction() {
   thrust::copy(device.begin(), device.end(), values.begin());
   if (values.front() != canary || values.back() != canary) throw std::runtime_error("device function overwrote a boundary canary");
   for (size_t index = 0; index < size; ++index) {
-    const float input = (static_cast<float>(index) - 128.0f) * 0.25f;
+    const float input = (static_cast<float>(index) - 128.0F) * 0.25F;
     const float expected = Indirect ? input * static_cast<float>(2 + (index & 3)) : input * input;
     if (values[index + 1] != expected) throw std::runtime_error(fmt::format("device function result mismatch at lane {}", index));
   }

@@ -3,6 +3,8 @@ package net.kurobako.gemstone.isa.nvidia
 import net.kurobako.gemstone.constraint.*
 
 class VMConditionCodesSuite extends munit.FunSuite {
+  import ConditionCodeReads.*
+
   test("ordinary carry writes supersede the two-bit IADD3 carry state") {
     val codes = VMConditionCodes()
     codes.writeThreeInputCarry(Some(2))

@@ -60,7 +60,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   ): Either[Fault, (Array[Byte], Int >= 0)] = {
     val slot = index(region)
     if (slot < 0 || slot >= local.size) Left(Fault.Memory("unknown graphics scratch region"))
-    else ByteRange.start(local(slot).length, offset.raw, size.raw)
+    else ByteRange.start(local(slot).length, offset, size)
       .toRight(Fault.Memory("graphics scratch access exceeds allocation"))
       .map(start => local(slot) -> start)
   }
@@ -79,11 +79,11 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
 
   override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
     if (index(region) < 0) backing.read(region, offset, size)
-    else localRange(region, offset, size).map((bytes, start) => Vec.from(bytes.slice(start.raw, (start + size).raw)))
+    else localRange(region, offset, size).map((bytes, start) => Vec.from(bytes.slice(start, start + size)))
   override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
     if (index(region) < 0) backing.write(region, offset, bytes)
     else localRange(region, offset, bytes.nonNegativeSize).map { (target, start) =>
-      val _ = bytes.copyToArray(target, start.raw)
+      val _ = bytes.copyToArray(target, start)
     }
   override def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
     AddressSpace.scalar(readValueInto(region, offset, size, _))
@@ -97,7 +97,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
     else AddressSpace.store(
       into,
       localRange(region, offset, size).map((bytes, start) =>
-        LittleEndian.decode(bytes, start.raw, size.widen[Int in 0 ~ 8])
+        LittleEndian.decode(bytes, start, size.widen[Int in 0 ~ 8])
       )
     )
   override def writeValue(
@@ -108,7 +108,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   ): Either[Fault, Unit] =
     if (index(region) < 0) backing.writeValue(region, offset, value, size)
     else localRange(region, offset, size).map((bytes, start) =>
-      LittleEndian.write(value, bytes, start.raw, size.widen[Int in 0 ~ 8])
+      LittleEndian.write(value, bytes, start, size.widen[Int in 0 ~ 8])
     )
   override def atomicModifyValue(
       region: AllocationId,
@@ -122,7 +122,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
     if (index(region) < 0) backing.address(region, offset)
     else localRange(region, offset, 0).map(_ =>
-      GuestAddress(ScratchBase + index(region).toLong * ScratchStride + offset.raw)
+      GuestAddress(ScratchBase + index(region).toLong * ScratchStride + offset)
     )
   private def isScratch(address: GuestAddress): Boolean = address.raw >= ScratchBase && address.raw < 0L
   override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] =
@@ -174,7 +174,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
 
   private def checked(range: GraphicsRange, offset: Long, length: Int >= 0): Long >= 0 = {
     require(
-      offset >= 0 && offset <= range.size.raw && length.toLong.raw <= range.size.raw - offset,
+      offset >= 0 && offset <= range.size && length.toLong <= range.size.raw - offset,
       "graphics access exceeds its view"
     )
     range.offset + offset.unsafe[Long >= 0]

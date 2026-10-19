@@ -5,26 +5,27 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.ptx.Instruction as PTXInstruction
 
 object Program {
-  enum DirectiveSeparator {
+  enum DirectiveSeparator derives CanEqual {
     case Space
     case Comma
   }
 
-  enum DirectiveTerminator {
+  enum DirectiveTerminator derives CanEqual {
     case Line
     case Semicolon
   }
 
   case class DirectiveArgument(separator: DirectiveSeparator, operand: Operand)
 
-  enum DataAddressSpace(val mnemonic: NonEmpty[String]) {
+  enum DataAddressSpace(val mnemonic: NonEmpty[String]) derives CanEqual {
     case Global extends DataAddressSpace("global")
     case Const  extends DataAddressSpace("const")
     case Shared extends DataAddressSpace("shared")
     case Local  extends DataAddressSpace("local")
   }
 
-  enum DataType(val mnemonic: NonEmpty[String], val widthBits: Int in (8, 16, 32, 64, 128), val kind: Char) {
+  enum DataType(val mnemonic: NonEmpty[String], val widthBits: Int in (8, 16, 32, 64, 128), val kind: Char)
+      derives CanEqual {
     case B8   extends DataType("b8", 8, 'b')
     case B16  extends DataType("b16", 16, 'b')
     case B32  extends DataType("b32", 32, 'b')
@@ -51,7 +52,7 @@ object Program {
     }
   }
 
-  enum DeclarationQualifier {
+  enum DeclarationQualifier derives CanEqual {
     case Alignment(bytes: Int > 0)
     case Attribute(name: NonEmpty[String])
     case Value(value: NonEmpty[String])
@@ -64,14 +65,14 @@ object Program {
       dimensions: Vec[Option[Operand]]
   )
 
-  enum Linkage(val mnemonic: String) {
+  enum Linkage(val mnemonic: String) derives CanEqual {
     case Default extends Linkage("")
     case Visible extends Linkage("visible")
     case Extern  extends Linkage("extern")
     case Weak    extends Linkage("weak")
   }
 
-  enum Extent {
+  enum Extent derives CanEqual {
     case Scalar, Unsized
     case Sized(elements: Int > 0)
   }

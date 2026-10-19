@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.spirv.graphics
 
-import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.isa.spirv.ImageFormats.*
@@ -9,17 +8,17 @@ import net.kurobako.gemstone.isa.spirv.ImageFormats.*
 private class ImageOperations(memory: GraphicsAccess) {
   private def storage(image: GraphicsImage): ImageStorage                        = ImageStorage(image, memory)
   private def aspect(format: GraphicsFormat, layers: GraphicsLayers): (Int, Int) =
-    if (layers.colour || (layers.depth && layers.stencil)) 0 -> format.texelBytes.raw
+    if (layers.colour || (layers.depth && layers.stencil)) 0 -> format.texelBytes
     else if (layers.stencil) format.stencilOffset -> 1
     else 0                                        -> (if (format.depth == GraphicsDepthFormat.Unorm16) 2 else 4)
 
   def clearColour(image: GraphicsImage, area: GraphicsRect, bits: Array[Int]): Unit = {
     require(bits.length == 4, "colour clear needs four components")
     val target = storage(image)
-    val pixel  = Array.ofDim[Byte](image.format.texelBytes.raw)
+    val pixel  = Array.ofDim[Byte](image.format.texelBytes)
     ImageTexelCodec.write(pixel, 0, image.format.shaderFormat.code, bits, 15)
     target.rows(area) { (offset, _, _, _, columns) =>
-      val count = Math.multiplyExact(columns, image.samples.raw)
+      val count = Math.multiplyExact(columns, image.samples)
       val row   = Array.ofDim[Byte](Math.multiplyExact(count, pixel.length))
       for (i <- 0 until count) Array.copy(pixel, 0, row, i * pixel.length, pixel.length)
       memory.store(image.memory, offset, row)
@@ -35,10 +34,10 @@ private class ImageOperations(memory: GraphicsAccess) {
   ): Unit = {
     val target = storage(image)
     target.rows(area) { (offset, _, _, _, columns) =>
-      val count = Math.multiplyExact(columns, image.samples.raw)
-      val row   = memory.bytes(image.memory, offset, Math.multiplyExact(count, image.format.texelBytes.raw))
+      val count = Math.multiplyExact(columns, image.samples)
+      val row   = memory.bytes(image.memory, offset, Math.multiplyExact(count, image.format.texelBytes))
       for (i <- 0 until count) {
-        val start = i * image.format.texelBytes.raw
+        val start = i * image.format.texelBytes
         if (clearDepth) image.format.depth match {
           case GraphicsDepthFormat.Unorm16 =>
             val value = ImageStorage.depth16(depth)
@@ -57,18 +56,18 @@ private class ImageOperations(memory: GraphicsAccess) {
     val (destinationAspect, destinationSize) = aspect(destination.format, region.destination)
     require(size == destinationSize && source.samples == destination.samples, "incompatible image copy")
     val step   = if (source.format.compression == GraphicsCompression.None) 1 else 4
-    val planes = math.max(region.extent.depth.raw, math.max(region.source.layers.raw, region.destination.layers.raw))
+    val planes = math.max(region.extent.depth, math.max(region.source.layers, region.destination.layers))
     for {
       plane <- 0 until planes
-      y     <- 0 until region.extent.height.raw by step
+      y     <- 0 until region.extent.height by step
     } {
       memory.checkpoint()
       for {
-        x      <- 0 until region.extent.width.raw by step
-        sample <- 0 until source.samples.raw
+        x      <- 0 until region.extent.width by step
+        sample <- 0 until source.samples
       } {
         val so = src.offset(
-          region.source.level.raw,
+          region.source.level,
           region.source.baseLayer.raw + (if (source.volume) 0 else plane),
           region.sourceOffset.x + x,
           region.sourceOffset.y + y,
@@ -76,7 +75,7 @@ private class ImageOperations(memory: GraphicsAccess) {
           sample
         )
         val dest = dst.offset(
-          region.destination.level.raw,
+          region.destination.level,
           region.destination.baseLayer.raw + (if (destination.volume) 0 else plane),
           region.destinationOffset.x + (x / step) *
             (if (destination.format.compression == GraphicsCompression.None) 1 else 4),
@@ -97,20 +96,20 @@ private class ImageOperations(memory: GraphicsAccess) {
   ): Unit = {
     val target               = storage(image)
     val (aspectOffset, size) = aspect(image.format, region.image)
-    require(image.samples.raw == 1, "buffer image copies require a single sample")
-    val step        = if (image.format.compression == GraphicsCompression.None) 1 else 4
-    val rowLength   = if (region.rowLength.raw == 0) region.extent.width.raw else region.rowLength.raw
-    val imageHeight = if (region.imageHeight.raw == 0) region.extent.height.raw else region.imageHeight.raw
-    val rowPitch    = ((rowLength.toLong + step - 1) / step) * size
-    val planePitch  = rowPitch * ((imageHeight.toLong + step - 1) / step)
+    require(image.samples == 1, "buffer image copies require a single sample")
+    val step             = if (image.format.compression == GraphicsCompression.None) 1 else 4
+    val rowLength: Int   = if (region.rowLength == 0) region.extent.width else region.rowLength
+    val imageHeight: Int = if (region.imageHeight == 0) region.extent.height else region.imageHeight
+    val rowPitch         = ((rowLength.toLong + step - 1) / step) * size
+    val planePitch       = rowPitch * ((imageHeight.toLong + step - 1) / step)
     for {
-      layer <- 0 until region.image.layers.raw
-      z     <- 0 until region.extent.depth.raw
-      y     <- 0 until region.extent.height.raw by step
+      layer <- 0 until region.image.layers
+      z     <- 0 until region.extent.depth
+      y     <- 0 until region.extent.height by step
     } {
       memory.checkpoint()
       val io = target.offset(
-        region.image.level.raw,
+        region.image.level,
         region.image.baseLayer.raw + layer,
         region.offset.x,
         region.offset.y + y,
@@ -124,35 +123,35 @@ private class ImageOperations(memory: GraphicsAccess) {
         if (toImage) memory.store(image.memory, io, memory.bytes(buffer, bo, bytes))
         else memory.store(buffer, bo, memory.bytes(image.memory, io, bytes))
       } else {
-        val row       = memory.bytes(image.memory, io, Math.multiplyExact(columns, image.format.texelBytes.raw))
+        val row       = memory.bytes(image.memory, io, Math.multiplyExact(columns, image.format.texelBytes))
         val bufferRow = if (toImage) memory.bytes(buffer, bo, Math.multiplyExact(columns, size))
         else Array.ofDim[Byte](Math.multiplyExact(columns, size))
         for (x <- 0 until columns)
-          if (toImage) Array.copy(bufferRow, x * size, row, x * image.format.texelBytes.raw + aspectOffset, size)
-          else Array.copy(row, x * image.format.texelBytes.raw + aspectOffset, bufferRow, x * size, size)
+          if (toImage) Array.copy(bufferRow, x * size, row, x * image.format.texelBytes + aspectOffset, size)
+          else Array.copy(row, x * image.format.texelBytes + aspectOffset, bufferRow, x * size, size)
         if (toImage) memory.store(image.memory, io, row) else memory.store(buffer, bo, bufferRow)
       }
     }
   }
   def resolve(source: GraphicsImage, destination: GraphicsImage, region: GraphicsImageCopy): Unit = {
     val src = storage(source); val dst = storage(destination)
-    require(destination.samples.raw == 1, "resolve destination must have one sample")
+    require(destination.samples == 1, "resolve destination must have one sample")
     for {
-      layer <- 0 until region.source.layers.raw
-      z     <- 0 until region.extent.depth.raw
-      y     <- 0 until region.extent.height.raw
+      layer <- 0 until region.source.layers
+      z     <- 0 until region.extent.depth
+      y     <- 0 until region.extent.height
     } {
       memory.checkpoint()
-      for (x <- 0 until region.extent.width.raw) {
+      for (x <- 0 until region.extent.width) {
         val so = src.offset(
-          region.source.level.raw,
+          region.source.level,
           region.source.baseLayer.raw + layer,
           region.sourceOffset.x + x,
           region.sourceOffset.y + y,
           region.sourceOffset.z + z
         )
         val dest = dst.offset(
-          region.destination.level.raw,
+          region.destination.level,
           region.destination.baseLayer.raw + layer,
           region.destinationOffset.x + x,
           region.destinationOffset.y + y,
@@ -161,10 +160,10 @@ private class ImageOperations(memory: GraphicsAccess) {
         val bits = if (ImageTexelCodec.integer(source.format.shaderFormat.code)) src.colourBits(so)
         else {
           val samples =
-            Array.tabulate(source.samples.raw)(s => src.colourDouble(so + s.toLong * source.format.texelBytes.raw))
+            Array.tabulate(source.samples)(s => src.colourDouble(so + s.toLong * source.format.texelBytes))
           val sums = Array.ofDim[Double](4)
           samples.foreach(value => (0 until 4).foreach(lane => sums(lane) += value(lane)))
-          sums.map(sum => java.lang.Float.floatToRawIntBits((sum / source.samples.raw).toFloat))
+          sums.map(sum => java.lang.Float.floatToRawIntBits((sum / source.samples).toFloat))
         }
         dst.writeColour(dest, bits)
       }
@@ -189,15 +188,15 @@ private class ImageOperations(memory: GraphicsAccess) {
       if (depth != GraphicsResolve.None) dst.writeDepth(
         dest,
         reduce(
-          Array.tabulate(source.samples.raw)(s => src.readDepth(so + s.toLong * source.format.texelBytes.raw)),
+          Array.tabulate(source.samples)(s => src.readDepth(so + s.toLong * source.format.texelBytes)),
           depth
         )
       )
       if (stencil != GraphicsResolve.None) dst.writeStencil(
         dest,
         reduce(
-          Array.tabulate(source.samples.raw)(s =>
-            src.readStencil(so + s.toLong * source.format.texelBytes.raw).toFloat
+          Array.tabulate(source.samples)(s =>
+            src.readStencil(so + s.toLong * source.format.texelBytes).toFloat
           ),
           stencil
         ).toInt
@@ -214,7 +213,7 @@ private class ImageOperations(memory: GraphicsAccess) {
     )
     for {
       level <- 0 until source.levels.size
-      layer <- 0 until source.layers.raw
+      layer <- 0 until source.layers
       z     <- 0 until src.depth(level)
       by    <- 0 until src.height(level) by 4
     } {
@@ -235,7 +234,7 @@ private class ImageOperations(memory: GraphicsAccess) {
   def blit(source: GraphicsImage, destination: GraphicsImage, region: GraphicsBlit, linear: Boolean): Unit = {
     val src = storage(source); val dst = storage(destination)
     require(
-      source.samples.raw == 1 && destination.samples.raw == 1 &&
+      source.samples == 1 && destination.samples == 1 &&
         destination.format.compression == GraphicsCompression.None,
       "unsupported blit image layout"
     )
@@ -244,11 +243,11 @@ private class ImageOperations(memory: GraphicsAccess) {
     val db         = Array(region.destinationBegin.x, region.destinationBegin.y, region.destinationBegin.z)
     val de         = Array(region.destinationEnd.x, region.destinationEnd.y, region.destinationEnd.z)
     val dimensions =
-      Array(src.width(region.source.level.raw), src.height(region.source.level.raw), src.depth(region.source.level.raw))
+      Array(src.width(region.source.level), src.height(region.source.level), src.depth(region.source.level))
     val compressed = scala.collection.mutable.Map.empty[Long, Array[Float]]
     def sample(layer: Int, coordinates: Array[Int]): (Long, Array[Double]) = {
       val c      = coordinates.indices.map(i => math.max(0, math.min(dimensions(i) - 1, coordinates(i)))).toArray
-      val offset = src.offset(region.source.level.raw, region.source.baseLayer.raw + layer, c(0), c(1), c(2))
+      val offset = src.offset(region.source.level, region.source.baseLayer.raw + layer, c(0), c(1), c(2))
       val colour = if (source.format.compression == GraphicsCompression.None) {
         if (
           source.format.depth != GraphicsDepthFormat.None || source.format.stencilOffset >= 0 ||
@@ -263,7 +262,7 @@ private class ImageOperations(memory: GraphicsAccess) {
     }
     if (db.indices.forall(i => db(i) != de(i)))
       for {
-        layer <- 0 until region.destination.layers.raw
+        layer <- 0 until region.destination.layers
         z     <- math.min(db(2), de(2)) until math.max(db(2), de(2))
         y     <- math.min(db(1), de(1)) until math.max(db(1), de(1))
       } {
@@ -272,7 +271,7 @@ private class ImageOperations(memory: GraphicsAccess) {
           val point      = Array(x, y, z)
           val coordinate =
             point.indices.map(i => sb(i) + (point(i) + .5 - db(i)) * (se(i) - sb(i)).toDouble / (de(i) - db(i))).toArray
-          val offset = dst.offset(region.destination.level.raw, region.destination.baseLayer.raw + layer, x, y, z)
+          val offset = dst.offset(region.destination.level, region.destination.baseLayer.raw + layer, x, y, z)
           if (!linear) {
             val (input, colour) = sample(layer, coordinate.map(v => math.floor(v).toInt))
             if (region.source.depth) dst.writeDepth(offset, src.readDepth(input))

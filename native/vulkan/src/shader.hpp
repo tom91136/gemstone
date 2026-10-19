@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <climits>
 #include <cstdint>
@@ -8,7 +7,10 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include <aspartame/vector.hpp>
 
 #include "descriptor.hpp"
 
@@ -36,6 +38,7 @@ struct BoundStageResources {
 // Registration and ownership stay with the caller. Image bindings retain the same
 // bounded storage ranges as ordinary arguments for both compute and graphics.
 template <typename Register> std::optional<BoundStageResources> bindStageResources(const StageResources &stage, Register registerMemory) {
+  using namespace aspartame;
   std::vector<gx::GraphicsRange> allocations;
   for (const auto &allocation : stage.allocations) {
     if (!allocation.data || !allocation.size || allocation.size > INT32_MAX) return std::nullopt;
@@ -47,7 +50,7 @@ template <typename Register> std::optional<BoundStageResources> bindStageResourc
   for (const auto &argument : stage.arguments) {
     if (!argument) {
       const auto index = result.arguments.size();
-      if (!std::any_of(stage.descriptorBindings.begin(), stage.descriptorBindings.end(), [&](const auto &binding) {
+      if (stage.descriptorBindings ^ none_match([&](const auto &binding) {
             return binding.argument.value == static_cast<int32_t>(index)
                    && std::holds_alternative<gx::GraphicsDescriptorSampler>(binding.descriptor);
           }))
@@ -57,12 +60,12 @@ template <typename Register> std::optional<BoundStageResources> bindStageResourc
     }
     if (argument->allocation >= allocations.size()) return std::nullopt;
     auto view = allocations[argument->allocation];
-    if (!argument->size || argument->offset > static_cast<uint64_t>(view.size.value)
+    if (!argument->size || std::cmp_greater(argument->offset, view.size.value)
         || argument->size > static_cast<uint64_t>(view.size.value) - argument->offset)
       return std::nullopt;
-    view.offset.value += argument->offset;
-    view.size.value = argument->size;
-    result.arguments.push_back(view);
+    view.offset.value += static_cast<int64_t>(argument->offset);
+    view.size.value = static_cast<int64_t>(argument->size);
+    result.arguments.emplace_back(view);
   }
   for (auto binding : stage.descriptorBindings) {
     if (binding.argument.value < 0 || static_cast<size_t>(binding.argument.value) >= result.arguments.size()) return std::nullopt;
@@ -81,7 +84,7 @@ template <typename Register> std::optional<BoundStageResources> bindStageResourc
   }
   return result;
 }
-std::optional<gx::PreparedShader> prepareShader(const std::vector<uint8_t> &image, const char *entry, gx::ShaderStageKind stage,
+std::optional<gx::PreparedShader> prepareShader(const std::vector<uint8_t> &image, const char *entry, gx::ShaderStageKind kind,
                                                 const VkSpecializationInfo *specialization);
 
 } // namespace gemstone::vulkan

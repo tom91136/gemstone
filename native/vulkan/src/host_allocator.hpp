@@ -17,7 +17,7 @@ namespace gemstone::vulkan::host {
 struct Block;
 struct Arena {
   VkAllocationCallbacks callbacks{};
-  VkSystemAllocationScope scope;
+  VkSystemAllocationScope scope{};
   Arena *device = nullptr;
   Block *blocks = nullptr;
   Block *freeBlocks = nullptr;
@@ -30,6 +30,8 @@ inline thread_local Arena *current = nullptr;
 struct Scope {
   Arena *previous;
   explicit Scope(Arena *arena) noexcept : previous(current) { current = arena; }
+  Scope(const Scope &) = delete;
+  Scope &operator=(const Scope &) = delete;
   ~Scope() { current = previous; }
 };
 struct Creation {
@@ -37,6 +39,8 @@ struct Creation {
   Scope scope;
   Creation(const VkAllocationCallbacks *callbacks, Arena *parent, VkSystemAllocationScope lifetime)
       : arena(Arena::create(callbacks, parent, lifetime)), scope(arena) {}
+  Creation(const Creation &) = delete;
+  Creation &operator=(const Creation &) = delete;
   ~Creation() {
     if (arena) arena->destroy();
   }

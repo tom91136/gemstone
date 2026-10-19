@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -21,13 +23,16 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <aspartame/all.hpp>
+
 #include "driver.hpp"
 #include <fmt/format.h>
+#include <sys/poll.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 
-extern "C" char **environ;
-
 namespace conformance::driver {
+using namespace aspartame;
 namespace {
 
 std::mutex spawnMutex;
@@ -38,7 +43,7 @@ class LineSink {
   std::string *capture;
   std::ostream *log;
 
-  void emit(std::string_view line) { std::osyncstream(*stream) << prefix << line << std::endl; }
+  void emit(std::string_view line) { std::osyncstream(*stream) << prefix << line << '\n' << std::flush; }
 
 public:
   bool overflow = false;
@@ -51,7 +56,7 @@ public:
       log->flush();
     }
     if (capture) {
-      if (capture->size() + size > 128 * 1024 * 1024) overflow = true;
+      if (capture->size() + size > size_t{128} * 1024 * 1024) overflow = true;
       else if (!overflow) capture->append(reinterpret_cast<const char *>(data), size);
     }
     if (!stream) return;
@@ -97,6 +102,15 @@ public:
   }
 };
 
+std::vector<char *> cStrings(std::vector<std::string> &storage) {
+  std::vector<char *> result;
+  result.reserve(storage.size() + 1);
+  for (auto &entry : storage)
+    result.push_back(entry.data());
+  result.push_back(nullptr);
+  return result;
+}
+
 // Returns the exit status, -1 on error, or -2 on timeout or cancellation.
 int waitForExit(int32_t pid, std::chrono::steady_clock::time_point deadline, bool cancellable = true) {
   for (;;) {
@@ -119,7 +133,7 @@ int waitForExit(int32_t pid, std::chrono::steady_clock::time_point deadline, boo
 } // namespace
 
 Interruption::Interruption() {
-  const std::lock_guard lock(interruptionMutex);
+  const std::scoped_lock lock(interruptionMutex);
   if (interruptionScopes++ == 0) {
     interrupted.store(0);
     struct sigaction action = {};
@@ -130,7 +144,7 @@ Interruption::Interruption() {
   }
 }
 Interruption::~Interruption() {
-  const std::lock_guard lock(interruptionMutex);
+  const std::scoped_lock lock(interruptionMutex);
   if (--interruptionScopes == 0) {
     sigaction(SIGTERM, &oldTerm, nullptr);
     sigaction(SIGINT, &oldInt, nullptr);
@@ -146,25 +160,22 @@ ProcessResult runProcess(const std::vector<std::string> &command, const std::fil
   const auto working = directory.string();
   const auto deadline = std::chrono::steady_clock::now() + timeout;
 
-  std::vector<char *> arguments;
-  arguments.reserve(command.size() + 1);
-  for (const auto &argument : command)
-    arguments.push_back(const_cast<char *>(argument.c_str()));
-  arguments.push_back(nullptr);
+  std::vector<std::string> argumentStorage(command);
+  auto arguments = cStrings(argumentStorage);
 
-  std::vector<std::string> environmentStorage;
-  environmentStorage.reserve(environment.size());
-  for (const auto &[key, value] : environment)
-    environmentStorage.push_back(key + "=" + value);
+  auto environmentStorage =
+      environment | map([](const std::string &key, const std::string &value) { return key + "=" + value; }) | to_vector();
+  auto environmentPointers = cStrings(environmentStorage);
 
-  std::string output, errorOutput;
+  std::string output;
+  std::string errorOutput;
   LineSink stdoutSink(captureOutput || outputLog ? nullptr : &std::cout, prefix, captureOutput ? &output : nullptr, outputLog);
   LineSink stderrSink(captureOutput || outputLog ? nullptr : &std::cerr, prefix, captureOutput ? &errorOutput : nullptr, outputLog);
 
   const auto completed = [&](int32_t status, bool timedOut = false) {
     if (stdoutSink.overflow || stderrSink.overflow)
       throw std::runtime_error("process output exceeded the 128 MiB capture limit: " + command.front());
-    return ProcessResult{status, std::move(output), std::move(errorOutput), timedOut};
+    return ProcessResult{.status = status, .output = std::move(output), .error = std::move(errorOutput), .timedOut = timedOut};
   };
 
   const auto timedOut = [&] {
@@ -175,61 +186,57 @@ ProcessResult runProcess(const std::vector<std::string> &command, const std::fil
     return completed(124, true);
   };
 
-  std::vector<char *> environmentPointers;
-  for (auto &entry : environmentStorage)
-    environmentPointers.push_back(entry.data());
-  environmentPointers.push_back(nullptr);
   ProcessGroup group;
-  // Serialise pipe creation through fork so another child cannot retain our writers.
-  std::unique_lock spawnLock(spawnMutex);
-  int outputPipe[2], errorPipe[2];
-  if (::pipe(outputPipe) != 0) throw std::runtime_error("cannot create output pipes for " + command.front());
-  if (::pipe(errorPipe) != 0) {
-    ::close(outputPipe[0]);
-    ::close(outputPipe[1]);
-    throw std::runtime_error("cannot create error pipes for " + command.front());
-  }
-
-  for (int fd : {outputPipe[0], outputPipe[1], errorPipe[0], errorPipe[1]})
-    if (::fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
-      for (int opened : {outputPipe[0], outputPipe[1], errorPipe[0], errorPipe[1]})
-        ::close(opened);
-      throw std::runtime_error("cannot protect process pipes for " + command.front());
+  int outputPipe[2];
+  int errorPipe[2];
+  const auto closePipes = [&] {
+    for (const int fd : {outputPipe[0], outputPipe[1], errorPipe[0], errorPipe[1]})
+      ::close(fd);
+  };
+  pid_t pid = -1;
+  {
+    // Serialise pipe creation through fork so another child cannot retain our writers.
+    const std::scoped_lock spawnLock(spawnMutex);
+    if (::pipe(outputPipe) != 0) throw std::runtime_error("cannot create output pipes for " + command.front());
+    if (::pipe(errorPipe) != 0) {
+      ::close(outputPipe[0]);
+      ::close(outputPipe[1]);
+      throw std::runtime_error("cannot create error pipes for " + command.front());
     }
-  const auto pid = ::fork();
-  if (pid < 0) {
-    ::close(outputPipe[0]);
-    ::close(outputPipe[1]);
-    ::close(errorPipe[0]);
-    ::close(errorPipe[1]);
-    throw std::runtime_error("cannot start " + command.front());
-  }
-  if (pid == 0) {
-    // Join a fresh process group so timeout cleanup reaches every descendant.
-    ::setpgid(0, 0);
-    const int devnull = ::open("/dev/null", O_RDONLY);
-    if (devnull >= 0) {
-      ::dup2(devnull, 0);
-      if (devnull > 2) ::close(devnull);
+
+    for (int const fd : {outputPipe[0], outputPipe[1], errorPipe[0], errorPipe[1]})
+      if (::fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+        closePipes();
+        throw std::runtime_error("cannot protect process pipes for " + command.front());
+      }
+    pid = ::fork();
+    if (pid < 0) {
+      closePipes();
+      throw std::runtime_error("cannot start " + command.front());
     }
-    ::dup2(outputPipe[1], 1);
-    ::dup2(errorPipe[1], 2);
-    ::close(outputPipe[0]);
+    if (pid == 0) {
+      // Join a fresh process group so timeout cleanup reaches every descendant.
+      ::setpgid(0, 0);
+      const int devnull = ::open("/dev/null", O_RDONLY);
+      if (devnull >= 0) {
+        ::dup2(devnull, 0);
+        if (devnull > 2) ::close(devnull);
+      }
+      ::dup2(outputPipe[1], 1);
+      ::dup2(errorPipe[1], 2);
+      closePipes();
+      if (::chdir(working.c_str()) != 0) std::_Exit(127);
+      environ = environmentPointers.data();
+      ::execvp(arguments.front(), arguments.data());
+      std::_Exit(127);
+    }
+
     ::close(outputPipe[1]);
-    ::close(errorPipe[0]);
     ::close(errorPipe[1]);
-    if (::chdir(working.c_str()) != 0) std::_Exit(127);
-    environ = environmentPointers.data();
-    ::execvp(arguments.front(), arguments.data());
-    std::_Exit(127);
+    group.started(static_cast<int32_t>(pid));
   }
 
-  ::close(outputPipe[1]);
-  ::close(errorPipe[1]);
-  group.started(static_cast<int32_t>(pid));
-  spawnLock.unlock();
-
-  struct pollfd descriptors[2]{{outputPipe[0], POLLIN, 0}, {errorPipe[0], POLLIN, 0}};
+  struct pollfd descriptors[2]{{.fd = outputPipe[0], .events = POLLIN, .revents = 0}, {.fd = errorPipe[0], .events = POLLIN, .revents = 0}};
   bool open[2]{true, true};
   std::array<uint8_t, 4096> buffer{};
   bool expired = false;
@@ -278,10 +285,7 @@ ProcessResult runProcess(const std::vector<std::string> &command, const std::fil
       const auto read = ::read(descriptors[stream].fd, buffer.data(), buffer.size());
       if (read > 0) {
         (stream == 0 ? stdoutSink : stderrSink).write(buffer.data(), static_cast<size_t>(read));
-      } else if (read == 0) {
-        open[stream] = false;
-        ::close(descriptors[stream].fd);
-      } else if (errno != EINTR && errno != EAGAIN) {
+      } else if (read == 0 || (errno != EINTR && errno != EAGAIN)) {
         open[stream] = false;
         ::close(descriptors[stream].fd);
       }

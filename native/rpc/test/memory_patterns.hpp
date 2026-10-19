@@ -1,10 +1,12 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -14,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gemstone/environment.hpp>
@@ -40,25 +43,45 @@ inline void *ordinary(size_t size) {
   return p;
 }
 
+template <class Derived> class MemoryClientBase {
+  friend Derived;
+  explicit MemoryClientBase(std::string kind) : kind(std::move(kind)) {}
+
+public:
+  std::string kind;
+  bool raw = false;
+  MemoryClientBase(const MemoryClientBase &) = delete;
+  MemoryClientBase &operator=(const MemoryClientBase &) = delete;
+  ~MemoryClientBase() = default;
+  void *allocate(size_t size) { return raw ? ordinary(size) : static_cast<Derived &>(*this).allocateBacking(size); }
+  void release(void *p) {
+    if (raw) std::free(p);
+    else static_cast<Derived &>(*this).releaseBacking(p);
+  }
+};
+
 // Release partially constructed cases on assertion/API failure as well as success.
 template <class Backend> struct AllocationScope {
-  Backend &backend;
+  Backend *backend;
   std::vector<void *> pointers;
-  explicit AllocationScope(Backend &backend) : backend(backend) {}
+  explicit AllocationScope(Backend &backend) : backend(&backend) {}
+  AllocationScope(const AllocationScope &) = delete;
+  AllocationScope &operator=(const AllocationScope &) = delete;
   void *allocate(size_t size) {
-    auto *p = backend.allocate(size);
+    auto *p = backend->allocate(size);
     pointers.push_back(p);
     return p;
   }
   void release(void *p) {
-    backend.release(p);
+    backend->release(p);
     pointers.erase(std::find(pointers.begin(), pointers.end(), p));
   }
   ~AllocationScope() {
     for (auto *p : pointers) {
       try {
-        backend.release(p);
+        backend->release(p);
       } catch (...) {
+        std::cerr << "cannot release test allocation\n";
       }
     }
   }
@@ -83,10 +106,22 @@ inline std::string allocationKind(const char *fallback) {
   return kind && std::string(kind) != "default" ? kind : fallback;
 }
 
+inline const char *accessName(unsigned mode) {
+  if (mode == 0) return "contiguous";
+  if (mode == 1) return "strided";
+  if (mode == 2) return "gather";
+  return "linked";
+}
+inline unsigned accessIndex(unsigned mode, unsigned item, const uint32_t *indices) {
+  if (mode == 0) return item;
+  if (mode == 1) return item * 17;
+  return indices[item];
+}
+
 template <class Backend> void ordinaryAccess(Backend &backend, unsigned mode) {
   AllocationScope allocations(backend);
-  const char *name = mode == 0 ? "contiguous" : mode == 1 ? "strided" : mode == 2 ? "gather" : "linked";
-  const size_t inputSize = mode == 3 ? Count * sizeof(Node) : Count * 17 * sizeof(uint32_t);
+  const char *name = accessName(mode);
+  const size_t inputSize = mode == 3 ? Count * sizeof(Node) : static_cast<size_t>(Count) * 17 * sizeof(uint32_t);
   auto *storage = static_cast<unsigned char *>(allocations.allocate(inputSize + 128));
   auto *input = storage + 64; // Every kernel sees an interior pointer, including first use.
   auto *out = static_cast<uint32_t *>(allocations.allocate((Count + 2) * sizeof(uint32_t)));
@@ -106,20 +141,20 @@ template <class Backend> void ordinaryAccess(Backend &backend, unsigned mode) {
     } else {
       auto *values = reinterpret_cast<uint32_t *>(input);
       for (unsigned i = 0; i < Count * 17; ++i)
-        values[i] = i * 3 + 7 + pass;
+        values[i] = (i * 3) + 7 + pass;
     }
-    std::cout << "start " << name << " nodes/items=" << Count << " pass=" << pass << std::endl;
+    std::cout << "start " << name << " nodes/items=" << Count << " pass=" << pass << '\n' << std::flush;
     backend.launch(input, out + 1, indices, mode, mode == 3 ? 1 : Count);
-    if (mode == 3) require(out[1] == Count * (Count + 1) / 2 + Count * pass, "linked sum mismatch");
+    if (mode == 3) require(out[1] == (Count * (Count + 1) / 2) + (Count * pass), "linked sum mismatch");
     else
       for (unsigned i = 0; i < Count; ++i) {
-        const unsigned index = mode == 0 ? i : mode == 1 ? i * 17 : indices[i];
-        require(out[i + 1] == index * 3 + 8 + pass, "regular/gather mismatch");
+        const unsigned index = accessIndex(mode, i, indices);
+        require(out[i + 1] == (index * 3) + 8 + pass, "regular/gather mismatch");
       }
     require(out[0] == 0xa5a5a5a5U && out[Count + 1] == 0xa5a5a5a5U, "output guard changed");
     for (unsigned i = 0; i < 64; ++i)
       require(storage[i] == 0x5a && storage[inputSize + 64 + i] == 0x5a, "input guard changed");
-    std::cout << "verified " << name << " pass=" << pass << std::endl;
+    std::cout << "verified " << name << " pass=" << pass << '\n';
   }
   allocations.release(indices);
   allocations.release(out);
@@ -135,7 +170,7 @@ template <class Backend> int compareTraffic(Backend &backend) {
   auto *output = static_cast<Word *>(allocations.allocate(96 * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, 96, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   std::atomic_bool cancelled{false};
   auto host = std::async(std::launch::async, [&] {
     auto published = std::atomic_ref<Word>(input[0]);
@@ -144,8 +179,8 @@ template <class Backend> int compareTraffic(Backend &backend) {
     std::exception_ptr failure;
     for (unsigned round = 0; round < 32; ++round) {
       // High bits exercise unsigned values across the full word width.
-      const Word value = (Word{1} << (sizeof(Word) * 8 - 1)) + 73 + round;
-      const Word token = (Word{1} << (sizeof(Word) * 8 - 1)) + round + 1;
+      const Word value = (Word{1} << ((sizeof(Word) * 8) - 1)) + 73 + round;
+      const Word token = (Word{1} << ((sizeof(Word) * 8) - 1)) + round + 1;
       input[1] = value;
       published.store(token, std::memory_order_release);
       while (acknowledged.load(std::memory_order_acquire) != token) {
@@ -154,9 +189,10 @@ template <class Backend> int compareTraffic(Backend &backend) {
         std::this_thread::yield();
       }
       try {
-        require(output[3 * round] == value, "failed acquire CAS read a stale payload");
-        require(output[3 * round + 1] == token, "failed CAS did not return the observed value");
-        require(output[3 * round + 2] == 0, "mismatched compare-exchange reported success");
+        const auto *slot = output + (static_cast<size_t>(round) * 3);
+        require(slot[0] == value, "failed acquire CAS read a stale payload");
+        require(slot[1] == token, "failed CAS did not return the observed value");
+        require(slot[2] == 0, "mismatched compare-exchange reported success");
         require(published.load(std::memory_order_relaxed) == token, "failed CAS changed its target");
       } catch (...) {
         if (!failure) failure = std::current_exception();
@@ -174,7 +210,7 @@ template <class Backend> int compareTraffic(Backend &backend) {
   host.get();
   allocations.release(output);
   allocations.release(input);
-  std::cout << "verified failed compare-exchange bits=" << sizeof(Word) * 8 << " rounds=32 atomic-locations=2" << std::endl;
+  std::cout << "verified failed compare-exchange bits=" << sizeof(Word) * 8 << " rounds=32 atomic-locations=2\n";
   return 0;
 }
 // File rendezvous with a test-only Backend wrapper. No timing-based races.
@@ -231,7 +267,7 @@ template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, 
   auto *output = static_cast<Word *>(allocations.allocate(lanes * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, lanes, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   auto host = std::async(std::launch::async, [&] {
     publishCounter(directory, launch, input);
     checkpoint(directory, launch, "before", [] {});
@@ -244,10 +280,10 @@ template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, 
   require(input[2] == Word(lanes) * step, "multi-workgroup RMW lost an update");
   std::sort(output, output + lanes);
   for (unsigned lane = 0; lane < lanes; ++lane)
-    require(output[lane] == Word(lane) * step + step - 1, "multi-workgroup atomic returned a stale or duplicate old value");
+    require(output[lane] == (Word(lane) * step) + step - 1, "multi-workgroup atomic returned a stale or duplicate old value");
   allocations.release(output);
   allocations.release(input);
-  std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4" << std::endl;
+  std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4\n";
 }
 template <class Word, class Backend> void atomicCase(Backend &backend, unsigned launch) {
   const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
@@ -258,7 +294,7 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
   auto *output = static_cast<Word *>(allocations.allocate(32 * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, 32, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   std::atomic_bool cancelled{false};
   auto host = std::async(std::launch::async, [&] {
     publishCounter(directory, launch, input);
@@ -300,7 +336,7 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
   host.get();
   allocations.release(output);
   allocations.release(input);
-  std::cout << "verified live system atomics bits=" << sizeof(Word) * 8 << " rounds=32 fences=" << fenced << std::endl;
+  std::cout << "verified live system atomics bits=" << sizeof(Word) * 8 << " rounds=32 fences=" << fenced << '\n';
 }
 
 template <class Backend> int atomicProbe(Backend &backend) {
@@ -310,9 +346,11 @@ template <class Backend> int atomicProbe(Backend &backend) {
     else multiLaneAtomicCase<uint32_t>(backend, 0);
     return 0;
   }
-  if (bits && std::string(bits) == "64") atomicCase<uint64_t>(backend, 0);
-  else if (bits && std::string(bits) == "32") atomicCase<uint32_t>(backend, 0);
-  else {
+  if (bits && std::string(bits) == "64") {
+    atomicCase<uint64_t>(backend, 0);
+  } else if (bits && std::string(bits) == "32") {
+    atomicCase<uint32_t>(backend, 0);
+  } else {
     atomicCase<uint32_t>(backend, 0);
     atomicCase<uint64_t>(backend, 1);
   }
@@ -320,7 +358,7 @@ template <class Backend> int atomicProbe(Backend &backend) {
 }
 template <class Backend> int concurrent(Backend &backend) {
   if (!backend.concurrentCapabilities()) {
-    std::cout << "implementation concurrency probe beyond advertised allocation capabilities" << std::endl;
+    std::cout << "implementation concurrency probe beyond advertised allocation capabilities\n";
   }
   const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
   auto *input = static_cast<uint32_t *>(backend.allocate(128));
@@ -328,7 +366,7 @@ template <class Backend> int concurrent(Backend &backend) {
   unsigned launch = 0;
   for (unsigned layout = 0; layout < 3; ++layout) {
     // Neighbouring words, byte holes within a word, and a 64 KiB transfer boundary.
-    const unsigned offset = layout == 0 ? 64 : layout == 1 ? 65 : 65535;
+    const unsigned offset = std::array{64U, 65U, 65535U}[layout];
     auto *output = storage + offset;
     const unsigned hostOffset = layout == 0 ? 4 : 1;
     for (unsigned pass = 0; pass < 2; ++pass, ++launch) {
@@ -355,7 +393,7 @@ template <class Backend> int concurrent(Backend &backend) {
         require(output[0] == 42 + pass && output[2] == 43 + pass, "concurrent kernel byte results");
       }
       require(output[-1] == 0x5a && output[8] == 0x5a, "concurrent guard overwritten");
-      std::cout << "verified concurrency layout=" << layout << " pass=" << pass << std::endl;
+      std::cout << "verified concurrency layout=" << layout << " pass=" << pass << '\n';
     }
   }
   backend.release(storage);
@@ -370,7 +408,7 @@ template <class Word, class Backend> int submission(Backend &backend) {
   auto *output = static_cast<Word *>(backend.allocate(32 * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, 32, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   auto handshake = [&] {
     auto state = std::atomic_ref<Word>(input[0]);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
@@ -405,20 +443,21 @@ template <class Word, class Backend> int submission(Backend &backend) {
   backend.release(output);
   backend.release(input);
   require(!blocked, "kernel submission blocked on a host flag written after return");
-  std::cout << "verified asynchronous submission bits=" << sizeof(Word) * 8 << " rounds=32" << std::endl;
+  std::cout << "verified asynchronous submission bits=" << sizeof(Word) * 8 << " rounds=32\n";
   return 0;
 }
 // Hold the first kernel in a host handshake while a second queue must run.
 // Rescue the first after two seconds so serialisation produces a bounded red.
 template <class Word, class Backend> int overlap(Backend &backend) {
   require(backend.concurrentCapabilities(), "overlap probe requires concurrent host storage");
-  Word *input[2], *output[2];
+  Word *input[2];
+  Word *output[2];
   for (unsigned i = 0; i < 2; ++i) {
     input[i] = static_cast<Word *>(backend.allocate(128));
     output[i] = static_cast<Word *>(backend.allocate(32 * sizeof(Word)));
     std::fill_n(input[i], 128 / sizeof(Word), Word{});
     std::fill_n(output[i], 32, Word{});
-    std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input[i]) << " " << sizeof(Word) << std::endl;
+    std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input[i]) << " " << sizeof(Word) << '\n';
   }
   auto round = [&](unsigned i, unsigned n) {
     input[i][1] = 71 + i + n;
@@ -470,7 +509,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
     backend.release(input[i]);
   }
   require(!serialised, "second queue only progressed after the first kernel completed");
-  std::cout << "verified overlapping queues bits=" << sizeof(Word) * 8 << " rounds=32 kernel-publication=1" << std::endl;
+  std::cout << "verified overlapping queues bits=" << sizeof(Word) * 8 << " rounds=32 kernel-publication=1\n";
   return 0;
 }
 // Same input graph, sparse targets, guard bytes and CPU edits for every API/ISA.
@@ -484,7 +523,7 @@ template <class Backend> int reviewCases(Backend &backend) {
       std::this_thread::yield();
     }
   };
-  for (bool mixed : {false, true}) {
+  for (bool const mixed : {false, true}) {
     auto *host = static_cast<uint32_t *>(backend.allocate(64));
     std::fill_n(host, 16, 0U);
     host[2] = 7;
@@ -502,7 +541,7 @@ template <class Backend> int reviewCases(Backend &backend) {
     backend.releaseDevice(device);
     backend.release(host);
     require(correct, mixed ? "device flag failed to order shared payload" : "overlapping disjoint device writes were lost");
-    std::cout << "verified " << (mixed ? "mixed backing publication" : "disjoint device writes") << std::endl;
+    std::cout << "verified " << (mixed ? "mixed backing publication" : "disjoint device writes") << '\n';
   }
   auto *control = static_cast<Node *>(backend.allocate(sizeof(Node)));
   auto *first = static_cast<Node *>(backend.allocate(sizeof(Node)));
@@ -529,7 +568,7 @@ template <class Backend> int reviewCases(Backend &backend) {
   backend.release(first);
   backend.release(control);
   require(deviceCorrect, "synchronised device pointer replacement was cached or replayed");
-  std::cout << "verified synchronised device pointer replacement" << std::endl;
+  std::cout << "verified synchronised device pointer replacement\n";
   return 0;
 }
 
@@ -558,12 +597,22 @@ template <class Backend> int run(Backend &backend) {
       output[1] = 0;
       backend.launch(input + 1, output + 1, input + 1, 0, 1);
       require(output[1] == input[1] + 1, "RPC dispatch did not publish its write");
-      std::cout << "verified host-memory transport pass=" << pass << std::endl;
+      std::cout << "verified host-memory transport pass=" << pass << '\n';
     }
   } else {
     for (unsigned mode = 0; mode != 4; ++mode)
       ordinaryAccess(backend, mode);
   }
   return 0;
+}
+
+template <class Backend> int runMain(int argc) {
+  try {
+    Backend backend(argc > 1);
+    return run(backend);
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << '\n';
+    return 1;
+  }
 }
 } // namespace memory_patterns

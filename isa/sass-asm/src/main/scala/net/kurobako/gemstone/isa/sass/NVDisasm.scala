@@ -1,12 +1,13 @@
 package net.kurobako.gemstone.isa.sass
 
 import cats.Eval
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.string.*
-import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.reflect.ClassTag
 import upickle.default.ReadWriter
@@ -15,7 +16,7 @@ import upickle.default.ReadWriter
 object NVDisasm {
 
   /** Semantic FORMAT field classes. `Vocabulary(name)` keeps vendor-defined identifiers as data. */
-  enum FieldKind {
+  enum FieldKind derives CanEqual {
     case Opcode, Register, UniformRegister, ZeroRegister, NonZeroRegister, ZeroUniformRegister, NonZeroUniformRegister
     case Predicate, PredicateVimnmx, UniformPredicate, PredicateRegister, Immediate, SignedImmediate, RelativeImmediate
     case FloatingImmediate(format: FloatEncoding)
@@ -46,6 +47,8 @@ object NVDisasm {
   /** Exact names take precedence; vocabulary names remain payloads and are never promoted to semantics merely because
     * they happen to contain a familiar word.
     */
+  private val FormRegister = "[a-z0-9_]+__(v[0-9]+_)?R[a-d]".r
+
   def fieldKind(name: String): FieldKind = name match {
     case "Opcode"                                 => FieldKind.Opcode
     case "Register" | "RegisterFAU"               => FieldKind.Register
@@ -59,7 +62,7 @@ object NVDisasm {
     case "UniformPredicate"                       => FieldKind.UniformPredicate
     case "PR"                                     => FieldKind.PredicateRegister
     case "UImm" | "BITSET"                        => FieldKind.Immediate
-    case "SImm"                                   => FieldKind.SignedImmediate
+    case "SImm" | "SSImm"                         => FieldKind.SignedImmediate
     case "RSImm"                                  => FieldKind.RelativeImmediate
     case value @ ("F16Imm" | "F32Imm" | "F64Imm") =>
       FieldKind.FloatingImmediate(FloatEncoding.fromSpelling(value))
@@ -77,70 +80,14 @@ object NVDisasm {
     case value if value.startsWith("ONLY") || value.endsWith("ONLY") => FieldKind.AddressQualifier
     case value if value.startsWith("ISWZ")                           => FieldKind.InstructionSelector
     case "Partsel"                                                   => FieldKind.PartitionSelector
-    case value                                                       => FieldKind.Vocabulary(value)
+    // the legacy packed-half forms give their register and swizzle fields form-specific vocabularies, such as
+    // hset2__v2_Rd
+    case value if FormRegister.matches(value) => FieldKind.Register
+    case value if value.contains("_iswz_")    => FieldKind.InstructionSelector
+    case value                                => FieldKind.Vocabulary(value)
   }
 
-  object UnaryOperator {
-    def from(spelling: String): UnaryOperator = spelling match {
-      case "!"   => UnaryOperator.LogicalNot
-      case "-"   => UnaryOperator.Negate
-      case "~"   => UnaryOperator.BitwiseNot
-      case value => UnaryOperator.Unsupported(value)
-    }
-  }
-
-  enum UnaryOperator {
-    case LogicalNot, Negate, BitwiseNot
-    case Unsupported(vendorSpelling: String)
-  }
-
-  object BinaryOperator {
-    def from(spelling: String): BinaryOperator = spelling match {
-      case "&&"  => BinaryOperator.LogicalAnd
-      case "||"  => BinaryOperator.LogicalOr
-      case "->"  => BinaryOperator.Implies
-      case "=="  => BinaryOperator.Equal
-      case "!="  => BinaryOperator.NotEqual
-      case "<"   => BinaryOperator.Less
-      case "<="  => BinaryOperator.LessEqual
-      case ">"   => BinaryOperator.Greater
-      case ">="  => BinaryOperator.GreaterEqual
-      case "+"   => BinaryOperator.Add
-      case "-"   => BinaryOperator.Subtract
-      case "*"   => BinaryOperator.Multiply
-      case "/"   => BinaryOperator.Divide
-      case "%"   => BinaryOperator.Remainder
-      case "&"   => BinaryOperator.BitwiseAnd
-      case "|"   => BinaryOperator.BitwiseOr
-      case "^"   => BinaryOperator.BitwiseXor
-      case "<<"  => BinaryOperator.ShiftLeft
-      case ">>"  => BinaryOperator.ShiftRight
-      case value => BinaryOperator.Unsupported(value)
-    }
-  }
-
-  enum BinaryOperator {
-    case LogicalAnd, LogicalOr, Implies, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual
-    case Add, Subtract, Multiply, Divide, Remainder, BitwiseAnd, BitwiseOr, BitwiseXor, ShiftLeft, ShiftRight
-    case Unsupported(vendorSpelling: String)
-  }
-
-  /** Known helper calls are closed; table lookup names remain explicit data. */
-  object BuiltinCall {
-    def from(name: String): BuiltinCall = name match {
-      case "DEFINED" => BuiltinCall.Defined
-      case "IsEven"  => BuiltinCall.IsEven
-      case "IsOdd"   => BuiltinCall.IsOdd
-      case value     => BuiltinCall.Table(value)
-    }
-  }
-
-  enum BuiltinCall {
-    case Defined, IsEven, IsOdd
-    case Table(tableName: String)
-  }
-
-  enum FailureCategory { case IllegalCandidate, Unsupported, MissingMetadata }
+  enum FailureCategory derives CanEqual { case IllegalCandidate, Unsupported, MissingMetadata }
   case class CandidateFailure(category: FailureCategory, message: String)
 
   enum MetadataIssue {
@@ -177,7 +124,7 @@ object NVDisasm {
     /** A bracketed group of operand prefix operators only, which binds no field. */
     def operatorGroup(node: Syntax): Boolean = node match {
       case Group("[", "]", children) => children.forall {
-          case Text(raw) => Set("!", "-", "~", "||")(raw.trim)
+          case Text(raw) => PartialFunction.cond(raw.trim) { case "!" | "-" | "~" | "||" => true }
           case _         => false
         }
       case _ => false
@@ -188,69 +135,31 @@ object NVDisasm {
     }
   }
 
-  enum Syntax {
+  enum Syntax derives CanEqual {
     case Text(raw: String)
     case Literal(value: String)
     case Field(kind: String, binding: String, arguments: Option[String], default: Option[String], category: FieldKind)
     case Group(open: String, close: String, children: Vec[Syntax])
     case Optional(marker: Option[String], children: Vec[Syntax])
-  }
-  enum ConditionExpression {
-    case Number(value: BigInt)
-    case StringValue(value: String)
-    case Field(name: String, attribute: Option[String])
-    case Parameter(name: String)
-    case Constant(name: String)
-    case EnumValue(kind: String, name: String)
-    case Unary(operator: UnaryOperator, value: ConditionExpression)
-    case Binary(operator: BinaryOperator, left: ConditionExpression, right: ConditionExpression)
-    case Call(name: BuiltinCall, arguments: Vec[ConditionExpression])
-    case Conditional(condition: ConditionExpression, whenTrue: ConditionExpression, whenFalse: ConditionExpression)
+
+    def isGuard: Boolean = this match {
+      case Field(binding = "Pg" | "UPg") => true
+      case _                             => false
+    }
   }
 
   /** `requires` names a pre-encoding value the condition constrains; without it the condition cannot be observed. */
   case class Condition(expression: ConditionExpression, message: String, requires: Option[String] = None)
 
-  enum Expression derives ReadWriter {
-    case Constant(value: BigInt, relaxed: Boolean)
-    case Reference(name: String, attribute: Option[String], relaxed: Boolean)
-    case Scale(value: Expression, factor: BigInt)
-    case Multiply(value: Expression, factor: BigInt)
-    case Identity(first: Expression, second: Expression)
-    case FixedFloat(value: Expression, format: FloatEncoding)
-    case Relaxed(value: Expression)
-    case FloatConvert(
-        value: Expression,
-        selector: String,
-        cases: Vec[(Vec[BigInt], FloatEncoding)],
-        fallback: FloatEncoding
-    )
-    case Lookup(name: String, arguments: Vec[Expression])
-
-    /** Bindings this expression reads; an attribute reference also names its base binding when `bases` is set. */
-    def references(bases: Boolean): Set[String] = this match {
-      case Reference(name, attribute, _) =>
-        attribute.fold(Set(name))(suffix => Set(s"$name@$suffix") ++ Option.when(bases)(name))
-      case FixedFloat(value, _)                => value.references(bases)
-      case Relaxed(value)                      => value.references(bases)
-      case Scale(value, _)                     => value.references(bases)
-      case Multiply(value, _)                  => value.references(bases)
-      case Identity(first, second)             => first.references(bases) ++ second.references(bases)
-      case FloatConvert(value, selector, _, _) => value.references(bases) + selector
-      case Lookup(_, arguments)                => arguments.flatMap(_.references(bases)).toSet
-      case Constant(_, _)                      => Set.empty
-    }
-  }
   case class SymbolValue(name: String, value: BigInt)
   case class Vocabulary(name: String, values: Vec[SymbolValue], default: Option[BigInt] = None)
-  case class Assignment(name: String, positions: Vec[Int], expression: Expression)
-  case class OpcodeValue(name: String, value: BigInt)
+  case class Assignment(name: String, positions: Vec[Int], expression: Expression) derives CanEqual
 
   /** One instruction form. Its FORMAT and binding analysis is computed once, on first use. */
   case class Form(
       name: String,
       alternate: Boolean,
-      opcodes: Vec[OpcodeValue],
+      opcodes: Vec[SymbolValue],
       fields: Vec[Assignment],
       syntax: Vec[Syntax] = Vec.empty,
       conditions: Vec[Condition] = Vec.empty
@@ -311,38 +220,19 @@ object NVDisasm {
     def vocabulary(field: Syntax.Field): Vec[SymbolValue] =
       byVocabulary.get(field.kind).fold(Vec.empty[SymbolValue])(_.values)
 
-    private val defaults = TrieMap.empty[Syntax.Field, Vec[BigInt]]
+    private val defaults = ConcurrentHashMap[Syntax.Field, Vec[BigInt]]()
 
     /** A field's display default, resolved through its vocabulary when it names a symbol. */
-    def defaultValues(field: Syntax.Field): Vec[BigInt] = defaults.getOrElseUpdate(
+    def defaultValues(field: Syntax.Field): Vec[BigInt] = defaults.computeIfAbsent(
       field,
-      field.default.toVec.flatMap { spelling =>
-        val aliases = vocabulary(field).collect { case symbol if symbol.name == spelling => symbol.value }
-        if (aliases.nonEmpty) aliases else number(spelling).toVec
-      }.distinct
+      key =>
+        key.default.toVec.flatMap { spelling =>
+          val aliases = vocabulary(key).collect { case symbol if symbol.name == spelling => symbol.value }
+          if (aliases.nonEmpty) aliases else number(spelling).toVec
+        }.distinct
     )
   }
 
-  private enum SyntaxNode derives ReadWriter {
-    case Text(raw: Int)
-    case Literal(value: Int)
-    case Field(kind: Int, binding: Int, arguments: Option[Int], default: Option[Int])
-    case Group(open: Int, close: Int, children: Vec[Int])
-    case Optional(marker: Option[Int], children: Vec[Int])
-  }
-  private enum ConditionNode derives ReadWriter {
-    case Number(value: BigInt)
-    case StringValue(value: Int)
-    case Field(name: Int, attribute: Option[Int])
-    case Parameter(name: Int)
-    case Constant(name: Int)
-    case EnumValue(kind: Int, name: Int)
-    case Unary(operator: Int, value: Int)
-    case Binary(operator: Int, left: Int, right: Int)
-    case Call(name: Int, arguments: Vec[Int])
-    case Conditional(condition: Int, whenTrue: Int, whenFalse: Int)
-  }
-  private case class ConditionRow(expression: Int, message: Int, requires: Option[Int]) derives ReadWriter
   private case class AssignmentRow(name: Int, positions: Vec[Int], expression: Int) derives ReadWriter
   private case class FormRow(
       name: Int,
@@ -356,7 +246,7 @@ object NVDisasm {
   private case class LookupRow(name: Int, rows: Vec[Row]) derives ReadWriter
   private case class DatabaseRow(
       digest: Int,
-      width: Int,
+      width: Int in (64, 88, 128),
       parameters: Vec[(Int, BigInt)],
       constants: Vec[(Int, BigInt)],
       forms: Vec[Int],
@@ -425,7 +315,7 @@ object NVDisasm {
       Eval.later(Form(
         strings(row.name),
         row.alternate,
-        row.opcodes.map((name, value) => OpcodeValue(strings(name), value)),
+        row.opcodes.map((name, value) => SymbolValue(strings(name), value)),
         row.fields.map(decodedAssignments(_).value),
         row.syntax.map(decodedSyntax),
         row.conditions.map { id =>
@@ -445,7 +335,7 @@ object NVDisasm {
     private lazy val decodedDatabases: Vec[Eval[Database]] = databases.map(row =>
       Eval.later(Database(
         strings(row.digest),
-        row.width.refine[Int in (64, 88, 128)].fold(error => throw IllegalStateException(error.raw), identity),
+        row.width,
         row.forms.map(decodedForms(_).value),
         row.lookups.map { id =>
           val lookup = lookups(id)

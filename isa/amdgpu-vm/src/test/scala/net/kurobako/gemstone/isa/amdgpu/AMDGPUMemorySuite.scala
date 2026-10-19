@@ -1,10 +1,13 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import IntegerSemantics.*
 import VMIR.*
 import fixtures.*
+import laneRuns.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 class AMDGPUMemorySuite extends munit.FunSuite {
@@ -68,6 +71,46 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec(0xff, 0xff, 0xbe, 0xd9, 0x00, 0x01, 0x00, 0x00),
         Instruction.Store(1, MemoryAddress.Local(0, 65535), 16, false)
       ),
+      // LLVM: scratch_load_dword v0, v1, off and scratch_load_dword v0, off, s2. A scalar address replaces the
+      // vector one (CDNA3 ISA 10.1, SADDR).
+      (
+        "scratch load from a vector address",
+        Target("gfx900"),
+        Vec(0x00, 0x40, 0x50, 0xdc, 0x01, 0x00, 0x7f, 0x00),
+        Instruction.Load(0, MemoryAddress.Scratch(Some(1), None, 0), 4, false, LoadPlacement.Full)
+      ),
+      (
+        "scratch load from a scalar address",
+        Target("gfx900"),
+        Vec(0x00, 0x40, 0x50, 0xdc, 0x00, 0x00, 0x02, 0x00),
+        Instruction.Load(0, MemoryAddress.Scratch(None, Some(2), 0), 4, false, LoadPlacement.Full)
+      ),
+      (
+        "scratch load from a vector address",
+        Target("gfx1030"),
+        Vec(0x00, 0x40, 0x30, 0xdc, 0x01, 0x00, 0x7d, 0x00),
+        Instruction.Load(0, MemoryAddress.Scratch(Some(1), None, 0), 4, false, LoadPlacement.Full)
+      ),
+      (
+        "scratch load from a scalar address",
+        Target("gfx1030"),
+        Vec(0x00, 0x40, 0x30, 0xdc, 0x00, 0x00, 0x02, 0x00),
+        Instruction.Load(0, MemoryAddress.Scratch(None, Some(2), 0), 4, false, LoadPlacement.Full)
+      ),
+      // llvm-mc -mcpu=gfx90a; Tensile's gfx90a DGEMM (Cijk_Alik_Bjlk_DB_MT64x16x8_MI16x16x4x1, rocBLAS 7.1.1) zeroes
+      // its accumulators with ds_read_b32 a0, v29 through a15 from an address past the LDS
+      (
+        "DS read into an accumulator register",
+        Target("gfx90a"),
+        Vec(0x00, 0x00, 0x6c, 0xda, 0x1d, 0x00, 0x00, 0x0e),
+        Instruction.Load(14, MemoryAddress.Local(29, 0), 4, false, LoadPlacement.Full, RegisterBank.Accumulator)
+      ),
+      (
+        "DS write from accumulator registers",
+        Target("gfx90a"),
+        Vec(0x00, 0x00, 0x9a, 0xda, 0x01, 0x02, 0x00, 0x00),
+        Instruction.Store(2, MemoryAddress.Local(1, 0), 8, false, RegisterBank.Accumulator)
+      ),
       (
         "DS permute",
         Target("gfx1036"),
@@ -90,21 +133,122 @@ class AMDGPUMemorySuite extends munit.FunSuite {
   }
 
   test("DS lane permutes select lanes from byte addresses") {
-    assertEquals(VMArithmetic.bpermuteSourceLane(address = 0L, offset = 0L).raw, 0)
-    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 0L).raw, 37)
-    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 69L, 0L).raw, 5)
-    assertEquals(VMArithmetic.bpermuteSourceLane(address = 0L, offset = 124L).raw, 31)
-    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 124L).raw, 4)
-    assertEquals(VMArithmetic.permuteDestinationLane(address = 0L, offset = 0L, 32).raw, 0)
-    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32).raw, 29)
-    assertEquals(VMArithmetic.permuteDestinationLane(address = 0L, offset = 124L, 32).raw, 31)
-    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32).raw, 4)
+    def source(address: Long, offset: Long): Long      = Execute.addressedLane(address, offset, 64L)
+    def destination(address: Long, offset: Long): Long = Execute.addressedLane(address, offset, 32L)
+    assertEquals(source(address = 0L, offset = 0L), 0L)
+    assertEquals(source(4L * 37L, 0L), 37L)
+    assertEquals(source(4L * 69L, 0L), 5L)
+    assertEquals(source(address = 0L, offset = 124L), 31L)
+    assertEquals(source(4L * 37L, 124L), 4L)
+    assertEquals(destination(address = 0L, offset = 0L), 0L)
+    assertEquals(destination(4L * 29L, 0L), 29L)
+    assertEquals(destination(address = 0L, offset = 124L), 31L)
+    assertEquals(destination(4L * 37L, 124L), 4L)
   }
 
-  test("DS operations strip the local address-space tag") {
-    assertEquals(VMInterpreter.ldsOffset(0x18000018L), 0x18L)
+  test("DS addresses are 32-bit byte offsets into the LDS") {
     assertEquals(VMInterpreter.ldsOffset(0x00000018L), 0x18L)
-    assertEquals(VMInterpreter.ldsOffset(0x00010018L), 0x18L)
+    assertEquals(VMInterpreter.ldsOffset(0x00010018L), 0x10018L)
+    assertEquals(VMInterpreter.ldsOffset(0x100000018L), 0x18L)
+  }
+
+  // CDNA3 ISA 3.6.1: an LDS address at or past the allocation reads zero and drops writes. Tensile's gfx942 DGEMM
+  // (Cijk_Ailk_Bljk_DB_MT64x32x16_MI16x16x4x1, rocBLAS 7.1.1) zeroes its accumulators so: s_mov_b32 m0, 0x1400;
+  // v_mov_b32_e32 v62, 0xf00000; ds_read_b64 v[14:15], v62
+  test("gfx942 LDS reads past the allocation return zero") {
+    // ds_write_b64 v1, v[2:3] then the Tensile sequence, from llvm-objdump --mcpu=gfx942
+    val code = octets(0x00, 0x00, 0x9a, 0xd8, 0x01, 0x02, 0x00, 0x00) ++
+      octets(0xff, 0x00, 0xfc, 0xbe, 0x00, 0x14, 0x00, 0x00) ++
+      octets(0xff, 0x02, 0x7c, 0x7e, 0x00, 0x00, 0xf0, 0x00) ++
+      octets(0x00, 0x00, 0xec, 0xd8, 0x3e, 0x00, 0x00, 0x0e)
+    val lanes = Vec(Vec(0L, 0x3ff00000L))
+    Vec(14, 15).foreach(result =>
+      assertEquals(
+        laneResults(
+          Target("gfx942"),
+          lanes,
+          program(Target("gfx942"), code),
+          result.unsafe[VectorRegisterIndex],
+          groupSegmentSize = 0x1400
+        ),
+        Vec(0L)
+      )
+    )
+  }
+
+  test("gfx942 LDS writes past the allocation are dropped") {
+    // llvm-mc -mcpu=gfx942: ds_write_b32 v1, v2 offset:65532; ds_read_b32 v6, v1 offset:65532; ds_read_b64 v[4:5], v1
+    val code = octets(0xfc, 0xff, 0x1a, 0xd8, 0x01, 0x02, 0x00, 0x00) ++
+      octets(0xfc, 0xff, 0x6c, 0xd8, 0x01, 0x00, 0x00, 0x06) ++
+      octets(0x00, 0x00, 0xec, 0xd8, 0x01, 0x00, 0x00, 0x04)
+    assertEquals(
+      laneResults(Target("gfx942"), Vec(Vec(7L)), program(Target("gfx942"), code), 6, groupSegmentSize = 64),
+      Vec(0L)
+    )
+  }
+
+  // CDNA3 ISA 9.1.6: with ECC, which every CDNA part enables, a 16-bit load writes the whole VGPR, the other half
+  // zero. LLVM relies on it only for sramecc+ (global_load_ushort and v_perm_b32 for sramecc+ or any, short_d16_hi into
+  // the live register for sramecc- and gfx1030); Tensile's CDNA kernels always do, merging a d16 and a d16_hi load with
+  // v_or_b32 (Cijk_Ailk_Bljk_HB_MT16x16x16, rocBLAS 7.1.1 gfx942).
+  private val halves = Vec(0x12345678L, 0xdeadbeefL)
+
+  for (
+    (target, low, high) <- Seq(
+      (Target("gfx942"), 0x0000beefL, 0x56780000L),
+      (Target("gfx1030"), 0x1234beefL, 0x5678beefL)
+    )
+  )
+    test(s"$target 16-bit global loads ${if (target.isa.isCDNA) "zero" else "keep"} the other half") {
+      // llvm-mc: global_load_short_d16 v2, v1, s[6:7] offset:4; global_load_short_d16_hi v3, v1, s[6:7]
+      val code = octets(0x04, 0x80, 0x90, 0xdc, 0x01, 0x00, 0x06, 0x02) ++
+        octets(0x00, 0x80, 0x94, 0xdc, 0x01, 0x00, 0x06, 0x03)
+      assertEquals(laneResults(target, Vec(halves), program(target, code), 2), Vec(low))
+      assertEquals(laneResults(target, Vec(halves), program(target, code), 3), Vec(high))
+    }
+
+  test("gfx942 16-bit LDS loads zero the other half") {
+    val gfx942 = Target("gfx942")
+    // llvm-mc: ds_write_b64 v1, v[2:3]; ds_read_u16_d16 v2, v1 offset:4; ds_read_u16_d16_hi v3, v1
+    val code = octets(0x00, 0x00, 0x9a, 0xd8, 0x01, 0x02, 0x00, 0x00) ++
+      octets(0x04, 0x00, 0xb4, 0xd8, 0x01, 0x00, 0x00, 0x02) ++
+      octets(0x00, 0x00, 0xb6, 0xd8, 0x01, 0x00, 0x00, 0x03)
+    assertEquals(laneResults(gfx942, Vec(halves), program(gfx942, code), 2, groupSegmentSize = 64), Vec(0x0000beefL))
+    assertEquals(laneResults(gfx942, Vec(halves), program(gfx942, code), 3, groupSegmentSize = 64), Vec(0x56780000L))
+  }
+
+  test("gfx942 Tensile merges 16-bit buffer loads of the halves of a dword") {
+    val gfx942 = Target("gfx942")
+    // a raw buffer over the lanes' memory in s[12:15], v9 its offset and v17 a stale value, then from the kernel:
+    // buffer_load_short_d16 v12, v9, s[12:15], 0 offen; buffer_load_short_d16_hi v17, v9, s[12:15], 0 offen offset:2;
+    // v_or_b32_e32 v12, v12, v17
+    val code = octets(0x06, 0x01, 0x8c, 0xbe) ++ octets(0xff, 0x00, 0x8e, 0xbe, 0x00, 0x10, 0x00, 0x00) ++
+      octets(0xff, 0x00, 0x8f, 0xbe, 0x00, 0x00, 0x02, 0x00) ++ octets(0x01, 0x03, 0x12, 0x7e) ++
+      octets(0x03, 0x03, 0x22, 0x7e) ++ octets(0x00, 0x10, 0x90, 0xe0, 0x09, 0x0c, 0x03, 0x80) ++
+      octets(0x02, 0x10, 0x94, 0xe0, 0x09, 0x11, 0x03, 0x80) ++ octets(0x0c, 0x23, 0x18, 0x28)
+    assertEquals(laneResults(gfx942, Vec(Vec(0x3c00bc00L, 0xdeadbeefL)), program(gfx942, code), 12), Vec(0x3c00bc00L))
+  }
+
+  // Tensile's gfx942 SGEMM (Cijk_Ailk_Bjlk_SB_MT32x64x32_MI16x16x4x1, rocBLAS 7.1.1 XPU) reaches the columns of a
+  // global read through scalar offsets and leaves K's tail to the range check, so columns past K read as zero only when
+  // the check counts the scalar offset, which the ISA documents leave out.
+  test("gfx942 raw buffers check the scalar offset against NUM_RECORDS") {
+    val gfx942 = Target("gfx942")
+    // a raw buffer of 8 bytes over the lanes' memory in s[12:15], v9 its offset, then
+    // buffer_load_dword v12, v9, s[12:15], s16 offen with a scalar offset of 4 or 8
+    def load(scalar: Int): Vec[Long] = laneResults(
+      gfx942,
+      Vec(Vec(0x11111111L, 0x22222222L, 0x33333333L)),
+      program(
+        gfx942,
+        octets(0x06, 0x01, 0x8c, 0xbe) ++ octets(0x88, 0x00, 0x8e, 0xbe) ++
+          octets(0xff, 0x00, 0x8f, 0xbe, 0x00, 0x00, 0x02, 0x00) ++ octets(0x01, 0x03, 0x12, 0x7e) ++
+          octets(0x80 + scalar, 0x00, 0x90, 0xbe) ++ octets(0x00, 0x10, 0x50, 0xe0, 0x09, 0x0c, 0x03, 0x10)
+      ),
+      12
+    )
+    assertEquals(load(4), Vec(0x22222222L))
+    assertEquals(load(8), Vec(0L))
   }
 
   test("legacy flat memory uses unsigned offsets through the top encoded bit") {
@@ -159,7 +303,27 @@ class AMDGPUMemorySuite extends munit.FunSuite {
     )
   }
 
+  test("gfx1250 flat takes a null scalar address as 124 and offsets a scalar base by a 32-bit VGPR") {
+    val gfx1250 = Target("gfx1250")
+    // llvm-mc 22 -mcpu=gfx1250: flat_load_b32 v0, v[2:3]; flat_load_b32 v0, v2, s[0:1] offset:-16
+    assertEquals(
+      VMCompiler.decodeInstruction(octets(0x7c, 0, 5, 0xec, 0, 0, 0, 0, 2, 0, 0, 0), gfx1250),
+      Right(Instruction.Load(0, MemoryAddress.Flat(2, 0), 4, false, LoadPlacement.Full))
+    )
+    assertEquals(
+      VMCompiler.decodeInstruction(octets(0, 0, 5, 0xec, 0, 0, 0, 0, 2, 0xf0, 0xff, 0xff), gfx1250),
+      Right(Instruction.Load(0, MemoryAddress.Flat(2, -16, Some(0)), 4, false, LoadPlacement.Full))
+    )
+    // flat_load_b32 v3, v1, s[6:7] offset:4
+    val code = octets(0x06, 0, 5, 0xec, 3, 0, 0, 0, 1, 4, 0, 0)
+    assertEquals(
+      laneResults(gfx1250, Vec(Vec(1L, 0x11L), Vec(2L, 0x22L)), program(gfx1250, code), 3),
+      Vec(0x11L, 0x22L)
+    )
+  }
+
   test("RDNA4 cache maintenance retains its invalidation and writeback semantics") {
+    val trailer = Vec[Byte](0, 0, 12, 0, 0, 0, 0, 0)
     for (
       (opcode, expected) <- Seq(
         43 -> Instruction.CacheInvalidate,
@@ -168,7 +332,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
       )
     ) {
       val word  = 0xee00007cL | (opcode.toLong << 14)
-      val bytes = LittleEndian.toVec(word, 4) ++ Vec[Byte](0, 0, 12, 0, 0, 0, 0, 0)
+      val bytes = LittleEndian.toVec(word, 4) ++ trailer
       assertEquals(VMCompiler.decodeInstruction(bytes, Target("gfx1200")), Right(expected))
     }
   }
@@ -200,14 +364,16 @@ class AMDGPUMemorySuite extends munit.FunSuite {
   }
 
   test("RDNA single LDS loads and stores preserve byte offsets") {
+    val store = Instruction.Store(2, MemoryAddress.Local(1, 1795), 4, false)
+    val load  = Instruction.Load(8, MemoryAddress.Local(1, 1795), 4, false, LoadPlacement.Full)
     for (target <- Seq(Target("gfx1100"), Target("gfx1200"))) {
       assertEquals(
         VMCompiler.decodeInstruction(Vec[Byte](3, 7, 0x34, 0xd8.toByte, 1, 2, 0, 0), target),
-        Right(Instruction.Store(2, MemoryAddress.Local(1, 1795), 4, false))
+        Right(store)
       )
       assertEquals(
         VMCompiler.decodeInstruction(Vec[Byte](3, 7, 0xd8.toByte, 0xd8.toByte, 1, 0, 0, 8), target),
-        Right(Instruction.Load(8, MemoryAddress.Local(1, 1795), 4, false, LoadPlacement.Full))
+        Right(load)
       )
     }
 
@@ -215,29 +381,31 @@ class AMDGPUMemorySuite extends munit.FunSuite {
 
   test("RDNA paired LDS loads and stores preserve register pairs and scaled offsets") {
     // LLVM fixtures: ds_{load,store}_2addr[_stride64]_b{32,64}, with offset0:3 offset1:7.
+    val widths = Seq[(Int, Int in (4, 8))]((0xd8, 4), (0xd9, 8))
     for {
       (opcode, stride) <- Seq((0x38, 1), (0x3c, 64))
-      (high, width)    <- Seq[(Int, Int in (4, 8))]((0xd8, 4), (0xd9, 8))
+      (high, width)    <- widths
     } {
       assertEquals(
         VMCompiler.decodeInstruction(
           Vec[Byte](3, 7, opcode.toByte, high.toByte, 1, 2, 4, 0),
           Target("gfx1100")
         ),
-        Right(Instruction.StorePair(1, 2, 4, width, 3 * stride * width.raw, 7 * stride * width.raw))
+        Right(Instruction.StorePair(1, 2, 4, width, 3 * stride * width, 7 * stride * width))
       )
       assertEquals(
         VMCompiler.decodeInstruction(
           Vec[Byte](3, 7, (opcode + 0xa4).toByte, high.toByte, 1, 0, 0, 8),
           Target("gfx1100")
         ),
-        Right(Instruction.LoadPair(8, 1, width, 3 * stride * width.raw, 7 * stride * width.raw))
+        Right(Instruction.LoadPair(8, 1, width, 3 * stride * width, 7 * stride * width))
       )
     }
   }
 
   test("VMEM uses generation-specific segment, null address and coherence fields") {
     // Fixed llvm-mc encodings for the same flat/global operations across generations.
+    val flat = Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full)
     for (
       (target, opcode, segment, absent) <- Seq(
         (Target("gfx900"), 0x50, 0x80, 0x7f),
@@ -283,7 +451,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
           ),
           target
         ),
-        Right(Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full))
+        Right(flat)
       )
     }
     assertEquals(
@@ -327,7 +495,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
       (last, scalarOffset)   <- Seq(0xf8 -> None, 0x0c -> Some(6))
     }
       decoded(target, 0x02, second, third, 0xf4, 0x10, 0x00, 0x00, last) match {
-        case Instruction.SLoad(destination, words, base, offset, registerOffset, _) =>
+        case Instruction.SLoad(destination, words, base, offset, registerOffset, _, _) =>
           assertEquals(
             (destination.raw, words.raw, base.raw, offset, registerOffset.map(_.raw)),
             (8, count, 4, 16L, scalarOffset)
@@ -345,8 +513,12 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Right(Instruction.Load(7, MemoryAddress.Buffer(Some(1), 20, Some(3), 12), 4, false, LoadPlacement.Full))
       )
     }
+    // buffer_load_b32 v7, v1, s[20:23], s3 idxen indexes by v1
     val indexed = Vec(0, 0, 0x50, 0xe0, 1, 7, 0x85, 3).map(_.toByte)
-    assert(VMCompiler.decodeInstruction(indexed, Target("gfx1100")).isLeft)
+    assertEquals(
+      VMCompiler.decodeInstruction(indexed, Target("gfx1100")),
+      Right(Instruction.Load(7, MemoryAddress.Buffer(None, 20, Some(3), 0, Some(1)), 4, false, LoadPlacement.Full))
+    )
   }
 
 }

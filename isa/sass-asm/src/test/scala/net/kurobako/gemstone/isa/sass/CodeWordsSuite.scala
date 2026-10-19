@@ -112,11 +112,11 @@ class CodeWordsSuite extends munit.FunSuite {
     }
     val editedControls = controls.updated(
       1,
-      (controls(1).raw ^ 1).unsafe[CodeWords.ControlBits]
+      (controls(1) ^ 1).unsafe[CodeWords.ControlBits]
     )
     val editedWord   = bundle.words.head.copy(bytes = bundle.words.head.bytes.updated(0, 0x5a.toByte))
     val editedBundle = bundle.copy(
-      control = CodeWords.BundleControl.Maxwell(editedControls, (reserved.raw ^ 1).unsafe[Int in (0, 1)]),
+      control = CodeWords.BundleControl.Maxwell(editedControls, (reserved ^ 1).unsafe[Int in (0, 1)]),
       words = bundle.words.updated(0, editedWord)
     )
     val edited  = section.copy(bundles = section.bundles.updated(0, editedBundle))

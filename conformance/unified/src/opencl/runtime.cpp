@@ -17,19 +17,17 @@
 
 namespace {
 void check(cl_int status, const char *operation) {
-  {
-    INFO(fmt::format("{} returned {}", operation, status));
-    REQUIRE(status == CL_SUCCESS);
-  }
+  INFO(fmt::format("{} returned {}", operation, status));
+  REQUIRE(status == CL_SUCCESS);
 }
 void execute(bool binaryRoundtrip) {
   unified::test_runtime::Cleanup cleanup;
-  const auto device = reinterpret_cast<cl_device_id>(static_cast<uintptr_t>(conformance::deviceSelection().nativeHandle));
+  auto *const device = reinterpret_cast<cl_device_id>(static_cast<uintptr_t>(conformance::deviceSelection().nativeHandle));
   cl_int status = 0;
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
   check(status, "context");
   cleanup.add([=] { clReleaseContext(context); });
-  auto queue = clCreateCommandQueue(context, device, 0, &status);
+  auto *queue = clCreateCommandQueue(context, device, 0, &status);
   check(status, "queue");
   cleanup.add([=] { clReleaseCommandQueue(queue); });
   const char *source = R"cl(
@@ -39,7 +37,7 @@ void execute(bool binaryRoundtrip) {
       barrier(CLK_LOCAL_MEM_FENCE);
       output[i] = tile[(l + 1) % get_local_size(0)] + (int)get_group_id(0);
     })cl";
-  auto program = clCreateProgramWithSource(context, 1, &source, nullptr, &status);
+  auto *program = clCreateProgramWithSource(context, 1, &source, nullptr, &status);
   check(status, "source program");
   cleanup.add([=] { clReleaseProgram(program); });
   auto build = [&](cl_program value) {
@@ -71,19 +69,22 @@ void execute(bool binaryRoundtrip) {
     check(binaryStatus, "binary status");
     build(program);
   }
-  auto kernel = clCreateKernel(program, "stencil", &status);
+  auto *kernel = clCreateKernel(program, "stencil", &status);
   check(status, "kernel");
   cleanup.add([=] { clReleaseKernel(kernel); });
-  constexpr size_t size = 128, local = 32;
+  constexpr size_t size = 128;
+  constexpr size_t local = 32;
   auto values = unified::test_runtime::input(size);
   std::vector<int32_t> output(size, 0);
-  auto sourceBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, size * sizeof(int32_t), nullptr, &status);
+  auto *sourceBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, size * sizeof(int32_t), nullptr, &status);
   check(status, "input buffer");
   cleanup.add([=] { clReleaseMemObject(sourceBuffer); });
-  auto destination = clCreateBuffer(context, CL_MEM_WRITE_ONLY, size * sizeof(int32_t), nullptr, &status);
+  auto *destination = clCreateBuffer(context, CL_MEM_WRITE_ONLY, size * sizeof(int32_t), nullptr, &status);
   check(status, "output buffer");
   cleanup.add([=] { clReleaseMemObject(destination); });
-  cl_event uploaded{}, executed{}, downloaded{};
+  cl_event uploaded{};
+  cl_event executed{};
+  cl_event downloaded{};
   check(clEnqueueWriteBuffer(queue, sourceBuffer, CL_FALSE, 0, size * sizeof(int32_t), values.data(), 0, nullptr, &uploaded), "upload");
   cleanup.add([=] { clReleaseEvent(uploaded); });
   check(clSetKernelArg(kernel, 0, sizeof(sourceBuffer), &sourceBuffer), "input argument");
@@ -96,7 +97,7 @@ void execute(bool binaryRoundtrip) {
   check(clWaitForEvents(1, &downloaded), "completion");
   for (size_t i = 0; i < size; ++i) {
     INFO(fmt::format("local-memory/barrier result mismatch at {}", i));
-    REQUIRE(output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local));
+    REQUIRE(output[i] == values[((i / local) * local) + ((i + 1) % local)] + static_cast<int32_t>(i / local));
   }
 }
 } // namespace

@@ -15,14 +15,16 @@
 
 #include <stdint.h>
 
+#include <aspartame/vector.hpp>
+
 namespace gemstone {
 
 /** Saturating steady-clock deadline `nanoseconds` from now. */
 inline std::chrono::steady_clock::time_point deadlineAfter(uint64_t nanoseconds) {
   const auto now = std::chrono::steady_clock::now();
   const auto room = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::time_point::max() - now).count();
-  return nanoseconds >= static_cast<uint64_t>(room) ? std::chrono::steady_clock::time_point::max()
-                                                    : now + std::chrono::nanoseconds(nanoseconds);
+  return std::cmp_greater_equal(nanoseconds, room) ? std::chrono::steady_clock::time_point::max()
+                                                   : now + std::chrono::nanoseconds(nanoseconds);
 }
 
 // A bounded pool executes independent streams. Completion handles retain event
@@ -49,14 +51,14 @@ public:
    */
   void shutdown() {
     {
-      std::lock_guard lock(mutex);
+      std::scoped_lock const lock(mutex);
       stopping = true;
     }
     changed.notify_all();
     for (;;) {
       std::thread worker;
       {
-        std::lock_guard lock(mutex);
+        std::scoped_lock const lock(mutex);
         if (workers.empty()) break;
         worker = std::move(workers.back());
         workers.pop_back();
@@ -71,7 +73,7 @@ public:
 
   void configure(const void *stream, bool nonblocking) {
     stream = streamKey(stream);
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     streams[stream].nonblocking = nonblocking;
   }
   Ticket submit(const void *stream, std::function<int32_t()> work, std::vector<Ticket> dependencies = {}, Order order = Order::Ordered) {
@@ -82,7 +84,7 @@ public:
   }
   Ticket snapshot(const void *stream) {
     stream = streamKey(stream);
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     if (!stream) {
       auto result = std::make_shared<Completion>();
       result->join = true;
@@ -99,7 +101,7 @@ public:
     return result;
   }
   Ticket snapshotAll() {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     auto result = std::make_shared<Completion>();
     result->join = true;
     for (const auto &[_, value] : streams)
@@ -107,16 +109,16 @@ public:
     return result;
   }
   bool ready(const Ticket &ticket) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     return readyLocked(ticket);
   }
   int32_t query(const Ticket &ticket, int32_t notReady) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     return readyLocked(ticket) ? statusLocked(ticket, false) : notReady;
   }
   void forget(const void *stream) {
     stream = streamKey(stream);
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     streams.erase(stream);
   }
   int32_t wait(const Ticket &ticket) {
@@ -131,10 +133,10 @@ public:
     return statusLocked(ticket, true);
   }
   int32_t waitAll() { return onWorker() ? 0 : wait(snapshotAll()); }
-  bool onWorker() const { return activeQueue == this; }
+  [[nodiscard]] bool onWorker() const { return activeQueue == this; }
 
   /** A ticket completed by the host rather than by queued work. */
-  Ticket pending() { return std::make_shared<Completion>(); }
+  static Ticket pending() { return std::make_shared<Completion>(); }
   void complete(const Ticket &ticket, int32_t status) {
     {
       std::unique_lock lock(mutex);
@@ -149,17 +151,20 @@ public:
   template <class Wait> decltype(auto) blocking(Wait &&wait) {
     if (!onWorker()) return std::forward<Wait>(wait)();
     {
-      std::lock_guard lock(mutex);
+      std::scoped_lock const lock(mutex);
       if (!stopping && workers.size() - blocked <= Concurrency) workers.emplace_back([this] { run(); });
       ++blocked;
     }
     struct Unblock {
-      CommandQueue &queue;
+      CommandQueue *queue;
+      explicit Unblock(CommandQueue *queue) : queue(queue) {}
+      Unblock(const Unblock &) = delete;
+      Unblock &operator=(const Unblock &) = delete;
       ~Unblock() {
-        std::lock_guard lock(queue.mutex);
-        --queue.blocked;
+        std::scoped_lock const lock(queue->mutex);
+        --queue->blocked;
       }
-    } unblock{*this};
+    } const unblock{this};
     return std::forward<Wait>(wait)();
   }
   /** Like `wait`, but a worker also waits while another covers for it. */
@@ -168,7 +173,7 @@ public:
   }
 
   void *createStream(bool nonblocking) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     auto *stream = mintHandle();
     auto &created = streams[stream];
     created.created = true;
@@ -177,7 +182,7 @@ public:
   }
   /** False for streams this queue did not create, including the special legacy and per-thread streams. */
   bool destroyStream(const void *stream) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     const auto found = streams.find(stream);
     if (found == streams.end() || !found->second.created) return false;
     streams.erase(found);
@@ -186,26 +191,26 @@ public:
   bool hasStream(const void *stream) {
     stream = streamKey(stream);
     if (!stream || stream == &perThreadStream()) return true;
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     const auto found = streams.find(stream);
     return found != streams.end() && found->second.created;
   }
 
   /** Destroys every stream and event this queue created; queued work keeps its own references. */
   void reset() {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     std::erase_if(streams, [](const auto &entry) { return entry.second.created; });
     events.clear();
   }
 
   void *createEvent() {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     auto *event = mintHandle();
     events.emplace(event, Ticket{});
     return event;
   }
   bool destroyEvent(const void *event) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     return events.erase(event) == 1;
   }
   bool recordEvent(const void *event, const void *stream) {
@@ -218,7 +223,7 @@ public:
   }
   /** The completion of the event's latest record; empty when the event is unknown. */
   std::optional<Ticket> eventTicket(const void *event) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     const auto found = events.find(event);
     if (found == events.end()) return std::nullopt;
     return found->second;
@@ -272,13 +277,15 @@ private:
     if (!stream) {
       for (const auto &[key, value] : streams)
         if (key && !value.nonblocking) frontier(value, dependencies);
-    } else if (!target.nonblocking) frontier(streams[nullptr], dependencies);
+    } else if (!target.nonblocking) {
+      frontier(streams[nullptr], dependencies);
+    }
     auto ticket = std::make_shared<Completion>();
     ticket->dependencies = std::move(dependencies);
     if (!stopping && workers.empty())
       for (unsigned i = 0; i < Concurrency; ++i)
         workers.emplace_back([this] { run(); });
-    jobs.push_back({ticket, std::move(work)});
+    jobs.push_back({.ticket = ticket, .work = std::move(work)});
     if (order == Order::Ordered) {
       target.tail = ticket;
       target.outstanding.clear();
@@ -291,7 +298,8 @@ private:
   }
   static bool readyLocked(const Ticket &ticket) { return !ticket || ticket->done || (ticket->join && dependenciesReady(ticket)); }
   static bool dependenciesReady(const Ticket &ticket) {
-    return std::all_of(ticket->dependencies.begin(), ticket->dependencies.end(), readyLocked);
+    using namespace aspartame;
+    return ticket->dependencies ^ forall(readyLocked);
   }
   static int32_t statusLocked(const Ticket &ticket, bool consume) {
     if (!ticket) return 0;
@@ -311,7 +319,7 @@ private:
     const int32_t inherited = statusLocked(job.ticket, false);
     lock.unlock();
     const auto *previous = std::exchange(activeQueue, this);
-    int32_t status;
+    int32_t status = 0;
     try {
       status = job.work();
     } catch (...) {

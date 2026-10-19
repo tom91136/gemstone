@@ -95,7 +95,7 @@ import net.kurobako.gemstone.constraint.*
     val buffer   = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
     // CUDA libraries can leave SHI_REGISTERS unset, retaining EIATTR_REGCOUNT in .nv.info.
     val sectionTable = buffer.getLong(40).toInt
-    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, module.sections(kernel.section.raw).info & 0x00ffffff)
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, module.sections(kernel.section).info & 0x00ffffff)
     val info   = module.sections.find(_.name == ".nv.info").get
     val record = sections(info.index.raw).offset.raw
     assertEquals(buffer.getShort(record) & 0xffff, 0x2f04)
@@ -117,16 +117,16 @@ import net.kurobako.gemstone.constraint.*
     val buffer       = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
     val sectionTable = buffer.getLong(40).toInt
     // cuBLAS CUTLASS images retain matching old links in .nv.info and .text after stripping sections.
-    Vec(info.index.raw, kernel.section.raw).foreach(index =>
-      buffer.putInt(sectionTable + index * 64 + 40, info.index.raw)
+    Vec(info.index, kernel.section).foreach(index =>
+      buffer.putInt(sectionTable + index.raw * 64 + 40, info.index)
     )
-    val symbol = module.sections(kernel.section.raw).info & 0x00ffffff
+    val symbol = module.sections(kernel.section).info & 0x00ffffff
     buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol)
     val record = headers(info.index.raw).offset.raw
     buffer.putInt(record + 8, 14)
     assertEquals(Cubin.decode(Vec.unsafeWrapArray(image)).value.kernels.head.registerCount.raw, 14)
 
-    val symbolOffset = headers(table.index.raw).offset.raw + symbol * 24
+    val symbolOffset = headers(table.index).offset.raw + symbol * 24
     val originalName = buffer.getInt(symbolOffset)
     buffer.putInt(symbolOffset, originalName + 1)
     assert(Cubin.decode(Vec.unsafeWrapArray(image)).isLeft, "symbol name must match its text section")

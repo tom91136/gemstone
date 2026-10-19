@@ -1,23 +1,27 @@
 package net.kurobako.gemstone.isa.ptx
 
 import execution.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class ShiftSuite extends munit.FunSuite {
+  private val shiftOperations = Vec("shl", "shr.s", "shr.u")
+
   test("integer shifts clamp counts for 16, 32, and 64-bit operands") {
     val counts   = Vec(0L, 1L, 15L, 16L, 17L, 31L, 32L, 33L, 63L, 64L, 65L, 0xffffffffL)
     val allCases = Vec(16, 32, 64).flatMap { width =>
       val negative = if (width == 64) Long.MinValue | 1L else (1L << (width - 1)) | 1L
       val positive = if (width == 64) 0x4000000000000001L else (1L << (width - 2)) | 1L
+      val raws     = Vec(negative, positive)
       for {
         count     <- counts
-        raw       <- Vec(negative, positive)
-        operation <- Vec("shl", "shr.s", "shr.u")
+        raw       <- raws
+        operation <- shiftOperations
       } yield {
-        val signed = if (width == 64) raw else (raw << (64 - width)) >> (64 - width)
+        val signed = Bits.signExtend(raw, width.unsafe[Int in 1 ~ 64])
         (width, raw, signed, count, operation)
       }
     }

@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** ALU-only companion to [[AMDGPUVectorCopyBenchmark]], isolating instruction and lane dispatch from guest memory. */
 object AMDGPUALUBenchmark {
-  private enum Mode {
+  private enum Mode derives CanEqual {
     case Move, Binary
   }
 
@@ -28,7 +28,7 @@ object AMDGPUALUBenchmark {
       // gfx9 VOP2 v_add_f32 v0, v1, v2
       case Mode.Binary => 0x02000501L
     }
-    val words    = Vec.fill(instructions.raw)(instruction) :+ 0xbf810000L
+    val words    = Vec.fill(instructions)(instruction) :+ 0xbf810000L
     val code     = words.flatMap(word => LittleEndian.toVec(word, 4))
     val kernel   = CodeObjectKernel("alu", Target("gfx900"), 0, 0, 0, 0, 0, code, code.nonNegativeSize)
     val prepared = VMCompiler().compile(kernel).fold(failure => throw RuntimeException(failure.message), identity)

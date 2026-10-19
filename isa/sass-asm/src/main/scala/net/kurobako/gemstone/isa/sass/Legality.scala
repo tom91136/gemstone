@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.sass
 
+import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.NVDisasm.*
 
 /** Evaluates recovered operand constraints; unknown conditions never become permission to execute. */
@@ -45,19 +47,23 @@ object Legality {
 
   def evaluate(
       database: NVDisasm.Database,
-      expression: NVDisasm.ConditionExpression,
+      expression: ConditionExpression,
       bindings: Map[String, BigInt]
   ): Either[String, BigInt] = {
-    import NVDisasm.ConditionExpression.*
-    def truth(value: Boolean): BigInt                                     = if (value) BigInt(1) else BigInt(0)
-    def eval(value: NVDisasm.ConditionExpression): Either[String, BigInt] = evaluate(database, value, bindings)
-    def values(arguments: Vec[NVDisasm.ConditionExpression]): Either[String, Vec[BigInt]] =
-      arguments.foldLeft[Either[String, Vec[BigInt]]](Right(Vec.empty)) { (result, argument) =>
-        for {
-          previous <- result
-          value    <- eval(argument)
-        } yield previous :+ value
-      }
+    import ConditionExpression.*
+    def truth(value: Boolean): BigInt                            = if (value) BigInt(1) else BigInt(0)
+    def eval(value: ConditionExpression): Either[String, BigInt] = evaluate(database, value, bindings)
+    def shortCircuit(
+        left: ConditionExpression,
+        right: ConditionExpression,
+        decisive: Boolean,
+        result: Boolean
+    ): Either[String, BigInt] =
+      eval(left).flatMap(value =>
+        if ((value != 0) == decisive) Right(truth(result)) else eval(right).map(value => truth(value != 0))
+      )
+    def values(arguments: Vec[ConditionExpression]): Either[String, Vec[BigInt]] =
+      arguments.traverse(eval(_))
     expression match {
       case Number(value)                               => Right(value)
       case Conditional(condition, whenTrue, whenFalse) =>
@@ -80,13 +86,10 @@ object Legality {
       case Unary(UnaryOperator.Negate, value)             => eval(value).map(-_)
       case Unary(UnaryOperator.BitwiseNot, value)         => eval(value).map(~_)
       case Unary(UnaryOperator.Unsupported(operator), _)  => Left(s"unsupported condition operator $operator")
-      case Binary(BinaryOperator.LogicalAnd, left, right) =>
-        eval(left).flatMap(value => if (value == 0) Right(BigInt(0)) else eval(right).map(value => truth(value != 0)))
-      case Binary(BinaryOperator.LogicalOr, left, right) =>
-        eval(left).flatMap(value => if (value != 0) Right(BigInt(1)) else eval(right).map(value => truth(value != 0)))
-      case Binary(BinaryOperator.Implies, left, right) =>
-        eval(left).flatMap(value => if (value == 0) Right(BigInt(1)) else eval(right).map(value => truth(value != 0)))
-      case Binary(operator, left, right) => for {
+      case Binary(BinaryOperator.LogicalAnd, left, right) => shortCircuit(left, right, decisive = false, result = false)
+      case Binary(BinaryOperator.LogicalOr, left, right)  => shortCircuit(left, right, decisive = true, result = true)
+      case Binary(BinaryOperator.Implies, left, right)    => shortCircuit(left, right, decisive = false, result = true)
+      case Binary(operator, left, right)                  => for {
           a      <- eval(left)
           b      <- eval(right)
           result <- operator match {

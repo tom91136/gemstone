@@ -2,10 +2,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <numeric>
 #include <vector>
 
+#include <aspartame/optional.hpp>
+#include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "test_support.hpp"
@@ -28,7 +30,25 @@ using support::TwoRanges;
 using support::duplicateKeys;
 using support::sortedValues;
 
-template <class T> inline std::vector<T> values(size_t size, size_t salt = 0) { return support::algorithmValues<T>(size, salt); }
+template <class T> inline std::vector<T> values(size_t size, size_t salt = 0) {
+  using namespace aspartame;
+  return iota(size_t{0}, size)
+         | map([&](size_t index) { return static_cast<T>(static_cast<int64_t>(((index * 17) + (salt * 11)) % 23) - 11); }) | to_vector();
+}
+
+template <class T> inline std::vector<T> groupedKeys(size_t size) {
+  using namespace aspartame;
+  return iota(size_t{0}, size) | map([](size_t index) {
+           const auto group = index / 3;
+           return static_cast<T>(group);
+         })
+         | to_vector();
+}
+
+inline std::vector<int32_t> cyclicValues(size_t size) {
+  using namespace aspartame;
+  return iota(size_t{0}, size) | map([](size_t index) { return static_cast<int32_t>((index % 4) + 1); }) | to_vector();
+}
 
 template <class T> inline std::vector<T> referenceMerge(const std::vector<T> &left, const std::vector<T> &right) {
   std::vector<T> result;
@@ -47,11 +67,15 @@ template <class T> inline std::vector<T> referenceSetUnion(const std::vector<T> 
   size_t a = 0;
   size_t b = 0;
   while (a < left.size() || b < right.size()) {
-    if (a == left.size()) result.push_back(right[b++]);
-    else if (b == right.size()) result.push_back(left[a++]);
-    else if (left[a] < right[b]) result.push_back(left[a++]);
-    else if (right[b] < left[a]) result.push_back(right[b++]);
-    else {
+    if (a == left.size()) {
+      result.push_back(right[b++]);
+    } else if (b == right.size()) {
+      result.push_back(left[a++]);
+    } else if (left[a] < right[b]) {
+      result.push_back(left[a++]);
+    } else if (right[b] < left[a]) {
+      result.push_back(right[b++]);
+    } else {
       result.push_back(left[a]);
       ++a;
       ++b;
@@ -65,9 +89,11 @@ template <class T> inline std::vector<T> referenceSetIntersection(const std::vec
   size_t a = 0;
   size_t b = 0;
   while (a < left.size() && b < right.size()) {
-    if (left[a] < right[b]) ++a;
-    else if (right[b] < left[a]) ++b;
-    else {
+    if (left[a] < right[b]) {
+      ++a;
+    } else if (right[b] < left[a]) {
+      ++b;
+    } else {
       result.push_back(left[a]);
       ++a;
       ++b;
@@ -83,10 +109,10 @@ template <class T, class Backend> void copy(Backend &backend, size_t size) {
 }
 
 template <class T, class Backend> void copyIf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  std::vector<T> expected;
-  std::copy_if(input.begin(), input.end(), std::back_inserter(expected), IsEven<T>{});
+  const auto expected = input ^ filter(IsEven<T>{});
   REQUIRE(backend.copyIf(input) == expected);
 }
 
@@ -125,56 +151,54 @@ template <class T, class Backend> void forEach(Backend &backend, size_t size) {
 }
 
 template <class T, class Backend> void transformUnary(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  for (auto &value : expected)
-    value = Affine<T>{}(value);
+  const auto expected = input ^ map(Affine<T>{});
   REQUIRE(backend.transformUnary(input) == expected);
 }
 
 template <class T, class Backend> void transformBinary(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
   const auto right = values<T>(size, 7);
-  auto expected = input;
-  for (size_t index = 0; index < size; ++index)
-    expected[index] = Combine<T>{}(input[index], right[index]);
+  const auto expected = input ^ zip(right) ^ map(Combine<T>{});
   REQUIRE(backend.transformBinary(input, right) == expected);
 }
 
 template <class T, class Backend> void replaceIf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  std::replace_if(expected.begin(), expected.end(), IsEven<T>{}, T{9});
+  const auto expected = input ^ map([](T value) { return IsEven<T>{}(value) ? T{9} : value; });
   const auto actual = backend.replaceIf(input, T{9});
   REQUIRE(actual == expected);
 }
 
 template <class T, class Backend> void replaceCopyIf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  std::replace_if(expected.begin(), expected.end(), IsEven<T>{}, T{9});
+  const auto expected = input ^ map([](T value) { return IsEven<T>{}(value) ? T{9} : value; });
   const auto actual = backend.replaceCopyIf(input, T{9});
   REQUIRE(actual == expected);
 }
 
 template <class T, class Backend> void removeIf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  expected.erase(std::remove_if(expected.begin(), expected.end(), IsEven<T>{}), expected.end());
+  const auto expected = input ^ filter([](T value) { return !IsEven<T>{}(value); });
   const auto actual = backend.removeIf(input);
   REQUIRE(actual == expected);
 }
 
 template <class T, class Backend> void removeCopyIf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  expected.erase(std::remove_if(expected.begin(), expected.end(), IsEven<T>{}), expected.end());
+  const auto expected = input ^ filter([](T value) { return !IsEven<T>{}(value); });
   const auto actual = backend.removeCopyIf(input);
   REQUIRE(actual == expected);
 }
@@ -182,26 +206,20 @@ template <class T, class Backend> void removeCopyIf(Backend &backend, size_t siz
 template <class T, class Backend> void reverse(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  std::reverse(expected.begin(), expected.end());
-  REQUIRE(backend.reverse(input) == expected);
+  REQUIRE(backend.reverse(input) == (input ^ aspartame::reverse()));
 }
 
 template <class T, class Backend> void reverseCopy(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  std::reverse(expected.begin(), expected.end());
-  REQUIRE(backend.reverseCopy(input) == expected);
+  REQUIRE(backend.reverseCopy(input) == (input ^ aspartame::reverse()));
 }
 
 template <class T, class Backend> void shuffle(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  auto actual = backend.shuffle(input);
-  std::sort(expected.begin(), expected.end());
-  std::sort(actual.begin(), actual.end());
+  const auto expected = input ^ aspartame::sort();
+  const auto actual = backend.shuffle(input) ^ aspartame::sort();
   REQUIRE(actual == expected);
 }
 
@@ -215,76 +233,54 @@ template <class T, class Backend> void swapRanges(Backend &backend, size_t size)
 }
 
 template <class T, class Backend> void reduce(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  T expected{};
-  for (const auto value : input)
-    expected = Plus<T>{}(expected, value);
-  REQUIRE(backend.reduce(input) == expected);
+  REQUIRE(backend.reduce(input) == (input ^ fold_left(T{}, Plus<T>{})));
 }
 
 template <class T, class Backend> void transformReduce(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  T expected{};
-  for (const auto value : input)
-    expected = Plus<T>{}(expected, Square<T>{}(value));
-  REQUIRE(backend.transformReduce(input) == expected);
+  REQUIRE(backend.transformReduce(input) == (input ^ map(Square<T>{}) ^ fold_left(T{}, Plus<T>{})));
 }
 
 template <class T, class Backend> void innerProduct(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
   const auto right = values<T>(size, 7);
-  T expected{};
-  for (size_t index = 0; index < size; ++index)
-    expected = Plus<T>{}(expected, static_cast<T>(input[index] * right[index]));
+  const auto expected = input ^ zip(right) ^ map([](T a, T b) { return static_cast<T>(a * b); }) ^ fold_left(T{}, Plus<T>{});
   REQUIRE(backend.innerProduct(input, right) == expected);
 }
 
 template <class T, class Backend> void inclusiveScan(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  for (size_t index = 1; index < size; ++index)
-    expected[index] = Plus<T>{}(expected[index - 1], input[index]);
-  REQUIRE(backend.inclusiveScan(input) == expected);
+  REQUIRE(backend.inclusiveScan(input) == (input ^ scan_left(T{}, Plus<T>{}) ^ tail()));
 }
 
 template <class T, class Backend> void exclusiveScan(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  std::vector<T> expected(size);
-  T running{};
-  for (size_t index = 0; index < size; ++index) {
-    expected[index] = running;
-    running = Plus<T>{}(running, input[index]);
-  }
-  REQUIRE(backend.exclusiveScan(input) == expected);
+  REQUIRE(backend.exclusiveScan(input) == (input ^ scan_left(T{}, Plus<T>{}) ^ init()));
 }
 
 template <class T, class Backend> void transformInclusiveScan(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  std::vector<T> expected(size);
-  T running{};
-  for (size_t index = 0; index < size; ++index) {
-    running = Plus<T>{}(running, Square<T>{}(input[index]));
-    expected[index] = running;
-  }
-  REQUIRE(backend.transformInclusiveScan(input) == expected);
+  REQUIRE(backend.transformInclusiveScan(input) == (input ^ map(Square<T>{}) ^ scan_left(T{}, Plus<T>{}) ^ tail()));
 }
 
 template <class T, class Backend> void transformExclusiveScan(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  std::vector<T> expected(size);
-  T running{};
-  for (size_t index = 0; index < size; ++index) {
-    expected[index] = running;
-    running = Plus<T>{}(running, Square<T>{}(input[index]));
-  }
-  REQUIRE(backend.transformExclusiveScan(input) == expected);
+  REQUIRE(backend.transformExclusiveScan(input) == (input ^ map(Square<T>{}) ^ scan_left(T{}, Plus<T>{}) ^ init()));
 }
 
 template <class T, class Backend> void adjacentDifference(Backend &backend, size_t size) {
@@ -300,9 +296,7 @@ template <class T, class Backend> void adjacentDifference(Backend &backend, size
 template <class T, class Backend> void sort(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  std::sort(expected.begin(), expected.end());
-  REQUIRE(backend.sort(input) == expected);
+  REQUIRE(backend.sort(input) == (input ^ aspartame::sort()));
 }
 
 template <class T, class Backend> void stableSort(Backend &backend, size_t size) {
@@ -316,28 +310,22 @@ template <class T, class Backend> void stableSort(Backend &backend, size_t size)
 template <class T, class Backend> void sortDescending(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto expected = input;
-  std::sort(expected.begin(), expected.end(), Greater<T>{});
-  REQUIRE(backend.sortDescending(input) == expected);
+  REQUIRE(backend.sortDescending(input) == (input ^ aspartame::sort(Greater<T>{})));
 }
 
 template <class T, class Backend> void sortByKey(Backend &backend, size_t size) {
-  auto keys = values<T>(size, 4);
-  for (size_t index = 0; index < keys.size(); ++index)
-    keys[index] = static_cast<T>(keys[index] * static_cast<T>(size + 1) + static_cast<T>(index));
-  std::vector<int32_t> payload(size);
-  std::iota(payload.begin(), payload.end(), 0);
-  const auto actual = backend.sortByKey(keys, payload);
-  REQUIRE(std::is_sorted(actual.keys.begin(), actual.keys.end()));
+  using namespace aspartame;
+  const auto keys = values<T>(size, 4) ^ zip_with_index()
+                    ^ map([&](T key, size_t index) { return static_cast<T>((key * static_cast<T>(size + 1)) + static_cast<T>(index)); });
+  const auto actual = backend.sortByKey(keys, support::payload(size));
+  REQUIRE((actual.keys ^ is_sorted()));
   REQUIRE_THAT(actual.keys, unified::KeyPermutation(actual.values, keys));
 }
 
 template <class T, class Backend> void stableSortByKey(Backend &backend, size_t size) {
   const auto keys = duplicateKeys<T>(size);
-  std::vector<int32_t> payload(size);
-  std::iota(payload.begin(), payload.end(), 0);
-  const auto actual = backend.stableSortByKey(keys, payload);
-  REQUIRE(std::is_sorted(actual.keys.begin(), actual.keys.end()));
+  const auto actual = backend.stableSortByKey(keys, support::payload(size));
+  REQUIRE((actual.keys ^ aspartame::is_sorted()));
   REQUIRE_THAT(actual.keys, unified::KeyPermutation(actual.values, keys));
   for (size_t index = 0; index < size; ++index) {
     if (index != 0 && actual.keys[index] == actual.keys[index - 1]) REQUIRE(actual.values[index - 1] < actual.values[index]);
@@ -345,16 +333,14 @@ template <class T, class Backend> void stableSortByKey(Backend &backend, size_t 
 }
 
 template <class T, class Backend> void unique(Backend &backend, size_t size) {
-  auto repeated = duplicateKeys<T>(size);
-  std::sort(repeated.begin(), repeated.end());
+  const auto repeated = duplicateKeys<T>(size) ^ aspartame::sort();
   auto expected = repeated;
   expected.erase(std::unique(expected.begin(), expected.end()), expected.end());
   REQUIRE(backend.unique(repeated) == expected);
 }
 
 template <class T, class Backend> void uniqueCopy(Backend &backend, size_t size) {
-  auto repeated = duplicateKeys<T>(size);
-  std::sort(repeated.begin(), repeated.end());
+  const auto repeated = duplicateKeys<T>(size) ^ aspartame::sort();
   auto expected = repeated;
   expected.erase(std::unique(expected.begin(), expected.end()), expected.end());
   REQUIRE(backend.uniqueCopy(repeated) == expected);
@@ -371,48 +357,44 @@ template <class T, class Backend> void count(Backend &backend, size_t size) {
 template <class T, class Backend> void countIf(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  size_t expected = 0;
-  for (const auto value : input)
-    if (IsEven<T>{}(value)) ++expected;
-  REQUIRE(backend.countIf(input) == expected);
+  REQUIRE(backend.countIf(input) == (input ^ aspartame::count(IsEven<T>{})));
 }
 
 template <class T, class Backend> void find(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
   const T needle = T{1};
-  const auto expected = static_cast<size_t>(std::find(input.begin(), input.end(), needle) - input.begin());
+  const auto expected = input ^ index_of_maybe(needle) ^ get_or_else(input.size());
   REQUIRE(backend.find(input, needle) == expected);
 }
 
 template <class T, class Backend> void findIf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  size_t expected = size;
-  for (size_t index = 0; index < size; ++index)
-    if (IsEven<T>{}(input[index])) {
-      expected = index;
-      break;
-    }
-  REQUIRE(backend.findIf(input) == expected);
+  REQUIRE(backend.findIf(input) == (input ^ index_where_maybe(IsEven<T>{}) ^ get_or_else(size)));
 }
 
 template <class T, class Backend> void allOf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  REQUIRE(backend.allOf(input) == std::all_of(input.begin(), input.end(), IsEven<T>{}));
+  REQUIRE(backend.allOf(input) == (input ^ forall(IsEven<T>{})));
 }
 
 template <class T, class Backend> void anyOf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  REQUIRE(backend.anyOf(input) == std::any_of(input.begin(), input.end(), IsEven<T>{}));
+  REQUIRE(backend.anyOf(input) == (input ^ exists(IsEven<T>{})));
 }
 
 template <class T, class Backend> void noneOf(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  REQUIRE(backend.noneOf(input) == std::none_of(input.begin(), input.end(), IsEven<T>{}));
+  REQUIRE(backend.noneOf(input) == (input ^ none_match(IsEven<T>{})));
 }
 
 template <class T, class Backend> void equal(Backend &backend, size_t size) {
@@ -429,28 +411,25 @@ template <class T, class Backend> void mismatch(Backend &backend, size_t size) {
   auto right = input;
   if (!right.empty()) right[size / 2] = static_cast<T>(right[size / 2] + T{1});
   const auto expectedPair = std::mismatch(input.begin(), input.end(), right.begin());
-  const TwoPositions expected{static_cast<size_t>(expectedPair.first - input.begin()),
-                              static_cast<size_t>(expectedPair.second - right.begin())};
+  const TwoPositions expected{.first = static_cast<size_t>(expectedPair.first - input.begin()),
+                              .second = static_cast<size_t>(expectedPair.second - right.begin())};
   REQUIRE(backend.mismatch(input, right) == expected);
 }
 
 template <class T, class Backend> void lowerBound(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto sorted = input;
-  std::sort(sorted.begin(), sorted.end());
+  const auto sorted = input ^ aspartame::sort();
   const T needle = T{1};
-  size_t expected = 0;
-  while (expected < sorted.size() && sorted[expected] < needle)
-    ++expected;
+  const auto expected = sorted ^ index_where_maybe([&](T value) { return !(value < needle); }) ^ get_or_else(sorted.size());
   REQUIRE(backend.lowerBound(sorted, needle) == expected);
 }
 
 template <class T, class Backend> void upperBound(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto sorted = input;
-  std::sort(sorted.begin(), sorted.end());
+  const auto sorted = input ^ aspartame::sort();
   const T needle = T{1};
   const auto expected = static_cast<size_t>(std::upper_bound(sorted.begin(), sorted.end(), needle) - sorted.begin());
   REQUIRE(backend.upperBound(sorted, needle) == expected);
@@ -459,19 +438,17 @@ template <class T, class Backend> void upperBound(Backend &backend, size_t size)
 template <class T, class Backend> void binarySearch(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto sorted = input;
-  std::sort(sorted.begin(), sorted.end());
+  const auto sorted = input ^ aspartame::sort();
   const T needle = T{1};
   REQUIRE(backend.binarySearch(sorted, needle) == std::binary_search(sorted.begin(), sorted.end(), needle));
 }
 
 template <class T, class Backend> void equalRange(Backend &backend, size_t size) {
-  auto sorted = duplicateKeys<T>(size);
-  std::sort(sorted.begin(), sorted.end());
+  const auto sorted = duplicateKeys<T>(size) ^ aspartame::sort();
   const T needle = T{3};
   const auto expectedPair = std::equal_range(sorted.begin(), sorted.end(), needle);
-  const TwoPositions expected{static_cast<size_t>(expectedPair.first - sorted.begin()),
-                              static_cast<size_t>(expectedPair.second - sorted.begin())};
+  const TwoPositions expected{.first = static_cast<size_t>(expectedPair.first - sorted.begin()),
+                              .second = static_cast<size_t>(expectedPair.second - sorted.begin())};
   REQUIRE(backend.equalRange(sorted, needle) == expected);
 }
 
@@ -490,30 +467,23 @@ template <class T, class Backend> void partition(Backend &backend, size_t size) 
     REQUIRE(IsEven<T>{}(actual.values[index]));
   for (size_t index = actual.boundary; index < actual.values.size(); ++index)
     REQUIRE(!IsEven<T>{}(actual.values[index]));
-  auto expectedValues = input;
-  auto actualValues = actual.values;
-  std::sort(expectedValues.begin(), expectedValues.end());
-  std::sort(actualValues.begin(), actualValues.end());
-  REQUIRE(actualValues == expectedValues);
+  REQUIRE((actual.values ^ aspartame::sort()) == (input ^ aspartame::sort()));
 }
 
 template <class T, class Backend> void stablePartition(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
   const auto actual = backend.stablePartition(input);
-  std::vector<T> expected = input;
-  const auto boundary = std::stable_partition(expected.begin(), expected.end(), IsEven<T>{});
-  REQUIRE(actual.values == expected);
-  REQUIRE(actual.boundary == (static_cast<size_t>(boundary - expected.begin())));
+  const auto [selected, rejected] = input ^ aspartame::partition(IsEven<T>{});
+  REQUIRE(actual.values == (selected ^ concat(rejected)));
+  REQUIRE(actual.boundary == selected.size());
 }
 
 template <class T, class Backend> void partitionCopy(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  std::vector<T> selected;
-  std::vector<T> rejected;
-  for (const auto value : input)
-    (IsEven<T>{}(value) ? selected : rejected).push_back(value);
+  const auto [selected, rejected] = input ^ aspartame::partition(IsEven<T>{});
   const auto actual = backend.partitionCopy(input);
   REQUIRE(actual.first == selected);
   REQUIRE(actual.second == rejected);
@@ -579,43 +549,43 @@ template <class T, class Backend> void setSymmetricDifference(Backend &backend, 
 }
 
 template <class T, class Backend> void minElement(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
   auto extrema = input;
   if (!extrema.empty()) extrema[size / 3] = T{-100};
-  const auto expected = extrema.empty() ? size : static_cast<size_t>(std::min_element(extrema.begin(), extrema.end()) - extrema.begin());
-  REQUIRE(backend.minElement(extrema) == expected);
+  REQUIRE(backend.minElement(extrema) == (extrema ^ index_of_min() ^ get_or_else(size)));
 }
 
 template <class T, class Backend> void maxElement(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
   auto extrema = input;
   if (!extrema.empty()) extrema[(size * 2) / 3] = T{100};
-  const auto expected = extrema.empty() ? size : static_cast<size_t>(std::max_element(extrema.begin(), extrema.end()) - extrema.begin());
-  REQUIRE(backend.maxElement(extrema) == expected);
+  REQUIRE(backend.maxElement(extrema) == (extrema ^ index_of_max() ^ get_or_else(size)));
 }
 
 template <class T, class Backend> void minmaxElement(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
   auto extrema = input;
-  if (extrema.size() == 1) extrema[0] = T{0};
-  else if (!extrema.empty()) {
+  if (extrema.size() == 1) {
+    extrema[0] = T{0};
+  } else if (!extrema.empty()) {
     extrema[size / 3] = T{-100};
     extrema[(size * 2) / 3] = T{100};
   }
   const auto pair = std::minmax_element(extrema.begin(), extrema.end());
-  const TwoPositions expected{static_cast<size_t>(pair.first - extrema.begin()), static_cast<size_t>(pair.second - extrema.begin())};
+  const TwoPositions expected{.first = static_cast<size_t>(pair.first - extrema.begin()),
+                              .second = static_cast<size_t>(pair.second - extrema.begin())};
   REQUIRE(backend.minmaxElement(extrema) == expected);
 }
 
 template <class T, class Backend> void isSorted(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto sorted = input;
-  std::sort(sorted.begin(), sorted.end());
-  REQUIRE(backend.isSorted(sorted) == true);
+  REQUIRE(backend.isSorted(input ^ aspartame::sort()) == true);
 }
 
 template <class T, class Backend> void isSortedFalse(Backend &backend, size_t size) {
@@ -634,8 +604,7 @@ template <class T, class Backend> void isSortedFalse(Backend &backend, size_t si
 template <class T, class Backend> void isSortedUntil(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto nearly = input;
-  std::sort(nearly.begin(), nearly.end());
+  auto nearly = input ^ aspartame::sort();
   if (nearly.size() > 2) std::swap(nearly[nearly.size() / 2], nearly.back());
   const auto expected = static_cast<size_t>(std::is_sorted_until(nearly.begin(), nearly.end()) - nearly.begin());
   REQUIRE(backend.isSortedUntil(nearly) == expected);
@@ -662,13 +631,11 @@ template <class T, class Backend> void rotateCopy(Backend &backend, size_t size)
 }
 
 template <class T, class Backend> void includes(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  auto left = input;
-  std::sort(left.begin(), left.end());
-  std::vector<T> right;
-  for (size_t index = 0; index < left.size(); index += 3)
-    right.push_back(left[index]);
+  const auto left = input ^ aspartame::sort();
+  const auto right = left ^ stride(3);
   const bool actual = backend.includes(left, right);
   REQUIRE(actual);
 }
@@ -676,44 +643,34 @@ template <class T, class Backend> void includes(Backend &backend, size_t size) {
 template <class T, class Backend> void includesFalse(Backend &backend, size_t size) {
   const auto input = values<T>(size, 1);
 
-  auto left = input;
-  std::sort(left.begin(), left.end());
+  const auto left = input ^ aspartame::sort();
   const std::vector<T> right{T{100}};
   const bool actual = backend.includes(left, right);
   REQUIRE_FALSE(actual);
 }
 
 template <class T, class Backend> void gather(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  std::vector<size_t> indices(size);
-  for (size_t index = 0; index < size; ++index)
-    indices[index] = size - index - 1;
-  auto expected = input;
-  std::reverse(expected.begin(), expected.end());
+  const auto indices = iota(size_t{0}, size) | map(support::ReverseIndex{size}) | to_vector();
   const auto actual = backend.gather(input, indices);
-  REQUIRE(actual == expected);
+  REQUIRE(actual == (input ^ aspartame::reverse()));
 }
 
 template <class T, class Backend> void scatter(Backend &backend, size_t size) {
+  using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  std::vector<size_t> indices(size);
-  for (size_t index = 0; index < size; ++index)
-    indices[index] = size - index - 1;
-  auto expected = input;
-  std::reverse(expected.begin(), expected.end());
+  const auto indices = iota(size_t{0}, size) | map(support::ReverseIndex{size}) | to_vector();
   const auto actual = backend.scatter(input, indices);
-  REQUIRE(actual == expected);
+  REQUIRE(actual == (input ^ aspartame::reverse()));
 }
 
 template <class T, class Backend> void reduceByKey(Backend &backend, size_t size) {
-  std::vector<T> keys(size);
-  std::vector<int32_t> values(size);
-  for (size_t index = 0; index < size; ++index) {
-    keys[index] = static_cast<T>(index / 3);
-    values[index] = static_cast<int32_t>(index % 4 + 1);
-  }
+  using namespace aspartame;
+  const auto keys = groupedKeys<T>(size);
+  const auto values = cyclicValues(size);
   KeyValues<T> expected;
 
   for (size_t index = 0; index < size; ++index) {
@@ -725,36 +682,28 @@ template <class T, class Backend> void reduceByKey(Backend &backend, size_t size
     }
   }
 
-  KeyValues<T> actual;
-  actual = backend.reduceByKey(keys, values);
+  const auto actual = backend.reduceByKey(keys, values);
   REQUIRE(actual == expected);
 }
 
 template <class T, class Backend> void inclusiveScanByKey(Backend &backend, size_t size) {
-  std::vector<T> keys(size);
-  std::vector<int32_t> values(size);
-  for (size_t index = 0; index < size; ++index) {
-    keys[index] = static_cast<T>(index / 3);
-    values[index] = static_cast<int32_t>(index % 4 + 1);
-  }
+  using namespace aspartame;
+  const auto keys = groupedKeys<T>(size);
+  const auto values = cyclicValues(size);
   KeyValues<T> expected;
 
   expected = {keys, values};
   for (size_t index = 1; index < size; ++index)
     if (keys[index] == keys[index - 1]) expected.values[index] += expected.values[index - 1];
 
-  KeyValues<T> actual;
-  actual = backend.inclusiveScanByKey(keys, values);
+  const auto actual = backend.inclusiveScanByKey(keys, values);
   REQUIRE(actual == expected);
 }
 
 template <class T, class Backend> void exclusiveScanByKey(Backend &backend, size_t size) {
-  std::vector<T> keys(size);
-  std::vector<int32_t> values(size);
-  for (size_t index = 0; index < size; ++index) {
-    keys[index] = static_cast<T>(index / 3);
-    values[index] = static_cast<int32_t>(index % 4 + 1);
-  }
+  using namespace aspartame;
+  const auto keys = groupedKeys<T>(size);
+  const auto values = cyclicValues(size);
   KeyValues<T> expected;
 
   expected = {keys, std::vector<int32_t>(size)};
@@ -765,18 +714,14 @@ template <class T, class Backend> void exclusiveScanByKey(Backend &backend, size
     running += values[index];
   }
 
-  KeyValues<T> actual;
-  actual = backend.exclusiveScanByKey(keys, values);
+  const auto actual = backend.exclusiveScanByKey(keys, values);
   REQUIRE(actual == expected);
 }
 
 template <class T, class Backend> void uniqueByKey(Backend &backend, size_t size) {
-  std::vector<T> keys(size);
-  std::vector<int32_t> values(size);
-  for (size_t index = 0; index < size; ++index) {
-    keys[index] = static_cast<T>(index / 3);
-    values[index] = static_cast<int32_t>(index % 4 + 1);
-  }
+  using namespace aspartame;
+  const auto keys = groupedKeys<T>(size);
+  const auto values = cyclicValues(size);
   KeyValues<T> expected;
 
   for (size_t index = 0; index < size; ++index)
@@ -785,8 +730,7 @@ template <class T, class Backend> void uniqueByKey(Backend &backend, size_t size
       expected.values.push_back(values[index]);
     }
 
-  KeyValues<T> actual;
-  actual = backend.uniqueByKey(keys, values);
+  const auto actual = backend.uniqueByKey(keys, values);
   REQUIRE(actual == expected);
 }
 
@@ -821,12 +765,9 @@ template <class T, class Backend> void partialSort(Backend &backend, size_t size
 
   const auto middle = size / 2;
   const auto actual = backend.partialSort(input, middle);
-  auto fullySorted = input;
-  std::sort(fullySorted.begin(), fullySorted.end());
+  const auto fullySorted = input ^ aspartame::sort();
   REQUIRE(std::equal(actual.begin(), actual.begin() + static_cast<ptrdiff_t>(middle), fullySorted.begin()));
-  auto permutation = actual;
-  std::sort(permutation.begin(), permutation.end());
-  REQUIRE(permutation == fullySorted);
+  REQUIRE((actual ^ aspartame::sort()) == fullySorted);
 }
 
 template <class T, class Backend> void nthElement(Backend &backend, size_t size) {
@@ -834,12 +775,9 @@ template <class T, class Backend> void nthElement(Backend &backend, size_t size)
 
   const auto nth = size / 2;
   const auto actual = backend.nthElement(input, nth);
-  auto fullySorted = input;
-  std::sort(fullySorted.begin(), fullySorted.end());
+  const auto fullySorted = input ^ aspartame::sort();
   if (!actual.empty()) REQUIRE(actual[nth] == fullySorted[nth]);
-  auto permutation = actual;
-  std::sort(permutation.begin(), permutation.end());
-  REQUIRE(permutation == fullySorted);
+  REQUIRE((actual ^ aspartame::sort()) == fullySorted);
 }
 
 template <class T, class Backend> void inplaceMerge(Backend &backend, size_t size) {

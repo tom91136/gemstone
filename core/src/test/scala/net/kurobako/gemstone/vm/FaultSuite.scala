@@ -25,6 +25,14 @@ class FaultSuite extends munit.FunSuite {
       Fault.Unsupported("d"),
       Fault.EventHandling("e"),
       Fault.Backend("f"),
+      Fault.InvalidProgram("g"),
+      Fault.InvalidConfiguration("h"),
+      Fault.OutOfResources("i"),
+      Fault.Misaligned("j"),
+      Fault.IllegalInstruction("k"),
+      Fault.Trap("l"),
+      Fault.Assertion("m"),
+      Fault.Hang("n"),
       Fault.BudgetExceeded(10L)
     )
     faults.foreach(fault => assertEquals(fault.at(location).location, Some(location), fault))

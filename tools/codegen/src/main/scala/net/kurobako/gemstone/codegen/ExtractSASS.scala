@@ -20,6 +20,8 @@ import scala.util.control.NonFatal
 
 /** Recovers digest-pinned machine descriptions using the two version-specific nvdisasm capture hooks. */
 object ExtractSASS {
+  private given CanEqual[ujson.Value, ujson.Value] = CanEqual.derived
+
   class Tool(val name: String, val binary: Path, val digest: String, val packageInfo: ujson.Obj)
 
   private val ResourceRoot            = "/net/kurobako/gemstone/codegen/sass/"

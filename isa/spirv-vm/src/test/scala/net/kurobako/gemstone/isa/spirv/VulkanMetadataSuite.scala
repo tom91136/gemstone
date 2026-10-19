@@ -10,6 +10,9 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class VulkanMetadataSuite extends munit.FunSuite {
+  private val DefaultSize = Seq(4L, 3L, 2L)
+  private val SizeIds     = Seq("%x", "%y", "%z")
+
   private val functionTypes = """%void = OpTypeVoid
     |%fn = OpTypeFunction %void""".stripMargin
 
@@ -79,7 +82,7 @@ class VulkanMetadataSuite extends munit.FunSuite {
     } {
       // Boxing three test dimensions per case is immaterial.
       @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
-      val dimensions = Seq(4L, 3L, 2L).updated(axis, invalid)
+      val dimensions = DefaultSize.updated(axis, invalid)
       val module     = spv"""
         $vulkan
         OpEntryPoint GLCompute %main "main"
@@ -87,7 +90,7 @@ class VulkanMetadataSuite extends munit.FunSuite {
         $functionTypes
         %ulong = OpTypeInt 64 0
         %ulong3 = OpTypeVector %ulong 3
-        ${Seq("%x", "%y", "%z").zip(dimensions).map((id, size) => s"$id = OpSpecConstant %ulong $size").mkString("\n")}
+        ${SizeIds.zip(dimensions).map((id, size) => s"$id = OpSpecConstant %ulong $size").mkString("\n")}
         %size = OpSpecConstantComposite %ulong3 %x %y %z
         ${function("%main")}
       """

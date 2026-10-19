@@ -16,8 +16,8 @@ class BinaryExecutionSuite extends munit.FunSuite {
     val image   = Fixture.copyAddCubin.toArray
     val module  = Cubin.decode(Vec.unsafeWrapArray(image)).value
     val kernel  = module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add"))
-    val section = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections(kernel.section.raw)
-    java.util.Arrays.fill(image, section.offset.raw, (section.offset + 16).raw, 0.toByte)
+    val section = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections(kernel.section)
+    java.util.Arrays.fill(image, section.offset, section.offset + 16, 0.toByte)
     Using.resource(ExecutionSession(List(CubinBackend()))) { service =>
       val memory  = service.registerAllocation(128).value
       val program = service.load(ProgramEncoding.CUDACubin, Vec.from(image)).value
@@ -29,9 +29,9 @@ class BinaryExecutionSuite extends munit.FunSuite {
       ).value
       val completion = service.launch(program, task).value
       service.completion(completion) match {
-        case Right(CompletionStatus.Failed(error: ExecutionFailure.Unsupported)) =>
+        case Right(CompletionStatus.Failed(error: ExecutionFailure.InvalidProgram)) =>
           assert(error.message.startsWith("copy_add sm_89 at 0x0:"), error.message)
-        case other => fail(s"expected unsupported instruction failure, got $other")
+        case other => fail(s"expected invalid program failure, got $other")
       }
     }
   }

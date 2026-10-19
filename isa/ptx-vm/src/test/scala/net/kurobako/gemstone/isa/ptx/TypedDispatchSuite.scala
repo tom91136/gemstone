@@ -8,6 +8,8 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction as VMI
 import net.kurobako.gemstone.vm.*
 
 class TypedDispatchSuite extends munit.FunSuite {
+  private val atomicOperations = Vec("add.u32", "min.u32", "max.u32", "and.b32", "exch.b32", "add.f32", "cas.b32")
+
   private def compileInstructions(body: String) = VMCompiler.compile(s""".version 8.0
 .target sm_80
 .address_size 64
@@ -60,7 +62,7 @@ ret;
   test("atomic ordering and scope qualifiers retain every supported global operation") {
     for {
       qualifiers <- Vec("sys.global", "acq_rel.gpu.global")
-      operation  <- Vec("add.u32", "min.u32", "max.u32", "and.b32", "exch.b32", "add.f32", "cas.b32")
+      operation  <- atomicOperations
     } {
       val operands = if (operation == "cas.b32") "%r0, [%rd0], 0, 1" else "%r0, [%rd0], 1"
       val source   = s"atom.$qualifiers.$operation $operands;"
@@ -75,7 +77,7 @@ cvta.to.global.u64 %rd0, %rd0;
 """).toOption.get
     assertEquals(instructions.size, 3)
     assert(instructions.take(2).forall {
-      case VMI.Move(_, _, width) => width.raw == 64
+      case VMI.Move(_, _, width) => width == 64
       case _                     => false
     })
   }
@@ -238,10 +240,13 @@ st.relaxed.sys.v2.u32 [%rd0], {%r0, %r1};
       "fence.sc.cta",
       "fence.acq_rel.gpu",
       "fence.acquire.sys",
-      "fence.release.cluster"
+      "fence.release.cluster",
+      // clang's spellings of the scoped-and-ordered fences in conformance/unified/src/cuda/memory_atomics.cu
+      "fence.gpu.sc",
+      "fence.cta.acq_rel"
     ).foreach(opcode => assert(compileFence(opcode).isRight, clues(opcode)))
 
-    Vec("fence.relaxed.cta", "fence.sc.cluster.extra", "fence.unknown.gpu")
+    Vec("fence.relaxed.cta", "fence.sc.cluster.extra", "fence.unknown.gpu", "fence.gpu.cta", "fence.sc.acq_rel")
       .foreach(opcode => assert(compileFence(opcode).isLeft, clues(opcode)))
   }
   test("scalar memory opcode patterns preserve supported order and scope spellings") {

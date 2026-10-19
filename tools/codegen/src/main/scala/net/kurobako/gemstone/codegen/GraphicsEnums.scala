@@ -25,23 +25,26 @@ object GraphicsEnums {
     Mapping("GraphicsBorderColour", "VkBorderColor", "VK_BORDER_COLOR_", GraphicsBorderColour.values.toVector),
     Mapping("GraphicsSwizzle", "VkComponentSwizzle", "VK_COMPONENT_SWIZZLE_", GraphicsSwizzle.values.toVector)
   )
+  private val DescriptorEnums = Set(
+    "GraphicsCompare",
+    "GraphicsFilter",
+    "GraphicsAddressMode",
+    "GraphicsMipmapMode",
+    "GraphicsBorderColour",
+    "GraphicsSwizzle"
+  )
   val descriptorGroups: Vector[(String, String, Vector[(String, Long)])] = mappings.filter(mapping =>
-    Set(
-      "GraphicsCompare",
-      "GraphicsFilter",
-      "GraphicsAddressMode",
-      "GraphicsMipmapMode",
-      "GraphicsBorderColour",
-      "GraphicsSwizzle"
-    ).contains(mapping.name)
+    DescriptorEnums(mapping.name)
   ).map { mapping =>
     val name = if (mapping.name == "GraphicsCompare") "CompareOp" else mapping.name.stripPrefix("Graphics")
     (name, "Int", mapping.cases.zipWithIndex.map((name, ordinal) => name -> ordinal.toLong))
   }
+  private val CaseBoundary = "([a-z])([A-Z])".r
+
   def nativeSource: String = {
     val functions = mappings.map { mapping =>
       val cases = mapping.cases.map { name =>
-        val symbol = mapping.prefix + name.replaceAll("([a-z])([A-Z])", "$1_$2").toUpperCaseRoot
+        val symbol = mapping.prefix + CaseBoundary.replaceAllIn(name, "$1_$2").toUpperCaseRoot
         s"    case $symbol: return execution::${mapping.name}::$name;"
       }.mkString("\n")
       val method = "graphics" + mapping.name.stripPrefix("Graphics")

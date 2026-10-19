@@ -19,7 +19,8 @@ class JournalSuite extends munit.FunSuite {
       capture(file) { writer =>
         val generic = writer.connection(client)
         for (_ <- 0 until 2) { generic.request(execution()); generic.response(response()) }
-        generic.close()
+        // the writer's own close runs on every path
+        generic.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
         writer.clientClosed(client)
       }
       Using.resource(Journal.open(file)) { reader =>
@@ -52,7 +53,10 @@ class JournalSuite extends munit.FunSuite {
         writer.clientClosed(ClientId(7L))
         for (owner <- List(client, client, other)) {
           val connection = writer.connection(owner)
-          connection.request(execution()); connection.response(response()); connection.close()
+          // the writer's own close runs on every path
+          connection.request(execution())
+          connection.response(response())
+          connection.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
         }
         writer.clientClosed(client)
         writer.clientClosed(other)
@@ -92,7 +96,11 @@ class JournalSuite extends munit.FunSuite {
   test("truncated and corrupt archives fail instead of replaying a prefix") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(execution()); c.response(response()); c.close()
+        // the writer's own close runs on every path
+        val c = w.connection(client)
+        c.request(execution())
+        c.response(response())
+        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val original = Files.readAllBytes(file)
       Using.resource(RandomAccessFile(file.toFile, "rw"))(_.setLength(original.length - 1L))
@@ -107,7 +115,10 @@ class JournalSuite extends munit.FunSuite {
   test("unfinished exchanges and capture limits are explicitly unreplayable") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(execution()); c.close()
+        // the writer's own close runs on every path
+        val c = w.connection(client)
+        c.request(execution())
+        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val summary = Journal.inspect(file)
       assert(!summary.replayable)
@@ -123,31 +134,27 @@ class JournalSuite extends munit.FunSuite {
       val frame   = execution("Ping", Array.ofDim[Byte](5))
       val maximum = (frame.length - 1).refine[Journal.FrameByteSize]
         .fold(message => fail(message), value => value)
-      val writer = Journal.Writer(
-        file,
-        Journal.Header(profile, Journal.Limits(maxFrameBytes = maximum))
-      )
-      val connection = writer.connection(client)
-      val _          = intercept[IOException](connection.request(frame))
-      writer.close()
+      Using.resource(Journal.Writer(file, Journal.Header(profile, Journal.Limits(maxFrameBytes = maximum)))) {
+        writer =>
+          val connection = writer.connection(client)
+          val _          = intercept[IOException](connection.request(frame))
+      }
       assert(!Journal.inspect(file).replayable)
     }
   }
   test("frame bounds include headers and lifecycle ordering is validated") {
     temporary { file =>
-      val writer =
-        Journal.Writer(file, Journal.Header(profile, Journal.Limits(maxEvents = 2)))
-      val c = writer.connection(client)
-      c.request(execution()); c.response(response())
-      val _ = intercept[IOException](c.close())
-      writer.close()
+      Using.resource(Journal.Writer(file, Journal.Header(profile, Journal.Limits(maxEvents = 2)))) { writer =>
+        val c = writer.connection(client)
+        c.request(execution()); c.response(response())
+        val _ = intercept[IOException](c.close())
+      }
       assert(!Journal.inspect(file).replayable)
     }
     temporary { file =>
-      val writer = Journal.Writer(file, Journal.Header(profile))
-      val c      = writer.connection(client)
-      val _      = intercept[IOException](c.response(response()))
-      writer.close()
+      capture(file) { writer =>
+        val _ = intercept[IOException](writer.connection(client).response(response()))
+      }
       assert(!Journal.inspect(file).replayable)
     }
   }
@@ -181,14 +188,14 @@ class JournalSuite extends munit.FunSuite {
   test("stored requests must carry a normalised client field") {
     val maximum = Journal.Limits().maxFrameBytes
     val frame   = Journal.Frames.normalised(Journal.Kind.Request, execution(), maximum)
-    Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum, normalised = true)
+    Journal.Frames.validateNormalised(kind = Journal.Kind.Request, bytes = frame, maximum = maximum)
     val _ = intercept[IOException] {
-      Journal.Frames.validate(kind = Journal.Kind.Response, bytes = frame, maximum = maximum, normalised = true)
+      Journal.Frames.validateNormalised(kind = Journal.Kind.Response, bytes = frame, maximum = maximum)
     }
-    frame(ExecutionRPC.RequestClientOffset.raw) = 1
-    Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum, normalised = false)
+    frame(ExecutionRPC.RequestClientOffset) = 1
+    Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum)
     val _ = intercept[IOException] {
-      Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum, normalised = true)
+      Journal.Frames.validateNormalised(kind = Journal.Kind.Request, bytes = frame, maximum = maximum)
     }
   }
 }

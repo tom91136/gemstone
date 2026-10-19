@@ -97,7 +97,7 @@ class GenerateSASSISASuite extends munit.FunSuite {
   test("case-colliding opcodes keep their word boundaries") {
     val source = SASSInstructionRenderer.render(Vector("UCGABAR_ARV", "UCGABARARV", "MOV").map(opcode =>
       SASSInstructionModel.Shape(opcode, Vector.empty, Vector.empty)
-    ))("Instruction.scala")
+    ))("Form.scala")
     assert(source.contains("case MovNoOperands("))
     assert(source.contains("case Ucgabar_ArvNoOperands("))
     assert(source.contains("case UcgabararvNoOperands("))

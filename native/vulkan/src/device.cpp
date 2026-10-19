@@ -1,16 +1,27 @@
 #include <algorithm>
-#include <bit>
-#include <limits>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
 
+#include <aspartame/array.hpp>
+
+#include "gemstone_execution_rpc.hpp"
 #include "gemstone_vulkan_adapter.hpp"
 #include "gemstone_vulkan_graphics.hpp"
 
 #include "resources.hpp"
 #include "state.hpp"
 
+using namespace aspartame;
+
 namespace gemstone::vulkan {
 
-template <typename T> VkResult enumerateOne(uint32_t *count, T *values, const T &value) {
+template <typename T> static VkResult enumerateOne(uint32_t *count, T *values, const T &value) {
   if (!count) return VK_ERROR_INITIALIZATION_FAILED;
   if (!values) {
     *count = 1;
@@ -23,9 +34,9 @@ template <typename T> VkResult enumerateOne(uint32_t *count, T *values, const T 
 }
 
 constexpr std::array<VkExtensionProperties, 3> SupportedDeviceExtensions{{
-    {VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION},
-    {VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_16BIT_STORAGE_SPEC_VERSION},
-    {VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION},
+    {.extensionName = VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, .specVersion = VK_EXT_HOST_QUERY_RESET_SPEC_VERSION},
+    {.extensionName = VK_KHR_16BIT_STORAGE_EXTENSION_NAME, .specVersion = VK_KHR_16BIT_STORAGE_SPEC_VERSION},
+    {.extensionName = VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME, .specVersion = VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION},
 }};
 
 VkResult implVkEnumerateInstanceVersion(uint32_t *version) {
@@ -55,21 +66,21 @@ VkResult implVkCreateInstance(const VkInstanceCreateInfo *info, const VkAllocati
   if (!supported) return VK_ERROR_INITIALIZATION_FAILED;
   // Vulkan 1.1 relaxed instance-version negotiation: newer application versions
   // do not make instance creation fail. The Vulkan 1.0 target remains strict.
-  if (*supported < VK_API_VERSION_1_1 && info->pApplicationInfo && (info->pApplicationInfo->apiVersion & ~0xfffu) > *supported)
+  if (*supported < VK_API_VERSION_1_1 && info->pApplicationInfo && (info->pApplicationInfo->apiVersion & ~0xfffU) > *supported)
     return VK_ERROR_INCOMPATIBLE_DRIVER;
   if (info->enabledLayerCount) return VK_ERROR_LAYER_NOT_PRESENT;
   for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
     if (std::strcmp(info->ppEnabledExtensionNames[i], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) != 0)
       return VK_ERROR_EXTENSION_NOT_PRESENT;
   *instance = makeHandle<VkInstance>();
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   instanceProperties2[*instance] = info->enabledExtensionCount != 0;
   return VK_SUCCESS;
 }
 
 void implVkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *) {
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     instanceProperties2.erase(instance);
   }
   deleteHandle(instance);
@@ -115,7 +126,7 @@ void implVkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice, uint32_t *co
     properties[0].queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
     properties[0].queueCount = 2;
     properties[0].timestampValidBits = 64;
-    properties[0].minImageTransferGranularity = {1, 1, 1};
+    properties[0].minImageTransferGranularity = {.width = 1, .height = 1, .depth = 1};
     *count = 1;
   }
 }
@@ -146,8 +157,7 @@ VkResult implVkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreat
   bool hostQueryResetExtension = false;
   for (uint32_t i = 0; i < info->enabledExtensionCount; ++i) {
     const auto *name = info->ppEnabledExtensionNames[i];
-    if (std::none_of(SupportedDeviceExtensions.begin(), SupportedDeviceExtensions.end(),
-                     [=](const auto &extension) { return std::strcmp(name, extension.extensionName) == 0; }))
+    if (SupportedDeviceExtensions ^ none_match([=](const auto &extension) { return std::strcmp(name, extension.extensionName) == 0; }))
       return VK_ERROR_EXTENSION_NOT_PRESENT;
     hostQueryResetExtension |= std::strcmp(name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0;
   }
@@ -157,7 +167,8 @@ VkResult implVkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreat
   const auto *chained = findChained<VkPhysicalDeviceFeatures2>(info->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
   const auto *requested = chained ? &chained->features : info->pEnabledFeatures;
   if (requested) {
-    std::array<VkBool32, sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)> wanted{}, available{};
+    std::array<VkBool32, sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)> wanted{};
+    std::array<VkBool32, sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)> available{};
     std::memcpy(wanted.data(), requested, sizeof(*requested));
     std::memcpy(available.data(), &supported, sizeof(supported));
     for (size_t i = 0; i < wanted.size(); ++i)
@@ -168,7 +179,7 @@ VkResult implVkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreat
     return VK_ERROR_INITIALIZATION_FAILED;
   const auto result = createQueues(info->pQueueCreateInfos[0].queueCount, device);
   if (result == VK_SUCCESS) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     devices.at(*device)->hostQueryResetExtension = hostQueryResetExtension;
   }
   return result;
@@ -177,7 +188,7 @@ VkResult implVkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreat
 void implVkDestroyDevice(VkDevice device, const VkAllocationCallbacks *) {
   std::shared_ptr<DeviceState> state;
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     const auto found = devices.find(device);
     if (found == devices.end()) return;
     state = found->second;
@@ -192,7 +203,7 @@ void implVkDestroyDevice(VkDevice device, const VkAllocationCallbacks *) {
 }
 void implVkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *queue) {
   if (!queue) return;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto found = devices.find(device);
   *queue =
       family == 0 && found != devices.end() && index < found->second->queues.size() ? found->second->queues[index]->handle : VK_NULL_HANDLE;
@@ -230,25 +241,26 @@ void implVkGetPhysicalDeviceQueueFamilyProperties2(VkPhysicalDevice device, uint
 VkResult implVkCreateEvent(VkDevice, const VkEventCreateInfo *, const VkAllocationCallbacks *, VkEvent *event) {
   if (!event) return VK_ERROR_INITIALIZATION_FAILED;
   *event = makeHandle<VkEvent>();
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   events[*event] = false;
   return VK_SUCCESS;
 }
 void implVkDestroyEvent(VkDevice, VkEvent event, const VkAllocationCallbacks *) {
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     events.erase(event);
     stateChanged.notify_all();
   }
   deleteHandle(event);
 }
 VkResult implVkGetEventStatus(VkDevice, VkEvent event) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto found = events.find(event);
-  return found == events.end() ? VK_ERROR_DEVICE_LOST : found->second ? VK_EVENT_SET : VK_EVENT_RESET;
+  if (found == events.end()) return VK_ERROR_DEVICE_LOST;
+  return found->second ? VK_EVENT_SET : VK_EVENT_RESET;
 }
 VkResult implVkSetEvent(VkDevice, VkEvent event) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto found = events.find(event);
   if (found == events.end()) return VK_ERROR_DEVICE_LOST;
   found->second = true;
@@ -256,7 +268,7 @@ VkResult implVkSetEvent(VkDevice, VkEvent event) {
   return VK_SUCCESS;
 }
 VkResult implVkResetEvent(VkDevice, VkEvent event) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto found = events.find(event);
   if (found == events.end()) return VK_ERROR_DEVICE_LOST;
   found->second = false;
@@ -270,29 +282,29 @@ VkResult implVkCreateSampler(VkDevice, const VkSamplerCreateInfo *info, const Vk
   if (reduction && reduction->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) return VK_ERROR_FEATURE_NOT_PRESENT;
   gx::GraphicsSampler value;
   try {
-    value = {graphicsFilter(info->minFilter),
-             graphicsFilter(info->magFilter),
-             graphicsAddressMode(info->addressModeU),
-             graphicsAddressMode(info->addressModeV),
-             graphicsAddressMode(info->addressModeW),
-             bool(info->unnormalizedCoordinates),
-             bool(info->compareEnable),
-             graphicsCompare(info->compareOp),
-             graphicsBorderColour(info->borderColor),
-             info->mipLodBias,
-             info->minLod,
-             info->maxLod,
-             graphicsMipmapMode(info->mipmapMode)};
+    value = {.minFilter = graphicsFilter(info->minFilter),
+             .magFilter = graphicsFilter(info->magFilter),
+             .addressU = graphicsAddressMode(info->addressModeU),
+             .addressV = graphicsAddressMode(info->addressModeV),
+             .addressW = graphicsAddressMode(info->addressModeW),
+             .unnormalized = static_cast<bool>(info->unnormalizedCoordinates),
+             .compareEnable = static_cast<bool>(info->compareEnable),
+             .compareOp = graphicsCompare(info->compareOp),
+             .borderColour = graphicsBorderColour(info->borderColor),
+             .mipLodBias = info->mipLodBias,
+             .minLod = info->minLod,
+             .maxLod = info->maxLod,
+             .mipmapMode = graphicsMipmapMode(info->mipmapMode)};
   } catch (const std::invalid_argument &) {
     return VK_ERROR_FEATURE_NOT_PRESENT;
   }
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   *sampler = makeHandle<VkSampler>();
   samplers.emplace(*sampler, value);
   return VK_SUCCESS;
 }
 void implVkDestroySampler(VkDevice, VkSampler sampler, const VkAllocationCallbacks *) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   samplers.erase(sampler);
   deleteHandle(sampler);
 }

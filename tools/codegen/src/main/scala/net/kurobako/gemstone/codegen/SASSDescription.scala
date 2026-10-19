@@ -9,7 +9,6 @@ import cats.parse.Parser0
   * code can interpret them without losing syntax that this version does not understand.
   */
 object SASSDescription {
-  case class ParseError(message: String, offset: Int)
 
   case class Description(
       architecture: Option[String],
@@ -38,7 +37,7 @@ object SASSDescription {
 
   case class Entry(name: String, value: String, raw: String, start: Int, end: Int)
 
-  private enum LexemeKind { case Word, Quoted, Comment, Group, Space, Symbol }
+  private enum LexemeKind derives CanEqual { case Word, Quoted, Comment, Group, Space, Symbol }
   private case class Lexeme(
       raw: String,
       kind: LexemeKind,

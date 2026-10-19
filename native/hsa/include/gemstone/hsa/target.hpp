@@ -30,10 +30,10 @@ inline TargetVersion targetVersion(const char *target) noexcept {
 
   const unsigned first = static_cast<unsigned>(target[3] - '0');
   if ((first == 1U || first == 2U) && target[4] >= '0' && target[4] <= '9') {
-    return TargetVersion{first * 10U + static_cast<unsigned>(target[4] - '0'),
-                         target[5] >= '0' && target[5] <= '9' ? static_cast<unsigned>(target[5] - '0') : 0U};
+    return TargetVersion{.major = (first * 10U) + static_cast<unsigned>(target[4] - '0'),
+                         .minor = target[5] >= '0' && target[5] <= '9' ? static_cast<unsigned>(target[5] - '0') : 0U};
   }
-  return TargetVersion{first, target[4] >= '0' && target[4] <= '9' ? static_cast<unsigned>(target[4] - '0') : 0U};
+  return TargetVersion{.major = first, .minor = target[4] >= '0' && target[4] <= '9' ? static_cast<unsigned>(target[4] - '0') : 0U};
 }
 
 inline unsigned waveSize() noexcept { return gemstone::amdgpu::defaultWaveSize(targetArch()); }

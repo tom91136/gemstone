@@ -1,42 +1,48 @@
 #include "gemstone/hsa/target.hpp"
 
-#include <cstdlib>
 #include <cstring>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <gemstone/test_support.hpp>
 #include <gemstone/trace.hpp>
 
 #include <environment_keys.hpp>
 
 TEST_CASE("HSA target and trace environment", "[hsa]") {
-  unsetenv(gemstone::environment::Trace);
-  REQUIRE((!gemstone::traceEnabled("hsa", "api")));
-  REQUIRE((setenv(gemstone::environment::Trace, "hsa.api,hsa.packets", 1) == 0));
-  REQUIRE((gemstone::traceEnabled("hsa", "api")));
-  REQUIRE((gemstone::traceEnabled("hsa", "packets")));
-  REQUIRE((!gemstone::traceEnabled("hsa", "memory")));
-  REQUIRE((setenv(gemstone::environment::Trace, "all", 1) == 0));
+  {
+    const gemstone_test::Environment trace(gemstone::environment::Trace, nullptr);
+    REQUIRE((!gemstone::traceEnabled("hsa", "api")));
+  }
+  {
+    const gemstone_test::Environment trace(gemstone::environment::Trace, "hsa.api,hsa.packets");
+    REQUIRE((gemstone::traceEnabled("hsa", "api")));
+    REQUIRE((gemstone::traceEnabled("hsa", "packets")));
+    REQUIRE((!gemstone::traceEnabled("hsa", "memory")));
+  }
+  const gemstone_test::Environment trace(gemstone::environment::Trace, "all");
   REQUIRE((gemstone::traceEnabled("hsa", "loaders")));
-  unsetenv(gemstone::environment::TargetArch);
+  const gemstone_test::Environment defaultTarget(gemstone::environment::TargetArch, nullptr);
   REQUIRE((std::strcmp(gemstone::hsa::targetArch(), "gfx900") == 0));
   const auto defaultVersion = gemstone::hsa::targetVersion();
   REQUIRE((defaultVersion.major == 9 && defaultVersion.minor == 0));
 
   struct Expected {
-    const char *name;
+    const char *name{};
     gemstone::hsa::TargetVersion version;
   };
   constexpr Expected targets[] = {
-      {"gfx600", {6, 0}},   {"gfx700", {7, 0}},   {"gfx803", {8, 0}},   {"gfx900", {9, 0}},
-      {"gfx1010", {10, 1}}, {"gfx1100", {11, 0}}, {"gfx1200", {12, 0}},
+      {.name = "gfx600", .version = {.major = 6, .minor = 0}},   {.name = "gfx700", .version = {.major = 7, .minor = 0}},
+      {.name = "gfx803", .version = {.major = 8, .minor = 0}},   {.name = "gfx900", .version = {.major = 9, .minor = 0}},
+      {.name = "gfx1010", .version = {.major = 10, .minor = 1}}, {.name = "gfx1100", .version = {.major = 11, .minor = 0}},
+      {.name = "gfx1200", .version = {.major = 12, .minor = 0}},
   };
   for (const auto &expected : targets) {
-    REQUIRE((setenv(gemstone::environment::TargetArch, expected.name, 1) == 0));
+    const gemstone_test::Environment selected(gemstone::environment::TargetArch, expected.name);
     REQUIRE((std::strcmp(gemstone::hsa::targetArch(), expected.name) == 0));
     const auto version = gemstone::hsa::targetVersion();
     REQUIRE((version.major == expected.version.major && version.minor == expected.version.minor));
   }
-  REQUIRE((setenv(gemstone::environment::TargetArch, "", 1) == 0));
+  const gemstone_test::Environment emptyTarget(gemstone::environment::TargetArch, "");
   REQUIRE((std::strcmp(gemstone::hsa::targetArch(), "gfx900") == 0));
 }

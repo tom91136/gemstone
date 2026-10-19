@@ -20,6 +20,12 @@ object Operand {
     case _                => false
   }
 
+  /** `operand` without the predicate a `base|predicate` form also names. */
+  def splitPredicate(operand: Operand): (base: Operand, predicate: Option[Operand]) = operand match {
+    case WithPredicate(base, predicate) => (base = base, predicate = Some(predicate))
+    case other                          => (base = other, predicate = None)
+  }
+
   def isWithPredicate(operand: Operand): Boolean = operand match {
     case WithPredicate(_, _) => true
     case _                   => false

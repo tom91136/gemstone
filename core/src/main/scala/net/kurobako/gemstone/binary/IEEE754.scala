@@ -1,14 +1,49 @@
 package net.kurobako.gemstone.binary
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. Every conversion and arithmetic helper rounds
   * once; NaN results are quiet and keep the leading payload bits of their source.
   */
+// raw operands and width keep each arithmetic call allocation-free
+@SuppressWarnings(Array("baumkuchen:data-clump"))
 object IEEE754 {
-  enum Rounding {
-    case NearestEven, TowardZero, Up, Down
+  enum Rounding derives CanEqual {
+    case NearestEven, TowardZero, Up, Down, NearestAway
+
+    /** The encoding a magnitude beyond the finite range rounds to: infinity, or the largest finite magnitude. */
+    private[IEEE754] def overflow(format: Format, negative: Boolean): Long = this match {
+      case NearestEven | NearestAway => format.infinity
+      case TowardZero                => format.infinity - 1L
+      case Up                        => if (negative) format.infinity - 1L else format.infinity
+      case Down                      => if (negative) format.infinity else format.infinity - 1L
+    }
+  }
+
+  private enum Pick derives CanEqual {
+    case Smaller, Larger
+  }
+
+  private enum NaNPolicy derives CanEqual {
+    case Propagate, Ignore
+  }
+
+  /** The operand whose NaN an arithmetic result propagates where both are NaN, which hardware fixes per ISA. */
+  enum NaNOperand derives CanEqual {
+    case Left, Right
+  }
+
+  /** `value` rounded to an integer under `rounding`. */
+  def integral(value: Double, rounding: Rounding): Double = rounding match {
+    case Rounding.NearestEven => Math.rint(value)
+    case Rounding.TowardZero  => if (value < 0.0) Math.ceil(value) else Math.floor(value)
+    case Rounding.Up          => Math.ceil(value)
+    case Rounding.Down        => Math.floor(value)
+    case Rounding.NearestAway =>
+      val truncated = if (value < 0.0) Math.ceil(value) else Math.floor(value)
+      if (Math.abs(value - truncated) >= 0.5) truncated + Math.signum(value) else truncated
   }
 
   private case class Format(exponentBits: Int, fractionBits: Int) {
@@ -18,6 +53,33 @@ object IEEE754 {
     val infinity: Long = ((1L << exponentBits) - 1L) << fractionBits
     val quietBit: Long = 1L << (fractionBits - 1)
   }
+
+  /** The sign bit of a `width`-bit encoding. */
+  inline def signBit(width: Int in (16, 32, 64)): Long = 1L << (width.raw - 1)
+
+  private inline def perWidth(
+      width: Int in (16, 32, 64),
+      inline half: Long,
+      inline single: Long,
+      inline double: Long
+  ): Long =
+    width.raw match {
+      case 16 => half
+      case 32 => single
+      case _  => double
+    }
+
+  /** The exponent field of a `width`-bit encoding, which infinities and NaNs fill. */
+  inline def infinity(width: Int in (16, 32, 64)): Long =
+    perWidth(width, half = 0x7c00L, single = 0x7f800000L, double = 0x7ff0000000000000L)
+
+  /** The leading fraction bit, which a quiet NaN sets. */
+  inline def quietBit(width: Int in (16, 32, 64)): Long =
+    perWidth(width, half = 0x200L, single = 0x400000L, double = 0x8000000000000L)
+
+  /** The encoding of 1.0 at `width`. */
+  inline def one(width: Int in (16, 32, 64)): Long =
+    perWidth(width, half = 0x3c00L, single = 0x3f800000L, double = 0x3ff0000000000000L)
 
   private val Half     = Format(exponentBits = 5, fractionBits = 10)
   private val BFloat16 = Format(exponentBits = 8, fractionBits = 7)
@@ -30,13 +92,26 @@ object IEEE754 {
     case _  => Double64
   }
 
-  /** Round the exact value `magnitude * 2^scale`, with `magnitude` unsigned and nonzero. */
-  private def encode(format: Format, negative: Boolean, magnitude: Long, scale: Int, rounding: Rounding): Long = {
+  /** Round the exact value `magnitude * 2^scale`, with `magnitude` unsigned and nonzero, keeping only the high `kept`
+    * of the format's fraction bits. A magnitude beyond the format's range is what `overflowMode` rounds it to.
+    */
+  private def encode(
+      format: Format,
+      negative: Boolean,
+      magnitude: Long,
+      scale: Int,
+      rounding: Rounding,
+      kept: Int,
+      overflowMode: Rounding
+  ): Long = {
+    def overflowed: Long =
+      (if (negative) format.signBit else 0L) |
+        overflowMode.overflow(format, negative)
     val exponent = 63 - java.lang.Long.numberOfLeadingZeros(magnitude) + scale
-    if (exponent > format.bias) (if (negative) format.signBit else 0L) | overflow(format, negative, rounding)
+    if (exponent > format.bias) overflowed
     else {
       val minimum  = 1 - format.bias
-      val shift    = math.max(exponent, minimum) - format.fractionBits - scale
+      val shift    = math.max(exponent, minimum) - kept - scale
       val retained =
         if (shift <= 0) magnitude << -shift
         else if (shift >= 64) 0L
@@ -53,20 +128,38 @@ object IEEE754 {
         case Rounding.TowardZero  => false
         case Rounding.Up          => !negative && inexact
         case Rounding.Down        => negative && inexact
+        case Rounding.NearestAway => half >= 0
       }
       val base    = if (exponent < minimum) 0L else (exponent + format.bias - 1).toLong << format.fractionBits
-      val encoded = base + retained + (if (increment) 1L else 0L)
-      (if (negative) format.signBit else 0L) |
-        (if (encoded < format.infinity) encoded else overflow(format, negative, rounding))
+      val encoded = base + ((retained + (if (increment) 1L else 0L)) << (format.fractionBits - kept))
+      if (encoded < format.infinity) (if (negative) format.signBit else 0L) | encoded else overflowed
     }
   }
 
-  private def overflow(format: Format, negative: Boolean, rounding: Rounding): Long = rounding match {
-    case Rounding.NearestEven => format.infinity
-    case Rounding.TowardZero  => format.infinity - 1L
-    case Rounding.Up          => if (negative) format.infinity - 1L else format.infinity
-    case Rounding.Down        => if (negative) format.infinity else format.infinity - 1L
-  }
+  /** `sum * 2^scale` rounded to a format of `exponentBits` and `fieldBits` stored fraction bits, of which only the high
+    * `kept` may be set, under `rounding`; a magnitude beyond the format's range is infinite whatever the rounding.
+    */
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
+  def encodeSum(
+      sum: Long,
+      scale: Int,
+      exponentBits: Int,
+      fieldBits: Int,
+      kept: Int,
+      rounding: Rounding
+  ): Long =
+    if (sum == 0L) 0L
+    else
+      encode(
+        Format(exponentBits, fieldBits),
+        sum < 0L,
+        math.abs(sum),
+        scale,
+        rounding,
+        kept,
+        overflowMode = Rounding.NearestEven
+      )
 
   private def roundDouble(value: Double, format: Format, rounding: Rounding): Long = {
     val bits     = java.lang.Double.doubleToRawLongBits(value)
@@ -78,13 +171,31 @@ object IEEE754 {
       if (fraction == 0L) sign | format.infinity
       else sign | format.infinity | format.quietBit | (fraction >>> (52 - format.fractionBits))
     else if (exponent == 0 && fraction == 0L) sign
-    else if (exponent == 0) encode(format, negative, fraction, -1074, rounding)
-    else encode(format, negative, fraction | (1L << 52), exponent - 1075, rounding)
+    else if (exponent == 0)
+      encode(format, negative, fraction, -1074, rounding, format.fractionBits, overflowMode = rounding)
+    else encode(
+      format,
+      negative,
+      fraction | (1L << 52),
+      exponent - 1075,
+      rounding,
+      format.fractionBits,
+      overflowMode = rounding
+    )
   }
 
   private def roundInteger(value: Long, unsigned: Boolean, format: Format, rounding: Rounding): Long = {
     val negative = !unsigned && value < 0L
-    if (value == 0L) 0L else encode(format, negative, if (negative) -value else value, 0, rounding)
+    if (value == 0L) 0L
+    else encode(
+      format,
+      negative,
+      if (negative) -value else value,
+      0,
+      rounding,
+      format.fractionBits,
+      overflowMode = rounding
+    )
   }
 
   /** Convert a signed or unsigned 64-bit register without rounding through Double first. */
@@ -178,6 +289,15 @@ object IEEE754 {
 
   inline def bfloat16ToFloat(bits: Binary16): Float = java.lang.Float.intBitsToFloat(bits.toInt << 16)
 
+  /** The upper half of `bits` rounded to nearest even. NaN keeps its sign and leading payload bits, quieted. */
+  def binary32ToBfloat16(bits: Binary32): Binary16 = {
+    val raw = bits.toLong
+    Binary16.low(
+      if ((raw & 0x7fffffffL) > 0x7f800000L) (raw >>> 16) | 0x40L
+      else (raw + 0x7fffL + ((raw >>> 16) & 1L)) >>> 16
+    )
+  }
+
   def doubleToBfloat16(value: Double, rounding: Rounding = Rounding.NearestEven): Binary16 =
     Binary16.low(roundDouble(value, BFloat16, rounding))
 
@@ -199,13 +319,8 @@ object IEEE754 {
     * `width` bits.
     */
   def toIntegerSaturated(value: Double, width: Int in 1 ~ 64, signed: Boolean, rounding: Rounding): Long = {
-    val integral = rounding match {
-      case Rounding.NearestEven => Math.rint(value)
-      case Rounding.TowardZero  => if (value < 0.0) Math.ceil(value) else Math.floor(value)
-      case Rounding.Up          => Math.ceil(value)
-      case Rounding.Down        => Math.floor(value)
-    }
-    val result =
+    val integral = this.integral(value, rounding)
+    val result   =
       if (value.isNaN) 0L
       else if (signed) {
         val minimum = -1L << (width.raw - 1)
@@ -214,7 +329,7 @@ object IEEE754 {
         else if (integral >= maximum.toDouble) maximum
         else integral.toLong
       } else if (integral <= 0.0) 0L
-      else if (width.raw < 64) math.min(integral, Bits.mask(width).toDouble).toLong
+      else if (width < 64) math.min(integral, Bits.mask(width).toDouble).toLong
       else if (integral >= 18446744073709551616.0) -1L
       else if (integral >= 9223372036854775808.0) (integral - 9223372036854775808.0).toLong | Long.MinValue
       else integral.toLong
@@ -228,26 +343,26 @@ object IEEE754 {
 
   /** IEEE 754-2008 minNum with -0 below +0: a NaN operand yields the other operand. */
   def minNum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
-    extremum(left, right, width, smaller = true, propagate = false)
+    extremum(left, right, width, Pick.Smaller, NaNPolicy.Ignore)
 
   /** IEEE 754-2008 maxNum with +0 above -0: a NaN operand yields the other operand. */
   def maxNum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
-    extremum(left, right, width, smaller = false, propagate = false)
+    extremum(left, right, width, Pick.Larger, NaNPolicy.Ignore)
 
   /** IEEE 754-2019 minimum: any NaN operand yields a quiet NaN, and -0 is below +0. */
   def minimum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
-    extremum(left, right, width, smaller = true, propagate = true)
+    extremum(left, right, width, Pick.Smaller, NaNPolicy.Propagate)
 
   /** IEEE 754-2019 maximum: any NaN operand yields a quiet NaN, and +0 is above -0. */
   def maximum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
-    extremum(left, right, width, smaller = false, propagate = true)
+    extremum(left, right, width, Pick.Larger, NaNPolicy.Propagate)
 
   private def extremum(
       left: Long,
       right: Long,
       width: Int in (16, 32, 64),
-      smaller: Boolean,
-      propagate: Boolean
+      pick: Pick,
+      nan: NaNPolicy
   ): Long = {
     val encoding = format(width)
     val a        = Bits.truncate(left, width)
@@ -255,7 +370,7 @@ object IEEE754 {
     val leftNaN  = isNaN(a, width)
     val rightNaN = isNaN(b, width)
     if (leftNaN || rightNaN) {
-      if (propagate || (leftNaN && rightNaN)) (if (leftNaN) a else b) | encoding.quietBit
+      if (nan == NaNPolicy.Propagate || (leftNaN && rightNaN)) (if (leftNaN) a else b) | encoding.quietBit
       else if (leftNaN) b
       else a
     } else {
@@ -264,24 +379,56 @@ object IEEE754 {
         if ((bits & encoding.signBit) != 0L) -magnitude else magnitude
       }
       val comparison = java.lang.Long.compare(order(a), order(b))
+      val smaller    = pick == Pick.Smaller
       if (comparison == 0) { if (((a & encoding.signBit) != 0L) == smaller) a else b }
       else if ((comparison < 0) == smaller) a
       else b
     }
   }
 
-  def add(left: Long, right: Long, width: Int in (16, 32, 64)): Long = width.raw match {
-    // binary16 sums and products are exact in binary64
-    case 16 => doubleToBinary16(toDouble(left, width) + toDouble(right, width)).toLong
-    case 32 => floatToBinary32(binary32ToFloat(Bits.low32(left)) + binary32ToFloat(Bits.low32(right))).toLong
-    case _  => doubleToBinary64(binary64ToDouble(left) + binary64ToDouble(right))
-  }
+  /** `left + right`. A NaN operand propagates quieted, `nan` picking one of two; an invalid sum is the host's NaN. */
+  def add(left: Long, right: Long, width: Int in (16, 32, 64), nan: NaNOperand): Long = propagated(
+    left,
+    right,
+    width,
+    nan,
+    width.raw match {
+      // binary16 sums and products are exact in binary64
+      case 16 => doubleToBinary16(toDouble(left, width) + toDouble(right, width)).toLong
+      case 32 => floatToBinary32(binary32ToFloat(Bits.low32(left)) + binary32ToFloat(Bits.low32(right))).toLong
+      case _  => doubleToBinary64(binary64ToDouble(left) + binary64ToDouble(right))
+    }
+  )
 
-  def multiply(left: Long, right: Long, width: Int in (16, 32, 64)): Long = width.raw match {
-    case 16 => doubleToBinary16(toDouble(left, width) * toDouble(right, width)).toLong
-    case 32 => floatToBinary32(binary32ToFloat(Bits.low32(left)) * binary32ToFloat(Bits.low32(right))).toLong
-    case _  => doubleToBinary64(binary64ToDouble(left) * binary64ToDouble(right))
-  }
+  /** `left * right`, propagating NaN as [[add]] does. */
+  def multiply(left: Long, right: Long, width: Int in (16, 32, 64), nan: NaNOperand): Long = propagated(
+    left,
+    right,
+    width,
+    nan,
+    width.raw match {
+      case 16 => doubleToBinary16(toDouble(left, width) * toDouble(right, width)).toLong
+      case 32 => floatToBinary32(binary32ToFloat(Bits.low32(left)) * binary32ToFloat(Bits.low32(right))).toLong
+      case _  => doubleToBinary64(binary64ToDouble(left) * binary64ToDouble(right))
+    }
+  )
+
+  // compiled code may order a commutative operation's operands either way, so the host's choice of NaN varies
+  private inline def propagated(
+      left: Long,
+      right: Long,
+      width: Int in (16, 32, 64),
+      nan: NaNOperand,
+      result: Long
+  ): Long =
+    if (!isNaN(result, width)) result
+    else {
+      val first  = Bits.truncate(if (nan == NaNOperand.Left) left else right, width)
+      val second = Bits.truncate(if (nan == NaNOperand.Left) right else left, width)
+      if (isNaN(first, width)) first | quietBit(width)
+      else if (isNaN(second, width)) second | quietBit(width)
+      else result
+    }
 
   // call sites name these arguments, which the argument checks enforce
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
@@ -295,18 +442,18 @@ object IEEE754 {
     if (rounding != Rounding.NearestEven)
       fusedMultiplyAddExact(toDouble(left, width), toDouble(right, width), toDouble(addend, width), width, rounding)
     else width.raw match {
-      // a binary16 fma result that stays finite is either exact in binary64 or decided by its dominant term
-      case 16 =>
-        doubleToBinary16(Math.fma(toDouble(left, width), toDouble(right, width), toDouble(addend, width))).toLong
+      // a binary16 product is exact in binary64, so the sum rounds once there
+      case 16 => doubleToBinary16(toDouble(left, width) * toDouble(right, width) + toDouble(addend, width)).toLong
       case 32 =>
         floatToBinary32(
-          Math.fma(
+          fma(
             binary32ToFloat(Bits.low32(left)),
             binary32ToFloat(Bits.low32(right)),
             binary32ToFloat(Bits.low32(addend))
           )
         ).toLong
-      case _ => doubleToBinary64(Math.fma(binary64ToDouble(left), binary64ToDouble(right), binary64ToDouble(addend)))
+      case _ =>
+        doubleToBinary64(fma(binary64ToDouble(left), binary64ToDouble(right), binary64ToDouble(addend)))
     }
 
   /** `left * right + addend` computed exactly and rounded once into `width`. */
@@ -318,30 +465,80 @@ object IEEE754 {
       addend: Double,
       width: Int in (16, 32, 64),
       rounding: Rounding
-  ): Long = {
-    val nearest = Math.fma(left, right, addend)
-    if (!left.isFinite || !right.isFinite || !addend.isFinite || (width.raw == 64 && rounding == Rounding.NearestEven))
-      fromDouble(nearest, width, rounding)
+  ): Long =
+    if (!left.isFinite || !right.isFinite || !addend.isFinite || (width == 64 && rounding == Rounding.NearestEven))
+      fromDouble(fma(left, right, addend), width, rounding)
+    else finiteFusedMultiplyAdd(left, right, addend, width, rounding)
+
+  /** `left * right + addend` rounded once, through the platform's fused multiply-add where it has one. */
+  private[gemstone] inline def fma(left: Double, right: Double, addend: Double): Double =
+    inline if (PlatformMath.FusedMultiplyAdd) Math.fma(left, right, addend)
+    else if (!left.isFinite || !right.isFinite) left * right + addend
+    // the exact product of finite operands is finite even where the rounded one overflows
+    else if (!addend.isFinite) addend
+    else binary64ToDouble(finiteFusedMultiplyAdd(left, right, addend, 64, Rounding.NearestEven))
+
+  private[gemstone] inline def fma(left: Float, right: Float, addend: Float): Float =
+    inline if (PlatformMath.FusedMultiplyAdd) Math.fma(left, right, addend)
+    else if (!left.isFinite || !right.isFinite) left * right + addend
+    else if (!addend.isFinite) addend
+    else fusedMultiplyAddViaDouble(left, right, addend)
+
+  /** Finite `left * right + addend` rounded once to binary32: the product is exact in binary64. */
+  private[gemstone] def fusedMultiplyAddViaDouble(left: Float, right: Float, addend: Float): Float =
+    oddSum(left.toDouble * right.toDouble, addend.toDouble).toFloat
+
+  /** `left + right` in binary64, made odd where inexact, so that it rounds to a format of at most 51 significand bits
+    * as the exact sum would. A sum that is not finite stays as it is.
+    */
+  private[gemstone] def oddSum(left: Double, right: Double): Double = {
+    val sum = left + right
+    if (!sum.isFinite) sum
     else {
-      // BigInt rather than BigDecimal: Scala Native's BigDecimal multiply and divide are wrong for some operands
-      val (leftSignificand, leftExponent)     = exactParts(left)
-      val (rightSignificand, rightExponent)   = exactParts(right)
-      val (addendSignificand, addendExponent) = exactParts(addend)
-      val productExponent                     = leftExponent + rightExponent
-      val scale                               = math.min(productExponent, addendExponent)
-      val exact                               = ((leftSignificand * rightSignificand) << (productExponent - scale)) +
-        (addendSignificand << (addendExponent - scale))
-      if (exact.signum == 0) {
-        val positiveTerms = (left == 0.0 || right == 0.0) && (doubleToBinary64(left) ^ doubleToBinary64(right)) >= 0L &&
-          doubleToBinary64(addend) >= 0L
-        fromDouble(if (rounding == Rounding.Down && !positiveTerms) -0.0 else nearest, width)
-      } else {
-        val magnitude = exact.abs
-        // 62 bits keep at least two bits plus a sticky bit below a binary64 significand
-        val dropped = math.max(magnitude.bitLength - 62, 0)
-        val sticky  = if (dropped > 0 && magnitude.lowestSetBit < dropped) 1L else 0L
-        encode(format(width), exact.signum < 0, (magnitude >> dropped).toLong | sticky, scale + dropped, rounding)
-      }
+      val virtual = sum - left
+      val error   = (left - (sum - virtual)) + (right - virtual)
+      val raw     = doubleToBinary64(sum)
+      if (error == 0.0 || (raw & 1L) != 0L) sum
+      else if ((error > 0.0) == (sum > 0.0)) binary64ToDouble(raw + 1L)
+      else binary64ToDouble(raw - 1L)
+    }
+  }
+
+  /** Finite `left * right + addend` computed exactly and rounded once into `width`, without a platform fma. */
+  private[gemstone] def finiteFusedMultiplyAdd(
+      left: Double,
+      right: Double,
+      addend: Double,
+      width: Int in (16, 32, 64),
+      rounding: Rounding
+  ): Long = {
+    // BigInt rather than BigDecimal: Scala Native's BigDecimal multiply and divide are wrong for some operands
+    val (leftSignificand, leftExponent)     = exactParts(left)
+    val (rightSignificand, rightExponent)   = exactParts(right)
+    val (addendSignificand, addendExponent) = exactParts(addend)
+    val productExponent                     = leftExponent + rightExponent
+    val scale                               = math.min(productExponent, addendExponent)
+    val exact                               = ((leftSignificand * rightSignificand) << (productExponent - scale)) +
+      (addendSignificand << (addendExponent - scale))
+    if (exact.signum == 0) {
+      val positiveTerms = (left == 0.0 || right == 0.0) && (doubleToBinary64(left) ^ doubleToBinary64(right)) >= 0L &&
+        doubleToBinary64(addend) >= 0L
+      // an exact zero sum is a rounded product cancelling the addend exactly, so the unfused sum has its sign
+      fromDouble(if (rounding == Rounding.Down && !positiveTerms) -0.0 else left * right + addend, width)
+    } else {
+      val magnitude = exact.abs
+      // 62 bits keep at least two bits plus a sticky bit below a binary64 significand
+      val dropped = math.max(magnitude.bitLength - 62, 0)
+      val sticky  = if (dropped > 0 && magnitude.lowestSetBit < dropped) 1L else 0L
+      encode(
+        format(width),
+        exact.signum < 0,
+        (magnitude >> dropped).toLong | sticky,
+        scale + dropped,
+        rounding,
+        format(width).fractionBits,
+        overflowMode = rounding
+      )
     }
   }
 

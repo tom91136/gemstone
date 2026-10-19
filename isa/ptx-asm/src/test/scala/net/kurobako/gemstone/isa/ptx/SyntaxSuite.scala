@@ -45,6 +45,14 @@ class SyntaxSuite extends munit.FunSuite {
     assert(Parser.parse(source).isRight, Parser.parse(source).left.toString)
   }
 
+  test("a qualifier value ending in digits stops before the next qualifier") {
+    statement("tcgen05.cp.cta_group::1.128x256b [%r2], %rd1;") match {
+      case Statement.Instruction(instruction) =>
+        assertEquals(instruction.signature.modifiers, Vec(Modifier.Cp, Modifier.CtaGroup1, Modifier.N128x256b))
+      case other => fail(s"expected an instruction, found $other")
+    }
+  }
+
   private def statement(source: String): Statement =
     Parser.parseStatement(source) match {
       case Right(value) => value
@@ -54,7 +62,7 @@ class SyntaxSuite extends munit.FunSuite {
   test("instruction operands retain modifiers, registers, vectors, and addresses") {
     statement("@p ld.global.nc.L1::evict_last.v2.f64 {%f0,%f1}, [%rd3+8];") match {
       case Statement.Instruction(
-            instruction @ Instruction.LdGlobalNc(destination, address, None, modifiers, Some(predicate))
+            instruction @ Instruction(Form.LdGlobalNc(destination, address, None), modifiers, Some(predicate))
           ) =>
         assertEquals(predicate.negated, false)
         assertEquals(instruction.opcode, "ld.global.nc")
@@ -143,7 +151,7 @@ class SyntaxSuite extends munit.FunSuite {
   test("data declarations retain structured storage, type, extent, and initialiser") {
     statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
       case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Extent.Sized(count), initialiser)
-          if name == "table" && count.raw == 4 =>
+          if name == "table" && count == 4 =>
         assertEquals(qualifiers, Vec(DeclarationQualifier.Alignment(4)))
         assertEquals(initialiser.size, 4)
       case other => fail(s"unexpected declaration: $other")
@@ -183,6 +191,6 @@ class SyntaxSuite extends munit.FunSuite {
   test("syntax errors report a source location") {
     val error = Parser.parse("add.u32 %r0, [;").left.toOption.get
     assertEquals(error.position.line.raw, 1)
-    assert(error.position.column.raw > 0)
+    assert(error.position.column > 0)
   }
 }

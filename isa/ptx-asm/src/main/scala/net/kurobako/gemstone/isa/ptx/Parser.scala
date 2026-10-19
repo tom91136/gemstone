@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.text.*
 import scala.annotation.nowarn
 import scala.collection.mutable
@@ -16,7 +17,8 @@ object Parser {
 
   private case class Token(text: String, offset: Int >= 0, quoted: Boolean = false)
 
-  private case class Failure(token: Token, expectation: String) extends RuntimeException with NoStackTrace
+  private case class Failure(token: Token, expectation: String)         extends RuntimeException with NoStackTrace
+  private case class Rejection(token: Token, message: NonEmpty[String]) extends RuntimeException with NoStackTrace
 
   private def name(value: String): NonEmpty[String] = value.unsafe[NonEmpty[String]]
 
@@ -28,6 +30,7 @@ object Parser {
       // Successful parses need token offsets only. Recover diagnostic coordinates on the error path.
       case Failure(token, expectation) =>
         Left(SourceError(SourcePosition.at(source, token.offset), s"expected $expectation"))
+      case Rejection(token, message) => Left(SourceError(SourcePosition.at(source, token.offset), message))
     }
 
   /** Extract one semantic statement; parse retains surrounding comments in the program. */
@@ -91,7 +94,7 @@ object Parser {
         character match {
           case '"' =>
             advance()
-            val value  = StringBuilder()
+            val value  = mutable.StringBuilder()
             var closed = false
             while (!sourceCursor.atEnd && !closed)
               sourceCursor.char() match {
@@ -115,7 +118,9 @@ object Parser {
                 tokens.lastOption.exists(previous =>
                   previous.offset.raw + previous.text.length == sourceCursor.offset.raw &&
                     previous.text.forall(_.isDigit)
-                ) =>
+                ) &&
+                // a qualifier value such as `cta_group::1` ends before the next qualifier, as in `.128x256b`
+                !(tokens.length >= 2 && tokens(tokens.length - 2).text == "::") =>
             val previous = tokens.remove(tokens.size - 1)
             advance()
             while (wordCharacter) advance()
@@ -155,6 +160,8 @@ object Parser {
 
     private def fail(expectation: String): Nothing = throw Failure(current, expectation)
 
+    private def reject(message: NonEmpty[String]): Nothing = throw Rejection(current, message)
+
     private def word(): String = {
       if (eof || current.quoted || punctuation(current.text)) fail("identifier")
       val value = current.text
@@ -173,7 +180,7 @@ object Parser {
     }
 
     private def appendComments(statements: mutable.ArrayBuffer[Statement]): Unit =
-      while (commentIndex < comments.length && comments(commentIndex).offset.raw < current.offset.raw) {
+      while (commentIndex < comments.length && comments(commentIndex).offset < current.offset) {
         statements += Statement.Comment(name(comments(commentIndex).text))
         commentIndex += 1
       }
@@ -252,12 +259,12 @@ object Parser {
     }
 
     private def lineDirective(): Statement = {
-      val newline   = source.indexOf('\n', current.offset.raw)
+      val newline   = source.indexOf('\n', current.offset)
       val lineEnd   = if (newline < 0) source.length else newline
       val path      = dottedPath()
       val arguments = mutable.ArrayBuffer.empty[DirectiveArgument]
       var separator = DirectiveSeparator.Space
-      while (!eof && !at(";") && !at("}") && current.offset.raw < lineEnd)
+      while (!eof && !at(";") && !at("}") && current.offset < lineEnd)
         if (accept(",")) separator = DirectiveSeparator.Comma
         else {
           arguments += DirectiveArgument(separator, operand())
@@ -289,10 +296,10 @@ object Parser {
     private def dottedPath(): NonEmpty[Vec[NonEmpty[String]]] = {
       val parts = mutable.ArrayBuffer.empty[NonEmpty[String]]
       expect(".")
-      parts += name(segment(allowSingleColon = false))
+      parts += name(segment())
       while (at(".") && adjacent) {
         expect(".")
-        parts += name(segment(allowSingleColon = false))
+        parts += name(segment())
       }
       Vec.from(parts).unsafe
     }
@@ -363,7 +370,7 @@ object Parser {
       val parts = mutable.ArrayBuffer.empty[String]
       while (at(".")) {
         expect(".")
-        parts += segment(allowSingleColon = false)
+        parts += segment()
         if (parts.last == "align" && !eof && current.text.toIntOption.nonEmpty) parts += word()
       }
       Vec.from(parts)
@@ -474,12 +481,12 @@ object Parser {
           val negated = accept("!")
           Some(Predication(negated, operandAtom()))
         } else None
-      val operation = segment(allowSingleColon = false)
+      val operation = segment()
       val modifiers = mutable.ArrayBuilder.make[Modifier]
       modifiers.sizeHint(2)
       while (at(".") && adjacent) {
         expect(".")
-        modifiers += Modifier(name(segment(allowSingleColon = true)))
+        modifiers += Modifier(name(modifierSegment()))
       }
       val operands   = operandsUntil(";")
       val _          = accept(";")
@@ -490,10 +497,10 @@ object Parser {
         else values
       }
       Instruction.decodeParsed(name(operation), operands, normalised, predicate) match {
-        case Right(value)                                   => Statement.Instruction(value)
-        case Left(Instruction.DecodeError.UnknownOpcode(_)) =>
+        case Right(value)                                      => Statement.Instruction(value)
+        case Left(DecodeError(_, DecodeProblem.UnknownOpcode)) =>
           Statement.UnsupportedInstruction(name(operation), operands, normalised, predicate)
-        case Left(error) => fail(error.toString)
+        case Left(error) => reject(error.message("PTX"))
       }
     }
 
@@ -531,8 +538,11 @@ object Parser {
       while (suffix && at(".") && adjacent) {
         val mark = index
         expect(".")
-        val part = segment(allowSingleColon = false)
-        if (looksLikeRegisterPart(part) || Set("x", "y", "z", "w", "r", "g", "b", "a").contains(part))
+        val part = segment()
+        if (
+          looksLikeRegisterPart(part) ||
+          PartialFunction.cond(part) { case "x" | "y" | "z" | "w" | "r" | "g" | "b" | "a" => true }
+        )
           value = value match {
             case Operand.Symbol(symbol) =>
               Operand.Register(symbol, Some(OperandDomains.RegisterPart.fromSpelling(name(part))))
@@ -571,10 +581,10 @@ object Parser {
         expect("]")
         Operand.Address(values)
       } else if (accept(".")) {
-        val values = mutable.ArrayBuffer(name(segment(allowSingleColon = false)))
+        val values = mutable.ArrayBuffer(name(segment()))
         while (at(".") && adjacent) {
           expect(".")
-          values += name(segment(allowSingleColon = false))
+          values += name(segment())
         }
         Operand.Qualifier(Vec.from(values).unsafe)
       } else {
@@ -585,7 +595,7 @@ object Parser {
             val segments = mutable.ArrayBuffer(value)
             while (at(".") && adjacent) {
               expect(".")
-              segments += segment(allowSingleColon = false)
+              segments += segment()
             }
             val part = segments.indexWhere(looksLikeRegisterPart(_), 1)
             if (part > 0 && part == segments.size - 1)
@@ -603,12 +613,16 @@ object Parser {
         else Operand.Symbol(name(value))
       }
 
-    private def segment(allowSingleColon: Boolean): String = {
+    private def segment(): String = joined(at("::"))
+
+    private def modifierSegment(): String = joined(at("::") || at(":"))
+
+    private inline def joined(separator: => Boolean): String = {
       val first = word()
-      if (!adjacent || !(at("::") || (allowSingleColon && at(":")))) first
+      if (!adjacent || !separator) first
       else {
-        val value = StringBuilder(first)
-        while (adjacent && (at("::") || (allowSingleColon && at(":")))) {
+        val value = mutable.StringBuilder(first)
+        while (adjacent && separator) {
           index += 1
           val _ = value.append("::").append(word())
         }

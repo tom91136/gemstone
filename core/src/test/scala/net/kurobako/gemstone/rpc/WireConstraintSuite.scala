@@ -42,6 +42,35 @@ class WireConstraintSuite extends munit.FunSuite {
     assert(decode[Aligned, Long](40L).isLeft)
   }
 
+  test("unions and floating-point bounds validate and describe their domains") {
+    type Encoded = Int in (24 ~ 31) | (0 ~ 17)
+    assertEquals(decode[Encoded, Int](25).map(_.raw), Right(25))
+    assert(decode[Encoded, Int](20).isLeft)
+    assertEquals(
+      Codec[Encoded].shape,
+      Shape.Alias(
+        "Int",
+        Shape.Int32,
+        Vector(Constraint.AnyOf(Vector(
+          Vector(Constraint.IntInterval(minimum = 0, maximum = 17)),
+          Vector(Constraint.IntInterval(minimum = 24, maximum = 31))
+        )))
+      )
+    )
+    assertEquals(Codec[Int in 2 | 5 | 9].shape, Codec[Int in (2, 5, 9)].shape)
+    assertEquals(decode[Double in 0.0 ~ 1.0, Double](0.5).map(_.raw), Right(0.5))
+    assert(decode[Double in 0.0 ~ 1.0, Double](Double.NaN).isLeft)
+    assert(decode[Double in 0.0 ~ 1.0, Double](1.5).isLeft)
+    assertEquals(
+      Codec[Float >= 0].shape,
+      Shape.Alias(
+        "Float",
+        Shape.Float32,
+        Vector(Constraint.DoubleInterval(minimum = 0.0, maximum = Double.PositiveInfinity))
+      )
+    )
+  }
+
   test("range shorthand derives the same codec and rejects empty schemas") {
     assertEquals(Codec[Int in -2 ~ 5].shape, Codec[Int where Between[-2, 5]].shape)
     assertEquals(decode[Int in -2 ~ 5, Int](5).map(_.raw), Right(5))
@@ -66,7 +95,7 @@ class WireConstraintSuite extends munit.FunSuite {
     assert(decode[Count.Type, Int](6).isLeft)
     assertEquals(
       Codec[Count.Type].shape,
-      Shape.Alias("Count", Shape.Int32, Vector(Constraint.IntInterval(7, Int.MaxValue)))
+      Shape.Alias("Count", Shape.Int32, Vector(Constraint.IntInterval(minimum = 7, maximum = Int.MaxValue)))
     )
     assertEquals(decode[Label.Type, String]("kernel").map(_.raw), Right("kernel"))
     assert(decode[Label.Type, String]("value").isLeft)
@@ -77,7 +106,7 @@ class WireConstraintSuite extends munit.FunSuite {
   test("protocol identities distinguish numeric bounds, finite choices and alignment") {
     def schema[A: Codec]: ProtocolShape = ProtocolShape(
       "fixture",
-      Vector(OperationShape(Alternative("request", Codec[A].shape), Shape.UnitValue)),
+      Vector(OperationShape(Named("request", Codec[A].shape), Shape.UnitValue)),
       Shape.Text
     )
     val interval = schema[Long in -3L ~ 17L]
@@ -101,6 +130,33 @@ class WireConstraintSuite extends munit.FunSuite {
     assertNotEquals(aligned.canonical, schema[Long where (Between[0L, 32L] & MultipleOf[16L])].canonical)
   }
 
+  test("floating-point bounds render as their exact bits, whatever the platform prints") {
+    def canonical(constraint: Constraint): String = ProtocolShape(
+      "fixture",
+      Vector(OperationShape(
+        Named("request", Shape.Alias("Double", Shape.Float64, Vector(constraint))),
+        Shape.UnitValue
+      )),
+      Shape.Text
+    ).canonical
+    assertEquals(
+      canonical(Constraint.DoubleInterval(minimum = 0.0, maximum = 1.0)),
+      "protocol(fixture){request:alias(Double,f64)[double-interval[0000000000000000,3ff0000000000000]]=>unit};failure=text"
+    )
+    assertEquals(
+      canonical(Constraint.DoubleInterval(minimum = -0.0, maximum = Double.PositiveInfinity)),
+      canonical(Constraint.DoubleInterval(minimum = 0.0, maximum = Double.PositiveInfinity))
+    )
+    assertEquals(
+      canonical(Constraint.DoubleInterval(minimum = Double.NegativeInfinity, maximum = -2.5)),
+      "protocol(fixture){request:alias(Double,f64)[double-interval[fff0000000000000,c004000000000000]]=>unit};failure=text"
+    )
+    assertNotEquals(
+      canonical(Constraint.DoubleInterval(minimum = 0.0, maximum = Math.nextUp(1.0))),
+      canonical(Constraint.DoubleInterval(minimum = 0.0, maximum = 1.0))
+    )
+  }
+
   test("narrow numeric codecs retain their carrier bounds and schema") {
     assertEquals(decode[Byte in 0 ~ 31, Int](31).map(_.raw), Right(31.toByte))
     assert(decode[Byte in 0 ~ 31, Int](32).isLeft)
@@ -121,7 +177,7 @@ class WireConstraintSuite extends munit.FunSuite {
     assertEquals(decode[Vec[Short], Vec[Short]](Vec(1.toShort, (-2).toShort)), Right(Vec(1.toShort, (-2).toShort)))
     val schema = ProtocolShape(
       "narrow",
-      Vector(OperationShape(Alternative("request", Codec[Short].shape), Shape.UnitValue)),
+      Vector(OperationShape(Named("request", Codec[Short].shape), Shape.UnitValue)),
       Shape.Text
     )
     assertEquals(schema.canonical, "protocol(narrow){request:i16=>unit};failure=text")

@@ -4,19 +4,26 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
-#include <limits>
+#include <span>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
-#include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
 #include <unistd.h>
 
 #include "gemstone/environment.hpp"
+#include "gemstone/file_descriptor.hpp"
 #include "gemstone_execution_rpc.hpp"
 
+#include <asm-generic/socket.h>
 #include <environment_keys.hpp>
 #include <netinet/tcp.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -27,7 +34,7 @@ bool ready(int fd, short events, int timeout) {
   for (;;) {
     const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
     if (remaining <= 0) return false;
-    pollfd item{fd, events, 0};
+    pollfd item{.fd = fd, .events = events, .revents = 0};
     const int result = ::poll(&item, 1, static_cast<int>(remaining));
     if (result < 0 && errno == EINTR) continue;
     return result > 0 && (item.revents & POLLNVAL) == 0;
@@ -129,7 +136,7 @@ int openEndpoint(std::string_view endpoint, int timeout, std::string &error) {
   return -1;
 }
 void appendU32(std::vector<uint8_t> &out, uint32_t value) {
-  for (int shift : {24, 16, 8, 0})
+  for (int const shift : {24, 16, 8, 0})
     out.push_back(static_cast<uint8_t>(value >> shift));
 }
 void appendU64(std::vector<uint8_t> &out, uint64_t value) {

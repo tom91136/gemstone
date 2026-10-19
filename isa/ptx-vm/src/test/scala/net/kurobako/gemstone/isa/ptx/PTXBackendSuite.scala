@@ -14,30 +14,31 @@ import scala.util.Using
 
 class PTXBackendSuite extends munit.FunSuite {
   test("loads and executes PTX through the typed runtime boundary") {
-    val source  = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
-    val program = PTXBackend()
-      .load(
-        Vec.from(source.getBytes(StandardCharsets.UTF_8))
-      )
-      .fold(error => fail(error.message), value => value)
+    val source = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
+    Using.resource(
+      PTXBackend()
+        .load(
+          Vec.from(source.getBytes(StandardCharsets.UTF_8))
+        )
+        .fold(error => fail(error.message), value => value)
+    ) { program =>
+      assertEquals(program.symbols.map(_.kernels.map(_.name)), Right(Vec[NonEmpty[String]]("empty")))
+      assert(program.kernel("empty").isRight)
 
-    assertEquals(program.symbols.map(_.kernels.map(_.name)), Right(Vec[NonEmpty[String]]("empty")))
-    assert(program.kernel("empty").isRight)
+      val task = KernelTask.validated(
+        "empty",
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec.empty
+      ).value
+      program.execute(task, RejectingMemory(), TaskControl(), _ => Right(()))
+        .fold(error => fail(error.message), value => value)
 
-    val task = KernelTask.validated(
-      "empty",
-      LaunchGeometry.Dimensions.One,
-      LaunchGeometry.Dimensions.One,
-      Vec.empty
-    ).value
-    program.execute(task, RejectingMemory(), TaskControl(), _ => Right(()))
-      .fold(error => fail(error.message), value => value)
-
-    val cancelled = TaskControl()
-    cancelled.cancel()
-    assertEquals(program.execute(task, RejectingMemory(), cancelled, _ => Right(())), Left(Fault.Cancelled))
-    assertEquals(program.global("unused").left.map(_.message: String), Left("PTX global 'unused' is not present"))
-    program.close()
+      val cancelled = TaskControl()
+      cancelled.cancel()
+      assertEquals(program.execute(task, RejectingMemory(), cancelled, _ => Right(())), Left(Fault.Cancelled))
+      assertEquals(program.global("unused").left.map(_.message: String), Left("PTX global 'unused' is not present"))
+    }
   }
 
   private def loadModule(version: String, target: String, instruction: String) = PTXBackend().load(Vec.from(

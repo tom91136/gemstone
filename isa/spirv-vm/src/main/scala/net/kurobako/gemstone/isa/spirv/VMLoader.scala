@@ -13,6 +13,9 @@ import scala.collection.mutable
 private object VMLoader {
   import Operand.*
 
+  /** The SPIR-V universal limit on the result id bound. */
+  private val IdLimit: Int = 4194303
+
   // The tables stay locals: held as fields of a per-call object, they crash the Scala Native tests in HashMap lookups.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   def tables(module: Module): Either[Fault, Tables] = {
@@ -36,6 +39,9 @@ private object VMLoader {
     val vulkanEntries           = mutable.HashSet.empty[NonEmpty[String]]
     val graphicsEntries         = mutable.HashSet.empty[NonEmpty[String]]
     val subgroupSizes           = mutable.HashMap.empty[Int, Int > 0]
+    val cooperativeMatrices     = mutable.HashMap.empty[Int, CooperativeMatrix]
+    val tensorLayouts           = mutable.HashMap.empty[Int, TensorLayout]
+    val tensorViews             = mutable.HashMap.empty[Int, TensorView]
     val workGroupSizes          = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
     val workGroupSizeHints      = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
     val localSizeIds            = mutable.ArrayBuffer.empty[(Int, Operand)]
@@ -68,6 +74,7 @@ private object VMLoader {
 
     // Types, constants and module-scope variables.
     def declare(instruction: Instruction): Either[Fault, Unit] = {
+      var zeroFailure = Option.empty[Fault]
       instruction match {
         case Instruction.TypeVoid(dest)                   => types.update(id(dest), RuntimeType.Void)
         case Instruction.TypeBool(dest)                   => types.update(id(dest), RuntimeType.Bool)
@@ -76,6 +83,11 @@ private object VMLoader {
             case Left(_)     => return Left(Fault.Unsupported(s"SPIR-V integer width ${id(width)} is unsupported"))
             case Right(bits) => types.update(id(dest), RuntimeType.Integer(bits, unsigned(signedness) != 0L))
           }
+        case Instruction.TypeFloat(dest, width, Some(encoding))
+            if id(width) == 8 && float8(unsigned(encoding)).nonEmpty =>
+          float8(unsigned(encoding)).foreach(format => types.update(id(dest), RuntimeType.Float8(format)))
+        case Instruction.TypeFloat(_, _, Some(encoding)) =>
+          return Left(Fault.Unsupported(s"SPIR-V floating-point encoding ${unsigned(encoding)} is unsupported"))
         case Instruction.TypeFloat(dest, width, _) =>
           id(width).refine[Int in (16, 32, 64)] match {
             case Left(_) => return Left(Fault.Unsupported(s"SPIR-V floating-point width ${id(width)} is unsupported"))
@@ -90,7 +102,7 @@ private object VMLoader {
         case Instruction.TypeMatrix(dest, column, count) =>
           val validColumn = types.get(id(column)).exists {
             case RuntimeType.VectorType(component, rows) =>
-              rows.raw >= 2 && rows.raw <= 4 && types.get(component).exists {
+              rows >= 2 && rows <= 4 && types.get(component).exists {
                 case RuntimeType.Floating(_) => true
                 case _                       => false
               }
@@ -132,9 +144,6 @@ private object VMLoader {
             case Right(value) => types.update(id(instruction.dest), value)
           }
         case Instruction.TypeEvent(dest)        => types.update(id(dest), RuntimeType.Event)
-        case Instruction.TypeReserveId(dest)    => types.update(id(dest), RuntimeType.ReserveId)
-        case Instruction.TypeDeviceEvent(dest)  => types.update(id(dest), RuntimeType.DeviceEvent)
-        case Instruction.TypeQueue(dest)        => types.update(id(dest), RuntimeType.Queue)
         case Instruction.TypePipe(dest, access) => types.update(id(dest), RuntimeType.Pipe(unsigned(access).toInt))
         case Instruction.ConstantTrue(resultType, dest) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(1L)))
@@ -166,10 +175,7 @@ private object VMLoader {
                 case Some(Constant.NullPointer(_, _, _)) => true
                 case _                                   => false
               }) =>
-          zeroValue(types, id(resultType), id(dest), "OpSpecConstantOp") match {
-            case Left(error)  => return Left(error)
-            case Right(value) => constants.update(id(dest), value)
-          }
+          zeroFailure = zero(resultType, dest, "OpSpecConstantOp")
         case Instruction.SpecConstantOp(resultType, dest, opcode, operands) =>
           SpecializationOperation.evaluate(
             types,
@@ -188,22 +194,165 @@ private object VMLoader {
             id(dest),
             literalSampler(id(resultType), unsigned(addressingMode), unsigned(normalised), unsigned(filter))
           )
+        case Instruction.ConstantFunctionPointerINTEL(resultType, dest, function) =>
+          constants.update(id(dest), Constant.FunctionPointer(id(resultType), id(function)))
         case Instruction.ConstantNull(resultType, dest) =>
-          zeroValue(types, id(resultType), id(dest), "OpConstantNull") match {
-            case Left(error)  => return Left(error)
-            case Right(value) => constants.update(id(dest), value)
-          }
+          zeroFailure = zero(resultType, dest, "OpConstantNull")
         case Instruction.Undef(resultType, dest) =>
-          zeroValue(types, id(resultType), id(dest), "OpUndef") match {
-            case Left(error)  => return Left(error)
-            case Right(value) => constants.update(id(dest), value)
-          }
+          zeroFailure = zero(resultType, dest, "OpUndef")
         case Instruction.Variable(resultType, dest, storageClass, initialiser) =>
-          globals.update(id(dest), Global(id(resultType), id(storageClass), initialiser.map(id(_))))
+          global(resultType, dest, storageClass, initialiser)
         case _ => ()
       }
-      Right(())
+      zeroFailure.toLeft(())
     }
+
+    // Extension types, constants and variables, before the core declarations; false where none applies.
+    def declareExtension(instruction: Instruction): Either[Fault, Boolean] = {
+      var zeroFailure = Option.empty[Fault]
+      instruction match {
+        // the pointee is the module's untyped byte, which only exists once every id is known
+        // Gemstone is in no device registry, so it matches no target or architecture of SPV_INTEL_function_variants
+        case Instruction.SpecConstantTargetINTEL(resultType, dest, _, _) =>
+          constants.update(id(dest), Constant.Bits(id(resultType), Vec(0L)))
+        case Instruction.SpecConstantArchitectureINTEL(resultType = resultType, dest = dest) =>
+          constants.update(id(dest), Constant.Bits(id(resultType), Vec(0L)))
+        case Instruction.SpecConstantCapabilitiesINTEL(resultType, dest, required) =>
+          val supported = required.forall(capability => SupportedCapabilities(unsigned(capability).toInt))
+          constants.update(id(dest), Constant.Bits(id(resultType), Vec(if (supported) 1L else 0L)))
+        // a pipe storage reads and writes, as a ReadWrite (2) pipe does
+        case Instruction.TypePipeStorage(dest)                     => types.update(id(dest), RuntimeType.Pipe(2))
+        case Instruction.TypeUntypedPointerKHR(dest, storageClass) =>
+          types.update(id(dest), RuntimeType.Pointer(id(storageClass), -1))
+        // a structure whose members a kernel never declares; pointers to it carry addresses only
+        case Instruction.TypeOpaque(dest, _) => types.update(id(dest), RuntimeType.Structure(Vec.empty))
+        case CooperativeMatrixType(dest, component, scope, rows, columns, use, nv) =>
+          val dimensions = Vec(scope, rows, columns).map(operand => constants.get(id(operand)).flatMap(scalarBits(_)))
+          val usage      = use.fold(Option(2L))(operand => constants.get(id(operand)).flatMap(scalarBits(_)))
+          (dimensions, usage) match {
+            case (Vec(Some(within), Some(height), Some(width)), Some(kind))
+                if height > 0 && width > 0 && height * width <= 65536 =>
+              types.update(id(dest), RuntimeType.VectorType(id(component), (height * width).toInt.unsafe[Int > 0]))
+              cooperativeMatrices.update(
+                id(dest),
+                CooperativeMatrix(
+                  component = id(component),
+                  scope = within,
+                  rows = height.toInt,
+                  columns = width.toInt,
+                  use = kind,
+                  nv = nv
+                )
+              )
+            case _ => return Left(Fault.Unsupported(
+                s"SPIR-V cooperative matrix %${id(dest)} needs constant scope, rows, columns and use of at most 65536 components"
+              ))
+          }
+        case Instruction.TypeVectorIdEXT(dest, component, count) =>
+          constants.get(id(count)).flatMap(scalarBits(_)).flatMap(_.refine[Long in 1L ~ 2147483647L].toOption) match {
+            case Some(lanes) =>
+              types.update(id(dest), RuntimeType.VectorType(id(component), lanes.toIntExact.widen[Int > 0]))
+            case None =>
+              return Left(
+                Fault.InvalidRequest(s"SPIR-V vector component count %${id(count)} is not a positive constant")
+              )
+          }
+        case Instruction.TypeNamedBarrier(dest) => types.update(id(dest), RuntimeType.NamedBarrier)
+        case Instruction.TypeReserveId(dest)    => types.update(id(dest), RuntimeType.ReserveId)
+        case Instruction.TypeDeviceEvent(dest)  => types.update(id(dest), RuntimeType.DeviceEvent)
+        case Instruction.TypeQueue(dest)        => types.update(id(dest), RuntimeType.Queue)
+        // a cooperative matrix constant has one constituent, which fills it
+        case CompositeConstant(resultType, dest, Vec(constituent)) if cooperativeMatrices.contains(id(resultType)) =>
+          val shape = cooperativeMatrices(id(resultType))
+          constantComposite(
+            types,
+            constants,
+            globals,
+            resultType,
+            dest,
+            Vec.fill(shape.rows * shape.columns)(constituent)
+          ) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => constants.update(id(dest), value)
+          }
+        case Instruction.SpecConstantOp(resultType, dest, opcode, Vec(matrix))
+            if (unsigned(opcode) == SPIRV.Opcode.CooperativeMatrixLengthKHR ||
+              unsigned(opcode) == SPIRV.Opcode.CooperativeMatrixLengthNV) && cooperativeMatrices.contains(id(matrix)) =>
+          val shape = cooperativeMatrices(id(matrix))
+          constants.update(id(dest), Constant.Bits(id(resultType), Vec((shape.rows * shape.columns).toLong)))
+        case DataConstant(resultType, dest, data) =>
+          constantData(types, resultType, dest, data) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => constants.update(id(dest), value)
+          }
+        case ReplicatedConstant(resultType, dest, constituent) =>
+          constituentCount(types, id(resultType))
+            .toRight(Fault.InvalidRequest(s"SPIR-V replicated constant %${id(dest)} has no constituents"))
+            .flatMap(count =>
+              constantComposite(types, constants, globals, resultType, dest, Vec.fill(count)(constituent))
+            ) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => constants.update(id(dest), value)
+          }
+        // the VM gives poison, as it gives undefined values, the zero of their type
+        case Instruction.PoisonKHR(resultType, dest) =>
+          zeroFailure = zero(resultType, dest, "OpPoisonKHR")
+        case Instruction.UntypedVariableKHR(resultType, dest, storageClass, _, initialiser) =>
+          global(resultType, dest, storageClass, initialiser)
+        case _ => return Right(false)
+      }
+      zeroFailure.toLeft(true)
+    }
+
+    // Tensor layouts and views hold their state in 32-bit words, whose type only exists once every id is known.
+    def declareTensor(instruction: Instruction): Either[Fault, Boolean] = {
+      def constant(operand: Operand) = constants.get(id(operand)).flatMap(scalarBits(_))
+      instruction match {
+        case Instruction.TypeTensorLayoutNV(dest, dim, clampMode) =>
+          (constant(dim).flatMap(_.refine[Long in 1 ~ 5].toOption), constant(clampMode)) match {
+            case (Some(dimensions), Some(mode)) if mode >= 0 && mode <= 4 =>
+              types.update(id(dest), RuntimeType.VectorType(-1, TensorLayout.Lanes.unsafe[Int > 0]))
+              tensorLayouts.update(id(dest), TensorLayout(dimensions.toIntExact, mode))
+            case _ => return Left(Fault.InvalidRequest(
+                s"SPIR-V tensor layout %${id(dest)} needs a constant 1 to 5 dimensions and clamp mode"
+              ))
+          }
+        case Instruction.TypeTensorViewNV(dest, dim, hasDimensions, permutation) =>
+          (
+            constant(dim).flatMap(_.refine[Long in 1 ~ 5].toOption),
+            constant(hasDimensions),
+            permutation.map(constant(_))
+          ) match {
+            case (Some(dimensions), Some(own), order)
+                if order.flatten.map(_.toInt).sorted == Vec.tabulate(dimensions.toIntExact)(identity) =>
+              types.update(id(dest), RuntimeType.VectorType(-1, TensorView.Lanes.unsafe[Int > 0]))
+              tensorViews.update(id(dest), TensorView(dimensions.toIntExact, own != 0L, order.flatten.map(_.toInt)))
+            case _ => return Left(Fault.InvalidRequest(
+                s"SPIR-V tensor view %${id(dest)} needs a constant 1 to 5 dimensions and a permutation of them"
+              ))
+          }
+        case _ => return Right(false)
+      }
+      Right(true)
+    }
+
+    def global(resultType: Operand, dest: Operand, storageClass: Operand, initialiser: Option[Operand]): Unit =
+      globals.update(id(dest), Global(id(resultType), id(storageClass), initialiser.map(id(_))))
+
+    def zero(resultType: Operand, dest: Operand, opcode: String): Option[Fault] =
+      zeroValue(types, id(resultType), id(dest), opcode) match {
+        case Left(error)  => Some(error)
+        case Right(value) =>
+          constants.update(id(dest), value)
+          None
+      }
+
+    def descriptorIndex(argument: Word, kind: String): Either[Fault, Int >= 0] =
+      argument.raw.refine[Int >= 0].left.map(_ =>
+        Fault.Unsupported(
+          s"SPIR-V descriptor $kind ${argument.toUnsigned.toLong} exceeds the supported index range"
+        )
+      )
 
     // Decorations that the tables record per id or structure member.
     def decorate(instruction: Instruction): Either[Fault, Unit] = {
@@ -211,20 +360,13 @@ private object VMLoader {
         case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 =>
           val argument = decoration.words(1)
           unsigned(decoration) match {
-            case Decoration.BuiltIn => builtins.update(id(target), argument.raw)
-            case Decoration.Binding =>
-              argument.raw.refine[Int >= 0] match {
-                case Left(_) => return Left(Fault.Unsupported(
-                    s"SPIR-V descriptor binding ${argument.toUnsigned.toLong} exceeds the supported index range"
-                  ))
-                case Right(value) => descriptorSlots.update(id(target), value)
-              }
-            case Decoration.DescriptorSet =>
-              argument.raw.refine[Int >= 0] match {
-                case Left(_) => return Left(Fault.Unsupported(
-                    s"SPIR-V descriptor set ${argument.toUnsigned.toLong} exceeds the supported index range"
-                  ))
-                case Right(value) => descriptorSets.update(id(target), value)
+            case Decoration.BuiltIn                                      => builtins.update(id(target), argument.raw)
+            case index @ (Decoration.Binding | Decoration.DescriptorSet) =>
+              val (kind, table) =
+                if (index == Decoration.Binding) ("binding", descriptorSlots) else ("set", descriptorSets)
+              descriptorIndex(argument, kind) match {
+                case Left(error)  => return Left(error)
+                case Right(value) => table.update(id(target), value)
               }
             case Decoration.ArrayStride =>
               argument.raw.refine[Int > 0] match {
@@ -365,12 +507,95 @@ private object VMLoader {
             case Right(end)  => index = end
           }
         case _ =>
-          declare(instruction).flatMap(_ => decorate(instruction)).flatMap(_ => entry(instruction)) match {
+          declareExtension(instruction).flatMap(handled => if (handled) Right(true) else declareTensor(instruction))
+            .flatMap(handled => if (handled) Right(()) else declare(instruction))
+            .flatMap(_ => decorate(instruction)).flatMap(_ => entry(instruction)) match {
             case Left(error) => return Left(error)
             case Right(())   => ()
           }
       }
       index += 1
+    }
+    // Untyped pointer types address a byte of their own; untyped variables and variable-length arrays take a typed
+    // pointer to their data type, which the module never declares, so their storage has a layout.
+    val untypedTypes   = types.collect { case (typeId, RuntimeType.Pointer(storage, -1)) => typeId -> storage }
+    val untypedPointee =
+      if (untypedTypes.isEmpty) -1
+      else {
+        largestId += 1
+        types.update(largestId, RuntimeType.Integer(8, false))
+        untypedTypes.foreach((typeId, storage) => types.update(typeId, RuntimeType.Pointer(storage, largestId)))
+        largestId
+      }
+    if (tensorLayouts.nonEmpty || tensorViews.nonEmpty) {
+      largestId += 1
+      types.update(largestId, RuntimeType.Integer(32, false))
+      (tensorLayouts.keys ++ tensorViews.keys).foreach(typeId =>
+        types.update(
+          typeId,
+          RuntimeType.VectorType(
+            largestId,
+            (if (tensorLayouts.contains(typeId)) TensorLayout.Lanes else TensorView.Lanes).unsafe[Int > 0]
+          )
+        )
+      )
+    }
+    def typedPointer(dest: Operand, storageClass: Int, data: Operand): Unit = {
+      largestId += 1
+      types.update(largestId, RuntimeType.Pointer(storageClass, id(data)))
+      valueTypes.update(id(dest), largestId)
+      globals.get(id(dest)).foreach(global => globals.update(id(dest), global.copy(pointerType = largestId)))
+    }
+    module.instructions.foreach {
+      case Instruction.UntypedVariableKHR(_, dest, storageClass, Some(data), _) =>
+        typedPointer(dest, id(storageClass), data)
+      case Instruction.UntypedVariableLengthArrayINTEL(_, dest, element, _) =>
+        typedPointer(dest, StorageClass.Function, element)
+      case _ => ()
+    }
+    // A pipe storage is a program-scope variable holding an empty pipe in the PipeLayout ABI, whose address
+    // OpCreatePipeFromPipeStorage takes.
+    val pipeStorages = module.instructions.collect {
+      case Instruction.ConstantPipeStorage(_, dest, packetSize, _, capacity) =>
+        (dest, unsigned(packetSize), unsigned(capacity))
+    }
+    if (pipeStorages.nonEmpty) {
+      largestId += 1
+      val byte = largestId
+      types.update(byte, RuntimeType.Integer(8, false))
+      var pipe = 0
+      while (pipe < pipeStorages.size) {
+        val (dest, packetSize, capacity) = pipeStorages(pipe)
+        pipe += 1
+        val header =
+          Vec(0L, 0L, capacity, packetSize).flatMap(word => Vec.tabulate(4)(at => (word >>> (at * 8)) & 0xffL))
+        val bytes = PipeLayout.Packets + packetSize * capacity
+        if (packetSize <= 0L || capacity <= 0L || bytes > Int.MaxValue)
+          return Left(Fault.InvalidRequest(s"SPIR-V pipe storage %${id(dest)} of $capacity $packetSize-byte packets"))
+        val array   = largestId + 1
+        val pointer = largestId + 2
+        val image   = largestId + 3
+        largestId += 3
+        types.update(array, RuntimeType.Array(byte, bytes.unsafe[Long >= 0]))
+        types.update(pointer, RuntimeType.Pointer(StorageClass.CrossWorkgroup, array))
+        constants.update(image, Constant.Bits(array, header ++ Vec.fill((bytes - header.size).toInt)(0L)))
+        globals.update(id(dest), Global(pointer, StorageClass.CrossWorkgroup, Some(image)))
+        valueTypes.update(id(dest), pointer)
+      }
+    }
+    // Conditional entry points take forward references to their conditions.
+    var conditional = 0
+    while (conditional < module.instructions.size) {
+      module.instructions(conditional) match {
+        case Instruction.ConditionalEntryPointINTEL(condition, executionModel, entryPoint, name, interfaces)
+            if constants.get(id(condition)).flatMap(scalarBits(_)).exists(_ != 0L) =>
+          entry(Instruction.EntryPoint(executionModel, entryPoint, name, interfaces)) match {
+            case Left(error) => return Left(error)
+            case Right(())   => ()
+          }
+        case _ => ()
+      }
+      conditional += 1
     }
     // Constant builtins resolve after the complete stream, including forward declarations.
     // OpenCL also uses WorkgroupSize on input variables; the dispatch supplies those.
@@ -406,7 +631,7 @@ private object VMLoader {
         types.get(global.pointerType) match {
           case Some(RuntimeType.Pointer(_, pointee)) => types.get(pointee) match {
               case Some(RuntimeType.Array(element, count)) =>
-                count.raw <= 0 || count.raw > 4096 || types.get(element).exists {
+                count <= 0 || count > 4096 || types.get(element).exists {
                   case RuntimeType.Array(_, _) => true
                   case _                       => false
                 }
@@ -432,7 +657,7 @@ private object VMLoader {
       arrayStrides = arrayStrides.toMap,
       memberOffsets = memberOffsets.toMap,
       memberMatrixLayouts = matrixStrides.map { case (key, stride) =>
-        key -> MatrixLayout(stride, rowMajorMatrices.contains(key))
+        key -> VMMemory.MatrixLayout(stride, rowMajorMatrices.contains(key))
       }.toMap,
       packedStructures = packedStructures.toSet,
       byValueParameters = byValueParameters.toSet,
@@ -444,6 +669,9 @@ private object VMLoader {
       vulkanEntries = vulkanEntries.toSet,
       graphicsEntries = graphicsEntries.toSet,
       subgroupSizes = subgroupSizes.toMap,
+      cooperativeMatrices = cooperativeMatrices.toMap,
+      tensorLayouts = tensorLayouts.toMap,
+      tensorViews = tensorViews.toMap,
       workGroupSizes = workGroupSizes.toMap,
       builtinWorkGroupSize = builtinSize,
       workGroupSizeHints = workGroupSizeHints.toMap,
@@ -451,6 +679,7 @@ private object VMLoader {
       names = definedNames,
       collectiveFunctions = collectiveFunctions(module, definedFunctions, definedNames),
       valueTypes = valueTypes.toMap,
+      untypedPointee = untypedPointee,
       idBound = largestId + 1
     ))
   }
@@ -520,7 +749,7 @@ private object VMLoader {
           (floating || ImageFormats.integer(format.toInt).isDefined) &&
           (if (floating) types.get(sampledType).contains(RuntimeType.Floating(32))
            else types.get(sampledType).exists {
-             case RuntimeType.Integer(width, _) => width.raw == 32
+             case RuntimeType.Integer(width, _) => width == 32
              case _                             => false
            }),
         RuntimeType.StorageImage(
@@ -578,7 +807,9 @@ private object VMLoader {
         _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR |
         _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL |
         _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL |
-        _: Instruction.GroupBroadcast | _: Instruction.ControlBarrier | _: Instruction.GroupReserveReadPipePackets |
+        _: Instruction.GroupBroadcast | _: Instruction.ControlBarrier | _: Instruction.ControlBarrierWaitEXT |
+        _: Instruction.MemoryNamedBarrier | _: Instruction.SubgroupMatrixMultiplyAccumulateINTEL |
+        _: Instruction.GroupReserveReadPipePackets |
         _: Instruction.GroupReserveWritePipePackets => true
     case Instruction.FunctionCall(function = called) => names.get(id(called)).exists(OpenCLBuiltins.collective)
     case _                                           => false
@@ -680,6 +911,8 @@ private object VMLoader {
           count += values.size
         case Some(Constant.Sampler(_, _)) =>
           return Left(Fault.Unsupported(s"SPIR-V composite constant %${id(destination)} contains a sampler"))
+        case Some(Constant.FunctionPointer(_, _)) =>
+          return Left(Fault.Unsupported(s"SPIR-V composite constant %${id(destination)} contains a function pointer"))
         case None if globals.contains(constituent) =>
           lanes += 0L
           pointers += count -> constituent
@@ -727,6 +960,135 @@ private object VMLoader {
     }
   }
 
+  /** The capabilities the VM executes, which OpSpecConstantCapabilitiesINTEL tests modules against: the OpenCL kernel
+    * capabilities the OpenCL driver reports.
+    */
+  private val SupportedCapabilities: Set[Int] = Set(
+    Capability.Addresses,
+    Capability.Linkage,
+    Capability.Kernel,
+    Capability.Vector16,
+    Capability.Float16Buffer,
+    Capability.Float16,
+    Capability.Float64,
+    Capability.Int64,
+    Capability.Int64Atomics,
+    Capability.ImageBasic,
+    Capability.ImageReadWrite,
+    Capability.Pipes,
+    Capability.Groups,
+    Capability.DeviceEnqueue,
+    Capability.LiteralSampler,
+    Capability.Int16,
+    Capability.GenericPointer,
+    Capability.Int8,
+    Capability.Sampled1D,
+    Capability.Image1D,
+    Capability.SampledBuffer,
+    Capability.ImageBuffer,
+    Capability.SubgroupDispatch,
+    Capability.GroupNonUniform,
+    Capability.GroupNonUniformVote,
+    Capability.GroupNonUniformArithmetic,
+    Capability.GroupNonUniformBallot,
+    Capability.GroupNonUniformShuffle,
+    Capability.GroupNonUniformShuffleRelative,
+    Capability.GroupNonUniformClustered,
+    Capability.UniformDecoration,
+    Capability.SubgroupShuffleINTEL,
+    Capability.SubgroupBufferBlockIOINTEL,
+    Capability.SubgroupImageBlockIOINTEL,
+    Capability.ExpectAssumeKHR,
+    Capability.DotProductInput4x8Bit,
+    Capability.DotProductInput4x8BitPacked,
+    Capability.DotProduct,
+    Capability.BitInstructions,
+    Capability.GroupNonUniformRotateKHR,
+    Capability.ShaderClockKHR,
+    Capability.SubgroupImageMediaBlockIOINTEL,
+    Capability.BFloat16ConversionINTEL,
+    Capability.SplitBarrierEXT,
+    Capability.SubgroupMatrixMultiplyAccumulateINTEL
+  )
+
+  /** The cooperative matrix types of SPV_KHR_cooperative_matrix and SPV_NV_cooperative_matrix, whose matrices are
+    * accumulators unless a use says otherwise.
+    */
+  private object CooperativeMatrixType {
+    def unapply(instruction: Instruction)
+        : Option[(Operand, Operand, Operand, Operand, Operand, Option[Operand], Boolean)] =
+      instruction match {
+        case Instruction.TypeCooperativeMatrixKHR(dest, component, scope, rows, columns, use) =>
+          Some((dest, component, scope, rows, columns, Some(use), false))
+        case Instruction.TypeCooperativeMatrixNV(dest, component, scope, rows, columns) =>
+          Some((dest, component, scope, rows, columns, None, true))
+        case _ => None
+      }
+  }
+
+  /** SPV_KHR_constant_data's array constants, specialisation constants declaring their defaults. */
+  private object DataConstant {
+    def unapply(instruction: Instruction): Option[(Operand, Operand, Vec[Operand])] = instruction match {
+      case Instruction.ConstantDataKHR(resultType, dest, data)     => Some((resultType, dest, data))
+      case Instruction.SpecConstantDataKHR(resultType, dest, data) => Some((resultType, dest, data))
+      case _                                                       => None
+    }
+  }
+
+  /** SPV_EXT_replicated_composites' constants, every constituent of which is one value. */
+  private object ReplicatedConstant {
+    def unapply(instruction: Instruction): Option[(Operand, Operand, Operand)] = instruction match {
+      case Instruction.ConstantCompositeReplicateEXT(resultType, dest, value)     => Some((resultType, dest, value))
+      case Instruction.SpecConstantCompositeReplicateEXT(resultType, dest, value) => Some((resultType, dest, value))
+      case _                                                                      => None
+    }
+  }
+
+  /** The number of constituents a composite of `typeId` is built from. */
+  def constituentCount(types: scala.collection.Map[Int, RuntimeType], typeId: Int): Option[Int] =
+    types.get(typeId).collect {
+      case RuntimeType.VectorType(_, count)                     => count
+      case RuntimeType.MatrixType(_, count)                     => count
+      case RuntimeType.Array(_, count) if count <= Int.MaxValue => count.toInt
+      case RuntimeType.Structure(members)                       => members.size
+    }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def constantBits(words: Vec[Long], index: Int, bits: Int): Long = {
+    var value = 0L
+    var bit   = 0
+    while (bit < bits) {
+      val at = index.toLong * bits + bit
+      value |= ((words((at / 32).toInt) >>> (at % 32)) & 1L) << bit
+      bit += 1
+    }
+    value
+  }
+
+  /** An array of integers whose bits pack, without padding and lowest first, into `data`'s words. */
+  private def constantData(
+      types: scala.collection.Map[Int, RuntimeType],
+      resultType: Operand,
+      destination: Operand,
+      data: Vec[Operand]
+  ): Either[Fault, Constant] = {
+    val words = data.flatMap(operand => Vec.from(operand.words.map(_.toUnsigned.toLong)))
+    types.get(id(resultType)) match {
+      case Some(RuntimeType.Array(element, count)) =>
+        types.get(element) match {
+          case Some(RuntimeType.Integer(width, _)) if count.raw * width.raw <= words.size * 32L =>
+            val bits = width
+            Right(Constant.Bits(
+              id(resultType),
+              Vec.tabulate(count.toInt)(constantBits(words, _, bits))
+            ))
+          case _ =>
+            Left(Fault.InvalidRequest(s"SPIR-V constant data %${id(destination)} does not fill an integer array"))
+        }
+      case _ => Left(Fault.InvalidRequest(s"SPIR-V constant data %${id(destination)} is not an array"))
+    }
+  }
+
   private def localSize(x: Word, y: Word, z: Word): Option[LaunchGeometry.Dimensions] =
     positiveTriple(x.toUnsigned.toLong, y.toUnsigned.toLong, z.toUnsigned.toLong)
 
@@ -757,14 +1119,21 @@ private object VMLoader {
     case _                                            => None
   }
 
+  /** The SPV_EXT_float8 encodings of `OpTypeFloat` with a width of 8. */
+  private def float8(encoding: Long): Option[Minifloat] = encoding match {
+    case 4214L => Some(Minifloat.E4M3)
+    case 4215L => Some(Minifloat.E5M2)
+    case _     => None
+  }
+
   // Narrow signed literals arrive sign-extended, but every runtime producer holds scalars masked to their width.
   private def literalBits(types: collection.Map[Int, RuntimeType], resultType: Int, operand: Operand): Long = {
-    val bits = operand.words.take(2).zipWithIndex.foldLeft(0L) { case (result, (word, index)) =>
-      result | (word.toUnsigned.toLong << (index * 32))
-    }
+    def word(index: Int): Long = if (index < operand.words.size) operand.words(index).toUnsigned.toLong else 0L
+    val bits                   = word(0) | (word(1) << 32)
     types.get(resultType) match {
       case Some(RuntimeType.Integer(width, _)) => bits & Bits.mask(width.widen)
       case Some(RuntimeType.Floating(width))   => bits & Bits.mask(width.widen)
+      case Some(RuntimeType.Float8(_))         => bits & 0xffL
       case _                                   => bits
     }
   }

@@ -18,7 +18,7 @@ class ProgramRoundTripSuite extends munit.FunSuite {
   test("relaying an edited program moves preserved encodings and the branch targets that name them") {
     val code    = Fixture.copyAddCubin
     val module  = Cubin.decode(code).fold(fail(_), identity(_))
-    val text    = module.sections(module.kernels.head.section.raw).bytes
+    val text    = module.sections(module.kernels.head.section).bytes
     val program = Disassembler(target(89)).decode(text).fold(error => fail(error.message), identity(_))
     val extra   = Parser.parse("IADD3 R7, R7, 0x1, RZ").fold(fail(_), identity(_))
     val edited  = program.copy(statements = program.statements.patch(1, Vec(Program.Statement.Operation(extra)), 0))
@@ -190,7 +190,7 @@ class ProgramRoundTripSuite extends munit.FunSuite {
     val program = Disassembler(target(50)).decode(bytes).fold(error => fail(error.message), identity(_))
     val changed = program.statements.map {
       case Program.Statement.Bundle(CodeWords.BundleControl.Maxwell(slots, reserved)) =>
-        val first = (slots.head.raw ^ 1).unsafe[CodeWords.ControlBits]
+        val first = (slots.head ^ 1).unsafe[CodeWords.ControlBits]
         Program.Statement.Bundle(CodeWords.BundleControl.Maxwell(slots.updated(0, first), reserved))
       case other => other
     }

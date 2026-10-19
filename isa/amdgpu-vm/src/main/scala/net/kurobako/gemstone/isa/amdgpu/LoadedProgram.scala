@@ -56,7 +56,7 @@ object LoadedProgram {
       ).toMap
       layouts = manifests.view.flatMap { manifest =>
         val layout = KernargLayout(
-          manifest.metadata.parameters.take(manifest.metadata.explicitParameterCount.raw),
+          manifest.metadata.parameters.take(manifest.metadata.explicitParameterCount),
           manifest.hiddenArguments
         )
         Vec(
@@ -73,7 +73,7 @@ object LoadedProgram {
         GlobalSymbol.validated(
           global.name,
           Some(global.address),
-          global.size.toLong.widen[Long >= 0],
+          global.size.widen[Long >= 0],
           global.pointerOffsets
         )
           .leftMap(detail => Fault.InvalidRequest(detail))
@@ -87,7 +87,7 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
 
   private lazy val initialised = LoadedProgram.index(program)
 
-  private case class Bound(value: GlobalMapping, memory: AddressSpace)
+  private case class Bound(value: GlobalMapping, memory: AddressSpace) derives CanEqual
   private val bindingLock = ReentrantLock()
   private val bound       = mutable.Map.empty[NonEmpty[String], Bound]
 
@@ -105,7 +105,8 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
     for {
       program <- initialised
       data    <- program.index.globalData(name).leftMap(error => Fault.NotFound(error.message))
-      global  <- ProgramGlobal.validated(data._2.nonNegativeSize.toLong, data._2).leftMap(Fault.InvalidRequest(_))
+      global  <-
+        ProgramGlobal.validated(data._2.nonNegativeSize.widen[Long >= 0], data._2).leftMap(Fault.InvalidRequest(_))
     } yield global
 
   /** Uncovered `[start, start + size)` sub-ranges, relative to `start`, of the bound mappings overlapping it. */
@@ -114,7 +115,7 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
   private def gaps(start: Long, size: Int): Vec[(Int, Int)] = {
     val covered = bound.values.view.map(_.value).filter(mapping => mapping.overlaps(start, size)).map(mapping =>
       (math.max(start, mapping.address.raw) - start).toInt ->
-        (math.min(start + size, mapping.address.raw + mapping.size.raw) - start).toInt
+        (math.min(start + size, mapping.address.raw + mapping.size) - start).toInt
     ).toVec.sortBy(_._1)
     val result = Vec.newBuilder[(Int, Int)]
     var cursor = 0
@@ -133,7 +134,7 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
         data    <- program.index.globalData(name).leftMap(error => Fault.NotFound(error.message))
         (address, initial) = data
         _ <- Either.cond(
-          address.raw >= binding.offset.raw && address.raw <= Long.MaxValue - initial.size,
+          address.raw >= binding.offset && address.raw <= Long.MaxValue - initial.size,
           (),
           Fault.InvalidRequest("global binding exceeds the virtual address range")
         )
@@ -146,10 +147,10 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
   // Aliases of a bound global must map the same storage; uncovered bytes take the code-object initialiser.
   private def bindFirst(entry: Bound, initial: Vec[Byte]): Either[Fault, Unit] = {
     val mapping = entry.value
-    val delta   = mapping.address.raw - mapping.binding.offset.raw
+    val delta   = mapping.address.raw - mapping.binding.offset
     val sharing = bound.values.forall { other =>
       val same = mapping.binding.region == other.value.binding.region &&
-        delta == other.value.address.raw - other.value.binding.offset.raw &&
+        delta == other.value.address.raw - other.value.binding.offset &&
         mapping.binding.regionSize == other.value.binding.regionSize && entry.memory == other.memory
       same ||
       (!other.value.overlaps(mapping.address.raw, mapping.size.raw) &&
@@ -173,15 +174,15 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
         symbol  <- program.index.global(name).toRight(Fault.NotFound(s"AMDGPU global $name is not present"))
         (address, size) = symbol
         _ <- Either.cond(
-          offset.raw <= size.raw && bytes.size.toLong <= size.raw.toLong - offset.raw,
+          offset <= size && bytes.size.toLong <= size.toLong - offset,
           (),
           Fault.InvalidRequest("global write exceeds symbol bounds")
         )
-        start = address.raw + offset.raw
+        start = address.raw + offset
         // Bound aliases share storage, so writing every overlapping one stores the same bytes.
         _ <- bound.values.view.filter(_.value.overlaps(start, bytes.size)).toVec.distinct.traverse_ { entry =>
           val from  = math.max(start, entry.value.address.raw)
-          val until = math.min(start + bytes.size, entry.value.address.raw + entry.value.size.raw)
+          val until = math.min(start + bytes.size, entry.value.address.raw + entry.value.size)
           entry.memory.write(
             entry.value.binding.region,
             entry.value.offsetOf(from),

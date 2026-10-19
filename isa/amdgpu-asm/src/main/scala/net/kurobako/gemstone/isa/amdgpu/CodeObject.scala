@@ -30,7 +30,7 @@ case class CodeObject private (image: Vec[Byte]) {
       s"kernel $name holds ${symbol.size} bytes, not ${code.size}": NonEmpty[String]
     )
     (section, offset) <- parsed.symbolOffset(symbol)
-    patched           <- parsed.patched(section, parsed.contents(section).patch(offset.raw, code, code.size))
+    patched           <- parsed.patched(section, parsed.contents(section).patch(offset, code, code.size))
   } yield CodeObject(patched.bytes)).leftMap(CodeObjectError.Invalid(_))
 
   /** This code object with kernel `name`'s code replaced by `code` of any size. Shorter or equal code stays in place;
@@ -58,21 +58,21 @@ case class CodeObject private (image: Vec[Byte]) {
         other.kind.raw != elf.SymbolKind.Function || other.section != symbol.section || other.value <= symbol.value
       )
       (placed, start) =
-        if (code.size <= symbol.size.raw)
+        if (code.size <= symbol.size)
           (
-            contents.patch(offset.raw, code ++ Vec.fill(symbol.size.raw - code.size)(0.toByte), symbol.size.raw),
+            contents.patch(offset, code ++ Vec.fill(symbol.size.raw - code.size)(0.toByte), symbol.size),
             offset.raw
           )
         else if (last) (contents.take(offset.raw) ++ code, offset.raw)
         else {
-          val moved = ((contents.size + alignment - 1) / alignment * alignment).toInt
+          val moved = contents.size.toLong.alignUp(alignment).toInt
           (contents ++ Vec.fill(moved - contents.size)(0.toByte) ++ code, moved)
         }
       address = section.address + start
       resized <- if (placed.size == contents.size) parsed.patched(section, placed) else parsed.resized(section, placed)
       renamed <- functions(resized).foldLeft[Either[NonEmpty[String], elf.Image]](Right(resized)) {
         case (result, (table, index, _)) => result.flatMap(image =>
-            image.withSymbol(image.sections(table.index.raw), index, address, code.size.toLong)
+            image.withSymbol(image.sections(table.index), index, address, code.size.toLong)
           )
       }
       described <-

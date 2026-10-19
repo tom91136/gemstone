@@ -2,19 +2,20 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
-
-#include <stddef.h>
-#include <stdint.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "gemstone/hsa/aql.hpp"
 #include "gemstone/hsa/doorbell_monitor.hpp"
+#include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/test_support.hpp>
 
@@ -26,6 +27,7 @@ namespace {
 using namespace gemstone::hsa;
 using gemstone::execution::AllocationId;
 using gemstone::execution::DirtyRange;
+using gemstone::execution::FailureKind;
 using gemstone::execution::ParameterKind;
 using Packet = std::array<uint8_t, AqlPacketSize>;
 
@@ -35,7 +37,7 @@ struct RocrSignal {
 
   explicit RocrSignal(int64_t initial = 1) : value(initial) {}
   uint64_t handle() { return reinterpret_cast<uint64_t>(this); }
-  int64_t load() const { return __atomic_load_n(&value, __ATOMIC_ACQUIRE); }
+  [[nodiscard]] int64_t load() const { return __atomic_load_n(&value, __ATOMIC_ACQUIRE); }
   void store(int64_t next) { __atomic_store_n(&value, next, __ATOMIC_RELEASE); }
 };
 static_assert(offsetof(RocrSignal, value) == 8);
@@ -54,15 +56,15 @@ struct Harness {
     fixture.opaqueLaunches();
   }
 
-  uint64_t allocate(const void *base, size_t size) {
+  uint64_t allocate(const void *base, size_t size) const {
     const auto id = gemstone::execution::registerAllocation(*client, size, base);
-    REQUIRE(id);
+    if (!id) FAIL("allocation registration failed");
     REQUIRE(runtime->registerAllocation(reinterpret_cast<uint64_t>(base), size, static_cast<uint64_t>(id->value)));
     return static_cast<uint64_t>(id->value);
   }
 
-  void install(uint64_t object, const std::string &name) {
-    const std::array<KernelSymbol, 1> symbols{{{object, name}}};
+  void install(uint64_t object, const std::string &name) const {
+    const std::array<KernelSymbol, 1> symbols{{{.object = object, .name = name}}};
     REQUIRE(runtime->installCodeObject(Image, symbols));
   }
 };
@@ -89,7 +91,7 @@ Packet barrierPacket(PacketType type, std::array<uint64_t, 5> dependencies, uint
   Packet packet{};
   gemstone::writeNative<uint16_t>(packet.data(), 0, static_cast<uint16_t>(type));
   for (size_t index = 0; index < dependencies.size(); ++index)
-    gemstone::writeNative<uint64_t>(packet.data(), 8 + index * 8, dependencies[index]);
+    gemstone::writeNative<uint64_t>(packet.data(), 8 + (index * 8), dependencies[index]);
   gemstone::writeNative<uint64_t>(packet.data(), 56, completion);
   return packet;
 }
@@ -108,11 +110,12 @@ template <size_t N> struct Ring {
   std::array<Packet, N> packets{};
   std::unique_ptr<AqlQueue> queue;
 
-  Ring(DoorbellMonitor &monitor, AqlRuntime &runtime) {
+  Ring(DoorbellMonitor &monitor, AqlRuntime &runtime)
+      : queue(monitor.registerQueue(packets.data(), N,
+                                    [&runtime](uint64_t, uint64_t, const void *packet) { return runtime.consume(packet); })) {
     for (auto &slot : packets)
       gemstone::writeNative<uint16_t>(slot.data(), 0, static_cast<uint16_t>(PacketType::Invalid));
-    queue =
-        monitor.registerQueue(packets.data(), N, [&runtime](uint64_t, uint64_t, const void *packet) { return runtime.consume(packet); });
+
     REQUIRE(queue);
   }
 
@@ -121,8 +124,8 @@ template <size_t N> struct Ring {
     __atomic_store_n(queue->writeIndex(), index + 1, __ATOMIC_RELEASE);
     __atomic_store_n(queue->doorbell(), index, __ATOMIC_RELEASE);
   }
-  uint64_t read() const { return __atomic_load_n(queue->readIndex(), __ATOMIC_ACQUIRE); }
-  bool waitRead(uint64_t index) const {
+  [[nodiscard]] uint64_t read() const { return __atomic_load_n(queue->readIndex(), __ATOMIC_ACQUIRE); }
+  [[nodiscard]] bool waitRead(uint64_t index) const {
     return gemstone_test::waitUntil([&] { return read() == index; }, std::chrono::seconds(10));
   }
 };
@@ -176,7 +179,8 @@ TEST_CASE("AQL malformed dispatch fails its completion signal", "[hsa][aql]") {
 
 TEST_CASE("AQL failure codes distinguish malformed packets", "[hsa][aql]") {
   Harness harness;
-  RocrSignal grid, reserved;
+  RocrSignal grid;
+  RocrSignal reserved;
   auto smallGrid = kernelPacket(77, 0, grid.handle());
   gemstone::writeNative<uint32_t>(smallGrid.data(), 12, 7);
   REQUIRE(harness.runtime->consume(smallGrid.data()) == PacketResult::Accepted);
@@ -217,19 +221,27 @@ TEST_CASE("AQL execution queues dispatch and complete", "[hsa][aql]") {
   Harness harness;
   // An opaque by-value C++ functor holding a pointer and a scalar, then a separate
   // scalar. Padding between and after the fields stays in the kernarg buffer.
-  harness.fixture.kernelMetadata(24, 2, {{12, 0, 1, 1}, {4, 16, 1, 0}});
+  harness.fixture.kernelMetadata(
+      24, 2, {{.width = 12, .offset = 0, .kind = 1, .containsPointers = 1}, {.width = 4, .offset = 16, .kind = 1, .containsPointers = 0}});
   harness.install(77, "add_one");
 
-  std::array<uint8_t, 32> allocation{};
-  std::array<uint8_t, 64> unrelated{};
-  std::array<uint8_t, 24> kernarg{};
+  // The gap keeps another registered buffer from starting where the one-past pointer below lands.
+  struct {
+    std::array<uint8_t, 32> allocation{};
+    std::array<uint8_t, 16> gap{};
+    std::array<uint8_t, 64> unrelated{};
+    std::array<uint8_t, 24> kernarg{};
+  } buffers;
+  auto &allocation = buffers.allocation;
+  auto &unrelated = buffers.unrelated;
+  auto &kernarg = buffers.kernarg;
   // A one-past pointer is a legal C/C++ loop bound and must remain relocatable.
   const uint64_t pointer = reinterpret_cast<uint64_t>(allocation.data() + allocation.size());
   std::memcpy(kernarg.data(), &pointer, sizeof(pointer));
   const auto allocationId = harness.allocate(allocation.data(), allocation.size());
   const auto kernargId = harness.allocate(kernarg.data(), kernarg.size());
   harness.allocate(unrelated.data(), unrelated.size());
-  harness.fixture.opaqueLaunches({DirtyRange{AllocationId{static_cast<int64_t>(allocationId)}, 8, 4}});
+  harness.fixture.opaqueLaunches({DirtyRange{.allocation = AllocationId{static_cast<int64_t>(allocationId)}, .offset = {8}, .size = {4}}});
 
   DoorbellMonitor monitor;
   Ring<4> ring(monitor, *harness.runtime);
@@ -244,18 +256,17 @@ TEST_CASE("AQL execution queues dispatch and complete", "[hsa][aql]") {
   REQUIRE((launch.globalSize.x.value == 17 && launch.globalSize.y.value == 8 && launch.globalSize.z.value == 1));
   REQUIRE((launch.privateSegmentBytes.value == 96 && launch.groupSegmentBytes.value == 128));
   REQUIRE(launch.arguments.empty());
-  REQUIRE(launch.argumentBuffer);
-  REQUIRE((launch.argumentBuffer->region.value == static_cast<int64_t>(kernargId) && launch.argumentBuffer->offset.value == 0));
+  REQUIRE((launch.argumentBuffer && std::cmp_equal(launch.argumentBuffer->region.value, kernargId)
+           && launch.argumentBuffer->offset.value == 0));
   REQUIRE(launch.pointerRelocations.size() == 1);
   const auto &relocation = launch.pointerRelocations.front();
-  REQUIRE(std::get<gemstone::execution::RelocationSourceMemory>(relocation.source).region.value == static_cast<int64_t>(kernargId));
+  REQUIRE(std::cmp_equal(std::get<gemstone::execution::RelocationSourceMemory>(relocation.source).region.value, kernargId));
   REQUIRE(relocation.sourceOffset.value == 0);
-  REQUIRE((relocation.target.value == static_cast<int64_t>(allocationId)
-           && relocation.targetOffset.value == static_cast<int64_t>(allocation.size())));
+  REQUIRE((std::cmp_equal(relocation.target.value, allocationId) && std::cmp_equal(relocation.targetOffset.value, allocation.size())));
 
   const auto dirty = harness.runtime->takeDirtyRanges();
   REQUIRE(dirty.size() == 1);
-  REQUIRE((dirty[0].allocation.value == static_cast<int64_t>(allocationId) && dirty[0].offset.value == 8 && dirty[0].size.value == 4));
+  REQUIRE((std::cmp_equal(dirty[0].allocation.value, allocationId) && dirty[0].offset.value == 8 && dirty[0].size.value == 4));
   REQUIRE(harness.runtime->takeDirtyRanges().empty());
 
   RocrSignal missing;
@@ -276,9 +287,51 @@ TEST_CASE("AQL execution queues dispatch and complete", "[hsa][aql]") {
   REQUIRE(harness.fixture.programUnloads.load() == 1);
 }
 
+TEST_CASE("AQL dispatch failures publish the code for the failure kind", "[hsa][aql]") {
+  Harness harness;
+  harness.fixture.kernelMetadata(
+      24, 2, {{.width = 12, .offset = 0, .kind = 1, .containsPointers = 1}, {.width = 4, .offset = 16, .kind = 1, .containsPointers = 0}});
+  harness.install(77, "add_one");
+  std::array<uint8_t, 32> allocation{};
+  std::array<uint8_t, 24> kernarg{};
+  const uint64_t pointer = reinterpret_cast<uint64_t>(allocation.data());
+  std::memcpy(kernarg.data(), &pointer, sizeof(pointer));
+  const auto allocationId = harness.allocate(allocation.data(), allocation.size());
+  harness.allocate(kernarg.data(), kernarg.size());
+  harness.fixture.opaqueLaunches({DirtyRange{.allocation = AllocationId{static_cast<int64_t>(allocationId)}, .offset = {0}, .size = {4}}});
+
+  const struct {
+    FailureKind kind;
+    int64_t code;
+  } cases[]{
+      {.kind = FailureKind::InvalidProgram, .code = static_cast<int64_t>(PacketFailure::InvalidCodeObject)},
+      {.kind = FailureKind::InvalidConfiguration, .code = static_cast<int64_t>(PacketFailure::InvalidDimensions)},
+      {.kind = FailureKind::OutOfResources, .code = static_cast<int64_t>(PacketFailure::OutOfResources)},
+      {.kind = FailureKind::IllegalAddress, .code = static_cast<int64_t>(PacketFailure::InvalidMemoryReference)},
+      {.kind = FailureKind::MisalignedAddress, .code = static_cast<int64_t>(PacketFailure::InvalidMemoryReference)},
+      {.kind = FailureKind::IllegalInstruction, .code = static_cast<int64_t>(PacketFailure::IllegalInstruction)},
+      {.kind = FailureKind::Trapped, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
+      {.kind = FailureKind::AssertionFailed, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
+      {.kind = FailureKind::TimedOut, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
+      {.kind = FailureKind::Unsupported, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
+      {.kind = FailureKind::Failed, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
+  };
+  DoorbellMonitor monitor;
+  Ring<4> ring(monitor, *harness.runtime);
+  uint64_t index = 0;
+  for (const auto &[kind, code] : cases) {
+    CAPTURE(static_cast<int>(kind));
+    harness.fixture.failNextCompletion(kind);
+    RocrSignal failed;
+    ring.submit(index, kernelPacket(77, reinterpret_cast<uint64_t>(kernarg.data()), failed.handle()));
+    REQUIRE(ring.waitRead(++index));
+    CHECK(failed.load() == code);
+  }
+}
+
 TEST_CASE("AQL code objects bind multiple kernel objects", "[hsa][aql]") {
   Harness harness;
-  const std::array<KernelSymbol, 2> symbols{{{41, "first"}, {42, "second"}}};
+  const std::array<KernelSymbol, 2> symbols{{{.object = 41, .name = "first"}, {.object = 42, .name = "second"}}};
   REQUIRE(harness.runtime->installCodeObject(Image, symbols));
   REQUIRE((harness.fixture.programLoads.load() == 1 && harness.fixture.programUnloads.load() == 0));
   REQUIRE(!harness.runtime->installCodeObject(Image, symbols));
@@ -294,10 +347,10 @@ TEST_CASE("AQL code objects bind multiple kernel objects", "[hsa][aql]") {
 
 TEST_CASE("AQL kernel layouts come from the service manifest", "[hsa][aql]") {
   Harness harness;
-  harness.fixture.kernelMetadata(8, 1, {{8, 0, 2, 0}});
+  harness.fixture.kernelMetadata(8, 1, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}});
   harness.install(41, "server_kernel");
   const auto layout = harness.runtime->layout(41);
-  REQUIRE(layout);
+  if (!layout) FAIL("kernel has no layout");
   REQUIRE((layout->kernargSize == 8 && layout->explicitArgumentCount == 1 && layout->fields.size() == 1));
   REQUIRE((layout->fields[0].kind == ParameterKind::Allocation && layout->fields[0].offset == 0 && layout->fields[0].size == 8));
 
@@ -313,10 +366,10 @@ TEST_CASE("AQL kernel layouts come from the service manifest", "[hsa][aql]") {
   REQUIRE(completion.load() == 0);
   const auto relocations = harness.fixture.lastLaunch().pointerRelocations;
   REQUIRE(relocations.size() == 1);
-  REQUIRE((relocations[0].target.value == static_cast<int64_t>(allocationId) && relocations[0].targetOffset.value == 0));
+  REQUIRE((std::cmp_equal(relocations[0].target.value, allocationId) && relocations[0].targetOffset.value == 0));
 
-  harness.fixture.kernelMetadata(8, 1, {{8, 0, 3, 0}});
-  const std::array<KernelSymbol, 1> local{{{43, "local_kernel"}}};
+  harness.fixture.kernelMetadata(8, 1, {{.width = 8, .offset = 0, .kind = 3, .containsPointers = 0}});
+  const std::array<KernelSymbol, 1> local{{{.object = 43, .name = "local_kernel"}}};
   REQUIRE(!harness.runtime->installCodeObject(Image, local));
   REQUIRE(harness.runtime->lastError() == "execution service returned invalid AMDGPU kernel metadata");
 }
@@ -334,7 +387,7 @@ TEST_CASE("AQL allocation-backed kernargs retain zero-sized metadata buffers", "
   REQUIRE(completion.load() == 0);
   REQUIRE(harness.fixture.launches.load() == 1);
   const auto buffer = harness.fixture.lastLaunch().argumentBuffer;
-  REQUIRE((buffer && buffer->region.value == static_cast<int64_t>(id) && buffer->offset.value == 16));
+  REQUIRE((buffer && std::cmp_equal(buffer->region.value, id) && buffer->offset.value == 16));
 
   RocrSignal onePast;
   packet = kernelPacket(77, base + storage.size(), onePast.handle());
@@ -348,9 +401,25 @@ TEST_CASE("AQL allocation-backed kernargs retain zero-sized metadata buffers", "
   REQUIRE(harness.fixture.launches.load() == 1);
 }
 
+TEST_CASE("AQL dispatches from a cooperative queue launch cooperatively", "[hsa][aql]") {
+  Harness harness;
+  harness.fixture.kernelMetadata(0, 0, {});
+  harness.install(77, "grid_sync");
+  std::array<uint8_t, 16> storage{};
+  harness.allocate(storage.data(), storage.size());
+  for (const bool cooperative : {false, true}) {
+    RocrSignal completion;
+    const auto packet = kernelPacket(77, reinterpret_cast<uint64_t>(storage.data()), completion.handle());
+    REQUIRE(harness.runtime->consume(packet.data(), cooperative) == PacketResult::Accepted);
+    REQUIRE(completion.load() == 0);
+    REQUIRE(harness.fixture.lastLaunch().cooperative == cooperative);
+  }
+}
+
 TEST_CASE("AQL OpenMP sentinel preserves ABI without pointer resolution", "[hsa][aql]") {
   Harness harness;
-  harness.fixture.kernelMetadata(16, 2, {{8, 0, 2, 0}, {8, 8, 1, 0}});
+  harness.fixture.kernelMetadata(
+      16, 2, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}, {.width = 8, .offset = 8, .kind = 1, .containsPointers = 0}});
   harness.install(77, "openmp_kernel");
   std::array<uint8_t, 16> kernarg{};
   const uint64_t sentinel = UINT64_MAX;
@@ -362,14 +431,16 @@ TEST_CASE("AQL OpenMP sentinel preserves ABI without pointer resolution", "[hsa]
   REQUIRE(completion.load() == 0);
   const auto launch = harness.fixture.lastLaunch();
   REQUIRE(launch.pointerRelocations.empty());
-  REQUIRE((launch.argumentBuffer && launch.argumentBuffer->region.value == static_cast<int64_t>(kernargId)));
+  REQUIRE((launch.argumentBuffer && std::cmp_equal(launch.argumentBuffer->region.value, kernargId)));
 }
 
 TEST_CASE("AQL barriers wait and complete", "[hsa][aql]") {
   Harness harness;
   DoorbellMonitor monitor;
   Ring<2> ring(monitor, *harness.runtime);
-  RocrSignal satisfied(0), pending(1), completion(1);
+  RocrSignal satisfied(0);
+  RocrSignal pending(1);
+  RocrSignal completion(1);
   ring.submit(0, barrierPacket(PacketType::BarrierAnd, {satisfied.handle(), pending.handle(), 0, 0, 0}, completion.handle()));
   std::this_thread::sleep_for(std::chrono::milliseconds(5));
   REQUIRE(ring.read() == 0);
@@ -377,7 +448,9 @@ TEST_CASE("AQL barriers wait and complete", "[hsa][aql]") {
   REQUIRE(ring.waitRead(1));
   REQUIRE(completion.load() == 0);
 
-  RocrSignal unsatisfied(1), ready(0), either(1);
+  RocrSignal unsatisfied(1);
+  RocrSignal ready(0);
+  RocrSignal either(1);
   ring.submit(1, barrierPacket(PacketType::BarrierOr, {unsatisfied.handle(), ready.handle(), 0, 0, 0}, either.handle()));
   REQUIRE(ring.waitRead(2));
   REQUIRE(either.load() == 0);
@@ -388,7 +461,9 @@ TEST_CASE("AQL waiting barriers do not block another queue", "[hsa][aql]") {
   DoorbellMonitor monitor;
   Ring<2> waiting(monitor, *harness.runtime);
   Ring<2> ready(monitor, *harness.runtime);
-  RocrSignal dependency(1), waitingCompletion(1), readyCompletion(1);
+  RocrSignal dependency(1);
+  RocrSignal waitingCompletion(1);
+  RocrSignal readyCompletion(1);
   waiting.submit(0, barrierPacket(PacketType::BarrierAnd, {dependency.handle(), 0, 0, 0, 0}, waitingCompletion.handle()));
   ready.submit(0, barrierPacket(PacketType::BarrierAnd, {0, 0, 0, 0, 0}, readyCompletion.handle()));
   REQUIRE(ready.waitRead(1));

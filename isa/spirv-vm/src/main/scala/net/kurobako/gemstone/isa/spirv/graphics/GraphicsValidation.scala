@@ -16,7 +16,7 @@ private object GraphicsValidation {
       count: Int >= 0,
       size: AllocationId => Option[Int > 0]
   ): Either[String, Set[AllocationId]] =
-    checked(size)(_.descriptorBindings(values, count.raw))
+    checked(size)(_.descriptorBindings(values, count))
   private def checked(size: AllocationId => Option[Int > 0])(validate: GraphicsValidation => Unit)
       : Either[String, Set[AllocationId]] = {
     val validator = GraphicsValidation(size)
@@ -40,25 +40,25 @@ private class GraphicsValidation(allocationSize: AllocationId => Option[Int > 0]
     )
     referenced += id
   }
-  private def view(value: GraphicsRange): Unit  = range(value.allocation, value.offset.raw, value.size.raw)
+  private def view(value: GraphicsRange): Unit  = range(value.allocation, value.offset, value.size)
   private def image(value: GraphicsImage): Unit = {
     require(value.levels.size <= 32, "image has too many mip levels")
-    require(!value.volume || value.layers.raw == 1, "volume image cannot have array layers")
+    require(!value.volume || value.layers == 1, "volume image cannot have array layers")
     val block = if (value.format.compression == GraphicsCompression.None) 1 else 4
     val _     = value.levels.foldLeft(0L) { (previousEnd, level) =>
-      val columns  = (level.extent.width.raw.toLong + block - 1) / block
-      val rows     = (level.extent.height.raw.toLong + block - 1) / block
+      val columns  = (level.extent.width.toLong + block - 1) / block
+      val rows     = (level.extent.height.toLong + block - 1) / block
       val rowBytes =
-        Math.multiplyExact(Math.multiplyExact(columns, value.samples.raw.toLong), value.format.texelBytes.raw.toLong)
-      require(level.rowPitch.raw >= rowBytes, "image row pitch is too small")
-      require(level.slicePitch.raw >= Math.multiplyExact(level.rowPitch.raw, rows), "image slice pitch is too small")
+        Math.multiplyExact(Math.multiplyExact(columns, value.samples.toLong), value.format.texelBytes.toLong)
+      require(level.rowPitch >= rowBytes, "image row pitch is too small")
+      require(level.slicePitch >= Math.multiplyExact(level.rowPitch, rows), "image slice pitch is too small")
       require(
-        level.layerPitch.raw >= Math.multiplyExact(level.slicePitch.raw, level.extent.depth.raw.toLong),
+        level.layerPitch >= Math.multiplyExact(level.slicePitch, level.extent.depth.toLong),
         "image layer pitch is too small"
       )
-      require(level.offset.raw >= previousEnd, "image mip levels overlap")
-      val end = Math.addExact(level.offset.raw, Math.multiplyExact(level.layerPitch.raw, value.layers.raw.toLong))
-      require(end <= value.memory.size.raw, "image storage exceeds its view")
+      require(level.offset >= previousEnd, "image mip levels overlap")
+      val end = Math.addExact(level.offset, Math.multiplyExact(level.layerPitch, value.layers.toLong))
+      require(end <= value.memory.size, "image storage exceeds its view")
       end
     }
 
@@ -66,7 +66,7 @@ private class GraphicsValidation(allocationSize: AllocationId => Option[Int > 0]
   private def checkBindings(values: Vec[DescriptorBinding], count: Int): Unit = {
     require(values.map(_.argument).distinct.size == values.size, "duplicate shader descriptor argument")
     values.foreach { binding =>
-      require(binding.argument.raw < count, "shader descriptor argument is out of range")
+      require(binding.argument < count, "shader descriptor argument is out of range")
       ShaderDescriptors.validate(binding)
     }
   }
@@ -84,22 +84,22 @@ private class GraphicsValidation(allocationSize: AllocationId => Option[Int > 0]
     value.interfaces.foreach { record =>
       record.fields.foreach { field =>
         require(
-          field.offset.raw <= record.size.raw && field.size.raw <= record.size.raw - field.offset.raw,
+          field.offset <= record.size && field.size <= record.size - field.offset,
           "shader field exceeds invocation record"
         )
         if (field.location.nonEmpty) require(
-          field.size.raw % 4 == 0 && field.size.raw / 4 <= 4 - field.qualifiers.component.raw,
+          field.size % 4 == 0 && field.size / 4 <= 4 - field.qualifiers.component,
           "shader location exceeds four components"
         )
       }
     }
     value.relocations.foreach { relocation =>
       relocation.source match {
-        case RelocationSource.Memory(id)  => range(id, relocation.sourceOffset.raw, 8)
+        case RelocationSource.Memory(id)  => range(id, relocation.sourceOffset, 8)
         case RelocationSource.Argument(_) =>
           throw IllegalArgumentException("graphics descriptor relocations must name allocations")
       }
-      range(relocation.target, relocation.targetOffset.raw, 0)
+      range(relocation.target, relocation.targetOffset, 0)
     }
   }
 
@@ -113,16 +113,16 @@ private class GraphicsValidation(allocationSize: AllocationId => Option[Int > 0]
       case GraphicsCommand.Draw(draw) =>
         draw.indirect.foreach { indirect =>
           val size = if (draw.index.nonEmpty) 20 else 16
-          require(indirect.count.raw <= 1 || indirect.stride.raw >= size, "indirect command stride is too small")
-          if (indirect.count.raw > 0) require(
-            (indirect.count.raw.toLong - 1) * indirect.stride.raw + size <= indirect.memory.size.raw,
+          require(indirect.count <= 1 || indirect.stride >= size, "indirect command stride is too small")
+          if (indirect.count > 0) require(
+            (indirect.count.toLong - 1) * indirect.stride + size <= indirect.memory.size,
             "indirect commands exceed their view"
           )
         }
         require(draw.blends.size >= draw.colours.size, "missing attachment blend state")
         (draw.colours.toVector.flatten ++ draw.depth.toVector).foreach { attachment =>
           require(
-            attachment.extent.width.raw >= draw.width.raw && attachment.extent.height.raw >= draw.height.raw &&
+            attachment.extent.width >= draw.width && attachment.extent.height >= draw.height &&
               attachment.samples == draw.raster.samples,
             "attachment dimensions or samples disagree with framebuffer"
           )

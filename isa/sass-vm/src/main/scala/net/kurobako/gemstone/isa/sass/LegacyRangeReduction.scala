@@ -8,8 +8,10 @@ import net.kurobako.gemstone.isa.sass.Instruction.*
 
 /** Fuse legacy trigonometric reduction only when its opaque fixed-point result cannot escape. */
 private object LegacyRangeReduction {
+  private val ReductionModifiers = Set(Vec(Modifier.SINCOS), Vec(Modifier.EX2))
+
   private def registers(operand: Operand): Set[Int] = operand match {
-    case Operand.Register(RegisterBank.R, index)                              => Set(index.raw)
+    case Operand.Register(RegisterBank.R, index)                              => Set(index)
     case Operand.Group(values)                                                => values.flatMap(registers(_)).toSet
     case Operand.ConstantBank(_, offset)                                      => registers(offset)
     case Operand.Address(base = base, index = index, descriptor = descriptor) =>
@@ -21,28 +23,42 @@ private object LegacyRangeReduction {
   }
 
   // traps and kills end the thread and yields resume in place, so none splits a lifetime
-  private def branches(instruction: DecodedInstruction): Boolean = instruction.operation match {
-    case _: Instruction.Bpt | _: Instruction.Kill | _: Instruction.Yield => false
-    case operation                                                       => ControlFlow.transfers(operation)
+  private def branches(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
+    case _: Form.Bpt | _: Form.Kill | _: Form.Yield => false
+    case _                                          => ControlFlow.transfers(instruction.operation)
   }
 
+  private def wideModifier(instruction: DecodedInstruction): Boolean = instruction.modifiers.exists(
+    PartialFunction.cond(_) {
+      case Modifier.`64` | Modifier.`128` | Modifier.F64 | Modifier.S64 | Modifier.U64 => true
+    }
+  )
+
   private def scalarDestination(instruction: DecodedInstruction): Option[Operand] = {
-    val scalar = instruction.operation match {
-      case _: Instruction.Mov | _: Instruction.Mov32i | _: Instruction.Rro | _: Instruction.Mufu |
-          _: Instruction.Fmul | _: Instruction.Fadd | _: Instruction.Ffma | _: Instruction.Lop |
-          _: Instruction.Lop32i | _: Instruction.Iadd | _: Instruction.Iadd32i | _: Instruction.Imnmx |
-          _: Instruction.Ldg | _: Instruction.Ld | _: Instruction.Lds | _: Instruction.Ldl => true
+    val scalar = instruction.operation.form match {
+      case _: Form.Mov | _: Form.Mov32i | _: Form.Rro | _: Form.Mufu |
+          _: Form.Fmul | _: Form.Fadd | _: Form.Ffma | _: Form.Lop |
+          _: Form.Lop32i | _: Form.Iadd | _: Form.Iadd32i | _: Form.Imnmx |
+          _: Form.Iscadd | _: Form.Shl | _: Form.Shr | _: Form.Sel |
+          _: Form.Xmad | _: Form.Imad |
+          _: Form.Ldg | _: Form.Ld | _: Form.Lds | _: Form.Ldl => true
       case _ => false
     }
     if (
       scalar &&
-      !instruction.modifiers.exists(Set(Modifier.`64`, Modifier.`128`, Modifier.F64, Modifier.S64, Modifier.U64))
+      !wideModifier(instruction)
     )
-      instruction.operands.headOption.filter {
-        case Operand.Register(RegisterBank.R, _) => true
-        case _                                   => false
-      }
+      instruction.operands.headOption.filter(OperandQueries.isRegister(_))
     else None
+  }
+
+  /** The registers a 64- or 128-bit load writes. */
+  private def wideLoadDestination(instruction: DecodedInstruction): Set[Int] = instruction.operation.form match {
+    case _: Form.Ldg | _: Form.Ld | _: Form.Lds | _: Form.Ldl if wideModifier(instruction) =>
+      val words = if (instruction.modifiers.contains(Modifier.`128`)) 4 else 2
+      instruction.operands.headOption.filter(OperandQueries.isRegister(_)).toSet
+        .flatMap(registers(_)).flatMap(first => first until first + words)
+    case _ => Set.empty
   }
 
   /** The shadow register each fused reduction's consumers read, by consumer address, and how many shadows there are. */
@@ -52,7 +68,7 @@ private object LegacyRangeReduction {
     if (sm >= 70) Reductions(Map.empty, 0)
     else {
       val reductions = function.instructions.zipWithIndex.filter((instruction, _) =>
-        OperandQueries.is[Instruction.Rro](instruction.operation)
+        OperandQueries.is[Form.Rro](instruction.operation)
       )
       val transfers = function.instructions.filter(branches(_))
       if (reductions.nonEmpty && transfers.exists(_.operands.exists(registers(_).nonEmpty)))
@@ -63,8 +79,14 @@ private object LegacyRangeReduction {
           def reject(detail: String = "unverified form"): Nothing = throw IllegalArgumentException(
             s"RRO at 0x${producer.address.raw.toHexString} requires a closed, straight-line MUFU trigonometric lifetime $detail"
           )
-          if (producer.guard.nonEmpty || producer.modifiers != Vec(Modifier.SINCOS) || producer.operands.size != 2)
-            reject()
+          if (
+            producer.guard.nonEmpty || !ReductionModifiers(producer.modifiers) ||
+            producer.operands.size != 2
+          ) reject()
+          // EX2 reductions feed MUFU.EX2, the others MUFU.SIN and MUFU.COS
+          val consumers =
+            if (producer.modifiers == Vec(Modifier.EX2)) Set(Vec(Modifier.EX2))
+            else Set(Vec(Modifier.SIN), Vec(Modifier.COS))
           val destination                 = scalarDestination(producer).getOrElse(reject())
           val register                    = registers(destination).head
           val shadow: VMIR.Value.Register = VMIR.Value.Register(layout.reduction(ordinal))
@@ -77,38 +99,44 @@ private object LegacyRangeReduction {
             if (position >= function.instructions.size) reject()
             val next     = function.instructions(position)
             val terminal = next.guard.isEmpty &&
-              OperandQueries.is[Instruction.Exit](next.operation)
+              OperandQueries.is[Form.Exit](next.operation)
             if (terminal) {
               if (!consumed) reject()
               mappings
             } else {
               if (branches(next)) reject(s"across 0x${next.address.raw.toHexString}")
-              val destinationMatches = scalarDestination(next).contains(destination)
-              val reads              = if (scalarDestination(next).nonEmpty) next.operands.tail else next.operands
-              val referenced         = reads.exists(registers(_)(register))
+              val loaded             = wideLoadDestination(next)
+              val destinationMatches =
+                scalarDestination(next).exists(registers(_) == Set(register)) || loaded(register)
+              val reads =
+                if (scalarDestination(next).nonEmpty || loaded.nonEmpty) next.operands.tail else next.operands
+              val referenced = reads.exists(registers(_)(register))
               // An implicit register pair can alias the reduced register through its preceding word.
               val wide =
-                next.modifiers.exists(Set(Modifier.`64`, Modifier.`128`, Modifier.F64, Modifier.S64, Modifier.U64)) ||
-                  (next.operation match {
-                    case _: Instruction.Dadd | _: Instruction.Dmul | _: Instruction.Dfma | _: Instruction.Dsetp |
-                        _: Instruction.Dset | _: Instruction.Dmnmx => true
+                wideModifier(next) ||
+                  (next.operation.form match {
+                    case _: Form.Dadd | _: Form.Dmul | _: Form.Dfma | _: Form.Dsetp |
+                        _: Form.Dset | _: Form.Dmnmx => true
                     case _ => false
                   })
-              if (
-                wide &&
-                next.operands.exists(operand => registers(operand).exists(r => r <= register && register < r + 4))
-              ) reject(s"with wide alias at 0x${next.address.raw.toHexString}")
+              // an address names its whole register pair, so only data operands widen
+              def aliases(operand: Operand): Boolean = operand match {
+                case _: Operand.Address => false
+                case _                  => registers(operand).exists(r => r <= register && register < r + 4)
+              }
+              if (wide && reads.exists(aliases(_)))
+                reject(s"with wide alias at 0x${next.address.raw.toHexString}")
               if (referenced) {
                 if (targets.exists(target => target > producer.address.raw && target <= next.address.raw))
                   reject("control flow enters before a trigonometric consumer")
-                val trigonometric = OperandQueries.is[Instruction.Mufu](next.operation)
+                val trigonometric = OperandQueries.is[Form.Mufu](next.operation)
                 if (
                   !trigonometric || next.guard.nonEmpty || next.operands.size != 2 ||
                   OperandQueries.without(next.operands(1), OperandSelector.reuse) != destination ||
-                  !Set(Vec(Modifier.SIN), Vec(Modifier.COS))(next.modifiers)
+                  !consumers(next.modifiers)
                 ) reject(s"read by ${next.mnemonic.raw} at 0x${next.address.raw.toHexString}")
               }
-              val updated = if (referenced) mappings.updated(next.address.raw, shadow) else mappings
+              val updated = if (referenced) mappings.updated(next.address, shadow) else mappings
               if (destinationMatches) {
                 if (next.guard.nonEmpty || !(consumed || referenced)) reject()
                 updated
@@ -118,7 +146,7 @@ private object LegacyRangeReduction {
               }
             }
           }
-          scan(index + 1, result.updated(producer.address.raw, shadow), false)
+          scan(index + 1, result.updated(producer.address, shadow), false)
       }
       Reductions(mapped, reductions.nonNegativeSize)
     }

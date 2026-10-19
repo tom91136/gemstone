@@ -24,10 +24,14 @@ object Fixture {
     IntegerMultiplyFixtures.listings,
     LeaFixtures.listings,
     LogicFixtures.listings,
+    MatrixFixtures.listings,
+    WarpgroupFixtures.listings,
     MemoryFixtures.listings,
+    MemoryFormFixtures.listings,
     MinMaxFixtures.listings,
     SharedMemoryFixtures.listings,
-    TensorFixtures.listings
+    TensorFixtures.listings,
+    AsyncFixtures.listings
   ).reduce(_ ++ _)
 
   def listing(name: String): String = listings.getOrElse(name, throw IllegalArgumentException(s"missing listing $name"))

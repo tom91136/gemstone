@@ -77,7 +77,7 @@ object string {
       else if (character >= 'a' && character <= 'z') character - 'a' + 10
       else if (character >= 'A' && character <= 'Z') character - 'A' + 10
       else radix.raw
-    value < radix.raw
+    value < radix
   }
 
   /** Signed decimal or 0x hexadecimal text, with 0b binary, leading-zero octal and `_` digit separators when the
@@ -102,7 +102,7 @@ object string {
     val (body, radix) = literal
     val digits        = if (separators) body.filterNot(_ == '_') else body
     Option.when(digits.nonEmpty && digits.forall(isDigit(_, radix))) {
-      val value = BigInt(digits, radix.raw)
+      val value = BigInt(digits, radix)
       if (negative) -value else value
     }
   }

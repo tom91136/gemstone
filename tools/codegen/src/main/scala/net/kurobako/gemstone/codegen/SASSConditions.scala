@@ -2,41 +2,32 @@ package net.kurobako.gemstone.codegen
 
 import cats.parse.Parser
 import cats.parse.Parser0
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 
 /** Structured reader for the boolean conditions used by recovered SASS instruction descriptions. */
 object SASSConditions {
-  enum Expr {
-    case Number(value: BigInt)
-    case StringValue(value: String)
-    case Field(name: String, attribute: Option[String])
-    case Parameter(name: String)
-    case Constant(name: String)
-    case EnumValue(kind: String, name: String)
-    case Unary(operator: String, value: Expr)
-    case Binary(operator: String, left: Expr, right: Expr)
-    case Call(name: String, arguments: Vector[Expr])
-    case Conditional(condition: Expr, whenTrue: Expr, whenFalse: Expr)
-  }
-  case class Condition(category: String, expression: Expr, message: String)
+  case class Condition(category: String, expression: ConditionExpression, message: String)
   case class Definitions(parameters: Map[String, BigInt], constants: Map[String, BigInt])
-  case class ParseError(message: String, offset: Int)
 
   private enum Token {
     case WordToken(value: String)
     case IntegerToken(value: BigInt)
     case TextToken(value: String)
-    case EnumToken(kind: String, name: String)
+    case EnumToken(table: String, symbol: String)
     case ParameterToken(value: String)
     case ConstantToken(value: String)
     case OperatorToken(value: String)
     case PunctuationToken(value: String)
   }
-  import Expr.*
+  import ConditionExpression.*
   import Token.*
 
-  private val identifier: Parser[String] =
+  def identifierOf(punctuation: String): Parser[String] =
     (Parser.charWhere(c => c.isLetter || c == '_') ~
-      Parser.charWhere(c => c.isLetterOrDigit || "_.$".contains(c)).rep0).string
+      Parser.charWhere(c => c.isLetterOrDigit || punctuation.contains(c)).rep0).string
+
+  private val identifier: Parser[String]   = identifierOf("_.$")
   private val digits: Parser[String]       = Parser.charWhere(_.isDigit).rep.string
   private val hexadecimal: Parser[String]  = Parser.charWhere(c => c.isDigit || "abcdefABCDEF".contains(c)).rep.string
   private val binaryDigits: Parser[String] = Parser.charWhere(c => c == '0' || c == '1').rep.string
@@ -149,10 +140,14 @@ object SASSConditions {
   private def isCategory(name: String): Boolean = Set("ERROR", "WARNING")(name) || name.endsWith("_ERROR") ||
     name.endsWith("_WARNING")
 
-  private def expression(input: Vector[Token], minimum: Int): Either[ParseError, (Expr, Vector[Token])] =
+  private def expression(input: Vector[Token], minimum: Int): Either[ParseError, (ConditionExpression, Vector[Token])] =
     prefix(input).flatMap { case (left, remaining) => continue(left, remaining, minimum) }
 
-  private def continue(left: Expr, remaining: Vector[Token], minimum: Int): Either[ParseError, (Expr, Vector[Token])] =
+  private def continue(
+      left: ConditionExpression,
+      remaining: Vector[Token],
+      minimum: Int
+  ): Either[ParseError, (ConditionExpression, Vector[Token])] =
     remaining match {
       case OperatorToken("?") +: tail if minimum == 0 =>
         expression(tail, 0).flatMap {
@@ -166,46 +161,47 @@ object SASSConditions {
         val level       = precedence(op).get
         val nextMinimum = if (op == "->") level else level + 1
         expression(tail, nextMinimum).flatMap { case (right, rest) =>
-          continue(Binary(op, left, right), rest, minimum)
+          continue(Binary(BinaryOperator.from(op), left, right), rest, minimum)
         }
       case _ => Right(left -> remaining)
     }
 
-  private def prefix(input: Vector[Token]): Either[ParseError, (Expr, Vector[Token])] = input match {
-    case IntegerToken(value) +: tail                   => Right(Expr.Number(value) -> tail)
-    case TextToken(value) +: tail                      => Right(Expr.StringValue(value) -> tail)
-    case EnumToken(kind, name) +: tail                 => Right(Expr.EnumValue(kind, name) -> tail)
-    case ParameterToken(name) +: tail                  => Right(Expr.Parameter(name) -> tail)
-    case ConstantToken(name) +: tail                   => Right(Expr.Constant(name) -> tail)
+  private def prefix(input: Vector[Token]): Either[ParseError, (ConditionExpression, Vector[Token])] = input match {
+    case IntegerToken(value) +: tail                   => Right(ConditionExpression.Number(value) -> tail)
+    case TextToken(value) +: tail                      => Right(ConditionExpression.StringValue(value) -> tail)
+    case EnumToken(kind, name) +: tail                 => Right(ConditionExpression.EnumValue(kind, name) -> tail)
+    case ParameterToken(name) +: tail                  => Right(ConditionExpression.Parameter(name) -> tail)
+    case ConstantToken(name) +: tail                   => Right(ConditionExpression.Constant(name) -> tail)
     case OperatorToken(op @ ("!" | "-" | "~")) +: tail => expression(tail, 12).map { case (value, rest) =>
-        Expr.Unary(op, value) -> rest
+        Unary(UnaryOperator.from(op), value) -> rest
       }
     case PunctuationToken("(") +: tail => expression(tail, 0).flatMap {
         case (value, PunctuationToken(")") +: rest) => Right(value -> rest)
         case _                                      => Left(ParseError("unclosed parenthesized expression", 0))
       }
     case WordToken("DEFINED") +: WordToken(name) +: PunctuationToken("(") +: tail =>
-      call(name, tail).map { case (value, rest) => Expr.Call("DEFINED", Vector(value)) -> rest }
+      call(name, tail).map { case (value, rest) => Call(BuiltinCall.Defined, Vec(value)) -> rest }
     case WordToken(name) +: PunctuationToken("(") +: tail                      => call(name, tail)
     case WordToken(name) +: OperatorToken("@") +: WordToken(attribute) +: tail =>
-      Right(Expr.Field(name, Some(attribute)) -> tail)
-    case WordToken(name) +: tail => Right(Expr.Field(name, None) -> tail)
+      Right(ConditionExpression.Field(name, Some(attribute)) -> tail)
+    case WordToken(name) +: tail => Right(ConditionExpression.Field(name, None) -> tail)
     case _                       => Left(ParseError(s"expected expression, found ${input.headOption}", 0))
   }
 
-  private def call(name: String, input: Vector[Token]): Either[ParseError, (Expr, Vector[Token])] =
-    arguments(input).map { case (values, rest) => Expr.Call(name, values) -> rest }
+  private def call(name: String, input: Vector[Token]): Either[ParseError, (ConditionExpression, Vector[Token])] =
+    arguments(input).map { case (values, rest) => Call(BuiltinCall.from(name), values) -> rest }
 
-  private def arguments(input: Vector[Token]): Either[ParseError, (Vector[Expr], Vector[Token])] = input match {
-    case PunctuationToken(")") +: tail => Right(Vector.empty -> tail)
-    case _                             => expression(input, 0).flatMap {
-        case (value, PunctuationToken(",") +: tail) => arguments(tail).map { case (values, rest) =>
-            (value +: values) -> rest
-          }
-        case (value, PunctuationToken(")") +: tail) => Right(Vector(value) -> tail)
-        case _                                      => Left(ParseError("malformed function arguments", 0))
-      }
-  }
+  private def arguments(input: Vector[Token]): Either[ParseError, (Vec[ConditionExpression], Vector[Token])] =
+    input match {
+      case PunctuationToken(")") +: tail => Right(Vec.empty[ConditionExpression] -> tail)
+      case _                             => expression(input, 0).flatMap {
+          case (value, PunctuationToken(",") +: tail) => arguments(tail).map { case (values, rest) =>
+              (value +: values) -> rest
+            }
+          case (value, PunctuationToken(")") +: tail) => Right(Vec(value) -> tail)
+          case _                                      => Left(ParseError("malformed function arguments", 0))
+        }
+    }
 
   private def precedence(operator: String): Option[Int] = operator match {
     case "->"                    => Some(1)

@@ -57,6 +57,10 @@ endif()
 
 target_compile_options(gemstone_vulkan PRIVATE
   "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/src/host_allocator_redirect.hpp")
+# GCC 13 crashes demangling the unmangled asm labels when it matches new and delete
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+  target_compile_options(gemstone_vulkan PRIVATE -Wno-mismatched-new-delete -Wno-mismatched-dealloc -Wno-free-nonheap-object)
+endif()
 set_source_files_properties(src/host_allocator.cpp PROPERTIES
   COMPILE_DEFINITIONS GEMSTONE_VULKAN_HOST_IMPLEMENTATION)
 target_link_options(gemstone_vulkan PRIVATE -Wl,-Bsymbolic-functions)

@@ -1,9 +1,8 @@
 package net.kurobako.gemstone.isa.ptx
 
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.FutureTask
 import java.util.concurrent.locks.ReentrantLock
-import java.util.zip.CRC32
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
@@ -35,19 +34,15 @@ class PTXBackend(
 
   private case class Image(bytes: Vec[Byte]) {
     // Hash outside the cache lock and retain it for release; modules can be many megabytes.
-    private val hash = {
-      val checksum = CRC32()
-      bytes match {
-        case image: ArraySeq.ofByte => checksum.update(image.unsafeArray)
-        case _                      => checksum.update(Vec.toArray(bytes))
-      }
-      checksum.getValue.toInt
+    private val hash = bytes match {
+      case image: ArraySeq.ofByte => PlatformChecksum.crc32(image.unsafeArray)
+      case _                      => PlatformChecksum.crc32(Vec.toArray(bytes))
     }
     override def hashCode(): Int = hash
   }
 
   private class Cached(val image: Image) {
-    val program: FutureTask[Either[Fault, Program]] = FutureTask(() =>
+    val program: PlatformConcurrency.Once[Either[Fault, Program]] = PlatformConcurrency.once(() =>
       decode(image.bytes).left.map(error => Fault.InvalidRequest(error.message)).flatMap(admit(_))
     )
     // Includes callers still waiting for the parse, so a completed load cannot evict their entry.
@@ -61,7 +56,7 @@ class PTXBackend(
 
   private def release(cached: Cached): Unit = cacheLock.withLock {
     cached.references -= 1
-    if (cached.references.raw == 0) {
+    if (cached.references == 0) {
       val _ = decoded.remove(cached.image)
     }
   }
@@ -75,7 +70,7 @@ class PTXBackend(
     }
 
     val loaded = try {
-      // FutureTask runs at most once. Different images parse concurrently; identical images wait here,
+      // The parse runs at most once. Different images parse concurrently; identical images wait here,
       // outside the cache lock. Each load still receives its own mutable runtime state.
       cached.program.run()
       val parsed = try cached.program.get()

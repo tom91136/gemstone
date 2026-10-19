@@ -1,5 +1,13 @@
 // Native memory transport and scheduling regression client.
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
 
 #if __has_include(<hsa/hsa.h>)
   #include <hsa/hsa.h>
@@ -11,10 +19,8 @@
 
 #include "../../rpc/test/memory_patterns.hpp"
 
-namespace memory_patterns {
-struct MemoryClient {
-  std::string kind;
-  std::string allocationKind() const { return kind; }
+namespace memory_patterns { namespace {
+struct MemoryClient : MemoryClientBase<MemoryClient> {
   hsa_agent_t cpu{}, gpu{};
   hsa_region_t region{};
   hsa_amd_memory_pool_t pool{};
@@ -25,7 +31,7 @@ struct MemoryClient {
   uint64_t kernel{};
   uint32_t argumentSize{}, groupSize{}, privateSize{};
   void *arguments{};
-  explicit MemoryClient(std::string kind, uint64_t selected = 0) : kind(std::move(kind)) {
+  explicit MemoryClient(std::string kind, uint64_t selected = 0) : MemoryClientBase(std::move(kind)) {
     check(hsa_init());
     check(hsa_iterate_agents(
         [](hsa_agent_t agent, void *data) {
@@ -107,7 +113,7 @@ struct MemoryClient {
     }
   }
 
-  void *allocateDevice(size_t size) {
+  [[nodiscard]] void *allocateDevice(size_t size) const {
     hsa_amd_memory_pool_t devicePool{};
     check(hsa_amd_agent_iterate_memory_pools(
         gpu,
@@ -124,13 +130,14 @@ struct MemoryClient {
     check(hsa_amd_memory_pool_allocate(devicePool, size, 0, &p));
     return p;
   }
-  void releaseDevice(void *p) { check(hsa_amd_memory_pool_free(p)); }
-  void deviceWrite(void *p, const void *bytes, size_t size) { check(hsa_memory_copy(p, bytes, size)); }
-  void deviceRead(void *bytes, const void *p, size_t size) { check(hsa_memory_copy(bytes, p, size)); }
+  static void releaseDevice(void *p) { check(hsa_amd_memory_pool_free(p)); }
+  static void deviceWrite(void *p, const void *bytes, size_t size) { check(hsa_memory_copy(p, bytes, size)); }
+  static void deviceRead(void *bytes, const void *p, size_t size) { check(hsa_memory_copy(bytes, p, size)); }
   void *allocateBacking(size_t size) {
     void *p{};
-    if (allocationKind() == "pool") check(hsa_amd_memory_pool_allocate(pool, size, 0, &p));
-    else if (allocationKind() == "locked") {
+    if (kind == "pool") {
+      check(hsa_amd_memory_pool_allocate(pool, size, 0, &p));
+    } else if (kind == "locked") {
       p = ordinary(size);
       void *alias{};
       check(hsa_amd_memory_lock(p, size, &gpu, 1, &alias));
@@ -139,19 +146,24 @@ struct MemoryClient {
         std::free(p);
         throw std::runtime_error("locked host pointer graphs require identical host/device addresses");
       }
-    } else check(hsa_memory_allocate(region, size, &p));
-    if (allocationKind() == "pool") check(hsa_amd_agents_allow_access(1, &gpu, nullptr, p));
+    } else {
+      check(hsa_memory_allocate(region, size, &p));
+    }
+    if (kind == "pool") check(hsa_amd_agents_allow_access(1, &gpu, nullptr, p));
     return p;
   }
-  void releaseBacking(void *p) {
-    if (allocationKind() == "locked") {
+  void releaseBacking(void *p) const {
+    if (kind == "locked") {
       check(hsa_amd_memory_unlock(p));
       std::free(p);
-    } else if (allocationKind() == "pool") check(hsa_amd_memory_pool_free(p));
-    else check(hsa_memory_free(p));
+    } else if (kind == "pool") {
+      check(hsa_amd_memory_pool_free(p));
+    } else {
+      check(hsa_memory_free(p));
+    }
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, void *args, hsa_queue_t *target,
-               hsa_signal_t completion) {
+               hsa_signal_t completion) const {
     std::memset(args, 0, argumentSize);
     std::memcpy(args, &input, 8);
     std::memcpy(static_cast<char *>(args) + 8, &output, 8);
@@ -175,44 +187,30 @@ struct MemoryClient {
                             | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
                             | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     __atomic_store_n(&p->header, header, __ATOMIC_RELEASE);
-    hsa_signal_store_screlease(target->doorbell_signal, index);
+    hsa_signal_store_screlease(target->doorbell_signal, static_cast<hsa_signal_value_t>(index));
   }
-  void wait(hsa_signal_t signal) {
+  static void wait(hsa_signal_t signal) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
     while (hsa_signal_load_scacquire(signal) == 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::yield();
     require(hsa_signal_load_scacquire(signal) == 0, "HSA dispatch failed or timed out");
   }
-  void submit(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
+  void submit(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) const {
     enqueue(input, output, indices, mode, count, arguments, queue, done);
   }
-  void finish() { wait(done); }
-  void launch(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
+  void finish() const { wait(done); }
+  void launch(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) const {
     enqueue(input, output, indices, mode, count, arguments, queue, done);
     wait(done);
   }
   explicit MemoryClient(bool raw = false) : MemoryClient(memory_patterns::allocationKind("region")) { this->raw = raw; }
-  bool raw = false;
-  void *allocate(size_t size) { return raw ? ordinary(size) : allocateBacking(size); }
-  void release(void *p) {
-    if (raw) std::free(p);
-    else releaseBacking(p);
-  }
-  bool concurrentCapabilities() {
+  [[nodiscard]] bool concurrentCapabilities() const {
     hsa_region_global_flag_t flags{};
     check(hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags));
     require(flags & HSA_REGION_GLOBAL_FLAG_FINE_GRAINED, "HSA fine-grained region unavailable");
     return true;
   }
 };
-} // namespace memory_patterns
+}} // namespace memory_patterns
 
-int main(int argc, char **) {
-  try {
-    memory_patterns::MemoryClient backend(argc > 1);
-    return run(backend);
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << '\n';
-    return 1;
-  }
-}
+int main(int argc, char **) { return memory_patterns::runMain<memory_patterns::MemoryClient>(argc); }

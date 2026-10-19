@@ -9,7 +9,7 @@ namespace {
 auto threads() { return std::distance(std::filesystem::directory_iterator("/proc/self/task"), {}); }
 
 void CL_CALLBACK waitForGate(cl_event, cl_int, void *gate) {
-  auto event = static_cast<cl_event>(gate);
+  auto *event = static_cast<cl_event>(gate);
   (void)clWaitForEvents(1, &event);
 }
 
@@ -21,7 +21,7 @@ cl_event late = nullptr;
 // from it.
 void teardown() {
   cl_int error = CL_SUCCESS;
-  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   cl_event queued = nullptr;
   const bool released = queue && clEnqueueMarkerWithWaitList(queue, 1, &late, &queued) == CL_SUCCESS
                         && clSetUserEventStatus(late, CL_COMPLETE) == CL_SUCCESS && clWaitForEvents(1, &queued) == CL_SUCCESS
@@ -42,10 +42,10 @@ int main() {
   cl_int error = CL_SUCCESS;
   context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   if (!context || error != CL_SUCCESS) return EXIT_FAILURE;
-  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   if (!queue || error != CL_SUCCESS) return EXIT_FAILURE;
-  auto start = clCreateUserEvent(context, &error);
-  auto gate = clCreateUserEvent(context, &error);
+  auto *start = clCreateUserEvent(context, &error);
+  auto *gate = clCreateUserEvent(context, &error);
   late = clCreateUserEvent(context, &error);
   if (!start || !gate || !late) return EXIT_FAILURE;
   cl_event marker = nullptr;

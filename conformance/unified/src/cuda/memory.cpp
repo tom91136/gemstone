@@ -20,7 +20,7 @@ CUdevice prerequisites(const std::string &kind, bool atomic) {
     return value;
   };
   const auto architecture =
-      attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) * 10 + attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR);
+      (attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) * 10) + attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR);
   if (architecture < 35) SKIP("memory access fixture requires sm_35 or newer");
   if (atomic && architecture < 70) SKIP("acquire/release memory fixtures require sm_70 or newer");
   if (!attribute(CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING)) SKIP("shared pointer graphs require unified addressing");
@@ -32,15 +32,16 @@ CUdevice prerequisites(const std::string &kind, bool atomic) {
     SKIP("allocation lacks concurrent host/device atomics");
   return ordinal;
 }
+const char *fixture(unsigned scenario) {
+  if (scenario == 6) return "exchange.ptx";
+  const unsigned operation = scenario >= 7 ? (scenario - 7) % 4 : 4;
+  if (operation == 1) return "fence.ptx";
+  if (operation == 2) return "contended.ptx";
+  return operation < 4 ? "atomic.ptx" : "kernel.ptx";
+}
 void execute(const char *kind, unsigned scenario) {
   const auto device = prerequisites(kind, scenario >= 6);
-  const unsigned operation = scenario >= 7 ? (scenario - 7) % 4 : 4;
-  Backend backend(kind, static_cast<uint64_t>(device),
-                  scenario == 6    ? "exchange.ptx"
-                  : operation == 1 ? "fence.ptx"
-                  : operation == 2 ? "contended.ptx"
-                  : operation < 4  ? "atomic.ptx"
-                                   : "kernel.ptx");
+  Backend backend(kind, static_cast<uint64_t>(device), fixture(scenario));
   runScenario(backend, scenario);
 }
 } // namespace

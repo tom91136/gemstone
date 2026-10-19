@@ -102,6 +102,19 @@ object HalfFixtures {
       |}
       |""".stripMargin
 
+  val hset2Cuda: String =
+    """#include <cuda_fp16.h>
+      |#include <stdint.h>
+      |extern "C" __global__ void probe(uint32_t *out, const uint32_t *in) {
+      |  unsigned i = threadIdx.x;
+      |  uint32_t a = in[i], b = in[i ^ 1];
+      |  __half2 x = *reinterpret_cast<__half2 *>(&a), y = *reinterpret_cast<__half2 *>(&b);
+      |  __half2 equal = __heq2(x, y), nan = __hisnan2(x);
+      |  out[i * 2] = *reinterpret_cast<uint32_t *>(&equal);
+      |  out[i * 2 + 1] = *reinterpret_cast<uint32_t *>(&nan);
+      |}
+      |""".stripMargin
+
   val hmnmx2Cuda: String =
     """#include <cuda_fp16.h>
       |#include <stdint.h>
@@ -254,6 +267,47 @@ object HalfFixtures {
       |""".stripMargin
 
   val listings: Map[String, String] = Map(
+    "hset2Sm60" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=9"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                            /* 0x083fc400e3e007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;                   /* 0x4c98078000870001 */
+        |        /*0010*/                   S2R R2, SR_TID.X ;                       /* 0xf0c8000002170002 */
+        |        /*0018*/                   SHL R6, R2.reuse, 0x2 ;                  /* 0x3848000000270206 */
+        |                                                                            /* 0x001f9400fc2007e5 */
+        |        /*0028*/                   SHR.U32 R0, R2, 0x1e ;                   /* 0x3828000001e70200 */
+        |        /*0030*/                   IADD R4.CC, R6, c[0x0][0x148] ;          /* 0x4c10800005270604 */
+        |        /*0038*/                   LOP32I.XOR R6, R6, 0x4 ;                 /* 0x0440000000470606 */
+        |                                                                            /* 0x001ed800fe0007e2 */
+        |        /*0048*/                   IADD.X R5, R0, c[0x0][0x14c] ;           /* 0x4c10080005370005 */
+        |        /*0050*/         {         IADD R6.CC, R6, c[0x0][0x148] ;          /* 0x4c10800005270606 */
+        |        /*0058*/                   LDG.E R4, [R4]         }
+        |                                                                            /* 0xeed4200000070404 */
+        |                                                                            /* 0x001fd800f62007e2 */
+        |        /*0068*/                   IADD.X R7, R0, c[0x0][0x14c] ;           /* 0x4c10080005370007 */
+        |        /*0070*/                   LDG.E R6, [R6] ;                         /* 0xeed4200000070606 */
+        |        /*0078*/                   SHL R2, R2, 0x1 ;                        /* 0x3848000000170202 */
+        |                                                                            /* 0x001fdc00fcc207f1 */
+        |        /*0088*/                   SHR.U32 R0, R2.reuse, 0x1e ;             /* 0x3828000001e70200 */
+        |        /*0090*/                   ISCADD R2.CC, R2, c[0x0][0x140], 0x2 ;   /* 0x4c18810005070202 */
+        |        /*0098*/                   IADD.X R3, R0, c[0x0][0x144] ;           /* 0x4c10080005170003 */
+        |                                                                            /* 0x001c4801fe230712 */
+        |        /*00a8*/                   HSET2.BF.NAN.AND R8, R4.reuse, R4, PT ;  /* 0x5d1a03c000470408 */
+        |        /*00b0*/                   STG.E [R2+0x4], R8 ;                     /* 0xeedc200000470208 */
+        |        /*00b8*/                   HSET2.BF.EQ.AND R0, R4, R6, PT ;         /* 0x5d1a039000670400 */
+        |                                                                            /* 0x001ffc00ffe00ff1 */
+        |        /*00c8*/                   STG.E [R2], R0 ;                         /* 0xeedc200000070200 */
+        |        /*00d0*/                   EXIT ;                                   /* 0xe30000000007000f */
+        |.L_x_1:
+        |""".stripMargin,
     "hadd2F32Sm75" ->
       """//--------------------- .text.probe               --------------------------
         |	.section	.text.probe,"ax",@progbits

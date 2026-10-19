@@ -8,7 +8,7 @@ import net.kurobako.gemstone.graphics.ShaderMetadata.*
 
 private object ShaderRecords {
   def allocate(shader: GraphicsShader, count: Int >= 0): Array[Array[Byte]] =
-    shader.interfaces.map(i => Array.ofDim[Byte]((count * i.size).raw)).toArray
+    shader.interfaces.map(i => Array.ofDim[Byte](count * i.size)).toArray
   def fields(
       shader: GraphicsShader,
       direction: ShaderDirection

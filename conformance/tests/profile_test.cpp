@@ -1,9 +1,14 @@
 #include "profile.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <system_error>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,6 +20,8 @@ struct TemporaryDirectory {
   std::filesystem::path path = std::filesystem::temp_directory_path()
                                / fmt::format("conformance-profile-test-{}", std::chrono::steady_clock::now().time_since_epoch().count());
   TemporaryDirectory() { std::filesystem::create_directories(path); }
+  TemporaryDirectory(const TemporaryDirectory &) = delete;
+  TemporaryDirectory &operator=(const TemporaryDirectory &) = delete;
   ~TemporaryDirectory() noexcept {
     std::error_code error;
     std::filesystem::remove_all(path, error);
@@ -24,7 +31,7 @@ struct TemporaryDirectory {
 } // namespace
 
 TEST_CASE("machine profiles preserve target settings", "[profile]") {
-  TemporaryDirectory directory;
+  TemporaryDirectory const directory;
   std::ofstream(directory.path / "local-machine.toml") << R"(
 environment = { SHARED = "global" }
 skips = ["global/case"]
@@ -60,12 +67,12 @@ device = "*second*"
 }
 
 TEST_CASE("machine profiles do not invent a fallback target", "[profile]") {
-  TemporaryDirectory directory;
+  TemporaryDirectory const directory;
   CHECK_THROWS_AS(conformance::profile::resolveProfile(directory.path, std::nullopt, "missing-machine"), std::invalid_argument);
 }
 
 TEST_CASE("machine profiles may select multiple architectures of one backend", "[profile]") {
-  TemporaryDirectory directory;
+  TemporaryDirectory const directory;
   std::ofstream(directory.path / "multi.toml") << R"(
 [[targets]]
 name = "older"
@@ -102,10 +109,16 @@ TEST_CASE("direct routes are explicit and contain no machine policy", "[profile]
   }
   CHECK_THROWS(directTargets({}));
   for (const auto &route : {"all", "cuda", "cuda-ptx", "cuda-sass", "cuda-sass/gfx1030", "cuda-auto/sm_89", "hip", "hsa/sm_89",
-                            "cuda/../../escape", "vulkan/gfx1030", "unknown"})
+                            "cuda/sm_90b", "cuda/sm_90af", "cuda/sm_a", "cuda/../../escape", "vulkan/gfx1030", "unknown"})
     CHECK_THROWS(directTargets({route}));
   CHECK_THROWS(directTargets({"vulkan", "vulkan"}));
   CHECK(directTargets({"cuda/sm_89", "cuda/sm_80"}).size() == 4);
+  const auto suffixed = directTargets({"cuda-sass/sm_90a", "cuda-ptx/sm_100f"});
+  REQUIRE(suffixed.size() == 2);
+  CHECK(suffixed[0].id == "cuda-sass-sm_90a");
+  CHECK(suffixed[0].architecture == "sm_90a");
+  CHECK(suffixed[1].id == "cuda-ptx-sm_100f");
+  CHECK(suffixed[1].architecture == "sm_100f");
 }
 
 TEST_CASE("direct CUDA routes select strict PTX and SASS independently from the same artifact", "[profile]") {
@@ -114,7 +127,7 @@ TEST_CASE("direct CUDA routes select strict PTX and SASS independently from the 
   REQUIRE(targets.size() == 2);
   for (size_t i = 0; i < targets.size(); ++i) {
     const auto &target = targets[i];
-    const auto mode = i == 0 ? "ptx" : "sass";
+    const auto *const mode = i == 0 ? "ptx" : "sass";
     CHECK(target.id == std::string("cuda-") + mode + "-sm_89");
     CHECK(target.backend == "cuda");
     CHECK(target.architecture == "sm_89");
@@ -155,7 +168,10 @@ TEST_CASE("compiler routes preserve code modes and reject unsupported combinatio
 
 TEST_CASE("machine compiler selection requires a compatible backend and code mode", "[profile]") {
   TemporaryDirectory directory;
-  std::string compiler = "gcc", backend = "cuda", architecture = "sm_80", mode;
+  std::string compiler = "gcc";
+  std::string backend = "cuda";
+  std::string architecture = "sm_80";
+  std::string mode;
   bool invalid = false;
   SECTION("GCC CUDA selects PTX") {}
   SECTION("GCC supports HSA") {
@@ -185,8 +201,9 @@ TEST_CASE("machine compiler selection requires a compatible backend and code mod
   const auto resolve = [&] {
     return conformance::profile::resolveTargets(conformance::profile::resolveProfile(directory.path, "compiler"), {});
   };
-  if (invalid) CHECK_THROWS(resolve());
-  else {
+  if (invalid) {
+    CHECK_THROWS(resolve());
+  } else {
     const auto targets = resolve();
     REQUIRE(targets.size() == 1);
     CHECK(targets[0].compiler == "gcc");
@@ -207,8 +224,9 @@ TEST_CASE("machine CUDA code modes derive the driver JIT policy", "[profile]") {
   const auto resolve = [&] {
     return conformance::profile::resolveTargets(conformance::profile::resolveProfile(directory.path, "cuda"), {});
   };
-  if (mode != "sass") CHECK_THROWS(resolve());
-  else {
+  if (mode != "sass") {
+    CHECK_THROWS(resolve());
+  } else {
     const auto targets = resolve();
     REQUIRE(targets.size() == 1);
     CHECK(targets[0].environment.at("CUDA_FORCE_PTX_JIT") == "0");
@@ -217,7 +235,7 @@ TEST_CASE("machine CUDA code modes derive the driver JIT policy", "[profile]") {
 }
 
 TEST_CASE("profile selectors preserve all compilers by backend and narrow by target name", "[profile]") {
-  TemporaryDirectory directory;
+  TemporaryDirectory const directory;
   std::ofstream(directory.path / "compilers.toml") << R"(
 [[targets]]
 name = "cuda-vendor"

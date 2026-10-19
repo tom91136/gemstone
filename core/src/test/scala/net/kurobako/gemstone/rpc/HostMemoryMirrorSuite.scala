@@ -71,7 +71,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     assertEquals(first.size, 2)
     assertEquals(first.map(_.size.raw).sum, 8)
     assert(mirror.supply(first.map(range =>
-      HostMemoryBytes(range.address, Vec.fill(range.size.raw)(1.toByte))
+      HostMemoryBytes(range.address, Vec.fill(range.size)(1.toByte))
     )).isRight)
     assertEquals(mirror.requests().size, 1)
     mirror.write(at(0x4000), Vec.fill(20)(2.toByte))

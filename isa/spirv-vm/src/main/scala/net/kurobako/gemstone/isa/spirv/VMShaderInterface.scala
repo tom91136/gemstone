@@ -26,7 +26,7 @@ private object VMShaderInterface {
     // Before SPIR-V 1.4, descriptor globals were not required in OpEntryPoint's
     // interface. Retain compatibility with those modules when none are listed.
     val bindings =
-      if (program.module.header.version.minor.raw >= 4 || scoped.nonEmpty) scoped else program.descriptorBindings
+      if (program.module.header.version.minor >= 4 || scoped.nonEmpty) scoped else program.descriptorBindings
     Vec.from(bindings.toSeq.sortBy { case (variable, (set, binding)) =>
       (set, binding, variable)
     }.flatMap { case (variable, _) =>
@@ -36,14 +36,14 @@ private object VMShaderInterface {
             g.pointerType
           ).collect { case RuntimeType.Pointer(_, pointee) => pointee }.flatMap(program.runtimeType(_))
         ) match {
-          case Some(RuntimeType.Array(_, count)) => Math.toIntExact(count.raw)
+          case Some(RuntimeType.Array(_, count)) => Math.toIntExact(count)
           case _                                 => 1
         }
       Seq.fill(count)(variable)
     }) ++ Vec.from(program.globals.toSeq.collect {
       case (variable, global)
           if global.storageClass == StorageClass.PushConstant &&
-            (program.module.header.version.minor.raw < 4 || declared.contains(variable)) => variable
+            (program.module.header.version.minor < 4 || declared.contains(variable)) => variable
     }.sorted) ++ stageInterfaceVariables(program, name)
   }
 

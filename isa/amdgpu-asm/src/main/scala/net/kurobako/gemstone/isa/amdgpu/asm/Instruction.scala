@@ -2,23 +2,19 @@ package net.kurobako.gemstone.isa.amdgpu.asm
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.string.*
 import scala.annotation.tailrec
 
 object Instruction {
-  enum DecodeError {
-    case UnknownOpcode(opcode: String)
-    case InvalidOperandCount(opcode: String, expected: Vec[Int], actual: Int)
-    case AmbiguousForms(opcode: String, definitions: Vec[Opcode])
-  }
 
   /** Assembly operand counts: distinct explicit operand signatures from the catalogue plus a reviewed syntax overlay
     * for forms absent from ACO's physical opcode model or conditional operands that AMD XML marks as always present.
     */
   def operandCounts(definition: Opcode): Vec[Int] = {
     val explicit = definition.meta.encodings.map(_.operands.count(!_.implicitOperand)).filter(_ > 0)
-    (explicit ++ syntaxOperandCounts(definition.opcode)).distinct.sorted match {
+    (explicit ++ syntaxOperandCounts(definition.mnemonic)).distinct.sorted match {
       case Vec()  => Vec(0)
       case counts => counts
     }
@@ -26,7 +22,7 @@ object Instruction {
 
   /** SOPP branches whose label operand encodes a signed word displacement from the next instruction. */
   def branchesRelative(definition: Opcode, target: Target): Boolean =
-    Metadata.encodingsFor(definition, target).exists(encoding =>
+    definition.encodings(target).exists(encoding =>
       encoding.format == EncodingFormat.SOPP && encoding.operands.exists(_.kind == OperandKind.LABEL)
     )
 
@@ -55,7 +51,7 @@ object Instruction {
     Either.cond(
       counts.contains(operands.size),
       Instruction(definition, operands, mods),
-      DecodeError.InvalidOperandCount(definition.opcode, counts, operands.size)
+      DecodeError(definition.mnemonic, DecodeProblem.InvalidOperandCount(counts, operands.size))
     )
   }
 
@@ -82,12 +78,12 @@ object Instruction {
       original: String
   ): Either[DecodeError, Instruction] =
     decodeCanonical(name, operands, mods) match {
-      case Left(DecodeError.UnknownOpcode(_)) =>
+      case Left(DecodeError(_, DecodeProblem.UnknownOpcode)) =>
         EncodingSuffixes.collectFirst {
           case (suffix, modifier) if name.endsWith(suffix) => name.dropRight(suffix.length) -> modifier
         } match {
           case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
-          case None                        => Left(DecodeError.UnknownOpcode(original))
+          case None                        => Left(DecodeError(original, DecodeProblem.UnknownOpcode))
         }
       case result => result
     }
@@ -97,22 +93,22 @@ object Instruction {
       operands: Vec[Operand],
       mods: Vec[Modifier]
   ): Either[DecodeError, Instruction] =
-    Opcode.forOpcode(name) match {
-      case Vec()      => Left(DecodeError.UnknownOpcode(name))
+    InstructionDefs.forOpcode(name) match {
+      case Vec()      => Left(DecodeError(name, DecodeProblem.UnknownOpcode))
       case candidates => candidates.flatMap(decode(_, operands, mods).toOption) match {
           case Vec(instruction) => Right(instruction)
-          case Vec()            => Left(DecodeError.InvalidOperandCount(
+          case Vec()            => Left(DecodeError(
               name,
-              candidates.flatMap(operandCounts(_)).distinct.sorted,
-              operands.size
+              DecodeProblem.InvalidOperandCount(candidates.flatMap(operandCounts(_)).distinct.sorted, operands.size)
             ))
-          case matches => Left(DecodeError.AmbiguousForms(name, matches.map(_.definition)))
+          case matches =>
+            Left(DecodeError(name, DecodeProblem.AmbiguousDefinitions(matches.map(_.definition.mnemonic))))
         }
     }
 }
 
 /** An assembly instruction whose operand count matches one of its opcode's forms. */
 case class Instruction private (definition: Opcode, operands: Vec[Operand], mods: Vec[Modifier]) {
-  def opcode: NonEmpty[String] = definition.opcode
+  def opcode: NonEmpty[String] = definition.mnemonic
   def meta: Metadata           = definition.meta
 }

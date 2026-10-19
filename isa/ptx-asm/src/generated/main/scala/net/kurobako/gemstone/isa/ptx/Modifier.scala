@@ -153,7 +153,6 @@ object Modifier {
     "filter_mode" -> FilterMode,
     "finite" -> Finite,
     "force_unnormalized_coords" -> ForceUnnormalizedCoords,
-    "fp16x2" -> Fp16x2,
     "fractional" -> Fractional,
     "ftz" -> Ftz,
     "full" -> Full,
@@ -552,10 +551,18 @@ object Modifier {
   )
   def apply(name: NonEmpty[String]): Modifier = byName.getOrElse(name.raw, Unrecognised(name))
   def unapply(value: Modifier): Some[NonEmpty[String]] = Some(value.name)
+
+  lazy val PackedHalfTypes: Set[Modifier] = Set(F16x2, Bf16x2)
+
+  extension (modifier: Modifier) {
+    def isInteger32: Boolean = PartialFunction.cond(modifier) { case U32 | S32 => true }
+    def isPackedHalf: Boolean = PackedHalfTypes(modifier)
+    def is64Bit: Boolean = PartialFunction.cond(modifier) { case B64 | U64 | S64 | F64 => true }
+  }
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum Modifier(val name: NonEmpty[String]) {
+enum Modifier(val name: NonEmpty[String]) derives CanEqual {
   case N128x128b extends Modifier("128x128b")
   case N128x256b extends Modifier("128x256b")
   case N16x128b extends Modifier("16x128b")
@@ -705,7 +712,6 @@ enum Modifier(val name: NonEmpty[String]) {
   case FilterMode extends Modifier("filter_mode")
   case Finite extends Modifier("finite")
   case ForceUnnormalizedCoords extends Modifier("force_unnormalized_coords")
-  case Fp16x2 extends Modifier("fp16x2")
   case Fractional extends Modifier("fractional")
   case Ftz extends Modifier("ftz")
   case Full extends Modifier("full")

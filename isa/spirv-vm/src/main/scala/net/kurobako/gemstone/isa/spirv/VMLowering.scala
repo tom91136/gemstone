@@ -1,30 +1,21 @@
 package net.kurobako.gemstone.isa.spirv
 
+import OpBuilder.*
 import VMProgram.*
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.vm.*
 import scala.util.control.NonFatal
 
 /** Lowers every instruction of a program into its per-pc op table. */
 private object VMLowering {
-  import Operand.*
-
-  /** Load-time view of one instruction: its program, position and enclosing function. */
-  class Site(val program: VMProgram, val pc: Int, val function: Option[Function]) {
-    def label(operand: Operand): Either[Fault, Int] = function match {
-      case Some(value) =>
-        value.labels.get(id(operand))
-          .toRight(Fault.InvalidRequest(s"SPIR-V label %${id(operand)} is absent in function %${value.id}"))
-      case None => Left(Fault.InvalidRequest(s"SPIR-V label %${id(operand)} is outside a function"))
-    }
-  }
 
   def lower(program: VMProgram): Array[Op] = {
     val functions = Array.fill[Option[Function]](program.module.instructions.size)(None)
     program.functions.values.foreach(function =>
       (function.start to function.end).foreach(functions(_) = Some(function))
     )
-    Array.tabulate(program.module.instructions.size) { pc =>
+    val ops = Array.tabulate(program.module.instructions.size) { pc =>
       val site        = Site(program, pc, functions(pc))
       val instruction = program.module.instructions(pc)
       try lower(site, instruction)
@@ -33,22 +24,68 @@ private object VMLowering {
           Op.Fail(Fault.InvalidRequest(s"malformed SPIR-V execution state: ${throwables.detail(error)}"))
       }
     }
+    // a run of instructions without an execution effect, such as debug information, passes in one step from any of them
+    val _ = ops.indices.reverse.foldLeft(0) { (following, pc) =>
+      if (ops(pc) ne Op.Next) 0
+      else {
+        val run = if (pc + 1 < ops.length && functions(pc + 1) == functions(pc)) following + 1 else 1
+        if (run > 1) ops(pc) = Op.Skip(run)
+        run
+      }
+    }
+    ops
   }
 
+  /** The op families in the order lowering tries them, each with what its ops run. */
+  def families(site: Site): Vec[(String, PartialFunction[Instruction, Op])] = Vec(
+    "labels, branches, calls and returns"                   -> ControlOps.lower(site),
+    "integer, floating-point and matrix arithmetic"         -> ArithmeticOps.lower(site),
+    "comparisons and selection"                             -> ComparisonOps.lower(site),
+    "conversions and value copies"                          -> ConversionOps.lower(site),
+    "variables, loads, stores and pointer operations"       -> MemoryOps.lower(site),
+    "atomic memory operations and memory barriers"          -> AtomicOps.lower(site),
+    "composite construction, extraction and permutation"    -> CompositeOps.lower(site),
+    "workgroup and subgroup collectives and barriers"       -> CollectiveOps.lower(site),
+    "extended instructions"                                 -> ExtendedOps.lower(site),
+    "image access and sampling"                             -> ImageOps.lower(site),
+    "OpenCL pipes"                                          -> PipeOps.lower,
+    "device-side enqueue"                                   -> DeviceEnqueueOps.lower(site),
+    "integer dot products"                                  -> IntegerDotOps.lower(site),
+    "Intel and VALVE vendor arithmetic"                     -> IntelArithmeticOps.lower(site),
+    "cooperative matrix loads, stores and products"         -> CooperativeMatrixOps.lower(site),
+    "cooperative vector loads, stores and products"         -> CooperativeVectorOps.lower(site),
+    "tensor layouts, views, and tensor loads and stores"    -> TensorAddressingOps.lower(site),
+    "vendor gathers, scatters, predicated and raw accesses" -> VendorMemoryOps.lower(site),
+    "Intel subgroup block reads and writes"                 -> IntelBlockOps.lower(site),
+    "clock reads"                                           -> ClockOps.lower(site),
+    "module-scope declarations the loader reads"            -> constants,
+    "composite continuations the loader folds"              -> continuations
+  )
+
+  // SPV_INTEL_long_composites continuations fold into what they continue as the module loads; one left here follows
+  // nothing it can continue
+  private val continuations: PartialFunction[Instruction, Op] = {
+    case instruction @ (_: Instruction.TypeStructContinuedINTEL | _: Instruction.ConstantCompositeContinuedINTEL |
+        _: Instruction.SpecConstantCompositeContinuedINTEL | _: Instruction.CompositeConstructContinuedINTEL) =>
+      Op.Fail(Fault.InvalidRequest(s"${instruction.opcode} does not follow the instruction it continues"))
+  }
+
+  // declarations outside the core grammar's declaration classes, whose ops never run; aliasing scopes only permit
+  // optimisations
+  private val constants: PartialFunction[Instruction, Op] = {
+    case Instruction.ConstantFunctionPointerINTEL(_, _, _) | Instruction.AliasDomainDeclINTEL(_, _) |
+        Instruction.AliasScopeDeclINTEL(_, _, _) | Instruction.AliasScopeListDeclINTEL(_, _) => Op.Next
+    // SPV_INTEL_function_variants' conditional declarations, which the loader reads, or ignores where they only declare
+    // what a module may use
+    case Instruction.ConditionalCapabilityINTEL(_, _) | Instruction.ConditionalExtensionINTEL(_, _) |
+        Instruction.ConditionalEntryPointINTEL(_, _, _, _, _) => Op.Next
+    case Instruction.ConstantPipeStorage(_, _, _, _, _) => Op.Next
+  }
+
+  def unsupported(instruction: Instruction): Fault =
+    Fault.Unsupported(s"${instruction.opcode} execution is not implemented")
+
   private def lower(site: Site, instruction: Instruction): Op =
-    ControlOps.lower(site)
-      .orElse(ArithmeticOps.lower(site))
-      .orElse(ComparisonOps.lower(site))
-      .orElse(ConversionOps.lower(site))
-      .orElse(MemoryOps.lower(site))
-      .orElse(AtomicOps.lower(site))
-      .orElse(CompositeOps.lower(site))
-      .orElse(CollectiveOps.lower(site))
-      .orElse(ExtendedOps.lower(site))
-      .orElse(ImageOps.lower(site))
-      .orElse(PipeOps.lower)
-      .orElse(DeviceEnqueueOps.lower(site))
-      .orElse(IntegerDotOps.lower(site))
-      .orElse(IntelBlockOps.lower(site))
-      .applyOrElse(instruction, other => Op.Fail(Fault.Unsupported(s"${other.opcode} execution is not implemented")))
+    families(site).view.map(_._2.applyOrElse(instruction, _ => unmatched)).find(_ ne unmatched)
+      .getOrElse(Op.Fail(unsupported(instruction)))
 }

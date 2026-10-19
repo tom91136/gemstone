@@ -11,7 +11,7 @@ object OperandKind {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum OperandKind {
+enum OperandKind derives CanEqual {
   case `ACCVGPR`
   case `ATTR`
   case `BUFFER_FORMAT`
@@ -79,8 +79,6 @@ enum OperandKind {
   case `WAIT_EVENT`
   case `WAIT_MEM_DS`
   case `float`
-  case `int`
-  case `uint`
   def isImmediate: Boolean =
     this match { case `SIMM16` | `SIMM24` | `SIMM32` | `SIMM4` | `SIMM5` | `SIMM64` | `SIMM8` => true; case _ => false }
   def isVector: Boolean = this match { case `VGPR` | `VGPR_OR_ACCVGPR` | `VGPR_OR_LDS` => true; case _ => false }
@@ -99,7 +97,8 @@ enum OperandKind {
   }
   def isScalarDestination: Boolean =
     this match { case `SDST` | `SDST_EXEC` | `SDST_M0` | `SDST_NULL` => true; case _ => false }
-  def isAccumulator: Boolean = this match { case `ACCVGPR` => true; case _ => false }
+  def isBareAccumulator: Boolean = this match { case `ACCVGPR` => true; case _ => false }
+  def isAccumulatorOnly: Boolean = this match { case `ACCVGPR` | `SRC_ACCVGPR` => true; case _ => false }
   def acceptsAccumulator: Boolean = this match {
     case `ACCVGPR` | `SRC_ACCVGPR` | `SRC_ACCVGPR_OR_CONST` | `SRC_VGPR_OR_ACCVGPR` | `SRC_VGPR_OR_ACCVGPR_OR_CONST` | `VGPR_OR_ACCVGPR` =>
       true;

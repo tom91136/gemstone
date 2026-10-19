@@ -1,12 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import FloatSemantics.*
+import IntegerSemantics.*
 import VMIR.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.semantics.*
 
 class AMDGPUArithmeticSuite extends munit.FunSuite {
+
+  /** The dword in `result` after `operations` on one gfx900 lane with `inputs` in v2 onwards. */
+  private def run(inputs: Vec[Long], result: VectorRegisterIndex, operations: Instruction*): Int =
+    laneRuns.laneResult(Target("gfx900"), inputs, Vec.from(operations), result).toInt
+
   private def packed(low: Float, high: Float): Long =
     Bits.low16(IEEE754.floatToBinary16(low).toLong).toLong |
       (Bits.low16(IEEE754.floatToBinary16(high).toLong).toLong << 16)
@@ -27,7 +35,10 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
         -53 - shift + (if (exponent >= 1968) 128 else 0)
       )
       val input = IEEE754.binary64ToDouble(exponent.toLong << 52)
-      assertEquals(VMArithmetic.trigPreopF64(input, segment), expected)
+      assertEquals(
+        Execute.trigPreop(IEEE754.doubleToBinary64(input), segment.toLong),
+        IEEE754.doubleToBinary64(expected)
+      )
     }
   }
 
@@ -50,7 +61,7 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
         "gfx900 packed-half FMA decoding preserves low and high operand selection",
         Target("gfx900"),
         Vec(0x00, 0x40, 0x8e, 0xd3, 0x02, 0x09, 0x02, 0x0c),
-        Instruction.VPackedFmaF16(
+        Instruction.VPackedTernary(
           0,
           InstructionSource.VectorRegister(2),
           InstructionSource.VectorRegister(4),
@@ -66,7 +77,7 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
         "gfx1036 VOP3P packed-half FMA decodes all three sources",
         Target("gfx1036"),
         Vec(0x05, 0x40, 0x0e, 0xcc, 0x01, 0x05, 0x0e, 0x1c),
-        Instruction.VPackedFmaF16(
+        Instruction.VPackedTernary(
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -224,13 +235,13 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
         "gfx1036 VOP1 movrels b32 decodes",
         Target("gfx1036"),
         Vec(0x01, 0x87, 0x0a, 0x7e),
-        Instruction.VMoveRelative(5, InstructionSource.VectorRegister(1))
+        Instruction.VMoveRelative(5, InstructionSource.VectorRegister(1), RelativeField.Whole)
       ),
       (
         "gfx1036 VOP1 movreld b32 decodes",
         Target("gfx1036"),
         Vec(0x01, 0x85, 0x0a, 0x7e),
-        Instruction.VMoveRelativeDestination(5, InstructionSource.VectorRegister(1))
+        Instruction.VMoveRelativeDestination(5, InstructionSource.VectorRegister(1), None, RelativeField.Whole)
       ),
       (
         "gfx900 VOP1 aperture source encodings decode",
@@ -287,27 +298,41 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     def f32(value: Float): Long  = IEEE754.floatToBinary32(value).toLong
     def f64(value: Double): Long = IEEE754.doubleToBinary64(value)
     def f16(value: Float): Long  = Bits.low16(IEEE754.floatToBinary16(value).toLong).toLong
-    assertEquals(VMArithmetic.outputModified(f32(1.5f), OutputScale.Multiply2, 32, false), f32(3.0f))
-    assertEquals(VMArithmetic.outputModified(f32(1.5f), OutputScale.Multiply4, 32, false), f32(6.0f))
-    assertEquals(VMArithmetic.outputModified(f32(-3.0f), OutputScale.Divide2, 32, false), f32(-1.5f))
-    assertEquals(VMArithmetic.outputModified(f32(-0.0f), OutputScale.Multiply2, 32, false), 0L)
-    assertEquals(VMArithmetic.outputModified(f32(-1e-40f), OutputScale.Multiply4, 32, false), 0L)
-    assertEquals(VMArithmetic.outputModified(f32(java.lang.Float.MIN_NORMAL), OutputScale.Divide2, 32, false), 0L)
-    assertEquals(VMArithmetic.outputModified(f32(0.75f), OutputScale.Multiply2, 32, true), f32(1.0f))
-    assertEquals(VMArithmetic.outputModified(f32(-0.75f), OutputScale.Multiply2, 32, true), 0L)
-    assertEquals(VMArithmetic.outputModified(0x7fc00001L, OutputScale.Multiply2, 32, false), 0x7fc00001L)
-    assertEquals(VMArithmetic.outputModified(f64(1.5), OutputScale.Multiply2, 64, false), f64(3.0))
-    assertEquals(VMArithmetic.outputModified(f64(-0.0), OutputScale.Divide2, 64, false), 0L)
-    assertEquals(VMArithmetic.outputModified(f64(java.lang.Double.MIN_NORMAL), OutputScale.Divide2, 64, false), 0L)
-    assertEquals(VMArithmetic.outputModified(f16(1.5f), OutputScale.Multiply2, 16, false), f16(3.0f))
-    assertEquals(VMArithmetic.outputModified(f16(-0.0f), OutputScale.Multiply4, 16, false), 0L)
+    def scaled(bits: Long, scale: OutputScale, width: Int in (16, 32, 64), clamp: Boolean): Long =
+      Execute.outputModifier(scale, width, clamp, bits)
+    assertEquals(scaled(f32(1.5f), OutputScale.Multiply2, 32, false), f32(3.0f))
+    assertEquals(scaled(f32(1.5f), OutputScale.Multiply4, 32, false), f32(6.0f))
+    assertEquals(scaled(f32(-3.0f), OutputScale.Divide2, 32, false), f32(-1.5f))
+    assertEquals(scaled(f32(-0.0f), OutputScale.Multiply2, 32, false), 0L)
+    assertEquals(scaled(f32(-1e-40f), OutputScale.Multiply4, 32, false), 0L)
+    assertEquals(scaled(f32(java.lang.Float.MIN_NORMAL), OutputScale.Divide2, 32, false), 0L)
+    assertEquals(scaled(f32(0.75f), OutputScale.Multiply2, 32, true), f32(1.0f))
+    assertEquals(scaled(f32(-0.75f), OutputScale.Multiply2, 32, true), 0L)
+    assertEquals(scaled(0x7fc00001L, OutputScale.Multiply2, 32, false), 0x7fc00001L)
+    assertEquals(scaled(0x7fc00001L, OutputScale.Multiply2, 32, true), 0x7fc00001L)
+    assertEquals(scaled(f64(1.5), OutputScale.Multiply2, 64, false), f64(3.0))
+    assertEquals(scaled(f64(-0.0), OutputScale.Divide2, 64, false), 0L)
+    assertEquals(scaled(f64(java.lang.Double.MIN_NORMAL), OutputScale.Divide2, 64, false), 0L)
+    assertEquals(scaled(f16(1.5f), OutputScale.Multiply2, 16, false), f16(3.0f))
+    assertEquals(scaled(f16(-0.0f), OutputScale.Multiply4, 16, false), 0L)
     // binary16's smallest normal is 2^-14; halving it leaves a flushed denormal.
-    assertEquals(VMArithmetic.outputModified(f16(6.1035156e-5f), OutputScale.Divide2, 16, false), 0L)
+    assertEquals(scaled(f16(6.1035156e-5f), OutputScale.Divide2, 16, false), 0L)
   }
 
   test("AMDGPU f32 trigonometry consumes turns") {
-    assert(math.abs(VMArithmetic.trigF32(VectorConvertOperation.SineF32, 0.25f) - 1.0f) < 1.0e-6f)
-    assert(math.abs(VMArithmetic.trigF32(VectorConvertOperation.CosineF32, 0.25f)) < 1.0e-6f)
+    def trig(operation: VectorConvertOperation, value: Float): Float = {
+      val sinks = Values(IEEE754.floatToBinary32(value).toLong)
+      IEEE754.binary32ToFloat(Bits.low32(
+        FloatSemantics.convert(Execute, operation, clamp = false)(
+          sinks,
+          0,
+          Values.Unused,
+          SourceModifiers.Unmodified
+        )._1
+      ))
+    }
+    assert(math.abs(trig(VectorConvertOperation.SineF32, 0.25f) - 1.0f) < 1.0e-6f)
+    assert(math.abs(trig(VectorConvertOperation.CosineF32, 0.25f)) < 1.0e-6f)
   }
 
   test("division fixup recovers a finite quotient after pre-scale approximation overflows") {
@@ -353,7 +378,7 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     )
     assert(
       decoded.exists {
-        case Instruction.VTernary(operation = VectorTernaryOperation.Median3I16, dest = dest) => dest.raw == 5
+        case Instruction.VTernary(operation = VectorTernaryOperation.Median3I16, dest = dest) => dest == 5
         case _                                                                                => false
       },
       decoded.toString
@@ -361,40 +386,38 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
   }
 
   test("dot2c f32-f16 computes both packed halves before accumulation") {
-    val result = VMArithmetic.dot2F32F16(
+    val result = Execute.dotHalves(
+      accumulate = true,
       packed(low = 1.0f, high = 2.0f),
       packed(low = 3.0f, high = 4.0f),
-      IEEE754.floatToBinary32(5.0f).toLong,
-      accumulate = true
+      IEEE754.floatToBinary32(5.0f).toLong
     )
-    assertEquals(IEEE754.binary32ToFloat(result), 16.0f)
+    assertEquals(IEEE754.binary32ToFloat(Bits.low32(result)), 16.0f)
   }
 
   test("gfx900 packed-half FMA applies operand selection, negation, and clamp independently") {
+    def fma(lowSelection: Int, highSelection: Int, negateLow: Int, negateHigh: Int, clamp: Boolean): Long =
+      run(
+        Vec(packed(low = 2.0f, high = 3.0f), packed(low = 4.0f, high = 5.0f), packed(low = 6.0f, high = 7.0f)),
+        5,
+        Instruction.VPackedTernary(
+          5,
+          InstructionSource.VectorRegister(2),
+          InstructionSource.VectorRegister(3),
+          InstructionSource.VectorRegister(4),
+          lowSelection = lowSelection,
+          highSelection = highSelection,
+          negateLow = negateLow,
+          negateHigh = negateHigh,
+          clamp = clamp
+        )
+      ).toLong & 0xffffffffL
     assertEquals(
-      VMArithmetic.packedFmaF16(
-        packed(low = 2.0f, high = 3.0f),
-        packed(low = 4.0f, high = 5.0f),
-        packed(low = 6.0f, high = 7.0f),
-        lowSelection = 0,
-        highSelection = 5,
-        negateLow = 0,
-        negateHigh = 0,
-        clamp = false
-      ),
+      fma(lowSelection = 0, highSelection = 5, negateLow = 0, negateHigh = 0, clamp = false),
       packed(low = 14.0f, high = 19.0f)
     )
     assertEquals(
-      VMArithmetic.packedFmaF16(
-        packed(low = 2.0f, high = 3.0f),
-        packed(low = 4.0f, high = 5.0f),
-        packed(low = 6.0f, high = 7.0f),
-        lowSelection = 0,
-        highSelection = 7,
-        negateLow = 1,
-        negateHigh = 4,
-        clamp = true
-      ),
+      fma(lowSelection = 0, highSelection = 7, negateLow = 1, negateHigh = 4, clamp = true),
       packed(low = 0.0f, high = 1.0f)
     )
   }
@@ -407,67 +430,94 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
   }
 
   test("gfx900 V_PERM_B32 selectors address the second source before the first and high selectors produce zero") {
-    assertEquals(
-      VMArithmetic.permuteBytes(srcA = 0xa3a2a1a0L, srcB = 0xb3b2b1b0L, selectors = 0x05040100L),
-      0xa1a0b1b0L
-    )
-    assertEquals(
-      VMArithmetic.permuteBytes(srcA = 0xa3a2a1a0L, srcB = 0xb3b2b1b0L, selectors = 0x0c0c0001L),
-      0x0000b0b1L
-    )
+    def permute(srcA: Long, srcB: Long, selectors: Long): Long = {
+      val sinks = Values(srcA, srcB, selectors)
+      IntegerSemantics.vectorTernary(Execute, VectorTernaryOperation.PermuteBytes32, clamp = false)(
+        sinks,
+        0,
+        Values.Unused,
+        Values.Unused,
+        Values.Unused,
+        SourceModifiers.Unmodified
+      )(fail("unstaged"))._1
+    }
+    assertEquals(permute(srcA = 0xa3a2a1a0L, srcB = 0xb3b2b1b0L, selectors = 0x05040100L), 0xa1a0b1b0L)
+    assertEquals(permute(srcA = 0xa3a2a1a0L, srcB = 0xb3b2b1b0L, selectors = 0x0c0c0001L), 0x0000b0b1L)
   }
 
   test("D16 merges ignore input bits above the destination dword and the loaded half") {
-    assertEquals(VMArithmetic.mergeD16(existing = 0xfeed11223344L, value = 0xffffaabbL, high = false), 0x1122aabbL)
-    assertEquals(VMArithmetic.mergeD16(existing = 0xfeed11223344L, value = 0xffffaabbL, high = true), 0xaabb3344L)
+    assertEquals(
+      Execute.mergeHalf(existing = 0xfeed11223344L, value = 0xffffaabbL, high = false),
+      0x1122aabbL
+    )
+    assertEquals(
+      Execute.mergeHalf(existing = 0xfeed11223344L, value = 0xffffaabbL, high = true),
+      0xaabb3344L
+    )
+  }
+
+  private def binary(operation: VectorBinaryOperation, left: Long, right: Long): Long = {
+    val sinks = Values(left, right)
+    IntegerSemantics.vectorBinary(
+      Execute,
+      operation,
+      clamp = false
+    )(sinks, 0, Values.Unused, Values.Unused)(fail("unstaged"))._1
   }
 
   test("24-bit multiplies mask or sign-extend their multiplicands") {
-    assertEquals(VMArithmetic.unsignedMultiply24(left = 0x1ffffffL, right = 2L), 0x1fffffeL)
-    assertEquals(VMArithmetic.unsignedMultiplyAdd24(left = 0xffffffL, right = 2L, addend = 3L), 0x2000001L)
-    assertEquals(VMArithmetic.unsignedMultiplyHigh24(left = 0xffffffL, right = 0xffffffL), 0xffffL)
-    assertEquals(VMArithmetic.unsignedMultiplyHigh24(left = 0x1000000L, right = 0xffffffL), 0L)
-    assertEquals(VMArithmetic.signedMultiply24(left = 0xffffd8L, right = 0xfffffeL), 80L)
-    assertEquals(VMArithmetic.signedMultiply24(left = 0x1000001L, right = 3L), 3L)
-    assertEquals(VMArithmetic.signedMultiplyHigh24(left = 0x7fffffL, right = 0x7fffffL), 0x3fffL)
-    assertEquals(VMArithmetic.signedMultiplyHigh24(left = 0x800000L, right = 1L), 0xffffffffL)
-    assertEquals(VMArithmetic.signedMultiplyHigh24(left = 0x800000L, right = 0x800000L), 0x4000L)
+    assertEquals(binary(VectorBinaryOperation.MultiplyU24, left = 0x1ffffffL, right = 2L), 0x1fffffeL)
+    val multiplicands = Values(0xffffffL, 2L, 3L)
+    assertEquals(
+      IntegerSemantics.vectorTernary(Execute, VectorTernaryOperation.MultiplyAddU24, clamp = false)(
+        multiplicands,
+        0,
+        Values.Unused,
+        Values.Unused,
+        Values.Unused,
+        SourceModifiers.Unmodified
+      )(fail("unstaged"))._1,
+      0x2000001L
+    )
+    assertEquals(binary(VectorBinaryOperation.MultiplyHighU24, left = 0xffffffL, right = 0xffffffL), 0xffffL)
+    assertEquals(binary(VectorBinaryOperation.MultiplyHighU24, left = 0x1000000L, right = 0xffffffL), 0L)
+    assertEquals(binary(VectorBinaryOperation.MultiplyI24, left = 0xffffd8L, right = 0xfffffeL), 80L)
+    assertEquals(binary(VectorBinaryOperation.MultiplyI24, left = 0x1000001L, right = 3L), 3L)
+    assertEquals(binary(VectorBinaryOperation.MultiplyHighI24, left = 0x7fffffL, right = 0x7fffffL), 0x3fffL)
+    assertEquals(binary(VectorBinaryOperation.MultiplyHighI24, left = 0x800000L, right = 1L), 0xffffffffL)
+    assertEquals(binary(VectorBinaryOperation.MultiplyHighI24, left = 0x800000L, right = 0x800000L), 0x4000L)
   }
 
   test("reverse unsigned vector subtraction wraps to 32 bits") {
-    assertEquals(VMArithmetic.unsignedSubtractReverse32(left = 20L, right = 19L), 0xffffffffL)
-    assertEquals(VMArithmetic.unsignedSubtractReverse32(left = 20L, right = 99L), 79L)
+    assertEquals(binary(VectorBinaryOperation.SubtractReverseU32, left = 20L, right = 19L), 0xffffffffL)
+    assertEquals(binary(VectorBinaryOperation.SubtractReverseU32, left = 20L, right = 99L), 79L)
   }
 
   test("VOP3 mask bit counts compose across both halves of a wave") {
-    val executionMask = 0xf000000f0000000fL
-    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 0, false, 0L), 0L)
-    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 4, false, 0L), 4L)
-    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 32, false, 0L), 4L)
-    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 60, true, 8L), 12L)
-    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 64 - 1, true, 8L), 15L)
-  }
-
-  test("scalar min/max SCC reports whether source zero won") {
-    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumU32, left = 3L, right = 4L), (3L, true))
-    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumU32, left = 4L, right = 3L), (3L, false))
-    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumU32, left = 4L, right = 3L), (4L, true))
-    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumU32, left = 3L, right = 4L), (4L, false))
-    assertEquals(
-      VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumI32, left = 0xffffffffL, right = 1L),
-      (0xffffffffL, true)
-    )
-    assertEquals(
-      VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumI32, left = 0xffffffffL, right = 1L),
-      (1L, false)
-    )
-    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumU32, left = 7L, right = 7L), (7L, false))
-    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumI32, left = 7L, right = 7L), (7L, false))
+    val mask                                              = 0xf000000f0000000fL
+    def count(lane: Int, high: Boolean, base: Long): Long = {
+      val sinks = Values(if (high) mask >>> 32 else mask & 0xffffffffL, lane.toLong, base)
+      IntegerSemantics.maskBitCount(
+        Execute,
+        high
+      )(sinks, 0, Values.Unused, Values.Unused)._1
+    }
+    assertEquals(count(0, high = false, base = 0L), 0L)
+    assertEquals(count(4, high = false, base = 0L), 4L)
+    assertEquals(count(32, high = false, base = 0L), 4L)
+    assertEquals(count(60, high = true, base = 8L), 12L)
+    assertEquals(count(64 - 1, high = true, base = 8L), 15L)
   }
 
   test("SOPK signed multiply uses a sign-extended immediate and reports overflow") {
-    assertEquals(VMArithmetic.signedMultiplyImmediate(0xffffffffL, 0x300), (0xfffffd00L, false))
-    assertEquals(VMArithmetic.signedMultiplyImmediate(Int.MaxValue.toLong, 2), (0xfffffffeL, true))
+    assertEquals(
+      Values.flagged(IntegerSemantics.multiplyImmediate(Execute)(Values(0xffffffffL), 0, 0x300L)),
+      (0xfffffd00L, false)
+    )
+    assertEquals(
+      Values.flagged(IntegerSemantics.multiplyImmediate(Execute)(Values(Int.MaxValue.toLong), 0, 2L)),
+      (0xfffffffeL, true)
+    )
   }
 
   for (
@@ -494,8 +544,26 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
   }
 
   test("gfx900 ANDN2_SAVEEXEC uses source AND NOT old EXEC") {
-    assertEquals(VMIR.SaveExecOperation.AndNot(source = 0x3333L, previous = 0x0f0fL), 0x3030L)
-    assertEquals(VMIR.SaveExecOperation.AndNot(source = 0x3000000000000000L, previous = 0xf000000000000000L), 0L)
+    val narrow = Values(0x3333L, 0x0f0fL)
+    assertEquals(
+      Values.flagged(IntegerSemantics.saveExec(
+        Execute,
+        SaveExecOperation.AndNot
+      )(narrow, 0, Values.Unused, 64)),
+      (0x3030L, true)
+    )
+    val wide = Values(0x3000000000000000L, 0xf000000000000000L)
+    assertEquals(
+      Values.flagged(
+        IntegerSemantics.saveExec(Execute, SaveExecOperation.AndNot)(
+          wide,
+          0,
+          Values.Unused,
+          64
+        )
+      ),
+      (0L, false)
+    )
   }
 
   test("gfx900 VOP2 multiply-high and minimum have distinct opcodes and preserve both sources") {
@@ -519,15 +587,27 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
   }
 
   test("half-precision not-less-than includes unordered values") {
-    val one     = IEEE754.floatToBinary16(1.0f)
-    val two     = IEEE754.floatToBinary16(2.0f)
-    val notLess = VectorComparison(
-      kind = VectorComparisonKind.Float16,
-      relation = VectorComparisonRelation.NotLess,
-      updateExec = false
-    )
-    assert(!VMArithmetic.compare(notLess, one.toLong, two.toLong))
-    assert(VMArithmetic.compare(notLess, two.toLong, one.toLong))
-    assert(VMArithmetic.compare(notLess, 0x7e00L, one.toLong))
+    val one                                       = IEEE754.floatToBinary16(1.0f)
+    val two                                       = IEEE754.floatToBinary16(2.0f)
+    def notLess(left: Long, right: Long): Boolean = {
+      val (test, swap) = (
+        VectorComparisonRelation.NotLess.floatTest,
+        VectorComparisonRelation.NotLess.floatSwapped
+      )
+      val sinks = Values(left, right)
+      FloatSemantics.compare(Execute, VectorComparisonKind.Float16, test, swap)(
+        sinks,
+        scalar = false,
+        0,
+        Values.Unused,
+        Values.Unused,
+        SourceModifiers.Unmodified,
+        None,
+        false
+      )(fail("unstaged"))._1 != 0L
+    }
+    assert(!notLess(one.toLong, two.toLong))
+    assert(notLess(two.toLong, one.toLong))
+    assert(notLess(0x7e00L, one.toLong))
   }
 }

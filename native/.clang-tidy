@@ -1,0 +1,4 @@
+InheritParentConfig: true
+# The drivers define vendor-declared C API entry points, whose parameter names follow each vendor's conventions rather
+# than this project's naming rules, so the declaration and definition names cannot agree.
+Checks: '-readability-inconsistent-declaration-parameter-name'

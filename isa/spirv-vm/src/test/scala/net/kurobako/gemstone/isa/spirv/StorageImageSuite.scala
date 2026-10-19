@@ -5,6 +5,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 private object StorageImageSuite {
@@ -15,7 +16,7 @@ private object StorageImageSuite {
 
   def stage(model: Int): String = enumerant(OperandKind.ExecutionModel, model)
 
-  enum Encoding { case Float, Unorm, Snorm, Ufloat, Sint, Uint }
+  enum Encoding derives CanEqual { case Float, Unorm, Snorm, Ufloat, Sint, Uint }
 
   val Inputs: Seq[Float] = Seq(-1f, 0.25f, 1f, 2f)
   val Lanes: Seq[String] = Seq("%red", "%green", "%blue", "%alpha")
@@ -28,7 +29,7 @@ private object StorageImageSuite {
     def input: Vec[Long] = encoding match {
       case Encoding.Sint => Vec(-123456L, -1L, Int.MaxValue.toLong, Int.MinValue.toLong)
       case Encoding.Uint => Vec(7L, 42L, 0xffffffffL, 65536L)
-      case _             => Vec.from(Inputs.map(floatBits))
+      case _             => Vec.from(Inputs.map(single))
     }
     def literal(value: Long): String = if (signed) value.toString else s"0x${(value & 0xffffffffL).toHexString}"
     def literals: Seq[String]        = if (integer) input.map(value => literal(value)) else Inputs.map(_.toString)
@@ -36,17 +37,17 @@ private object StorageImageSuite {
       val one = lane == 3
       if (lane >= widths.size) {
         if (integer) { if (one) 1L else 0L }
-        else floatBits(if (one) 1f else 0f)
+        else single(if (one) 1f else 0f)
       } else {
         val bits                                           = widths(lane)
         val value                                          = Inputs(lane)
         def normalised(minimum: Float, maximum: Int): Long =
-          floatBits(Math.round(value.max(minimum).min(1f) * maximum) / maximum.toFloat)
+          single(Math.round(value.max(minimum).min(1f) * maximum) / maximum.toFloat)
         def saturated(low: Long, high: Long): Long =
           (input(lane).max(low).min(high) + (if (atomic) 1L else 0L)) & 0xffffffffL
         encoding match {
-          case Encoding.Float  => floatBits(value)
-          case Encoding.Ufloat => floatBits(value.max(0f))
+          case Encoding.Float  => single(value)
+          case Encoding.Ufloat => single(value.max(0f))
           case Encoding.Unorm  => normalised(0f, (1 << bits) - 1)
           case Encoding.Snorm  => normalised(-1f, (1 << (bits - 1)) - 1)
           case Encoding.Sint   => saturated(-(1L << (bits - 1)), (1L << (bits - 1)) - 1)
@@ -134,10 +135,10 @@ private object StorageImageSuite {
 
   def decode(bytes: Array[Byte], offset: Int, format: Format): Vec[Long] = Vec.tabulate(4)(lane =>
     if (format.integer) ImageTexelCodec.readInteger(bytes, offset, format.code, lane).toLong & 0xffffffffL
-    else floatBits(ImageTexelCodec.read(bytes, offset, format.code, lane).toFloat)
+    else single(ImageTexelCodec.read(bytes, offset, format.code, lane).toFloat)
   )
 
-  enum Position(label: String) {
+  enum Position(label: String) derives CanEqual {
     case First    extends Position("first")
     case Last     extends Position("last")
     case Negative extends Position("negative")
@@ -162,11 +163,11 @@ private object StorageImageSuite {
     def height: Int      = if (dim == Dim.Value1D || dim == Dim.Buffer) 1 else if (dim == Dim.Cube) width else 2
     def slices: Int      = if (dim == Dim.Cube) 12 else if (layered) 3 else 1
     // cube images cannot be fetched, so the sampled view of a cube array is a 2D array over the same texels
-    def fetchDim: Int                       = if (dim == Dim.Cube) Dim.Value2D else dim
-    def extent(storage: Boolean): Vec[Long] = Vec.from(
-      (Seq(width) ++ Option.when(height > 1)(height) ++
-        Option.when(layered)(if (storage && dim == Dim.Cube) slices / 6 else slices)).map(_.toLong)
-    )
+    def fetchDim: Int                         = if (dim == Dim.Cube) Dim.Value2D else dim
+    def sampledExtent: Vec[Long]              = extent(slices)
+    def storageExtent: Vec[Long]              = extent(if (dim == Dim.Cube) slices / 6 else slices)
+    private def extent(depth: Int): Vec[Long] =
+      Vec.from((Seq(width) ++ Option.when(height > 1)(height) ++ Option.when(layered)(depth)).map(_.toLong))
     def label: String =
       (Seq(enumerant(OperandKind.Dim, dim)) ++ Option.when(arrayed)("arrayed") ++
         Option.when(width > 16384)(s"width $width") ++ Option.when(wrapped)("sampled wrapper")).mkString(" ")
@@ -249,7 +250,7 @@ class StorageImageSuite extends munit.FunSuite {
       %sampled = OpTypeSampledImage %image
     """
     assertEquals(
-      VMProgram.loadUnchecked(module).map(_ => ()),
+      LoadedProgram.loadUnchecked(module).map(_ => ()),
       Left(Fault.InvalidRequest("OpTypeSampledImage cannot wrap a Buffer image in SPIR-V 1.6"))
     )
   }
@@ -381,8 +382,8 @@ class StorageImageSuite extends munit.FunSuite {
     val expected = if (valid) format.expected(atomic) else Vec.fill(4)(0L)
     assertEquals(words(memory, out, offset = 0, count = 4), expected, "read")
     assertEquals(words(memory, out, offset = 16, count = 4), expected, "fetched")
-    assertEquals(words(memory, out, 32, coordinate.size), shape.extent(storage = true), "storage size")
-    assertEquals(words(memory, out, 48, coordinate.size), shape.extent(storage = false), "sampled size")
+    assertEquals(words(memory, out, 32, coordinate.size), shape.storageExtent, "storage size")
+    assertEquals(words(memory, out, 48, coordinate.size), shape.sampledExtent, "sampled size")
     assertEquals(word(memory, texels, 0), 0xfeedL)
     assertEquals(word(memory, texels, 4 + payload), 0xbeefL)
     val stored = memory.bytes(texels).slice(4, 4 + payload)

@@ -21,10 +21,13 @@ class ScalarNotSuite extends munit.FunSuite {
   )
   private val output = AllocationId(1)
   test("scalar NOT writes full width and sets or clears SCC independently of its previous value") {
+    val initials = Seq(false, true)
+    val inputs   = Seq(-1L, 0L, 0xaaaaaaaa55555555L, 0xffffffffL)
+    val argument = KernelTask.Argument.Memory(output, 0L)
     for {
       width   <- Seq(32, 64)
-      initial <- Seq(false, true)
-      input   <- Seq(-1L, 0L, 0xaaaaaaaa55555555L, 0xffffffffL)
+      initial <- initials
+      input   <- inputs
     } {
       val instruction = if (width == 64) 0xbe880504 else 0xbe880404
       val cmp         = if (initial) 0xbf068080 else 0xbf078080
@@ -32,7 +35,7 @@ class ScalarNotSuite extends munit.FunSuite {
       val kernel      = codeKernel(kernargSize = 16, computePgmRsrc2 = 0x80, kernelCodeProperties = 0x08, code = code)
       val dispatch    = singleTask(
         KernelTask.Argument.Scalar(LittleEndian.toVec(input, 8).unsafe),
-        KernelTask.Argument.Memory(output, 0L)
+        argument
       )
       val memory = RegionMemory(output -> 16)
       assertEquals(

@@ -11,17 +11,21 @@ import java.nio.file.attribute.BasicFileAttributes
 
 /** One registry produces names for all language boundaries. Parsing behaviour remains authored. */
 object GenerateEnvironment {
+  private given CanEqual[Path, Path] = CanEqual.derived
+
   case class Entry(name: String, default: Option[Long]) {
     def symbol: String = name.stripPrefix("GEMSTONE_").split('_').map { word =>
       word.head.toString + word.tail.map(_.toLower)
     }.mkString
   }
 
+  private val EnvironmentName = "GEMSTONE_[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*".r
+
   def parse(arguments: Seq[String]): Vector[Entry] = {
     require(arguments.nonEmpty, "environment table must not be empty")
     val entries = arguments.grouped(2).map {
       case Seq(name, default) =>
-        require(name.matches("GEMSTONE_[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*"), s"invalid environment name: $name")
+        require(EnvironmentName.matches(name), s"invalid environment name: $name")
         val numeric = Option.when(default.nonEmpty) {
           require(default.forall(c => c >= '0' && c <= '9'), s"invalid numeric default: $default")
           default.toLongOption.getOrElse(throw IllegalArgumentException(s"numeric default overflows Long: $default"))
@@ -86,15 +90,15 @@ object GenerateEnvironment {
         "object environment {\n" +
         entries.map { entry =>
           s"  val ${entry.symbol}: String = \"${entry.name}\"\n" +
-            entry.default.map(value =>
+            entry.default.fold("")(value =>
               s"  val ${entry.symbol}Default: Long ${if (value > 0) ">" else ">="} 0 = ${value}L\n"
-            ).getOrElse("")
+            )
         }.mkString + "}\n"
     val cpp = GeneratedHeader.cpp(source) +
       "#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::environment {\n" +
       entries.map { entry =>
         s"inline constexpr char ${entry.symbol}[] = \"${entry.name}\";\n" +
-          entry.default.map(value => s"inline constexpr uint64_t ${entry.symbol}Default = $value;\n").getOrElse("")
+          entry.default.fold("")(value => s"inline constexpr uint64_t ${entry.symbol}Default = $value;\n")
       }.mkString + "} // namespace gemstone::environment\n"
     Vector(
       scalaPath                                             -> GeneratedScalaFormatter(scalaPath, scala),
@@ -113,16 +117,22 @@ object GenerateEnvironment {
     else files.foreach(GeneratedFiles.write(_, _))
   }
 
+  private val tomlKey = "\\b(GEMSTONE_[A-Z0-9_]+)\\s*=".r
+
+  private val ExcludedDirectories = Set("target", ".git", ".sbt", "generated", "intellij_report2")
+  private val SourceExtensions    = Set("scala", "sbt", "cpp", "hpp", "h", "cmake", "toml", "txt")
+
+  private val access = "(?:\\$ENV\\{|\\$(?!\\{))(GEMSTONE_[A-Z0-9_]+)".r
+
+  private val quoted = "\"(GEMSTONE_[A-Z0-9_]+)\"".r
+
   /** Reject stray owned names at actual environment accesses, without mistaking CMake/compiler definitions for them. */
   def checkNames(root: Path, entries: Vector[Entry]): Unit = {
-    val known    = entries.map(_.name).toSet
-    val quoted   = "\"(GEMSTONE_[A-Z0-9_]+)\"".r
-    val access   = "(?:\\$ENV\\{|\\$(?!\\{))(GEMSTONE_[A-Z0-9_]+)".r
-    val paths    = Vector.newBuilder[Path]
-    val excluded = Set("target", ".git", ".sbt", "generated", "intellij_report2")
+    val known = entries.map(_.name).toSet
+    val paths = Vector.newBuilder[Path]
     class Visitor extends SimpleFileVisitor[Path] {
       override def preVisitDirectory(path: Path, attributes: BasicFileAttributes): FileVisitResult =
-        if (path == root.resolve("conformance") || (path != root && excluded(path.getFileName.toString)))
+        if (path == root.resolve("conformance") || (path != root && ExcludedDirectories(path.getFileName.toString)))
           FileVisitResult.SKIP_SUBTREE
         else FileVisitResult.CONTINUE
       override def visitFile(path: Path, attributes: BasicFileAttributes): FileVisitResult = {
@@ -131,9 +141,8 @@ object GenerateEnvironment {
       }
     }
     val _       = Files.walkFileTree(root, Visitor())
-    val tomlKey = "\\b(GEMSTONE_[A-Z0-9_]+)\\s*=".r
     val invalid = paths.result().filter { path =>
-      Set("scala", "sbt", "cpp", "hpp", "h", "cmake", "toml", "txt")(path.getFileName.toString.split('.').last)
+      SourceExtensions(path.getFileName.toString.split('.').last)
     }.flatMap { path =>
       Files.readString(path).linesIterator.zipWithIndex.flatMap { (line, index) =>
         (quoted.findAllMatchIn(line) ++ access.findAllMatchIn(line) ++

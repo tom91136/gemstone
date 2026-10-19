@@ -49,7 +49,7 @@ class Clients(createSession: () => ExecutionSession, clientClosed: ClientId => U
           if (!client.sessions.get(session).contains(entry)) None
           else {
             entry.references -= 1
-            if (entry.references.raw == 0) {
+            if (entry.references == 0) {
               val _ = client.sessions.remove(session)
               Some(entry.service)
             } else None

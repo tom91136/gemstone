@@ -20,7 +20,8 @@ struct Registration {
 } // namespace
 
 int main() {
-  hipStream_t first{}, second{};
+  hipStream_t first{};
+  hipStream_t second{};
   if (hipStreamCreateWithFlags(&first, hipStreamNonBlocking) != hipSuccess) return 1;
   if (hipStreamCreateWithFlags(&second, hipStreamNonBlocking) != hipSuccess) return 2;
   return 0; // The exit callback must still have a live queue to drain.

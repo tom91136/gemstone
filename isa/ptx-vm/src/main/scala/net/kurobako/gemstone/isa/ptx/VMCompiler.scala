@@ -10,12 +10,18 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as _, Parameter as _, *}
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.text.{SourceError as SyntaxError, *}
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
 private object VMCompiler {
+  private val VectorComponentAliases = Vec(Vec("x", "r"), Vec("y", "g"), Vec("z", "b"), Vec("w", "a"))
+
+  /** The architecture a module without `.target` is lowered for, where an instruction's arithmetic depends on it. */
+  private val DefaultArchitecture: Int = 89
+
   import Lowering.*
 
-  enum SourceError {
+  enum SourceError derives CanEqual {
     case Syntax(error: SyntaxError)
     case MissingEntry
     case Compilation(error: Error)
@@ -36,8 +42,17 @@ private object VMCompiler {
       functionTable: FunctionTable,
       shared: Map[NonEmpty[String], Long],
       routineShared: Map[NonEmpty[String], Map[NonEmpty[String], Long]],
-      initialisedFunctions: Vec[NonEmpty[String]]
+      initialisedFunctions: Vec[NonEmpty[String]],
+      architecture: Int
   )
+
+  /** The architecture the first `.target` names; some arithmetic differs between architectures. */
+  private def architecture(program: Program): Int = program.statements.collectFirst {
+    case Statement.Directive(path, arguments, _, _) if path.raw == Vec("target") =>
+      arguments.view.map(_.operand).collect {
+        case Operand.Symbol(name) if name.raw.startsWith("sm_") => Target.parse(name.raw).toOption
+      }.flatten.headOption
+  }.flatten.fold(DefaultArchitecture)(_.raw)
 
   def module(program: Program): Either[Error, Module] = {
     val entries = program.statements.collect { case entry: Statement.Entry => entry }
@@ -54,7 +69,15 @@ private object VMCompiler {
       case value: Statement.Data if value.addressSpace != DataAddressSpace.Shared => value.initialiser
     }.flatten.flatMap(expressionSymbols(_)).filter(table.address(_).nonEmpty).distinct
     SharedLayout(module, routines).map((shared, routineShared) =>
-      Module(entries, functions, table, shared, routineShared, initialised)
+      Module(
+        entries,
+        functions,
+        table,
+        shared,
+        routineShared,
+        initialised,
+        architecture(program)
+      )
     )
   }
 
@@ -89,14 +112,12 @@ private object VMCompiler {
   }.distinctBy(_.name)
 
   private def alignment(declaration: Statement.Data): Long =
-    declaration.qualifiers.collectFirst { case DeclarationQualifier.Alignment(bytes) => bytes.raw.toLong }
-      .getOrElse(declaration.elementType.widthBits.raw.toLong / 8L)
-
-  private def aligned(address: Long, alignment: Long): Long = address + (alignment - address % alignment) % alignment
+    declaration.qualifiers.collectFirst { case DeclarationQualifier.Alignment(bytes) => bytes.toLong }
+      .getOrElse(declaration.elementType.widthBits.toLong / 8L)
 
   private def extentBytes(declaration: Statement.Data): Long = declaration.extent match {
-    case Extent.Sized(elements) => elements.raw.toLong * declaration.elementType.byteCount.raw
-    case _                      => declaration.elementType.byteCount.raw.toLong
+    case Extent.Sized(elements) => elements.toLong * declaration.elementType.byteCount
+    case _                      => declaration.elementType.byteCount.toLong
   }
 
   private object SharedLayout {
@@ -116,10 +137,10 @@ private object VMCompiler {
         Right(VMAddressSpace.SharedBase -> Vec.empty)
       ) { case (layout, (owner, declaration)) =>
         layout.flatMap { (next, placed) =>
-          val address = aligned(next, alignment(declaration))
+          val address = next.alignUp(alignment(declaration))
           val end     = address + extentBytes(declaration)
           Either.cond(
-            end <= VMAddressSpace.SharedLimit,
+            end <= VMAddressSpace.ClusterWindowBase,
             end -> (placed :+ (owner, declaration.name, address)),
             Error.Invalid(s"shared declaration '${declaration.name}' exceeds the shared address aperture")
           )
@@ -129,10 +150,10 @@ private object VMCompiler {
           all.flatMap((owner, values) =>
             values.collect { case value if value.extent == Extent.Unsized => owner -> value }
           )
-        val dynamicAlignment = dynamic.foldLeft(1L)((current, value) => math.max(current, alignment(value._2)))
-        val base             = aligned(next, dynamicAlignment)
+        val dynamicAlignment = math.max(1L, dynamic.map((_, value) => alignment(value)).maxOption.getOrElse(1L))
+        val base             = next.alignUp(dynamicAlignment)
         Either.cond(
-          dynamic.isEmpty || base < VMAddressSpace.SharedLimit,
+          dynamic.isEmpty || base < VMAddressSpace.ClusterWindowBase,
           placed ++ dynamic.map((owner, declaration) => (owner, declaration.name, base)),
           Error.Invalid("dynamic shared storage exceeds the shared address aperture")
         )
@@ -160,10 +181,10 @@ private object VMCompiler {
         for {
           (offset, placed) <- layout
           width            <- parameterWidth(parameter)
-          alignment = parameter.qualifiers.collectFirst { case DeclarationQualifier.Alignment(bytes) => bytes.raw }
-            .getOrElse(width.raw).toLong
-          start = aligned(offset, alignment)
-          end   = start + width.raw.toLong
+          alignment = parameter.qualifiers.collectFirst { case DeclarationQualifier.Alignment(bytes) => bytes }
+            .getOrElse(width).toLong
+          start = offset.alignUp(alignment)
+          end   = start + width.toLong
           _ <- Either.cond(
             end <= Int.MaxValue.toLong,
             (),
@@ -174,7 +195,7 @@ private object VMCompiler {
     }.map(_._2)
 
   private def parameterWidth(parameter: Parameter): Either[Error, Int > 0] =
-    parameter.dimensions.foldLeft[Either[Error, Long]](Right(parameter.elementType.byteCount.raw.toLong)) {
+    parameter.dimensions.foldLeft[Either[Error, Long]](Right(parameter.elementType.byteCount.toLong)) {
       (width, dimension) =>
         for {
           current  <- width
@@ -188,14 +209,17 @@ private object VMCompiler {
         } yield current * elements
     }.flatMap(_.toInt.refine[Int > 0].left.map(_ => Error.Invalid(s"kernel parameter ${parameter.name} is too wide")))
 
-  private def clusterDirectives(directives: Vec[Statement.Directive]): Either[Error, Unit] = directives.traverse_ {
-    case Statement.Directive(path, arguments, _, _) if path.raw == Vec("reqnctapercluster") =>
-      arguments.traverse(argument => NumericLiteral.immediate(argument.operand)).filter(_ == Vec(1L, 1L, 1L))
-        .toRight(Error.Invalid("multi-workgroup PTX clusters are not supported")).map(_ => ())
-    case Statement.Directive(path = path) if path.raw == Vec("explicitcluster") =>
-      invalid("PTX kernels requiring an explicit cluster launch are not supported")
-    case _ => Right(())
-  }
+  /** The cluster shape `.reqnctapercluster` requires; `.explicitcluster` alone leaves the shape to the launch. */
+  private def clusterDirectives(directives: Vec[Statement.Directive]): Either[Error, Option[Dimensions]] =
+    directives.collectFirst {
+      case Statement.Directive(path, arguments, _, _) if path.raw == Vec("reqnctapercluster") => arguments
+    }.traverse { arguments =>
+      arguments.traverse(argument => NumericLiteral.immediate(argument.operand)).flatMap {
+        case Vec(x, y, z) if x > 0 && y > 0 && z > 0 && x * y * z <= VMInterpreter.ClusterLimit =>
+          Some(Dimensions(x.toInt.unsafe[Int > 0], y.toInt.unsafe[Int > 0], z.toInt.unsafe[Int > 0]))
+        case _ => None
+      }.toRight(Error.Invalid("invalid .reqnctapercluster cluster shape"))
+    }
 
   /** One kernel compilation: lowers the entry and every routine it can reach. */
   class KernelCompilation(val module: Module, val globals: Map[NonEmpty[String], GuestAddress]) {
@@ -233,8 +257,9 @@ private object VMCompiler {
     for {
       declaration          <- module.entries.get(entry).toRight(Error.Invalid(s"missing entry $entry"))
       root                 <- lowerEntry(declaration, compilation)
+      cluster              <- clusterDirectives(declaration.directives)
       (functions, entries) <- compilation.lowerReachable()
-    } yield Kernel(root, "PTX", functions, entries, module.functionTable)
+    } yield Kernel(root, "PTX", functions, entries, module.functionTable, cluster)
   }
 
   private def lowerEntry(entry: Statement.Entry, compilation: KernelCompilation): Either[Error, Entry] =
@@ -245,7 +270,7 @@ private object VMCompiler {
       routine    <- lowerRoutine(
         entry.name,
         body,
-        parameters.map(parameter => parameter.name -> (VMAddressSpace.ParameterBase + parameter.offset.raw)).toMap,
+        parameters.map(parameter => parameter.name -> (VMAddressSpace.ParameterBase + parameter.offset)).toMap,
         Vec.empty,
         Vec.empty,
         compilation
@@ -281,7 +306,7 @@ private object VMCompiler {
       parameterWidth(parameter).map { width =>
         val alignment = parameter.qualifiers.collectFirst { case DeclarationQualifier.Alignment(bytes) => bytes.raw }
           .getOrElse(parameter.elementType.byteCount.raw)
-        (parameter.name, alignment.toLong, width.raw.toLong)
+        (parameter.name, alignment.toLong, width.toLong)
       }
     }.flatMap { spills =>
       val data = statements.collect {
@@ -290,7 +315,7 @@ private object VMCompiler {
       }
       val (offsets, end) = (data ++ spills).foldLeft(Map.empty[NonEmpty[String], Long] -> 0L) {
         case ((offsets, next), (name, alignment, size)) =>
-          val address = aligned(next, alignment)
+          val address = next.alignUp(alignment)
           (offsets.updated(name, address), address + size)
       }
       Option.when(end <= Int.MaxValue.toLong)(end.toInt).flatMap(_.refine[Int >= 0].toOption)
@@ -309,7 +334,9 @@ private object VMCompiler {
   }
 
   /** Copies between a spilled parameter and its stack slot in at most 8-byte parts. */
-  private def spillCopy(parameter: Parameter, toStack: Boolean)(using
+  private enum Spill derives CanEqual { case ToStack, FromStack }
+
+  private def spillCopy(parameter: Parameter, direction: Spill)(using
       scope: Scope
   )
       : Either[Error, Vec[VMIR.Instruction]] =
@@ -320,13 +347,13 @@ private object VMCompiler {
       local     <- scope.spilledParameter(parameter.name).toRight(Error.Invalid(s"${parameter.name} is not spilled"))
     } yield {
       val parts = Vec.from(Iterator.unfold(0) { offset =>
-        Vec[ScalarBitWidth](64, 32, 16, 8).find(_.raw / 8 <= width.raw - offset).map(part =>
-          (offset.unsafe[Int >= 0], part) -> (offset + part.raw / 8)
+        Vec[ScalarBitWidth](64, 32, 16, 8).find(_.raw / 8 <= width - offset).map(part =>
+          (offset.unsafe[Int >= 0], part) -> (offset + part / 8)
         )
       })
       parts.flatMap { (offset, part) =>
-        val stack = Value.Immediate(local + offset.raw)
-        if (toStack)
+        val stack = Value.Immediate(local + offset)
+        if (direction == Spill.ToStack)
           Vec(
             VMIR.Instruction.LoadParameter(Vec(temporary), slot, offset, part, false),
             VMIR.Instruction.Store(stack, Value.Register(temporary), part, MemoryAccess.Local)
@@ -339,6 +366,29 @@ private object VMCompiler {
       }
     }
 
+  /** The labels each `.branchtargets` list names. */
+  private def branchTargets(statements: Vec[Statement]): Map[NonEmpty[String], Vec[NonEmpty[String]]] =
+    statements.zip(statements.drop(1)).collect {
+      case (Statement.Label(name), Statement.Directive(path, arguments, _, _)) if path.raw == Vec("branchtargets") =>
+        name -> arguments.collect { case DirectiveArgument(_, Operand.Symbol(label)) => label }
+    }.toMap
+
+  /** `brx.idx` as one jump: each lane takes the label its index selects, and an index outside the list, whose behaviour
+    * PTX leaves undefined, falls through.
+    */
+  private def indexedBranch(
+      index: Operand,
+      table: NonEmpty[String],
+      guard: Option[Predication],
+      tables: Map[NonEmpty[String], Vec[NonEmpty[String]]]
+  )(using scope: Scope): Either[Error, VMAssembler.Statement] =
+    for {
+      labels    <- tables.get(table).toRight(Error.Invalid(s"brx.idx names no .branchtargets list $table"))
+      selector  <- scope.value(index)
+      predicate <- guard.traverse(value => scope.predicate(value.operand).map(ExecutionPredicate(_, value.negated)))
+    } yield VMAssembler.Statement.BranchTable(selector, labels, predicate)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def lowerRoutine(
       name: NonEmpty[String],
       body: Vec[Statement],
@@ -348,12 +398,17 @@ private object VMCompiler {
       compilation: KernelCompilation
   ): Either[Error, (Routine, Scope)] =
     for {
-      flat <- flattenScoped(body, (kernelParameters.keySet ++ (inputs ++ returns).map(_.name)).toSet)
+      scoped <- flattenScoped(body, (kernelParameters.keySet ++ (inputs ++ returns).map(_.name)).toSet)
+      tables = branchTargets(scoped)
+      flat   = scoped.filter {
+        case Statement.Directive(path = path) => path.raw != Vec("branchtargets")
+        case _                                => true
+      }
       spilled = addressTaken(flat, inputs ++ returns)
       (locals, bytes) <- frameLocals(flat, spilled)
       _ <- flat.collectFirst { case Statement.UnsupportedInstruction(opcode, operands, modifiers, predication) =>
         val qualified = (opcode +: modifiers.map(_.name.raw)).mkString(".")
-        val rendered  = predication.map(value => s"$value ").getOrElse("") + qualified +
+        val rendered  = predication.fold("")(value => s"$value ") + qualified +
           (if (operands.isEmpty) "" else operands.mkString(" ", ", ", "")) + ";"
         Error.Unsupported(rendered.unsafe[NonEmpty[String]], "instruction is not implemented")
       }.toLeft(())
@@ -365,24 +420,38 @@ private object VMCompiler {
         ((inputs ++ returns).map(_.name) ++ declaredParameters(flat)).toSet,
         spilled.map(_.name).toSet,
         locals,
-        compilation.module.shared ++ compilation.module.routineShared.getOrElse(name, Map.empty)
+        compilation.module.shared ++ compilation.module.routineShared.getOrElse(name, Map.empty),
+        declaredRegisters(flat).toSet,
+        compilation.module.architecture
       )
-      ordinals = flat.scanLeft(0L) {
-        case (count, Statement.Instruction(_)) => count + 1
-        case (count, _)                        => count
+      ordinals = {
+        var count  = 0L
+        val before = Array.ofDim[Long](flat.size)
+        flat.indices.foreach { index =>
+          before(index) = count
+          flat(index) match {
+            case Statement.Instruction(_) => count += 1
+            case _                        => ()
+          }
+        }
+        Vec.from(before)
       }
       statements <- flat.zip(ordinals).flatTraverse {
-        case (Statement.Label(label), _)                   => Right(Vec(VMAssembler.Statement.Label(label)))
+        case (Statement.Label(label), _) => Right(Vec(VMAssembler.Statement.Label(label)))
+        case (Statement.Instruction(Instruction(Form.BrxIdx(index, Operand.Symbol(table)), _, guard)), ordinal) =>
+          indexedBranch(index, table, guard, tables)(using scope).map(branch =>
+            Vec(VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0]), branch)
+          )
         case (Statement.Instruction(instruction), ordinal) =>
-          VMInstructionCompiler.lower(instruction)(using scope)
-            .map(lowered => Vec(VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0]), lowered)).leftMap {
+          lowerInstruction(instruction)(using scope)
+            .map(VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0]) +: _).leftMap {
               case Error.Invalid(detail)        => Error.Invalid(s"${instruction.qualifiedOpcode}: $detail")
               case Error.Unsupported(_, detail) => Error.Unsupported(instruction.qualifiedOpcode, detail)
             }
         case _ => Right(Vec.empty[VMAssembler.Statement])
       }
-      spillIn  <- inputs.intersect(spilled).flatTraverse(spillCopy(_, toStack = true)(using scope))
-      spillOut <- returns.intersect(spilled).flatTraverse(spillCopy(_, toStack = false)(using scope))
+      spillIn  <- inputs.intersect(spilled).flatTraverse(spillCopy(_, Spill.ToStack)(using scope))
+      spillOut <- returns.intersect(spilled).flatTraverse(spillCopy(_, Spill.FromStack)(using scope))
       program  <- VMAssembler.assemble(spillIn.map(VMAssembler.Statement.Execute(_)) ++ statements.flatMap {
         case VMAssembler.Statement.Execute(VMIR.Instruction.Return, predication) =>
           spillOut.map(VMAssembler.Statement.Execute(_, predication)) :+
@@ -392,12 +461,55 @@ private object VMCompiler {
     } yield {
       scope.directCalls.foreach(compilation.reference(_))
       scope.addressTaken.foreach(compilation.reference(_))
-      Routine(name, program, scope.registerCount, scope.predicateCount, bytes, scope.predicateNames) -> scope
+      Routine(
+        name = name,
+        program = program,
+        registerCount = scope.registerCount,
+        predicateCount = scope.predicateCount,
+        localBytes = bytes,
+        predicateNames = scope.predicateNames,
+        registerNames = scope.registerNames
+      ) -> scope
     }
+
+  private def lowerInstruction(instruction: Instruction)(using
+      scope: Scope
+  ): Either[Error, Vec[VMAssembler.Statement]] = {
+    val modifiers = instruction.signature.modifiers
+    for {
+      _ <- modifiers.collectFirst {
+        case Modifier.Unrecognised(spelling) if !VMTensorMemoryCompiler.Spellings(spelling.raw) => spelling
+      }
+        .toLeft(()).leftMap(spelling =>
+          Error.Unsupported(instruction.qualifiedOpcode, s"unknown modifier: ${spelling.raw}")
+        )
+      _         <- VMInstructionCompiler.validateFloating(instruction)
+      predicate <- instruction.pred.traverse(value =>
+        scope.predicate(value.operand).map(ExecutionPredicate(_, value.negated))
+      )
+      lowered <- instruction.form match {
+        case Form.Bra(target) if modifiers.isEmpty || modifiers == Vec(Modifier.Uni) =>
+          target match {
+            case Operand.Symbol(label) => Right(Vec(VMAssembler.Statement.Branch(label, predicate)))
+            case other                 => invalid(s"expected branch label, found $other")
+          }
+        case _ =>
+          VMSequenceCompiler.lower(instruction, modifiers)
+            .getOrElse(VMInstructionCompiler.lowerOperation(instruction, modifiers).map(Vec(_)))
+            .map(_.map(VMAssembler.Statement.Execute(_, predicate)))
+      }
+    } yield lowered
+  }
 
   private def declaredParameters(statements: Vec[Statement]): Vec[NonEmpty[String]] = statements.flatMap {
     case Statement.Directive(path, arguments, _, _) if path.head.raw == "param" =>
       arguments.flatMap(argument => declaredOperandNames(argument.operand))
+    case _ => Vec.empty[NonEmpty[String]]
+  }
+
+  private def declaredRegisters(statements: Vec[Statement]): Vec[NonEmpty[String]] = statements.flatMap {
+    case Statement.Directive(path, arguments, _, _) if path.head.raw == "reg" =>
+      arguments.flatMap(argument => declaredOperandNames(argument.operand).flatMap(expandRange(_)))
     case _ => Vec.empty[NonEmpty[String]]
   }
 
@@ -434,7 +546,7 @@ private object VMCompiler {
           val scoped: NonEmpty[String] = scope.fold(name)(index => s"$name$$scope$index")
           if (components == 1) Vec(name -> Operand.Register(scoped, None))
           else {
-            val aliases   = Vec(Vec("x", "r"), Vec("y", "g"), Vec("z", "b"), Vec("w", "a")).take(components)
+            val aliases   = VectorComponentAliases.take(components)
             val registers = aliases.map(fields => Operand.Register(s"$scoped.${fields.head}", None))
             Vec(name -> Operand.VectorLiteral(registers)) ++ aliases.zip(registers).flatMap { (fields, register) =>
               fields.map(field => (s"$name.$field": NonEmpty[String]) -> register)
@@ -474,13 +586,13 @@ private object VMCompiler {
             )
           )))
         case Statement.Instruction(instruction) =>
-          instruction.decoder(
-            instruction.operands.map(rename(_, names)),
-            instruction.mods,
-            instruction.pred.map(value => value.copy(operand = rename(value.operand, names)))
-          ).bimap(
+          instruction.decoder(instruction.operands.map(rename(_, names)), instruction.mods).bimap(
             error => Error.Invalid(s"failed to preserve scoped instruction ${instruction.qualifiedOpcode}: $error"),
-            value => Vec(Statement.Instruction(value))
+            form =>
+              Vec(Statement.Instruction(instruction.copy(
+                form = form,
+                pred = instruction.pred.map(value => value.copy(operand = rename(value.operand, names)))
+              )))
           )
         case Statement.UnsupportedInstruction(opcode, operands, modifiers, predication) =>
           Right(Vec(Statement.UnsupportedInstruction(

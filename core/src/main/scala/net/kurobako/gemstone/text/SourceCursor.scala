@@ -26,13 +26,13 @@ class SourceCursor(source: String) {
   def mark: SourceCursor.Mark  = SourceCursor.Mark(currentOffset, position)
   def atEnd: Boolean           = currentOffset.raw == source.length
 
-  def has(ahead: Int >= 0 = 0): Boolean = ahead.raw < source.length - currentOffset.raw
+  def has(ahead: Int >= 0 = 0): Boolean = ahead < source.length - currentOffset
   def char(ahead: Int >= 0 = 0): Char   = {
     if (!has(ahead)) fail("source character")
-    source.charAt(currentOffset.raw + ahead.raw)
+    source.charAt(currentOffset.raw + ahead)
   }
-  def at(value: Char): Boolean           = !atEnd && source.charAt(currentOffset.raw) == value
-  def startsWith(value: String): Boolean = source.startsWith(value, currentOffset.raw)
+  def at(value: Char): Boolean           = !atEnd && source.charAt(currentOffset) == value
+  def startsWith(value: String): Boolean = source.startsWith(value, currentOffset)
 
   def advance(): Unit = {
     val value = char()
@@ -48,17 +48,17 @@ class SourceCursor(source: String) {
   def consume(value: String): Boolean =
     if (startsWith(value)) {
       val end = currentOffset.raw + value.length
-      while (currentOffset.raw < end) advance()
+      while (currentOffset < end) advance()
       true
     } else false
 
-  def skipWhile(predicate: Char => Boolean): Unit =
-    while (!atEnd && predicate(source.charAt(currentOffset.raw))) advance()
+  inline def skipWhile(inline predicate: Char => Boolean): Unit =
+    while (!atEnd && predicate(source.charAt(currentOffset))) advance()
 
   def skipWhitespace(): Unit = skipWhile(_.isWhitespace)
 
   def restore(saved: SourceCursor.Mark): Unit = {
-    require(saved.offset.raw <= source.length, "source position is outside the input")
+    require(saved.offset <= source.length, "source position is outside the input")
     currentOffset = saved.offset
     currentLine = saved.position.line
     currentColumn = saved.position.column
@@ -66,7 +66,7 @@ class SourceCursor(source: String) {
 
   def slice(start: Int >= 0): String = {
     require(start <= currentOffset, "source span starts after the cursor")
-    source.substring(start.raw, currentOffset.raw)
+    source.substring(start, currentOffset)
   }
 
   def fail(expectation: NonEmpty[String]): Nothing = throw SourceCursor.Failure(mark, expectation)

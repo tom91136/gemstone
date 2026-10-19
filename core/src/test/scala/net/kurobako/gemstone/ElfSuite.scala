@@ -86,9 +86,9 @@ class ElfSuite extends munit.FunSuite {
   test("a symbol's value and size are rewritten in place") {
     val image   = elf.Image.parse(layoutImage).value
     val table   = image.section(".symtab").get
-    val updated = image.withSymbol(table, 1, 2L, 9L).value
+    val updated = image.withSymbol(table, 1, value = 2L, size = 9L).value
     assertEquals(updated.symbols.map(_(1)).map(symbol => (symbol.value, symbol.size.raw)), Some((2L, 9)))
-    assert(image.withSymbol(table, 2, 0L, 0L).isLeft)
+    assert(image.withSymbol(table, 2, value = 0L, size = 0L).isLeft)
   }
 
   test("ELF64 images expose named sections, symbols, and section contents") {
@@ -153,8 +153,9 @@ class ElfSuite extends munit.FunSuite {
   }
 
   test("ELF64 REL and RELA entries preserve unsigned symbol IDs and signed explicit addends") {
+    val fixed = Seq(0x100000008L, 0xfedcba98abcdef01L)
     for (explicit <- Vec(false, true)) {
-      val entry      = bytes.longs((Seq(0x100000008L, 0xfedcba98abcdef01L) ++ Option.when(explicit)(-17L))*)
+      val entry      = bytes.longs((fixed ++ Option.when(explicit)(-17L))*)
       val relocation = elf.relocations(Vec.unsafeWrapArray(entry), explicit, 0).value.head
       assertEquals(relocation.offset, 0x100000008L)
       assertEquals(relocation.symbol.raw, 0xfedcba98L)

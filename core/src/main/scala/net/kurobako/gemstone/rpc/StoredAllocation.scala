@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.rpc
 
-import java.util.concurrent.atomic.AtomicIntegerArray
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
@@ -17,9 +16,9 @@ private object StoredAllocation {
     * only if the sequence stayed even and unchanged, so it never observes a partial write; otherwise it repeats locked.
     */
   class Storage(val size: Int > 0) {
-    val bytes: Array[Byte] = Array.ofDim[Byte](size.raw)
-    private val locks      = Array.fill(math.min(64, size.ceilDiv(64).raw))(ReentrantLock())
-    private val versions   = AtomicIntegerArray(locks.length * VersionStride)
+    val bytes: Array[Byte] = Array.ofDim[Byte](size)
+    private val locks      = Array.fill(math.min(64, size.ceilDiv(64)))(ReentrantLock())
+    private val versions   = PlatformConcurrency.atomicInts(locks.length * VersionStride)
     // Written only with every stripe held; unlocked readers observe it through the stripe sequence.
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var live = true

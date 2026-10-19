@@ -7,4 +7,4 @@ import net.kurobako.gemstone.rpc.Wire.*
 case class SpecializationConstant(
     specId: Binary32,
     value: Vec[Byte]
-) derives Codec
+) derives Codec, CanEqual

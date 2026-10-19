@@ -4,7 +4,7 @@ import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
 /** The image formats native facades name on the wire. */
-enum ProgramEncoding derives Codec {
+enum ProgramEncoding derives Codec, CanEqual {
   case PTXText
   case CUDACubin
   case HSACodeObject

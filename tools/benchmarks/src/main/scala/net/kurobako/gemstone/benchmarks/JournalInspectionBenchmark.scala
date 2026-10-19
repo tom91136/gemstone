@@ -22,7 +22,7 @@ object JournalInspectionBenchmark {
       .putInt(tag.length).putInt(payload.length).put(tag).put(payload).array()
   }
   private def response(): Array[Byte] =
-    ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw).putInt(ExecutionRPC.ResponseMagic)
+    ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes).putInt(ExecutionRPC.ResponseMagic)
       .putInt(0).putInt(0).array()
 
   val benchmark: Case = Opts.argument[String]("journal").map(Path.of(_)).map(file => () => run(file))
@@ -39,7 +39,7 @@ object JournalInspectionBenchmark {
     }
     val measurement = Measurement(Journal.inspect(file))
     val summary     = measurement.value
-    if (summary.events.raw != 401 || summary.frames.raw != 400 || !summary.replayable)
+    if (summary.events != 401 || summary.frames != 400 || !summary.replayable)
       throw IllegalStateException(s"unexpected journal summary: $summary")
     measurement.sample(1L)
   }

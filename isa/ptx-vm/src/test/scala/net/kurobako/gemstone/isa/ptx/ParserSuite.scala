@@ -6,6 +6,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.text.*
+import scala.collection.mutable
 
 class ParserSuite extends munit.FunSuite {
   private def roundTrip(source: String): Program = {
@@ -164,7 +165,7 @@ class ParserSuite extends munit.FunSuite {
   }
 
   test("parses a large generated module") {
-    val source = StringBuilder(".version 8.0\n.target sm_80\n.address_size 64\n")
+    val source = mutable.StringBuilder(".version 8.0\n.target sm_80\n.address_size 64\n")
     (0 until 256).foreach { index =>
       source.append(s".visible .entry kernel_$index() { .reg .b32 %r<2>; mov.u32 %r0, %tid.x; ")
       (0 until 64).foreach(value => source.append(s"add.u32 %r1, %r0, ${value + 1}; "))
@@ -174,28 +175,30 @@ class ParserSuite extends munit.FunSuite {
     assertEquals(program.statements.size, 259)
     val entries = program.statements.collect { case entry: Statement.Entry => entry }
     assertEquals(entries.map(_.name.raw), Vec.from((0 until 256).map(index => s"kernel_$index")))
+    val r0   = Operand.Register("%r0", None)
+    val r1   = Operand.Register("%r1", None)
+    val tidX = Operand.Register("%tid.x", None)
+    val move = Instruction(
+      Form.Mov(r0, tidX),
+      Vec(Modifier("u32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity))),
+      None
+    )
     entries.foreach { entry =>
       assertEquals(entry.parameters, Vec.empty[Parameter])
       val instructions = entry.body.toSeq.flatten.collect { case Statement.Instruction(value) => value }
       assertEquals(entry.body.toSeq.flatten.size, 67, entry.name)
       assertEquals(instructions.size, 66, entry.name)
-      assertEquals(
-        instructions.head,
-        Instruction.Mov(
-          Operand.Register("%r0", None),
-          Operand.Register("%tid.x", None),
-          Vec(Modifier("u32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity))),
-          None
-        )
-      )
+      assertEquals(instructions.head, move)
       (0 until 64).foreach { index =>
         assertEquals(
           instructions(index + 1),
-          Instruction.Add(
-            Operand.Register("%r1", None),
-            Operand.Register("%r0", None),
-            Operand.Immediate(
-              (index + 1).toString.refine[NonEmpty[String]].fold(error => fail(error.raw), identity)
+          Instruction(
+            Form.Add(
+              r1,
+              r0,
+              Operand.Immediate(
+                (index + 1).toString.refine[NonEmpty[String]].fold(error => fail(error.raw), identity)
+              )
             ),
             Vec(Modifier("u32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity))),
             None
@@ -203,7 +206,7 @@ class ParserSuite extends munit.FunSuite {
           s"${entry.name}, add $index"
         )
       }
-      assertEquals(instructions.last, Instruction.Ret(Vec.empty, None))
+      assertEquals(instructions.last, Instruction(Form.Ret(), Vec.empty, None))
     }
     assert(Parser.parse(source.result() + "/* unterminated").isLeft)
   }
@@ -252,7 +255,7 @@ class ParserSuite extends munit.FunSuite {
       val program = Parser.parse(source).fold(error => fail(error.message), identity)
       assertEquals(
         program.statements.collect { case Statement.Instruction(value) => value },
-        Vec(Instruction.Ret(Vec.empty, None))
+        Vec(Instruction(Form.Ret(), Vec.empty, None))
       )
       val directives = program.statements.collect { case value: Statement.Directive => value }
       assertEquals(

@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import VMInvocation.*
 import VMMemory.*
-import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.vm.*
 
 private object Op {
@@ -12,6 +11,7 @@ private object Op {
   class Fail(fault: Fault) extends Op {
     private val result                                                                      = Left(fault)
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = result
+    override def failure: Option[Fault]                                                     = Some(fault)
   }
 
   /** An op whose run is a closure over its lowered operands; used where a dedicated class adds nothing. */
@@ -30,10 +30,13 @@ private object Op {
       }
     }
 
+  /** A hint that reads nothing: it faults only when its pointer operand is not an address. */
+  def prefetch(pointer: Int): Op = step((execution, _) => address(execution.values, pointer).map(_ => ()))
+
   /** Suspends the invocation at a collective rendezvous built from its current position. */
-  def suspend(
+  inline def suspend(
       execution: InvocationState,
-      request: (Int, Int) => VMCollectives.Request
+      inline request: (Int, Int) => VMCollectives.Request
   ): AddressSpace.ReadResult[Unit] = {
     execution.suspend(request(execution.currentFunction.id, execution.pc))
     Done
@@ -47,19 +50,29 @@ private object Op {
     }
   }
 
+  /** `count` consecutive instructions without an execution effect. */
+  class Skip(count: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
+      execution.pc += count
+      Done
+    }
+  }
+
   def undefined(id: Int): Fault = Fault.InvalidRequest(s"SPIR-V value %$id is undefined")
+
+  /** Whether `count` elements of `size` bytes past `base` leave the 64-bit address space; `count` is unsigned, as the
+    * size_t offsets of OpenCL.std are.
+    */
+  def displacementOverflows(base: Long, count: Long, size: Long): Boolean =
+    count < 0L || Math.multiplyHigh(count, size) != 0L || java.lang.Long.compareUnsigned(base + count * size, base) < 0
+
+  def displacementFault(base: Long, count: Long, size: Long): Fault = Fault.Memory(
+    s"SPIR-V address 0x${java.lang.Long.toHexString(base)} + ${java.lang.Long.toUnsignedString(count)} * $size bytes " +
+      "leaves the address space"
+  )
 
   /** The op a lowering produced, or one that faults with its load-time failure. */
   def lowered(op: Either[Fault, Op]): Op = op.fold(Fail(_), identity)
-
-  /** The rounding an `FPRoundingMode` value names, or `default` for any other value. */
-  def rounding(mode: Int, default: IEEE754.Rounding): IEEE754.Rounding = mode match {
-    case FPRoundingMode.RTE => IEEE754.Rounding.NearestEven
-    case FPRoundingMode.RTZ => IEEE754.Rounding.TowardZero
-    case FPRoundingMode.RTP => IEEE754.Rounding.Up
-    case FPRoundingMode.RTN => IEEE754.Rounding.Down
-    case _                  => default
-  }
 
   /** Checks the memory scope and semantics operands of an atomic or barrier. */
   def memoryControls(values: InvocationValues, scope: Int, semantics: Int, opcode: String): Either[Fault, Unit] =
@@ -120,4 +133,7 @@ private object Op {
 /** One lowered instruction. Operand ids, shapes and widths are resolved when the program loads. */
 private abstract class Op {
   def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit]
+
+  /** The fault lowering found, where the op only raises it. */
+  def failure: Option[Fault] = None
 }

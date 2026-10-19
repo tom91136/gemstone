@@ -8,6 +8,8 @@ import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
 
 object Validation {
+  // the issue cases are told apart by name, not by payload
+  @SuppressWarnings(Array("baumkuchen:duplicate-shape"))
   enum Issue {
     case VersionTooOld(opcode: NonEmpty[String], required: Version, selected: Version)
     case TargetTooOld(opcode: NonEmpty[String], required: Target, selected: Target)

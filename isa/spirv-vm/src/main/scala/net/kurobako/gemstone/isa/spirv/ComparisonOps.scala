@@ -2,106 +2,80 @@ package net.kurobako.gemstone.isa.spirv
 
 import LaneOps.*
 import Op.*
-import VMLowering.*
-import net.kurobako.gemstone.binary.*
-import net.kurobako.gemstone.binary.Bits.*
+import OpBuilder.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 /** Integer, Boolean and floating-point comparisons, classification and selection. */
 private object ComparisonOps {
   import Operand.*
 
-  private inline def flag(value: Boolean): Long = if (value) 1L else 0L
-
-  /** Integer and Boolean comparison kernels by opcode and operand width, shared with `OpSpecConstantOp` folding. Unary
-    * kernels ignore their second operand.
+  /** The integer or Boolean comparison kernel of `opcode` at operand width `width` for `OpSpecConstantOp` folding, from
+    * the same semantics the ops run, or None outside them. Unary kernels ignore their second operand.
     */
-  val integerComparisons: Map[Int, (Int in 1 ~ 64) => Kernel2] = {
-    def plain(predicate: (Long, Long) => Boolean): (Int in 1 ~ 64) => Kernel2 = _ => (a, b) => flag(predicate(a, b))
-    def logical(predicate: (Boolean, Boolean) => Boolean) = plain((a, b) => predicate(a != 0L, b != 0L))
-    def unsigned(predicate: Int => Boolean) = plain((a, b) => predicate(java.lang.Long.compareUnsigned(a, b)))
-    def signed(predicate: (Long, Long) => Boolean)(width: Int in 1 ~ 64): Kernel2 =
-      (a, b) => flag(predicate(signExtend(a, width), signExtend(b, width)))
-    Map(
-      SPIRV.Opcode.LogicalEqual      -> logical(_ == _),
-      SPIRV.Opcode.LogicalNotEqual   -> logical(_ != _),
-      SPIRV.Opcode.LogicalOr         -> logical(_ || _),
-      SPIRV.Opcode.LogicalAnd        -> logical(_ && _),
-      SPIRV.Opcode.LogicalNot        -> logical((a, _) => !a),
-      SPIRV.Opcode.IEqual            -> plain(_ == _),
-      SPIRV.Opcode.INotEqual         -> plain(_ != _),
-      SPIRV.Opcode.ULessThan         -> unsigned(_ < 0),
-      SPIRV.Opcode.UGreaterThan      -> unsigned(_ > 0),
-      SPIRV.Opcode.ULessThanEqual    -> unsigned(_ <= 0),
-      SPIRV.Opcode.UGreaterThanEqual -> unsigned(_ >= 0),
-      SPIRV.Opcode.SGreaterThan      -> signed(_ > _),
-      SPIRV.Opcode.SGreaterThanEqual -> signed(_ >= _),
-      SPIRV.Opcode.SLessThan         -> signed(_ < _),
-      SPIRV.Opcode.SLessThanEqual    -> signed(_ <= _)
+  def comparisonKernel(opcode: Int, width: Int in 1 ~ 64): Option[Kernel2] = ConstantFolder.matched(
+    ComparisonSemantics.binary(Execute, ConstantFolder, opcode, width)(OperandIds.none)(
+      ComparisonSemantics.unary(Execute, ConstantFolder, opcode)(OperandIds.none)(ConstantFolder.unmatched)
     )
-  }
+  )
+
+  private val floatingFamilies =
+    Seq(CoreFamily.OrderedComparison, CoreFamily.UnorderedComparison, CoreFamily.Classification)
 
   def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.IEqual(t, d, a, b)    => integerEquality(site, "OpIEqual", t, d, a, b, SPIRV.Opcode.IEqual)
-    case Instruction.INotEqual(t, d, a, b) => integerEquality(site, "OpINotEqual", t, d, a, b, SPIRV.Opcode.INotEqual)
-    case Instruction.LogicalEqual(t, d, a, b) => logical(site, "OpLogicalEqual", t, d, a, b, SPIRV.Opcode.LogicalEqual)
-    case Instruction.LogicalNotEqual(t, d, a, b) =>
-      logical(site, "OpLogicalNotEqual", t, d, a, b, SPIRV.Opcode.LogicalNotEqual)
-    case Instruction.LogicalOr(t, d, a, b)         => logical(site, "OpLogicalOr", t, d, a, b, SPIRV.Opcode.LogicalOr)
-    case Instruction.LogicalAnd(t, d, a, b)        => logical(site, "OpLogicalAnd", t, d, a, b, SPIRV.Opcode.LogicalAnd)
-    case Instruction.LogicalNot(t, d, a)           => logicalNot(site, t, d, a)
-    case Instruction.Any(t, d, a)                  => reduction(site, t, d, a, all = false)
-    case Instruction.All(t, d, a)                  => reduction(site, t, d, a, all = true)
-    case Instruction.ULessThan(t, d, a, b)         => unsigned(site, t, d, a, b, SPIRV.Opcode.ULessThan)
-    case Instruction.UGreaterThan(t, d, a, b)      => unsigned(site, t, d, a, b, SPIRV.Opcode.UGreaterThan)
-    case Instruction.ULessThanEqual(t, d, a, b)    => unsigned(site, t, d, a, b, SPIRV.Opcode.ULessThanEqual)
-    case Instruction.UGreaterThanEqual(t, d, a, b) => unsigned(site, t, d, a, b, SPIRV.Opcode.UGreaterThanEqual)
-    case Instruction.SGreaterThan(t, d, a, b) => signed(site, "OpSGreaterThan", t, d, a, b, SPIRV.Opcode.SGreaterThan)
-    case Instruction.SGreaterThanEqual(t, d, a, b) =>
-      signed(site, "OpSGreaterThanEqual", t, d, a, b, SPIRV.Opcode.SGreaterThanEqual)
-    case Instruction.SLessThan(t, d, a, b)      => signed(site, "OpSLessThan", t, d, a, b, SPIRV.Opcode.SLessThan)
-    case Instruction.SLessThanEqual(t, d, a, b) =>
-      signed(site, "OpSLessThanEqual", t, d, a, b, SPIRV.Opcode.SLessThanEqual)
-    case Instruction.FOrdEqual(t, d, a, b)    => floating(site, "OpFOrdEqual", t, d, a, b)((x, y) => x == y)
-    case Instruction.FOrdNotEqual(t, d, a, b) =>
-      floating(site, "OpFOrdNotEqual", t, d, a, b)((x, y) => !x.isNaN && !y.isNaN && x != y)
-    case Instruction.Ordered(t, d, a, b)     => floating(site, "OpOrdered", t, d, a, b)((x, y) => !x.isNaN && !y.isNaN)
-    case Instruction.FUnordEqual(t, d, a, b) =>
-      floating(site, "OpFUnordEqual", t, d, a, b)((x, y) => x == y || x.isNaN || y.isNaN)
-    case Instruction.FUnordNotEqual(t, d, a, b) => floating(site, "OpFUnordNotEqual", t, d, a, b)((x, y) => x != y)
-    case Instruction.FUnordLessThan(t, d, a, b) =>
-      floating(site, "OpFUnordLessThan", t, d, a, b)((x, y) => x < y || x.isNaN || y.isNaN)
-    case Instruction.FUnordGreaterThan(t, d, a, b) =>
-      floating(site, "OpFUnordGreaterThan", t, d, a, b)((x, y) => x > y || x.isNaN || y.isNaN)
-    case Instruction.FUnordLessThanEqual(t, d, a, b) =>
-      floating(site, "OpFUnordLessThanEqual", t, d, a, b)((x, y) => x <= y || x.isNaN || y.isNaN)
-    case Instruction.FUnordGreaterThanEqual(t, d, a, b) =>
-      floating(site, "OpFUnordGreaterThanEqual", t, d, a, b)((x, y) => x >= y || x.isNaN || y.isNaN)
-    case Instruction.Unordered(t, d, a, b)    => floating(site, "OpUnordered", t, d, a, b)((x, y) => x.isNaN || y.isNaN)
-    case Instruction.FOrdLessThan(t, d, a, b) => floating(site, "OpFOrdLessThan", t, d, a, b)(_ < _)
-    case Instruction.FOrdLessThanEqual(t, d, a, b)    => floating(site, "OpFOrdLessThanEqual", t, d, a, b)(_ <= _)
-    case Instruction.FOrdGreaterThan(t, d, a, b)      => floating(site, "OpFOrdGreaterThan", t, d, a, b)(_ > _)
-    case Instruction.FOrdGreaterThanEqual(t, d, a, b) =>
-      floating(site, "OpFOrdGreaterThanEqual", t, d, a, b)(_ >= _)
-    case Instruction.IsInf(t, d, a) =>
-      classify(site, "OpIsInf", t, d, a)((raw, _, exponent, fraction) =>
-        (raw & exponent) == exponent && (raw & fraction) == 0L
-      )
-    case Instruction.IsNan(t, d, a) =>
-      classify(site, "OpIsNan", t, d, a)((raw, _, exponent, fraction) =>
-        (raw & exponent) == exponent && (raw & fraction) != 0L
-      )
-    case Instruction.IsFinite(t, d, a) =>
-      classify(site, "OpIsFinite", t, d, a)((raw, _, exponent, _) => (raw & exponent) != exponent)
-    case Instruction.IsNormal(t, d, a) =>
-      classify(site, "OpIsNormal", t, d, a)((raw, _, exponent, _) =>
-        (raw & exponent) != exponent && (raw & exponent) != 0L
-      )
-    case Instruction.SignBitSet(t, d, a) =>
-      classify(site, "OpSignBitSet", t, d, a)((raw, sign, _, _) => (raw & sign) != 0L)
-    case Instruction.Select(t, d, c, a, b) =>
-      select(site, resultType = t, dest = d, condition = c, whenTrue = a, whenFalse = b)
+    case instruction @ Instruction.IEqual(t, _, a, b)    => integerEquality(site, "OpIEqual", t, a, b, instruction)
+    case instruction @ Instruction.INotEqual(t, _, a, b) =>
+      integerEquality(site, "OpINotEqual", t, a, b, instruction)
+    case instruction @ Instruction.LogicalEqual(t, _, a, b)    => logical(site, "OpLogicalEqual", t, a, b, instruction)
+    case instruction @ Instruction.LogicalNotEqual(t, _, a, b) =>
+      logical(site, "OpLogicalNotEqual", t, a, b, instruction)
+    case instruction @ Instruction.LogicalOr(t, _, a, b)         => logical(site, "OpLogicalOr", t, a, b, instruction)
+    case instruction @ Instruction.LogicalAnd(t, _, a, b)        => logical(site, "OpLogicalAnd", t, a, b, instruction)
+    case instruction @ Instruction.LogicalNot(t, _, a)           => logicalNot(site, t, a, instruction)
+    case instruction @ Instruction.Any(t, _, a)                  => reduction(site, t, a, instruction)
+    case instruction @ Instruction.All(t, _, a)                  => reduction(site, t, a, instruction)
+    case instruction @ Instruction.ULessThan(_, _, a, b)         => unsigned(site, a, b, instruction)
+    case instruction @ Instruction.UGreaterThan(_, _, a, b)      => unsigned(site, a, b, instruction)
+    case instruction @ Instruction.ULessThanEqual(_, _, a, b)    => unsigned(site, a, b, instruction)
+    case instruction @ Instruction.UGreaterThanEqual(_, _, a, b) => unsigned(site, a, b, instruction)
+    case instruction @ Instruction.SGreaterThan(t, _, a, b)      => signed(site, "OpSGreaterThan", t, a, b, instruction)
+    case instruction @ Instruction.SGreaterThanEqual(t, _, a, b) =>
+      signed(site, "OpSGreaterThanEqual", t, a, b, instruction)
+    case instruction @ Instruction.SLessThan(t, _, a, b)      => signed(site, "OpSLessThan", t, a, b, instruction)
+    case instruction @ Instruction.SLessThanEqual(t, _, a, b) =>
+      signed(site, "OpSLessThanEqual", t, a, b, instruction)
+    case instruction @ Instruction.FOrdEqual(t, d, a, b)    => floating(site, "OpFOrdEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.FOrdNotEqual(t, d, a, b) => floating(site, "OpFOrdNotEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.LessOrGreater(t, d, a, b) =>
+      floating(site, "OpLessOrGreater", instruction, t, d, a, b)
+    case instruction @ Instruction.Ordered(t, d, a, b)     => floating(site, "OpOrdered", instruction, t, d, a, b)
+    case instruction @ Instruction.FUnordEqual(t, d, a, b) => floating(site, "OpFUnordEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.FUnordNotEqual(t, d, a, b) =>
+      floating(site, "OpFUnordNotEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.FUnordLessThan(t, d, a, b) =>
+      floating(site, "OpFUnordLessThan", instruction, t, d, a, b)
+    case instruction @ Instruction.FUnordGreaterThan(t, d, a, b) =>
+      floating(site, "OpFUnordGreaterThan", instruction, t, d, a, b)
+    case instruction @ Instruction.FUnordLessThanEqual(t, d, a, b) =>
+      floating(site, "OpFUnordLessThanEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.FUnordGreaterThanEqual(t, d, a, b) =>
+      floating(site, "OpFUnordGreaterThanEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.Unordered(t, d, a, b)    => floating(site, "OpUnordered", instruction, t, d, a, b)
+    case instruction @ Instruction.FOrdLessThan(t, d, a, b) => floating(site, "OpFOrdLessThan", instruction, t, d, a, b)
+    case instruction @ Instruction.FOrdLessThanEqual(t, d, a, b) =>
+      floating(site, "OpFOrdLessThanEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.FOrdGreaterThan(t, d, a, b) =>
+      floating(site, "OpFOrdGreaterThan", instruction, t, d, a, b)
+    case instruction @ Instruction.FOrdGreaterThanEqual(t, d, a, b) =>
+      floating(site, "OpFOrdGreaterThanEqual", instruction, t, d, a, b)
+    case instruction @ Instruction.IsInf(t, _, a)        => classify(site, "OpIsInf", instruction, t, a)
+    case instruction @ Instruction.IsNan(t, _, a)        => classify(site, "OpIsNan", instruction, t, a)
+    case instruction @ Instruction.IsFinite(t, _, a)     => classify(site, "OpIsFinite", instruction, t, a)
+    case instruction @ Instruction.IsNormal(t, _, a)     => classify(site, "OpIsNormal", instruction, t, a)
+    case instruction @ Instruction.SignBitSet(t, _, a)   => classify(site, "OpSignBitSet", instruction, t, a)
+    case instruction @ Instruction.Select(t, d, c, a, b) =>
+      select(site, instruction, resultType = t, dest = d, condition = c, whenTrue = a, whenFalse = b)
   }
 
   private def pointerFault(opcode: String, left: Operand)(value: Typed): Fault =
@@ -121,10 +95,9 @@ private object ComparisonOps {
       site: Site,
       opcode: String,
       resultType: Operand,
-      dest: Operand,
       left: Operand,
       right: Operand,
-      code: Int
+      instruction: Instruction
   )
       : Op = lowered(pair(site, left, right, pointerFault(opcode, left)).flatMap { case (leftType, rightType) =>
     (
@@ -134,7 +107,7 @@ private object ComparisonOps {
     ) match {
       case (Some(leftShape), Some(rightShape), Some(resultLanes))
           if leftShape == rightShape && leftShape._2 == resultLanes =>
-        Right(binary(site, id(resultType), id(dest), id(left), id(right))(integerComparisons(code)(leftShape._1)))
+        Right(staged(site, instruction, CoreFamily.Comparison))
       case (None, _, _) =>
         Left(Fault.InvalidRequest(s"$opcode left operand %${id(left)} is not an integer scalar or vector"))
       case (_, None, _) =>
@@ -152,10 +125,9 @@ private object ComparisonOps {
       site: Site,
       opcode: String,
       resultType: Operand,
-      dest: Operand,
       left: Operand,
       right: Operand,
-      code: Int
+      instruction: Instruction
   )
       : Op = {
     val mismatch = Fault.InvalidRequest(s"$opcode requires matching boolean scalar or vector operand and result types")
@@ -167,59 +139,56 @@ private object ComparisonOps {
       ) match {
         case (Some(leftCount), Some(rightCount), Some(resultCount))
             if leftCount == rightCount && leftCount == resultCount =>
-          Right(binary(site, id(resultType), id(dest), id(left), id(right))(integerComparisons(code)(1)))
+          Right(staged(site, instruction, CoreFamily.Comparison))
         case _ => Left(mismatch)
       }
     })
   }
 
-  private def logicalNot(site: Site, resultType: Operand, dest: Operand, source: Operand): Op =
+  private def logicalNot(site: Site, resultType: Operand, source: Operand, instruction: Instruction): Op =
     typed(site, source) match {
       case Typed.Undefined(value) => Fail(undefined(value))
       case Typed.Data(_, sourceType)
           if site.program.booleanLanes(sourceType).isDefined &&
             site.program.booleanLanes(sourceType) == site.program.booleanLanes(id(resultType)) =>
-        val kernel = integerComparisons(SPIRV.Opcode.LogicalNot)(1)
-        unary(site, id(resultType), id(dest), id(source))(kernel(_, 0L))
+        staged(site, instruction, CoreFamily.Comparison)
       case _ => Fail(Fault.InvalidRequest("OpLogicalNot requires matching boolean operand and result types"))
     }
 
-  private def reduction(site: Site, resultType: Operand, dest: Operand, source: Operand, all: Boolean): Op = {
-    val name = if (all) "All" else "Any"
+  private def reduction(site: Site, resultType: Operand, source: Operand, instruction: Instruction)
+      : Op = {
+    val name = if (instruction.opcodeNumber.toInt == SPIRV.Opcode.All) "All" else "Any"
     typed(site, source) match {
       case Typed.Undefined(value)    => Fail(undefined(value))
       case Typed.Opaque(_, _)        => Fail(Fault.InvalidRequest(s"Op$name source is a pointer"))
       case Typed.Data(_, sourceType) =>
         (site.program.booleanLanes(sourceType), site.program.booleanLanes(id(resultType))) match {
           case (Some(_), Some(1)) =>
-            step { (execution, _) =>
-              Option(execution.values.lanes(id(source))).toRight(undefined(id(source))).map { lanes =>
-                execution.values.updateScalar(
-                  id(dest),
-                  id(resultType),
-                  flag(if (all) !lanes.contains(0L) else lanes.exists(_ != 0L))
-                )
-              }
-            }
+            staged(site, instruction, CoreFamily.Comparison)
           case _ => Fail(Fault.InvalidRequest(s"Op$name requires a boolean vector"))
         }
     }
   }
 
   // Unsigned comparisons broadcast operands without checking their shapes.
-  private def unsigned(site: Site, resultType: Operand, dest: Operand, left: Operand, right: Operand, code: Int): Op =
+  private def unsigned(
+      site: Site,
+      left: Operand,
+      right: Operand,
+      instruction: Instruction
+  )
+      : Op =
     lowered(pair(site, left, right, value => Fault.InvalidRequest(s"SPIR-V value %${value.id} is not numeric")).map { _ =>
-      binary(site, id(resultType), id(dest), id(left), id(right))(integerComparisons(code)(64))
+      staged(site, instruction, CoreFamily.Comparison)
     })
 
   private def signed(
       site: Site,
       opcode: String,
       resultType: Operand,
-      dest: Operand,
       left: Operand,
       right: Operand,
-      code: Int
+      instruction: Instruction
   )
       : Op = lowered(pair(site, left, right, pointerFault(opcode, left)).flatMap { case (leftType, rightType) =>
     (
@@ -229,7 +198,7 @@ private object ComparisonOps {
     ) match {
       case (Some((width, count)), Some((rightWidth, rightCount)), Some(resultCount))
           if width == rightWidth && count == rightCount && count == resultCount =>
-        Right(binary(site, id(resultType), id(dest), id(left), id(right))(integerComparisons(code)(width)))
+        Right(staged(site, instruction, CoreFamily.Comparison))
       case (None, _, _) =>
         Left(Fault.InvalidRequest(s"$opcode left operand %${id(left)} is not an integer scalar or vector"))
       case (_, None, _) =>
@@ -243,19 +212,23 @@ private object ComparisonOps {
     }
   })
 
-  private def floating(site: Site, opcode: String, resultType: Operand, dest: Operand, left: Operand, right: Operand)(
-      predicate: (Double, Double) => Boolean
+  private def floating(
+      site: Site,
+      opcode: String,
+      instruction: Instruction,
+      resultType: Operand,
+      dest: Operand,
+      left: Operand,
+      right: Operand
   ): Op = lowered(pair(site, left, right, pointerFault(opcode, left)).flatMap { case (leftType, rightType) =>
     (
       site.program.floatingShape(leftType),
       site.program.floatingShape(rightType),
       site.program.booleanLanes(id(resultType))
     ) match {
-      case (Some(leftShape @ (width, count)), Some(rightShape), Some(resultLanes))
+      case (Some(leftShape @ (_, count)), Some(rightShape), Some(resultLanes))
           if leftShape == rightShape && count == resultLanes =>
-        Right(binary(site, id(resultType), id(dest), id(left), id(right))((a, b) =>
-          flag(predicate(IEEE754.toDouble(a, width), IEEE754.toDouble(b, width)))
-        ))
+        Right(staged(site, instruction, floatingFamilies*))
       case (None, _, _) => Left(Fault.InvalidRequest(s"$opcode left operand %${id(left)} is not floating-point"))
       case (_, None, _) => Left(Fault.InvalidRequest(s"$opcode right operand %${id(right)} is not floating-point"))
       case (_, _, None) =>
@@ -268,24 +241,20 @@ private object ComparisonOps {
     }
   })
 
-  private def classify(site: Site, opcode: String, resultType: Operand, dest: Operand, source: Operand)(
-      predicate: (Long, Long, Long, Long) => Boolean
-  ): Op = typed(site, source) match {
+  private def classify(
+      site: Site,
+      opcode: String,
+      instruction: Instruction,
+      resultType: Operand,
+      source: Operand
+  )
+      : Op = typed(site, source) match {
     case Typed.Undefined(value)    => Fail(undefined(value))
     case Typed.Opaque(_, _)        => Fail(Fault.InvalidRequest(s"$opcode source is a pointer"))
     case Typed.Data(_, sourceType) =>
       (site.program.floatingShape(sourceType), site.program.booleanLanes(id(resultType))) match {
-        case (Some((width, sourceLanes)), Some(resultLanes)) if sourceLanes == resultLanes =>
-          val sign     = 1L << (width.raw - 1)
-          val fraction =
-            (1L <<
-              (width.raw match {
-                case 16 => 10
-                case 32 => 23
-                case _  => 52
-              })) - 1L
-          val exponent = (sign - 1L) & ~fraction
-          unary(site, id(resultType), id(dest), id(source))(raw => flag(predicate(raw, sign, exponent, fraction)))
+        case (Some((_, sourceLanes)), Some(resultLanes)) if sourceLanes == resultLanes =>
+          staged(site, instruction, floatingFamilies*)
         case (None, _) =>
           Fail(Fault.InvalidRequest(s"$opcode source %${id(source)} is not a floating-point scalar or vector"))
         case (_, None) =>
@@ -297,6 +266,7 @@ private object ComparisonOps {
 
   private def select(
       site: Site,
+      instruction: Instruction,
       resultType: Operand,
       dest: Operand,
       condition: Operand,
@@ -321,16 +291,7 @@ private object ComparisonOps {
               trueCount == resultCount.raw && falseCount == resultCount.raw &&
               (conditionCount == 1 || conditionCount == resultCount.raw)
             )
-              ternary(
-                site,
-                resultType = id(resultType),
-                dest = id(dest),
-                a = id(condition),
-                b = id(whenTrue),
-                c = id(whenFalse)
-              )((c, a, b) =>
-                if (c != 0L) a else b
-              )
+              staged(site, instruction, CoreFamily.Comparison)
             else
               Fail(Fault.InvalidRequest(
                 s"OpSelect condition/value shapes are incompatible: condition $conditionCount, true $trueCount, false $falseCount"

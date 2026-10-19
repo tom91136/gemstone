@@ -11,16 +11,18 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class BarrierSuite extends munit.FunSuite {
+  private val Flags         = Vec(false, true)
+  private val OutOfRangeIds = Vec("4294967296", "-4294967296")
+
   test("register-counted block barriers synchronise participants without waiting for exited lanes") {
     check(
       100,
       """S2R R0, SR_TID.X
         |ISETP.GE.U32.AND P0, PT, R0, 32, PT
         |@P0 EXIT
-        |MOV R36, 1
-        |MOV R37, 32
+        |MOV R36, 0x200001
         |STS [R0.X4], R0
-        |BAR.SYNC.DEFER_BLOCKING R36, R37
+        |BAR.SYNC.DEFER_BLOCKING R36, R36
         |LOP3.LUT R6, R0, 1, RZ, 0x3c, !PT
         |LDS R4, [R6.X4]
         |LDC.64 R10, c[0x0][0x160]
@@ -31,6 +33,34 @@ class BarrierSuite extends munit.FunSuite {
       shared = 128
     )
   }
+
+  // bar.sync, bar.arrive and bar.red with a register id and count: ptxas from sm_50 to sm_120 packs both into one
+  // register, the id in the low bits and the count in bits 16 to 27, and names it twice (memory_atomics.cu barriers).
+  for (sm <- Vec(75, 89, 100))
+    test(s"sm_$sm a register id and count share one register, the count in bits 16 to 27") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |ISETP.GE.U32.AND P0, PT, R0, 0x40, PT
+          |MOV R7, 0x800001
+          |MOV R9, 0x800006
+          |@!P0 STS [R0.X4], R0
+          |@!P0 BAR.ARV R7, R7
+          |@P0 BAR.SYNC.DEFER_BLOCKING R7, R7
+          |@P0 LDS R4, [R0.X4+-0x100]
+          |@!P0 MOV R4, R0
+          |LOP3.LUT P1, RZ, R0, 0x1, RZ, 0xc0, !PT
+          |BAR.RED.POPC.DEFER_BLOCKING R9, R9, P1
+          |B2R.RESULT R5
+          |IMAD R4, R5, 0x100, R4
+          |LDC.64 R2, c[0x0][0x160]
+          |IMAD.WIDE.U32 R2, R0, 4, R2
+          |STG.E [R2.64], R4
+          |EXIT""".stripMargin,
+        Vec.tabulate(128)(thread => 64 * 0x100 + thread % 64),
+        shared = 512
+      )
+    }
 
   test("block predicate reduction and per-lane local spills preserve values") {
     check(
@@ -53,7 +83,7 @@ class BarrierSuite extends munit.FunSuite {
   test("SASS barrier IDs reject values that would wrap during Int conversion") {
     Vec(("BAR.SYNC", "3"), ("BAR.RED.OR.DEFER_BLOCKING", "3, P0")).foreach { (opcode, valid) =>
       assert(program(86, s"$opcode $valid").lower().isRight, s"$opcode $valid")
-      Vec("4294967296", "-4294967296").foreach { outOfRange =>
+      OutOfRangeIds.foreach { outOfRange =>
         val operands = valid.replace("3", outOfRange)
         val result   = program(86, s"$opcode $operands").lower()
         assert(result.left.exists(_.contains("barrier id is outside Int range")), s"$opcode $operands: $result")
@@ -88,7 +118,7 @@ class BarrierSuite extends munit.FunSuite {
 
   for {
     sm     <- Vec(50, 60)
-    binary <- Vec(false, true)
+    binary <- Flags
   }
     test(s"sm_$sm mask-only dependency barriers observe completed loads binary=$binary") {
       check(
@@ -97,8 +127,8 @@ class BarrierSuite extends munit.FunSuite {
           "STG.E [R2], R6; EXIT",
         Vec(42),
         rewrite = instruction =>
-          instruction.operation match {
-            case _: Instruction.Depbar if binary =>
+          instruction.operation.form match {
+            case _: Form.Depbar if binary =>
               // CUDA emits this mask-only DEPBAR {0} word; the decoder exposes its bitmask
               val bytes = LittleEndian.toVec(0xf0f0000000070001L, 8).toArray ++ Array[Byte](0xfd.toByte, 0x07, 0x00)
               InstructionDecoder.decode(instruction.address, bytes, target(sm)).value
@@ -229,18 +259,17 @@ class BarrierSuite extends munit.FunSuite {
     )
   }
 
-  test("ordinary Hopper blocks have cluster CTA rank zero and clustered kernels reject execution") {
+  test("ordinary Hopper blocks have cluster CTA rank zero and clustered kernels keep their cluster shape") {
     check(
       90,
       "LDC.64 R2, c[0x0][0x160]; S2UR UR4, SR_CgaCtaId; WARPSYNC.ALL; MOV R4, UR4; STG.E [R2], R4; EXIT",
       Vec(0)
     )
-    val kernel = program(90, "EXIT")
-    val module = kernel.module(Vec.empty)
-    Vec(
-      module.kernels.head.copy(requiredCluster = LaunchGeometry.Dimensions(2, 1, 1)),
-      module.kernels.head.copy(explicitCluster = true)
-    ).foreach(entry => assert(lowerStatements(module, entry, kernel.functions).left.exists(_.contains("cluster"))))
+    val kernel  = program(90, "EXIT")
+    val module  = kernel.module(Vec.empty)
+    val shape   = LaunchGeometry.Dimensions(2, 1, 1)
+    val compile = VMCompiler.compile(module, module.kernels.head.copy(requiredCluster = shape), kernel.functions)
+    assertEquals(compile.map(_.cluster), Right(Some(shape)))
   }
 
   test("sm_70 NANOSLEEP.WARP preserves following memory effects") {
@@ -251,9 +280,9 @@ class BarrierSuite extends munit.FunSuite {
     load(75, Fixture.listing(s"nanosleep${name.capitalize}Sm75"), s"nanosleep_$name")
 
   private def sleeps(kernel: Kernel): Vec[DecodedInstruction] = kernel.function.instructions.filter(i =>
-    (i.operation match {
-      case _: Instruction.Nanosleep => true
-      case _                        => false
+    (i.operation.form match {
+      case _: Form.Nanosleep => true
+      case _                 => false
     }) && i.modifiers == Vec(Instruction.Modifier.WARP)
   )
 
@@ -264,9 +293,9 @@ class BarrierSuite extends munit.FunSuite {
     val guarded = nanosleep("predicated")
     assertEquals(sleeps(guarded).map(_.operands.head), operands("c[0x0][0x168]"))
     assert(sleeps(guarded).forall(_.guard.isEmpty))
-    assert(guarded.function.instructions.exists(_.operation match {
-      case _: Instruction.Bra => true
-      case _                  => false
+    assert(guarded.function.instructions.exists(_.operation.form match {
+      case _: Form.Bra => true
+      case _           => false
     }))
     assert(nanosleep("immediates").lower(8).isRight)
     assert(nanosleep("dynamic").lower(8, 4).isRight)

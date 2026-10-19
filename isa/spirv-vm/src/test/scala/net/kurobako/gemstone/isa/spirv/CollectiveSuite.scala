@@ -4,13 +4,18 @@ import fixtures.*
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class CollectiveSuite extends munit.FunSuite {
-  private val Operations = Seq("Reduce", "InclusiveScan", "ExclusiveScan")
+  private val Operations          = Seq("Reduce", "InclusiveScan", "ExclusiveScan")
+  private val InclusiveOperations = Seq("Reduce", "InclusiveScan")
+  private val BitwiseOperators    = Seq("And", "Or", "Xor")
+  private val ExecutionScopes     = Seq("%workgroup", "%subgroup")
 
   private case class GroupCase(
       name: String,
@@ -34,14 +39,15 @@ class CollectiveSuite extends munit.FunSuite {
     """
 
   // wider accumulation would round 1 + 2 * 4e-8 up to the next binary32 value
-  private def rounding(opcode: String, input: Seq[Float], combine: (Float, Float) => Float): GroupCase = GroupCase(
-    s"$opcode InclusiveScan rounds every step to binary32",
-    "%float",
-    s"%result = $opcode %float %workgroup InclusiveScan %x",
-    32,
-    input.map(floatBits),
-    input.tail.scanLeft(input.head)(combine).map(floatBits)
-  )
+  private inline def rounding(opcode: String, input: Seq[Float], inline combine: (Float, Float) => Float): GroupCase =
+    GroupCase(
+      s"$opcode InclusiveScan rounds every step to binary32",
+      "%float",
+      s"%result = $opcode %float %workgroup InclusiveScan %x",
+      32,
+      input.map(single),
+      input.tail.scanLeft(input.head)(combine).map(single)
+    )
 
   private val groupCases = {
     val input  = Seq(7L, -3, 9, -8, 4, 1, -2, 6)
@@ -54,9 +60,9 @@ class CollectiveSuite extends munit.FunSuite {
         ("GroupFMin", "%float", Seq(7L, -3, -3, -8, -8, -8, -8, -8)),
         ("GroupFMax", "%float", Seq(7L, 7, 9, 9, 9, 9, 9, 9))
       )
-      operation <- Seq("Reduce", "InclusiveScan")
+      operation <- InclusiveOperations
     } yield {
-      def bits(values: Seq[Long]) = if (value == "%float") values.map(v => floatBits(v.toFloat)) else values
+      def bits(values: Seq[Long]) = if (value == "%float") values.map(v => single(v.toFloat)) else values
       val expected                = if (operation == "Reduce") Seq.fill(8)(prefix.last) else prefix
       GroupCase(
         s"Op$opcode $operation",
@@ -102,7 +108,7 @@ class CollectiveSuite extends munit.FunSuite {
         "%result = OpGroupFAdd %float %workgroup InclusiveScan %three_float",
         32,
         Seq.fill(8)(0L),
-        (1 to 8).map(index => floatBits(3f * index))
+        (1 to 8).map(index => single(3f * index))
       ),
       GroupCase(
         "OpGroupFMulKHR InclusiveScan of a constant",
@@ -110,7 +116,7 @@ class CollectiveSuite extends munit.FunSuite {
         "%result = OpGroupFMulKHR %float %workgroup InclusiveScan %three_float",
         32,
         Seq.fill(8)(0L),
-        (1 to 8).map(index => floatBits(math.pow(3.0, index).toFloat))
+        (1 to 8).map(index => single(math.pow(3.0, index).toFloat))
       ),
       rounding("OpGroupFAdd", 1f +: Seq.fill(7)(4e-8f), _ + _),
       rounding("OpGroupFMulKHR", Seq.fill(8)(1.1f), _ * _),
@@ -175,16 +181,16 @@ class CollectiveSuite extends munit.FunSuite {
   }
 
   for {
-    logical  <- Seq(false, true)
-    operator <- Seq("And", "Or", "Xor")
-    vector   <- Seq(false, true)
+    logical  <- booleans
+    operator <- BitwiseOperators
+    vector   <- booleans
   } test(
     s"OpGroup${if (logical) "Logical" else "Bitwise"}${operator}KHR ${if (vector) "vector" else "scalar"} " +
       "reductions and scans"
   ) {
     for {
       width     <- if (logical) Seq(64) else Seq(8, 16, 32, 64)
-      subgroup  <- Seq(false, true)
+      subgroup  <- booleans
       operation <- Operations
     } {
       val lanes    = if (vector) 2 else 1
@@ -229,10 +235,10 @@ class CollectiveSuite extends munit.FunSuite {
       case Fault.InvalidRequest(_) => true
       case _                       => false
     }
-    for (logical <- Seq(false, true)) {
+    for (logical <- booleans) {
       assert(unsupported(khr("And", logical, vector = false, 32, "%device", "Reduce")))
       assert(unsupported(khr("And", logical, vector = false, 32, "%workgroup", "ClusteredReduce")))
-      assert(invalid(khr("And", logical, vector = false, 32, "%workgroup", "Reduce", mistyped = true)))
+      assert(invalid(mistypedKhr("And", logical, 32, "%workgroup", "Reduce")))
     }
     failure(kernel("%ulong", anyMinimum("%device"))) match {
       case Fault.Unsupported(message) =>
@@ -248,15 +254,15 @@ class CollectiveSuite extends munit.FunSuite {
   }
 
   for {
-    xor    <- Seq(false, true)
-    vector <- Seq(false, true)
+    xor    <- booleans
+    vector <- booleans
   } test(
     s"OpSubgroupShuffle${if (xor) "Xor" else ""}INTEL ${if (vector) "vector" else "scalar"} " +
       "handles lane selectors and partial subgroups"
   ) {
     for {
       mask    <- Seq(0, 1, 3, 32, Int.MinValue)
-      varying <- Seq(false, true)
+      varying <- booleans
     } {
       val lanes  = if (vector) 2 else 1
       val data   = if (vector) "%pair" else "%payload"
@@ -344,8 +350,8 @@ class CollectiveSuite extends munit.FunSuite {
   test("control barriers accept every memory scope and propagate memory fence failures") {
     for {
       scope       <- 0 to 6
-      execution   <- Seq("%workgroup", "%subgroup")
-      rejectFence <- Seq(false, true)
+      execution   <- ExecutionScopes
+      rejectFence <- booleans
     } {
       val module = kernel(
         "%ulong",
@@ -437,6 +443,160 @@ class CollectiveSuite extends munit.FunSuite {
     assertEquals(dispatch(module, testDimensions(40), Dimensions.One, Vec.empty, 40 * 4), littleEndian(expected, 32))
   }
 
+  test("subgroup masks and ballot scans, searches and extraction follow the lane order in a partial subgroup") {
+    val masks   = Seq("Eq", "Ge", "Gt", "Le", "Lt")
+    val results = masks.map(mask => s"OpCompositeExtract %uint %${mask.toLowerCaseRoot}_value 0") ++ Seq(
+      "OpGroupNonUniformBallotBitCount %uint %subgroup InclusiveScan %ballot",
+      "OpGroupNonUniformBallotBitCount %uint %subgroup ExclusiveScan %ballot",
+      "OpGroupNonUniformBallotFindLSB %uint %subgroup %ballot",
+      "OpGroupNonUniformBallotFindMSB %uint %subgroup %ballot",
+      "OpSelect %uint %bit %one %zero"
+    )
+    val module = spv"""
+      OpCapability GroupNonUniform
+      OpCapability GroupNonUniformBallot
+      $openCL
+      OpEntryPoint Kernel %main "collective" %gid %lane_id ${masks.map(mask => s"%${mask.toLowerCaseRoot}").mkString(
+        " "
+      )}
+      OpDecorate %gid BuiltIn GlobalInvocationId
+      OpDecorate %lane_id BuiltIn SubgroupLocalInvocationId
+      ${masks.map(mask => s"OpDecorate %${mask.toLowerCaseRoot} BuiltIn Subgroup${mask}Mask").mkString("\n")}
+      %void = OpTypeVoid
+      %bool = OpTypeBool
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %uint4 = OpTypeVector %uint 4
+      %ulong3 = OpTypeVector %ulong 3
+      %ulong3_input = OpTypePointer Input %ulong3
+      %uint_input = OpTypePointer Input %uint
+      %uint4_input = OpTypePointer Input %uint4
+      %gid = OpVariable %ulong3_input Input
+      %lane_id = OpVariable %uint_input Input
+      ${masks.map(mask => s"%${mask.toLowerCaseRoot} = OpVariable %uint4_input Input").mkString("\n")}
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %uint_ptr %uint_ptr
+      %subgroup = OpConstant %uint 3
+      %zero = OpConstant %uint 0
+      %one = OpConstant %uint 1
+      %zero_long = OpConstant %ulong 0
+      %three_long = OpConstant %ulong 3
+      %count = OpConstant %ulong ${results.size}
+      ${results.indices.map(index => s"%offset_$index = OpConstant %ulong $index").mkString("\n")}
+      %main = OpFunction %void None %fn
+      %in = OpFunctionParameter %uint_ptr
+      %out = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      %ids = OpLoad %ulong3 %gid
+      %index = OpCompositeExtract %ulong %ids 0
+      %lane = OpLoad %uint %lane_id
+      %remainder = OpUMod %ulong %index %three_long
+      %predicate = OpINotEqual %bool %remainder %zero_long
+      %ballot = OpGroupNonUniformBallot %uint4 %subgroup %predicate
+      %bit = OpGroupNonUniformBallotBitExtract %bool %subgroup %ballot %lane
+      ${masks.map(mask => s"%${mask.toLowerCaseRoot}_value = OpLoad %uint4 %${mask.toLowerCaseRoot}").mkString("\n")}
+      %base = OpIMul %ulong %index %count
+      ${results.zipWithIndex.map((result, index) => s"""%result_$index = $result
+                                                       |%at_$index = OpIAdd %ulong %base %offset_$index
+                                                       |%slot_$index = OpPtrAccessChain %uint_ptr %out %at_$index
+                                                       |OpStore %slot_$index %result_$index""".stripMargin).mkString(
+        "\n"
+      )}
+      OpReturn
+      OpFunctionEnd
+    """
+    val invocations = 40
+    val expected    = (0 until invocations).flatMap { index =>
+      val (first, local) = (index / 32 * 32, index % 32)
+      val ballot         = (0 until 32).filter(lane => first + lane < invocations && (first + lane) % 3 != 0)
+        .foldLeft(0L)((bits, lane) => bits | (1L << lane))
+      def lanes(from: Int, until: Int): Long = ((1L << until) - 1L) & ~((1L << from) - 1L)
+      Seq(
+        lanes(local, local + 1),
+        lanes(local, 32),
+        lanes(local + 1, 32),
+        lanes(0, local + 1),
+        lanes(0, local),
+        java.lang.Long.bitCount(ballot & lanes(0, local + 1)).toLong,
+        java.lang.Long.bitCount(ballot & lanes(0, local)).toLong,
+        java.lang.Long.numberOfTrailingZeros(ballot).toLong,
+        63L - java.lang.Long.numberOfLeadingZeros(ballot),
+        (ballot >>> local) & 1L
+      )
+    }
+    assertEquals(
+      dispatch(module, testDimensions(40), Dimensions.One, Vec.empty, invocations * results.size * 4),
+      littleEndian(expected, 32)
+    )
+  }
+
+  // SPV_KHR_shader_ballot and SPV_KHR_subgroup_vote, which glslang emits for GL_ARB_shader_ballot and group votes
+  test("the KHR ballot and vote instructions act on the subgroup") {
+    val module = kernel(
+      "%uint",
+      """
+        %predicate = OpULessThan %bool %index %three_long
+        %ballot = OpSubgroupBallotKHR %uint4 %predicate
+        %bits = OpCompositeExtract %uint %ballot 0
+        %any = OpSubgroupAnyKHR %bool %predicate
+        %all = OpSubgroupAllKHR %bool %predicate
+        %equal = OpSubgroupAllEqualKHR %bool %predicate
+        %lane = OpUConvert %uint %index
+        %shifted = OpIAdd %uint %lane %three
+        %first = OpSubgroupFirstInvocationKHR %uint %shifted
+        %read = OpSubgroupReadInvocationKHR %uint %lane %five
+        %any_bit = OpSelect %uint %any %c256 %c0
+        %all_bit = OpSelect %uint %all %c512 %c0
+        %equal_bit = OpSelect %uint %equal %c1024 %c0
+        %read_part = OpIMul %uint %read %c16
+        %first_part = OpIMul %uint %first %c2048
+        %s0 = OpIAdd %uint %bits %read_part
+        %s1 = OpIAdd %uint %s0 %any_bit
+        %s2 = OpIAdd %uint %s1 %all_bit
+        %s3 = OpIAdd %uint %s2 %equal_bit
+        %result = OpIAdd %uint %s3 %first_part
+      """,
+      """
+        %uint4 = OpTypeVector %uint 4
+        %c0 = OpConstant %uint 0
+        %five = OpConstant %uint 5
+        %c16 = OpConstant %uint 16
+        %c256 = OpConstant %uint 256
+        %c512 = OpConstant %uint 512
+        %c1024 = OpConstant %uint 1024
+        %c2048 = OpConstant %uint 2048
+      """
+    )
+    assertEquals(
+      dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
+      littleEndian(Seq.fill(8)(7L + 5 * 16 + 256 + 3 * 2048), 32)
+    )
+  }
+
+  // SPIR-V 3.3.24: quad operations act on aligned groups of four lanes, as glslang emits them for compute
+  test("quad broadcasts and swaps read within aligned groups of four lanes") {
+    val module = kernel(
+      "%uint",
+      """
+        %lane = OpUConvert %uint %index
+        %broadcast = OpGroupNonUniformQuadBroadcast %uint %subgroup %lane %two
+        %swapped = OpGroupNonUniformQuadSwap %uint %subgroup %lane %one
+        %diagonal = OpGroupNonUniformQuadSwap %uint %subgroup %lane %two
+        %b = OpIMul %uint %broadcast %hundred
+        %d = OpIMul %uint %diagonal %ten
+        %partial = OpIAdd %uint %b %d
+        %result = OpIAdd %uint %partial %swapped
+      """,
+      """
+        %two = OpConstant %uint 2
+        %ten = OpConstant %uint 10
+        %hundred = OpConstant %uint 100
+      """
+    )
+    val expected = (0 until 8).map(lane => ((lane & ~3) | 2) * 100L + (lane ^ 3) * 10L + (lane ^ 2))
+    assertEquals(dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4), littleEndian(expected, 32))
+  }
+
   test("clustered reductions combine each aligned cluster of the subgroup separately") {
     val module = kernel(
       "%uint",
@@ -502,7 +662,7 @@ class CollectiveSuite extends munit.FunSuite {
     }
     for {
       name     <- Seq[NonEmpty[String]]("plain", "collective")
-      deferred <- Seq(false, true)
+      deferred <- booleans
     } {
       val launch = task(name, local = testDimensions(8), groups = testDimensions(2))
       assertEquals(execute(program, launch, DeferringMemory(deferred)), Right(()), s"$name, deferred $deferred")
@@ -560,7 +720,7 @@ class CollectiveSuite extends munit.FunSuite {
   """
 
   /** KHR group operation over `width`-bit payloads `0x80.. + index`, or over `index % 4 != 3` when `logical`; vector
-    * forms add the complement as a second lane. `mistyped` passes an operand of the wrong type.
+    * forms add the complement as a second lane.
     */
   private def khr(
       operator: String,
@@ -568,17 +728,27 @@ class CollectiveSuite extends munit.FunSuite {
       vector: Boolean,
       width: Int,
       scope: String,
+      operation: String
+  ): Module = khrOver(operator, logical, vector, width, scope, operation, if (vector) "%pair" else "%scalar")
+
+  /** A scalar KHR group operation whose operand has the wrong type. */
+  private def mistypedKhr(operator: String, logical: Boolean, width: Int, scope: String, operation: String): Module =
+    khrOver(operator, logical, vector = false, width, scope, operation, if (logical) "%payload" else "%pair")
+
+  private def khrOver(
+      operator: String,
+      logical: Boolean,
+      vector: Boolean,
+      width: Int,
+      scope: String,
       operation: String,
-      mistyped: Boolean = false
+      operand: String
   ): Module = {
     val element  = if (logical) "%bool" else "%element"
     val dataType = if (vector) "%pair_type" else element
-    val operand  = if (!mistyped) { if (vector) "%pair" else "%scalar" }
-    else if (logical) "%payload"
-    else "%pair"
-    val value  = if (vector) "%ulong2" else "%ulong"
-    val widen  = if (width == 64) "OpCopyObject" else "OpUConvert"
-    val result =
+    val value    = if (vector) "%ulong2" else "%ulong"
+    val widen    = if (width == 64) "OpCopyObject" else "OpUConvert"
+    val result   =
       if (!logical) s"%result = $widen $value %group"
       else if (vector) "%result = OpSelect %ulong2 %group %ones %zeros"
       else "%result = OpSelect %ulong %group %one_long %zero_long"

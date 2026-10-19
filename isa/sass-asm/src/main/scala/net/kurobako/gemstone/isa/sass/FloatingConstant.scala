@@ -11,7 +11,7 @@ object FloatingConstant {
 }
 
 /** Symbolic floating immediates; a sign is a `Unary` negation of the operand. */
-enum FloatingConstant(val spellingValue: NonEmpty[String]) {
+enum FloatingConstant(val spellingValue: NonEmpty[String]) derives CanEqual {
   inline def spelling: String = spellingValue
   def isNaN: Boolean          = this == QNAN || this == SNAN || this == NAN
   case INF                                       extends FloatingConstant("INF")

@@ -3,27 +3,29 @@ package net.kurobako.gemstone.isa.spirv
 import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 
 class FragmentDiscardSuite extends munit.FunSuite {
-  private val discard = """
+  // SPIR-V 3.3.17: OpTerminateInvocation stops the invocation as OpKill does
+  private def discard(terminator: String) = s"""
     %discarded = OpLoad %float %in
     %small     = OpFOrdLessThan %bool %discarded %float_3
     OpSelectionMerge %kept None
     OpBranchConditional %small %killed %kept
     %killed    = OpLabel
-    OpKill
+    $terminator
     %kept      = OpLabel
   """
 
-  private val callee = s"""
+  private def callee(terminator: String) = s"""
     %nested       = OpFunction %void None %fn
     %nested_entry = OpLabel
-    $discard
+    ${discard(terminator)}
     OpReturn
     OpFunctionEnd
   """
 
-  private def module(nested: Boolean, derivative: Boolean): Module = spv"""
+  private def module(nested: Boolean, derivative: Boolean, terminator: String): Module = spv"""
     $vulkan
     OpEntryPoint Fragment %main "main" %in %out %buffer %helper %mask
     OpExecutionMode %main OriginUpperLeft
@@ -63,7 +65,7 @@ class FragmentDiscardSuite extends munit.FunSuite {
     %entry      = OpLabel
     %before     = OpAccessChain %uint_ptr %buffer %uint_0
     %entered    = OpAtomicIAdd %uint %before %uint_1 %uint_0 %uint_1
-    ${if (nested) "%call = OpFunctionCall %void %nested" else discard}
+    ${if (nested) "%call = OpFunctionCall %void %nested" else discard(terminator)}
     %x          = OpLoad %float %in
     ${if (derivative) "%dx = OpDPdx %float %x" else ""}
     OpStore %out ${if (derivative) "%dx" else "%x"}
@@ -71,7 +73,7 @@ class FragmentDiscardSuite extends munit.FunSuite {
     %survived   = OpAtomicIAdd %uint %after %uint_1 %uint_0 %uint_1
     OpReturn
     OpFunctionEnd
-    ${if (nested) callee else ""}
+    ${if (nested) callee(terminator) else ""}
   """
 
   private val patterns = Seq(
@@ -80,37 +82,43 @@ class FragmentDiscardSuite extends munit.FunSuite {
     "no"    -> Seq.fill(4)(5f)
   )
 
+  private val Terminators = Seq("OpKill", "OpTerminateInvocation")
+
   private val kills = pairwise(Seq(false, true), Seq(false, true), Seq(false, true), patterns)
 
   // partial kills before a derivative, inline and nested, with and without helper lanes
   private val partialDerivatives = for {
-    nested  <- Seq(false, true)
-    helpers <- Seq(false, true)
+    nested  <- booleans
+    helpers <- booleans
   } yield (nested, true, helpers, patterns.head)
 
-  for ((nested, derivative, helpers, (pattern, inputs)) <- kills ++ partialDerivatives.filterNot(kills.toSet))
-    test(s"OpKill of $pattern lanes, nested $nested, derivative $derivative, helpers $helpers keeps earlier work") {
-      val memory = RegionMemory()
-      val region = memory.allocate(128L)
-      val values = inputs ++ inputs.reverse
-      writeWords(memory, region, 16, values.map(floatBits)*)
-      val flags = Seq.tabulate(8)(i => if (helpers && i % 2 == 1) 1.toByte else 0.toByte)
-      assertEquals(memory.write(region, 80L, Vec.from(flags)), Right(()))
-      val arguments = Vec(
-        buffer(region, 0L, Some(8L)),
-        buffer(region, 16L, Some(32L)),
-        buffer(region, 48L, Some(32L)),
-        buffer(region, 80L, Some(8L)),
-        buffer(region, 88L, Some(32L))
-      )
-      val (local, groups) =
-        if (derivative) (testDimensions(4), testDimensions(2)) else (testDimensions(1), testDimensions(8))
-      assertEquals(run(module(nested, derivative), "main", memory, arguments, local, groups), Right(()))
-      assertEquals(word(memory, region, 0), flags.count(_ == 0).toLong)
-      assertEquals(word(memory, region, 4), values.zip(flags).count((v, h) => v >= 3 && h == 0).toLong)
-      for ((v, i) <- values.zipWithIndex) {
-        assertEquals(word(memory, region, 88 + i * 4), if (v < 3) 0L else 0xffffffffL)
-        if (v < 3) assertEquals(word(memory, region, 48 + i * 4), 0L)
-      }
+  for {
+    (nested, derivative, helpers, (pattern, inputs)) <- kills ++ partialDerivatives.filterNot(kills.toSet)
+    terminator                                       <- Terminators
+  } test(
+    s"$terminator of $pattern lanes, nested $nested, derivative $derivative, helpers $helpers keeps earlier work"
+  ) {
+    val memory = RegionMemory()
+    val region = memory.allocate(128L)
+    val values = inputs ++ inputs.reverse
+    writeWords(memory, region, 16, values.map(single)*)
+    val flags = Seq.tabulate(8)(i => if (helpers && i % 2 == 1) 1.toByte else 0.toByte)
+    assertEquals(memory.write(region, 80L, Vec.from(flags)), Right(()))
+    val arguments = Vec(
+      buffer(region, 0L, Some(8L)),
+      buffer(region, 16L, Some(32L)),
+      buffer(region, 48L, Some(32L)),
+      buffer(region, 80L, Some(8L)),
+      buffer(region, 88L, Some(32L))
+    )
+    val local  = testDimensions(if (derivative) 4 else 1)
+    val groups = testDimensions(if (derivative) 2 else 8)
+    assertEquals(run(module(nested, derivative, terminator), "main", memory, arguments, local, groups), Right(()))
+    assertEquals(word(memory, region, 0), flags.count(_ == 0).toLong)
+    assertEquals(word(memory, region, 4), values.zip(flags).count((v, h) => v >= 3 && h == 0).toLong)
+    for ((v, i) <- values.zipWithIndex) {
+      assertEquals(word(memory, region, 88 + i * 4), if (v < 3) 0L else 0xffffffffL)
+      if (v < 3) assertEquals(word(memory, region, 48 + i * 4), 0L)
     }
+  }
 }

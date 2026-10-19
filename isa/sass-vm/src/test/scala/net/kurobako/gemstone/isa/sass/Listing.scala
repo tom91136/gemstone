@@ -8,6 +8,7 @@ import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.text.*
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.util.control.NonFatal
 
 /** Parses `nvdisasm -c` listings and address-free assembly blocks into decoded instructions. Listings printed with
@@ -21,6 +22,8 @@ object Listing {
       predicate: Option[String],
       word: Option[BigInt]
   )
+
+  private val OperandSeparators = Array(' ', '\t', '\r', '\n', '\f', '\u000b')
 
   def parse(text: String, kernel: String, sm: Int): Either[String, Vec[DecodedInstruction]] =
     records(text, kernel, sm).flatMap(_.traverse(decode(_, kernel, sm)))
@@ -40,16 +43,24 @@ object Listing {
   /** Instructions separated by newlines or `;` at 16-byte steps; a `name:` prefix labels an instruction for
     * `` `(name) ``.
     */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def program(text: String, kernel: String = "kernel"): Either[String, DecodedFunction] = {
-    val lines                = text.linesIterator.flatMap(_.split(';')).map(_.trim).filter(_.nonEmpty).toVec
-    val (statements, labels) = lines.foldLeft((Vec.empty[String], Map.empty[String, Int])) {
-      case ((statements, labels), line) =>
-        line match {
-          case s"$name:$rest" if Parser.validName(name) =>
-            (if (rest.isBlank) statements else statements :+ rest.trim, labels + (name -> statements.size * 16))
-          case _ => (statements :+ line, labels)
+    val lines            = text.linesIterator.flatMap(_.split(';')).map(_.trim).filter(_.nonEmpty).toVec
+    val statementBuilder = Vec.newBuilder[String]
+    var statementCount   = 0
+    var labels           = Map.empty[String, Int]
+    lines.foreach {
+      case s"$name:$rest" if Parser.validName(name) =>
+        labels += (name -> statementCount * 16)
+        if (!rest.isBlank) {
+          val _ = statementBuilder += rest.trim
+          statementCount += 1
         }
+      case line =>
+        val _ = statementBuilder += line
+        statementCount += 1
     }
+    val statements = statementBuilder.result()
     statements.zipWithIndex.traverse { (line, index) =>
       catching(parseRecord(s"/*${"%04x".format(index * 16)}*/ $line;"))
         .flatMap(_.toRight(s"invalid SASS statement: $line"))
@@ -62,10 +73,11 @@ object Listing {
     try Right(body)
     catch {
       case SourceCursor.Failure(mark, expectation) =>
-        Left(s"invalid nvdisasm text: ${expectation.raw} at ${mark.offset.raw}")
+        Left(s"invalid nvdisasm text: ${expectation.raw} at ${mark.offset}")
       case NonFatal(error) => Left(s"invalid nvdisasm text: ${error.getMessage}")
     }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def records(text: String, kernel: String, sm: Int): Either[String, Vec[Record]] = catching {
     val width                   = if (sm < 70) 8 else 16
     val bundle                  = if (sm < 50) 64 else if (sm < 70) 32 else 0
@@ -73,22 +85,26 @@ object Listing {
       val following = address + width
       if (bundle != 0 && following % bundle == 0) following + width else following
     }
-    val lines               = text.linesIterator.toVec
-    val (parsed, positions) = lines.indices.foldLeft((Vec.empty[Record], Map.empty[String, Int])) {
-      case ((records, labels), index) =>
-        parseRecord(lines(index)) match {
-          case Some(record) =>
-            val word =
-              if (sm < 70) record.word
-              else (record.word, lines.lift(index + 1).flatMap(hexWord(_))).mapN((low, high) => low | (high << 64))
-            (records :+ record.copy(word = word), labels)
-          case None =>
-            lines(index).trim match {
-              case s"$name:" if Parser.validName(name) => (records, labels + (name -> records.size))
-              case _                                   => (records, labels)
-            }
-        }
+    val lines         = text.linesIterator.toVec
+    val recordBuilder = Vec.newBuilder[Record]
+    var recordCount   = 0
+    var positions     = Map.empty[String, Int]
+    lines.indices.foreach { index =>
+      parseRecord(lines(index)) match {
+        case Some(record) =>
+          val word =
+            if (sm < 70) record.word
+            else (record.word, lines.lift(index + 1).flatMap(hexWord(_))).mapN((low, high) => low | (high << 64))
+          val _ = recordBuilder += record.copy(word = word)
+          recordCount += 1
+        case None =>
+          lines(index).trim match {
+            case s"$name:" if Parser.validName(name) => positions += (name -> recordCount)
+            case _                                   => ()
+          }
+      }
     }
+    val parsed    = recordBuilder.result()
     val addresses = parsed.map(_.address)
     if (
       addresses.headOption.exists(_ != (if (bundle == 0) 0 else width)) ||
@@ -143,7 +159,7 @@ object Listing {
         val opcodeStart = cursor.offset
         cursor.skipWhile(c =>
           (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '_' || c == '.'
+            (c >= '0' && c <= '9') || c == '_' || c == '.' || c == 'x'
         )
         val opcode = cursor.slice(opcodeStart)
         if (opcode.isEmpty) malformed()
@@ -175,7 +191,7 @@ object Listing {
 
   /** Joins `c[0x0] [0x10]` operand pieces and replaces label references with their addresses. */
   private def resolve(record: Record, labels: Map[String, Int]): Either[String, Record] = catching {
-    val result = StringBuilder()
+    val result = mutable.StringBuilder()
     val cursor = SourceCursor(record.operands)
     while (!cursor.atEnd)
       if (cursor.consume("`(")) {
@@ -198,12 +214,14 @@ object Listing {
     record.copy(operands = result.result())
   }
 
-  /** RET/CALL/BRX may separate operands with whitespace and P2R may name PR explicitly; lowering expects neither. */
+  /** RET/CALL/BRX may separate operands with whitespace, P2R may name PR explicitly and VOTEU may omit its ballot;
+    * lowering expects none of these.
+    */
   private def decode(record: Record, kernel: String, sm: Int): Either[String, DecodedInstruction] = {
     val base   = record.opcode.takeWhile(_ != '.')
     val source = base match {
       case "RET" | "CALL" | "BRX" if !record.operands.contains(',') =>
-        record.operands.split(Array(' ', '\t', '\r', '\n', '\f', '\u000b')).filter(_.nonEmpty).mkString(", ")
+        record.operands.split(OperandSeparators).filter(_.nonEmpty).mkString(", ")
       case _ => record.operands
     }
     val fields = if (record.operands.isEmpty) Vec.empty[String] else record.operands.split(',').toVec.map(_.trim)
@@ -218,7 +236,10 @@ object Listing {
       operands <- parsed.left.map(diagnostic + _)
       normalised = if (base == "P2R" && operands.size == 4 && fields.lift(1).contains("PR"))
         operands.patch(1, Vec.empty[Operand], 1)
-      else operands
+      // nvdisasm omits VOTEU's discarded URZ ballot.
+      else if (base == "VOTEU" && operands.size == 2) Operand.Register(RegisterBank.UR, 255) +: operands
+      // UP2UR and UR2UP leave the uniform predicate file they name implicit
+      else operands.filterNot(_ == Operand.Symbol("UPR"))
       guard <- record.predicate.traverse { value =>
         val negated = value.stripPrefix("@").startsWith("!")
         OperandParser.parse(value.stripPrefix("@").stripPrefix("!")).flatMap {
@@ -227,8 +248,10 @@ object Listing {
           case other => Left(s"invalid SASS predicate $value: $other")
         }
       }.left.map(diagnostic + _)
-      modifiers = record.opcode.split('.').toVec.drop(1).map(Instruction.Modifier(_))
-      operation <- Instruction.decode(base, modifiers, normalised, guard).left.map(diagnostic + _)
+      (scoreboards, unscored) = normalised.partition(OperandQueries.isScoreboard(_))
+      modifiers = (record.opcode.split('.').toVec.drop(1) ++ scoreboards.map(OperandQueries.scoreboard(_)))
+        .map(Instruction.Modifier(_))
+      operation <- InstructionDefinitions.decode(base, modifiers, unscored, guard).left.map(diagnostic + _)
     } yield DecodedInstruction(address, operation, record.word, None)
   }
 }

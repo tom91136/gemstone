@@ -11,11 +11,12 @@ using namespace memory_patterns;
 // Prerequisites apply only to the selected allocation and operation.
 uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
   const auto selected = conformance::deviceSelection().nativeHandle;
-  ze_device_memory_access_properties_t properties{ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES};
-  check(zeDeviceGetMemoryAccessProperties(reinterpret_cast<ze_device_handle_t>(selected), &properties));
+  auto *device = reinterpret_cast<ze_device_handle_t>(selected);
+  ze_device_memory_access_properties_t properties{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES};
+  check(zeDeviceGetMemoryAccessProperties(device, &properties));
   if (wide) {
-    ze_device_module_properties_t module{ZE_STRUCTURE_TYPE_DEVICE_MODULE_PROPERTIES};
-    check(zeDeviceGetModuleProperties(reinterpret_cast<ze_device_handle_t>(selected), &module));
+    ze_device_module_properties_t module{.stype = ZE_STRUCTURE_TYPE_DEVICE_MODULE_PROPERTIES};
+    check(zeDeviceGetModuleProperties(device, &module));
     if (!(module.flags & ZE_DEVICE_MODULE_FLAG_INT64_ATOMICS)) SKIP("64-bit atomics unavailable");
   }
   auto flags = kind == "host" ? properties.hostAllocCapabilities : properties.sharedSingleDeviceAllocCapabilities;

@@ -69,10 +69,6 @@ object Metadata {
       }.toVec
     }
   }
-
-  def encodingsFor(definition: Opcode, target: Target): Vec[Encoding] =
-    definition.meta.encodings.filter(_.supports(target))
-
 }
 
 case class Metadata(encodings: Vec[Metadata.Encoding])

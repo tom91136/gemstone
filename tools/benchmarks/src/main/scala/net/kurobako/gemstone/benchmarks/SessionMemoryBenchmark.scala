@@ -6,7 +6,6 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.memory.*
@@ -32,9 +31,9 @@ object SessionMemoryBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def run(parsed: Options): BenchmarkSample = {
     // Separate independent clients by one storage-lock stripe; shared mode deliberately uses the same word.
-    val bytes     = Math.multiplyExact(parsed.workers.raw, 64).unsafe[Int > 0]
-    val addresses = Array.tabulate(parsed.allocations.raw)(index =>
-      GuestAddress(0x100000L + index.toLong * (bytes.raw.toLong + 4096L))
+    val bytes     = Math.multiplyExact(parsed.workers, 64).unsafe[Int > 0]
+    val addresses = Array.tabulate(parsed.allocations)(index =>
+      GuestAddress(0x100000L + index.toLong * (bytes.toLong + 4096L))
     )
     val completed = ConcurrentLinkedQueue[Measurement[Long]]()
     Using.resource(WorkerPool(parsed.workers, minGroups = 1L, minWorkItems = 1L)) { workers =>
@@ -58,12 +57,12 @@ object SessionMemoryBenchmark {
           checked(session.releaseCompletion(completion))
         }
         // One in four transactions accesses the device heap. Check every registered word, including untouched ones.
-        val expected = Array.fill(parsed.allocations.raw, parsed.workers.raw)(0L)
+        val expected = Array.fill(parsed.allocations, parsed.workers)(0L)
         var worker   = 0
-        while (worker < parsed.workers.raw) {
+        while (worker < parsed.workers) {
           var index = 0
-          while (index < parsed.iterations.raw) {
-            if (index % 4 != 0) expected(index % parsed.allocations.raw)(if (parsed.shared) 0 else worker) += 1L
+          while (index < parsed.iterations) {
+            if (index % 4 != 0) expected(index % parsed.allocations)(if (parsed.shared) 0 else worker) += 1L
             index += 1
           }
           worker += 1
@@ -76,12 +75,12 @@ object SessionMemoryBenchmark {
         }
         val measurements = completed.asScala.toVector
         require(measurements.size == parsed.workers.raw, "missing worker measurements")
-        measurements.foreach(m => require(m.value == (parsed.iterations.raw.toLong + 3L) / 4L, "device heap result"))
+        measurements.foreach(m => require(m.value == (parsed.iterations.toLong + 3L) / 4L, "device heap result"))
         val allocated = measurements.map(_.allocatedBytes)
         val total     = Option.when(allocated.forall(_.nonEmpty))(
-          allocated.flatten.map(_.raw).sum.unsafe[Long >= 0]
+          allocated.flatten.rawElements.sum.unsafe[Long >= 0]
         )
-        measured.sample((parsed.iterations.raw.toLong * parsed.workers.raw).unsafe[Long > 0]).copy(
+        measured.sample((parsed.iterations.toLong * parsed.workers).unsafe[Long > 0]).copy(
           allocatedBytes = total,
           allocationScope = if (total.nonEmpty) BenchmarkSample.AllocationScope.Workers
           else BenchmarkSample.AllocationScope.Unavailable
@@ -112,7 +111,7 @@ object SessionMemoryBenchmark {
           handler: Event => Either[Fault, Unit]
       ): Either[Fault, Unit] = {
         val heap = DeviceHeap(memory)
-        workers.parallelFor(options.workers.toLong) { worker =>
+        workers.parallelFor(options.workers.widen[Long >= 0]) { worker =>
           val offset = if (options.shared) 0L else worker.raw * 64L
           val ranges = addresses.map { address =>
             val range = AddressSpace.ReadRangeBuffer(1)
@@ -128,7 +127,7 @@ object SessionMemoryBenchmark {
           val measured = Measurement {
             val scratch = checked(heap.allocate(8))
             var index   = 0
-            while (index < options.iterations.raw) {
+            while (index < options.iterations) {
               if (index % 4 == 0) {
                 val previous = read(scratch)
                 checked(heap.writeValue(scratch, previous + 1L, 8))

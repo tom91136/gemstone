@@ -57,7 +57,7 @@ class GraphicsMemorySuite extends munit.FunSuite {
       override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] =
         if (address == remote) Right(AddressSpace.Location.Absolute(address)) else super.locate(address, size)
       override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-        if (address == remote) Right(Vec.fill(size.raw)(42.toByte)) else super.readDeferred(address, size)
+        if (address == remote) Right(Vec.fill(size)(42.toByte)) else super.readDeferred(address, size)
       override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
         if (address == remote) write(allocation, 0L, bytes) else super.write(address, bytes)
     }
@@ -123,7 +123,7 @@ class GraphicsMemorySuite extends munit.FunSuite {
       Vec(standalone, DescriptorBinding(1, GraphicsDescriptor.Combined(compressedImage, IdentityComponents, sampler)))
     val result = GraphicsRuntime().withDescriptorBindings(bindings, Backing(80), TaskControl()) {
       (memory, descriptors, relocations) =>
-        val plain    = memory.read(descriptors(0).allocation, 0L, descriptors(0).size.raw.toInt.unsafe).value
+        val plain    = memory.read(descriptors(0).allocation, 0L, descriptors(0).size.toInt.unsafe).value
         val combined = memory.read(
           descriptors(1).allocation,
           ImageDescriptor.Layout.InlineHeaderBytes.toLong.unsafe,

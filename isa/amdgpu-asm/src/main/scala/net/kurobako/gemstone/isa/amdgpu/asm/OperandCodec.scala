@@ -37,27 +37,27 @@ private object OperandCodec {
       ).map(value => (value.toInt, None))
     else operand match {
       case Operand.Register(RegisterFile.Scalar, first, last)
-          if first >= 0 && last < 128 && last - first + 1 == math.max(info.bits.raw, 32) / 32 &&
-            (info.bits.raw <= 32 || first % 2 == 0) =>
+          if first >= 0 && last < 128 && last - first + 1 == math.max(info.bits, 32) / 32 &&
+            (info.bits <= 32 || first % 2 == 0) =>
         Some((first, None))
       case Operand.Register(RegisterFile.TrapTemporary, first, last)
-          if first >= 0 && last - first + 1 == math.max(info.bits.raw, 32) / 32 =>
+          if first >= 0 && last - first + 1 == math.max(info.bits, 32) / 32 =>
         for {
           start <- encoding.selectors.get(s"ttmp$first")
           end   <- encoding.selectors.get(s"ttmp$last")
-          if end - start == last - first && (info.bits.raw <= 32 || first % 2 == 0)
+          if end - start == last - first && (info.bits <= 32 || first % 2 == 0)
         } yield (start, None)
       case Operand.Identifier(name) => special(name, target).filter(value =>
-          value._2 == 0 || value._2 == math.max(info.bits.raw, 32)
+          value._2 == 0 || value._2 == math.max(info.bits, 32)
         ).map { case (index, _) => (index, None) }
       case Operand.SpecialRegister(name) => special(name, target).filter { case (_, bits) =>
-          bits == 0 || bits == math.max(info.bits.raw, 32)
+          bits == 0 || bits == math.max(info.bits, 32)
         }
           .map { case (index, _) => (index, None) }
       case Operand.IntegerLiteral(value, _) if isSource =>
-        val modulus  = BigInt(1) << info.bits.raw
+        val modulus  = BigInt(1) << info.bits
         val signed   = if (value >= modulus / 2 && value < modulus) value - modulus else value
-        val floating = if (info.bits.raw == 32) encoding.floating.toVector.find { case (_, number) =>
+        val floating = if (info.bits == 32) encoding.floating.toVector.find { case (_, number) =>
           BigInt(java.lang.Float.floatToRawIntBits(number.toFloat).toLong & 0xffffffffL) == value
         }.map(_._1)
         else None
@@ -65,7 +65,7 @@ private object OperandCodec {
           if (value >= Int.MinValue && value <= BigInt("ffffffff", 16))
             Some((Source.LITERAL_CONST, Some(Literal(value.toLong & 0xffffffffL))))
           else if (
-            encoding.selectors.contains("src_literal64") && info.bits.raw >= 64 &&
+            encoding.selectors.contains("src_literal64") && info.bits >= 64 &&
             value >= Long.MinValue && value < (BigInt(1) << 64)
           )
             Some((Source.LITERAL64_CONST, Some(Literal(value.toLong, 8))))
@@ -79,7 +79,7 @@ private object OperandCodec {
           }
         }
       case Operand.Expression(ForcedWideLiteral(value))
-          if isSource && encoding.selectors.contains("src_literal64") && info.bits.raw >= 64 =>
+          if isSource && encoding.selectors.contains("src_literal64") && info.bits >= 64 =>
         parseBigIntLiteral(value).filter(number => number >= Long.MinValue && number < (BigInt(1) << 64))
           .map(number => (Source.LITERAL64_CONST, Some(Literal(number.toLong, 8))))
       case Operand.Expression(ForcedLiteral(value)) if isSource =>
@@ -93,11 +93,11 @@ private object OperandCodec {
     val isSource = !info.field.contains(EncodingField.SDST)
     if (info.kind.isMessage || info.kind == OperandKind.SIMM4) Some(Operand.IntegerLiteral(BigInt(value), 10))
     else if (value < 128) {
-      val aliases = if (math.max(info.bits.raw, 32) == 64) Vec("vcc", "exec", "null")
+      val aliases = if (math.max(info.bits, 32) == 64) Vec("vcc", "exec", "null")
       else Vec("vcc_lo", "vcc_hi", "exec_lo", "exec_hi", "m0", "null")
       aliases.find(name => special(name, target).exists(_._1 == value)).map(Operand.SpecialRegister(_))
-        .orElse(Option.when(math.max(info.bits.raw, 32) == 32 || (value % 2 == 0 && value < 127))(
-          Operand.Register(RegisterFile.Scalar, value, value + math.max(info.bits.raw, 32) / 32 - 1)
+        .orElse(Option.when(math.max(info.bits, 32) == 32 || (value % 2 == 0 && value < 127))(
+          Operand.Register(RegisterFile.Scalar, value, value + math.max(info.bits, 32) / 32 - 1)
         ))
     } else if (!isSource) None
     else SourceOperand.decode(value, target.isa).flatMap {
@@ -105,7 +105,7 @@ private object OperandCodec {
       case SourceOperand.Floating(number)  => Some(Operand.DecimalLiteral(number.toString))
       case SourceOperand.Special(register) => Some(Operand.SpecialRegister(register.toString))
       case SourceOperand.Literal(size)     => literal.filter(_.size == size).map(bits =>
-          Operand.Expression(s"${if (size.raw == 8) "lit64" else "lit"}(0x${bits.value.toHexString})")
+          Operand.Expression(s"${if (size == 8) "lit64" else "lit"}(0x${bits.value.toHexString})")
         )
       case _ => None
     }

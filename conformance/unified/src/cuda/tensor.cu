@@ -10,7 +10,7 @@
 
 #include "test_support.hpp"
 
-namespace cuda_tensor {
+namespace {
 
 void checkTensor(cudaError_t result) {
   if (result != cudaSuccess) throw std::runtime_error(std::string("CUDA tensor test: ") + cudaGetErrorString(result));
@@ -19,19 +19,21 @@ void checkTensor(cudaError_t result) {
 __global__ void tensorGemm(const half *a, const half *b, float *c) {
 #if __CUDA_ARCH__ >= 700
   using namespace nvcuda;
-  const unsigned tile = blockIdx.x * 2 + threadIdx.x / 32;
+  const size_t tile = (blockIdx.x * 2) + (threadIdx.x / 32);
   wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> af;
   wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> bf;
   wmma::fragment<wmma::accumulator, 16, 16, 16, float> cf;
-  wmma::load_matrix_sync(af, a + tile * 512, 32);
-  wmma::load_matrix_sync(bf, b + tile * 512, 32);
-  wmma::load_matrix_sync(cf, c + tile * 512, 32, wmma::mem_row_major);
+  wmma::load_matrix_sync(af, a + (tile * 512), 32);
+  wmma::load_matrix_sync(bf, b + (tile * 512), 32);
+  wmma::load_matrix_sync(cf, c + (tile * 512), 32, wmma::mem_row_major);
   wmma::mma_sync(cf, af, bf, cf);
-  for (int i = 0; i < cf.num_elements; ++i)
-    cf.x[i] *= 2.0f;
-  wmma::store_matrix_sync(c + tile * 512, cf, 32, wmma::mem_row_major);
+  for (float &i : cf.x)
+    i *= 2.0F;
+  wmma::store_matrix_sync(c + (tile * 512), cf, 32, wmma::mem_row_major);
 #endif
 }
+
+} // namespace
 
 TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor][compact]") {
   cudaDeviceProp properties{};
@@ -41,24 +43,24 @@ TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor][compact]"
   constexpr int tiles = 4;
   constexpr int stride = 32;
   constexpr int tileSize = 16 * stride;
-  std::vector<half> a(tiles * tileSize, __float2half(0.0f));
-  std::vector<half> b(tiles * tileSize, __float2half(0.0f));
-  std::vector<float> c(tiles * tileSize, -1234.0f);
+  std::vector<half> a(static_cast<size_t>(tiles) * tileSize, __float2half(0.0F));
+  std::vector<half> b(static_cast<size_t>(tiles) * tileSize, __float2half(0.0F));
+  std::vector<float> c(static_cast<size_t>(tiles) * tileSize, -1234.0F);
   for (int tile = 0; tile < tiles; ++tile)
     for (int row = 0; row < 16; ++row)
       for (int col = 0; col < 16; ++col) {
-        a[tile * tileSize + row * stride + col] = __float2half(static_cast<float>((row + 3 * col + tile) % 7 - 3));
-        b[tile * tileSize + col * stride + row] = __float2half(static_cast<float>((2 * row + col) % 5 - 2));
-        c[tile * tileSize + row * stride + col] = static_cast<float>(row - col);
+        a[(tile * tileSize) + (row * stride) + col] = __float2half(static_cast<float>(((row + (3 * col) + tile) % 7) - 3));
+        b[(tile * tileSize) + (col * stride) + row] = __float2half(static_cast<float>((((2 * row) + col) % 5) - 2));
+        c[(tile * tileSize) + (row * stride) + col] = static_cast<float>(row - col);
       }
   auto expected = c;
   for (int tile = 0; tile < tiles; ++tile)
     for (int row = 0; row < 16; ++row)
       for (int col = 0; col < 16; ++col) {
-        auto &result = expected[tile * tileSize + row * stride + col];
+        auto &result = expected[(tile * tileSize) + (row * stride) + col];
         for (int k = 0; k < 16; ++k)
-          result += __half2float(a[tile * tileSize + row * stride + k]) * __half2float(b[tile * tileSize + col * stride + k]);
-        result *= 2.0f;
+          result += __half2float(a[(tile * tileSize) + (row * stride) + k]) * __half2float(b[(tile * tileSize) + (col * stride) + k]);
+        result *= 2.0F;
       }
 
   unified::test_runtime::Cleanup cleanup;
@@ -80,5 +82,3 @@ TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor][compact]"
   checkTensor(cudaMemcpy(c.data(), dc, c.size() * sizeof(float), cudaMemcpyDeviceToHost));
   REQUIRE(c == expected);
 }
-
-} // namespace cuda_tensor

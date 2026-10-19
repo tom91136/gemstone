@@ -65,14 +65,14 @@ class SharedServerSuite extends munit.FunSuite {
     test(s"$count simultaneous clients retain independent server-issued allocation state") {
       scala.util.Using.Manager { use =>
         val server  = use(Server.start(Server.Settings(parallelism = 2)))
-        val clients = Vector.fill(count.raw)(
+        val clients = Vector.fill(count)(
           use(connections.Client(
             server.endpoint,
             Control.register(server.endpoint)
           ))
         )
-        val executor = use(threads.Pool(count.raw)).executor
-        val written  = CyclicBarrier(count.raw)
+        val executor = use(threads.Pool(count)).executor
+        val written  = CyclicBarrier(count)
         type RoundResult = (expected: Int, write: Either[ExecutionFailure, Unit], read: Either[ExecutionFailure, Int])
         val results = Vector.newBuilder[CompletableFuture[Either[ExecutionFailure, Vector[RoundResult]]]]
         clients.zipWithIndex.foreach { case (client, index) =>

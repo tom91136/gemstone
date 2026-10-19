@@ -7,9 +7,12 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class CollectiveExecutionSuite extends munit.FunSuite {
-  private def execute(body: String): Vec[(Int, Int)] = {
-    val source = s""".version 8.0
-      |.target sm_80
+  private val inactiveLane         = (999, 999)
+  private val highByteLane         = (0xff00, 1)
+  private val legacyVoteThresholds = Vec(0, 8, 32, 40, 64)
+
+  private def execute(body: String, header: String = ".version 8.0\n.target sm_80"): Vec[(Int, Int)] = {
+    val source = s"""$header
       |.address_size 64
       |.visible .entry collective(.param .u64 output) {
       | .reg .b32 %lane, %value, %result, %valid;
@@ -97,7 +100,71 @@ class CollectiveExecutionSuite extends munit.FunSuite {
         |@%active vote.sync.$operation.pred %p, %selected, 0x0000ffff;
         |@%active selp.u32 %result, 1, 0, %p;
         |@%active mov.u32 %valid, 1;""".stripMargin)
-      assertEquals(result, (0 until 64).map(lane => if (lane < 16) (expected, 1) else (999, 999)))
+      val activeLane = (expected, 1)
+      assertEquals(result, (0 until 64).map(lane => if (lane < 16) activeLane else inactiveLane))
+    }
+
+  // PTX ISA 9.7.9.5 and 9.7.14.9: without .sync, shfl and vote act on the whole warp, as their .sync forms with a full
+  // member mask do; they remain valid for targets below sm_70.
+  private val legacy = ".version 6.0\n.target sm_60"
+
+  for ((operation, clamp) <- Vec("up" -> 0, "down" -> 31, "bfly" -> 31, "idx" -> 31))
+    test(s"legacy $operation shuffle matches its synchronising form over the full warp") {
+      assertEquals(
+        execute(s"shfl.$operation.b32 %result|%p, %value, 3, $clamp; selp.u32 %valid, 1, 0, %p;", legacy),
+        execute(s"shfl.sync.$operation.b32 %result|%p, %value, 3, $clamp, -1; selp.u32 %valid, 1, 0, %p;")
+      )
+    }
+
+  for {
+    operation <- Vec("all", "any", "uni")
+    threshold <- legacyVoteThresholds
+  }
+    test(s"legacy $operation vote with $threshold true lanes matches its synchronising form over the full warp") {
+      def vote(spelling: String, header: String) = execute(
+        s"""setp.lt.u32 %selected, %lane, $threshold;
+           |$spelling %p, %selected${if (spelling.contains("sync")) ", -1" else ""};
+           |selp.u32 %result, 1, 0, %p;
+           |vote.ballot.b32 %valid, %selected;""".stripMargin,
+        header
+      )
+      assertEquals(vote(s"vote.$operation.pred", legacy), vote(s"vote.sync.$operation.pred", legacy))
+    }
+
+  // PTX ISA 9.7.14.1: bar{.cta}.sync, .arrive and .red are barrier{.cta}.sync, .arrive and .red with .aligned.
+  for (
+    spelling <- Vec(
+      "bar.red.popc.u32",
+      "bar.cta.red.popc.u32",
+      "barrier.red.popc.u32",
+      "barrier.red.popc.aligned.u32",
+      "barrier.cta.red.popc.aligned.u32"
+    )
+  )
+    test(s"$spelling counts the participants whose predicate holds") {
+      val result = execute(s"""setp.lt.u32 %p, %lane, 40;
+        |$spelling %result, 0, %p;
+        |$spelling %valid, 1, 64, !%p;""".stripMargin)
+      assertEquals(result, Vec.fill(64)((40, 24)))
+    }
+
+  for (
+    (operation, spelling) <- Vec("and", "or").flatMap(operation =>
+      Vec(
+        s"barrier.red.$operation.pred",
+        s"barrier.red.$operation.aligned.pred",
+        s"barrier.cta.red.$operation.pred",
+        s"bar.cta.red.$operation.pred"
+      ).map(operation -> _)
+    )
+  )
+    test(s"$spelling reduces like bar.red.$operation.pred") {
+      def reduce(spelling: String) = execute(s"""setp.lt.u32 %p, %lane, 40;
+        |$spelling %active, 0, %p;
+        |selp.u32 %result, 1, 0, %active;
+        |$spelling %active, 1, 64, !%p;
+        |selp.u32 %valid, 1, 0, %active;""".stripMargin)
+      assertEquals(reduce(spelling), reduce(s"bar.red.$operation.pred"))
     }
 
   test("ballot uses lane bits within the participating warp and leaves inactive lanes untouched") {
@@ -105,7 +172,7 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |setp.ge.u32 %selected, %lane, 8;
       |@%active vote.sync.ballot.b32 %result, %selected, 0x0000ffff;
       |@%active mov.u32 %valid, 1;""".stripMargin)
-    assertEquals(result, (0 until 64).map(lane => if (lane < 16) (0xff00, 1) else (999, 999)))
+    assertEquals(result, (0 until 64).map(lane => if (lane < 16) highByteLane else inactiveLane))
   }
 
   test("predicated branches reconverge at a block barrier") {
@@ -384,6 +451,51 @@ class CollectiveExecutionSuite extends munit.FunSuite {
     assertEquals(
       Vec.tabulate(2)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(7, 7)
+    )
+  }
+
+  // 9.7.14.11: .any gives each lane the lanes holding its value, .all every participating lane where they all match
+  test("match.any and match.all compare a value across the warp") {
+    val any =
+      execute("and.b32 %valid, %lane, 3; match.any.sync.b32 %result, %valid, -1;", ".version 8.0\n.target sm_70")
+    assertEquals(any.map(_._1), Vec.tabulate(64)(lane => 0x11111111 << (lane % 4)))
+    val all = execute(
+      """shr.u32 %valid, %lane, 5; match.all.sync.b32 %result|%p, %valid, -1; selp.u32 %valid, 1, 0, %p;""".stripMargin,
+      ".version 8.0\n.target sm_70"
+    )
+    assertEquals(all, Vec.fill(64)((-1, 1)))
+    val some = execute(
+      "setp.lt.u32 %active, %lane, 8; @%active match.all.sync.b64 %result|%p, %out, 0xff;" +
+        " @%active selp.u32 %valid, 1, 0, %p;",
+      ".version 8.0\n.target sm_70"
+    )
+    assertEquals(some, Vec.tabulate(64)(lane => if (lane < 8) (0xff, 1) else inactiveLane))
+  }
+
+  // 9.7.14.13: binary32 minimum and maximum over the warp, of magnitudes under .abs, NaN only under .NaN
+  test("redux.sync reduces binary32 values to their minimum and maximum") {
+    val values  = "sub.u32 %valid, %lane, 10; cvt.rn.f32.s32 %valid, %valid;"
+    val minimum = execute(s"$values redux.sync.min.f32 %result, %valid, -1;", ".version 8.6\n.target sm_100a")
+    assertEquals(
+      minimum.map(_._1),
+      Vec.tabulate(64)(lane => java.lang.Float.floatToRawIntBits(if (lane < 32) -10f else 22f))
+    )
+    val magnitude = execute(s"$values redux.sync.max.abs.f32 %result, %valid, -1;", ".version 8.6\n.target sm_100a")
+    assertEquals(
+      magnitude.map(_._1),
+      Vec.tabulate(64)(lane => java.lang.Float.floatToRawIntBits(if (lane < 32) 21f else 53f))
+    )
+    val nan = execute(
+      s"$values setp.eq.u32 %p, %lane, 5; @%p mov.b32 %valid, 0x7fc00000; redux.sync.max.NaN.f32 %result, %valid, -1;" +
+        " redux.sync.max.f32 %valid, %valid, -1;",
+      ".version 8.6\n.target sm_100a"
+    )
+    assertEquals(
+      nan,
+      Vec.tabulate(64)(lane =>
+        if (lane < 32) (0x7fffffff, java.lang.Float.floatToRawIntBits(21f))
+        else (java.lang.Float.floatToRawIntBits(53f), java.lang.Float.floatToRawIntBits(53f))
+      )
     )
   }
 }

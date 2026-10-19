@@ -16,10 +16,10 @@ class SubmissionResources {
   execution::ClientManager connection;
   execution::Client *client = connection.client();
   struct Allocation {
-    uint8_t *data;
-    size_t size;
+    uint8_t *data{};
+    size_t size{};
     execution::AllocationId id;
-    bool hostBacked;
+    bool hostBacked{};
   };
   std::vector<Allocation> allocations;
   std::optional<execution::ProgramId> program;
@@ -30,7 +30,7 @@ public:
   ~SubmissionResources();
   SubmissionResources(const SubmissionResources &) = delete;
   SubmissionResources &operator=(const SubmissionResources &) = delete;
-  execution::Client *get() const { return okay ? client : nullptr; }
+  [[nodiscard]] execution::Client *get() const { return okay ? client : nullptr; }
   void fail() { okay = false; }
   execution::GraphicsRange memory(uint8_t *data, size_t size, bool hostBacked);
   std::optional<execution::ProgramId> load(const std::vector<uint8_t> &image);

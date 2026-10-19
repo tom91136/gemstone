@@ -8,6 +8,8 @@ import net.kurobako.gemstone.constraint.*
 import scala.collection.immutable.IntMap
 
 /** Field-level machine decoding shared by the VM compiler and the disassembler. */
+// the instruction cursor is passed unpacked so decoding allocates no cursor per instruction
+@SuppressWarnings(Array("baumkuchen:data-clump"))
 private object InstructionDecoder {
 
   /** One machine instruction: its layout, catalogue encoding, fixed bits and literal. */
@@ -68,6 +70,8 @@ private object InstructionDecoder {
   private val Variants =
     Vec("_INST_LITERAL64", "_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA_SDST_ENC", "_VOP_SDWA")
 
+  private val DualSides = Vec(EncodingField.VDSTX, EncodingField.VDSTY)
+
   private def entry(layout: InstructionLayout): Entry =
     Entry(
       layout,
@@ -84,15 +88,16 @@ private object InstructionDecoder {
   }.toMap
 
   private lazy val duals: Map[(ISA, EncodingFormat, EncodingField, Int), Vec[(Opcode, Metadata.Encoding)]] =
-    Opcode.definitions.flatMap { definition =>
+    InstructionDefs.definitions.flatMap { definition =>
       definition.meta.encodings.flatMap { encoding =>
         val family =
           if (encoding.format == EncodingFormat.VOPD3XY) Some(EncodingFormat.VOPD3XY)
           else Option.when(encoding.format.base == EncodingFormat.VOPDXY)(EncodingFormat.VOPDXY)
+        val source = (definition, encoding)
         family.toVec.flatMap(family =>
-          Vec(EncodingField.VDSTX, EncodingField.VDSTY).collect {
+          DualSides.collect {
             case side if encoding.operands.exists(_.field.contains(side)) =>
-              (encoding.isa, family, side, encoding.opcode) -> (definition, encoding)
+              (encoding.isa, family, side, encoding.opcode) -> source
           }
         )
       }
@@ -166,7 +171,7 @@ private object InstructionDecoder {
               Vec(EncodingField.SRCX0, EncodingField.SRCY0).exists(layout.get(word, _) == Source.LITERAL_CONST)
             size <- (width + (if (literal) 4 else 0)).refine[Int > 0]
             _    <- Either.cond[NonEmpty[String], Unit](
-              bytes.length - offset >= size.raw,
+              bytes.length - offset >= size,
               (),
               s"truncated dual-issue literal at byte $offset"
             )
@@ -228,7 +233,7 @@ private object InstructionDecoder {
     val source   =
       if (embedded) 0
       else operands.flatMap(_.field).filter(SourceFields).flatMap(field =>
-        SourceOperand.literalSize(layout.get(word, field).toInt, layout.isa).map(_.raw)
+        SourceOperand.literalSize(layout.get(word, field).toInt, layout.isa).rawElements
       ).maxOption.getOrElse(0)
     // Instruction literals such as the FMAAK constant follow the word whatever the source selectors say.
     val instruction =
@@ -240,7 +245,7 @@ private object InstructionDecoder {
     val trailing = source.max(instruction)
     for {
       size <- (layout.bits / 8 + trailing).refine[Int > 0].toOption
-      if encoding.supports(target) && bytes.length - offset >= size.raw && layout.accepts(word, source)
+      if encoding.supports(target) && bytes.length - offset >= size && layout.accepts(word, source)
     } yield {
       val embeddedLiteral = layout.byName.get(EncodingField.LITERAL).map(_.get(word))
       val literal         = embeddedLiteral.orElse(Option.when(trailing > 0)(

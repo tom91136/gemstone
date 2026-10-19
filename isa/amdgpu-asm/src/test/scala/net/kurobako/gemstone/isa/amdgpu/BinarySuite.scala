@@ -8,6 +8,8 @@ import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.testing.either.*
 
 class BinarySuite extends munit.FunSuite {
+  private val HalfLiteral = "0.5".r
+
   test("validation shares symbolic operand checking while retaining incomplete processor availability") {
     val target = Target("gfx900")
     Vec("s_waitcnt vmcnt(0)", "s_branch destination", "s_nop 0").foreach { text =>
@@ -154,15 +156,16 @@ class BinarySuite extends munit.FunSuite {
   }
 
   test("scalar codecs preserve asymmetric widths and shared literal words across ISAs") {
+    val sources = Seq(
+      "s_mov_b32 s0, 1",
+      "s_mov_b64 s[0:1], s[2:3]",
+      "s_ashr_i64 s[0:1], s[2:3], s4",
+      "s_getpc_b64 s[0:1]",
+      "s_cmp_eq_u32 s0, -1",
+      "s_add_u32 s2, lit(1), lit(1)"
+    )
     Seq(Target("gfx600"), Target("gfx900"), Target("gfx1030"), Target("gfx1100")).foreach { target =>
-      Seq(
-        "s_mov_b32 s0, 1",
-        "s_mov_b64 s[0:1], s[2:3]",
-        "s_ashr_i64 s[0:1], s[2:3], s4",
-        "s_getpc_b64 s[0:1]",
-        "s_cmp_eq_u32 s0, -1",
-        "s_add_u32 s2, lit(1), lit(1)"
-      ).foreach { source =>
+      sources.foreach { source =>
         val instruction = parse(source)
         val bytes       = encoded(instruction, target)
         val decoded     = disassembled(bytes, target)
@@ -200,8 +203,9 @@ class BinarySuite extends munit.FunSuite {
   }
 
   test("SOPP disassembly retains distinct opcodes and operands before execution lowering") {
+    val sources = Seq("s_nop 7", "s_waitcnt 0", "s_branch -2", "s_endpgm")
     Seq(Target("gfx900"), Target("gfx1030"), Target("gfx1100")).foreach { target =>
-      Seq("s_nop 7", "s_waitcnt 0", "s_branch -2", "s_endpgm").foreach { source =>
+      sources.foreach { source =>
         val instruction = parse(source)
         val bytes       = encoded(instruction, target)
         val decoded     = disassembled(bytes, target)
@@ -228,6 +232,24 @@ class BinarySuite extends munit.FunSuite {
       assertEquals(Binary.encode(instruction, target), Right(bytes))
       assertEquals(Binary.decode(bytes, target).map(Printer.render), Right(text))
     }
+  }
+
+  test("s_delay_alu takes the instid0, instskip and instid1 syntax hipcc emits for GFX11 and GFX12") {
+    // llvm-mc -triple=amdgcn -mcpu=gfx1100 -show-encoding
+    Vec(
+      ("s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(SALU_CYCLE_1)", "91 04 87 bf"),
+      ("s_delay_alu instid0(TRANS32_DEP_3)", "07 00 87 bf"),
+      ("s_delay_alu instid0(VALU_DEP_2) | instskip(SKIP_3) | instid1(VALU_DEP_1)", "c2 00 87 bf"),
+      ("s_delay_alu instskip(NEXT)", "10 00 87 bf"),
+      ("s_delay_alu instid0(VALU_DEP_1)|instskip(NEXT)", "11 00 87 bf"),
+      ("s_delay_alu 0", "00 00 87 bf")
+    ).foreach { (source, expected) =>
+      Vec(Target("gfx1100"), Target("gfx1151"), Target("gfx1201")).foreach { target =>
+        assertEquals(Binary.encode(parse(source), target), Right(hex(expected)), s"$source on $target")
+      }
+    }
+    assert(Binary.encode(parse("s_delay_alu instid0(VALU_DEP_9)"), Target("gfx1100")).isLeft)
+    assert(Binary.encode(parse("s_delay_alu instid0(VALU_DEP_1) | instid0(VALU_DEP_2)"), Target("gfx1100")).isLeft)
   }
 
   test("lane, image, export, interpolation, literal, matrix and dual encodings match LLVM bytes") {
@@ -302,6 +324,27 @@ class BinarySuite extends munit.FunSuite {
     }
   }
 
+  test("GFX12 image atomics take LLVM's renamed mnemonics with the base opcode's operand shapes") {
+    // llvm-mc 22 -triple=amdgcn -mcpu=gfx1201 -show-encoding
+    val target = Target("gfx1201")
+    Vec(
+      "image_atomic_add_uint v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D" -> "00 00 43 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_sub_uint v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D" -> "00 40 43 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_min_int v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D"  -> "00 80 43 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_min_uint v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D" -> "00 c0 43 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_max_int v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D"  -> "00 00 44 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_max_uint v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D" -> "00 40 44 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_inc_uint v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D" -> "00 40 45 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_dec_uint v0, v4, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D" -> "00 80 45 d0 00 00 00 00 04 00 00 00",
+      "image_atomic_add_uint v0, [v4, v5], s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_2D th:TH_ATOMIC_RETURN" ->
+        "01 00 43 d0 00 00 10 00 04 05 00 00"
+    ).foreach { (source, bytes) =>
+      val expected = hex(bytes)
+      assertEquals(Binary.encodeStatement(parseStatement(source), target), Right(expected), source)
+      assert(Binary.decodeStatementAt(expected, 0, target).isRight, source)
+    }
+  }
+
   test("VOPD3 accepts inline constants but rejects appended literals") {
     val target = Target("gfx1250")
     val source = "v_dual_add_f64 v[254:255], 0.5, v[8:9] :: v_dual_add_f32 v7, 0.5, v2"
@@ -313,10 +356,47 @@ class BinarySuite extends munit.FunSuite {
     assertEquals(Binary.encodeStatement(decoded.statement, target), Right(bytes))
     Vec("lit(1)", "lit64(0x123456789abcdef0)", "0x12345678").foreach { literal =>
       val invalid =
-        parseStatement(source.replaceFirst("0.5", literal))
+        parseStatement(HalfLiteral.replaceFirstIn(source, literal))
       assert(Binary.encodeStatement(invalid, target).isLeft, literal)
     }
     assert(Binary.decodeStatementAt(bytes.updated(0, 0xff.toByte) ++ Vec.fill(4)(0.toByte), 0, target).isLeft)
+  }
+
+  test("VOPD3 selects take their lane mask from an explicit SGPR") {
+    // llvm-mc 22 -triple=amdgcn -mcpu=gfx1250 -show-encoding
+    val target = Target("gfx1250")
+    Vec(
+      "v_dual_cndmask_b32 v0, v1, v2, s0 :: v_dual_fma_f32 v7, v14, v15, v16" ->
+        "01 31 25 cf 0e 01 02 00 00 0f 10 07",
+      "v_dual_cndmask_b32 v0, v1, v2, vcc_lo :: v_dual_fma_f32 v7, v14, v15, v16" ->
+        "01 31 25 cf 0e 01 02 6a 00 0f 10 07",
+      "v_dual_fma_f32 v7, v14, v15, v16 :: v_dual_cndmask_b32 v0, v1, v2, s1" ->
+        "0e 91 4c cf 01 01 0f 10 07 02 01 00"
+    ).foreach { (source, bytes) =>
+      val expected = hex(bytes)
+      assertEquals(Binary.encodeStatement(parseStatement(source), target), Right(expected), source)
+      val decoded = Binary.decodeStatementAt(expected, 0, target).value
+      assertEquals(Binary.encodeStatement(decoded.statement, target), Right(expected), source)
+    }
+  }
+
+  test("VOPD3 negates the float sources NEGX and NEGY name and gives bitop2 its truth table") {
+    // llvm-mc 22 -triple=amdgcn -mcpu=gfx1250 -show-encoding
+    val target = Target("gfx1250")
+    Vec(
+      "v_dual_add_f32 v0, -v1, v2 :: v_dual_fma_f32 v7, v14, -v15, -v16" -> "01 31 11 cf 0e 63 02 00 00 0f 10 07",
+      "v_dual_fmac_f32 v0, -v1, v2 :: v_dual_mov_b32 v7, v14"            -> "01 81 00 cf 0e 03 02 00 00 00 00 07",
+      "v_dual_lshlrev_b32 v0, v1, v2 :: v_dual_subrev_f32 v7, -v14, v15" -> "01 61 44 cf 0e 11 02 00 00 0f 00 07",
+      "v_dual_fma_f64 v[10:11], -v[2:3], v[4:5], v[6:7] :: v_dual_add_f32 v12, v9, -v7" ->
+        "02 41 80 cf 09 23 04 06 0a 07 00 0c",
+      "v_dual_fma_f32 v7, v14, v15, v16 :: v_dual_bitop2_b32 v0, v1, v2 bitop3:0x3c" ->
+        "0e 21 4d cf 01 01 0f 10 07 02 3c 00"
+    ).foreach { (source, bytes) =>
+      val expected = hex(bytes)
+      assertEquals(Binary.encodeStatement(parseStatement(source), target), Right(expected), source)
+      val decoded = Binary.decodeStatementAt(expected, 0, target).value
+      assertEquals(Printer.render(Program(Vec(decoded.statement))).replace(" e96", ""), source, source)
+    }
   }
 
   test("image register counts, lane controls and dual-issue literal constraints are checked") {

@@ -90,6 +90,8 @@ object Launch {
     val client: ClientId        = Control.register(endpoint)
     private val released        = AtomicBoolean(false)
     private val releaseFinished = CountDownLatch(1)
+    // a second caller waits on the first, whose release is bounded by the control connection's timeouts
+    @scala.annotation.nowarn("msg=baumkuchen:unbounded-wait")
     private def release(): Unit =
       if (released.compareAndSet(false, true)) {
         try Control.release(endpoint, client)
@@ -162,12 +164,11 @@ object Launch {
       env.RpcEndpoint -> endpoint.toString,
       env.RpcClient   -> s"$client"
     )
-    val dynamic = Map.newBuilder[String, String]
-    if (preload.nonEmpty) dynamic +=
-      "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
-    if (directories.nonEmpty)
-      dynamic +=
-        "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
+    val dynamic                                                                      = Map.newBuilder[String, String]
+    def searchPath(name: String, own: Vector[Path], inherited: Vector[String]): Unit =
+      if (own.nonEmpty) dynamic += name -> (own.map(path => s"$path") ++ inherited).mkString(":")
+    searchPath("LD_PRELOAD", preload, inheritedPreload)
+    searchPath("LD_LIBRARY_PATH", directories, inheritedLibraryPath)
     if (apis(API.OpenCL)) {
       dynamic += "OCL_ICD_FILENAMES" -> s"${root.resolve(API.OpenCL.lib)}"
       dynamic += "OCL_ICD_VENDORS"   -> s"${root.resolve(API.OpenCL.lib)}"

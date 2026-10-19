@@ -7,7 +7,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.Wire.*
 
 object KernelTask {
-  enum Argument derives Codec {
+  enum Argument derives Codec, CanEqual {
     case Scalar(bytes: NonEmpty[Vec[Byte]])
     case Memory(region: AllocationId, offset: Long >= 0, range: Option[Long > 0] = None)
     case Local(size: Long > 0)
@@ -18,7 +18,7 @@ object KernelTask {
 
   case class ArgumentBuffer(region: AllocationId, offset: Long >= 0) derives Codec
 
-  enum RelocationSource derives Codec {
+  enum RelocationSource derives Codec, CanEqual {
     case Memory(region: AllocationId)
     case Argument(index: Int >= 0)
   }
@@ -42,7 +42,9 @@ object KernelTask {
       workDim: Int in 1 ~ 3 = 3,
       globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates.origin,
       discoverArgumentRelocations: Boolean = false,
-      argumentBuffer: Option[ArgumentBuffer] = None
+      argumentBuffer: Option[ArgumentBuffer] = None,
+      cluster: Option[LaunchGeometry.Dimensions] = None,
+      cooperative: Boolean = false
   ): Either[NonEmpty[String], KernelTask] =
     for {
       geometry <- LaunchGeometry.forLaunch(groupSize, groupCount, globalSize, workDim, globalOffset)
@@ -60,7 +62,9 @@ object KernelTask {
       arguments,
       pointerRelocations,
       discoverArgumentRelocations,
-      argumentBuffer
+      argumentBuffer,
+      cluster,
+      cooperative
     )
   private def validateRelocations(
       pointerRelocations: Vec[PointerRelocation],
@@ -85,7 +89,11 @@ case class KernelTask private (
     arguments: Vec[KernelTask.Argument],
     pointerRelocations: Vec[KernelTask.PointerRelocation],
     discoverArgumentRelocations: Boolean,
-    argumentBuffer: Option[KernelTask.ArgumentBuffer]
+    argumentBuffer: Option[KernelTask.ArgumentBuffer],
+    // The thread-block cluster shape a launch names; workgroups of one cluster run together.
+    cluster: Option[LaunchGeometry.Dimensions],
+    // Every workgroup of a cooperative launch is resident at once, so workgroups can wait on each other.
+    cooperative: Boolean
 ) {
   def withArguments(arguments: Vec[KernelTask.Argument]): Either[NonEmpty[String], KernelTask] =
     Either.cond(arguments.size == this.arguments.size, copy(arguments = arguments), "argument count cannot change")

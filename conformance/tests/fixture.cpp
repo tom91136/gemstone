@@ -22,8 +22,8 @@ TEST_CASE("a comma, bracket[quoted] star* backslash\\ semi; quote\" unicode-π",
     REQUIRE(value);
     REQUIRE(std::string(value) == expected);
   }
-  REQUIRE(
-      (std::getenv("CONFORMANCE_TARGET_ARCHITECTURE") == nullptr || std::string(std::getenv("CONFORMANCE_TARGET_ARCHITECTURE")).empty()));
+  const auto *architecture = std::getenv("CONFORMANCE_TARGET_ARCHITECTURE");
+  REQUIRE((architecture == nullptr || std::string_view(architecture).empty()));
 }
 
 TEST_CASE("z skipped", "[fixture][skip]") { SKIP("native skip fixture"); }
@@ -60,14 +60,14 @@ int main(int argc, char **argv) {
     const auto identity = std::string(argv[1]).substr(std::string_view("--deqp-case=").size());
     const auto log = std::string(argv[2]).substr(std::string_view("--deqp-log-filename=").size());
     std::ofstream(log) << "#beginTestCaseResult " << identity << "\n<TestCaseResult CasePath=\"" << identity
-                       << "\" Version=\"0.3.4\"><Result StatusCode=\"" << (identity.ends_with(".fail") ? "Fail" : "Pass")
+                       << R"(" Version="0.3.4"><Result StatusCode=")" << (identity.ends_with(".fail") ? "Fail" : "Pass")
                        << "\">fixture</Result></TestCaseResult>\n#endTestCaseResult\n";
     std::cout << "fixture dEQP output\n";
     return 0;
   }
   if (argc > 1 && std::string_view(argv[1]) == "--large-inventory") {
     const std::string group = "GROUP: " + std::string(1024 - 8, 'x') + "\n";
-    for (size_t i = 0; i < 129 * 1024; ++i)
+    for (size_t i = 0; i < size_t{129} * 1024; ++i)
       std::cout << group;
     std::cout << "TEST: dEQP-VK.last.case\n";
     return 0;
@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
         pause();
     }
     if (child < 0) return 2;
-    std::cout << child << std::endl;
+    std::cout << child << '\n' << std::flush;
     for (;;)
       pause();
   }

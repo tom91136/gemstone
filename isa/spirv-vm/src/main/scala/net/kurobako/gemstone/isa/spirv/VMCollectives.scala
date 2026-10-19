@@ -37,11 +37,29 @@ private object VMCollectives {
         _: Instruction.GroupNonUniformBitwiseXor |
         _: Instruction.GroupNonUniformLogicalAnd |
         _: Instruction.GroupNonUniformLogicalOr |
-        _: Instruction.GroupNonUniformLogicalXor => true
+        _: Instruction.GroupNonUniformLogicalXor |
+        _: Instruction.GroupNonUniformQuadBroadcast |
+        _: Instruction.GroupNonUniformQuadSwap |
+        _: Instruction.SubgroupBallotKHR |
+        _: Instruction.SubgroupFirstInvocationKHR |
+        _: Instruction.SubgroupAllKHR |
+        _: Instruction.SubgroupAnyKHR |
+        _: Instruction.SubgroupAllEqualKHR |
+        _: Instruction.SubgroupReadInvocationKHR |
+        _: Instruction.GroupNonUniformPartitionEXT |
+        _: Instruction.GroupIAddNonUniformAMD |
+        _: Instruction.GroupFAddNonUniformAMD |
+        _: Instruction.GroupFMinNonUniformAMD |
+        _: Instruction.GroupUMinNonUniformAMD |
+        _: Instruction.GroupSMinNonUniformAMD |
+        _: Instruction.GroupFMaxNonUniformAMD |
+        _: Instruction.GroupUMaxNonUniformAMD |
+        _: Instruction.GroupSMaxNonUniformAMD |
+        _: Instruction.CompositeConstructCoopMatQCOM => true
     case _ => false
   }
 
-  enum Kind {
+  enum Kind derives CanEqual {
     case Elect
     case AllEqual
     case BroadcastFirst
@@ -68,12 +86,15 @@ private object VMCollectives {
     case ShuffleDown
     case Broadcast
     case Ballot
+    case Partition
+    case MatrixMultiply
+    case MatrixRows
     case Barrier
     case PipeReservation
   }
 
   enum Payload {
-    case Value(resultType: Int, destination: Int, value: VMValue)
+    case Value(resultType: Int, destination: Int, operand: VMValue)
     case Shuffle(resultType: Int, destination: Int, data: VMValue, invocationId: VMValue)
     case ShuffleUp(
         resultType: Int,
@@ -90,7 +111,7 @@ private object VMCollectives {
         delta: Long
     )
     case Barrier(memoryScope: Int, semantics: Long)
-    case PipeReservation(resultType: Int, destination: Int, pipe: VMMemory.Pointer, packets: Long, writing: Boolean)
+    case PipeReservation(resultType: Int, destination: Int, pipe: VMMemory.Pointer, packets: Long, end: PipeEnd)
   }
 
   case class Request(

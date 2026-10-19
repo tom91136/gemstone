@@ -1,4 +1,4 @@
-#include <array>
+#include <cstdint>
 #include <limits>
 
 #include <catch2/catch_test_macros.hpp>
@@ -24,7 +24,8 @@ TEST_CASE("Memory registrations retain independent overlapping leases", "[memory
 }
 
 TEST_CASE("Memory range discovery preserves holes and excludes overflow", "[memory]") {
-  auto missing = gemstone::missingMemoryRanges({0x1000, 64}, {{0x1008, 8}, {0x1020, 16}, {0x1028, 16}});
+  auto missing = gemstone::missingMemoryRanges({.base = 0x1000, .size = 64},
+                                               {{.base = 0x1008, .size = 8}, {.base = 0x1020, .size = 16}, {.base = 0x1028, .size = 16}});
   REQUIRE(missing.size() == 3);
   CHECK(missing[0].base == 0x1000);
   CHECK(missing[0].size == 8);
@@ -53,7 +54,8 @@ TEST_CASE("Registration release selects the matching extent at a shared base", "
 }
 
 TEST_CASE("Live transfers exclude released prefixes and preserve registration holes", "[memory]") {
-  const auto ranges = gemstone::coveredMemoryRanges({0x1000, 64}, {{0x1008, 8}, {0x1020, 16}, {0x1028, 32}});
+  const auto ranges = gemstone::coveredMemoryRanges(
+      {.base = 0x1000, .size = 64}, {{.base = 0x1008, .size = 8}, {.base = 0x1020, .size = 16}, {.base = 0x1028, .size = 32}});
   REQUIRE(ranges.size() == 2);
   CHECK(ranges[0].base == 0x1008);
   CHECK(ranges[0].size == 8);

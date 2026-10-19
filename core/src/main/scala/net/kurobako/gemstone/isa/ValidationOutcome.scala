@@ -5,6 +5,8 @@ import net.kurobako.gemstone.constraint.*
 import scala.annotation.unchecked.uncheckedVariance
 
 object ValidationOutcome {
+  given CanEqual[ValidationOutcome[?], ValidationOutcome[?]] = CanEqual.derived
+
   def combineAll[Issue](outcomes: Vec[ValidationOutcome[Issue]]): ValidationOutcome[Issue] = {
     def issuesOf(select: ValidationOutcome[Issue] => Option[NonEmpty[Vec[Issue]]]): Option[NonEmpty[Vec[Issue]]] = {
       val issues = outcomes.flatMap(select).flatten

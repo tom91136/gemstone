@@ -42,16 +42,25 @@ inline void appendArgument(std::vector<uint8_t> &metadata, uint32_t offset, uint
 }
 
 inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bool singleOutput = false, bool withHidden = false) {
+  uint8_t argumentArray = 0x93;
+  uint32_t kernargSize = 20;
+  if (singleOutput) {
+    argumentArray = withHidden ? 0x9c : 0x92;
+    kernargSize = withHidden ? 88 : 12;
+  }
   std::vector<uint8_t> metadata;
+  // GCC 14 reports a false -Wstringop-overflow when this vector grows from empty
+  metadata.reserve(256);
   metadata.push_back(0x81);
   appendString(metadata, "amdhsa.kernels");
   metadata.push_back(0x91);
   metadata.push_back(0x84);
   appendString(metadata, ".args");
-  metadata.push_back(singleOutput ? (withHidden ? 0x9c : 0x92) : 0x93);
+  metadata.push_back(argumentArray);
   appendArgument(metadata, 0, 8, "global_buffer");
-  if (singleOutput) appendArgument(metadata, 8, 4, "by_value");
-  else {
+  if (singleOutput) {
+    appendArgument(metadata, 8, 4, "by_value");
+  } else {
     appendArgument(metadata, 8, 8, "global_buffer");
     appendArgument(metadata, 16, 4, "by_value");
   }
@@ -68,7 +77,7 @@ inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bo
     appendArgument(metadata, 80, 2, "hidden_grid_dims");
   }
   appendString(metadata, ".kernarg_segment_size");
-  appendUint(metadata, singleOutput ? (withHidden ? 88 : 12) : 20);
+  appendUint(metadata, kernargSize);
   appendString(metadata, ".name");
   appendString(metadata, "add");
   appendString(metadata, ".symbol");
@@ -79,8 +88,8 @@ inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bo
   const size_t paddedName = 8;
   const size_t paddedDescription = (metadata.size() + 3) & ~size_t{3};
   const size_t noteSize = 12 + paddedName + paddedDescription;
-  const size_t sectionOffset = noteOffset + noteSize * metadataNoteCount;
-  std::vector<uint8_t> image(sectionOffset + 2 * sizeof(Elf64_Shdr));
+  const size_t sectionOffset = noteOffset + (noteSize * metadataNoteCount);
+  std::vector<uint8_t> image(sectionOffset + (2 * sizeof(Elf64_Shdr)));
 
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, ELFMAG, SELFMAG);
@@ -99,7 +108,7 @@ inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bo
 
   const uint32_t noteHeader[] = {static_cast<uint32_t>(nameSize), static_cast<uint32_t>(metadata.size()), 32};
   for (uint32_t index = 0; index < metadataNoteCount; ++index) {
-    const size_t current = noteOffset + static_cast<size_t>(index) * noteSize;
+    const size_t current = noteOffset + (static_cast<size_t>(index) * noteSize);
     std::memcpy(image.data() + current, noteHeader, sizeof(noteHeader));
     std::memcpy(image.data() + current + 12, "AMDGPU\0", nameSize);
     std::memcpy(image.data() + current + 12 + paddedName, metadata.data(), metadata.size());
@@ -119,9 +128,9 @@ inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bo
 inline std::vector<uint8_t> variableObjectFixture() {
   constexpr char names[] = "\0arbitrary_data\0arbitrary_bss\0data_alias\0zero_global\0undefined_global\0";
   constexpr size_t count = 6;
-  constexpr size_t stringsOffset = sizeof(Elf64_Ehdr) + count * sizeof(Elf64_Shdr);
+  constexpr size_t stringsOffset = sizeof(Elf64_Ehdr) + (count * sizeof(Elf64_Shdr));
   constexpr size_t symbolsOffset = stringsOffset + sizeof(names);
-  constexpr size_t dataOffset = symbolsOffset + 6 * sizeof(Elf64_Sym);
+  constexpr size_t dataOffset = symbolsOffset + (6 * sizeof(Elf64_Sym));
   std::vector<uint8_t> bytes(dataOffset + 16, 0);
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, ELFMAG, SELFMAG);
@@ -187,11 +196,11 @@ inline std::vector<uint8_t> variableKernelObjectFixture() {
   std::memcpy(&kernelHeader, kernel.data(), sizeof(kernelHeader));
   Elf64_Shdr note{};
   for (uint16_t index = 0; index < kernelHeader.e_shnum; ++index) {
-    std::memcpy(&note, kernel.data() + kernelHeader.e_shoff + index * sizeof(note), sizeof(note));
+    std::memcpy(&note, kernel.data() + kernelHeader.e_shoff + (index * sizeof(note)), sizeof(note));
     if (note.sh_type == SHT_NOTE) break;
   }
   const auto noteOffset = bytes.size();
-  bytes.insert(bytes.end(), kernel.begin() + note.sh_offset, kernel.begin() + note.sh_offset + note.sh_size);
+  bytes.insert(bytes.end(), kernel.data() + note.sh_offset, kernel.data() + note.sh_offset + note.sh_size);
   note.sh_offset = noteOffset;
   Elf64_Ehdr header{};
   std::memcpy(&header, bytes.data(), sizeof(header));
@@ -200,7 +209,7 @@ inline std::vector<uint8_t> variableKernelObjectFixture() {
   sections.push_back(note);
   header.e_shoff = bytes.size();
   header.e_shnum = sections.size();
-  bytes.resize(bytes.size() + sections.size() * sizeof(Elf64_Shdr));
+  bytes.resize(bytes.size() + (sections.size() * sizeof(Elf64_Shdr)));
   std::memcpy(bytes.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   std::memcpy(bytes.data(), &header, sizeof(header));
   return bytes;

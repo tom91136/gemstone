@@ -11,9 +11,11 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.recording.*
+import net.kurobako.gemstone.string.*
 import scala.util.Using
 import scala.util.control.NonFatal
 
@@ -22,7 +24,7 @@ object CLI {
 
   private given Argument[Endpoint] = Argument.from("endpoint")(Endpoint.parse(_).toValidatedNel)
   private given Argument[Bind]     = Argument.from("listen address")(Bind.parse(_).toValidatedNel)
-  private given Argument[Path]     = Argument.from("path")(configuration.path("path", _).toValidatedNel)
+  private given Argument[Path]     = Argument.from("path")(paths.parse("path", _).toValidatedNel)
 
   private val invocation = Opts.arguments[String]("command").mapValidated { command =>
     (for {
@@ -38,7 +40,7 @@ object CLI {
     invocation
   ).tupled.mapValidated { (apis, serverEndpoint, command) =>
     sys.env.get(env.NativeDirectory).filter(_.nonEmpty)
-      .fold[Either[String, Path]](Right(Path.of("native-build")))(configuration.path(env.NativeDirectory, _))
+      .fold[Either[String, Path]](Right(Path.of("native-build")))(paths.parse(env.NativeDirectory, _))
       .map(Launch.Options(apis.getOrElse(API.defaults), serverEndpoint, _, command._1, command._2))
       .toValidatedNel
   }
@@ -49,12 +51,59 @@ object CLI {
     else names.traverse(name => API(name)).flatMap(_.toSet.refine[NonEmpty[Set[API]]])
   }
 
-  private enum Action {
+  enum Action {
     case Serve(bind: Bind, endpointFile: Option[Path], record: Option[Path])
     case Inspect(archive: Path)
     case Replay(archive: Path)
     case Shutdown(endpoint: Endpoint)
     case Run(options: Launch.Options)
+    case Assemble(format: Assembly.Format, input: Path, output: Path)
+    case Disassemble(format: Assembly.Format, input: Path, output: Option[Path], section: Option[String])
+  }
+
+  private val formatOption = (
+    Opts.option[String]("isa", help = "spirv, amdgpu, sass, or ptx (textual)"),
+    Opts.option[String]("target", help = "AMDGPU or SASS processor, e.g. gfx1030 or sm_89").orNone,
+    Opts.option[Int]("wave-size", help = "AMDGPU wave size: 32 (default) or 64")
+      .mapValidated(_.refine[Int in (32, 64)].leftMap(_ => "--wave-size must be 32 or 64").toValidatedNel).orNone
+  ).tupled.mapValidated { (isa, target, waveSize) =>
+    if (waveSize.nonEmpty && isa != "amdgpu") "--wave-size is only used with --isa amdgpu".invalidNel
+    else (isa, target) match {
+      case ("spirv", None)         => Assembly.Format.SPIRV.validNel
+      case ("ptx", None)           => Assembly.Format.PTX.validNel
+      case ("amdgpu", Some(value)) =>
+        value.refine[amdgpu.Target].leftMap(_.toString).map(target =>
+          Assembly.Format.AMDGPU(target, waveSize.getOrElse(32))
+        ).toValidatedNel
+      case ("sass", Some(value))      => sass.Target.parse(value).map(Assembly.Format.SASS(_)).toValidatedNel
+      case ("sass", None)             => "SASS requires --target".invalidNel
+      case ("amdgpu", None)           => "AMDGPU requires --target".invalidNel
+      case ("spirv" | "ptx", Some(_)) => "--target is only used with --isa amdgpu or sass".invalidNel
+      case _                          => s"unknown ISA '$isa'".invalidNel
+    }
+  }
+
+  private val inputArgument = Opts.argument[String]("input").map(Path.of(_))
+  private val outputOption  = Opts.option[String]("output", short = "o", help = "Output file (required for assembly)")
+    .map(Path.of(_))
+
+  private val assembleOptions = (
+    formatOption,
+    inputArgument,
+    outputOption.orNone.mapValidated(_.toValidNel("assembly requires --output"))
+  ).mapN(Action.Assemble(_, _, _))
+
+  private val disassembleOptions = (
+    formatOption,
+    inputArgument,
+    outputOption.orNone,
+    Opts.option[String]("section", help = "Executable ELF section to disassemble").orNone
+  ).tupled.mapValidated { (format, input, output, section) =>
+    (format, section) match {
+      case (Assembly.Format.AMDGPU(_, _) | Assembly.Format.SASS(_), _) | (_, None) =>
+        Action.Disassemble(format, input, output, section).validNel
+      case _ => "--section requires disassemble --isa amdgpu or sass".invalidNel
+    }
   }
 
   private val archive      = Opts.argument[Path]("archive")
@@ -67,7 +116,7 @@ object CLI {
     Opts.option[Path]("record", help = "Record RPC traffic to this journal").orNone
   ).tupled
     .map { case (bind, endpointFile, record) => Action.Serve(bind, endpointFile, record) }
-  private val command = Command("gemstone", "Run or inspect the Gemstone execution server")(
+  val command: Command[Action] = Command("gemstone", "Run or inspect the Gemstone execution server")(
     Opts.subcommands(
       Command("run", "Run a process with a Gemstone compute API")(launchOptions.map(Action.Run(_))),
       Command("serve", "Run the execution server")(serveOptions),
@@ -76,7 +125,9 @@ object CLI {
       Command("shutdown", "Shut down a server")(
         Opts.option[Endpoint]("server", help = "Server endpoint")
           .map(Action.Shutdown(_))
-      )
+      ),
+      Command("assemble", "Assemble text into an ISA image")(assembleOptions),
+      Command("disassemble", "Print an ISA image as canonical assembly")(disassembleOptions)
     )
   )
 
@@ -95,7 +146,9 @@ object CLI {
                 Launch.run(options).fold(error => { Console.err.println(s"gemstone: $error"); 86 }, identity)
             }
             if (status != 0) sys.exit(status)
-          case Action.Serve(bind, endpointFile, record) => serve(bind, endpointFile, record)
+          case Action.Serve(bind, endpointFile, record)           => serve(bind, endpointFile, record)
+          case Action.Assemble(format, input, output)             => assemble(format, input, output)
+          case Action.Disassemble(format, input, output, section) => disassemble(format, input, output, section)
         }
       catch {
         case NonFatal(error) => Console.err.println(s"gemstone: ${throwables.detail(error)}"); sys.exit(86)
@@ -130,4 +183,27 @@ object CLI {
       running.await()
     }
   }
+
+  private def assemble(format: Assembly.Format, input: Path, output: Path): Unit =
+    emit(Some(output))(Assembly.text(read(input)).flatMap(Assembly.assemble(_, format)))
+
+  private def disassemble(format: Assembly.Format, input: Path, output: Option[Path], section: Option[String]): Unit =
+    emit(output)(
+      Assembly.disassemble(read(input), format, section)
+        .flatMap(text => UTF8.encode(text + "\n").leftMap(Assembly.Error.TextEncoding(_)))
+    )
+
+  private def read(input: Path): Vec[Byte] = Vec.unsafeWrapArray(Files.readAllBytes(input))
+
+  private def emit(destination: Option[Path])(result: => Either[Assembly.Error, Vec[Byte]]): Unit =
+    try result match {
+        case Left(error)  => Console.err.println(error); sys.exit(1)
+        case Right(bytes) => destination match {
+            case Some(path) => val _ = Files.write(path, Vec.toArray(bytes))
+            case None       => Console.out.write(Vec.toArray(bytes))
+          }
+      }
+    catch {
+      case NonFatal(error) => Console.err.println(error.getMessage); sys.exit(1)
+    }
 }

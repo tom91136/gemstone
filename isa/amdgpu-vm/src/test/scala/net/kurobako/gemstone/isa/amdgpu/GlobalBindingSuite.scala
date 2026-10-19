@@ -85,6 +85,7 @@ class GlobalBindingSuite extends munit.FunSuite {
     )
     val prepared = compileKernel(kernel)
     val bindings = Vec(mapping(global))
+    val argument = KernelTask.Argument.Memory(output, 0L)
     assertEquals(
       memory.write(global, 8L, LittleEndian.toVec(41L, 4)),
       Right(())
@@ -95,7 +96,7 @@ class GlobalBindingSuite extends munit.FunSuite {
         (KernelTask.Argument.Scalar(LittleEndian.toVec(0x8008L, 8).unsafe), 0L, 43L)
       )
     ) {
-      val dispatch = singleTask(pointer, KernelTask.Argument.Memory(output, 0L))
+      val dispatch = singleTask(pointer, argument)
       assertEquals(
         VMInterpreter.execute(
           prepared,

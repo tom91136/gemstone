@@ -5,34 +5,86 @@ import VMCollectives.Kind as CollectiveKind
 import VMCollectives.Payload as CollectivePayload
 import VMCollectives.Request as CollectiveRequest
 import VMInvocation.*
-import VMLowering.*
 import VMMemory.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
 /** Workgroup and subgroup collectives, barriers and fragment derivatives: lowering builds the rendezvous request each
   * lane suspends with, and resolution combines the requests of the lanes that meet.
   */
+// result type, site and operand ids are the raw operands of each opcode; a holder would allocate per instruction
+@SuppressWarnings(Array("baumkuchen:data-clump"))
 private object CollectiveOps {
   import Operand.*
 
+  /** Which way a subgroup shift reads from. */
+  enum ShuffleDirection derives CanEqual {
+    case Up, Down
+
+    def label: String = this match {
+      case Up   => "up"
+      case Down => "down"
+    }
+  }
+
   def lower(site: Site): PartialFunction[Instruction, Op] =
-    workgroup(site).orElse(nonUniform(site)).orElse(derivatives(site))
+    workgroup(site).orElse(nonUniform(site)).orElse(extensions(site)).orElse(derivatives(site))
+
+  // split and named barriers, vendor subgroup reductions, partitions and matrix products
+  private def extensions(site: Site): PartialFunction[Instruction, Op] = {
+    // every invocation arrives before it waits, so the wait's rendezvous orders whatever the arrival releases
+    case Instruction.ControlBarrierArriveEXT(executionScope, memory, semantics) =>
+      step { (execution, _) =>
+        val values = execution.values
+        scalar(values, id(executionScope)).flatMap(scope =>
+          Either.cond(isWorkgroupOrSubgroup(scope), (), scopeFault("OpControlBarrierArriveEXT", scope)).flatMap(_ =>
+            memoryControls(values, id(memory), id(semantics), "OpControlBarrierArriveEXT")
+          )
+        )
+      }
+    case Instruction.ControlBarrierWaitEXT(execution, memory, semantics) =>
+      barrier(id(execution), id(memory), id(semantics))
+    case Instruction.SubgroupMatrixMultiplyAccumulateINTEL(t, d, inner, a, b, c, operands) =>
+      matrixMultiply(site, id(t), id(d), id(inner), Vec(id(a), id(b), id(c)), operands.fold(0L)(unsigned))
+    case Instruction.NamedBarrierInitialize(t, d, count) =>
+      step((execution, _) => scalar(execution.values, id(count)).map(execution.values.updateScalar(id(d), id(t), _)))
+    case Instruction.MemoryNamedBarrier(barrier, memory, semantics) =>
+      namedBarrier(id(barrier), id(memory), id(semantics))
+    // SPV_AMD_shader_ballot's reductions and scans over the active lanes of a subgroup
+    case Instruction.GroupIAddNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupArithmetic(site, CollectiveKind.IntegerAdd, t, d, scope, operation, value, None)
+    case Instruction.GroupUMinNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupArithmetic(site, CollectiveKind.UnsignedMin, t, d, scope, operation, value, None)
+    case Instruction.GroupSMinNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupArithmetic(site, CollectiveKind.SignedMin, t, d, scope, operation, value, None)
+    case Instruction.GroupUMaxNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupArithmetic(site, CollectiveKind.UnsignedMax, t, d, scope, operation, value, None)
+    case Instruction.GroupSMaxNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupArithmetic(site, CollectiveKind.SignedMax, t, d, scope, operation, value, None)
+    case instruction @ Instruction.GroupFAddNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupFloating(site, instruction, CollectiveKind.FloatingAdd, t, d, scope, operation, value, None)
+    case instruction @ Instruction.GroupFMinNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupFloating(site, instruction, CollectiveKind.FloatingMin, t, d, scope, operation, value, None)
+    case instruction @ Instruction.GroupFMaxNonUniformAMD(t, d, scope, operation, value) =>
+      subgroupFloating(site, instruction, CollectiveKind.FloatingMax, t, d, scope, operation, value, None)
+    case Instruction.GroupNonUniformPartitionEXT(t, d, value) => partition(site, id(t), id(d), id(value))
+  }
 
   private def workgroup(site: Site): PartialFunction[Instruction, Op] = {
     case Instruction.ControlBarrier(execution, memory, semantics) => barrier(id(execution), id(memory), id(semantics))
     case Instruction.GroupReserveReadPipePackets(t, d, scope, pipe, count, _, _) =>
-      pipeReservation(id(t), id(d), id(scope), id(pipe), id(count), writing = false)
+      pipeReservation(id(t), id(d), id(scope), id(pipe), id(count), end = PipeEnd.Read)
     case Instruction.GroupReserveWritePipePackets(t, d, scope, pipe, count, _, _) =>
-      pipeReservation(id(t), id(d), id(scope), id(pipe), id(count), writing = true)
+      pipeReservation(id(t), id(d), id(scope), id(pipe), id(count), end = PipeEnd.Write)
     case Instruction.GroupAny(t, d, scope, predicate) =>
-      boolean(site, "OpGroupAny", CollectiveKind.Any, t, d, scope, predicate)
+      boolean(site, "OpGroupAny", CollectiveKind.Any, t, d, id(scope), predicate)
     case Instruction.GroupAll(t, d, scope, predicate) =>
-      boolean(site, "OpGroupAll", CollectiveKind.All, t, d, scope, predicate)
+      boolean(site, "OpGroupAll", CollectiveKind.All, t, d, id(scope), predicate)
     case Instruction.GroupUMin(t, d, scope, operation, value) =>
       group(site, "OpGroupUMin", CollectiveKind.UnsignedMin, Shape.Integer, t, d, scope, operation, value)
     case Instruction.GroupUMax(t, d, scope, operation, value) =>
@@ -66,13 +118,13 @@ private object CollectiveOps {
     case Instruction.GroupFMulKHR(t, d, scope, operation, value) =>
       group(site, "OpGroupFMulKHR", CollectiveKind.FloatingMultiply, Shape.Floating, t, d, scope, operation, value)
     case Instruction.SubgroupShuffleINTEL(t, d, data, invocation) =>
-      intelShuffle(id(t), id(d), id(data), id(invocation), xor = false)
+      intelShuffle(id(t), id(d), id(data), id(invocation), ShuffleIndex.Absolute)
     case Instruction.SubgroupShuffleXorINTEL(t, d, data, invocation) =>
-      intelShuffle(id(t), id(d), id(data), id(invocation), xor = true)
+      intelShuffle(id(t), id(d), id(data), id(invocation), ShuffleIndex.Xor)
     case Instruction.SubgroupShuffleUpINTEL(t, d, previous, current, delta) =>
-      intelShift(id(t), id(d), id(previous), id(current), id(delta), up = true, "OpSubgroupShuffleUpINTEL")
+      intelShift(id(t), id(d), id(previous), id(current), id(delta), ShuffleDirection.Up, "OpSubgroupShuffleUpINTEL")
     case Instruction.SubgroupShuffleDownINTEL(t, d, current, next, delta) =>
-      intelShift(id(t), id(d), id(current), id(next), id(delta), up = false, "OpSubgroupShuffleDownINTEL")
+      intelShift(id(t), id(d), id(current), id(next), id(delta), ShuffleDirection.Down, "OpSubgroupShuffleDownINTEL")
     case Instruction.GroupBroadcast(t, d, scope, value, local) =>
       broadcast(site, resultType = id(t), dest = id(d), scope = id(scope), source = id(value), local = id(local))
   }
@@ -101,19 +153,19 @@ private object CollectiveOps {
           }
         }
     case Instruction.GroupNonUniformAll(t, d, scope, value) =>
-      nonUniform(boolean(site, "OpGroupNonUniformAll", CollectiveKind.All, t, d, scope, value))
+      nonUniform(boolean(site, "OpGroupNonUniformAll", CollectiveKind.All, t, d, id(scope), value))
     case Instruction.GroupNonUniformAny(t, d, scope, value) =>
-      nonUniform(boolean(site, "OpGroupNonUniformAny", CollectiveKind.Any, t, d, scope, value))
+      nonUniform(boolean(site, "OpGroupNonUniformAny", CollectiveKind.Any, t, d, id(scope), value))
     case Instruction.GroupNonUniformAllEqual(t, d, scope, value) =>
-      subgroupValue(site, CollectiveKind.AllEqual, id(t), id(d), id(scope), id(value), predicate = true)
+      subgroupValue(site, CollectiveKind.AllEqual, id(t), id(d), id(scope), id(value))
     case Instruction.GroupNonUniformBroadcastFirst(t, d, scope, value) =>
       subgroupValue(site, CollectiveKind.BroadcastFirst, id(t), id(d), id(scope), id(value))
     case Instruction.GroupNonUniformBroadcast(t, d, scope, value, lane) =>
-      subgroupShuffle(site, t, d, scope, value, lane)((_, index, _) => index)
+      subgroupShuffle(site, t, d, id(scope), value, lane)((_, index, _) => index)
     case Instruction.GroupNonUniformShuffle(t, d, scope, value, lane) =>
-      subgroupShuffle(site, t, d, scope, value, lane)((_, index, _) => index)
+      subgroupShuffle(site, t, d, id(scope), value, lane)((_, index, _) => index)
     case Instruction.GroupNonUniformShuffleXor(t, d, scope, value, lane) =>
-      subgroupShuffle(site, t, d, scope, value, lane)((local, index, _) => local ^ index)
+      subgroupShuffle(site, t, d, id(scope), value, lane)((local, index, _) => local ^ index)
     case Instruction.GroupNonUniformRotateKHR(t, d, scope, value, delta, cluster) =>
       // Lanes rotate within aligned clusters, or within the whole subgroup.
       val size = cluster.map(operand => site.program.constants.get(id(operand)))
@@ -121,18 +173,34 @@ private object CollectiveOps {
         case Some(Some(VMValue.Bits(_, Array(lanes)))) if lanes <= 0L || (lanes & (lanes - 1L)) != 0L =>
           Fail(Fault.InvalidRequest(s"OpGroupNonUniformRotateKHR cluster size $lanes is not a power of two"))
         case Some(Some(VMValue.Bits(_, Array(lanes)))) =>
-          subgroupShuffle(site, t, d, scope, value, delta)((local, index, _) =>
+          subgroupShuffle(site, t, d, id(scope), value, delta)((local, index, _) =>
             local - local % lanes + (local % lanes + index) % lanes
           )
         case Some(_) => Fail(Fault.InvalidRequest("OpGroupNonUniformRotateKHR cluster size must be a scalar constant"))
         case None    =>
-          subgroupShuffle(site, t, d, scope, value, delta)((local, index, subgroup) => (local + index) % subgroup)
+          subgroupShuffle(site, t, d, id(scope), value, delta)((local, index, subgroup) => (local + index) % subgroup)
       }
     case Instruction.GroupNonUniformShuffleUp(t, d, scope, value, lane) =>
-      subgroupShuffle(site, t, d, scope, value, lane)((local, index, _) => local - index)
+      subgroupShuffle(site, t, d, id(scope), value, lane)((local, index, _) => local - index)
     case Instruction.GroupNonUniformShuffleDown(t, d, scope, value, lane) =>
-      subgroupShuffle(site, t, d, scope, value, lane)((local, index, _) => local + index)
+      subgroupShuffle(site, t, d, id(scope), value, lane)((local, index, _) => local + index)
     case Instruction.GroupNonUniformBallot(t, d, scope, value) => ballot(site, id(t), id(d), id(scope), id(value))
+    case Instruction.GroupNonUniformQuadBroadcast(t, d, scope, value, index) =>
+      subgroupShuffle(site, t, d, id(scope), value, index)((local, lane, _) => (local & ~3L) | lane)
+    // directions 0, 1 and 2 swap horizontally, vertically and diagonally within the quad
+    case Instruction.GroupNonUniformQuadSwap(t, d, scope, value, direction) =>
+      subgroupShuffle(site, t, d, id(scope), value, direction)((local, swap, _) => local ^ (swap + 1L))
+    case Instruction.SubgroupBallotKHR(t, d, predicate) => ballot(site, id(t), id(d), ImpliedSubgroup, id(predicate))
+    case Instruction.SubgroupFirstInvocationKHR(t, d, value) =>
+      subgroupValue(site, CollectiveKind.BroadcastFirst, id(t), id(d), ImpliedSubgroup, id(value))
+    case Instruction.SubgroupAllKHR(t, d, predicate) =>
+      nonUniform(boolean(site, "OpSubgroupAllKHR", CollectiveKind.All, t, d, ImpliedSubgroup, predicate))
+    case Instruction.SubgroupAnyKHR(t, d, predicate) =>
+      nonUniform(boolean(site, "OpSubgroupAnyKHR", CollectiveKind.Any, t, d, ImpliedSubgroup, predicate))
+    case Instruction.SubgroupAllEqualKHR(t, d, predicate) =>
+      subgroupValue(site, CollectiveKind.AllEqual, id(t), id(d), ImpliedSubgroup, id(predicate))
+    case Instruction.SubgroupReadInvocationKHR(t, d, value, index) =>
+      subgroupShuffle(site, t, d, ImpliedSubgroup, value, index)((_, lane, _) => lane)
     case Instruction.GroupNonUniformIAdd(t, d, scope, operation, value, cluster) =>
       subgroupArithmetic(site, CollectiveKind.IntegerAdd, t, d, scope, operation, value, cluster)
     case Instruction.GroupNonUniformIMul(t, d, scope, operation, value, cluster) =>
@@ -210,6 +278,14 @@ private object CollectiveOps {
   private def scopeFault(opcode: String, scope: Long): Fault =
     Fault.Unsupported(s"$opcode execution scope $scope is not Subgroup or Workgroup")
 
+  private enum ShuffleIndex derives CanEqual {
+    case Absolute, Xor
+  }
+
+  private trait ShuffleSource { def apply(local: Long, index: Long, subgroup: Long): Long }
+
+  private val SingleMemoryOrders = Vec(0L, 2L, 4L, 8L, 16L)
+
   private def barrier(executionScope: Int, memoryScope: Int, semantics: Int): Op = Dynamic { (execution, _) =>
     val values = execution.values
     for {
@@ -219,7 +295,7 @@ private object CollectiveOps {
       memory <- scalar(values, memoryScope)
       flags  <- scalar(values, semantics)
       _      <- Either.cond(
-        Vec(0L, 2L, 4L, 8L, 16L).contains(flags & 0x1eL),
+        SingleMemoryOrders.contains(flags & 0x1eL),
         (),
         Fault.InvalidRequest(f"OpControlBarrier memory semantics 0x$flags%x are invalid or unsupported")
       )
@@ -230,13 +306,146 @@ private object CollectiveOps {
     } yield ()
   }
 
+  /** The element `typeId`'s components read as under SPV_INTEL_subgroup_matrix_multiply_accumulate's operand `flags`:
+    * packed narrow integers or floats, TF32 or bfloat16 views, or the component type itself.
+    */
+  private def multiplyElement(
+      program: VMProgram,
+      typeId: Int,
+      flags: Long,
+      signed: Long,
+      int8: Long,
+      int4: Long,
+      half: Long,
+      bfloat16: Long,
+      tf32: Long
+  ): Option[(SubgroupMatrixMultiply.Element, Int)] = {
+    import SubgroupMatrixMultiply.*
+    def has(flag: Long) = (flags & flag) != 0L
+    program.floatingShape(typeId).map { (width, _) =>
+      val kind =
+        if (width == 16) Kind.Half
+        else if (width == 32) { if (has(tf32)) Kind.TensorFloat32 else Kind.Single }
+        else Kind.Double
+      (Element(kind, width.raw), width.raw)
+    }.orElse(program.integerShape(typeId).map { (width, _) =>
+      val element =
+        if (has(int8)) Element(if (has(signed)) Kind.Signed else Kind.Unsigned, 8)
+        else if (has(int4)) Element(if (has(signed)) Kind.Signed else Kind.Unsigned, 4)
+        else if (has(half)) Element(Kind.Half, 16)
+        else if (has(bfloat16)) Element(Kind.BFloat16, 16)
+        else Element(if (has(signed)) Kind.Signed else Kind.Unsigned, width)
+      (element, width)
+    })
+  }
+
+  private def matrixMultiply(
+      site: Site,
+      resultType: Int,
+      dest: Int,
+      inner: Int,
+      operands: Vec[Int],
+      flags: Long
+  ): Op = {
+    import SubgroupMatrixMultiply.*
+    val program                              = site.program
+    val types                                = operands.map(program.valueType(_))
+    def element(typeId: Int, bfloat16: Long) = program.floatingShape(typeId).map(shape =>
+      Element(if (shape._1 == 16) Kind.Half else Kind.Single, shape._1)
+    )
+      .orElse(program.integerShape(typeId).map(shape =>
+        if ((flags & bfloat16) != 0L) Element(Kind.BFloat16, 16) else Element(Kind.Signed, shape._1)
+      ))
+    val result      = element(resultType, 0x8L)
+    val accumulator = element(types(2), 0x4L)
+    val shape       = for {
+      k <- program.constants.get(inner).collect { case VMValue.Bits(_, Array(value)) => value }
+      a <- multiplyElement(
+        program,
+        types(0),
+        flags,
+        signed = 0x1L,
+        int8 = 0x10L,
+        int4 = 0x40L,
+        half = 0x400L,
+        bfloat16 = 0x1000L,
+        tf32 = 0x100L
+      )
+      b <- multiplyElement(
+        program,
+        types(1),
+        flags,
+        signed = 0x2L,
+        int8 = 0x20L,
+        int4 = 0x80L,
+        half = 0x800L,
+        bfloat16 = 0x2000L,
+        tf32 = 0x200L
+      )
+      c      <- accumulator
+      output <- result
+      if k > 0L && a._2 % a._1.bits == 0 && b._2 % b._1.bits == 0
+    } yield Dimensions(
+      inner = k.toInt,
+      a = a._1,
+      b = b._1,
+      c = c,
+      result = output,
+      aComponent = a._2,
+      bComponent = b._2
+    )
+    shape.fold(
+      Fail(Fault.InvalidRequest("OpSubgroupMatrixMultiplyAccumulateINTEL operands do not form a matrix product"))
+    ) { found =>
+      val selector = found.selector
+      Dynamic { (execution, _) =>
+        val values = execution.values
+        Traversal.traverse(operands)(bits(values, _)).flatMap { parts =>
+          suspend(
+            execution,
+            CollectiveRequest(
+              CollectiveKind.MatrixMultiply,
+              _,
+              _,
+              Scope.Subgroup,
+              CollectivePayload.Value(resultType, dest, VMValue.Bits(resultType, Array.concat(parts*))),
+              selector = selector ++ parts.map(_.length.toLong)
+            )
+          )
+        }
+      }
+    }
+  }
+
+  /** A named barrier spanning every subgroup of the workgroup waits as a workgroup barrier does. */
+  private def namedBarrier(barrier: Int, memoryScope: Int, semantics: Int): Op = Dynamic { (execution, _) =>
+    val values = execution.values
+    for {
+      count <- scalar(values, barrier)
+      _     <- Either.cond(
+        count >= execution.invocation.numSubgroups,
+        (),
+        Fault.Unsupported(
+          s"OpMemoryNamedBarrier over $count of the workgroup's ${execution.invocation.numSubgroups} subgroups"
+        )
+      )
+      _      <- memoryControls(values, memoryScope, semantics, "OpMemoryNamedBarrier")
+      memory <- scalar(values, memoryScope)
+      flags  <- scalar(values, semantics)
+      _      <- suspend(
+        execution,
+        CollectiveRequest(CollectiveKind.Barrier, _, _, Scope.Workgroup, CollectivePayload.Barrier(memory.toInt, flags))
+      )
+    } yield ()
+  }
+
   private def boolean(
       site: Site,
       opcode: String,
       kind: CollectiveKind,
       resultType: Operand,
       dest: Operand,
-      scope: Operand,
+      scope: Int,
       predicate: Operand
   )
       : Op = {
@@ -244,7 +453,7 @@ private object CollectiveOps {
     val valid   = program.booleanLanes(id(resultType)).contains(1) &&
       program.booleanLanes(program.valueType(id(predicate))).contains(1)
     Dynamic { (execution, _) =>
-      (scalar(execution.values, id(scope)), execution.values.get(id(predicate))) match {
+      (scopeOf(execution.values, scope), execution.values.get(id(predicate))) match {
         case (Right(value), Some(predicateValue @ VMValue.Bits(_, Array(_))))
             if isWorkgroupOrSubgroup(value) && valid =>
           suspend(
@@ -266,7 +475,7 @@ private object CollectiveOps {
     }
   }
 
-  private enum Shape {
+  private enum Shape derives CanEqual {
     case Integer, Boolean, Floating
   }
 
@@ -330,12 +539,15 @@ private object CollectiveOps {
     }
   }
 
-  private def intelShuffle(resultType: Int, dest: Int, data: Int, invocation: Int, xor: Boolean): Op =
+  private def intelShuffle(resultType: Int, dest: Int, data: Int, invocation: Int, index: ShuffleIndex): Op =
     Dynamic { (execution, _) =>
       (execution.values.get(data), execution.values.get(invocation)) match {
         case (Some(value @ VMValue.Bits(dataType, lanes)), Some(VMValue.Bits(selectorType, Array(selector))))
             if dataType == resultType && lanes.nonEmpty =>
-          val source = if (xor) selector ^ execution.invocation.subgroupLocal.toLong else selector
+          val source = index match {
+            case ShuffleIndex.Absolute => selector
+            case ShuffleIndex.Xor      => selector ^ execution.invocation.subgroupLocal.toLong
+          }
           suspend(
             execution,
             CollectiveRequest(
@@ -362,7 +574,7 @@ private object CollectiveOps {
       first: Int,
       second: Int,
       delta: Int,
-      up: Boolean,
+      direction: ShuffleDirection,
       opcode: String
   ): Op = Dynamic { (execution, _) =>
     val values = execution.values
@@ -374,19 +586,13 @@ private object CollectiveOps {
           )
           if leftType == resultType && rightType == resultType && leftLanes.length == rightLanes.length &&
             distance >= 0L =>
-        val payload =
-          if (up) CollectivePayload.ShuffleUp(resultType, dest, left, right, distance)
-          else CollectivePayload.ShuffleDown(resultType, dest, left, right, distance)
-        suspend(
-          execution,
-          CollectiveRequest(
-            if (up) CollectiveKind.ShuffleUp else CollectiveKind.ShuffleDown,
-            _,
-            _,
-            Scope.Subgroup,
-            payload
-          )
-        )
+        val (kind, payload) = direction match {
+          case ShuffleDirection.Up =>
+            (CollectiveKind.ShuffleUp, CollectivePayload.ShuffleUp(resultType, dest, left, right, distance))
+          case ShuffleDirection.Down =>
+            (CollectiveKind.ShuffleDown, CollectivePayload.ShuffleDown(resultType, dest, left, right, distance))
+        }
+        suspend(execution, CollectiveRequest(kind, _, _, Scope.Subgroup, payload))
       case (Some(_), Some(_), Right(distance)) if distance < 0L =>
         Left(Fault.InvalidRequest(s"$opcode delta must be non-negative"))
       case (Some(_), Some(_), Right(_)) =>
@@ -429,7 +635,7 @@ private object CollectiveOps {
     }
   }
 
-  private def pipeReservation(resultType: Int, dest: Int, scope: Int, pipe: Int, count: Int, writing: Boolean): Op =
+  private def pipeReservation(resultType: Int, dest: Int, scope: Int, pipe: Int, count: Int, end: PipeEnd): Op =
     Dynamic { (execution, _) =>
       val values = execution.values
       for {
@@ -444,13 +650,19 @@ private object CollectiveOps {
             _,
             _,
             group.toInt,
-            CollectivePayload.PipeReservation(resultType, dest, handle, packets & 0xffffffffL, writing)
+            CollectivePayload.PipeReservation(resultType, dest, handle, packets & 0xffffffffL, end)
           )
         )
       } yield ()
     }
 
   /** Non-uniform requests rendezvous among the active lanes of a subgroup. */
+  /** The scope id of the KHR ballot and vote instructions, which act on the subgroup without one. */
+  private val ImpliedSubgroup = -1
+
+  private def scopeOf(values: InvocationValues, scope: Int): Either[Fault, Long] =
+    if (scope == ImpliedSubgroup) Right(Scope.Subgroup.toLong) else scalar(values, scope)
+
   private def nonUniform(op: Op, message: NonEmpty[String] = "nonuniform operations require Subgroup scope"): Op =
     Dynamic {
       (execution, memory) =>
@@ -475,12 +687,11 @@ private object CollectiveOps {
       scope: Int,
       source: Int,
       operation: Int = 0,
-      predicate: Boolean = false,
       cluster: Option[Operand] = None
   ): Op = {
-    val compatible = predicate && site.program.booleanLanes(resultType).contains(1)
+    val compatible = kind == CollectiveKind.AllEqual && site.program.booleanLanes(resultType).contains(1)
     Dynamic { (execution, _) =>
-      (scalar(execution.values, scope), execution.values.get(source)) match {
+      (scopeOf(execution.values, scope), execution.values.get(source)) match {
         case (Right(Scope.Subgroup), Some(value @ VMValue.Bits(sourceType, _)))
             if compatible || sourceType == resultType =>
           clusterSize(execution.values, cluster).flatMap(selector =>
@@ -510,13 +721,13 @@ private object CollectiveOps {
       site: Site,
       resultType: Operand,
       dest: Operand,
-      scope: Operand,
+      scope: Int,
       source: Operand,
       lane: Operand
   )(
-      select: (Long, Long, Long) => Long
+      select: ShuffleSource
   ): Op = {
-    val request   = subgroupValue(site, CollectiveKind.Shuffle, id(resultType), id(dest), id(scope), id(source))
+    val request   = subgroupValue(site, CollectiveKind.Shuffle, id(resultType), id(dest), scope, id(source))
     val laneType  = site.program.valueType(id(lane))
     val validLane = site.program.integerShape(laneType).contains(32 -> 1)
     Dynamic { (execution, memory) =>
@@ -545,7 +756,7 @@ private object CollectiveOps {
     val valid   = program.integerShape(resultType).contains(32 -> 4) &&
       program.booleanLanes(program.valueType(predicate)).contains(1)
     Dynamic { (execution, _) =>
-      (scalar(execution.values, scope), execution.values.get(predicate)) match {
+      (scopeOf(execution.values, scope), execution.values.get(predicate)) match {
         case (Right(Scope.Subgroup), Some(value @ VMValue.Bits(_, Array(_)))) if valid =>
           suspend(
             execution,
@@ -569,6 +780,30 @@ private object CollectiveOps {
       }
     }
   }
+
+  /** A ballot of the active lanes of the subgroup whose value equals the lane's own. */
+  private def partition(site: Site, resultType: Int, dest: Int, source: Int): Op =
+    if (!site.program.integerShape(resultType).contains(32 -> 4))
+      Fail(Fault.InvalidRequest("OpGroupNonUniformPartitionEXT requires a four-lane 32-bit integer result"))
+    else
+      Dynamic { (execution, _) =>
+        execution.values.get(source) match {
+          case Some(value @ VMValue.Bits(_, _)) =>
+            suspend(
+              execution,
+              CollectiveRequest(
+                CollectiveKind.Partition,
+                _,
+                _,
+                Scope.Subgroup,
+                CollectivePayload.Value(resultType, dest, value),
+                nonUniform = true
+              )
+            )
+          case Some(_) => Left(Fault.InvalidRequest("OpGroupNonUniformPartitionEXT partitions numeric values"))
+          case None    => Left(undefined(source))
+        }
+      }
 
   private def subgroupArithmetic(
       site: Site,
@@ -637,6 +872,12 @@ private object CollectiveOps {
 
   /** Ballot queries read a uint4 ballot within the invocation; `mode` -1 tests one bit, 0 to 2 count, 3 and 4 search.
     */
+  /** The bits of ballot word `word`, whose low 32 bits hold lanes `32 * word` up, for lanes `from` until `until`. */
+  def ballotLanes(from: Int, until: Int, word: Int): Long = {
+    def below(lanes: Int): Long = (1L << math.min(math.max(lanes - word * 32, 0), 32)) - 1L
+    below(until) & ~below(from)
+  }
+
   private def ballotQuery(
       site: Site,
       resultType: Int,
@@ -656,15 +897,22 @@ private object CollectiveOps {
       val bit        = index.fold[Either[Fault, Long]](Right(invocation.subgroupLocal.toLong))(scalar(values, _))
       (scalar(values, scope), values.get(source), bit) match {
         case (Right(Scope.Subgroup), Some(VMValue.Bits(_, words)), Right(local)) if valid && words.length == 4 =>
-          def set(bit: Int): Boolean = (words(bit / 32) & (1L << (bit % 32))) != 0
-          val result                 = mode match {
-            case -1 => if (local >= 0 && local < 128 && set(local.toInt)) 1L else 0L
-            case 0  => (0 until invocation.maxSubgroupSize).count(set(_)).toLong
-            case 1  => (0 to invocation.subgroupLocal).count(set(_)).toLong
-            case 2  => (0 until invocation.subgroupLocal).count(set(_)).toLong
-            case 3  => (0 until invocation.maxSubgroupSize).find(set(_)).fold(0xffffffffL)(_.toLong)
-            case 4  => (0 until invocation.maxSubgroupSize).reverse.find(set(_)).fold(0xffffffffL)(_.toLong)
-            case _  => -1L
+          def count(until: Int): Long =
+            words.indices.map(word => java.lang.Long.bitCount(words(word) & ballotLanes(0, until, word))).sum.toLong
+          val active = words.indices.map(word => words(word) & ballotLanes(0, invocation.maxSubgroupSize, word))
+          val result = mode match {
+            case -1 =>
+              if (local >= 0 && local < 128 && (words(local.toInt / 32) >>> (local % 32) & 1L) != 0L) 1L else 0L
+            case 0 => count(invocation.maxSubgroupSize)
+            case 1 => count(invocation.subgroupLocal + 1)
+            case 2 => count(invocation.subgroupLocal)
+            case 3 =>
+              active.indices.find(active(_) != 0L)
+                .fold(0xffffffffL)(word => word * 32L + java.lang.Long.numberOfTrailingZeros(active(word)))
+            case 4 =>
+              active.indices.findLast(active(_) != 0L)
+                .fold(0xffffffffL)(word => word * 32L + 63 - java.lang.Long.numberOfLeadingZeros(active(word)))
+            case _ => -1L
           }
           if (result < 0) Left(Fault.InvalidRequest("invalid subgroup ballot operation"))
           else Right(values.updateScalar(dest, resultType, result))
@@ -680,8 +928,8 @@ private object CollectiveOps {
   /** Derivatives pause the lane until its quad's neighbours reach the same site. */
   private def derivative(site: Site, resultType: Int, dest: Int, operand: Int, derivative: Derivative): Op =
     site.program.floatingShape(resultType) match {
-      case None                                => Fail(Fault.InvalidRequest("derivative result is not floating point"))
-      case Some((width, _)) if width.raw != 32 =>
+      case None                            => Fail(Fault.InvalidRequest("derivative result is not floating point"))
+      case Some((width, _)) if width != 32 =>
         Fail(Fault.Unsupported("derivatives currently require 32-bit components"))
       case Some((_, count)) =>
         Dynamic { (execution, _) =>
@@ -870,15 +1118,19 @@ private object CollectiveOps {
       val request =
         execution.suspended.getOrElse(throw IllegalStateException("collective participant is not suspended"))
       result.foreach { value =>
-        val (resultType, destination) = request.payload match {
-          case CollectivePayload.Value(resultType, destination, _)                 => (resultType, destination)
-          case CollectivePayload.Shuffle(resultType, destination, _, _)            => (resultType, destination)
-          case CollectivePayload.ShuffleUp(resultType, destination, _, _, _)       => (resultType, destination)
-          case CollectivePayload.ShuffleDown(resultType, destination, _, _, _)     => (resultType, destination)
-          case CollectivePayload.Barrier(_, _)                                     => (-1, -1)
-          case CollectivePayload.PipeReservation(resultType, destination, _, _, _) => (resultType, destination)
+        def place(resultType: Int, destination: Int): Unit =
+          if (destination >= 0) execution.values.update(destination, retag(value, resultType))
+        request.payload match {
+          case CollectivePayload.Value(resultType, destination, _)      => place(resultType, destination)
+          case CollectivePayload.Shuffle(resultType, destination, _, _) => place(resultType, destination)
+          case CollectivePayload.ShuffleUp(resultType = resultType, destination = destination) =>
+            place(resultType, destination)
+          case CollectivePayload.ShuffleDown(resultType = resultType, destination = destination) =>
+            place(resultType, destination)
+          case CollectivePayload.Barrier(_, _)                                                       => ()
+          case CollectivePayload.PipeReservation(resultType = resultType, destination = destination) =>
+            place(resultType, destination)
         }
-        if (destination >= 0) execution.values.update(destination, retag(value, resultType))
       }
       execution.pc = request.pc + 1
       execution.resume()
@@ -932,15 +1184,17 @@ private object CollectiveOps {
         resultType: Int
     )(op: (Long, Long) => Long): Vec[Option[VMValue]] = {
       val accumulated = Array.fill(inputs.head.length)(initial)
-      inputs.map { input =>
+      val scanned     = Vec.newBuilder[Option[VMValue]]
+      inputs.foreach { input =>
         val before = accumulated.clone()
         var lane   = 0
         while (lane < accumulated.length) {
           accumulated(lane) = op(accumulated(lane), input(lane))
           lane += 1
         }
-        Some(VMValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before))
+        scanned += Some(VMValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before))
       }
+      scanned.result()
     }
     def reduceOrScan(
         inputs: Vec[Array[Long]],
@@ -961,7 +1215,7 @@ private object CollectiveOps {
       )
     }
     // A shift selects the source lane in a subgroup-sized window; an out-of-window source reads the neighbouring operand.
-    def shift(resultType: Int, up: Boolean): Either[Fault, Vec[Option[VMValue]]] = {
+    def shift(resultType: Int, direction: ShuffleDirection): Either[Fault, Vec[Option[VMValue]]] = {
       def shifted(execution: InvocationState, request: CollectiveRequest): Either[Fault, Option[VMValue]] = {
         val size     = execution.invocation.subgroupSize.toLong
         val distance = request.payload match {
@@ -979,23 +1233,20 @@ private object CollectiveOps {
               case Some(CollectivePayload.ShuffleDown(current = current, next = next)) =>
                 Right(Some(retag(if (outside) next else current, resultType)))
               case _ =>
-                Left(Fault.InvalidRequest(s"subgroup shuffle-${if (up) "up" else "down"} source is not suspended"))
+                Left(Fault.InvalidRequest(s"subgroup shuffle-${direction.label} source is not suspended"))
             }
           case None =>
-            Left(Fault.InvalidRequest(s"subgroup shuffle-${if (up) "up" else "down"} source lane $source is absent"))
+            Left(Fault.InvalidRequest(s"subgroup shuffle-${direction.label} source lane $source is absent"))
         }
       }
-      participants.foldLeft[Either[Fault, Vec[Option[VMValue]]]](Right(Vec.empty)) { (result, execution) =>
-        for {
-          existing <- result
-          request  <- execution.suspended.toRight(Fault.InvalidRequest("collective participant is not suspended"))
-          value    <- shifted(execution, request)
-        } yield existing :+ value
-      }
+      Traversal.traverse(participants)(execution =>
+        execution.suspended.toRight(Fault.InvalidRequest("collective participant is not suspended"))
+          .flatMap(shifted(execution, _))
+      )
     }
     val results: Either[Fault, Vec[Option[VMValue]]] = expected.payload match {
-      case CollectivePayload.PipeReservation(resultType, _, pipe, packets, writing) =>
-        PipeOps.reserveOnce(memory, pipe, packets, writing).map(reserved =>
+      case CollectivePayload.PipeReservation(resultType, _, pipe, packets, end) =>
+        PipeOps.reserveOnce(memory, pipe, packets, end).map(reserved =>
           Vec.fill(participants.size)(Some(VMValue.Bits(resultType, Array(reserved))))
         )
       case CollectivePayload.Barrier(memoryScope, semantics) =>
@@ -1006,26 +1257,24 @@ private object CollectiveOps {
           else memory.fence()
         fence.map(_ => Vec.fill(participants.size)(None))
       case CollectivePayload.Shuffle(resultType = resultType) =>
-        participants.foldLeft[Either[Fault, Vec[Option[VMValue]]]](Right(Vec.empty)) { (result, execution) =>
-          result.flatMap { existing =>
-            execution.suspended.map(_.payload) match {
-              case Some(CollectivePayload.Shuffle(_, _, data, VMValue.Bits(_, Array(sourceLocal)))) =>
-                participants.find(_.invocation.subgroupLocal.toLong == sourceLocal) match {
-                  case Some(sourceExecution) => sourceExecution.suspended.map(_.payload) match {
-                      case Some(CollectivePayload.Shuffle(data = sourceData)) =>
-                        Right(existing :+ Some(retag(sourceData, resultType)))
-                      case _ => Left(Fault.InvalidRequest("subgroup shuffle source is not suspended"))
-                    }
-                  // SYCL selection and permutation permit an out-of-range source with an unspecified result; the lane
-                  // keeps its own input.
-                  case None => Right(existing :+ Some(retag(data, resultType)))
-                }
-              case _ => Left(Fault.InvalidRequest("subgroup shuffle invocation id must be scalar"))
-            }
+        Traversal.traverse(participants)(execution =>
+          execution.suspended.map(_.payload) match {
+            case Some(CollectivePayload.Shuffle(_, _, data, VMValue.Bits(_, Array(sourceLocal)))) =>
+              participants.find(_.invocation.subgroupLocal.toLong == sourceLocal) match {
+                case Some(sourceExecution) => sourceExecution.suspended.map(_.payload) match {
+                    case Some(CollectivePayload.Shuffle(data = sourceData)) =>
+                      Right(Some(retag(sourceData, resultType)))
+                    case _ => Left(Fault.InvalidRequest("subgroup shuffle source is not suspended"))
+                  }
+                // SYCL selection and permutation permit an out-of-range source with an unspecified result; the lane
+                // keeps its own input.
+                case None => Right(Some(retag(data, resultType)))
+              }
+            case _ => Left(Fault.InvalidRequest("subgroup shuffle invocation id must be scalar"))
           }
-        }
-      case CollectivePayload.ShuffleUp(resultType = resultType)   => shift(resultType, up = true)
-      case CollectivePayload.ShuffleDown(resultType = resultType) => shift(resultType, up = false)
+        )
+      case CollectivePayload.ShuffleUp(resultType = resultType)   => shift(resultType, ShuffleDirection.Up)
+      case CollectivePayload.ShuffleDown(resultType = resultType) => shift(resultType, ShuffleDirection.Down)
       case CollectivePayload.Value(resultType, _, _)              =>
         val values = requests.map(payloadValue(_))
         expected.kind match {
@@ -1047,10 +1296,7 @@ private object CollectiveOps {
             }
             Right(Vec.fill(participants.size)(Some(VMValue.Bits(resultType, Array(if (equal) 1L else 0L)))))
           case CollectiveKind.Any | CollectiveKind.All =>
-            val flags = values.map {
-              case VMValue.Bits(_, Array(value)) => value != 0L
-              case _                             => false
-            }
+            val flags  = values.map(VMValue.isTrue)
             val result = if (expected.kind == CollectiveKind.Any) flags.exists(identity) else flags.forall(identity)
             Right(Vec.fill(participants.size)(Some(VMValue.Bits(resultType, Array(if (result) 1L else 0L)))))
           case CollectiveKind.UnsignedMin | CollectiveKind.UnsignedMax | CollectiveKind.SignedMin | CollectiveKind.SignedMax =>
@@ -1058,24 +1304,28 @@ private object CollectiveOps {
               val width: Int in 1 ~ 64 = program.integerShape(resultType).map(_._1).getOrElse(64)
               val signed  = expected.kind == CollectiveKind.SignedMin || expected.kind == CollectiveKind.SignedMax
               val maximum = expected.kind == CollectiveKind.UnsignedMax || expected.kind == CollectiveKind.SignedMax
-              def extremum(left: Long, right: Long): Long = {
-                val comparison =
-                  if (signed) java.lang.Long.compare(signExtend(left, width), signExtend(right, width))
-                  else java.lang.Long.compareUnsigned(left, right)
-                if ((maximum && comparison >= 0) || (!maximum && comparison <= 0)) left else right
+              val extremum: (Long, Long) => Long = expected.kind match {
+                case CollectiveKind.SignedMin =>
+                  (l, r) => Execute.truncate(IntegerSemantics.minimum(Execute, l, r, width, signed = true), width)
+                case CollectiveKind.SignedMax =>
+                  (l, r) => Execute.truncate(IntegerSemantics.maximum(Execute, l, r, width, signed = true), width)
+                case CollectiveKind.UnsignedMin =>
+                  (l, r) => Execute.truncate(IntegerSemantics.minimum(Execute, l, r, width, signed = false), width)
+                case _ =>
+                  (l, r) => Execute.truncate(IntegerSemantics.maximum(Execute, l, r, width, signed = false), width)
               }
               if (expected.operation == 0) {
                 val lanes =
                   Array.tabulate(inputs.head.length)(lane =>
-                    inputs.view.map(_(lane) & mask(width)).reduce(extremum(_, _))
+                    inputs.view.map(_(lane) & mask(width)).reduce(extremum)
                   )
                 Vec.fill(participants.size)(Some(VMValue.Bits(resultType, lanes)))
               } else {
                 val identity =
-                  if (signed) { if (maximum) 1L << (width.raw - 1) else (1L << (width.raw - 1)) - 1L }
+                  if (signed) { if (maximum) 1L << (width - 1) else (1L << (width - 1)) - 1L }
                   else if (maximum) 0L
                   else mask(width)
-                scan(inputs, identity & mask(width), resultType)((left, right) => extremum(left, right & mask(width)))
+                scan(inputs, identity & mask(width), resultType)(extremum)
               }
             }
           case CollectiveKind.IntegerAdd | CollectiveKind.IntegerMultiply =>
@@ -1109,8 +1359,8 @@ private object CollectiveOps {
             lanesOf(expected.kind.toString).map { inputs =>
               val width: Int in (16, 32, 64) = program.floatingShape(resultType).map(_._1).getOrElse(64)
               val op: (Long, Long) => Long   = expected.kind match {
-                case CollectiveKind.FloatingAdd      => IEEE754.add(_, _, width)
-                case CollectiveKind.FloatingMultiply => IEEE754.multiply(_, _, width)
+                case CollectiveKind.FloatingAdd      => IEEE754.add(_, _, width, IEEE754.NaNOperand.Left)
+                case CollectiveKind.FloatingMultiply => IEEE754.multiply(_, _, width, IEEE754.NaNOperand.Left)
                 case CollectiveKind.FloatingMin      => IEEE754.minNum(_, _, width)
                 case _                               => IEEE754.maxNum(_, _, width)
               }
@@ -1147,11 +1397,14 @@ private object CollectiveOps {
           case CollectiveKind.Ballot =>
             val ballot = Array.fill(4)(0L)
             val valid  = participants.zip(values).forall {
+              case (_, VMValue.Bits(_, Array(_))) => true
+              case _                              => false
+            }
+            if (valid) participants.zip(values).foreach {
               case (execution, VMValue.Bits(_, Array(predicate))) =>
                 val local = execution.invocation.subgroupLocal
                 if (predicate != 0L) ballot(local / 32) |= 1L << (local % 32)
-                true
-              case _ => false
+              case _ => ()
             }
             if (!valid)
               Left(
@@ -1160,6 +1413,71 @@ private object CollectiveOps {
                 )
               )
             else Right(Vec.fill(participants.size)(Some(VMValue.Bits(resultType, ballot))))
+          case CollectiveKind.MatrixMultiply =>
+            val shape                  = SubgroupMatrixMultiply.Dimensions.of(expected.selector.take(7))
+            val Vec(aLanes, bLanes, _) = expected.selector.drop(7).map(_.toInt): @unchecked
+            lanesOf("OpSubgroupMatrixMultiplyAccumulateINTEL").map { inputs =>
+              val contributions = participants.zip(inputs).map((execution, lanes) =>
+                (
+                  execution.invocation.subgroupLocal,
+                  lanes.slice(0, aLanes),
+                  lanes.slice(aLanes, aLanes + bLanes),
+                  lanes.drop(aLanes + bLanes)
+                )
+              )
+              val columns =
+                SubgroupMatrixMultiply(
+                  shape,
+                  contributions,
+                  participants.headOption.fold(1)(_.invocation.maxSubgroupSize)
+                )
+              participants.map(execution =>
+                Some(VMValue.Bits(resultType, columns(execution.invocation.subgroupLocal)))
+              )
+            }
+          case CollectiveKind.MatrixRows =>
+            val Vec(rows, columns, use, componentBits, elementBits) = expected.selector.map(_.toInt): @unchecked
+            val shape = VMProgram.CooperativeMatrix(0, Scope.Subgroup, rows, columns, use.toLong, nv = false)
+            lanesOf("OpCompositeConstructCoopMatQCOM").map { inputs =>
+              val matrix = Array.ofDim[Long](rows * columns)
+              participants.zip(inputs).foreach { (execution, elements) =>
+                val lane = execution.invocation.subgroupLocal
+                if (lane < CooperativeMatrixOps.lineCount(shape)) {
+                  val line = CooperativeMatrixOps.unpackLine(
+                    elements,
+                    CooperativeMatrixOps.lineLength(shape),
+                    componentBits,
+                    elementBits
+                  )
+                  line.indices.foreach(at =>
+                    matrix(if (use == 1) at * columns + lane else lane * columns + at) = line(at)
+                  )
+                }
+              }
+              val result = Some(VMValue.Bits(resultType, matrix))
+              Vec.fill(participants.size)(result)
+            }
+          case CollectiveKind.Partition =>
+            lanesOf("OpGroupNonUniformPartitionEXT").map { inputs =>
+              val typeId = values.head match {
+                case VMValue.Bits(typeId, _)    => typeId
+                case VMValue.Address(typeId, _) => typeId
+              }
+              val width = program.floatingShape(typeId).map(_._1)
+              // lanes partition by bits, except that floating-point zeros of either sign compare equal
+              val keys = inputs.map(_.toSeq.map(bits =>
+                if (width.exists(IEEE754.toDouble(bits, _) == 0.0)) 0L else bits
+              ))
+              val ballots = keys.indices.groupBy(keys(_)).view.mapValues { members =>
+                val ballot = Array.fill(4)(0L)
+                members.foreach { member =>
+                  val local = participants(member).invocation.subgroupLocal
+                  ballot(local / 32) |= 1L << (local % 32)
+                }
+                VMValue.Bits(resultType, ballot)
+              }.toMap
+              keys.map(key => Some(ballots(key)))
+            }
           case kind => Left(Fault.InvalidRequest(s"$kind rendezvous unexpectedly carried a value"))
         }
     }

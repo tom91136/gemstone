@@ -12,7 +12,7 @@ inline constexpr uint32_t MaxColorAttachments = 8;
 struct GraphicsCommandState {
   VkPipeline pipeline = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, MaxBoundDescriptorSets> descriptors{};
-  std::map<DescriptorSlot, uint32_t> dynamicOffsets{};
+  std::map<DescriptorSlot, uint32_t> dynamicOffsets;
   VkBuffer indexBuffer = VK_NULL_HANDLE;
   VkDeviceSize indexOffset = 0;
   VkIndexType indexType = VK_INDEX_TYPE_UINT16;
@@ -31,8 +31,8 @@ struct GraphicsPipeline {
   gx::PreparedShader vertex, fragment;
   std::vector<VkVertexInputBindingDescription> bindings;
   std::vector<gx::GraphicsVertexAttribute> attributes;
-  VkViewport viewport;
-  VkRect2D scissor;
+  VkViewport viewport{};
+  VkRect2D scissor{};
   gx::GraphicsRasterState raster{};
   gx::GraphicsDepthStencil depthStencil{};
   std::vector<gx::GraphicsBlend> blends;
@@ -44,8 +44,8 @@ struct GraphicsPipeline {
   uint32_t depthAttachment = VK_ATTACHMENT_UNUSED;
 };
 struct Image {
-  VkExtent3D extent;
-  VkFormat format;
+  VkExtent3D extent{};
+  VkFormat format{};
   VkDeviceMemory memory = VK_NULL_HANDLE;
   VkDeviceSize offset = 0;
   uint32_t layers = 1;
@@ -57,7 +57,7 @@ struct Image {
 };
 struct Framebuffer {
   std::vector<VkImageView> attachments;
-  uint32_t width, height, layers = 1;
+  uint32_t width{}, height{}, layers = 1;
   bool imageless = false;
 };
 struct AttachmentReference {
@@ -65,7 +65,7 @@ struct AttachmentReference {
   VkImageLayout layout;
   VkImageAspectFlags aspects = 0;
   std::optional<VkImageLayout> stencilLayout;
-  AttachmentReference(uint32_t attachment = VK_ATTACHMENT_UNUSED, VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED)
+  explicit AttachmentReference(uint32_t attachment = VK_ATTACHMENT_UNUSED, VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED)
       : attachment(attachment), layout(layout) {}
 };
 struct Subpass {

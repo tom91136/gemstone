@@ -28,6 +28,7 @@ class AllocationAddressSuite extends munit.FunSuite {
     executeKernel(compileKernel(value), dispatch, memory)
 
   test("nested native pointers dereference unpassed allocations without rewriting payload or scalar words") {
+    val values = Seq(41L, 70L)
     for (base <- Seq(0x3d9d8000L, 0x7a0010001000L)) {
       val target = base + 0x10000L
       val memory = RegionMemory()
@@ -42,7 +43,7 @@ class AllocationAddressSuite extends munit.FunSuite {
       ) // ordinary scalar equal to a pointer; must remain untouched
       LittleEndian.write(target, memory.array(env), 8, 8)
       val original = memory.array(env).clone()
-      for (value <- Seq(41L, 70L)) {
+      for (value <- values) {
         LittleEndian.write(value, memory.array(nested), 0, 4)
         assertEquals(run(memory), Right(()))
         assertEquals(LittleEndian.decode(memory.array(nested), 0, 4), value + 1)

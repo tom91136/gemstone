@@ -13,16 +13,17 @@ private object VMBuiltins {
 
   // Attribute values of the emulated device, by cudaDeviceAttr ordinal.
   private def deviceAttribute(attribute: Int): Int = attribute match {
-    case 1 | 2 | 3 | 39 => 1024
-    case 4              => 64
-    case 5              => Int.MaxValue
-    case 6 | 7          => 65535
-    case 8              => 49152
-    case 10             => 32
-    case 16             => 1
-    case 41             => 1
-    case 75             => 7
-    case _              => 0
+    case 1 | 2 | 3 => 1024
+    case 4         => 64
+    case 5         => Int.MaxValue
+    case 6 | 7     => 65535
+    case 8         => 49152
+    case 10        => 32
+    case 16        => EmulatedDevice.Multiprocessors
+    case 39        => EmulatedDevice.WarpsPerMultiprocessor * 32
+    case 41        => 1
+    case 75        => 7
+    case _         => 0
   }
 
   def execute(
@@ -37,7 +38,7 @@ private object VMBuiltins {
       parameters.lift(index).fold(0L)(storage.readParameter(_, 0, size))
     def returnValue(value: Long): Unit = returnParameters.headOption.foreach(storage.writeParameter(_, 0, 64, value))
     def output(value: Long): Either[Fault, Unit] =
-      if (parameters.nonEmpty) VMSemantics.storeGeneric(context, lane, parameter(0), 32, value) else Right(())
+      if (parameters.nonEmpty) VMMemoryAccess.storeGeneric(context, lane, parameter(0), 32, value) else Right(())
     builtin match {
       case Builtin.GetDevice       => output(0L).map(_ => returnValue(0L))
       case Builtin.DeviceAttribute =>
@@ -52,9 +53,10 @@ private object VMBuiltins {
         parameter(0).refine[Long in 1L ~ 2147483647L].left.map(_ =>
           Fault.Backend(s"invalid malloc size: ${parameter(0)}")
         )
-          .flatMap(size => context.memory.allocate(size.raw.toInt.unsafe[Int > 0]))
+          .flatMap(size => context.memory.allocate(size.toInt.unsafe[Int > 0]))
           .map(address => returnValue(address.raw))
-      case Builtin.Free =>
+      case Builtin.AssertFail => Left(Fault.Assertion("device-side assertion failed"))
+      case Builtin.Free       =>
         val _ = context.memory.free(GuestAddress(parameter(0)))
         Right(())
       case Builtin.LaunchDevice => launch(context, lane, parameters, parameter(_, _)).map(_ => returnValue(0L))
@@ -69,11 +71,11 @@ private object VMBuiltins {
     (axis(0), axis(1), axis(2)).mapN(Dimensions(_, _, _))
   }
 
-  private def launch(
+  private inline def launch(
       context: VMContext,
       lane: WorkgroupLane,
       parameters: Vec[Parameter],
-      parameter: (Int, Int in 0 ~ 8) => Long
+      inline parameter: (Int, Int in 0 ~ 8) => Long
   ): Either[Fault, Unit] =
     if (parameters.size < 6)
       Left(Fault.Backend(s"cudaLaunchDevice expects six parameters, found ${parameters.size}"))
@@ -86,7 +88,7 @@ private object VMBuiltins {
         )
         buffer = parameter(1, 8)
         block <-
-          if (child.blockSize.raw == 0) Right(Array.emptyByteArray)
+          if (child.blockSize == 0) Right(Array.emptyByteArray)
           else context.workgroup.bufferBytes(buffer, child.blockSize).toRight(
             Fault.Backend(
               s"cudaLaunchDevice parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
@@ -98,7 +100,7 @@ private object VMBuiltins {
         shared     <- parameter(4, 4).toInt.refine[Int >= 0].left.map(_ =>
           Fault.Backend("child dynamic shared size exceeds the supported range")
         )
-        _ <- VMInterpreter.launch(
+        _ <- context.launch(
           context.kernel.copy(entry = child),
           geometry,
           block,

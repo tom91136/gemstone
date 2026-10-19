@@ -5,7 +5,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import scala.collection.mutable
 
 private object VMLane {
   private val NoValues     = Array.emptyLongArray
@@ -23,15 +22,18 @@ private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
   // Reused lane storage: clearing zeroes registers only up to this high-water mark.
   private var used = 0
   // Two words per 64 predicates: the defined bits, then their values.
-  private var predicates: Array[Long]                   = VMLane.NoValues
-  private var parameters: Array[Array[Byte] | Null]     = VMLane.NoParameters
-  private var codes: VMConditionCodes | Null            = null
-  private var returns: mutable.ArrayBuffer[Long] | Null = null
-  var carry: Boolean                                    = false
+  private var predicates: Array[Long]               = VMLane.NoValues
+  private var parameters: Array[Array[Byte] | Null] = VMLane.NoParameters
+  private var codes: VMConditionCodes | Null        = null
+  private var returns: LongStack | Null             = null
+  var carry: Boolean                                = false
+
+  /** Bytes `alloca` has taken below the top of the frame's local window. */
+  var stack: Long = 0L
   reserve(registerCount, predicateCount)
 
   def reserve(registerCount: Int >= 0, predicateCount: Int >= 0): Unit = {
-    if (registerCount.raw > registers.length) registers = java.util.Arrays.copyOf(registers, registerCount.raw)
+    if (registerCount > registers.length) registers = java.util.Arrays.copyOf(registers, registerCount)
     val words = ((predicateCount.raw + 63) >>> 6) * 2
     if (words > predicates.length) predicates = java.util.Arrays.copyOf(predicates, words)
   }
@@ -57,6 +59,13 @@ private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
     else VMLane.DefinedFalse
   }
 
+  /** 1 when the predicate is defined and true, otherwise 0. */
+  def predicateBit(predicate: Predicate): Long = {
+    val word = (predicate.raw >>> 6) * 2
+    if (word >= predicates.length) 0L
+    else ((predicates(word) & predicates(word + 1)) >>> (predicate.raw & 63)) & 1L
+  }
+
   def setPredicate(predicate: Predicate, value: Boolean): Unit = {
     val word = (predicate.raw >>> 6) * 2
     val bit  = 1L << (predicate.raw & 63)
@@ -76,7 +85,7 @@ private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
     }
 
   def writeParameter(parameter: Parameter, offset: Int >= 0, width: ScalarBitWidth, value: Long): Unit = {
-    val end   = Math.addExact(offset.raw, width.toScalarByteWidth.raw)
+    val end   = Math.addExact(offset, width.toScalarByteWidth)
     val bytes = storedParameter(parameter) match {
       case existing: Array[Byte] if existing.length >= end => existing
       case existing                                        =>
@@ -87,7 +96,7 @@ private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
         setParameterBytes(parameter, grown)
         grown
     }
-    LittleEndian.write(value, bytes, offset.raw, width.toScalarByteWidth)
+    LittleEndian.write(value, bytes, offset, width.toScalarByteWidth)
   }
 
   def copyParameter(parameter: Parameter, target: VMLane, destination: Parameter): Unit =
@@ -114,9 +123,9 @@ private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
     case existing => existing
   }
 
-  def returnStack: mutable.ArrayBuffer[Long] = returns match {
+  def returnStack: LongStack = returns match {
     case null =>
-      val allocated = mutable.ArrayBuffer.empty[Long]
+      val allocated = LongStack()
       returns = allocated
       allocated
     case existing => existing
@@ -140,5 +149,6 @@ private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
       case existing => existing.clear()
     }
     carry = false
+    stack = 0L
   }
 }

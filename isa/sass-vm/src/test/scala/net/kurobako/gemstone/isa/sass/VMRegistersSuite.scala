@@ -10,9 +10,9 @@ class VMRegistersSuite extends munit.FunSuite {
       s"lowered banks occupy distinct dense slots with ${layout.generalCount} general and ${layout.uniformCount} uniform"
     ) {
       val slots = Vec.range[0, 255].collect {
-        case index if index.raw < layout.generalCount.raw => layout.general(index)
+        case index if index < layout.generalCount => layout.general(index)
       } ++
-        Vec.range[0, 255].collect { case index if index.raw < layout.uniformCount.raw => layout.uniform(index) } ++
+        Vec.range[0, 255].collect { case index if index < layout.uniformCount => layout.uniform(index) } ++
         Vec.tabulate(VMRegisters.TemporaryCount)(layout.temporary(_)) ++
         Vec.range[0, 16].map(layout.barrier(_)) ++
         Vec.tabulate(4)(layout.reduction(_))

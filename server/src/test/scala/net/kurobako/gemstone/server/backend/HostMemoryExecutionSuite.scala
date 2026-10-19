@@ -17,6 +17,9 @@ import scala.collection.mutable
 import scala.util.Using
 
 class HostMemoryExecutionSuite extends munit.FunSuite {
+  private val Booleans       = List(false, true)
+  private val PointerOffsets = List(0L, 8L)
+
   private def encoded(value: Long, size: Int in 0 ~ 8): Vec[Byte] =
     LittleEndian.toVec(value, size)
   private def scalar(value: Long, size: Int in 0 ~ 8 = 8): KernelTask.Argument =
@@ -86,7 +89,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
           native ++= beforeSync(sync, LongMap.from(native))
           val observed = sync.atomic.fold(0L) { request =>
             val size     = request.size
-            val observed = (0 until size.raw).foldLeft(0L)((value, index) =>
+            val observed = (0 until size).foldLeft(0L)((value, index) =>
               value | ((native(request.address.raw + index).toLong & 255L) << (index * 8))
             )
             if (request.operation == HostMemoryAtomicOperation.Load) observed
@@ -115,7 +118,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
             native ++= beforeRead(range, native)
             HostMemoryBytes(
               range.address,
-              Vec.from((0 until range.size.raw).map { index =>
+              Vec.from((0 until range.size).map { index =>
                 val address = range.address.raw + index
                 native.getOrElse(address, fail(s"speculative host read at 0x${address.toHexString}"))
               })
@@ -256,10 +259,10 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
 
   for {
     width   <- List[Int in (16, 32, 64)](32, 64)
-    changed <- List(false, true)
+    changed <- Booleans
   } test(s"host atomic $width-bit hints avoid redundant RPCs and retry native changes, changed=$changed") {
-    val initial     = if (width.raw == 32) 0xfffffffeL else Long.MinValue + 7L
-    val replacement = if (width.raw == 32) 20L else 0x678900000014L
+    val initial     = if (width == 32) 0xfffffffeL else Long.MinValue + 7L
+    val replacement = if (width == 32) 20L else 0x678900000014L
     val size        = width.toFloatByteWidth
     val source      = header + s"""
       .visible .entry probe(.param .u64 counter, .param .u64 output) {
@@ -292,7 +295,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val second = if (changed) replacement else initial + 1
     assertEquals(
       writes,
-      bytes(0x1000, second + 1, size) ++ bytes(0x8000, initial, size) ++ bytes(0x8000 + size.raw, second, size)
+      bytes(0x1000, second + 1, size) ++ bytes(0x8000, initial, size) ++ bytes(0x8000 + size, second, size)
     )
     assert(requests.size <= (if (changed) 4 else 3), s"redundant native atomic RPCs: $requests")
   }
@@ -326,8 +329,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
 
   for {
     width   <- List[Int in (16, 32, 64)](32, 64)
-    release <- List(false, true)
-    rmw     <- List(false, true)
+    release <- Booleans
+    rmw     <- Booleans
   } test(s"PTX device-backed flag orders host payload, width=$width release=$release rmw=$rmw") {
     val atomic = if (release) {
       if (rmw) s"atom.release.gpu.global.exch.b$width %v, [%flag], 1;"
@@ -358,7 +361,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         if (range.address.raw == 0x3000) {
           if (release) {
             assertEquals(
-              (0 until width.toFloatByteWidth.raw).map(i => native(0x1000L + i)),
+              (0 until width.toFloatByteWidth).map(i => native(0x1000L + i)),
               encoded(73, width.toFloatByteWidth)
             )
             Map.empty
@@ -514,7 +517,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     )
   }
 
-  test("relaxed.sys host load rejects misaligned atomic-width addresses") {
+  test("relaxed.sys host load at a misaligned address faults as misaligned") {
     val source = header + """
       .visible .entry probe(.param .u64 input) {
         .reg .u64 %p; .reg .u32 %value;
@@ -534,8 +537,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       ).toOption.get
       val completion = service.launch(program, task).toOption.get
       service.pollHostMemory(completion) match {
-        case Left(error)  => assert(error.message.contains("naturally aligned"), error.message)
-        case Right(batch) => fail(s"misaligned relaxed.sys load completed or requested a host copy: $batch")
+        case Left(ExecutionFailure.MisalignedAddress(_)) => ()
+        case other => fail(s"misaligned relaxed.sys load did not fault as misaligned: $other")
       }
     }
   }
@@ -590,7 +593,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
 
   for {
     fence       <- List("membar.sys", "fence.sc.sys", "fence.acq_rel.sys", "fence.acquire.sys", "fence.release.sys")
-    writeBefore <- List(false, true)
+    writeBefore <- Booleans
   } test(s"PTX $fence refreshes host data, pending writes=$writeBefore") {
     // fence.acquire and fence.release need PTX ISA 8.6 and sm_90
     val target = if (fence.startsWith("fence.acquire") || fence.startsWith("fence.release"))
@@ -607,7 +610,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     checkFence(ProgramEncoding.PTXText, Vec.from(source.getBytes(StandardCharsets.UTF_8)), writeBefore)
   }
 
-  for (writeBefore <- List(false, true))
+  for (writeBefore <- Booleans)
     test(s"SPIR-V memory barrier refreshes host data, pending writes=$writeBefore") {
       val image = spirvAssembly.image(s"""
         ${spirvAssembly.openCL}
@@ -636,8 +639,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     }
 
   for {
-    reload    <- List(false, true)
-    relocated <- List(false, true)
+    reload    <- Booleans
+    relocated <- Booleans
   } test(s"SPIR-V synchronised host pointer replacement stays authoritative, reload=$reload relocated=$relocated") {
     val reloading = "%reloaded = OpLoad %uint_ptr %slot\n%value = OpLoad %uint %reloaded\nOpStore %output %value"
     val image     = spirvAssembly.image(s"""
@@ -695,7 +698,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     if (reload) assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(address = 0x8000, value = 29, 4))
   }
 
-  for (registered <- List(false, true))
+  for (registered <- Booleans)
     test(s"SPIR-V ByVal aggregate preserves native pointer bytes without relocation, registered=$registered") {
       val image = spirvAssembly.image(s"""
         ${spirvAssembly.openCL}
@@ -733,8 +736,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     }
 
   for {
-    structure <- List(false, true)
-    offset    <- List(0L, 8L)
+    structure <- Booleans
+    offset    <- PointerOffsets
   } test(s"SPIR-V typed external pointer argument reads native bytes, structure=$structure offset=$offset") {
     val argument = if (structure) "%holder_ptr" else "%uint_ptr_ptr"
     val slot     =

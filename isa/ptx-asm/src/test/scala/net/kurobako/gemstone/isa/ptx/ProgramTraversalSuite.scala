@@ -25,16 +25,17 @@ class ProgramTraversalSuite extends munit.FunSuite {
   private def adds(program: Program): Vec[String] = {
     val found = Vec.newBuilder[String]
     val _     = program.mapInstructions {
-      case add: Instruction.Add => found += asm.Printer.render(add).raw; add
-      case other                => other
+      case add @ Instruction(_: Form.Add, _, _) => found += asm.Printer.render(add).raw; add
+      case other                                => other
     }
     found.result()
   }
 
   test("instructions in functions, entries and nested blocks are all reached") {
     val edited = program.mapInstructions {
-      case add @ Instruction.Add(_, _, Operand.Immediate(_), _, _) => add.copy(srcB = Operand.Immediate("5"))
-      case other                                                   => other
+      case add @ Instruction(Form.Add(dest, srcA, Operand.Immediate(_)), _, _) =>
+        add.copy(form = Form.Add(dest, srcA, Operand.Immediate("5")))
+      case other => other
     }
     assertEquals(adds(edited), Vec("add.u32 %r1, %r0, 5;", "add.u32 %r1, %r0, 5;"))
   }

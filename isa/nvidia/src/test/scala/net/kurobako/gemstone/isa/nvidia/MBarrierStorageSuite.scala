@@ -90,8 +90,8 @@ class MBarrierStorageSuite extends munit.FunSuite {
       val q       = MBarrier.MaximumCount + 1L - count
       val bits    = ((q << 11) << 32) | (q << 1)
       val barrier = MBarrier.fromStoredInitialState(bits).toOption.get
-      assertEquals(barrier.arrive(count, 0), Right(0L))
-      assert(barrier.complete(0, parity = true))
+      assertEquals(barrier.arrive(count, 0), Right(bits))
+      assert(barrier.complete(0))
     }
   }
 

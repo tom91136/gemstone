@@ -13,7 +13,7 @@ class SASSSymbolsSuite extends munit.FunSuite {
       )
     assertEquals(parsed.name, "SpecialRegister")
     assertEquals(
-      parsed.values.map(value => value.name -> value.value),
+      parsed.values.map(value => value.name -> value.number),
       Vector(
         "SR0"      -> BigInt(0),
         "SR1"      -> BigInt(1),
@@ -28,7 +28,7 @@ class SASSSymbolsSuite extends munit.FunSuite {
   }
   test("binary values, implicit tokens and comments are parsed without guessing") {
     val parsed = SASSSymbols.parse("REQ req*, other=0b11, // comment\n next, hex=0xff").fold(fail(_), identity)
-    assertEquals(parsed.values.map(_.value), Vector(0, 3, 4, 255).map(BigInt(_)))
+    assertEquals(parsed.values.map(_.number), Vector(0, 3, 4, 255).map(BigInt(_)))
     assert(SASSSymbols.parse("Bad A = runtime(foo)").isLeft)
   }
   test("starred enum entries retain their default and ambiguous union defaults are omitted") {

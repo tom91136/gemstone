@@ -4,7 +4,6 @@ import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*
-import net.kurobako.gemstone.isa.amdgpu.Metadata.*
 
 object Binary {
   def encodeStatement(
@@ -30,7 +29,7 @@ object Binary {
       target: Target,
       waveSize: Int in (32, 64)
   ): Either[CodecError, DecodedStatement] =
-    DualIssueCodec.decode(bytes, offset.raw, target).getOrElse(
+    DualIssueCodec.decode(bytes, offset, target).getOrElse(
       decodeAt(bytes, offset, target, waveSize).map(value =>
         DecodedStatement(Statement.Instruction(value.instruction), value.size)
       )
@@ -41,7 +40,7 @@ object Binary {
       target: Target,
       waveSize: Int in (32, 64) = 32
   ): Either[CodecError, Vec[Byte]] = {
-    val definitions = encodingsFor(instruction.definition, target)
+    val definitions = instruction.definition.encodings(target)
     if (definitions.isEmpty) Left(CodecError.UnsupportedInstruction(instruction.opcode, target))
     else if (definitions.exists(InstructionCodec.supports(_))) InstructionCodec.encode(instruction, target, waveSize)
     else Left(CodecError.UnsupportedFormat(instruction.opcode, target, definitions.map(_.format).distinct))
@@ -50,7 +49,7 @@ object Binary {
   def decode(bytes: Vec[Byte], target: Target, waveSize: Int in (32, 64) = 32): Either[CodecError, Instruction] =
     decodeAt(Vec.toArray(bytes), 0, target, waveSize).flatMap { decoded =>
       if (decoded.size.raw == bytes.size) Right(decoded.instruction)
-      else Left(CodecError.InvalidEncoding(s"trailing bytes after instruction: ${bytes.size - decoded.size.raw}"))
+      else Left(CodecError.InvalidEncoding(s"trailing bytes after instruction: ${bytes.size - decoded.size}"))
     }
 
   private def decodeAt(
@@ -59,7 +58,7 @@ object Binary {
       target: Target,
       waveSize: Int in (32, 64)
   ): Either[CodecError, DecodedInstruction] =
-    if (offset.raw > bytes.length || bytes.length - offset.raw < 4)
+    if (offset > bytes.length || bytes.length - offset < 4)
       Left(CodecError.InvalidEncoding(s"truncated instruction at byte $offset"))
-    else InstructionCodec.decode(bytes, offset.raw, target, waveSize)
+    else InstructionCodec.decode(bytes, offset, target, waveSize)
 }

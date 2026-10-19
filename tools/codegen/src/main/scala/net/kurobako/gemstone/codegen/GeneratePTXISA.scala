@@ -11,6 +11,7 @@ import net.kurobako.gemstone.string.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.util.matching.Regex
 
@@ -66,7 +67,8 @@ object GeneratePTXISA {
     "Launch instructions"
   )
   private val HeadingNumber: Regex = raw"^((?:\d+\.)+)\s*(.*)$$".r
-  private val Mnemonic: Regex      = raw"^\s*([A-Za-z_][A-Za-z0-9_]*)(?=\.|\{|\s|;|$$)".r
+  // opcodes are lower case, so captions inside syntax blocks such as "FP8 floating point type" begin no form
+  private val Mnemonic: Regex      = raw"^\s*([a-z_][a-z0-9_]*)(?=\.|\{|\s|;|$$)".r
   private val Predication: Regex   = raw"^\s*@[!]?[A-Za-z_$$][A-Za-z0-9_$$]*\s+".r
   private val Elision: Regex       = raw"\.{3,}".r
   private val ExamplePrefix: Regex = raw"^Example \d+:\s*".r
@@ -74,7 +76,9 @@ object GeneratePTXISA {
   private val TargetNote: Regex    = raw"sm_([0-9]+)[af]?\s+or\s+(?:higher|later)".r
   private val Definition: Regex    = raw"(?:\.|::)([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)\s*=\s*\{".r
   private val NoteClause: Regex    = raw"(?<=(?:higher|later)\.?)\s+|(?<=\.)\s+(?=[A-Z])".r
-  private val Spelling: Regex      =
+  // "when destination state space is .shared::cluster" conditions another qualifier's requirement, not its own.
+  private val StateSpaceCondition: Regex = raw"when (?:the )?(?:destination|source) state space is \.[A-Za-z:_]+".r
+  private val Spelling: Regex            =
     raw"([A-Za-z_][A-Za-z0-9_]*)?((?:\.?\{[^{}]*\}|\.[A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)+)".r
   private val SpellingPart: Regex     = raw"\{([^{}]*)\}|\.([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)".r
   private val OpcodeDefinition: Regex = raw"(?s)(?:^|\n)\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*\{([^}]*)\}\s*;?".r
@@ -85,6 +89,52 @@ object GeneratePTXISA {
     raw"\.([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)(?:\{([^{}]*)\})?".r
   private val DomainValue: Regex = "[A-Za-z0-9][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*".r
   private val PackageRoot        = "net/kurobako/gemstone/isa/ptx"
+
+  private val SpellingSeparators = Set('/', ',', '|')
+  private val ListSeparators     = Set(',', '|')
+
+  private val BulkMBarrierFields = Vector(
+    InstructionField("destinationAddress", optional = false),
+    InstructionField("sourceAddress", optional = false),
+    InstructionField("size", optional = false),
+    InstructionField("barrierAddress", optional = false),
+    InstructionField("ignoredBytesLeft", optional = true),
+    InstructionField("ignoredBytesRight", optional = true),
+    InstructionField("ctaMask", optional = true),
+    InstructionField("cachePolicy", optional = true)
+  )
+  private val BulkGroupFields = Vector(
+    InstructionField("destinationAddress", optional = false),
+    InstructionField("sourceAddress", optional = false),
+    InstructionField("size", optional = false),
+    InstructionField("cachePolicy", optional = true),
+    InstructionField("byteMask", optional = true)
+  )
+  private val TensorMBarrierFields = Vector(
+    InstructionField("destinationAddress", optional = false),
+    InstructionField("tensorMapAndCoordinates", optional = false),
+    InstructionField("barrierAddress", optional = false),
+    InstructionField("im2colInfo", optional = true),
+    InstructionField("ctaMask", optional = true),
+    InstructionField("cachePolicy", optional = true)
+  )
+  private val TensorGroupFields = Vector(
+    InstructionField("tensorMapAndCoordinates", optional = false),
+    InstructionField("sourceAddress", optional = false),
+    InstructionField("cachePolicy", optional = true)
+  )
+  private val AbbreviatedFields = Map(
+    "destination"        -> "dest",
+    "source"             -> "src",
+    "sourceA"            -> "srcA",
+    "sourceB"            -> "srcB",
+    "sourceC"            -> "srcC",
+    "secondarySource"    -> "secondarySrc",
+    "returnParameters"   -> "returnParams",
+    "parameters"         -> "params",
+    "sourceOrOrdinal"    -> "srcOrOrdinal",
+    "sourceSizeOrIgnore" -> "srcSizeOrIgnore"
+  )
 
   /** Qualifier domains whose spelling order is not significant; toolchains emit `ldmatrix.sync.aligned.x4.m8n8`. */
   private val UnorderedQualifiers: Map[String, Set[String]] = Map("ldmatrix" -> Set("shape", "num", "trans"))
@@ -105,23 +155,32 @@ object GeneratePTXISA {
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
     val specificationVersion = parseSpecificationVersion(request.version)
     val sections             = checkedSections(request.input)
-    val fileName             = if (request.tests) "DocumentationSuite.scala" else "Instruction.scala"
     val outputRoot           = request.sourceRoot.resolve(PackageRoot)
-    val output               = outputRoot.resolve(fileName)
-    if (request.tests) {
-      val examples = checkedExamples(sections)
-      write(output, renderTests(specificationVersion, examples))
-    } else write(output, renderInstructions(specificationVersion, sections))
-    val domains = if (request.tests) Vector.empty
-    else renderDomains(sections).map { case (name, source) =>
-      val path = output.resolveSibling(s"$name.scala")
+    val sources              =
+      if (request.tests)
+        Vector("DocumentationSuite.scala" -> renderTests(specificationVersion, checkedExamples(sections)))
+      else
+        renderInstructions(specificationVersion, sections) ++
+          renderDomains(sections).map { case (name, source) => s"$name.scala" -> source }
+    val written = sources.map { case (name, source) =>
+      val path = outputRoot.resolve(name)
       write(path, source)
       path
     }
-    val include  = (path: Path) => path.getFileName.toString.endsWith(".scala")
-    val expected = if (request.tests) Set(output) else Set(output) ++ domains
-    GeneratedFiles.removeUnexpected(outputRoot, expected, include)
+    val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
+    GeneratedFiles.removeUnexpected(outputRoot, written.toSet, include)
   }
+
+  private val ModifierMembers =
+    """|
+       |  lazy val PackedHalfTypes: Set[Modifier] = Set(F16x2, Bf16x2)
+       |
+       |  extension (modifier: Modifier) {
+       |    def isInteger32: Boolean  = PartialFunction.cond(modifier) { case U32 | S32 => true }
+       |    def isPackedHalf: Boolean = PackedHalfTypes(modifier)
+       |    def is64Bit: Boolean      = PartialFunction.cond(modifier) { case B64 | U64 | S64 | F64 => true }
+       |  }
+       |""".stripMargin
 
   private def renderDomains(sections: Vector[Section]): Vector[(String, String)] = {
     val shapes    = instructionShapes(sections)
@@ -134,14 +193,11 @@ object GeneratePTXISA {
             operationsFor(section, form).flatMap { case (opcode, _) => opcode.split('.').drop(1) }
           )
         )).distinct.sorted
-    def render(name: String, values: Vector[String], unknown: Boolean): String = {
+    def render(name: String, values: Vector[String], fallback: String, extra: String, members: String): String = {
       require(values.map(scalaCaseName(_)).distinct.size == values.size, s"ambiguous PTX $name names")
       val cases =
         values.map(value => s"  case ${scalaCaseName(value)} extends $name(${Emission.literal(value)})").mkString("\n")
-      val entries  = values.map(value => s"${Emission.literal(value)} -> ${scalaCaseName(value)}").mkString(", ")
-      val fallback =
-        if (unknown) "Unrecognised(name)" else "throw IllegalArgumentException(s\"unknown PTX opcode $name\")"
-      val extra = if (unknown) "  case Unrecognised(spelling: NonEmpty[String]) extends Modifier(spelling)" else ""
+      val entries = values.map(value => s"${Emission.literal(value)} -> ${scalaCaseName(value)}").mkString(", ")
       GeneratedHeader.scala("from the pinned PTX syntax domains") +
         s"""|package net.kurobako.gemstone.isa.ptx
             |import net.kurobako.gemstone.constraint.*
@@ -150,17 +206,29 @@ object GeneratePTXISA {
             |  private lazy val byName: Map[String, $name] = Map($entries)
             |  def apply(name: NonEmpty[String]): $name = byName.getOrElse(name.raw, $fallback)
             |  def unapply(value: $name): Some[NonEmpty[String]] = Some(value.name)
-            |}
+            |$members}
             |
-            |${GeneratedHeader.annotation()}enum $name(val name: NonEmpty[String]) {
+            |${GeneratedHeader.annotation()}enum $name(val name: NonEmpty[String]) derives CanEqual {
             |$cases
             |$extra
             |}
             |""".stripMargin
     }
     Vector(
-      "Opcode"   -> render("Opcode", opcodes, unknown = false),
-      "Modifier" -> render("Modifier", modifiers, unknown = true)
+      "Opcode" -> render(
+        "Opcode",
+        opcodes,
+        fallback = "throw IllegalArgumentException(s\"unknown PTX opcode $name\")",
+        extra = "",
+        members = ""
+      ),
+      "Modifier" -> render(
+        "Modifier",
+        modifiers,
+        fallback = "Unrecognised(name)",
+        extra = "  case Unrecognised(spelling: NonEmpty[String]) extends Modifier(spelling)",
+        members = ModifierMembers
+      )
     )
   }
 
@@ -265,11 +333,11 @@ object GeneratePTXISA {
         Option(part.group(2)) match {
           case Some(name) => sets.map(_ + name)
           case None       =>
-            val alternatives = Text.splitWords(part.group(1), Set('/', ',', '|')).map(_.stripPrefix("."))
+            val alternatives = Text.splitWords(part.group(1), SpellingSeparators).map(_.stripPrefix("."))
             sets.flatMap(set => alternatives.map(set + _))
         }
       }.map(_.filter(known)).filter(_.nonEmpty)
-    notes.flatMap(NoteClause.split(_)).flatMap { clause =>
+    notes.flatMap(NoteClause.split(_)).map(StateSpaceCondition.replaceAllIn(_, "")).flatMap { clause =>
       TargetNote.findAllMatchIn(clause).map(_.group(1).toInt).minOption.toVector.flatMap { target =>
         val spellings = Spelling.findAllMatchIn(clause).toVector
           .map(matched => Option(matched.group(1)).exists(mnemonics) -> combinations(matched.group(2)))
@@ -281,23 +349,25 @@ object GeneratePTXISA {
   }
 
   private def cleanExamples(blocks: Vector[Vector[String]]): Vector[String] = {
-    def flush(examples: Vector[String], buffer: String): (Vector[String], String) =
-      if (buffer.isEmpty || isKnownNoise(buffer)) examples -> "" else (examples :+ buffer) -> ""
-    val (examples, buffer) = blocks.flatten.foldLeft((Vector.empty[String], "")) {
-      case ((examples, buffer), raw) =>
-        val line = ExamplePrefix.replaceFirstIn(raw.trim, "")
-        if (line.nonEmpty && !line.startsWith("//")) {
-          Elision.split(line).foldLeft((examples, buffer)) { case ((currentExamples, currentBuffer), fragment) =>
-            val value = fragment.trim
-            if (value.nonEmpty) {
-              val next = if (currentBuffer.isEmpty) value else currentBuffer + " " + value
-              if (next.endsWith(";") || next.endsWith(":") || next == "}") flush(currentExamples, next)
-              else currentExamples -> next
-            } else currentExamples -> currentBuffer
-          }
-        } else examples -> buffer
+    val examples      = Vector.newBuilder[String]
+    val buffer        = mutable.StringBuilder()
+    def flush(): Unit = {
+      if (buffer.nonEmpty && !isKnownNoise(buffer.toString)) { val _ = examples += buffer.toString }
+      buffer.clear()
     }
-    flush(examples, buffer)._1
+    blocks.flatten.foreach { raw =>
+      val line = ExamplePrefix.replaceFirstIn(raw.trim, "")
+      if (line.nonEmpty && !line.startsWith("//")) Elision.split(line).foreach { fragment =>
+        val value = fragment.trim
+        if (value.nonEmpty) {
+          if (buffer.nonEmpty) { val _ = buffer.append(' ') }
+          val _ = buffer.append(value)
+          if (buffer.last == ';' || buffer.last == ':' || (buffer.length == 1 && buffer.last == '}')) flush()
+        }
+      }
+    }
+    flush()
+    examples.result()
   }
 
   private def isKnownNoise(line: String): Boolean = {
@@ -338,7 +408,7 @@ object GeneratePTXISA {
   ).flatMap { block =>
     val definitions       = domainDefinitions(block)
     val opcodeDefinitions = OpcodeDefinition.findAllMatchIn(block).map { matched =>
-      val values = Text.splitWords(matched.group(2), Set(',', '|')).view.map(_.stripPrefix(".")).filter(value =>
+      val values = Text.splitWords(matched.group(2), ListSeparators).view.map(_.stripPrefix(".")).filter(value =>
         Mnemonic.matches(value)
       ).toVector
       matched.group(1) -> values
@@ -385,11 +455,13 @@ object GeneratePTXISA {
       }
     ).zipWithIndex.drop(1).collectFirst { case (0, step) => open + step - 1 }.getOrElse(source.length)
 
+  private val AnyQualifier = "::([A-Za-z0-9_]+)".r
+
   /** Values of a domain definition; `.param{::entry, ::func}` contributes `param` and each qualified spelling. */
   private def definitionValues(source: String): Set[String] =
     splitTopLevel(source.replace('|', ',')).flatMap { value =>
       val base       = value.takeWhile(_ != '{').trim.stripPrefix(".").stripPrefix("::")
-      val qualifiers = "::([A-Za-z0-9_]+)".r.findAllMatchIn(value.dropWhile(_ != '{')).map(_.group(1))
+      val qualifiers = AnyQualifier.findAllMatchIn(value.dropWhile(_ != '{')).map(_.group(1))
       base +: qualifiers.map(qualifier => s"$base::$qualifier").toVector
     }.filter(DomainValue.matches(_)).toSet
 
@@ -415,8 +487,10 @@ object GeneratePTXISA {
   }
 
   private def normaliseForm(source: String, definitions: Map[String, Set[String]]): Option[Form] = {
-    val normalised = Predication.replaceFirstIn(Text.normaliseWhitespace(source), "")
-    val space      = normalised.indexWhere(_.isWhitespace)
+    // the specification once separates a qualifier from its dot, as in `.noftz. vec_16_bit`
+    val normalised =
+      Predication.replaceFirstIn(Text.normaliseWhitespace(source), "").replaceAll(raw"\.\s+(?=[a-z_])", ".")
+    val space = normalised.indexWhere(_.isWhitespace)
     if (normalised.isEmpty) None
     else {
       val opcodeToken = if (space < 0) normalised else normalised.take(space)
@@ -465,6 +539,19 @@ object GeneratePTXISA {
     (if (head.isEmpty) Vector.empty else Vector(head -> false)) ++ tail
   }
 
+  /** The values a qualifier name stands for; the specification also refers to a packed-type domain such as
+    * `.fp16x2type` as `.fp16x2`.
+    */
+  private def domain(definitions: Map[String, Set[String]], name: String): Set[String] =
+    definitions.getOrElse(
+      name,
+      definitions.get(s"${name}type").filter(_ => PackedName.matches(name)).getOrElse(Set(name))
+    )
+
+  private val PackedName: Regex = "[a-z0-9]+x[24]".r
+
+  private val Qualifier = "::([A-Za-z][A-Za-z0-9_]*)".r
+
   private def normaliseModifiers(
       source: String,
       definitions: Map[String, Set[String]]
@@ -481,15 +568,15 @@ object GeneratePTXISA {
         case '.' =>
           val name = ModifierName.findPrefixOf(source.drop(index + 1)).getOrElse("")
           if (name.isEmpty) loop(index + 1, required, optional, false)
-          else loop(index + name.length + 1, required :+ definitions.getOrElse(name, Set(name)), optional, complete)
+          else loop(index + name.length + 1, required :+ domain(definitions, name), optional, complete)
         case '{' =>
           val end = closingBrace(source, index)
           if (end >= source.length) loop(source.length, required, optional, false)
           else if (source.startsWith("::", index + 1) && required.nonEmpty) {
-            val suffixes = "::([A-Za-z][A-Za-z0-9_]*)".r
+            val suffixes = Qualifier
               .findAllMatchIn(source.slice(index + 1, end)).flatMap { matched =>
                 val name = matched.group(1)
-                definitions.getOrElse(name, Set(name))
+                domain(definitions, name)
               }.toSet
             val qualified = for {
               base   <- required.last
@@ -498,9 +585,9 @@ object GeneratePTXISA {
             loop(end + 1, required.init :+ (required.last ++ qualified), optional, complete && suffixes.nonEmpty)
           } else {
             val names = OptionalSpelling.findAllMatchIn(source.slice(index + 1, end)).flatMap { matched =>
-              val bases    = definitions.getOrElse(matched.group(1), Set(matched.group(1)))
+              val bases    = domain(definitions, matched.group(1))
               val suffixes = Option(matched.group(2)).toVector.flatMap(group =>
-                "::([A-Za-z][A-Za-z0-9_]*)".r.findAllMatchIn(group).map(_.group(1))
+                Qualifier.findAllMatchIn(group).map(_.group(1))
               )
               bases ++ bases.flatMap(base => suffixes.map(suffix => s"$base::$suffix"))
             }.toSet
@@ -555,33 +642,18 @@ object GeneratePTXISA {
   private def renderInstructions(
       version: SpecificationVersion,
       sections: Vector[Section]
-  ): String = {
+  ): Vector[(String, String)] = {
     val shapes = instructionShapes(sections).flatMap {
       case shape if shape.opcode == "cp.async.bulk" =>
         Vector(
           shape.copy(
             caseName = "CpAsyncBulkMBarrier",
-            fields = Vector(
-              InstructionField("destinationAddress", false),
-              InstructionField("sourceAddress", false),
-              InstructionField("size", false),
-              InstructionField("barrierAddress", false),
-              InstructionField("ignoredBytesLeft", true),
-              InstructionField("ignoredBytesRight", true),
-              InstructionField("ctaMask", true),
-              InstructionField("cachePolicy", true)
-            ),
+            fields = BulkMBarrierFields,
             decodeGuard = Some("!modifierNames.contains(\"bulk_group\")")
           ),
           shape.copy(
             caseName = "CpAsyncBulkGroup",
-            fields = Vector(
-              InstructionField("destinationAddress", false),
-              InstructionField("sourceAddress", false),
-              InstructionField("size", false),
-              InstructionField("cachePolicy", true),
-              InstructionField("byteMask", true)
-            ),
+            fields = BulkGroupFields,
             decodeGuard = Some("modifierNames.contains(\"bulk_group\")")
           )
         )
@@ -589,23 +661,12 @@ object GeneratePTXISA {
         Vector(
           shape.copy(
             caseName = "CpAsyncBulkTensorMBarrier",
-            fields = Vector(
-              InstructionField("destinationAddress", false),
-              InstructionField("tensorMapAndCoordinates", false),
-              InstructionField("barrierAddress", false),
-              InstructionField("im2colInfo", true),
-              InstructionField("ctaMask", true),
-              InstructionField("cachePolicy", true)
-            ),
+            fields = TensorMBarrierFields,
             decodeGuard = Some("!modifierNames.contains(\"bulk_group\")")
           ),
           shape.copy(
             caseName = "CpAsyncBulkTensorGroup",
-            fields = Vector(
-              InstructionField("tensorMapAndCoordinates", false),
-              InstructionField("sourceAddress", false),
-              InstructionField("cachePolicy", true)
-            ),
+            fields = TensorGroupFields,
             decodeGuard = Some("modifierNames.contains(\"bulk_group\")")
           )
         )
@@ -646,19 +707,21 @@ object GeneratePTXISA {
       val fields = shape.fields.map { field =>
         s"${field.name}: ${if (field.optional) "Option[Operand]" else "Operand"}"
       }
-      val parameters      = (fields ++ Vector("mods: Vec[Modifier]", "pred: Option[Predication]")).mkString(", ")
+      val parameters      = fields.mkString(", ")
       val constructorArgs =
         if (shape.fields.isEmpty) ""
         else if (shape.fields.forall(!_.optional)) s", ${shape.fields.map(_.name).mkString(", ")}"
         else s", (${operandValues(shape)})*"
-      s"  case ${shape.caseName}($parameters) extends Instruction(Instruction.Definition.${shape.caseName}$constructorArgs)"
+      s"  case ${shape.caseName}($parameters) extends Form(${constructorArgs.stripPrefix(", ")})"
     }
     def renderDecoder(shape: InstructionShape): String = {
       val minRequired        = shape.fields.lastIndexWhere(!_.optional) + 1
       val allowed            = allowedOperandCounts(shape)
-      val allowedTest        = allowed.map(count => s"operands.size == $count").mkString(" || ")
+      val allowedTest        = operandCountTest(allowed)
       val defaultOperandTest =
-        if (allowedTest.isEmpty) "false" else s"operands.size >= $minRequired && ($allowedTest)"
+        if (allowedTest.isEmpty) "false"
+        else if (allowed.min >= minRequired) allowedTest
+        else s"operands.size >= $minRequired && ($allowedTest)"
       val operandTest = shape.caseName match {
         case "CpAsyncBulkMBarrier" =>
           "if (modifierNames.contains(\"ignore_oob\")) operands.size == 6 || operands.size == 7 else if (modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 6 else operands.size == 4 || operands.size == 5"
@@ -670,105 +733,86 @@ object GeneratePTXISA {
         case _ => defaultOperandTest
       }
       val operationTest     = shape.decodeGuard.getOrElse("true")
+      val named             = shape.fields.size > 2
       val constructorFields = shape.fields.zipWithIndex.map { case (field, position) =>
-        if (field.optional) s"operands.lift($position)" else s"operands($position)"
+        val value =
+          if (!field.optional) s"operands($position)"
+          else if (position == 0) "operands.headOption"
+          else s"operands.lift($position)"
+        if (named) s"${field.name} = $value" else value
       }
-      val remainingModifiers = "mods"
-      val defaultConstructor =
-        s"Instruction.${shape.caseName}(${(constructorFields ++ Vector(remainingModifiers, "pred")).mkString(", ")})"
-      val constructor = shape.caseName match {
+      def call(arguments: String*): String = {
+        val passed =
+          if (named) shape.fields.map(_.name).zip(arguments).map((field, value) => s"$field = $value") else arguments
+        s"Form.${shape.caseName}(${passed.mkString(", ")})"
+      }
+      val defaultConstructor = s"Form.${shape.caseName}(${constructorFields.mkString(", ")})"
+      val constructor        = shape.caseName match {
         case "CpAsyncBulkMBarrier" =>
-          s"if (modifierNames.contains(\"ignore_oob\")) Instruction.CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(5), Some(operands(3)), Some(operands(4)), None, operands.lift(6), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(3), None, None, operands.lift(4), operands.lift(5), $remainingModifiers, pred) else Instruction.CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(3), None, None, None, operands.lift(4), $remainingModifiers, pred)"
+          s"if (modifierNames.contains(\"ignore_oob\")) ${call("operands(0)", "operands(1)", "operands(2)", "operands(5)", "Some(operands(3))", "Some(operands(4))", "None", "operands.lift(6)")} else if (modifierNames.contains(\"multicast::cluster\")) ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "None", "None", "operands.lift(4)", "operands.lift(5)")} else ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "None", "None", "None", "operands.lift(4)")}"
         case "CpAsyncBulkGroup" =>
-          s"if (operands.size == 3) Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, None, $remainingModifiers, pred) else if (operands.size == 4 && modifierNames.contains(\"cp_mask\")) Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, Some(operands(3)), $remainingModifiers, pred) else Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), $remainingModifiers, pred)"
+          s"if (operands.size == 3) ${call("operands(0)", "operands(1)", "operands(2)", "None", "None")} else if (operands.size == 4 && modifierNames.contains(\"cp_mask\")) ${call("operands(0)", "operands(1)", "operands(2)", "None", "Some(operands(3))")} else ${call("operands(0)", "operands(1)", "operands(2)", "Some(operands(3))", "operands.lift(4)")}"
         case "CpAsyncBulkTensorMBarrier" =>
-          s"if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), operands.lift(5), $remainingModifiers, pred) else if (modifierNames.exists(_.startsWith(\"im2col\"))) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), None, operands.lift(4), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, operands.lift(3), operands.lift(4), $remainingModifiers, pred) else Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, None, operands.lift(3), $remainingModifiers, pred)"
+          s"if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) ${call("operands(0)", "operands(1)", "operands(2)", "Some(operands(3))", "operands.lift(4)", "operands.lift(5)")} else if (modifierNames.exists(_.startsWith(\"im2col\"))) ${call("operands(0)", "operands(1)", "operands(2)", "Some(operands(3))", "None", "operands.lift(4)")} else if (modifierNames.contains(\"multicast::cluster\")) ${call("operands(0)", "operands(1)", "operands(2)", "None", "operands.lift(3)", "operands.lift(4)")} else ${call("operands(0)", "operands(1)", "operands(2)", "None", "None", "operands.lift(3)")}"
         case "CpAsyncBulkTensorGroup" =>
-          s"Instruction.CpAsyncBulkTensorGroup(operands(0), operands(1), operands.lift(2), $remainingModifiers, pred)"
+          s"${call("operands(0)", "operands(1)", "operands.lift(2)")}"
         case "Call" =>
-          s"if (operands.size >= 2 && Operand.isParenthesized(operands(0))) Instruction.Call(Some(operands(0)), operands(1), operands.lift(2), operands.lift(3), $remainingModifiers, pred) else Instruction.Call(None, operands(0), operands.lift(1), operands.lift(2), $remainingModifiers, pred)"
+          s"if (operands.size >= 2 && Operand.isParenthesized(operands(0))) ${call("Some(operands(0))", "operands(1)", "operands.lift(2)", "operands.lift(3)")} else ${call("None", "operands(0)", "operands.lift(1)", "operands.lift(2)")}"
         case "MbarrierTestWait" =>
-          s"if (operands.size == 3) Instruction.MbarrierTestWait(operands(0), None, operands(1), operands(2), $remainingModifiers, pred) else Instruction.MbarrierTestWait(operands(0), Some(operands(1)), operands(2), operands(3), $remainingModifiers, pred)"
+          s"if (operands.size == 3) ${call("operands(0)", "None", "operands(1)", "operands(2)")} else ${call("operands(0)", "Some(operands(1))", "operands(2)", "operands(3)")}"
         case "MbarrierTryWait" =>
-          s"if (operands.size == 3) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), None, $remainingModifiers, pred) else if (operands.size == 4 && !Operand.isWithPredicate(operands(0))) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), Some(operands(3)), $remainingModifiers, pred) else Instruction.MbarrierTryWait(operands(0), Some(operands(1)), operands(2), operands(3), operands.lift(4), $remainingModifiers, pred)"
+          s"if (operands.size == 3) ${call("operands(0)", "None", "operands(1)", "operands(2)", "None")} else if (operands.size == 4 && !Operand.isWithPredicate(operands(0))) ${call("operands(0)", "None", "operands(1)", "operands(2)", "Some(operands(3))")} else ${call("operands(0)", "Some(operands(1))", "operands(2)", "operands(3)", "operands.lift(4)")}"
         case "Tcgen05Mma" =>
-          s"if (operands.size == 5) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, None, operands(4), None, $remainingModifiers, pred) else if (Operand.isAddress(operands(4))) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), Some(operands(4)), Some(operands(5)), None, operands(6), None, $remainingModifiers, pred) else Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, Some(operands(4)), operands(5), operands.lift(6), $remainingModifiers, pred)"
+          s"if (operands.size == 5) ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "None", "None", "None", "operands(4)", "None")} else if (Operand.isAddress(operands(4))) ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "Some(operands(4))", "Some(operands(5))", "None", "operands(6)", "None")} else ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "None", "None", "Some(operands(4))", "operands(5)", "operands.lift(6)")}"
         case "Tcgen05MmaSp" =>
-          s"if (operands.size == 6) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, None, operands(5), None, $remainingModifiers, pred) else if (Operand.isAddress(operands(5))) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), Some(operands(5)), Some(operands(6)), None, operands(7), None, $remainingModifiers, pred) else Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, Some(operands(5)), operands(6), operands.lift(7), $remainingModifiers, pred)"
+          s"if (operands.size == 6) ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "operands(4)", "None", "None", "None", "operands(5)", "None")} else if (Operand.isAddress(operands(5))) ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "operands(4)", "Some(operands(5))", "Some(operands(6))", "None", "operands(7)", "None")} else ${call("operands(0)", "operands(1)", "operands(2)", "operands(3)", "operands(4)", "None", "None", "Some(operands(5))", "operands(6)", "operands.lift(7)")}"
         case _ => defaultConstructor
       }
       val invalidOperands =
-        s"Left(Instruction.DecodeError.InvalidOperandCount(${Emission.literal(shape.opcode)}, Vec(${allowed.mkString(", ")}), operands.size))"
+        s"Left(DecodeError(${Emission.literal(shape.opcode)}, DecodeProblem.InvalidOperandCount(Vec(${allowed.mkString(", ")}), operands.size)))"
       val decodeBody =
         if (operationTest == "true")
           s"if ($operandTest) Right($constructor) else $invalidOperands"
         else
-          s"if ($operationTest && ($operandTest)) Right($constructor) else if ($operationTest) $invalidOperands else Left(Instruction.DecodeError.UnknownOpcode(((${Emission.literal(shape.opcode)}) +: modifierNames).mkString(\".\")))"
-      val modifierNames =
-        Option.when(s"$operationTest $operandTest $constructor".contains("modifierNames"))(
-          "      val modifierNames = mods.map(_.name)\n"
-        ).getOrElse("")
-      s"""|(
-          |      operands: Vec[Operand],
-          |      mods: Vec[Modifier],
-          |      pred: Option[Predication]
-          |    ) => {
+          s"if ($operationTest && ($operandTest)) Right($constructor) else if ($operationTest) $invalidOperands else Left(DecodeError(((${Emission.literal(shape.opcode)}) +: modifierNames).mkString(\".\"), DecodeProblem.UnknownOpcode))"
+      val usesModifiers = s"$operationTest $operandTest $constructor".contains("modifierNames")
+      val modifierNames = if (usesModifiers) "      val modifierNames = mods.map(_.name)\n" else ""
+      s"""|(operands, ${if (usesModifiers) "mods" else "_"}) => {
           |$modifierNames      $decodeBody
           |    }""".stripMargin
     }
-    val metadataHelpers                                 = Vector.newBuilder[String]
     def renderMetadata(shape: InstructionShape): String = {
-      val entries = sections.zipWithIndex.flatMap { (section, sectionIndex) =>
-        val renderedForms = section.forms.view.flatMap(form => operationsFor(section, form)).flatMap {
+      val entries = sections.flatMap { section =>
+        val forms = section.forms.view.flatMap(form => operationsFor(section, form)).flatMap {
           case (opcode, form) if opcode == shape.opcode                => renderForms(form, shape.operationModifiers)
           case (opcode, form) if spelledUnderBase(opcode, form, shape) => renderForms(form, Vector.empty)
           case _                                                       => Vector.empty
         }.toVector.distinct
-        // Large tensor tables exceed JVM method limits when initialised inline.
-        val forms = if (renderedForms.mkString.length < 4000) renderedForms
-        else renderedForms.zipWithIndex.map { (form, index) =>
-          val name = s"metadata${shape.caseName}_${sectionIndex}_$index"
-          metadataHelpers += s"  private def $name(): InstructionForm = $form"
-          s"$name()"
-        }
-        val modifierTargets = Emission.collection(
-          "Map",
-          section.modifierTargets.toVector.map((modifiers, target) =>
-            Emission.collection(
-              "_root_.scala.collection.immutable.Set",
-              modifiers.toVector.sorted.map(modifier => s"Modifier.${scalaCaseName(modifier)}")
-            ) + s" -> Target($target)"
-          ).sorted
-        )
-        Option.when(forms.nonEmpty) {
-          s"""|Metadata.Entry(
-              |          Version(${section.introduced.major}, ${section.introduced.minor}),
-              |          Target(${section.minimumTarget}),
-              |          $modifierTargets,
-              |          Vec(${forms.mkString(", ")})
-              |        )""".stripMargin
-        }
+        val modifierTargets = section.modifierTargets.toVector
+          .map((modifiers, target) => s"${modifiers.toVector.sorted.mkString("+")}=$target").sorted.mkString(",")
+        val header =
+          s"${section.introduced.major}.${section.introduced.minor} ${section.minimumTarget} $modifierTargets"
+        Option.when(forms.nonEmpty)((header +: forms).mkString(" "))
       }
       if (entries.isEmpty) throw IllegalStateException(s"missing PTX metadata for ${shape.opcode}")
-      s"""|() => Metadata(Vec.nonEmpty(
-          |        ${entries.mkString(",\n")}
-          |      ))""".stripMargin
+      val text = entries.mkString("\n")
+      require(text.length < 65535, s"PTX metadata for ${shape.opcode} exceeds a string constant")
+      Emission.literal(text)
     }
-    val definitions = shapes.map { shape =>
+    val metadata    = shapes.map(renderMetadata(_))
+    val definitions = shapes.zip(metadata).map { (shape, rendered) =>
       s"""|    case ${shape.caseName} extends Definition(
           |    ${Emission.literal(shape.opcode)},
           |    Opcode.${scalaCaseName(shape.opcode.takeWhile(_ != '.'))},
           |    Vec(${shape.opcode.split('.').drop(1).map(value => s"Modifier.${scalaCaseName(value)}").mkString(", ")}),
           |    ${renderDecoder(shape)},
-          |    ${renderMetadata(shape)}
+          |    $rendered
           |  )""".stripMargin
     }
-    GeneratedHeader.scala(
+    val instruction = GeneratedHeader.scala(
       s"PTX instruction model from the pinned NVIDIA ISA ${version.source} specification"
     ) +
       s"""|package net.kurobako.gemstone.isa.ptx
-        |
-        |import Metadata.*
         |
         |import net.kurobako.gemstone.string.*
         |import net.kurobako.gemstone.constraint.*
@@ -777,24 +821,12 @@ object GeneratePTXISA {
         |import net.kurobako.gemstone.collection.Vec.*
         |
         |${GeneratedHeader.annotation()}object Instruction {
-        |  enum DecodeError {
-        |    case UnknownOpcode(opcode: String)
-        |    case InvalidOperandCount(opcode: String, expected: Vec[Int], actual: Int)
-        |    case AmbiguousInstruction(opcode: String, definitions: Vec[String])
-        |  }
+        |  type Decoder = (operands: Vec[Operand], mods: Vec[Modifier]) => Either[DecodeError, Form]
         |
-        |  type Decoder = (
-        |      operands: Vec[Operand],
-        |      mods: Vec[Modifier],
-        |      pred: Option[Predication]
-        |  ) => Either[DecodeError, Instruction]
-        |
-        |${metadataHelpers.result().mkString("\n")}
-        |
-        |  enum Definition(val opcode: NonEmpty[String], val mnemonic: Opcode, val fixedModifiers: Vec[Modifier], val decoder: Decoder, metadata: () => Metadata) {
+        |  enum Definition(val opcode: NonEmpty[String], val mnemonic: Opcode, val fixedModifiers: Vec[Modifier], val decoder: Decoder, metadata: String) {
         |${definitions.mkString("\n")}
         |
-        |  lazy val meta: Metadata = metadata()
+        |  lazy val meta: Metadata = Metadata.parse(metadata)
         |
         |  }
         |
@@ -835,33 +867,34 @@ object GeneratePTXISA {
         |      index += 1
         |    }
         |
-        |    var successful: Option[(Definition, Instruction)] = None
-        |    var ambiguous = Vec.empty[String]
-        |    var expected = Vec.empty[Int]
+        |    val remaining = allModifiers.drop(specificity)
+        |    var successful: Option[(Definition, Form)] = None
+        |    val ambiguous = scala.collection.mutable.ArrayBuffer.empty[String]
+        |    val expected = scala.collection.mutable.ArrayBuffer.empty[Int]
         |    index = 0
         |    while (index < definitions.size) {
         |      val definition = definitions(index)
         |      if (definition.fixedModifiers.size == specificity && fixedModifiersMatch(allModifiers, definition.fixedModifiers))
-        |        definition.decoder(operands, allModifiers.drop(specificity), pred) match {
-        |          case Right(instruction) => successful match {
-        |              case None => successful = Some(definition -> instruction)
+        |        definition.decoder(operands, remaining) match {
+        |          case Right(form) => successful match {
+        |              case None => successful = Some(definition -> form)
         |              case Some((first, _)) =>
-        |                if (ambiguous.isEmpty) ambiguous = Vec(first.toString)
-        |                ambiguous = ambiguous :+ definition.toString
+        |                if (ambiguous.isEmpty) ambiguous.append(first.toString)
+        |                ambiguous.append(definition.toString)
         |            }
-        |          case Left(DecodeError.InvalidOperandCount(_, counts, _)) => expected = expected ++ counts
+        |          case Left(DecodeError(_, DecodeProblem.InvalidOperandCount(counts, _))) => expected.appendAll(counts)
         |          case Left(_) => ()
         |        }
         |      index += 1
         |    }
         |
         |    if (ambiguous.nonEmpty)
-        |      Left(DecodeError.AmbiguousInstruction(qualifiedOpcode(name, allModifiers), ambiguous))
+        |      Left(DecodeError(qualifiedOpcode(name, allModifiers), DecodeProblem.AmbiguousDefinitions(ambiguous.toVec)))
         |    else successful match {
-        |      case Some((_, instruction)) => Right(instruction)
+        |      case Some((_, form)) => Right(Instruction(form, remaining, pred))
         |      case None if expected.nonEmpty =>
-        |        Left(DecodeError.InvalidOperandCount(qualifiedOpcode(name, allModifiers), expected.distinct.sorted, operands.size))
-        |      case None => Left(DecodeError.UnknownOpcode(qualifiedOpcode(name, allModifiers)))
+        |        Left(DecodeError(qualifiedOpcode(name, allModifiers), DecodeProblem.InvalidOperandCount(expected.distinct.sorted.toVec, operands.size)))
+        |      case None => Left(DecodeError(qualifiedOpcode(name, allModifiers), DecodeProblem.UnknownOpcode))
         |    }
         |  }
         |
@@ -872,30 +905,42 @@ object GeneratePTXISA {
         |    (name +: modifiers.map(_.name)).mkString(".")
         |}
         |
-        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
-        |${cases.mkString("\n")}
+        |${GeneratedHeader.annotation()}case class Instruction(form: Form, mods: Vec[Modifier], pred: Option[Predication]) {
+        |  def definition: Instruction.Definition = Instruction.Definition.fromOrdinal(form.ordinal)
         |
-        |  val operands: Vec[Operand] = operandValues.toVec
+        |  def operands: Vec[Operand] = form.operands
         |
-        |  final def opcode: NonEmpty[String] = definition.opcode
+        |  def opcode: NonEmpty[String] = definition.opcode
         |
-        |  final def fixedModifiers: Vec[Modifier] = definition.fixedModifiers
+        |  def fixedModifiers: Vec[Modifier] = definition.fixedModifiers
         |
-        |  final def decoder: Instruction.Decoder = definition.decoder
+        |  def decoder: Instruction.Decoder = definition.decoder
         |
-        |  final def meta: Metadata = definition.meta
+        |  def meta: Metadata = definition.meta
         |
-        |  def mods: Vec[Modifier]
-        |
-        |  def pred: Option[Predication]
-        |
-        |  final def qualifiedOpcode: NonEmpty[String] =
+        |  def qualifiedOpcode: NonEmpty[String] =
         |    if (mods.isEmpty) opcode else s"$$opcode.$${mods.map(_.name).mkString(".")}"
-        |  lazy val signature: InstructionSignature = InstructionSignature(definition.mnemonic, definition.fixedModifiers ++ mods)
         |
+        |  lazy val signature: InstructionSignature = InstructionSignature(definition.mnemonic, definition.fixedModifiers ++ mods)
         |}
         |
         |""".stripMargin
+    val form = GeneratedHeader.scala(
+      s"PTX instruction forms from the pinned NVIDIA ISA ${version.source} specification"
+    ) +
+      s"""|package net.kurobako.gemstone.isa.ptx
+        |
+        |import net.kurobako.gemstone.collection.*
+        |import net.kurobako.gemstone.collection.Vec.*
+        |
+        |${GeneratedHeader.annotation()}enum Form(operandValues: Operand*) {
+        |${cases.mkString("\n")}
+        |
+        |  val operands: Vec[Operand] = operandValues.toVec
+        |}
+        |""".stripMargin
+    Vector("Instruction.scala" -> instruction, "Form.scala" -> form)
+
   }
 
   private def instructionShapes(sections: Vector[Section]): Vector[InstructionShape] = {
@@ -924,6 +969,19 @@ object GeneratePTXISA {
       }._2
       InstructionShape(opcode, mnemonic, parts.tail, scalaCaseName(opcode), fields, forms)
     }
+  }
+
+  private def operandCountTest(counts: Vector[Int]): String = {
+    val runs = counts.sorted.distinct.foldLeft(Vector.empty[(Int, Int)]) {
+      case (init :+ ((low, high)), count) if count == high + 1 => init :+ ((low, count))
+      case (runs, count)                                       => runs :+ ((count, count))
+    }
+    runs.map {
+      case (0, 0)                     => "operands.isEmpty"
+      case (low, high) if low == high => s"operands.size == $low"
+      case (0, high)                  => s"operands.size <= $high"
+      case (low, high)                => s"operands.size >= $low && operands.size <= $high"
+    }.mkString(" || ")
   }
 
   private def allowedOperandCounts(shape: InstructionShape): Vector[Int] = {
@@ -962,9 +1020,12 @@ object GeneratePTXISA {
     direct match {
       case Some(opcode) => Vector(opcode -> form)
       case None         =>
-        val titleSuffixes = candidates.flatMap(_.split('.').toVector.drop(1).headOption).distinct
-        val namespaced    = groups.headOption.toVector.flatMap(_.toVector.sorted).filter { value =>
-          titleSuffixes.exists(prefix => value.startsWith(prefix + "::"))
+        val titleSuffixes  = candidates.flatMap(_.split('.').toVector.drop(1).headOption).distinct
+        val titleSuffixSet = titleSuffixes.toSet
+        // `mma.sp` and `mma.sp::ordered_metadata` share one form whose first group selects the variant
+        val namespaced = groups.headOption.toVector.flatMap(_.toVector.sorted).filter { value =>
+          titleSuffixes.exists(prefix => value.startsWith(prefix + "::")) ||
+          (groups.headOption.exists(_.exists(_.startsWith(value + "::"))) && titleSuffixSet(value))
         }
         if (namespaced.nonEmpty)
           namespaced.map { value =>
@@ -1020,6 +1081,7 @@ object GeneratePTXISA {
       "scaleBData",
       "scaleBSelector"
     ),
+    "mma.sp"                   -> Vector("destination", "sourceA", "sourceB", "sourceC", "e", "f"),
     "mma.sp::ordered_metadata" -> Vector(
       "destination",
       "sourceA",
@@ -1138,8 +1200,7 @@ object GeneratePTXISA {
     ).orElse(FieldOverrides.get(opcode.takeWhile(_ != '.'))).flatMap(_.lift(position)).getOrElse {
       val candidates = sourceNames.map(sourceFieldName(_)).filter(_.nonEmpty)
       val selected   = candidates.groupBy(value => value).toVector
-        .sortBy { case (name, values) => (-values.size, fieldNamePenalty(name), name) }
-        .headOption.map(_._1)
+        .minByOption { case (name, values) => (-values.size, fieldNamePenalty(name), name) }.map(_._1)
         .getOrElse(s"operand${position + 1}")
       val identifier = if (selected.headOption.exists(_.isDigit)) s"operand$selected" else selected
       val safe       = if (ScalaKeywords(identifier)) identifier + "Value" else identifier
@@ -1188,20 +1249,8 @@ object GeneratePTXISA {
     }
   }
 
-  private def abbreviateFieldName(value: String): String = {
-    val exact = Map(
-      "destination"        -> "dest",
-      "source"             -> "src",
-      "sourceA"            -> "srcA",
-      "sourceB"            -> "srcB",
-      "sourceC"            -> "srcC",
-      "secondarySource"    -> "secondarySrc",
-      "returnParameters"   -> "returnParams",
-      "parameters"         -> "params",
-      "sourceOrOrdinal"    -> "srcOrOrdinal",
-      "sourceSizeOrIgnore" -> "srcSizeOrIgnore"
-    )
-    exact.getOrElse(
+  private def abbreviateFieldName(value: String): String =
+    AbbreviatedFields.getOrElse(
       value,
       value
         .replace("destination", "dest")
@@ -1214,7 +1263,6 @@ object GeneratePTXISA {
         .replace("instruction", "inst")
         .replace("Instruction", "Inst")
     )
-  }
 
   private val CaseNameOverrides: Map[String, String] = Map(
     "applypriority"                     -> "ApplyPriority",
@@ -1287,16 +1335,16 @@ object GeneratePTXISA {
         |""".stripMargin
   }
 
-  /** One rendered form per subset of the optional operands. */
+  /** One form per subset of the optional operands, as `Metadata.parse` reads it. */
   private def renderForms(form: Form, operationModifiers: Vector[String]): Vector[String] = {
-    val operands = form.operands.foldLeft(Vector(Vector.empty[String])) { (prefixes, operand) =>
+    val operands = form.operands.foldLeft(Vector("")) { (prefixes, operand) =>
       val constraint = operand.constraint match {
-        case "Register" => "OperandConstraint.Register"
-        case "Address"  => "OperandConstraint.Address"
-        case "Vector"   => "OperandConstraint.VectorOperand"
-        case "Symbol"   => "OperandConstraint.Symbol"
-        case "Value"    => "OperandConstraint.Value"
-        case _          => "OperandConstraint.Unknown"
+        case "Register" => 'R'
+        case "Address"  => 'A'
+        case "Vector"   => 'V'
+        case "Symbol"   => 'S'
+        case "Value"    => 'X'
+        case _          => 'U'
       }
       prefixes.map(_ :+ constraint) ++ (if (operand.optional) prefixes else Vector.empty)
     }.distinct
@@ -1304,25 +1352,10 @@ object GeneratePTXISA {
       val index = groups.indexWhere(_ == Set(modifier))
       if (index < 0) groups else groups.patch(index, Nil, 1)
     }
-    val required = requiredModifiers.map(values =>
-      values.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
-        .mkString(
-          "ModifierGroup(",
-          ", ",
-          ")"
-        )
-    ).mkString("Vec(", ", ", ")")
-    val optional = Emission.collection(
-      "_root_.scala.collection.immutable.Set",
-      form.optionalModifiers.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
-    )
-    val unordered = Emission.collection(
-      "_root_.scala.collection.immutable.Set",
-      form.unorderedModifiers.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
-    )
-    operands.map(values =>
-      s"InstructionForm(${values.mkString("Vec(", ", ", ")")}, $required, $optional, $unordered, ${form.complete})"
-    )
+    def modifiers(values: Set[String]): String = values.toVector.sorted.mkString(",")
+    val rest = s";${requiredModifiers.map(modifiers(_)).mkString("/")};${modifiers(form.optionalModifiers)};" +
+      s"${modifiers(form.unorderedModifiers)};${if (form.complete) "1" else "0"}"
+    operands.map(_ + rest)
   }
 
   private def extractMnemonic(value: String): Option[String] =

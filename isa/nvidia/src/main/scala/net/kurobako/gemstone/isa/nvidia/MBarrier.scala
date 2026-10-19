@@ -27,45 +27,75 @@ private object MBarrier {
 
   def transactionBytes(value: Long): Either[Fault, Count] =
     count(value, s"invalid mbarrier transaction size: $value")
+
+  /** The phase parity a token names. */
+  def tokenParity(token: Long): Long = token >>> 63
 }
 
-/** One CTA-local mbarrier. Copies complete synchronously, but arrivals and transaction counts remain independent. */
+/** One mbarrier. Copies complete synchronously, but arrivals and transaction counts remain independent. A token is the
+  * barrier's TRANS64 state before an arrival: the reset arrival count from bit 1 and the outstanding arrivals from bit
+  * 43, each as 2^20 minus the count, and the phase parity in bit 63.
+  */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-private class MBarrier private (expectedArrivals: Long in 1L ~ 1048575L) {
+private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
   import MBarrier.*
 
   private var phase           = 0L
-  private var pendingArrivals = expectedArrivals.raw
+  private var expected        = initialArrivals.raw
+  private var pendingArrivals = expected
   private var pendingBytes    = 0L
+  // Once every participant has dropped out, no later phase can complete.
+  private var exhausted = false
 
-  def arrive(count: Long, expectedBytes: Long): Either[Fault, Long] =
+  def state: Long =
+    (((MaximumCount + 1L - expected) & MaximumCount) << 1) |
+      (((MaximumCount + 1L - pendingArrivals) & MaximumCount) << 43) |
+      ((phase & 1L) << 63)
+
+  /** Arrives `count` times with `expectedBytes` more transaction bytes and returns the token. `drop` also lowers the
+    * arrivals later phases expect; without `complete` the arrivals must leave the phase incomplete.
+    */
+  def arrive(count: Long, expectedBytes: Long, drop: Boolean = false, complete: Boolean = true): Either[Fault, Long] =
     transactionBytes(expectedBytes).flatMap { bytes =>
-      if (count <= 0 || count > pendingArrivals || pendingBytes + bytes.raw > MaximumCount)
-        Left(Fault.Backend(s"invalid mbarrier arrival: count=$count, expected bytes=$expectedBytes"))
+      if (
+        count <= 0 || count > pendingArrivals ||
+        (drop && count > expected) ||
+        pendingBytes + bytes > MaximumCount ||
+        (!complete && count == pendingArrivals)
+      ) Left(Fault.Backend(s"invalid mbarrier arrival: count=$count, expected bytes=$expectedBytes"))
       else {
-        val token = phase
-        pendingBytes += bytes.raw
+        val token = state
+        pendingBytes += bytes
         pendingArrivals -= count
-        completePhase()
+        if (drop) expected -= count
+        if (complete) completePhase()
         Right(token)
       }
     }
 
+  def expectBytes(count: Count): Either[Fault, Unit] =
+    if (pendingBytes + count > MaximumCount) Left(Fault.Backend(s"invalid mbarrier transaction count: $count"))
+    else {
+      pendingBytes += count
+      Right(())
+    }
+
   def completeBytes(count: Count): Either[Fault, Unit] =
-    if (pendingBytes - count.raw < -MaximumCount)
+    if (pendingBytes - count < -MaximumCount)
       Left(Fault.Backend(s"invalid mbarrier transaction completion: $count"))
     else {
-      pendingBytes -= count.raw
+      pendingBytes -= count
       completePhase()
       Right(())
     }
 
-  def complete(token: Long, parity: Boolean): Boolean =
-    if (parity) (phase & 1L) != token else phase != token
+  /** Whether the phase of parity `parity` has completed. */
+  def complete(parity: Long): Boolean = (phase & 1L) != (parity & 1L)
 
   private def completePhase(): Unit =
-    if (pendingArrivals == 0 && pendingBytes == 0) {
+    if (pendingArrivals == 0 && pendingBytes == 0 && !exhausted) {
       phase += 1L
-      pendingArrivals = expectedArrivals.raw
+      pendingArrivals = expected
+      exhausted = expected == 0
     }
 }

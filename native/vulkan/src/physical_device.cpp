@@ -1,12 +1,17 @@
 #include "physical_device.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <optional>
 
+#include "gemstone_execution_rpc.hpp"
 #include <gemstone/environment.hpp>
 
+#include "environment_keys.hpp"
 #include "graphics_state.hpp"
 
 namespace gemstone::vulkan {
@@ -56,12 +61,12 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   limits.maxFramebufferWidth = limits.maxFramebufferHeight = 16384;
   limits.maxFramebufferLayers = 2048;
   limits.maxColorAttachments = MaxColorAttachments;
-  limits.maxDrawIndexedIndexValue = 0x00ffffffu;
+  limits.maxDrawIndexedIndexValue = 0x00ffffffU;
   limits.maxDrawIndirectCount = 65535;
   limits.maxViewports = 1;
   limits.maxViewportDimensions[0] = limits.maxViewportDimensions[1] = 16384;
-  limits.viewportBoundsRange[0] = -32768.0f;
-  limits.viewportBoundsRange[1] = 32767.0f;
+  limits.viewportBoundsRange[0] = -32768.0F;
+  limits.viewportBoundsRange[1] = 32767.0F;
   limits.framebufferColorSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
   limits.framebufferStencilSampleCounts = limits.sampledImageStencilSampleCounts = limits.framebufferDepthSampleCounts =
       VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
@@ -101,7 +106,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   limits.maxDescriptorSetStorageBuffersDynamic = 4;
   limits.maxComputeSharedMemorySize = 65536;
   limits.timestampComputeAndGraphics = VK_TRUE;
-  limits.timestampPeriod = 1.0f;
+  limits.timestampPeriod = 1.0F;
   limits.maxComputeWorkGroupCount[0] = limits.maxComputeWorkGroupCount[1] = limits.maxComputeWorkGroupCount[2] = 65535;
   limits.maxComputeWorkGroupInvocations = 1024;
   limits.maxComputeWorkGroupSize[0] = 1024;
@@ -152,7 +157,7 @@ void fillMemoryProperties(VkPhysicalDeviceMemoryProperties *properties) {
 
 // Output query structures retain the caller's chain, but every known payload
 // field must be initialised even when the associated feature is unsupported.
-template <typename T> void resetQueryPayload(VkBaseOutStructure *base) {
+template <typename T> static void resetQueryPayload(VkBaseOutStructure *base) {
   const auto type = base->sType;
   auto *next = base->pNext;
   *reinterpret_cast<T *>(base) = {};
@@ -198,7 +203,7 @@ void fillPropertyChain(void *next) {
         std::snprintf(value->driverName, sizeof(value->driverName), "%s", "Gemstone");
         std::snprintf(value->driverInfo, sizeof(value->driverInfo), "%s", "Portable SPIR-V interpreter");
         // Matches the pinned CTS suite, not the supported Vulkan API version.
-        value->conformanceVersion = {1, 4, 6, 2};
+        value->conformanceVersion = {.major = 1, .minor = 4, .subminor = 6, .patch = 2};
         // Stable, unregistered local ID ("GEMS"); not a Khronos allocation.
         value->driverID = static_cast<VkDriverId>(0x47454d53);
         break;
@@ -280,7 +285,7 @@ void fillPropertyChain(void *next) {
   }
 }
 
-template <typename T> T supportedFeatures(VkStructureType type) {
+template <typename T> static T supportedFeatures(VkStructureType type) {
   T value{};
   value.sType = type;
   if constexpr (requires { value.timelineSemaphore; }) value.timelineSemaphore = VK_TRUE;
@@ -359,7 +364,7 @@ void fillFeatureChain(void *next) {
   }
 }
 
-template <typename T> bool featureRequestSupported(const VkBaseInStructure *base, VkBool32 T::*first, VkBool32 T::*last) {
+template <typename T> static bool featureRequestSupported(const VkBaseInStructure *base, VkBool32 T::*first, VkBool32 T::*last) {
   const auto *requested = reinterpret_cast<const T *>(base);
   const T supported = supportedFeatures<T>(base->sType);
   const auto *wanted = reinterpret_cast<const uint8_t *>(requested);
@@ -367,7 +372,8 @@ template <typename T> bool featureRequestSupported(const VkBaseInStructure *base
   const auto begin = reinterpret_cast<const uint8_t *>(&(requested->*first)) - wanted;
   const auto end = reinterpret_cast<const uint8_t *>(&(requested->*last)) - wanted + sizeof(VkBool32);
   for (size_t offset = begin; offset < static_cast<size_t>(end); offset += sizeof(VkBool32)) {
-    VkBool32 value, support;
+    VkBool32 value{};
+    VkBool32 support{};
     std::memcpy(&value, wanted + offset, sizeof(value));
     std::memcpy(&support, available + offset, sizeof(support));
     if (value && !support) return false;
@@ -375,7 +381,7 @@ template <typename T> bool featureRequestSupported(const VkBaseInStructure *base
   return true;
 }
 bool featureChainSupported(const void *next) {
-  for (auto *base = static_cast<const VkBaseInStructure *>(next); base; base = base->pNext) {
+  for (const auto *base = static_cast<const VkBaseInStructure *>(next); base; base = base->pNext) {
     switch (base->sType) {
 #define GEMSTONE_FEATURES(tag, type, first, last)                                                                                          \
   case tag:                                                                                                                                \

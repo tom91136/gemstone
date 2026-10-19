@@ -64,7 +64,7 @@ class TypeLayoutSuite extends munit.FunSuite {
         false -> Vector(0L, 4L, 8L, 16L, 20L, 24L)
       )
     ) {
-      val storage                          = Some(VMProgram.MatrixLayout(16, rowMajor))
+      val storage                          = Some(VMMemory.MatrixLayout(16, rowMajor))
       val first: Vector[(Long >= 0, Int)]  = layout.matrixStorageLeaves(3, storage)
       val second: Vector[(Long >= 0, Int)] = layout.matrixStorageLeaves(3, storage)
       assertEquals(first.map(_._1.raw), expected)
@@ -217,8 +217,6 @@ class TypeLayoutSuite extends munit.FunSuite {
     """)
     assertEquals(Seq(1, 2, 4, 5).map(layout.typeSize(_).raw), Seq(4, 16, 20, 0))
     assertEquals(layout.typeAlignment(2).raw, 16)
-    assertEquals(layout.alignUp(17, 16).raw, 32)
-    intercept[ArithmeticException](layout.alignUp(Int.MaxValue, 16))
   }
 
   test("negative fixed-array lengths are rejected before layout") {

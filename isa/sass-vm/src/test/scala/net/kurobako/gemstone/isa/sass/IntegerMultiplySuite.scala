@@ -9,6 +9,21 @@ import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.testing.either.*
 
 class IntegerMultiplySuite extends munit.FunSuite {
+  private val XmadCases = Vec(
+    (0x8001ffffL, 0xffff8001L, 0xffff0003L),
+    (0x1234abcdL, 0x5678fedcL, 0x76543210L),
+    (0x00010001L, 0x00020003L, 0x0000ffffL),
+    (0x0000ffffL, 0x80000001L, 0x76543210L),
+    (0xffff1234L, 0x0000ffffL, 0x80000000L),
+    (0x80018001L, 0x0001ffffL, 0x00000000L),
+    (0xffff0000L, 0x00010000L, 0x00000000L),
+    (0xffffffffL, 0x00000001L, 0x00000000L)
+  )
+  private val XmadChainCases     = XmadCases.take(3)
+  private val NegativeImmediates = Vec(-1, -2, -17)
+  private val Addends            = Vec(0L, 1L, 0xfffffff0L)
+  private val Shifts             = Vec(0, 1, 31, 32, 33, 63, 64, 79)
+
   private def u32(value: Long): Long                 = value & 0xffffffffL
   private def half(value: Long, high: Boolean): Long = (value >>> (if (high) 16 else 0)) & 0xffffL
   private def signed16(value: Long): Long            = if ((value & 0x8000L) != 0L) value - 0x10000L else value
@@ -20,35 +35,35 @@ class IntegerMultiplySuite extends munit.FunSuite {
     |MOV R3, c[0x0][0x14c]
     |MOV R4, c[0x0][0x140]
     |MOV R5, c[0x0][0x144]
-    |LDG R0, [R2]
-    |LDG R6, [R2+0x4]
-    |LDG R7, [R2+0x8]
+    |LDG.E R0, [R2]
+    |LDG.E R6, [R2+0x4]
+    |LDG.E R7, [R2+0x8]
     |XMAD R8, R0.H0.reuse, R6.H0, R7.reuse
-    |STG [R4], R8
+    |STG.E [R4], R8
     |XMAD.PSL R8, R0.H1.reuse, R6.H0, R7
-    |STG [R4+0x4], R8
+    |STG.E [R4+0x4], R8
     |XMAD.PSL.CLO R8, R0.H1, 0x1100, R7
-    |STG [R4+0x8], R8
+    |STG.E [R4+0x8], R8
     |XMAD.PSL.CBCC R8, R0.H1.reuse, R6.H1, R7
-    |STG [R4+0xc], R8
+    |STG.E [R4+0xc], R8
     |XMAD.CHI R8, R0.H1.reuse, 0xab, R7
-    |STG [R4+0x10], R8
+    |STG.E [R4+0x10], R8
     |XMAD.MRG R8, R0.H1.reuse, R6.H1.reuse, R7
-    |STG [R4+0x14], R8
+    |STG.E [R4+0x14], R8
     |XMAD.S16.U16 R8, R0.H1, R6.H0, R7
-    |STG [R4+0x18], R8
+    |STG.E [R4+0x18], R8
     |XMAD.U16.S16 R8, R0.H0, R6.H1, R7
-    |STG [R4+0x1c], R8
+    |STG.E [R4+0x1c], R8
     |XMAD.PSL.CBCC R7, R0.H1, R6.H1, R7
-    |STG [R4+0x20], R7
+    |STG.E [R4+0x20], R7
     |XMAD.MRG R8, R0.H1, c[0x0][0x8].H1, R7
-    |STG [R4+0x24], R8
+    |STG.E [R4+0x24], R8
     |XMAD.S16.S16.CSFU R8, R0.H1, R6.H1, RZ
-    |STG [R4+0x28], R8
+    |STG.E [R4+0x28], R8
     |XMAD.MRG R8, R0.reuse, RZ.H1, RZ
-    |STG [R4+0x2c], R8
+    |STG.E [R4+0x2c], R8
     |XMAD.MRG R8, R0.H1, RZ, R7
-    |STG [R4+0x30], R8
+    |STG.E [R4+0x30], R8
     |EXIT""".stripMargin
 
   // the aliased CBCC must read C before its write; c[0x0][0x8] is ntid.x, whose H1 half is zero
@@ -85,16 +100,7 @@ class IntegerMultiplySuite extends munit.FunSuite {
         "XMAD.PSL.CBCC",
         "XMAD.S16.U16"
       ).subsetOf(opcodes(load(sm, Fixture.listing("xmadCompilerFormsSm50"), "xmad_patterns"))))
-      Vec(
-        (0x8001ffffL, 0xffff8001L, 0xffff0003L),
-        (0x1234abcdL, 0x5678fedcL, 0x76543210L),
-        (0x00010001L, 0x00020003L, 0x0000ffffL),
-        (0x0000ffffL, 0x80000001L, 0x76543210L),
-        (0xffff1234L, 0x0000ffffL, 0x80000000L),
-        (0x80018001L, 0x0001ffffL, 0x00000000L),
-        (0xffff0000L, 0x00010000L, 0x00000000L),
-        (0xffffffffL, 0x00000001L, 0x00000000L)
-      ).foreach { (a, b, c) =>
+      XmadCases.foreach { (a, b, c) =>
         assertEquals(
           kernel.copy(sm = sm).launch(1)(Arg.zeros(52), Arg.words(a, b, c)).words(0),
           xmadExpected(a, b, c),
@@ -146,11 +152,7 @@ class IntegerMultiplySuite extends munit.FunSuite {
   test("CUDA 11.8 compiled PTX multiply-add chains match their source arithmetic in the VM") {
     for {
       sm        <- Vec(50, 60)
-      (a, b, c) <- Vec(
-        (0x8001ffffL, 0xffff8001L, 0xffff0003L),
-        (0x1234abcdL, 0x5678fedcL, 0x76543210L),
-        (0x00010001L, 0x00020003L, 0x0000ffffL)
-      )
+      (a, b, c) <- XmadChainCases
     } {
       val listing = if (sm == 50) "xmadArithmeticSm50" else "xmadCompilerFormsSm50"
       val product = half(a, high = false) * half(b, high = false)
@@ -191,7 +193,7 @@ class IntegerMultiplySuite extends munit.FunSuite {
 
   for {
     sm        <- Vec(35, 50)
-    immediate <- Vec(-1, -2, -17)
+    immediate <- NegativeImmediates
   }
     test(s"sm$sm extended addition preserves negative immediate $immediate") {
       check(
@@ -204,7 +206,7 @@ class IntegerMultiplySuite extends munit.FunSuite {
 
   for {
     sm     <- Vec(50, 60)
-    addend <- Vec(0L, 1L, 0xfffffff0L)
+    addend <- Addends
   }
     test(s"sm$sm XMAD condition codes carry into the next word with addend $addend") {
       check(
@@ -304,7 +306,7 @@ class IntegerMultiplySuite extends munit.FunSuite {
     )
     for {
       word  <- Vec(0x00000000L, 0xffffffffL, 0x80000000L, 0x81234567L)
-      shift <- Vec(0, 1, 31, 32, 33, 63, 64, 79)
+      shift <- Shifts
     } {
       val high    = (~word) & 0xffffffffL
       val shifted = if (shift >= 64) 0L else ((high << 32 | word) << shift) >>> 32

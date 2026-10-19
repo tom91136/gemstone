@@ -27,6 +27,12 @@ class VMAddressSpaceSuite extends munit.FunSuite {
   }
 
   test("CDNA2 flat and global accumulator transfers preserve vector registers") {
+    val readbacks = Vec(
+      Instruction.VAccumulatorRead(2, 0),
+      Instruction.VAccumulatorRead(3, 1),
+      Instruction.Store(2, MemoryAddress.Flat(16, 8), 8, false),
+      Instruction.Store(0, MemoryAddress.Flat(16, 16), 8, false)
+    )
     for (global <- Vec(false, true)) {
       val globals  = Array.ofDim[Byte](32)
       val original = 0x123456789abcdef0L
@@ -51,12 +57,8 @@ class VMAddressSpaceSuite extends munit.FunSuite {
         Instruction.VMove64(16, InstructionSource.Constant(512)),
         decode(false),
         Instruction.VMove64(16, InstructionSource.Constant(520)),
-        decode(true),
-        Instruction.VAccumulatorRead(2, 0),
-        Instruction.VAccumulatorRead(3, 1),
-        Instruction.Store(2, MemoryAddress.Flat(16, 8), 8, false),
-        Instruction.Store(0, MemoryAddress.Flat(16, 16), 8, false)
-      )
+        decode(true)
+      ) ++ readbacks
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(
         Vec.tabulate(4)(index => LittleEndian.decode(globals, index * 8, 8)),
@@ -66,9 +68,11 @@ class VMAddressSpaceSuite extends munit.FunSuite {
   }
 
   test("RDNA3 flat 64-bit compare exchange compares both words and returns the old pair") {
+    val equalities = Vec(false, true)
+    val store      = Instruction.Store(8, MemoryAddress.Flat(2, 8), 8, false)
     for {
       target <- Vec(Target("gfx1100"), Target("gfx1103"))
-      equal  <- Vec(false, true)
+      equal  <- equalities
     } {
       val globals     = Array.ofDim[Byte](16)
       val original    = 0x123456789abcdef0L
@@ -81,7 +85,7 @@ class VMAddressSpaceSuite extends munit.FunSuite {
         Instruction.VMove64(4, InstructionSource.Constant(replacement)),
         Instruction.VMove64(6, InstructionSource.Constant(if (equal) original else original ^ (1L << 32))),
         operation,
-        Instruction.Store(8, MemoryAddress.Flat(2, 8), 8, false)
+        store
       )
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(LittleEndian.decode(globals, 0, 8), if (equal) replacement else original)
@@ -119,19 +123,19 @@ class VMAddressSpaceSuite extends munit.FunSuite {
   }
 
   test("flat segment atomics preserve return values and update only their addressed segment") {
+    val updates = Vec(
+      Instruction.VMove(2, InstructionSource.Constant(41)),
+      Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
+      Instruction.VMove(2, InstructionSource.Constant(1)),
+      Instruction.Atomic(AtomicOperation.Add, 3, MemoryAddress.Flat(0, 0), 2, 4, true),
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
+      Instruction.VMove64(4, InstructionSource.Constant(512)),
+      Instruction.Store(3, MemoryAddress.Flat(4, 0), 4, false),
+      Instruction.Store(2, MemoryAddress.Flat(4, 4), 4, false)
+    )
     for (base <- Vec(VMAddressSpace.LocalBase, VMAddressSpace.PrivateBase)) {
       val globals    = Array.ofDim[Byte](8)
-      val operations = Vec(
-        Instruction.VMove64(0, InstructionSource.Constant(base + 256)),
-        Instruction.VMove(2, InstructionSource.Constant(41)),
-        Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
-        Instruction.VMove(2, InstructionSource.Constant(1)),
-        Instruction.Atomic(AtomicOperation.Add, 3, MemoryAddress.Flat(0, 0), 2, 4, true),
-        Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
-        Instruction.VMove64(4, InstructionSource.Constant(512)),
-        Instruction.Store(3, MemoryAddress.Flat(4, 0), 4, false),
-        Instruction.Store(2, MemoryAddress.Flat(4, 4), 4, false)
-      )
+      val operations = Instruction.VMove64(0, InstructionSource.Constant(base + 256)) +: updates
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(LittleEndian.decodeInt32(globals, 0), 41)
       assertEquals(LittleEndian.decodeInt32(globals, 4), 42)
@@ -165,14 +169,17 @@ class VMAddressSpaceSuite extends munit.FunSuite {
   }
 
   test("flat aperture bounds cannot fall through into global memory") {
-    for ((base, size) <- Vec(VMAddressSpace.LocalBase -> 65536, VMAddressSpace.PrivateBase -> 4096)) {
-      val globals    = Array.ofDim[Byte](8)
-      val operations = Vec(
-        Instruction.VMove64(0, InstructionSource.Constant(base + size - 2)),
-        Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full)
-      )
-      assert(execute(operations, globals).isLeft)
-    }
+    def straddling(base: Long, size: Int) = Vec(
+      Instruction.VMove64(0, InstructionSource.Constant(base + size - 2)),
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
+      Instruction.VMove64(4, InstructionSource.Constant(512)),
+      Instruction.Store(2, MemoryAddress.Flat(4, 0), 4, false)
+    )
+    // the bytes past the LDS allocation read zero, as DS accesses past it do
+    val globals = Array.fill[Byte](8)(0x55)
+    assertEquals(execute(straddling(VMAddressSpace.LocalBase, 65536), globals), Right(()))
+    assertEquals(LittleEndian.decodeInt32(globals, 0), 0)
+    assert(execute(straddling(VMAddressSpace.PrivateBase, 4096), Array.ofDim[Byte](8)).isLeft)
   }
 
   test("architectural aperture sources and SH_MEM_BASES agree for complete and sliced hardware reads") {

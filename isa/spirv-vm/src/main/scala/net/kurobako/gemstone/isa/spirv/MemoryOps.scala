@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.spirv
 
+import LaneOps.*
 import Op.*
+import OpBuilder.*
 import VMInvocation.*
-import VMLowering.*
 import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.binary.*
@@ -25,17 +26,67 @@ private object MemoryOps {
     case instruction @ Instruction.Store(pointer, source, _)     => store(site, instruction, id(pointer), id(source))
     case Instruction.CopyMemory(target, source, _, _)            => copyMemory(site, id(target), id(source))
     case Instruction.CopyMemorySized(target, source, size, _, _) => copyMemorySized(id(target), id(source), id(size))
-    case Instruction.AccessChain(t, d, base, indexes)            => accessChain(site, t, d, base, None, indexes)
-    case Instruction.InBoundsAccessChain(t, d, base, indexes)    =>
+    case Instruction.UntypedVariableKHR(_, dest, storageClass, Some(_), initialiser) =>
+      variable(site, site.program.valueType(id(dest)), id(dest), id(storageClass), initialiser.map(id(_)))
+    case Instruction.UntypedVariableKHR(dest = dest) =>
+      Fail(Fault.InvalidRequest(s"OpUntypedVariableKHR %${id(dest)} in a function declares no data type"))
+    case Instruction.UntypedAccessChainKHR(t, d, baseType, base, indexes) =>
+      accessChain(site, t, d, base, None, indexes, Some(id(baseType)))
+    case Instruction.UntypedInBoundsAccessChainKHR(t, d, baseType, base, indexes) =>
+      accessChain(site, t, d, base, None, indexes, Some(id(baseType)))
+    case Instruction.UntypedPtrAccessChainKHR(t, d, baseType, base, element, indexes) =>
+      accessChain(site, t, d, base, Some(element), indexes, Some(id(baseType)))
+    case Instruction.UntypedInBoundsPtrAccessChainKHR(t, d, baseType, base, element, indexes) =>
+      accessChain(site, t, d, base, Some(element), indexes, Some(id(baseType)))
+    case Instruction.UntypedArrayLengthKHR(t, d, structure, pointer, member) =>
+      arrayLength(id(t), id(d), id(pointer), unsigned(member).toInt, Some(id(structure)))
+    case Instruction.UntypedPrefetchKHR(pointerType = pointer) => prefetch(id(pointer))
+    case Instruction.VariableLengthArrayINTEL(t, _, _) if site.program.runtimeType(id(t)).exists {
+          case RuntimeType.Pointer(_, pointee) => site.program.untyped(pointee)
+          case _                               => false
+        } =>
+      Fail(Fault.Unsupported(
+        "OpVariableLengthArrayINTEL of an untyped pointer has no element type; OpUntypedVariableLengthArrayINTEL names it"
+      ))
+    case Instruction.VariableLengthArrayINTEL(t, d, length) =>
+      variableLengthArray(site, id(t), id(d), site.program.pointerPointee(id(t)), id(length))
+    case Instruction.UntypedVariableLengthArrayINTEL(_, d, element, length) =>
+      variableLengthArray(site, site.program.valueType(id(d)), id(d), id(element), id(length))
+    case Instruction.SaveMemoryINTEL(t, d) =>
+      step { (execution, _) =>
+        val top = apertureAddress(PrivateAperture, execution.storage.top)
+        Right(
+          execution.values.update(
+            id(d),
+            VMValue.Address(id(t), Pointer(top, site.program.pointerPointee(id(t)), StorageClass.Function))
+          )
+        )
+      }
+    case Instruction.RestoreMemoryINTEL(pointer) =>
+      step { (execution, _) =>
+        address(execution.values, id(pointer)).flatMap { saved =>
+          val offset = offsetOf(saved.address).raw
+          Either.cond(
+            aperture(saved.address) == PrivateAperture && offset <= execution.storage.top,
+            execution.storage.top = offset.toInt,
+            Fault.InvalidRequest("OpRestoreMemoryINTEL pointer is not a saved stack position below the top")
+          )
+        }
+      }
+    case Instruction.AccessChain(t, d, base, indexes)         => accessChain(site, t, d, base, None, indexes)
+    case Instruction.InBoundsAccessChain(t, d, base, indexes) =>
       accessChain(site, t, d, base, None, indexes)
     case Instruction.PtrAccessChain(t, d, base, element, indexes) =>
       accessChain(site, t, d, base, Some(element), indexes)
     case Instruction.InBoundsPtrAccessChain(t, d, base, element, indexes) =>
       accessChain(site, t, d, base, Some(element), indexes)
-    case Instruction.PtrEqual(t, d, a, b) => pointerCompare(site, "OpPtrEqual", Some(true), id(t), id(d), id(a), id(b))
-    case Instruction.PtrNotEqual(t, d, a, b) =>
-      pointerCompare(site, "OpPtrNotEqual", Some(false), id(t), id(d), id(a), id(b))
-    case Instruction.PtrDiff(t, d, a, b)       => pointerCompare(site, "OpPtrDiff", None, id(t), id(d), id(a), id(b))
+    case instruction @ Instruction.PtrEqual(resultType = _)    => staged(site, instruction, CoreFamily.Pointer)
+    case instruction @ Instruction.PtrNotEqual(resultType = _) => staged(site, instruction, CoreFamily.Pointer)
+    case instruction @ Instruction.PtrDiff(resultType = t)     =>
+      site.program.integerShape(id(t)) match {
+        case Some((_, 1)) => staged(site, instruction, CoreFamily.Pointer)
+        case _            => Fail(Fault.InvalidRequest("OpPtrDiff requires a scalar integer result"))
+      }
     case Instruction.PtrCastToGeneric(t, d, a) => castToGeneric(site, id(t), id(d), id(a))
     case Instruction.GenericCastToPtr(t, d, a) =>
       castFromGeneric(site, "OpGenericCastToPtr", id(t), id(d), id(a), None)
@@ -46,6 +97,7 @@ private object MemoryOps {
     case Instruction.ConvertUToPtr(t, d, a)               => integerToPointer(site, id(t), id(d), id(a))
     case Instruction.ArrayLength(t, d, structure, member) =>
       arrayLength(id(t), id(d), id(structure), unsigned(member).toInt)
+    case Instruction.SizeOf(t, d, pointer)        => sizeOf(site, id(t), id(d), pointer)
     case Instruction.LifetimeStart(pointer, size) => lifetime(site, "OpLifetimeStart", pointer, size)
     case Instruction.LifetimeStop(pointer, size)  => lifetime(site, "OpLifetimeStop", pointer, size)
     case Instruction.GroupAsyncCopy(t, d, scope, destination, source, count, stride, _) =>
@@ -59,6 +111,26 @@ private object MemoryOps {
         strideId = id(stride)
       )
     case Instruction.GroupWaitEvents(scope, count, events) => groupWaitEvents(id(scope), id(count), id(events))
+    case Instruction.UntypedGroupAsyncCopyKHR(
+          resultType = t,
+          dest = d,
+          execution = scope,
+          destination = destination,
+          src = source,
+          elementNumBytes = element,
+          numElements = count,
+          stride = stride
+        ) =>
+      groupAsyncCopy(
+        resultType = id(t),
+        dest = id(d),
+        scopeId = id(scope),
+        destinationId = id(destination),
+        sourceId = id(source),
+        countId = id(count),
+        strideId = id(stride),
+        elementId = Some(id(element))
+      )
   }
 
   /** InvalidRequest faults from a memory access name the instruction that made it. */
@@ -74,13 +146,32 @@ private object MemoryOps {
     case _ => error
   }
 
+  /** SPV_INTEL_variable_length_array: `length` elements of `element` in function storage, released as the function's
+    * variables are or by OpRestoreMemoryINTEL.
+    */
+  private def variableLengthArray(site: Site, resultType: Int, dest: Int, element: Int, length: Int): Op = {
+    val program = site.program
+    val size    = program.typeSize(element).toLong
+    step { (execution, _) =>
+      scalar(execution.values, length).flatMap { count =>
+        val bytes = count * size
+        if (count < 0L || bytes > Int.MaxValue.toLong)
+          Left(Fault.InvalidRequest(s"OpVariableLengthArrayINTEL length $count is outside private storage"))
+        else
+          execution.storage.allocate(bytes.toInt, program.typeAlignment(element)).map(address =>
+            execution.values.update(dest, VMValue.Address(resultType, Pointer(address, element, StorageClass.Function)))
+          )
+      }
+    }
+  }
+
   private def variable(site: Site, resultType: Int, dest: Int, storageClass: Int, initialiser: Option[Int]): Op = {
     val program = site.program
     val pointee = program.pointerPointee(resultType)
     val size    = program.typeSize(pointee).raw
     val bounded = program.vulkan && (storageClass == StorageClass.Private || storageClass == StorageClass.Function)
     step { (execution, memory) =>
-      execution.storage.allocate(size, program.typeAlignment(pointee).raw).flatMap { address =>
+      execution.storage.allocate(size, program.typeAlignment(pointee)).flatMap { address =>
         val pointer =
           Pointer(address, pointee, storageClass, bounds = Option.when(bounded)(address -> (address + size)))
         val stored = initialiser.flatMap(execution.values.get) match {
@@ -117,7 +208,7 @@ private object MemoryOps {
         case Right(value) => value
       }
       memory.readScalar(
-        pointer.copy(address = pointer.address + offset.raw, pointee = scalar, matrixLayout = None),
+        pointer.copy(address = pointer.address + offset, pointee = scalar, matrixLayout = None),
         size
       ) match {
         case Left(error)  => return Left(error)
@@ -146,7 +237,7 @@ private object MemoryOps {
         case Right(width) => width
       }
       memory.writeScalar(
-        pointer.copy(address = pointer.address + offset.raw, pointee = scalar, matrixLayout = None),
+        pointer.copy(address = pointer.address + offset, pointee = scalar, matrixLayout = None),
         value.lanes(index),
         size
       ) match {
@@ -183,7 +274,9 @@ private object MemoryOps {
             Some(RuntimeType.Pointer(sourceStorage, sourcePointee))
           )
           if target.pointee == sourceType && targetStorage == sourceStorage && targetPointee == sourcePointee &&
-            source.pointee == sourcePointee =>
+            (source.pointee == sourcePointee || program.untyped(sourcePointee)) =>
+        memory.writePointer(target, source)
+      case (_, Some(RuntimeType.Pointer(_, _))) if program.untyped(target.pointee) =>
         memory.writePointer(target, source)
       case (targetType, sourceValue) =>
         Left(Fault.InvalidRequest(
@@ -225,7 +318,7 @@ private object MemoryOps {
           address(execution.values, pointer).flatMap(loadPointer(program, memory, _, resultType))
             .left.map(located(_, execution, instruction)).map(execution.values.update(dest, _))
         )
-      case Some(RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_)) =>
+      case Some(RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_) | RuntimeType.Float8(_)) =>
         program.scalarMemoryWidth(resultType) match {
           case Left(error) => Fail(error)
           case Right(size) => ScalarLoad(dest, resultType, pointer, size)
@@ -339,7 +432,8 @@ private object MemoryOps {
       destOperand: Operand,
       baseOperand: Operand,
       elementOperand: Option[Operand],
-      indexOperands: Vec[Operand]
+      indexOperands: Vec[Operand],
+      baseType: Option[Int] = None
   ): Op = {
     val resultType = id(resultTypeOperand)
     val dest       = id(destOperand)
@@ -349,6 +443,8 @@ private object MemoryOps {
     val program    = site.program
     val pointee    = program.pointerPointee(resultType)
     val baseStride = program.arrayStrides.get(program.valueType(base))
+    // an untyped chain walks its base type, and its result points at the type it reaches
+    val walked = program.untyped(pointee)
     step { (execution, _) =>
       val values = execution.values
       address(values, base) match {
@@ -357,7 +453,7 @@ private object MemoryOps {
           var source                = start
           var matrixLayout          = start.matrixLayout
           var offset                = start.address
-          var typeId                = start.pointee
+          var typeId                = baseType.getOrElse(start.pointee)
           var position              = 0
           var failure: Fault | Null = null
           element match {
@@ -368,7 +464,7 @@ private object MemoryOps {
                   offset += first *
                     (baseStride match {
                       case Some(stride) => stride.raw
-                      case None         => program.storageTypeSize(start.pointee, start.matrixLayout).raw
+                      case None         => program.storageTypeSize(typeId, start.matrixLayout).raw
                     })
               }
             case None => ()
@@ -389,7 +485,7 @@ private object MemoryOps {
                 if (index < 0L || index >= members.size.toLong)
                   failure = Fault.InvalidRequest(s"structure member index $index is out of range")
                 else {
-                  offset += program.structMemberOffset(typeId, members, index.toInt).raw
+                  offset += program.structMemberOffset(typeId, members, index.toInt)
                   matrixLayout = program.memberMatrixLayouts.get(typeId -> index.toInt)
                   typeId = members(index.toInt)
                 }
@@ -418,7 +514,7 @@ private object MemoryOps {
                       failure = Fault.InvalidRequest("invalid matrix column type")
                       0
                   }
-                  else matrixLayout.map(_.stride.raw).getOrElse(program.typeSize(column).raw)
+                  else matrixLayout.fold(program.typeSize(column).raw)(_.stride.raw)
                 offset += index * stride
                 matrixLayout = matrixLayout.filter(_.rowMajor)
                 typeId = column
@@ -436,50 +532,13 @@ private object MemoryOps {
           else {
             values.update(
               dest,
-              VMValue.Address(resultType, source.copy(address = offset, pointee = pointee, matrixLayout = matrixLayout))
+              VMValue.Address(
+                resultType,
+                source.copy(address = offset, pointee = if (walked) typeId else pointee, matrixLayout = matrixLayout)
+              )
             )
             Done
           }
-      }
-    }
-  }
-
-  /** Pointer equality when `equal` names the expected outcome, otherwise the element difference. */
-  private def pointerCompare(
-      site: Site,
-      opcode: String,
-      equal: Option[Boolean],
-      resultType: Int,
-      dest: Int,
-      left: Int,
-      right: Int
-  ): Op = {
-    val program = site.program
-    step { (execution, _) =>
-      val values = execution.values
-      (values.get(left), values.get(right)) match {
-        case (Some(VMValue.Address(leftType, a)), Some(VMValue.Address(rightType, b)))
-            if leftType == rightType && program.runtimeType(leftType).exists {
-              case RuntimeType.Pointer(storageClass, _) => storageClass != StorageClass.PhysicalStorageBuffer
-              case _                                    => false
-            } =>
-          val result = equal match {
-            case None => program.integerShape(resultType) match {
-                case Some((width, 1)) =>
-                  val element = program.storageTypeSize(a.pointee, a.matrixLayout).raw
-                  val stride  = program.arrayStrides.get(leftType).fold(element)(_.raw)
-                  if (stride == 0) Left(Fault.InvalidRequest("OpPtrDiff requires a nonempty element type"))
-                  else Right(((BigInt(a.address) - BigInt(b.address)) / stride).toLong & mask(width))
-                case _ => Left(Fault.InvalidRequest("OpPtrDiff requires a scalar integer result"))
-              }
-            case Some(expected) if program.runtimeType(resultType).contains(RuntimeType.Bool) =>
-              Right(if ((a.address == b.address) == expected) 1L else 0L)
-            case _ => Left(Fault.InvalidRequest("pointer equality requires a scalar Boolean result"))
-          }
-          result.map(values.updateScalar(dest, resultType, _))
-        case (None, _) => Left(undefined(left))
-        case (_, None) => Left(undefined(right))
-        case _ => Left(Fault.InvalidRequest(s"$opcode requires matching non-PhysicalStorageBuffer pointer types"))
       }
     }
   }
@@ -495,7 +554,8 @@ private object MemoryOps {
             case Some(VMValue.Address(sourceType, pointer)) =>
               program.runtimeType(sourceType) match {
                 case Some(RuntimeType.Pointer(storageClass, sourcePointee))
-                    if castable.contains(storageClass) && sourcePointee == pointee && pointer.pointee == pointee =>
+                    if castable.contains(storageClass) && sourcePointee == pointee &&
+                      (pointer.pointee == pointee || program.untyped(pointee)) =>
                   Right(execution.values.update(
                     dest,
                     VMValue.Address(resultType, pointer.copy(storageClass = StorageClass.Generic))
@@ -536,11 +596,16 @@ private object MemoryOps {
             case Some(VMValue.Address(sourceType, pointer)) =>
               program.runtimeType(sourceType) match {
                 case Some(RuntimeType.Pointer(StorageClass.Generic, sourcePointee))
-                    if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
+                    if sourcePointee == targetPointee &&
+                      (pointer.pointee == targetPointee || program.untyped(targetPointee)) =>
                   val named    = storageClassOf(pointer.address) == targetStorage
                   val retained = if (storage.isEmpty) pointer.address != 0L && named else pointer.address == 0L || named
                   val converted =
-                    if (retained) pointer.copy(pointee = targetPointee, storageClass = targetStorage)
+                    if (retained)
+                      pointer.copy(
+                        pointee = if (program.untyped(targetPointee)) pointer.pointee else targetPointee,
+                        storageClass = targetStorage
+                      )
                     else Pointer(0L, targetPointee, targetStorage)
                   Right(execution.values.update(dest, VMValue.Address(resultType, converted)))
                 case Some(RuntimeType.Pointer(sourceStorage, sourcePointee)) =>
@@ -599,6 +664,17 @@ private object MemoryOps {
             execution.values.updateScalar(dest, resultType, value.address & bits)
           )
         )
+      // SPV_INTEL_masked_gather_scatter's vectors of pointers hold their addresses as lanes
+      case Some((width, lanes)) if site.program.runtimeType(site.program.valueType(pointer)).exists {
+            case RuntimeType.VectorType(_, count) => count.raw == lanes
+            case _                                => false
+          } =>
+        val bits = mask(width)
+        step((execution, _) =>
+          Op.bits(execution.values, pointer).map(addresses =>
+            execution.values.update(dest, VMValue.Bits(resultType, addresses.map(_ & bits)))
+          )
+        )
       case _ => Fail(Fault.InvalidRequest("OpConvertPtrToU requires a scalar integer result"))
     }
 
@@ -626,36 +702,61 @@ private object MemoryOps {
             case None    => Left(undefined(source))
           }
         }
+      case Some(RuntimeType.VectorType(component, count)) if program.runtimeType(component).exists(isPointer) =>
+        step { (execution, _) =>
+          execution.values.get(source) match {
+            case Some(VMValue.Bits(integerType, lanes)) if lanes.length == count.raw =>
+              val bits = mask(program.scalarWidth(integerType))
+              Right(execution.values.update(dest, VMValue.Bits(resultType, lanes.map(_ & bits))))
+            case Some(_) => Left(Fault.InvalidRequest("OpConvertUToPtr requires an integer vector of its lane count"))
+            case None    => Left(undefined(source))
+          }
+        }
       case Some(_) => Fail(Fault.InvalidRequest("OpConvertUToPtr requires a pointer result type"))
       case None    => Fail(Fault.InvalidRequest(s"OpConvertUToPtr result type %$resultType is undefined"))
     }
   }
 
-  private def arrayLength(resultType: Int, dest: Int, structure: Int, member: Int): Op = step { (execution, _) =>
-    val program = execution.values.program
-    val result  = execution.values.get(structure) match {
-      case Some(VMValue.Address(_, pointer)) => program.runtimeType(pointer.pointee) match {
-          case Some(RuntimeType.Structure(members)) =>
-            if (member < 0 || member >= members.size)
-              Left(Fault.InvalidRequest("OpArrayLength member is outside its structure"))
-            else program.runtimeType(members(member)) match {
-              case Some(RuntimeType.Array(element, count)) if count.raw == 0L =>
-                val stride = program.arrayStrides.get(members(member)).fold(program.typeSize(element).raw)(_.raw)
-                pointer.bounds.toRight(Fault.InvalidRequest("OpArrayLength requires a bounded descriptor")).flatMap {
-                  case (_, end) =>
-                    val offset = pointer.address + program.structMemberOffset(pointer.pointee, members, member).raw
-                    if (stride <= 0 || offset > end)
-                      Left(Fault.InvalidRequest("OpArrayLength array is outside its descriptor"))
-                    else Right((end - offset) / stride)
-                }
-              case _ => Left(Fault.InvalidRequest("OpArrayLength requires a runtime array member"))
-            }
-          case _ => Left(Fault.InvalidRequest("OpArrayLength requires a structure pointer"))
-        }
-      case _ => Left(Fault.InvalidRequest("OpArrayLength requires a pointer"))
-    }
-    result.map(execution.values.updateScalar(dest, resultType, _))
+  /** OpSizeOf: the size of the pointee type, as its arrays and structures lay it out in memory. */
+  private def sizeOf(site: Site, resultType: Int, dest: Int, pointer: Operand): Op = typed(site, pointer) match {
+    case Typed.Undefined(value)  => Fail(undefined(value))
+    case Typed.Data(value, _)    => Fail(Fault.InvalidRequest(s"OpSizeOf operand %$value is not a pointer"))
+    case Typed.Opaque(_, typeId) => site.program.runtimeType(typeId) match {
+        case Some(RuntimeType.Pointer(_, pointee)) =>
+          val size = site.program.typeSize(pointee).toLong
+          step((execution, _) => Right(execution.values.updateScalar(dest, resultType, size)))
+        case _ => Fail(Fault.InvalidRequest(s"OpSizeOf operand %${id(pointer)} is not a pointer"))
+      }
   }
+
+  private def arrayLength(resultType: Int, dest: Int, structure: Int, member: Int, declared: Option[Int] = None): Op =
+    step { (execution, _) =>
+      val program = execution.values.program
+      val result  = execution.values.get(structure) match {
+        case Some(VMValue.Address(_, located)) =>
+          val pointer = declared.fold(located)(typeId => located.copy(pointee = typeId))
+          program.runtimeType(pointer.pointee) match {
+            case Some(RuntimeType.Structure(members)) =>
+              if (member < 0 || member >= members.size)
+                Left(Fault.InvalidRequest("OpArrayLength member is outside its structure"))
+              else program.runtimeType(members(member)) match {
+                case Some(RuntimeType.Array(element, count)) if count == 0L =>
+                  val stride = program.arrayStrides.get(members(member)).fold(program.typeSize(element).raw)(_.raw)
+                  pointer.bounds.toRight(Fault.InvalidRequest("OpArrayLength requires a bounded descriptor")).flatMap {
+                    case (_, end) =>
+                      val offset = pointer.address + program.structMemberOffset(pointer.pointee, members, member)
+                      if (stride <= 0 || offset > end)
+                        Left(Fault.InvalidRequest("OpArrayLength array is outside its descriptor"))
+                      else Right((end - offset) / stride)
+                  }
+                case _ => Left(Fault.InvalidRequest("OpArrayLength requires a runtime array member"))
+              }
+            case _ => Left(Fault.InvalidRequest("OpArrayLength requires a structure pointer"))
+          }
+        case _ => Left(Fault.InvalidRequest("OpArrayLength requires a pointer"))
+      }
+      result.map(execution.values.updateScalar(dest, resultType, _))
+    }
 
   /** Lifetime markers carry no effect, but a malformed marker indicates a corrupt module. */
   private def lifetime(site: Site, opcode: String, pointerOperand: Operand, sizeOperand: Operand): Op =
@@ -665,7 +766,8 @@ private object MemoryOps {
         step { (execution, memory) =>
           execution.values.get(pointerId.raw) match {
             case Some(VMValue.Address(pointerType, pointer)) => site.program.runtimeType(pointerType) match {
-                case Some(RuntimeType.Pointer(_, pointee)) if pointee == pointer.pointee =>
+                case Some(RuntimeType.Pointer(_, pointee))
+                    if pointee == pointer.pointee || site.program.untyped(pointee) =>
                   Either.cond(
                     memory.contains(pointer, size),
                     (),
@@ -694,12 +796,14 @@ private object MemoryOps {
       destinationId: Int,
       sourceId: Int,
       countId: Int,
-      strideId: Int
+      strideId: Int,
+      elementId: Option[Int] = None
   )
       : Op = step { (execution, memory) =>
     val values  = execution.values
     val program = values.program
     for {
+      element     <- elementId.fold[Either[Fault, Option[Long]]](Right(None))(scalar(values, _).map(Some(_)))
       scope       <- scalar(values, scopeId)
       destination <- address(values, destinationId)
       source      <- address(values, sourceId)
@@ -724,8 +828,10 @@ private object MemoryOps {
         )
       )
       _ <- {
-        val elementSize = program.typeSize(destination.pointee).raw
-        val invocation  = execution.invocation
+        val elementSize = element.fold(program.typeSize(destination.pointee).raw)(bytes =>
+          if (bytes > 0L && bytes <= Int.MaxValue) bytes.toInt else 0
+        )
+        val invocation = execution.invocation
         if (elementSize <= 0) Left(Fault.InvalidRequest("OpGroupAsyncCopy element type has no data size"))
         else if (invocation.local(0) != 0L || invocation.local(1) != 0L || invocation.local(2) != 0L)
           Right(values.updateScalar(dest, resultType, 0L))
@@ -827,16 +933,16 @@ private object MemoryOps {
         case KernelTask.Argument.Scalar(original)
             if !byValue && relocatedAtZero &&
               (program.pointerLeafOffsets(pointee, 0L).toOption.exists(_.isEmpty) ||
-                program.typeSize(pointee).raw > original.size) =>
+                program.typeSize(pointee) > original.size) =>
           Right(pointer(LittleEndian.decode(bytes, 0, 8)))
         case KernelTask.Argument.Scalar(original)
             if !byValue && original.size == 8 &&
               (storageClass == StorageClass.CrossWorkgroup || storageClass == StorageClass.Generic) =>
           Right(pointer(LittleEndian.decode(bytes, 0, 8)))
         case KernelTask.Argument.Scalar(_) =>
-          val copy = Array.ofDim[Byte](math.max(program.typeSize(pointee).raw, bytes.length))
+          val copy = Array.ofDim[Byte](math.max(program.typeSize(pointee), bytes.length))
           Array.copy(bytes, 0, copy, 0, bytes.length)
-          privateImage.append(Vec.unsafeWrapArray(copy), program.typeAlignment(pointee).raw).map(pointer(_))
+          privateImage.append(Vec.unsafeWrapArray(copy), program.typeAlignment(pointee)).map(pointer(_))
         case KernelTask.Argument.Local(_) =>
           local.toRight(Fault.InvalidRequest("SPIR-V local parameter has no workgroup storage")).map(pointer(_))
         case KernelTask.Argument.Descriptor =>
@@ -855,7 +961,7 @@ private object MemoryOps {
               address,
               parameterType,
               StorageClass.UniformConstant,
-              range.map(size => address -> (address + size.raw))
+              range.map(size => address -> (address + size))
             )
           ))
         case other => Left(Fault.InvalidRequest(s"SPIR-V image or sampler parameter cannot bind $other"))

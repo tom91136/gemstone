@@ -79,7 +79,7 @@ object Journal {
       limits: Limits = Limits(),
       schema: String = ExecutionRPC.Schema.canonical
   )
-  enum Kind(val code: Int, val hasFrame: Boolean) {
+  enum Kind(val code: Int, val hasFrame: Boolean) derives CanEqual {
     case Request         extends Kind(1, hasFrame = true)
     case Response        extends Kind(2, hasFrame = true)
     case ConnectionClose extends Kind(3, hasFrame = false)
@@ -106,16 +106,16 @@ object Journal {
         bytes: Array[Byte],
         maximum: FrameByteSize
     ): Array[Byte] = {
-      validate(kind = kind, bytes = bytes, maximum = maximum, normalised = false)
+      validate(kind = kind, bytes = bytes, maximum = maximum)
       if (kind != Kind.Request) bytes
       else {
         val result = bytes.clone()
-        ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset.raw, 0L)
+        ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset, 0L)
         result
       }
     }
 
-    def validate(kind: Kind, bytes: Array[Byte], maximum: FrameByteSize, normalised: Boolean): Unit = {
+    def validate(kind: Kind, bytes: Array[Byte], maximum: FrameByteSize): Unit = {
       if (bytes.length > maximum.raw) throw IOException("RPC journal: frame exceeds archive bounds")
       Frame.validatePrefix(bytes, bytes.length.toLong)
       val expectedMagic = kind match {
@@ -124,10 +124,12 @@ object Journal {
         case _             => throw IOException("RPC journal: event has no frame")
       }
       if (Frame.magic(bytes) != expectedMagic) throw IOException("RPC journal: frame kind/magic differ")
-      if (normalised && kind == Kind.Request) {
-        if (ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset.raw) != 0L)
-          throw IOException("RPC journal: request client is not normalised")
-      }
+    }
+
+    def validateNormalised(kind: Kind, bytes: Array[Byte], maximum: FrameByteSize): Unit = {
+      validate(kind = kind, bytes = bytes, maximum = maximum)
+      if (kind == Kind.Request && ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset) != 0L)
+        throw IOException("RPC journal: request client is not normalised")
     }
   }
 
@@ -294,8 +296,8 @@ object Journal {
       header.schema,
       header.limits.maxFrameBytes.raw,
       header.limits.maxArchiveBytes.raw,
-      header.limits.maxEvents.raw,
-      ExecutionProfileRecord(header.executionProfile.maxInstructions.raw, header.executionProfile.parallelism.raw)
+      header.limits.maxEvents,
+      ExecutionProfileRecord(header.executionProfile.maxInstructions, header.executionProfile.parallelism)
     ))
     ensure(encodedHeader.length <= HeaderRecordLimit, "archive header exceeds its byte limit")
     ensure(
@@ -336,7 +338,7 @@ object Journal {
       lock.withLock {
         ensure(!closed, "capture is closed")
         try {
-          ensure(sequence.raw < header.limits.maxEvents.raw, "event limit exceeded")
+          ensure(sequence.raw < header.limits.maxEvents, "event limit exceeded")
           val frame   = Option.when(kind.hasFrame)(Journal.Frames.normalised(kind, bytes, header.limits.maxFrameBytes))
           val eventId = sequence
           val record  = encode(EventRecord(
@@ -369,7 +371,7 @@ object Journal {
           failure = Some(FailureReason("capture ended with an open or incomplete exchange"))
         Using.resource(output) { output =>
           val footer =
-            encode(FooterRecord(Math.toIntExact(sequence.raw), frames.raw, failure.isEmpty, failure.map(_.raw)))
+            encode(FooterRecord(Math.toIntExact(sequence.raw), frames, failure.isEmpty, failure.map(_.raw)))
           ensure(footer.length <= MetadataRecordLimit, "archive footer exceeds its byte limit")
           ensure(
             footer.length.toLong + RecordFramingBytes <= header.limits.maxArchiveBytes.raw - written,
@@ -431,11 +433,10 @@ object Journal {
               connection == event.connection.fold(0L)(_.raw),
             "event changed after archive verification"
           )
-          Journal.Frames.validate(
+          Journal.Frames.validateNormalised(
             kind = event.kind,
             bytes = frame,
-            maximum = summary.header.limits.maxFrameBytes,
-            normalised = true
+            maximum = summary.header.limits.maxFrameBytes
           )
           frame
         case _ => invalid("frame record changed after archive verification")
@@ -508,12 +509,12 @@ object Journal {
     while (summary.isEmpty)
       readRecord(input, math.max(recordLimit, MetadataRecordLimit)) match {
         case Some((location, EventRecord(sequence, code, client, connection, frame))) =>
-          ensure(count.raw < declared.maxEvents.raw, "too many events")
+          ensure(count < declared.maxEvents, "too many events")
           val kind = Kind.values.find(_.code == code).getOrElse(invalid("unknown event kind"))
-          ensure(sequence == count.toLong.raw, "event sequence is not contiguous")
+          ensure(sequence == count.toLong, "event sequence is not contiguous")
           ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
           frame.foreach(bytes =>
-            Journal.Frames.validate(kind = kind, bytes = bytes, maximum = declared.maxFrameBytes, normalised = true)
+            Journal.Frames.validateNormalised(kind = kind, bytes = bytes, maximum = declared.maxFrameBytes)
           )
           val eventId = sequence.refine[EventId]
             .fold(message => invalid(s"invalid event identity: $message"), value => value)

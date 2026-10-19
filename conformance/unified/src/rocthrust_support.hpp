@@ -38,7 +38,7 @@ template <class T> struct TupleLess {
 
 template <class T> struct TupleCode {
   template <class Tuple> UNIFIED_ROCTHRUST_HOST_DEVICE int64_t operator()(const Tuple &value) const {
-    return static_cast<int64_t>(thrust::get<0>(value)) * 1000 + static_cast<int64_t>(thrust::get<1>(value));
+    return (static_cast<int64_t>(thrust::get<0>(value)) * 1000) + static_cast<int64_t>(thrust::get<1>(value));
   }
 };
 
@@ -66,25 +66,14 @@ template <class T> struct Negate {
 
 enum class SetKind { UnionSet, Intersection, Difference, SymmetricDifference };
 
-template <class T> struct KeyValues {
-  std::vector<T> keys;
-  std::vector<int32_t> values;
-  friend bool operator==(const KeyValues &a, const KeyValues &b) { return a.keys == b.keys && a.values == b.values; }
-};
+using support::KeyValues;
+using support::payload;
 
 template <class T> inline std::vector<T> ascendingKeys() { return {T{-5}, T{-5}, T{-3}, T{-1}, T{-1}, T{0}, T{2}, T{2}, T{2}, T{4}, T{7}}; }
 
 template <class T> inline std::vector<T> descendingKeys() {
-  auto result = ascendingKeys<T>();
-  std::reverse(result.begin(), result.end());
-  return result;
-}
-
-inline std::vector<int32_t> payload(size_t count, int32_t base) {
-  std::vector<int32_t> result(count);
-  for (size_t index = 0; index < count; ++index)
-    result[index] = base + static_cast<int32_t>(index);
-  return result;
+  using namespace aspartame;
+  return ascendingKeys<T>() ^ reverse();
 }
 
 template <class T> inline KeyValues<T> descendingKeyValues(const std::vector<T> &keys, int32_t base) {
@@ -142,7 +131,7 @@ template <class T> inline KeyValues<T> thrustSetByKey(const KeyValues<T> &left, 
   thrust::device_vector<T> outputKeys(left.keys.size() + right.keys.size());
   thrust::device_vector<int32_t> outputValues(left.values.size() + right.values.size());
 
-  thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<int32_t>::iterator> ends;
+  thrust::pair<typename thrust::device_vector<T>::iterator, thrust::device_vector<int32_t>::iterator> ends;
   if (kind == SetKind::UnionSet) {
     ends = descending ? thrust::set_union_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
                                                  rightValues.begin(), outputKeys.begin(), outputValues.begin(), algorithms::Greater<T>{})
@@ -174,12 +163,8 @@ template <class T> inline KeyValues<T> thrustSetByKey(const KeyValues<T> &left, 
 }
 
 template <class T> inline std::vector<Pair<T>> pairValues(const std::vector<T> &keys, int32_t base) {
-  std::vector<Pair<T>> result;
-  const auto values = payload(keys.size(), base);
-  result.reserve(keys.size());
-  for (size_t index = 0; index < keys.size(); ++index)
-    result.emplace_back(keys[index], values[index]);
-  return result;
+  using namespace aspartame;
+  return keys ^ zip(payload(keys.size(), base)) ^ map([](const T &key, int32_t value) { return Pair<T>(key, value); });
 }
 
 template <class T> inline std::vector<Pair<T>> hostPairs(const thrust::device_vector<Pair<T>> &values, size_t count) {

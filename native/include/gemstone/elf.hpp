@@ -30,15 +30,15 @@ inline std::optional<size_t> elfImageSize(const void *image, size_t maximumSize 
     end = std::max(end, offset + size);
     return true;
   };
-  if ((header.e_phnum != 0 && !cover(header.e_phoff, uint64_t(header.e_phentsize) * header.e_phnum))
-      || (header.e_shnum != 0 && !cover(header.e_shoff, uint64_t(header.e_shentsize) * header.e_shnum)))
+  if ((header.e_phnum != 0 && !cover(header.e_phoff, static_cast<uint64_t>(header.e_phentsize) * header.e_phnum))
+      || (header.e_shnum != 0 && !cover(header.e_shoff, static_cast<uint64_t>(header.e_shentsize) * header.e_shnum)))
     return std::nullopt;
   for (uint16_t index = 0; index < header.e_phnum; ++index) {
-    const auto segment = readNative<Elf64_Phdr>(image, header.e_phoff + uint64_t(index) * header.e_phentsize);
+    const auto segment = readNative<Elf64_Phdr>(image, header.e_phoff + (static_cast<uint64_t>(index) * header.e_phentsize));
     if (!cover(segment.p_offset, segment.p_filesz)) return std::nullopt;
   }
   for (uint16_t index = 0; index < header.e_shnum; ++index) {
-    const auto section = readNative<Elf64_Shdr>(image, header.e_shoff + uint64_t(index) * header.e_shentsize);
+    const auto section = readNative<Elf64_Shdr>(image, header.e_shoff + (static_cast<uint64_t>(index) * header.e_shentsize));
     if (section.sh_type != SHT_NOBITS && !cover(section.sh_offset, section.sh_size)) return std::nullopt;
   }
   return static_cast<size_t>(end);

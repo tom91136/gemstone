@@ -44,7 +44,6 @@ object Opcode {
     "fence" -> Fence,
     "fma" -> Fma,
     "fns" -> Fns,
-    "fp8" -> Fp8,
     "getctarank" -> GetCtaRank,
     "griddepcontrol" -> GridDependencyControl,
     "isspacep" -> IsSpacePredicate,
@@ -149,7 +148,7 @@ object Opcode {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum Opcode(val name: NonEmpty[String]) {
+enum Opcode(val name: NonEmpty[String]) derives CanEqual {
   case Abs extends Opcode("abs")
   case Activemask extends Opcode("activemask")
   case Add extends Opcode("add")
@@ -190,7 +189,6 @@ enum Opcode(val name: NonEmpty[String]) {
   case Fence extends Opcode("fence")
   case Fma extends Opcode("fma")
   case Fns extends Opcode("fns")
-  case Fp8 extends Opcode("fp8")
   case GetCtaRank extends Opcode("getctarank")
   case GridDependencyControl extends Opcode("griddepcontrol")
   case IsSpacePredicate extends Opcode("isspacep")

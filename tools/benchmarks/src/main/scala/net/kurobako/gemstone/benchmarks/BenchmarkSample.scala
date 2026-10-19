@@ -3,7 +3,7 @@ package net.kurobako.gemstone.benchmarks
 import net.kurobako.gemstone.constraint.*
 
 object BenchmarkSample {
-  enum AllocationScope {
+  enum AllocationScope derives CanEqual {
     case CallingThread, Workers, Unavailable
   }
 }

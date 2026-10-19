@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
 project(gemstone-native LANGUAGES C CXX)
 
+if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
+    OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19))
+  message(FATAL_ERROR "C++23 and glaze need GCC 13 or clang 19 or newer, found ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -17,14 +22,10 @@ option(GEMSTONE_ENABLE_OPENCL "Build the OpenCL facade" ON)
 option(GEMSTONE_ENABLE_VULKAN "Build the Vulkan compute facade" ON)
 option(GEMSTONE_ENABLE_LEVEL_ZERO "Build the Level Zero facade" ON)
 
-if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HSA OR GEMSTONE_ENABLE_HIP OR
-   GEMSTONE_ENABLE_OPENCL OR GEMSTONE_ENABLE_LEVEL_ZERO)
-  include(cmake/Aspartame.cmake)
-endif()
-
+include(cmake/Aspartame.cmake)
 include(cmake/Fmt.cmake)
 include(cmake/Glaze.cmake)
-include_directories(SYSTEM "${glaze_SOURCE_DIR}/include")
+include_directories(SYSTEM "${aspartame_SOURCE_DIR}/src" "${glaze_SOURCE_DIR}/include")
 
 if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HIP)
   set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)

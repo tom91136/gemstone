@@ -1,16 +1,23 @@
+#include <cstddef>
+#include <exception>
 #include <iostream>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <fire.hpp>
 
 #include "driver.hpp"
 
-int conformanceMain(std::vector<std::string> positional = fire::arg({0, "command/targets", fire::variadic()}),
-                    std::string profiles = fire::arg("--profiles", ""), std::string artifacts = fire::arg("--artifacts", ""),
-                    std::string output = fire::arg("--output", ""), std::string machine = fire::arg("--machine", ""),
-                    std::string workload = fire::arg("--workload", "compact"), bool direct = fire::arg("--direct"),
-                    std::string workloads = fire::arg("--workloads", ""), bool isolated = fire::arg("--isolated-launcher"),
-                    bool launcher = fire::arg("--launcher")) {
+static int conformanceMain(std::vector<std::string> positional = fire::arg({0, "command/targets", fire::variadic()}),
+                           const std::string &profiles = fire::arg("--profiles", ""),
+                           const std::string &artifacts = fire::arg("--artifacts", ""),
+                           const std::string &output = fire::arg("--output", ""), const std::string &machine = fire::arg("--machine", ""),
+                           std::string workload = fire::arg("--workload", "compact"), bool direct = fire::arg("--direct"),
+                           const std::string &workloads = fire::arg("--workloads", ""), bool isolated = fire::arg("--isolated-launcher"),
+                           bool launcher = fire::arg("--launcher")) {
   try {
     if (positional.empty()) throw std::invalid_argument("expected run");
     // Fire keeps arguments after -- positional. Its raw argument API preserves
@@ -32,7 +39,7 @@ int conformanceMain(std::vector<std::string> positional = fire::arg({0, "command
       c.direct = direct;
       c.artifacts = artifacts;
       c.output = output;
-      c.workload = workload;
+      c.workload = std::move(workload);
       if (!machine.empty()) c.machine = machine;
       c.selectors = std::move(positional);
       c.launcher = std::move(launch);

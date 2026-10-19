@@ -1,11 +1,15 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import scala.concurrent.duration.*
 
 class SASSConditionsSuite extends munit.FunSuite {
   override val munitTimeout: Duration = 120.seconds
 
   import SASSConditions.*
+
+  private val ConditionSections = Set("CONDITION", "CONDITIONS")
 
   test("parses nested arithmetic, attribute, enum, parameter, and TABLES expressions") {
     val source = """
@@ -22,20 +26,27 @@ class SASSConditionsSuite extends munit.FunSuite {
     assertEquals(parsed.head.message, "register outside range")
     assertEquals(
       parsed(1).expression,
-      Expr.Binary(
-        "->",
-        Expr.Call(
-          "DEFINED",
-          Vector(Expr.Call(
-            "TABLES_mem_0",
-            Vector(
-              Expr.Field("sem", None),
-              Expr.Field("sco", None),
-              Expr.Field("private", None)
+      ConditionExpression.Binary(
+        BinaryOperator.Implies,
+        ConditionExpression.Call(
+          BuiltinCall.Defined,
+          Vec(ConditionExpression.Call(
+            BuiltinCall.Table("TABLES_mem_0"),
+            Vec(
+              ConditionExpression.Field("sem", None),
+              ConditionExpression.Field("sco", None),
+              ConditionExpression.Field("private", None)
             )
           ))
         ),
-        Expr.Unary("!", Expr.Binary("==", Expr.Field("Pg", Some("not")), Expr.EnumValue("Predicate", "PT")))
+        ConditionExpression.Unary(
+          UnaryOperator.LogicalNot,
+          ConditionExpression.Binary(
+            BinaryOperator.Equal,
+            ConditionExpression.Field("Pg", Some("not")),
+            ConditionExpression.EnumValue("Predicate", "PT")
+          )
+        )
       )
     )
   }
@@ -51,25 +62,53 @@ class SASSConditionsSuite extends munit.FunSuite {
     assertEquals(result.constants, Map("ST_CS" -> BigInt(5), "HEX" -> BigInt(16)))
   }
 
-  private val sharedMemorySize = Expr.Binary(
-    "*",
-    Expr.Conditional(
-      Expr.Binary(">=", Expr.Field("sz", None), Expr.Number(8)),
-      Expr.Conditional(
-        Expr.Binary("<=", Expr.Field("sz", None), Expr.Number(12)),
-        Expr.Number(1),
-        Expr.Conditional(Expr.Binary("==", Expr.Field("sz", None), Expr.Number(13)), Expr.Number(2), Expr.Number(4))
+  private val sharedMemorySize = ConditionExpression.Binary(
+    BinaryOperator.Multiply,
+    ConditionExpression.Conditional(
+      ConditionExpression.Binary(
+        BinaryOperator.GreaterEqual,
+        ConditionExpression.Field("sz", None),
+        ConditionExpression.Number(8)
       ),
-      Expr.Conditional(
-        Expr.Binary("<=", Expr.Field("sz", None), Expr.Number(4)),
-        Expr.Number(1),
-        Expr.Conditional(Expr.Binary("==", Expr.Field("sz", None), Expr.Number(5)), Expr.Number(2), Expr.Number(4))
+      ConditionExpression.Conditional(
+        ConditionExpression.Binary(
+          BinaryOperator.LessEqual,
+          ConditionExpression.Field("sz", None),
+          ConditionExpression.Number(12)
+        ),
+        ConditionExpression.Number(1),
+        ConditionExpression.Conditional(
+          ConditionExpression.Binary(
+            BinaryOperator.Equal,
+            ConditionExpression.Field("sz", None),
+            ConditionExpression.Number(13)
+          ),
+          ConditionExpression.Number(2),
+          ConditionExpression.Number(4)
+        )
+      ),
+      ConditionExpression.Conditional(
+        ConditionExpression.Binary(
+          BinaryOperator.LessEqual,
+          ConditionExpression.Field("sz", None),
+          ConditionExpression.Number(4)
+        ),
+        ConditionExpression.Number(1),
+        ConditionExpression.Conditional(
+          ConditionExpression.Binary(
+            BinaryOperator.Equal,
+            ConditionExpression.Field("sz", None),
+            ConditionExpression.Number(5)
+          ),
+          ConditionExpression.Number(2),
+          ConditionExpression.Number(4)
+        )
       )
     ),
-    Expr.Number(32)
+    ConditionExpression.Number(32)
   )
 
-  private def destinationSize(description: SASSDescription.Description): Expr = {
+  private def destinationSize(description: SASSDescription.Description): ConditionExpression = {
     val predicate = description.classes.find(_.name == "lds__sImmOffset").flatMap(_.section("PREDICATES")).toVector
       .flatMap(_.entries).find(_.name == "IDEST_SIZE").getOrElse(fail("missing shared-memory IDEST_SIZE predicate"))
     val parsed =
@@ -99,7 +138,7 @@ class SASSConditionsSuite extends munit.FunSuite {
     test(s"parses every condition block in $digest") {
       val table  = generator.sassReferences.tables.find(_.digest == digest).getOrElse(fail(s"missing $digest"))
       val parsed = table.description.classes.flatMap { klass =>
-        klass.sections.view.filter(section => Set("CONDITION", "CONDITIONS")(section.name)).map(section =>
+        klass.sections.view.filter(section => ConditionSections(section.name)).map(section =>
           parse(section.body).fold(error => fail(s"${klass.name}: ${error.message}"), identity)
         )
       }

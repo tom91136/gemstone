@@ -5,7 +5,7 @@ import cats.parse.Parser0
 
 /** Register and qualifier vocabularies, including the implicit enumeration and range syntax. */
 object SASSSymbols {
-  case class Value(name: String, value: BigInt, default: Boolean = false)
+  case class Value(name: String, number: BigInt, default: Boolean = false)
   case class Vocabulary(name: String, values: Vector[Value], default: Option[BigInt] = None)
   private case class Entry(
       name: String,
@@ -69,7 +69,7 @@ object SASSSymbols {
       Vocabulary(
         kind,
         values,
-        values.filter(_.default).map(_.value).distinct match {
+        values.filter(_.default).map(_.number).distinct match {
           case Vector(value) => Some(value)
           case _             => None
         }
@@ -105,7 +105,7 @@ object SASSSymbols {
             Vocabulary(
               name,
               values,
-              values.collect { case value if value.default => value.value }.distinct match {
+              values.collect { case value if value.default => value.number }.distinct match {
                 case Vector(value) => Some(value)
                 case _             => None
               }

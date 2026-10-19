@@ -50,7 +50,7 @@ object Printer {
   }
 
   def render(instruction: Instruction): NonEmpty[String] = {
-    val prefix       = instruction.pred.map(predication => s"${render(predication)} ").getOrElse("")
+    val prefix       = instruction.pred.fold("")(predication => s"${render(predication)} ")
     val operandsText =
       if (instruction.operands.isEmpty) "" else instruction.operands.map(render(_)).mkString(" ", ", ", "")
     s"$prefix${instruction.qualifiedOpcode}$operandsText;"
@@ -85,7 +85,7 @@ object Printer {
       head + tail + assignment + suffix
     case Statement.Instruction(instruction)                             => render(instruction).raw
     case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
-      val prefix    = pred.map(value => s"${render(value)} ").getOrElse("")
+      val prefix    = pred.fold("")(value => s"${render(value)} ")
       val qualified = (opcode.raw +: mods.map(_.name.raw)).mkString(".")
       val tail      = if (operands.isEmpty) "" else operands.map(render(_)).mkString(" ", ", ", "")
       s"$prefix$qualified$tail;"

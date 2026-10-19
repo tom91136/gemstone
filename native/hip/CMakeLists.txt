@@ -23,8 +23,7 @@ target_compile_options(gemstone_hip_runtime PRIVATE -Wall -Wextra -Werror -Wno-p
 target_link_libraries(gemstone_hip_runtime PRIVATE
   gemstone_zstd
   gemstone_hsa_runtime_embedded
-  gemstone_hsa_core
-  Aspartame::Aspartame)
+  gemstone_hsa_core)
 target_link_options(gemstone_hip_runtime PRIVATE "-Wl,-Bsymbolic")
 gemstone_require_abi_implementations(
   TARGET gemstone_hip_runtime

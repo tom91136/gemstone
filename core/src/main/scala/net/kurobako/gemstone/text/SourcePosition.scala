@@ -7,7 +7,7 @@ object SourcePosition {
 
   /** Position of a UTF-16 offset, with LF advancing the line. */
   def at(source: String, offset: Int >= 0): SourcePosition = {
-    val end = math.min(offset.raw, source.length)
+    val end = math.min(offset, source.length)
     SourcePosition(
       (source.view.take(end).count(_ == '\n') + 1).unsafe[Int > 0],
       (end - source.lastIndexOf('\n', end - 1)).unsafe[Int > 0]

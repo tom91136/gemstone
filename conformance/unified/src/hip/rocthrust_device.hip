@@ -10,6 +10,7 @@
 
 using namespace unified::rocthrust_support;
 
+namespace {
 // The device-side random semantics of rocThrust's `testing/random`, decomposed
 // into one case per engine characteristic and one per distribution
 // characteristic so a single regression names the exact instantiation.
@@ -28,8 +29,7 @@ template <class Functor> inline int32_t deviceFunctorResult(Functor functor) {
 }
 
 template <class Engine> struct EngineValidation {
-  using result_type = typename Engine::result_type;
-  result_type expected;
+  Engine::result_type expected;
   UNIFIED_ROCTHRUST_HOST_DEVICE int32_t operator()() {
     Engine engine;
     engine.discard(RandomDraws - 1);
@@ -60,19 +60,23 @@ template <class Engine> struct EngineMaximum {
 template <class Engine> struct EngineEquality {
   UNIFIED_ROCTHRUST_HOST_DEVICE int32_t operator()() {
     int32_t result = 1;
-    Engine first, second;
+    Engine first;
+    Engine second;
     result &= (first == second) ? 1 : 0;
     first.discard(RandomPropertyDraws);
     second.discard(RandomPropertyDraws);
     result &= (first == second) ? 1 : 0;
-    Engine seededA(13), seededB(13);
+    Engine seededA(13);
+    Engine seededB(13);
     result &= (seededA == seededB) ? 1 : 0;
-    Engine otherA(7), otherB(13);
+    Engine otherA(7);
+    Engine otherB(13);
     result &= !(otherA == otherB) ? 1 : 0;
     otherA.seed(13);
     result &= (otherA == otherB) ? 1 : 0;
     result &= !(first != second) ? 1 : 0;
-    Engine unequalA(13), unequalB(13);
+    Engine unequalA(13);
+    Engine unequalB(13);
     unequalA.discard(500);
     unequalB.discard(RandomPropertyDraws / 10);
     result &= (unequalA != unequalB) ? 1 : 0;
@@ -106,6 +110,8 @@ template <class Distribution, class Engine> struct DistributionMaximum {
   }
 };
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/random-engine-validation/i32/n11", "[unified][rocthrust][compact]") {
   using namespace thrust::random;
   const auto check = [](const char *name, int32_t value) {
@@ -114,15 +120,16 @@ TEST_CASE("algorithms/roc-thrust-semantic/random-engine-validation/i32/n11", "[u
       REQUIRE(value == 1);
     }
   };
-  check("ranlux24_base", deviceFunctorResult(EngineValidation<ranlux24_base>{7937952u}));
-  check("ranlux48_base", deviceFunctorResult(EngineValidation<ranlux48_base>{192113843633948ull}));
-  check("minstd_rand", deviceFunctorResult(EngineValidation<minstd_rand>{399268537u}));
-  check("minstd_rand0", deviceFunctorResult(EngineValidation<minstd_rand0>{1043618065u}));
-  check("taus88", deviceFunctorResult(EngineValidation<taus88>{3535848941ull}));
-  check("ranlux24", deviceFunctorResult(EngineValidation<ranlux24>{9901578u}));
-  check("ranlux48", deviceFunctorResult(EngineValidation<ranlux48>{88229545517833ull}));
+  check("ranlux24_base", deviceFunctorResult(EngineValidation<ranlux24_base>{7937952U}));
+  check("ranlux48_base", deviceFunctorResult(EngineValidation<ranlux48_base>{192113843633948ULL}));
+  check("minstd_rand", deviceFunctorResult(EngineValidation<minstd_rand>{399268537U}));
+  check("minstd_rand0", deviceFunctorResult(EngineValidation<minstd_rand0>{1043618065U}));
+  check("taus88", deviceFunctorResult(EngineValidation<taus88>{3535848941ULL}));
+  check("ranlux24", deviceFunctorResult(EngineValidation<ranlux24>{9901578U}));
+  check("ranlux48", deviceFunctorResult(EngineValidation<ranlux48>{88229545517833ULL}));
 }
 
+namespace {
 template <template <class> class Check> inline void checkAllEngines(const char *what) {
   using namespace thrust::random;
   const auto check = [what](const char *name, int32_t value) {
@@ -140,6 +147,8 @@ template <template <class> class Check> inline void checkAllEngines(const char *
   check("ranlux48", deviceFunctorResult(Check<ranlux48>{}));
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/random-engine-min/i32/n11", "[unified][rocthrust][compact]") {
   checkAllEngines<EngineMinimum>("random-engine-min");
 }
@@ -152,6 +161,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/random-engine-equality/i32/n11", "[uni
   checkAllEngines<EngineEquality>("random-engine-equality");
 }
 
+namespace {
 template <class Engine> inline void checkEngineSaveRestore(const char *name) {
   Engine engine;
   engine.discard(RandomDraws);
@@ -167,6 +177,8 @@ template <class Engine> inline void checkEngineSaveRestore(const char *name) {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/random-engine-save-restore/i32/n11", "[unified][rocthrust][compact]") {
   using namespace thrust::random;
   checkEngineSaveRestore<ranlux24_base>("ranlux24_base");
@@ -178,6 +190,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/random-engine-save-restore/i32/n11", "
   checkEngineSaveRestore<ranlux48>("ranlux48");
 }
 
+namespace {
 template <template <class, class> class Check> inline void checkAllDistributions(const char *what) {
   using namespace thrust::random;
   using Engine = thrust::random::minstd_rand;
@@ -208,6 +221,8 @@ template <template <class, class> class Check> inline void checkAllDistributions
   if (!failures.empty()) throw std::runtime_error(fmt::format("{}: failing distributions:{}", what, failures));
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/random-distribution-min/i32/n11", "[unified][rocthrust][compact]") {
   checkAllDistributions<DistributionMinimum>("random-distribution-min");
 }
@@ -216,6 +231,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/random-distribution-max/i32/n11", "[un
   checkAllDistributions<DistributionMaximum>("random-distribution-max");
 }
 
+namespace {
 template <class Distribution> inline void checkDistributionSaveRestore(const char *name) {
   Distribution original(7, 13);
   std::stringstream buffer;
@@ -227,6 +243,8 @@ template <class Distribution> inline void checkDistributionSaveRestore(const cha
     REQUIRE(original == restored);
   }
 }
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/random-distribution-save-restore/i32/n11", "[unified][rocthrust][compact]") {
   using namespace thrust::random;
@@ -243,19 +261,22 @@ TEST_CASE("algorithms/roc-thrust-semantic/random-distribution-save-restore/i32/n
 // `__device__` global with hipMemcpyToSymbol, so that capability is the
 // semantic unit here rather than the static-assert macro itself.
 
-#if defined(__HIPCC__)
+namespace {
+#ifdef __HIPCC__
 __device__ int32_t unifiedDeviceGlobalMarker = 77;
 __device__ void *unifiedDeviceGlobalSlot = nullptr;
 
-static __global__ void unifiedPublishThroughDeviceGlobal(int32_t *marker) {
+__global__ void unifiedPublishThroughDeviceGlobal(int32_t *marker) {
   if (marker != nullptr) *marker = unifiedDeviceGlobalMarker;
   auto *slot = static_cast<int32_t *>(unifiedDeviceGlobalSlot);
   if (slot != nullptr) *slot = 77;
 }
 #endif
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/device-global-symbol-roundtrip/i32/n11", "[unified][rocthrust][compact]") {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
   int32_t *target = nullptr;
   int32_t *marker = nullptr;
   if (hipMalloc(reinterpret_cast<void **>(&target), sizeof(int32_t)) != hipSuccess
@@ -582,10 +603,13 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-reference/i32/n11", "[unified][
 // allocation roundtrips and universal (managed) storage, mirrored against an
 // exact host reference.
 
+namespace {
 template <class Value> struct HoldsValue {
   UNIFIED_ROCTHRUST_HOST_DEVICE bool operator()(Value value) const { return value == expected; }
   Value expected;
 };
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/memory-malloc-free/i32/n11", "[unified][rocthrust][compact]") {
   const ptrdiff_t count = 17;

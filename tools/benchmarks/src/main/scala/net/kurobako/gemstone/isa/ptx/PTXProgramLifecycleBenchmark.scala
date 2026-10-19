@@ -8,12 +8,12 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 /** Exercises the PTX program lifecycle that CUDA conformance spends most of its setup time in. */
 object PTXProgramLifecycleBenchmark {
-  private enum Operation {
+  private enum Operation derives CanEqual {
     case Decode, Launch
   }
 
@@ -41,13 +41,13 @@ object PTXProgramLifecycleBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def run(options: Options): BenchmarkSample = {
     val source = options.source.fold(generatedSource(options.entries, options.instructions))(Files.readString(_))
-    val images = Vector.tabulate(options.images.raw)(index => s"$source\n// lifecycle benchmark image $index\n")
+    val images = Vector.tabulate(options.images)(index => s"$source\n// lifecycle benchmark image $index\n")
     options.operation match {
       case Operation.Decode =>
         val measurement = Measurement {
           var iteration = 0
           var total     = 0L
-          while (iteration < options.iterations.raw) {
+          while (iteration < options.iterations) {
             val program = decode(images(iteration % images.size))
             total += program.symbols.fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
             iteration += 1
@@ -55,12 +55,12 @@ object PTXProgramLifecycleBenchmark {
           total
         }
         require(measurement.value > 0L, "benchmark program has no kernels")
-        measurement.sample(options.iterations.toLong)
+        measurement.sample(options.iterations.widen[Long > 0])
       case Operation.Launch =>
         val program  = decode(images.head)
         val metadata =
           program.kernel(options.kernel).fold(error => throw IllegalArgumentException(error.message), identity)
-        if (metadata.explicitParameterCount.raw != 0)
+        if (metadata.explicitParameterCount != 0)
           throw IllegalArgumentException(
             s"benchmark launch kernel '${options.kernel}' has ${metadata.explicitParameterCount} parameters"
           )
@@ -85,14 +85,14 @@ object PTXProgramLifecycleBenchmark {
 
   private def generatedSource(entries: Int > 0, instructions: Int >= 0): String = {
     val body =
-      if (instructions.raw == 0) "ret;"
+      if (instructions == 0) "ret;"
       else {
-        val arithmetic = (0 until instructions.raw).map(index => s"add.u32 %r1, %r0, ${index + 1};").mkString("\n")
+        val arithmetic = (0 until instructions).map(index => s"add.u32 %r1, %r0, ${index + 1};").mkString("\n")
         s".reg .b32 %r<2>;\nmov.u32 %r0, %tid.x;\n$arithmetic\nret;"
       }
-    val source = StringBuilder(".version 8.0\n.target sm_80\n.address_size 64\n")
+    val source = mutable.StringBuilder(".version 8.0\n.target sm_80\n.address_size 64\n")
     source.append(s".visible .entry benchmark() { $body }\n")
-    (1 until entries.raw).foreach(index => source.append(s".visible .entry unused_$index() { $body }\n"))
+    (1 until entries).foreach(index => source.append(s".visible .entry unused_$index() { $body }\n"))
     source.result()
   }
 }

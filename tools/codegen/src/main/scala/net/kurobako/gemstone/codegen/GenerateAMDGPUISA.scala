@@ -8,8 +8,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.string.*
 import org.w3c.dom.Element
+import org.w3c.dom.Node
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.Process
 import scala.sys.process.ProcessLogger
@@ -79,7 +82,7 @@ for name in sorted(module.instructions):
       operands: Vector[ujson.Value]
   )
   private case class ComparisonClassification(kind: String, relation: String, updateExec: Boolean)
-  private enum DefinitionDomain(val directory: String, val stem: String) {
+  private enum DefinitionDomain(val directory: String, val stem: String) derives CanEqual {
     case SOP1          extends DefinitionDomain("scalar", "SOP1")
     case SOP2          extends DefinitionDomain("scalar", "SOP2")
     case SOPC          extends DefinitionDomain("scalar", "SOPC")
@@ -114,7 +117,170 @@ for name in sorted(module.instructions):
   private val InstructionGroups                 = Set("ATOMIC", "WMMA", "SWMMAC")
   // Operand kinds whose field layouts the assembler and VM decode symbolically.
   private val SymbolicOperandKinds =
-    Set("BUFFER_FORMAT", "HWREG", "MATRIX", "SENDMSG", "WAITCNT", "WAITCNT_DEPCTR", "WAIT_ALU", "WAIT_EVENT")
+    Set("BUFFER_FORMAT", "DELAY", "HWREG", "MATRIX", "SENDMSG", "WAITCNT", "WAITCNT_DEPCTR", "WAIT_ALU", "WAIT_EVENT")
+
+  private val TableSelection = Map(
+    "FeatureSet"                    -> Vector("Features"),
+    "Processor"                     -> Vector("Name", "Features"),
+    "SubtargetFeature"              -> Vector("Implies"),
+    "GCNSubtargetFeatureGeneration" -> Vector.empty,
+    "VOP3_Pseudo"                   -> Vector("OpName", "IsWMMA", "IsSWMMAC"),
+    "AMDGPUDimProps"                -> Vector("Encoding", "AsmSuffix", "NumCoords", "NumGradients"),
+    "MIMG"                          -> Vector("BaseOpcode", "VAddrDwords", "VDataDwords"),
+    "MIMGBaseOpcode"                -> Vector(
+      "Store",
+      "Atomic",
+      "Sampler",
+      "Gather4",
+      "NumExtraArgs",
+      "Gradients",
+      "G16",
+      "Coordinates",
+      "LodOrClampOrMip",
+      "BVH"
+    )
+  )
+  private val MatrixFlags      = Vector("IsWMMA" -> "WMMA", "IsSWMMAC" -> "SWMMAC")
+  private val ProcessorAliases = Vector("gfx1001" -> "gfx1010", "gfx12" -> "gfx1200")
+  private val OpcodeFields     = Set("OP", "OPX", "OPY")
+  private val CarryNames       = Map(
+    "v_addc_co_u32"    -> "v_add_co_ci_u32",
+    "v_subb_co_u32"    -> "v_sub_co_ci_u32",
+    "v_subbrev_co_u32" -> "v_subrev_co_ci_u32"
+  )
+  private val Gfx117Parents     = Set("RDNA3_5", "RDNA4")
+  private val PreGfx11Parents   = Set("CDNA1", "RDNA1", "RDNA2")
+  private val DocumentedFormats = Set(
+    "SOP1",
+    "SOP2",
+    "SOPC",
+    "SOPP",
+    "SOPK",
+    "VOP1",
+    "VOP2",
+    "VOPC",
+    "VOP3",
+    "VOP3P",
+    "DS",
+    "MUBUF",
+    "MTBUF",
+    "FLAT",
+    "FLAT_GLBL",
+    "FLAT_SCRATCH",
+    "SMEM",
+    "EXP",
+    "MIMG",
+    "VINTRP"
+  )
+  private val VopFormats        = Set("VOP1", "VOP2", "VOPC")
+  private val FallbackFormats   = Set("VOP1", "VOP2", "VOPC", "VOP3", "VINTRP")
+  private val Vop3Formats       = Set("VOP3", "VOP3_SDST_ENC")
+  private val RetiredOperations = Map(
+    "v_min_legacy_f32" -> "v_min_f32",
+    "v_max_legacy_f32" -> "v_max_f32",
+    "v_lshl_b32"       -> "v_lshlrev_b32",
+    "v_lshr_b32"       -> "v_lshrrev_b32",
+    "v_ashr_i32"       -> "v_ashrrev_i32",
+    "v_rcp_legacy_f32" -> "v_rcp_f32",
+    "v_rcp_clamp_f32"  -> "v_rcp_f32",
+    "v_rsq_legacy_f32" -> "v_rsq_f32",
+    "v_rsq_clamp_f32"  -> "v_rsq_f32",
+    "v_log_clamp_f32"  -> "v_log_f32",
+    "v_rcp_clamp_f64"  -> "v_rcp_f64",
+    "v_rsq_clamp_f64"  -> "v_rsq_f64",
+    "v_exp_legacy_f32" -> "v_exp_f32",
+    "v_log_legacy_f32" -> "v_log_f32"
+  )
+  private val LegacyGenerations   = Vector("GFX6", "GFX7", "GFX8", "GFX9")
+  private val LegacyGenerationSet = LegacyGenerations.toSet
+  private val EarliestGenerations = Set("GFX6", "GFX7")
+  private val SignedCarryNames    = Map(
+    "v_add_co_u32"       -> "v_add_i32",
+    "v_sub_co_u32"       -> "v_sub_i32",
+    "v_subrev_co_u32"    -> "v_subrev_i32",
+    "v_add_co_ci_u32"    -> "v_addc_u32",
+    "v_sub_co_ci_u32"    -> "v_subb_u32",
+    "v_subrev_co_ci_u32" -> "v_subbrev_u32"
+  )
+  private val CarryAliasNames = Map(
+    "v_add_co_ci_u32"    -> "v_addc_co_u32",
+    "v_sub_co_ci_u32"    -> "v_subb_co_u32",
+    "v_subrev_co_ci_u32" -> "v_subbrev_co_u32"
+  )
+  private val Gfx8Names = Map(
+    "v_add_co_u32"    -> "v_add_u32",
+    "v_sub_co_u32"    -> "v_sub_u32",
+    "v_subrev_co_u32" -> "v_subrev_u32"
+  )
+  private val CdnaGenerations      = Vector("CDNA1", "CDNA2", "CDNA3", "CDNA4")
+  private val CdnaGenerationSet    = CdnaGenerations.toSet
+  private val VopOrVop3            = Set("VOP2", "VOP3")
+  private val LaterCdnaGenerations = Set("CDNA2", "CDNA3", "CDNA4")
+  private val SignedDotGenerations = Set("RDNA3", "RDNA3_5", "GFX11_7", "RDNA4")
+  private val IllegalGenerations   = Vector("RDNA1", "RDNA2", "RDNA3", "RDNA3_5", "RDNA4", "GFX11_7", "CDNA5")
+  private val DataShareFormats     = Set("DS", "VDS")
+  private val ScopeNames           = Vector("CU", "SE", "DEV", "SYS")
+  private val FixedRegisters       = Vector(
+    "VccLo"           -> "vcc_lo",
+    "VccHi"           -> "vcc_hi",
+    "M0"              -> "m0",
+    "NullSgpr"        -> "null",
+    "ExecLo"          -> "exec_lo",
+    "ExecHi"          -> "exec_hi",
+    "SccSource"       -> "src_scc",
+    "LdsDirectSource" -> "src_lds_direct"
+  )
+  private val BufferFormatIsas = Vector(
+    "GFX6",
+    "GFX7",
+    "GFX8",
+    "GFX9",
+    "CDNA1",
+    "CDNA2",
+    "CDNA3",
+    "CDNA4",
+    "CDNA5",
+    "RDNA1",
+    "RDNA2",
+    "RDNA3",
+    "RDNA3_5",
+    "RDNA4",
+    "GFX11_7"
+  )
+  private val GfxTenUnifiedIsas = Set("RDNA1", "RDNA2")
+  private val MatrixEnums       = Vector(
+    ("FMT", "MatrixFMT", "MATRIX_FMT_", 3),
+    ("SCALE", "MatrixScale", "MATRIX_SCALE_", 1),
+    ("SCALE_FMT", "MatrixScaleFmt", "MATRIX_SCALE_FMT_", 2)
+  )
+  private val ModernSourceIsas      = Set("RDNA4", "CDNA5", "GFX11_7")
+  private val ImplicitSources       = Vector("SRC_VCCZ", "SRC_EXECZ", "SRC_SCC", "SRC_POPS_EXITING_WAVE_ID")
+  private val TrapSources           = Vector("TBA_LO", "TBA_HI", "TMA_LO", "TMA_HI")
+  private val ByteSelectConversions = Set("v_cvt_f32_bf8", "v_cvt_f32_fp8")
+  private val ScalarFormats         = Set("SOP1", "SOP2", "SOPC")
+  private val LiteralSuffixes       = Vector(4 -> "_INST_LITERAL", 8 -> "_INST_LITERAL64")
+  private val ModernImageFormats    = Set("VIMAGE", "VSAMPLE")
+  private val IndexedFields         = Vector(
+    ("VectorSources", "VSRC", ""),
+    ("ImageAddresses", "VADDR", ""),
+    ("LaneSelectors", "LANE_SEL_", ""),
+    ("ScalarSelectors", "S", "")
+  )
+  private val MatrixMnemonics      = Vector("mfma", "wmma", "swmma", "tensor")
+  private val OperandConstantEnums = Vector(
+    ("EncValues", "", "Source"),
+    ("DPP", "DppCtrl", "DPP"),
+    ("DPP", "DppFiMode", "DPP8"),
+    ("SDWA", "SdwaSel", "SDWA"),
+    ("SDWA", "DstUnused", "SDWAUnused"),
+    ("Swizzle", "EncBits", "Swizzle"),
+    ("SIOutMods", "", "OutputModifiers")
+  )
+  private val BarrierImmediates = Set("s_barrier_init_imm", "s_barrier_join_imm", "s_get_barrier_state_imm")
+  private val BitOp3Dropped     = Set("ABS", "NEG", "OMOD")
+  private val OpSelFields       = Set("OPSEL", "OP_SEL")
+  private val ScaledFormats     = Set("VOP3PX2", "VOP3PX3")
+  private val HwregIsas         = Set("RDNA4", "CDNA5")
 
   private val command = Command("GenerateAMDGPUISA", "Generate AMDGPU ISA sources")((
     Opts.option[String]("python", help = "Python executable for the pinned ACO model").withDefault("python3"),
@@ -125,6 +291,8 @@ for name in sorted(module.instructions):
     Opts.argument[String]("generated-native-root").map(Path.of(_))
   ).mapN(Request(_, _, _, _, _, _)))
 
+  private val Gfx9Version = "FeatureISAVersion9_0_[0-9A-F]".r
+
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
     val result = extract(request.references, request.python)
     val llvm   = request.references.resolve("llvm/llvm")
@@ -132,27 +300,7 @@ for name in sorted(module.instructions):
       executable = request.tablegen,
       source = llvm.resolve("lib/Target/AMDGPU/AMDGPU.td"),
       includes = Vector(llvm.resolve("include"), llvm.resolve("lib/Target/AMDGPU")),
-      selection = Map(
-        "FeatureSet"                    -> Vector("Features"),
-        "Processor"                     -> Vector("Name", "Features"),
-        "SubtargetFeature"              -> Vector("Implies"),
-        "GCNSubtargetFeatureGeneration" -> Vector.empty,
-        "VOP3_Pseudo"                   -> Vector("OpName", "IsWMMA", "IsSWMMAC"),
-        "AMDGPUDimProps"                -> Vector("Encoding", "AsmSuffix", "NumCoords", "NumGradients"),
-        "MIMG"                          -> Vector("BaseOpcode", "VAddrDwords", "VDataDwords"),
-        "MIMGBaseOpcode"                -> Vector(
-          "Store",
-          "Atomic",
-          "Sampler",
-          "Gather4",
-          "NumExtraArgs",
-          "Gradients",
-          "G16",
-          "Coordinates",
-          "LodOrClampOrMip",
-          "BVH"
-        )
-      ),
+      selection = TableSelection,
       python = request.python
     )
     val instructionRoot                 = request.sourceRoot.resolve(PackageRoot)
@@ -163,13 +311,13 @@ for name in sorted(module.instructions):
     val constants = instructionRoot.resolve("EncodingConstants.scala")
     write(constants, renderConstants(result, request.references))
     val matrixGroups = tables("VOP3_Pseudo").obj.values.toVector.groupBy(_("OpName").str).map { case (name, values) =>
-      name -> Vector("IsWMMA" -> "WMMA", "IsSWMMAC" -> "SWMMAC").collect {
+      name -> MatrixFlags.collect {
         case (flag, group) if values.exists(_(flag).num == 1) => group
       }
     }
     val dlProcessors = tables("FeatureSet").obj.toVector.collect {
       case (name, value)
-          if name.matches("FeatureISAVersion9_0_[0-9A-F]") &&
+          if Gfx9Version.matches(name) &&
             value("Features").arr.exists(_("def").str == "FeatureDLInsts") =>
         "gfx" + name.stripPrefix("FeatureISAVersion").replace("_", "").toLowerCaseRoot
     }.sorted
@@ -238,7 +386,7 @@ for name in sorted(module.instructions):
     }.toSet
     require(wave32("gfx1200"), "LLVM processor defaults lack RDNA wave32 metadata")
     // Accepted legacy/family aliases absent from LLVM's processor records.
-    val aliases = Vector("gfx1001" -> "gfx1010", "gfx12" -> "gfx1200").collect {
+    val aliases = ProcessorAliases.collect {
       case (alias, processor) if wave32(processor) => alias
     }
     val names       = (wave32.toVector ++ aliases).sorted.map(Emission.literal)
@@ -270,7 +418,7 @@ for name in sorted(module.instructions):
   }
 
   private def layoutMetadata(value: ujson.Value): Option[ujson.Value] = {
-    val opcodes = value("fields").arr.filter(field => Set("OP", "OPX", "OPY")(field("name").str))
+    val opcodes = value("fields").arr.filter(field => OpcodeFields(field("name").str))
       .flatMap(_("ranges").arr).foldLeft(BigInt(0)) { (bits, range) =>
         bits | (((BigInt(1) << range("bits").num.toInt) - 1) << range("offset").num.toInt)
       }
@@ -329,7 +477,7 @@ for name in sorted(module.instructions):
       "noncontiguous image dimension encodings"
     )
     val bases        = tables("MIMGBaseOpcode").obj
-    val machine      = tables("MIMG").obj.values.toVector.filter(_("BaseOpcode") != ujson.Null)
+    val machine      = tables("MIMG").obj.values.toVector.filterNot(_("BaseOpcode").isNull)
     val instructions = bases.toVector.sortBy(_._1).map { case (name, value) =>
       val properties = ujson.Obj.from(value.obj.toVector.map { case (field, data) =>
         val key = if (field == "BVH") "bvh" else field.head.toLower.toString + field.tail
@@ -354,6 +502,18 @@ for name in sorted(module.instructions):
     ujson.Obj("dimensions" -> ujson.Arr.from(dimensions), "instructions" -> ujson.Obj.from(instructions))
   }
 
+  private val IllegalWord = raw"(?s)def V_ILLEGAL :.*?Inst\{31-0\} = 0x([0-9a-fA-F]+);".r
+
+  private val HwregId = "ID_(DVGPR_ALLOC_(?:LO|HI)) = ([0-9]+)".r
+
+  private val ReverseSubtractName = "(buffer|image)_atomic_rsub(_x2)?".r
+
+  private val CompareName = "v_cmpx?_(lg|tru)_[iu][0-9]+".r
+
+  private val FloatSuffix = "_f".r
+
+  private val MinMaxName = "v_(dual_|pk_)?(min|max|min3|max3|med3|minmax|maxmin)_f(16|32|64)".r
+
   private def extract(references: Path, python: String): Extracted = {
     if (!Files.isRegularFile(references.resolve("MANIFEST.tsv")))
       throw IllegalArgumentException(s"not a prepared ISA reference directory: $references")
@@ -364,25 +524,37 @@ for name in sorted(module.instructions):
     if (xmlFiles.size != 10)
       throw IllegalStateException(s"expected ten AMD ISA XML files, found ${xmlFiles.size}")
 
-    val carryNames = Map(
-      "v_addc_co_u32"    -> "v_add_co_ci_u32",
-      "v_subb_co_u32"    -> "v_sub_co_ci_u32",
-      "v_subbrev_co_u32" -> "v_subrev_co_ci_u32"
-    )
     val xml = xmlFiles.flatMap(parseOfficialXML(_)).map(value =>
-      value.copy(name = carryNames.getOrElse(value.name, value.name))
+      value.copy(name = CarryNames.getOrElse(value.name, value.name))
     )
     val official = xml ++ xml.filter(_.isa == "RDNA3_5").map(_.copy(isa = "GFX11_7"))
-    val aco      = parseACO(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), python)
-    val older    = aco.map { original =>
+    // ACO keeps the pre-GFX11 names of opcodes GFX11 renamed; on GFX11.7 the RDNA3.5 encoding of the same opcode names
+    // them
+    val aco = parseACO(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), python).map { original =>
+      val name = original.name.stripSuffix("_e64")
+      if (
+        original.isa != "GFX11_7" ||
+        official.exists(value => (value.isa == "RDNA3_5" || value.isa == "RDNA4") && value.name == name)
+      ) original
+      else {
+        val format = original.format match {
+          case "GLOBAL"  => "FLAT_GLBL"
+          case "SCRATCH" => "FLAT_SCRATCH"
+          case format    => format
+        }
+        official.find(value => value.isa == "RDNA3_5" && value.opcode == original.opcode && value.format == format)
+          .fold(original)(value => original.copy(name = value.name))
+      }
+    }
+    val older = aco.map { original =>
       val normalisedName = original.name.stripSuffix("_e64")
       val record         = original.copy(
         name = normalisedName match {
           case name
               if original.isa == "GFX11_7" &&
-                name.matches("v_(dual_|pk_)?(min|max|min3|max3|med3|minmax|maxmin)_f(16|32|64)") =>
-            name.replaceFirst("_f", "_num_f")
-          case name if name.matches("v_cmpx?_(lg|tru)_[iu][0-9]+") =>
+                MinMaxName.matches(name) =>
+            FloatSuffix.replaceFirstIn(name, "_num_f")
+          case name if CompareName.matches(name) =>
             name.replace("_lg_", "_ne_").replace("_tru_", "_t_")
           case "v_addc_co_u32"    => "v_add_co_ci_u32"
           case "v_subb_co_u32"    => "v_sub_co_ci_u32"
@@ -395,8 +567,9 @@ for name in sorted(module.instructions):
           case format    => format
         }
       )
+      val parents    = if (record.isa == "GFX11_7") Gfx117Parents else PreGfx11Parents
       val compatible = official.filter(value =>
-        (if (record.isa == "GFX11_7") Set("RDNA3_5", "RDNA4") else Set("CDNA1", "RDNA1", "RDNA2")) (value.isa) &&
+        parents(value.isa) &&
           value.name == record.name &&
           (value.format == record.format || value.format == s"${record.format}_INST_LITERAL" ||
             (record.format == "VOP3" && value.format == "VOP3_SDST_ENC"))
@@ -413,36 +586,21 @@ for name in sorted(module.instructions):
                 }
               )
             )
-        }.flatten
+        }.flatten.orElse(
+          // the reverse subtractions GFX8 dropped take the operands of the subtractions
+          Option.when(ReverseSubtractName.matches(record.name))(
+            official.find(value =>
+              value.name == record.name.replace("_rsub", "_sub") && value.isa == "CDNA1" &&
+                value.format == record.format
+            )
+          ).flatten
+        )
       }
-      if (
-        Set(
-          "SOP1",
-          "SOP2",
-          "SOPC",
-          "SOPP",
-          "SOPK",
-          "VOP1",
-          "VOP2",
-          "VOPC",
-          "VOP3",
-          "VOP3P",
-          "DS",
-          "MUBUF",
-          "MTBUF",
-          "FLAT",
-          "FLAT_GLBL",
-          "FLAT_SCRATCH",
-          "SMEM",
-          "EXP",
-          "MIMG",
-          "VINTRP"
-        )(record.format)
-      )
+      if (DocumentedFormats(record.format))
         operands.fold {
           if (record.format == "DS" && record.name.contains("_src2_"))
             record.copy(operands = Vector(Operand("ADDR", "VGPR", true, false, false, 32)))
-          else if (Set("VOP1", "VOP2", "VOPC", "VOP3", "VINTRP")(record.format)) {
+          else if (FallbackFormats(record.format)) {
             val args   = record.operands.filterNot(_.implicitOperand)
             val fields = record.format match {
               case "VOP1" => Vector(if (record.name == "v_readfirstlane_b32") "SDST" else "VDST", "SRC0")
@@ -465,24 +623,29 @@ for name in sorted(module.instructions):
         }(value => record.copy(format = value.format, operands = value.operands))
       else record
     }
+    // opcodes GFX9 and later dropped, whose VOP3 forms no document lists, by an operation whose operands they share
     val extended = older.filter(record => record.isa.startsWith("GFX") && record.isa != "GFX11_7").flatMap { record =>
       val opcode = record.format match {
         case "VOP1" => Some(record.opcode + (if (record.isa == "GFX6" || record.isa == "GFX7") 0x180 else 0x140))
         case "VOP2" => Some(record.opcode + 0x100)
         case "VOPC" => Some(record.opcode)
-        case "VINTRP" if Set("GFX8", "GFX9")(record.isa) => Some(record.opcode + 0x270)
-        case _                                           => None
+        case "VINTRP" if PartialFunction.cond(record.isa) { case "GFX8" | "GFX9" => true } =>
+          Some(record.opcode + 0x270)
+        case _ => None
       }
       opcode.toVector.flatMap { value =>
         official.find(entry =>
-          entry.isa == "CDNA1" && entry.name == record.name && Set("VOP3", "VOP3_SDST_ENC")(entry.format)
+          entry.isa == "CDNA1" && entry.name == record.name && Vop3Formats(entry.format)
         )
           .orElse(official.find(entry => entry.isa == "RDNA1" && entry.name == record.name && entry.format == "VOP3"))
+          .orElse(RetiredOperations.get(record.name).flatMap(name =>
+            official.find(entry => entry.isa == "CDNA1" && entry.name == name && entry.format == "VOP3")
+          ))
           .map(entry => record.copy(format = entry.format, opcode = value, operands = entry.operands))
       }
     }
     val subwords = older.flatMap { record =>
-      if (Set("GFX8", "GFX9")(record.isa) && Set("VOP1", "VOP2", "VOPC")(record.format))
+      if (PartialFunction.cond(record.isa) { case "GFX8" | "GFX9" => true } && VopFormats(record.format))
         official.view.filter(value =>
           value.isa == "CDNA1" && value.name == record.name && value.format.startsWith(s"${record.format}_VOP_")
         )
@@ -496,16 +659,17 @@ for name in sorted(module.instructions):
       }
     }
     val gfx1170 = older.filter(_.isa == "GFX11_7").flatMap { record =>
-      val base = if (record.format == "VOPD") "VOPDXY" else record.format
+      val base     = if (record.format == "VOPD") "VOPDXY" else record.format
+      val promoted = base match {
+        case "VOP1" => Some(record.opcode + 0x180)
+        case "VOP2" => Some(record.opcode + 0x100)
+        case "VOPC" => Some(record.opcode)
+        case _      => None
+      }
       official.view.filter(value => value.isa == "RDNA4" && value.name == record.name).flatMap { value =>
         val format = value.format.takeWhile(_ != '_')
         val opcode = if (format == base) Some(record.opcode)
-        else if (format == "VOP3") base match {
-          case "VOP1" => Some(record.opcode + 0x180)
-          case "VOP2" => Some(record.opcode + 0x100)
-          case "VOPC" => Some(record.opcode)
-          case _      => None
-        }
+        else if (format == "VOP3") promoted
         else None
         opcode.map(opcode => value.copy(isa = "GFX11_7", opcode = opcode))
       }
@@ -523,49 +687,38 @@ for name in sorted(module.instructions):
       )) ||
         (value.isa == "GFX11_7" && gfx1170.exists(record => record.name == value.name && record.format == value.format))
     )
-    val historical = (additions ++ inherited).filter(entry => Set("GFX6", "GFX7", "GFX8", "GFX9")(entry.isa)).flatMap {
+    val historical = (additions ++ inherited).filter(entry => LegacyGenerationSet(entry.isa)).flatMap {
       entry =>
-        val names = Map(
-          "v_add_co_u32"       -> "v_add_i32",
-          "v_sub_co_u32"       -> "v_sub_i32",
-          "v_subrev_co_u32"    -> "v_subrev_i32",
-          "v_add_co_ci_u32"    -> "v_addc_u32",
-          "v_sub_co_ci_u32"    -> "v_subb_u32",
-          "v_subrev_co_ci_u32" -> "v_subbrev_u32"
-        )
-        names.get(entry.name).filter(_ => Set("GFX6", "GFX7")(entry.isa) || entry.name.contains("_ci_")).map(name =>
-          entry.copy(name = name)
+        SignedCarryNames.get(entry.name).filter(_ => EarliestGenerations(entry.isa) || entry.name.contains("_ci_")).map(
+          name =>
+            entry.copy(name = name)
         )
     }
     val carryAliases = (additions ++ inherited).flatMap { entry =>
-      Map(
-        "v_add_co_ci_u32"    -> "v_addc_co_u32",
-        "v_sub_co_ci_u32"    -> "v_subb_co_u32",
-        "v_subrev_co_ci_u32" -> "v_subbrev_co_u32"
-      ).get(entry.name)
+      CarryAliasNames.get(entry.name)
         .map(name => entry.copy(name = name))
     }
     val legacyNames = (additions ++ inherited).flatMap { entry =>
-      if (entry.isa == "GFX8") Map(
-        "v_add_co_u32"    -> "v_add_u32",
-        "v_sub_co_u32"    -> "v_sub_u32",
-        "v_subrev_co_u32" -> "v_subrev_u32"
-      ).get(entry.name).map(name => entry.copy(name = name))
+      if (entry.isa == "GFX8") Gfx8Names.get(entry.name).map(name => entry.copy(name = name))
       else if (entry.isa == "GFX9" && entry.name.startsWith("v_fma_mix"))
         Some(entry.copy(name = entry.name.replace("v_fma_", "v_mad_")))
       else None
     }
     val supplement = parseLLVM(references.resolve("llvm/llvm/lib/Target/AMDGPU"), additions ++ inherited ++ gfx1170)
-    val records    =
-      (additions ++ inherited ++ historical ++ carryAliases ++ legacyNames ++ supplement ++ gfx1170).distinct
-        .sortBy(record => (record.name, record.isa, record.format, record.opcode))
+    // CDNA's mixed-precision multiply-adds fuse, as LLVM spells them, though AMD's documents name them MAD
+    val records =
+      (additions ++ inherited ++ historical ++ carryAliases ++ legacyNames ++ supplement ++ gfx1170).map(record =>
+        if (CdnaGenerationSet(record.isa) && record.name.startsWith("v_mad_mix"))
+          record.copy(name = record.name.replace("v_mad_", "v_fma_"))
+        else record
+      ).distinct.sortBy(record => (record.name, record.isa, record.format, record.opcode))
     val layouts = xmlFiles.flatMap(parseLayouts(_)).flatMap { layout =>
       val format = layout("format").str
       if (format == "VOP3" || format.startsWith("VOP3_VOP_DPP") || format.startsWith("VOP3_INST_LITERAL")) {
         val copy = ujson.read(ujson.write(layout))
         copy("format") = format.replace("VOP3", "VOP3_BITOP3")
         copy("fields") =
-          ujson.Arr.from(copy("fields").arr.filterNot(field => Set("ABS", "NEG", "OMOD")(field("name").str)) :+
+          ujson.Arr.from(copy("fields").arr.filterNot(field => BitOp3Dropped(field("name").str)) :+
             ujson.Obj(
               "name"   -> "BITOP3",
               "ranges" -> ujson.Arr(
@@ -577,7 +730,7 @@ for name in sorted(module.instructions):
         val byteSelect = ujson.read(ujson.write(layout))
         byteSelect("format") = format.replace("VOP3", "VOP3_BYTESEL")
         byteSelect("fields") = ujson.Arr.from(byteSelect("fields").arr.map { field =>
-          if (Set("OPSEL", "OP_SEL")(field("name").str)) ujson.Obj(
+          if (OpSelFields(field("name").str)) ujson.Obj(
             "name" -> "BYTE_SEL",
             // LLVM VOP3 source byte selection reverses these two bits.
             "ranges" -> ujson.Arr(
@@ -590,7 +743,7 @@ for name in sorted(module.instructions):
         Vector(layout, copy, byteSelect)
       } else Vector(layout)
     }.map { layout =>
-      if (layout("isa").str == "CDNA5" && Set("VOP3PX2", "VOP3PX3")(layout("format").str)) {
+      if (layout("isa").str == "CDNA5" && ScaledFormats(layout("format").str)) {
         val scale = records.find(value =>
           value.isa == "CDNA5" && value.name ==
             (if (layout("format").str == "VOP3PX2") "v_wmma_ld_scale_paired_b32" else "v_wmma_ld_scale16_paired_b64")
@@ -608,12 +761,11 @@ for name in sorted(module.instructions):
     }
     val hwregText =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIDefines.h"), StandardCharsets.UTF_8)
-    val HwregId  = "ID_(DVGPR_ALLOC_(?:LO|HI)) = ([0-9]+)".r
     val hwregIds = HwregId.findAllMatchIn(hwregText).map(value =>
       s"HW_REG_WAVE_${value.group(1)}" -> ujson.Str(value.group(2))
     ).toVector
     val operandLayouts = xmlFiles.flatMap(parseOperandLayouts(_)).map { layout =>
-      if (Set("RDNA4", "CDNA5")(layout("isa").str) && layout("kind").str == "HWREG")
+      if (HwregIsas(layout("isa").str) && layout("kind").str == "HWREG")
         layout("fields").arr.filter(_("field")("name").str == "ID").foreach(field =>
           hwregIds.foreach { case (name, value) => field("names")(name) = value }
         )
@@ -625,7 +777,6 @@ for name in sorted(module.instructions):
       }
     val illegalSource =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIInstructions.td"), StandardCharsets.UTF_8)
-    val IllegalWord = raw"(?s)def V_ILLEGAL :.*?Inst\{31-0\} = 0x([0-9a-fA-F]+);".r
     val illegalWord = IllegalWord.findFirstMatchIn(
       illegalSource
     ).map(_.group(1)).getOrElse(throw IllegalArgumentException("missing V_ILLEGAL encoding"))
@@ -694,7 +845,7 @@ for name in sorted(module.instructions):
     }
     val gfx9Fmac = records("VOP2Instructions.td", "VOP2_Real_e32e64_vi").filter(_._1 == "v_fmac_f32")
       .flatMap { case (name, opcode) =>
-        existing.view.filter(entry => entry.name == name && entry.isa == "CDNA1" && Set("VOP2", "VOP3")(entry.format))
+        existing.view.filter(entry => entry.name == name && entry.isa == "CDNA1" && VopOrVop3(entry.format))
           .map(entry => entry.copy(isa = "GFX9", opcode = if (entry.format == "VOP2") opcode else entry.opcode))
       }
     val packed = records("VOP3PInstructions.td", "VOP3P_Real_gfx1250").filter { case (name, _) =>
@@ -713,7 +864,7 @@ for name in sorted(module.instructions):
     }
     val accumulators = records("VOP3PInstructions.td", "VOP3P_Real_MAI").filter(_._1.startsWith("v_accvgpr_")).flatMap {
       case (name, opcode) =>
-        Vector("CDNA1", "CDNA2", "CDNA3", "CDNA4").map { isa =>
+        CdnaGenerations.map { isa =>
           val write = name.contains("write")
           Instruction(
             name,
@@ -735,8 +886,8 @@ for name in sorted(module.instructions):
       )
     )
     val subwords = existing.filter(entry =>
-      (entry.name == "v_pk_fmac_f16" && Set("CDNA1", "CDNA2", "CDNA3", "CDNA4")(entry.isa) && entry.format == "VOP2") ||
-        (entry.name == "v_rndne_f64" && Set("CDNA2", "CDNA3", "CDNA4")(entry.isa) && entry.format == "VOP1")
+      (entry.name == "v_pk_fmac_f16" && CdnaGenerationSet(entry.isa) && entry.format == "VOP2") ||
+        (entry.name == "v_rndne_f64" && LaterCdnaGenerations(entry.isa) && entry.format == "VOP1")
     ).map(entry =>
       vectorVariant(entry, entry.format + (if (entry.name == "v_pk_fmac_f16") "_VOP_SDWA" else "_VOP_DPP"))
     )
@@ -749,7 +900,7 @@ for name in sorted(module.instructions):
     val signedDots = records("VOP3PInstructions.td", "VOP3P_Real_SignedDot_gfx11").flatMap { case (name, opcode) =>
       val unsigned = name.replace("_i8", "_iu8").replace("_i4", "_iu4")
       existing.view.filter(entry =>
-        Set("RDNA3", "RDNA3_5", "GFX11_7", "RDNA4")(entry.isa) && entry.name == unsigned && entry.format == "VOP3P"
+        SignedDotGenerations(entry.isa) && entry.name == unsigned && entry.format == "VOP3P"
       )
         .map(_.copy(name = name, opcode = opcode))
     }
@@ -758,7 +909,7 @@ for name in sorted(module.instructions):
         existing.find(value => value.isa == "GFX6" && value.name == "image_atomic_sub" && value.format == "MIMG")
           .map(value => entry.copy(isa = "GFX7", operands = value.operands))
     }
-    val illegal = Vector("RDNA1", "RDNA2", "RDNA3", "RDNA3_5", "RDNA4", "GFX11_7", "CDNA5")
+    val illegal = IllegalGenerations
       .map(isa => Instruction("v_illegal", isa, "ILLEGAL", 0, Vector.empty))
     val legacyHalf =
       (records("VOP3Instructions.td", "VOP3_F16_Real_vi") ++
@@ -778,7 +929,7 @@ for name in sorted(module.instructions):
         ))
       }
     val barriers = records("SOPInstructions.td", "SOP1_IMM_Real_gfx12_gfx13").filter { case (name, _) =>
-      Set("s_barrier_init_imm", "s_barrier_join_imm", "s_get_barrier_state_imm")(name)
+      BarrierImmediates(name)
     }.flatMap { case (name, opcode) =>
       Vector("RDNA4", "CDNA5").map { isa =>
         Instruction(
@@ -842,8 +993,7 @@ for name in sorted(module.instructions):
   }
 
   private object Layout {
-    case class Range(offset: Int, bits: Int, padding: Int) derives ReadWriter
-    case class Field(name: String, ranges: Vector[Range]) derives ReadWriter
+    case class Field(name: String, ranges: Vector[BitRange]) derives ReadWriter
     case class Condition(field: String, values: Vector[Int], included: Boolean) derives ReadWriter
   }
   private case class Layout(
@@ -856,17 +1006,22 @@ for name in sorted(module.instructions):
       conditions: Vector[Vector[Layout.Condition]] = Vector(Vector.empty)
   ) derives ReadWriter
 
+  private val HexLiteral = "0x[0-9a-fA-F]+".r
+
+  private val Assignment = raw"let Inst\{([0-9]+)(?:-([0-9]+))?\}\s*=\s*([^;]+);".r
+
+  private def llvmClass(text: String, pattern: String, owner: String): String =
+    pattern.r.findFirstIn(text).getOrElse(throw IllegalArgumentException(s"missing LLVM class $owner"))
+
   private def normaliseLayouts(values: Vector[ujson.Value], references: Path): Vector[ujson.Value] = {
     val root = references.resolve("llvm/llvm/lib/Target/AMDGPU")
-    def assignments(file: String, owner: String): Vector[(Layout.Range, String)] = {
+    def assignments(file: String, owner: String): Vector[(BitRange, String)] = {
       val text = Files.readString(root.resolve(file), StandardCharsets.UTF_8)
-      val body = (raw"(?ms)^(?:multi)?class\s+" + owner + raw"(?=[<\s]).*?^}").r.findFirstIn(text)
-        .getOrElse(throw IllegalArgumentException(s"missing LLVM encoding class $owner"))
-      val Assignment = raw"let Inst\{([0-9]+)(?:-([0-9]+))?\}\s*=\s*([^;]+);".r
+      val body = llvmClass(text, raw"(?ms)^(?:multi)?class\s+" + owner + raw"(?=[<\s]).*?^}", owner)
       Assignment.findAllMatchIn(body).map { value =>
         val high = value.group(1).toInt
         val low  = Option(value.group(2)).fold(high)(_.toInt)
-        Layout.Range(low, high - low + 1, 0) -> value.group(3).trim
+        BitRange(low.unsafe, (high - low + 1).unsafe, 0) -> value.group(3).trim
       }.toVector
     }
     val vop3  = assignments("VOPInstructions.td", "VOP3a") ++ assignments("VOPInstructions.td", "VOP3a_gfx6_gfx7")
@@ -878,7 +1033,7 @@ for name in sorted(module.instructions):
     val interpolation = assignments("SIInstrFormats.td", "VINTRPe")
     val exportLayout  = assignments("SIInstrFormats.td", "EXPe")
     val smrd          = assignments("SMInstructions.td", "SMRD_Real_si")
-    def llvmField(values: Vector[(Layout.Range, String)], name: String, symbol: String): Layout.Field = {
+    def llvmField(values: Vector[(BitRange, String)], name: String, symbol: String): Layout.Field = {
       val matches = values.filter { case (_, expression) =>
         if (symbol.startsWith("ps.")) expression == symbol
         else (raw"\b" + java.util.regex.Pattern.quote(symbol) + raw"\b").r.findFirstIn(expression).nonEmpty
@@ -887,10 +1042,18 @@ for name in sorted(module.instructions):
       val (range, expression) = matches.head
       val padding             = (java.util.regex.Pattern.quote(symbol) + raw"\{[0-9]+-([0-9]+)\}").r
         .findFirstMatchIn(expression).map(_.group(1).toInt).getOrElse(0)
-      Layout.Field(name, Vector(range.copy(padding = padding)))
+      Layout.Field(name, Vector(range.copy(padding = padding.unsafe)))
     }
-    def prefix(layout: Layout, values: Vector[(Layout.Range, String)]): Layout = {
-      val (range, value) = values.filter(_._2.matches("0x[0-9a-fA-F]+"))
+    def renamed(
+        fields: Vector[Layout.Field],
+        values: Vector[(BitRange, String)],
+        renames: (String, (String, String))*
+    ): Vector[Layout.Field] = fields.map(field =>
+      renames.collectFirst { case (from, (name, symbol)) if field.name == from => llvmField(values, name, symbol) }
+        .getOrElse(field)
+    )
+    def prefix(layout: Layout, values: Vector[(BitRange, String)]): Layout = {
+      val (range, value) = values.filter(value => HexLiteral.matches(value._2))
         .maxByOption(_._1.offset).getOrElse(throw IllegalArgumentException(s"missing LLVM ${layout.format} prefix"))
       layout.copy(
         mask = (((BigInt(1) << range.bits) - 1) << range.offset).toString(16),
@@ -922,61 +1085,43 @@ for name in sorted(module.instructions):
     }
     // ACO's GFX6-9 encoders share these layouts with CDNA1. GFX6/7 VOP3 moves OP and CLAMP.
     val legacy = official.filter(_.isa == "CDNA1").flatMap { layout =>
-      Vector("GFX6", "GFX7", "GFX8", "GFX9").map { isa =>
-        if ((isa == "GFX6" || isa == "GFX7") && layout.format == "VINTRP") {
-          prefix(layout.copy(isa = isa), interpolation)
-        } else if ((isa == "GFX6" || isa == "GFX7") && layout.format.startsWith("VOP3")) {
-          val fields = layout.fields.collect {
-            case field if field.name == "OP"     => llvmField(vop3, "OP", "op")
-            case field if field.name == "CLAMP"  => llvmField(vop3, "CLAMP", "clamp")
-            case field if field.name != "OP_SEL" => field
-          }
-          prefix(layout.copy(isa = isa, fields = fields), vop3)
-        } else if (Set("GFX6", "GFX7", "GFX8")(isa) && layout.format == "MUBUF") {
-          layout.copy(
-            isa = isa,
-            fields = layout.fields.map {
-              case field if field.name == "LDS" => llvmField(mubuf, "ADDR64", "addr64")
-              case field if field.name == "SLC" => llvmField(mubuf, "SLC", "CPolBit.SLC")
-              case field                        => field
-            }
-          )
-        } else if ((isa == "GFX6" || isa == "GFX7") && Set("DS", "VDS")(layout.format)) {
-          val fields = layout.fields.map {
-            case field if field.name == "OP"  => llvmField(ds, "OP", "op")
-            case field if field.name == "GDS" => llvmField(ds, "GDS", "gds")
-            case field                        => field
-          }
-          prefix(layout.copy(isa = isa, fields = fields), ds)
-        } else if ((isa == "GFX6" || isa == "GFX7") && layout.format == "MTBUF") {
-          prefix(
-            layout.copy(
-              isa = isa,
-              fields = layout.fields.map {
-                case field if field.name == "OP" => llvmField(mtbuf, "OP", "op")
-                case field                       => field
-              }
-            ),
-            mtbuf
-          )
-        } else if ((isa == "GFX6" || isa == "GFX7") && layout.format == "EXP") {
-          prefix(layout.copy(isa = isa), exportLayout)
-        } else if ((isa == "GFX6" || isa == "GFX7") && layout.format == "SMEM") {
-          prefix(
-            layout.copy(
-              isa = isa,
-              bits = 32,
-              fields = Vector(
-                llvmField(smrd, "OP", "op"),
-                llvmField(smrd, "SDATA", "sdst"),
-                llvmField(smrd, "SBASE", "sbase"),
-                llvmField(smrd, "IMM", "ps.has_offset"),
-                llvmField(smrd, "OFFSET", "offset")
-              )
-            ),
-            smrd
-          )
-        } else layout.copy(isa = isa)
+      lazy val vop3Fields = layout.fields.collect {
+        case field if field.name == "OP"     => llvmField(vop3, "OP", "op")
+        case field if field.name == "CLAMP"  => llvmField(vop3, "CLAMP", "clamp")
+        case field if field.name != "OP_SEL" => field
+      }
+      lazy val mubufFields =
+        renamed(layout.fields, mubuf, "LDS" -> ("ADDR64", "addr64"), "SLC" -> ("SLC", "CPolBit.SLC"))
+      lazy val dsFields    = renamed(layout.fields, ds, "OP" -> ("OP", "op"), "GDS" -> ("GDS", "gds"))
+      lazy val mtbufFields = renamed(layout.fields, mtbuf, "OP" -> ("OP", "op"))
+      LegacyGenerations.map { isa =>
+        val early = isa == "GFX6" || isa == "GFX7"
+        layout.format match {
+          case "VINTRP" if early                            => prefix(layout.copy(isa = isa), interpolation)
+          case format if early && format.startsWith("VOP3") =>
+            prefix(layout.copy(isa = isa, fields = vop3Fields), vop3)
+          case "MUBUF" if early || isa == "GFX8"           => layout.copy(isa = isa, fields = mubufFields)
+          case format if early && DataShareFormats(format) =>
+            prefix(layout.copy(isa = isa, fields = dsFields), ds)
+          case "MTBUF" if early => prefix(layout.copy(isa = isa, fields = mtbufFields), mtbuf)
+          case "EXP" if early   => prefix(layout.copy(isa = isa), exportLayout)
+          case "SMEM" if early  =>
+            prefix(
+              layout.copy(
+                isa = isa,
+                bits = 32,
+                fields = Vector(
+                  llvmField(smrd, "OP", "op"),
+                  llvmField(smrd, "SDATA", "sdst"),
+                  llvmField(smrd, "SBASE", "sbase"),
+                  llvmField(smrd, "IMM", "ps.has_offset"),
+                  llvmField(smrd, "OFFSET", "offset")
+                )
+              ),
+              smrd
+            )
+          case _ => layout.copy(isa = isa)
+        }
       }
     }
     (official ++ legacy).map(writeJs(_))
@@ -1020,11 +1165,8 @@ for name in sorted(module.instructions):
     val isa      = input.getFileName.toString.stripPrefix("amdgpu_isa_").stripSuffix(".xml").toUpperCaseRoot
     val nodes    = document.getElementsByTagName("Encoding")
     Vector.tabulate(nodes.getLength) { index =>
-      val encoding = nodes.item(index) match {
-        case element: Element => element
-        case node             => throw IllegalArgumentException(s"Encoding node is not an XML element: $node")
-      }
-      val fields =
+      val encoding = element(nodes.item(index), "Encoding")
+      val fields   =
         directChildren(requiredDirect(requiredDirect(encoding, "MicrocodeFormat"), "BitMap"), "Field").map { field =>
           ujson.Obj("name" -> requiredText(field, "FieldName"), "ranges" -> ujson.Arr.from(bitRanges(field)))
         }
@@ -1055,6 +1197,10 @@ for name in sorted(module.instructions):
     }
   }
 
+  private val ShiftOperator = java.util.regex.Pattern.compile("<<")
+
+  private val Entry = raw"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*(.+))?".r
+
   // call sites name these arguments, which the argument checks enforce
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def enumValues(text: String, namespace: String, name: String): Vector[(String, Int)] = {
@@ -1065,7 +1211,6 @@ for name in sorted(module.instructions):
       (raw"enum\s*" + java.util.regex.Pattern.quote(name) + raw"\s*(?::\s*[A-Za-z_][A-Za-z_0-9]*)?\s*\{").r
     val body = declaration.findFirstMatchIn(scope).map(value => scope.substring(value.end).takeWhile(_ != '}'))
       .getOrElse(throw IllegalArgumentException(s"missing LLVM enum $namespace::$name"))
-    val Entry = raw"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*(.+))?".r
     body.replaceAll("//[^\n]*", "").split(',').toVector.map(_.trim).filter(_.nonEmpty)
       .foldLeft((0, Vector.empty[(String, Int)])) { case ((next, values), member) =>
         val (key, value) = member match {
@@ -1074,7 +1219,7 @@ for name in sorted(module.instructions):
               .orElse(values.find(_._1 == text.trim).map(_._2))
               .getOrElse(throw IllegalArgumentException(s"unsupported LLVM enum initialiser: $member"))
             def expression(text: String): Int = text.split("\\|", -1).map { term =>
-              term.split("<<", -1).map(_.trim).toVector match {
+              ShiftOperator.split(term, -1).map(_.trim).toVector match {
                 case Vector(value)        => atom(value)
                 case Vector(value, shift) =>
                   val bits = atom(shift)
@@ -1091,15 +1236,7 @@ for name in sorted(module.instructions):
   }
 
   private def renderOperandConstants(text: String): String = {
-    val groups = Vector(
-      ("EncValues", "", "Source"),
-      ("DPP", "DppCtrl", "DPP"),
-      ("DPP", "DppFiMode", "DPP8"),
-      ("SDWA", "SdwaSel", "SDWA"),
-      ("SDWA", "DstUnused", "SDWAUnused"),
-      ("Swizzle", "EncBits", "Swizzle"),
-      ("SIOutMods", "", "OutputModifiers")
-    ).map { case (namespace, name, owner) =>
+    val groups = OperandConstantEnums.map { case (namespace, name, owner) =>
       val values    = enumValues(text, namespace, name)
       val constants = values.map { case (key, value) => s"    val $key: Int = $value" }.mkString("\n")
       s"  object $owner {\n$constants\n  }\n"
@@ -1121,7 +1258,7 @@ for name in sorted(module.instructions):
         name.stripPrefix("TH_") -> value
     }
     val scopes =
-      Vector("CU", "SE", "DEV", "SYS").map(name => name -> (policy(s"SCOPE_$name") >>> policy("SCOPE_SHIFT")))
+      ScopeNames.map(name => name -> (policy(s"SCOPE_$name") >>> policy("SCOPE_SHIFT")))
     val atomic = Vector("RT" -> 0, "NT" -> policy("TH_ATOMIC_NT"), "CASCADE" -> policy("TH_ATOMIC_CASCADE"))
     groups + names("SdwaSel", "SdwaSelectors") + names("DstUnused", "SdwaUnused") +
       table("TemporalHints", hints) + table("MemoryScopes", scopes) +
@@ -1133,26 +1270,18 @@ for name in sorted(module.instructions):
       )
   }
 
+  private val SentinelWord = raw"let Inst\{8-0\}\s*=\s*(0x[0-9a-fA-F]+);".r
+
   private def renderSharedConstants(result: Extracted, references: Path): String = {
     val source = result.operands.find(value => value("isa").str == "CDNA1" && value("kind").str == "SRC")
       .getOrElse(throw IllegalArgumentException("missing CDNA1 source selectors"))("values")
-    val registers = Vector(
-      "VccLo"           -> "vcc_lo",
-      "VccHi"           -> "vcc_hi",
-      "M0"              -> "m0",
-      "NullSgpr"        -> "null",
-      "ExecLo"          -> "exec_lo",
-      "ExecHi"          -> "exec_hi",
-      "SccSource"       -> "src_scc",
-      "LdsDirectSource" -> "src_lds_direct"
-    )
+    val registers = FixedRegisters
       .map { case (name, key) => s"    inline val $name = ${source(key).str}" }.mkString("\n")
     val text =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/VOP1Instructions.td"), StandardCharsets.UTF_8)
     def sentinel(name: String, owner: String): String = {
-      val body = (raw"(?s)class\s+" + owner + raw"\s*<.*?\n}").r.findFirstIn(text)
-        .getOrElse(throw IllegalArgumentException(s"missing LLVM $owner"))
-      val value = raw"let Inst\{8-0\}\s*=\s*(0x[0-9a-fA-F]+);".r.findFirstMatchIn(body)
+      val body  = llvmClass(text, raw"(?s)class\s+" + owner + raw"\s*<.*?\n}", owner)
+      val value = SentinelWord.findFirstMatchIn(body)
         .flatMap(value => parseIntLiteral(value.group(1)))
         .getOrElse(throw IllegalArgumentException(s"missing LLVM $owner source sentinel"))
       s"    inline val $name = $value\n"
@@ -1175,27 +1304,11 @@ for name in sorted(module.instructions):
     def enumeration(namespace: String, name: String, prefix: String): Vector[(String, ujson.Value)] =
       enumValues(text, namespace, name).takeWhile { case (key, _) => !Set(s"${prefix}MIN", s"${prefix}FIRST")(key) }
         .map { case (key, value) => key.stripPrefix(prefix) -> ujson.Str(value.toString) }
-    val buffers = Vector(
-      "GFX6",
-      "GFX7",
-      "GFX8",
-      "GFX9",
-      "CDNA1",
-      "CDNA2",
-      "CDNA3",
-      "CDNA4",
-      "CDNA5",
-      "RDNA1",
-      "RDNA2",
-      "RDNA3",
-      "RDNA3_5",
-      "RDNA4",
-      "GFX11_7"
-    ).map { isa =>
+    val buffers = BufferFormatIsas.map { isa =>
       val fields = if (isa.startsWith("RDNA") || isa == "GFX11_7" || isa == "CDNA5") Vector((
         "FORMAT",
         7,
-        enumeration(if (Set("RDNA1", "RDNA2")(isa)) "UfmtGFX10" else "UfmtGFX11", "UnifiedFormat", "UFMT_")
+        enumeration(if (GfxTenUnifiedIsas(isa)) "UfmtGFX10" else "UfmtGFX11", "UnifiedFormat", "UFMT_")
       ))
       else Vector(
         ("DFMT", 4, enumeration("MTBUFFormat", "DataFormat", "DFMT_")),
@@ -1212,11 +1325,7 @@ for name in sorted(module.instructions):
         })
       )
     }
-    val matrix = Vector(
-      ("FMT", "MatrixFMT", "MATRIX_FMT_", 3),
-      ("SCALE", "MatrixScale", "MATRIX_SCALE_", 1),
-      ("SCALE_FMT", "MatrixScaleFmt", "MATRIX_SCALE_FMT_", 2)
-    ).map { case (field, name, prefix, bits) =>
+    val matrix = MatrixEnums.map { case (field, name, prefix, bits) =>
       ujson.Obj(
         "field" -> lowBitsField(field, bits),
         "names" -> ujson.Obj.from(enumeration("WMMA", name, prefix))
@@ -1225,12 +1334,14 @@ for name in sorted(module.instructions):
     buffers :+ ujson.Obj("isa" -> "CDNA5", "kind" -> "MATRIX", "fields" -> ujson.Arr.from(matrix))
   }
 
+  private val Flat = """defm\s+(FLAT_SCR_(?:LO|HI))\s*:\s*FLAT_SCR_LOHI_m<"[^"]*",\s*([0-9]+),\s*([0-9]+)>""".r
+
+  private val Register = """defm\s+([A-Z_0-9a-z]+)\s*:\s*SIRegLoHi16\s*<\s*"([^"]*)",\s*([0-9]+)>""".r
+
   private def normaliseOperandLayouts(values: Vector[ujson.Value], references: Path): Vector[ujson.Value] = {
     val root      = references.resolve("llvm/llvm/lib/Target/AMDGPU")
     val registers = Files.readString(root.resolve("SIRegisterInfo.td"), StandardCharsets.UTF_8)
-    val Register  = """defm\s+([A-Z_0-9a-z]+)\s*:\s*SIRegLoHi16\s*<\s*"([^"]*)",\s*([0-9]+)>""".r
     val codes     = Register.findAllMatchIn(registers).map(value => value.group(1) -> value.group(3)).toMap
-    val Flat      = """defm\s+(FLAT_SCR_(?:LO|HI))\s*:\s*FLAT_SCR_LOHI_m<"[^"]*",\s*([0-9]+),\s*([0-9]+)>""".r
     val flat = Flat.findAllMatchIn(registers).map(value => value.group(1) -> (value.group(2), value.group(3))).toMap
     val constants =
       enumValues(Files.readString(root.resolve("SIDefines.h"), StandardCharsets.UTF_8), "EncValues", "").toMap
@@ -1240,13 +1351,14 @@ for name in sorted(module.instructions):
       result
     }
     val legacy = values.filter(_("isa").str == "CDNA1").flatMap(value =>
-      Vector("GFX6", "GFX7", "GFX8", "GFX9").map(copy(value, _))
+      LegacyGenerations.map(copy(value, _))
     )
     val waitEvent = values.filter(value => value("isa").str == "RDNA3_5" && value("kind").str == "WAIT_EVENT")
       .map(copy(_, "RDNA3"))
-    (values ++ legacy ++ waitEvent).map { value =>
+    val combined = values ++ legacy ++ waitEvent
+    combined.foreach { value =>
       val isa = value("isa").str
-      val old = Set("GFX6", "GFX7", "GFX8")(isa)
+      val old = PartialFunction.cond(isa) { case "GFX6" | "GFX7" | "GFX8" => true }
       if (value("kind").str == "WAITCNT" && old)
         value("fields").arr.filter(_("field")("name").str == "VM").foreach { field =>
           field("field")("ranges") = ujson.Arr(ujson.Obj("offset" -> 0, "bits" -> 4, "padding" -> 0))
@@ -1254,9 +1366,9 @@ for name in sorted(module.instructions):
       if (value("kind").str == "SRC") {
         val names = value("values")
         // LLVM provides assembler aliases absent from some AMD XML generations.
-        val modern = isa.startsWith("RDNA3") || Set("RDNA4", "CDNA5", "GFX11_7")(isa)
+        val modern = isa.startsWith("RDNA3") || ModernSourceIsas(isa)
         names("null") = codes(if (modern) "SGPR_NULL_gfx11plus" else "SGPR_NULL_gfxpre11")
-        Vector("SRC_VCCZ", "SRC_EXECZ", "SRC_SCC", "SRC_POPS_EXITING_WAVE_ID").foreach { name =>
+        ImplicitSources.foreach { name =>
           names(name.toLowerCaseRoot) = codes(name)
         }
         if (old) {
@@ -1264,7 +1376,7 @@ for name in sorted(module.instructions):
           (constants("TTMP_VI_MIN") to constants("TTMP_VI_MAX")).zipWithIndex.foreach { case (code, index) =>
             names(s"ttmp$index") = code.toString
           }
-          Vector("TBA_LO", "TBA_HI", "TMA_LO", "TMA_HI").foreach(name => names(name.toLowerCaseRoot) = codes(name))
+          TrapSources.foreach(name => names(name.toLowerCaseRoot) = codes(name))
         }
         if (isa == "GFX7") flat.foreach { case (name, (ci, _)) =>
           names(name.toLowerCaseRoot.replace("flat_scr_", "flat_scratch_")) = ci
@@ -1276,8 +1388,8 @@ for name in sorted(module.instructions):
             names(name.stripSuffix("_lo")) = code
         }
       }
-      value
     }
+    combined
   }
 
   private def lowBitsField(name: String, bits: Int): ujson.Obj =
@@ -1339,15 +1451,12 @@ for name in sorted(module.instructions):
     val document = xmlDocument(input)
     val nodes    = document.getElementsByTagName("Instruction")
     Vector.tabulate(nodes.getLength) { index =>
-      val instruction = nodes.item(index) match {
-        case element: Element => element
-        case node             => throw IllegalArgumentException(s"Instruction node is not an XML element: $node")
-      }
-      val name = requiredText(instruction, "InstructionName").toLowerCaseRoot
+      val instruction = element(nodes.item(index), "Instruction")
+      val name        = requiredText(instruction, "InstructionName").toLowerCaseRoot
       directChildren(requiredDirect(instruction, "InstructionEncodings"), "InstructionEncoding").map { encoding =>
         val originalFormat = requiredText(encoding, "EncodingName").stripPrefix("ENC_")
         val format         = if (name.startsWith("v_bitop3_")) originalFormat.replace("VOP3", "VOP3_BITOP3")
-        else if (Set("v_cvt_f32_bf8", "v_cvt_f32_fp8")(name)) originalFormat.replace("VOP3", "VOP3_BYTESEL")
+        else if (ByteSelectConversions(name)) originalFormat.replace("VOP3", "VOP3_BYTESEL")
         else originalFormat
         val opcode   = parseRadix(requiredDirect(encoding, "Opcode"))
         val operands = optionalDirect(encoding, "Operands")
@@ -1409,7 +1518,7 @@ for name in sorted(module.instructions):
               fields(1).toInt * fields(2).toInt
             )
           }
-      val scalarFields = Set("SOP1", "SOP2", "SOPC").contains(columns(2))
+      val scalarFields = ScalarFormats(columns(2))
       val normalised   = operands.zipWithIndex.map { case (operand, index) =>
         if (!scalarFields || operand.implicitOperand) operand
         else if (operand.output) operand.copy(field = "SDST")
@@ -1428,8 +1537,9 @@ for name in sorted(module.instructions):
     }
   }
 
+  private val Relocation = raw"ELF_RELOC\((R_AMDGPU_[A-Z0-9_]+),\s*([0-9]+)\)".r
+
   private def renderConstants(result: Extracted, references: Path): String = {
-    val Relocation  = raw"ELF_RELOC\((R_AMDGPU_[A-Z0-9_]+),\s*([0-9]+)\)".r
     val relocations = Relocation.findAllMatchIn(Files.readString(
       references.resolve("llvm/llvm/include/llvm/BinaryFormat/ELFRelocs/AMDGPU.def"),
       StandardCharsets.UTF_8
@@ -1438,7 +1548,7 @@ for name in sorted(module.instructions):
     val header =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIDefines.h"), StandardCharsets.UTF_8)
     GeneratedHeader.scala("encoding constants from pinned AMD and LLVM inputs") +
-      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}private object EncodingConstants {\n" +
+      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}@SuppressWarnings(Array(\"baumkuchen:unused-member\"))\nprivate object EncodingConstants {\n" +
       renderOperandConstants(header) + renderSharedConstants(result, references) + relocations + "\n" +
       renderELFMachines(Files.readString(
         references.resolve("llvm/llvm/include/llvm/BinaryFormat/ELF.h"),
@@ -1449,8 +1559,9 @@ for name in sorted(module.instructions):
       )) + "}\n"
   }
 
+  private val Property = raw"KERNEL_CODE_PROPERTY\(([A-Z0-9_]+),\s*([0-9]+),\s*([0-9]+)\)".r
+
   def renderKernelCodeProperties(header: String): String = {
-    val Property   = raw"KERNEL_CODE_PROPERTY\(([A-Z0-9_]+),\s*([0-9]+),\s*([0-9]+)\)".r
     val properties = Property.findAllMatchIn(header).filterNot(_.group(1).startsWith("RESERVED")).map { value =>
       val mask = ((1L << value.group(3).toInt) - 1L) << value.group(2).toInt
       s"    val ${value.group(1)}: Int = 0x${mask.toHexString}"
@@ -1459,10 +1570,12 @@ for name in sorted(module.instructions):
     s"  object KernelCodeProperty {\n${properties.mkString("\n")}\n  }\n"
   }
 
+  private val Machine = """X\((0x[0-9a-fA-F]+),\s*EF_AMDGPU_MACH_AMDGCN_[A-Z0-9_]+,\s*"([^"]+)"\)""".r
+
+  private val Mask = raw"EF_AMDGPU_MACH\s*=\s*(0x[0-9a-fA-F]+)".r
+
   def renderELFMachines(header: String): String = {
-    val Mask    = raw"EF_AMDGPU_MACH\s*=\s*(0x[0-9a-fA-F]+)".r
-    val Machine = """X\((0x[0-9a-fA-F]+),\s*EF_AMDGPU_MACH_AMDGCN_[A-Z0-9_]+,\s*"([^"]+)"\)""".r
-    val mask    = Mask.findFirstMatchIn(header).map(_.group(1))
+    val mask = Mask.findFirstMatchIn(header).map(_.group(1))
       .getOrElse(throw IllegalArgumentException("LLVM ELF header has no AMDGPU machine mask"))
     val machines = Machine.findAllMatchIn(header).map(value => value.group(1) -> value.group(2)).toVector
     require(machines.nonEmpty, "LLVM ELF header has no AMDGCN machine names")
@@ -1475,16 +1588,18 @@ for name in sorted(module.instructions):
     val cases      = dimensions.zipWithIndex.map { case (value, encoding) =>
       val spelling = value("name").str
       val name     = "Image" + spelling.split('_').map(_.toLowerCaseRoot.capitalize).mkString
-      s"  case $name extends ImageDimension($encoding, ${Emission.literal("SQ_RSRC_IMG_" + spelling)}, ${value("coordinates").num.toInt}, ${value("gradients").num.toInt})"
+      s"  case $name extends ImageDimension(encoding = $encoding, assemblyName = ${Emission.literal("SQ_RSRC_IMG_" + spelling)}, coordinates = ${value("coordinates").num.toInt}, gradients = ${value("gradients").num.toInt})"
     }.mkString("\n")
     GeneratedHeader.scala("from LLVM AMDGPUDimProps") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
           |
-          |${GeneratedHeader.annotation()}enum ImageDimension(val encoding: Int, val assemblyName: String, val coordinates: Int, val gradients: Int) {
+          |${GeneratedHeader.annotation()}enum ImageDimension(val encoding: Int, val assemblyName: String, val coordinates: Int, val gradients: Int) derives CanEqual {
           |$cases
           |}
           |""".stripMargin
   }
+
+  private val SourceName = "VSRC[0-9]+".r
 
   private def renderDomains(result: Extracted): Vector[(String, String)] = {
     val operands = result.records.flatMap(_.operands)
@@ -1509,7 +1624,7 @@ for name in sorted(module.instructions):
         else s"  def $method: Boolean = this match { case $selected => true; case _ => false }"
       }
       def sourceModifier(method: String, prefix: String, suffix: String): String = {
-        val associations = names.view.filter(_.matches("VSRC[0-9]+")).flatMap { source =>
+        val associations = names.view.filter(SourceName.matches(_)).flatMap { source =>
           val modifier = prefix + source.stripPrefix("VSRC") + suffix
           Option.when(known(modifier))(s"case `$source` => Some(`$modifier`)")
         }.mkString("; ")
@@ -1520,7 +1635,7 @@ for name in sorted(module.instructions):
           s"    case `$value` => `${value.takeWhile(_ != '_')}`"
         ).mkString("\n")
         val literals = names.flatMap { value =>
-          Vector(4 -> "_INST_LITERAL", 8 -> "_INST_LITERAL64").collect {
+          LiteralSuffixes.collect {
             case (bytes, suffix) if known(value + suffix) =>
               s"case (`$value`, $bytes) => Some(`${value + suffix}`)"
           }
@@ -1528,7 +1643,7 @@ for name in sorted(module.instructions):
         Vector(
           s"  def base: EncodingFormat = this match {\n$bases\n    case _ => this\n  }",
           s"  def withLiteral(bytes: Int): Option[EncodingFormat] = (this, bytes) match {\n$literals\n case _ => None\n }",
-          predicate("isImage")(value => value.startsWith("MIMG") || Set("VIMAGE", "VSAMPLE")(value)),
+          predicate("isImage")(value => value.startsWith("MIMG") || ModernImageFormats(value)),
           predicate("isNonSequentialImage")(_.contains("NSA")),
           predicate("isVector")(_.startsWith("VOP")),
           predicate("isVOP3")(_.startsWith("VOP3")),
@@ -1536,7 +1651,11 @@ for name in sorted(module.instructions):
           predicate("isLiteral32")(_.endsWith("_INST_LITERAL")),
           predicate("isDpp")(_.contains("_VOP_DPP")),
           predicate("isSdwa")(_.contains("_VOP_SDWA")),
-          predicate("isDpp8")(_.endsWith("DPP8"))
+          predicate("isDpp8")(_.endsWith("DPP8")),
+          predicate("isScratch")(_.endsWith("SCRATCH")),
+          predicate("isBuffer")(PartialFunction.cond(_) { case "MTBUF" | "MUBUF" | "VBUFFER" => true }),
+          predicate("isDataShare")(PartialFunction.cond(_) { case "DS" | "VDS" => true }),
+          predicate("isVOP3PX")(_.startsWith("VOP3PX"))
         ).mkString("\n")
       } else if (name == "OperandKind") Vector(
         predicate("isImmediate")(_.startsWith("SIMM")),
@@ -1546,7 +1665,8 @@ for name in sorted(module.instructions):
         predicate("isScalarRegister")(_.startsWith("SREG")),
         predicate("isScalarSource")(_.startsWith("SSRC")),
         predicate("isScalarDestination")(_.startsWith("SDST")),
-        predicate("isAccumulator")(_.startsWith("ACC")),
+        predicate("isBareAccumulator")(_.startsWith("ACC")),
+        predicate("isAccumulatorOnly")(PartialFunction.cond(_) { case "ACCVGPR" | "SRC_ACCVGPR" => true }),
         predicate("acceptsAccumulator")(_.contains("ACC")),
         predicate("acceptsConstant")(_.endsWith("OR_CONST")),
         predicate("excludesLiteral")(_.endsWith("NOLIT"))
@@ -1559,6 +1679,9 @@ for name in sorted(module.instructions):
         sourceModifier("negativeModifier", "SRC", "_NEG"),
         sourceModifier("extensionModifier", "SRC", "_SEXT"),
         predicate("isVectorDestination")(_.startsWith("VDST")),
+        predicate("isDataOperand")(PartialFunction.cond(_) { case "DATA" | "DATA0" | "DATA1" | "VDATA" | "VDST" =>
+          true
+        }),
         predicate("isScale")(_.startsWith("SCALE_")),
         predicate("isImageAddress")(_.startsWith("VADDR")),
         predicate("isWait")(_.startsWith("WAIT_")),
@@ -1567,12 +1690,7 @@ for name in sorted(module.instructions):
         ).mkString("; ") + "; case _ => -1 }"
       ).mkString("\n")
       else ""
-      val indexed = if (name == "EncodingField") Vector(
-        ("VectorSources", "VSRC", ""),
-        ("ImageAddresses", "VADDR", ""),
-        ("LaneSelectors", "LANE_SEL_", ""),
-        ("ScalarSelectors", "S", "")
-      ).map { case (member, prefix, suffix) =>
+      val indexed = if (name == "EncodingField") IndexedFields.map { case (member, prefix, suffix) =>
         val selected = names.filter(_.matches(prefix + "[0-9]+" + suffix)).sortBy(value =>
           value.stripPrefix(prefix).stripSuffix(suffix).toInt
         )
@@ -1592,7 +1710,7 @@ for name in sorted(module.instructions):
             |  def fromName(name: String): Option[$name] = byName.get(name)
             |}
             |
-            |${GeneratedHeader.annotation()}enum $name {
+            |${GeneratedHeader.annotation()}enum $name derives CanEqual {
             |$cases
             |$properties
             |}
@@ -1636,25 +1754,42 @@ for name in sorted(module.instructions):
       comparisonClassification(opcode).map(classification => reference -> classification)
     }.sortBy(_._1)
     val renderedComparisons = comparisonEntries.map { case (reference, classification) =>
-      s"    $reference -> ComparisonOpcode(ComparisonKind.${classification.kind}, ComparisonRelation.${classification.relation}, ${classification.updateExec})"
+      s"    $reference -> ComparisonOpcode(ComparisonKind.${classification.kind}, ComparisonRelation.${classification.relation}, updateExec = ${classification.updateExec})"
     }.mkString(",\n")
-    val definitionSources = definitionChunks.map { chunk =>
-      chunk.fileName -> renderDefinitionChunkFile(chunk.objectName, chunk.definitions, metadataIdByOpcode)
-    }
     val definitionChunkNames = definitionChunks.map(chunk => s"${chunk.objectName}.definitions").mkString(", ")
-    val opcodes              = GeneratedHeader.scala("from the pinned AMDGPU instruction metadata") +
+    val registry             = GeneratedHeader.scala("from the pinned AMDGPU instruction metadata") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
-        |import net.kurobako.gemstone.constraint.*
+        |
+        |import Opcode.*
         |import net.kurobako.gemstone.collection.*
         |import net.kurobako.gemstone.string.*
         |
+        |${GeneratedHeader.annotation()}object InstructionDefs {
+        |  val ComparisonOpcodes: Map[Opcode, ComparisonOpcode] = Map(
+        |$renderedComparisons
+        |  )
+        |
+        |  val definitions: Vec[Opcode] = Vec($definitionChunkNames).flatten
+        |
+        |  private lazy val byName = definitions.groupBy(_.mnemonic.raw)
+        |  def forOpcode(name: String): Vec[Opcode] = byName.getOrElse(name.toLowerCaseRoot, Vec.empty)
+        |}
+        |""".stripMargin
+    val definitionSources = definitionChunks.map { chunk =>
+      chunk.fileName -> renderDefinitionChunkFile(chunk.objectName, chunk.definitions, metadataIdByOpcode)
+    } :+ ("InstructionDefs.scala" -> registry)
+    val opcodes = GeneratedHeader.scala("from the pinned AMDGPU instruction metadata") +
+      """|package net.kurobako.gemstone.isa.amdgpu
+        |import net.kurobako.gemstone.constraint.*
+        |import net.kurobako.gemstone.collection.*
+        |
         |object Opcode {
-        |  enum ComparisonKind {
+        |  enum ComparisonKind derives CanEqual {
         |    case Signed16, Signed32, Signed64, Unsigned16, Unsigned32, Unsigned64
         |    case Float16, Float32, Float64, ClassFloat32, ClassFloat64
         |  }
         |
-        |  enum ComparisonRelation {
+        |  enum ComparisonRelation derives CanEqual {
         |    case Equal, NotEqual, OrderedNotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
         |    case NotLess, NotLessOrEqual, NotGreater, NotGreaterOrEqual
         |    case Ordered, Unordered, NotLessOrGreater, Class
@@ -1665,20 +1800,14 @@ for name in sorted(module.instructions):
         |      relation: ComparisonRelation,
         |      updateExec: Boolean
         |  )
-        |
-        |  val ComparisonOpcodes: Map[Opcode, ComparisonOpcode] = Map(
-        |$renderedComparisons
-        |  )
-        |
-        |  val definitions: Vec[Opcode] = Vec($definitionChunkNames).flatten
-        |
-        |  private lazy val byName = definitions.groupBy(_.opcode.raw)
-        |  def forOpcode(name: String): Vec[Opcode] = byName.getOrElse(name.toLowerCaseRoot, Vec.empty)
         |}
         |
-        |abstract class Opcode(val opcode: NonEmpty[String], private val metadataId: Int) {
+        |abstract class Opcode(val mnemonic: NonEmpty[String], private val metadataId: Int) derives CanEqual {
         |  lazy val meta: Metadata = Metadata.Catalogue.metadata(metadataId)
-        |  override final def toString: String = opcode
+        |
+        |  /** The encodings of the opcode that `target` supports. */
+        |  def encodings(target: Target): Vec[Metadata.Encoding] = meta.encodings.filter(_.supports(target))
+        |  override final def toString: String = mnemonic
         |}
         |""".stripMargin
     InstructionSources(opcodes, metadata, definitionSources)
@@ -1755,7 +1884,7 @@ for name in sorted(module.instructions):
 
     if (
       formats.contains("VOP3P_MFMA") ||
-      Vector("mfma", "wmma", "swmma", "tensor").exists(opcode.contains(_))
+      MatrixMnemonics.exists(opcode.contains(_))
     ) DefinitionDomain.Matrix
     else if (hasPrefix("VOPD")) DefinitionDomain.DualVector
     else if (hasPrefix("VOPC")) DefinitionDomain.VectorCompare
@@ -1782,7 +1911,7 @@ for name in sorted(module.instructions):
       )
   }
 
-  private def weightedChunks[A](values: Vector[A])(weight: A => Int): Vector[Vector[A]] =
+  private inline def weightedChunks[A](values: Vector[A])(inline weight: A => Int): Vector[Vector[A]] =
     values.foldLeft(Vector.empty[(Int, Vector[A])]) { (chunks, value) =>
       val valueWeight = weight(value)
       chunks.lastOption match {
@@ -1916,6 +2045,11 @@ for name in sorted(module.instructions):
     optionalDirect(element, name).getOrElse(throw IllegalArgumentException(s"missing direct <$name>"))
 
   private def optionalDirect(element: Element, name: String): Option[Element] = directChildren(element, name).headOption
+
+  private def element(node: Node, tag: String): Element = node match {
+    case found: Element => found
+    case _              => throw IllegalArgumentException(s"$tag node is not an XML element: $node")
+  }
 
   private def directChildren(element: Element, name: String): Vector[Element] = {
     val children = element.getChildNodes

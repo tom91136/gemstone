@@ -18,7 +18,7 @@ object AddressMode {
   }
 }
 
-enum AddressMode(val spellingValue: NonEmpty[String]) {
+enum AddressMode(val spellingValue: NonEmpty[String]) derives CanEqual {
   inline def spelling: String = spellingValue
   case `64`                                      extends AddressMode("64")
   case U32                                       extends AddressMode("U32")

@@ -48,9 +48,10 @@ class WrittenRangesSuite extends munit.FunSuite {
     val ranges = WrittenRanges()
     ranges.add(10, 10)
     ranges.add(30, 10)
+    val expected = Vec[(Int >= 0, Int > 0)]((10, 10), (30, 10))
     List[(Int >= 0, Int >= 0)]((10, 10), (10, 1), (19, 1), (13, 4), (30, 10), (35, 0)).foreach { (offset, size) =>
       (0 until 3).foreach(_ => ranges.add(offset, size))
-      assertEquals(ranges.chunks(100), Vec[(Int >= 0, Int > 0)]((10, 10), (30, 10)))
+      assertEquals(ranges.chunks(100), expected)
     }
     ranges.add(5, 10)
     ranges.add(35, 10)
@@ -68,22 +69,24 @@ class WrittenRangesSuite extends munit.FunSuite {
   }
 
   test("a write bridges adjacent intervals regardless of insertion order") {
-    val writes = Vec[(Int >= 0, Int >= 0)]((10, 4), (14, 6), (20, 4))
+    val writes  = Vec[(Int >= 0, Int >= 0)]((10, 4), (14, 6), (20, 4))
+    val whole   = Vec[(Int >= 0, Int > 0)]((10, 14))
+    val chunked = Vec[(Int >= 0, Int > 0)]((10, 5), (15, 5), (20, 4))
     writes.permutations.foreach { ordered =>
       val ranges = WrittenRanges()
       ordered.foreach((offset, size) => ranges.add(offset, size))
-      assertEquals(ranges.chunks(65536), Vec[(Int >= 0, Int > 0)]((10, 14)), clues(ordered))
-      assertEquals(ranges.chunks(5), Vec[(Int >= 0, Int > 0)]((10, 5), (15, 5), (20, 4)), clues(ordered))
+      assertEquals(ranges.chunks(65536), whole, clues(ordered))
+      assertEquals(ranges.chunks(5), chunked, clues(ordered))
     }
   }
 
   test("reordered sparse writes preserve exactly the written set") {
     val ranges       = WrittenRanges()
     val one: Int > 0 = 1
-    val writes       = Vec.range[0, 300].map(index => ((index * 127) % 1024, one + index % 9))
+    val writes       = Vec.range[0, 300].map(index => (index.widen[Int >= 0] * 127 % 1024, one + index % 9))
     writes.reverse.foreach((offset, size) => ranges.add(offset, size))
-    val expected = writes.flatMap((offset, size) => offset.raw until (offset + size).raw).toSet
-    val actual   = ranges.chunks(65536).flatMap((offset, size) => Vec.from(offset.raw until (offset + size).raw))
+    val expected = writes.flatMap((offset, size) => offset.raw until offset + size).toSet
+    val actual   = ranges.chunks(65536).flatMap((offset, size) => Vec.from(offset.raw until offset + size))
     assertEquals(actual.toSet, expected)
     assertEquals(actual.size, expected.size)
   }

@@ -1,11 +1,16 @@
+#include <array>
 #include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <random>
+
+#include <aspartame/array.hpp>
 
 #include "reference/compressed_format.hpp"
 #include "reference/vertex_format.hpp"
 
 int main() {
+  using namespace aspartame;
   using namespace gemstone::vulkan;
   const std::array<VkFormat, 10> formats{VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,   VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK,
                                          VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK, VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK,
@@ -15,7 +20,9 @@ int main() {
   const std::array<unsigned, 10> encodings{1, 1, 2, 2, 3, 3, 4, 6, 5, 7};
   std::mt19937 random(0x3754);
   for (size_t index = 0; index < formats.size(); ++index) {
-    const auto format = compressedImageFormat(formats[index]).value();
+    const auto compressed = compressedImageFormat(formats[index]);
+    if (!compressed) return 1;
+    const auto &format = *compressed;
     for (unsigned iteration = 0; iteration < 512; ++iteration) {
       std::array<uint8_t, 16> bytes{};
       for (auto &byte : bytes)
@@ -40,7 +47,7 @@ int main() {
       const std::array<VertexEncoding, 8> encodings{VertexEncoding::Unorm, VertexEncoding::Snorm,   VertexEncoding::Uint,
                                                     VertexEncoding::Sint,  VertexEncoding::Uscaled, VertexEncoding::Sscaled,
                                                     VertexEncoding::Float, VertexEncoding::Ufloat};
-      const auto encoding = static_cast<unsigned>(std::find(encodings.begin(), encodings.end(), format->encoding) - encodings.begin());
+      const auto encoding = static_cast<unsigned>(encodings ^ index_of(format->encoding));
       std::printf("V %u %u %u %u", encoding, format->bytes, format->bgra, format->components);
       for (unsigned lane = 0; lane < format->components; ++lane)
         std::printf(" %u", format->widths[lane]);

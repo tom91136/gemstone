@@ -1,19 +1,23 @@
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <future>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 #include <dlfcn.h>
-#include <stddef.h>
-#include <stdint.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
+
+#include "../../rpc/test/queued_lifetime.hpp"
+#include <environment_keys.hpp>
+
+namespace {
 
 // CUDA 11.8 callers allocate only these leading fields of cudaPointerAttributes.
 struct LegacyPointerAttributes {
@@ -25,11 +29,6 @@ struct LegacyPointerAttributes {
 static_assert(offsetof(cudaPointerAttributes, devicePointer) == offsetof(LegacyPointerAttributes, devicePointer));
 static_assert(offsetof(cudaPointerAttributes, hostPointer) == offsetof(LegacyPointerAttributes, hostPointer));
 static_assert(sizeof(LegacyPointerAttributes) == 24);
-
-#include "../../rpc/test/queued_lifetime.hpp"
-#include <environment_keys.hpp>
-
-namespace {
 
 // Standalone native Driver API client; MUnit supplies the emulator endpoint and client identity.
 constexpr char Source[] = ".version 8.0\n"
@@ -345,7 +344,7 @@ void run() {
   check(launch(publish, 1, 1, 1, 1, 1, 1, 0, reinterpret_cast<CUstream>(uintptr_t{1}), streamProbeArguments.data(), nullptr));
   for (const unsigned groupCount : groups) {
     for (const unsigned width : widths) {
-      unsigned n = groupCount * width - width / 2;
+      unsigned n = (groupCount * width) - (width / 2);
       for (unsigned repeat = 0; repeat < 2; ++repeat) {
         host.fill(0);
         check(copyHostToDevice(memory, host.data(), sizeof(host)));
@@ -354,28 +353,28 @@ void run() {
         ++launches;
         check(copyDeviceToHost(host.data(), memory, sizeof(host)));
         for (unsigned block = 0; block < groupCount; ++block) {
-          const uint64_t first = host[6 + block * 4] | (static_cast<uint64_t>(host[7 + block * 4]) << 32);
-          const uint64_t second = host[8 + block * 4] | (static_cast<uint64_t>(host[9 + block * 4]) << 32);
-          REQUIRE((first == static_cast<uint64_t>(0x1122334455667788)));
-          REQUIRE((second == static_cast<uint64_t>(0x1020304050607080)));
+          const uint64_t first = host[6 + (block * 4)] | (static_cast<uint64_t>(host[7 + (block * 4)]) << 32);
+          const uint64_t second = host[8 + (block * 4)] | (static_cast<uint64_t>(host[9 + (block * 4)]) << 32);
+          REQUIRE((first == uint64_t{0x1122334455667788}));
+          REQUIRE((second == uint64_t{0x1020304050607080}));
         }
         host.fill(0);
         check(copyHostToDevice(memory, host.data(), sizeof(host)));
-        CUdeviceptr output = memory + groupCount * 8;
+        CUdeviceptr output = memory + (static_cast<CUdeviceptr>(groupCount) * 8);
         std::array<void *, 3> arguments{&memory, &output, &n};
         check(launch(compact, groupCount, 1, 1, width, 1, 1, 0, nullptr, arguments.data(), nullptr));
         ++launches;
         check(copyDeviceToHost(host.data(), memory, sizeof(host)));
         CAPTURE(groupCount, width, repeat, n, host[0], host[1]);
-        REQUIRE((host[2 * groupCount - 1] == (n + 1) / 2));
+        REQUIRE((host[(2 * groupCount) - 1] == (n + 1) / 2));
         for (unsigned block = 0; block < groupCount; ++block) {
           unsigned end = (block + 1) * width;
-          if (end > n) end = n;
-          REQUIRE((host[2 * block] == 101));
-          REQUIRE((host[2 * block + 1] == (end + 1) / 2));
+          end = std::min(end, n);
+          REQUIRE((host[2 * static_cast<size_t>(block)] == 101));
+          REQUIRE((host[(2 * block) + 1] == (end + 1) / 2));
         }
         for (unsigned i = 0; i < (n + 1) / 2; ++i)
-          REQUIRE((host[2 * groupCount + i] == 2 * i));
+          REQUIRE((host[(2 * groupCount) + i] == 2 * i));
       }
       host.fill(0);
       check(copyHostToDevice(memory, host.data(), sizeof(host)));
@@ -474,10 +473,10 @@ void runStreamCallbacks() {
   REQUIRE(runtimeCaptureInfo(nullptr, &runtimeCapture, nullptr) == cudaSuccess);
   REQUIRE(runtimeCapture == cudaStreamCaptureStatusNone);
   struct Observed {
-    CUstream expected;
+    CUstream expected{};
     int calls = 0;
     bool valid = true;
-  } observed{first};
+  } observed{.expected = first};
   check(streamAddCallback(
       first,
       [](CUstream stream, CUresult status, void *data) {
@@ -585,14 +584,14 @@ void runManagedRuntime() {
 
   void *managed = nullptr;
   REQUIRE((mallocManaged(&managed, bytes, attachGlobal) == success));
-  REQUIRE((managed != nullptr));
+  if (!managed) FAIL("managed allocation returned null");
   void *device = nullptr;
   REQUIRE((malloc(&device, bytes) == success));
 
   // Host writes reach the device directly, since the managed allocation is the host buffer.
   auto *words = static_cast<uint32_t *>(managed);
   for (unsigned index = 0; index < 64; ++index)
-    words[index] = index * 7U + 1U;
+    words[index] = (index * 7U) + 1U;
   REQUIRE((copy(device, managed, bytes, hostToDevice) == success));
 
   // Device writes copied back land in the same host buffer the caller already holds.
@@ -666,9 +665,9 @@ TEST_CASE("CUDA accepts metadata-only cubins but rejects malformed executable im
                                                 0x89, 0x87, 0xd9, 0x39, 0x12, 0xfd, 0x9d, 0xf9};
   const void *runtimeTable = nullptr;
   check(library.load<CUresult (*)(const void **, const void *)>("cuGetExportTable")(&runtimeTable, runtimeId.data()));
-  const auto entries = static_cast<const void *const *>(runtimeTable);
+  const auto *const entries = static_cast<const void *const *>(runtimeTable);
   const auto loadCatalogue =
-      reinterpret_cast<CUresult (*)(void **, const void *, void *, void *, uint32_t)>(const_cast<void *>(entries[6]));
+      reinterpret_cast<CUresult (*)(void **, const void *, void *, void *, uint32_t)>(reinterpret_cast<uintptr_t>(entries[6]));
   put(8, 0, 8);
   void *catalogue = nullptr;
   check(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0));
@@ -695,7 +694,7 @@ TEST_CASE("CUDA accepts metadata-only cubins but rejects malformed executable im
   REQUIRE(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
   put(24, 200, 4);
   put(8, image.size() - 16, 8);
-  for (const uint64_t flags : {2u, 4u, 6u}) {
+  for (const uint64_t flags : {2U, 4U, 6U}) {
     put(elf + 128 + 8, flags, 8);
     REQUIRE(load(&module, image.data()) != CUDA_SUCCESS);
   }
@@ -722,6 +721,8 @@ struct UnifiedMemoryClient {
   decltype(&cuLaunchKernel) launch = library.load<decltype(&cuLaunchKernel)>("cuLaunchKernel");
   decltype(&cuCtxSynchronize) synchronise = library.load<decltype(&cuCtxSynchronize)>("cuCtxSynchronize");
   decltype(&cuModuleGetFunction) function = library.load<decltype(&cuModuleGetFunction)>("cuModuleGetFunction");
+  decltype(&cuModuleUnload) moduleUnload = library.load<decltype(&cuModuleUnload)>("cuModuleUnload");
+  decltype(&cuCtxDestroy) contextDestroy = library.load<decltype(&cuCtxDestroy)>("cuCtxDestroy_v2");
   UnifiedMemoryClient() {
     check(library.load<CUresult (*)(unsigned)>("cuInit")(0));
     check(library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2")(&context, CU_CTX_MAP_HOST, 0));
@@ -741,10 +742,10 @@ struct UnifiedMemoryClient {
     check(library.load<CUresult (*)(CUmodule *, const void *)>("cuModuleLoadData")(&module, source));
   }
   ~UnifiedMemoryClient() {
-    if (module) (void)library.load<CUresult (*)(CUmodule)>("cuModuleUnload")(module);
-    if (context) (void)library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2")(context);
+    if (module) (void)moduleUnload(module);
+    if (context) (void)contextDestroy(context);
   }
-  void increment(CUdeviceptr address) {
+  void increment(CUdeviceptr address) const {
     CUfunction kernel = nullptr;
     check(function(&kernel, module, "alias_increment"));
     void *args[] = {&address, &address};
@@ -755,14 +756,14 @@ struct UnifiedMemoryClient {
 } // namespace
 
 TEST_CASE("CUDA managed interior aliases preserve host edits between launches", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
+  const UnifiedMemoryClient api;
   CUdeviceptr allocation = 0;
   check(api.managed(&allocation, 64, CU_MEM_ATTACH_GLOBAL));
   auto *host = reinterpret_cast<uint32_t *>(allocation);
-  for (uint32_t seed : {11U, 91U, 123U}) {
+  for (uint32_t const seed : {11U, 91U, 123U}) {
     std::fill_n(host, 16, 0xa5a5a5a5U);
     host[3] = seed;
-    api.increment(allocation + 3 * sizeof(uint32_t));
+    api.increment(allocation + (3 * sizeof(uint32_t)));
     CHECK((host[3] == seed + 2));
     for (unsigned index = 0; index < 16; ++index)
       if (index != 3) CHECK((host[index] == 0xa5a5a5a5U));
@@ -771,16 +772,16 @@ TEST_CASE("CUDA managed interior aliases preserve host edits between launches", 
 }
 
 TEST_CASE("CUDA pinned interior aliases preserve host edits between launches", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
+  const UnifiedMemoryClient api;
   void *allocation = nullptr;
   check(api.hostAlloc(&allocation, 64, CU_MEMHOSTALLOC_DEVICEMAP));
   CUdeviceptr device = 0;
   check(api.hostDevicePointer(&device, allocation, 0));
   auto *host = static_cast<uint32_t *>(allocation);
-  for (uint32_t seed : {11U, 91U}) {
+  for (uint32_t const seed : {11U, 91U}) {
     std::fill_n(host, 16, 0xa5a5a5a5U);
     host[3] = seed;
-    api.increment(device + 3 * sizeof(uint32_t));
+    api.increment(device + (3 * sizeof(uint32_t)));
     CHECK((host[3] == seed + 2));
     CHECK((host[2] == 0xa5a5a5a5U && host[4] == 0xa5a5a5a5U));
   }
@@ -788,10 +789,10 @@ TEST_CASE("CUDA pinned interior aliases preserve host edits between launches", "
 }
 
 TEST_CASE("CUDA registered stack subrange supports kernels and unregister", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
+  const UnifiedMemoryClient api;
   std::array<uint32_t, 16> host{};
   auto *registered = host.data() + 2;
-  for (uint32_t seed : {11U, 91U}) {
+  for (uint32_t const seed : {11U, 91U}) {
     host.fill(0xa5a5a5a5U);
     host[3] = seed;
     check(api.hostRegister(registered, 8 * sizeof(uint32_t), CU_MEMHOSTREGISTER_DEVICEMAP));
@@ -805,7 +806,7 @@ TEST_CASE("CUDA registered stack subrange supports kernels and unregister", "[cu
 }
 
 TEST_CASE("CUDA registered heap subrange supports kernels and unregister", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
+  const UnifiedMemoryClient api;
   auto host = std::make_unique<uint32_t[]>(16);
   std::fill_n(host.get(), 16, 11U);
   check(api.hostRegister(host.get() + 2, 8 * sizeof(uint32_t), CU_MEMHOSTREGISTER_DEVICEMAP));
@@ -819,21 +820,22 @@ TEST_CASE("CUDA registered heap subrange supports kernels and unregister", "[cud
 }
 
 TEST_CASE("CUDA managed pointer graph preserves interior targets and pointer bytes", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
-  CUdeviceptr allocation = 0, table = 0;
+  UnifiedMemoryClient const api;
+  CUdeviceptr allocation = 0;
+  CUdeviceptr table = 0;
   check(api.managed(&allocation, 64, CU_MEM_ATTACH_GLOBAL));
   check(api.managed(&table, sizeof(CUdeviceptr), CU_MEM_ATTACH_GLOBAL));
   auto *host = reinterpret_cast<uint32_t *>(allocation);
   CUfunction kernel = nullptr;
   check(api.function(&kernel, api.module, "indirect_increment"));
-  for (unsigned offset : {1U, 7U, 14U}) {
+  for (unsigned const offset : {1U, 7U, 14U}) {
     std::fill_n(host, 16, 41U);
-    *reinterpret_cast<CUdeviceptr *>(table) = allocation + offset * sizeof(uint32_t);
+    *reinterpret_cast<CUdeviceptr *>(table) = allocation + (offset * sizeof(uint32_t));
     void *args[] = {&table};
     check(api.launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
     check(api.synchronise());
     CHECK((host[offset] == 42));
-    CHECK((*reinterpret_cast<CUdeviceptr *>(table) == allocation + offset * sizeof(uint32_t)));
+    CHECK((*reinterpret_cast<CUdeviceptr *>(table) == allocation + (offset * sizeof(uint32_t))));
     CHECK((host[offset - 1] == 41 && host[offset + 1] == 41));
   }
   check(api.free(table));
@@ -841,15 +843,16 @@ TEST_CASE("CUDA managed pointer graph preserves interior targets and pointer byt
 }
 
 TEST_CASE("CUDA managed device pointer publication preserves host addresses", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
-  CUdeviceptr allocation = 0, table = 0;
+  UnifiedMemoryClient const api;
+  CUdeviceptr allocation = 0;
+  CUdeviceptr table = 0;
   check(api.managed(&allocation, 64, CU_MEM_ATTACH_GLOBAL));
   check(api.managed(&table, sizeof(CUdeviceptr), CU_MEM_ATTACH_GLOBAL));
   CUfunction kernel = nullptr;
   check(api.function(&kernel, api.module, "publish_pointer"));
-  for (unsigned offset : {1U, 7U, 15U}) {
+  for (unsigned const offset : {1U, 7U, 15U}) {
     *reinterpret_cast<CUdeviceptr *>(table) = 0;
-    CUdeviceptr target = allocation + offset * sizeof(uint32_t);
+    CUdeviceptr target = allocation + (offset * sizeof(uint32_t));
     void *args[] = {&table, &target};
     check(api.launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
     check(api.synchronise());
@@ -860,7 +863,7 @@ TEST_CASE("CUDA managed device pointer publication preserves host addresses", "[
 }
 
 TEST_CASE("CUDA runtime host registration supports a borrowed stack range", "[cuda][integration][unified-memory]") {
-  UnifiedMemoryClient api;
+  const UnifiedMemoryClient api;
   const auto registerHost = api.library.load<int (*)(void *, size_t, unsigned)>("cudaHostRegister");
   const auto unregisterHost = api.library.load<int (*)(void *)>("cudaHostUnregister");
   const auto devicePointer = api.library.load<int (*)(void **, void *, unsigned)>("cudaHostGetDevicePointer");
@@ -933,13 +936,14 @@ TEST_CASE("CUDA driver lookup exposes known unsupported APIs and ordinary stream
                                                  0x8c, 0xa6, 0x41, 0xff, 0x73, 0x24, 0xc8, 0xf2};
   const void *table = nullptr;
   check(library.load<CUresult (*)(const void **, const void *)>("cuGetExportTable")(&table, metadataId.data()));
-  const auto entries = static_cast<const void *const *>(table);
-  const auto streamHandle = reinterpret_cast<CUresult (*)(void *, void *, void **, int)>(const_cast<void *>(entries[51]));
-  const auto streamId = reinterpret_cast<CUresult (*)(void *, void *, uint64_t *)>(const_cast<void *>(entries[39]));
+  const auto *const entries = static_cast<const void *const *>(table);
+  const auto streamHandle = reinterpret_cast<CUresult (*)(void *, void *, void **, int)>(reinterpret_cast<uintptr_t>(entries[51]));
+  const auto streamId = reinterpret_cast<CUresult (*)(void *, void *, uint64_t *)>(reinterpret_cast<uintptr_t>(entries[39]));
   void *normalised = canary;
   check(streamHandle(context, reinterpret_cast<void *>(uintptr_t{1}), &normalised, 0));
   REQUIRE(normalised == nullptr);
-  uint64_t legacyId = 1, threadId = 0;
+  uint64_t legacyId = 1;
+  uint64_t threadId = 0;
   check(streamId(context, normalised, &legacyId));
   check(streamHandle(context, nullptr, &normalised, 1));
   check(streamId(context, normalised, &threadId));

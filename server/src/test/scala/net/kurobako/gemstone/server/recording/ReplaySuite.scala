@@ -85,11 +85,11 @@ class ReplaySuite extends munit.FunSuite {
           val header = ExecutionRPC.RequestHeaderBytes.raw
           val prefix = Array.ofDim[Byte](header); ByteBuffer.wrap(prefix).putInt(magic)
           input.readFully(prefix, 4, header - 4)
-          val extra = Frame.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset.raw) +
-            Frame.integer(prefix, ExecutionRPC.RequestTagSizeOffset.raw)
+          val extra = Frame.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset) +
+            Frame.integer(prefix, ExecutionRPC.RequestTagSizeOffset)
           assert(extra >= 0 && extra <= 4096)
           val frame  = java.util.Arrays.copyOf(prefix, header + extra); input.readFully(frame, header, extra)
-          val client = ByteBuffer.wrap(frame).getLong(ExecutionRPC.RequestClientOffset.raw)
+          val client = ByteBuffer.wrap(frame).getLong(ExecutionRPC.RequestClientOffset)
           assert(client != 23L); clients.add(client)
           handle(frame, input, output); output.flush()
         }
@@ -111,7 +111,10 @@ class ReplaySuite extends munit.FunSuite {
       capture(file) { w =>
         val a = w.connection(ClientId(1L)); val b = w.connection(ClientId(2L))
         a.request(execution(session = 77)); b.request(execution(session = 77))
-        b.response(response()); a.response(response()); a.close(); b.close()
+        b.response(response()); a.response(response())
+        // the writer's own close runs on every path
+        a.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+        b.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val arrivals = CountDownLatch(2)
       val peer     = Peer { (request, _, out) =>
@@ -138,7 +141,9 @@ class ReplaySuite extends munit.FunSuite {
     for (early <- Seq(false, true)) temporary { file =>
       capture(file) { w =>
         val c = w.connection(client); c.request(query); c.response(completion(1)); c.request(query);
-        c.response(completion(2)); c.close()
+        c.response(completion(2))
+        // the writer's own close runs on every path
+        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(completion(if (early || calls.incrementAndGet() >= 4) 2 else 1)))
@@ -155,7 +160,9 @@ class ReplaySuite extends munit.FunSuite {
       capture(file) { w =>
         val c = w.connection(client)
         c.request(query); c.response(completion(1))
-        c.request(query); c.response(completion(2)); c.close()
+        c.request(query); c.response(completion(2))
+        // the writer's own close runs on every path
+        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val peer = Peer((_, _, out) => out.write(if (failed) completion(0) else completion(1)))
       Using.resource(peer) { peer =>
@@ -175,7 +182,9 @@ class ReplaySuite extends munit.FunSuite {
   test("recorded terminal failures wait through pending replies and compare the actual status") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(query); c.response(completion(0)); c.close()
+        val c = w.connection(client); c.request(query); c.response(completion(0))
+        // the writer's own close runs on every path
+        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(if (calls.incrementAndGet() < 3) completion(1) else completion(0)))
@@ -190,7 +199,9 @@ class ReplaySuite extends munit.FunSuite {
   test("response mismatches close the endpoint and preserve cleanup failures as suppressed") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(execution()); c.response(response()); c.close()
+        val c = w.connection(client); c.request(execution()); c.response(response())
+        // the writer's own close runs on every path
+        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
       }
       val closed = AtomicBoolean(false)
       val peer   = Peer((_, _, out) => out.write(response(1)))

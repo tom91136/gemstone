@@ -118,10 +118,13 @@ class TransportSuite extends munit.FunSuite {
       Files.delete(path)
       val listener = Sockets.listen(Bind.Unix(path))
       val moved    = directory.resolve("moved")
-      Files.move(path, moved)
-      Files.writeString(path, "replacement")
-      listener.close()
-      listener.close()
+      try {
+        Files.move(path, moved)
+        Files.writeString(path, "replacement")
+      } finally {
+        listener.close()
+        listener.close()
+      }
       assertEquals(Files.readString(path), "replacement")
     }
   }

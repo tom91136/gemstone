@@ -21,6 +21,8 @@ std::string failureDetail(const ExecutionFailure &failure) {
   return std::visit([](const auto &value) { return value.detail.value; }, failure);
 }
 
+FailureKind failureKind(const ExecutionFailure &failure) { return static_cast<FailureKind>(failure.index() + 1); }
+
 } // namespace
 
 class Client::Impl {
@@ -40,7 +42,7 @@ class Client::Impl {
     if (status == 1) {
       ExecutionFailure failure{};
       if (glz::read<GlazeOptions{}>(failure, body) || !wire::valid(failure)) { connection.poison(); return failed<T>("execution failure response is invalid"); }
-      lastError = failureDetail(failure); return Result<T>::failure(Error{lastError});
+      lastError = failureDetail(failure); return Result<T>::failure(Error{lastError, failureKind(failure)});
     }
     T value{};
     if (glz::read<GlazeOptions{}>(value, body) || !wire::valid(value)) { connection.poison(); return failed<T>("execution response payload is invalid"); }

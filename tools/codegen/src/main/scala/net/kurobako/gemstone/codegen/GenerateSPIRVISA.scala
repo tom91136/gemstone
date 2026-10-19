@@ -12,17 +12,18 @@ import net.kurobako.gemstone.string.*
 import ujson.Value
 
 object GenerateSPIRVISA {
-  private val MetadataChunkSize = 200
-  // keeps each operand-kind table method well under HotSpot's 8000-byte compilation limit
-  private val EnumerantChunkSize = 64
-
   private case class Instructions(
       grammar: Path,
       extinst: Path,
       sourceRoot: Path,
       nativeRoot: Path
   )
-  private case class ExtendedInstructionSet(name: String, objectName: String, instructions: Vector[(String, Int)])
+  private case class ExtendedInstructionSet(
+      name: String,
+      objectName: String,
+      instructions: Vector[(String, Int)],
+      grammar: Vector[(String, Vector[String], Vector[String])]
+  )
   private case class Operand(
       kind: NonEmpty[String],
       name: Option[NonEmpty[String]],
@@ -44,7 +45,11 @@ object GenerateSPIRVISA {
       opcode: Int,
       name: NonEmpty[String],
       operands: Vector[Operand],
-      aliases: Vector[NonEmpty[String]]
+      aliases: Vector[NonEmpty[String]],
+      grammarClass: String = "",
+      version: String = "",
+      capabilities: Vector[NonEmpty[String]] = Vector.empty,
+      extensions: Vector[NonEmpty[String]] = Vector.empty
   )
   private case class Grammar(
       magic: Long,
@@ -106,15 +111,16 @@ object GenerateSPIRVISA {
       syncRoot(
         sourceRoot,
         (Map(
-          base.resolve("SPIRV.scala")               -> renderConstants(grammar),
-          base.resolve("OperandKind.scala")         -> renderOperandKinds(grammar),
-          base.resolve("NarrowEncoding.scala")      -> ImageFormats.narrowEncodingSource,
-          base.resolve("ImageFormats.scala")        -> ImageFormats.scalaSource,
-          base.resolve("ImageDescriptor.scala")     -> ImageDescriptorABI.scalaSource,
-          base.resolve("PipeLayout.scala")          -> PipeABI.scalaSource,
-          base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended)
-        ) ++ renderInstructions(grammar).map { case (name, content) => base.resolve(name) -> content } ++
-          enumerants).toMap
+          base.resolve("SPIRV.scala")                   -> renderConstants(grammar),
+          base.resolve("OperandKind.scala")             -> renderOperandKinds(grammar),
+          base.resolve("NarrowEncoding.scala")          -> ImageFormats.narrowEncodingSource,
+          base.resolve("ImageFormats.scala")            -> ImageFormats.scalaSource,
+          base.resolve("ImageDescriptor.scala")         -> ImageDescriptorABI.scalaSource,
+          base.resolve("PipeLayout.scala")              -> PipeABI.scalaSource,
+          base.resolve("ExtendedInstruction.scala")     -> renderExtendedInstructions(extended),
+          base.resolve("InstructionRequirements.scala") -> renderRequirements(grammar),
+          base.resolve("Instruction.scala")             -> renderInstructions(grammar)
+        ) ++ enumerants).toMap
       )
       val _ = GeneratedFiles.write(nativeRoot.resolve("gemstone_image_formats.hpp"), ImageFormats.nativeSource)
       val nativeOutput = nativeRoot.resolve("gemstone_spirv_constants.hpp")
@@ -162,7 +168,11 @@ object GenerateSPIRVISA {
               optionalString(operand, "quantifier")
             )
           } ++ grammarOverride(stringField(obj, "opname")),
-          aliases = optionalStringArray(obj, "aliases")
+          aliases = optionalStringArray(obj, "aliases"),
+          grammarClass = optionalString(obj, "class").fold("")(_.raw),
+          version = optionalString(obj, "version").fold("")(_.raw),
+          capabilities = optionalStringArray(obj, "capabilities"),
+          extensions = optionalStringArray(obj, "extensions")
         )
       case _ => throw IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode)
@@ -199,35 +209,11 @@ object GenerateSPIRVISA {
     )
   }
 
-  private def renderInstructions(grammar: Grammar): Map[String, String] = {
+  private def renderInstructions(grammar: Grammar): String = {
     val entriesWithFields = grammar.entries.toVector.map(entry => entry -> fields(entry))
-    val indexed           = entriesWithFields.zipWithIndex
-    val definitions       = indexed.map { case ((entry, entryFields), index) =>
-      renderDefinition(
-        entry,
-        entryFields,
-        s"InstructionMetadata${index / MetadataChunkSize}.m${index % MetadataChunkSize}"
-      )
-    }
-    val cases         = entriesWithFields.map { case (entry, entryFields) => renderCase(entry, entryFields) }
-    val metadataFiles = indexed.groupBy { case (_, index) => index / MetadataChunkSize }.map { case (chunk, values) =>
-      val body = values
-        .map { case ((_, entryFields), index) =>
-          s"  lazy val m${index % MetadataChunkSize}: Vec[OperandShape] = ${renderShapes(entryFields)}"
-        }
-        .mkString("\n")
-      s"InstructionMetadata$chunk.scala" ->
-        (GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
-          s"""|package net.kurobako.gemstone.isa.spirv
-              |
-              |import net.kurobako.gemstone.collection.*
-              |
-              |${GeneratedHeader.annotation()}object InstructionMetadata$chunk {
-              |$body
-              |}
-              |""".stripMargin)
-    }
-    val aliases = Emission.collection(
+    val definitions       = entriesWithFields.map((entry, entryFields) => renderDefinition(entry, entryFields))
+    val cases             = entriesWithFields.map((entry, entryFields) => renderCase(entry, entryFields))
+    val aliases           = Emission.collection(
       "Map",
       grammar.entries.toVector.flatMap(entry =>
         entry.aliases.map(name =>
@@ -235,30 +221,9 @@ object GenerateSPIRVISA {
         )
       )
     )
-    val (enumerantChunks, kindValues) =
-      grammar.kinds.toVector.filter(kind => kind.category == "ValueEnum" || kind.category == "BitEnum")
-        .foldLeft((Vector.empty[String], Vector.empty[(String, Int)])) { case ((methods, values), kind) =>
-          if (kind.enumerants.size <= EnumerantChunkSize)
-            (methods, values :+ (renderKind(kind, renderEnumerantValues(kind.enumerants)) -> kind.enumerants.size))
-          else {
-            val chunks = kind.enumerants.grouped(EnumerantChunkSize).toVector
-            val names  = chunks.indices.map(index => s"operandEnumerants${methods.size + index}")
-            val bodies = chunks.zip(names).map { case (chunk, name) =>
-              s"  private def $name: Vec[OperandEnumerant] = ${renderEnumerantValues(chunk)}"
-            }
-            (methods ++ bodies, values :+ (renderKind(kind, names.mkString("Vec(", ", ", ").flatten")) -> chunks.size))
-          }
-        }
-    val kindChunks = kindValues.foldLeft(Vector.empty[Vector[(String, Int)]]) { (groups, value) =>
-      groups.lastOption match {
-        case Some(last) if last.map(_._2).sum + value._2 <= EnumerantChunkSize => groups.init :+ (last :+ value)
-        case _                                                                 => groups :+ Vector(value)
-      }
-    }.zipWithIndex.map { case (values, index) =>
-      s"  private def operandKinds$index: Vec[OperandKindInfo] = Vec(\n${values.map(_._1).mkString(",\n")}\n  )"
-    }
-    val kindExpression = kindChunks.indices.map(index => s"operandKinds$index").mkString("Vec(", ", ", ").flatten")
-    val instruction    = GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
+    val kinds = grammar.kinds.toVector.filter(kind => kind.category == "ValueEnum" || kind.category == "BitEnum")
+      .map(renderKind(_))
+    val instruction = GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
       s"""|package net.kurobako.gemstone.isa.spirv
         |
         |import net.kurobako.gemstone.constraint.*
@@ -274,10 +239,11 @@ object GenerateSPIRVISA {
         |      val opcode: NonEmpty[java.lang.String],
         |      val opcodeNumber: SPIRVOpcodeNumber,
         |      decode: Definition => Decoder,
-        |      val shapes: Vec[OperandShape]
-        |  ) {
+        |      operands: java.lang.String
+        |  ) derives CanEqual {
         |${definitions.mkString("\n")}
         |
+        |    val shapes: Vec[OperandShape] = OperandShape.parse(operands)
         |    lazy val decoder: Decoder = decode(this)
         |  }
         |
@@ -287,10 +253,8 @@ object GenerateSPIRVISA {
         |  )
         |  val definitions: Vec[Definition] = Definition.values.toVec
         |
-        |${(enumerantChunks ++ kindChunks).mkString("\n\n")}
-        |
         |  val operandKinds: Map[OperandKind, OperandKindInfo] =
-        |    $kindExpression.view.map(value => value.kind -> value).toMap
+        |    ${table(kinds)}.view.map(row => OperandKindInfo.parse(row)).map(value => value.kind -> value).toMap
         |
         |  private val aliases: Map[java.lang.String, Definition] = $aliases
         |  private val byNumber: Map[SPIRVOpcodeNumber, Vec[Definition]] =
@@ -348,7 +312,7 @@ object GenerateSPIRVISA {
         |    }
         |}
         |
-        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) derives CanEqual {
         |${cases.mkString("\n")}
         |
         |  def operands: Vec[Operand] = operandValues.toVec
@@ -358,16 +322,16 @@ object GenerateSPIRVISA {
         |}
         |
         |""".stripMargin
-    Map("Instruction.scala" -> instruction) ++ metadataFiles
+    instruction
   }
 
-  private def renderDefinition(entry: Entry, fields: Vector[Field], metadataRef: String): String = {
+  private def renderDefinition(entry: Entry, fields: Vector[Field]): String = {
     val caseName  = normaliseCase(entry.name.stripPrefix("Op"))
     val parameter = if (fields.isEmpty) "_" else "values"
     val decoder   =
       s"definition => raw => Instruction.decodeDefinition(definition, raw, $parameter => ${construct(entry, fields)})"
     s"    case $caseName extends Definition(\"${Emission.escape(entry.name)}\", " +
-      s"SPIRVOpcodeNumber(${entry.opcode}), $decoder, $metadataRef)"
+      s"SPIRVOpcodeNumber(${entry.opcode}), $decoder, ${Emission.literal(renderShapes(fields))})"
   }
 
   private def renderCase(entry: Entry, fields: Vector[Field]): String = {
@@ -403,15 +367,9 @@ object GenerateSPIRVISA {
     }
   }
 
+  /** The operand shapes `OperandShape.parse` reads. */
   private def renderShapes(fields: Vector[Field]): String =
-    fields.map { field =>
-      val quantifier = field.operand.quantifier match {
-        case Some("?") => "OperandQuantifier.Optional"
-        case Some("*") => "OperandQuantifier.Repeated"
-        case _         => "OperandQuantifier.One"
-      }
-      s"OperandShape(OperandKind.${field.operand.kind}, $quantifier)"
-    }.mkString("Vec(", ", ", ")")
+    fields.map(field => s"${field.operand.kind}${field.operand.quantifier.getOrElse("")}").mkString(" ")
 
   private def renderOperandKinds(grammar: Grammar): String = {
     val categories = grammar.kinds.map(_.category).distinct.sorted.mkString(", ")
@@ -423,33 +381,37 @@ object GenerateSPIRVISA {
       s"""|package net.kurobako.gemstone.isa.spirv
           |
           |object OperandKind {
-          |  enum Category { case $categories }
+          |  enum Category derives CanEqual { case $categories }
           |}
           |
-          |${GeneratedHeader.annotation()}enum OperandKind(val category: OperandKind.Category, val components: Vector[OperandKind]) {
+          |${GeneratedHeader.annotation()}enum OperandKind(val category: OperandKind.Category, val components: Vector[OperandKind]) derives CanEqual {
           |$cases
           |}
           |""".stripMargin
   }
 
-  private def renderKind(kind: OperandKind, enumerants: String): String =
-    s"    OperandKindInfo(OperandKind.${kind.kind}, $enumerants)"
-
-  private def renderEnumerantValues(enumerants: Vector[Enumerant]): String = enumerants.map { enumerant =>
-    val parameters = enumerant.parameters.map(value => s"OperandKind.$value")
-      .mkString("Vec(", ", ", ")")
-    val aliases = enumerant.aliases.map(Emission.literal(_)).mkString("Vec(", ", ", ")")
-    s"OperandEnumerant(${Emission.literal(enumerant.name)}, ${enumerant.value}L, $parameters, $aliases)"
-  }.mkString("Vec(", ", ", ")")
+  /** The table row `OperandKindInfo.parse` reads. */
+  private def renderKind(kind: OperandKind): String = {
+    def list(values: Vector[NonEmpty[String]]): String = values.map(_.raw).mkString(",")
+    val enumerants                                     = kind.enumerants.map { enumerant =>
+      require(
+        (enumerant.name +: (enumerant.parameters ++ enumerant.aliases)).forall(_.forall(!" ,\t\n".contains(_))),
+        s"${kind.kind} enumerant ${enumerant.name} does not fit the operand kind table"
+      )
+      s"${enumerant.name} ${enumerant.value} ${list(enumerant.parameters)} ${list(enumerant.aliases)}"
+    }
+    (kind.kind.raw +: enumerants).mkString("\t")
+  }
 
   private def construct(entry: Entry, fields: Vector[Field]): String = {
     val caseName  = normaliseCase(entry.name.stripPrefix("Op"))
     val arguments = fields.zipWithIndex.map { case (field, index) =>
-      field.operand.quantifier match {
+      val value = field.operand.quantifier match {
         case Some("?") => s"values.optional($index)"
         case Some("*") => s"values.repeated($index)"
         case _         => s"values.required($index)"
       }
+      if (fields.size > 4) s"${field.name} = $value" else value
     }
     if (arguments.isEmpty) s"Instruction.$caseName()"
     else s"Instruction.$caseName(${arguments.mkString(", ")})"
@@ -542,23 +504,17 @@ object GenerateSPIRVISA {
       name: String
   ): Vector[NonEmpty[String]] = obj.value.get(name).toVector
     .flatMap {
-      case ujson.Arr(values) => values.toVector.map {
-          case ujson.Str(value) => nonEmpty(value, s"JSON field $name")
-          case _                => throw IllegalArgumentException(s"JSON field $name contains a non-string")
-        }
-      case _ => throw IllegalArgumentException(s"JSON field $name is not an array")
+      case ujson.Arr(values) => values.toVector.map(string(_, name, "contains a non-string"))
+      case _                 => throw IllegalArgumentException(s"JSON field $name is not an array")
     }
-  private def stringField(obj: ujson.Obj, name: String): NonEmpty[String] = field(obj, name) match {
-    case ujson.Str(value) => nonEmpty(value, s"JSON field $name")
-    case _                => throw IllegalArgumentException(s"JSON field $name is not a string")
+  private def string(value: ujson.Value, name: String, problem: String): NonEmpty[String] = value match {
+    case ujson.Str(text) => nonEmpty(text, s"JSON field $name")
+    case _               => throw IllegalArgumentException(s"JSON field $name $problem")
   }
-  private def optionalString(
-      obj: ujson.Obj,
-      name: String
-  ): Option[NonEmpty[String]] = obj.value.get(name).map {
-    case ujson.Str(value) => nonEmpty(value, s"JSON field $name")
-    case _                => throw IllegalArgumentException(s"JSON field $name is not a string")
-  }
+  private def stringField(obj: ujson.Obj, name: String): NonEmpty[String] =
+    string(field(obj, name), name, "is not a string")
+  private def optionalString(obj: ujson.Obj, name: String): Option[NonEmpty[String]] =
+    obj.value.get(name).map(string(_, name, "is not a string"))
   private def numberField(obj: ujson.Obj, name: String): Int = field(obj, name) match {
     case ujson.Num(value) if value.isValidInt => value.toInt
     case _                                    => throw IllegalArgumentException(s"JSON field $name is not an int")
@@ -596,13 +552,19 @@ object GenerateSPIRVISA {
         case value: ujson.Obj => value
         case _                => throw IllegalArgumentException(s"$file root is not an object")
       }
-      val instructions = arrayField(root, "instructions").map {
+      val entries = arrayField(root, "instructions").map {
         case obj: ujson.Obj =>
           val opname: String = stringField(obj, "opname")
           val opcode: Int    = opcodeField(obj, "opcode")
-          opname -> opcode
+          (
+            opname,
+            opcode,
+            optionalStringArray(obj, "capabilities").map(_.raw),
+            optionalObjectArray(obj, "operands").map(operand => stringField(operand, "name").raw)
+          )
         case _ => throw IllegalArgumentException(s"$file instruction entry is not an object")
       }
+      val instructions = entries.map((name, opcode, _, _) => name -> opcode)
       require(
         instructions.map(_._1).distinct.size == instructions.size,
         s"$file has duplicate extended instruction names"
@@ -611,7 +573,12 @@ object GenerateSPIRVISA {
         instructions.map(_._2).distinct.size == instructions.size,
         s"$file has duplicate extended instruction opcodes"
       )
-      ExtendedInstructionSet(name, objectName, instructions)
+      ExtendedInstructionSet(
+        name,
+        objectName,
+        instructions,
+        entries.map((name, _, capabilities, operands) => (name, capabilities, operands))
+      )
     }
 
   private def renderExtendedInstructions(sets: Vector[ExtendedInstructionSet]): String = {
@@ -630,15 +597,79 @@ object GenerateSPIRVISA {
         set.instructions.map { case (name, opcode) => s"${Emission.literal(name)} -> $opcode" }.mkString(", ")
       s"    ${Emission.literal(set.name)} -> Map($entries)"
     }.mkString(",\n")
+    val grammar = sets.flatMap(set =>
+      set.grammar.map((name, capabilities, operands) =>
+        (Vector(set.name, name, capabilities.mkString(",")) ++ operands).mkString("\t")
+      )
+    )
     GeneratedHeader.scala("from the pinned Khronos SPIR-V extended instruction grammars") +
       s"""|package net.kurobako.gemstone.isa.spirv
+          |
+          |import net.kurobako.gemstone.collection.*
+          |import net.kurobako.gemstone.collection.Vec.*
           |
           |${GeneratedHeader.annotation()}object ExtendedInstruction {
           |  val names: Map[String, Map[String, Int]] = Map(
           |$names
           |  )
+          |
+          |  /** The capabilities any one of which enables an instruction, and the grammar's names of its operands after its
+          |    * set and opcode, by set and instruction.
+          |    */
+          |  lazy val grammar: Map[String, Map[String, (capabilities: Vec[String], operands: Vec[String])]] =
+          |    ${table(grammar)}.map(_.split('\\t').toVec).groupBy(_.head).map((set, rows) =>
+          |      set -> rows.map(row => row(1) -> (Vec.from(row(2).split(',')).filter(_.nonEmpty), row.drop(3))).toMap
+          |    )
           |$objects
           |}
+          |""".stripMargin
+  }
+
+  /** Tab-separated rows as string constants of bounded size, each row ending in a newline, read back as rows. */
+  private def table(rows: Vector[String]): String = {
+    val chunks = rows.foldLeft(Vector.empty[String]) { (chunks, row) =>
+      if (chunks.nonEmpty && chunks.last.length + row.length < 8000) chunks.init :+ (chunks.last + row + "\n")
+      else chunks :+ (row + "\n")
+    }
+    s"Vec(${chunks.map(Emission.literal(_)).mkString(", ")}).flatMap(_.split('\\n').toVec)"
+  }
+
+  private def renderRequirements(grammar: Grammar): String = {
+    val rows = grammar.entries.toVector.map(entry =>
+      Vector(
+        entry.opcode.toString,
+        entry.grammarClass,
+        entry.version,
+        entry.capabilities.map(_.raw).mkString(","),
+        entry.extensions.map(_.raw).mkString(",")
+      ).mkString("\t")
+    )
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
+      s"""|package net.kurobako.gemstone.isa.spirv
+          |
+          |import net.kurobako.gemstone.collection.*
+          |import net.kurobako.gemstone.collection.Vec.*
+          |
+          |${GeneratedHeader.annotation()}object InstructionRequirements {
+          |  private def names(field: String): Vec[String] = Vec.from(field.split(',')).filter(_.nonEmpty)
+          |
+          |  /** By opcode number. */
+          |  lazy val all: Map[Int, InstructionRequirements] =
+          |    ${table(rows)}.map { row =>
+          |      val fields = row.split("\\t", -1)
+          |      fields(0).toInt -> InstructionRequirements(fields(1), fields(2), names(fields(3)), names(fields(4)))
+          |    }.toMap
+          |}
+          |
+          |/** What the grammar files an instruction under, the version that made it core ("None" for one only an extension
+          |  * adds), and the capabilities and extensions any one of which enables it.
+          |  */
+          |case class InstructionRequirements(
+          |    grammarClass: String,
+          |    version: String,
+          |    capabilities: Vec[String],
+          |    extensions: Vec[String]
+          |)
           |""".stripMargin
   }
 

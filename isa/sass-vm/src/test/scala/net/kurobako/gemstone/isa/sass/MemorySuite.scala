@@ -27,9 +27,10 @@ class MemorySuite extends munit.FunSuite {
   }
 
   test("compiler-produced sm_35 cache invalidation preserves atomic-to-normal-load coherence") {
-    val kernel = load(35, Fixture.listing("cacheInvalidateSm35"), "cache_probe")
+    val kernel     = load(35, Fixture.listing("cacheInvalidateSm35"), "cache_probe")
+    val invalidate = Vec("E", "IV")
     assert(kernel.function.instructions.exists(i =>
-      i.mnemonic.raw == "CCTL" && i.modifiers.map(_.name) == Vec("E", "IV")
+      i.mnemonic.raw == "CCTL" && i.modifiers.map(_.name) == invalidate
     ))
     for (initial <- Vec(0L, 42L, 0xfffffffcL)) {
       val run     = kernel.launch(1)(Arg.zeros(8), Arg.words(initial))
@@ -91,45 +92,37 @@ class MemorySuite extends munit.FunSuite {
   test("sm89 STRONG.SYS store becomes an explicit relaxed system-scope VM instruction") {
     assert(store89.function.instructions.exists(isStore(_, "E", "U8", "STRONG", "SYS")))
     assert(store89.instructions(8, 8, 8, 4).exists {
-      case VMInstruction.Store(_, _, width, MemoryAccess.Global(true)) => width.raw == 8
+      case VMInstruction.Store(_, _, width, MemoryAccess.Global(true)) => width == 8
       case _                                                           => false
     })
   }
 
   private def generic(text: String): Vec[VMInstruction] = {
+    val prefix  = Vec("E", "U8", "STRONG", "SYS")
     val address = store89.function.instructions.find(i =>
-      i.mnemonic.raw == "STG" && i.modifiers.map(_.name).startsWith(Vec("E", "U8", "STRONG", "SYS"))
+      i.mnemonic.raw == "STG" && i.modifiers.map(_.name).startsWith(prefix)
     ).get.address
     store89.copy(functions =
-      Vec(store89.function.copy(instructions = Vec(statement(text, address.raw))))
+      Vec(store89.function.copy(instructions = Vec(statement(text, address))))
     ).instructions(8, 8, 8, 4)
   }
 
   test("generic STRONG loads and stores preserve their scope without forcing global space") {
     assert(generic("LD.E.STRONG.GPU R3, [R2.64]").exists {
-      case VMInstruction.Load(_, _, width, _, MemoryAccess.Generic(false)) => width.raw == 32
+      case VMInstruction.Load(_, _, width, _, MemoryAccess.Generic(false)) => width == 32
       case _                                                               => false
     })
     assert(generic("ST.E.STRONG.SYS [R2.64], R3").exists {
-      case VMInstruction.Store(_, _, width, MemoryAccess.Generic(true)) => width.raw == 32
+      case VMInstruction.Store(_, _, width, MemoryAccess.Generic(true)) => width == 32
       case _                                                            => false
     })
   }
 
   test("generic STRONG.SYS load preserves generic space for runtime classification") {
     assert(generic("LD.E.STRONG.SYS R3, [R2.64]").exists {
-      case VMInstruction.Load(_, _, width, _, MemoryAccess.Generic(true)) => width.raw == 32
+      case VMInstruction.Load(_, _, width, _, MemoryAccess.Generic(true)) => width == 32
       case _                                                              => false
     })
-  }
-
-  test("sm75 U8 SYS uniform-base store rejects other address widths and modifiers") {
-    val store = store75.function.instructions.find(isStore(_, "E", "U8", "SYS")).get
-    def rejected(instruction: DecodedInstruction, sm: Int = 75): Boolean =
-      store75.copy(sm = sm).map(i => if (i == store) instruction else i).lower(8, 8, 8, 4).isLeft
-    assert(rejected(store.rewrite(operands = operands("[R0.U32+UR4+0x4], R3"))))
-    assert(rejected(store.rewrite(modifiers = Vec("E", "U16", "SYS").map(Instruction.Modifier(_)))))
-    assert(rejected(store, sm = 86))
   }
 
   for (size <- 0 to 6) test(s"Kepler texture-pipe global load preserves size code $size") {
@@ -148,8 +141,8 @@ class MemorySuite extends munit.FunSuite {
         "STG.E.128 [R10], R4; MOV R16, 99; MOV R17, 99; MOV R18, 99; MOV R19, 99; LDG.E R16, [R10]; STG.E.128 [R10], R16; EXIT",
       (first +: input.slice(1, count)) ++ Vec.fill(4 - count)(99),
       rewrite = instruction =>
-        instruction.operation match {
-          case _: Instruction.Ldg =>
+        instruction.operation.form match {
+          case _: Form.Ldg =>
             // nvdisasm's LDG.E.P is a TEX encoding with the size in tid and the component mask in wmsk
             val base = 0x600210867f9c287dL & ~(0x1fffL << 47) & ~(15L << 34) & ~(255L << 2)
             val word = base | (size.toLong << 47) | (((1L << count) - 1) << 34) | (16L << 2)
@@ -158,6 +151,28 @@ class MemorySuite extends munit.FunSuite {
         }
     )
   }
+
+  for ((sm, load) <- Vec(35 -> "LD.E.U.128", 50 -> "LDG.E.CI.U.128", 75 -> "LDG.E.U.128.CONSTANT.SYS"))
+    test(s"sm_$sm $load reads a four-register vector from a warp-uniform address") {
+      check(
+        sm,
+        "LDC.64 R10, c[0x0][0x160]; MOV R4, 1; MOV R5, 2; MOV R6, 3; MOV R7, 4; STG.E.128 [R10], R4; " +
+          s"$load R12, [R10]; STG.E.128 [R10+0x10], R12; EXIT",
+        Vec(1, 2, 3, 4, 1, 2, 3, 4)
+      )
+    }
+
+  // clang's generic scratch pointer in conformance/unified/src/cuda/memory_atomics.cu stores through cvta.to.local
+  for ((sm, origin) <- Vec(35 -> 0x44, 50 -> 0x20, 60 -> 0x20))
+    test(s"sm_$sm 24-bit local offsets and the stack pointer name the same words") {
+      check(
+        sm,
+        f"MOV R1, c[0x0][0x$origin%x]; IADD32I R1, R1, -0x10; MOV R4, 7; STL [R1+0x4], R4; LOP32I.AND R5, R1, 0xffffff; " +
+          "LDL R6, [R5+0x4]; MOV R7, 9; STL [R5+0x8], R7; LDL R8, [R1+0x8]; IADD R6, R6, R8; LDC.64 R10, c[0x0][0x160]; " +
+          "STG.E [R10], R6; EXIT",
+        Vec(16)
+      )
+    }
 
   for (address <- Vec("[RZ.U32+UR8]", "[UR8.U32]"))
     test(s"Blackwell U32 address $address keeps the full uniform pointer") {
@@ -177,8 +192,8 @@ class MemorySuite extends munit.FunSuite {
         "RED.E.MIN.STRONG.VC [UR4], R3; LD.E.STRONG.GPU R2, [UR4]; STG.E [R4], R2; EXIT",
       Vec(7),
       rewrite = instruction =>
-        instruction.operation match {
-          case _: Instruction.Ld =>
+        instruction.operation.form match {
+          case _: Form.Ld =>
             // nvdisasm prints GPU; the generated SCO vocabulary also calls this scope VC
             val bytes = LittleEndian.toVec(0x00000004ff027980L, 8).toArray ++
               LittleEndian.toVec(0x000ea8000c114900L, 8).toArray

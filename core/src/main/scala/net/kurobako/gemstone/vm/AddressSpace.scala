@@ -49,8 +49,8 @@ object AddressSpace {
   /** Reused by one worker, cleared and refilled for each instruction. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   class ReadRangeBuffer(capacity: Int > 0 = 32) extends ReadRanges {
-    private var addresses = Array.ofDim[Long](capacity.raw)
-    private var sizes     = Array.ofDim[Int](capacity.raw)
+    private var addresses = Array.ofDim[Long](capacity)
+    private var sizes     = Array.ofDim[Int](capacity)
     private var count     = 0
 
     def length: Int                       = count
@@ -65,7 +65,7 @@ object AddressSpace {
         sizes = java.util.Arrays.copyOf(sizes, count * 2)
       }
       addresses(count) = address.raw
-      sizes(count) = size.raw
+      sizes(count) = size
       count += 1
     }
   }
@@ -90,12 +90,12 @@ object AddressSpace {
   type ReadResult[+A] = Either[Fault | Pending.type, A]
 }
 
-trait AddressSpace {
+trait AddressSpace derives CanEqual {
   import AddressSpace.*
 
   @scala.annotation.tailrec
   final def awaitRead[A](read: => ReadResult[A]): Either[Fault, A] = read match {
-    case Left(Pending) => flushHostReads() match {
+    case Left(_: Pending.type) => flushHostReads() match {
         case Left(fault) => Left(fault)
         case Right(())   => awaitRead(read)
       }

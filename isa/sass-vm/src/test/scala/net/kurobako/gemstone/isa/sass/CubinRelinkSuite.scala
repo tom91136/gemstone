@@ -11,17 +11,17 @@ class CubinRelinkSuite extends munit.FunSuite {
   private val image  = fixtures.Fixture.copyAddCubin
   private val module = Cubin.decode(image).value
   private val text   =
-    module.sections(module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add")).section.raw).bytes
+    module.sections(module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add")).section).bytes
   private val code = CodeSection.decode(Vec.toArray(text), Target.of(module.sm).value).value
   private val nop  = code.instructions.find(_.mnemonic.raw == "NOP").map(instruction =>
-    text.slice(instruction.address.raw, instruction.address.raw + 16)
+    text.slice(instruction.address, instruction.address.raw + 16)
   ).getOrElse(fail("copy_add has no NOP padding"))
 
   private def exits(cubin: Vec[Byte]): Vec[Long] = {
     val parsed = elf.Image.parse(cubin).value
     val info   = parsed.contents(parsed.section(".nv.info.copy_add").get)
     val at     = info.indexOfSlice(Vec[Byte](4, 0x1c))
-    val size   = LittleEndian.decodeUInt16(info, at + 2).raw
+    val size   = LittleEndian.decodeUInt16(info, at + 2)
     Vec.tabulate(size / 4)(index => LittleEndian.decodeInt32(info, at + 4 + index * 4).toLong & 0xffffffffL)
   }
 
@@ -48,7 +48,7 @@ class CubinRelinkSuite extends munit.FunSuite {
     val relinked = Cubin.replaceKernel(image, "copy_add", nop ++ text).value
     val decoded  = Cubin.decode(relinked).value
     assertEquals(
-      decoded.sections(decoded.kernels.find(_.name == "copy_add").get.section.raw).bytes,
+      decoded.sections(decoded.kernels.find(_.name == "copy_add").get.section).bytes,
       nop ++ text
     )
     assertEquals(exits(relinked), exits(image).map(_ + 16))

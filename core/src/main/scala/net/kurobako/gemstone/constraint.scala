@@ -3,42 +3,89 @@ package net.kurobako.gemstone
 import scala.annotation.publicInBinary
 import scala.annotation.targetName
 import scala.language.implicitConversions
+import scala.util.NotGiven
+import upickle.default.ReadWriter
 
 /** Numeric predicates and nonempty values. Import `constraint.*`; add `constraint.auto.*` for proven implicit widening.
-  * Numeric representations stay opaque so primitive methods cannot discard predicates. Validate runtime inputs at their
-  * first domain boundary and retain the refined type in fields and helper parameters. Empty numeric domains fail at
-  * compile time when validation, proofs or codecs are materialised; a type alias alone does not run these checks.
+  * A refined value converts implicitly to its carrier wherever the carrier is expected; carrier operations return the
+  * bare carrier, and only proofs, validation and the checked count arithmetic below retain a predicate. Validate
+  * runtime inputs at their first domain boundary and retain the refined type in fields and helper parameters. Empty
+  * numeric domains fail at compile time when validation, proofs or codecs are materialised; a type alias alone does not
+  * run these checks.
   */
-object constraint {
-  sealed trait GreaterThan[N <: Int | Long]
-  sealed trait AtLeast[N <: Int | Long]
-  sealed trait LessThan[N <: Int | Long]
-  sealed trait AtMost[N <: Int | Long]
-  sealed trait In[T <: NonEmptyTuple]
-  type Between[L <: Int | Long, H <: Int | Long] = AtLeast[L] & AtMost[H]
+object constraint extends Unrefined {
+
+  /** The literal types a bound takes. Integer carriers take `Int` and `Long` literals; `Float` and `Double` take any,
+    * and a NaN fails every bound. An `Int` or `Long` bound on a `Float` or `Double` must be exactly representable.
+    */
+  type Bound = Int | Long | Float | Double
+
+  sealed trait GreaterThan[N <: Bound]
+  sealed trait AtLeast[N <: Bound]
+  sealed trait LessThan[N <: Bound]
+  sealed trait AtMost[N <: Bound]
   sealed trait MultipleOf[N <: Int | Long]
 
   sealed trait Interval
 
   /** Inclusive bounds. Symbolic precedence lets `Int in 1 ~ 3` omit parentheses. */
-  infix sealed trait ~[L <: Int | Long, H <: Int | Long] extends Interval
+  infix sealed trait ~[L <: Bound, H <: Bound] extends Interval
 
-  type Membership[T <: NonEmptyTuple | Interval] = T match {
-    case NonEmptyTuple => In[T & NonEmptyTuple]
-    case l ~ h         => Between[l, h]
+  /** Any of the values `T` admits: a literal, an interval, a tuple of literals, or a union of these, such as
+    * `(0 ~ 17) | (24 ~ 31)`. Precedence lets `UInt[5] in (0 ~ 17) | (24 ~ 31)` omit the outer parentheses.
+    */
+  sealed trait Membership[T <: NonEmptyTuple | Interval | Bound]
+  type Between[L <: Bound, H <: Bound] = Membership[L ~ H]
+
+  // Shorthands for Float, Double and any carrier with an IntegerView.
+  infix type >[A, N <: Bound]                             = A where GreaterThan[N]
+  infix type >=[A, N <: Bound]                            = A where AtLeast[N]
+  infix type <[A, N <: Bound]                             = A where LessThan[N]
+  infix type <=[A, N <: Bound]                            = A where AtMost[N]
+  infix type in[A, T <: NonEmptyTuple | Interval | Bound] = A where Membership[T]
+
+  object IntegerView {
+    given IntegerView[Byte, 8, true]   = _.toLong
+    given IntegerView[Short, 16, true] = _.toLong
+    given IntegerView[Int, 32, true]   = _.toLong
+    given IntegerView[Long, 64, true]  = value => value
   }
 
-  // Numeric shorthands share the same opaque representation and predicate implementation.
-  infix type >[A <: Byte | Short | Int | Long, N <: Int | Long]                = A where GreaterThan[N]
-  infix type >=[A <: Byte | Short | Int | Long, N <: Int | Long]               = A where AtLeast[N]
-  infix type <[A <: Byte | Short | Int | Long, N <: Int | Long]                = A where LessThan[N]
-  infix type <=[A <: Byte | Short | Int | Long, N <: Int | Long]               = A where AtMost[N]
-  infix type in[A <: Byte | Short | Int | Long, T <: NonEmptyTuple | Interval] = A where Membership[T]
+  /** Refinements of an integer type `A` read its values as the integers of a `W`-bit two's complement representation,
+    * or an unsigned one unless `S`. `toLong` gives the bits; an unsigned 64-bit value above `Long.MaxValue` reads as
+    * negative.
+    */
+  trait IntegerView[A, W <: Int, S <: Boolean] {
+    def toLong(value: A): Long
+  }
 
   object where {
     given [A, P](using base: Ordering[A]): Ordering[A where P] = base
 
-    implicit inline def literal[A <: Byte | Short | Int | Long, P](inline value: A): A where P = {
+    // Refined values compare boxed, which for Float and Double is not IEEE equality, so those compare through .raw.
+    given [A, P, B, Q](using
+        CanEqual[A, B],
+        NotGiven[A <:< (Float | Double)],
+        NotGiven[B <:< (Float | Double)]
+    ): CanEqual[A where P, B where Q] = CanEqual.derived
+
+    // An integer literal compares with, or as a pattern matches, a refined integer. The search sees both operands
+    // widened, so the macro reads the literal from the source; it does not expand in an inline method's body, which
+    // therefore goes unchecked.
+    transparent inline given [A, P, B <: AnyVal](using
+        CanEqual[A, B],
+        NotGiven[A <:< (Float | Double)]
+    ): CanEqual[A where P, B] = ${ macros.literalComparison[A where P, B](leading = false) }
+
+    transparent inline given [A, P, B <: AnyVal](using
+        CanEqual[B, A],
+        NotGiven[A <:< (Float | Double)]
+    ): CanEqual[B, A where P] = ${ macros.literalComparison[B, A where P](leading = true) }
+
+    /** Reading checks the refinement, failing with the violated predicate and value; writing emits the carrier. */
+    inline given [A, P](using base: ReadWriter[A]): ReadWriter[A where P] = base.bimap(_.raw, validate[A, P](_))
+
+    implicit inline def literal[A <: Byte | Short | Int | Long | Float | Double, P](inline value: A): A where P = {
       checkNumericLiteral[A, P](value)
       value
     }
@@ -57,9 +104,9 @@ object constraint {
 
   extension [A](value: A) {
 
-    /** Check a runtime value, throwing IllegalArgumentException on failure. The target's primitive carrier must match
-      * A; convert numeric representations explicitly first. Literals and provably nonempty interpolations need no
-      * `.unsafe` when their expected type supplies the refinement.
+    /** Check a runtime value, throwing IllegalArgumentException on failure. A must be the target's carrier or a
+      * refinement of it; convert numeric representations explicitly first. Literals and provably nonempty
+      * interpolations need no `.unsafe` when their expected type supplies the refinement.
       */
     transparent inline def unsafe[R]: R = ${ macros.unsafe[A, R]('value) }
 
@@ -83,6 +130,8 @@ object constraint {
   }
 
   extension [A, P](value: A where P) {
+
+    /** The value typed as its carrier, where no expected type selects the conversion, as in `.map(_.raw)`. */
     inline def raw: A = value
 
     /** Prove that every source value satisfies the complete target refinement, for example `.widen[Int >= 0]`. The
@@ -92,23 +141,12 @@ object constraint {
     transparent inline def widen[R]: R = ${ macros.widen[A, P, R]('value) }
   }
 
-  // Lossless conversions retain the source carrier bounds as well as the explicit predicate.
-  extension [P](value: Byte where P) {
-    @targetName("byteToShortRefined")
-    inline def toShort: Short where (P & Between[-128, 127]) = convert[Byte, P, Short, P & Between[-128, 127]](value)
-    @targetName("byteToIntRefined")
-    inline def toInt: Int where (P & Between[-128, 127]) = convert[Byte, P, Int, P & Between[-128, 127]](value)
-    @targetName("byteToLongRefined")
-    inline def toLong: Long where (P & Between[-128, 127]) = convert[Byte, P, Long, P & Between[-128, 127]](value)
-  }
+  extension [F[+_], A, P](values: F[A where P]) {
 
-  extension [P](value: Short where P) {
-    @targetName("shortToIntRefined")
-    inline def toInt: Int where (P & Between[-32768, 32767]) =
-      convert[Short, P, Int, P & Between[-32768, 32767]](value)
-    @targetName("shortToLongRefined")
-    inline def toLong: Long where (P & Between[-32768, 32767]) =
-      convert[Short, P, Long, P & Between[-32768, 32767]](value)
+    /** The elements typed as their carrier, without copying, as `.sum` needs. Only a covariant container qualifies: it
+      * offers no way to store a value outside the refinement through the original.
+      */
+    inline def rawElements: F[A] = values
   }
 
   extension [P](value: Int where P) {
@@ -118,30 +156,12 @@ object constraint {
       if (value < Short.MinValue || value > Short.MaxValue) throw ArithmeticException("Short overflow")
       value.toShort
     }
-    inline def toLong: Long where (P & Between[-2147483648, 2147483647]) =
-      convert[Int, P, Long, P & Between[-2147483648, 2147483647]](value)
-    @targetName("lessInt")
-    def <[Q](other: Int where Q): Boolean = value < other
-    @targetName("lessEqualInt")
-    def <=[Q](other: Int where Q): Boolean = value <= other
-    @targetName("greaterInt")
-    def >[Q](other: Int where Q): Boolean = value > other
-    @targetName("greaterEqualInt")
-    def >=[Q](other: Int where Q): Boolean = value >= other
   }
 
   extension [P](value: Long where P) {
 
     /** Narrow exactly, retaining the predicates because the numeric value does not change. */
     def toIntExact: Int where P = Math.toIntExact(value)
-    @targetName("lessLong")
-    def <[Q](other: Long where Q): Boolean = value < other
-    @targetName("lessEqualLong")
-    def <=[Q](other: Long where Q): Boolean = value <= other
-    @targetName("greaterLong")
-    def >[Q](other: Long where Q): Boolean = value > other
-    @targetName("greaterEqualLong")
-    def >=[Q](other: Long where Q): Boolean = value >= other
   }
 
   // The count arithmetic used by Gemstone. Exact operations preserve these signs.
@@ -162,6 +182,13 @@ object constraint {
     def -(other: Int >= 0): Int >= 0 = {
       require(value >= other, s"negative difference: $value - $other")
       value - other
+    }
+
+    /** The least multiple of `alignment` that is at least this, failing on overflow. */
+    @targetName("alignUpNonnegativeInt")
+    def alignUp(alignment: Int > 0): Int >= 0 = {
+      val remainder = value % alignment
+      if (remainder == 0) value else Math.addExact(value, alignment - remainder)
     }
   }
 
@@ -198,6 +225,13 @@ object constraint {
       require(value >= other, s"negative difference: $value - $other")
       value - other
     }
+
+    /** The least multiple of `alignment` that is at least this, failing on overflow. */
+    @targetName("alignUpNonnegativeLong")
+    def alignUp(alignment: Long > 0): Long >= 0 = {
+      val remainder = value % alignment
+      if (remainder == 0L) value else Math.addExact(value, alignment - remainder)
+    }
   }
 
   extension (value: Long > 0) {
@@ -211,6 +245,26 @@ object constraint {
     def min(other: Long > 0): Long > 0 = math.min(value, other)
     @targetName("maxPositiveLong")
     def max(other: Long >= 0): Long > 0 = math.max(value, other)
+  }
+
+  extension (value: Int) {
+
+    /** The least multiple of the positive `alignment` that is at least this nonnegative value, failing on overflow. */
+    @targetName("alignUpInt")
+    def alignUp(alignment: Int): Int = {
+      val remainder = value % alignment
+      if (remainder == 0) value else Math.addExact(value, alignment - remainder)
+    }
+  }
+
+  extension (value: Long) {
+
+    /** The least multiple of the positive `alignment` that is at least this nonnegative value, failing on overflow. */
+    @targetName("alignUpLong")
+    def alignUp(alignment: Long): Long = {
+      val remainder = value % alignment
+      if (remainder == 0L) value else Math.addExact(value, alignment - remainder)
+    }
   }
 
   private inline def checkNumericLiteral[A, P](inline value: A): Unit =
@@ -283,6 +337,8 @@ object constraint {
     opaque type Type = C
 
     given (using base: Ordering[C]): Ordering[Type] = base
+
+    given (using CanEqual[C, C]): CanEqual[Type, Type] = CanEqual.derived
 
     given representation: Newtype.Representation[Type, C] with {
       def wrap(value: C): Either[NonEmpty[String], Type] = attempt(value)

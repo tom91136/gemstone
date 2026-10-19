@@ -9,6 +9,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 object ExecutionRPC {
   val Name: NonEmpty[String]      = "gemstone.execution"
@@ -51,7 +52,7 @@ object ExecutionRPC {
   case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
   case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0)
       derives Codec
-  enum HostMemoryAtomicOperation derives Codec {
+  enum HostMemoryAtomicOperation derives Codec, CanEqual {
     case CompareExchange
     case Load
     case Store
@@ -87,27 +88,45 @@ object ExecutionRPC {
 
   /** Details name no native symbols, but the client reads them as bounded C strings. */
   enum ExecutionFailure(val message: NonEmpty[String]) {
-    case InvalidRequest(detail: NonEmpty[String]) extends ExecutionFailure(detail)
-    case NotFound(detail: NonEmpty[String])       extends ExecutionFailure(detail)
-    case Unsupported(detail: NonEmpty[String])    extends ExecutionFailure(detail)
-    case Failed(detail: NonEmpty[String])         extends ExecutionFailure(detail)
+    case InvalidRequest(detail: NonEmpty[String])       extends ExecutionFailure(detail)
+    case NotFound(detail: NonEmpty[String])             extends ExecutionFailure(detail)
+    case Unsupported(detail: NonEmpty[String])          extends ExecutionFailure(detail)
+    case Failed(detail: NonEmpty[String])               extends ExecutionFailure(detail)
+    case InvalidProgram(detail: NonEmpty[String])       extends ExecutionFailure(detail)
+    case InvalidConfiguration(detail: NonEmpty[String]) extends ExecutionFailure(detail)
+    case OutOfResources(detail: NonEmpty[String])       extends ExecutionFailure(detail)
+    case IllegalAddress(detail: NonEmpty[String])       extends ExecutionFailure(detail)
+    case MisalignedAddress(detail: NonEmpty[String])    extends ExecutionFailure(detail)
+    case IllegalInstruction(detail: NonEmpty[String])   extends ExecutionFailure(detail)
+    case Trapped(detail: NonEmpty[String])              extends ExecutionFailure(detail)
+    case AssertionFailed(detail: NonEmpty[String])      extends ExecutionFailure(detail)
+    case TimedOut(detail: NonEmpty[String])             extends ExecutionFailure(detail)
   }
 
   private def bounded(error: ExecutionFailure): ExecutionFailure = {
-    val detail = truncateUtf8(error.message.replace('\u0000', '?'), MaximumTextBytes.raw)
+    val detail = truncateUtf8(error.message.replace('\u0000', '?'), MaximumTextBytes)
       .refine[NonEmpty[String]].getOrElse[NonEmpty[String]]("execution failed")
     error match {
-      case ExecutionFailure.InvalidRequest(_) => ExecutionFailure.InvalidRequest(detail)
-      case ExecutionFailure.NotFound(_)       => ExecutionFailure.NotFound(detail)
-      case ExecutionFailure.Unsupported(_)    => ExecutionFailure.Unsupported(detail)
-      case ExecutionFailure.Failed(_)         => ExecutionFailure.Failed(detail)
+      case ExecutionFailure.InvalidRequest(_)       => ExecutionFailure.InvalidRequest(detail)
+      case ExecutionFailure.NotFound(_)             => ExecutionFailure.NotFound(detail)
+      case ExecutionFailure.Unsupported(_)          => ExecutionFailure.Unsupported(detail)
+      case ExecutionFailure.Failed(_)               => ExecutionFailure.Failed(detail)
+      case ExecutionFailure.InvalidProgram(_)       => ExecutionFailure.InvalidProgram(detail)
+      case ExecutionFailure.InvalidConfiguration(_) => ExecutionFailure.InvalidConfiguration(detail)
+      case ExecutionFailure.OutOfResources(_)       => ExecutionFailure.OutOfResources(detail)
+      case ExecutionFailure.IllegalAddress(_)       => ExecutionFailure.IllegalAddress(detail)
+      case ExecutionFailure.MisalignedAddress(_)    => ExecutionFailure.MisalignedAddress(detail)
+      case ExecutionFailure.IllegalInstruction(_)   => ExecutionFailure.IllegalInstruction(detail)
+      case ExecutionFailure.Trapped(_)              => ExecutionFailure.Trapped(detail)
+      case ExecutionFailure.AssertionFailed(_)      => ExecutionFailure.AssertionFailed(detail)
+      case ExecutionFailure.TimedOut(_)             => ExecutionFailure.TimedOut(detail)
     }
   }
 
   private def truncateUtf8(value: String, maximumBytes: Int): String =
     if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= maximumBytes) value
     else {
-      val result = StringBuilder()
+      val result = mutable.StringBuilder()
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
       var index = 0
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -129,7 +148,7 @@ object ExecutionRPC {
       result.result()
     }
 
-  enum CompletionStatus derives Codec {
+  enum CompletionStatus derives Codec, CanEqual {
     case Pending
     case Succeeded
     case Failed(error: ExecutionFailure)
@@ -160,6 +179,10 @@ object ExecutionRPC {
   given Codec[ProgramGlobal] = Codec.validated(Codec.derived[ProgramGlobal])(value =>
     ProgramGlobal.validated(value.size, value.initial, value.alias)
   )
+
+  object Operation {
+    given CanEqual[Operation[?], Operation[?]] = CanEqual.derived
+  }
 
   enum Operation[Reply](using val replyCodec: Codec[Reply]) derives Wire.Protocol {
     case Ping                                                                     extends Operation[Unit]
@@ -222,7 +245,9 @@ object ExecutionRPC {
         pointerRelocations: Vec[KernelTask.PointerRelocation],
         discoverArgumentRelocations: Boolean = false,
         descriptorBindings: Vec[DescriptorBinding] = Vec.empty,
-        argumentBuffer: Option[KernelTask.ArgumentBuffer] = None
+        argumentBuffer: Option[KernelTask.ArgumentBuffer] = None,
+        clusterSize: Option[LaunchGeometry.Dimensions] = None,
+        cooperative: Boolean = false
     ) extends Operation[CompletionId]
     case QueryCompletion(completion: CompletionId)
         extends Operation[CompletionStatus]

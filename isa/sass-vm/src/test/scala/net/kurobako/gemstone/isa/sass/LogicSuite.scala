@@ -11,6 +11,12 @@ class LogicSuite extends munit.FunSuite {
 
   private val patterns = Vec(0, 1, 2, 3, 31, 32, 0x80000000, -1, 0x55555555, 0xaaaaaaaa)
 
+  private val AndZero         = Vec(Instruction.Modifier.AND, Instruction.Modifier.Z)
+  private val LutPredicateAnd = Vec(Instruction.Modifier.LUT, Instruction.Modifier.PAND)
+  private val WordValues      = Vec(0L, 1L, 0x80000000L, 0xffffffffL)
+  private val AliasValues     = Vec(0L, 0xffffffffL)
+  private val Flags           = Vec(false, true)
+
   private def logic(sm: Int, function: String, listing: String, zero: Boolean = false): Unit = {
     val kernel                                                           = load(sm, Fixture.listing(listing), function)
     val instructions                                                     = kernel.function.instructions
@@ -24,7 +30,7 @@ class LogicSuite extends munit.FunSuite {
       assert(has("LOP", Instruction.Modifier.AND, Instruction.Modifier.NZ) &&
         has("LOP", Instruction.Modifier.OR, Instruction.Modifier.NZ))
       if (zero) assert(instructions.exists(i =>
-        i.mnemonic.raw == "LOP" && i.modifiers == Vec(Instruction.Modifier.AND, Instruction.Modifier.Z) &&
+        i.mnemonic.raw == "LOP" && i.modifiers == AndZero &&
           i.operands(1) != operand("RZ")
       ))
     }
@@ -82,13 +88,13 @@ class LogicSuite extends munit.FunSuite {
 
   for (sm <- Vec(70, 75, 80, 86, 89)) test(s"sm_$sm LOP3 predicate OR/AND preserves data and aliased input") {
     val rows = for {
-      a <- Vec(0L, 1L, 0x80000000L, 0xffffffffL)
-      b <- Vec(0L, 1L, 0x80000000L, 0xffffffffL)
-      q <- Vec(0L, 0xffffffffL)
+      a <- WordValues
+      b <- WordValues
+      q <- AliasValues
     } yield Vec(a, b, 0x12345678L, q)
     val kernel = lop3Predicate(sm)
     assert(kernel.function.instructions.exists(i =>
-      i.mnemonic.raw == "LOP3" && i.modifiers == Vec(Instruction.Modifier.LUT, Instruction.Modifier.PAND)
+      i.mnemonic.raw == "LOP3" && i.modifiers == LutPredicateAnd
     ))
     assertEquals(predicateLop(kernel).operands.last, operand("!P0"))
     val expected = rows.flatMap { row =>
@@ -117,7 +123,7 @@ class LogicSuite extends munit.FunSuite {
     }
     assert(rejected(35, "LOP3.LUT", "P0"))
     assert(rejected(70, "ULOP3.LUT", "UP0"))
-    val invalid = Instruction.decode(
+    val invalid = InstructionDefinitions.decode(
       lop.mnemonic.raw,
       lop.modifiers,
       lop.operands.updated(lop.operands.size - 1, operand("R0")),
@@ -146,7 +152,7 @@ class LogicSuite extends munit.FunSuite {
 
   for {
     (start, count, expected) <- Vec((0, 0, 0), (0, 32, -1), (4, 5, 0x1f0), (31, 2, Int.MinValue), (32, 1, 0))
-    immediate                <- Vec(false, true)
+    immediate                <- Flags
   }
     test(s"UBMSK start=$start count=$count immediate=$immediate preserves an aliased width source") {
       check(
@@ -220,7 +226,7 @@ class LogicSuite extends munit.FunSuite {
   private def checkSgxt(kernel: Kernel, raw: Boolean, immediate: Option[Int] = None): Unit = {
     val widened = immediate.fold(kernel) { width =>
       kernel.map { i =>
-        val immediateForm = (i.operation match { case _: Instruction.Sgxt => true; case _ => false }) &&
+        val immediateForm = (i.operation.form match { case _: Form.Sgxt => true; case _ => false }) &&
           ((i.modifiers == Vec(Instruction.Modifier.U32) && i.operands(2) == operand("0x2")) ||
             (i.modifiers.isEmpty && i.operands(2) == operand("0x3")))
         if (immediateForm)
@@ -268,6 +274,11 @@ class LogicSuite extends munit.FunSuite {
     checkSgxt(sgxtRaw, raw = true)
   }
 
+  // ptxas 13.3 emits the same SGXT.U32 form for sm_75 and sm_89 (__fns).
+  test("SGXT keeps its sm_70 behaviour on later architectures") {
+    checkSgxt(sgxt.copy(sm = 89), raw = false)
+  }
+
   test("SGXT immediate widths use the measured 9-bit encoding and clamp at 32") {
     checkSgxt(sgxt, raw = false, immediate = Some(256))
   }
@@ -282,6 +293,6 @@ class LogicSuite extends munit.FunSuite {
       original.rewrite(operands = original.operands.updated(2, operand("-1"))),
       original.rewrite(operands = original.operands.updated(2, operand("0x200")))
     ).foreach(invalid => assert(sgxt.map(i => if (i == original) invalid else i).lower(8, 4, 4).isLeft))
-    assert(sgxt.copy(sm = 89).lower(8, 4, 4).isLeft)
+    assert(sgxt.copy(sm = 61).lower(8, 4, 4).isLeft)
   }
 }

@@ -1,3 +1,5 @@
+#include <cstdint>
+
 #include "descriptor.hpp"
 
 extern "C" VKAPI_ATTR void VKAPI_CALL vkCmdSetDeviceMask(VkCommandBuffer, uint32_t) {

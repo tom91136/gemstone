@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import scala.collection.mutable
 import upickle.default.ReadWriter
 
@@ -14,7 +16,8 @@ import upickle.default.ReadWriter
   * semantics remain handwritten; recovered encoding forms do not imply execution support.
   */
 object GenerateSASSISA {
-  private val PackageRoot = "net/kurobako/gemstone/isa/sass"
+  private val PackageRoot       = "net/kurobako/gemstone/isa/sass"
+  private val ConditionSections = Set("CONDITION", "CONDITIONS")
 
   case class Table(digest: String, description: SASSDescription.Description)
   case class Bundle(targets: Vector[(String, String)], tables: Vector[Table])
@@ -92,26 +95,6 @@ object GenerateSASSISA {
     }
   }.mkString("{\n", ",\n", "\n}\n")
 
-  enum SyntaxNode derives ReadWriter {
-    case Text(raw: Int)
-    case Literal(value: Int)
-    case Field(kind: Int, binding: Int, arguments: Option[Int], default: Option[Int])
-    case Group(open: Int, close: Int, children: Vector[Int])
-    case Optional(marker: Option[Int], children: Vector[Int])
-  }
-  enum ConditionNode derives ReadWriter {
-    case Number(value: BigInt)
-    case StringValue(value: Int)
-    case Field(name: Int, attribute: Option[Int])
-    case Parameter(name: Int)
-    case Constant(name: Int)
-    case EnumValue(kind: Int, name: Int)
-    case Unary(operator: Int, value: Int)
-    case Binary(operator: Int, left: Int, right: Int)
-    case Call(name: Int, arguments: Vector[Int])
-    case Conditional(condition: Int, whenTrue: Int, whenFalse: Int)
-  }
-  case class Condition(expression: Int, message: Int, requires: Option[Int]) derives ReadWriter
   case class Assignment(name: Int, positions: Vector[Int], expression: Int) derives ReadWriter
   case class Form(
       name: Int,
@@ -135,10 +118,10 @@ object GenerateSASSISA {
   ) derives ReadWriter
   case class Catalogue(
       strings: Vector[String],
-      expressions: Vector[SASSEncoding.Expr],
+      expressions: Vector[Expression],
       syntaxNodes: Vector[SyntaxNode],
       conditionNodes: Vector[ConditionNode],
-      conditions: Vector[Condition],
+      conditions: Vector[ConditionRow],
       assignments: Vector[Assignment],
       forms: Vector[Form],
       vocabularies: Vector[Vocabulary],
@@ -157,10 +140,10 @@ object GenerateSASSISA {
 
   def renderCatalogue(bundle: Bundle): Catalogue = {
     val strings        = Interner[String]()
-    val expressions    = Interner[SASSEncoding.Expr]()
+    val expressions    = Interner[Expression]()
     val syntaxNodes    = Interner[SyntaxNode]()
     val conditionNodes = Interner[ConditionNode]()
-    val conditions     = Interner[Condition]()
+    val conditions     = Interner[ConditionRow]()
     val assignments    = Interner[Assignment]()
     val forms          = Interner[Form]()
     val vocabularies   = Interner[Vocabulary]()
@@ -172,22 +155,25 @@ object GenerateSASSISA {
       case SASSFormat.Field(kind, binding, arguments, default, _, _) =>
         SyntaxNode.Field(strings(kind), strings(binding), arguments.map(strings(_)), default.map(strings(_)))
       case SASSFormat.Group(open, close, children) =>
-        SyntaxNode.Group(strings(open.toString), strings(close.toString), children.map(syntax(_)))
-      case SASSFormat.Optional(marker, children) => SyntaxNode.Optional(marker.map(strings(_)), children.map(syntax(_)))
+        SyntaxNode.Group(strings(open.toString), strings(close.toString), Vec.from(children.map(syntax(_))))
+      case SASSFormat.Optional(marker, children) =>
+        SyntaxNode.Optional(marker.map(strings(_)), Vec.from(children.map(syntax(_))))
     })
 
-    def condition(value: SASSConditions.Expr): Int = conditionNodes(value match {
-      case SASSConditions.Expr.Number(number)         => ConditionNode.Number(number)
-      case SASSConditions.Expr.StringValue(text)      => ConditionNode.StringValue(strings(text))
-      case SASSConditions.Expr.Field(name, attribute) => ConditionNode.Field(strings(name), attribute.map(strings(_)))
-      case SASSConditions.Expr.Parameter(name)        => ConditionNode.Parameter(strings(name))
-      case SASSConditions.Expr.Constant(name)         => ConditionNode.Constant(strings(name))
-      case SASSConditions.Expr.EnumValue(kind, name)  => ConditionNode.EnumValue(strings(kind), strings(name))
-      case SASSConditions.Expr.Unary(operator, inner) => ConditionNode.Unary(strings(operator), condition(inner))
-      case SASSConditions.Expr.Binary(operator, left, right) =>
-        ConditionNode.Binary(strings(operator), condition(left), condition(right))
-      case SASSConditions.Expr.Call(name, arguments) => ConditionNode.Call(strings(name), arguments.map(condition(_)))
-      case SASSConditions.Expr.Conditional(test, whenTrue, whenFalse) =>
+    def condition(value: ConditionExpression): Int = conditionNodes(value match {
+      case ConditionExpression.Number(number)         => ConditionNode.Number(number)
+      case ConditionExpression.StringValue(text)      => ConditionNode.StringValue(strings(text))
+      case ConditionExpression.Field(name, attribute) => ConditionNode.Field(strings(name), attribute.map(strings(_)))
+      case ConditionExpression.Parameter(name)        => ConditionNode.Parameter(strings(name))
+      case ConditionExpression.Constant(name)         => ConditionNode.Constant(strings(name))
+      case ConditionExpression.EnumValue(kind, name)  => ConditionNode.EnumValue(strings(kind), strings(name))
+      case ConditionExpression.Unary(operator, inner) =>
+        ConditionNode.Unary(strings(operator.spelling), condition(inner))
+      case ConditionExpression.Binary(operator, left, right) =>
+        ConditionNode.Binary(strings(operator.spelling), condition(left), condition(right))
+      case ConditionExpression.Call(name, arguments) =>
+        ConditionNode.Call(strings(name.spelling), arguments.map(condition(_)))
+      case ConditionExpression.Conditional(test, whenTrue, whenFalse) =>
         ConditionNode.Conditional(condition(test), condition(whenTrue), condition(whenFalse))
     })
 
@@ -199,7 +185,7 @@ object GenerateSASSISA {
       val decoder = Decoder(table)
       Database(
         digest = strings(table.digest),
-        width = decoder.compiled.width.raw,
+        width = decoder.compiled.width,
         parameters = named(decoder.parameters),
         constants = named(decoder.constants),
         forms = decoder.forms.map { (form, format, legality) =>
@@ -208,11 +194,18 @@ object GenerateSASSISA {
             form.alternate,
             form.opcodes.map((name, value) => strings(name) -> value),
             form.fields.map(field =>
-              assignments(Assignment(strings(field.name), field.positions, expressions(field.expression)))
+              assignments(Assignment(
+                strings(field.name),
+                field.positions,
+                expressions(field.expression.fold(
+                  source => throw IllegalArgumentException(s"unsupported expression: $source"),
+                  identity
+                ))
+              ))
             ),
             format.map(syntax(_)),
             legality.map { (entry, requires) =>
-              conditions(Condition(condition(entry.expression), strings(entry.message), requires.map(strings(_))))
+              conditions(ConditionRow(condition(entry.expression), strings(entry.message), requires.map(strings(_))))
             }
           ))
         },
@@ -222,7 +215,7 @@ object GenerateSASSISA {
         vocabularies = decoder.vocabularies.map(vocabulary =>
           vocabularies(Vocabulary(
             strings(vocabulary.name),
-            vocabulary.values.map(value => strings(value.name) -> value.value),
+            vocabulary.values.map(value => strings(value.name) -> value.number),
             vocabulary.default
           ))
         )
@@ -256,35 +249,35 @@ object GenerateSASSISA {
       SASSConditions.definitions(table.description.preamble).fold(e => fail(e.message), identity)
 
     /** Scheduling constraints describe control fields that assembly preserves rather than checks. */
-    private def scheduling(expression: SASSConditions.Expr): Boolean = expression match {
-      case SASSConditions.Expr.Call("DEFINED", Vector(SASSConditions.Expr.Call(name, _))) =>
-        name.startsWith("TABLES_opex_")
-      case SASSConditions.Expr.Binary("->", _, right) =>
+    private def scheduling(expression: ConditionExpression): Boolean = expression match {
+      case ConditionExpression.Call(BuiltinCall.Defined, Vec(ConditionExpression.Call(call, _))) =>
+        call.spelling.startsWith("TABLES_opex_")
+      case ConditionExpression.Binary(BinaryOperator.Implies, _, right) =>
         val names = fieldNames(right)
         names.nonEmpty && names.subsetOf(Set("usched_info", "batch_t"))
       case _ => false
     }
 
-    private def fieldNames(expression: SASSConditions.Expr): Set[String] = expression match {
-      case SASSConditions.Expr.Field(name, _)             => Set(name)
-      case SASSConditions.Expr.Unary(_, inner)            => fieldNames(inner)
-      case SASSConditions.Expr.Binary(_, left, right)     => fieldNames(left) ++ fieldNames(right)
-      case SASSConditions.Expr.Conditional(test, yes, no) => fieldNames(test) ++ fieldNames(yes) ++ fieldNames(no)
-      case SASSConditions.Expr.Call(_, arguments)         => arguments.flatMap(fieldNames(_)).toSet
+    private def fieldNames(expression: ConditionExpression): Set[String] = expression match {
+      case ConditionExpression.Field(name, _)             => Set(name)
+      case ConditionExpression.Unary(_, inner)            => fieldNames(inner)
+      case ConditionExpression.Binary(_, left, right)     => fieldNames(left) ++ fieldNames(right)
+      case ConditionExpression.Conditional(test, yes, no) => fieldNames(test) ++ fieldNames(yes) ++ fieldNames(no)
+      case ConditionExpression.Call(_, arguments)         => arguments.flatMap(fieldNames(_)).toSet
       case _                                              => Set.empty
     }
 
     /** VarLatOperandEnc maps the scoreboard values 7 and 65535 to the same encoding, so the MIO_RD_SCBD constraint on
       * the pre-encoding value applies only when a caller supplies that value.
       */
-    private val unobservableScoreboard = SASSConditions.Expr.Binary(
-      "==",
-      SASSConditions.Expr.Field("dst_wr_sb", None),
-      SASSConditions.Expr.Number(7)
+    private val unobservableScoreboard = ConditionExpression.Binary(
+      BinaryOperator.Equal,
+      ConditionExpression.Field("dst_wr_sb", None),
+      ConditionExpression.Number(7)
     )
 
     private def legality(form: SASSDescription.InstructionClass): Vector[(SASSConditions.Condition, Option[String])] =
-      form.sections.filter(section => Set("CONDITION", "CONDITIONS")(section.name)).flatMap { section =>
+      form.sections.filter(section => ConditionSections(section.name)).flatMap { section =>
         SASSConditions.parse(section.body).fold(e => fail(s"${form.name}: ${e.message}"), identity)
       }.filter(entry =>
         (entry.category == "ERROR" || entry.category.endsWith("_ERROR")) && !scheduling(entry.expression)
@@ -305,37 +298,38 @@ object GenerateSASSISA {
         (form, format, legality(classes(form.name)))
       }
 
-    private def expressionLookups(value: SASSEncoding.Expr): Set[String] = value match {
-      case SASSEncoding.Expr.Lookup(name, arguments)     => Set(name) ++ arguments.flatMap(expressionLookups(_))
-      case SASSEncoding.Expr.Scale(inner, _)             => expressionLookups(inner)
-      case SASSEncoding.Expr.Multiply(inner, _)          => expressionLookups(inner)
-      case SASSEncoding.Expr.Identity(a, b)              => expressionLookups(a) ++ expressionLookups(b)
-      case SASSEncoding.Expr.FixedFloat(inner, _)        => expressionLookups(inner)
-      case SASSEncoding.Expr.FloatConvert(value = inner) => expressionLookups(inner)
-      case SASSEncoding.Expr.Relaxed(inner)              => expressionLookups(inner)
-      case _                                             => Set.empty
+    private def expressionLookups(value: Expression): Set[String] = value match {
+      case Expression.Lookup(name, arguments)     => Set(name) ++ arguments.flatMap(expressionLookups(_))
+      case Expression.Scale(inner, _)             => expressionLookups(inner)
+      case Expression.Multiply(inner, _)          => expressionLookups(inner)
+      case Expression.Identity(a, b)              => expressionLookups(a) ++ expressionLookups(b)
+      case Expression.FixedFloat(inner, _)        => expressionLookups(inner)
+      case Expression.FloatConvert(value = inner) => expressionLookups(inner)
+      case Expression.Relaxed(inner)              => expressionLookups(inner)
+      case _                                      => Set.empty
     }
 
-    private def conditionLookups(value: SASSConditions.Expr): Set[String] = value match {
-      case SASSConditions.Expr.Call(name, arguments) =>
-        Option.when(!Set("DEFINED", "IsEven", "IsOdd")(name))(name).toSet ++ arguments.flatMap(conditionLookups(_))
-      case SASSConditions.Expr.Unary(_, inner)            => conditionLookups(inner)
-      case SASSConditions.Expr.Binary(_, a, b)            => conditionLookups(a) ++ conditionLookups(b)
-      case SASSConditions.Expr.Conditional(test, yes, no) =>
+    private def conditionLookups(value: ConditionExpression): Set[String] = value match {
+      case ConditionExpression.Call(BuiltinCall.Table(name), arguments) =>
+        Set(name) ++ arguments.flatMap(conditionLookups(_))
+      case ConditionExpression.Call(_, arguments)         => arguments.flatMap(conditionLookups(_)).toSet
+      case ConditionExpression.Unary(_, inner)            => conditionLookups(inner)
+      case ConditionExpression.Binary(_, a, b)            => conditionLookups(a) ++ conditionLookups(b)
+      case ConditionExpression.Conditional(test, yes, no) =>
         conditionLookups(test) ++ conditionLookups(yes) ++ conditionLookups(no)
       case _ => Set.empty
     }
 
-    private def conditionNames(value: SASSConditions.Expr): Set[String] = value match {
-      case SASSConditions.Expr.Parameter(name)            => Set(name)
-      case SASSConditions.Expr.Constant(name)             => Set(name)
-      case SASSConditions.Expr.Field(name, attribute)     => Set(name) ++ attribute.map(suffix => s"$name@$suffix")
-      case SASSConditions.Expr.EnumValue(kind, _)         => Set(kind)
-      case SASSConditions.Expr.Unary(_, inner)            => conditionNames(inner)
-      case SASSConditions.Expr.Binary(_, a, b)            => conditionNames(a) ++ conditionNames(b)
-      case SASSConditions.Expr.Conditional(test, yes, no) =>
+    private def conditionNames(value: ConditionExpression): Set[String] = value match {
+      case ConditionExpression.Parameter(name)            => Set(name)
+      case ConditionExpression.Constant(name)             => Set(name)
+      case ConditionExpression.Field(name, attribute)     => Set(name) ++ attribute.map(suffix => s"$name@$suffix")
+      case ConditionExpression.EnumValue(kind, _)         => Set(kind)
+      case ConditionExpression.Unary(_, inner)            => conditionNames(inner)
+      case ConditionExpression.Binary(_, a, b)            => conditionNames(a) ++ conditionNames(b)
+      case ConditionExpression.Conditional(test, yes, no) =>
         conditionNames(test) ++ conditionNames(yes) ++ conditionNames(no)
-      case SASSConditions.Expr.Call(_, arguments) => arguments.flatMap(conditionNames(_)).toSet
+      case ConditionExpression.Call(_, arguments) => arguments.flatMap(conditionNames(_)).toSet
       case _                                      => Set.empty
     }
 
@@ -349,7 +343,9 @@ object GenerateSASSISA {
     private val expressions = forms.flatMap(_._3).map(_._1.expression)
     private val names       = expressions.flatMap(conditionNames(_)).toSet
     private val required    =
-      compiled.forms.flatMap(_.fields.flatMap(field => expressionLookups(field.expression))).toSet ++
+      compiled.forms.flatMap(_.fields.flatMap(field =>
+        field.expression.fold(_ => Set.empty[String], expressionLookups(_))
+      )).toSet ++
         expressions.flatMap(conditionLookups(_))
 
     val lookups: Vector[SASSEncoding.LookupTable] = compiled.tables.filter(lookup => required(lookup.name))

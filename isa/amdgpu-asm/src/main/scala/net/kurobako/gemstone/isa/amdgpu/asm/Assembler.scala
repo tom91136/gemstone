@@ -48,6 +48,8 @@ object Assembler {
       CodecError.InvalidOperand(s"invalid branch operands for ${instruction.opcode}")
     )
 
+  private val SymbolName = "[A-Za-z_.$][A-Za-z0-9_.$]*".r
+
   def encode(program: Program, target: Target, waveSize: Int in (32, 64) = 32): Either[CodecError, Vec[Byte]] = {
     val planned = program.statements.foldLeft[Either[CodecError, State]](Right(State(0, Map.empty, Vec.empty))) {
       (state, statement) =>
@@ -76,23 +78,23 @@ object Assembler {
             case Statement.Directive(".text", "") => Right(state)
             case Statement.Directive(".section", args) if args.split(',').headOption.exists(_.trim == ".text") =>
               Right(state)
-            case Statement.Directive(name, _)
-                if Set(".globl", ".global", ".local", ".hidden", ".type", ".size")(name) => Right(state)
+            case Statement.Directive(".globl" | ".global" | ".local" | ".hidden" | ".type" | ".size", _) =>
+              Right(state)
             case Statement.Directive(name, args) if DataWidths.contains(name) =>
               val expressions = args.split(",", -1).toVec.map(_.trim)
               val width       = DataWidths(name)
               if (expressions.exists(_.isEmpty)) Left(CodecError.InvalidOperand(s"$name requires data expressions"))
               else append(Part.Data(state.offset, width, expressions), Math.multiplyExact(width, expressions.size))
-            case Statement.Directive(name, args) if Set(".set", ".equ")(name) =>
+            case Statement.Directive(name @ (".set" | ".equ"), args) =>
               args.split(",", -1).toVector.map(_.trim) match {
-                case Vector(symbol, expression) if symbol.matches("[A-Za-z_.$][A-Za-z0-9_.$]*") =>
+                case Vector(symbol, expression) if SymbolName.matches(symbol) =>
                   if (state.labels.contains(symbol)) Left(CodecError.InvalidOperand(s"duplicate symbol '$symbol'"))
                   else evaluate(expression, state.labels, state.offset).map(value =>
                     state.copy(labels = state.labels.updated(symbol, value))
                   )
                 case _ => Left(CodecError.InvalidOperand(s"invalid $name directive"))
               }
-            case Statement.Directive(name, args) if Set(".p2align", ".align", ".balign", ".zero", ".space")(name) =>
+            case Statement.Directive(name @ (".p2align" | ".align" | ".balign" | ".zero" | ".space"), args) =>
               val values = args.split(",", -1).toVec.map(_.trim)
               values.traverse(evaluate(_, state.labels, state.offset)).flatMap {
                 case Vec(amount)       => padding(state.offset, name, amount, None, target).flatMap(bytes(_))

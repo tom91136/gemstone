@@ -4,10 +4,15 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class GLSLStd450Suite extends munit.FunSuite {
+  private val LaneCounts     = Seq(1, 4)
+  private val Decompositions = Seq("Modf", "Frexp")
+  private val Norms          = Seq("Length", "Distance")
+
   private val packing =
     """%float = OpTypeFloat 32
       |%double = OpTypeFloat 64
@@ -21,10 +26,52 @@ class GLSLStd450Suite extends munit.FunSuite {
       |%frexp_struct = OpTypeStruct %float %int
       |""".stripMargin
 
-  private def f(value: Float): Long = floatBits(value)
+  private def f(value: Float): Long = single(value)
 
   private def packed(operation: String, result: String, inputs: (String, Vec[Byte])*)(expected: Vec[Byte]): Unit =
     elementwise(packing, result, operation, inputs, expected)
+
+  test("geometric functions combine whole vectors") {
+    val types                             = "%float = OpTypeFloat 32\n%v4float = OpTypeVector %float 4\n"
+    def floats(values: Float*): Vec[Byte] = encode(32, values.map(f(_))*)
+    def vectors(values: Seq[Float]*)      = values.map(lanes => "%v4float" -> floats(lanes*))
+    elementwise(types, "%v4float", "Cross", vectors(Seq(1f, 2f, 3f, 7f), Seq(4f, 5f, 6f, 8f)), floats(-3f, 6f, -3f, 0f))
+    elementwise(
+      types,
+      "%v4float",
+      "Reflect",
+      vectors(Seq(1f, -1f, 0f, 2f), Seq(0f, 1f, 0f, 0f)),
+      floats(1f, 1f, 0f, 2f)
+    )
+    elementwise(
+      types,
+      "%v4float",
+      "FaceForward",
+      vectors(Seq(1f, 2f, 3f, 4f), Seq(1f, 0f, 0f, 0f), Seq(1f, 0f, 0f, 0f)),
+      floats(-1f, -2f, -3f, -4f)
+    )
+    elementwise(
+      types,
+      "%v4float",
+      "FaceForward",
+      vectors(Seq(1f, 2f, 3f, 4f), Seq(1f, 0f, 0f, 0f), Seq(-1f, 0f, 0f, 0f)),
+      floats(1f, 2f, 3f, 4f)
+    )
+    elementwise(
+      types,
+      "%v4float",
+      "Refract",
+      vectors(Seq(0.6f, -0.8f, 0f, 0f), Seq(0f, 1f, 0f, 0f)) :+ ("%float" -> floats(1f)),
+      floats(0.6f, -0.8f, 0f, 0f)
+    )
+    elementwise(
+      types,
+      "%v4float",
+      "Refract",
+      vectors(Seq(0.8f, -0.6f, 0f, 0f), Seq(0f, 1f, 0f, 0f)) :+ ("%float" -> floats(2f)),
+      floats(0f, 0f, 0f, 0f)
+    )
+  }
 
   test("normalised packing clamps and rounds each channel in bit order") {
     packed("PackSnorm4x8", "%uint", "%v4float" -> encode(32, f(-1), f(0), f(1), f(0.25f)))(encode(32, 0x207f0081L))
@@ -100,22 +147,21 @@ class GLSLStd450Suite extends munit.FunSuite {
 
   for {
     width     <- Seq(32, 64)
-    lanes     <- Seq(1, 4)
-    operation <- Seq("Modf", "Frexp")
+    lanes     <- LaneCounts
+    operation <- Decompositions
   } test(s"$operation stores its pointer component at width $width, lanes $lanes") {
-    val subnormal = Math.scalb(1.0, if (width == 32) -140 else -1070)
-    val exponent  = if (width == 32) -139L else -1069L
-    // Scala Native emits a boxed -0.0 literal as +0.0
-    val negativeZero                        = java.lang.Double.longBitsToDouble(Long.MinValue)
-    def floats(values: Double*): Vec[Byte]  = encode(width, values.take(lanes).map(floatingBits(_, width))*)
-    def vector(scalar: String): String      = if (lanes == 1) scalar else s"${scalar}_vector"
-    val (fractions, integral, integralType) =
-      if (operation == "Modf")
-        (floats(-0.5, negativeZero, subnormal, 0.0), floats(-2.0, negativeZero, 0.0, Double.PositiveInfinity), "%float")
-      else {
-        val exponents = encode(64, Seq(2L, 0L, exponent, 0L).take(lanes)*)
-        (floats(-0.625, negativeZero, 0.5, Double.PositiveInfinity), exponents, "%long")
-      }
+    val subnormal                          = Math.scalb(1.0, if (width == 32) -140 else -1070)
+    val exponent                           = if (width == 32) -139L else -1069L
+    def floats(values: Double*): Vec[Byte] = encode(width, values.take(lanes).map(floatingBits(_, width))*)
+    def vector(scalar: String): String     = if (lanes == 1) scalar else s"${scalar}_vector"
+    val modf                               = operation == "Modf"
+    val fractions                          =
+      if (modf) floats(-0.5, negativeZero, subnormal, 0.0)
+      else floats(-0.625, negativeZero, 0.5, Double.PositiveInfinity)
+    val integral =
+      if (modf) floats(-2.0, negativeZero, 0.0, Double.PositiveInfinity)
+      else encode(64, Seq(2L, 0L, exponent, 0L).take(lanes)*)
+    val integralType = if (modf) "%float" else "%long"
     elementwise(
       s"""%float = OpTypeFloat $width
          |%long = OpTypeInt 64 1
@@ -132,8 +178,8 @@ class GLSLStd450Suite extends munit.FunSuite {
 
   for {
     width     <- Seq(16, 32, 64)
-    operation <- Seq("Length", "Distance")
-    lanes     <- Seq(1, 4)
+    operation <- Norms
+    lanes     <- LaneCounts
   } test(s"$operation computes $width-bit results from $lanes components") {
     val left     = if (lanes == 1) Seq(-3.0) else Seq(3.0, 4.0, 0.0, 0.0)
     val right    = if (lanes == 1) Seq(1.0) else Seq.fill(4)(0.0)

@@ -23,30 +23,35 @@ class ConversionSuite extends munit.FunSuite {
     Vec(70, 75, 80, 86, 89).map(sm => sm -> load(sm, Fixture.listing(s"f2fF32F64Sm$sm"), "f2f_conversion_probe"))
 
   test("F2F narrowing and widening match the compiler fixtures and hardware reference values") {
-    val narrow = NumericCases.f64ToF32
-    val widen  = NumericCases.f32ToF64
-    val count  = narrow.size.max(widen.size)
+    val narrow         = NumericCases.f64ToF32
+    val widen          = NumericCases.f32ToF64
+    val count          = narrow.size.max(widen.size)
+    val narrowInputs   = narrow.map(_._1)
+    val narrowExpected = narrow.map(_._2)
+    val widenInputs    = widen.map(_._1)
+    val widenExpected  = widen.map(_._2)
     for ((sm, kernel) <- f2f) {
       val run = kernel.launch(count)(
         Arg.zeros(count * 4),
-        Arg.Buffer(words(narrow.map(_._1).padTo(count, 0L), 8)),
+        Arg.Buffer(words(narrowInputs.padTo(count, 0L), 8)),
         Arg.zeros(count * 8),
-        Arg.Buffer(words(widen.map(_._1).padTo(count, 0L))),
+        Arg.Buffer(words(widenInputs.padTo(count, 0L))),
         Arg.u32(count)
       )
-      assertEquals(run.words(0).take(narrow.size), narrow.map(_._2), s"sm_$sm")
-      assertEquals(run.words(argument = 2, width = 8).take(widen.size), widen.map(_._2), s"sm_$sm")
+      assertEquals(run.words(0).take(narrow.size), narrowExpected, s"sm_$sm")
+      assertEquals(run.words(argument = 2, width = 8).take(widen.size), widenExpected, s"sm_$sm")
     }
   }
 
-  test("F2F rejects unverified rounding modifiers and architectures") {
+  test("F2F rejects a rounding modifier in place of a format") {
     val kernel = f2f.last._2
     rejects(kernel, 8, 8, 8, 8, 4) {
       case instruction if opcode(instruction, "F2F", "F32", "F64") =>
         instruction.rewrite(modifiers = instruction.modifiers.updated(0, Instruction.Modifier("RZ")))
     }
-    assert(kernel.copy(sm = 90).lower(8, 8, 8, 8, 4).isLeft)
   }
+
+  private val NarrowHalfExpected = NumericCases.f32ToF16.map(_._2)
 
   private def f2fHalf(sm: Int) = load(sm, Fixture.listing(s"f2fF16F32Sm$sm"), "probe")
 
@@ -56,7 +61,25 @@ class ConversionSuite extends munit.FunSuite {
   }
 
   test("compiler-produced F2F.F16.F32 rounds, canonicalises NaNs, and zero-extends") {
-    Vec(70, 75, 89).foreach(sm => assertEquals(narrowHalf(f2fHalf(sm)), NumericCases.f32ToF16.map(_._2), s"sm_$sm"))
+    Vec(50, 60, 70, 75, 89).foreach(sm =>
+      assertEquals(narrowHalf(f2fHalf(sm)), NarrowHalfExpected, s"sm_$sm")
+    )
+  }
+
+  test("sm_50 F2F.F32.F16 widens binary16 exactly, from __half2float") {
+    val cases = Vec(
+      0x0000L -> 0x00000000L,
+      0x8000L -> 0x80000000L,
+      0x3c00L -> 0x3f800000L,
+      0x0001L -> 0x33800000L,
+      0x83ffL -> 0xb87fc000L,
+      0x7bffL -> 0x477fe000L,
+      0x7c00L -> 0x7f800000L,
+      0xfc00L -> 0xff800000L
+    )
+    val kernel = load(50, Fixture.listing("f2fF32F16Sm50"), "probe")
+    val run    = kernel.launch(1, cases.size)(Arg.zeros(cases.size * 4), Arg.Buffer(words(cases.map(_._1))))
+    assertEquals(run.words(0), cases.map(_._2))
   }
 
   test("F2F.F16.F32 lowering preserves generic predicate handling") {
@@ -73,7 +96,7 @@ class ConversionSuite extends munit.FunSuite {
         )
         else Vec(instruction)
     })))
-    assertEquals(narrowHalf(guarded), NumericCases.f32ToF16.map(_._2))
+    assertEquals(narrowHalf(guarded), NarrowHalfExpected)
   }
 
   private val i2fHalf = Vec(
@@ -186,10 +209,10 @@ class ConversionSuite extends munit.FunSuite {
     assertEquals(packed(aliased), packCases.map((_, _, expected) => (expected >>> 16) & 0xffffL))
   }
 
-  test("F2FP.PACK_AB lowering rejects unverified modifier forms") {
+  test("F2FP.PACK_AB lowering rejects conflicting packing modifiers") {
     rejects(pack, 8, 8) {
       case instruction if instruction.mnemonic.raw == "F2FP" =>
-        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("SATFINITE"))
+        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("UNPACK_B"))
     }
   }
 
@@ -203,9 +226,22 @@ class ConversionSuite extends munit.FunSuite {
   private val narrowSigned = load(35, Fixture.listing("i2iS16S8Sm35"), "probe")
 
   test("unsupported I2I modifiers, destinations, and operands fail through the cubin compiler") {
-    Vec("I2I.S16.S8.SAT R0, R0", "I2I.S16.S8 R0.CC, R0", "I2I.S16.S8 R0, 0xff", "I2I.S16.S8 R0, -R0").foreach { form =>
+    Vec("I2I.S16.S8 R0.CC, R0", "I2I.S16.S8 R0, 0xff", "I2I.S16.S8 R0, -R0").foreach { form =>
       val listing = Fixture.listing("i2iS16S8Sm35").replace("I2I.S16.S8 R0, R0", form)
       assert(load(35, listing, "probe").lower(8, 8).isLeft, form)
+    }
+  }
+
+  // a byte always fits a half-word, so saturation leaves the sign-extended value
+  test("sm_35 I2I.S16.S8.SAT widens like I2I.S16.S8") {
+    val listing   = Fixture.listing("i2iS16S8Sm35").replace("I2I.S16.S8 R0, R0", "I2I.S16.S8.SAT R0, R0")
+    val saturated = load(35, listing, "probe")
+    Vec(-128, -1, 0, 1, 127).foreach { byte =>
+      val input = Vec(byte.toByte, 0.toByte, 0.toByte, 0.toByte)
+      assertEquals(
+        saturated.launch(1)(Arg.zeros(4), Arg.Buffer(input)).bytes(0),
+        narrowSigned.launch(1)(Arg.zeros(4), Arg.Buffer(input)).bytes(0)
+      )
     }
   }
 

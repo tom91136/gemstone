@@ -198,17 +198,21 @@ object AMDGPUSample {
     }
 
   /** Every `v_add_u32` of the literal `from`, now adding `to`. */
-  private def replaceConstant(program: asm.Program, from: BigInt, to: BigInt): Either[String, asm.Program] =
-    program.statements.foldLeft[Either[String, Vec[Statement]]](Right(Vec.empty)) {
-      case (result, Statement.Instruction(instruction)) if isAddOf(instruction, from) =>
+  private def replaceConstant(program: asm.Program, from: BigInt, to: BigInt): Either[String, asm.Program] = {
+    val rewritten = program.statements.map[Either[String, Statement]] {
+      case Statement.Instruction(instruction) if isAddOf(instruction, from) =>
         val operands = instruction.operands.map {
           case asm.Operand.IntegerLiteral(`from`, radix) => asm.Operand.IntegerLiteral(to, radix)
           case other                                     => other
         }
         asm.Instruction.decode(instruction.definition, operands, instruction.mods).left.map(_.toString)
-          .flatMap(rewritten => result.map(_ :+ Statement.Instruction(rewritten)))
-      case (result, statement) => result.map(_ :+ statement)
-    }.map(statements => program.copy(statements = statements))
+          .map(Statement.Instruction(_))
+      case statement => Right(statement)
+    }
+    rewritten.collectFirst { case Left(error) => error }
+      .toLeft(rewritten.collect { case Right(statement) => statement })
+      .map(statements => program.copy(statements = statements))
+  }
 
   /** `extra` placed after the `v_add_u32` of `constant`. */
   private def insertAfterAdd(program: asm.Program, constant: BigInt, extra: Vec[Statement]): asm.Program =

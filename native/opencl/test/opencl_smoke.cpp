@@ -2,22 +2,38 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <iterator>
 #include <string>
 #include <vector>
-
-#include <stdint.h>
 
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include "gemstone/test_support.hpp"
+
 #include "../../rpc/test/rpc_fixture.hpp"
+#include "session.hpp"
 #include <environment_keys.hpp>
+
+using gemstone_opencl_test::gpu;
+
+namespace {
+
+void *allocateUnified(cl_context context, cl_device_id device, cl_unified_shared_memory_type_intel kind, size_t size, cl_int *error) {
+  if (kind == CL_MEM_TYPE_HOST_INTEL) return clHostMemAllocINTEL(context, nullptr, size, 0, error);
+  if (kind == CL_MEM_TYPE_DEVICE_INTEL) return clDeviceMemAllocINTEL(context, device, nullptr, size, 0, error);
+  return clSharedMemAllocINTEL(context, device, nullptr, size, 0, error);
+}
+
+} // namespace
 
 TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
   const gemstone_test::Environment profile(gemstone::environment::Profile, "rusticl-amd");
@@ -30,20 +46,17 @@ TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[
   REQUIRE((clGetPlatformInfo(platform, CL_PLATFORM_NAME, platformName.size(), platformName.data(), nullptr) == CL_SUCCESS));
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_NAME, deviceName.size(), deviceName.data(), nullptr) == CL_SUCCESS));
   REQUIRE((std::string(platformName.data()) == "rusticl"));
-  REQUIRE((std::string(deviceName.data()).find("AMD") != std::string::npos));
+  REQUIRE((std::string(deviceName.data()).contains("AMD")));
   cl_uint vendorId = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_VENDOR_ID, sizeof(vendorId), &vendorId, nullptr) == CL_SUCCESS));
   REQUIRE((vendorId == 0x1002));
 }
 
 TEST_CASE("OpenCL device exposes half precision arithmetic", "[opencl]") {
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   std::array<char, 2048> extensions{};
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, extensions.size(), extensions.data(), nullptr) == CL_SUCCESS));
-  REQUIRE((std::string(extensions.data()).find("cl_khr_fp16") != std::string::npos));
+  REQUIRE((std::string(extensions.data()).contains("cl_khr_fp16")));
   cl_device_fp_config halfConfig = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_HALF_FP_CONFIG, sizeof(halfConfig), &halfConfig, nullptr) == CL_SUCCESS));
   REQUIRE(((halfConfig & (CL_FP_ROUND_TO_NEAREST | CL_FP_INF_NAN)) == (CL_FP_ROUND_TO_NEAREST | CL_FP_INF_NAN)));
@@ -53,15 +66,13 @@ TEST_CASE("OpenCL device exposes half precision arithmetic", "[opencl]") {
 }
 
 TEST_CASE("OpenCL IL queries expose every supported SPIR-V revision consistently", "[opencl]") {
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, 0, nullptr, &size) == CL_SUCCESS));
   std::string versions(size, '\0');
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, versions.size(), versions.data(), nullptr) == CL_SUCCESS));
-  REQUIRE((std::string(versions.c_str()) == "SPIR-V_1.0 SPIR-V_1.1 SPIR-V_1.2 SPIR-V_1.3 SPIR-V_1.4 SPIR-V_1.5 SPIR-V_1.6"));
+  versions.pop_back();
+  REQUIRE((versions == "SPIR-V_1.0 SPIR-V_1.1 SPIR-V_1.2 SPIR-V_1.3 SPIR-V_1.4 SPIR-V_1.5 SPIR-V_1.6"));
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_ILS_WITH_VERSION, 0, nullptr, &size) == CL_SUCCESS));
   std::array<cl_name_version, 7> namedVersions{};
   REQUIRE((size == sizeof(namedVersions)));
@@ -73,12 +84,9 @@ TEST_CASE("OpenCL IL queries expose every supported SPIR-V revision consistently
 }
 
 TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
-  gemstone_test::RpcFixture server;
+  gemstone_test::RpcFixture const server;
   const gemstone_test::RpcEnvironment environment(server);
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error = CL_SUCCESS;
   cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
@@ -103,27 +111,26 @@ TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
 }
 
 TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact", "[opencl]") {
-  gemstone_test::RpcFixture server;
+  gemstone_test::RpcFixture const server;
   const gemstone_test::RpcEnvironment environment(server);
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE(clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS);
-  REQUIRE(clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS);
+  cl_device_id device = gpu();
   cl_int error = CL_SUCCESS;
-  const auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *const context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE(context);
+  constexpr unsigned workerCount = 8;
   std::vector<std::future<bool>> workers;
+  workers.reserve(workerCount);
   // Repeated allocations race connection lookups and exercise native address reuse.
-  for (unsigned worker = 0; worker < 8; ++worker)
+  for (unsigned worker = 0; worker < workerCount; ++worker)
     workers.push_back(std::async(std::launch::async, [context, device, worker] {
       cl_int status = CL_SUCCESS;
-      const auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &status);
+      auto *const queue = clCreateCommandQueueWithProperties(context, device, nullptr, &status);
       if (!queue) return false;
       bool valid = true;
       for (unsigned iteration = 0; iteration < 64 && valid; ++iteration) {
         std::array<unsigned, 4> input{worker, iteration, worker + iteration, 0xabcdef};
         std::array<unsigned, 4> output{};
-        const auto buffer = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR, sizeof(input), input.data(), &status);
+        auto *const buffer = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR, sizeof(input), input.data(), &status);
         if (!buffer) {
           valid = false;
           break;
@@ -141,7 +148,7 @@ TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact",
 
 TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   gemstone_test::RpcFixture server;
-  server.programCatalogue({{"groups", "groups"}}, {});
+  server.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(server);
 
   cl_platform_id platform = nullptr;
@@ -151,8 +158,8 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   std::array<char, 128> platformName{};
   REQUIRE((clGetPlatformInfo(platform, CL_PLATFORM_NAME, platformName.size(), platformName.data(), nullptr) == CL_SUCCESS));
   REQUIRE((std::string(platformName.data()).find("Intel") == 0));
-  REQUIRE((std::string(platformName.data()).find("Graphics") != std::string::npos));
-  REQUIRE((std::string(platformName.data()).find("Gemstone") != std::string::npos));
+  REQUIRE((std::string(platformName.data()).contains("Graphics")));
+  REQUIRE((std::string(platformName.data()).contains("Gemstone")));
 
   // The Khronos loader discovers an ICD through this extension lookup, not only dlsym.
   using GetPlatforms = cl_int(CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
@@ -218,7 +225,10 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((profilingQueue && error == CL_SUCCESS));
   cl_event profilingEvent = nullptr;
   REQUIRE((clEnqueueMarkerWithWaitList(profilingQueue, 0, nullptr, &profilingEvent) == CL_SUCCESS));
-  cl_ulong queued = 0, submitted = 0, started = 0, ended = 0;
+  cl_ulong queued = 0;
+  cl_ulong submitted = 0;
+  cl_ulong started = 0;
+  cl_ulong ended = 0;
   REQUIRE((clGetEventProfilingInfo(profilingEvent, CL_PROFILING_COMMAND_QUEUED, sizeof(queued), &queued, nullptr) == CL_SUCCESS));
   REQUIRE((clGetEventProfilingInfo(profilingEvent, CL_PROFILING_COMMAND_SUBMIT, sizeof(submitted), &submitted, nullptr) == CL_SUCCESS));
   REQUIRE((clGetEventProfilingInfo(profilingEvent, CL_PROFILING_COMMAND_START, sizeof(started), &started, nullptr) == CL_SUCCESS));
@@ -302,30 +312,30 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   for (size_t index = 24; index < 64; ++index)
     REQUIRE((svm[index] == 0));
 
-  cl_program program = clCreateProgramWithIL(context, server.Spirv, sizeof(server.Spirv), &error);
+  cl_program program = clCreateProgramWithIL(context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((server.programLoads.load() == 0));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   REQUIRE((server.programLoads.load() == 1));
   cl_kernel kernel = clCreateKernel(program, "groups", &error);
   REQUIRE((kernel && error == CL_SUCCESS));
-  constexpr size_t capacity = 9 * 33 + 2;
+  constexpr size_t capacity = (9 * 33) + 2;
   auto *memory = static_cast<uint32_t *>(clSVMAlloc(context, CL_MEM_READ_WRITE, capacity * 4, 8));
   REQUIRE((memory));
   REQUIRE((clSetKernelArgSVMPointer(kernel, 0, memory + 1) == CL_SUCCESS));
-  for (bool implicitLocal : {false, true})
-    for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
-      for (uint32_t chosen : {31U, 32U, 33U}) {
+  for (bool const implicitLocal : {false, true})
+    for (uint32_t const groups : {1U, 2U, 3U, 5U, 9U})
+      for (uint32_t const chosen : {31U, 32U, 33U}) {
         if (implicitLocal && chosen != 32) continue;
         const size_t local = chosen;
-        const size_t count = groups * local - (implicitLocal ? 1 : 0);
+        const size_t count = (groups * local) - (implicitLocal ? 1 : 0);
         const size_t origin = 7;
         for (uint32_t seed : {17U, 91U}) {
           REQUIRE((clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_WRITE, memory, capacity * 4, 0, nullptr, nullptr) == CL_SUCCESS));
           std::fill(memory, memory + capacity, 0U);
           REQUIRE((clEnqueueSVMUnmap(queue, memory, 0, nullptr, nullptr) == CL_SUCCESS));
           REQUIRE((clFinish(queue) == CL_SUCCESS));
-          server.expect({chosen, groups, static_cast<uint32_t>(count), 7, seed});
+          server.expect({.local = chosen, .groups = groups, .global = static_cast<uint32_t>(count), .offset = 7, .seed = seed});
           REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
           cl_event event = nullptr;
           REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, &origin, &count, implicitLocal ? nullptr : &local, 0, nullptr, &event)
@@ -446,12 +456,9 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
 }
 
 TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "[opencl][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error = CL_SUCCESS;
   cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
@@ -475,24 +482,19 @@ TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "
 }
 
 TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[opencl][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  cl_platform_id platform{};
-  cl_device_id device{};
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error{};
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
-  auto foreign = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *foreign = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((foreign && error == CL_SUCCESS));
-  for (cl_unified_shared_memory_type_intel kind : {CL_MEM_TYPE_HOST_INTEL, CL_MEM_TYPE_DEVICE_INTEL, CL_MEM_TYPE_SHARED_INTEL}) {
+  for (cl_unified_shared_memory_type_intel const kind : {CL_MEM_TYPE_HOST_INTEL, CL_MEM_TYPE_DEVICE_INTEL, CL_MEM_TYPE_SHARED_INTEL}) {
     CAPTURE(kind);
-    auto *base = kind == CL_MEM_TYPE_HOST_INTEL     ? clHostMemAllocINTEL(context, nullptr, 64, 0, &error)
-                 : kind == CL_MEM_TYPE_DEVICE_INTEL ? clDeviceMemAllocINTEL(context, device, nullptr, 64, 0, &error)
-                                                    : clSharedMemAllocINTEL(context, device, nullptr, 64, 0, &error);
+    auto *base = allocateUnified(context, device, kind, 64, &error);
     REQUIRE((base && error == CL_SUCCESS));
-    for (size_t offset : {size_t{0}, size_t{13}, size_t{63}}) {
+    for (size_t const offset : {size_t{0}, size_t{13}, size_t{63}}) {
       auto *pointer = static_cast<unsigned char *>(base) + offset;
       cl_unified_shared_memory_type_intel actual{};
       void *allocationBase{};
@@ -520,25 +522,20 @@ TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[
 }
 
 TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  cl_platform_id platform{};
-  cl_device_id device{};
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error{};
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
-  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  for (bool failed : {false, true}) {
-    for (cl_unified_shared_memory_type_intel kind : {CL_MEM_TYPE_HOST_INTEL, CL_MEM_TYPE_DEVICE_INTEL, CL_MEM_TYPE_SHARED_INTEL}) {
+  for (bool const failed : {false, true}) {
+    for (cl_unified_shared_memory_type_intel const kind : {CL_MEM_TYPE_HOST_INTEL, CL_MEM_TYPE_DEVICE_INTEL, CL_MEM_TYPE_SHARED_INTEL}) {
       CAPTURE(kind, failed);
-      auto *pointer = kind == CL_MEM_TYPE_HOST_INTEL     ? clHostMemAllocINTEL(context, nullptr, 64, 0, &error)
-                      : kind == CL_MEM_TYPE_DEVICE_INTEL ? clDeviceMemAllocINTEL(context, device, nullptr, 64, 0, &error)
-                                                         : clSharedMemAllocINTEL(context, device, nullptr, 64, 0, &error);
+      auto *pointer = allocateUnified(context, device, kind, 64, &error);
       REQUIRE((pointer && error == CL_SUCCESS));
-      auto gate = clCreateUserEvent(context, &error);
+      auto *gate = clCreateUserEvent(context, &error);
       REQUIRE((gate && error == CL_SUCCESS));
       uint32_t pattern = 17;
       cl_event completed{};
@@ -570,18 +567,15 @@ TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unif
 
 TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declarations", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  fixture.programCatalogue({{"groups", "groups"}}, {});
+  fixture.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(fixture);
-  cl_platform_id platform{};
-  cl_device_id device{};
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error{};
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
-  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  auto program = clCreateProgramWithIL(context, fixture.Spirv, sizeof(fixture.Spirv), &error);
+  auto *program = clCreateProgramWithIL(context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   auto *other = clSVMAlloc(context, CL_MEM_READ_WRITE, 64, 0);
@@ -594,7 +588,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     const bool clearedList = mode.ends_with("cleared-list");
     auto *pointer = clHostMemAllocINTEL(context, nullptr, 64, 0, &error);
     REQUIRE((pointer && error == CL_SUCCESS));
-    auto kernel = clCreateKernel(program, "groups", &error);
+    auto *kernel = clCreateKernel(program, "groups", &error);
     REQUIRE((kernel && error == CL_SUCCESS));
     REQUIRE((clSetKernelArgMemPointerINTEL(kernel, 0, mode == "direct" ? pointer : other) == CL_SUCCESS));
     uint32_t seed = 17;
@@ -613,7 +607,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
       cl_bool enabled = CL_TRUE;
       REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL, sizeof(enabled), &enabled) == CL_SUCCESS));
     }
-    auto gate = clCreateUserEvent(context, &error);
+    auto *gate = clCreateUserEvent(context, &error);
     REQUIRE((gate && error == CL_SUCCESS));
     const size_t one = 1;
     cl_event completed{};
@@ -644,46 +638,43 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
 
 TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is released", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  fixture.programCatalogue({{"groups", "groups"}}, {});
+  fixture.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(fixture);
-  cl_platform_id platform{};
-  cl_device_id device{};
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error{};
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
-  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  auto program = clCreateProgramWithIL(context, fixture.Spirv, sizeof(fixture.Spirv), &error);
+  auto *program = clCreateProgramWithIL(context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
-  for (bool failed : {false, true}) {
-    for (const auto mode : {"fill", "kernel-early", "kernel-late", "subbuffer"}) {
+  for (bool const failed : {false, true}) {
+    for (const auto *const mode : {"fill", "kernel-early", "kernel-late", "subbuffer"}) {
       const bool launch = std::string_view(mode).starts_with("kernel");
       CAPTURE(failed, mode);
       const auto baseline = fixture.allocationCount();
-      auto buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, 64, nullptr, &error);
+      auto *buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, 64, nullptr, &error);
       REQUIRE((buffer && error == CL_SUCCESS));
       if (std::string_view(mode) == "subbuffer") {
-        const cl_buffer_region region{0, 64};
-        auto child = clCreateSubBuffer(buffer, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, &error);
+        const cl_buffer_region region{.origin = 0, .size = 64};
+        auto *child = clCreateSubBuffer(buffer, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, &error);
         REQUIRE((child && error == CL_SUCCESS));
         REQUIRE((clReleaseMemObject(buffer) == CL_SUCCESS));
         buffer = child;
       }
-      auto gate = clCreateUserEvent(context, &error);
+      auto *gate = clCreateUserEvent(context, &error);
       REQUIRE((gate && error == CL_SUCCESS));
       cl_event completed{};
       cl_kernel retainedKernel{};
       uint32_t seed = 17;
       if (launch) {
-        auto kernel = clCreateKernel(program, "groups", &error);
+        auto *kernel = clCreateKernel(program, "groups", &error);
         REQUIRE((kernel && error == CL_SUCCESS));
         REQUIRE((clSetKernelArg(kernel, 0, sizeof(buffer), &buffer) == CL_SUCCESS));
         REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
         const size_t one = 1;
-        if (!failed) fixture.expect({1, 1, 1, 0, seed});
+        if (!failed) fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = seed});
         REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &one, &one, 1, &gate, &completed) == CL_SUCCESS));
         if (std::string_view(mode) == "kernel-late") retainedKernel = kernel;
         else REQUIRE((clReleaseKernel(kernel) == CL_SUCCESS));
@@ -716,30 +707,28 @@ TEST_CASE("OpenCL event waits reject empty lists", "[opencl]") {
 }
 
 TEST_CASE("OpenCL finish from an event callback waits for the queue", "[opencl]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  cl_platform_id platform{};
-  cl_device_id device{};
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gpu();
   cl_int error{};
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
-  auto source = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *source = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((source && error == CL_SUCCESS));
-  auto target = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  auto *target = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((target && error == CL_SUCCESS));
-  auto start = clCreateUserEvent(context, &error);
+  auto *start = clCreateUserEvent(context, &error);
   REQUIRE((start && error == CL_SUCCESS));
-  auto gate = clCreateUserEvent(context, &error);
+  auto *gate = clCreateUserEvent(context, &error);
   REQUIRE((gate && error == CL_SUCCESS));
-  cl_event pending{}, marker{};
+  cl_event pending{};
+  cl_event marker{};
   REQUIRE((clEnqueueMarkerWithWaitList(target, 1, &gate, &pending) == CL_SUCCESS));
   REQUIRE((clEnqueueMarkerWithWaitList(source, 1, &start, &marker) == CL_SUCCESS));
   struct Finish {
     cl_command_queue queue;
     std::promise<cl_int> result;
-  } finish{target, {}};
+  } finish{.queue = target, .result = {}};
   auto finished = finish.result.get_future();
   // The callback runs on a queue worker.
   REQUIRE((clSetEventCallback(

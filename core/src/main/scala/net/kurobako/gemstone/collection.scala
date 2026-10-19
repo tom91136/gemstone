@@ -1,7 +1,6 @@
 package net.kurobako.gemstone
 
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.FutureTask
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
@@ -10,6 +9,8 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 
+// Vec is ArraySeq by design, so every ArraySeq operation applies and nothing is wrapped
+@SuppressWarnings(Array("baumkuchen:alias-with-operations"))
 object collection {
 
   object Vec {
@@ -27,10 +28,10 @@ object collection {
 
     def fill[A: ClassTag](count: Int)(value: => A): Vec[A] = ArraySeq.fill(count)(value)
 
-    def tabulate[A: ClassTag](count: Int)(value: Int => A): Vec[A] = ArraySeq.tabulate(count)(value)
+    inline def tabulate[A: ClassTag](count: Int)(inline value: Int => A): Vec[A] = ArraySeq.tabulate(count)(value)
 
     def tabulateNonEmpty[A: ClassTag](count: Int > 0)(value: Int >= 0 => A): NonEmpty[Vec[A]] =
-      ArraySeq.tabulate(count.raw)(index => value(index.unsafe[Int >= 0])).unsafe[NonEmpty[Vec[A]]]
+      ArraySeq.tabulate(count)(index => value(index.unsafe[Int >= 0])).unsafe[NonEmpty[Vec[A]]]
 
     /** Construct a half-open integer range whose elements retain the compile-time bounds. Empty ranges are allowed;
       * reversed ranges and ranges too large for an indexed Vec are rejected before allocation.
@@ -58,7 +59,7 @@ object collection {
 
     /** Generate the zero-based indexes for a runtime-sized sequence, retaining nonnegative evidence. */
     def indices(count: Int >= 0): Vec[Int >= 0] =
-      ArraySeq.tabulate[Int >= 0](count.raw)(index => index.unsafe[Int >= 0])
+      ArraySeq.tabulate[Int >= 0](count)(index => index.unsafe[Int >= 0])
 
     def newBuilder[A: ClassTag]: mutable.Builder[A, Vec[A]] = ArraySeq.newBuilder[A]
 
@@ -120,8 +121,8 @@ object collection {
     }
 
     // Java's LinkedHashMap supplies access ordering; Scala's mutable LinkedHashMap is insertion ordered.
-    private val mutableEntries  = java.util.LinkedHashMap[Key, FutureTask[V]](capacity.raw, 0.75f, true)
-    private val mutableInFlight = mutable.HashMap.empty[Key, FutureTask[V]]
+    private val mutableEntries  = java.util.LinkedHashMap[Key, PlatformConcurrency.Once[V]](capacity, 0.75f, true)
+    private val mutableInFlight = mutable.HashMap.empty[Key, PlatformConcurrency.Once[V]]
 
     def get(key: K)(compute: => V): V = {
       // Large immutable byte keys must be hashed once, before taking the shared lock. Publication,
@@ -133,7 +134,7 @@ object collection {
           case None        => mutableInFlight.get(lookup) match {
               case Some(entry) => entry -> false
               case None        =>
-                val entry = FutureTask[V](() => compute)
+                val entry = PlatformConcurrency.once[V](() => compute)
                 val _     = mutableInFlight.put(lookup, entry)
                 entry -> true
             }
@@ -144,7 +145,7 @@ object collection {
         lock.withLock {
           val _ = mutableInFlight.remove(lookup)
           val _ = mutableEntries.put(lookup, entry)
-          while (mutableEntries.size() > capacity.raw)
+          while (mutableEntries.size() > capacity)
             mutableEntries.keySet().asScala.headOption.foreach(oldest => mutableEntries.remove(oldest))
         }
       }

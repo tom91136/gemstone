@@ -113,8 +113,9 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         )
       ))))
       right(service.awaitCompletion(completion))
+      val texel = Vec[Byte](-1, 0, 0, -1)
       for (offset <- Seq(0, 4, 16, 20, 40, 44, 56, 60)) {
-        val _ = Vec[Byte](-1, 0, 0, -1).copyToArray(expected, offset)
+        val _ = texel.copyToArray(expected, offset)
       }
       val _ = first.copyToArray(expected, 96)
       val _ = second.copyToArray(expected, 100)
@@ -206,6 +207,13 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
       override def load(image: Vec[Byte]): Either[Fault, Backend.Program] =
         Right(Consumer(reject, standalone))
     }
+    val level      = GraphicsImageLevel(GraphicsExtent(1, 1, 1), 0L, 8L, 8L, 8L)
+    val components = GraphicsComponents(
+      GraphicsSwizzle.Identity,
+      GraphicsSwizzle.Identity,
+      GraphicsSwizzle.Identity,
+      GraphicsSwizzle.Identity
+    )
     for {
       reject     <- Vector(false, true)
       standalone <- Vector(false, true)
@@ -228,18 +236,13 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
             descriptor = GraphicsDescriptor.Image(
               GraphicsImage(
                 memory = GraphicsRange(source, 0L, 8L),
-                levels = Vec.nonEmpty(GraphicsImageLevel(GraphicsExtent(1, 1, 1), 0L, 8L, 8L, 8L)),
+                levels = Vec.nonEmpty(level),
                 layers = 1,
                 samples = 1,
                 format = GraphicsFormat.Etc2R8g8b8UnormBlock,
                 volume = false
               ),
-              GraphicsComponents(
-                GraphicsSwizzle.Identity,
-                GraphicsSwizzle.Identity,
-                GraphicsSwizzle.Identity,
-                GraphicsSwizzle.Identity
-              )
+              components
             )
           )
           val binding = if (!standalone) imageBinding

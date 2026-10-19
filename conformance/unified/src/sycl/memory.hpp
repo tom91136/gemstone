@@ -8,12 +8,12 @@ struct Backend {
   std::string kind;
   explicit Backend(std::string kind) : kind(std::move(kind)) {}
   sycl::queue queue{sycl::gpu_selector_v};
-  void *allocate(size_t size) {
+  [[nodiscard]] void *allocate(size_t size) const {
     auto *p = (kind == "host") ? sycl::aligned_alloc_host(64, size, queue) : sycl::aligned_alloc_shared(64, size, queue);
     require(p, "SYCL shared allocation");
     return p;
   }
-  void release(void *p) { sycl::free(p, queue); }
+  void release(void *p) const { sycl::free(p, queue); }
   template <class WideWord>
   void enqueueTyped(sycl::queue &target, void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
     target.parallel_for(sycl::nd_range<1>(count, count == 1 ? 1 : 32), [=](sycl::nd_item<1> item) {
@@ -33,32 +33,36 @@ struct Backend {
         auto *p = static_cast<uint32_t *>(input);
         auto *out = reinterpret_cast<uint32_t *>(output);
         sycl::atomic_ref<uint32_t, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>
-            published(p[0]), acknowledged(p[2]);
+            published(p[0]);
+        sycl::atomic_ref<uint32_t, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>
+            acknowledged(p[2]);
         for (unsigned round = 0; round < 32; ++round) {
           const uint32_t token = (uint32_t{1} << 31) + round + 1;
           while (published.load(sycl::memory_order::relaxed) != token) {
           }
           uint32_t expected = 0;
           const bool exchanged = published.compare_exchange_strong(expected, 0, sycl::memory_order::acquire, sycl::memory_order::acquire);
-          out[3 * round] = p[1];
-          out[3 * round + 1] = expected;
-          out[3 * round + 2] = exchanged;
+          out[size_t{3} * round] = p[1];
+          out[(3 * round) + 1] = expected;
+          out[(3 * round) + 2] = exchanged;
           acknowledged.store(token, sycl::memory_order::release);
         }
       } else if (mode == 14) {
         auto *p = static_cast<WideWord *>(input);
         auto *out = reinterpret_cast<WideWord *>(output);
         sycl::atomic_ref<WideWord, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>
-            published(p[0]), acknowledged(p[2]);
+            published(p[0]);
+        sycl::atomic_ref<WideWord, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>
+            acknowledged(p[2]);
         for (unsigned round = 0; round < 32; ++round) {
-          const WideWord token = (WideWord{1} << (sizeof(WideWord) * 8 - 1)) + round + 1;
+          const WideWord token = (WideWord{1} << ((sizeof(WideWord) * 8) - 1)) + round + 1;
           while (published.load(sycl::memory_order::relaxed) != token) {
           }
           WideWord expected = 0;
           const bool exchanged = published.compare_exchange_strong(expected, 0, sycl::memory_order::acquire, sycl::memory_order::acquire);
-          out[3 * round] = p[1];
-          out[3 * round + 1] = expected;
-          out[3 * round + 2] = exchanged;
+          out[size_t{3} * round] = p[1];
+          out[(3 * round) + 1] = expected;
+          out[(3 * round) + 2] = exchanged;
           acknowledged.store(token, sycl::memory_order::release);
         }
       } else if (mode == 9) {
@@ -113,7 +117,9 @@ struct Backend {
         output[0] = sum;
       } else {
         const unsigned i = item.get_global_linear_id();
-        const unsigned target = mode == 0 ? i : mode == 1 ? i * 17 : indices[i];
+        unsigned target = i;
+        if (mode == 1) target = i * 17;
+        else if (mode != 0) target = indices[i];
         output[i] = static_cast<uint32_t *>(input)[target] + 1;
       }
     });

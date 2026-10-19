@@ -53,4 +53,18 @@ class GenerateExecutionRPCSuite extends munit.FunSuite {
       ))
     }
   }
+
+  test("native errors carry the failure alternative the service raised, after the transport kind") {
+    inDirectory { output =>
+      GenerateExecutionRPC.main(Array(output.toString))
+      val files  = snapshot(output)
+      val header = files("gemstone_execution_rpc.hpp").replaceAll("\\s+", " ")
+      assert(header.contains(
+        "enum class FailureKind : uint8_t { Transport = 0, InvalidRequest = 1, NotFound = 2, Unsupported = 3, Failed = 4, InvalidProgram = 5, InvalidConfiguration = 6, OutOfResources = 7, IllegalAddress = 8, MisalignedAddress = 9, IllegalInstruction = 10, Trapped = 11, AssertionFailed = 12, TimedOut = 13 };"
+      ))
+      assert(header.contains("struct Error { std::string detail; FailureKind kind = FailureKind::Transport; };"))
+      val source = files("gemstone_execution_rpc.cpp").replaceAll("\\s+", " ")
+      assert(source.contains("Result<T>::failure(Error{lastError, failureKind(failure)})"))
+    }
+  }
 }

@@ -1,3 +1,9 @@
+#include <exception>
+#include <system_error>
+
+#include "gemstone/environment.hpp"
+#include "gemstone/vector.hpp"
+
 // Declares the legacy and per-thread-stream spellings this library defines next to the current entry points.
 #define __CUDA_API_VERSION_INTERNAL 1
 
@@ -6,6 +12,8 @@
 #include <atomic>
 #include <cctype>
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -23,13 +31,13 @@
 #include <dlfcn.h>
 #include <elf.h>
 #include <pthread.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <unistd.h>
 
+#include <aspartame/array.hpp>
 #include <aspartame/optional.hpp>
 #include <aspartame/string_view.hpp>
 #include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
@@ -57,10 +65,10 @@ using gemstone::readNative;
 
 namespace {
 
-constexpr size_t MaximumImageSize = 64u * 1024u * 1024u;
+constexpr size_t MaximumImageSize = size_t{64} * 1024 * 1024;
 // CUDA 11's library can register compressed catalogues containing a valid 75 MB sm_90 image
 // while running on an older target; inspect those entries without passing them through RPC.
-constexpr size_t MaximumCubinValidationSize = 128u * 1024u * 1024u;
+constexpr size_t MaximumCubinValidationSize = size_t{128} * 1024 * 1024;
 constexpr char DeviceName[] = "Gemstone PTX emulator";
 constexpr char DevicePciBusId[] = "0000:01:00.0";
 constexpr uint8_t DeviceUuid[16] = {0x47, 0x45, 0x4d, 0x53, 0x54, 0x4f, 0x4e, 0x45, 0x2d, 0x43, 0x55, 0x44, 0x41, 0x2d, 0x30, 0x31};
@@ -68,12 +76,17 @@ constexpr size_t ContextCapacity = 64;
 constexpr uint32_t FatbinMagic = 0xba55ed50;
 constexpr int FatbinWrapperMagic = 0x466243b1;
 constexpr uintptr_t DefaultMemoryPool = 0x300000000;
+// cuda.h spells these handles as C-style casts of integers
+const auto LegacyStream = reinterpret_cast<CUstream>(uintptr_t{0x1});
+const auto PerThreadStream = reinterpret_cast<CUstream>(uintptr_t{0x2});
+const auto LaunchParamBufferPointer = reinterpret_cast<void *>(uintptr_t{0x1});
+const auto LaunchParamBufferSize = reinterpret_cast<void *>(uintptr_t{0x2});
 
 // The emulator exposes one synthetic device. These are the limits it enforces;
 // both the attribute and property queries read from this one definition so the
 // two views cannot drift apart.
 namespace device_limits {
-constexpr size_t TotalGlobalMemoryBytes = static_cast<uint64_t>(8) * 1024 * 1024 * 1024;
+constexpr size_t TotalGlobalMemoryBytes = uint64_t{8} * 1024 * 1024 * 1024;
 constexpr int32_t MaxThreadsPerBlock = 1024;
 constexpr int32_t MaxBlockDimX = 1024;
 constexpr int32_t MaxBlockDimY = 1024;
@@ -151,7 +164,60 @@ constexpr int32_t MaxSurfaceCubemapLayeredLayers = 2048;
 // Driver and runtime status enumerations share their numeric values.
 cudaError_t runtimeStatus(CUresult status) { return static_cast<cudaError_t>(status); }
 CUresult driverStatus(cudaError_t status) { return static_cast<CUresult>(status); }
-CUresult queueStatus(int32_t status) { return static_cast<CUresult>(status); }
+// A launch configuration the runtime API reports as cudaErrorInvalidConfiguration and the driver API as an invalid value.
+constexpr auto InvalidConfiguration = static_cast<CUresult>(cudaErrorInvalidConfiguration);
+
+CUresult driverLaunchStatus(CUresult status) { return status == InvalidConfiguration ? CUDA_ERROR_INVALID_VALUE : status; }
+
+// These leave the context unusable: every later call reports the first one until the process exits.
+bool stickyStatus(CUresult status) {
+  switch (status) {
+    case CUDA_ERROR_ILLEGAL_ADDRESS:
+    case CUDA_ERROR_MISALIGNED_ADDRESS:
+    case CUDA_ERROR_ILLEGAL_INSTRUCTION:
+    case CUDA_ERROR_ASSERT:
+    case CUDA_ERROR_LAUNCH_FAILED:
+    case CUDA_ERROR_LAUNCH_TIMEOUT: return true;
+    default: return false;
+  }
+}
+
+std::atomic<CUresult> stickyError{CUDA_SUCCESS};
+
+CUresult latchStatus(CUresult status) {
+  if (stickyStatus(status)) {
+    auto expected = CUDA_SUCCESS;
+    stickyError.compare_exchange_strong(expected, status);
+  }
+  return status;
+}
+
+CUresult queueStatus(int32_t status) {
+  const auto latched = stickyError.load();
+  return latched != CUDA_SUCCESS ? latched : latchStatus(static_cast<CUresult>(status));
+}
+
+// The status a failed program load, kernel lookup or dispatch reports; `otherwise` covers failures with no closer code.
+CUresult failureStatus(gemstone::execution::FailureKind kind, ProgramEncoding encoding, CUresult otherwise) {
+  using gemstone::execution::FailureKind;
+  switch (kind) {
+    case FailureKind::InvalidRequest:
+    case FailureKind::InvalidConfiguration: return CUDA_ERROR_INVALID_VALUE;
+    case FailureKind::NotFound: return CUDA_ERROR_NOT_FOUND;
+    case FailureKind::Unsupported: return CUDA_ERROR_NOT_SUPPORTED;
+    case FailureKind::InvalidProgram: return encoding == ProgramEncoding::PTXText ? CUDA_ERROR_INVALID_PTX : CUDA_ERROR_INVALID_IMAGE;
+    case FailureKind::OutOfResources: return CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES;
+    case FailureKind::IllegalAddress: return CUDA_ERROR_ILLEGAL_ADDRESS;
+    case FailureKind::MisalignedAddress: return CUDA_ERROR_MISALIGNED_ADDRESS;
+    case FailureKind::IllegalInstruction: return CUDA_ERROR_ILLEGAL_INSTRUCTION;
+    case FailureKind::Trapped: return CUDA_ERROR_LAUNCH_FAILED;
+    case FailureKind::AssertionFailed: return CUDA_ERROR_ASSERT;
+    case FailureKind::TimedOut: return CUDA_ERROR_LAUNCH_TIMEOUT;
+    case FailureKind::Failed:
+    case FailureKind::Transport: return otherwise;
+  }
+  return otherwise;
+}
 
 std::atomic<bool> executionShuttingDown{false};
 gemstone::CommandQueue &commands();
@@ -159,6 +225,7 @@ gemstone::CommandQueue &commands();
 CUresult waitCommands() { return executionShuttingDown.load() ? CUDA_ERROR_DEINITIALIZED : queueStatus(commands().waitAll()); }
 
 CUresult enqueueCommand(CUstream stream, std::function<int32_t()> work) {
+  if (const auto latched = stickyError.load(); latched != CUDA_SUCCESS) return latched;
   try {
     commands().submit(stream, std::move(work));
     return CUDA_SUCCESS;
@@ -278,7 +345,7 @@ bool metadataOnlyCubin(std::string_view content) {
       || static_cast<uint64_t>(header.e_shnum) * header.e_shentsize > content.size() - header.e_shoff)
     return false;
   for (uint16_t index = 0; index < header.e_shnum; ++index) {
-    const auto section = readNative<Elf64_Shdr>(content.data(), header.e_shoff + static_cast<uint64_t>(index) * header.e_shentsize);
+    const auto section = readNative<Elf64_Shdr>(content.data(), header.e_shoff + (static_cast<uint64_t>(index) * header.e_shentsize));
     if (section.sh_size != 0 && (section.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) != 0) return false;
   }
   return true;
@@ -318,7 +385,7 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
       return false;
     const auto payload = std::string_view(reinterpret_cast<const char *>(entry + headerSize), storedSize);
     const int cubinTarget = static_cast<int>(readNative<uint32_t>(entry + 28));
-    const bool cubin = (kind & 2u) != 0;
+    const bool cubin = (kind & 2U) != 0;
     std::vector<char> decompressed;
     const auto decompressedView = [&](std::optional<size_t> size) {
       return size ? std::optional{std::string_view(decompressed.data(), *size)} : std::nullopt;
@@ -326,13 +393,14 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
     std::optional<std::string_view> content = payload;
     if ((flags & 0x2000) != 0) {
       const size_t limit = validating && cubin && target && cubinTarget > *target ? MaximumCubinValidationSize : MaximumImageSize;
-      const size_t size = uncompressedPayload == 0 ? payloadSize : static_cast<size_t>(uncompressedPayload);
-      content = size > limit ? std::nullopt : decompressedView(gemstone::decompressLz4(decompressed, payload.data(), compressedSize, size));
+      const size_t expanded = uncompressedPayload == 0 ? payloadSize : static_cast<size_t>(uncompressedPayload);
+      content = expanded > limit ? std::nullopt
+                                 : decompressedView(gemstone::decompressLz4(decompressed, payload.data(), compressedSize, expanded));
     } else if ((flags & 0x8000) != 0) {
       content = decompressedView(gemstone::decompressZstdFrame(decompressed, payload.data(), compressedSize, MaximumImageSize));
     }
     if (validating && !content) fatbin.entriesValid = false;
-    if ((kind & 1u) != 0 && content)
+    if ((kind & 1U) != 0 && content)
       if (const auto ptx = findPtxText(*content)) {
         fatbin.metadataOnly = false;
         if (!appendPtx(fatbin.ptx, *ptx)) return false;
@@ -407,12 +475,12 @@ CUcontext activeContext() { return currentContext ? currentContext : implicitCon
 
 bool contextIsLive(CUcontext context) {
   if (!context) return false;
-  std::lock_guard lock{contextMutex};
+  std::scoped_lock const lock{contextMutex};
   return contexts ^ contains(context);
 }
 
 CUresult trackContext(CUcontext context) {
-  std::lock_guard lock{contextMutex};
+  std::scoped_lock const lock{contextMutex};
   if (contexts ^ contains(context)) return CUDA_ERROR_INVALID_VALUE;
   try {
     contexts.push_back(context);
@@ -438,13 +506,14 @@ std::vector<PointerMetadata> pointers;
 
 CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, const void *module, bool host, bool managed) {
   if (pointer == 0 || size == 0 || allocationId == 0 || size > UINT64_MAX - pointer) return CUDA_ERROR_INVALID_VALUE;
-  std::lock_guard lock{pointerMutex};
+  std::scoped_lock const lock{pointerMutex};
   for (const auto &p : pointers) {
     if (p.base == pointer && p.size == size && p.module == module) return CUDA_SUCCESS;
     if (pointer < p.base + p.size && p.base < pointer + size) return CUDA_ERROR_INVALID_VALUE;
   }
   try {
-    pointers.push_back(PointerMetadata{pointer, size, allocationId, activeContext(), module, host, managed});
+    pointers.push_back(PointerMetadata{
+        .base = pointer, .size = size, .id = allocationId, .context = activeContext(), .module = module, .host = host, .managed = managed});
   } catch (const std::exception &) {
     return CUDA_ERROR_UNKNOWN;
   }
@@ -452,7 +521,7 @@ CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, c
 }
 
 template <class Predicate> void untrackPointers(Predicate predicate) {
-  std::lock_guard lock{pointerMutex};
+  std::scoped_lock const lock{pointerMutex};
   std::erase_if(pointers, predicate);
 }
 
@@ -463,7 +532,7 @@ void untrackDevice(CUdeviceptr pointer) {
 void untrackContext(CUcontext context) {
   untrackPointers([context](const PointerMetadata &p) { return p.context == context; });
   {
-    std::lock_guard lock{contextMutex};
+    std::scoped_lock const lock{contextMutex};
     std::erase(contexts, context);
   }
   size_t output = 0;
@@ -474,10 +543,8 @@ void untrackContext(CUcontext context) {
 }
 
 std::optional<PointerMetadata> pointerMetadata(CUdeviceptr pointer) {
-  std::lock_guard lock{pointerMutex};
-  for (const auto &p : pointers)
-    if (pointer >= p.base && pointer - p.base < p.size) return p;
-  return std::nullopt;
+  std::scoped_lock const lock{pointerMutex};
+  return pointers | find([pointer](const PointerMetadata &p) { return pointer >= p.base && pointer - p.base < p.size; });
 }
 
 struct PointerBinding {
@@ -489,7 +556,7 @@ struct PointerBinding {
 std::optional<PointerBinding> pointerBinding(CUdeviceptr pointer) {
   return pointerMetadata(pointer) ^ map([pointer](const PointerMetadata &metadata) {
            const auto offset = pointer - metadata.base;
-           return PointerBinding{metadata.id, offset, metadata.size - offset};
+           return PointerBinding{.allocation = metadata.id, .offset = offset, .remaining = metadata.size - offset};
          });
 }
 
@@ -516,9 +583,10 @@ std::optional<uint64_t> bindAllocation(size_t size, uintptr_t address, bool host
   try {
     if (const auto id = registerAllocation(*client, size, reinterpret_cast<const void *>(address), hostBacked))
       return static_cast<uint64_t>(id->value);
+    return std::nullopt;
   } catch (...) {
+    return std::nullopt;
   }
-  return std::nullopt;
 }
 
 bool releaseAllocation(uint64_t id) noexcept {
@@ -529,10 +597,25 @@ bool releaseAllocation(uint64_t id) noexcept {
   }
 }
 
-bool transfer(const PointerBinding &binding, const void *bytes, size_t size, bool upload) noexcept {
+bool unloadProgram(uint64_t program) noexcept {
   try {
-    return transferAllocation(*client, AllocationId{static_cast<int64_t>(binding.allocation)}, binding.offset, bytes, size, upload,
-                              TransferChunk);
+    return static_cast<bool>(client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program)}}));
+  } catch (...) {
+    return false;
+  }
+}
+
+bool upload(const PointerBinding &binding, const void *bytes, size_t size) noexcept {
+  try {
+    return uploadAllocation(*client, AllocationId{static_cast<int64_t>(binding.allocation)}, binding.offset, bytes, size, TransferChunk);
+  } catch (...) {
+    return false;
+  }
+}
+
+bool download(const PointerBinding &binding, void *bytes, size_t size) noexcept {
+  try {
+    return downloadAllocation(*client, AllocationId{static_cast<int64_t>(binding.allocation)}, binding.offset, bytes, size, TransferChunk);
   } catch (...) {
     return false;
   }
@@ -548,10 +631,10 @@ CUresult allocate(CUdeviceptr *pointer, size_t size, const void *module) {
   if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
   const size_t bytes = size == 0 ? 1 : size;
   if (bytes > UINT64_MAX - 255) return CUDA_ERROR_INVALID_VALUE;
-  const uint64_t span = (static_cast<uint64_t>(bytes) + 255) & ~static_cast<uint64_t>(255);
+  const uint64_t span = (static_cast<uint64_t>(bytes) + 255) & ~uint64_t{255};
   CUdeviceptr address = 0;
   {
-    const std::lock_guard lock(stateMutex);
+    const std::scoped_lock lock(stateMutex);
     if (nextDeviceAddress > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - span) return CUDA_ERROR_UNKNOWN;
     address = nextDeviceAddress;
     nextDeviceAddress += span;
@@ -593,10 +676,10 @@ CUresult mirroredAllocate(void **pointer, size_t size, bool hostMemory, unsigned
   if (!storage) return CUDA_ERROR_UNKNOWN;
   const auto address = reinterpret_cast<uintptr_t>(storage.get());
   if (const auto status = registerMirror(address, bytes, hostMemory); status != CUDA_SUCCESS) return status;
-  std::lock_guard lock{mirrorMutex};
+  std::scoped_lock const lock{mirrorMutex};
   try {
     auto &slot = mirrorStorage[address];
-    mirrors.add({address, bytes}, gemstone::MemoryOwnership::Owned, flags);
+    mirrors.add({.base = address, .size = bytes}, gemstone::MemoryOwnership::Owned, flags);
     slot = std::move(storage);
   } catch (const std::exception &) {
     mirrorStorage.erase(address);
@@ -611,7 +694,7 @@ CUresult mirroredAllocate(void **pointer, size_t size, bool hostMemory, unsigned
 std::optional<CUresult> freeMirror(uintptr_t pointer, gemstone::MemoryOwnership ownership = gemstone::MemoryOwnership::Owned) {
   std::unique_ptr<unsigned char[]> storage;
   {
-    std::lock_guard lock{mirrorMutex};
+    std::scoped_lock const lock{mirrorMutex};
     const auto *view = mirrors.exact(pointer);
     if (!view) return std::nullopt;
     if (view->ownership != ownership) return CUDA_ERROR_INVALID_VALUE;
@@ -628,7 +711,7 @@ std::optional<CUresult> freeMirror(uintptr_t pointer, gemstone::MemoryOwnership 
 
 // Host-backed bytes are the allocation itself; false when `pointer` is not inside one registration.
 bool copyMirrored(void *destination, const void *source, uintptr_t pointer, size_t size) {
-  std::lock_guard lock{mirrorMutex};
+  std::scoped_lock const lock{mirrorMutex};
   if (!mirrors.find(pointer, size)) return false;
   if (size != 0) std::memmove(destination, source, size);
   return true;
@@ -683,7 +766,7 @@ CUresult arrayCreate(CUarray *handle, size_t width, size_t height, size_t depth,
   size_t rows = 0;
   size_t bytes = 0;
   if (width == 0 || height == 0 || channels == 0 || elementBytes == 0 || !sizeMul(width, elementBytes, &pitch)
-      || !sizeMul(pitch, channels, &pitch) || !sizeMul(height, actualDepth, &rows) || !sizeMul(pitch, rows, &bytes))
+      || !sizeMul(pitch, channels, &pitch) || !sizeMul(actualDepth, height, &rows) || !sizeMul(pitch, rows, &bytes))
     return CUDA_ERROR_INVALID_VALUE;
   auto array = std::unique_ptr<CudaArray>{new (std::nothrow) CudaArray{}};
   if (!array) return CUDA_ERROR_UNKNOWN;
@@ -867,8 +950,8 @@ struct Global {
 
 struct Module {
   uint64_t program{};
+  ProgramEncoding encoding = ProgramEncoding::PTXText;
   bool executable = true;
-  CUcontext context{};
   std::mutex mutex;
   std::vector<std::unique_ptr<Global>> globals;
 };
@@ -887,35 +970,48 @@ std::vector<std::unique_ptr<Module>> modules;
 std::vector<std::unique_ptr<Function>> functions;
 
 Module *findModule(const void *handle) {
-  const std::lock_guard lock(stateMutex);
-  const auto entry = std::find_if(modules.begin(), modules.end(), [handle](const auto &module) { return module.get() == handle; });
-  return entry == modules.end() ? nullptr : entry->get();
+  const std::scoped_lock lock(stateMutex);
+  const auto entry = modules | find_cref([handle](const auto &module) { return module.get() == handle; });
+  return entry ? entry->get().get() : nullptr;
+}
+
+Function *registeredFunction(const void *handle) {
+  const auto entry = functions | find_cref([handle](const auto &function) { return function.get() == handle; });
+  return entry ? entry->get().get() : nullptr;
 }
 
 Function *findFunction(const void *handle) {
-  const std::lock_guard lock(stateMutex);
-  const auto entry = std::find_if(functions.begin(), functions.end(), [handle](const auto &function) { return function.get() == handle; });
-  return entry == functions.end() ? nullptr : entry->get();
+  const std::scoped_lock lock(stateMutex);
+  return registeredFunction(handle);
+}
+
+// A function and the cluster shape its attributes require, read under one lock.
+std::pair<Function *, std::array<int, 3>> findLaunchFunction(const void *handle) {
+  const std::scoped_lock lock(stateMutex);
+  auto *entry = registeredFunction(handle);
+  return {entry, entry ? entry->clusterDimensions : std::array<int, 3>{}};
+}
+
+size_t clusterAxis(CUfunction_attribute attribute) {
+  if (attribute == CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH) return 0;
+  if (attribute == CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT) return 1;
+  return 2;
 }
 
 CUresult functionClusterAttribute(CUfunction function, CUfunction_attribute attribute, int *value, bool write) {
-  const auto entry = findFunction(function);
+  auto *const entry = findFunction(function);
   if (!entry) return CUDA_ERROR_INVALID_HANDLE;
-  const size_t axis = attribute == CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH    ? 0
-                      : attribute == CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT ? 1
-                                                                               : 2;
-  const std::lock_guard lock(stateMutex);
+  const size_t axis = clusterAxis(attribute);
+  const std::scoped_lock lock(stateMutex);
   if (write) entry->clusterDimensions[axis] = *value;
   else *value = entry->clusterDimensions[axis];
   return CUDA_SUCCESS;
 }
 
 CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly, bool allowCubinMetadata = false) noexcept {
-  uint64_t loadedProgram = 0;
-  bool hasLoadedProgram = false;
+  std::optional<uint64_t> loadedProgram;
   try {
-    const CUcontext context = activeContext();
-    if (!module || !image || !contextIsLive(context)) return CUDA_ERROR_INVALID_VALUE;
+    if (!module || !image || !contextIsLive(activeContext())) return CUDA_ERROR_INVALID_VALUE;
     if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
 
     auto encoding = ProgramEncoding::PTXText;
@@ -949,31 +1045,30 @@ CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly,
     if (size == MaximumPayload || size > std::numeric_limits<uint32_t>::max()) return CUDA_ERROR_INVALID_VALUE;
 
     auto entry = std::make_unique<Module>();
-    entry->context = context;
     // cuBLAS registers catalogues that contain unused cubin-only kernels. Keep
     // their metadata available without granting execution on a strict PTX route.
+    entry->encoding = encoding;
     entry->executable = encoding != ProgramEncoding::CUDACubin || !ptxCodeRequired();
     const auto *imageBytes = reinterpret_cast<const uint8_t *>(imageText);
-    auto loaded = client->call(LoadProgram{encoding, std::vector<uint8_t>(imageBytes, imageBytes + size)});
+    auto loaded = client->call(LoadProgram{.encoding = encoding, .image = std::vector<uint8_t>(imageBytes, imageBytes + size)});
     if (!loaded) {
       if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA module load failed: %s\n", loaded.error().detail.c_str());
-      return CUDA_ERROR_UNKNOWN;
+      return failureStatus(loaded.error().kind, encoding, CUDA_ERROR_UNKNOWN);
     }
 
     entry->program = static_cast<uint64_t>(loaded.value().value);
     loadedProgram = entry->program;
-    hasLoadedProgram = true;
-    const auto handle = reinterpret_cast<CUmodule>(entry.get());
+    auto *const handle = reinterpret_cast<CUmodule>(entry.get());
     {
-      const std::lock_guard lock(stateMutex);
+      const std::scoped_lock lock(stateMutex);
       modules.push_back(std::move(entry));
     }
     // Compiler-generated tables can be referenced by kernels without a host
     // cuModuleGetGlobal call. Bind every declared global before any launch.
-    auto catalogue = client->call(DescribeProgram{ProgramId{static_cast<int64_t>(loadedProgram)}});
+    auto catalogue = client->call(DescribeProgram{ProgramId{static_cast<int64_t>(*loadedProgram)}});
     if (!catalogue) {
       (void)cuModuleUnload(handle);
-      return CUDA_ERROR_UNKNOWN;
+      return failureStatus(catalogue.error().kind, encoding, CUDA_ERROR_UNKNOWN);
     }
     for (const auto &symbol : catalogue.value().globals) {
       CUdeviceptr address = 0;
@@ -985,12 +1080,7 @@ CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly,
     *module = handle;
     return CUDA_SUCCESS;
   } catch (...) {
-    if (hasLoadedProgram) {
-      try {
-        (void)client->call(UnloadProgram{ProgramId{static_cast<int64_t>(loadedProgram)}});
-      } catch (...) {
-      }
-    }
+    if (loadedProgram) (void)unloadProgram(*loadedProgram);
     return CUDA_ERROR_UNKNOWN;
   }
 }
@@ -999,6 +1089,7 @@ CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly,
 CUresult loadModuleImage(CUmodule *module, const void *image, bool allowCubinMetadata) {
   if (!module || !image) return CUDA_ERROR_INVALID_VALUE;
   const auto fatbin = parseFatbin(image);
+  if (!fatbin) return loadModule(module, image, false, allowCubinMetadata);
   const char *ptx = executablePtx(fatbin);
   return loadModule(module, ptx ? ptx : image, ptx && sassCodeRequired() && fatbin->metadataOnly, allowCubinMetadata);
 }
@@ -1111,7 +1202,7 @@ CUresult loadFatBinary(FatBinary &fat) {
 
 std::optional<int> registeredPtxVersion(const void *function) {
   auto version = configuredPtxVersion();
-  std::lock_guard lock{registrationMutex};
+  std::scoped_lock const lock{registrationMutex};
   if (!version) {
     for (const auto &entry : registeredFunctions) {
       if (entry->hostFunction == function || entry->deviceFunction == function) {
@@ -1126,11 +1217,10 @@ std::optional<int> registeredPtxVersion(const void *function) {
 
 // Resolves a host stub registered by __cudaRegisterFunction, loading its fatbin on first use; empty when unregistered.
 std::optional<CUresult> registeredKernel(const void *hostFunction, CUfunction *kernel) {
-  std::lock_guard lock{registrationMutex};
-  const auto found = std::find_if(registeredFunctions.begin(), registeredFunctions.end(),
-                                  [hostFunction](const auto &entry) { return entry->hostFunction == hostFunction; });
-  if (found == registeredFunctions.end()) return std::nullopt;
-  auto &entry = **found;
+  std::scoped_lock const lock{registrationMutex};
+  const auto found = registeredFunctions | find_cref([hostFunction](const auto &entry) { return entry->hostFunction == hostFunction; });
+  if (!found) return std::nullopt;
+  auto &entry = *found->get();
   auto status = loadFatBinary(*entry.fatBinary);
   if (status == CUDA_SUCCESS && !entry.deviceFunction)
     status = cuModuleGetFunction(&entry.deviceFunction, entry.fatBinary->module, entry.deviceName.c_str());
@@ -1139,9 +1229,10 @@ std::optional<CUresult> registeredKernel(const void *hostFunction, CUfunction *k
 }
 
 CUresult functionRegisterCount(const void *function, int *value) {
-  auto handle = static_cast<CUfunction>(const_cast<void *>(function));
-  if (const auto status = registeredKernel(function, &handle); status && *status != CUDA_SUCCESS) return *status;
-  const auto entry = findFunction(handle);
+  CUfunction kernel = nullptr;
+  const auto status = registeredKernel(function, &kernel);
+  if (status && *status != CUDA_SUCCESS) return *status;
+  auto *const entry = findFunction(status ? kernel : function);
   if (!entry) return CUDA_ERROR_INVALID_HANDLE;
   *value = entry->registerCount;
   return CUDA_SUCCESS;
@@ -1173,28 +1264,84 @@ struct ErrorText {
 };
 
 constexpr std::array ErrorTexts{
-    ErrorText{CUDA_SUCCESS, "CUDA_SUCCESS", "cudaSuccess", "no error"},
-    ErrorText{CUDA_ERROR_INVALID_VALUE, "CUDA_ERROR_INVALID_VALUE", "cudaErrorInvalidValue", "invalid argument"},
-    ErrorText{CUDA_ERROR_NOT_INITIALIZED, "CUDA_ERROR_NOT_INITIALIZED", "cudaErrorInitializationError", "initialization error"},
-    ErrorText{CUDA_ERROR_NOT_FOUND, "CUDA_ERROR_NOT_FOUND", "cudaErrorSymbolNotFound", "named symbol not found"},
-    ErrorText{CUDA_ERROR_NOT_SUPPORTED, "CUDA_ERROR_NOT_SUPPORTED", "cudaErrorNotSupported", "operation not supported"},
-    ErrorText{CUDA_ERROR_UNKNOWN, "CUDA_ERROR_UNKNOWN", "cudaErrorUnknown", "unknown error"},
+    ErrorText{.status = CUDA_SUCCESS, .driverName = "CUDA_SUCCESS", .runtimeName = "cudaSuccess", .message = "no error"},
+    ErrorText{.status = CUDA_ERROR_INVALID_VALUE,
+              .driverName = "CUDA_ERROR_INVALID_VALUE",
+              .runtimeName = "cudaErrorInvalidValue",
+              .message = "invalid argument"},
+    ErrorText{.status = CUDA_ERROR_NOT_INITIALIZED,
+              .driverName = "CUDA_ERROR_NOT_INITIALIZED",
+              .runtimeName = "cudaErrorInitializationError",
+              .message = "initialization error"},
+    ErrorText{.status = CUDA_ERROR_NOT_FOUND,
+              .driverName = "CUDA_ERROR_NOT_FOUND",
+              .runtimeName = "cudaErrorSymbolNotFound",
+              .message = "named symbol not found"},
+    ErrorText{.status = CUDA_ERROR_NOT_SUPPORTED,
+              .driverName = "CUDA_ERROR_NOT_SUPPORTED",
+              .runtimeName = "cudaErrorNotSupported",
+              .message = "operation not supported"},
+    ErrorText{
+        .status = CUDA_ERROR_UNKNOWN, .driverName = "CUDA_ERROR_UNKNOWN", .runtimeName = "cudaErrorUnknown", .message = "unknown error"},
+    ErrorText{.status = InvalidConfiguration,
+              .driverName = nullptr,
+              .runtimeName = "cudaErrorInvalidConfiguration",
+              .message = "invalid configuration argument"},
+    ErrorText{.status = CUDA_ERROR_INVALID_IMAGE,
+              .driverName = "CUDA_ERROR_INVALID_IMAGE",
+              .runtimeName = "cudaErrorInvalidKernelImage",
+              .message = "device kernel image is invalid"},
+    ErrorText{.status = CUDA_ERROR_NO_BINARY_FOR_GPU,
+              .driverName = "CUDA_ERROR_NO_BINARY_FOR_GPU",
+              .runtimeName = "cudaErrorNoKernelImageForDevice",
+              .message = "no kernel image is available for execution on the device"},
+    ErrorText{.status = CUDA_ERROR_INVALID_PTX,
+              .driverName = "CUDA_ERROR_INVALID_PTX",
+              .runtimeName = "cudaErrorInvalidPtx",
+              .message = "a PTX JIT compilation failed"},
+    ErrorText{.status = CUDA_ERROR_ILLEGAL_ADDRESS,
+              .driverName = "CUDA_ERROR_ILLEGAL_ADDRESS",
+              .runtimeName = "cudaErrorIllegalAddress",
+              .message = "an illegal memory access was encountered"},
+    ErrorText{.status = CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES,
+              .driverName = "CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES",
+              .runtimeName = "cudaErrorLaunchOutOfResources",
+              .message = "too many resources requested for launch"},
+    ErrorText{.status = CUDA_ERROR_LAUNCH_TIMEOUT,
+              .driverName = "CUDA_ERROR_LAUNCH_TIMEOUT",
+              .runtimeName = "cudaErrorLaunchTimeout",
+              .message = "the launch timed out and was terminated"},
+    ErrorText{.status = CUDA_ERROR_ASSERT,
+              .driverName = "CUDA_ERROR_ASSERT",
+              .runtimeName = "cudaErrorAssert",
+              .message = "device-side assert triggered"},
+    ErrorText{.status = CUDA_ERROR_ILLEGAL_INSTRUCTION,
+              .driverName = "CUDA_ERROR_ILLEGAL_INSTRUCTION",
+              .runtimeName = "cudaErrorIllegalInstruction",
+              .message = "an illegal instruction was encountered"},
+    ErrorText{.status = CUDA_ERROR_MISALIGNED_ADDRESS,
+              .driverName = "CUDA_ERROR_MISALIGNED_ADDRESS",
+              .runtimeName = "cudaErrorMisalignedAddress",
+              .message = "misaligned address"},
+    ErrorText{.status = CUDA_ERROR_LAUNCH_FAILED,
+              .driverName = "CUDA_ERROR_LAUNCH_FAILED",
+              .runtimeName = "cudaErrorLaunchFailure",
+              .message = "unspecified launch failure"},
 };
 
 const ErrorText *errorText(int status) {
-  const auto found = std::find_if(ErrorTexts.begin(), ErrorTexts.end(), [status](const auto &text) { return text.status == status; });
-  return found == ErrorTexts.end() ? nullptr : &*found;
+  const auto found = ErrorTexts | find_cref([status](const auto &text) { return text.status == status; });
+  return found ? &found->get() : nullptr;
 }
 
 CUresult describeError(CUresult status, const char **text, const char *ErrorText::*field) {
   if (!text) return CUDA_ERROR_INVALID_VALUE;
   const auto *found = errorText(status);
-  if (!found) return CUDA_ERROR_INVALID_VALUE;
+  if (!found || !(found->*field)) return CUDA_ERROR_INVALID_VALUE;
   *text = found->*field;
   return CUDA_SUCCESS;
 }
 
-// CUDA runtime's private interface table (CUDART_INTERFACE, 13 entries).
 CUresult cudartLoadModuleImage(CUmodule *module, const void *image, bool allowEmpty) {
   const auto fatbin = parseFatbin(image, true);
   if (!fatbin || !fatbin->entriesValid) return CUDA_ERROR_NOT_SUPPORTED;
@@ -1295,8 +1442,8 @@ CUresult driverMetadataQuery(void *object, uint64_t *result) {
 // canonical identity, with CUDA's special streams normalised consistently.
 CUresult driverStreamHandle(void *, CUstream stream, CUstream *result, int perThread) {
   if (!result) return CUDA_ERROR_INVALID_VALUE;
-  if (stream == CU_STREAM_LEGACY) stream = nullptr;
-  if (!stream && perThread) stream = CU_STREAM_PER_THREAD;
+  if (stream == LegacyStream) stream = nullptr;
+  if (!stream && perThread) stream = PerThreadStream;
   *result = stream;
   return CUDA_SUCCESS;
 }
@@ -1304,9 +1451,9 @@ CUresult driverStreamHandle(void *, CUstream stream, CUstream *result, int perTh
 CUresult driverStreamId(void *, CUstream stream, uint64_t *result) {
   if (!result) return CUDA_ERROR_INVALID_VALUE;
   static thread_local const unsigned char perThread = 0;
-  *result = stream == CU_STREAM_LEGACY       ? 0
-            : stream == CU_STREAM_PER_THREAD ? reinterpret_cast<uintptr_t>(&perThread)
-                                             : reinterpret_cast<uintptr_t>(stream);
+  if (stream == LegacyStream) *result = 0;
+  else if (stream == PerThreadStream) *result = reinterpret_cast<uintptr_t>(&perThread);
+  else *result = reinterpret_cast<uintptr_t>(stream);
   return CUDA_SUCCESS;
 }
 
@@ -1319,8 +1466,7 @@ const std::array<const void *, 96> DriverMetadataInterfaceTable = [] {
   return table;
 }();
 
-/* libcudart's private export-table handshake is an ABI compatibility transform,
- * not a Gemstone security or content-addressing mechanism. */
+// libcudart's private export-table handshake is an ABI compatibility transform, not a security mechanism.
 const uint8_t CudartHandshakeMixingTable[256] = {
     0x29, 0x2e, 0x43, 0xc9, 0xa2, 0xd8, 0x7c, 0x01, 0x3d, 0x36, 0x54, 0xa1, 0xec, 0xf0, 0x06, 0x13, 0x62, 0xa7, 0x05, 0xf3, 0xc0, 0xc7,
     0x73, 0x8c, 0x98, 0x93, 0x2b, 0xd9, 0xbc, 0x4c, 0x82, 0xca, 0x1e, 0x9b, 0x57, 0x3c, 0xfd, 0xd4, 0xe0, 0x16, 0x67, 0x42, 0x6f, 0x18,
@@ -1336,7 +1482,7 @@ const uint8_t CudartHandshakeMixingTable[256] = {
     0x50, 0xb4, 0x8f, 0xed, 0x1f, 0x1a, 0xdb, 0x99, 0x8d, 0x33, 0x9f, 0x11, 0x83, 0x14};
 
 void cudartHandshakeSinglePass(uint8_t *value, uint8_t input) {
-  uint8_t position = value[0x40];
+  uint8_t const position = value[0x40];
   value[static_cast<size_t>(position) + 0x10] = input;
   const uint8_t nextPosition = static_cast<uint8_t>((position + 1) & 0x0f);
   value[static_cast<size_t>(position) + 0x20] = value[position] ^ input;
@@ -1405,14 +1551,14 @@ void cudartHandshakeTransform(uint32_t version, uint64_t unixSeconds, const void
   static const uint8_t pass1Result[16] = {0x14, 0x6a, 0xdd, 0xae, 0x53, 0xa9, 0xa7, 0x52, 0xaa, 0x08, 0x41, 0x36, 0x0b, 0xf5, 0x5a, 0x9f};
   uint8_t value[66] = {0};
   cudartHandshakeMixBytes(value, pass1Result, sizeof(pass1Result), 0x36);
-  const CudartHandshakeInput input = {CUDA_VERSION,
-                                      version,
-                                      static_cast<uint32_t>(getpid()),
-                                      static_cast<uint32_t>(static_cast<uintptr_t>(pthread_self())),
-                                      cudartInterfaceTable,
-                                      cudartHandshakeCheckTable,
-                                      handshakeFunction,
-                                      unixSeconds};
+  const CudartHandshakeInput input = {.driverVersion = CUDA_VERSION,
+                                      .version = version,
+                                      .currentProcess = static_cast<uint32_t>(getpid()),
+                                      .currentThread = static_cast<uint32_t>(static_cast<uintptr_t>(pthread_self())),
+                                      .cudartTable = cudartInterfaceTable,
+                                      .handshakeTable = cudartHandshakeCheckTable,
+                                      .handshakeFunction = handshakeFunction,
+                                      .unixSeconds = unixSeconds};
   cudartHandshakeMixBytes(value, &input, sizeof(input), 0);
   CudartHandshakeDevice device{};
   std::memcpy(device.uuid, DeviceUuid, sizeof(DeviceUuid));
@@ -1433,13 +1579,13 @@ void cudartHandshakeTransform(uint32_t version, uint64_t unixSeconds, const void
 CUresult cudartHandshakeCheck(uint32_t version, uint64_t unixSeconds, uint64_t *result) {
   if (!result) return CUDA_ERROR_INVALID_VALUE;
   if (version % 10 == 0) {
-    result[0] = static_cast<uint64_t>(0x3341181c03cb675c);
-    result[1] = static_cast<uint64_t>(0x8ed383aa1f4cd1e8);
+    result[0] = uint64_t{0x3341181c03cb675c};
+    result[1] = uint64_t{0x8ed383aa1f4cd1e8};
     return CUDA_SUCCESS;
   }
   if (version % 10 == 1) {
-    result[0] = static_cast<uint64_t>(0x1841181c03cb675c);
-    result[1] = static_cast<uint64_t>(0x8ed383aa1f4cd1e8);
+    result[0] = uint64_t{0x1841181c03cb675c};
+    result[1] = uint64_t{0x8ed383aa1f4cd1e8};
     return CUDA_SUCCESS;
   }
   cudartHandshakeTransform(version, unixSeconds, reinterpret_cast<const void *>(cudartHandshakeCheck), reinterpret_cast<uint8_t *>(result));
@@ -1487,7 +1633,7 @@ CUresult contextLocalStoragePut(CUcontext context, void *key, void *value, Conte
   auto *entry = findContextStorage(context, key);
   if (!entry) entry = findContextStorage(nullptr, nullptr);
   if (!entry) return CUDA_ERROR_UNKNOWN;
-  *entry = {context, key, value, destructor};
+  *entry = {.context = context, .key = key, .value = value, .destructor = destructor};
   return CUDA_SUCCESS;
 }
 
@@ -1529,14 +1675,14 @@ struct ExportTable {
 };
 
 const std::array ExportTables{
-    ExportTable{CudartLoggingId, cudartLoggingTable},
-    ExportTable{CudartInterfaceId, cudartInterfaceTable},
-    ExportTable{CudartHandshakeCheckId, cudartHandshakeCheckTable},
-    ExportTable{ToolsRuntimeCallbackHooksId, toolsRuntimeCallbackHooksTable},
-    ExportTable{ToolsTlsId, toolsTlsTable},
-    ExportTable{ContextLocalStorageId, contextLocalStorageTable},
-    ExportTable{ContextChecksId, contextChecksTable},
-    ExportTable{DriverMetadataInterfaceId, DriverMetadataInterfaceTable.data()},
+    ExportTable{.id = CudartLoggingId, .table = cudartLoggingTable},
+    ExportTable{.id = CudartInterfaceId, .table = cudartInterfaceTable},
+    ExportTable{.id = CudartHandshakeCheckId, .table = cudartHandshakeCheckTable},
+    ExportTable{.id = ToolsRuntimeCallbackHooksId, .table = toolsRuntimeCallbackHooksTable},
+    ExportTable{.id = ToolsTlsId, .table = toolsTlsTable},
+    ExportTable{.id = ContextLocalStorageId, .table = contextLocalStorageTable},
+    ExportTable{.id = ContextChecksId, .table = contextChecksTable},
+    ExportTable{.id = DriverMetadataInterfaceId, .table = DriverMetadataInterfaceTable.data()},
 };
 
 void *libraryHandle() {
@@ -1566,25 +1712,25 @@ struct EntryPoint {
 // it: a known revision without an export resolves as unsupported. A function without a vendor history selects
 // its newest export. Per-thread-stream spellings without their own export resolve as the base entry point.
 EntryPoint resolveEntryPoint(std::string_view symbol, int version) {
-  constexpr EntryPoint missing{nullptr, CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND};
+  constexpr EntryPoint missing{.function = nullptr, .status = CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND};
   if (symbol.size() < 3 || !symbol.starts_with("cu") || !std::isupper(static_cast<unsigned char>(symbol[2]))) return missing;
-  const auto unsupported = reinterpret_cast<void *>(&gemstone_cuda_unsupported_driver);
+  auto *const unsupported = reinterpret_cast<void *>(&gemstone_cuda_unsupported_driver);
   if (symbol.ends_with("_ptds") || symbol.ends_with("_ptsz")) {
-    if (void *function = exported(std::string(symbol))) return {function, CU_GET_PROC_ADDRESS_SUCCESS};
+    if (void *function = exported(std::string(symbol))) return {.function = function, .status = CU_GET_PROC_ADDRESS_SUCCESS};
     return resolveEntryPoint(symbol.substr(0, symbol.size() - 5), version);
   }
   if (explicitRevision(symbol)) {
     void *function = exported(std::string(symbol));
-    return function ? EntryPoint{function, CU_GET_PROC_ADDRESS_SUCCESS} : missing;
+    return function ? EntryPoint{.function = function, .status = CU_GET_PROC_ADDRESS_SUCCESS} : missing;
   }
   using gemstone::cuda::EntryPointHistories;
-  using gemstone::cuda::EntryPointHistory;
-  const auto history = std::lower_bound(EntryPointHistories.begin(), EntryPointHistories.end(), symbol,
-                                        [](const EntryPointHistory &entry, std::string_view name) { return entry.name < name; });
+  const auto *const history =
+      std::lower_bound(EntryPointHistories.begin(), EntryPointHistories.end(), symbol,
+                       [](const gemstone::cuda::EntryPointHistory &entry, std::string_view name) { return entry.name < name; });
   const bool listed = history != EntryPointHistories.end() && history->name == symbol;
   const int revisions = listed ? static_cast<int>(history->revisions.size()) : 4;
   const int effective = version > 0 ? version : std::numeric_limits<int>::max();
-  if (listed && effective < history->revisions[0]) return {nullptr, CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT};
+  if (listed && effective < history->revisions[0]) return {.function = nullptr, .status = CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT};
   int requested = listed ? 1 : revisions;
   for (int revision = 2; listed && revision <= revisions; ++revision) {
     const int since = history->revisions[revision - 1];
@@ -1594,11 +1740,11 @@ EntryPoint resolveEntryPoint(std::string_view symbol, int version) {
     return exported(revision == 1 ? std::string(symbol) : std::string(symbol) + "_v" + std::to_string(revision));
   };
   for (int revision = requested; revision >= 1; --revision) {
-    if (void *function = revisionExport(revision)) return {function, CU_GET_PROC_ADDRESS_SUCCESS};
+    if (void *function = revisionExport(revision)) return {.function = function, .status = CU_GET_PROC_ADDRESS_SUCCESS};
     if (listed) break;
   }
   for (int revision = 1; revision <= revisions; ++revision)
-    if (revisionExport(revision)) return {unsupported, CU_GET_PROC_ADDRESS_SUCCESS};
+    if (revisionExport(revision)) return {.function = unsupported, .status = CU_GET_PROC_ADDRESS_SUCCESS};
   return missing;
 }
 
@@ -1614,6 +1760,154 @@ gemstone::CommandQueue &commands() {
   std::call_once(commandQueueOnce, [] { commandQueue.queue = std::make_unique<gemstone::CommandQueue>(CUDA_ERROR_UNKNOWN); });
   return *commandQueue.queue;
 }
+
+// Tensor maps in the layout the VM decodes. Fields tensormap.replace reaches sit where ptxas writes them; the mode,
+// L2 promotion and im2col fields follow from byte 0x40.
+namespace tensor_map {
+constexpr size_t Bytes = 128;
+constexpr uint32_t RankShift = 4;
+constexpr uint32_t ElementShift = 7;
+constexpr uint32_t InterleaveShift = 11;
+constexpr uint32_t SwizzleShift = 13;
+constexpr uint32_t NaNFillBit = 1U << 15;
+constexpr uint32_t TF32Bit = 1U << 16;
+constexpr uint32_t AtomicityShift = 19;
+constexpr uint32_t SwizzleHighBit = 1U << 22;
+
+enum class Mode : uint32_t { Tile = 0, Im2col = 1, Im2colWide = 2, Im2colWide128 = 3 };
+
+// Packed types move in units of `values` elements, `bytes` of them in global memory and `stored` in shared memory.
+struct Element {
+  uint32_t code;
+  uint32_t bytes;
+  bool tf32;
+  bool floating;
+  uint32_t values = 1;
+  uint32_t stored = 0;
+
+  [[nodiscard]] bool padded() const { return stored != 0 && stored != bytes; }
+  // The shared memory bytes of `count` elements.
+  [[nodiscard]] uint64_t shared(uint64_t count) const { return count / values * (stored != 0 ? stored : bytes); }
+};
+
+// The hardware element codes for CUtensorMapDataType.
+std::optional<Element> element(CUtensorMapDataType type) {
+  switch (type) {
+    case CU_TENSOR_MAP_DATA_TYPE_UINT8: return Element{.code = 0, .bytes = 1, .tf32 = false, .floating = false};
+    case CU_TENSOR_MAP_DATA_TYPE_UINT16: return Element{.code = 1, .bytes = 2, .tf32 = false, .floating = false};
+    case CU_TENSOR_MAP_DATA_TYPE_UINT32: return Element{.code = 2, .bytes = 4, .tf32 = false, .floating = false};
+    case CU_TENSOR_MAP_DATA_TYPE_INT32: return Element{.code = 3, .bytes = 4, .tf32 = false, .floating = false};
+    case CU_TENSOR_MAP_DATA_TYPE_UINT64: return Element{.code = 4, .bytes = 8, .tf32 = false, .floating = false};
+    case CU_TENSOR_MAP_DATA_TYPE_INT64: return Element{.code = 5, .bytes = 8, .tf32 = false, .floating = false};
+    case CU_TENSOR_MAP_DATA_TYPE_FLOAT16: return Element{.code = 6, .bytes = 2, .tf32 = false, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_FLOAT32: return Element{.code = 7, .bytes = 4, .tf32 = false, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_FLOAT32_FTZ: return Element{.code = 8, .bytes = 4, .tf32 = false, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_FLOAT64: return Element{.code = 9, .bytes = 8, .tf32 = false, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_BFLOAT16: return Element{.code = 10, .bytes = 2, .tf32 = false, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_TFLOAT32: return Element{.code = 7, .bytes = 4, .tf32 = true, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_TFLOAT32_FTZ: return Element{.code = 8, .bytes = 4, .tf32 = true, .floating = true};
+    case CU_TENSOR_MAP_DATA_TYPE_16U4_ALIGN8B:
+      return Element{.code = 11, .bytes = 1, .tf32 = false, .floating = false, .values = 2, .stored = 1};
+    case CU_TENSOR_MAP_DATA_TYPE_16U4_ALIGN16B:
+      return Element{.code = 12, .bytes = 8, .tf32 = false, .floating = false, .values = 16, .stored = 16};
+    case CU_TENSOR_MAP_DATA_TYPE_16U6_ALIGN16B:
+      return Element{.code = 13, .bytes = 12, .tf32 = false, .floating = false, .values = 16, .stored = 16};
+    default: return std::nullopt;
+  }
+}
+
+struct Swizzle {
+  uint32_t mode;
+  uint32_t atomicity;
+  uint32_t span;
+};
+
+std::optional<Swizzle> swizzle(CUtensorMapSwizzle value) {
+  switch (value) {
+    case CU_TENSOR_MAP_SWIZZLE_NONE: return Swizzle{.mode = 0, .atomicity = 0, .span = 0};
+    case CU_TENSOR_MAP_SWIZZLE_32B: return Swizzle{.mode = 1, .atomicity = 0, .span = 32};
+    case CU_TENSOR_MAP_SWIZZLE_64B: return Swizzle{.mode = 2, .atomicity = 0, .span = 64};
+    case CU_TENSOR_MAP_SWIZZLE_128B: return Swizzle{.mode = 3, .atomicity = 0, .span = 128};
+    case CU_TENSOR_MAP_SWIZZLE_128B_ATOM_32B: return Swizzle{.mode = 3, .atomicity = 1, .span = 128};
+    case CU_TENSOR_MAP_SWIZZLE_128B_ATOM_32B_FLIP_8B: return Swizzle{.mode = 3, .atomicity = 2, .span = 128};
+    case CU_TENSOR_MAP_SWIZZLE_128B_ATOM_64B: return Swizzle{.mode = 3, .atomicity = 3, .span = 128};
+    default: return std::nullopt;
+  }
+}
+
+void put32(uint8_t *bytes, size_t offset, uint32_t value) { std::memcpy(bytes + offset, &value, sizeof(value)); }
+uint32_t get32(const uint8_t *bytes, size_t offset) {
+  uint32_t value = 0;
+  std::memcpy(&value, bytes + offset, sizeof(value));
+  return value;
+}
+
+struct Common {
+  CUtensorMapDataType type;
+  uint32_t rank;
+  void *address;
+  const cuuint64_t *dimensions;
+  const cuuint64_t *strides;
+  const cuuint32_t *traversal;
+  CUtensorMapInterleave interleave;
+  CUtensorMapSwizzle swizzle;
+  CUtensorMapL2promotion promotion;
+  CUtensorMapFloatOOBfill fill;
+};
+
+// Validates and writes the fields every mode shares, as cuTensorMapEncodeTiled documents their limits.
+CUresult encodeCommon(CUtensorMap *map, const Common &common, uint32_t minimumRank, Mode mode, Element &chosen, Swizzle &layout) {
+  if (!map || reinterpret_cast<uintptr_t>(map) % 64 != 0 || !common.address || !common.dimensions || !common.traversal)
+    return CUDA_ERROR_INVALID_VALUE;
+  const auto type = element(common.type);
+  const auto arrangement = swizzle(common.swizzle);
+  if (!type) return CUDA_ERROR_INVALID_VALUE;
+  if (!arrangement || common.rank < minimumRank || common.rank > 5 || common.interleave > CU_TENSOR_MAP_INTERLEAVE_32B
+      || common.promotion > CU_TENSOR_MAP_L2_PROMOTION_L2_256B || common.fill > CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA)
+    return CUDA_ERROR_INVALID_VALUE;
+  if (common.interleave != CU_TENSOR_MAP_INTERLEAVE_NONE && common.rank < 3) return CUDA_ERROR_INVALID_VALUE;
+  if (common.interleave == CU_TENSOR_MAP_INTERLEAVE_32B && common.swizzle != CU_TENSOR_MAP_SWIZZLE_32B) return CUDA_ERROR_INVALID_VALUE;
+  if (common.fill == CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA && !type->floating) return CUDA_ERROR_INVALID_VALUE;
+  if (common.type == CU_TENSOR_MAP_DATA_TYPE_16U6_ALIGN16B && common.interleave != CU_TENSOR_MAP_INTERLEAVE_NONE)
+    return CUDA_ERROR_INVALID_VALUE;
+  const uint64_t alignment = common.interleave == CU_TENSOR_MAP_INTERLEAVE_32B || type->padded() ? 32 : 16;
+  const auto address = reinterpret_cast<uint64_t>(common.address);
+  if (address % alignment != 0) return CUDA_ERROR_INVALID_VALUE;
+  if (common.rank > 1 && !common.strides) return CUDA_ERROR_INVALID_VALUE;
+  if (common.dimensions[0] % (type->padded() ? 128 : type->values) != 0) return CUDA_ERROR_INVALID_VALUE;
+  for (uint32_t index = 0; index < common.rank; ++index) {
+    if (common.dimensions[index] == 0 || common.dimensions[index] > (uint64_t{1} << 32)) return CUDA_ERROR_INVALID_VALUE;
+    if (common.traversal[index] == 0 || common.traversal[index] > 8) return CUDA_ERROR_INVALID_VALUE;
+  }
+  for (uint32_t index = 0; index + 1 < common.rank; ++index)
+    if (common.strides[index] % alignment != 0 || common.strides[index] >= (uint64_t{1} << 40)) return CUDA_ERROR_INVALID_VALUE;
+  auto *bytes = reinterpret_cast<uint8_t *>(map);
+  std::memset(bytes, 0, Bytes);
+  std::memcpy(bytes, &address, sizeof(address));
+  put32(bytes, 8,
+        ((common.rank - 1) << RankShift) | (type->code << ElementShift) | (static_cast<uint32_t>(common.interleave) << InterleaveShift)
+            | ((arrangement->mode & 3) << SwizzleShift) | (common.fill != CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE ? NaNFillBit : 0)
+            | (type->tf32 ? TF32Bit : 0) | (arrangement->atomicity << AtomicityShift) | (arrangement->mode > 3 ? SwizzleHighBit : 0));
+  uint32_t high = 0;
+  for (uint32_t index = 0; index + 1 < common.rank; ++index) {
+    const uint64_t units = common.strides[index] >> 4;
+    put32(bytes, 0x0c + (index * 4), static_cast<uint32_t>(units));
+    high |= static_cast<uint32_t>(units >> 32) << (index * 4);
+  }
+  put32(bytes, 0x1c, high);
+  uint32_t traversal = 0;
+  for (uint32_t index = 0; index < common.rank; ++index) {
+    put32(bytes, 0x20 + (index * 4), static_cast<uint32_t>(common.dimensions[index] - 1));
+    traversal |= (common.traversal[index] - 1) << (index * 3);
+  }
+  put32(bytes, 0x34, traversal);
+  put32(bytes, 0x40, static_cast<uint32_t>(mode));
+  put32(bytes, 0x44, static_cast<uint32_t>(common.promotion));
+  chosen = *type;
+  layout = *arrangement;
+  return CUDA_SUCCESS;
+}
+} // namespace tensor_map
 
 } // namespace
 
@@ -1861,7 +2155,7 @@ CUresult cuCtxSetLimit(CUlimit, size_t) { return CUDA_SUCCESS; }
 
 CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
   if (!context || device != 0) return CUDA_ERROR_INVALID_VALUE;
-  std::lock_guard lock{primaryContextMutex};
+  std::scoped_lock const lock{primaryContextMutex};
   if (primaryContext && !contextIsLive(primaryContext)) {
     primaryContext = nullptr;
     primaryContextReferences = 0;
@@ -1882,10 +2176,10 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
 CUresult cuDevicePrimaryCtxRelease_v2(CUdevice device) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   if (device != 0) return CUDA_ERROR_INVALID_VALUE;
-  std::lock_guard lock{primaryContextMutex};
+  std::scoped_lock const lock{primaryContextMutex};
   if (!primaryContext || primaryContextReferences == 0) return CUDA_ERROR_INVALID_VALUE;
   if (--primaryContextReferences != 0) return CUDA_SUCCESS;
-  const CUcontext context = primaryContext;
+  CUcontext context = primaryContext;
   primaryContext = nullptr;
   implicitContext.store(nullptr, std::memory_order_release);
   return cuCtxDestroy_v2(context);
@@ -1894,14 +2188,18 @@ CUresult cuDevicePrimaryCtxRelease_v2(CUdevice device) {
 CUresult cuDevicePrimaryCtxGetState(CUdevice device, unsigned *flags, int *active) {
   if (device != 0 || !flags || !active) return CUDA_ERROR_INVALID_VALUE;
   *flags = 0;
-  std::lock_guard lock{primaryContextMutex};
+  std::scoped_lock const lock{primaryContextMutex};
   *active = primaryContextReferences == 0 ? 0 : 1;
   return CUDA_SUCCESS;
 }
 
 CUresult cuDevicePrimaryCtxSetFlags_v2(CUdevice device, unsigned) { return device == 0 ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
 
-CUresult cuDevicePrimaryCtxReset_v2(CUdevice device) { return device == 0 ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
+CUresult cuDevicePrimaryCtxReset_v2(CUdevice device) {
+  if (device != 0) return CUDA_ERROR_INVALID_VALUE;
+  stickyError.store(CUDA_SUCCESS);
+  return CUDA_SUCCESS;
+}
 
 CUresult cuMemAlloc_v2(CUdeviceptr *pointer, size_t size) { return allocate(pointer, size, nullptr); }
 
@@ -1940,7 +2238,7 @@ CUresult cuMemFreeHost(void *pointer) {
 
 CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pointer, void *host, unsigned flags) {
   if (flags != 0 || !pointer || !host) return CUDA_ERROR_INVALID_VALUE;
-  std::lock_guard lock{mirrorMutex};
+  std::scoped_lock const lock{mirrorMutex};
   if (!mirrors.find(reinterpret_cast<uintptr_t>(host))) return CUDA_ERROR_INVALID_VALUE;
   *pointer = reinterpret_cast<uintptr_t>(host);
   return CUDA_SUCCESS;
@@ -1948,7 +2246,7 @@ CUresult cuMemHostGetDevicePointer_v2(CUdeviceptr *pointer, void *host, unsigned
 
 CUresult cuMemHostGetFlags(unsigned *flags, void *host) {
   if (!flags || !host) return CUDA_ERROR_INVALID_VALUE;
-  std::lock_guard lock{mirrorMutex};
+  std::scoped_lock const lock{mirrorMutex};
   const auto *view = mirrors.find(reinterpret_cast<uintptr_t>(host));
   if (!view) return CUDA_ERROR_INVALID_VALUE;
   *flags = static_cast<unsigned>(view->flags);
@@ -1956,9 +2254,9 @@ CUresult cuMemHostGetFlags(unsigned *flags, void *host) {
 }
 
 CUresult cuMemHostRegister_v2(void *pointer, size_t size, unsigned flags) {
-  const gemstone::MemoryRange range{reinterpret_cast<uintptr_t>(pointer), size};
-  if (!range.valid() || (flags & ~15u)) return CUDA_ERROR_INVALID_VALUE;
-  std::lock_guard lock{mirrorMutex};
+  const gemstone::MemoryRange range{.base = reinterpret_cast<uintptr_t>(pointer), .size = size};
+  if (!range.valid() || (flags & ~15U)) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{mirrorMutex};
   if (mirrors.overlaps(range)) return CUDA_ERROR_INVALID_VALUE;
   if (const auto status = registerMirror(range.base, size, true); status != CUDA_SUCCESS) return status;
   mirrors.add(range, gemstone::MemoryOwnership::Borrowed, flags);
@@ -2105,7 +2403,7 @@ CUresult cuMemcpyHtoD_v2(CUdeviceptr destination, const void *source, size_t siz
   const auto binding = pointerBinding(destination);
   if (!binding || size > binding->remaining) return CUDA_ERROR_INVALID_VALUE;
   if (copyMirrored(reinterpret_cast<void *>(destination), source, destination, size)) return CUDA_SUCCESS;
-  return transfer(*binding, source, size, true) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
+  return upload(*binding, source, size) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 }
 
 CUresult cuMemcpyDtoH_v2(void *destination, CUdeviceptr source, size_t size) {
@@ -2114,7 +2412,7 @@ CUresult cuMemcpyDtoH_v2(void *destination, CUdeviceptr source, size_t size) {
   if (copyMirrored(destination, reinterpret_cast<const void *>(source), source, size)) return CUDA_SUCCESS;
   const auto binding = pointerBinding(source);
   if (!binding || size > binding->remaining) return CUDA_ERROR_INVALID_VALUE;
-  return transfer(*binding, destination, size, false) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
+  return download(*binding, destination, size) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 }
 
 CUresult cuMemcpyDtoD_v2(CUdeviceptr destination, CUdeviceptr source, size_t size) {
@@ -2220,30 +2518,31 @@ CUresult cuModuleGetFunction(CUfunction *function, CUmodule module, const char *
     Module *owner = findModule(module);
     if (!owner) return CUDA_ERROR_INVALID_CONTEXT;
     {
-      const std::lock_guard lock(stateMutex);
-      const auto existing = std::find_if(functions.begin(), functions.end(),
-                                         [owner, name](const auto &entry) { return entry->module == owner && entry->name == name; });
-      if (existing != functions.end()) {
-        *function = reinterpret_cast<CUfunction>(existing->get());
+      const std::scoped_lock lock(stateMutex);
+      const auto existing =
+          functions | find_cref([owner, name](const auto &entry) { return entry->module == owner && entry->name == name; });
+      if (existing) {
+        *function = reinterpret_cast<CUfunction>(existing->get().get());
         return CUDA_SUCCESS;
       }
     }
 
-    auto described = client->call(DescribeKernel{ProgramId{static_cast<int64_t>(owner->program)}, name});
+    auto described = client->call(DescribeKernel{.program = ProgramId{static_cast<int64_t>(owner->program)}, .name = {name}});
     if (!described) {
       if (gemstone::traceEnabled("cuda"))
         std::fprintf(stderr, "Gemstone CUDA kernel lookup failed for %s: %s\n", name, described.error().detail.c_str());
-      return CUDA_ERROR_NOT_FOUND;
+      return failureStatus(described.error().kind, owner->encoding, CUDA_ERROR_NOT_FOUND);
     }
 
     auto entry = std::make_unique<Function>();
     entry->module = owner;
     entry->name = name;
-    if (described.value().registerCount) entry->registerCount = described.value().registerCount->value;
-    entry->parameters = described.value().parameters;
-    const auto handle = reinterpret_cast<CUfunction>(entry.get());
+    const auto &kernel = described.value();
+    if (kernel.registerCount) entry->registerCount = kernel.registerCount->value;
+    entry->parameters = kernel.parameters;
+    auto *const handle = reinterpret_cast<CUfunction>(entry.get());
     {
-      const std::lock_guard lock(stateMutex);
+      const std::scoped_lock lock(stateMutex);
       functions.push_back(std::move(entry));
     }
     *function = handle;
@@ -2261,20 +2560,20 @@ CUresult cuModuleGetGlobal_v2(CUdeviceptr *pointer, size_t *bytes, CUmodule modu
     if (!owner) return CUDA_ERROR_INVALID_CONTEXT;
 
     std::unique_lock lock(owner->mutex);
-    const auto existing =
-        std::find_if(owner->globals.begin(), owner->globals.end(), [name](const auto &global) { return global->name == name; });
-    if (existing != owner->globals.end()) {
-      if (pointer) *pointer = (*existing)->address;
-      if (bytes) *bytes = (*existing)->size;
+    const auto existing = owner->globals | find_cref([name](const auto &global) { return global->name == name; });
+    if (existing) {
+      if (pointer) *pointer = existing->get()->address;
+      if (bytes) *bytes = existing->get()->size;
       return CUDA_SUCCESS;
     }
 
-    auto described = client->call(DescribeGlobal{ProgramId{static_cast<int64_t>(owner->program)}, name});
+    auto described = client->call(DescribeGlobal{.program = ProgramId{static_cast<int64_t>(owner->program)}, .name = {name}});
     if (!described) return CUDA_ERROR_NOT_FOUND;
 
-    const auto size = static_cast<uint64_t>(described.value().size.value);
-    if (described.value().alias) {
-      const auto &alias = *described.value().alias;
+    const auto &description = described.value();
+    const auto size = static_cast<uint64_t>(description.size.value);
+    if (description.alias) {
+      const auto &alias = *description.alias;
       if (alias.name.value == name || alias.offset.value < 0) return CUDA_ERROR_INVALID_VALUE;
       const std::string canonicalName = alias.name.value;
       const auto offset = static_cast<uint64_t>(alias.offset.value);
@@ -2293,22 +2592,21 @@ CUresult cuModuleGetGlobal_v2(CUdeviceptr *pointer, size_t *bytes, CUmodule modu
       return CUDA_SUCCESS;
     }
 
-    const auto &initial = described.value().initial;
+    const auto &initial = description.initial;
     auto global = std::make_unique<Global>();
     global->name = name;
 
     auto status = allocate(&address, static_cast<size_t>(size), owner);
     if (status == CUDA_SUCCESS && !initial.empty()) status = cuMemcpyHtoD_v2(address, initial.data(), initial.size());
 
-    const auto binding = pointerBinding(address);
-    if (status == CUDA_SUCCESS
-        && (!binding
-            || !client->call(BindProgramGlobal{ProgramId{static_cast<int64_t>(owner->program)}, name,
-                                               AllocationId{static_cast<int64_t>(binding->allocation)}, 0})))
-      status = CUDA_ERROR_UNKNOWN;
-    if (status != CUDA_SUCCESS) {
+    const auto binding = status == CUDA_SUCCESS ? pointerBinding(address) : std::nullopt;
+    if (!binding
+        || !client->call(BindProgramGlobal{.program = ProgramId{static_cast<int64_t>(owner->program)},
+                                           .name = {name},
+                                           .allocation = AllocationId{static_cast<int64_t>(binding->allocation)},
+                                           .offset = {0}})) {
       if (address != 0) (void)cuMemFree_v2(address);
-      return status;
+      return status == CUDA_SUCCESS ? CUDA_ERROR_UNKNOWN : status;
     }
 
     global->address = address;
@@ -2345,12 +2643,11 @@ CUresult cuModuleUnload(CUmodule module) {
 
     std::unique_ptr<Module> removed;
     {
-      const std::lock_guard lock(stateMutex);
+      const std::scoped_lock lock(stateMutex);
       std::erase_if(functions, [owner](const auto &entry) { return entry->module == owner; });
-      const auto entry = std::find_if(modules.begin(), modules.end(), [owner](const auto &candidate) { return candidate.get() == owner; });
-      if (entry != modules.end()) {
-        removed = std::move(*entry);
-        modules.erase(entry);
+      if (const auto index = modules ^ index_where_maybe([owner](const auto &candidate) { return candidate.get() == owner; })) {
+        removed = std::move(modules[*index]);
+        modules.erase(modules.begin() + static_cast<ptrdiff_t>(*index));
       }
     }
     if (!removed) return CUDA_ERROR_INVALID_VALUE;
@@ -2507,7 +2804,7 @@ CUresult cuFuncSetAttribute(CUfunction function, CUfunction_attribute attribute,
     case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT:
     case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH:
       if (value < 0) return CUDA_ERROR_INVALID_VALUE;
-      if (value > 1) return CUDA_ERROR_NOT_SUPPORTED;
+      if (value > 16) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
       return functionClusterAttribute(function, attribute, &value, true);
     default: return CUDA_SUCCESS;
   }
@@ -2553,7 +2850,7 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
     if (const auto status = cuFuncGetAttribute(&dimension, attributes[axis], function); status != CUDA_SUCCESS) return status;
     required[axis] = static_cast<uint32_t>(dimension);
   }
-  const bool hasRequired = std::any_of(required.begin(), required.end(), [](auto size) { return size != 0; });
+  const bool hasRequired = required ^ exists([](auto size) { return size != 0; });
   std::optional<std::array<uint32_t, 3>> dimensions;
   if (hasRequired) dimensions = required;
   bool hasAttribute = false;
@@ -2570,10 +2867,8 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
   const std::array grid{config->gridDimX, config->gridDimY, config->gridDimZ};
   for (size_t axis = 0; axis < grid.size(); ++axis)
     if (grid[axis] == 0 || (*dimensions)[axis] == 0 || grid[axis] % (*dimensions)[axis] != 0) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
-  if (std::any_of(dimensions->begin(), dimensions->end(), [](auto size) { return size != 1; })) {
-    *clusters = 0; // No multi-CTA cluster can be scheduled by the independent-workgroup executor.
-    return CUDA_SUCCESS;
-  }
+  const uint64_t volume = static_cast<uint64_t>((*dimensions)[0]) * (*dimensions)[1] * (*dimensions)[2];
+  if (volume > 16) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
   int blocks = 0;
   (void)occupancyMaxBlocks(&blocks, static_cast<int>(threads));
   blocks = std::min(blocks, device_limits::MaxBlocksPerMultiprocessor);
@@ -2583,15 +2878,27 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
   const auto shared = static_cast<uint64_t>(config->sharedMemBytes) + static_cast<uint32_t>(staticBytes);
   if (shared > device_limits::MaxSharedMemoryPerBlockOptin) blocks = 0;
   else if (shared != 0) blocks = std::min(blocks, static_cast<int>(device_limits::MaxSharedMemoryPerMultiprocessor / shared));
-  *clusters = blocks * device_limits::MultiprocessorCount;
+  *clusters = static_cast<int>(static_cast<uint64_t>(blocks) * device_limits::MultiprocessorCount / volume);
   return CUDA_SUCCESS;
 }
 
-CUresult cuLaunchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsigned gridZ, unsigned blockX, unsigned blockY,
-                        unsigned blockZ, unsigned sharedMemoryBytes, CUstream stream, void **kernelParams, void **extra) {
+namespace {
+using ClusterShape = std::array<uint32_t, 3>;
+// The non-portable cluster size limit that cudaFuncAttributeNonPortableClusterSizeAllowed unlocks.
+constexpr uint64_t MaximumClusterSize = 16;
+
+CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsigned gridZ, unsigned blockX, unsigned blockY,
+                      unsigned blockZ, unsigned sharedMemoryBytes, CUstream stream, void **kernelParams, void **extra,
+                      std::optional<ClusterShape> cluster) {
   try {
-    if (!function || gridX == 0 || gridY == 0 || gridZ == 0 || blockX == 0 || blockY == 0 || blockZ == 0 || (extra && kernelParams))
-      return CUDA_ERROR_INVALID_VALUE;
+    if (const auto latched = stickyError.load(); latched != CUDA_SUCCESS) return latched;
+    if (!function || (extra && kernelParams)) return CUDA_ERROR_INVALID_VALUE;
+    if (gridX == 0 || gridY == 0 || gridZ == 0 || blockX == 0 || blockY == 0 || blockZ == 0
+        || blockX > static_cast<unsigned>(device_limits::MaxBlockDimX) || blockY > static_cast<unsigned>(device_limits::MaxBlockDimY)
+        || blockZ > static_cast<unsigned>(device_limits::MaxBlockDimZ) || gridY > static_cast<unsigned>(device_limits::MaxGridDimY)
+        || gridZ > static_cast<unsigned>(device_limits::MaxGridDimZ)
+        || static_cast<uint64_t>(blockX) * blockY * blockZ > static_cast<uint64_t>(device_limits::MaxThreadsPerBlock))
+      return InvalidConfiguration;
     const uint64_t globalX = static_cast<uint64_t>(gridX) * blockX;
     const uint64_t globalY = static_cast<uint64_t>(gridY) * blockY;
     const uint64_t globalZ = static_cast<uint64_t>(gridZ) * blockZ;
@@ -2602,7 +2909,7 @@ CUresult cuLaunchKernel(CUfunction function, unsigned gridX, unsigned gridY, uns
         || globalZ > maximumGlobal || sharedMemoryBytes > maximumDimension)
       return CUDA_ERROR_INVALID_VALUE;
 
-    Function *entry = findFunction(function);
+    const auto [entry, required] = findLaunchFunction(function);
     if (!entry) return CUDA_ERROR_INVALID_VALUE;
     std::vector<void *> packedParameters;
     if (extra) {
@@ -2611,13 +2918,15 @@ CUresult cuLaunchKernel(CUfunction function, unsigned gridX, unsigned gridY, uns
       bool hasBuffer = false;
       bool hasSize = false;
       for (size_t index = 0; extra[index] != CU_LAUNCH_PARAM_END; index += 2) {
-        if (extra[index] == CU_LAUNCH_PARAM_BUFFER_POINTER && !hasBuffer) {
+        if (extra[index] == LaunchParamBufferPointer && !hasBuffer) {
           buffer = static_cast<uint8_t *>(extra[index + 1]);
           hasBuffer = true;
-        } else if (extra[index] == CU_LAUNCH_PARAM_BUFFER_SIZE && !hasSize && extra[index + 1]) {
+        } else if (extra[index] == LaunchParamBufferSize && !hasSize && extra[index + 1]) {
           std::memcpy(&size, extra[index + 1], sizeof(size));
           hasSize = true;
-        } else return CUDA_ERROR_INVALID_VALUE;
+        } else {
+          return CUDA_ERROR_INVALID_VALUE;
+        }
       }
       if (size != 0 && !buffer) return CUDA_ERROR_INVALID_VALUE;
       packedParameters.reserve(entry->parameters.size());
@@ -2648,49 +2957,73 @@ CUresult cuLaunchKernel(CUfunction function, unsigned gridX, unsigned gridY, uns
         std::memcpy(&pointer, kernelParams[index], sizeof(pointer));
       const auto binding = parameter.kind == ParameterKind::Allocation ? pointerBinding(pointer) : std::nullopt;
       if (width == sizeof(pointer) && binding) {
-        arguments.emplace_back(
-            ArgumentMemory{AllocationId{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
+        arguments.emplace_back(ArgumentMemory{.region = AllocationId{static_cast<int64_t>(binding->allocation)},
+                                              .offset = {static_cast<int64_t>(binding->offset)}});
       } else {
         const auto *bytes = static_cast<const uint8_t *>(kernelParams[index]);
         arguments.emplace_back(ArgumentScalar{std::vector<uint8_t>(bytes, bytes + width)});
       }
     }
 
-    auto launch = Launch{ProgramId{static_cast<int64_t>(entry->module->program)},
-                         entry->name,
-                         Dimensions{static_cast<int32_t>(blockX), static_cast<int32_t>(blockY), static_cast<int32_t>(blockZ)},
-                         Dimensions{static_cast<int32_t>(gridX), static_cast<int32_t>(gridY), static_cast<int32_t>(gridZ)},
-                         GlobalDimensions{static_cast<int64_t>(globalX), static_cast<int64_t>(globalY), static_cast<int64_t>(globalZ)},
-                         3,
-                         Coordinates{},
-                         0,
-                         static_cast<int32_t>(sharedMemoryBytes),
-                         std::move(arguments),
-                         {},
-                         true};
-    return enqueueCommand(stream, [launch = std::move(launch)]() mutable -> int32_t {
+    auto launch = Launch{
+        .program = ProgramId{static_cast<int64_t>(entry->module->program)},
+        .kernelName = {entry->name},
+        .groupSize =
+            Dimensions{.x = {static_cast<int32_t>(blockX)}, .y = {static_cast<int32_t>(blockY)}, .z = {static_cast<int32_t>(blockZ)}},
+        .groupCount =
+            Dimensions{.x = {static_cast<int32_t>(gridX)}, .y = {static_cast<int32_t>(gridY)}, .z = {static_cast<int32_t>(gridZ)}},
+        .globalSize = GlobalDimensions{.x = {static_cast<int64_t>(globalX)},
+                                       .y = {static_cast<int64_t>(globalY)},
+                                       .z = {static_cast<int64_t>(globalZ)}},
+        .workDim = {3},
+        .globalOffset = Coordinates{},
+        .privateSegmentBytes = {0},
+        .groupSegmentBytes = {static_cast<int32_t>(sharedMemoryBytes)},
+        .arguments = std::move(arguments),
+        .pointerRelocations = {},
+        .discoverArgumentRelocations = true};
+    if (!cluster && required ^ exists([](int size) { return size != 0; }))
+      cluster = ClusterShape{static_cast<uint32_t>(std::max(1, required[0])), static_cast<uint32_t>(std::max(1, required[1])),
+                             static_cast<uint32_t>(std::max(1, required[2]))};
+    if (cluster) {
+      const auto [x, y, z] = *cluster;
+      if (gridX % x != 0 || gridY % y != 0 || gridZ % z != 0) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
+      launch.clusterSize = Dimensions{.x = {static_cast<int32_t>(x)}, .y = {static_cast<int32_t>(y)}, .z = {static_cast<int32_t>(z)}};
+    }
+    return enqueueCommand(stream, [launch = std::move(launch), encoding = entry->module->encoding]() -> int32_t {
       std::string error;
       CompletionResult result;
-      if (launchAndCollect(std::move(launch), result, error)) return CUDA_SUCCESS;
+      if (launchAndCollect(launch, result, error)) return CUDA_SUCCESS;
       if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA launch failed: %s\n", error.c_str());
-      return CUDA_ERROR_ILLEGAL_ADDRESS;
+      return latchStatus(failureStatus(result.failure, encoding, CUDA_ERROR_LAUNCH_FAILED));
     });
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
   }
 }
 
+} // namespace
+
+CUresult cuLaunchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsigned gridZ, unsigned blockX, unsigned blockY,
+                        unsigned blockZ, unsigned sharedMemoryBytes, CUstream stream, void **kernelParams, void **extra) {
+  return driverLaunchStatus(
+      launchKernel(function, gridX, gridY, gridZ, blockX, blockY, blockZ, sharedMemoryBytes, stream, kernelParams, extra, std::nullopt));
+}
+
 CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction function, void **kernelParams, void **extra) {
   if (!config || (config->numAttrs != 0 && !config->attrs)) return CUDA_ERROR_INVALID_VALUE;
+  std::optional<ClusterShape> cluster;
   for (unsigned index = 0; index < config->numAttrs; ++index) {
     const auto &attribute = config->attrs[index];
     switch (attribute.id) {
-      case CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION:
-      case CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION: {
+      // A preferred shape is a scheduling hint over the required one, which the VM always honours.
+      case CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION: break;
+      case CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION: {
         const auto [x, y, z] = clusterDimension(attribute);
         if (x == 0 || y == 0 || z == 0 || config->gridDimX % x != 0 || config->gridDimY % y != 0 || config->gridDimZ % z != 0)
           return CUDA_ERROR_INVALID_VALUE;
-        if (x != 1 || y != 1 || z != 1) return CUDA_ERROR_NOT_SUPPORTED;
+        if (static_cast<uint64_t>(x) * y * z > MaximumClusterSize) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
+        cluster = ClusterShape{x, y, z};
         break;
       }
       case CU_LAUNCH_ATTRIBUTE_COOPERATIVE:
@@ -2709,8 +3042,128 @@ CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction function, voi
       default: return CUDA_ERROR_NOT_SUPPORTED;
     }
   }
-  return cuLaunchKernel(function, config->gridDimX, config->gridDimY, config->gridDimZ, config->blockDimX, config->blockDimY,
-                        config->blockDimZ, config->sharedMemBytes, config->hStream, kernelParams, extra);
+  return driverLaunchStatus(launchKernel(function, config->gridDimX, config->gridDimY, config->gridDimZ, config->blockDimX,
+                                         config->blockDimY, config->blockDimZ, config->sharedMemBytes, config->hStream, kernelParams, extra,
+                                         cluster));
+}
+
+CUresult cuTensorMapEncodeTiled(CUtensorMap *tensorMap, CUtensorMapDataType tensorDataType, cuuint32_t tensorRank, void *globalAddress,
+                                const cuuint64_t *globalDim, const cuuint64_t *globalStrides, const cuuint32_t *boxDim,
+                                const cuuint32_t *elementStrides, CUtensorMapInterleave interleave, CUtensorMapSwizzle swizzle,
+                                CUtensorMapL2promotion l2Promotion, CUtensorMapFloatOOBfill oobFill) {
+  if (!boxDim) return CUDA_ERROR_INVALID_VALUE;
+  tensor_map::Element element{};
+  tensor_map::Swizzle layout{};
+  const tensor_map::Common common{.type = tensorDataType,
+                                  .rank = tensorRank,
+                                  .address = globalAddress,
+                                  .dimensions = globalDim,
+                                  .strides = globalStrides,
+                                  .traversal = elementStrides,
+                                  .interleave = interleave,
+                                  .swizzle = swizzle,
+                                  .promotion = l2Promotion,
+                                  .fill = oobFill};
+  if (const auto status = tensor_map::encodeCommon(tensorMap, common, 1, tensor_map::Mode::Tile, element, layout); status != CUDA_SUCCESS)
+    return status;
+  for (cuuint32_t index = 0; index < tensorRank; ++index)
+    if (boxDim[index] == 0 || boxDim[index] > 256) return CUDA_ERROR_INVALID_VALUE;
+  if (element.padded() && boxDim[0] != 128) return CUDA_ERROR_INVALID_VALUE;
+  const uint64_t inner = element.shared(boxDim[0]);
+  if (interleave == CU_TENSOR_MAP_INTERLEAVE_NONE && (inner % 16 != 0 || (layout.span != 0 && inner > layout.span)))
+    return CUDA_ERROR_INVALID_VALUE;
+  auto *bytes = reinterpret_cast<uint8_t *>(tensorMap);
+  uint32_t lower = 0;
+  for (cuuint32_t index = 1; index < tensorRank; ++index)
+    lower |= (boxDim[index] - 1) << ((index - 1) * 8);
+  tensor_map::put32(bytes, 0x34, tensor_map::get32(bytes, 0x34) | ((boxDim[0] - 1) << 24));
+  tensor_map::put32(bytes, 0x38, lower);
+  return CUDA_SUCCESS;
+}
+
+namespace {
+// Corners are signed and narrow as the rank grows: 16, 8 and 5 bits for 3D, 4D and 5D maps.
+int cornerBits(uint32_t rank) {
+  if (rank == 3) return 16;
+  if (rank == 4) return 8;
+  return 5;
+}
+
+CUresult encodeColumns(CUtensorMap *tensorMap, const tensor_map::Common &common, tensor_map::Mode mode, const int *lower, const int *upper,
+                       cuuint32_t channelsPerPixel, cuuint32_t pixelsPerColumn) {
+  tensor_map::Element element{};
+  tensor_map::Swizzle layout{};
+  if (const auto status = tensor_map::encodeCommon(tensorMap, common, 3, mode, element, layout); status != CUDA_SUCCESS) return status;
+  const int bits = cornerBits(common.rank);
+  const int spatial = mode == tensor_map::Mode::Im2col ? static_cast<int>(common.rank) - 2 : 1;
+  for (int index = 0; index < spatial; ++index)
+    if (lower[index] < -(1 << (bits - 1)) || lower[index] >= (1 << (bits - 1)) || upper[index] < -(1 << (bits - 1))
+        || upper[index] >= (1 << (bits - 1)))
+      return CUDA_ERROR_INVALID_VALUE;
+  const uint64_t inner = element.shared(channelsPerPixel);
+  if (channelsPerPixel == 0 || channelsPerPixel > 256 || pixelsPerColumn == 0 || pixelsPerColumn > 1024 || inner % 16 != 0
+      || (layout.span != 0 && inner > layout.span) || (element.padded() && channelsPerPixel != 128)
+      || channelsPerPixel % element.values != 0)
+    return CUDA_ERROR_INVALID_VALUE;
+  auto *bytes = reinterpret_cast<uint8_t *>(tensorMap);
+  tensor_map::put32(bytes, 0x48, channelsPerPixel);
+  tensor_map::put32(bytes, 0x4c, pixelsPerColumn);
+  for (int index = 0; index < spatial; ++index) {
+    tensor_map::put32(bytes, 0x50 + (index * 4), static_cast<uint32_t>(lower[index]));
+    tensor_map::put32(bytes, 0x5c + (index * 4), static_cast<uint32_t>(upper[index]));
+  }
+  return CUDA_SUCCESS;
+}
+} // namespace
+
+CUresult cuTensorMapEncodeIm2col(CUtensorMap *tensorMap, CUtensorMapDataType tensorDataType, cuuint32_t tensorRank, void *globalAddress,
+                                 const cuuint64_t *globalDim, const cuuint64_t *globalStrides, const int *pixelBoxLowerCorner,
+                                 const int *pixelBoxUpperCorner, cuuint32_t channelsPerPixel, cuuint32_t pixelsPerColumn,
+                                 const cuuint32_t *elementStrides, CUtensorMapInterleave interleave, CUtensorMapSwizzle swizzle,
+                                 CUtensorMapL2promotion l2Promotion, CUtensorMapFloatOOBfill oobFill) {
+  if (!pixelBoxLowerCorner || !pixelBoxUpperCorner) return CUDA_ERROR_INVALID_VALUE;
+  const tensor_map::Common common{.type = tensorDataType,
+                                  .rank = tensorRank,
+                                  .address = globalAddress,
+                                  .dimensions = globalDim,
+                                  .strides = globalStrides,
+                                  .traversal = elementStrides,
+                                  .interleave = interleave,
+                                  .swizzle = swizzle,
+                                  .promotion = l2Promotion,
+                                  .fill = oobFill};
+  return encodeColumns(tensorMap, common, tensor_map::Mode::Im2col, pixelBoxLowerCorner, pixelBoxUpperCorner, channelsPerPixel,
+                       pixelsPerColumn);
+}
+
+CUresult cuTensorMapEncodeIm2colWide(CUtensorMap *tensorMap, CUtensorMapDataType tensorDataType, cuuint32_t tensorRank, void *globalAddress,
+                                     const cuuint64_t *globalDim, const cuuint64_t *globalStrides, int pixelBoxLowerCornerWidth,
+                                     int pixelBoxUpperCornerWidth, cuuint32_t channelsPerPixel, cuuint32_t pixelsPerColumn,
+                                     const cuuint32_t *elementStrides, CUtensorMapInterleave interleave, CUtensorMapIm2ColWideMode mode,
+                                     CUtensorMapSwizzle swizzle, CUtensorMapL2promotion l2Promotion, CUtensorMapFloatOOBfill oobFill) {
+  if (mode > CU_TENSOR_MAP_IM2COL_WIDE_MODE_W128) return CUDA_ERROR_INVALID_VALUE;
+  const tensor_map::Common common{.type = tensorDataType,
+                                  .rank = tensorRank,
+                                  .address = globalAddress,
+                                  .dimensions = globalDim,
+                                  .strides = globalStrides,
+                                  .traversal = elementStrides,
+                                  .interleave = interleave,
+                                  .swizzle = swizzle,
+                                  .promotion = l2Promotion,
+                                  .fill = oobFill};
+  return encodeColumns(tensorMap, common,
+                       mode == CU_TENSOR_MAP_IM2COL_WIDE_MODE_W128 ? tensor_map::Mode::Im2colWide128 : tensor_map::Mode::Im2colWide,
+                       &pixelBoxLowerCornerWidth, &pixelBoxUpperCornerWidth, channelsPerPixel, pixelsPerColumn);
+}
+
+CUresult cuTensorMapReplaceAddress(CUtensorMap *tensorMap, void *globalAddress) {
+  if (!tensorMap || reinterpret_cast<uintptr_t>(tensorMap) % 64 != 0 || !globalAddress) return CUDA_ERROR_INVALID_VALUE;
+  const auto address = reinterpret_cast<uint64_t>(globalAddress);
+  const auto interleave = (tensor_map::get32(reinterpret_cast<const uint8_t *>(tensorMap), 8) >> tensor_map::InterleaveShift) & 3;
+  if (address % (interleave == CU_TENSOR_MAP_INTERLEAVE_32B ? 32 : 16) != 0) return CUDA_ERROR_INVALID_VALUE;
+  std::memcpy(tensorMap, &address, sizeof(address));
+  return CUDA_SUCCESS;
 }
 
 CUresult cuLaunchHostFunc(CUstream stream, CUhostFn callback, void *userData) {
@@ -2804,7 +3257,7 @@ CUresult cuEventDestroy_v2(CUevent event) { return commands().destroyEvent(event
 
 CUresult cuEventElapsedTime_v2(float *milliseconds, CUevent, CUevent) {
   if (!milliseconds) return CUDA_ERROR_INVALID_VALUE;
-  *milliseconds = 0.0f;
+  *milliseconds = 0.0F;
   return CUDA_SUCCESS;
 }
 
@@ -2971,8 +3424,7 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrHostNativeAtomicSupported: *value = 1; break;
     case cudaDevAttrSingleToDoublePrecisionPerfRatio: *value = SingleToDoublePrecisionPerfRatio; break;
     // Managed, pinned and registered allocations share the native atomic path.
-    // Ordinary pageable memory remains an experimental opt-in path.
-    // GEMSTONE_SYSTEM_PAGING remains an explicit experimental access path.
+    // Ordinary pageable memory is an experimental opt-in through GEMSTONE_SYSTEM_PAGING.
     case cudaDevAttrPageableMemoryAccess: *value = 0; break;
     case cudaDevAttrConcurrentManagedAccess: *value = 1; break;
     case cudaDevAttrComputePreemptionSupported: *value = 1; break;
@@ -3091,13 +3543,15 @@ cudaError_t cudaPointerGetAttributes(cudaPointerAttributes *attributes, const vo
     attributes->type = cudaMemoryTypeUnregistered;
     attributes->device = -1;
     attributes->devicePointer = nullptr;
-    attributes->hostPointer = const_cast<void *>(pointer);
+    attributes->hostPointer = gemstone::apiAddress(pointer);
     return cudaSuccess;
   }
-  attributes->type = metadata->managed ? cudaMemoryTypeManaged : metadata->host ? cudaMemoryTypeHost : cudaMemoryTypeDevice;
+  if (metadata->managed) attributes->type = cudaMemoryTypeManaged;
+  else if (metadata->host) attributes->type = cudaMemoryTypeHost;
+  else attributes->type = cudaMemoryTypeDevice;
   attributes->device = 0;
-  attributes->devicePointer = const_cast<void *>(pointer);
-  attributes->hostPointer = metadata->host || metadata->managed ? const_cast<void *>(pointer) : nullptr;
+  attributes->devicePointer = gemstone::apiAddress(pointer);
+  attributes->hostPointer = metadata->host || metadata->managed ? gemstone::apiAddress(pointer) : nullptr;
   return cudaSuccess;
 }
 
@@ -3126,9 +3580,15 @@ const char *cudaGetErrorName(cudaError_t status) {
   return text ? text->runtimeName : "cudaErrorUnknown";
 }
 
-cudaError_t cudaPeekAtLastError() { return lastError; }
+cudaError_t cudaPeekAtLastError() {
+  const auto latched = stickyError.load();
+  return latched != CUDA_SUCCESS ? runtimeStatus(latched) : lastError;
+}
 
-cudaError_t cudaGetLastError() { return std::exchange(lastError, cudaSuccess); }
+cudaError_t cudaGetLastError() {
+  const auto latched = stickyError.load();
+  return latched != CUDA_SUCCESS ? runtimeStatus(latched) : std::exchange(lastError, cudaSuccess);
+}
 
 cudaError_t cudaStreamCreate(cudaStream_t *stream) { return runtimeStatus(cuStreamCreate(stream, 0)); }
 
@@ -3179,7 +3639,9 @@ cudaError_t cudaEventRecordWithFlags(cudaEvent_t event, cudaStream_t stream, uns
 
 cudaError_t cudaEventSynchronize(cudaEvent_t event) { return runtimeStatus(cuEventSynchronize(event)); }
 
-cudaChannelFormatDesc cudaCreateChannelDesc(int x, int y, int z, int w, cudaChannelFormatKind format) { return {x, y, z, w, format}; }
+cudaChannelFormatDesc cudaCreateChannelDesc(int x, int y, int z, int w, cudaChannelFormatKind format) {
+  return {.x = x, .y = y, .z = z, .w = w, .f = format};
+}
 
 void **__cudaRegisterFatBinary(void *image) {
   try {
@@ -3193,7 +3655,7 @@ void **__cudaRegisterFatBinary(void *image) {
       entry->cubin = fatbin->cubin;
     }
     void **token = &entry->token;
-    std::lock_guard lock{registrationMutex};
+    std::scoped_lock const lock{registrationMutex};
     fatBinaries.push_back(std::move(entry));
     return token;
   } catch (const std::exception &) {
@@ -3211,13 +3673,14 @@ void __cudaRegisterFunction(void **handle, const char *hostFunction, char *, con
     entry->hostFunction = hostFunction;
     entry->deviceName = deviceName;
     entry->fatBinary = static_cast<FatBinary *>(*handle);
-    std::lock_guard lock{registrationMutex};
+    std::scoped_lock const lock{registrationMutex};
     registeredFunctions.push_back(std::move(entry));
   } catch (const std::exception &) {
+    std::fprintf(stderr, "Gemstone CUDA cannot register function %s\n", deviceName);
   }
 }
 
-void __cudaRegisterVar(void **handle, char *hostVariable, char *, const char *deviceName, int, size_t size, int, int) {
+void __cudaRegisterVar(void **handle, const char *hostVariable, char *, const char *deviceName, int, size_t size, int, int) {
   if (!handle || !*handle || !deviceName || size == 0) return;
   try {
     auto entry = std::make_unique<RegisteredVariable>();
@@ -3225,9 +3688,10 @@ void __cudaRegisterVar(void **handle, char *hostVariable, char *, const char *de
     entry->deviceName = deviceName;
     entry->size = size;
     entry->fatBinary = static_cast<FatBinary *>(*handle);
-    std::lock_guard lock{registrationMutex};
+    std::scoped_lock const lock{registrationMutex};
     registeredVariables.push_back(std::move(entry));
   } catch (const std::exception &) {
+    std::fprintf(stderr, "Gemstone CUDA cannot register variable %s\n", deviceName);
   }
 }
 
@@ -3236,13 +3700,13 @@ void __cudaUnregisterFatBinary(void **handle) {
   auto *fat = static_cast<FatBinary *>(*handle);
   std::unique_ptr<FatBinary> removed;
   {
-    std::lock_guard lock{registrationMutex};
+    std::scoped_lock const lock{registrationMutex};
     std::erase_if(registeredFunctions, [fat](const auto &entry) { return entry->fatBinary == fat; });
     std::erase_if(registeredVariables, [fat](const auto &entry) { return entry->fatBinary == fat; });
-    const auto cursor = std::find_if(fatBinaries.begin(), fatBinaries.end(), [fat](const auto &entry) { return entry.get() == fat; });
-    if (cursor == fatBinaries.end()) return;
-    removed = std::move(*cursor);
-    fatBinaries.erase(cursor);
+    const auto index = fatBinaries ^ index_where_maybe([fat](const auto &entry) { return entry.get() == fat; });
+    if (!index) return;
+    removed = std::move(fatBinaries[*index]);
+    fatBinaries.erase(fatBinaries.begin() + static_cast<ptrdiff_t>(*index));
   }
   if (removed->module) (void)cuModuleUnload(removed->module);
   removed->token = nullptr;
@@ -3257,7 +3721,7 @@ cudaError_t __cudaGetKernel(cudaKernel_t *kernel, const void *hostFunction) {
 }
 
 unsigned __cudaPushCallConfiguration(dim3 grid, dim3 block, size_t sharedMemory, CUstream_st *stream) {
-  launchConfiguration = {grid, block, sharedMemory, stream, true};
+  launchConfiguration = {.grid = grid, .block = block, .sharedMemory = sharedMemory, .stream = stream, .valid = true};
   return 0;
 }
 
@@ -3272,14 +3736,15 @@ cudaError_t __cudaPopCallConfiguration(dim3 *grid, dim3 *block, size_t *sharedMe
 }
 
 cudaError_t __cudaLaunchKernel(cudaKernel_t kernel, dim3 grid, dim3 block, void **arguments, size_t sharedMemory, cudaStream_t stream) {
-  lastError = runtimeStatus(cuLaunchKernel(reinterpret_cast<CUfunction>(kernel), grid.x, grid.y, grid.z, block.x, block.y, block.z,
-                                           static_cast<unsigned>(sharedMemory), stream, arguments, nullptr));
+  lastError = runtimeStatus(launchKernel(reinterpret_cast<CUfunction>(kernel), grid.x, grid.y, grid.z, block.x, block.y, block.z,
+                                         static_cast<unsigned>(sharedMemory), stream, arguments, nullptr, std::nullopt));
   return lastError;
 }
 
 } // extern "C"
 
 // Revisions and per-thread-stream spellings sharing an ABI and implementation are aliases of one definition.
+// NOLINTNEXTLINE(bugprone-macro-parentheses)
 #define GEMSTONE_CUDA_ALIAS(symbol, target) extern "C" decltype(target) symbol __attribute__((alias(#target)));
 GEMSTONE_CUDA_ALIAS(cuDeviceGetUuid, cuDeviceGetUuid_v2)
 GEMSTONE_CUDA_ALIAS(cuDeviceGetMemPool, cuDeviceGetDefaultMemPool)

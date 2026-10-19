@@ -11,6 +11,51 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class ExecutionPointerSuite extends munit.FunSuite {
+  // SPIR-V 3.3.1 OpSizeOf: the run-time size of the pointee, as OpenCL lays out three-component vectors and structures
+  test("OpSizeOf gives the size of the pointee type") {
+    val module = spv"""
+      $openCL
+      OpEntryPoint Kernel %main "size"
+      %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+      %ushort = OpTypeInt 16 0
+      %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+      %float3 = OpTypeVector %float 3
+      %pair = OpTypeStruct %uchar %uint
+      %uint_5 = OpConstant %uint 5
+      %shorts = OpTypeArray %ushort %uint_5
+      %uint_1 = OpConstant %uint 1
+      %uint_2 = OpConstant %uint 2
+      %out_ptr = OpTypePointer CrossWorkgroup %uint
+      %float3_ptr = OpTypePointer Function %float3
+      %pair_ptr = OpTypePointer CrossWorkgroup %pair
+      %shorts_ptr = OpTypePointer Workgroup %shorts
+      %fn = OpTypeFunction %void %out_ptr %pair_ptr
+      %local = OpVariable %shorts_ptr Workgroup
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %out_ptr
+      %pairs = OpFunctionParameter %pair_ptr
+      %entry = OpLabel
+      %vector = OpVariable %float3_ptr Function
+      %vector_size = OpSizeOf %uint %vector
+      %pair_size = OpSizeOf %uint %pairs
+      %shorts_size = OpSizeOf %uint %local
+      OpStore %out %vector_size
+      %second = OpPtrAccessChain %out_ptr %out %uint_1
+      OpStore %second %pair_size
+      %third = OpPtrAccessChain %out_ptr %out %uint_2
+      OpStore %third %shorts_size
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(12L)
+    val pairs  = memory.allocate(8L)
+    assertEquals(run(module, "size", memory, Vec(buffer(out), buffer(pairs))), Right(()))
+    assertEquals(words(memory, out, offset = 0, count = 3), Vec(16L, 8L, 10L))
+  }
+
   test("generic pointers keep private and workgroup identity through integer round trips") {
     val module = spv"""
       OpCapability GenericPointer
@@ -401,8 +446,18 @@ class ExecutionPointerSuite extends munit.FunSuite {
     assertEquals(words(memory, out, offset = 0, count = 2), Vec(7L, 9L))
   }
 
-  private def pointers(body: String, first: Long >= 0, second: Long >= 0, checked: Boolean = true)
-      : Either[Fault, Vec[Byte]] = {
+  private def pointers(body: String, first: Long >= 0, second: Long >= 0): Either[Fault, Vec[Byte]] =
+    pointersLoaded(load(_), body, first, second)
+
+  private def uncheckedPointers(body: String, first: Long >= 0, second: Long >= 0): Either[Fault, Vec[Byte]] =
+    pointersLoaded(loadUnchecked(_), body, first, second)
+
+  private def pointersLoaded(
+      loading: Module => Either[Fault, Program],
+      body: String,
+      first: Long >= 0,
+      second: Long >= 0
+  ): Either[Fault, Vec[Byte]] = {
     val module = spv"""
       $openCL
       OpEntryPoint Kernel %main "pointers"
@@ -435,7 +490,7 @@ class ExecutionPointerSuite extends munit.FunSuite {
     val allocation = memory.allocate(32L)
     val launch     =
       task("pointers", Vec(buffer(allocation, first), buffer(allocation, second), buffer(allocation, 24L)))
-    (if (checked) load(module) else loadUnchecked(module))
+    loading(module)
       .flatMap(execute(_, launch, memory))
       .map(_ => memory.bytes(allocation).slice(24, 32))
   }
@@ -495,7 +550,7 @@ class ExecutionPointerSuite extends munit.FunSuite {
     test(s"pointer bitcast rejects incompatible $reason") {
       val body = s"""%cast = OpBitcast %$target %first
                     |%result = OpCopyObject %ulong %ulong_0""".stripMargin
-      pointers(body, 0L, 0L, checked = false) match {
+      uncheckedPointers(body, 0L, 0L) match {
         case Left(Fault.InvalidRequest(message)) => assert(message.contains("OpBitcast"), message)
         case result                              => fail(s"expected invalid pointer bitcast, found $result")
       }

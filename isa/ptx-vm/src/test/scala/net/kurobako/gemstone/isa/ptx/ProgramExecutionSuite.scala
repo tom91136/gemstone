@@ -145,6 +145,37 @@ class ProgramExecutionSuite extends munit.FunSuite {
     ).left.exists(_.message.contains("broken: pc")))
   }
 
+  test("traps, failed assertions and unmapped accesses fail with distinct fault kinds") {
+    def run(body: String): Either[Fault, Unit] = {
+      val source = s""".version 8.0
+        |.target sm_80
+        |.address_size 64
+        |.extern .func __assertfail(.param .b64 message);
+        |.visible .entry probe() {
+        | .reg .u64 %address;
+        | .reg .u32 %value;
+        | .param .b64 message;
+        | $body
+        | ret;
+        |}
+        |""".stripMargin
+      val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
+        LoadedProgram.load(program).left.map(_.message)
+      ).value
+      val task =
+        KernelTask.validated("probe", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty).value
+      loaded.execute(task, RejectingMemory(), TaskControl(), _ => Right(()))
+    }
+    assert(run("trap;").left.exists { case Fault.Trap(_) => true; case _ => false })
+    assert(run("st.param.b64 [message], 0; call __assertfail, (message);").left.exists {
+      case Fault.Assertion(_) => true; case _ => false
+    })
+    assert(run("mov.u64 %address, 0x100000000; ld.global.u32 %value, [%address];").left.exists {
+      case Fault.Memory(_) => true
+      case _               => false
+    })
+  }
+
   for (requested <- Vec[Int >= 0](0, 64, 160))
     test(s"dynamic shared size reports the launch request $requested separately from static declarations") {
       val source = s""".version 8.0

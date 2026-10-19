@@ -1,27 +1,38 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 
 class SASSEncodingSuite extends munit.FunSuite {
   private def parse(source: String): SASSDescription.Description =
     SASSDescription.parse(source).fold(error => fail(error.message), identity)
 
+  private def supported(
+      source: String,
+      enums: Map[String, Map[String, BigInt]] = Map.empty,
+      tableNames: Set[String] = Set.empty
+  ): Expression =
+    SASSEncoding.parseExpression(source, enums, tableNames).fold(unsupported => fail(unsupported), identity)
+
+  private def expressions(fields: Vector[SASSEncoding.Assignment]): Vector[Expression] =
+    fields.map(_.expression.fold(unsupported => fail(unsupported), identity))
+
   test("legacy lookup arguments and typed enum constants retain exact values") {
     val enums = Map("Predicate" -> Map("PT" -> BigInt(7)))
-    assertEquals(SASSEncoding.parseExpression("`Predicate@PT", enums), SASSEncoding.Expr.Constant(7, relaxed = false))
-    assertEquals(SASSEncoding.parseExpression("* `Predicate@PT", enums), SASSEncoding.Expr.Constant(7, relaxed = true))
+    assertEquals(supported("`Predicate@PT", enums), Expression.Constant(7, relaxed = false))
+    assertEquals(supported("* `Predicate@PT", enums), Expression.Constant(7, relaxed = true))
     assertEquals(
-      SASSEncoding.parseExpression("VarLatOperandEnc( dst_wr_sb )", enums, Set("VarLatOperandEnc")),
-      SASSEncoding.Expr.Lookup(
+      supported("VarLatOperandEnc( dst_wr_sb )", enums, Set("VarLatOperandEnc")),
+      Expression.Lookup(
         "VarLatOperandEnc",
-        Vector(SASSEncoding.Expr.Reference("dst_wr_sb", None, relaxed = false))
+        Vec(Expression.Reference("dst_wr_sb", None, relaxed = false))
       )
     )
     assertEquals(
-      SASSEncoding.parseExpression("* IntSize ( srcfmt )", enums, Set("IntSize")),
-      SASSEncoding.Expr.Relaxed(SASSEncoding.Expr.Lookup(
+      supported("* IntSize ( srcfmt )", enums, Set("IntSize")),
+      Expression.Relaxed(Expression.Lookup(
         "IntSize",
-        Vector(SASSEncoding.Expr.Reference("srcfmt", None, relaxed = false))
+        Vec(Expression.Reference("srcfmt", None, relaxed = false))
       ))
     )
   }
@@ -44,56 +55,52 @@ class SASSEncodingSuite extends munit.FunSuite {
     assertEquals(compiled.forms.head.fields.map(_.positions), Vector(Vector(1, 5)))
     assertEquals(
       compiled.forms.head.fields.map(_.expression),
-      Vector(SASSEncoding.Expr.Reference("Rd", None, relaxed = false))
+      Vector(Right(Expression.Reference("Rd", None, relaxed = false)))
     )
   }
 
   test("parses expression references, relaxation, scaling, and lookup calls") {
-    import SASSEncoding.*
-    assertEquals(SASSEncoding.parseExpression("*0x2a"), Expr.Constant(42, relaxed = true))
-    assertEquals(SASSEncoding.parseExpression("* 7"), Expr.Constant(7, relaxed = true))
-    assertEquals(SASSEncoding.parseExpression("Rd"), Expr.Reference("Rd", None, relaxed = false))
-    assertEquals(SASSEncoding.parseExpression("Ra@negate"), Expr.Reference("Ra", Some("negate"), relaxed = false))
+    assertEquals(supported("*0x2a"), Expression.Constant(42, relaxed = true))
+    assertEquals(supported("* 7"), Expression.Constant(7, relaxed = true))
+    assertEquals(supported("Rd"), Expression.Reference("Rd", None, relaxed = false))
+    assertEquals(supported("Ra@negate"), Expression.Reference("Ra", Some("negate"), relaxed = false))
     assertEquals(
-      SASSEncoding.parseExpression("sImm SCALE 4"),
-      Expr.Scale(Expr.Reference("sImm", None, relaxed = false), 4)
+      supported("sImm SCALE 4"),
+      Expression.Scale(Expression.Reference("sImm", None, relaxed = false), 4)
     )
     assertEquals(
-      SASSEncoding.parseExpression("tsPtrIdx MULTIPLY 4 SCALE 4"),
-      Expr.Scale(Expr.Multiply(Expr.Reference("tsPtrIdx", None, relaxed = false), 4), 4)
+      supported("tsPtrIdx MULTIPLY 4 SCALE 4"),
+      Expression.Scale(Expression.Multiply(Expression.Reference("tsPtrIdx", None, relaxed = false), 4), 4)
     )
     assertEquals(
-      SASSEncoding.parseExpression("IDENTICAL(Rb,Rc)"),
-      Expr.Identity(
-        Expr.Reference("Rb", None, relaxed = false),
-        Expr.Reference("Rc", None, relaxed = false)
+      supported("IDENTICAL(Rb,Rc)"),
+      Expression.Identity(
+        Expression.Reference("Rb", None, relaxed = false),
+        Expression.Reference("Rc", None, relaxed = false)
       )
     )
     assertEquals(
-      SASSEncoding.parseExpression("TABLES_opex_0(batch_t, usched_info)"),
-      Expr.Lookup(
+      supported("TABLES_opex_0(batch_t, usched_info)"),
+      Expression.Lookup(
         "TABLES_opex_0",
-        Vector(
-          Expr.Reference("batch_t", None, relaxed = false),
-          Expr.Reference("usched_info", None, relaxed = false)
+        Vec(
+          Expression.Reference("batch_t", None, relaxed = false),
+          Expression.Reference("usched_info", None, relaxed = false)
         )
       )
     )
     assertEquals(
-      SASSEncoding.parseExpression("*TABLES_mem_2(sem,sco,0)"),
-      Expr.Relaxed(Expr.Lookup(
+      supported("*TABLES_mem_2(sem,sco,0)"),
+      Expression.Relaxed(Expression.Lookup(
         "TABLES_mem_2",
-        Vector(
-          Expr.Reference("sem", None, relaxed = false),
-          Expr.Reference("sco", None, relaxed = false),
-          Expr.Constant(0, relaxed = false)
+        Vec(
+          Expression.Reference("sem", None, relaxed = false),
+          Expression.Reference("sco", None, relaxed = false),
+          Expression.Constant(0, relaxed = false)
         )
       ))
     )
-    assertEquals(
-      SASSEncoding.parseExpression("VarLatOperandEnc(src_rel_sb)"),
-      Expr.Unsupported("VarLatOperandEnc(src_rel_sb)")
-    )
+    assertEquals(SASSEncoding.parseExpression("VarLatOperandEnc(src_rel_sb)"), Left("VarLatOperandEnc(src_rel_sb)"))
   }
 
   test("parses named global lookup rows and preserves unsupported instructions") {
@@ -124,15 +131,15 @@ class SASSEncodingSuite extends munit.FunSuite {
     assertEquals(compiled.forms.head.fields.map(_.name), Vector("BITS_test", "!BITS_test"))
     assertEquals(
       compiled.forms.head.fields.head.expression,
-      SASSEncoding.Expr.Lookup(
+      Right(Expression.Lookup(
         "TABLES_demo",
-        Vector(
-          SASSEncoding.Expr.Reference("Rd", None, relaxed = false),
-          SASSEncoding.Expr.Constant(0, relaxed = false)
+        Vec(
+          Expression.Reference("Rd", None, relaxed = false),
+          Expression.Constant(0, relaxed = false)
         )
-      )
+      ))
     )
-    assertEquals(compiled.forms.head.fields.last.expression, SASSEncoding.Expr.Constant(0, relaxed = true))
+    assertEquals(compiled.forms.head.fields.last.expression, Right(Expression.Constant(0, relaxed = true)))
     assert(!compiled.forms.head.issues.exists(_.contains("unused-field directive")))
   }
 
@@ -148,7 +155,7 @@ class SASSEncodingSuite extends munit.FunSuite {
         |""".stripMargin
     val form = SASSEncoding.compile(parse(source)).forms.head
     assertEquals(form.fields.head.positions, Vector.empty)
-    assertEquals(form.fields.head.expression, SASSEncoding.Expr.Unsupported("convertFloatType(Rd, F16Imm)"))
+    assertEquals(form.fields.head.expression, Left("convertFloatType(Rd, F16Imm)"))
     assertEquals(form.issues.size, 2)
   }
 
@@ -168,7 +175,7 @@ class SASSEncodingSuite extends munit.FunSuite {
     val form = SASSEncoding.compile(parse(source)).forms.head
     assertEquals(form.fields.map(_.name), Vector("!RegA"))
     assertEquals(form.fields.last.positions, (0 until 8).toVector)
-    assertEquals(form.fields.last.expression, SASSEncoding.Expr.Constant(0, relaxed = true))
+    assertEquals(form.fields.last.expression, Right(Expression.Constant(0, relaxed = true)))
     assertEquals(form.issues, Vector.empty)
   }
 
@@ -188,10 +195,10 @@ class SASSEncodingSuite extends munit.FunSuite {
     val form = SASSEncoding.compile(parse(source)).forms.head
     assert(form.issues.exists(_.contains("expects 2 arguments, got 1")))
     assertEquals(
-      SASSEncoding.parseExpression("TABLES_absent(Rd)"),
-      SASSEncoding.Expr.Lookup(
+      supported("TABLES_absent(Rd)"),
+      Expression.Lookup(
         "TABLES_absent",
-        Vector(SASSEncoding.Expr.Reference("Rd", None, relaxed = false))
+        Vec(Expression.Reference("Rd", None, relaxed = false))
       )
     )
   }
@@ -209,7 +216,7 @@ class SASSEncodingSuite extends munit.FunSuite {
         |""".stripMargin
     val form = SASSEncoding.compile(parse(source)).forms.head
     assertEquals(form.fields.map(_.name), Vector("BITS_a,BITS_b"))
-    assertEquals(form.fields.head.expression, SASSEncoding.Expr.Unsupported("FutureAddress(Ra, offset)"))
+    assertEquals(form.fields.head.expression, Left("FutureAddress(Ra, offset)"))
     assert(form.issues.exists(_.contains("unsupported compound or malformed assignment")))
   }
 
@@ -232,15 +239,15 @@ class SASSEncodingSuite extends munit.FunSuite {
         |""".stripMargin
     val forms = SASSEncoding.compile(parse(source)).forms
     assertEquals(
-      forms.map(_.fields.map(_.expression)),
+      forms.map(form => expressions(form.fields)),
       Vector(
         Vector(
-          SASSEncoding.Expr.Reference("Sb_bank", None, relaxed = false),
-          SASSEncoding.Expr.Scale(SASSEncoding.Expr.Reference("Sb_addr", None, relaxed = false), 4)
+          Expression.Reference("Sb_bank", None, relaxed = false),
+          Expression.Scale(Expression.Reference("Sb_addr", None, relaxed = false), 4)
         ),
         Vector(
-          SASSEncoding.Expr.Reference("Sa_bank", None, relaxed = false),
-          SASSEncoding.Expr.Scale(SASSEncoding.Expr.Reference("Ra_offset", None, relaxed = false), 1)
+          Expression.Reference("Sa_bank", None, relaxed = false),
+          Expression.Scale(Expression.Reference("Ra_offset", None, relaxed = false), 1)
         )
       )
     )
@@ -279,7 +286,6 @@ class SASSEncodingSuite extends munit.FunSuite {
   }
 
   test("compiles float immediate selectors into explicit enum-value cases") {
-    import SASSEncoding.*
     val source =
       """FUNIT uC
         |ENCODING WIDTH 128;
@@ -300,25 +306,25 @@ class SASSEncodingSuite extends munit.FunSuite {
         |""".stripMargin
     val fields = SASSEncoding.compile(parse(source)).forms.head.fields
     assertEquals(
-      fields.map(_.expression),
+      expressions(fields),
       Vector(
-        Expr.FloatConvert(
-          Expr.Reference("Sb", None, relaxed = false),
+        Expression.FloatConvert(
+          Expression.Reference("Sb", None, relaxed = false),
           "dstfmt.srcfmt",
-          Vector(Vector(BigInt(34)) -> "E6M9Imm"),
-          "F16Imm"
+          Vec(Vec(BigInt(34)) -> FloatEncoding.E6M9Imm),
+          FloatEncoding.F16Imm
         ),
-        Expr.FloatConvert(
-          Expr.Reference("Sb", None, relaxed = false),
+        Expression.FloatConvert(
+          Expression.Reference("Sb", None, relaxed = false),
           "ofmt",
-          Vector(Vector(BigInt(2)) -> "E8M7Imm", Vector(BigInt(3)) -> "E6M9Imm"),
-          "F16Imm"
+          Vec(Vec(BigInt(2)) -> FloatEncoding.E8M7Imm, Vec(BigInt(3)) -> FloatEncoding.E6M9Imm),
+          FloatEncoding.F16Imm
         ),
-        Expr.FloatConvert(
-          Expr.Reference("Sb", None, relaxed = false),
+        Expression.FloatConvert(
+          Expression.Reference("Sb", None, relaxed = false),
           "mufuop",
-          Vector(Vector(BigInt(6), BigInt(7)) -> "F64Imm"),
-          "F32Imm"
+          Vec(Vec(BigInt(6), BigInt(7)) -> FloatEncoding.F64Imm),
+          FloatEncoding.F32Imm
         )
       )
     )
@@ -326,7 +332,6 @@ class SASSEncodingSuite extends munit.FunSuite {
   }
 
   test("preserves compile-time float formats and relaxed lookup expressions") {
-    import SASSEncoding.*
     val source =
       """FUNIT uC
         |ENCODING WIDTH 128;
@@ -345,15 +350,15 @@ class SASSEncodingSuite extends munit.FunSuite {
         |""".stripMargin
     val form = SASSEncoding.compile(parse(source)).forms.head
     assertEquals(
-      form.fields.map(_.expression),
+      expressions(form.fields),
       Vector(
-        Expr.FixedFloat(Expr.Reference("Sb", None, relaxed = false), "E8M7Imm"),
-        Expr.Relaxed(Expr.Lookup(
+        Expression.FixedFloat(Expression.Reference("Sb", None, relaxed = false), FloatEncoding.E8M7Imm),
+        Expression.Relaxed(Expression.Lookup(
           "TABLES_mem_2",
-          Vector(
-            Expr.Reference("sem", None, relaxed = false),
-            Expr.Reference("sco", None, relaxed = false),
-            Expr.Constant(0, relaxed = false)
+          Vec(
+            Expression.Reference("sem", None, relaxed = false),
+            Expression.Reference("sco", None, relaxed = false),
+            Expression.Constant(0, relaxed = false)
           )
         ))
       )
@@ -402,13 +407,13 @@ class SASSEncodingSuite extends munit.FunSuite {
     assert(compiled.tables(1).issues.exists(_.contains("Missing@Unknown")))
     assertEquals(
       compiled.forms.head.fields.head.expression,
-      SASSEncoding.Expr.Lookup(
+      Right(Expression.Lookup(
         "DemoMap",
-        Vector(
-          SASSEncoding.Expr.Constant(65, relaxed = false),
-          SASSEncoding.Expr.Constant(4, relaxed = false)
+        Vec(
+          Expression.Constant(65, relaxed = false),
+          Expression.Constant(4, relaxed = false)
         )
-      )
+      ))
     )
     assert(compiled.forms.head.issues.exists(_.contains("unsupported rows")))
   }

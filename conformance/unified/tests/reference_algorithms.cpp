@@ -15,7 +15,7 @@
 
 using namespace aspartame;
 
-namespace unified::test {
+namespace unified::test { namespace {
 class ReferenceAlgorithms {
 public:
   template <class T> std::vector<T> copy(const std::vector<T> &input) {
@@ -24,12 +24,7 @@ public:
     return output;
   }
 
-  template <class T> std::vector<T> copyIf(const std::vector<T> &input) {
-    std::vector<T> output(input.size());
-    const auto end = std::copy_if(input.begin(), input.end(), output.begin(), algorithms::IsEven<T>{});
-    output.erase(end, output.end());
-    return output;
-  }
+  template <class T> std::vector<T> copyIf(const std::vector<T> &input) { return input ^ filter(algorithms::IsEven<T>{}); }
 
   template <class T> std::vector<T> copyN(const std::vector<T> &input, size_t count) {
     std::vector<T> output(count);
@@ -77,41 +72,26 @@ public:
     return output;
   }
 
-  template <class T> std::vector<T> transformUnary(const std::vector<T> &input) {
-    std::vector<T> output(input.size());
-    std::transform(input.begin(), input.end(), output.begin(), algorithms::Affine<T>{});
-    return output;
-  }
+  template <class T> std::vector<T> transformUnary(const std::vector<T> &input) { return input ^ map(algorithms::Affine<T>{}); }
 
   template <class T> std::vector<T> transformBinary(const std::vector<T> &left, const std::vector<T> &right) {
-    std::vector<T> output(left.size());
-    std::transform(left.begin(), left.end(), right.begin(), output.begin(), algorithms::Combine<T>{});
-    return output;
+    return left ^ zip(right) ^ map(algorithms::Combine<T>{});
   }
 
   template <class T> std::vector<T> replaceIf(const std::vector<T> &input, T replacement) {
-    auto output = input;
-    std::replace_if(output.begin(), output.end(), algorithms::IsEven<T>{}, replacement);
-    return output;
+    return input ^ map([&](T value) { return algorithms::IsEven<T>{}(value) ? replacement : value; });
   }
 
   template <class T> std::vector<T> replaceCopyIf(const std::vector<T> &input, T replacement) {
-    std::vector<T> output(input.size());
-    std::replace_copy_if(input.begin(), input.end(), output.begin(), algorithms::IsEven<T>{}, replacement);
-    return output;
+    return input ^ map([&](T value) { return algorithms::IsEven<T>{}(value) ? replacement : value; });
   }
 
   template <class T> std::vector<T> removeIf(const std::vector<T> &input) {
-    auto output = input;
-    output.erase(std::remove_if(output.begin(), output.end(), algorithms::IsEven<T>{}), output.end());
-    return output;
+    return input ^ filter([](T value) { return !algorithms::IsEven<T>{}(value); });
   }
 
   template <class T> std::vector<T> removeCopyIf(const std::vector<T> &input) {
-    std::vector<T> output(input.size());
-    const auto end = std::remove_copy_if(input.begin(), input.end(), output.begin(), algorithms::IsEven<T>{});
-    output.erase(end, output.end());
-    return output;
+    return input ^ filter([](T value) { return !algorithms::IsEven<T>{}(value); });
   }
 
   template <class T> algorithms::TwoRanges<T> swapRanges(const std::vector<T> &left, const std::vector<T> &right) {
@@ -121,15 +101,10 @@ public:
     return {std::move(a), std::move(b)};
   }
 
-  template <class T> T reduce(const std::vector<T> &input) {
-    return std::accumulate(input.begin(), input.end(), T{}, algorithms::Plus<T>{});
-  }
+  template <class T> T reduce(const std::vector<T> &input) { return input ^ fold_left(T{}, algorithms::Plus<T>{}); }
 
   template <class T> T transformReduce(const std::vector<T> &input) {
-    T result{};
-    for (const auto value : input)
-      result = algorithms::Plus<T>{}(result, algorithms::Square<T>{}(value));
-    return result;
+    return input ^ map(algorithms::Square<T>{}) ^ fold_left(T{}, algorithms::Plus<T>{});
   }
 
   template <class T> T innerProduct(const std::vector<T> &left, const std::vector<T> &right) {
@@ -203,23 +178,19 @@ public:
     return static_cast<size_t>(std::count(input.begin(), input.end(), value));
   }
 
-  template <class T> size_t countIf(const std::vector<T> &input) {
-    return static_cast<size_t>(std::count_if(input.begin(), input.end(), algorithms::IsEven<T>{}));
-  }
+  template <class T> size_t countIf(const std::vector<T> &input) { return input ^ aspartame::count(algorithms::IsEven<T>{}); }
 
   template <class T> size_t findIf(const std::vector<T> &input) {
-    return static_cast<size_t>(std::distance(input.begin(), std::find_if(input.begin(), input.end(), algorithms::IsEven<T>{})));
+    return input ^ index_where_maybe(algorithms::IsEven<T>{}) ^ get_or_else(input.size());
   }
 
-  template <class T> size_t find(const std::vector<T> &input, T value) {
-    return static_cast<size_t>(std::distance(input.begin(), std::find(input.begin(), input.end(), value)));
-  }
+  template <class T> size_t find(const std::vector<T> &input, T value) { return input ^ index_of_maybe(value) ^ get_or_else(input.size()); }
 
-  template <class T> bool allOf(const std::vector<T> &input) { return std::all_of(input.begin(), input.end(), algorithms::IsEven<T>{}); }
+  template <class T> bool allOf(const std::vector<T> &input) { return input ^ forall(algorithms::IsEven<T>{}); }
 
-  template <class T> bool anyOf(const std::vector<T> &input) { return std::any_of(input.begin(), input.end(), algorithms::IsEven<T>{}); }
+  template <class T> bool anyOf(const std::vector<T> &input) { return input ^ exists(algorithms::IsEven<T>{}); }
 
-  template <class T> bool noneOf(const std::vector<T> &input) { return std::none_of(input.begin(), input.end(), algorithms::IsEven<T>{}); }
+  template <class T> bool noneOf(const std::vector<T> &input) { return input ^ none_match(algorithms::IsEven<T>{}); }
 
   template <class T> bool equal(const std::vector<T> &left, const std::vector<T> &right) {
     return std::equal(left.begin(), left.end(), right.begin());
@@ -227,7 +198,7 @@ public:
 
   template <class T> algorithms::TwoPositions mismatch(const std::vector<T> &left, const std::vector<T> &right) {
     const auto result = std::mismatch(left.begin(), left.end(), right.begin());
-    return {static_cast<size_t>(result.first - left.begin()), static_cast<size_t>(result.second - right.begin())};
+    return {.first = static_cast<size_t>(result.first - left.begin()), .second = static_cast<size_t>(result.second - right.begin())};
   }
 
   template <class T> size_t lowerBound(const std::vector<T> &input, T value) {
@@ -244,7 +215,7 @@ public:
 
   template <class T> algorithms::TwoPositions equalRange(const std::vector<T> &input, T value) {
     const auto result = std::equal_range(input.begin(), input.end(), value);
-    return {static_cast<size_t>(result.first - input.begin()), static_cast<size_t>(result.second - input.begin())};
+    return {.first = static_cast<size_t>(result.first - input.begin()), .second = static_cast<size_t>(result.second - input.begin())};
   }
 
   template <class T> std::vector<T> merge(const std::vector<T> &left, const std::vector<T> &right) {
@@ -318,17 +289,9 @@ public:
     return output;
   }
 
-  template <class T> std::vector<T> reverse(const std::vector<T> &input) {
-    auto output = input;
-    std::reverse(output.begin(), output.end());
-    return output;
-  }
+  template <class T> std::vector<T> reverse(const std::vector<T> &input) { return input ^ aspartame::reverse(); }
 
-  template <class T> std::vector<T> reverseCopy(const std::vector<T> &input) {
-    std::vector<T> output(input.size());
-    std::reverse_copy(input.begin(), input.end(), output.begin());
-    return output;
-  }
+  template <class T> std::vector<T> reverseCopy(const std::vector<T> &input) { return input ^ aspartame::reverse(); }
 
   template <class T> std::vector<T> shuffle(const std::vector<T> &input) {
     auto output = input;
@@ -337,20 +300,16 @@ public:
     return output;
   }
 
-  template <class T> size_t minElement(const std::vector<T> &input) {
-    return static_cast<size_t>(std::min_element(input.begin(), input.end()) - input.begin());
-  }
+  template <class T> size_t minElement(const std::vector<T> &input) { return input ^ index_of_min() ^ get_or_else(size_t{0}); }
 
-  template <class T> size_t maxElement(const std::vector<T> &input) {
-    return static_cast<size_t>(std::max_element(input.begin(), input.end()) - input.begin());
-  }
+  template <class T> size_t maxElement(const std::vector<T> &input) { return input ^ index_of_max() ^ get_or_else(size_t{0}); }
 
   template <class T> algorithms::TwoPositions minmaxElement(const std::vector<T> &input) {
     const auto result = std::minmax_element(input.begin(), input.end());
-    return {static_cast<size_t>(result.first - input.begin()), static_cast<size_t>(result.second - input.begin())};
+    return {.first = static_cast<size_t>(result.first - input.begin()), .second = static_cast<size_t>(result.second - input.begin())};
   }
 
-  template <class T> bool isSorted(const std::vector<T> &input) { return std::is_sorted(input.begin(), input.end()); }
+  template <class T> bool isSorted(const std::vector<T> &input) { return input ^ is_sorted(); }
 
   template <class T> size_t isSortedUntil(const std::vector<T> &input) {
     return static_cast<size_t>(std::is_sorted_until(input.begin(), input.end()) - input.begin());
@@ -471,7 +430,7 @@ private:
     return {std::move(result_keys), std::move(result_values)};
   }
 };
-} // namespace unified::test
+}} // namespace unified::test
 
 #define REFERENCE_ALGORITHM(name, function, ...)                                                                                           \
   TEMPLATE_TEST_CASE("reference algorithms/" #name, "[unit][unified]", int8_t, int32_t, int64_t, float, double) {                          \

@@ -17,6 +17,13 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   */
 class AtomicOperationSuite extends munit.FunSuite {
   private val allocation = AllocationId(1)
+
+  private val bothWidths   = Seq(32, 64)
+  private val returnFlags  = Seq(false, true)
+  private val groupCounts  = Vec[Int > 0](1, 5)
+  private val incScenarios = Seq("below", "equal", "above", "high")
+  private val casScenarios = Seq("equal", "different", "same-operands")
+
   for {
     op <- Seq(
       "add",
@@ -34,11 +41,10 @@ class AtomicOperationSuite extends munit.FunSuite {
       "inc"
     )
     width <-
-      if (op.startsWith("flat") && op != "flatcas" && op != "flatswap" && op != "flatinc") Seq(32) else Seq(32, 64)
-    returning <- Seq(false, true)
-    groups    <- Vec[Int > 0](1, 5)
-    scenario  <- if (op.endsWith("inc")) Seq("below", "equal", "above", "high")
-    else if (op.endsWith("cas")) Seq("equal", "different", "same-operands") else Seq("add")
+      if (op.startsWith("flat") && op != "flatcas" && op != "flatswap" && op != "flatinc") Seq(32) else bothWidths
+    returning <- returnFlags
+    groups    <- groupCounts
+    scenario  <- if (op.endsWith("inc")) incScenarios else if (op.endsWith("cas")) casScenarios else Seq("add")
   } test(s"$op width=$width return=$returning groups=$groups scenario=$scenario") {
     val mask = if (width == 64) -1L else 0xffffffffL
     val old  =
@@ -69,7 +75,7 @@ class AtomicOperationSuite extends munit.FunSuite {
     LittleEndian.write(old, memory.array(allocation), 0, 8)
     // The reference model boxes one seed per test case.
     @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
-    val expected = (0 until groups.raw).scanLeft(old) { (previous, _) =>
+    val expected = (0 until groups).scanLeft(old) { (previous, _) =>
       if (op == "add" || op == "flatadd") (previous + operand) & mask
       else if (op.endsWith("inc")) { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }
       else if (op == "flatswap") operand & mask
@@ -87,7 +93,7 @@ class AtomicOperationSuite extends munit.FunSuite {
     )
     val byteWidth: Int in 0 ~ 8 = if (width == 64) 8 else 4
     assertEquals(LittleEndian.decode(memory.array(allocation), 0, byteWidth), expected.last)
-    val result = (0 until groups.raw).map(index =>
+    val result = (0 until groups).map(index =>
       LittleEndian.decode(memory.array(allocation), 16 + index * 8, 8)
     )
     val returns = expected.dropRight(1).map(value =>

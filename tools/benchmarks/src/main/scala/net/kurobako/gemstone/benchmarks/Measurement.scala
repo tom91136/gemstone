@@ -2,7 +2,6 @@ package net.kurobako.gemstone.benchmarks
 
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
@@ -28,11 +27,11 @@ object Measurement {
   inline def repeat(iterations: Int > 0)(inline body: Unit): BenchmarkSample =
     apply {
       var iteration = 0
-      while (iteration < iterations.raw) {
+      while (iteration < iterations) {
         body
         iteration += 1
       }
-    }.sample(iterations.toLong)
+    }.sample(iterations.widen[Long > 0])
 
   /** A fault aborts the benchmark rather than timing the failure path. */
   def succeeded(result: Either[Fault, ?]): Unit =

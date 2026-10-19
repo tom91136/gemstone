@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.asm.*
 
 /** Verifies the generated PTX instruction sum type and its colocated decoders. */
@@ -55,7 +56,7 @@ class InstructionSuite extends munit.FunSuite {
       assertEquals(instruction.opcode, opcode)
       assert(instruction.operands.sameElements(operands))
       assertEquals(instruction.meta, instruction.definition.meta)
-      val decoded = instruction.decoder(instruction.operands, instruction.mods, instruction.pred).toOption.get
+      val decoded = instruction.copy(form = instruction.decoder(instruction.operands, instruction.mods).toOption.get)
       assertEquals(decoded.definition, instruction.definition)
       assert(decoded.operands.sameElements(instruction.operands))
     }
@@ -64,10 +65,10 @@ class InstructionSuite extends munit.FunSuite {
   test("unknown opcodes and invalid arities fail to decode") {
     assertEquals(
       Instruction.decode("gemstone_unknown", Vec.empty),
-      Left(Instruction.DecodeError.UnknownOpcode("gemstone_unknown"))
+      Left(DecodeError("gemstone_unknown", DecodeProblem.UnknownOpcode))
     )
     Instruction.decode("add", Vec(Operand.Symbol("destination"))) match {
-      case Left(Instruction.DecodeError.InvalidOperandCount("add", expected, 1)) =>
+      case Left(DecodeError("add", DecodeProblem.InvalidOperandCount(expected, 1))) =>
         assertEquals(expected, Vec(3))
       case value => fail(s"unexpected result: $value")
     }

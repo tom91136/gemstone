@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.sass.asm
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 
 class OperandParserSuite extends munit.FunSuite {
@@ -48,6 +49,36 @@ class OperandParserSuite extends munit.FunSuite {
       Right(Operand.Floating(BigDecimal("4E+2"), "4E+2", negativeZero = false))
     )
     assert(OperandParser.parse("12.5e-").isLeft)
+  }
+
+  test("a selector follows an immediate as it follows a register") {
+    val half = Vec(OperandSelector.H0)
+    assertEquals(OperandParser.parse("1.H0"), Right(Operand.Qualified(Operand.Integer(1), half)))
+    assertEquals(
+      OperandParser.parse("0x3f80.H0"),
+      Right(Operand.Qualified(Operand.Bits(0x3f80, 0), half))
+    )
+    assertEquals(
+      OperandParser.parse("1.5.H0"),
+      Right(Operand.Qualified(Operand.Floating(BigDecimal("1.5"), "1.5", negativeZero = false), half))
+    )
+    assertEquals(
+      OperandParser.parse("1.e2"),
+      Right(Operand.Floating(BigDecimal("1.e2"), "1.e2", negativeZero = false))
+    )
+    val bits = Operand.FloatingBits(FloatEncoding.F32Imm, 32, 0x3f800000L)
+    assertEquals(
+      OperandParser.parse("bits<F32Imm>:32(0x3f800000).H1"),
+      Right(Operand.Qualified(bits, Vec(OperandSelector.H1)))
+    )
+    assertEquals(
+      OperandParser.parseMany("R0, R4, 1.H0"),
+      Right(Vec(
+        Operand.Register(RegisterBank.R, 0),
+        Operand.Register(RegisterBank.R, 4),
+        Operand.Qualified(Operand.Integer(1), half)
+      ))
+    )
   }
 
   test("parses addresses, dynamic constant offsets, vectors, and selectors structurally") {

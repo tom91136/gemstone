@@ -106,8 +106,8 @@ class NonUniformSuite extends munit.FunSuite {
       val module =
         kernel(s"OpTypeFloat $width", lanes, branch, 0, s"OpGroupNonUniform$kind %value %subgroup $operation %x")
       val outputs =
-        dispatch(module, width.raw, lanes, (thread, component) => IEEE754.fromDouble(input(thread, component), width))
-      check(outputs, width.raw, lanes, branch, 0) { (thread, masked) =>
+        dispatch(module, width, lanes, (thread, component) => IEEE754.fromDouble(input(thread, component), width))
+      check(outputs, width, lanes, branch, 0) { (thread, masked) =>
         val selected = scanned(operation, thread, participants(thread, masked, 0))
         // The oracle reduces in the subgroup's order, so it folds over boxed doubles.
         @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
@@ -245,8 +245,8 @@ class NonUniformSuite extends munit.FunSuite {
   }
 
   /** `expected(thread, masked)` gives the lanes of an invocation that ran the collective, or None when unspecified. */
-  private def check(outputs: Vec[Byte], width: Int, lanes: Int, branch: String, active: Int)(
-      expected: (Int, Boolean) => Option[Seq[Long]]
+  private inline def check(outputs: Vec[Byte], width: Int, lanes: Int, branch: String, active: Int)(
+      inline expected: (Int, Boolean) => Option[Seq[Long]]
   ): Unit = for {
     output <- 0 until 2
     thread <- 0 until Count
@@ -288,9 +288,9 @@ class NonUniformSuite extends munit.FunSuite {
       readDeferred(id, offset, size.widen[Int >= 0])
         .map(bytes => LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8]))
     override def readDeferred(id: AllocationId, offset: Long >= 0, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-      if (offset.raw % 8L == 0L || ready.contains(offset.raw)) memory.read(id, offset, size)
+      if (offset.raw % 8L == 0L || ready.contains(offset)) memory.read(id, offset, size)
       else {
-        val _ = pending.add(offset.raw)
+        val _ = pending.add(offset)
         Left(AddressSpace.Pending)
       }
   }

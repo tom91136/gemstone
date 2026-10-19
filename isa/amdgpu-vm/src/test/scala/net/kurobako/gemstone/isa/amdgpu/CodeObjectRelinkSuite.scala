@@ -64,6 +64,6 @@ class CodeObjectRelinkSuite extends munit.FunSuite {
     val entry      = kernel(moved, "kernel.kd")._2
     assertEquals(LittleEndian.decodeInt64(entry, 16), 0x1100L - 0x2000L)
     assert(run(moved, "kernel", 0).left.exists(_.message.raw.contains("s_trap 3")), run(moved, "kernel", 0))
-    assert(descriptor.section(".text").exists(_.size.raw == 0x10c))
+    assert(descriptor.section(".text").exists(_.size == 0x10c))
   }
 }

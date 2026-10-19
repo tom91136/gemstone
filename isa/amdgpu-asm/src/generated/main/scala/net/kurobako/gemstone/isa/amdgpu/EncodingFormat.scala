@@ -11,7 +11,7 @@ object EncodingFormat {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum EncodingFormat {
+enum EncodingFormat derives CanEqual {
   case `DS`
   case `EXP`
   case `FLAT`
@@ -220,4 +220,8 @@ enum EncodingFormat {
       true;
     case _ => false
   }
+  def isScratch: Boolean = this match { case `FLAT_SCRATCH` | `VSCRATCH` => true; case _ => false }
+  def isBuffer: Boolean = this match { case `MTBUF` | `MUBUF` | `VBUFFER` => true; case _ => false }
+  def isDataShare: Boolean = this match { case `DS` | `VDS` => true; case _ => false }
+  def isVOP3PX: Boolean = this match { case `VOP3PX2` | `VOP3PX3` => true; case _ => false }
 }

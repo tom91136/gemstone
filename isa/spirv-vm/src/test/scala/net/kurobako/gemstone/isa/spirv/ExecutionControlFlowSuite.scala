@@ -8,9 +8,45 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class ExecutionControlFlowSuite extends munit.FunSuite {
+  // SPIR-V 3.3.17: reaching OpUnreachable is undefined behaviour, so it faults the invocation that does
+  test("OpUnreachable faults only the invocations that reach it") {
+    val module = spv"""
+      $openCL
+      OpEntryPoint Kernel %main "unreachable"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %bool = OpTypeBool
+      %out_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %out_ptr %uint
+      %seven = OpConstant %uint 7
+      %zero = OpConstant %uint 0
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %out_ptr
+      %selector = OpFunctionParameter %uint
+      %entry = OpLabel
+      %reached = OpIEqual %bool %selector %zero
+      OpSelectionMerge %merge None
+      OpBranchConditional %reached %dead %merge
+      %dead = OpLabel
+      OpUnreachable
+      %merge = OpLabel
+      OpStore %out %seven
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(4L)
+    assertEquals(run(module, "unreachable", memory, Vec(buffer(out), scalar(1L, 4))), Right(()))
+    assertEquals(word(memory, out, 0), 7L)
+    assertEquals(
+      run(module, "unreachable", memory, Vec(buffer(out), scalar(0L, 4))).leftValue.message.raw,
+      "OpUnreachable was reached"
+    )
+  }
+
   for {
     width  <- Seq(8, 16, 32, 64)
-    signed <- Seq(false, true)
+    signed <- booleans
   } test(s"OpSwitch compares $width-bit literals, signed $signed") {
     val literal = if (signed) "-7" else s"0x${((BigInt(1) << width) - 7).toString(16)}"
     val module  = spv"""
@@ -94,7 +130,61 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
     assertEquals(execute(program, call((1L << 32) | helper), memory), Right(()))
   }
 
-  for (nested <- Seq(false, true))
+  // SPV_INTEL_function_pointers: icpx -fsycl -Xclang -fsycl-allow-func-ptr emits these constants for function pointers
+  test("OpConstantFunctionPointerINTEL calls its function, in direct execution and in a bound namespace") {
+    val module = spv"""
+      OpCapability FunctionPointersINTEL
+      $openCL
+      OpEntryPoint Kernel %main "select"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %bool = OpTypeBool
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %entry_fn = OpTypeFunction %void %uint_ptr %uint
+      %helper_fn = OpTypeFunction %uint %uint
+      %helper_ptr = OpTypePointer Function %helper_fn
+      %zero = OpConstant %uint 0
+      %two = OpConstant %uint 2
+      %three = OpConstant %uint 3
+      %twice_ptr = OpConstantFunctionPointerINTEL %helper_ptr %twice
+      %thrice_ptr = OpConstantFunctionPointerINTEL %helper_ptr %thrice
+      %main = OpFunction %void None %entry_fn
+      %out = OpFunctionParameter %uint_ptr
+      %input = OpFunctionParameter %uint
+      %entry = OpLabel
+      %odd = OpINotEqual %bool %input %zero
+      %chosen = OpSelect %helper_ptr %odd %twice_ptr %thrice_ptr
+      %called = OpFunctionPointerCallINTEL %uint %chosen %input
+      OpStore %out %called
+      OpReturn
+      OpFunctionEnd
+      %twice = OpFunction %uint None %helper_fn
+      %a = OpFunctionParameter %uint
+      %twice_entry = OpLabel
+      %doubled = OpIMul %uint %a %two
+      OpReturnValue %doubled
+      OpFunctionEnd
+      %thrice = OpFunction %uint None %helper_fn
+      %b = OpFunctionParameter %uint
+      %thrice_entry = OpLabel
+      %tripled = OpIMul %uint %b %three
+      OpReturnValue %tripled
+      OpFunctionEnd
+    """
+    val program           = load(module).value
+    val memory            = RegionMemory()
+    val out               = memory.allocate(4L)
+    def call(input: Long) = execute(program, task("select", Vec(buffer(out), scalar(input, 4))), memory)
+    assertEquals(call(5L), Right(()))
+    assertEquals(word(memory, out, 0), 10L)
+    assertEquals(program.bindFunctionPointerNamespace(ProgramId(3L)), Right(()))
+    assertEquals(call(0L), Right(()))
+    assertEquals(word(memory, out, 0), 0L)
+    assertEquals(call(7L), Right(()))
+    assertEquals(word(memory, out, 0), 14L)
+  }
+
+  for (nested <- booleans)
     test(s"OpFunctionCall passes arguments and return values${if (nested) " through a nested call" else ""}") {
       val nestedFunction = """%nested = OpFunction %uint None %helper_fn
                              |%nested_parameter = OpFunctionParameter %uint

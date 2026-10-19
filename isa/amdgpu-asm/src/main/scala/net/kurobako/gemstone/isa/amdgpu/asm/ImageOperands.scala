@@ -10,7 +10,7 @@ import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 private object ImageOperands {
   def supports(layout: InstructionLayout): Boolean       = layout.format.isImage
   private def modern(layout: InstructionLayout): Boolean =
-    Set(EncodingFormat.VIMAGE, EncodingFormat.VSAMPLE)(layout.format)
+    PartialFunction.cond(layout.format) { case EncodingFormat.VIMAGE | EncodingFormat.VSAMPLE => true }
 
   def modifier(
       value: Modifier,

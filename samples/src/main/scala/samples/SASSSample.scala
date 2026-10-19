@@ -176,18 +176,22 @@ object SASSSample {
     instruction.mnemonic.raw == "IADD3" && instruction.operands.exists(immediate(_).contains(constant))
 
   /** Every `IADD3` of the immediate `from`, now adding `to`. */
-  private def replaceConstant(program: asm.Program, from: BigInt, to: BigInt): Either[String, asm.Program] =
-    program.statements.foldLeft[Either[String, Vec[Statement]]](Right(Vec.empty)) {
-      case (result, Statement.Operation(instruction, _, reference)) if isAddOf(instruction, from) =>
+  private def replaceConstant(program: asm.Program, from: BigInt, to: BigInt): Either[String, asm.Program] = {
+    val rewritten = program.statements.map[Either[String, Statement]] {
+      case Statement.Operation(instruction, _, reference) if isAddOf(instruction, from) =>
         val operands = instruction.operands.map {
           case Operand.Integer(`from`)     => Operand.Integer(to)
           case Operand.Bits(`from`, width) => Operand.Bits(to, width)
           case other                       => other
         }
-        Instruction.decode(instruction.mnemonic.raw, instruction.modifiers, operands, instruction.guard)
-          .flatMap(rewritten => result.map(_ :+ Statement.Operation(rewritten, None, reference)))
-      case (result, statement) => result.map(_ :+ statement)
-    }.map(statements => program.copy(statements = statements))
+        InstructionDefinitions.decode(instruction.mnemonic.raw, instruction.modifiers, operands, instruction.guard)
+          .map(Statement.Operation(_, reference = reference))
+      case statement => Right(statement)
+    }
+    rewritten.collectFirst { case Left(error) => error }
+      .toLeft(rewritten.collect { case Right(statement) => statement })
+      .map(statements => program.copy(statements = statements))
+  }
 
   /** `extra` placed after the `IADD3` of `constant`, with the code after it laid out again. */
   private def insertAfterAdd(target: Target, program: asm.Program, constant: BigInt, extra: Instruction)
@@ -199,17 +203,16 @@ object SASSSample {
     })).left.map(_.message)
 
   def run(): Either[String, Outcome] = for {
-    target      <- Target.of(89)
-    program     <- asm.Parser.parseProgram(source).left.map(_.message)
-    code        <- asm.Assembler(target).encode(program).left.map(_.message)
-    original    <- run(target, program)
-    decoded     <- asm.Disassembler(target).decode(code).left.map(_.message)
-    disassembly <- decoded.statements.collect { case Statement.Operation(instruction, _, _) =>
+    target   <- Target.of(89)
+    program  <- asm.Parser.parseProgram(source).left.map(_.message)
+    code     <- asm.Assembler(target).encode(program).left.map(_.message)
+    original <- run(target, program)
+    decoded  <- asm.Disassembler(target).decode(code).left.map(_.message)
+    printed = decoded.statements.collect { case Statement.Operation(instruction, _, _) =>
       asm.Printer.print(instruction)
     }
-      .foldLeft[Either[String, Vec[String]]](Right(Vec.empty))((lines, line) =>
-        lines.flatMap(done => line.map(done :+ _))
-      )
+    disassembly <- printed.collectFirst { case Left(error) => error }
+      .toLeft(printed.collect { case Right(line) => line })
     changed  <- replaceConstant(decoded, 3, 5)
     edited   <- run(target, changed)
     extra    <- asm.Parser.parse("IADD3 R7, R7, 0x1, RZ")

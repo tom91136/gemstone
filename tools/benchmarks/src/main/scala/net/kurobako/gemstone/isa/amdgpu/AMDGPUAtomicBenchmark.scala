@@ -4,7 +4,6 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -20,18 +19,7 @@ object AMDGPUAtomicBenchmark {
 
   private def run(iterations: Int > 0): BenchmarkSample = {
     val code   = Vec.from(Image.grouped(2).map(Integer.parseInt(_, 16).toByte))
-    val kernel = VMCompiler().compile(CodeObjectKernel(
-      "atomic",
-      Target("gfx1030"),
-      24,
-      0,
-      0,
-      0x80,
-      0x08,
-      code,
-      code.nonNegativeSize
-    ))
-      .fold(error => throw IllegalStateException(error.message), identity)
+    val kernel = SequentialDispatch.compile("atomic", Target("gfx1030"), kernargSize = 24, code)
     val memory = BenchmarkMemory(24)
     val target = memory.ids(0)
     memory.putInt(target, offset = 0, value = 7)
@@ -47,7 +35,7 @@ object AMDGPUAtomicBenchmark {
     ).fold(error => throw IllegalArgumentException(error), identity)
     val sample   = SequentialDispatch.repeat(iterations, kernel, dispatch, memory)
     val observed = memory.getInt(target, 0).toLong & 0xffffffffL
-    val expected = (7L + iterations.raw.toLong * 9L) & 0xffffffffL
+    val expected = (7L + iterations.toLong * 9L) & 0xffffffffL
     if (observed != expected) throw IllegalStateException(s"atomic benchmark result $observed != $expected")
     sample
   }

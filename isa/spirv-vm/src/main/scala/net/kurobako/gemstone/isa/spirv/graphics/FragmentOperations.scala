@@ -2,9 +2,8 @@ package net.kurobako.gemstone.isa.spirv.graphics
 
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.isa.spirv.*
-import net.kurobako.gemstone.isa.spirv.ImageFormats.*
 
-/** Fixed-function tests and blending, independent of shader invocation and primitive traversal. */
+/** Fixed-function tests, independent of shader invocation and primitive traversal. */
 private object FragmentOperations {
   def compare(operation: GraphicsCompare, source: Float, destination: Float): Boolean = operation match {
     case GraphicsCompare.Never          => false
@@ -53,48 +52,6 @@ private object FragmentOperations {
       if (stencilPass && depthPass && hasDepth && state.depthTest && state.depthWrite)
         target.writeDepth(offset, converted)
       stencilPass && depthPass
-    }
-  }
-  def blend(
-      sourceValue: Array[Float],
-      destinationValue: Array[Float],
-      constantsValue: GraphicsColour,
-      state: GraphicsBlend,
-      format: GraphicsFormat
-  ): Array[Float] = {
-    val normalised                 = !ImageTexelCodec.floating(format.shaderFormat.code)
-    val minimum                    = if (ImageTexelCodec.signed(format.shaderFormat.code)) -1f else 0f
-    def clamp(value: Float): Float = if (normalised) math.max(minimum, math.min(1f, value)) else value
-    val source                     = sourceValue.map(clamp(_)); val destination = destinationValue.map(clamp(_))
-    val constants = Array(constantsValue.r, constantsValue.g, constantsValue.b, constantsValue.a).map(clamp(_))
-    def factor(mode: GraphicsBlendFactor, lane: Int): Float = clamp(mode match {
-      case GraphicsBlendFactor.Zero                  => 0f
-      case GraphicsBlendFactor.One                   => 1f
-      case GraphicsBlendFactor.SrcColor              => source(lane)
-      case GraphicsBlendFactor.OneMinusSrcColor      => 1f - source(lane)
-      case GraphicsBlendFactor.DstColor              => destination(lane)
-      case GraphicsBlendFactor.OneMinusDstColor      => 1f - destination(lane)
-      case GraphicsBlendFactor.SrcAlpha              => source(3)
-      case GraphicsBlendFactor.OneMinusSrcAlpha      => 1f - source(3)
-      case GraphicsBlendFactor.DstAlpha              => destination(3)
-      case GraphicsBlendFactor.OneMinusDstAlpha      => 1f - destination(3)
-      case GraphicsBlendFactor.ConstantColor         => constants(lane)
-      case GraphicsBlendFactor.OneMinusConstantColor => 1f - constants(lane)
-      case GraphicsBlendFactor.ConstantAlpha         => constants(3)
-      case GraphicsBlendFactor.OneMinusConstantAlpha => 1f - constants(3)
-      case GraphicsBlendFactor.SrcAlphaSaturate      => if (lane == 3) 1f else math.min(source(3), 1f - destination(3))
-    })
-    Array.tabulate(4) { lane =>
-      val src = source(lane) * factor(if (lane == 3) state.sourceAlpha else state.sourceColour, lane)
-      val dst = destination(lane) * factor(if (lane == 3) state.destinationAlpha else state.destinationColour, lane)
-      val operation: GraphicsBlendOp = if (lane == 3) state.alphaOp else state.colourOp
-      operation match {
-        case GraphicsBlendOp.Add             => src + dst
-        case GraphicsBlendOp.Subtract        => src - dst
-        case GraphicsBlendOp.ReverseSubtract => dst - src
-        case GraphicsBlendOp.Min             => math.min(source(lane), destination(lane))
-        case GraphicsBlendOp.Max             => math.max(source(lane), destination(lane))
-      }
     }
   }
 }

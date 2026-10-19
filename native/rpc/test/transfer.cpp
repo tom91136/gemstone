@@ -1,7 +1,9 @@
 #include "transfer.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
-#include <string>
+#include <cstring>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,10 +12,9 @@
 #include "gemstone_execution_rpc.hpp"
 
 #include "rpc_fixture.hpp"
-#include <environment_keys.hpp>
 
 TEST_CASE("chunked transfer round-trips allocation bytes") {
-  gemstone_test::RpcFixture fixture(GENERATE(false, true));
+  gemstone_test::RpcFixture const fixture(GENERATE(false, true));
   const gemstone_test::RpcEnvironment environment(fixture);
 
   auto client = gemstone::execution::Client::fromEnvironment();
@@ -22,16 +23,16 @@ TEST_CASE("chunked transfer round-trips allocation bytes") {
   REQUIRE((static_cast<bool>(registered)));
 
   const std::vector<uint8_t> input{1, 2, 3, 4, 5, 6, 7, 8};
-  REQUIRE((gemstone::execution::transferAllocation(*client, registered.value(), 0, input.data(), input.size(), true, 3)));
+  REQUIRE((gemstone::execution::uploadAllocation(*client, registered.value(), 0, input.data(), input.size(), 3)));
 
   std::vector<uint8_t> output(input.size(), 0);
-  REQUIRE((gemstone::execution::transferAllocation(*client, registered.value(), 0, output.data(), output.size(), false, 3)));
+  REQUIRE((gemstone::execution::downloadAllocation(*client, registered.value(), 0, output.data(), output.size(), 3)));
   REQUIRE((output == input));
 }
 
 TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
   using namespace gemstone::execution;
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
@@ -39,7 +40,9 @@ TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
   REQUIRE(allocation);
   REQUIRE(client->call(WriteAllocation{allocation.value(), 0, std::vector<uint8_t>(16, 42)}));
   std::vector<uint8_t> host(16, 99);
-  const std::vector<DirtyRange> ranges{{allocation.value(), 1, 2}, {allocation.value(), 7, 1}, {allocation.value(), 12, 3}};
+  const std::vector<DirtyRange> ranges{{.allocation = allocation.value(), .offset = {1}, .size = {2}},
+                                       {.allocation = allocation.value(), .offset = {7}, .size = {1}},
+                                       {.allocation = allocation.value(), .offset = {12}, .size = {3}}};
   REQUIRE(readDirtyRanges(*client, ranges, [&](const DirtyRange &range, const uint8_t *bytes) {
     std::memcpy(host.data() + range.offset.value, bytes, range.size.value);
     return true;
@@ -52,7 +55,7 @@ TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
   CHECK(fixture.reads.load() == reads);
   // A single interval can span multiple transport batches. Distinct allocations
   // must also remain separate even when their offsets happen to be adjacent.
-  constexpr int32_t largeSize = 2 * 1024 * 1024 + 3;
+  constexpr int32_t largeSize = (2 * 1024 * 1024) + 3;
   const auto large = client->call(RegisterAllocation{{largeSize}});
   REQUIRE(large);
   const std::vector<uint8_t> largeInput(largeSize, 17);
@@ -71,7 +74,7 @@ TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
 
 TEST_CASE("bounded dirty reads respect gap and payload limits without publishing gaps") {
   using namespace gemstone::execution;
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
@@ -84,7 +87,9 @@ TEST_CASE("bounded dirty reads respect gap and payload limits without publishing
     std::memcpy(host.data() + range.offset.value, bytes, range.size.value);
     return true;
   };
-  const std::vector<DirtyRange> sparse{{allocation.value(), 1, 2}, {allocation.value(), 259, 1}, {allocation.value(), 517, 1}};
+  const std::vector<DirtyRange> sparse{{.allocation = allocation.value(), .offset = {1}, .size = {2}},
+                                       {.allocation = allocation.value(), .offset = {259}, .size = {1}},
+                                       {.allocation = allocation.value(), .offset = {517}, .size = {1}}};
   REQUIRE(readDirtyRanges(*client, sparse, apply, 256, batchBytes));
   CHECK(fixture.reads.load() == 2); // The first gap is 256 bytes; the next is 257.
   for (size_t index = 0; index < host.size(); ++index)
@@ -92,7 +97,7 @@ TEST_CASE("bounded dirty reads respect gap and payload limits without publishing
   std::fill(host.begin(), host.end(), 99);
   std::vector<DirtyRange> spans;
   for (int32_t offset = 0; offset <= batchBytes; offset += 256)
-    spans.push_back({allocation.value(), offset, 1});
+    spans.push_back({.allocation = allocation.value(), .offset = {offset}, .size = {1}});
   const auto reads = fixture.reads.load();
   REQUIRE(readDirtyRanges(*client, spans, apply, 256, batchBytes));
   CHECK(fixture.reads.load() == reads + 2);

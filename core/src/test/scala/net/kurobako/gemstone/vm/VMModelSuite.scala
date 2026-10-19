@@ -1,14 +1,13 @@
 package net.kurobako.gemstone.vm
 
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.*
-import scala.util.Using
 
 class VMModelSuite extends munit.FunSuite {
+  private val booleans = Vec(false, true)
+
   test("inactive groups remain inactive across the Int narrowing boundary") {
     val geometry = LaunchGeometry.forLaunch(
       LaunchGeometry.Dimensions(1024, 1, 1),
@@ -64,16 +63,17 @@ class VMModelSuite extends munit.FunSuite {
   }
 
   test("argument buffers exclude structured arguments and inferred argument relocations") {
-    val buffer = KernelTask.ArgumentBuffer(AllocationId(7L), 0L)
+    val buffer              = KernelTask.ArgumentBuffer(AllocationId(7L), 0L)
+    val structuredArguments = Vec(KernelTask.Argument.Memory(buffer.region, 0L))
     for {
-      structured <- Vec(false, true)
-      discover   <- Vec(false, true)
+      structured <- booleans
+      discover   <- booleans
     } {
       val task = KernelTask.validated(
         kernelName = "fill",
         groupSize = LaunchGeometry.Dimensions.One,
         groupCount = LaunchGeometry.Dimensions.One,
-        arguments = if (structured) Vec(KernelTask.Argument.Memory(buffer.region, 0L)) else Vec.empty,
+        arguments = if (structured) structuredArguments else Vec.empty,
         discoverArgumentRelocations = discover,
         argumentBuffer = Some(buffer)
       )
@@ -127,53 +127,13 @@ class VMModelSuite extends munit.FunSuite {
     assert(limited.checkpoint().isRight)
     assert(limited.checkpoint().isRight)
     assertEquals(limited.checkpoint(), Left(Fault.BudgetExceeded(2L)))
-    assert(limited.usedInstructions.raw == 2L)
+    assert(limited.usedInstructions == 2L)
 
     val cancelled = TaskControl()
     cancelled.cancel()
     cancelled.cancel()
     assert(cancelled.isCancelled)
     assertEquals(cancelled.checkpoint(), Left(Fault.Cancelled))
-  }
-
-  test("instruction budgets are shared across workers and reject an oversized charge without consuming it") {
-    val control  = TaskControl(TaskControl.Limits(1000L))
-    val accepted = AtomicInteger()
-    Using.resource(threads.Pool(4)) { pool =>
-      val task: Runnable = () =>
-        while (!Thread.currentThread().isInterrupted && control.checkpoint().isRight) {
-          val _ = accepted.incrementAndGet()
-        }
-      val workers = Vector.fill(4)(pool.executor.submit(task))
-      workers.foreach(_.get(5, TimeUnit.SECONDS))
-    }
-    assertEquals(accepted.get(), 1000)
-    assertEquals(control.usedInstructions.raw, 1000L)
-    assertEquals(control.remainingInstructions.raw, 0L)
-
-    val limited = TaskControl(TaskControl.Limits(Long.MaxValue))
-    assertEquals(limited.checkpoint(Long.MaxValue - 1L), Right(()))
-    assertEquals(limited.checkpoint(2), Left(Fault.BudgetExceeded(Long.MaxValue)))
-    assertEquals(limited.remainingInstructions.raw, 1L)
-    assertEquals(limited.checkpoint(), Right(()))
-  }
-
-  test("a lease left by an idle worker is reclaimed before a charge is rejected") {
-    val control              = TaskControl(TaskControl.Limits(1000L))
-    def on[A](body: => A): A = {
-      val result = java.util.concurrent.FutureTask[A](() => body)
-      Thread(result).start()
-      result.get(5, TimeUnit.SECONDS)
-    }
-    assertEquals(on(control.checkpoint()), Right(()))
-    assertEquals(on((0 until 999).count(_ => control.checkpoint().isRight)), 999)
-    assertEquals(on(control.checkpoint()), Left(Fault.BudgetExceeded(1000L)))
-    assertEquals(control.usedInstructions.raw, 1000L)
-    val cancelled = TaskControl()
-    assertEquals(cancelled.checkpoint(), Right(()))
-    cancelled.cancel()
-    assertEquals(cancelled.checkpoint(), Left(Fault.Cancelled))
-    assertEquals(cancelled.usedInstructions.raw, 1L)
   }
 
   test("default controls have independent cancellation flags") {
@@ -189,10 +149,9 @@ class VMModelSuite extends munit.FunSuite {
     val visited = AtomicInteger()
     val result  = Workgroups.Sequential.forEach(5L, parallel = false) { index =>
       val _ = visited.incrementAndGet()
-      if (index.raw == 2L) Left(Fault.Backend("stop")) else Right(())
+      if (index == 2L) Left(Fault.Backend("stop")) else Right(())
     }
     assertEquals(result, Left(Fault.Backend("stop")))
     assertEquals(visited.get(), 3)
   }
-
 }

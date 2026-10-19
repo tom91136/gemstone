@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
@@ -7,10 +8,13 @@ import scala.collection.mutable
 
 /** Resolves symbolic branch targets of lowered NVIDIA code into program counters. */
 private[isa] object VMAssembler {
+  // the pre-assembly line beside Branch and BranchTable
+  @SuppressWarnings(Array("baumkuchen:duplicate-shape"))
   enum Statement {
     case Label(name: NonEmpty[String])
     case Execute(instruction: Instruction, predication: Option[ExecutionPredicate] = None)
     case Branch(target: NonEmpty[String], predication: Option[ExecutionPredicate] = None)
+    case BranchTable(index: Value, targets: Vec[NonEmpty[String]], predication: Option[ExecutionPredicate] = None)
 
     /** Attributes the instructions that follow, up to the next marker, to `address` in the source ISA. */
     case Source(address: Long >= 0)
@@ -30,7 +34,7 @@ private[isa] object VMAssembler {
       val instructions = Vec.newBuilder[PredicatedInstruction]
       val sources      = mutable.ArrayBuilder.ofLong()
       statements.foldLeft[Either[NonEmpty[String], Long]](Right(ExecutableProgram.NoSource)) {
-        case (Right(_), Statement.Source(address))                        => Right(address.raw)
+        case (Right(_), Statement.Source(address))                        => Right(address)
         case (Right(source), Statement.Label(_))                          => Right(source)
         case (Right(source), Statement.Execute(instruction, predication)) =>
           instructions += PredicatedInstruction(instruction, predication)
@@ -41,6 +45,13 @@ private[isa] object VMAssembler {
             instructions += PredicatedInstruction(Instruction.Branch(pc), predication)
             sources.addOne(source)
             source
+          }
+        case (Right(source), Statement.BranchTable(index, targets, predication)) =>
+          targets.traverse(target => labels.get(target).toRight[NonEmpty[String]](s"unknown label: $target")).map {
+            pcs =>
+              instructions += PredicatedInstruction(Instruction.BranchTable(index, pcs), predication)
+              sources.addOne(source)
+              source
           }
         case (left, _) => left
       }.map { _ =>

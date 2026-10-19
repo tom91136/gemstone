@@ -24,6 +24,15 @@ class LeaSuite extends munit.FunSuite {
 
   private val carryDestination = Operand.Qualified(register(0), Vec(OperandSelector.CC))
 
+  private val Shifts             = Vec(0, 1, 2, 3, 31)
+  private val Flags              = Vec(false, true)
+  private val FalseOnly          = Vec(false)
+  private val DivisionForms      = Vec(("s5", 32), ("s6", 64), ("s24", 16777216))
+  private val ImmediateEncodings = Vec(0x80000, 0xfc100, 0xfffff, 0x100000)
+  private val ScaledIndexKernels =
+    Vec(("index_scaled7_minus_base", 7), ("index_scaled_minus_base", 8), ("index_scaled9_minus_base", 9))
+  private val NegatedScaleIndices = Vec(0, 1, -1, Int.MinValue, Int.MaxValue, 0x800001)
+
   private def pair(sm: Int, shift: Int): Kernel =
     load(sm, Fixture.listing(s"leaS${shift}Sm${if (shift == 0) 50 else sm}"), s"lea_s$shift")
 
@@ -58,8 +67,8 @@ class LeaSuite extends munit.FunSuite {
 
   for {
     sm       <- Vec(50, 60)
-    shift    <- Vec(0, 1, 2, 3, 31)
-    negative <- if (shift == 0) Vec(false) else Vec(false, true)
+    shift    <- Shifts
+    negative <- if (shift == 0) FalseOnly else Flags
   }
     test(s"CUDA 11.8 sm_$sm 64-bit address pair matches unsigned arithmetic at shift $shift, negative=$negative") {
       val kernel       = pair(sm, shift)
@@ -91,7 +100,7 @@ class LeaSuite extends munit.FunSuite {
 
   for {
     sm                <- Vec(50, 60)
-    (suffix, divisor) <- Vec(("s5", 32), ("s6", 64), ("s24", 16777216))
+    (suffix, divisor) <- DivisionForms
   }
     test(s"CUDA 11.8 sm_$sm no-carry LEA.HI folds signed division correction by $divisor") {
       val kernel = load(sm, Fixture.listing(s"leaDiv${suffix.capitalize}Sm$sm"), s"div_$suffix")
@@ -146,7 +155,6 @@ class LeaSuite extends munit.FunSuite {
       original.rewrite(operands =
         original.operands.updated(2, Operand.Qualified(register(4), Vec(OperandSelector.H1)))
       ),
-      original.rewrite(modifiers = Vec(Instruction.Modifier.HI)),
       original.rewrite(operands = original.operands.updated(0, Operand.Qualified(register(4), Vec(OperandSelector.CC))))
     ).foreach(invalid => assert(replaced(invalid).lower(8, 4, 4, 4, 4).isLeft))
     assert(replaced(original.rewrite(guard = Some(Instruction.Guard(predicate(Some(0)))))).lower(8, 4, 4, 4, 4).isRight)
@@ -189,7 +197,7 @@ class LeaSuite extends munit.FunSuite {
       val changed = immediatePair(kernel, addend)(
         _.rewrite(operands = Vec(register(4), register(4), register(255), register(5), Operand.Integer(BigInt(2))))
       )
-      Vec(0x80000, 0xfc100, 0xfffff, 0x100000).foreach { encoded =>
+      ImmediateEncodings.foreach { encoded =>
         val unverified = changed.map(i =>
           if (i.address == low(kernel).address)
             i.rewrite(operands = i.operands.updated(2, Operand.Integer(BigInt(encoded))))
@@ -248,8 +256,7 @@ class LeaSuite extends munit.FunSuite {
     ).words(2).map(_.toInt)
     for {
       sm                <- Vec(50, 60)
-      (function, shift) <-
-        Vec(("index_scaled7_minus_base", 7), ("index_scaled_minus_base", 8), ("index_scaled9_minus_base", 9))
+      (function, shift) <- ScaledIndexKernels
     } {
       val kernel = iscadd(sm, function)
       val scaled = kernel.function.instructions.filter(_.mnemonic.raw == "ISCADD")
@@ -285,7 +292,7 @@ class LeaSuite extends munit.FunSuite {
 
   for {
     sm    <- Vec(35, 50, 60)
-    index <- Vec(0, 1, -1, Int.MinValue, Int.MaxValue, 0x800001)
+    index <- NegatedScaleIndices
   }
     test(s"sm_$sm negated ISCADD scales before subtraction and produces no-borrow for index $index") {
       val shifted = (index << 9).toLong & 0xffffffffL

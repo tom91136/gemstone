@@ -2,18 +2,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iterator>
-#include <stdexcept>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <cuda.h>
+#include <cuda_runtime_api.h>
 
+#include <gemstone/test_support.hpp>
+
+#include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
 
 extern "C" CUresult cuCtxCreate_v2(CUcontext *context, unsigned flags, CUdevice device);
+extern "C" cudaError_t __cudaLaunchKernel(cudaKernel_t kernel, dim3 grid, dim3 block, void **arguments, size_t sharedMemory,
+                                          cudaStream_t stream);
 #undef cuLinkCreate
 #undef cuLinkAddData
 extern "C" CUresult cuLinkCreate(unsigned, CUjit_option *, void **, CUlinkState *);
@@ -71,14 +78,51 @@ std::vector<uint8_t> metadataFatbin(const std::vector<uint8_t> &cubin) {
   return fatbin;
 }
 
-void setCodeMode(const char *mode) {
-  if (setenv(gemstone::environment::CudaCode, mode, 1) != 0) throw std::runtime_error("cannot set CUDA code mode");
-}
+// A fixture-backed context with one loaded module whose kernel takes a single allocation parameter.
+class FailureSession {
+public:
+  FailureSession()
+      : endpoint(fixture.endpoint()), rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str()),
+        rpcClient(gemstone::environment::RpcClient, "42"), targetArch(gemstone::environment::TargetArch, "compute_89") {
+    REQUIRE(cuInit(0) == CUDA_SUCCESS);
+    REQUIRE(cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS);
+    REQUIRE(cuMemAlloc_v2(&allocation, 16) == CUDA_SUCCESS);
+    fixture.kernelMetadata(8, 1, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}});
+    fixture.expectAllocationArguments({{.alias = 0, .offset = 0}});
+  }
+
+  CUresult load(const void *image) { return cuModuleLoadData(&module, image); }
+
+  void loadKernel(const void *image) {
+    REQUIRE(load(image) == CUDA_SUCCESS);
+    REQUIRE(cuModuleGetFunction(&function, module, "probe") == CUDA_SUCCESS);
+  }
+
+  CUresult launch() {
+    fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+    void *arguments[]{&allocation};
+    return cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr);
+  }
+
+  gemstone_test::RpcFixture fixture;
+  std::string endpoint;
+  gemstone_test::Environment rpcEndpoint;
+  gemstone_test::Environment rpcClient;
+  gemstone_test::Environment targetArch;
+  CUcontext context = nullptr;
+  CUdeviceptr allocation = 0;
+  CUmodule module = nullptr;
+  CUfunction function = nullptr;
+};
+
+// cuda.h spells these as C-style casts of integers
+void *const LaunchParamBufferPointer = reinterpret_cast<void *>(uintptr_t{0x1});
+void *const LaunchParamBufferSize = reinterpret_cast<void *>(uintptr_t{0x2});
 
 } // namespace
 
 TEST_CASE("CUDA legacy linker symbols preserve every PTX input", "[cuda][code-mode]") {
-  setCodeMode("ptx");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCode, "ptx");
   CUlinkState state = nullptr;
   REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
   std::string first(Ptx);
@@ -97,13 +141,15 @@ TEST_CASE("CUDA legacy linker symbols preserve every PTX input", "[cuda][code-mo
 TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin images", "[cuda][code-mode]") {
   gemstone_test::RpcFixture fixture;
   const auto endpoint = fixture.endpoint();
-  REQUIRE(setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0);
-  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
-  REQUIRE(setenv(gemstone::environment::TargetArch, "compute_89", 1) == 0);
+  const gemstone_test::Environment rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str());
+  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClient, "42");
+  const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, "compute_89");
+  std::optional<gemstone_test::Environment> codeMode;
+  const auto setCodeMode = [&](const char *mode) { codeMode.emplace(gemstone::environment::CudaCode, mode); };
 
   setCodeMode("cubin");
   CHECK((cuInit(0) == CUDA_ERROR_NOT_INITIALIZED));
-  REQUIRE(unsetenv(gemstone::environment::CudaCode) == 0);
+  setCodeMode(nullptr);
   REQUIRE((cuInit(0) == CUDA_SUCCESS));
   CUcontext context = nullptr;
   REQUIRE((cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS));
@@ -126,7 +172,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   const auto cubin = minimalCubin();
   const auto fatbin = mixedFatbin(cubin);
   const auto metadataOnlyFatbin = metadataFatbin(cubin);
-  std::string ptx(Ptx);
+  std::string const ptx(Ptx);
   const auto loadsBefore = fixture.programLoads.load();
 
   setCodeMode("sass");
@@ -227,14 +273,15 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS));
   CUfunction clustered = nullptr;
   REQUIRE((cuModuleGetFunction(&clustered, module, "probe") == CUDA_SUCCESS));
-  CHECK((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 2) == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 17) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
+  CHECK((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 2) == CUDA_SUCCESS));
   REQUIRE((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 1) == CUDA_SUCCESS));
   int clusterWidth = -1;
   REQUIRE((cuFuncGetAttribute(&clusterWidth, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, clustered) == CUDA_SUCCESS));
   CHECK(clusterWidth == 1);
   CUlaunchAttribute attribute{};
   attribute.id = CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION;
-  attribute.value.clusterDim = {2, 1, 1};
+  attribute.value.clusterDim = {.x = 2, .y = 1, .z = 1};
   CUlaunchConfig config{};
   config.gridDimX = 2;
   config.gridDimY = config.gridDimZ = config.blockDimX = config.blockDimY = config.blockDimZ = 1;
@@ -247,23 +294,26 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   CHECK(sharedForOne == 2 * sharedForTwo);
   CHECK((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 0, 256) == CUDA_ERROR_INVALID_VALUE));
   CHECK((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 2, 1024) == CUDA_ERROR_INVALID_VALUE));
-  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_NOT_SUPPORTED));
+  config.gridDimX = 3;
+  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
+  attribute.value.clusterDim = {.x = 17, .y = 1, .z = 1};
+  config.gridDimX = 17;
+  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
   REQUIRE((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 0) == CUDA_SUCCESS));
-  attribute.value.clusterDim = {3, 1, 1};
+  attribute.value.clusterDim = {.x = 3, .y = 1, .z = 1};
   config.gridDimX = 3;
   config.gridDimY = 1024;
   config.blockDimX = 128;
   config.sharedMemBytes = 98304; // Exact cuBLAS Hopper catalogue capacity probe.
   int activeClusters = -1;
   REQUIRE((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_SUCCESS));
-  CHECK(activeClusters == 0);
-  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_NOT_SUPPORTED));
-  attribute.value.clusterDim = {1, 1, 1};
+  CHECK(activeClusters > 0);
+  attribute.value.clusterDim = {.x = 1, .y = 1, .z = 1};
   REQUIRE((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_SUCCESS));
   CHECK(activeClusters > 0);
-  attribute.value.clusterDim = {2, 1, 1};
+  attribute.value.clusterDim = {.x = 2, .y = 1, .z = 1};
   CHECK((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
-  attribute.value.clusterDim = {0, 1, 1};
+  attribute.value.clusterDim = {.x = 0, .y = 1, .z = 1};
   CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
   config.attrs = nullptr;
   CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
@@ -291,9 +341,10 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuLibraryUnload(library) == CUDA_SUCCESS));
 
   // The fixture uses kind 2 for allocation parameters; the gap checks ABI offsets.
-  fixture.kernelMetadata(24, 2, {{8, 0, 2, 0}, {8, 16, 2, 0}});
-  fixture.expect({1, 1, 1, 0, 0});
-  fixture.expectAllocationArguments({{0, 0}, {0, 4}});
+  fixture.kernelMetadata(
+      24, 2, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}, {.width = 8, .offset = 16, .kind = 2, .containsPointers = 0}});
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+  fixture.expectAllocationArguments({{.alias = 0, .offset = 0}, {.alias = 0, .offset = 4}});
   REQUIRE(cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS);
   REQUIRE(cuModuleGetFunction(&function, module, "probe") == CUDA_SUCCESS);
   REQUIRE(cuMemAlloc_v2(&allocation, bytes) == CUDA_SUCCESS);
@@ -301,7 +352,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   store64(packed, 0, allocation);
   store64(packed, 16, allocation + 4);
   size_t packedSize = packed.size();
-  void *extra[]{CU_LAUNCH_PARAM_BUFFER_SIZE, &packedSize, CU_LAUNCH_PARAM_BUFFER_POINTER, packed.data(), CU_LAUNCH_PARAM_END};
+  void *extra[]{LaunchParamBufferSize, &packedSize, LaunchParamBufferPointer, packed.data(), CU_LAUNCH_PARAM_END};
   const auto launches = fixture.launches.load();
   CHECK(cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, extra) == CUDA_ERROR_INVALID_VALUE);
   --packedSize;
@@ -315,8 +366,212 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE(cuModuleUnload(module) == CUDA_SUCCESS);
 
   CHECK((cuCtxDestroy_v2(context) == CUDA_SUCCESS));
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
-  unsetenv(gemstone::environment::TargetArch);
-  unsetenv(gemstone::environment::CudaCode);
+}
+
+TEST_CASE("CUDA architecture- and family-specific targets report their compute capability", "[cuda][code-mode]") {
+  gemstone_test::RpcFixture const fixture;
+  const auto endpoint = fixture.endpoint();
+  const gemstone_test::Environment rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str());
+  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClient, "42");
+  for (const auto &[target, major, minor] :
+       {std::tuple{"sm_90a", 9, 0}, std::tuple{"sm_100f", 10, 0}, std::tuple{"sm_103a", 10, 3}, std::tuple{"compute_120f", 12, 0}}) {
+    const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, target);
+    REQUIRE((cuInit(0) == CUDA_SUCCESS));
+    int value = 0;
+    REQUIRE((cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, 0) == CUDA_SUCCESS));
+    CHECK(value == major);
+    REQUIRE((cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, 0) == CUDA_SUCCESS));
+    CHECK(value == minor);
+  }
+}
+
+TEST_CASE("CUDA module and kernel lookup failures follow the failure kind and image kind", "[cuda][code-mode]") {
+  using gemstone::execution::FailureKind;
+  FailureSession session;
+  const auto cubin = minimalCubin();
+  const std::string ptx(Ptx);
+
+  const auto rejects = [&](const void *image, FailureKind kind) {
+    session.fixture.rejectNext(gemstone::execution::operation::LoadProgram, kind);
+    session.module = nullptr;
+    return session.load(image);
+  };
+  CHECK(rejects(ptx.c_str(), FailureKind::InvalidProgram) == CUDA_ERROR_INVALID_PTX);
+  CHECK(rejects(cubin.data(), FailureKind::InvalidProgram) == CUDA_ERROR_INVALID_IMAGE);
+  CHECK(rejects(ptx.c_str(), FailureKind::Unsupported) == CUDA_ERROR_NOT_SUPPORTED);
+  CHECK(rejects(ptx.c_str(), FailureKind::InvalidRequest) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(rejects(ptx.c_str(), FailureKind::Failed) == CUDA_ERROR_UNKNOWN);
+  CHECK(session.module == nullptr);
+
+  REQUIRE(session.load(ptx.c_str()) == CUDA_SUCCESS);
+  const auto lookup = [&](FailureKind kind) {
+    session.fixture.rejectNext(gemstone::execution::operation::DescribeKernel, kind);
+    return cuModuleGetFunction(&session.function, session.module, "probe");
+  };
+  CHECK(lookup(FailureKind::InvalidProgram) == CUDA_ERROR_INVALID_PTX);
+  CHECK(lookup(FailureKind::NotFound) == CUDA_ERROR_NOT_FOUND);
+  CHECK(lookup(FailureKind::Failed) == CUDA_ERROR_NOT_FOUND);
+  CHECK(cuModuleUnload(session.module) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA dispatch failures that leave the context usable are reported once", "[cuda][code-mode]") {
+  using gemstone::execution::FailureKind;
+  FailureSession session;
+  const auto cubin = minimalCubin();
+  const std::string ptx(Ptx);
+  const struct {
+    FailureKind kind;
+    bool cubinModule;
+    CUresult expected;
+  } cases[]{
+      {.kind = FailureKind::OutOfResources, .cubinModule = false, .expected = CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES},
+      {.kind = FailureKind::InvalidProgram, .cubinModule = false, .expected = CUDA_ERROR_INVALID_PTX},
+      {.kind = FailureKind::InvalidProgram, .cubinModule = true, .expected = CUDA_ERROR_INVALID_IMAGE},
+      {.kind = FailureKind::Unsupported, .cubinModule = false, .expected = CUDA_ERROR_NOT_SUPPORTED},
+      {.kind = FailureKind::InvalidRequest, .cubinModule = false, .expected = CUDA_ERROR_INVALID_VALUE},
+      {.kind = FailureKind::NotFound, .cubinModule = false, .expected = CUDA_ERROR_NOT_FOUND},
+  };
+  for (const auto &[kind, cubinModule, expected] : cases) {
+    CAPTURE(static_cast<int>(kind), cubinModule);
+    session.loadKernel(cubinModule ? static_cast<const void *>(cubin.data()) : ptx.c_str());
+    session.fixture.failNextCompletion(kind);
+    REQUIRE(session.launch() == CUDA_SUCCESS);
+    CHECK(cuCtxSynchronize() == expected);
+    CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    CHECK(cuStreamQuery(nullptr) == CUDA_SUCCESS);
+    CHECK(cudaGetLastError() == cudaSuccess);
+    REQUIRE(session.launch() == CUDA_SUCCESS);
+    CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    REQUIRE(cuModuleUnload(session.module) == CUDA_SUCCESS);
+  }
+}
+
+TEST_CASE("CUDA kernels that fail to load fail their launch, leaving the following synchronisation clean", "[cuda][code-mode]") {
+  using gemstone::execution::FailureKind;
+  FailureSession session;
+  const auto cubin = minimalCubin();
+  const std::string ptx(Ptx);
+  const struct {
+    bool cubinModule;
+    CUresult driver;
+    cudaError_t runtime;
+  } cases[]{
+      {.cubinModule = false, .driver = CUDA_ERROR_INVALID_PTX, .runtime = cudaErrorInvalidPtx},
+      {.cubinModule = true, .driver = CUDA_ERROR_INVALID_IMAGE, .runtime = cudaErrorInvalidKernelImage},
+  };
+  for (const auto &[cubinModule, driver, runtime] : cases) {
+    CAPTURE(cubinModule);
+    session.loadKernel(cubinModule ? static_cast<const void *>(cubin.data()) : ptx.c_str());
+    session.fixture.failNextCompletion(FailureKind::InvalidProgram);
+    session.fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+    void *arguments[]{&session.allocation};
+    CHECK(__cudaLaunchKernel(reinterpret_cast<cudaKernel_t>(session.function), dim3(1), dim3(1), arguments, 0, nullptr) == runtime);
+    CHECK(cudaGetLastError() == runtime);
+    CHECK(cudaDeviceSynchronize() == cudaSuccess);
+    CHECK(cudaGetLastError() == cudaSuccess);
+
+    session.fixture.failNextCompletion(FailureKind::InvalidProgram);
+    CHECK(session.launch() == driver);
+    CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    REQUIRE(cuModuleUnload(session.module) == CUDA_SUCCESS);
+  }
+}
+
+namespace {
+
+// A context-corrupting failure outlives its launch, so each kind runs in a process of its own.
+void checkStickyFailure(gemstone::execution::FailureKind kind, CUresult expected) {
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+
+  session.fixture.failNextCompletion(kind);
+  REQUIRE(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == expected);
+  CHECK(cuCtxSynchronize() == expected);
+  CHECK(cuStreamQuery(nullptr) == expected);
+  CHECK(session.launch() == expected);
+  CHECK(cudaPeekAtLastError() == static_cast<cudaError_t>(expected));
+  CHECK(cudaGetLastError() == static_cast<cudaError_t>(expected));
+  CHECK(cudaGetLastError() == static_cast<cudaError_t>(expected));
+  CHECK(cuDevicePrimaryCtxReset(0) == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+}
+
+} // namespace
+
+TEST_CASE("CUDA illegal addresses persist", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::IllegalAddress, CUDA_ERROR_ILLEGAL_ADDRESS);
+}
+
+TEST_CASE("CUDA misaligned addresses persist", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::MisalignedAddress, CUDA_ERROR_MISALIGNED_ADDRESS);
+}
+
+TEST_CASE("CUDA illegal instructions persist", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::IllegalInstruction, CUDA_ERROR_ILLEGAL_INSTRUCTION);
+}
+
+TEST_CASE("CUDA traps persist as launch failures", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::Trapped, CUDA_ERROR_LAUNCH_FAILED);
+}
+
+TEST_CASE("CUDA failed assertions persist", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::AssertionFailed, CUDA_ERROR_ASSERT);
+}
+
+TEST_CASE("CUDA launch timeouts persist", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::TimedOut, CUDA_ERROR_LAUNCH_TIMEOUT);
+}
+
+TEST_CASE("CUDA unclassified dispatch failures persist as launch failures", "[cuda][code-mode]") {
+  checkStickyFailure(gemstone::execution::FailureKind::Failed, CUDA_ERROR_LAUNCH_FAILED);
+}
+
+TEST_CASE("CUDA launch configurations outside the device limits are invalid configurations", "[cuda][code-mode]") {
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  void *arguments[]{&session.allocation};
+  const struct {
+    unsigned gridY, blockX, blockY, blockZ;
+  } limits[]{
+      {.gridY = 1, .blockX = 1025, .blockY = 1, .blockZ = 1},  {.gridY = 1, .blockX = 1, .blockY = 1025, .blockZ = 1},
+      {.gridY = 1, .blockX = 1, .blockY = 1, .blockZ = 65},    {.gridY = 1, .blockX = 33, .blockY = 32, .blockZ = 1},
+      {.gridY = 65536, .blockX = 1, .blockY = 1, .blockZ = 1}, {.gridY = 0, .blockX = 1, .blockY = 1, .blockZ = 1},
+      {.gridY = 1, .blockX = 0, .blockY = 1, .blockZ = 1},
+  };
+  for (const auto &[gridY, blockX, blockY, blockZ] : limits) {
+    CAPTURE(gridY, blockX, blockY, blockZ);
+    CHECK(cuLaunchKernel(session.function, 1, gridY, 1, blockX, blockY, blockZ, 0, nullptr, arguments, nullptr)
+          == CUDA_ERROR_INVALID_VALUE);
+    CHECK(__cudaLaunchKernel(reinterpret_cast<cudaKernel_t>(session.function), dim3(1, gridY, 1), dim3(blockX, blockY, blockZ), arguments,
+                             0, nullptr)
+          == cudaErrorInvalidConfiguration);
+    CHECK(cudaGetLastError() == cudaErrorInvalidConfiguration);
+    CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  }
+}
+
+TEST_CASE("CUDA names every error the facade reports", "[cuda][code-mode]") {
+  const auto [driver, runtime, driverName, runtimeName] = GENERATE(table<CUresult, cudaError_t, const char *, const char *>({
+      {CUDA_ERROR_INVALID_IMAGE, cudaErrorInvalidKernelImage, "CUDA_ERROR_INVALID_IMAGE", "cudaErrorInvalidKernelImage"},
+      {CUDA_ERROR_NO_BINARY_FOR_GPU, cudaErrorNoKernelImageForDevice, "CUDA_ERROR_NO_BINARY_FOR_GPU", "cudaErrorNoKernelImageForDevice"},
+      {CUDA_ERROR_INVALID_PTX, cudaErrorInvalidPtx, "CUDA_ERROR_INVALID_PTX", "cudaErrorInvalidPtx"},
+      {CUDA_ERROR_ILLEGAL_ADDRESS, cudaErrorIllegalAddress, "CUDA_ERROR_ILLEGAL_ADDRESS", "cudaErrorIllegalAddress"},
+      {CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES, cudaErrorLaunchOutOfResources, "CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES",
+       "cudaErrorLaunchOutOfResources"},
+      {CUDA_ERROR_LAUNCH_TIMEOUT, cudaErrorLaunchTimeout, "CUDA_ERROR_LAUNCH_TIMEOUT", "cudaErrorLaunchTimeout"},
+      {CUDA_ERROR_ASSERT, cudaErrorAssert, "CUDA_ERROR_ASSERT", "cudaErrorAssert"},
+      {CUDA_ERROR_ILLEGAL_INSTRUCTION, cudaErrorIllegalInstruction, "CUDA_ERROR_ILLEGAL_INSTRUCTION", "cudaErrorIllegalInstruction"},
+      {CUDA_ERROR_MISALIGNED_ADDRESS, cudaErrorMisalignedAddress, "CUDA_ERROR_MISALIGNED_ADDRESS", "cudaErrorMisalignedAddress"},
+      {CUDA_ERROR_LAUNCH_FAILED, cudaErrorLaunchFailure, "CUDA_ERROR_LAUNCH_FAILED", "cudaErrorLaunchFailure"},
+  }));
+  CHECK(static_cast<int>(driver) == static_cast<int>(runtime));
+  const char *name = nullptr;
+  REQUIRE(cuGetErrorName(driver, &name) == CUDA_SUCCESS);
+  CHECK(std::string(name) == driverName);
+  CHECK(std::string(cudaGetErrorName(runtime)) == runtimeName);
+  CHECK(std::string(cudaGetErrorName(cudaErrorInvalidConfiguration)) == "cudaErrorInvalidConfiguration");
+  CHECK(cuGetErrorName(static_cast<CUresult>(cudaErrorInvalidConfiguration), &name) == CUDA_ERROR_INVALID_VALUE);
 }

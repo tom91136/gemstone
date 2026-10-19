@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 import java.nio.file.Path
+import scala.collection.mutable
 import scala.sys.process.Process
 import scala.sys.process.ProcessLogger
 
@@ -32,7 +33,7 @@ json.dump(result, sys.stdout, sort_keys=True)
   ): ujson.Value = {
     val command = Vector(python, "-B", "-c", Export, ujson.write(selection), executable.toString, "--dump-json") ++
       includes.flatMap(path => Vector("-I", path.toString)) :+ source.toString
-    val output = StringBuilder()
+    val output = mutable.StringBuilder()
     val status = Process(command).!(ProcessLogger(line => output.append(line), Console.err.println(_)))
     require(status == 0, s"TableGen export failed with exit code $status")
     ujson.read(output.result())

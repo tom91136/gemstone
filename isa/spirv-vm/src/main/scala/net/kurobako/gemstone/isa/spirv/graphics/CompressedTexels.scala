@@ -37,25 +37,27 @@ private object CompressedTexels {
     Array(-4, -6, -8, -9, 3, 5, 7, 8),
     Array(-3, -5, -7, -9, 2, 4, 6, 8)
   )
-  private def clamp(value: Int, low: Int = 0, high: Int = 255): Int = math.max(low, math.min(high, value))
-  private def channel(data: Array[Byte], offset: Int, x: Int, y: Int, signed: Boolean, eac: Boolean): Float = {
-    val raw        = data(offset) & 255
-    val base       = if (signed) math.max(-127, data(offset).toInt) else raw
-    val multiplier = (data(offset + 1) & 255) >>> 4
-    val selectors  = (2 until 8).foldLeft(0L)((value, byte) => (value << 8) | (data(offset + byte) & 255))
-    val selector   = ((selectors >>> (45 - (x * 4 + y) * 3)) & 7).toInt
-    val modifier   = modifiers(data(offset + 1) & 15)(selector)
-    if (!eac) clamp(base + modifier * multiplier).toFloat / 255f
-    else {
-      val value = base * 8 + (if (signed) 0 else 4) + modifier * (if (multiplier == 0) 1 else multiplier * 8)
-      if (signed) clamp(value, low = -1023, high = 1023).toFloat / 1023f
-      else clamp(value, high = 2047).toFloat / 2047f
-    }
+  private def clamp(value: Int, low: Int = 0, high: Int = 255): Int           = math.max(low, math.min(high, value))
+  private def modifierAt(data: Array[Byte], offset: Int, x: Int, y: Int): Int = {
+    val selectors = (2 until 8).foldLeft(0L)((value, byte) => (value << 8) | (data(offset + byte) & 255))
+    val selector  = ((selectors >>> (45 - (x * 4 + y) * 3)) & 7).toInt
+    modifiers(data(offset + 1) & 15)(selector)
+  }
+  private def multiplierAt(data: Array[Byte], offset: Int): Int               = (data(offset + 1) & 255) >>> 4
+  private def etcAlpha(data: Array[Byte], offset: Int, x: Int, y: Int): Float =
+    clamp((data(offset) & 255) + modifierAt(data, offset, x, y) * multiplierAt(data, offset)).toFloat / 255f
+  private def eacChannel(data: Array[Byte], offset: Int, x: Int, y: Int, signed: Boolean): Float = {
+    val base       = if (signed) math.max(-127, data(offset).toInt) else data(offset) & 255
+    val multiplier = multiplierAt(data, offset)
+    val value      = base * 8 + (if (signed) 0 else 4) + modifierAt(data, offset, x, y) *
+      (if (multiplier == 0) 1 else multiplier * 8)
+    if (signed) clamp(value, low = -1023, high = 1023).toFloat / 1023f
+    else clamp(value, high = 2047).toFloat / 2047f
   }
   def decode(format: GraphicsFormat, data: Array[Byte]): Array[Float] = {
     import GraphicsCompression.*
     val result = Array.tabulate(64)(i => if (i % 4 == 3) 1f else 0f)
-    val eac    = Set(EacR, EacRg, EacSignedR, EacSignedRg)(format.compression)
+    val eac    = PartialFunction.cond(format.compression) { case EacR | EacRg | EacSignedR | EacSignedRg => true }
     if (eac) {
       val signed     = format.compression == EacSignedR || format.compression == EacSignedRg
       val components = if (format.compression == EacRg || format.compression == EacSignedRg) 2 else 1
@@ -63,7 +65,7 @@ private object CompressedTexels {
         y    <- 0 until 4
         x    <- 0 until 4
         lane <- 0 until components
-      } result((y * 4 + x) * 4 + lane) = channel(data, lane * 8, x, y, signed, true)
+      } result((y * 4 + x) * 4 + lane) = eacChannel(data, lane * 8, x, y, signed)
     } else {
       val offset                                        = if (format.compression == EtcRgba) 8 else 0
       val b                                             = Array.tabulate(8)(i => data(offset + i) & 255)
@@ -153,7 +155,7 @@ private object CompressedTexels {
         }
         result((y * 4 + x) * 4 + 3) =
           if (transparent) 0f
-          else if (format.compression == EtcRgba) channel(data, 0, x, y, signed = false, eac = false) else 1f
+          else if (format.compression == EtcRgba) etcAlpha(data, 0, x, y) else 1f
       }
     }
     result

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass.asm
 
 import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import scala.collection.mutable
 
@@ -28,7 +29,7 @@ object Encoder {
         case _                                   => Right(bindings.updated("Opcode", value))
       }
     }
-    val width = database.width.raw
+    val width = database.width
     for {
       original <- preserved match {
         case Some(value) if value < 0 || value.bitLength > width => Left(s"preserved word exceeds $width bits")
@@ -40,7 +41,7 @@ object Encoder {
       encodedFields <- form.fields.traverse { field =>
         val oldField = preserved.map(word => FieldDecoder.extract(word, field.positions))
         val encoded  = field.expression match {
-          case NVDisasm.Expression.Constant(_, true) if oldField.nonEmpty => Right(oldField.get)
+          case Expression.Constant(_, true) if oldField.nonEmpty => Right(oldField.get)
           case _ => evaluate(database, field.expression, values).orElse {
               oldField.filter(FieldDecoder.accepts(database, field.expression, _, values))
                 .toRight(s"cannot encode ${field.name} from supplied bindings")
@@ -60,7 +61,7 @@ object Encoder {
         val positions = field.positions
         if (positions.distinct.size != positions.size)
           Left(s"${form.name}.${field.name} assigns a bit more than once")
-        else if (positions.exists(position => position < 0 || position >= database.width.raw))
+        else if (positions.exists(position => position < 0 || position >= database.width))
           Left(s"${form.name}.${field.name} has a position outside the ${database.width}-bit word")
         else Right(())
       }
@@ -102,30 +103,30 @@ object Encoder {
 
   private def evaluate(
       database: NVDisasm.Database,
-      expression: NVDisasm.Expression,
+      expression: Expression,
       bindings: Map[String, BigInt]
   ): Either[String, BigInt] = expression match {
-    case NVDisasm.Expression.Constant(value, _)            => Right(value)
-    case NVDisasm.Expression.Reference(name, attribute, _) =>
+    case Expression.Constant(value, _)            => Right(value)
+    case Expression.Reference(name, attribute, _) =>
       val key = NVDisasm.bindingKey(name, attribute)
       bindings.get(key).toRight(s"missing encoding binding $key")
-    case NVDisasm.Expression.Scale(inner, factor) =>
+    case Expression.Scale(inner, factor) =>
       if (factor == 0) Left("zero encoding scale")
       else evaluate(database, inner, bindings).flatMap { value =>
         Either.cond(value % factor == 0, value / factor, s"value $value cannot be represented by scale $factor")
       }
-    case NVDisasm.Expression.Multiply(inner, factor) =>
+    case Expression.Multiply(inner, factor) =>
       if (factor == 0) Left("zero encoding multiplier")
       else evaluate(database, inner, bindings).map(_ * factor)
-    case NVDisasm.Expression.Identity(first, second) => for {
+    case Expression.Identity(first, second) => for {
         left  <- evaluate(database, first, bindings)
         right <- evaluate(database, second, bindings)
         value <- Either.cond(left == right, left, s"conflicting identity encodings $left and $right")
       } yield value
-    case NVDisasm.Expression.FixedFloat(inner, _)        => evaluate(database, inner, bindings)
-    case NVDisasm.Expression.Relaxed(inner)              => evaluate(database, inner, bindings)
-    case NVDisasm.Expression.FloatConvert(value = inner) => evaluate(database, inner, bindings)
-    case NVDisasm.Expression.Lookup(name, arguments)     =>
+    case Expression.FixedFloat(inner, _)        => evaluate(database, inner, bindings)
+    case Expression.Relaxed(inner)              => evaluate(database, inner, bindings)
+    case Expression.FloatConvert(value = inner) => evaluate(database, inner, bindings)
+    case Expression.Lookup(name, arguments)     =>
       database.byTable.get(name).toRight(s"missing encoding lookup $name").flatMap { table =>
         arguments.traverse(evaluate(database, _, bindings)).flatMap { inputs =>
           table.lookup(inputs) match {

@@ -4,7 +4,6 @@ import scala.annotation.tailrec
 
 /** Resolves the small conditional-preprocessing language used by legacy SASS tables. */
 object SASSPreprocessor {
-  case class ParseError(message: String, offset: Int)
 
   private case class Branch(parentActive: Boolean, condition: Boolean, sawElse: Boolean)
 

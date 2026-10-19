@@ -14,6 +14,19 @@ import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class ConstantSuite extends munit.FunSuite {
+  private val Flags = Vec(false, true)
+
+  // cuda::barrier's init in conformance/unified/src/cuda/async_bulk.cu counts the block with ULDC.64 on sm_75
+  for (sm <- Vec(75, 89)) test(s"sm_$sm 64-bit constant loads read launch dimensions in pairs") {
+    val run = program(
+      sm,
+      "ULDC.64 UR4, c[0x0][0x0]; ULDC.64 UR6, c[0x0][0x8]; ULDC.64 UR8, c[0x0][0x10]; MOV R4, UR4; MOV R5, UR5; " +
+        "MOV R6, UR6; MOV R7, UR7; MOV R8, UR8; MOV R9, UR9; LDC.64 R2, c[0x0][0x160]; STG.E.128 [R2.64], R4; " +
+        "STG.E.64 [R2.64+0x10], R8; EXIT"
+    ).launch(LaunchGeometry.Dimensions(4, 2, 3), LaunchGeometry.Dimensions(5, 6, 7))(Arg.zeros(24))
+    assertEquals(run.words(0), Vec(4L, 2L, 3L, 5L, 6L, 7L))
+  }
+
   test("kernel-scoped constant banks are constant sections for both decoding and binding") {
     Vec(".nv.constant3", ".nv.constant3.scoped", ".nv.constant12._Z6scopedv")
       .foreach(name => assert(Cubin.isConstantSection(name), name))
@@ -50,7 +63,8 @@ class ConstantSuite extends munit.FunSuite {
     }
   }
 
-  test("unused catalogues with external device relocations bind but remain non-executable") {
+  // ptxas binds driver system calls through bank 4; kernels run until they reach one, which traps.
+  test("unused catalogues with external device system calls bind and leave their kernels executable") {
     val initial = Vec.fill(8)(0.toByte)
     val base    = Harness.module(
       120,
@@ -81,7 +95,7 @@ class ConstantSuite extends munit.FunSuite {
       0,
       24,
       symbols.index,
-      bank.index.raw,
+      bank.index,
       LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((1L << 32) | 2L, 8) ++ LittleEndian.toVec(0L, 8)
     )
     val module  = base.copy(sections = base.sections ++ Vec(strings, symbols, relocation))
@@ -106,12 +120,8 @@ class ConstantSuite extends munit.FunSuite {
         Vec(KernelTask.Argument.Memory(storage, 0L))
       ).toOption.get
       val completion = service.launch(program, task).fold(error => fail(error.message), identity)
-      service.completion(completion) match {
-        case Right(CompletionStatus.Failed(error: ExecutionFailure.Unsupported)) =>
-          assert(error.message.contains(target), error.message)
-        case other => fail(s"expected unsupported relocation failure, got $other")
-      }
-      assertEquals(service.read(storage, 0L, 8), Right(initial))
+      assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
+      assertEquals(service.read(storage, 0L, 8), Right(LittleEndian.toVec(123L, 8)))
     }
   }
 
@@ -152,8 +162,8 @@ class ConstantSuite extends munit.FunSuite {
         assertEquals(named.initial.size, 0)
         val alias = named.alias.getOrElse(fail("named constant has no bank alias"))
         val bank  = service.global(catalogue, alias.name).fold(e => fail(e.message), identity)
-        assert(alias.offset.raw + named.size.raw <= bank.size.raw)
-        val storage = service.registerAllocation(bank.size.raw.toInt.unsafe[Int > 0]).toOption.get
+        assert(alias.offset.raw + named.size <= bank.size)
+        val storage = service.registerAllocation(bank.size.toInt.unsafe[Int > 0]).toOption.get
         assert(service.write(storage, 0L, bank.initial).isRight)
         val output  = service.registerAllocation(8).toOption.get
         val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(lowered))
@@ -176,9 +186,63 @@ class ConstantSuite extends munit.FunSuite {
         }
       }
     }
+  // CUDA 13.3 ptxas loads the driver's malloc from a bank 4 pointer relocated to the undefined function and calls it
+  // with CALL.ABS.NOINC, size and result in R4:R5.
+  test("bank pointers relocated to the driver's malloc reach it through an absolute register call") {
+    val base = Harness.module(
+      89,
+      Vec(Entry("driver_call", 0x160, Vec(8), registers = 12)),
+      constants = Vec(".nv.constant4" -> Vec.fill(8)(0.toByte))
+    )
+    val bank        = base.sections.find(_.name == ".nv.constant4").get
+    val names       = Vec.from("\u0000malloc\u0000".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val strings     = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
+    val symbolBytes = java.nio.ByteBuffer.allocate(48).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    symbolBytes.putInt(24, 1).put(28, 0x12.toByte)
+    val symbols =
+      Cubin.Section(strings.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
+    val relocation = Cubin.Section(
+      symbols.index + 1,
+      ".rel.nv.constant4",
+      9,
+      0,
+      16,
+      symbols.index,
+      bank.index,
+      LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((1L << 32) | 2L, 8)
+    )
+    val module = base.copy(sections = base.sections ++ Vec(strings, symbols, relocation))
+    assertEquals(
+      Cubin.relocateConstants(module, Map.empty).map(_.sections(bank.index).bytes),
+      Right(LittleEndian.toVec(Cubin.DriverFunctions("malloc"), 8))
+    )
+    val functions = Vec(Listing.program(
+      "LDC.64 R2, c[0x4][0x0]; MOV R4, 0x10; MOV R5, RZ; CALL.ABS.NOINC R2; MOV R6, 0x2a; ST.E [R4.64], R6; " +
+        "LD.E R7, [R4.64]; LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R7; EXIT",
+      "driver_call"
+    ).value)
+    session { (service, fixtures) =>
+      val program =
+        service.load(ProgramEncoding.CUDACubin, fixtures.image(Image(module, functions)))
+          .fold(e => fail(e.message), identity)
+      val storage = service.registerAllocation(8).toOption.get
+      val output  = service.registerAllocation(4).toOption.get
+      assert(service.bindGlobal(program, s"__sass_const${bank.index}", storage, 0L).isRight)
+      val task = KernelTask.validated(
+        "driver_call": NonEmpty[String],
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec(KernelTask.Argument.Memory(output, 0L))
+      ).toOption.get
+      val completion = service.launch(program, task).fold(e => fail(e.message), identity)
+      assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
+      assertEquals(service.read(output, 0L, 4), Right(LittleEndian.toVec(42L, 4)))
+    }
+  }
+
   for {
-    destinationFirst <- Vec(false, true)
-    dynamic          <- Vec(false, true)
+    destinationFirst <- Flags
+    dynamic          <- Flags
   } test(s"absolute data relocation survives binding order=$destinationFirst and dynamic=$dynamic") {
     val initial = Vec.fill(8)(0.toByte) ++ LittleEndian.toVec(4L, 8)
     val base    = Harness.module(
@@ -200,8 +264,9 @@ class ConstantSuite extends munit.FunSuite {
     )
     val global      = Cubin.Section(strings.index + 1, ".nv.global.init", 1, 0, 8, 0, 0, base.globals.head.bytes)
     val symbolBytes = java.nio.ByteBuffer.allocate(48).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-    symbolBytes.putInt(24, 1).put(28, 1.toByte).putShort(30, global.index.raw.toShort).putLong(40, 8L)
-    val symbols = Cubin.Section(global.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
+    symbolBytes.putInt(24, 1).put(28, 1.toByte).putShort(30, global.index.toShort).putLong(40, 8L)
+    val symbols =
+      Cubin.Section(global.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
     // CUDA ELF relocation type 2 is an absolute 64-bit data pointer; REL stores its addend in the bank.
     val relocation = Cubin.Section(
       symbols.index + 1,
@@ -210,7 +275,7 @@ class ConstantSuite extends munit.FunSuite {
       0,
       16,
       symbols.index,
-      bank.index.raw,
+      bank.index,
       LittleEndian.toVec(8L, 8) ++ LittleEndian.toVec((1L << 32) | 2L, 8)
     )
     val module    = base.copy(sections = base.sections ++ Vec(strings, global, symbols, relocation))
@@ -259,7 +324,7 @@ class ConstantSuite extends munit.FunSuite {
     }
     assert(Cubin.relocateConstants(module, Map.empty).left.exists(_.contains("unbound")))
     val invalid = relocation.copy(bytes = LittleEndian.toVec(8L, 8) ++ LittleEndian.toVec((1L << 32) | 99L, 8))
-    assert(Cubin.constantRelocations(module.copy(sections = module.sections.updated(relocation.index.raw, invalid)))
+    assert(Cubin.constantRelocations(module.copy(sections = module.sections.updated(relocation.index, invalid)))
       .left.exists(_.contains("unsupported constant relocation kind")))
   }
 
@@ -316,7 +381,7 @@ class ConstantSuite extends munit.FunSuite {
     val module     = saxpy.module(Vec(8, 8, 4, 4))
     val constant   = module.sections.find(_.name.startsWith(".nv.constant0")).get
     val relocation =
-      Cubin.Section(module.sections.nonNegativeSize, ".rel" + constant.name, 9, 0, 16, 0, constant.index.raw, Vec.empty)
+      Cubin.Section(module.sections.nonNegativeSize, ".rel" + constant.name, 9, 0, 16, 0, constant.index, Vec.empty)
     val relocated = module.copy(sections = module.sections :+ relocation)
     assert(lowerStatements(relocated, relocated.kernels.head, saxpy.functions).left.exists(_.contains("relocations")))
   }

@@ -1,18 +1,15 @@
 #include "gemstone/hsa/doorbell_monitor.hpp"
 
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
-
-#include <stdint.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -42,7 +39,7 @@ struct Captures {
 PacketResult capture(Captures &captures, uint64_t packetId, const void *raw) {
   const auto &packet = *static_cast<const Packet *>(raw);
   {
-    std::lock_guard<std::mutex> guard(captures.lock);
+    std::scoped_lock const guard(captures.lock);
     captures.packetIds.push_back(packetId);
     captures.markers.push_back(packet.marker);
   }
@@ -70,7 +67,7 @@ struct QueueFixture {
     REQUIRE((queue));
   }
 
-  void ringDoorbell(uint64_t value) { __atomic_store_n(queue->doorbell(), value, __ATOMIC_RELEASE); }
+  void ringDoorbell(uint64_t value) const { __atomic_store_n(queue->doorbell(), value, __ATOMIC_RELEASE); }
   void setWrite(uint64_t value) { __atomic_store_n(&writeIndex, value, __ATOMIC_RELEASE); }
 
   std::vector<Packet> ring;

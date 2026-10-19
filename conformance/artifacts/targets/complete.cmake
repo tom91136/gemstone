@@ -17,6 +17,14 @@ if(NOT DEFINED CUDA_ARCHITECTURES)
     sm_100
     sm_103
     sm_120
+
+    sm_90a
+    sm_100a
+    sm_100f
+    sm_103a
+    sm_103f
+    sm_120a
+    sm_120f
   )
 endif()
 if(NOT DEFINED AMDGPU_ARCHITECTURES)

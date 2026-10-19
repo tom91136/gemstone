@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, *}
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
@@ -75,11 +76,11 @@ class SharedMemorySuite extends munit.FunSuite {
   test("compiler-produced sm_86 LDGSTS adds the 64-bit UR pair to its global base") {
     val kernel = load(86, Fixture.listing("sharedUniformAddressCudaSm86Patched"), "probe", 128)
     assert(kernel.instructions(8, 8, 4, 4).exists {
-      case VMInstruction.Load(_, _, width, _, MemoryAccess.Global(false)) => width.raw == 32
+      case VMInstruction.Load(_, _, width, _, MemoryAccess.Global(false)) => width == 32
       case _                                                              => false
     })
     assert(kernel.instructions(8, 8, 4, 4).exists {
-      case VMInstruction.Store(_, _, width, MemoryAccess.Shared) => width.raw == 32
+      case VMInstruction.Store(_, _, width, MemoryAccess.Shared) => width == 32
       case _                                                     => false
     })
     val input = words(range(0x12340000L, 36))
@@ -93,9 +94,10 @@ class SharedMemorySuite extends munit.FunSuite {
 
   for (sm <- Vec(50, 60))
     test(s"sm_$sm compiler LDS.U.32 preserves all data bits across a shared-memory barrier") {
-      val kernel = load(sm, Fixture.listing("lds32Sm50"), "probe", 8)
+      val kernel    = load(sm, Fixture.listing("lds32Sm50"), "probe", 8)
+      val modifiers = Vec("U", "32")
       assert(kernel.function.instructions.exists(i =>
-        i.mnemonic.raw == "LDS" && i.modifiers.map(_.name) == Vec("U", "32")
+        i.mnemonic.raw == "LDS" && i.modifiers.map(_.name) == modifiers
       ))
       Vec(0, 1, Int.MinValue, -1, 0).foreach { input =>
         assertEquals(kernel.launch(1)(Arg.zeros(4), Arg.u32(input)).words(0), Vec(input.toLong & 0xffffffffL))
@@ -105,13 +107,31 @@ class SharedMemorySuite extends munit.FunSuite {
   test("a shared-memory load into RZ still emits a real load and discards only its result") {
     val kernel = program(50, "MOV R4, RZ; LDS.U.32 RZ, [R4+0x4]; EXIT", 8)
     val loads  = kernel.instructions(8, 4).collect {
-      case VMInstruction.Load(destination, _, width, _, MemoryAccess.Shared) if width.raw == 32 => destination
+      case VMInstruction.Load(destination, _, width, _, MemoryAccess.Shared) if width == 32 => destination
     }
     val image       = kernel.module(Vec(8, 4))
     val layout      = VMRegisters.Layout.of(image.kernels.head, kernel.functions)
     val temporaries = Vec.tabulate(VMRegisters.TemporaryCount)(layout.temporary(_))
     assertEquals(loads.size, 1)
     assert(temporaries.contains(loads.head), s"an RZ load must target a temporary: ${loads.head}")
+  }
+
+  test("a shared access masks the cluster rank and rebases the address in one step") {
+    val kernel = program(50, "MOV R4, RZ; LDS.U.32 R5, [R4+0x4]; EXIT", 8)
+    val steps  = kernel.instructions(8, 4)
+    val mask   = Value.Immediate(VMAddressSpace.SharedOffsetMask)
+    val base   = Value.Immediate(VMAddressSpace.SharedBase)
+    assertEquals(
+      steps.count {
+        case VMInstruction.Logic3(_, _, `mask`, `base`, table, width) => table == 0xea && width == 64
+        case _                                                        => false
+      },
+      1
+    )
+    assert(!steps.exists {
+      case VMInstruction.IntegerBinary(right = `mask` | `base`) => true
+      case _                                                    => false
+    })
   }
 
   for (sm <- Vec(50, 60))
@@ -143,8 +163,8 @@ class SharedMemorySuite extends munit.FunSuite {
         Vec(254),
         shared = 28,
         rewrite = instruction =>
-          instruction.operation match {
-            case _: Instruction.Lds =>
+          instruction.operation.form match {
+            case _: Form.Lds =>
               // nvdisasm prints LDS.U.U8; the recovered SIZE vocabulary spells unsigned bytes as 8
               val bytes = LittleEndian.toVec(0xef4810000187ff08L, 8).toArray ++ Array[Byte](0xfd.toByte, 0x07, 0x00)
               InstructionDecoder.decode(instruction.address, bytes, target(sm)).value
@@ -224,8 +244,8 @@ class SharedMemorySuite extends munit.FunSuite {
     val kernel = load(35, Fixture.listing("sharedPointerSm35"), "shared_base_probe", 512)
     Vec(true, false).foreach { load =>
       assert(kernel.instructions(8, 8).exists {
-        case VMInstruction.Load(_, _, width, _, MemoryAccess.Generic(false)) if load => width.raw == 32
-        case VMInstruction.Store(_, _, width, MemoryAccess.Generic(false)) if !load  => width.raw == 32
+        case VMInstruction.Load(_, _, width, _, MemoryAccess.Generic(false)) if load => width == 32
+        case VMInstruction.Store(_, _, width, MemoryAccess.Generic(false)) if !load  => width == 32
         case _                                                                       => false
       })
     }

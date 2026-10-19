@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import Op.*
 import VMInvocation.*
-import VMLowering.*
 import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.binary.*
@@ -12,6 +11,19 @@ import net.kurobako.gemstone.vm.*
 
 /** Image views, samplers, texel access and sampling. Descriptor words are read once per memory state. */
 private object ImageOps {
+  private enum Lod derives CanEqual {
+    case Implicit, Explicit
+  }
+
+  private enum Projection derives CanEqual {
+    case Flat, Projective
+  }
+
+  private enum Gather derives CanEqual {
+    case Off, Depth
+    case Component(operand: Operand)
+  }
+
   import Operand.*
 
   def lower(site: Site): PartialFunction[Instruction, Op] = {
@@ -32,43 +44,103 @@ private object ImageOps {
         }
       case Instruction.ImageSampleImplicitLod(t, d, i, c, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, None, explicit = false, m)
+          sample(program, execution, memory, t, d, i, c, None, lod = Lod.Implicit, m)
         }
       case Instruction.ImageSampleExplicitLod(t, d, i, c, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, None, explicit = true, Some(m))
+          sample(program, execution, memory, t, d, i, c, None, lod = Lod.Explicit, Some(m))
         }
       case Instruction.ImageSampleDrefImplicitLod(t, d, i, c, r, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, Some(r), explicit = false, m)
+          sample(program, execution, memory, t, d, i, c, Some(r), lod = Lod.Implicit, m)
         }
       case Instruction.ImageSampleDrefExplicitLod(t, d, i, c, r, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, Some(r), explicit = true, Some(m))
+          sample(program, execution, memory, t, d, i, c, Some(r), lod = Lod.Explicit, Some(m))
         }
       case Instruction.ImageSampleProjImplicitLod(t, d, i, c, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, None, explicit = false, m, projective = true)
+          sample(
+            program,
+            execution,
+            memory,
+            t,
+            d,
+            i,
+            c,
+            None,
+            lod = Lod.Implicit,
+            m,
+            projection = Projection.Projective
+          )
         }
       case Instruction.ImageSampleProjExplicitLod(t, d, i, c, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, None, explicit = true, Some(m), projective = true)
+          sample(
+            program,
+            execution,
+            memory,
+            t,
+            d,
+            i,
+            c,
+            None,
+            lod = Lod.Explicit,
+            Some(m),
+            projection = Projection.Projective
+          )
         }
       case Instruction.ImageSampleProjDrefImplicitLod(t, d, i, c, r, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, Some(r), explicit = false, m, projective = true)
+          sample(
+            program,
+            execution,
+            memory,
+            t,
+            d,
+            i,
+            c,
+            Some(r),
+            lod = Lod.Implicit,
+            m,
+            projection = Projection.Projective
+          )
         }
       case Instruction.ImageSampleProjDrefExplicitLod(t, d, i, c, r, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, Some(r), explicit = true, Some(m), projective = true)
+          sample(
+            program,
+            execution,
+            memory,
+            t,
+            d,
+            i,
+            c,
+            Some(r),
+            lod = Lod.Explicit,
+            Some(m),
+            projection = Projection.Projective
+          )
         }
       case Instruction.ImageGather(t, d, i, c, component, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, None, explicit = false, m, gatherComponent = Some(component))
+          sample(
+            program,
+            execution,
+            memory,
+            t,
+            d,
+            i,
+            c,
+            None,
+            lod = Lod.Implicit,
+            m,
+            gather = Gather.Component(component)
+          )
         }
       case Instruction.ImageDrefGather(t, d, i, c, r, m) =>
         sampling { (execution, memory, _) =>
-          sample(program, execution, memory, t, d, i, c, Some(r), explicit = false, m, gatherDepth = true)
+          sample(program, execution, memory, t, d, i, c, Some(r), lod = Lod.Implicit, m, gather = Gather.Depth)
         }
       case Instruction.ImageQueryLod(t, d, i, c) =>
         sampling { (execution, memory, values) =>
@@ -95,7 +167,7 @@ private object ImageOps {
               minBits     <- memory.descriptor(sampler, ImageDescriptor.SamplerWord.MinLod * 4, 4)
               maxBits     <- memory.descriptor(sampler, ImageDescriptor.SamplerWord.MaxLod * 4, 4)
               mipmap      <- memory.descriptor(sampler, ImageDescriptor.SamplerWord.MipmapMode * 4, 4)
-              resultShape <- program.floatingShape(id(t)).filter((w, n) => w.raw == 32 && n == 2)
+              resultShape <- program.floatingShape(id(t)).filter((w, n) => w == 32 && n == 2)
                 .toRight(Fault.InvalidRequest("LOD query result must be float32 vec2"))
             } yield {
               def float(bits: Long): Double = IEEE754.binary32ToFloat(Binary32.low(bits)).toDouble
@@ -131,13 +203,8 @@ private object ImageOps {
           for {
             level      <- scalar(values, id(lod))
             image      <- address(values, id(i))
-            dimensions <- program.runtimeType(image.pointee) match {
-              case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
-              case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((2, arrayed, true))
-              case Some(RuntimeType.StorageImage(_, ImageFormat.Unknown, dimensions, false, arrayed, false)) =>
-                Right((dimensions, arrayed, false))
-              case _ => Left(Fault.InvalidRequest("image mip size query requires a sampled image"))
-            }
+            dimensions <-
+              view(program, image, cubeDimensions = 2, "image mip size query requires a sampled image")
             levels <- imageLevels(memory, image)
             bounded = if (program.vulkan) Math.max(0, Math.min(levels - 1, level.toInt)) else level.toInt
             data <- imageLevel(memory, image, bounded)
@@ -172,7 +239,7 @@ private object ImageOps {
               case Some(RuntimeType.MultisampledTexture(_, arrayed)) => Right((2, false, true, arrayed))
               case _ => Left(Fault.InvalidRequest("texel fetch requires a sampled image"))
             }
-            operands      = mods.map(_.words.toVector.map(_.raw).toArray).getOrElse(Array(0))
+            operands      = mods.fold(Array(0))(_.words.toVector.map(_.raw).toArray)
             mask          = operands.headOption.getOrElse(-1)
             selectionMask = if (imageType._3) ImageOperands.Sample else ImageOperands.Lod
             hasSelection  = (mask & selectionMask) != 0
@@ -256,13 +323,7 @@ private object ImageOps {
               .map(lanes => values.update(id(dest), VMValue.Bits(id(resultType), lanes)))
           else
             for {
-              _ <- Either.cond(
-                mods.forall(m =>
-                  m.words.length == 1 && hintsOnly(unsigned(m))
-                ),
-                (),
-                Fault.Unsupported("unsupported storage image read operands")
-              )
+              _     <- hinted(mods, "unsupported storage image read operands")
               texel <- imageTexel(program, memory, values, image, coordinate)
               lanes <- {
                 val (pointer, format) = texel
@@ -288,7 +349,7 @@ private object ImageOps {
               }
             } yield {
               // read_imageh narrows the float result to binary16; depth images read a scalar.
-              val half   = program.floatingShape(id(resultType)).exists((width, _) => width.raw == 16)
+              val half   = program.floatingShape(id(resultType)).exists((width, _) => width == 16)
               val result = if (program.floatingShape(id(resultType)).exists(_._2 == 1)) lanes.take(1) else lanes
               values.update(
                 id(dest),
@@ -303,13 +364,7 @@ private object ImageOps {
       case Instruction.ImageWrite(image, coordinate, texel, mods) =>
         imaging { (_, memory, values) =>
           for {
-            _ <- Either.cond(
-              mods.forall(m =>
-                m.words.length == 1 && hintsOnly(unsigned(m))
-              ),
-              (),
-              Fault.Unsupported("unsupported storage image write operands")
-            )
+            _       <- hinted(mods, "unsupported storage image write operands")
             target  <- imageTexel(program, memory, values, image, coordinate)
             written <- bits(values, id(texel))
             lanes = if (written.length == 1) Array(written(0), 0L, 0L, 0x3f800000L) else written
@@ -320,7 +375,7 @@ private object ImageOps {
               else (0 until layout.components).foldLeft[AddressSpace.ReadResult[Unit]](Right(())) { (result, lane) =>
                 result.flatMap(_ =>
                   memory.writeScalar(
-                    target._1.copy(address = target._1.address + lane * layout.componentBytes.raw),
+                    target._1.copy(address = target._1.address + lane * layout.componentBytes),
                     layout.encode(lanes(lane)),
                     layout.componentBytes
                   )
@@ -410,8 +465,31 @@ private object ImageOps {
     }: PartialFunction[Instruction, Op]
   }
 
-  private def channelQuery(program: VMProgram, resultType: Operand, dest: Operand, image: Operand, label: String)(
-      select: ((Int, Int)) => Int
+  /** The dimensions, array flag and cube flag of a sampled or storage image view; a cube has `cubeDimensions`. */
+  private def view(
+      program: VMProgram,
+      image: Pointer,
+      cubeDimensions: Int,
+      failure: NonEmpty[String]
+  ): Either[Fault, (Int, Boolean, Boolean)] = program.runtimeType(image.pointee) match {
+    case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
+    case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((cubeDimensions, arrayed, true))
+    case Some(RuntimeType.StorageImage(_, ImageFormat.Unknown, dimensions, false, arrayed, false)) =>
+      Right((dimensions, arrayed, false))
+    case _ => Left(Fault.InvalidRequest(failure))
+  }
+
+  private def hinted(mods: Option[Operand], failure: NonEmpty[String]): Either[Fault, Unit] =
+    Either.cond(mods.forall(m => m.words.length == 1 && hintsOnly(unsigned(m))), (), Fault.Unsupported(failure))
+
+  private inline def channelQuery(
+      program: VMProgram,
+      resultType: Operand,
+      dest: Operand,
+      image: Operand,
+      label: String
+  )(
+      inline select: ((Int, Int)) => Int
   ): Op =
     imaging { (_, memory, values) =>
       for {
@@ -425,6 +503,8 @@ private object ImageOps {
           ImageChannels(format).toRight(Fault.Unsupported(s"image format $format has no OpenCL channel $label"))
       } yield values.update(id(dest), VMValue.Bits(id(resultType), Array(select(channels).toLong)))
     }
+
+  private def blackTexel(): Array[Double] = Array.tabulate(4)(lane => if (lane == 3) 1.0 else 0.0)
 
   private val Hints = ImageOperands.SignExtend | ImageOperands.ZeroExtend | ImageOperands.Nontemporal
 
@@ -489,22 +569,18 @@ private object ImageOps {
       source: Operand,
       coordinate: Operand,
       dref: Option[Operand],
-      explicit: Boolean,
+      lod: Lod,
       mods: Option[Operand],
-      projective: Boolean = false,
-      gatherComponent: Option[Operand] = None,
-      gatherDepth: Boolean = false
+      projection: Projection = Projection.Flat,
+      gather: Gather = Gather.Off
   ): AddressSpace.ReadResult[Unit] = {
-    val values = execution.values
+    val values     = execution.values
+    val explicit   = lod == Lod.Explicit
+    val projective = projection == Projection.Projective
     for {
       image      <- address(values, id(source))
-      dimensions <- program.runtimeType(image.pointee) match {
-        case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
-        case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((3, arrayed, true))
-        case Some(RuntimeType.StorageImage(_, ImageFormat.Unknown, dimensions, false, arrayed, false)) =>
-          Right((dimensions, arrayed, false))
-        case _ => Left(Fault.InvalidRequest("sampling requires an image view, not a texel buffer"))
-      }
+      dimensions <-
+        view(program, image, cubeDimensions = 3, "sampling requires an image view, not a texel buffer")
       supplied <- bits(values, id(coordinate))
       // OpenCL samples unnormalised integer coordinates with nearest filtering.
       raw =
@@ -527,19 +603,19 @@ private object ImageOps {
           scalar(values, id(value)).map(w => Some((IEEE754.binary32ToFloat(Binary32.low(w)) / q).toDouble))
         case None => Right(None)
       }
-      gather <- if (gatherDepth) Right(Some(0))
-      else gatherComponent match {
-        case None            => Right(None)
-        case Some(component) => scalar(values, id(component)).flatMap(c =>
+      channel <- gather match {
+        case Gather.Off                  => Right(None)
+        case Gather.Depth                => Right(Some(0))
+        case Gather.Component(component) => scalar(values, id(component)).flatMap(c =>
             Either.cond(c >= 0 && c <= 3, Some(c.toInt), Fault.InvalidRequest("gather component must be in [0,3]"))
           )
       }
       _ <- Either.cond(
-        gather.isEmpty || dimensions._1 == 2 || dimensions._3,
+        channel.isEmpty || dimensions._1 == 2 || dimensions._3,
         (),
         Fault.InvalidRequest("gather requires a 2D or cube image")
       )
-      _ <- if (gather.isEmpty && !explicit && execution.fragmentQuad && execution.gradients.isEmpty)
+      _ <- if (channel.isEmpty && !explicit && execution.fragmentQuad && execution.gradients.isEmpty)
         requestGradients(execution, id(resultType), id(dest), coords)
       else sampleImage(
         memory,
@@ -553,7 +629,7 @@ private object ImageOps {
         dimensions._1,
         dimensions._2,
         dimensions._3,
-        gather,
+        channel,
         program.vulkan
       ).map { result =>
         execution.gradients = None
@@ -870,7 +946,7 @@ private object ImageOps {
     } else if (ImageFormats.normalised(format).isDefined) {
       readNormalisedTexel(memory, pointer, ImageFormats.normalised(format).get)
     } else if (components != 0) {
-      (0 until components).foldLeft[AddressSpace.ReadResult[Array[Double]]](Right(Array(0.0, 0.0, 0.0, 1.0))) {
+      (0 until components).foldLeft[AddressSpace.ReadResult[Array[Double]]](Right(blackTexel())) {
         (result, lane) =>
           for {
             data <- result
@@ -1007,7 +1083,7 @@ private object ImageOps {
         (),
         Fault.InvalidRequest("cube sampling requires normalised coordinates")
       )
-      operands = mods.map(_.words.toVector.map(_.raw).toArray).getOrElse(Array(0))
+      operands = mods.fold(Array(0))(_.words.toVector.map(_.raw).toArray)
       // Integer texels decode at their format's signedness, so the extension and temporal hints add nothing.
       mask        = operands.headOption.fold(-1)(_ & ~Hints)
       lodMask     = mask & (ImageOperands.Bias | ImageOperands.Lod | ImageOperands.Grad)

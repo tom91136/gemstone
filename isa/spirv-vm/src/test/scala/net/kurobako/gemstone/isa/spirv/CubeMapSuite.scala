@@ -6,18 +6,22 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class CubeMapSuite extends munit.FunSuite {
-  private val faces = Vector("+X", "-X", "+Y", "-Y", "+Z", "-Z")
-  private val axes  =
+  private val faces             = Vector("+X", "-X", "+Y", "-Y", "+Z", "-Z")
+  private val NoGradient        = (0.0, 0.0)
+  private val CornerCoordinates = Seq(-1L, 4L)
+  private val ClampedLayers     = Seq(-1f, 0f, 1f, 2f)
+  private val axes              =
     Vector((1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, -1.0))
 
   test("each axis projects to its face centre with zero radial derivative") {
     for (((x, y, z), face) <- axes.zipWithIndex) {
       assertEquals(CubeMap.project(x, y, z), CubeMap.Projection(face, .5, .5), faces(face))
       assertEquals(CubeMap.project(x * 7, y * 7, z * 7), CubeMap.Projection(face, .5, .5), faces(face))
-      assertEquals(CubeMap.gradient(face, Array(x, y, z), Array(x, y, z)), (0.0, 0.0), faces(face))
+      assertEquals(CubeMap.gradient(face, Array(x, y, z), Array(x, y, z)), NoGradient, faces(face))
     }
   }
 
@@ -32,6 +36,7 @@ class CubeMapSuite extends munit.FunSuite {
   for (size <- Seq(1L, 3L, 4L, 17L)) test(s"cube edge rotations at size $size") {
     val n = size - 1
     for (i <- 0L until size) {
+      val outside  = Vector((-1L, i), (size, i), (i, -1L), (i, size)).zipWithIndex
       val expected = Vector(
         Vector((4, n, i), (5, 0L, i), (2, n, n - i), (3, n, i)),
         Vector((5, n, i), (4, 0L, i), (2, 0L, i), (3, 0L, n - i)),
@@ -42,7 +47,7 @@ class CubeMapSuite extends munit.FunSuite {
       )
       for {
         face       <- 0 until 6
-        (xy, side) <- Vector((-1L, i), (size, i), (i, -1L), (i, size)).zipWithIndex
+        (xy, side) <- outside
       } {
         val (target, x, y) = expected(face)(side)
         val clue           = s"${faces(face)} at $xy"
@@ -59,8 +64,8 @@ class CubeMapSuite extends munit.FunSuite {
   test("cube corner averages three incident faces") {
     for {
       face <- 0 until 6
-      x    <- Seq(-1L, 4L)
-      y    <- Seq(-1L, 4L)
+      x    <- CornerCoordinates
+      y    <- CornerCoordinates
     } {
       val taps = CubeMap.taps(face, x, y, 4, linear = true)
       val clue = s"${faces(face)} at ($x, $y)"
@@ -90,14 +95,24 @@ class CubeMapSuite extends munit.FunSuite {
       linear: Boolean = false,
       compare: Boolean = false,
       lod: Int = 0,
-      gradient: Option[String] = None,
-      gather: Option[Seq[Float]] = None
+      variant: Variant = Variant.Plain
   )
 
+  private enum Variant {
+    case Plain
+    case Gradient(derivative: String)
+    case Gather(texels: Seq[Float])
+
+    def gathers: Boolean = this match {
+      case Gather(_) => true
+      case _         => false
+    }
+  }
+
   private val samples = Seq(
-    Sample("gather seam", Seq(1, 0, 1), .625f, gather = Some(Seq(.625f, .125f, .125f, .625f))),
-    Sample("gather corner", Seq(1, 1, 1), .625f, gather = Some(Seq(.625f, .125f, .625f, .375f))),
-    Sample("gather comparison corner", Seq(1, 1, 1), 1f, compare = true, gather = Some(Seq(1f, 0f, 1f, 0f))),
+    Sample("gather seam", Seq(1, 0, 1), .625f, variant = Variant.Gather(Seq(.625f, .125f, .125f, .625f))),
+    Sample("gather corner", Seq(1, 1, 1), .625f, variant = Variant.Gather(Seq(.625f, .125f, .625f, .375f))),
+    Sample("gather comparison corner", Seq(1, 1, 1), 1f, compare = true, variant = Variant.Gather(Seq(1f, 0f, 1f, 0f))),
     Sample("positive X", Seq(1, 0, 0), .125f),
     Sample("negative X", Seq(-1, 0, 0), .25f),
     Sample("positive Y", Seq(0, 1, 0), .375f),
@@ -109,21 +124,26 @@ class CubeMapSuite extends munit.FunSuite {
     Sample("linear corner", Seq(1, 1, 1), .375f, linear = true),
     Sample("comparison seam", Seq(1, 0, 1), .5f, linear = true, compare = true),
     Sample("explicit mip", Seq(1, 0, 0), .875f, lod = 1),
-    Sample("projected gradient mip", Seq(1, 0, 0), .875f, gradient = Some("%zero %zero %one")),
-    Sample("radial gradient does not change mip", Seq(1, 0, 0), .125f, gradient = Some("%one %zero %zero"))
+    Sample("projected gradient mip", Seq(1, 0, 0), .875f, variant = Variant.Gradient("%zero %zero %one")),
+    Sample("radial gradient does not change mip", Seq(1, 0, 0), .125f, variant = Variant.Gradient("%one %zero %zero"))
   )
 
   // layer values clamp below 0 and above the last layer; comparison results cannot tell layers apart; gathers also
   // read the second cube and linear seams a clamped layer
   for {
     (sample, index) <- samples.zipWithIndex
-    layer           <- Seq(None, Some(if (sample.compare) 0f else Seq(-1f, 0f, 1f, 2f)(index % 4))) ++
-      Option.when(!sample.compare && sample.gather.nonEmpty)(Some(index + 1f)) ++
+    layer           <- Seq(None, Some(if (sample.compare) 0f else ClampedLayers(index % 4))) ++
+      Option.when(!sample.compare && sample.variant.gathers)(Some(index + 1f)) ++
       Option.when(!sample.compare && sample.linear)(Some(-1f))
   } test(s"Cube ${layer.fold("")(value => s"array layer $value ")}${sample.name}") {
-    val arrayed = layer.isDefined
-    val layers  = if (arrayed) 12 else 6
-    val module  = spv"""
+    val arrayed  = layer.isDefined
+    val gathered = sample.variant.gathers
+    val gradient = sample.variant match {
+      case Variant.Gradient(derivative) => Some(derivative)
+      case _                            => None
+    }
+    val layers = if (arrayed) 12 else 6
+    val module = spv"""
       $vulkan
       OpCapability ImageQuery
       ${if (arrayed) "OpCapability SampledCubeArray" else ""}
@@ -174,7 +194,7 @@ class CubeMapSuite extends munit.FunSuite {
         if (arrayed || sample.compare) "OpConstantComposite %v4float %x %y %z %layer"
         else "OpConstantComposite %v3float %x %y %z"
       }
-      %dx = OpConstantComposite %v3float ${sample.gradient.getOrElse("%zero %zero %zero")}
+      %dx = OpConstantComposite %v3float ${gradient.getOrElse("%zero %zero %zero")}
       %dy = OpConstantComposite %v3float %zero %zero %zero
       %main = OpFunction %void None %fn
       %entry = OpLabel
@@ -182,12 +202,12 @@ class CubeMapSuite extends munit.FunSuite {
       %sampler_value = OpLoad %sampler_type %sampler
       %sampled = OpSampledImage %sampled_type %image_value %sampler_value
       ${
-        if (sample.gather.isDefined && sample.compare) "%result = OpImageDrefGather %v4float %sampled %coord %reference"
-        else if (sample.gather.isDefined) "%result = OpImageGather %v4float %sampled %coord %uint_0"
+        if (gathered && sample.compare) "%result = OpImageDrefGather %v4float %sampled %coord %reference"
+        else if (gathered) "%result = OpImageGather %v4float %sampled %coord %uint_0"
         else if (sample.compare)
           """%depth = OpImageSampleDrefExplicitLod %float %sampled %coord %reference Lod %lod
             |%result = OpCompositeConstruct %v4float %depth %zero %zero %one""".stripMargin
-        else if (sample.gradient.isDefined) "%result = OpImageSampleExplicitLod %v4float %sampled %coord Grad %dx %dy"
+        else if (gradient.isDefined) "%result = OpImageSampleExplicitLod %v4float %sampled %coord Grad %dx %dy"
         else "%result = OpImageSampleExplicitLod %v4float %sampled %coord Lod %lod"
       }
       %colour_element = OpAccessChain %colour_ptr %out %uint_0
@@ -206,7 +226,7 @@ class CubeMapSuite extends munit.FunSuite {
       mip   <- 0 to 1
       face  <- 0 until layers
       _     <- 0 until (if (mip == 0) 16 else 4)
-      value <- LittleEndian.toVec(floatBits((face % 6 + 1) / 8f + (face / 6) * 2f + mip * .75f), 4)
+      value <- LittleEndian.toVec(single((face % 6 + 1) / 8f + (face / 6) * 2f + mip * .75f), 4)
     } yield value))
     val view = ImageView(
       ImageFormat.R32f,
@@ -232,8 +252,11 @@ class CubeMapSuite extends munit.FunSuite {
     val arguments = Vec(buffer(image, range = Some(size)), buffer(samplerData), buffer(out))
     assertEquals(run(module, "main", memory, arguments, relocations = Vec(relocation)), Right(()))
     val shift    = if (layer.exists(_ >= 1)) 2f else 0f
-    val expected = sample.gather.fold(Seq(sample.expected + shift, 0f, 0f, 1f))(_.map(_ + shift))
-    assertEquals(words(memory, out, offset = 0, count = 4), Vec.from(expected.map(floatBits)))
+    val expected = sample.variant match {
+      case Variant.Gather(values) => values.map(_ + shift)
+      case _                      => Seq(sample.expected + shift, 0f, 0f, 1f)
+    }
+    assertEquals(words(memory, out, offset = 0, count = 4), Vec.from(expected.map(single)))
     assertEquals(words(memory, out, offset = 16, count = 2), Vec(4L, 4L))
     if (arrayed) assertEquals(word(memory, out, 24), 2L)
     assertEquals(word(memory, out, 32), 2L)

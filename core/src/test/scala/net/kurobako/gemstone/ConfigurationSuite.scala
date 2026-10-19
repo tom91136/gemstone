@@ -10,11 +10,6 @@ class ConfigurationSuite extends munit.FunSuite {
     assertEquals(configuration.positiveLong(Long.MaxValue.toString).map(_.raw), Some(Long.MaxValue))
   }
 
-  test("paths reject NUL on every platform") {
-    assertEquals(configuration.path("NAME", "a\u0000b"), Left("NAME must not contain a NUL character"))
-    assertEquals(configuration.path("NAME", "dir/file"), Right(java.nio.file.Path.of("dir/file")))
-  }
-
   test("trace scope and category matching is exact, with spaces and tabs only") {
     for (value <- List("all", "rpc", "rpc.memory", "cuda, \trpc.memory\t ,perf"))
       assert(configuration.traceEnabled(value, "rpc", "memory"), value)

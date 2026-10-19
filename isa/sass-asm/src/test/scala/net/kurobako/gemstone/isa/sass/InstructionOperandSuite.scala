@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 
 class InstructionOperandSuite extends munit.FunSuite {
   private def wrapped(value: Operand): Operand =

@@ -15,13 +15,11 @@ function(babelstream_adapt model source)
   const auto kernel_wgsize = cl::Kernel(program, "stream_dot")
                                  .getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
   dot_wgsize = std::min(dot_wgsize, kernel_wgsize);]=])
-  elseif(CONFORMANCE_BACKEND STREQUAL "cuda" AND model STREQUAL "cuda")
-    patch_exact("${source}/src/cuda/model.cmake"
+  elseif(model STREQUAL "cuda-tuned")
+    patch_exact("${source}/src/cuda-tuned/model.cmake"
       "    register_link_library(\"nvidia-ml\")" "")
-    set(path "${source}/src/cuda/CUDAStream.cu")
+    set(path "${source}/src/cuda-tuned/CUDAStream.cu")
     file(READ "${path}" content)
-    string(REPLACE "#include \"CUDAStream.h\"\n"
-      "#include \"CUDAStream.h\"\n#include <cstdint>\n" content "${content}")
     string(REGEX REPLACE "#include <nvml.h>\n" "" content "${content}")
     string(REPLACE [=[[[noreturn]] inline void nvml_error(char const* file, int line, char const* expr, nvmlReturn_t e) {
   std::fprintf(stderr, "NVML Error at %s:%d: %s (%d)\n  %s\n", file, line, nvmlErrorString(e), e, expr);
@@ -34,20 +32,20 @@ function(babelstream_adapt model source)
     string(REGEX REPLACE "[^\n]*(mybus|nvmldev)[^\n]*\n" "" content "${content}")
     file(WRITE "${path}" "${content}")
     if(CONFORMANCE_COMPILER STREQUAL "clang")
-      patch_exact("${source}/src/cuda/model.cmake"
-        [=["-forward-unknown-to-host-compiler" "-arch=${CUDA_ARCH}"]=]
-        [=["--cuda-gpu-arch=${CUDA_ARCH}"]=])
-      patch_exact("${source}/src/cuda/model.cmake" [=["--extended-lambda"]=] "")
+      patch_exact("${source}/src/cuda-tuned/model.cmake"
+        [=["-forward-unknown-to-host-compiler" "-arch=${CUDA_ARCH}"
+      "--extended-lambda" ]=]
+        [=["--cuda-gpu-arch=${CUDA_ARCH}" ]=])
     endif()
   endif()
-  if(model MATCHES "^(ocl|sycl)$")
+  if(model MATCHES "^(ocl|sycl2020-(acc|usm))$")
     set(arguments ${arguments} --float PARENT_SCOPE)
   endif()
   set(BUILD_NATIVE OFF CACHE BOOL "" FORCE)
 endfunction()
 
 conformance_miniapp(babelstream
-  MODELS cuda hip omp-target=omp kokkos ocl sycl acc
+  MODELS cuda cuda-tuned hip omp-target=omp kokkos ocl sycl2020-acc sycl2020-usm acc
   MAIN src/main.cpp
   LICENCE_FILE LICENSE BabelStream.txt
   OPENMP_DEFINITIONS OMP_TARGET_GPU

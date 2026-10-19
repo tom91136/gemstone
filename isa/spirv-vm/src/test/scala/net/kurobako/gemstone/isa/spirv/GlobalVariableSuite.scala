@@ -188,7 +188,7 @@ class GlobalVariableSuite extends munit.FunSuite {
     val memory  = RegionMemory()
     val out     = memory.allocate(12L)
     val regions = program.symbols.value.globals.map { global =>
-      val size    = global.size.raw.unsafe[Long > 0]
+      val size    = global.size.unsafe[Long > 0]
       val region  = memory.allocate(size)
       val binding = GlobalBinding.validated(global.name, region, 0L, global.size, size).value
       assertEquals(program.bindGlobal(global.name, binding, memory), Right(()))

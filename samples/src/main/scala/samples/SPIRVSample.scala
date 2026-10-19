@@ -52,11 +52,11 @@ object SPIRVSample {
       )
     )
 
-  /** Every constant whose value is `from`, now `to`. */
-  private def replaceConstant(module: Module, from: Int, to: Int): Module =
+  /** Every constant whose value is 3, now 5. */
+  private def replaceConstant(module: Module): Module =
     module.copy(instructions = module.instructions.map {
-      case constant @ Instruction.Constant(_, _, value) if value.words == words(from) =>
-        constant.copy(value = value.copy(words = words(to)))
+      case constant @ Instruction.Constant(_, _, value) if value.words == words(3) =>
+        constant.copy(value = value.copy(words = words(5)))
       case other => other
     })
 
@@ -76,8 +76,9 @@ object SPIRVSample {
         Operand(sum.srcA.kind, words(constant))
       )
       val constants    = module.instructions.lastIndexWhere { case _: Instruction.Constant => true; case _ => false }
+      val summed       = Vec(sum, increment)
       val instructions = module.instructions.flatMap {
-        case `sum`                                                                     => Vec(sum, increment)
+        case `sum`                                                                     => summed
         case store @ Instruction.Store(_, stored, _) if stored.words == sum.dest.words =>
           Vec(store.copy(src = stored.copy(words = words(total))))
         case other => Vec(other)
@@ -90,8 +91,8 @@ object SPIRVSample {
     image       <- ISA.encode(module).left.map(_.message.raw)
     original    <- run(module)
     decoded     <- ISA.decode(image).left.map(_.message.raw)
-    edited      <- run(replaceConstant(decoded, 3, 5))
-    incremented <- addToSum(replaceConstant(decoded, 3, 5), 1)
+    edited      <- run(replaceConstant(decoded))
+    incremented <- addToSum(replaceConstant(decoded), 1)
     extended    <- run(incremented)
   } yield Outcome(original, asm.Printer.render(decoded), edited, extended)
 }

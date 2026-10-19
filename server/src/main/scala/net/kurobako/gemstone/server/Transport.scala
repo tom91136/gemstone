@@ -18,7 +18,7 @@ object Transport {
 
   object Endpoint {
     def parse(value: String): Either[String, Endpoint] = Bind.parse(value).flatMap {
-      case Bind.Tcp(host, port) => port.raw.refine[Port].map(Tcp(host, _))
+      case Bind.Tcp(host, port) => port.refine[Port].map(Tcp(host, _))
       case Bind.Unix(path)      => Right(Unix(path))
     }
   }
@@ -51,7 +51,7 @@ object Transport {
             .left.map(_ => s"invalid endpoint '$value': TCP endpoint requires a host and port")
         case "unix" =>
           require(Option(uri.getRawAuthority).forall(_.isEmpty), "Unix endpoint must not contain a host")
-          configuration.path("Unix endpoint", Option(uri.getPath).getOrElse(""))
+          paths.parse("Unix endpoint", Option(uri.getPath).getOrElse(""))
             .filterOrElse(_.isAbsolute, "Unix endpoint requires an absolute path")
             .map(Unix(_))
             .left.map(error => s"invalid endpoint '$value': $error")

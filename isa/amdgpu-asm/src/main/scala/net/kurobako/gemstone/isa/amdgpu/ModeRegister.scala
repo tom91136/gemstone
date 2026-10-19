@@ -14,5 +14,5 @@ private object ModeRegister {
 
   /** Hardware ignores OMOD under IEEE mode or when the result width keeps output denormals. */
   def outputModifierApplies(mode: Int, width: Int in (16, 32, 64)): Boolean =
-    (mode & (IEEE | (if (width.raw == 32) Denormal32Output else Denormal16And64Output))) == 0
+    (mode & (IEEE | (if (width == 32) Denormal32Output else Denormal16And64Output))) == 0
 }

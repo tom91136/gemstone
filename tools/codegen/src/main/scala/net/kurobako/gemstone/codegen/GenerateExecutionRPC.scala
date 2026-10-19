@@ -11,7 +11,6 @@ import scala.collection.mutable
 /** Derives the native execution client and its Glaze MessagePack codecs from the Scala operation enum. */
 object GenerateExecutionRPC {
   private case class Request(output: Path)
-  private case class Named(name: String, shape: Shape)
 
   private val Namespace = "gemstone::execution"
 
@@ -37,22 +36,31 @@ object GenerateExecutionRPC {
   private def qualified(name: String): String = s"$Namespace::$name"
   private def numberName(value: Long): String =
     if (value < 0L) s"Negative${value.toString.drop(1)}" else value.toString
+  private def realName(value: Double): String =
+    if (value < 0.0) s"Negative${realName(-value)}" else value.toString.replace('.', '_')
+  private def constraintName(constraint: Wire.Constraint): String = constraint match {
+    case Wire.Constraint.Positive                 => "Positive"
+    case Wire.Constraint.Positive0                => "Positive0"
+    case Wire.Constraint.IntInterval(min, max)    => s"Interval${numberName(min)}To${numberName(max)}"
+    case Wire.Constraint.LongInterval(min, max)   => s"Interval${numberName(min)}To${numberName(max)}"
+    case Wire.Constraint.DoubleInterval(min, max) => s"Interval${realName(min)}To${realName(max)}"
+    case Wire.Constraint.OneOf(values)            => s"OneOf${values.map(numberName(_)).mkString("Or")}"
+    case Wire.Constraint.MultipleOf(divisor)      => s"MultipleOf${numberName(divisor)}"
+    case Wire.Constraint.MinimumLength(min)       => s"MinimumLength$min"
+    case Wire.Constraint.NotContains(value)       =>
+      s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
+    case Wire.Constraint.AnyOf(alternatives) =>
+      s"AnyOf${alternatives.map(_.map(constraintName(_)).mkString).mkString("Or")}"
+  }
   private def aliasName(name: String, constraints: Vector[Wire.Constraint]): String =
-    if (name == "Byte" || name == "Short" || name == "Int" || name == "Long" || name == "String")
-      identifier(name + constraints.map {
-        case Wire.Constraint.Positive               => "Positive"
-        case Wire.Constraint.Positive0              => "Positive0"
-        case Wire.Constraint.IntInterval(min, max)  => s"Interval${numberName(min)}To${numberName(max)}"
-        case Wire.Constraint.LongInterval(min, max) => s"Interval${numberName(min)}To${numberName(max)}"
-        case Wire.Constraint.OneOf(values)          => s"OneOf${values.map(numberName(_)).mkString("Or")}"
-        case Wire.Constraint.MultipleOf(divisor)    => s"MultipleOf${numberName(divisor)}"
-        case Wire.Constraint.MinimumLength(min)     => s"MinimumLength$min"
-        case Wire.Constraint.NotContains(value)     =>
-          s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
-      }.mkString)
+    if (
+      name == "Byte" || name == "Short" || name == "Int" || name == "Long" || name == "Float" || name == "Double" ||
+      name == "String"
+    )
+      identifier(name + constraints.map(constraintName(_)).mkString)
     else identifier(name)
   private def alternativeName(sum: String, alternative: String): String = s"$sum$alternative"
-  private def isNullary(alternative: Alternative): Boolean              = alternative.shape match {
+  private def isNullary(alternative: Named): Boolean                    = alternative.shape match {
     case Shape.Product(_, fields) => fields.isEmpty
     case _                        => false
   }
@@ -115,7 +123,7 @@ object GenerateExecutionRPC {
     }
   }
 
-  private def fields(value: Vector[Field], model: Model): String =
+  private def fields(value: Vector[Named], model: Model): String =
     if (value.isEmpty) ""
     else value.map(field => s"  ${model.cppType(field.shape)} ${identifier(field.name)}{};").mkString("\n") + "\n"
 
@@ -210,12 +218,17 @@ object GenerateExecutionRPC {
   private def validation(protocol: Wire.ProtocolShape, model: Model): String = {
     def integer(value: Long): String =
       if (value == Long.MinValue) "std::numeric_limits<int64_t>::min()" else s"${value}LL"
+    def real(value: Double): String =
+      if (value.isPosInfinity) "std::numeric_limits<double>::infinity()"
+      else if (value.isNegInfinity) "-std::numeric_limits<double>::infinity()"
+      else java.lang.Double.toHexString(value)
     def constraint(value: Wire.Constraint, underlying: Shape): String = value match {
       case Wire.Constraint.Positive               => "value.value > 0"
       case Wire.Constraint.Positive0              => "value.value >= 0"
       case Wire.Constraint.IntInterval(min, max)  => s"value.value >= ${integer(min)} && value.value <= ${integer(max)}"
       case Wire.Constraint.LongInterval(min, max) => s"value.value >= ${integer(min)} && value.value <= ${integer(max)}"
-      case Wire.Constraint.OneOf(values)          =>
+      case Wire.Constraint.DoubleInterval(min, max) => s"value.value >= ${real(min)} && value.value <= ${real(max)}"
+      case Wire.Constraint.OneOf(values)            =>
         values.map(value => s"value.value == ${integer(value)}").mkString("(", " || ", ")")
       case Wire.Constraint.MultipleOf(divisor) => s"value.value % ${integer(divisor)} == 0"
       case Wire.Constraint.MinimumLength(min)  =>
@@ -225,6 +238,8 @@ object GenerateExecutionRPC {
         val bytes   = excluded.getBytes(java.nio.charset.StandardCharsets.UTF_8)
         val literal = bytes.view.map(byte => f"\\x${byte & 0xff}%02x").mkString
         s"value.value.find(std::string_view(\"$literal\", ${bytes.length})) == std::string::npos"
+      case Wire.Constraint.AnyOf(alternatives) =>
+        alternatives.map(_.map(constraint(_, underlying)).mkString("(", " && ", ")")).mkString("(", " || ", ")")
     }
     val products = model.named.flatMap { named =>
       named.shape match {
@@ -345,8 +360,11 @@ object GenerateExecutionRPC {
        |
        |${validation(protocol, model)}
        |
+       |${failureKinds(protocol)}
+       |
        |struct Error {
        |  std::string detail;
+       |  FailureKind kind = FailureKind::Transport;
        |};
        |
        |template <class T> class Result {
@@ -387,6 +405,15 @@ object GenerateExecutionRPC {
        |""".stripMargin
   }
 
+  /** The failure alternatives in wire order, after `Transport` for a failure that never reached the service. */
+  private def failureKinds(protocol: Wire.ProtocolShape): String = protocol.failure match {
+    case Shape.Sum(_, alternatives) =>
+      val values = ("Transport" +: alternatives.map(alternative => identifier(alternative.name))).zipWithIndex
+        .map { case (name, index) => s"  $name = $index" }.mkString(",\n")
+      s"enum class FailureKind : uint8_t {\n$values\n};"
+    case other => throw IllegalArgumentException(s"the execution failure is not a sum: $other")
+  }
+
   private def source(protocol: Wire.ProtocolShape): String = {
     val model = Model(protocol)
     val calls = protocol.operations.map(call(_, model)).mkString("\n\n")
@@ -413,6 +440,8 @@ object GenerateExecutionRPC {
        |  return std::visit([](const auto &value) { return value.detail.value; }, failure);
        |}
        |
+       |FailureKind failureKind(const ExecutionFailure &failure) { return static_cast<FailureKind>(failure.index() + 1); }
+       |
        |} // namespace
        |
        |class Client::Impl {
@@ -432,7 +461,7 @@ object GenerateExecutionRPC {
        |    if (status == 1) {
        |      ExecutionFailure failure{};
        |      if (glz::read<GlazeOptions{}>(failure, body) || !wire::valid(failure)) { connection.poison(); return failed<T>("execution failure response is invalid"); }
-       |      lastError = failureDetail(failure); return Result<T>::failure(Error{lastError});
+       |      lastError = failureDetail(failure); return Result<T>::failure(Error{lastError, failureKind(failure)});
        |    }
        |    T value{};
        |    if (glz::read<GlazeOptions{}>(value, body) || !wire::valid(value)) { connection.poison(); return failed<T>("execution response payload is invalid"); }

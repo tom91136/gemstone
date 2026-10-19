@@ -5,6 +5,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class OpenCLMathSuite extends munit.FunSuite {
@@ -342,13 +343,60 @@ class OpenCLMathSuite extends munit.FunSuite {
     assertEquals(IEEE754.maxNum(left = 0L, right = 0x8000000000000000L, 64), 0L)
   }
 
+  // SPV_KHR_fma: OpFmaKHR rounds the exact a * b + c once, which llvm-spirv emits for fma with the extension enabled
+  for (
+    (width, a, b, c, fused) <- Seq(
+      (
+        32,
+        single(1f + Math.ulp(1f)),
+        single(1f - Math.ulp(1f)),
+        single(-1f),
+        single(-Math.ulp(1f) * Math.ulp(1f))
+      ),
+      (
+        64,
+        double(1.0 + Math.ulp(1.0)),
+        double(1.0 - Math.ulp(1.0)),
+        double(-1.0),
+        double(-Math.ulp(1.0) * Math.ulp(1.0))
+      )
+    )
+  )
+    test(s"OpFmaKHR rounds once at width $width") {
+      val module = spv"""
+        OpCapability FMAKHR
+        $openCL
+        OpEntryPoint Kernel %main "fma"
+        %void = OpTypeVoid
+        %float = OpTypeFloat $width
+        %ptr = OpTypePointer CrossWorkgroup %float
+        %fn = OpTypeFunction %void %ptr %float %float %float
+        %main = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+        %a = OpFunctionParameter %float
+        %b = OpFunctionParameter %float
+        %c = OpFunctionParameter %float
+        %entry = OpLabel
+        %result = OpFmaKHR %float %a %b %c
+        OpStore %out %result
+        OpReturn
+        OpFunctionEnd
+      """
+      val memory   = RegionMemory()
+      val out      = memory.allocate((width / 8).toLong.refine[Long > 0].value)
+      val bytes    = (width / 8).refine[Int in 0 ~ 8].value
+      val operands = Seq(a, b, c).map(value => scalar(value, bytes))
+      assertEquals(run(module, "fma", memory, Vec(buffer(out)) ++ Vec.from(operands)), Right(()))
+      assertEquals(LittleEndian.decode(memory.bytes(out), 0, bytes), fused)
+    }
+
   test("OpenCL hypot computes binary64 results") {
     evaluate("hypot", 64, Seq(Seq(3.0), Seq(4.0)), Seq(5.0))
   }
 
   test("OpenCL fma rounds once") {
     val (a, b, c) = (1.0f + Math.scalb(1.0f, -23), 1.0f - Math.scalb(1.0f, -23), -1.0f)
-    evaluate("fma", 32, Seq(Seq(a.toDouble), Seq(b.toDouble), Seq(c.toDouble)), Seq(Math.fma(a, b, c).toDouble))
+    evaluate("fma", 32, Seq(Seq(a.toDouble), Seq(b.toDouble), Seq(c.toDouble)), Seq(-Math.scalb(1.0, -46)))
   }
 
   test("OpenCL half fma rounds once") {
@@ -358,31 +406,36 @@ class OpenCLMathSuite extends munit.FunSuite {
 
   private val families: Seq[(String, (Int, Int) => Unit)] = Seq(
     "fract and modf return and store rounded components" -> { (width, lanes) =>
-      def all(x: Double) = Seq.fill(lanes)(x)
-      for (
-        (x, fraction, integral) <- Seq(
+      def all(x: Double)                                                 = Seq.fill(lanes)(x)
+      def check(operation: String, cases: Seq[(Double, Double, Double)]) =
+        for ((x, fraction, integral) <- cases)
+          evaluate(operation, width, Seq(all(x)), all(fraction), Some(all(integral)))
+      check(
+        "fract",
+        Seq(
           (0.5, 0.5, 0.0),
           (-1.25, 0.75, -2.0),
           (4.0, 0.0, 4.0),
           (-0.0, -0.0, -0.0),
           (Double.NegativeInfinity, -0.0, Double.NegativeInfinity)
         )
-      ) evaluate("fract", width, Seq(all(x)), all(fraction), Some(all(integral)))
-      for (
-        (x, fraction, integral) <- Seq(
+      )
+      check(
+        "modf",
+        Seq(
           (0.5, 0.5, 0.0),
           (-1.25, -0.25, -1.0),
           (-0.0, -0.0, -0.0),
           (Double.NegativeInfinity, -0.0, Double.NegativeInfinity)
         )
-      ) evaluate("modf", width, Seq(all(x)), all(fraction), Some(all(integral)))
+      )
     },
     "frexp normalises finite, zero and subnormal values" -> { (width, lanes) =>
       def all(x: Double) = Seq.fill(lanes)(x)
       val exponent       = width match { case 16 => -23; case 32 => -148; case _ => -1073 }
       val cases          = Seq((12.0, 0.75, 4), (-0.5, -0.5, 0), (-0.0, -0.0, 0), (smallest(width), 0.5, exponent))
       for ((x, fraction, power) <- cases)
-        evaluate("frexp", width, Seq(all(x)), all(fraction), Some(all(power.toDouble)), integerPointer = true)
+        evaluate("frexp", width, Seq(all(x)), all(fraction), Some(all(power.toDouble)), storedKind = Kind.Integer)
     },
     "magnitude selection handles signs, ties and NaNs" -> { (width, lanes) =>
       def all(x: Double) = Seq.fill(lanes)(x)
@@ -411,7 +464,7 @@ class OpenCLMathSuite extends munit.FunSuite {
           (0.0, Int.MinValue),
           (Double.NaN, Int.MaxValue)
         )
-      ) evaluate("ilogb", width, Seq(all(x)), all(power.toDouble), integerResult = true)
+      ) evaluate("ilogb", width, Seq(all(x)), all(power.toDouble), resultKind = Kind.Integer)
     },
     "remainder and remquo use the nearest even quotient" -> { (width, lanes) =>
       def all(x: Double) = Seq.fill(lanes)(x)
@@ -426,7 +479,14 @@ class OpenCLMathSuite extends munit.FunSuite {
         )
       ) {
         evaluate("remainder", width, Seq(all(x), all(y)), all(remain))
-        evaluate("remquo", width, Seq(all(x), all(y)), all(remain), Some(all(quotient.toDouble)), integerPointer = true)
+        evaluate(
+          "remquo",
+          width,
+          Seq(all(x), all(y)),
+          all(remain),
+          Some(all(quotient.toDouble)),
+          storedKind = Kind.Integer
+        )
       }
     },
     "special functions handle scalar and vector lanes" -> { (width, lanes) =>
@@ -445,7 +505,7 @@ class OpenCLMathSuite extends munit.FunSuite {
         Seq(all(-0.5)),
         all(1.2655121234846454),
         Some(all(-1.0)),
-        integerPointer = true,
+        storedKind = Kind.Integer,
         toleranceUlps = 16
       )
     }
@@ -453,6 +513,41 @@ class OpenCLMathSuite extends munit.FunSuite {
 
   for (((family, body), width, lanes) <- pairwise(families, Seq(16, 32, 64), Seq(1, 3, 4, 16)))
     test(s"OpenCL $family at width $width, lanes $lanes")(body(width, lanes))
+
+  test("OpenCL cross products evaluate each lane in binary64") {
+    val left    = Seq(1.0, 2.0, 3.0, 7.0)
+    val right   = Seq(4.0, 5.0, 6.0, 8.0)
+    val product = Seq(-3.0, 6.0, -3.0, 0.0)
+    val counts  = Seq(3, 4)
+    for {
+      width <- Seq(16, 32, 64)
+      lanes <- counts
+    } evaluate("cross", width, Seq(left.take(lanes), right.take(lanes)), product.take(lanes))
+  }
+
+  // OpenCL C 6.15.6: zero vectors return themselves, NaN lanes make every lane NaN, and infinite lanes become +-1 and
+  // finite ones 0 before normalising
+  test("OpenCL normalize handles zero, NaN, infinite and extreme vectors") {
+    val root   = 1.0 / Math.sqrt(2.0)
+    val counts = Seq(2, 3, 4)
+    for (width <- Seq(16, 32, 64)) {
+      val largest = width match { case 16 => 65504.0; case 32 => Float.MaxValue.toDouble; case _ => Double.MaxValue }
+      for (lanes <- counts) {
+        def padded(values: Double*): Seq[Double] = (values ++ Seq.fill(lanes)(0.0)).take(lanes)
+        val cases                                = Seq(
+          padded(3.0, 4.0)                                         -> padded(0.6, 0.8),
+          padded(0.0, -0.0)                                        -> padded(0.0, -0.0),
+          padded(Double.PositiveInfinity, 1.0)                     -> padded(1.0, 0.0),
+          padded(Double.NegativeInfinity, Double.PositiveInfinity) -> padded(-root, root),
+          padded(-2.0, Double.PositiveInfinity)                    -> padded(-0.0, 1.0),
+          padded(Double.NaN, 1.0)                                  -> Seq.fill(lanes)(Double.NaN),
+          padded(largest, -largest)                                -> padded(root, -root)
+        )
+        for ((input, expected) <- cases) evaluate("normalize", width, Seq(input), expected)
+        evaluate("fast_normalize", width, Seq(padded(3.0, 4.0)), padded(0.6, 0.8))
+      }
+    }
+  }
 
   for (prefix <- Seq("native", "half")) {
     test(s"OpenCL $prefix math executes every approximate unary operation") {
@@ -479,56 +574,38 @@ class OpenCLMathSuite extends munit.FunSuite {
   }
 
   test("OpenCL powr preserves NaNs and rejects undefined zero and infinity combinations") {
+    val nanInputs =
+      Seq(Seq(Double.NaN, 0.0, Double.PositiveInfinity, 1.0), Seq(0.0, Double.NaN, 0.0, Double.PositiveInfinity))
+    val undefinedInputs =
+      Seq(Seq(1.0, -0.0, Double.PositiveInfinity, -2.0), Seq(Double.NegativeInfinity, -0.0, -0.0, 2.0))
+    val finiteInputs  = Seq(Seq(1.0, 1.0, 0.5, 2.0), Seq(-2.0, 2.0, Double.PositiveInfinity, Double.PositiveInfinity))
+    val finiteResults = Seq(1.0, 1.0, 0.0, Double.PositiveInfinity)
+    val allWidths     = Seq(16, 32, 64)
+    val singleWidth   = Seq(32)
     for {
       operation <- Seq("powr", "native_powr", "half_powr")
-      width     <- if (operation == "powr") Seq(16, 32, 64) else Seq(32)
+      width     <- if (operation == "powr") allWidths else singleWidth
     } {
-      evaluate(
-        operation,
-        width,
-        Seq(Seq(Double.NaN, 0.0, Double.PositiveInfinity, 1.0), Seq(0.0, Double.NaN, 0.0, Double.PositiveInfinity)),
-        Seq.fill(4)(Double.NaN)
-      )
-      evaluate(
-        operation,
-        width,
-        Seq(Seq(1.0, -0.0, Double.PositiveInfinity, -2.0), Seq(Double.NegativeInfinity, -0.0, -0.0, 2.0)),
-        Seq.fill(4)(Double.NaN)
-      )
-      evaluate(
-        operation,
-        width,
-        Seq(Seq(1.0, 1.0, 0.5, 2.0), Seq(-2.0, 2.0, Double.PositiveInfinity, Double.PositiveInfinity)),
-        Seq(1.0, 1.0, 0.0, Double.PositiveInfinity)
-      )
+      evaluate(operation, width, nanInputs, Seq.fill(4)(Double.NaN))
+      evaluate(operation, width, undefinedInputs, Seq.fill(4)(Double.NaN))
+      evaluate(operation, width, finiteInputs, finiteResults)
     }
   }
 
   test("OpenCL pointer math handles mixed finite and exceptional lanes") {
+    val frexpInput    = Seq(Double.PositiveInfinity, Double.NaN, -12.0, -0.0)
+    val frexpFraction = Seq(Double.PositiveInfinity, Double.NaN, -0.75, -0.0)
+    val frexpExponent = Seq(0.0, 0.0, 4.0, 0.0)
+    val fractInput    = Seq(-1.25, 2.75, -0.0, Double.PositiveInfinity)
+    val fractResult   = Seq(0.75, 0.75, -0.0, 0.0)
+    val fractStored   = Seq(-2.0, 2.0, -0.0, Double.PositiveInfinity)
+    val remquoInputs  = Seq(Seq(Double.PositiveInfinity, 1.0, Double.NaN, -7.0), Seq(1.0, 0.0, 2.0, 2.0))
+    val remquoResult  = Seq(Double.NaN, Double.NaN, Double.NaN, 1.0)
+    val remquoQuot    = Seq(0.0, 0.0, 0.0, -4.0)
     for (width <- Seq(16, 32, 64)) {
-      evaluate(
-        "frexp",
-        width,
-        Seq(Seq(Double.PositiveInfinity, Double.NaN, -12.0, -0.0)),
-        Seq(Double.PositiveInfinity, Double.NaN, -0.75, -0.0),
-        Some(Seq(0.0, 0.0, 4.0, 0.0)),
-        integerPointer = true
-      )
-      evaluate(
-        "fract",
-        width,
-        Seq(Seq(-1.25, 2.75, -0.0, Double.PositiveInfinity)),
-        Seq(0.75, 0.75, -0.0, 0.0),
-        Some(Seq(-2.0, 2.0, -0.0, Double.PositiveInfinity))
-      )
-      evaluate(
-        "remquo",
-        width,
-        Seq(Seq(Double.PositiveInfinity, 1.0, Double.NaN, -7.0), Seq(1.0, 0.0, 2.0, 2.0)),
-        Seq(Double.NaN, Double.NaN, Double.NaN, 1.0),
-        Some(Seq(0.0, 0.0, 0.0, -4.0)),
-        integerPointer = true
-      )
+      evaluate("frexp", width, Seq(frexpInput), frexpFraction, Some(frexpExponent), storedKind = Kind.Integer)
+      evaluate("fract", width, Seq(fractInput), fractResult, Some(fractStored))
+      evaluate("remquo", width, remquoInputs, remquoResult, Some(remquoQuot), storedKind = Kind.Integer)
     }
     evaluate(
       "remquo",
@@ -536,7 +613,7 @@ class OpenCLMathSuite extends munit.FunSuite {
       Seq(Seq(Double.MaxValue), Seq(Double.MinPositiveValue)),
       Seq(0.0),
       Some(Seq(0.0)),
-      integerPointer = true
+      storedKind = Kind.Integer
     )
   }
 
@@ -604,21 +681,23 @@ class OpenCLMathSuite extends munit.FunSuite {
   }
 
   /** Runs one OpenCL.std instruction on `inputs`; `stored` is the value written through its trailing pointer. */
+  private enum Kind derives CanEqual { case Floating, Integer }
+
   private def evaluate(
       operation: String,
       width: Int,
       inputs: Seq[Seq[Double]],
       expected: Seq[Double],
       stored: Option[Seq[Double]] = None,
-      integerPointer: Boolean = false,
-      integerResult: Boolean = false,
+      storedKind: Kind = Kind.Floating,
+      resultKind: Kind = Kind.Floating,
       toleranceUlps: Int = 0
   ): Unit = {
     val lanes                          = expected.size
     def vector(scalar: String): String = if (lanes == 1) scalar else s"${scalar}_vector"
     val value                          = vector("%float")
-    val result                         = if (integerResult) vector("%int") else value
-    val auxiliary                      = if (integerPointer) vector("%int") else value
+    val result                         = if (resultKind == Kind.Integer) vector("%int") else value
+    val auxiliary                      = if (storedKind == Kind.Integer) vector("%int") else value
     val arguments                      = inputs.indices.map(index => s"%a$index")
     val module                         = spv"""
       $openCL
@@ -642,24 +721,24 @@ class OpenCLMathSuite extends munit.FunSuite {
       OpFunctionEnd
     """
     val slots       = if (lanes == 3) 4 else lanes
-    val resultBytes = (if (integerResult) 32 else width) / 8
-    val storedBytes = (if (integerPointer) 32 else width) / 8
+    val resultBytes = (if (resultKind == Kind.Integer) 32 else width) / 8
+    val storedBytes = (if (storedKind == Kind.Integer) 32 else width) / 8
     val memory      = RegionMemory()
     val out         = memory.allocate((slots * resultBytes).toLong.refine[Long > 0].value)
     val aux         = memory.allocate((slots * storedBytes).toLong.refine[Long > 0].value)
     val scalars     = inputs.map(values => scalarBytes(littleEndian(values.map(floatingBits(_, width)), width)))
     assertEquals(run(module, "math", memory, Vec(buffer(out), buffer(aux)) ++ Vec.from(scalars)), Right(()))
+    val exponent = width match { case 16 => 0x7c00L; case 32 => 0x7f800000L; case _ => 0x7ff0000000000000L }
+    val fraction = width match { case 16 => 0x3ffL; case 32 => 0x7fffffL; case _ => 0xfffffffffffffL }
     expected.zipWithIndex.foreach { (value, lane) =>
       val actual = LittleEndian.decode(memory.bytes(out), lane * resultBytes, resultBytes.refine[Int in 0 ~ 8].value)
-      if (value.isNaN && !integerResult) {
-        val exponent = width match { case 16 => 0x7c00L; case 32 => 0x7f800000L; case _ => 0x7ff0000000000000L }
-        val fraction = width match { case 16 => 0x3ffL; case 32 => 0x7fffffL; case _ => 0xfffffffffffffL }
+      if (value.isNaN && resultKind != Kind.Integer) {
         assert(
           (actual & exponent) == exponent && (actual & fraction) != 0L,
           s"$operation, width $width, lane $lane, inputs ${inputs.map(_(lane))}: expected NaN, got bits $actual"
         )
       } else {
-        val wanted = if (integerResult) value.toLong & 0xffffffffL else floatingBits(value, width)
+        val wanted = if (resultKind == Kind.Integer) value.toLong & 0xffffffffL else floatingBits(value, width)
         assert((BigInt(actual) - BigInt(wanted)).abs <= toleranceUlps, s"lane $lane: bits $actual != $wanted")
       }
     }
@@ -667,7 +746,7 @@ class OpenCLMathSuite extends munit.FunSuite {
       assertEquals(
         memory.bytes(aux).take(lanes * storedBytes),
         littleEndian(
-          values.map(value => if (integerPointer) value.toLong else floatingBits(value, width)),
+          values.map(value => if (storedKind == Kind.Integer) value.toLong else floatingBits(value, width)),
           storedBytes * 8
         )
       )

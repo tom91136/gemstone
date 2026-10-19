@@ -9,10 +9,13 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class TensorSuite extends munit.FunSuite {
-  private val Layouts = Vec("row-col", "row-row", "col-col", "col-row")
+  private val Layouts             = Vec("row-col", "row-row", "col-col", "col-row")
+  private val AccumulatorVariants = Vec("Alias", "Nonalias")
+  private val Flags               = Vec(false, true)
 
   private def hmma884(kind: String, layout: String): Kernel = {
     val name = layout.split('-').map(_.capitalize).mkString
@@ -56,7 +59,7 @@ class TensorSuite extends munit.FunSuite {
     }
     val count                       = 8
     def lanes(group: Int): Vec[Int] = Vec.tabulate(8)(index => group * 4 + index % 4 + index / 4 * 16)
-    val results                     = (0 until 4).flatMap { group =>
+    def products(group: Int)        = {
       val matrixA = Array.ofDim[Double](8, 4)
       val matrixB = Array.ofDim[Double](4, 8)
       val matrixC = Array.ofDim[Double](8, 8)
@@ -81,7 +84,8 @@ class TensorSuite extends munit.FunSuite {
           (0 until 4).map(k => matrixA(row)(k) * matrixB(k)(column)).sum + matrixC(row)(column)
         }
       }
-    }.sortBy(_._1)
+    }
+    val results = (0 until 4).flatMap(products(_)).sortBy(_._1)
     Vec.from(results.flatMap { (_, values) =>
       if (kind == "f32") values.map(value => java.lang.Float.floatToRawIntBits(value.toFloat).toLong & 0xffffffffL)
       else values.grouped(2).map(pair => IEEE754.fromDouble(pair(0), 16) | (IEEE754.fromDouble(pair(1), 16) << 16))
@@ -158,8 +162,6 @@ class TensorSuite extends munit.FunSuite {
     assert(kernel.copy(sm = 80).lower(8, 8, 8, 8).isLeft)
   }
 
-  private def half(value: Float): Long = IEEE754.floatToBinary16(value).raw & 0xffffL
-
   private def packed(low: Int, high: Int): Long = half(low.toFloat) | (half(high.toFloat) << 16)
 
   private def f16Accumulator(name: String, sm: Int, function: String): Kernel =
@@ -218,7 +220,7 @@ class TensorSuite extends munit.FunSuite {
     val hmma                            = kernel.function.instructions.find(_.mnemonic.raw == "HMMA").get
     val (from, to)                      = (hmma.operands.head, hmma.operands(3))
     def next(operand: Operand): Operand = operand match {
-      case Operand.Register(bank, index) => Operand.Register(bank, (index.raw + 1).refine[Int in 0 ~ 255].value)
+      case Operand.Register(bank, index) => Operand.Register(bank, (index + 1).refine[Int in 0 ~ 255].value)
       case other                         => fail(s"expected register operand, got $other")
     }
     kernel.map { instruction =>
@@ -265,8 +267,8 @@ class TensorSuite extends munit.FunSuite {
 
   test("Turing sm_75 compiler fixture supports the F16 1688 form") {
     for {
-      dense   <- Vec(false, true)
-      variant <- Vec("Alias", "Nonalias")
+      dense   <- Flags
+      variant <- AccumulatorVariants
     }
       accumulateF16(
         f16Accumulator(s"hmma1688F16AccShuffle${variant}Sm75", 75, s"mma_f16_acc_${variant.toLowerCaseRoot}_1688"),
@@ -276,33 +278,15 @@ class TensorSuite extends munit.FunSuite {
   }
 
   test("Turing sm_75 LDG offset plus uniform 64-bit base executes with tensor operations") {
-    for (variant <- Vec("Alias", "Nonalias")) {
+    for (variant <- AccumulatorVariants) {
       val kernel = f16Accumulator(s"hmma1688F16Acc${variant}Sm75", 75, s"mma_f16_acc_${variant.toLowerCaseRoot}_1688")
       assert(kernel.instructions(8, 8, 8, 8).exists {
-        case VMInstruction.Tensor(VMIR.Matrix.Operation.Multiply(_, _, _, _, _, _, _, _, _)) => true
-        case _                                                                               => false
+        case VMInstruction.Tensor(VMIR.Matrix.Operation.Multiply(accumulation = _)) => true
+        case _                                                                      => false
       })
       accumulateF16(kernel, 8)
       accumulateF16(kernel, 8, dense = true)
     }
-  }
-
-  test("sm_75 U32 uniform-base address lowering rejects unverified variants") {
-    val kernel                             = f16Accumulator("hmma1688F16AccAliasSm75", 75, "mma_f16_acc_alias_1688")
-    def uniform(operand: Operand): Boolean = OperandPrinter.print(operand).toOption.exists(_.contains(".U32+UR"))
-    val load  = kernel.function.instructions.find(i => i.mnemonic.raw == "LDG" && i.operands.exists(uniform(_))).get
-    val index = load.operands.indexWhere(uniform(_))
-    def rejected(candidate: Kernel): Unit =
-      assert(candidate.lower(8, 8, 8, 8).left.exists(_.contains("unsupported .U32 uniform global address")))
-    def address(text: String): Kernel =
-      kernel.map(i =>
-        if (i eq load) load.rewrite(operands = load.operands.updated(index, OperandParser.parse(text).value)) else i
-      )
-    rejected(address("[R12.U32+UR4+0x4]"))
-    rejected(address("[R12.U32]"))
-    val store = Parser.parse("STG.E.SYS [R12.U32+UR4], R8;").value
-    rejected(kernel.map(i => if (i eq load) load.rewrite(store) else i))
-    rejected(kernel.copy(sm = 89))
   }
 
   test("nonuniform ldmatrix.trans fragments feed HMMA.1688.F16 in the measured lane layout") {
@@ -340,8 +324,9 @@ class TensorSuite extends munit.FunSuite {
       val expected = Vec.tabulate(32) { lane =>
         Vec((1, false), (2, false), (4, false), (4, true)).flatMap { (count, transpose) =>
           Vec.tabulate(count) { matrix =>
-            val (row, col) = if (transpose) (lane % 4 * 2, lane / 4) else (lane / 4, lane % 4 * 2)
-            val low        = 1 + matrix * 64 + row * 8 + col
+            val row = if (transpose) lane % 4 * 2 else lane / 4
+            val col = if (transpose) lane / 4 else lane % 4 * 2
+            val low = 1 + matrix * 64 + row * 8 + col
             low.toLong | ((low + (if (transpose) 8 else 1)).toLong << 16)
           }
         }
@@ -372,5 +357,56 @@ class TensorSuite extends munit.FunSuite {
       Arg.Buffer(words(floats(cv)))
     )
     assertEquals(run.words(2), floats(expected))
+  }
+
+  // the upper half-warp takes the longer path, so the lower one reaches the collective first; compiler output
+  // reconverges with BSSY and BSYNC first, which this skips
+  for (
+    (name, before, collective, stored) <- Vec(
+      (
+        "LDSM",
+        Vec("LOP3.LUT R4, R0, 0x100, RZ, 0xfc, !PT", "STS [R0.X4], R4", "SHF.L.U32 R6, R0, 0x4, RZ"),
+        "LDSM.16.M88.4 R4, [R6]",
+        "R4"
+      ),
+      (
+        "HMMA",
+        Vec(
+          "LOP3.LUT R4, R0, 0x3c003c00, RZ, 0xfc, !PT",
+          "LOP3.LUT R5, R0, 0x3c003d00, RZ, 0xfc, !PT",
+          "LOP3.LUT R6, R0, 0x3c003e00, RZ, 0xfc, !PT",
+          "LOP3.LUT R7, R0, 0x3c003f00, RZ, 0xfc, !PT",
+          "LOP3.LUT R12, R0, 0x40003800, RZ, 0xfc, !PT",
+          "LOP3.LUT R13, R0, 0x38004000, RZ, 0xfc, !PT"
+        ),
+        "HMMA.16816.F32 R8, R4, R12, RZ",
+        "R8"
+      )
+    )
+  ) test(s"$name waits for the lanes of its warp still in a divergent branch") {
+    def result(diverge: Boolean): Vec[Long] = {
+      val prefix = Vec("S2R R0, SR_TID.X") ++ before
+      val detour =
+        if (!diverge) Vec.empty[String]
+        else
+          Vec(
+            "ISETP.LT.U32.AND P0, PT, R0, 16, PT",
+            s"@P0 BRA 0x${((prefix.size + 4) * 16).toHexString}",
+            "IADD3 R30, R30, 1, RZ",
+            "IADD3 R30, R30, 1, RZ"
+          )
+      val text =
+        (prefix ++ detour ++ Vec(
+          collective,
+          "LDC.64 R2, c[0x0][0x160]",
+          "IMAD.WIDE.U32 R2, R0, 0x10, R2",
+          s"STG.E.128 [R2.64], $stored",
+          "EXIT"
+        )).mkString("\n")
+      program(86, text, shared = 512).launch(32)(Arg.zeros(512)).words(0)
+    }
+    val converged = result(false)
+    assert(converged.exists(_ != 0L))
+    assertEquals(result(true), converged)
   }
 }

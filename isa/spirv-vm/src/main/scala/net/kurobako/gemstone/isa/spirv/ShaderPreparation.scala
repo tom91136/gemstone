@@ -26,7 +26,7 @@ object ShaderPreparation {
         selected <- select(ModuleNormalisation.expandDecorationGroups(decoded), entry, stage)
         module   <- Specialization.specialize(selected, constants)
         lowered = ShaderLowering.lower(module, stage)
-        program <- VMProgram.load(
+        program <- LoadedProgram.load(
           lowered.module,
           if (stage == ShaderStageKind.Compute) Validation.Environment.VulkanCompute
           else Validation.Environment.VulkanGraphics
@@ -48,7 +48,7 @@ object ShaderPreparation {
           descriptors,
           pushConstants == 1,
           ShaderReflection.interfaces(program, entry, stage),
-          metadata.requiredWorkGroupSize.map(size => ShaderWorkgroup(size.x, size.y, size.z)),
+          metadata.requiredWorkGroupSize,
           lowered.earlyFragmentTests,
           lowered.fragmentQuads
         )

@@ -1,41 +1,26 @@
-#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
+#include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
+#include "session.hpp"
+
+using namespace aspartame;
+
+using gemstone_opencl_test::gpu;
+using gemstone_opencl_test::hasFeature;
+using gemstone_opencl_test::info;
 
 namespace {
-cl_device_id gpu() {
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
-  return device;
-}
-
-cl_bool flag(cl_device_id device, cl_device_info name) {
-  cl_bool value = CL_FALSE;
-  REQUIRE((clGetDeviceInfo(device, name, sizeof(value), &value, nullptr) == CL_SUCCESS));
-  return value;
-}
-
-bool hasFeature(cl_device_id device, std::string_view feature) {
-  size_t size = 0;
-  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_FEATURES, 0, nullptr, &size) == CL_SUCCESS));
-  std::vector<cl_name_version> features(size / sizeof(cl_name_version));
-  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_FEATURES, size, features.data(), nullptr) == CL_SUCCESS));
-  for (const auto &entry : features)
-    if (entry.name == feature) return true;
-  return false;
-}
-
 struct Session {
   gemstone_test::RpcFixture server;
   gemstone_test::RpcEnvironment environment{server};
@@ -70,22 +55,22 @@ struct Session {
   }
   cl_program source(const char *text, const char *options) const {
     cl_int error = CL_SUCCESS;
-    auto program = clCreateProgramWithSource(context, 1, &text, nullptr, &error);
+    auto *program = clCreateProgramWithSource(context, 1, &text, nullptr, &error);
     REQUIRE((program && error == CL_SUCCESS));
     REQUIRE((build(program, options) == CL_SUCCESS));
     return program;
   }
   cl_program il(const char *options) {
-    server.programCatalogue({{"groups", "groups"}}, {});
+    server.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
     cl_int error = CL_SUCCESS;
-    auto program = clCreateProgramWithIL(context, server.Spirv, sizeof(server.Spirv), &error);
+    auto *program = clCreateProgramWithIL(context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
     REQUIRE((program && error == CL_SUCCESS));
     REQUIRE((build(program, options) == CL_SUCCESS));
     return program;
   }
   cl_kernel kernel(cl_program program, const char *name) const {
     cl_int error = CL_SUCCESS;
-    auto kernel = clCreateKernel(program, name, &error);
+    auto *kernel = clCreateKernel(program, name, &error);
     REQUIRE((kernel && error == CL_SUCCESS));
     const uint32_t seed = 0;
     REQUIRE((clSetKernelArgSVMPointer(kernel, 0, memory) == CL_SUCCESS));
@@ -116,24 +101,25 @@ void requireGeometry(const auto &launch, std::array<int64_t, 3> size, std::array
 } // namespace
 
 TEST_CASE("OpenCL advertises non-uniform work-groups", "[opencl][capability]") {
-  CHECK((flag(gpu(), CL_DEVICE_NON_UNIFORM_WORK_GROUP_SUPPORT) == CL_TRUE));
+  CHECK((info<cl_bool>(gpu(), CL_DEVICE_NON_UNIFORM_WORK_GROUP_SUPPORT) == CL_TRUE));
 }
 
 TEST_CASE("OpenCL advertises work-group collective functions", "[opencl][capability]") {
-  const auto device = gpu();
-  CHECK((flag(device, CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT) == CL_TRUE));
+  auto *const device = gpu();
+  CHECK((info<cl_bool>(device, CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT) == CL_TRUE));
   CHECK(hasFeature(device, "__opencl_c_work_group_collective_functions"));
 }
 
 TEST_CASE("OpenCL advertises the generic address space", "[opencl][capability]") {
-  const auto device = gpu();
-  CHECK((flag(device, CL_DEVICE_GENERIC_ADDRESS_SPACE_SUPPORT) == CL_TRUE));
+  auto *const device = gpu();
+  CHECK((info<cl_bool>(device, CL_DEVICE_GENERIC_ADDRESS_SPACE_SUPPORT) == CL_TRUE));
   CHECK(hasFeature(device, "__opencl_c_generic_address_space"));
 }
 
 TEST_CASE("OpenCL advertises program-scope global variables", "[opencl][capability]") {
-  const auto device = gpu();
-  size_t limit = 0, preferred = 0;
+  auto *const device = gpu();
+  size_t limit = 0;
+  size_t preferred = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE, sizeof(limit), &limit, nullptr) == CL_SUCCESS));
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE, sizeof(preferred), &preferred, nullptr) == CL_SUCCESS));
   CHECK(limit >= 65536);
@@ -149,8 +135,8 @@ TEST_CASE("OpenCL reports no passed conformance version", "[opencl][capability]"
 
 TEST_CASE("OpenCL IL programs launch partial work-groups with the exact global size", "[opencl][capability]") {
   Session session;
-  auto program = session.il("");
-  auto kernel = session.kernel(program, "groups");
+  auto *program = session.il("");
+  auto *kernel = session.kernel(program, "groups");
   const size_t offset[] = {3, 5, 0};
   const size_t global[] = {100, 7, 3};
   const size_t local[] = {16, 2, 2};
@@ -166,31 +152,34 @@ TEST_CASE("OpenCL IL programs launch partial work-groups with the exact global s
 
 TEST_CASE("OpenCL uniform work-group builds reject partial work-groups", "[opencl][capability]") {
   Session session;
-  auto program = session.il("-cl-uniform-work-group-size");
-  auto kernel = session.kernel(program, "groups");
-  const size_t global = 100, local = 32, divisible = 96;
+  auto *program = session.il("-cl-uniform-work-group-size");
+  auto *kernel = session.kernel(program, "groups");
+  const size_t global = 100;
+  const size_t local = 32;
+  const size_t divisible = 96;
   CHECK(session.enqueue(kernel, 1, nullptr, &global, &local) == CL_INVALID_WORK_GROUP_SIZE);
   CHECK(session.enqueue(kernel, 1, nullptr, &divisible, &local) == CL_SUCCESS);
   CHECK(session.enqueue(kernel, 1, nullptr, &global, nullptr) == CL_SUCCESS);
   const auto launch = session.server.lastLaunch();
   CHECK((global % static_cast<size_t>(launch.groupSize.x.value) == 0));
-  CHECK((launch.globalSize.x.value == launch.groupSize.x.value * launch.groupCount.x.value));
+  CHECK((launch.globalSize.x.value == static_cast<int64_t>(launch.groupSize.x.value) * launch.groupCount.x.value));
   clReleaseKernel(kernel);
   clReleaseProgram(program);
 }
 
 TEST_CASE("OpenCL C 1.x programs keep work-groups uniform", "[opencl][capability]") {
   Session session;
-  session.server.programCatalogue({{"store", "store"}}, {});
+  session.server.programCatalogue({{.name = "store", .linkageName = "store"}}, {});
   for (const char *options : {"", "-cl-std=CL1.2"}) {
-    auto program = session.source(StoreSource, options);
-    auto kernel = session.kernel(program, "store");
-    const size_t global[] = {100, 9}, local[] = {16, 4};
+    auto *program = session.source(StoreSource, options);
+    auto *kernel = session.kernel(program, "store");
+    const size_t global[] = {100, 9};
+    const size_t local[] = {16, 4};
     CHECK(session.enqueue(kernel, 2, nullptr, global, local) == CL_INVALID_WORK_GROUP_SIZE);
     REQUIRE(session.enqueue(kernel, 2, nullptr, global, nullptr) == CL_SUCCESS);
     const auto launch = session.server.lastLaunch();
-    CHECK((launch.globalSize.x.value == launch.groupSize.x.value * launch.groupCount.x.value));
-    CHECK((launch.globalSize.y.value == launch.groupSize.y.value * launch.groupCount.y.value));
+    CHECK((launch.globalSize.x.value == static_cast<int64_t>(launch.groupSize.x.value) * launch.groupCount.x.value));
+    CHECK((launch.globalSize.y.value == static_cast<int64_t>(launch.groupSize.y.value) * launch.groupCount.y.value));
     CHECK((launch.globalSize.x.value == 100));
     CHECK((launch.globalSize.y.value == 9));
     clReleaseKernel(kernel);
@@ -200,10 +189,11 @@ TEST_CASE("OpenCL C 1.x programs keep work-groups uniform", "[opencl][capability
 
 TEST_CASE("OpenCL C 3.0 programs launch partial work-groups", "[opencl][capability]") {
   Session session;
-  session.server.programCatalogue({{"store", "store"}}, {});
-  auto program = session.source(StoreSource, "-cl-std=CL3.0");
-  auto kernel = session.kernel(program, "store");
-  const size_t global[] = {100, 9}, local[] = {16, 4};
+  session.server.programCatalogue({{.name = "store", .linkageName = "store"}}, {});
+  auto *program = session.source(StoreSource, "-cl-std=CL3.0");
+  auto *kernel = session.kernel(program, "store");
+  const size_t global[] = {100, 9};
+  const size_t local[] = {16, 4};
   REQUIRE(session.enqueue(kernel, 2, nullptr, global, local) == CL_SUCCESS);
   requireGeometry(session.server.lastLaunch(), {16, 4, 1}, {7, 3, 1}, {100, 9, 1});
   clReleaseKernel(kernel);
@@ -211,7 +201,7 @@ TEST_CASE("OpenCL C 3.0 programs launch partial work-groups", "[opencl][capabili
 }
 
 TEST_CASE("OpenCL C compiles work-group collective functions", "[opencl][capability]") {
-  Session session;
+  Session const session;
   const char *source = R"CLC(
     #ifndef __opencl_c_work_group_collective_functions
     #error work-group collective functions are not enabled
@@ -224,14 +214,14 @@ TEST_CASE("OpenCL C compiles work-group collective functions", "[opencl][capabil
                + (long)work_group_reduce_max((float)value);
     })CLC";
   cl_int error = CL_SUCCESS;
-  auto program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
+  auto *program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
   REQUIRE((program && error == CL_SUCCESS));
   CHECK((session.build(program, "-cl-std=CL3.0") == CL_SUCCESS));
   clReleaseProgram(program);
 }
 
 TEST_CASE("OpenCL C compiles generic address space pointers", "[opencl][capability]") {
-  Session session;
+  Session const session;
   const char *source = R"CLC(
     #ifndef __opencl_c_generic_address_space
     #error the generic address space is not enabled
@@ -249,7 +239,7 @@ TEST_CASE("OpenCL C compiles generic address space pointers", "[opencl][capabili
       out[1] = total;
     })CLC";
   cl_int error = CL_SUCCESS;
-  auto program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
+  auto *program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
   REQUIRE((program && error == CL_SUCCESS));
   CHECK((session.build(program, "-cl-std=CL3.0") == CL_SUCCESS));
   clReleaseProgram(program);
@@ -257,12 +247,15 @@ TEST_CASE("OpenCL C compiles generic address space pointers", "[opencl][capabili
 
 TEST_CASE("OpenCL builds bind every program-scope global for the program's lifetime", "[opencl][capability]") {
   Session session;
-  session.server.programCatalogue({{"groups", "groups"}}, {{"counter", 0, 4, {}}, {"table", 0, 16, {}}});
+  session.server.programCatalogue({{.name = "groups", .linkageName = "groups"}},
+                                  {{.name = "counter", .virtualAddress = 0, .size = 4, .pointerOffsets = {}},
+                                   {.name = "table", .virtualAddress = 0, .size = 16, .pointerOffsets = {}}});
   session.server.expectGlobalBinding("counter", 0, {5, 0, 0, 0});
   session.server.expectGlobalBinding("table", 0, {1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0});
   const auto before = session.server.allocationCount();
   cl_int error = CL_SUCCESS;
-  auto program = clCreateProgramWithIL(session.context, session.server.Spirv, sizeof(session.server.Spirv), &error);
+  auto *program =
+      clCreateProgramWithIL(session.context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE(session.build(program, "") == CL_SUCCESS);
   session.server.checkGlobalBindings();
@@ -279,9 +272,11 @@ TEST_CASE("OpenCL builds reject program-scope globals above the device limit", "
   Session session;
   size_t limit = 0;
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE, sizeof(limit), &limit, nullptr) == CL_SUCCESS));
-  session.server.programCatalogue({{"groups", "groups"}}, {{"huge", 0, limit + 1, {}}});
+  session.server.programCatalogue({{.name = "groups", .linkageName = "groups"}},
+                                  {{.name = "huge", .virtualAddress = 0, .size = limit + 1, .pointerOffsets = {}}});
   cl_int error = CL_SUCCESS;
-  auto program = clCreateProgramWithIL(session.context, session.server.Spirv, sizeof(session.server.Spirv), &error);
+  auto *program =
+      clCreateProgramWithIL(session.context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   CHECK(session.build(program, "") == CL_BUILD_PROGRAM_FAILURE);
   cl_build_status status = CL_BUILD_NONE;
@@ -291,7 +286,7 @@ TEST_CASE("OpenCL builds reject program-scope globals above the device limit", "
 }
 
 TEST_CASE("OpenCL C compiles program-scope global variables", "[opencl][capability]") {
-  Session session;
+  Session const session;
   const char *source = R"CLC(
     #ifndef __opencl_c_program_scope_global_variables
     #error program-scope global variables are not enabled
@@ -303,32 +298,36 @@ TEST_CASE("OpenCL C compiles program-scope global variables", "[opencl][capabili
       out[0] = *pointer + calls++ + (int)seed;
     })CLC";
   cl_int error = CL_SUCCESS;
-  auto program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
+  auto *program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
   REQUIRE((program && error == CL_SUCCESS));
   CHECK(session.build(program, "-cl-std=CL3.0") == CL_SUCCESS);
   clReleaseProgram(program);
 }
 
 TEST_CASE("OpenCL device and host timers share the profiling clock", "[opencl][capability]") {
-  Session session;
+  Session const session;
   cl_platform_id platform = nullptr;
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_PLATFORM, sizeof(platform), &platform, nullptr) == CL_SUCCESS));
   cl_ulong resolution = 0;
   REQUIRE((clGetPlatformInfo(platform, CL_PLATFORM_HOST_TIMER_RESOLUTION, sizeof(resolution), &resolution, nullptr) == CL_SUCCESS));
   CHECK(resolution > 0);
-  cl_ulong device = 0, host = 0, before = 0, after = 0;
+  cl_ulong device = 0;
+  cl_ulong host = 0;
+  cl_ulong before = 0;
+  cl_ulong after = 0;
   CHECK(clGetDeviceAndHostTimer(session.device, &device, nullptr) == CL_INVALID_VALUE);
   CHECK(clGetHostTimer(session.device, nullptr) == CL_INVALID_VALUE);
   REQUIRE(clGetHostTimer(session.device, &before) == CL_SUCCESS);
   REQUIRE(clGetDeviceAndHostTimer(session.device, &device, &host) == CL_SUCCESS);
   const cl_queue_properties properties[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
   cl_int error = CL_SUCCESS;
-  auto queue = clCreateCommandQueueWithProperties(session.context, session.device, properties, &error);
+  auto *queue = clCreateCommandQueueWithProperties(session.context, session.device, properties, &error);
   REQUIRE((queue && error == CL_SUCCESS));
   cl_event marker = nullptr;
   REQUIRE((clEnqueueMarkerWithWaitList(queue, 0, nullptr, &marker) == CL_SUCCESS));
   REQUIRE((clWaitForEvents(1, &marker) == CL_SUCCESS));
-  cl_ulong ended = 0, later = 0;
+  cl_ulong ended = 0;
+  cl_ulong later = 0;
   REQUIRE((clGetEventProfilingInfo(marker, CL_PROFILING_COMMAND_END, sizeof(ended), &ended, nullptr) == CL_SUCCESS));
   REQUIRE(clGetDeviceAndHostTimer(session.device, &later, &after) == CL_SUCCESS);
   CHECK(before <= host);
@@ -341,29 +340,29 @@ TEST_CASE("OpenCL device and host timers share the profiling clock", "[opencl][c
 
 TEST_CASE("OpenCL libraries stay unloaded until linked into an executable", "[opencl][capability]") {
   Session session;
-  session.server.programCatalogue({{"step", "step"}}, {});
+  session.server.programCatalogue({{.name = "step", .linkageName = "step"}}, {});
   const char *librarySource = "int helper(int *value) { return *value + 1; }";
   const char *kernelSource = "extern int helper(int *value);\n"
                              "kernel void step(global int *out, uint seed) { out[0] = helper(out) + (int)seed; }";
   cl_int error = CL_SUCCESS;
-  auto library = clCreateProgramWithSource(session.context, 1, &librarySource, nullptr, &error);
+  auto *library = clCreateProgramWithSource(session.context, 1, &librarySource, nullptr, &error);
   REQUIRE((library && error == CL_SUCCESS));
   REQUIRE((clCompileProgram(library, 1, &session.device, "-cl-std=CL3.0", 0, nullptr, nullptr, nullptr, nullptr) == CL_SUCCESS));
-  auto object = clCreateProgramWithSource(session.context, 1, &kernelSource, nullptr, &error);
+  auto *object = clCreateProgramWithSource(session.context, 1, &kernelSource, nullptr, &error);
   REQUIRE((object && error == CL_SUCCESS));
   REQUIRE((clCompileProgram(object, 1, &session.device, "-cl-std=CL3.0", 0, nullptr, nullptr, nullptr, nullptr) == CL_SUCCESS));
   const auto loads = session.server.programLoads.load();
-  auto linkedLibrary = clLinkProgram(session.context, 1, &session.device, "-create-library", 1, &library, nullptr, nullptr, &error);
+  auto *linkedLibrary = clLinkProgram(session.context, 1, &session.device, "-create-library", 1, &library, nullptr, nullptr, &error);
   REQUIRE(error == CL_SUCCESS);
   CHECK(session.server.programLoads.load() == loads);
   cl_program_binary_type type = CL_PROGRAM_BINARY_TYPE_NONE;
   REQUIRE((clGetProgramBuildInfo(linkedLibrary, session.device, CL_PROGRAM_BINARY_TYPE, sizeof(type), &type, nullptr) == CL_SUCCESS));
   CHECK(type == CL_PROGRAM_BINARY_TYPE_LIBRARY);
   const cl_program inputs[] = {object, linkedLibrary};
-  auto executable = clLinkProgram(session.context, 1, &session.device, "", 2, inputs, nullptr, nullptr, &error);
+  auto *executable = clLinkProgram(session.context, 1, &session.device, "", 2, inputs, nullptr, nullptr, &error);
   REQUIRE(error == CL_SUCCESS);
   CHECK(session.server.programLoads.load() == loads + 1);
-  auto kernel = clCreateKernel(executable, "step", &error);
+  auto *kernel = clCreateKernel(executable, "step", &error);
   CHECK((kernel && error == CL_SUCCESS));
   clReleaseKernel(kernel);
   clReleaseProgram(executable);
@@ -373,7 +372,7 @@ TEST_CASE("OpenCL libraries stay unloaded until linked into an executable", "[op
 }
 
 TEST_CASE("OpenCL reports OpenCL C 2.0 together with every OpenCL C 2.0 feature", "[opencl][capability]") {
-  const auto device = gpu();
+  auto *const device = gpu();
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, 0, nullptr, &size) == CL_SUCCESS));
   std::string version(size, '\0');
@@ -419,8 +418,8 @@ TEST_CASE("OpenCL advertises cl_khr_integer_dot_product for packed and unpacked 
   }
   CHECK(hasFeature(session.device, "__opencl_c_integer_dot_product_input_4x8bit"));
   CHECK(hasFeature(session.device, "__opencl_c_integer_dot_product_input_4x8bit_packed"));
-  session.server.programCatalogue({{"dots", "dots"}}, {});
-  auto program = session.source(R"CLC(
+  session.server.programCatalogue({{.name = "dots", .linkageName = "dots"}}, {});
+  auto *program = session.source(R"CLC(
     #if !defined(__opencl_c_integer_dot_product_input_4x8bit) || !defined(__opencl_c_integer_dot_product_input_4x8bit_packed)
     #error integer dot products are not enabled
     #endif
@@ -428,7 +427,7 @@ TEST_CASE("OpenCL advertises cl_khr_integer_dot_product for packed and unpacked 
       out[0] = dot(a[0], a[1]);
       out[1] = dot_acc_sat_4x8packed_ss_int(p[0], p[1], out[2]);
     })CLC",
-                                "-cl-std=CL3.0");
+                                 "-cl-std=CL3.0");
   clReleaseProgram(program);
 }
 
@@ -442,14 +441,14 @@ TEST_CASE("OpenCL advertises the cl_khr_subgroups extension family and compiles 
                                 "cl_khr_subgroup_non_uniform_arithmetic", "cl_khr_subgroup_shuffle", "cl_khr_subgroup_shuffle_relative",
                                 "cl_khr_subgroup_extended_types", "cl_khr_subgroup_clustered_reduce", "cl_khr_subgroup_rotate"}) {
     INFO(extension);
-    CHECK((" " + extensions + " ").find(std::string(" ") + extension + " ") != std::string::npos);
+    CHECK((" " + extensions + " ").contains(std::string(" ") + extension + " "));
   }
   cl_bool progress = CL_FALSE;
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_SUB_GROUP_INDEPENDENT_FORWARD_PROGRESS, sizeof(progress), &progress, nullptr)
            == CL_SUCCESS));
   CHECK(progress == CL_TRUE);
-  session.server.programCatalogue({{"k", "k"}}, {});
-  auto program = session.source(R"CLC(
+  session.server.programCatalogue({{.name = "k", .linkageName = "k"}}, {});
+  auto *program = session.source(R"CLC(
     #if !defined(cl_khr_subgroup_ballot) || !defined(cl_khr_subgroup_rotate) || !defined(cl_khr_subgroup_clustered_reduce)
     #error subgroup extensions are not enabled
     #endif
@@ -470,7 +469,7 @@ TEST_CASE("OpenCL advertises the cl_khr_subgroups extension family and compiles 
       ints[3] = sub_group_rotate(ints[id], 1) + sub_group_clustered_rotate(ints[id], 1, 4);
     }
     )CLC",
-                                "-cl-std=CL3.0");
+                                 "-cl-std=CL3.0");
   clReleaseProgram(program);
 }
 
@@ -480,34 +479,34 @@ TEST_CASE("OpenCL advertises cl_khr_extended_bit_ops and compiles its built-ins"
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size) == CL_SUCCESS));
   std::string extensions(size, '\0');
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr) == CL_SUCCESS));
-  CHECK((" " + extensions + " ").find(" cl_khr_extended_bit_ops ") != std::string::npos);
-  session.server.programCatalogue({{"bits", "bits"}}, {});
-  auto program = session.source(R"CLC(
+  CHECK((" " + extensions + " ").contains(" cl_khr_extended_bit_ops "));
+  session.server.programCatalogue({{.name = "bits", .linkageName = "bits"}}, {});
+  auto *program = session.source(R"CLC(
     kernel void bits(global uint *u, global int *i, global uchar4 *v) {
       u[0] = bitfield_insert(u[0], u[1], 3, 5);
       i[0] = bitfield_extract_signed(i[1], 2, 6);
       u[2] = bitfield_extract_unsigned(i[2], 1, 4);
       v[0] = bit_reverse(v[1]);
     })CLC",
-                                "-cl-std=CL3.0");
+                                 "-cl-std=CL3.0");
   clReleaseProgram(program);
 }
 
 TEST_CASE("OpenCL advertises the SPIR-V hint extensions the interpreter accepts", "[opencl][capability]") {
-  const auto device = gpu();
+  auto *const device = gpu();
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size) == CL_SUCCESS));
   std::string extensions(size, '\0');
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr) == CL_SUCCESS));
   for (const auto *extension : {"cl_khr_expect_assume", "cl_khr_spirv_no_integer_wrap_decoration", "cl_khr_spirv_linkonce_odr"}) {
     INFO(extension);
-    CHECK((" " + extensions + " ").find(std::string(" ") + extension + " ") != std::string::npos);
+    CHECK((" " + extensions + " ").contains(std::string(" ") + extension + " "));
   }
 }
 
 TEST_CASE("OpenCL suggests the local size an implicit launch uses", "[opencl][capability]") {
   Session session;
-  session.server.programCatalogue({{"store", "store"}}, {});
+  session.server.programCatalogue({{.name = "store", .linkageName = "store"}}, {});
   cl_platform_id platform = nullptr;
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_PLATFORM, sizeof(platform), &platform, nullptr) == CL_SUCCESS));
   auto suggest = reinterpret_cast<clGetKernelSuggestedLocalWorkSizeKHR_fn>(
@@ -515,15 +514,16 @@ TEST_CASE("OpenCL suggests the local size an implicit launch uses", "[opencl][ca
   REQUIRE(suggest);
   for (const char *options : {"", "-cl-std=CL3.0"}) {
     INFO("options " << options);
-    auto program = session.source(StoreSource, options);
-    auto kernel = session.kernel(program, "store");
-    const size_t global[] = {100, 9}, offset[] = {3, 1};
+    auto *program = session.source(StoreSource, options);
+    auto *kernel = session.kernel(program, "store");
+    const size_t global[] = {100, 9};
+    const size_t offset[] = {3, 1};
     size_t suggested[3] = {0, 0, 0};
     REQUIRE((suggest(session.queue, kernel, 2, offset, global, suggested) == CL_SUCCESS));
     REQUIRE(session.enqueue(kernel, 2, offset, global, nullptr) == CL_SUCCESS);
     const auto launch = session.server.lastLaunch();
-    CHECK((static_cast<int64_t>(suggested[0]) == launch.groupSize.x.value));
-    CHECK((static_cast<int64_t>(suggested[1]) == launch.groupSize.y.value));
+    CHECK((std::cmp_equal(suggested[0], launch.groupSize.x.value)));
+    CHECK((std::cmp_equal(suggested[1], launch.groupSize.y.value)));
     CHECK(suggest(session.queue, kernel, 0, nullptr, global, suggested) == CL_INVALID_WORK_DIMENSION);
     CHECK(suggest(session.queue, kernel, 2, nullptr, nullptr, suggested) == CL_INVALID_GLOBAL_WORK_SIZE);
     CHECK(suggest(session.queue, kernel, 2, nullptr, global, nullptr) == CL_INVALID_VALUE);
@@ -533,13 +533,13 @@ TEST_CASE("OpenCL suggests the local size an implicit launch uses", "[opencl][ca
 }
 
 TEST_CASE("OpenCL creates command queues through cl_khr_create_command_queue", "[opencl][capability]") {
-  Session session;
+  Session const session;
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size) == CL_SUCCESS));
   std::string extensions(size, '\0');
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr) == CL_SUCCESS));
-  CHECK((" " + extensions + " ").find(" cl_khr_create_command_queue ") != std::string::npos);
-  CHECK((" " + extensions + " ").find(" cl_khr_suggested_local_work_size ") != std::string::npos);
+  CHECK((" " + extensions + " ").contains(" cl_khr_create_command_queue "));
+  CHECK((" " + extensions + " ").contains(" cl_khr_suggested_local_work_size "));
   cl_platform_id platform = nullptr;
   REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_PLATFORM, sizeof(platform), &platform, nullptr) == CL_SUCCESS));
   auto create = reinterpret_cast<clCreateCommandQueueWithPropertiesKHR_fn>(
@@ -547,7 +547,7 @@ TEST_CASE("OpenCL creates command queues through cl_khr_create_command_queue", "
   REQUIRE(create);
   const cl_queue_properties_khr properties[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
   cl_int error = CL_SUCCESS;
-  auto queue = create(session.context, session.device, properties, &error);
+  auto *queue = create(session.context, session.device, properties, &error);
   REQUIRE((queue && error == CL_SUCCESS));
   cl_command_queue_properties reported = 0;
   REQUIRE((clGetCommandQueueInfo(queue, CL_QUEUE_PROPERTIES, sizeof(reported), &reported, nullptr) == CL_SUCCESS));
@@ -556,13 +556,14 @@ TEST_CASE("OpenCL creates command queues through cl_khr_create_command_queue", "
 }
 
 TEST_CASE("OpenCL reports the device and driver UUIDs that Vulkan reports for the same device", "[opencl][capability]") {
-  const auto device = gpu();
+  auto *const device = gpu();
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size) == CL_SUCCESS));
   std::string extensions(size, '\0');
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr) == CL_SUCCESS));
-  CHECK((" " + extensions + " ").find(" cl_khr_device_uuid ") != std::string::npos);
-  std::array<cl_uchar, CL_UUID_SIZE_KHR> deviceUuid{}, driverUuid{};
+  CHECK((" " + extensions + " ").contains(" cl_khr_device_uuid "));
+  std::array<cl_uchar, CL_UUID_SIZE_KHR> deviceUuid{};
+  std::array<cl_uchar, CL_UUID_SIZE_KHR> driverUuid{};
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_UUID_KHR, deviceUuid.size(), deviceUuid.data(), nullptr) == CL_SUCCESS));
   REQUIRE((clGetDeviceInfo(device, CL_DRIVER_UUID_KHR, driverUuid.size(), driverUuid.data(), nullptr) == CL_SUCCESS));
   for (size_t index = 0; index < CL_UUID_SIZE_KHR; ++index) {
@@ -581,25 +582,25 @@ TEST_CASE("OpenCL reports the device and driver UUIDs that Vulkan reports for th
 
 TEST_CASE("OpenCL C compiles Intel subgroup block reads and writes", "[opencl][capability]") {
   Session session;
-  session.server.programCatalogue({{"blocks", "blocks"}}, {});
-  auto program = session.source(R"CLC(
+  session.server.programCatalogue({{.name = "blocks", .linkageName = "blocks"}}, {});
+  auto *program = session.source(R"CLC(
     kernel void blocks(global uint *in, global uint *out, read_only image2d_t source, write_only image2d_t target) {
       uint4 values = intel_sub_group_block_read4(in);
       uint texel = intel_sub_group_block_read(source, (int2)(0, 0));
       intel_sub_group_block_write(out, values.x + texel);
       intel_sub_group_block_write(target, (int2)(0, 1), values.y);
     })CLC",
-                                "-cl-std=CL3.0");
+                                 "-cl-std=CL3.0");
   clReleaseProgram(program);
 }
 
 TEST_CASE("OpenCL reports the SPIR-V instruction sets, extensions and capabilities it executes", "[opencl][capability]") {
-  const auto device = gpu();
+  auto *const device = gpu();
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size) == CL_SUCCESS));
   std::string extensions(size, '\0');
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr) == CL_SUCCESS));
-  CHECK((" " + extensions + " ").find(" cl_khr_spirv_queries ") != std::string::npos);
+  CHECK((" " + extensions + " ").contains(" cl_khr_spirv_queries "));
   const auto strings = [&](cl_device_info name) {
     REQUIRE((clGetDeviceInfo(device, name, 0, nullptr, &size) == CL_SUCCESS));
     std::vector<const char *> values(size / sizeof(const char *));
@@ -610,17 +611,40 @@ TEST_CASE("OpenCL reports the SPIR-V instruction sets, extensions and capabiliti
   const auto spirv = strings(CL_DEVICE_SPIRV_EXTENSIONS_KHR);
   for (const auto *extension :
        {"SPV_KHR_expect_assume", "SPV_KHR_bit_instructions", "SPV_KHR_integer_dot_product", "SPV_KHR_no_integer_wrap_decoration",
-        "SPV_KHR_subgroup_rotate", "SPV_INTEL_subgroups", "SPV_KHR_linkonce_odr"}) {
+        "SPV_KHR_subgroup_rotate", "SPV_INTEL_subgroups", "SPV_KHR_linkonce_odr", "SPV_KHR_shader_clock", "SPV_INTEL_bfloat16_conversion",
+        "SPV_INTEL_split_barrier", "SPV_INTEL_media_block_io", "SPV_INTEL_subgroup_matrix_multiply_accumulate"}) {
     INFO(extension);
-    CHECK(std::find(spirv.begin(), spirv.end(), extension) != spirv.end());
+    CHECK((spirv ^ contains(std::string(extension))));
   }
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_SPIRV_CAPABILITIES_KHR, 0, nullptr, &size) == CL_SUCCESS));
   std::vector<cl_uint> capabilities(size / sizeof(cl_uint));
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_SPIRV_CAPABILITIES_KHR, size, capabilities.data(), nullptr) == CL_SUCCESS));
-  // Addresses, Kernel, ImageReadWrite, GenericPointer, Pipes, DeviceEnqueue, SubgroupDispatch, GroupNonUniformRotateKHR and
-  // SubgroupBufferBlockIOINTEL.
-  for (const cl_uint capability : {4u, 6u, 14u, 38u, 17u, 19u, 58u, 6026u, 5569u}) {
+  // Addresses, Kernel, ImageReadWrite, GenericPointer, Pipes, DeviceEnqueue, SubgroupDispatch, GroupNonUniformRotateKHR,
+  // SubgroupBufferBlockIOINTEL, ShaderClockKHR and SubgroupMatrixMultiplyAccumulateINTEL.
+  for (const cl_uint capability : {4U, 6U, 14U, 38U, 17U, 19U, 58U, 6026U, 5569U, 5055U, 6236U}) {
     INFO("capability " << capability);
-    CHECK(std::find(capabilities.begin(), capabilities.end(), capability) != capabilities.end());
+    CHECK((capabilities ^ contains(capability)));
+  }
+}
+
+TEST_CASE("OpenCL reports cl_khr_kernel_clock at every scope and its OpenCL C features", "[opencl][capability]") {
+  auto *const device = gpu();
+  size_t size = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size) == CL_SUCCESS));
+  std::string extensions(size, '\0');
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr) == CL_SUCCESS));
+  CHECK((" " + extensions + " ").contains(" cl_khr_kernel_clock "));
+  cl_device_kernel_clock_capabilities_khr clocks = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_KERNEL_CLOCK_CAPABILITIES_KHR, sizeof(clocks), &clocks, nullptr) == CL_SUCCESS));
+  CHECK(clocks
+        == (CL_DEVICE_KERNEL_CLOCK_SCOPE_DEVICE_KHR | CL_DEVICE_KERNEL_CLOCK_SCOPE_WORK_GROUP_KHR
+            | CL_DEVICE_KERNEL_CLOCK_SCOPE_SUB_GROUP_KHR));
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_FEATURES, 0, nullptr, &size) == CL_SUCCESS));
+  std::vector<cl_name_version> features(size / sizeof(cl_name_version));
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_FEATURES, size, features.data(), nullptr) == CL_SUCCESS));
+  for (const auto *feature :
+       {"__opencl_c_kernel_clock_scope_device", "__opencl_c_kernel_clock_scope_work_group", "__opencl_c_kernel_clock_scope_sub_group"}) {
+    INFO(feature);
+    CHECK((features ^ exists([&](const cl_name_version &entry) { return std::string(entry.name) == feature; })));
   }
 }

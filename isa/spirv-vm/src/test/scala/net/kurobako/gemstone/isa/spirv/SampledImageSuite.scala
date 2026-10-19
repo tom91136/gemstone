@@ -6,9 +6,18 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class SampledImageSuite extends munit.FunSuite {
+  private val Dimensions       = List(1, 2)
+  private val OffsetOperations = List("sample", "fetch")
+  private val OffsetTexel      = Seq(.25f, 0f, 0f, 1f)
+  private val Modes            = Seq("nearest", "linear", "mip", "grad")
+  private val ShaderStages     = Seq("Vertex", "GLCompute")
+  private val Stages           = Seq("Fragment", "Vertex", "GLCompute")
+  private val LayerRamp        = Seq(0f, .25f, .75f, 1f)
+
   private case class Sample(
       name: String,
       x: Float,
@@ -41,6 +50,9 @@ class SampledImageSuite extends munit.FunSuite {
       offset: Option[(Int, Int)] = None,
       expected: Seq[Float]
   )
+
+  private def volumeW(name: String, modeW: Int, expected: Seq[Float]) =
+    Sample(name, .75f, .25f, dimensions = 3, z = 1.75f, mip = true, modeW = modeW, expected = expected)
 
   private val samples = List(
     Sample("projective 1D", 1.5f, 0f, dimensions = 1, projectiveQ = Some(2f), expected = Seq(.25f, 0f, 0f, 1f)),
@@ -215,36 +227,9 @@ class SampledImageSuite extends munit.FunSuite {
       filter = Filter.Linear,
       expected = Seq(2.5f, 0, 0, 1)
     ),
-    Sample(
-      "volume W repeat",
-      .75f,
-      .25f,
-      dimensions = 3,
-      z = 1.75f,
-      mip = true,
-      modeW = AddressMode.Repeat,
-      expected = Seq(4.25f, 0, 0, 1)
-    ),
-    Sample(
-      "volume W mirror",
-      .75f,
-      .25f,
-      dimensions = 3,
-      z = 1.75f,
-      mip = true,
-      modeW = AddressMode.MirroredRepeat,
-      expected = Seq(.25f, 0, 0, 1)
-    ),
-    Sample(
-      "volume W border",
-      .75f,
-      .25f,
-      dimensions = 3,
-      z = 1.75f,
-      mip = true,
-      modeW = AddressMode.ClampToBorder,
-      expected = Seq(0, 0, 0, 1)
-    ),
+    volumeW("volume W repeat", AddressMode.Repeat, Seq(4.25f, 0, 0, 1)),
+    volumeW("volume W mirror", AddressMode.MirroredRepeat, Seq(.25f, 0, 0, 1)),
+    volumeW("volume W border", AddressMode.ClampToBorder, Seq(0, 0, 0, 1)),
     Sample(
       "volume W border filtering",
       .5f,
@@ -507,19 +492,20 @@ class SampledImageSuite extends munit.FunSuite {
     Sample("offset fetch outside", 0, 0, operation = "fetch", offset = Some((-1, 0)), expected = Seq(0, 0, 0, 0))
   ) ++
     (for {
-      amount     <- List(-8, -1, 7)
-      dimensions <- List(1, 2)
-      operation  <- List("sample", "fetch")
+      amount <- List(-8, -1, 7)
+      offset = Some((amount, 0))
+      dimensions <- Dimensions
+      operation  <- OffsetOperations
     } yield Sample(
       s"${dimensions}D $operation offset $amount",
       if (operation == "fetch") 1f - amount.toFloat else .75f - amount.toFloat / 2f,
       .25f,
       dimensions = dimensions,
       operation = operation,
-      offset = Some((amount, 0)),
-      expected = Seq(.25f, 0, 0, 1)
+      offset = offset,
+      expected = OffsetTexel
     )) ++ List(-2f, .49f, .5f, .51f, 1.49f, 1.5f, 1.51f, 5f).zipWithIndex.map { (layer, index) =>
-      val mode     = Seq("nearest", "linear", "mip", "grad")(index % 4)
+      val mode     = Modes(index % 4)
       val selected = if (layer == .5f) 0 else Math.max(0, Math.min(2, Math.floor(layer + .5).toInt))
       val expected = mode match { case "linear" => .5f; case "mip" => 1.125f; case "grad" => 2f; case _ => .25f }
       Sample(
@@ -542,8 +528,8 @@ class SampledImageSuite extends munit.FunSuite {
   for {
     (sample, index) <- samples.zipWithIndex
     stage           <-
-      if (sample.operation == "sample" && !sample.mip) Seq("Fragment", Seq("Vertex", "GLCompute")(index % 2))
-      else Seq(Seq("Fragment", "Vertex", "GLCompute")(index % 3))
+      if (sample.operation == "sample" && !sample.mip) Seq("Fragment", ShaderStages(index % 2))
+      else Seq(Stages(index % 3))
   } {
     val combined = index / 3 % 2 == 1
     test(s"${sample.name} in $stage with ${if (combined) "combined" else "separate"} sampler") {
@@ -560,7 +546,7 @@ class SampledImageSuite extends munit.FunSuite {
     val stage    =
       if (querylod) "Fragment"
       else if (sample.operation == "sample" && !sample.mip) "Fragment"
-      else Seq("Fragment", "Vertex", "GLCompute")(index % 3)
+      else Stages(index % 3)
     val usual    = index / 3 % 2 == 1
     val combined = if (querylod) usual else !usual
     test(s"${sample.name} in $stage with ${if (combined) "combined" else "separate"} sampler") {
@@ -574,20 +560,20 @@ class SampledImageSuite extends munit.FunSuite {
     val implicitLod                = stage == "Fragment" && !sample.mip
     val (texelValues, secondLevel) =
       if (arrayed) (
-        (0 until 3).flatMap(layer => Seq(0f, .25f, .75f, 1f).map(_ + layer * 4f)) ++
+        (0 until 3).flatMap(layer => LayerRamp.map(_ + layer * 4f)) ++
           (0 until 3).map(2f + _ * 4f),
         48L
       )
       else if (dimensions == 3) (Seq(0f, .25f, .75f, 1f, 4f, 4.25f, 4.75f, 5f, 8f), 32L)
       else if (sample.rgb) (Seq(0f, .25f, .75f, 1f).flatMap(red => Seq(red, .5f, 1f)), 0L)
       else (Seq(0f, .25f, .75f, 1f, 2f), 16L)
-    val texelBytes = Vec.from(texelValues.flatMap(value => LittleEndian.toVec(floatBits(value), 4)))
+    val texelBytes = Vec.from(texelValues.flatMap(value => LittleEndian.toVec(single(value), 4)))
     val memory     = RegionMemory()
     val texels     = memory.allocate(texelBytes)
     val levels     =
       if (!sample.mip) Vec(ImageLevel(2, if (dimensions == 1) 1 else 2))
       else if (sample.rgb) Vec(ImageLevel(width = 2, height = 2))
-      else Vec(ImageLevel(width = 2, height = 2), ImageLevel(width = 1, height = 1, secondLevel)).drop(sample.baseLevel)
+      else Vec(ImageLevel(width = 2, height = 2), ImageLevel(width = 1, offset = secondLevel)).drop(sample.baseLevel)
     val view = ImageView(
       if (sample.rgb) ImageDescriptor.Format.DecodedRgb32f else ImageFormat.R32f,
       levels,
@@ -774,10 +760,10 @@ class SampledImageSuite extends munit.FunSuite {
       OpFunctionEnd
     """
     assertEquals(run(module, "main", memory, arguments, relocations = relocations), Right(()))
-    assertEquals(words(memory, out, offset = 0, count = 4), Vec.from(sample.expected.map(floatBits)))
+    assertEquals(words(memory, out, offset = 0, count = 4), Vec.from(sample.expected.map(single)))
     assertEquals(memory.bytes(descriptors), before)
     val written =
-      if (sample.alias) Vec.from(LittleEndian.toVec(floatBits(.625f), 4)) ++ texelBytes.drop(4) else texelBytes
+      if (sample.alias) Vec.from(LittleEndian.toVec(single(.625f), 4)) ++ texelBytes.drop(4) else texelBytes
     assertEquals(memory.bytes(texels), written)
   }
 }

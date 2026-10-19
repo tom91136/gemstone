@@ -11,6 +11,8 @@ import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.testing.either.*
 
 class HalfSuite extends munit.FunSuite {
+  private val Flags = Vec(false, true)
+
   private def kernel(name: String, function: String, sm: Int = 89): Kernel = load(sm, Fixture.listing(name), function)
 
   private def operands(text: String): Vec[Operand] = OperandParser.parseMany(text).value
@@ -77,7 +79,9 @@ class HalfSuite extends munit.FunSuite {
     )
   }
 
-  test("HFMA2.MMA rejects unverified multiplier and accumulator forms") {
+  // ptxas emits HFMA2.MMA for fma.rn.f16x2 (__hfma2) on sm_80 and later, so every multiplier and accumulator form
+  // computes the same fused product as HFMA2.
+  test("HFMA2.MMA multiplier and accumulator forms match HFMA2") {
     Vec(
       "R6, R2, R3, R6",
       "R6, R2.H0_H0, RZ, R6",
@@ -85,7 +89,11 @@ class HalfSuite extends munit.FunSuite {
       "R6, R2, 2, 1, R6",
       "R6, R2.H0_H0, 1, 1, R6",
       "R6, R2, 1, 1, R7.H0_H0"
-    ).foreach(form => assert(replace(hfma2, "HFMA2", s"HFMA2.MMA $form;").lower(8, 8, 8, 8).isLeft, form))
+    ).foreach { form =>
+      val mma   = replace(hfma2, "HFMA2", s"HFMA2.MMA $form;").instructions(8, 8, 8, 8)
+      val fused = replace(hfma2, "HFMA2", s"HFMA2 $form;").instructions(8, 8, 8, 8)
+      assertEquals(mma, fused, form)
+    }
   }
 
   test("HFMA2.MMA accumulator alias matches the fused packed operation for special values") {
@@ -122,8 +130,8 @@ class HalfSuite extends munit.FunSuite {
   }
 
   for {
-    binary <- Vec(false, true)
-    fused  <- Vec(false, true)
+    binary <- Flags
+    fused  <- Flags
   }
     test(s"HFMA2 mma=$fused immediate addends preserve special values (${if (binary) "binary" else "text"} frontend)") {
       Vec(
@@ -148,9 +156,9 @@ class HalfSuite extends munit.FunSuite {
         val selected =
           if (fused) decoded
           else decoded.map { instruction =>
-            instruction.operation match {
-              case _: Instruction.Hfma2 => instruction.rewrite(modifiers = Vec.empty[Instruction.Modifier])
-              case _                    => instruction
+            instruction.operation.form match {
+              case _: Form.Hfma2 => instruction.rewrite(modifiers = Vec.empty[Instruction.Modifier])
+              case _             => instruction
             }
           }
         assertEquals(selected.launch(1)(Arg.zeros(4), Arg.zeros(4), Arg.zeros(4)).words(0), Vec(expected), immediate)
@@ -197,11 +205,9 @@ class HalfSuite extends munit.FunSuite {
     )
   }
 
-  test("HSETP2 rejects unverified modifiers, destinations, and mixed selectors") {
+  test("HSETP2 rejects unknown selectors and a combination without its predicate") {
     Vec(
-      "HSETP2.NE.OR P0, PT, R2, RZ, PT",
-      "HSETP2.LT.AND P0, PT, R2, RZ, PT",
-      "HSETP2.NE.AND P0, P1, R2, RZ, PT",
+      "HSETP2.NE.AND P0, PT, R2, RZ",
       "HSETP2.NE.AND P0, PT, R2.H0_H1, RZ, PT"
     ).foreach(form => assert(replace(hsetp2Ne, "HSETP2", s"$form;").lower(8, 8, 8).isLeft, form))
   }
@@ -250,8 +256,8 @@ class HalfSuite extends munit.FunSuite {
     checkDualOutput(89, duplicateLow = true)
   }
 
-  test("dual-output HSETP2 rejects an unverified predicate input") {
-    assert(dualOutput(89, "R2", "P2").lower(8, 8, 8).isLeft)
+  test("dual-output HSETP2 combines a predicate input") {
+    assert(dualOutput(89, "R2", "P2").lower(8, 8, 8).isRight)
   }
 
   test("CUDA 11.8 sm_70 compiler form preserves both outputs in the shared NVIDIA VM") {
@@ -329,20 +335,38 @@ class HalfSuite extends munit.FunSuite {
 
   private val scalarHadd2 = kernel("hadd2F32ToHalfSm75Patched", "probe", 75)
 
-  test("sm_75 scalar-float HADD2 rounds to and duplicates the packed half result") {
-    val inputs = NumericCases.f32ToF16.map(_._1)
-    val run    = scalarHadd2.launch(1, inputs.size)(Arg.zeros(inputs.size * 4), Arg.Buffer(words(inputs)))
-    assertEquals(run.words(0), NumericCases.f32ToF16.map(_._2 * 0x00010001L))
+  // ptxas 11.8 and 13.3 lower __float2half_rz to HADD2 R0, R2.F32, -RZ.H0_H0 for sm_60 to sm_75, so .F32 truncates
+  private val towardZero = NumericCases.f32ToF16.map { (input, nearest) =>
+    input ->
+      (input match {
+        case 0x3f803000L               => 0x3c01L
+        case 0x477ff000L | 0x7f7fffffL => 0x7bffL
+        case 0xc77ff000L | 0xff7fffffL => 0xfbffL
+        case _                         => nearest
+      })
   }
 
-  test("scalar-float HADD2 rejects other architectures and unmeasured zero-source forms") {
-    assert(scalarHadd2.copy(sm = 89).lower(8, 8).left.exists(_.contains("supported only on sm_75")))
+  test("sm_75 scalar-float HADD2 truncates to and duplicates the packed half result") {
+    val inputs = towardZero.map(_._1)
+    val run    = scalarHadd2.launch(1, inputs.size)(Arg.zeros(inputs.size * 4), Arg.Buffer(words(inputs)))
+    assertEquals(run.words(0), towardZero.map(_._2 * 0x00010001L))
+  }
+
+  // .F32 truncates the source to binary16 before the packed addition, so a positive zero addend only turns -0 into +0.
+  test("scalar-float HADD2 converts on later architectures and with a positive zero addend") {
+    val inputs              = towardZero.map(_._1)
+    def run(kernel: Kernel) =
+      kernel.launch(1, inputs.size)(Arg.zeros(inputs.size * 4), Arg.Buffer(words(inputs))).words(0)
+    assertEquals(run(scalarHadd2.copy(sm = 89)), towardZero.map(_._2 * 0x00010001L))
     val positiveZero = scalarHadd2.map { i =>
       if (i.mnemonic.raw == "HADD2" && i.modifiers.isEmpty && i.operands.head == operands("R0").head)
         i.rewrite(operands = i.operands.updated(2, operands("RZ.H0_H0").head))
       else i
     }
-    assert(positiveZero.lower(8, 8).left.exists(_.contains("requires the compiler-emitted -RZ.H0_H0 zero addend")))
+    assertEquals(
+      run(positiveZero),
+      towardZero.map((_, half) => (if (half == 0x8000L) 0L else half) * 0x00010001L)
+    )
   }
 
   private val hmul2 = kernel("hmul2Sm89", "hmul2_vector")
@@ -428,14 +452,14 @@ class HalfSuite extends munit.FunSuite {
     assertEquals(multiplyF32(aliased, inputs).map(_.head), inputs.map(products(_, _).head))
   }
 
-  test("HMUL2.F32 rejects other architectures and mixed selector forms") {
-    assert(hmul2F32.copy(sm = 89).lower(8, 8, 8).left.exists(_.contains("HMUL2.F32 is supported only on sm_75")))
+  test("HMUL2.F32 lowers on other architectures and rejects mixed selector forms") {
+    assert(hmul2F32.copy(sm = 89).lower(8, 8, 8).isRight)
     val mixed = hmul2F32.map { i =>
       if (i.mnemonic.raw == "HMUL2" && i.operands(1) == operands("R2.H0_H0").head)
         i.rewrite(operands = i.operands.updated(1, operands("R2.H0_H1").head))
       else i
     }
-    assert(mixed.lower(8, 8, 8).left.exists(_.contains("HMUL2.F32 supports only duplicated H0_H0 or H1_H1 selectors")))
+    assert(mixed.lower(8, 8, 8).left.exists(_.contains("HMUL2.F32 sources select one half with H0_H0 or H1_H1")))
   }
 
   private val hmnmx2Cases = Vec(

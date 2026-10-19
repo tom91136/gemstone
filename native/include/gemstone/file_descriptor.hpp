@@ -11,7 +11,7 @@ class FileDescriptor {
 public:
   explicit FileDescriptor(int value = -1) noexcept : descriptor(value) {}
   ~FileDescriptor() {
-    if (descriptor != -1) close(descriptor);
+    if (descriptor >= 0) close(descriptor);
   }
 
   FileDescriptor(const FileDescriptor &) = delete;
@@ -20,7 +20,7 @@ public:
   FileDescriptor(FileDescriptor &&other) noexcept : descriptor(std::exchange(other.descriptor, -1)) {}
   FileDescriptor &operator=(FileDescriptor &&other) noexcept {
     if (this != &other) {
-      if (descriptor != -1) close(descriptor);
+      if (descriptor >= 0) close(descriptor);
       descriptor = std::exchange(other.descriptor, -1);
     }
     return *this;

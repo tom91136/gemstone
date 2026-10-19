@@ -55,7 +55,10 @@ private object ShaderLowering {
       case Instruction.TypeImage(dim = dim) => unsigned(dim) == Dim.SubpassData
       case _                                => false
     }
-    val kill         = fragment && module.instructions.exists { case Instruction.Kill() => true; case _ => false }
+    val kill = fragment && module.instructions.exists {
+      case Instruction.Kill() | Instruction.TerminateInvocation() => true
+      case _                                                      => false
+    }
     val declarations = mutable.ArrayBuffer.empty[Instruction]
     val decorations  = mutable.ArrayBuffer.empty[Instruction]
     val added        = mutable.ArrayBuffer.empty[Operand]
@@ -73,8 +76,8 @@ private object ShaderLowering {
     def typ(value: Int): Operand      = operand(OperandKind.IdResultType, value)
     def literal(value: Int): Operand  = operand(OperandKind.LiteralInteger, value)
     def storage(value: Long): Operand = operand(OperandKind.StorageClass, value.toInt)
-    def declaration(existing: PartialFunction[Instruction, Int], create: Int => Instruction): Int =
-      (module.instructions ++ Vec.from(declarations)).collect(existing).headOption.getOrElse {
+    inline def declaration(existing: PartialFunction[Instruction, Int], inline create: Int => Instruction): Int =
+      (module.instructions ++ Vec.from(declarations)).collectFirst(existing).getOrElse {
         val value = fresh()
         declarations += create(value)
         value

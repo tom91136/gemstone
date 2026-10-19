@@ -30,7 +30,7 @@ class ObserverSuite extends munit.FunSuite {
   }
 
   test("an observer stops a wave before the instruction executes") {
-    val stop: LaunchObserver = (at, _) => if (at.instruction.exists(_.raw == 4L)) Left(Fault.Cancelled) else Right(())
+    val stop: LaunchObserver = (at, _) => if (at.instruction.exists(_ == 4L)) Left(Fault.Cancelled) else Right(())
     assertEquals(
       executeKernel(irKernel(operations), singleTask(), RegionMemory(), TaskControl(observer = Some(stop))),
       Left(Fault.Cancelled)

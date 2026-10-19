@@ -10,7 +10,7 @@ object API {
   val defaults: NonEmpty[Set[API]] = Set(HSA, CUDA, OpenCL, Vulkan, LevelZero).unsafe
 }
 
-enum API(val id: String, val lib: String) {
+enum API(val id: String, val lib: String) derives CanEqual {
   case CUDA      extends API("cuda", "libcuda.so.1")
   case HIP       extends API("hip", "libamdhip64.so.7")
   case HSA       extends API("hsa", "libhsa-runtime64.so.1")

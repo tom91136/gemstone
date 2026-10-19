@@ -3,7 +3,7 @@ package net.kurobako.gemstone.vm
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicLongArray
-import java.util.concurrent.locks.ReentrantReadWriteLock
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
@@ -39,18 +39,18 @@ class TaskControl(
   private val granted   = AtomicLong()
   private val leases    = AtomicLongArray(Cells * Stride)
   // Refills share the read side; reclaiming takes the write side so no granted lease is still on its way to a cell.
-  private val reclaim = ReentrantReadWriteLock()
+  private val reclaim = PlatformConcurrency.readWriteLock()
 
   def cancel(): Unit       = cancelled.set(true)
   def isCancelled: Boolean = cancelled.get()
 
-  def checkpoint(cost: Int > 0 = 1): Either[Fault, Unit] = checkpoint(cost.toLong)
+  def checkpoint(cost: Int > 0 = 1): Either[Fault, Unit] = checkpoint(cost.widen[Long > 0])
 
   final def checkpoint(cost: Long > 0): Either[Fault, Unit] =
-    if (cancelled.getOpaque) Left(Fault.Cancelled)
+    if (PlatformConcurrency.getOpaque(cancelled)) Left(Fault.Cancelled)
     else {
-      val cell = (Thread.currentThread().threadId().toInt & (Cells - 1)) * Stride
-      if (spend(cell, cost.raw) || refill(cell, cost.raw) || reclaimed(cell, cost.raw)) Accepted
+      val cell = (PlatformConcurrency.threadId().toInt & (Cells - 1)) * Stride
+      if (spend(cell, cost) || refill(cell, cost) || reclaimed(cell, cost)) Accepted
       else Left(Fault.BudgetExceeded(limits.maxInstructions))
     }
 

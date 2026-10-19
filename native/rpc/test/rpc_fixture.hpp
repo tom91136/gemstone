@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include <aspartame/map.hpp>
 #include <gemstone/test_support.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
@@ -31,7 +32,8 @@
 
 #define GEMSTONE_RPC_REQUIRE(condition)                                                                                                    \
   do {                                                                                                                                     \
-    if (!(condition)) throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": " + #condition);                \
+    if (const bool satisfied = (condition); !satisfied)                                                                                    \
+      throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": " + #condition);                                \
   } while (false)
 
 namespace gemstone_test {
@@ -42,6 +44,26 @@ struct FixtureOptions : glz::opts {
   static constexpr auto format = glz::MSGPACK;
   bool structs_as_arrays = true;
 };
+
+inline ExecutionFailure executionFailure(FailureKind kind, const std::string &detail) {
+  switch (kind) {
+    case FailureKind::InvalidRequest: return ExecutionFailureInvalidRequest{{detail}};
+    case FailureKind::NotFound: return ExecutionFailureNotFound{{detail}};
+    case FailureKind::Unsupported: return ExecutionFailureUnsupported{{detail}};
+    case FailureKind::InvalidProgram: return ExecutionFailureInvalidProgram{{detail}};
+    case FailureKind::InvalidConfiguration: return ExecutionFailureInvalidConfiguration{{detail}};
+    case FailureKind::OutOfResources: return ExecutionFailureOutOfResources{{detail}};
+    case FailureKind::IllegalAddress: return ExecutionFailureIllegalAddress{{detail}};
+    case FailureKind::MisalignedAddress: return ExecutionFailureMisalignedAddress{{detail}};
+    case FailureKind::IllegalInstruction: return ExecutionFailureIllegalInstruction{{detail}};
+    case FailureKind::Trapped: return ExecutionFailureTrapped{{detail}};
+    case FailureKind::AssertionFailed: return ExecutionFailureAssertionFailed{{detail}};
+    case FailureKind::TimedOut: return ExecutionFailureTimedOut{{detail}};
+    case FailureKind::Failed:
+    case FailureKind::Transport: break;
+  }
+  return ExecutionFailureFailed{{detail}};
+}
 
 template <class T> T decodePayload(const std::vector<uint8_t> &payload) {
   T value{};
@@ -60,9 +82,9 @@ template <class T> void encodePayload(std::vector<uint8_t> &out, const T &value)
 // validate launch geometry, publish one range per group, and complete when awaited.
 class RpcFixture {
 public:
-  inline static constexpr uint64_t ClientId = 42;
+  static constexpr uint64_t ClientId = 42;
   struct Expected {
-    uint32_t local, groups, global, offset, seed;
+    uint32_t local{}, groups{}, global{}, offset{}, seed{};
     std::array<uint32_t, 2> localYz{1, 1}, groupsYz{1, 1}, globalYz{1, 1};
     // Boundary-sized geometry can be inspected without mocking billions of output elements.
     bool geometryOnly = false;
@@ -89,7 +111,7 @@ public:
     std::optional<uint64_t> range = std::nullopt;
   };
   std::atomic<unsigned> launches{0}, reads{0}, programLoads{0}, programUnloads{0};
-  std::atomic_bool completionEntered{false}, releaseEntered{false};
+  std::atomic_bool completionEntered{false};
 
   explicit RpcFixture(bool unixSocket = false) {
     if (unixSocket) {
@@ -126,7 +148,7 @@ public:
           }
           const int enabled = 1;
           if (socketPath.empty()) GEMSTONE_RPC_REQUIRE(setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) == 0);
-          std::lock_guard lock(connectionsMutex);
+          std::scoped_lock const lock(connectionsMutex);
           connections.push_back(connection);
           workers.emplace_back([this, connection] {
             try {
@@ -134,8 +156,8 @@ public:
             } catch (...) {
               recordFailure(std::current_exception());
             }
-            std::lock_guard guard(connectionsMutex);
-            connections.erase(std::remove(connections.begin(), connections.end(), connection), connections.end());
+            std::scoped_lock const guard(connectionsMutex);
+            std::erase(connections, connection);
             close(connection);
           });
         }
@@ -150,8 +172,8 @@ public:
     close(listener);
     acceptor.join();
     {
-      std::lock_guard lock(connectionsMutex);
-      for (int connection : connections)
+      std::scoped_lock const lock(connectionsMutex);
+      for (int const connection : connections)
         shutdown(connection, SHUT_RDWR);
     }
     for (auto &worker : workers)
@@ -164,16 +186,16 @@ public:
   std::string endpoint() const {
     if (socketPath.empty()) return "tcp://127.0.0.1:" + std::to_string(port);
     std::string encoded = "unix://";
-    for (char ch : socketPath)
+    for (char const ch : socketPath)
       encoded += ch == ' ' ? "%20" : std::string(1, ch);
     return encoded;
   }
   bool hostMemory() {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     return hostMemoryEnabled;
   }
   void expect(Expected expected) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     GEMSTONE_RPC_REQUIRE(!active);
     expectation = expected;
     trailingArguments.reset();
@@ -181,125 +203,122 @@ public:
     indirectWrite.reset();
   }
   void expectTrailingArguments(std::vector<uint8_t> bytes) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     trailingArguments = std::move(bytes);
   }
   void expectAllocationArguments(std::vector<ExpectedAllocationArgument> arguments) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     allocationArguments = std::move(arguments);
   }
   void writeAllocationArgument(size_t argument, uint64_t offset, std::vector<uint8_t> bytes) {
-    std::lock_guard lock(stateMutex);
-    allocationArgumentWrite = AllocationArgumentWrite{argument, offset, std::move(bytes)};
+    std::scoped_lock const lock(stateMutex);
+    allocationArgumentWrite = AllocationArgumentWrite{.argument = argument, .offset = offset, .bytes = std::move(bytes)};
   }
   void kernelMetadata(uint32_t argumentBlockSize, uint32_t explicitParameterCount, std::vector<KernelParameter> parameters) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     GEMSTONE_RPC_REQUIRE(explicitParameterCount <= parameters.size());
     kernelArgumentBlockSize = argumentBlockSize;
     kernelExplicitParameterCount = explicitParameterCount;
     kernelParameters = std::move(parameters);
   }
   void programCatalogue(std::vector<ProgramKernel> kernels, std::vector<ProgramGlobal> globals) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     programKernels = std::move(kernels);
     programGlobals = std::move(globals);
   }
   void kernelWorkGroup(std::array<uint32_t, 3> size) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     requiredWorkGroupSize = size;
   }
-  void kernelBindings(std::vector<uint32_t> bindings) {
-    std::lock_guard lock(stateMutex);
-    bindingIndices = std::move(bindings);
-  }
   void shaderDescriptors(std::vector<ShaderDescriptor> descriptors) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     preparedDescriptors = std::move(descriptors);
   }
   void specializationTable(std::map<uint32_t, uint32_t> sizes) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     specializationSizes = std::move(sizes);
   }
   std::vector<std::pair<uint32_t, std::vector<uint8_t>>> lastSpecialization() {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     return specialization;
   }
   void expectGlobalBinding(std::string name, uint64_t offset, std::vector<uint8_t> initial) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     expectedGlobals.emplace(std::move(name), std::make_pair(offset, std::move(initial)));
   }
   size_t allocationCount() {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     return allocations.size();
   }
-  void checkAllocationAddress(const void *pointer, bool present = true) {
-    std::lock_guard lock(stateMutex);
+  // HSA allocations register a guard granule ahead of the address they hand out.
+  static constexpr uint64_t LeadingGuard = 4096;
+  std::map<uint64_t, uint64_t>::const_iterator allocationAt(const void *pointer) const {
     const auto address = reinterpret_cast<uint64_t>(pointer);
-    const auto found =
-        std::find_if(allocationAddresses.begin(), allocationAddresses.end(), [&](const auto &entry) { return entry.second == address; });
-    GEMSTONE_RPC_REQUIRE((found != allocationAddresses.end()) == present);
+    return std::find_if(allocationAddresses.begin(), allocationAddresses.end(), [&](const auto &entry) {
+      return address == entry.second || (address == entry.second + LeadingGuard && LeadingGuard < allocations.at(entry.first).size());
+    });
+  }
+  void checkAllocationAddress(const void *pointer, bool present = true) {
+    std::scoped_lock const lock(stateMutex);
+    GEMSTONE_RPC_REQUIRE((allocationAt(pointer) != allocationAddresses.end()) == present);
   }
   void checkAllocationContainingAddress(const void *pointer, bool present = true) {
-    std::lock_guard lock(stateMutex);
+    using namespace aspartame;
+    std::scoped_lock const lock(stateMutex);
     const auto address = reinterpret_cast<uint64_t>(pointer);
-    const auto found = std::find_if(allocationAddresses.begin(), allocationAddresses.end(), [&](const auto &entry) {
-      const auto size = allocations.at(entry.first).size();
-      return address >= entry.second && address - entry.second < size;
+    const auto found = allocationAddresses ^ exists([&](uint64_t id, uint64_t base) {
+      return address >= base && address - base < allocations.at(id).size();
     });
-    GEMSTONE_RPC_REQUIRE((found != allocationAddresses.end()) == present);
+    GEMSTONE_RPC_REQUIRE(found == present);
   }
-  void pauseReleaseContaining(const void *pointer) {
-    releaseEntered = false;
-    pauseReleaseAddress = reinterpret_cast<uint64_t>(pointer);
-  }
-  void releasePausedRelease() { pauseReleaseAddress = 0; }
   void checkHostBacked(const void *pointer) {
-    std::lock_guard lock(stateMutex);
-    for (const auto &[id, base] : allocationAddresses)
-      if (base == reinterpret_cast<uintptr_t>(pointer)) {
-        GEMSTONE_RPC_REQUIRE(hostBacked.at(id));
-        return;
-      }
-    GEMSTONE_RPC_REQUIRE(false);
+    std::scoped_lock const lock(stateMutex);
+    const auto found = allocationAt(pointer);
+    GEMSTONE_RPC_REQUIRE(found != allocationAddresses.end());
+    GEMSTONE_RPC_REQUIRE(hostBacked.at(found->first));
   }
   void checkAllocationWord(const void *base, size_t offset, uint64_t expected) {
-    std::lock_guard lock(stateMutex);
-    const auto found = std::find_if(allocationAddresses.begin(), allocationAddresses.end(),
-                                    [&](const auto &entry) { return entry.second == reinterpret_cast<uint64_t>(base); });
+    std::scoped_lock const lock(stateMutex);
+    const auto found = allocationAt(base);
     GEMSTONE_RPC_REQUIRE(found != allocationAddresses.end());
     const auto &bytes = allocations.at(found->first);
-    GEMSTONE_RPC_REQUIRE(offset <= bytes.size() && bytes.size() - offset >= sizeof(uint64_t));
+    const auto lead = reinterpret_cast<uint64_t>(base) - found->second;
+    GEMSTONE_RPC_REQUIRE(offset <= bytes.size() - lead && bytes.size() - lead - offset >= sizeof(uint64_t));
     uint64_t actual = 0;
-    std::memcpy(&actual, hostBacked[found->first] ? static_cast<const uint8_t *>(base) + offset : bytes.data() + offset, sizeof(actual));
+    std::memcpy(&actual, hostBacked[found->first] ? static_cast<const uint8_t *>(base) + offset : bytes.data() + lead + offset,
+                sizeof(actual));
     GEMSTONE_RPC_REQUIRE(actual == expected);
   }
   void expectIndirectInput(const void *table, uint32_t value, std::optional<uint32_t> deviceWrite = std::nullopt) {
-    std::lock_guard lock(stateMutex);
-    indirectInput = IndirectInput{reinterpret_cast<uint64_t>(table), value, deviceWrite};
+    std::scoped_lock const lock(stateMutex);
+    indirectInput = IndirectInput{.table = reinterpret_cast<uint64_t>(table), .value = value, .deviceWrite = deviceWrite};
   }
   uint64_t writtenBytes(const void *address) {
-    std::lock_guard lock(stateMutex);
-    for (const auto &[id, base] : allocationAddresses)
-      if (base == reinterpret_cast<uint64_t>(address)) return allocationWrites[id];
-    GEMSTONE_RPC_REQUIRE(false);
-    return 0;
+    std::scoped_lock const lock(stateMutex);
+    const auto found = allocationAt(address);
+    GEMSTONE_RPC_REQUIRE(found != allocationAddresses.end());
+    return allocationWrites[found->first];
   }
   void checkGlobalBindings() {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     GEMSTONE_RPC_REQUIRE(expectedGlobals.empty());
   }
   void check() {
     rethrowFailure();
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     GEMSTONE_RPC_REQUIRE(!active && launches > 0 && awaited == launches);
   }
   void failNextGraphicsStatistics() { failGraphicsStatistics = true; }
   // The next request with this operation tag fails without changing fixture state.
-  void rejectNext(std::string_view operation) {
-    std::lock_guard lock(stateMutex);
+  void rejectNext(std::string_view operation, FailureKind kind = FailureKind::Failed) {
+    std::scoped_lock const lock(stateMutex);
     rejectedOperation = operation;
+    rejectedKind = kind;
   }
-  void failNextCompletion() { failCompletion = true; }
+  void failNextCompletion(FailureKind kind = FailureKind::Failed) {
+    completionKind = kind;
+    failCompletion = true;
+  }
   void pauseNextCompletion() {
     completionEntered = false;
     pauseCompletion = true;
@@ -307,73 +326,73 @@ public:
   void releasePausedCompletion() { pauseCompletion = false; }
   // Launches are recorded without interpreting their arguments and complete with `dirty`.
   void opaqueLaunches(std::vector<DirtyRange> dirty = {}) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     opaqueDirty = std::move(dirty);
   }
   Launch lastLaunch() {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     return recordedLaunch;
   }
   std::vector<uint8_t> lastProgramImage() {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     return programImage;
   }
 
-  inline static constexpr uint32_t Spirv[] = {0x07230203,
-                                              0x00010600,
-                                              0,
-                                              10,
-                                              0,
-                                              (2U << 16) | 17U,
-                                              6,
-                                              (3U << 16) | 14U,
-                                              2,
-                                              2,
-                                              (5U << 16) | 15U,
-                                              6,
-                                              5,
-                                              0x756f7267,
-                                              0x00007370,
-                                              (2U << 16) | 19U,
-                                              1,
-                                              (4U << 16) | 21U,
-                                              2,
-                                              32,
-                                              0,
-                                              (4U << 16) | 32U,
-                                              3,
-                                              5,
-                                              2,
-                                              (5U << 16) | 33U,
-                                              4,
-                                              1,
-                                              3,
-                                              2,
-                                              (5U << 16) | 54U,
-                                              1,
-                                              5,
-                                              0,
-                                              4,
-                                              (3U << 16) | 55U,
-                                              3,
-                                              6,
-                                              (3U << 16) | 55U,
-                                              2,
-                                              7,
-                                              (2U << 16) | 248U,
-                                              8,
-                                              (1U << 16) | 253U,
-                                              (1U << 16) | 56U};
+  static constexpr uint32_t Spirv[] = {0x07230203,
+                                       0x00010600,
+                                       0,
+                                       10,
+                                       0,
+                                       (2U << 16) | 17U,
+                                       6,
+                                       (3U << 16) | 14U,
+                                       2,
+                                       2,
+                                       (5U << 16) | 15U,
+                                       6,
+                                       5,
+                                       0x756f7267,
+                                       0x00007370,
+                                       (2U << 16) | 19U,
+                                       1,
+                                       (4U << 16) | 21U,
+                                       2,
+                                       32,
+                                       0,
+                                       (4U << 16) | 32U,
+                                       3,
+                                       5,
+                                       2,
+                                       (5U << 16) | 33U,
+                                       4,
+                                       1,
+                                       3,
+                                       2,
+                                       (5U << 16) | 54U,
+                                       1,
+                                       5,
+                                       0,
+                                       4,
+                                       (3U << 16) | 55U,
+                                       3,
+                                       6,
+                                       (3U << 16) | 55U,
+                                       2,
+                                       7,
+                                       (2U << 16) | 248U,
+                                       8,
+                                       (1U << 16) | 253U,
+                                       (1U << 16) | 56U};
 
 private:
   void recordFailure(std::exception_ptr failure) noexcept {
-    std::lock_guard lock(failureMutex);
+    std::scoped_lock const lock(failureMutex);
     if (!firstFailure) firstFailure = std::move(failure);
   }
   void rethrowFailure() const {
     std::exception_ptr failure;
     {
-      std::lock_guard lock(failureMutex);
+      std::scoped_lock const lock(failureMutex);
       failure = firstFailure;
     }
     if (failure) std::rethrow_exception(failure);
@@ -399,11 +418,9 @@ private:
       metadata.parameters.push_back(entry);
     }
     if (requiredWorkGroupSize)
-      metadata.requiredWorkGroupSize = Dimensions{IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[0])},
-                                                  IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[1])},
-                                                  IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[2])}};
-    for (const auto binding : bindingIndices)
-      metadata.bindingIndices.push_back(IntPositive0{static_cast<int32_t>(binding)});
+      metadata.requiredWorkGroupSize = Dimensions{.x = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[0])},
+                                                  .y = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[1])},
+                                                  .z = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[2])}};
     encodePayload(result, metadata);
   }
   bool receive(int socket, void *output, size_t size) {
@@ -450,14 +467,16 @@ private:
       GEMSTONE_RPC_REQUIRE(size <= MaximumPayload);
       std::vector<uint8_t> payload(size);
       if (size && !receive(socket, payload.data(), size)) break;
-      std::lock_guard lock(stateMutex);
+      std::scoped_lock const lock(stateMutex);
       std::vector<uint8_t> result;
       bool failed = false;
       std::string failure = "completion failed";
+      auto failureKind = completionKind;
       if (operationTag == rejectedOperation) {
         rejectedOperation.clear();
         failed = true;
         failure = operationTag + " rejected";
+        failureKind = rejectedKind;
       } else if (operationTag == operation::Ping) {
         encodePayload(result, Unit{});
       } else if (operationTag == operation::EnableHostMemory) {
@@ -472,14 +491,6 @@ private:
       } else if (operationTag == operation::ReleaseAllocation) {
         const auto request = decodePayload<ReleaseAllocation>(payload);
         const auto id = static_cast<uint64_t>(request.allocation.value);
-        const auto address = pauseReleaseAddress.load();
-        const auto alias = allocationAddresses.find(id);
-        if (address != 0 && alias != allocationAddresses.end() && address >= alias->second
-            && address - alias->second < allocations.at(id).size()) {
-          releaseEntered = true;
-          while (pauseReleaseAddress.load() != 0 && !stopped.load())
-            std::this_thread::yield();
-        }
         GEMSTONE_RPC_REQUIRE(allocations.erase(id) == 1);
         allocationAddresses.erase(id);
         hostBacked.erase(id);
@@ -510,7 +521,7 @@ private:
         const auto offset = static_cast<uint64_t>(request.offset.value);
         const auto count = static_cast<size_t>(request.size.value);
         GEMSTONE_RPC_REQUIRE(offset + count <= bytes.size());
-        encodePayload(result, std::vector<uint8_t>(bytes.begin() + offset, bytes.begin() + offset + count));
+        encodePayload(result, std::vector<uint8_t>(bytes.data() + offset, bytes.data() + offset + count));
       } else if (operationTag == operation::LoadProgram) {
         const auto request = decodePayload<LoadProgram>(payload);
         programImage = request.image;
@@ -520,12 +531,15 @@ private:
       } else if (operationTag == operation::DescribeSpecialization) {
         decodePayload<DescribeSpecialization>(payload);
         std::vector<SpecializationInfo> infos;
+        infos.reserve(specializationSizes.size());
         for (const auto &[id, byteSize] : specializationSizes)
-          infos.push_back(SpecializationInfo{Binary32{static_cast<int64_t>(id)}, IntPositive{static_cast<int32_t>(byteSize)}});
+          infos.push_back(
+              SpecializationInfo{.specId = Binary32{static_cast<int64_t>(id)}, .byteSize = IntPositive{static_cast<int32_t>(byteSize)}});
         encodePayload(result, infos);
       } else if (operationTag == operation::SpecializeImage) {
         const auto request = decodePayload<SpecializeImage>(payload);
         std::vector<std::pair<uint32_t, std::vector<uint8_t>>> constants;
+        constants.reserve(request.constants.size());
         for (const auto &constant : request.constants)
           constants.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
         specialization = std::move(constants);
@@ -543,9 +557,9 @@ private:
         prepared.stage = request.stage;
         prepared.descriptors = *preparedDescriptors;
         if (requiredWorkGroupSize)
-          prepared.workgroup =
-              ShaderWorkgroup{static_cast<int32_t>((*requiredWorkGroupSize)[0]), static_cast<int32_t>((*requiredWorkGroupSize)[1]),
-                              static_cast<int32_t>((*requiredWorkGroupSize)[2])};
+          prepared.workgroup = Dimensions{.x = {static_cast<int32_t>((*requiredWorkGroupSize)[0])},
+                                          .y = {static_cast<int32_t>((*requiredWorkGroupSize)[1])},
+                                          .z = {static_cast<int32_t>((*requiredWorkGroupSize)[2])}};
         encodePayload(result, prepared);
       } else if (operationTag == operation::UnloadProgram) {
         GEMSTONE_RPC_REQUIRE(livePrograms.erase(decodePayload<UnloadProgram>(payload).program.value) == 1);
@@ -564,13 +578,13 @@ private:
         GEMSTONE_RPC_REQUIRE(livePrograms.contains(request.program.value));
         ProgramSymbols catalogue{};
         for (const auto &kernel : programKernels)
-          catalogue.kernels.push_back(gemstone::execution::KernelSymbol{{kernel.name}, {kernel.linkageName}});
+          catalogue.kernels.push_back(gemstone::execution::KernelSymbol{.name = {kernel.name}, .linkageName = {kernel.linkageName}});
         for (const auto &global : programGlobals) {
           GlobalSymbol meta{};
           meta.name = {global.name};
           meta.virtualAddress = GuestAddress{static_cast<int64_t>(global.virtualAddress)};
           meta.size = LongPositive0{static_cast<int64_t>(global.size)};
-          for (uint32_t offset : global.pointerOffsets)
+          for (uint32_t const offset : global.pointerOffsets)
             meta.pointerOffsets.push_back(IntPositive0{static_cast<int32_t>(offset)});
           catalogue.globals.push_back(std::move(meta));
         }
@@ -586,7 +600,7 @@ private:
         auto &memory = allocations.at(allocation);
         const auto &initial = expected->second.second;
         GEMSTONE_RPC_REQUIRE(offset <= memory.size() && initial.size() <= memory.size() - offset);
-        std::copy(initial.begin(), initial.end(), memory.begin() + offset);
+        std::copy(initial.begin(), initial.end(), memory.data() + offset);
         expectedGlobals.erase(expected);
         encodePayload(result, Unit{});
       } else if (operationTag == operation::Launch) {
@@ -594,20 +608,18 @@ private:
         encodePayload(result, CompletionId{static_cast<int64_t>(completionId)});
       } else if (operationTag == operation::QueryCompletion) {
         const auto request = decodePayload<QueryCompletion>(payload);
-        GEMSTONE_RPC_REQUIRE(request.completion.value == static_cast<int64_t>(completionId));
+        GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.completion.value, completionId));
         if (polls++ < 2) {
-          ++pending;
           encodePayload(result, CompletionStatus{CompletionStatusPending{}});
         } else {
           completed = true;
           if (failCompletion.exchange(false))
-            encodePayload(result,
-                          CompletionStatus{CompletionStatusFailed{ExecutionFailure{ExecutionFailureFailed{{"completion failed"}}}}});
+            encodePayload(result, CompletionStatus{CompletionStatusFailed{executionFailure(completionKind, "completion failed")}});
           else encodePayload(result, CompletionStatus{CompletionStatusSucceeded{}});
         }
       } else if (operationTag == operation::PollHostMemory) {
         const auto completion = decodePayload<PollHostMemory>(payload).completion;
-        GEMSTONE_RPC_REQUIRE(completion.value == static_cast<int64_t>(completionId));
+        GEMSTONE_RPC_REQUIRE(std::cmp_equal(completion.value, completionId));
         if (pauseCompletion.load()) {
           completionEntered = true;
           while (pauseCompletion.load() && !stopped.load())
@@ -625,22 +637,24 @@ private:
         ++awaited;
         completed = true;
         failed = failCompletion.exchange(false);
-        if (operationTag == operation::PollHostMemory && !failed) {
+        if (!failed) {
           HostMemoryBatch batch{};
           batch.completed = true;
           if (hostOutputAddress)
             for (const auto &range : ranges) {
               HostMemoryBytes bytes{};
               bytes.address = GuestAddress{static_cast<int64_t>(hostOutputAddress + range.first)};
-              bytes.bytes.assign(hostOutputBytes.begin() + range.first, hostOutputBytes.begin() + range.first + range.second);
+              bytes.bytes.assign(hostOutputBytes.data() + range.first, hostOutputBytes.data() + range.first + range.second);
               bytes.atomicWidth = {0};
               batch.writes.push_back(std::move(bytes));
             }
           encodePayload(result, batch);
-        } else encodePayload(result, Unit{});
+        } else {
+          encodePayload(result, Unit{});
+        }
       } else if (operationTag == operation::ReleaseCompletion) {
         const auto request = decodePayload<ReleaseCompletion>(payload);
-        GEMSTONE_RPC_REQUIRE(completed && request.completion.value == static_cast<int64_t>(completionId));
+        GEMSTONE_RPC_REQUIRE(completed && std::cmp_equal(request.completion.value, completionId));
         active = false;
         encodePayload(result, Unit{});
       } else if (operationTag == operation::CompletionDirtyRanges) {
@@ -649,21 +663,23 @@ private:
         std::vector<DirtyRange> dirty = opaqueDirty.value_or(std::vector<DirtyRange>{});
         if (!opaqueDirty && !hostOutputAddress && !hostBacked[outputId])
           for (const auto &range : ranges)
-            dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(outputId)}, LongPositive0{static_cast<int64_t>(range.first)},
-                                       IntPositive{static_cast<int32_t>(range.second)}});
+            dirty.push_back(DirtyRange{.allocation = AllocationId{static_cast<int64_t>(outputId)},
+                                       .offset = LongPositive0{static_cast<int64_t>(range.first)},
+                                       .size = IntPositive{static_cast<int32_t>(range.second)}});
         if (indirectWrite && !hostBacked[indirectWrite->first])
-          dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(indirectWrite->first)},
-                                     LongPositive0{static_cast<int64_t>(indirectWrite->second)}, IntPositive{4}});
+          dirty.push_back(DirtyRange{.allocation = AllocationId{static_cast<int64_t>(indirectWrite->first)},
+                                     .offset = LongPositive0{static_cast<int64_t>(indirectWrite->second)},
+                                     .size = IntPositive{4}});
         const auto begin = std::min(static_cast<size_t>(request.offset.value), dirty.size());
         const auto end = std::min(begin + MaximumElements, dirty.size());
-        encodePayload(result, std::vector<DirtyRange>(dirty.begin() + begin, dirty.begin() + end));
+        encodePayload(result, std::vector<DirtyRange>(dirty.data() + begin, dirty.data() + end));
       } else if (operationTag == operation::CompletionPointerRelocations) {
         decodePayload<CompletionPointerRelocations>(payload);
         GEMSTONE_RPC_REQUIRE(completed);
         encodePayload(result, std::vector<PointerRelocation>{});
       } else if (operationTag == operation::ReadGraphicsStatistics) {
         const auto request = decodePayload<ReadGraphicsStatistics>(payload);
-        GEMSTONE_RPC_REQUIRE(completed && active && request.completion.value == static_cast<int64_t>(completionId));
+        GEMSTONE_RPC_REQUIRE(completed && active && std::cmp_equal(request.completion.value, completionId));
         failed = failGraphicsStatistics.exchange(false);
         // A distinctive fixture result, independent of simulated compute writes.
         encodePayload(result, GraphicsStatistics{17});
@@ -679,12 +695,20 @@ private:
       wire::appendBigEndian<uint32_t>(response, failed ? 1 : 0);
       if (failed) {
         result.clear();
-        encodePayload(result, ExecutionFailure{ExecutionFailureFailed{{failure}}});
+        encodePayload(result, executionFailure(failureKind, failure));
       }
       wire::appendBigEndian<uint32_t>(response, static_cast<uint32_t>(result.size()));
       response.insert(response.end(), result.begin(), result.end());
       send(socket, response);
     }
+  }
+
+  void startCompletion() {
+    ++completionId;
+    ++launches;
+    polls = 0;
+    active = true;
+    completed = false;
   }
 
   void launch(const std::vector<uint8_t> &payload) {
@@ -694,24 +718,20 @@ private:
     if (opaqueDirty) {
       outputId = 0;
       ranges.clear();
-      ++completionId;
-      ++launches;
-      polls = 0;
-      active = true;
-      completed = false;
+      startCompletion();
       return;
     }
     if (indirectInput) {
       uint64_t child = 0;
-      bool foundTable = false;
-      for (const auto &[id, address] : allocationAddresses)
-        if (address == indirectInput->table) {
-          const auto &bytes = allocations.at(id);
-          GEMSTONE_RPC_REQUIRE(bytes.size() >= sizeof(child));
-          std::memcpy(&child, hostBacked[id] ? reinterpret_cast<const void *>(address) : bytes.data(), sizeof(child));
-          foundTable = true;
-        }
-      GEMSTONE_RPC_REQUIRE(foundTable);
+      const auto table = allocationAt(reinterpret_cast<const void *>(indirectInput->table));
+      GEMSTONE_RPC_REQUIRE(table != allocationAddresses.end());
+      {
+        const auto &bytes = allocations.at(table->first);
+        const auto lead = indirectInput->table - table->second;
+        GEMSTONE_RPC_REQUIRE(bytes.size() - lead >= sizeof(child));
+        std::memcpy(&child, hostBacked[table->first] ? reinterpret_cast<const void *>(indirectInput->table) : bytes.data() + lead,
+                    sizeof(child));
+      }
       bool foundChild = false;
       for (const auto &[id, address] : allocationAddresses) {
         auto &bytes = allocations.at(id);
@@ -728,17 +748,17 @@ private:
       }
       GEMSTONE_RPC_REQUIRE(foundChild);
     }
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupSize.x.value) == expectation.local);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupSize.y.value) == expectation.localYz[0]);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupSize.z.value) == expectation.localYz[1]);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupCount.x.value) == expectation.groups);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupCount.y.value) == expectation.groupsYz[0]);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupCount.z.value) == expectation.groupsYz[1]);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint64_t>(request.globalSize.x.value) == expectation.global);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint64_t>(request.globalSize.y.value) == expectation.globalYz[0]);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint64_t>(request.globalSize.z.value) == expectation.globalYz[1]);
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.groupSize.x.value, expectation.local));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.groupSize.y.value, expectation.localYz[0]));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.groupSize.z.value, expectation.localYz[1]));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.groupCount.x.value, expectation.groups));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.groupCount.y.value, expectation.groupsYz[0]));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.groupCount.z.value, expectation.groupsYz[1]));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.globalSize.x.value, expectation.global));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.globalSize.y.value, expectation.globalYz[0]));
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.globalSize.z.value, expectation.globalYz[1]));
     GEMSTONE_RPC_REQUIRE(request.workDim.value >= 1 && request.workDim.value <= 3);
-    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.x.value) == expectation.offset);
+    GEMSTONE_RPC_REQUIRE(std::cmp_equal(request.globalOffset.x.value, expectation.offset));
     GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.y.value) == 0);
     GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.z.value) == 0);
     auto arguments = request.arguments;
@@ -756,7 +776,8 @@ private:
       std::optional<ArgumentMemory> output;
       for (const auto &[allocation, address] : allocationAddresses)
         if (pointer >= address && pointer - address <= allocations.at(allocation).size()) {
-          output = ArgumentMemory{AllocationId{static_cast<int64_t>(allocation)}, static_cast<int64_t>(pointer - address)};
+          output =
+              ArgumentMemory{.region = AllocationId{static_cast<int64_t>(allocation)}, .offset = {static_cast<int64_t>(pointer - address)}};
           break;
         }
       if (output) arguments.emplace_back(*output);
@@ -786,33 +807,29 @@ private:
         auto &bytes = allocations.at(id);
         const auto offset = base + allocationArgumentWrite->offset;
         GEMSTONE_RPC_REQUIRE(offset <= bytes.size() && allocationArgumentWrite->bytes.size() <= bytes.size() - offset);
-        std::copy(allocationArgumentWrite->bytes.begin(), allocationArgumentWrite->bytes.end(), bytes.begin() + offset);
+        std::copy(allocationArgumentWrite->bytes.begin(), allocationArgumentWrite->bytes.end(), bytes.data() + offset);
         if (hostBacked[id])
           std::memcpy(reinterpret_cast<void *>(allocationAddresses.at(id) + offset), allocationArgumentWrite->bytes.data(),
                       allocationArgumentWrite->bytes.size());
       }
       outputId = actual.empty() ? 0 : actual.front().first;
       ranges.clear();
-      ++completionId;
-      ++launches;
-      polls = 0;
-      active = true;
-      completed = false;
+      startCompletion();
       return;
     }
     GEMSTONE_RPC_REQUIRE(arguments.size() >= 2);
     hostOutputAddress = 0;
     uint64_t base = 0;
-    if (const auto *memory = std::get_if<ArgumentMemory>(&arguments[0])) {
+    if (const auto *memory = std::get_if<ArgumentMemory>(arguments.data())) {
       outputId = static_cast<uint64_t>(memory->region.value);
       base = static_cast<uint64_t>(memory->offset.value);
       GEMSTONE_RPC_REQUIRE(!memory->range);
     } else {
-      const auto *scalar = std::get_if<ArgumentScalar>(&arguments[0]);
+      const auto *scalar = std::get_if<ArgumentScalar>(arguments.data());
       GEMSTONE_RPC_REQUIRE(scalar != nullptr && hostMemoryEnabled && scalar->bytes.value.size() == 8);
       std::memcpy(&hostOutputAddress, scalar->bytes.value.data(), 8);
       GEMSTONE_RPC_REQUIRE(hostOutputAddress != 0);
-      hostOutputBytes.resize(expectation.global * expectation.globalYz[0] * expectation.globalYz[1] * 4);
+      hostOutputBytes.resize(static_cast<size_t>(expectation.global) * expectation.globalYz[0] * expectation.globalYz[1] * 4);
       outputId = 0;
     }
     uint32_t seed = 0;
@@ -846,21 +863,18 @@ private:
             const auto countZ = std::min(expectation.localYz[1], expectation.globalYz[1] - firstZ);
             for (uint32_t z = 0; z < countZ; ++z)
               for (uint32_t y = 0; y < countY; ++y) {
-                const uint64_t first = ((uint64_t(firstZ + z) * expectation.globalYz[0]) + firstY + y) * expectation.global + firstX;
-                GEMSTONE_RPC_REQUIRE(base + (first + countX) * 4 <= bytes.size());
+                const uint64_t first =
+                    (((static_cast<uint64_t>(firstZ + z) * expectation.globalYz[0]) + firstY + y) * expectation.global) + firstX;
+                GEMSTONE_RPC_REQUIRE(base + ((first + countX) * 4) <= bytes.size());
                 for (uint32_t x = 0; x < countX; ++x) {
                   const uint32_t value = seed + expectation.offset + static_cast<uint32_t>(first + x);
-                  std::memcpy(bytes.data() + base + (first + x) * 4, &value, 4);
+                  std::memcpy(bytes.data() + base + ((first + x) * 4), &value, 4);
                 }
-                ranges.emplace_back(base + first * 4, countX * 4);
+                ranges.emplace_back(base + (first * 4), countX * 4);
               }
           }
     }
-    ++completionId;
-    ++launches;
-    polls = 0;
-    active = true;
-    completed = false;
+    startCompletion();
   }
 
   std::string socketPath, socketDirectory;
@@ -884,11 +898,11 @@ private:
   std::optional<AllocationArgumentWrite> allocationArgumentWrite;
   uint32_t kernelArgumentBlockSize = 12;
   uint32_t kernelExplicitParameterCount = 2;
-  std::vector<KernelParameter> kernelParameters{{8, 0, 2, 0}, {4, 8, 1, 0}};
+  std::vector<KernelParameter> kernelParameters{{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0},
+                                                {.width = 4, .offset = 8, .kind = 1, .containsPointers = 0}};
   std::optional<std::array<uint32_t, 3>> requiredWorkGroupSize;
   std::optional<std::vector<ShaderDescriptor>> preparedDescriptors;
-  std::vector<uint32_t> bindingIndices;
-  std::vector<ProgramKernel> programKernels{{"add", "add.kd"}};
+  std::vector<ProgramKernel> programKernels{{.name = "add", .linkageName = "add.kd"}};
   std::vector<ProgramGlobal> programGlobals;
   std::set<int64_t> livePrograms;
   struct IndirectInput {
@@ -909,15 +923,16 @@ private:
   std::vector<std::pair<uint64_t, uint32_t>> ranges;
   std::atomic_bool failGraphicsStatistics{false};
   std::string rejectedOperation;
+  FailureKind rejectedKind = FailureKind::Failed;
+  FailureKind completionKind = FailureKind::Failed;
   std::atomic_bool failCompletion{false};
   std::atomic_bool pauseCompletion{false};
-  std::atomic_uint64_t pauseReleaseAddress{0};
   bool hostMemoryEnabled = false;
   uint64_t hostOutputAddress = 0;
   std::vector<uint8_t> hostOutputBytes;
   uint64_t nextAllocation = 1, outputId = 0, completionId = 100;
   uint32_t polls = 0;
-  std::atomic<unsigned> pending{0}, awaited{0};
+  std::atomic<unsigned> awaited{0};
   std::optional<std::vector<DirtyRange>> opaqueDirty;
   Launch recordedLaunch{};
   bool active = false, completed = false;

@@ -4,7 +4,6 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -22,18 +21,7 @@ object AMDGPUDwordx4CopyBenchmark {
 
   private def run(iterations: Int > 0): BenchmarkSample = {
     val code   = Words.flatMap(word => LittleEndian.toVec(word, 4))
-    val kernel = VMCompiler().compile(CodeObjectKernel(
-      "kernel",
-      Target("gfx900"),
-      16,
-      0,
-      0,
-      0x80,
-      0x08,
-      code,
-      code.nonNegativeSize
-    ))
-      .fold(error => throw IllegalStateException(error.message), identity)
+    val kernel = SequentialDispatch.compile("kernel", Target("gfx900"), kernargSize = 16, code)
     val memory = BenchmarkMemory(1024, 1024)
     val input  = memory.ids(0)
     val output = memory.ids(1)

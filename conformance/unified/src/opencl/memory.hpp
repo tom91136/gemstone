@@ -1,6 +1,7 @@
 #pragma once
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
+#include <aspartame/vector.hpp>
 
 #include "memory_files.hpp"
 #include "memory_support.hpp"
@@ -19,13 +20,15 @@ struct Backend {
   cl_command_queue queue{};
   cl_program program{};
   cl_kernel kernel{};
-  Backend(std::string kind, uint64_t selected, bool atomics, const char *fixture) : kind(std::move(kind)), atomicStorage(atomics) {
+  Backend(std::string kindName, uint64_t selected, bool atomics, const char *fixture) : kind(std::move(kindName)), atomicStorage(atomics) {
     cl_platform_id platform{};
     check(clGetPlatformIDs(1, &platform, nullptr));
     if (selected) {
       device = reinterpret_cast<cl_device_id>(selected);
       check(clGetDeviceInfo(device, CL_DEVICE_PLATFORM, sizeof(platform), &platform, nullptr));
-    } else check(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &device, nullptr));
+    } else {
+      check(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &device, nullptr));
+    }
     clHostMemAllocINTELFn =
         reinterpret_cast<decltype(clHostMemAllocINTELFn)>(clGetExtensionFunctionAddressForPlatform(platform, "clHostMemAllocINTEL"));
     clMemFreeINTELFn = reinterpret_cast<decltype(clMemFreeINTELFn)>(clGetExtensionFunctionAddressForPlatform(platform, "clMemFreeINTEL"));
@@ -33,7 +36,7 @@ struct Backend {
         clGetExtensionFunctionAddressForPlatform(platform, "clSetKernelArgMemPointerINTEL"));
     clSharedMemAllocINTELFn =
         reinterpret_cast<decltype(clSharedMemAllocINTELFn)>(clGetExtensionFunctionAddressForPlatform(platform, "clSharedMemAllocINTEL"));
-    if (kind == "usm_host" || kind == "usm_shared")
+    if (usm())
       require(clHostMemAllocINTELFn && clSharedMemAllocINTELFn && clMemFreeINTELFn && clSetKernelArgMemPointerINTELFn,
               "advertised USM entry points missing");
     cl_int status{};
@@ -48,12 +51,15 @@ struct Backend {
     kernel = clCreateKernel(program, "probe", &status);
     check(status);
   }
+  Backend(const Backend &) = delete;
+  Backend &operator=(const Backend &) = delete;
   ~Backend() {
     clReleaseKernel(kernel);
     clReleaseProgram(program);
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
   }
+  [[nodiscard]] bool usm() const { return kind == "usm_host" || kind == "usm_shared"; }
   void *allocate(size_t size) {
     void *p{};
     cl_int status{};
@@ -66,37 +72,40 @@ struct Backend {
     return p;
   }
   void release(void *p) {
-    allocations.erase(std::remove(allocations.begin(), allocations.end(), p), allocations.end());
-    if (kind == "usm_host" || kind == "usm_shared") check(clMemFreeINTELFn(context, p));
+    using namespace aspartame;
+    allocations ^= filter([&](void *allocation) { return allocation != p; });
+    if (usm()) check(clMemFreeINTELFn(context, p));
     else clSVMFree(context, p);
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, cl_command_queue target, cl_uint waitCount,
                const cl_event *waits, cl_event *event) {
     if (!allocations.empty()) {
-      const auto info = kind == "usm_host" || kind == "usm_shared" ? CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL : CL_KERNEL_EXEC_INFO_SVM_PTRS;
+      const auto info = usm() ? CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL : CL_KERNEL_EXEC_INFO_SVM_PTRS;
       check(clSetKernelExecInfo(kernel, info, allocations.size() * sizeof(void *), allocations.data()));
     }
-    auto setPointer = kind == "usm_host" || kind == "usm_shared" ? clSetKernelArgMemPointerINTELFn : clSetKernelArgSVMPointer;
+    auto setPointer = usm() ? clSetKernelArgMemPointerINTELFn : clSetKernelArgSVMPointer;
     check(setPointer(kernel, 0, input));
     check(setPointer(kernel, 1, output));
     check(setPointer(kernel, 2, indices));
     check(clSetKernelArg(kernel, 3, sizeof(mode), &mode));
-    const size_t global = count, local = count == 1 ? 1 : 32;
+    const size_t global = count;
+    const size_t local = count == 1 ? 1 : 32;
     check(clEnqueueNDRangeKernel(target, kernel, 1, nullptr, &global, &local, waitCount, waits, event));
   }
   void submit(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
     enqueue(input, output, indices, mode, count, queue, 0, nullptr, nullptr);
   }
-  void finish() { check(clFinish(queue)); }
+  void finish() const { check(clFinish(queue)); }
   void launch(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
-    enqueue(input, output, indices, mode, count, queue, 0, nullptr, nullptr);
-    check(clFinish(queue));
+    submit(input, output, indices, mode, count);
+    finish();
   }
   void ordered(uint32_t *input, uint32_t *middle, uint32_t *output, unsigned count, bool crossQueue) {
     cl_int status{};
-    auto second = clCreateCommandQueueWithProperties(context, device, nullptr, &status);
+    auto *second = clCreateCommandQueueWithProperties(context, device, nullptr, &status);
     check(status);
-    cl_event produced{}, consumed{};
+    cl_event produced{};
+    cl_event consumed{};
     enqueue(input, middle, input, 0, count, queue, 0, nullptr, &produced);
     enqueue(middle, output, input, 0, count, crossQueue ? second : queue, 1, &produced, &consumed);
     check(clFlush(queue));

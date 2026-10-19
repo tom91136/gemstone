@@ -117,14 +117,15 @@ class ConstraintLiteralSuite extends munit.FunSuite {
   test("range precedence and tuple choices preserve the existing predicate types") {
     import constraint.auto.*
     summon[(Int in 1 ~ 3) =:= (Int where Between[1, 3])]
-    summon[(Int in (1, 3)) =:= (Int where In[(1, 3)])]
+    summon[(Int in (1, 3)) =:= (Int where Membership[(1, 3)])]
+    summon[(Int in (0 ~ 17) | (24 ~ 31)) =:= (Int where Membership[(24 ~ 31) | (0 ~ 17)])]
     val low: Int in 1 ~ 3        = 1
     val mid: Int in 1 ~ 3        = 2
     val high: Int in 1 ~ 3       = 3
     val wide: Long in 0L ~ 4L    = mid
     val negative: Int in -3 ~ -1 = -2
     val singleton: Int in 2 ~ 2  = 2
-    assertEquals(List(low.raw, mid.raw, high.raw), List(1, 2, 3))
+    assertEquals(List[Int](low, mid, high), List(1, 2, 3))
     assertEquals(wide.raw, 2L)
     assertEquals(negative.raw, -2)
     assertEquals(singleton.raw, 2)
@@ -178,7 +179,7 @@ class ConstraintLiteralSuite extends munit.FunSuite {
     """)
     assertUnsatisfiable("""
       import net.kurobako.gemstone.constraint.*
-      def check(value: Int) = value.refine[Int where (In[(1, 3)] & AtLeast[4])]
+      def check(value: Int) = value.refine[Int where (Membership[(1, 3)] & AtLeast[4])]
     """)
     assertUnsatisfiable("""
       import net.kurobako.gemstone.constraint.*

@@ -70,6 +70,64 @@ object Fault {
     def at(where: Location): Fault = if (location.isEmpty) Backend(detail)(Some(where)) else this
   }
 
+  object InvalidProgram {
+    def apply(detail: NonEmpty[String]): Fault = new InvalidProgram(detail)(None)
+  }
+  case class InvalidProgram private (detail: NonEmpty[String])(val location: Option[Location]) extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) InvalidProgram(detail)(Some(where)) else this
+  }
+
+  object InvalidConfiguration {
+    def apply(detail: NonEmpty[String]): Fault = new InvalidConfiguration(detail)(None)
+  }
+  case class InvalidConfiguration private (detail: NonEmpty[String])(val location: Option[Location])
+      extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) InvalidConfiguration(detail)(Some(where)) else this
+  }
+
+  object OutOfResources {
+    def apply(detail: NonEmpty[String]): Fault = new OutOfResources(detail)(None)
+  }
+  case class OutOfResources private (detail: NonEmpty[String])(val location: Option[Location]) extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) OutOfResources(detail)(Some(where)) else this
+  }
+
+  object Misaligned {
+    def apply(detail: NonEmpty[String]): Fault = new Misaligned(detail)(None)
+  }
+  case class Misaligned private (detail: NonEmpty[String])(val location: Option[Location]) extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) Misaligned(detail)(Some(where)) else this
+  }
+
+  object IllegalInstruction {
+    def apply(detail: NonEmpty[String]): Fault = new IllegalInstruction(detail)(None)
+  }
+  case class IllegalInstruction private (detail: NonEmpty[String])(val location: Option[Location])
+      extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) IllegalInstruction(detail)(Some(where)) else this
+  }
+
+  object Trap {
+    def apply(detail: NonEmpty[String]): Fault = new Trap(detail)(None)
+  }
+  case class Trap private (detail: NonEmpty[String])(val location: Option[Location]) extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) Trap(detail)(Some(where)) else this
+  }
+
+  object Assertion {
+    def apply(detail: NonEmpty[String]): Fault = new Assertion(detail)(None)
+  }
+  case class Assertion private (detail: NonEmpty[String])(val location: Option[Location]) extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) Assertion(detail)(Some(where)) else this
+  }
+
+  object Hang {
+    def apply(detail: NonEmpty[String]): Fault = new Hang(detail)(None)
+  }
+  case class Hang private (detail: NonEmpty[String])(val location: Option[Location]) extends Fault(detail) {
+    def at(where: Location): Fault = if (location.isEmpty) Hang(detail)(Some(where)) else this
+  }
+
   object BudgetExceeded {
     def apply(limit: Long > 0): Fault = new BudgetExceeded(limit)(None)
   }
@@ -85,7 +143,7 @@ object Fault {
 }
 
 /** Why a request or launch failed. Equality and extraction consider only the kind and detail, not the location. */
-sealed abstract class Fault(val message: NonEmpty[String]) {
+sealed abstract class Fault(val message: NonEmpty[String]) derives CanEqual {
 
   /** Where in a launch the fault arose, when the backend knows. */
   def location: Option[Fault.Location]

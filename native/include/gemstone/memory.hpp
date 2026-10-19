@@ -6,18 +6,21 @@
 #include <limits>
 #include <vector>
 
+#include <aspartame/optional.hpp>
+#include <aspartame/vector.hpp>
+
 namespace gemstone {
 
 // Half-open byte ranges. Never round a borrowed range out to allocator/page boundaries.
 struct MemoryRange {
   uintptr_t base = 0;
   size_t size = 0;
-  bool valid() const { return base != 0 && size != 0 && size <= std::numeric_limits<uintptr_t>::max() - base; }
-  uintptr_t end() const { return base + size; }
-  bool contains(uintptr_t address, size_t bytes = 0) const {
+  [[nodiscard]] bool valid() const { return base != 0 && size != 0 && size <= std::numeric_limits<uintptr_t>::max() - base; }
+  [[nodiscard]] uintptr_t end() const { return base + size; }
+  [[nodiscard]] bool contains(uintptr_t address, size_t bytes = 0) const {
     return address >= base && address - base <= size && bytes <= size - (address - base);
   }
-  bool overlaps(MemoryRange other) const { return base < other.end() && other.base < end(); }
+  [[nodiscard]] bool overlaps(MemoryRange other) const { return base < other.end() && other.base < end(); }
 };
 
 enum class MemoryOwnership { Borrowed, Owned };
@@ -37,32 +40,28 @@ private:
   std::vector<View> views;
 
 public:
-  std::vector<MemoryRange> ranges() const {
-    std::vector<MemoryRange> result;
-    result.reserve(views.size());
-    for (const auto &view : views)
-      result.push_back(view.range);
-    return result;
+  [[nodiscard]] std::vector<MemoryRange> ranges() const {
+    using namespace aspartame;
+    return views ^ map([](const View &view) { return view.range; });
   }
-  const View *exact(uintptr_t base, size_t size = 0) const {
-    for (auto it = views.rbegin(); it != views.rend(); ++it)
-      if (it->range.base == base && (size == 0 || it->range.size == size)) return &*it;
-    return nullptr;
+  [[nodiscard]] const View *exact(uintptr_t base, size_t size = 0) const {
+    using namespace aspartame;
+    return views ^ last_index_where_maybe([&](const View &view) { return view.range.base == base && (size == 0 || view.range.size == size); }) ^
+           map([&](size_t index) { return &views[index]; }) ^ get_or_else<const View *>(nullptr);
   }
-  const View *find(uintptr_t address, size_t bytes = 1) const {
+  [[nodiscard]] const View *find(uintptr_t address, size_t bytes = 1) const {
     const View *found = nullptr;
     for (const auto &view : views)
       if (view.range.contains(address, bytes) && (!found || view.range.size < found->range.size)) found = &view;
     return found;
   }
-  bool overlaps(MemoryRange range) const {
-    for (const auto &view : views)
-      if (view.range.overlaps(range)) return true;
-    return false;
+  [[nodiscard]] bool overlaps(MemoryRange range) const {
+    using namespace aspartame;
+    return views ^ exists([&](const View &view) { return view.range.overlaps(range); });
   }
   bool add(MemoryRange range, MemoryOwnership ownership, uint64_t flags, bool allowOverlap = false) {
     if (!range.valid() || (!allowOverlap && overlaps(range))) return false;
-    views.push_back({range, ownership, flags});
+    views.push_back({.range = range, .ownership = ownership, .flags = flags});
     return true;
   }
   bool remove(uintptr_t base, MemoryOwnership ownership, size_t size = 0) {
@@ -80,30 +79,38 @@ public:
 
 // Union of the live view intersections, without including gaps or retired bytes.
 inline std::vector<MemoryRange> coveredMemoryRanges(MemoryRange requested, std::vector<MemoryRange> covered) {
+  using namespace aspartame;
   std::vector<MemoryRange> result;
   if (!requested.valid()) return result;
-  std::sort(covered.begin(), covered.end(), [](auto a, auto b) { return a.base < b.base; });
+  covered ^= sort_by([](const MemoryRange &range) { return range.base; });
   for (const auto range : covered) {
     if (!range.valid() || !requested.overlaps(range)) continue;
-    const auto begin = std::max(requested.base, range.base), end = std::min(requested.end(), range.end());
+    const auto begin = std::max(requested.base, range.base);
+    const auto end = std::min(requested.end(), range.end());
     if (!result.empty() && begin <= result.back().end()) result.back().size = std::max(result.back().end(), end) - result.back().base;
-    else result.push_back({begin, end - begin});
+    else result.push_back({.base = begin, .size = end - begin});
   }
   return result;
 }
 
 // Return only uncovered bytes, preserving holes instead of guessing a larger extent.
 inline std::vector<MemoryRange> missingMemoryRanges(MemoryRange requested, std::vector<MemoryRange> covered) {
+  using namespace aspartame;
   std::vector<MemoryRange> result;
   if (!requested.valid()) return result;
-  std::sort(covered.begin(), covered.end(), [](auto a, auto b) { return a.base < b.base; });
+  covered ^= sort_by([](const MemoryRange &range) { return range.base; });
   auto cursor = requested.base;
   for (const auto range : covered) {
     if (range.end() <= cursor || range.base >= requested.end()) continue;
-    if (range.base > cursor) result.push_back({cursor, range.base - cursor});
+    if (range.base > cursor) result.push_back({.base = cursor, .size = range.base - cursor});
     cursor = std::max(cursor, std::min(range.end(), requested.end()));
   }
-  if (cursor < requested.end()) result.push_back({cursor, requested.end() - cursor});
+  if (cursor < requested.end()) result.push_back({.base = cursor, .size = requested.end() - cursor});
   return result;
+}
+
+// C APIs hand back, or pass on, as mutable an address their caller supplied as const
+template <typename T> [[nodiscard]] constexpr T *apiAddress(const T *address) noexcept {
+  return const_cast<T *>(address); // NOLINT(cppcoreguidelines-pro-type-const-cast)
 }
 } // namespace gemstone

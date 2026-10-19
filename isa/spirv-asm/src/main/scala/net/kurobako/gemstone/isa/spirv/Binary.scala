@@ -78,7 +78,7 @@ object Binary {
 
   def encode(module: RawModule): Either[BinaryError, Vec[Byte]] = for {
     version <- encodeVersion(module.header.version).toRight(BinaryError.VersionTooLarge(module.header.version))
-    bytes   <- module.instructions.find(_.wordCount.raw > 0xffff) match {
+    bytes   <- module.instructions.find(_.wordCount > 0xffff) match {
       case Some(instruction) =>
         Left(BinaryError.InstructionTooLong(instruction.opcodeNumber, instruction.wordCount))
       case None =>
@@ -90,7 +90,7 @@ object Binary {
           module.header.schema
         )
         val body = module.instructions.flatMap { instruction =>
-          Vec(Word((instruction.wordCount.raw << 16) | instruction.opcodeNumber.toInt)) ++
+          Vec(Word((instruction.wordCount << 16) | instruction.opcodeNumber.toInt)) ++
             instruction.operandWords
         }
         Right((header ++ body).flatMap(word => writeInt(word.raw, module.endianness)))
@@ -117,13 +117,13 @@ object Binary {
     // Physical layout: zero byte, major byte, minor byte, zero byte.
     if ((raw & 0xff0000ffL) != 0L) None
     else for {
-      major <- Bits.unsignedIntField(raw, 16, 8).raw.refine[Int > 0].toOption
+      major <- Bits.unsignedIntField(raw, 16, 8).refine[Int > 0].toOption
       minor = Bits.unsignedIntField(raw, 8, 8)
     } yield Version(major, minor)
   }
 
   private def encodeVersion(version: Version): Option[Word] =
-    Option.when(version.major.raw <= 0xff && version.minor.raw <= 0xff)(
-      Word((version.major.raw << 16) | (version.minor.raw << 8))
+    Option.when(version.major <= 0xff && version.minor <= 0xff)(
+      Word((version.major << 16) | (version.minor << 8))
     )
 }

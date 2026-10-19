@@ -7,6 +7,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.pickler.given
+import scala.collection.mutable
 import scala.sys.process.Process
 import scala.sys.process.ProcessLogger
 import upickle.default.ReadWriter
@@ -80,7 +81,7 @@ object GenerateOfficialAPIManifest {
       Vector(s"-I${surface.include(references)}") ++
       surface.defines.map(define => s"-D$define") ++
       surface.headers.flatMap(header => Vector("-include", header)) ++ Vector("-")
-    val diagnostics = StringBuilder()
+    val diagnostics = mutable.StringBuilder()
     val output      = try
       Process(command).#<(java.io.ByteArrayInputStream(Array.emptyByteArray)).!!(
         ProcessLogger { line =>
@@ -138,10 +139,12 @@ object GenerateOfficialAPIManifest {
     )
   }
 
+  private val PfnName = "\\bPFN_([A-Za-z0-9_]+?)_v([0-9]+)\\b".r
+
   // Read as text: the oldest revisions are only declared under the vendor's internal-build guard. Per-thread-stream
   // typedefs end in a suffix and name a stream variant of a revision rather than a new one.
   private def entryPoints(surface: NativeAPIs.Surface, header: String): Vector[EntryPoint] =
-    "\\bPFN_([A-Za-z0-9_]+?)_v([0-9]+)\\b".r.findAllMatchIn(header).map(found => found.group(1) -> found.group(2).toInt)
+    PfnName.findAllMatchIn(header).map(found => found.group(1) -> found.group(2).toInt)
       .filter((name, _) => surface.accepts(name)).toVector.groupMap(_._1)(_._2).toVector.sortBy(_._1)
       .map((name, versions) => EntryPoint(nonEmpty(name, "entry point"), versions.distinct.sorted))
 

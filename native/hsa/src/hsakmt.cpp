@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -14,9 +16,8 @@
 #include <utility>
 #include <vector>
 
-#include <stdint.h>
-
 #include <aspartame/unordered_map.hpp>
+#include <aspartame/vector.hpp>
 #include <hsakmt/hsakmt.h>
 
 #include "gemstone/hsa/aql.hpp"
@@ -24,16 +25,18 @@
 #include "gemstone/hsa/doorbell_monitor.hpp"
 #include "gemstone/hsa/target.hpp"
 #include "gemstone_execution_rpc.hpp"
-#include <gemstone/export.h>
 #include <gemstone/trace.hpp>
 
 #ifdef GEMSTONE_HSAKMT_TEST_SUPPORT
+  #include <span>
+
+  #include <gemstone/environment.hpp>
   #include <gemstone/process.hpp>
 
   #include "hsakmt_test_support.hpp"
+  #include <environment_keys.hpp>
 #endif
 #include "transfer.hpp"
-#include <environment_keys.hpp>
 
 namespace {
 
@@ -48,8 +51,14 @@ using gemstone::hsa::PacketType;
 
 constexpr uint32_t CpuNode = 0;
 constexpr uint32_t GpuNode = 1;
+
+constexpr uint32_t memoryBanks(uint32_t node) {
+  if (node == CpuNode) return 1;
+  if (node == GpuNode) return 3;
+  return 0;
+}
 // Keep the advertised virtual aperture below ROCr's eager scratch-reservation threshold.
-constexpr uint64_t AvailableMemory = static_cast<uint64_t>(1) * 1024 * 1024 * 1024;
+constexpr uint64_t AvailableMemory = uint64_t{1} * 1024 * 1024 * 1024;
 constexpr uint32_t PageSize = 4096;
 constexpr uint32_t UploadChunk = 64U * 1024U;
 
@@ -163,7 +172,7 @@ bool prepareUploadSnapshot(Allocation &allocation) {
 }
 
 bool uploadChangedAllocation(Client &client, Allocation &allocation) {
-  std::lock_guard<std::mutex> guard(allocation.memoryLock);
+  std::scoped_lock const guard(allocation.memoryLock);
   if (!prepareUploadSnapshot(allocation)) return false;
   const bool snapshotValid = allocation.uploadSnapshotValid;
   for (uint64_t offset = 0; offset < allocation.size;) {
@@ -171,7 +180,7 @@ bool uploadChangedAllocation(Client &client, Allocation &allocation) {
     const auto *bytes = static_cast<const unsigned char *>(allocation.base) + offset;
     auto *snapshot = allocation.uploadSnapshot.data() + offset;
     if (!snapshotValid || std::memcmp(bytes, snapshot, chunk) != 0) {
-      if (!transferAllocation(client, AllocationId{static_cast<int64_t>(allocation.id)}, offset, bytes, chunk, true, chunk)) {
+      if (!uploadAllocation(client, AllocationId{static_cast<int64_t>(allocation.id)}, offset, bytes, chunk, chunk)) {
         allocation.uploadSnapshotValid = false;
         return false;
       }
@@ -184,7 +193,7 @@ bool uploadChangedAllocation(Client &client, Allocation &allocation) {
 }
 
 bool downloadAllocationRange(Client &client, Allocation &allocation, uint64_t offset, uint32_t size) {
-  std::lock_guard<std::mutex> guard(allocation.memoryLock);
+  std::scoped_lock const guard(allocation.memoryLock);
   if (size == 0 || offset > allocation.size || size > allocation.size - offset) return false;
   if (!prepareUploadSnapshot(allocation)) return false;
   if (!allocation.uploadSnapshotValid) {
@@ -192,7 +201,7 @@ bool downloadAllocationRange(Client &client, Allocation &allocation, uint64_t of
     allocation.uploadSnapshotValid = true;
   }
   auto *bytes = static_cast<unsigned char *>(allocation.base) + offset;
-  if (!transferAllocation(client, AllocationId{static_cast<int64_t>(allocation.id)}, offset, bytes, size, false, TransferChunk)) {
+  if (!downloadAllocation(client, AllocationId{static_cast<int64_t>(allocation.id)}, offset, bytes, size, TransferChunk)) {
     allocation.uploadSnapshotValid = false;
     return false;
   }
@@ -210,7 +219,7 @@ bool notifySignalEvent(uint64_t signal) {
     return true;
   }
   auto &runtime = state();
-  std::lock_guard<std::mutex> stateGuard(runtime.lock);
+  std::scoped_lock const stateGuard(runtime.lock);
   const auto found = runtime.events ^ find_cref([eventId](const auto &, const auto &event) { return event->value.EventId == eventId; });
   if (!found) {
     if (tracing) std::fprintf(stderr, "Gemstone completion signal=%lu references unknown event=%u\n", signal, eventId);
@@ -218,7 +227,7 @@ bool notifySignalEvent(uint64_t signal) {
   }
   auto &event = *found->get().second;
   {
-    std::lock_guard<std::mutex> eventGuard(event.lock);
+    std::scoped_lock const eventGuard(event.lock);
     __atomic_store_n(&event.mailbox, static_cast<uint64_t>(eventId), __ATOMIC_RELEASE);
     event.signalled = true;
     ++event.age;
@@ -238,7 +247,7 @@ PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *pack
   AqlRuntime *aql = nullptr;
   Client *client = nullptr;
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     aql = runtime.runtime.get();
     client = runtime.client.get();
     if (decode == gemstone::hsa::DecodeStatus::Success && decoded.type == PacketType::KernelDispatch) {
@@ -305,14 +314,15 @@ PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *pack
   std::vector<DirtyAllocationRange> dirty;
   {
     const auto ranges = aql->takeDirtyRanges();
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     dirty.reserve(ranges.size());
     for (const auto &range : ranges) {
       const auto id = static_cast<uint64_t>(range.allocation.value);
       const auto found = runtime.allocations ^ find_cref([id](const auto &, const auto &allocation) { return allocation->id == id; });
       if (!found) return PacketResult::Fatal;
-      dirty.push_back(
-          DirtyAllocationRange{found->get().second, static_cast<uint64_t>(range.offset.value), static_cast<uint32_t>(range.size.value)});
+      dirty.push_back(DirtyAllocationRange{.allocation = found->get().second,
+                                           .offset = static_cast<uint64_t>(range.offset.value),
+                                           .size = static_cast<uint32_t>(range.size.value)});
     }
   }
   if (tracing) {
@@ -336,12 +346,13 @@ HSAKMT_STATUS registerAllocation(void *base, uint64_t size, HsaMemFlags flags, H
   if (!base || size == 0 || size > std::numeric_limits<uintptr_t>::max() - address) return HSAKMT_STATUS_INVALID_PARAMETER;
   auto &runtime = state();
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     if (requireOpen(runtime) != HSAKMT_STATUS_SUCCESS) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
-    for (const auto &[_, allocation] : runtime.allocations) {
-      const auto other = reinterpret_cast<uintptr_t>(allocation->base);
-      if (address < other + allocation->size && other < address + size) return HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED;
-    }
+    const bool overlaps = runtime.allocations ^ exists([&](const void *, const AllocationRef &allocation) {
+                            const auto other = reinterpret_cast<uintptr_t>(allocation->base);
+                            return address < other + allocation->size && other < address + size;
+                          });
+    if (overlaps) return HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED;
   }
   const auto id = gemstone::execution::registerAllocation(*runtime.client, size, base);
   if (!id) return HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR;
@@ -349,7 +360,7 @@ HSAKMT_STATUS registerAllocation(void *base, uint64_t size, HsaMemFlags flags, H
     (void)runtime.client->call(ReleaseAllocation{*id});
     return HSAKMT_STATUS_ERROR;
   }
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   runtime.allocations.emplace(base, std::make_shared<Allocation>(base, size, static_cast<uint64_t>(id->value), flags, type, node, owned));
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -371,18 +382,18 @@ HSAKMT_STATUS waitEvents(HsaEvent *events[], HSAuint32 count, bool all, HSAuint3
     bool anySignalled = false;
     bool allSignalled = true;
     {
-      std::lock_guard<std::mutex> stateGuard(runtime.lock);
+      std::scoped_lock const stateGuard(runtime.lock);
       for (HSAuint32 index = 0; index < count; ++index) {
         const auto found = runtime.events.find(events[index]);
         if (found == runtime.events.end()) return HSAKMT_STATUS_INVALID_HANDLE;
-        std::lock_guard<std::mutex> eventGuard(found->second->lock);
+        std::scoped_lock const eventGuard(found->second->lock);
         anySignalled = anySignalled || found->second->signalled;
         allSignalled = allSignalled && found->second->signalled;
       }
       if ((all && allSignalled) || (!all && anySignalled)) {
         for (HSAuint32 index = 0; index < count; ++index) {
           auto &event = *runtime.events.at(events[index]);
-          std::lock_guard<std::mutex> eventGuard(event.lock);
+          std::scoped_lock const eventGuard(event.lock);
           if (event.signalled && !event.manualReset) event.signalled = false;
           if (age) age[index] = event.age;
         }
@@ -400,7 +411,7 @@ HSAKMT_STATUS waitEvents(HsaEvent *events[], HSAuint32 count, bool all, HSAuint3
 bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::span<const LoadedKernel> kernels) {
   auto &runtime = state();
   const auto reject = [&](std::string message) {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     runtime.loaderError = std::move(message);
     return false;
   };
@@ -408,7 +419,7 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
   AqlRuntime *aql = nullptr;
   std::vector<gemstone::hsa::KernelSymbol> pending;
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     if (!opened(runtime)) {
       runtime.loaderError = "Gemstone hsakmt is not open";
       return false;
@@ -419,7 +430,7 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
         runtime.loaderError = "ROCr reported an invalid loaded kernel symbol";
         return false;
       }
-      if (!runtime.notifiedKernels.contains(kernel.object)) pending.push_back({kernel.object, kernel.name});
+      if (!runtime.notifiedKernels.contains(kernel.object)) pending.push_back({.object = kernel.object, .name = kernel.name});
     }
   }
   if (!pending.empty() && !aql->installCodeObject(image, pending)) {
@@ -430,7 +441,7 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
     return reject(detail.empty() ? "execution service rejected AMDGPU code object" : detail);
   }
   for (const auto &kernel : kernels) {
-    if (!std::any_of(pending.begin(), pending.end(), [&](const auto &symbol) { return symbol.object == kernel.object; })) continue;
+    if (!(pending ^ exists([&](const gemstone::hsa::KernelSymbol &symbol) { return symbol.object == kernel.object; }))) continue;
     const auto layout = aql->layout(kernel.object);
     if (!layout || layout->kernargSize != kernel.kernargSize) {
       for (const auto &symbol : pending)
@@ -441,7 +452,7 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
   if (gemstone::traceEnabled("hsa", "loaders"))
     for (const auto &symbol : pending)
       std::fprintf(stderr, "Gemstone installed AMDGPU kernel name=%s kernel_object=0x%lx\n", symbol.name.c_str(), symbol.object);
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   for (const auto &symbol : pending)
     runtime.notifiedKernels.insert(symbol.object);
   runtime.loaderError.clear();
@@ -450,14 +461,14 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
 
 std::string gemstone::hsakmt::loaderError() {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   return runtime.loaderError;
 }
 #endif
 
 extern "C" HSAKMT_STATUS hsaKmtOpenKFD() {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   if (runtime.openCount++ != 0) return HSAKMT_STATUS_SUCCESS;
   const auto reset = [&](HSAKMT_STATUS status) {
     runtime.monitor.reset();
@@ -479,14 +490,14 @@ extern "C" HSAKMT_STATUS hsaKmtOpenKFD() {
 
 extern "C" HSAKMT_STATUS hsaKmtCloseKFD() {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   if (!opened(runtime)) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
   if (--runtime.openCount != 0) return HSAKMT_STATUS_SUCCESS;
   if (!runtime.queues.empty() || !runtime.allocations.empty() || !runtime.events.empty()) {
     ++runtime.openCount;
     return HSAKMT_STATUS_UNAVAILABLE;
   }
-  for (uint64_t kernelObject : runtime.notifiedKernels)
+  for (uint64_t const kernelObject : runtime.notifiedKernels)
     runtime.runtime->removeKernel(kernelObject);
   runtime.notifiedKernels.clear();
   runtime.loaderError.clear();
@@ -541,12 +552,12 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   *properties = {};
   if (node == CpuNode) {
     properties->NumCPUCores = std::max(1U, std::thread::hardware_concurrency());
-    properties->NumMemoryBanks = 1;
+    properties->NumMemoryBanks = memoryBanks(CpuNode);
     properties->LocalMemSize = AvailableMemory;
     return HSAKMT_STATUS_SUCCESS;
   }
   properties->NumFComputeCores = 16;
-  properties->NumMemoryBanks = 3;
+  properties->NumMemoryBanks = memoryBanks(GpuNode);
   properties->MaxWavesPerSIMD = 10;
   properties->LDSSizeInKB = 64;
   properties->WaveFrontSize = gemstone::hsa::waveSize();
@@ -578,41 +589,34 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->AMDName[nameSize] = 0;
   const char *marketing = "Gemstone Virtual AMDGPU";
   for (size_t index = 0; marketing[index] != '\0' && index + 1 < HSA_PUBLIC_NAME_SIZE; ++index)
-    properties->MarketingName[index] = static_cast<HSAuint16>(marketing[index]);
+    properties->MarketingName[index] = static_cast<HSAuint16>(static_cast<unsigned char>(marketing[index]));
   return HSAKMT_STATUS_SUCCESS;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetNodeMemoryProperties(HSAuint32 node, HSAuint32 count, HsaMemoryProperties *properties) {
-  const auto expected = node == CpuNode ? 1U : node == GpuNode ? 3U : 0U;
+  const auto expected = memoryBanks(node);
   if (count != expected || count == 0 || !properties) return HSAKMT_STATUS_INVALID_PARAMETER;
   std::fill_n(properties, count, HsaMemoryProperties{});
-  if (node == CpuNode) {
-    properties[0].HeapType = HSA_HEAPTYPE_SYSTEM;
-    properties[0].SizeInBytes = AvailableMemory;
-    properties[0].Width = 256;
-    properties[0].MemoryClockMax = 1000;
-  } else {
-    properties[0].HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC;
-    properties[0].SizeInBytes = AvailableMemory;
-    properties[0].Width = 256;
-    properties[0].MemoryClockMax = 1000;
+  properties[0].HeapType = node == CpuNode ? HSA_HEAPTYPE_SYSTEM : HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC;
+  properties[0].SizeInBytes = AvailableMemory;
+  properties[0].Width = 256;
+  properties[0].MemoryClockMax = 1000;
+  if (node == GpuNode) {
     properties[1].HeapType = HSA_HEAPTYPE_GPU_LDS;
-    properties[1].SizeInBytes = static_cast<uint64_t>(64) * 1024;
-    properties[1].VirtualBaseAddress = static_cast<uint64_t>(0x100000000000);
+    properties[1].SizeInBytes = uint64_t{64} * 1024;
+    properties[1].VirtualBaseAddress = uint64_t{0x100000000000};
     properties[2].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
-    properties[2].SizeInBytes = static_cast<uint64_t>(4) * 1024 * 1024 * 1024;
-    properties[2].VirtualBaseAddress = static_cast<uint64_t>(0x200000000000);
+    properties[2].SizeInBytes = uint64_t{4} * 1024 * 1024 * 1024;
+    properties[2].VirtualBaseAddress = uint64_t{0x200000000000};
   }
   return HSAKMT_STATUS_SUCCESS;
 }
 
-extern "C" HSAKMT_STATUS hsaKmtGetNodeCacheProperties(HSAuint32 node, HSAuint32, HSAuint32 count, HsaCacheProperties *properties) {
-  (void)properties;
+extern "C" HSAKMT_STATUS hsaKmtGetNodeCacheProperties(HSAuint32 node, HSAuint32, HSAuint32 count, HsaCacheProperties *) {
   return (node == CpuNode || node == GpuNode) && count == 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_PARAMETER;
 }
 
-extern "C" HSAKMT_STATUS hsaKmtGetNodeIoLinkProperties(HSAuint32 node, HSAuint32 count, HsaIoLinkProperties *properties) {
-  (void)properties;
+extern "C" HSAKMT_STATUS hsaKmtGetNodeIoLinkProperties(HSAuint32 node, HSAuint32 count, HsaIoLinkProperties *) {
   return (node == CpuNode || node == GpuNode) && count == 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_PARAMETER;
 }
 
@@ -637,7 +641,7 @@ extern "C" HSAKMT_STATUS hsaKmtGetClockCounters(HSAuint32 node, HsaClockCounters
   counters->GPUClockCounter = now;
   counters->CPUClockCounter = now;
   counters->SystemClockCounter = now;
-  counters->SystemClockFrequencyHz = static_cast<uint64_t>(1000000000);
+  counters->SystemClockFrequencyHz = uint64_t{1000000000};
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -698,7 +702,7 @@ extern "C" HSAKMT_STATUS hsaKmtDeregisterMemory(void *address) {
   auto &runtime = state();
   AllocationRef allocation;
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     const auto found = runtime.allocations.find(address);
     if (found == runtime.allocations.end() || found->second->owned) return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
     if (found->second.use_count() != 1) return HSAKMT_STATUS_UNAVAILABLE;
@@ -712,7 +716,7 @@ extern "C" HSAKMT_STATUS hsaKmtFreeMemory(void *address, HSAuint64 size) {
   auto &runtime = state();
   AllocationRef allocation;
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     const auto found = runtime.allocations.find(address);
     if (found == runtime.allocations.end() || !found->second->owned || found->second->size != size) {
       if (tracePackets())
@@ -732,7 +736,7 @@ extern "C" HSAKMT_STATUS hsaKmtFreeMemory(void *address, HSAuint64 size) {
 
 extern "C" HSAKMT_STATUS hsaKmtMapMemoryToGPU(void *address, HSAuint64 size, HSAuint64 *alternate) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   auto *allocation = findAllocation(runtime, address);
   if (!allocation) return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
   const auto offset = reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(allocation->base);
@@ -752,7 +756,7 @@ extern "C" HSAKMT_STATUS hsaKmtMapMemoryToGPUNodes(void *address, HSAuint64 size
 
 extern "C" HSAKMT_STATUS hsaKmtUnmapMemoryToGPU(void *address) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   auto *allocation = findAllocation(runtime, address);
   if (!allocation || allocation->mapCount == 0) return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
   --allocation->mapCount;
@@ -762,7 +766,7 @@ extern "C" HSAKMT_STATUS hsaKmtUnmapMemoryToGPU(void *address) {
 extern "C" HSAKMT_STATUS hsaKmtQueryPointerInfo(const void *pointer, HsaPointerInfo *info) {
   if (!pointer || !info) return HSAKMT_STATUS_INVALID_PARAMETER;
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   const auto *allocation = findAllocation(runtime, pointer);
   if (!allocation) return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
   *info = {};
@@ -778,7 +782,7 @@ extern "C" HSAKMT_STATUS hsaKmtQueryPointerInfo(const void *pointer, HsaPointerI
 
 extern "C" HSAKMT_STATUS hsaKmtSetMemoryUserData(const void *pointer, void *userData) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   auto *allocation = findAllocation(runtime, pointer);
   if (!allocation) return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
   allocation->userData = userData;
@@ -788,7 +792,7 @@ extern "C" HSAKMT_STATUS hsaKmtSetMemoryUserData(const void *pointer, void *user
 extern "C" HSAKMT_STATUS hsaKmtSVMSetAttr(void *address, HSAuint64 size, unsigned int count, HSA_SVM_ATTRIBUTE *attributes) {
   if (!address || size == 0 || count == 0 || !attributes) return HSAKMT_STATUS_INVALID_PARAMETER;
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   const auto *allocation = findAllocation(runtime, address);
   if (!allocation) return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
   const auto offset = reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(allocation->base);
@@ -800,7 +804,7 @@ extern "C" HSAKMT_STATUS hsaKmtCreateEvent(HsaEventDescriptor *, bool manualRese
   auto record = std::make_unique<Event>();
   auto &runtime = state();
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     record->value.EventId = runtime.nextEvent++;
     record->value.EventData.HWData2 = reinterpret_cast<uint64_t>(&record->mailbox);
     record->manualReset = manualReset;
@@ -815,17 +819,17 @@ extern "C" HSAKMT_STATUS hsaKmtCreateEvent(HsaEventDescriptor *, bool manualRese
 extern "C" HSAKMT_STATUS hsaKmtDestroyEvent(HsaEvent *event) {
   if (!event) return HSAKMT_STATUS_INVALID_PARAMETER;
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   return runtime.events.erase(event) == 1 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_HANDLE;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtSetEvent(HsaEvent *event) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> stateGuard(runtime.lock);
+  std::scoped_lock const stateGuard(runtime.lock);
   const auto found = runtime.events.find(event);
   if (found == runtime.events.end()) return HSAKMT_STATUS_INVALID_HANDLE;
   {
-    std::lock_guard<std::mutex> eventGuard(found->second->lock);
+    std::scoped_lock const eventGuard(found->second->lock);
     found->second->signalled = true;
     ++found->second->age;
   }
@@ -834,20 +838,20 @@ extern "C" HSAKMT_STATUS hsaKmtSetEvent(HsaEvent *event) {
 
 extern "C" HSAKMT_STATUS hsaKmtResetEvent(HsaEvent *event) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> stateGuard(runtime.lock);
+  std::scoped_lock const stateGuard(runtime.lock);
   const auto found = runtime.events.find(event);
   if (found == runtime.events.end()) return HSAKMT_STATUS_INVALID_HANDLE;
-  std::lock_guard<std::mutex> eventGuard(found->second->lock);
+  std::scoped_lock const eventGuard(found->second->lock);
   found->second->signalled = false;
   return HSAKMT_STATUS_SUCCESS;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtQueryEventState(HsaEvent *event) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> stateGuard(runtime.lock);
+  std::scoped_lock const stateGuard(runtime.lock);
   const auto found = runtime.events.find(event);
   if (found == runtime.events.end()) return HSAKMT_STATUS_INVALID_HANDLE;
-  std::lock_guard<std::mutex> eventGuard(found->second->lock);
+  std::scoped_lock const eventGuard(found->second->lock);
   return found->second->signalled ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_WAIT_TIMEOUT;
 }
 
@@ -890,7 +894,7 @@ extern "C" HSAKMT_STATUS hsaKmtCreateQueueExt(HSAuint32 node, HSA_QUEUE_TYPE typ
   const uint64_t initialWrite = !writePointer ? 0 : __atomic_load_n(writePointer, __ATOMIC_ACQUIRE);
   if (initialRead == initialWrite) {
     for (size_t index = 0; index < static_cast<size_t>(size / AqlPacketSize); ++index)
-      __atomic_store_n(reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(ring) + index * AqlPacketSize),
+      __atomic_store_n(reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(ring) + (index * AqlPacketSize)),
                        static_cast<uint16_t>(PacketType::Invalid), __ATOMIC_RELAXED);
   }
   auto &runtime = state();
@@ -903,7 +907,7 @@ extern "C" HSAKMT_STATUS hsaKmtCreateQueueExt(HSAuint32 node, HSA_QUEUE_TYPE typ
   resource->Queue_write_ptr_aql = record->aql->writeIndex();
   resource->Queue_read_ptr_aql = record->aql->readIndex();
   resource->ErrorReason = &record->errorReason;
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   runtime.queues.emplace(id, std::move(record));
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -918,7 +922,7 @@ extern "C" HSAKMT_STATUS hsaKmtDestroyQueue(HSA_QUEUEID id) {
   // Released after the lock: unregistering waits for in-flight packets, which take it.
   std::unique_ptr<Queue> queue;
   {
-    std::lock_guard<std::mutex> guard(runtime.lock);
+    std::scoped_lock const guard(runtime.lock);
     const auto found = runtime.queues.find(id);
     if (found == runtime.queues.end()) return HSAKMT_STATUS_INVALID_HANDLE;
     queue = std::move(found->second);
@@ -929,7 +933,7 @@ extern "C" HSAKMT_STATUS hsaKmtDestroyQueue(HSA_QUEUEID id) {
 
 extern "C" HSAKMT_STATUS hsaKmtUpdateQueue(HSA_QUEUEID id, HSAuint32, HSA_QUEUE_PRIORITY, void *ring, HSAuint64 size, HsaEvent *) {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   const auto found = runtime.queues.find(id);
   if (found == runtime.queues.end()) return HSAKMT_STATUS_INVALID_HANDLE;
   return found->second->ring == ring && found->second->ringSize == size ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_NOT_SUPPORTED;
@@ -938,14 +942,14 @@ extern "C" HSAKMT_STATUS hsaKmtUpdateQueue(HSA_QUEUEID id, HSAuint32, HSA_QUEUE_
 extern "C" HSAKMT_STATUS hsaKmtSetQueueCUMask(HSA_QUEUEID id, HSAuint32 count, HSAuint32 *mask) {
   if (count == 0 || !mask) return HSAKMT_STATUS_INVALID_PARAMETER;
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   return runtime.queues.count(id) == 1 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_HANDLE;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetQueueInfo(HSA_QUEUEID id, HsaQueueInfo *info) {
   if (!info) return HSAKMT_STATUS_INVALID_PARAMETER;
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::scoped_lock const guard(runtime.lock);
   if (runtime.queues.count(id) != 1) return HSAKMT_STATUS_INVALID_HANDLE;
   *info = {};
   return HSAKMT_STATUS_SUCCESS;

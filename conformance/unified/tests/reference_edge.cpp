@@ -13,21 +13,18 @@
 
 using namespace aspartame;
 
-namespace unified::test {
+namespace unified::test { namespace {
 class ReferenceEdgeCases {
 public:
   template <class T> int64_t composedIteratorReduce(size_t size) {
-    int64_t result = 0;
-    for (size_t index = 0; index < size; ++index)
-      result += edge::WidePairValue<T>{}(edge::ValueAt<T>{}(size - index - 1), edge::ValueAt<T>{}(index));
-    return result;
+    return iota(size_t{0}, size) | sum_by([&](size_t index) {
+             return edge::WidePairValue<T>{}(edge::ValueAt<T>{}(size - index - 1), edge::ValueAt<T>{}(index));
+           });
   }
 
   template <class T> uint64_t biasedIndexChecksum(uint64_t base, size_t size) {
-    uint64_t result = 0;
-    for (size_t index = 0; index < size; ++index)
-      result ^= edge::BiasedHash<T>{}(base + index);
-    return result;
+    return iota(size_t{0}, size)
+           | fold_left(uint64_t{0}, [&](uint64_t checksum, size_t index) { return checksum ^ edge::BiasedHash<T>{}(base + index); });
   }
 
   template <class T> std::vector<T> segmentedInclusiveScan(const std::vector<int32_t> &keys, const std::vector<T> &input) {
@@ -54,10 +51,7 @@ public:
   }
 
   template <class T> std::vector<T> dependencyDiamond(const std::vector<T> &input) {
-    std::vector<T> output(input.size());
-    std::transform(input.begin(), input.end(), output.begin(),
-                   [](T value) { return support::Combine<T>{}(support::Affine<T>{}(value), support::Square<T>{}(value)); });
-    return output;
+    return input ^ map([](T value) { return support::Combine<T>{}(support::Affine<T>{}(value), support::Square<T>{}(value)); });
   }
 
   template <class T> std::vector<T> numericEdgeRoundtrip(const std::vector<T> &input) { return input; }
@@ -77,7 +71,7 @@ public:
     }
   }
 };
-} // namespace unified::test
+}} // namespace unified::test
 
 #define REFERENCE_EDGE_CASE(name, function, ...)                                                                                           \
   TEMPLATE_TEST_CASE("reference edge cases/" #name, "[unit][unified]", int8_t, int32_t, int64_t, float, double) {                          \

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.isa.*
 object Validation {
   import Operand.*
 
-  enum Issue {
+  enum Issue derives CanEqual {
     case InvalidHeader(detail: NonEmpty[String])
     case MissingKernelCapability
     case MissingKernelEntryPoint
@@ -27,13 +27,13 @@ object Validation {
       case MissingShaderCapability     => "OpCapability Shader is required"
       case MissingGraphicsEntryPoint   => "an OpEntryPoint Vertex or Fragment is required"
       case MissingGLComputeEntryPoint  => "an OpEntryPoint GLCompute is required"
-      case MissingGLSL450MemoryModel   => "a Logical GLSL450 OpMemoryModel is required"
+      case MissingGLSL450MemoryModel   => "a Logical GLSL450 or Vulkan OpMemoryModel is required"
       case UnsupportedVersion(version) =>
         s"SPIR-V ${version.major}.${version.minor} is newer than ${Instruction.version.major}.${Instruction.version.minor}"
     }
   }
 
-  enum Environment {
+  enum Environment derives CanEqual {
     case OpenCLCompute
     case OpenCLLibrary
     case VulkanCompute
@@ -48,14 +48,24 @@ object Validation {
       val missingEntryPoint: Issue,
       val missingMemoryModel: Issue,
       val requireEntryPoint: Boolean
-  )
+  ) {
+    def withoutEntryPoint: Requirements = Requirements(
+      capability,
+      entryPoints,
+      acceptsMemoryModel,
+      missingCapability,
+      missingEntryPoint,
+      missingMemoryModel,
+      requireEntryPoint = false
+    )
+  }
 
   private def issueWhen(condition: Boolean)(issue: => Issue): Chain[Issue] =
     if (condition) Chain.one(issue) else Chain.empty
 
   def validate(module: Module, environment: Environment): ValidationOutcome[Issue] = environment match {
-    case Environment.OpenCLCompute => validateEnvironment(module, openCL(requireEntryPoint = true))
-    case Environment.OpenCLLibrary => validateEnvironment(module, openCL(requireEntryPoint = false))
+    case Environment.OpenCLCompute => validateEnvironment(module, openCL)
+    case Environment.OpenCLLibrary => validateEnvironment(module, openCL.withoutEntryPoint)
     case Environment.VulkanCompute =>
       validateEnvironment(module, vulkan(Set(ExecutionModel.GLCompute), Issue.MissingGLComputeEntryPoint))
     case Environment.VulkanGraphics => validateEnvironment(
@@ -64,7 +74,7 @@ object Validation {
       )
   }
 
-  private def openCL(requireEntryPoint: Boolean): Requirements = Requirements(
+  private val openCL: Requirements = Requirements(
     capability = Capability.Kernel,
     entryPoints = Set(ExecutionModel.Kernel),
     acceptsMemoryModel = (addressing, memory) =>
@@ -73,13 +83,14 @@ object Validation {
     missingCapability = Issue.MissingKernelCapability,
     missingEntryPoint = Issue.MissingKernelEntryPoint,
     missingMemoryModel = Issue.MissingOpenCLMemoryModel,
-    requireEntryPoint = requireEntryPoint
+    requireEntryPoint = true
   )
 
   private def vulkan(entryPoints: Set[Int], missingEntryPoint: Issue): Requirements = Requirements(
     capability = Capability.Shader,
     entryPoints = entryPoints,
-    acceptsMemoryModel = (addressing, memory) => addressing == AddressingModel.Logical && memory == MemoryModel.GLSL450,
+    acceptsMemoryModel = (addressing, memory) =>
+      addressing == AddressingModel.Logical && (memory == MemoryModel.GLSL450 || memory == MemoryModel.Vulkan),
     missingCapability = Issue.MissingShaderCapability,
     missingEntryPoint = missingEntryPoint,
     missingMemoryModel = Issue.MissingGLSL450MemoryModel,
@@ -104,7 +115,9 @@ object Validation {
     }
     val hasEntryPoint = module.instructions.exists {
       case Instruction.EntryPoint(executionModel = model) => requirements.entryPoints.contains(unsigned(model).toInt)
-      case _                                              => false
+      case Instruction.ConditionalEntryPointINTEL(executionModel = model) =>
+        requirements.entryPoints.contains(unsigned(model).toInt)
+      case _ => false
     }
     val hasMemoryModel = module.instructions.exists {
       case Instruction.MemoryModel(addressing, memory) =>

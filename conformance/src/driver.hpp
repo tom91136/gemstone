@@ -24,7 +24,7 @@ namespace conformance::driver {
 /// Exit status of an unsupported or profile-skipped case.
 inline constexpr int32_t SkipReturnCode = 4;
 /// Upper bound accepted for a test program timeout, in seconds.
-inline constexpr uint64_t MaximumTimeoutSeconds = 24 * 60 * 60;
+inline constexpr uint64_t MaximumTimeoutSeconds = uint64_t{24} * 60 * 60;
 
 struct RunOptions {
   std::string workload = "compact";
@@ -49,6 +49,25 @@ struct Workload {
   // apply under --isolated-launcher too. Machine-specific profile skips are
   // execution-time and are intentionally disabled there.
   std::vector<std::string> excludePrograms;
+};
+struct ArtifactMetadata {
+  std::string backend, architecture, support;
+  std::string compiler = "vendor";
+};
+struct CatchCase {
+  std::string name;
+};
+struct CatchListing {
+  std::vector<CatchCase> tests;
+};
+struct CatchReport {
+  uint32_t version = 0;
+  CatchListing listings;
+};
+struct WorkloadFields {
+  std::string extends;
+  std::optional<std::vector<std::string>> specs, includePrograms, levelzeroCases, vulkanCases, excludePrograms;
+  std::optional<std::string> vulkanMustpass;
 };
 struct ExecutionConfig {
   std::string directory, reportDirectory, device;
@@ -127,3 +146,4 @@ int32_t run(RunOptions configuration);
 
 // Workload TOML keys are snake_case.
 template <> struct glz::meta<conformance::driver::Workload> : glz::snake_case {};
+template <> struct glz::meta<conformance::driver::WorkloadFields> : glz::snake_case {};

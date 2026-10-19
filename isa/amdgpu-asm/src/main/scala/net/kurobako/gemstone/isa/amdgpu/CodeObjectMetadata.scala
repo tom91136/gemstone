@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import scala.reflect.ClassTag
 
 /** AMDGPU MessagePack metadata from the ELF note already owned by the Scala code-object decoder. */
 object CodeObjectMetadata {
@@ -18,6 +19,7 @@ object CodeObjectMetadata {
   )
 
   private val MetadataNoteType                 = 32
+  private val Owner                            = "AMDGPU\u0000".getBytes(StandardCharsets.US_ASCII)
   private val MaximumDepth                     = 64
   private val MaximumContainerEntries: Int > 0 = 1048576
 
@@ -33,6 +35,9 @@ object CodeObjectMetadata {
         case None            => decodeNotes(Vec.toArray(note), 0, note.size)
       }
     }
+
+  private def named(bytes: Array[Byte], at: Int): Boolean =
+    Owner.indices.forall(index => bytes(at + index) == Owner(index))
 
   private def decodeNotes(
       bytes: Array[Byte],
@@ -62,15 +67,7 @@ object CodeObjectMetadata {
         else {
           val description = payload + paddedName.toInt
           val next        = description + paddedDescription.toInt
-          val owner       = nameSize == 7L &&
-            java.util.Arrays.equals(
-              bytes,
-              payload,
-              payload + 7,
-              "AMDGPU\u0000".getBytes(StandardCharsets.US_ASCII),
-              0,
-              7
-            )
+          val owner       = nameSize == Owner.length.toLong && named(bytes, payload)
           if (!owner || noteType != MetadataNoteType) loop(next, found)
           else
             decodeMetadata(Reader(bytes, description, Math.toIntExact(descriptionSize))) match {
@@ -82,11 +79,28 @@ object CodeObjectMetadata {
     loop(start, Vec.empty).map(result => Option.when(result.nonEmpty)(result))
   }
 
+  private def decodeAll[A: ClassTag](count: Int >= 0)(
+      decode: => Either[CodeObjectError, A]
+  ): Either[CodeObjectError, Vec[A]] = {
+    val decoded = Vec.newBuilder[A]
+    @scala.annotation.tailrec
+    def loop(remaining: Int): Either[CodeObjectError, Vec[A]] =
+      if (remaining == 0) Right(decoded.result())
+      else
+        decode match {
+          case Left(error)  => Left(error)
+          case Right(value) =>
+            decoded += value
+            loop(remaining - 1)
+        }
+    loop(count)
+  }
+
   private case class ParameterFields(offset: Option[Int >= 0], width: Option[Int >= 0], valueKind: Option[String])
 
   private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelMetadata.Parameter, Option[String])] =
     reader.mapSize.flatMap { count =>
-      (0 until count.raw).foldLeft[Either[CodeObjectError, ParameterFields]](
+      (0 until count).foldLeft[Either[CodeObjectError, ParameterFields]](
         Right(ParameterFields(None, None, None))
       ) { case (result, _) =>
         result.flatMap { fields =>
@@ -102,11 +116,11 @@ object CodeObjectMetadata {
           case (Some(offset), Some(width), Some(valueKind)) =>
             val allocation = Set("global_buffer", "by_reference", "queue").contains(valueKind)
             for {
-              refinedWidth <- width.raw.refine[Int > 0].left.map(_ =>
+              refinedWidth <- width.refine[Int > 0].left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel argument width must be positive")
               )
               _ <- Either.cond(
-                !allocation || width.raw == 8,
+                !allocation || width == 8,
                 (),
                 CodeObjectError.Invalid("AMDGPU pointer kernarg is not 64 bits")
               )
@@ -130,7 +144,7 @@ object CodeObjectMetadata {
 
   private def decodeKernel(reader: Reader): Either[CodeObjectError, KernelManifest] =
     reader.mapSize.flatMap { count =>
-      (0 until count.raw).foldLeft[Either[CodeObjectError, KernelFields]](
+      (0 until count).foldLeft[Either[CodeObjectError, KernelFields]](
         Right(KernelFields(None, None, None, None))
       ) { case (result, _) =>
         result.flatMap { fields =>
@@ -140,13 +154,7 @@ object CodeObjectMetadata {
             case ".kernarg_segment_size" => reader.uint32.map(value => fields.copy(argumentBlockSize = Some(value)))
             case ".args"                 =>
               reader.arraySize.flatMap { parameterCount =>
-                (0 until parameterCount.raw).foldLeft[Either[CodeObjectError, Vec[(
-                    KernelMetadata.Parameter,
-                    Option[String]
-                )]]](
-                  Right(Vec.empty)
-                )((parameters, _) => parameters.flatMap(values => decodeParameter(reader).map(values.appended)))
-                  .map(value => fields.copy(parameters = Some(value)))
+                decodeAll(parameterCount)(decodeParameter(reader)).map(value => fields.copy(parameters = Some(value)))
               }
             case _ => reader.skip().map(_ => fields)
           }
@@ -184,14 +192,11 @@ object CodeObjectMetadata {
 
   private def decodeMetadata(reader: Reader): Either[CodeObjectError, Vec[KernelManifest]] =
     reader.mapSize.flatMap { count =>
-      (0 until count.raw).foldLeft[Either[CodeObjectError, Option[Vec[KernelManifest]]]](Right(None)) {
+      (0 until count).foldLeft[Either[CodeObjectError, Option[Vec[KernelManifest]]]](Right(None)) {
         case (result, _) => result.flatMap { found =>
             reader.string.flatMap {
               case "amdhsa.kernels" => reader.arraySize.flatMap { kernelCount =>
-                  (0 until kernelCount.raw).foldLeft[Either[CodeObjectError, Vec[KernelManifest]]](
-                    Right(Vec.empty)
-                  )((kernels, _) => kernels.flatMap(values => decodeKernel(reader).map(values.appended)))
-                    .map(Some(_))
+                  decodeAll(kernelCount)(decodeKernel(reader)).map(Some(_))
                 }
               case _ => reader.skip().map(_ => found)
             }

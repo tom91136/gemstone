@@ -19,7 +19,7 @@ object Dispatch {
   ): Either[E, Unit] = {
     val total: Long >= 0 = geometry.groupTotal
     val first            = AtomicReference(Option.empty[E])
-    val parallel         = workgroups.shouldParallel(total, geometry.groupVolume.toLong)
+    val parallel         = workgroups.shouldParallel(total, geometry.groupVolume)
     workgroups.forEach(total, parallel) { index =>
       run(index, geometry.groupCoordinates(index)).left.map { error =>
         val _ = first.compareAndSet(None, Some(error))

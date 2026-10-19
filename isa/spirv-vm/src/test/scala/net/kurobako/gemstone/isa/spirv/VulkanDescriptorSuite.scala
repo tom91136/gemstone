@@ -6,6 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
@@ -72,7 +73,7 @@ class VulkanDescriptorSuite extends munit.FunSuite {
       )
       val memory = RegionMemory()
       val region = memory.allocate(16L)
-      writeWords(memory, region, 4, floatBits(2f), floatBits(3f), floatBits(4f))
+      writeWords(memory, region, 4, single(2f), single(3f), single(4f))
       assertEquals(run(module, "main", memory, Vec(buffer(region), buffer(region, 4L))), Right(()))
       assertEqualsDouble(java.lang.Float.intBitsToFloat(word(memory, region, 0).toInt).toDouble, expected, 0.000001)
     }
@@ -195,11 +196,11 @@ class VulkanDescriptorSuite extends munit.FunSuite {
     val memory = RegionMemory()
     val in     = memory.allocate(48L)
     val out    = memory.allocate(48L)
-    writeWords(memory, in, 4, floatBits(2f))
-    writeWords(memory, in, 16, floatBits(3f))
+    writeWords(memory, in, 4, single(2f))
+    writeWords(memory, in, 16, single(3f))
     writeWords(memory, in, 32, 11L, 13L, 99L)
     assertEquals(run(module, "main", memory, Vec(buffer(in, range = Some(40L)), buffer(out))), Right(()))
-    assertEquals(words(memory, out, offset = 32, count = 3), Vec(2L, 0L, floatBits(3f)))
+    assertEquals(words(memory, out, offset = 32, count = 3), Vec(2L, 0L, single(3f)))
   }
 
   test("a descriptor array pointer reloaded from a function variable indexes its elements") {

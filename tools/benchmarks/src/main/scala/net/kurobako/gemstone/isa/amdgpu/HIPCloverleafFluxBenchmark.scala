@@ -30,7 +30,7 @@ object HIPCloverleafFluxBenchmark {
       val field = manifest.hiddenArguments.find(_.valueKind == name)
         .getOrElse(throw IllegalArgumentException(s"missing HIP kernarg field $name"))
       val offset = field.offset.raw - ExplicitArgumentBytes
-      if (field.width.raw != width.raw || !ByteRange.contains(hidden.length, offset, width.raw.toLong))
+      if (field.width != width || !ByteRange.contains(hidden.length, offset, width.toLong))
         throw IllegalArgumentException(s"invalid HIP kernarg field $name layout")
       LittleEndian.write(value, hidden, offset, width)
     }
@@ -54,14 +54,14 @@ object HIPCloverleafFluxBenchmark {
       compiled   <- VMCompiler().compile(kernel).left.map(error => CodeObjectError.Invalid(error.message))
     } yield compiled).fold(error => throw IllegalArgumentException(error.message), identity)
     val groups = cells.ceilDiv(64)
-    val hidden = hiddenArguments(image, prepared.source.kernargSize.raw, cells.raw, groups.raw)
+    val hidden = hiddenArguments(image, prepared.source.kernargSize, cells, groups)
     val task   = KernelTask.validated(
       "clover_flux",
       Dimensions(64, 1, 1),
       Dimensions(groups, 1, 1),
       memory.ids.map(KernelTask.Argument.Memory(_, 0L)) ++ Vec(
-        KernelTask.Argument.Scalar(LittleEndian.toVec(cells.raw.toLong, 4).unsafe),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(CloverleafFluxFixture.rowStride.raw.toLong, 4).unsafe),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(cells.toLong, 4).unsafe),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(CloverleafFluxFixture.rowStride.toLong, 4).unsafe),
         KernelTask.Argument.Scalar(LittleEndian.toVec(
           java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.dt),
           8

@@ -17,10 +17,10 @@ object IntegerArithmetic {
     unsignedMultiplyHigh(left, right) - (if (left < 0) right else 0L) - (if (right < 0) left else 0L)
 
   def multiplyHigh(left: Long, right: Long, width: Int in 1 ~ 64, signed: Boolean): Long = {
-    val a    = if (signed) Bits.signExtend(left, width) else Bits.truncate(left, width)
-    val b    = if (signed) Bits.signExtend(right, width) else Bits.truncate(right, width)
+    val a    = Bits.extend(left, width, signed)
+    val b    = Bits.extend(right, width, signed)
     val high = if (signed) signedMultiplyHigh(a, b) else unsignedMultiplyHigh(a, b)
-    if (width.raw == 64) high else ((a * b) >>> width.raw) | (high << (64 - width.raw))
+    if (width == 64) high else ((a * b) >>> width) | (high << (64 - width))
   }
 
   def addUnsigned(left: Long, right: Long, carry: Boolean, width: Int in 1 ~ 64): (value: Long, carry: Boolean) = {
@@ -28,9 +28,9 @@ object IntegerArithmetic {
     val b        = Bits.truncate(right, width)
     val first    = a + b
     val result   = if (carry) first + 1L else first
-    val overflow = if (width.raw == 64)
+    val overflow = if (width == 64)
       java.lang.Long.compareUnsigned(first, a) < 0 || (carry && result == 0L)
-    else (result >>> width.raw) != 0L
+    else (result >>> width) != 0L
     (Bits.truncate(result, width), overflow)
   }
 
@@ -61,7 +61,7 @@ object IntegerArithmetic {
       val a       = Bits.signExtend(left, width)
       val b       = Bits.signExtend(right, width)
       val sum     = a + b
-      val minimum = -1L << (width.raw - 1)
+      val minimum = -1L << (width - 1)
       val maximum = ~minimum
       if (((a ^ sum) & (b ^ sum)) < 0) { if (a < 0) minimum else maximum }
       else sum.max(minimum).min(maximum)
@@ -75,7 +75,7 @@ object IntegerArithmetic {
       val a          = Bits.signExtend(left, width)
       val b          = Bits.signExtend(right, width)
       val difference = a - b
-      val minimum    = -1L << (width.raw - 1)
+      val minimum    = -1L << (width - 1)
       val maximum    = ~minimum
       if (((a ^ b) & (a ^ difference)) < 0) { if (a < 0) minimum else maximum }
       else difference.max(minimum).min(maximum)
@@ -93,15 +93,15 @@ object IntegerArithmetic {
       width: Int in 1 ~ 64,
       signed: Boolean
   ): Long = {
-    val a      = if (signed) Bits.signExtend(left, width) else Bits.truncate(left, width)
-    val b      = if (signed) Bits.signExtend(right, width) else Bits.truncate(right, width)
-    val c      = if (signed) Bits.signExtend(addend, width) else Bits.truncate(addend, width)
+    val a      = Bits.extend(left, width, signed)
+    val b      = Bits.extend(right, width, signed)
+    val c      = Bits.extend(addend, width, signed)
     val low    = a * b
     val result = low + c
     val carry  = if (java.lang.Long.compareUnsigned(result, low) < 0) 1L else 0L
     if (signed) {
       val high    = signedMultiplyHigh(a, b) + (if (c < 0) -1L else 0L) + carry
-      val minimum = -1L << (width.raw - 1)
+      val minimum = -1L << (width - 1)
       val maximum = ~minimum
       if (high == (result >> 63) && result >= minimum && result <= maximum) result
       else if (high < 0) minimum else maximum
@@ -110,5 +110,27 @@ object IntegerArithmetic {
       if (high != 0L || java.lang.Long.compareUnsigned(result, Bits.mask(width)) > 0) Bits.mask(width)
       else result
     }
+  }
+
+  /** `value` clamped to the range of a `width`-bit integer, as its low `width` bits. */
+  def clampToWidth(value: BigInt, width: Int in 1 ~ 64, signed: Boolean): Long = {
+    val (lowest, highest) =
+      if (signed) (-(BigInt(1) << (width - 1)), (BigInt(1) << (width - 1)) - 1)
+      else (BigInt(0), (BigInt(1) << width) - 1)
+    Bits.truncate(value.max(lowest).min(highest).toLong, width)
+  }
+
+  /** `value`, read as signed when `valueSigned`, clamped to the range of a `width`-bit integer, as its low `width`
+    * bits.
+    */
+  def clampToWidth(value: Long, valueSigned: Boolean, width: Int in 1 ~ 64, signed: Boolean): Long = {
+    val clamped =
+      if (signed) {
+        val maximum = ~(-1L << (width - 1))
+        if (!valueSigned && value < 0L) maximum else value.max(~maximum).min(maximum)
+      } else if (valueSigned && value < 0L) 0L
+      else if (java.lang.Long.compareUnsigned(value, Bits.mask(width)) > 0) Bits.mask(width)
+      else value
+    Bits.truncate(clamped, width)
   }
 }

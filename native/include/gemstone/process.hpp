@@ -50,7 +50,7 @@ class TemporaryDirectory {
 public:
   explicit TemporaryDirectory(std::string_view name) {
     auto buffer = detail::temporaryPattern(name);
-    if (const auto created = mkdtemp(buffer.data())) path = created;
+    if (auto *const created = mkdtemp(buffer.data())) path = created;
   }
 
   ~TemporaryDirectory() {
@@ -76,7 +76,7 @@ struct ProcessResult {
 /** Runs `arguments[0]` with `arguments[1..]`, capturing combined stdout and stderr. A status of 127 means the program
  * could not be executed.
  */
-inline ProcessResult runProcess(const std::vector<std::string> &arguments) {
+inline ProcessResult runProcess(std::vector<std::string> arguments) {
   ProcessResult result;
   if (arguments.empty()) return result;
   int pipeDescriptors[2];
@@ -85,8 +85,8 @@ inline ProcessResult runProcess(const std::vector<std::string> &arguments) {
   FileDescriptor writePipe(pipeDescriptors[1]);
   std::vector<char *> argv;
   argv.reserve(arguments.size() + 1);
-  for (const auto &argument : arguments)
-    argv.push_back(const_cast<char *>(argument.c_str()));
+  for (auto &argument : arguments)
+    argv.push_back(argument.data());
   argv.push_back(nullptr);
   const pid_t child = fork();
   if (child == -1) return result;

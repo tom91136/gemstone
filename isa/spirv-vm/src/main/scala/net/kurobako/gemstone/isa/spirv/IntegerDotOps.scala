@@ -1,85 +1,119 @@
 package net.kurobako.gemstone.isa.spirv
 
 import Op.*
-import VMLowering.*
+import OpBuilder.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 
-/** Integer dot products of SPV_KHR_integer_dot_product. Plain products wrap to the result width; accumulating ones add
-  * the exact product to the accumulator and saturate.
+/** Integer dot products of SPV_KHR_integer_dot_product, staged from [[IntegerDotSemantics]]. Accumulating vector
+  * products whose partial sums may leave 64 bits sum exactly in arbitrary precision here.
   */
 private object IntegerDotOps {
   import Operand.*
 
-  private enum Signedness(val first: Boolean, val second: Boolean) {
-    case Signed   extends Signedness(first = true, second = true)
-    case Unsigned extends Signedness(first = false, second = false)
-    case Mixed    extends Signedness(first = true, second = false)
-  }
-
   def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.SDot(t, d, a, b, packed) => dot(site, id(t), id(d), id(a), id(b), None, packed, Signedness.Signed)
-    case Instruction.UDot(t, d, a, b, packed) =>
-      dot(site, id(t), id(d), id(a), id(b), None, packed, Signedness.Unsigned)
-    case Instruction.SUDot(t, d, a, b, packed) => dot(site, id(t), id(d), id(a), id(b), None, packed, Signedness.Mixed)
-    case Instruction.SDotAccSat(t, d, a, b, acc, packed) =>
-      dot(site, id(t), id(d), id(a), id(b), Some(id(acc)), packed, Signedness.Signed)
-    case Instruction.UDotAccSat(t, d, a, b, acc, packed) =>
-      dot(site, id(t), id(d), id(a), id(b), Some(id(acc)), packed, Signedness.Unsigned)
-    case Instruction.SUDotAccSat(t, d, a, b, acc, packed) =>
-      dot(site, id(t), id(d), id(a), id(b), Some(id(acc)), packed, Signedness.Mixed)
+    case instruction @ Instruction.SDot(resultType = t, vector1 = a, packedVectorFormat = packed) =>
+      dot(site, instruction, t, a, None, packed)
+    case instruction @ Instruction.UDot(resultType = t, vector1 = a, packedVectorFormat = packed) =>
+      dot(site, instruction, t, a, None, packed)
+    case instruction @ Instruction.SUDot(resultType = t, vector1 = a, packedVectorFormat = packed) =>
+      dot(site, instruction, t, a, None, packed)
+    case instruction @ Instruction.SDotAccSat(
+          resultType = t,
+          vector1 = a,
+          accumulator = acc,
+          packedVectorFormat = packed
+        ) =>
+      dot(site, instruction, t, a, Some(acc), packed)
+    case instruction @ Instruction.UDotAccSat(
+          resultType = t,
+          vector1 = a,
+          accumulator = acc,
+          packedVectorFormat = packed
+        ) =>
+      dot(site, instruction, t, a, Some(acc), packed)
+    case instruction @ Instruction.SUDotAccSat(
+          resultType = t,
+          vector1 = a,
+          accumulator = acc,
+          packedVectorFormat = packed
+        ) =>
+      dot(site, instruction, t, a, Some(acc), packed)
   }
-
-  private def extend(value: Long, width: Int, signed: Boolean): Long =
-    if (width == 64) value
-    else if (signed) (value << (64 - width)) >> (64 - width)
-    else value & ((1L << width) - 1L)
 
   private def dot(
       site: Site,
+      instruction: Instruction,
+      resultTypeOperand: Operand,
+      firstOperand: Operand,
+      accumulator: Option[Operand],
+      packed: Option[Operand]
+  ): Op = {
+    val program    = site.program
+    val opcode     = instruction.opcodeNumber.toInt
+    val ids        = SPIRVStaged.operandIds(instruction)
+    val resultType = id(resultTypeOperand)
+    val first      = id(firstOperand)
+    lowered(for {
+      result <- program.integerShape(resultType).map(_._1)
+        .toRight(Fault.InvalidRequest(s"integer dot product result %$resultType is not an integer"))
+      component <-
+        if (packed.isDefined) Right((8: Int in 1 ~ 64) -> 1)
+        else program.integerShape(program.valueType(first))
+          .toRight(Fault.InvalidRequest(s"integer dot product operand %$first is not an integer vector"))
+    } yield (packed, accumulator.map(id(_))) match {
+      case (None, Some(addend)) if !IntegerDotSemantics.exact(component._1, component._2) =>
+        wide(
+          resultType = resultType,
+          dest = ids.result,
+          first = first,
+          second = ids(1),
+          addend = addend,
+          component = component._1,
+          result = result,
+          opcode = opcode
+        )
+      case _ =>
+        staged(site, instruction, CoreFamily.IntegerDot)
+    })
+  }
+
+  private val Unsigned64 = BigInt(1) << 64
+
+  /** The low `width` bits of `value` as an exact integer. */
+  private def exact(value: Long, width: Int in 1 ~ 64, signed: Boolean): BigInt =
+    if (signed) BigInt(Bits.signExtend(value, width))
+    else {
+      val bits = Bits.truncate(value, width)
+      if (bits < 0L) BigInt(bits) + Unsigned64 else BigInt(bits)
+    }
+
+  /** An accumulating vector product summed exactly, for components too wide for a 64-bit sum. */
+  private def wide(
       resultType: Int,
       dest: Int,
       first: Int,
       second: Int,
-      accumulator: Option[Int],
-      packed: Option[Operand],
-      signedness: Signedness
+      addend: Int,
+      component: Int in 1 ~ 64,
+      result: Int in 1 ~ 64,
+      opcode: Int
   ): Op = {
-    val program = site.program
-    lowered(for {
-      result <- program.integerShape(resultType).map(_._1.raw)
-        .toRight(Fault.InvalidRequest(s"integer dot product result %$resultType is not an integer"))
-      component <-
-        if (packed.isDefined) Right(8)
-        else program.integerShape(program.valueType(first)).map(_._1.raw)
-          .toRight(Fault.InvalidRequest(s"integer dot product operand %$first is not an integer vector"))
-    } yield {
-      def lanes(id: Int, signed: Boolean, values: VMInvocation.InvocationValues): Either[Fault, Array[Long]] =
-        bits(values, id).map(words =>
-          if (packed.isDefined) Array.tabulate(4)(lane => extend(words(0) >>> (lane * 8), 8, signed))
-          else words.map(extend(_, component, signed))
+    val signed     = opcode != SPIRV.Opcode.UDotAccSat
+    val secondSign = opcode == SPIRV.Opcode.SDotAccSat
+    step { (execution, _) =>
+      val values = execution.values
+      for {
+        a     <- bits(values, first)
+        b     <- bits(values, second)
+        start <- scalar(values, addend)
+      } yield {
+        val sum = a.indices.foldLeft(exact(start, result, signed))((sum, lane) =>
+          sum + exact(a(lane), component, signed) * exact(b(lane), component, secondSign)
         )
-      step { (execution, _) =>
-        val values = execution.values
-        for {
-          a     <- lanes(first, signedness.first, values)
-          b     <- lanes(second, signedness.second, values)
-          added <- accumulator.fold[Either[Fault, Option[Long]]](Right(None))(scalar(values, _).map(Some(_)))
-        } yield {
-          val value = added match {
-            case None        => a.indices.foldLeft(0L)((sum, lane) => sum + a(lane) * b(lane))
-            case Some(start) =>
-              val signed = signedness != Signedness.Unsigned
-              val exact  = a.indices.foldLeft(BigInt(extend(start, result, signed)))((sum, lane) =>
-                sum + BigInt(a(lane)) * BigInt(b(lane))
-              )
-              val (low, high) =
-                if (signed) (-(BigInt(1) << (result - 1)), (BigInt(1) << (result - 1)) - 1)
-                else (BigInt(0), (BigInt(1) << result) - 1)
-              exact.max(low).min(high).toLong
-          }
-          values.updateScalar(dest, resultType, extend(value, result, signed = false))
-        }
+        values.updateScalar(dest, resultType, IntegerArithmetic.clampToWidth(sum, result, signed))
       }
-    })
+    }
   }
 }

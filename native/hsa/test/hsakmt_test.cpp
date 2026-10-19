@@ -1,17 +1,19 @@
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <ios>
 #include <iterator>
 #include <utility>
 #include <vector>
-
-#include <stdint.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <hsakmt/hsakmt.h>
 
 #include "gemstone/hsa/aql.hpp"
+#include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/process.hpp>
 #include <gemstone/test_support.hpp>
@@ -30,7 +32,7 @@ struct alignas(8) SignalStorage {
   uint32_t eventId = 0;
   uint32_t reserved = 0;
 
-  int64_t load() const { return __atomic_load_n(&value, __ATOMIC_ACQUIRE); }
+  [[nodiscard]] int64_t load() const { return __atomic_load_n(&value, __ATOMIC_ACQUIRE); }
 };
 static_assert(offsetof(SignalStorage, value) == 8);
 static_assert(offsetof(SignalStorage, eventId) == 24);
@@ -85,18 +87,19 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
     const auto dump = directory.file("rejected.co");
     const gemstone_test::Environment rejectedCodeObject(gemstone::environment::HsaRejectedCodeObject, dump.c_str());
     fixture.rejectNext(gemstone::execution::operation::LoadProgram);
-    const std::array<gemstone::hsakmt::LoadedKernel, 1> rejected{{{0x123600, "add", 12}}};
+    const std::array<gemstone::hsakmt::LoadedKernel, 1> rejected{{{.object = 0x123600, .name = "add", .kernargSize = 12}}};
     REQUIRE((!gemstone::hsakmt::installCodeObject(codeObject, rejected)));
     REQUIRE((gemstone::hsakmt::loaderError() == "LoadProgram rejected"));
     std::ifstream written(dump, std::ios::binary);
     REQUIRE((std::vector<uint8_t>(std::istreambuf_iterator<char>(written), {}) == codeObject));
     REQUIRE((fixture.programLoads.load() == 0));
   }
-  const std::array<gemstone::hsakmt::LoadedKernel, 1> mismatched{{{0x123500, "mismatched", 20}}};
+  const std::array<gemstone::hsakmt::LoadedKernel, 1> mismatched{{{.object = 0x123500, .name = "mismatched", .kernargSize = 20}}};
   REQUIRE((!gemstone::hsakmt::installCodeObject(codeObject, mismatched)));
   REQUIRE((gemstone::hsakmt::loaderError() == "execution manifest disagrees with loaded kernarg for kernel mismatched"));
   REQUIRE((fixture.programLoads.load() == 1 && fixture.programUnloads.load() == 1));
-  const std::array<gemstone::hsakmt::LoadedKernel, 2> loaded{{{0x123300, "internal_add", 12}, {0x123400, "add", 12}}};
+  const std::array<gemstone::hsakmt::LoadedKernel, 2> loaded{
+      {{.object = 0x123300, .name = "internal_add", .kernargSize = 12}, {.object = 0x123400, .name = "add", .kernargSize = 12}}};
   REQUIRE((gemstone::hsakmt::installCodeObject(codeObject, loaded)));
   REQUIRE((fixture.programLoads.load() == 2 && fixture.lastProgramImage() == codeObject));
   // ROCr's symbol iterator also reports kernels from earlier code objects.
@@ -120,7 +123,7 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
 
   HsaMemFlags flags{};
   flags.ui32.HostAccess = 1;
-  constexpr uint64_t uploadChunk = 64U * 1024U;
+  constexpr uint64_t uploadChunk = uint64_t{64} * 1024;
   constexpr uint64_t primaryAllocationSize = 2 * uploadChunk;
   void *allocation = nullptr;
   const auto allocationsBefore = fixture.allocationCount();
@@ -184,7 +187,7 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
   const int32_t poison = -1;
   std::memcpy(bytes + outputOffset, &poison, sizeof(poison));
   setKernarg(outputOffset, 42);
-  fixture.expect({1, 1, 1, 0, 42});
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 42});
   SignalStorage completion;
   completion.eventMailbox = event->EventData.HWData2;
   completion.eventId = event->EventId;
@@ -209,7 +212,7 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
 
   // One changed byte range uploads exactly its 64 KiB chunk before the next kernel.
   setKernarg(outputOffset, 91);
-  fixture.expect({1, 1, 1, 0, 91});
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 91});
   SignalStorage changed;
   REQUIRE((consumed(submit(kernelPacket(0x123400, reinterpret_cast<uint64_t>(bytes), changed)))));
   REQUIRE((changed.load() == 0));
@@ -239,16 +242,16 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
 
   // Across the group matrix the host keeps seeing the sentinel until the held completion is released.
   constexpr size_t matrixOutput = 4096;
-  for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
-    for (uint32_t width : {31U, 32U, 33U})
-      for (uint32_t tail : {0U, 1U})
-        for (int32_t epoch : {7, 29}) {
-          const uint32_t count = groups * width - tail;
+  for (uint32_t const groups : {1U, 2U, 3U, 5U, 9U})
+    for (uint32_t const width : {31U, 32U, 33U})
+      for (uint32_t const tail : {0U, 1U})
+        for (int32_t const epoch : {7, 29}) {
+          const uint32_t count = (groups * width) - tail;
           INFO("groups=" << groups << " width=" << width << " tail=" << tail << " epoch=" << epoch);
           setKernarg(matrixOutput, epoch);
           const int32_t sentinel = -777;
-          for (uint32_t index = 0; index <= count; ++index)
-            std::memcpy(bytes + matrixOutput + index * 4, &sentinel, 4);
+          for (size_t index = 0; index <= count; ++index)
+            std::memcpy(bytes + matrixOutput + (index * 4), &sentinel, 4);
           reads = fixture.reads.load();
           SignalStorage matrixCompletion;
           const auto packet =
@@ -258,24 +261,24 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
             REQUIRE((consumed(submit(packet))));
             REQUIRE((matrixCompletion.load() < 0));
             REQUIRE((fixture.reads.load() == reads));
-            for (uint32_t index = 0; index <= count; ++index)
-              REQUIRE((word(bytes, matrixOutput + index * 4) == sentinel));
+            for (size_t index = 0; index <= count; ++index)
+              REQUIRE((word(bytes, matrixOutput + (index * 4)) == sentinel));
             continue;
           }
-          fixture.expect({width, groups, count, 0, static_cast<uint32_t>(epoch)});
+          fixture.expect({.local = width, .groups = groups, .global = count, .offset = 0, .seed = static_cast<uint32_t>(epoch)});
           fixture.pauseNextCompletion();
           const auto index = submit(packet);
           REQUIRE((gemstone_test::waitUntil([&] { return fixture.completionEntered.load(); }, std::chrono::seconds(10))));
           REQUIRE((matrixCompletion.load() == 1));
-          for (uint32_t element = 0; element <= count; ++element)
-            REQUIRE((word(bytes, matrixOutput + element * 4) == sentinel));
+          for (size_t element = 0; element <= count; ++element)
+            REQUIRE((word(bytes, matrixOutput + (element * 4)) == sentinel));
           REQUIRE((fixture.reads.load() == reads));
           fixture.releasePausedCompletion();
           REQUIRE((consumed(index)));
           REQUIRE((matrixCompletion.load() == 0));
-          for (uint32_t element = 0; element < count; ++element)
-            REQUIRE((word(bytes, matrixOutput + element * 4) == epoch + static_cast<int32_t>(element)));
-          REQUIRE((word(bytes, matrixOutput + count * 4) == sentinel));
+          for (size_t element = 0; element < count; ++element)
+            REQUIRE((word(bytes, matrixOutput + (element * 4)) == epoch + static_cast<int32_t>(element)));
+          REQUIRE((word(bytes, matrixOutput + (size_t{count} * 4)) == sentinel));
           REQUIRE((fixture.reads.load() == reads + groups));
           REQUIRE((unrelatedBytes[17] == 0x33));
         }
@@ -292,7 +295,7 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
 }
 
 TEST_CASE("KFD GPU wave size follows the selected processor", "[hsa][kmt]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS));
   for (const auto &[target, expected] : std::array<std::pair<const char *, uint32_t>, 6>{

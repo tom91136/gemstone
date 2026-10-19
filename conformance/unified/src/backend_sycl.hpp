@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 #include <oneapi/dpl/algorithm>
 #include <oneapi/dpl/execution>
 #include <oneapi/dpl/iterator>
@@ -43,23 +45,28 @@ public:
   ~Shared() { sycl::free(storage, *queue); }
 
   T *begin() { return storage; }
-  const T *begin() const { return storage; }
+  [[nodiscard]] const T *begin() const { return storage; }
   T *end() { return storage + length; }
-  const T *end() const { return storage + length; }
-  size_t size() const { return length; }
-  std::vector<T> host(size_t count) const {
+  [[nodiscard]] const T *end() const { return storage + length; }
+  [[nodiscard]] size_t size() const { return length; }
+  [[nodiscard]] std::vector<T> host(size_t count) const {
     if (count > length) throw std::out_of_range("SYCL download exceeds allocation");
     std::vector<T> result(count);
     if (count != 0) queue->memcpy(result.data(), storage, count * sizeof(T)).wait_and_throw();
     return result;
   }
-  std::vector<T> host() const { return host(length); }
+  [[nodiscard]] std::vector<T> host() const { return host(length); }
 
 private:
   sycl::queue *queue;
   T *storage{};
   size_t length{};
 };
+
+template <class T> std::vector<T> finish(sycl::queue &queue, const Shared<T> &output) {
+  queue.wait_and_throw();
+  return output.host();
+}
 
 inline bool enabled(std::string_view variable) {
   const auto *value = std::getenv(std::string(variable).c_str());
@@ -72,13 +79,12 @@ inline bool supportsFp64(const sycl::device &device) {
 } // namespace unified::backend::sycl_support
 
 namespace unified::backend {
-namespace onedpl_detail = sycl_support;
 
 class OneDPLAlgorithms {
 public:
   OneDPLAlgorithms() : queue(sycl::gpu_selector_v, sycl::property::queue::in_order{}) {}
 
-  template <class T> bool supports(std::string_view operation, size_t size) const {
+  template <class T> [[nodiscard]] bool supports(std::string_view operation, size_t size) const {
     if (sizeof(T) == 4 && size >= 31 && arcPolicyFaults
         && (operation == "set_intersection" || operation == "set_difference" || operation == "set_symmetric_difference"
             || operation == "partial_sort" || operation == "nth_element"))
@@ -87,118 +93,118 @@ public:
   }
 
   template <class T> std::vector<T> copy(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::copy(policy<T, 0>(), source.begin(), source.end(), output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> copyIf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
-    const auto end = std::copy_if(policy<T, 20>(), source.begin(), source.end(), output.begin(), algorithms::IsEven<T>{});
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
+    auto *const end = std::copy_if(policy<T, 20>(), source.begin(), source.end(), output.begin(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> copyN(const std::vector<T> &input, size_t count) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, count);
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, count);
     std::copy_n(policy<T, 21>(), source.begin(), count, output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> uninitializedCopy(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::uninitialized_copy(policy<T, 68>(), source.begin(), source.end(), output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> uninitializedFill(size_t size, T value) {
-    onedpl_detail::Shared<T> output(queue, size);
+    sycl_support::Shared<T> output(queue, size);
     std::uninitialized_fill(policy<T, 69>(), output.begin(), output.end(), value);
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> fill(size_t size, T value) {
-    onedpl_detail::Shared<T> output(queue, size);
+    sycl_support::Shared<T> output(queue, size);
     std::fill(policy<T, 22>(), output.begin(), output.end(), value);
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> generate(size_t size) {
-    onedpl_detail::Shared<T> output(queue, size);
+    sycl_support::Shared<T> output(queue, size);
     std::generate(policy<T, 23>(), output.begin(), output.end(), algorithms::Constant<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> forEach(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::for_each(policy<T, 24>(), output.begin(), output.end(), algorithms::Increment<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> transformUnary(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::transform(policy<T, 1>(), source.begin(), source.end(), output.begin(), algorithms::Affine<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> transformBinary(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
-    onedpl_detail::Shared<T> output(queue, left.size());
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
+    sycl_support::Shared<T> output(queue, left.size());
     std::transform(policy<T, 2>(), a.begin(), a.end(), b.begin(), output.begin(), algorithms::Combine<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> replaceIf(const std::vector<T> &input, T replacement) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::replace_if(policy<T, 25>(), output.begin(), output.end(), algorithms::IsEven<T>{}, replacement);
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> replaceCopyIf(const std::vector<T> &input, T replacement) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::replace_copy_if(policy<T, 26>(), source.begin(), source.end(), output.begin(), algorithms::IsEven<T>{}, replacement);
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> removeIf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
-    const auto end = std::remove_if(policy<T, 27>(), output.begin(), output.end(), algorithms::IsEven<T>{});
+    sycl_support::Shared<T> output(queue, input);
+    auto *const end = std::remove_if(policy<T, 27>(), output.begin(), output.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> removeCopyIf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
-    const auto end = std::remove_copy_if(policy<T, 28>(), source.begin(), source.end(), output.begin(), algorithms::IsEven<T>{});
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
+    auto *const end = std::remove_copy_if(policy<T, 28>(), source.begin(), source.end(), output.begin(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> algorithms::TwoRanges<T> swapRanges(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
     std::swap_ranges(policy<T, 29>(), a.begin(), a.end(), b.begin());
     queue.wait_and_throw();
     return {a.host(), b.host()};
   }
 
   template <class T> T reduce(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::reduce(policy<T, 3>(), source.begin(), source.end(), T{}, algorithms::Plus<T>{});
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> T transformReduce(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result =
         std::transform_reduce(policy<T, 4>(), source.begin(), source.end(), T{}, algorithms::Plus<T>{}, algorithms::Square<T>{});
     queue.wait_and_throw();
@@ -206,163 +212,163 @@ public:
   }
 
   template <class T> T innerProduct(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
     const auto result = std::transform_reduce(policy<T, 30>(), a.begin(), a.end(), b.begin(), T{});
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> std::vector<T> inclusiveScan(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::inclusive_scan(policy<T, 5>(), source.begin(), source.end(), output.begin(), algorithms::Plus<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> exclusiveScan(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::exclusive_scan(policy<T, 6>(), source.begin(), source.end(), output.begin(), T{}, algorithms::Plus<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> transformInclusiveScan(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::transform_inclusive_scan(policy<T, 31>(), source.begin(), source.end(), output.begin(), algorithms::Plus<T>{},
                                   algorithms::Square<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> transformExclusiveScan(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::transform_exclusive_scan(policy<T, 32>(), source.begin(), source.end(), output.begin(), T{}, algorithms::Plus<T>{},
                                   algorithms::Square<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> sort(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::sort(policy<T, 7>(), output.begin(), output.end(), algorithms::Less<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> stableSort(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::stable_sort(policy<T, 33>(), output.begin(), output.end(), algorithms::Less<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> sortDescending(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::sort(policy<T, 34>(), output.begin(), output.end(), algorithms::Greater<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> algorithms::KeyValues<T> sortByKey(const std::vector<T> &keys, const std::vector<int32_t> &values) {
-    onedpl_detail::Shared<T> deviceKeys(queue, keys);
-    onedpl_detail::Shared<int32_t> deviceValues(queue, values);
+    sycl_support::Shared<T> deviceKeys(queue, keys);
+    sycl_support::Shared<int32_t> deviceValues(queue, values);
     oneapi::dpl::sort_by_key(policy<T, 8>(), deviceKeys.begin(), deviceKeys.end(), deviceValues.begin(), algorithms::Less<T>{});
     queue.wait_and_throw();
     return {deviceKeys.host(), deviceValues.host()};
   }
 
   template <class T> algorithms::KeyValues<T> stableSortByKey(const std::vector<T> &keys, const std::vector<int32_t> &values) {
-    onedpl_detail::Shared<T> deviceKeys(queue, keys);
-    onedpl_detail::Shared<int32_t> deviceValues(queue, values);
+    sycl_support::Shared<T> deviceKeys(queue, keys);
+    sycl_support::Shared<int32_t> deviceValues(queue, values);
     oneapi::dpl::stable_sort_by_key(policy<T, 9>(), deviceKeys.begin(), deviceKeys.end(), deviceValues.begin(), algorithms::Less<T>{});
     queue.wait_and_throw();
     return {deviceKeys.host(), deviceValues.host()};
   }
 
   template <class T> std::vector<T> unique(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
-    const auto end = std::unique(policy<T, 10>(), output.begin(), output.end());
+    sycl_support::Shared<T> output(queue, input);
+    auto *const end = std::unique(policy<T, 10>(), output.begin(), output.end());
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> uniqueCopy(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
-    const auto end = std::unique_copy(policy<T, 35>(), source.begin(), source.end(), output.begin());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
+    auto *const end = std::unique_copy(policy<T, 35>(), source.begin(), source.end(), output.begin());
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> size_t count(const std::vector<T> &input, T value) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::count(policy<T, 36>(), source.begin(), source.end(), value);
     queue.wait_and_throw();
     return static_cast<size_t>(result);
   }
 
   template <class T> size_t countIf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::count_if(policy<T, 11>(), source.begin(), source.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return static_cast<size_t>(result);
   }
 
   template <class T> size_t findIf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    const auto result = std::find_if(policy<T, 12>(), source.begin(), source.end(), algorithms::IsEven<T>{});
+    sycl_support::Shared<T> source(queue, input);
+    auto *const result = std::find_if(policy<T, 12>(), source.begin(), source.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return static_cast<size_t>(result - source.begin());
   }
 
   template <class T> size_t find(const std::vector<T> &input, T value) {
-    onedpl_detail::Shared<T> source(queue, input);
-    const auto result = std::find(policy<T, 37>(), source.begin(), source.end(), value);
+    sycl_support::Shared<T> source(queue, input);
+    auto *const result = std::find(policy<T, 37>(), source.begin(), source.end(), value);
     queue.wait_and_throw();
     return static_cast<size_t>(result - source.begin());
   }
 
   template <class T> bool allOf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::all_of(policy<T, 38>(), source.begin(), source.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> bool anyOf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::any_of(policy<T, 39>(), source.begin(), source.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> bool noneOf(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::none_of(policy<T, 40>(), source.begin(), source.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> bool equal(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
     const auto result = std::equal(policy<T, 41>(), a.begin(), a.end(), b.begin());
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> algorithms::TwoPositions mismatch(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
     const auto result = std::mismatch(policy<T, 42>(), a.begin(), a.end(), b.begin());
     queue.wait_and_throw();
-    return {static_cast<size_t>(result.first - a.begin()), static_cast<size_t>(result.second - b.begin())};
+    return {.first = static_cast<size_t>(result.first - a.begin()), .second = static_cast<size_t>(result.second - b.begin())};
   }
 
   template <class T> size_t lowerBound(const std::vector<T> &input, T value) {
     // oneDPL leaves vector-search output untouched for an empty haystack.
     if (input.empty()) return 0;
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> needles(queue, std::vector<T>{value});
-    onedpl_detail::Shared<size_t> results(queue, 1);
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> needles(queue, std::vector<T>{value});
+    sycl_support::Shared<size_t> results(queue, 1);
     oneapi::dpl::lower_bound(policy<T, 13>(), source.begin(), source.end(), needles.begin(), needles.end(), results.begin(),
                              algorithms::Less<T>{});
     queue.wait_and_throw();
@@ -372,9 +378,9 @@ public:
   template <class T> size_t upperBound(const std::vector<T> &input, T value) {
     // oneDPL leaves vector-search output untouched for an empty haystack.
     if (input.empty()) return 0;
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> needles(queue, std::vector<T>{value});
-    onedpl_detail::Shared<size_t> results(queue, 1);
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> needles(queue, std::vector<T>{value});
+    sycl_support::Shared<size_t> results(queue, 1);
     oneapi::dpl::upper_bound(policy<T, 43>(), source.begin(), source.end(), needles.begin(), needles.end(), results.begin(),
                              algorithms::Less<T>{});
     queue.wait_and_throw();
@@ -384,9 +390,9 @@ public:
   template <class T> bool binarySearch(const std::vector<T> &input, T value) {
     // oneDPL leaves vector-search output untouched for an empty haystack.
     if (input.empty()) return false;
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> needles(queue, std::vector<T>{value});
-    onedpl_detail::Shared<uint8_t> results(queue, 1);
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> needles(queue, std::vector<T>{value});
+    sycl_support::Shared<uint8_t> results(queue, 1);
     oneapi::dpl::binary_search(policy<T, 44>(), source.begin(), source.end(), needles.begin(), needles.end(), results.begin(),
                                algorithms::Less<T>{});
     queue.wait_and_throw();
@@ -395,45 +401,45 @@ public:
 
   template <class T> algorithms::TwoPositions equalRange(const std::vector<T> &input, T value) {
     // oneDPL leaves vector-search output untouched for an empty haystack.
-    if (input.empty()) return {0, 0};
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> needles(queue, std::vector<T>{value});
-    onedpl_detail::Shared<size_t> lower(queue, 1);
-    onedpl_detail::Shared<size_t> upper(queue, 1);
+    if (input.empty()) return {.first = 0, .second = 0};
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> needles(queue, std::vector<T>{value});
+    sycl_support::Shared<size_t> lower(queue, 1);
+    sycl_support::Shared<size_t> upper(queue, 1);
     oneapi::dpl::lower_bound(policy<T, 45>(), source.begin(), source.end(), needles.begin(), needles.end(), lower.begin(),
                              algorithms::Less<T>{});
     oneapi::dpl::upper_bound(policy<T, 46>(), source.begin(), source.end(), needles.begin(), needles.end(), upper.begin(),
                              algorithms::Less<T>{});
     queue.wait_and_throw();
-    return {lower.host(1)[0], upper.host(1)[0]};
+    return {.first = lower.host(1)[0], .second = upper.host(1)[0]};
   }
 
   template <class T> std::vector<T> merge(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
-    onedpl_detail::Shared<T> output(queue, left.size() + right.size());
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
+    sycl_support::Shared<T> output(queue, left.size() + right.size());
     std::merge(policy<T, 14>(), a.begin(), a.end(), b.begin(), b.end(), output.begin(), algorithms::Less<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> algorithms::Partitioned<T> partition(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
-    const auto boundary = std::partition(policy<T, 15>(), output.begin(), output.end(), algorithms::IsEven<T>{});
+    sycl_support::Shared<T> output(queue, input);
+    auto *const boundary = std::partition(policy<T, 15>(), output.begin(), output.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return {output.host(), static_cast<size_t>(boundary - output.begin())};
   }
 
   template <class T> algorithms::Partitioned<T> stablePartition(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
-    const auto boundary = std::stable_partition(policy<T, 47>(), output.begin(), output.end(), algorithms::IsEven<T>{});
+    sycl_support::Shared<T> output(queue, input);
+    auto *const boundary = std::stable_partition(policy<T, 47>(), output.begin(), output.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return {output.host(), static_cast<size_t>(boundary - output.begin())};
   }
 
   template <class T> algorithms::TwoRanges<T> partitionCopy(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> selected(queue, input.size());
-    onedpl_detail::Shared<T> rejected(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> selected(queue, input.size());
+    sycl_support::Shared<T> rejected(queue, input.size());
     const auto ends =
         std::partition_copy(policy<T, 48>(), source.begin(), source.end(), selected.begin(), rejected.begin(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
@@ -442,7 +448,7 @@ public:
   }
 
   template <class T> bool isPartitioned(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::is_partitioned(policy<T, 49>(), source.begin(), source.end(), algorithms::IsEven<T>{});
     queue.wait_and_throw();
     return result;
@@ -451,114 +457,114 @@ public:
   template <class T> size_t partitionPoint(const std::vector<T> &) { SKIP("partition-point has no oneDPL execution-policy overload"); }
 
   template <class T> std::vector<T> adjacentDifference(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::adjacent_difference(policy<T, 16>(), source.begin(), source.end(), output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> setUnion(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
-    onedpl_detail::Shared<T> output(queue, left.size() + right.size());
-    const auto end = std::set_union(policy<T, 17>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
+    sycl_support::Shared<T> output(queue, left.size() + right.size());
+    auto *const end = std::set_union(policy<T, 17>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> setIntersection(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
-    onedpl_detail::Shared<T> output(queue, std::min(left.size(), right.size()));
-    const auto end = std::set_intersection(policy<T, 18>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
+    sycl_support::Shared<T> output(queue, std::min(left.size(), right.size()));
+    auto *const end = std::set_intersection(policy<T, 18>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> setDifference(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
-    onedpl_detail::Shared<T> output(queue, left.size());
-    const auto end = std::set_difference(policy<T, 51>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
+    sycl_support::Shared<T> output(queue, left.size());
+    auto *const end = std::set_difference(policy<T, 51>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> setSymmetricDifference(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
-    onedpl_detail::Shared<T> output(queue, left.size() + right.size());
-    const auto end = std::set_symmetric_difference(policy<T, 52>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
+    sycl_support::Shared<T> output(queue, left.size() + right.size());
+    auto *const end = std::set_symmetric_difference(policy<T, 52>(), a.begin(), a.end(), b.begin(), b.end(), output.begin());
     queue.wait_and_throw();
     return output.host(static_cast<size_t>(end - output.begin()));
   }
 
   template <class T> std::vector<T> reverse(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::reverse(policy<T, 19>(), output.begin(), output.end());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> reverseCopy(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::reverse_copy(policy<T, 53>(), source.begin(), source.end(), output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> shuffle(const std::vector<T> &) { SKIP("shuffle has no oneDPL execution-policy overload"); }
 
   template <class T> size_t minElement(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    const auto result = std::min_element(policy<T, 54>(), source.begin(), source.end());
+    sycl_support::Shared<T> source(queue, input);
+    auto *const result = std::min_element(policy<T, 54>(), source.begin(), source.end());
     queue.wait_and_throw();
     return static_cast<size_t>(result - source.begin());
   }
 
   template <class T> size_t maxElement(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    const auto result = std::max_element(policy<T, 55>(), source.begin(), source.end());
+    sycl_support::Shared<T> source(queue, input);
+    auto *const result = std::max_element(policy<T, 55>(), source.begin(), source.end());
     queue.wait_and_throw();
     return static_cast<size_t>(result - source.begin());
   }
 
   template <class T> algorithms::TwoPositions minmaxElement(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::minmax_element(policy<T, 56>(), source.begin(), source.end());
     queue.wait_and_throw();
-    return {static_cast<size_t>(result.first - source.begin()), static_cast<size_t>(result.second - source.begin())};
+    return {.first = static_cast<size_t>(result.first - source.begin()), .second = static_cast<size_t>(result.second - source.begin())};
   }
 
   template <class T> bool isSorted(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = std::is_sorted(policy<T, 57>(), source.begin(), source.end());
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> size_t isSortedUntil(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    const auto result = std::is_sorted_until(policy<T, 58>(), source.begin(), source.end());
+    sycl_support::Shared<T> source(queue, input);
+    auto *const result = std::is_sorted_until(policy<T, 58>(), source.begin(), source.end());
     queue.wait_and_throw();
     return static_cast<size_t>(result - source.begin());
   }
 
   template <class T> std::vector<T> rotate(const std::vector<T> &input, size_t middle) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::rotate(policy<T, 59>(), output.begin(), output.begin() + static_cast<ptrdiff_t>(middle), output.end());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> rotateCopy(const std::vector<T> &input, size_t middle) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     std::rotate_copy(policy<T, 60>(), source.begin(), source.begin() + static_cast<ptrdiff_t>(middle), source.end(), output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> bool includes(const std::vector<T> &left, const std::vector<T> &right) {
-    onedpl_detail::Shared<T> a(queue, left);
-    onedpl_detail::Shared<T> b(queue, right);
+    sycl_support::Shared<T> a(queue, left);
+    sycl_support::Shared<T> b(queue, right);
     const auto result = std::includes(policy<T, 61>(), a.begin(), a.end(), b.begin(), b.end());
     queue.wait_and_throw();
     return result;
@@ -573,10 +579,10 @@ public:
   }
 
   template <class T> algorithms::KeyValues<T> reduceByKey(const std::vector<T> &keys, const std::vector<int32_t> &values) {
-    onedpl_detail::Shared<T> sourceKeys(queue, keys);
-    onedpl_detail::Shared<int32_t> sourceValues(queue, values);
-    onedpl_detail::Shared<T> outputKeys(queue, keys.size());
-    onedpl_detail::Shared<int32_t> outputValues(queue, values.size());
+    sycl_support::Shared<T> sourceKeys(queue, keys);
+    sycl_support::Shared<int32_t> sourceValues(queue, values);
+    sycl_support::Shared<T> outputKeys(queue, keys.size());
+    sycl_support::Shared<int32_t> outputValues(queue, values.size());
     const auto ends = oneapi::dpl::reduce_by_segment(policy<T, 65>(), sourceKeys.begin(), sourceKeys.end(), sourceValues.begin(),
                                                      outputKeys.begin(), outputValues.begin());
     queue.wait_and_throw();
@@ -585,19 +591,19 @@ public:
   }
 
   template <class T> algorithms::KeyValues<T> inclusiveScanByKey(const std::vector<T> &keys, const std::vector<int32_t> &values) {
-    onedpl_detail::Shared<T> deviceKeys(queue, keys);
-    onedpl_detail::Shared<int32_t> source(queue, values);
-    onedpl_detail::Shared<int32_t> output(queue, values.size());
+    sycl_support::Shared<T> deviceKeys(queue, keys);
+    sycl_support::Shared<int32_t> source(queue, values);
+    sycl_support::Shared<int32_t> output(queue, values.size());
     oneapi::dpl::inclusive_scan_by_segment(policy<T, 66>(), deviceKeys.begin(), deviceKeys.end(), source.begin(), output.begin());
     queue.wait_and_throw();
     return {keys, output.host()};
   }
 
   template <class T> algorithms::KeyValues<T> exclusiveScanByKey(const std::vector<T> &keys, const std::vector<int32_t> &values) {
-    onedpl_detail::Shared<T> deviceKeys(queue, keys);
-    onedpl_detail::Shared<int32_t> source(queue, values);
+    sycl_support::Shared<T> deviceKeys(queue, keys);
+    sycl_support::Shared<int32_t> source(queue, values);
     // Every output must be written, including zero-valued segment starts.
-    onedpl_detail::Shared<int32_t> output(queue, std::vector<int32_t>(values.size(), std::numeric_limits<int32_t>::min()));
+    sycl_support::Shared<int32_t> output(queue, std::vector<int32_t>(values.size(), std::numeric_limits<int32_t>::min()));
     oneapi::dpl::exclusive_scan_by_segment(policy<T, 67>(), deviceKeys.begin(), deviceKeys.end(), source.begin(), output.begin(),
                                            int32_t{0});
     queue.wait_and_throw();
@@ -613,36 +619,30 @@ public:
   }
 
   template <class T> std::vector<T> partialSort(const std::vector<T> &input, size_t middle) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::partial_sort(policy<T, 62>(), output.begin(), output.begin() + static_cast<ptrdiff_t>(middle), output.end());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> nthElement(const std::vector<T> &input, size_t nth) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     if (!input.empty()) std::nth_element(policy<T, 63>(), output.begin(), output.begin() + static_cast<ptrdiff_t>(nth), output.end());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> inplaceMerge(const std::vector<T> &input, size_t middle) {
-    onedpl_detail::Shared<T> output(queue, input);
+    sycl_support::Shared<T> output(queue, input);
     std::inplace_merge(policy<T, 64>(), output.begin(), output.begin() + static_cast<ptrdiff_t>(middle), output.end());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
 private:
   sycl::queue queue;
   // Restrict the observed oneDPL faults to the tested Arc A750 device.
-  const bool arcPolicyFaults =
-      queue.get_backend() == sycl::backend::ext_oneapi_level_zero
-      && queue.get_device().get_info<sycl::info::device::name>().find("Intel(R) Arc(TM) A750") != std::string::npos;
+  bool arcPolicyFaults = queue.get_backend() == sycl::backend::ext_oneapi_level_zero
+                         && queue.get_device().get_info<sycl::info::device::name>().find("Intel(R) Arc(TM) A750") != std::string::npos;
 
-  template <class T, size_t Id> auto policy() { return oneapi::dpl::execution::make_device_policy<onedpl_detail::Kernel<T, Id>>(queue); }
-
-  template <class T> std::vector<T> finish(const onedpl_detail::Shared<T> &output) {
-    queue.wait_and_throw();
-    return output.host();
-  }
+  template <class T, size_t Id> auto policy() { return oneapi::dpl::execution::make_device_policy<sycl_support::Kernel<T, Id>>(queue); }
 };
 } // namespace unified::backend
 
@@ -660,7 +660,7 @@ class OneDPLEdgeCases {
 public:
   OneDPLEdgeCases() : queue(sycl::gpu_selector_v, sycl::property::queue::in_order{}) {}
 
-  template <class T> bool supports(std::string_view, size_t) const {
+  template <class T> [[nodiscard]] bool supports(std::string_view, size_t) const {
     return !std::is_same_v<T, double> || sycl_support::supportsFp64(queue.get_device());
   }
 
@@ -676,30 +676,30 @@ public:
 
   template <class T> uint64_t biasedIndexChecksum(uint64_t base, size_t size) {
     const oneapi::dpl::counting_iterator<uint64_t> begin(base);
-    const auto result =
-        oneapi::dpl::transform_reduce(policy<T, 1>(), begin, begin + size, uint64_t{}, edge::Xor64{}, edge::BiasedHash<T>{});
+    const auto result = oneapi::dpl::transform_reduce(policy<T, 1>(), begin, begin + static_cast<ptrdiff_t>(size), uint64_t{},
+                                                      edge::Xor64{}, edge::BiasedHash<T>{});
     queue.wait_and_throw();
     return result;
   }
 
   template <class T> std::vector<T> segmentedInclusiveScan(const std::vector<int32_t> &keys, const std::vector<T> &input) {
-    onedpl_detail::Shared<int32_t> deviceKeys(queue, keys);
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<int32_t> deviceKeys(queue, keys);
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     oneapi::dpl::inclusive_scan_by_segment(policy<T, 2>(), deviceKeys.begin(), deviceKeys.end(), source.begin(), output.begin());
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> inplaceInclusiveScan(const std::vector<T> &storage, size_t offset, size_t count) {
-    onedpl_detail::Shared<T> output(queue, storage);
+    sycl_support::Shared<T> output(queue, storage);
     oneapi::dpl::inclusive_scan(policy<T, 3>(), output.begin() + static_cast<ptrdiff_t>(offset),
                                 output.begin() + static_cast<ptrdiff_t>(offset + count), output.begin() + static_cast<ptrdiff_t>(offset));
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> support::KeyValues<T> stableSortPayload(const std::vector<T> &keys, const std::vector<int32_t> &payload) {
-    onedpl_detail::Shared<T> deviceKeys(queue, keys);
-    onedpl_detail::Shared<int32_t> devicePayload(queue, payload);
+    sycl_support::Shared<T> deviceKeys(queue, keys);
+    sycl_support::Shared<int32_t> devicePayload(queue, payload);
     oneapi::dpl::stable_sort_by_key(policy<T, 4>(), deviceKeys.begin(), deviceKeys.end(), devicePayload.begin());
     queue.wait_and_throw();
     return {deviceKeys.host(), devicePayload.host()};
@@ -712,10 +712,10 @@ public:
     sycl::queue leftQueue(context, device);
     sycl::queue rightQueue(context, device);
     sycl::queue joinQueue(context, device);
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> left(queue, input.size());
-    onedpl_detail::Shared<T> right(queue, input.size());
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> left(queue, input.size());
+    sycl_support::Shared<T> right(queue, input.size());
+    sycl_support::Shared<T> output(queue, input.size());
     const auto count = input.size();
     const auto *sourceData = source.begin();
     auto *leftData = left.begin();
@@ -739,17 +739,17 @@ public:
   }
 
   template <class T> std::vector<T> numericEdgeRoundtrip(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     oneapi::dpl::transform(policy<T, 5>(), source.begin(), source.end(), output.begin(), edge::Identity<T>{});
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> primitiveBlockScan(const std::vector<T> &input, size_t blockSize) {
     if (blockSize != 32) SKIP("SYCL group scan currently requires a block size of 32");
     if (input.empty()) return {};
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     const auto global = ((input.size() + blockSize - 1) / blockSize) * blockSize;
     const auto size = input.size();
     const auto *sourceData = source.begin();
@@ -762,7 +762,7 @@ public:
         if (index < size) outputData[index] = scanned;
       });
     });
-    return finish(output);
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> runtimeErrorRecover(const std::vector<T> &) {
@@ -774,11 +774,6 @@ private:
 
   template <class T, size_t Id> auto policy() {
     return oneapi::dpl::execution::make_device_policy<onedpl_edge_detail::Kernel<T, Id>>(queue);
-  }
-
-  template <class T> std::vector<T> finish(const onedpl_detail::Shared<T> &output) {
-    queue.wait_and_throw();
-    return output.host();
   }
 };
 namespace onedpl_async_detail {
@@ -792,21 +787,21 @@ class OneDPLAsync {
 public:
   OneDPLAsync() : queue(sycl::gpu_selector_v, sycl::property::queue::in_order{}) {}
 
-  template <class T> bool supports(std::string_view, size_t) const {
+  template <class T> [[nodiscard]] bool supports(std::string_view, size_t) const {
     return !std::is_same_v<T, double> || sycl_support::supportsFp64(queue.get_device());
   }
 
   template <class T> std::vector<T> asyncCopy(const std::vector<T> &input) {
     if (input.empty()) return {};
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     auto event = queue.memcpy(output.begin(), source.begin(), input.size() * sizeof(T));
     event.wait_and_throw();
     return output.host();
   }
 
   template <class T> T asyncReduce(const std::vector<T> &input) {
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     const auto result = oneapi::dpl::reduce(policy<T, 0>(), source.begin(), source.end(), T{}, support::Plus<T>{});
     queue.wait_and_throw();
     return result;
@@ -814,26 +809,24 @@ public:
 
   template <class T> std::vector<T> asyncScan(const std::vector<T> &input) {
     if (input.empty()) return {};
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> output(queue, input.size());
     oneapi::dpl::inclusive_scan(policy<T, 1>(), source.begin(), source.end(), output.begin(), support::Plus<T>{});
-    queue.wait_and_throw();
-    return output.host();
+    return sycl_support::finish(queue, output);
   }
 
   template <class T> std::vector<T> asyncSort(const std::vector<T> &input) {
     if (input.empty()) return {};
-    onedpl_detail::Shared<T> source(queue, input);
+    sycl_support::Shared<T> source(queue, input);
     oneapi::dpl::sort(policy<T, 2>(), source.begin(), source.end());
-    queue.wait_and_throw();
-    return source.host();
+    return sycl_support::finish(queue, source);
   }
 
   template <class T> std::vector<T> asyncFutureChain(const std::vector<T> &input) {
     if (input.empty()) return {};
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> first(queue, input.size());
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> first(queue, input.size());
+    sycl_support::Shared<T> output(queue, input.size());
     const auto count = input.size();
     const auto *sourceData = source.begin();
     auto *firstData = first.begin();
@@ -858,10 +851,10 @@ public:
     sycl::queue leftQueue(context, device);
     sycl::queue rightQueue(context, device);
     sycl::queue joinQueue(context, device);
-    onedpl_detail::Shared<T> source(queue, input);
-    onedpl_detail::Shared<T> left(queue, input.size());
-    onedpl_detail::Shared<T> right(queue, input.size());
-    onedpl_detail::Shared<T> output(queue, input.size());
+    sycl_support::Shared<T> source(queue, input);
+    sycl_support::Shared<T> left(queue, input.size());
+    sycl_support::Shared<T> right(queue, input.size());
+    sycl_support::Shared<T> output(queue, input.size());
     const auto count = input.size();
     const auto *sourceData = source.begin();
     auto *leftData = left.begin();
@@ -885,20 +878,17 @@ public:
   }
 
   template <class T> std::vector<T> asyncInterleavedStreams(const std::vector<T> &input) {
-    std::vector<T> even;
-    std::vector<T> odd;
-    even.reserve((input.size() + 1) / 2);
-    odd.reserve(input.size() / 2);
-    for (size_t index = 0; index < input.size(); ++index)
-      (index % 2 == 0 ? even : odd).push_back(input[index]);
+    using namespace aspartame;
+    const auto even = input ^ stride(2);
+    const auto odd = input ^ drop(1) ^ stride(2);
     if (input.empty()) return {};
 
     const auto device = queue.get_device();
     const auto context = queue.get_context();
     sycl::queue evenQueue(context, device);
     sycl::queue oddQueue(context, device);
-    onedpl_detail::Shared<T> evenData(queue, even);
-    onedpl_detail::Shared<T> oddData(queue, odd);
+    sycl_support::Shared<T> evenData(queue, even);
+    sycl_support::Shared<T> oddData(queue, odd);
     const auto evenCount = even.size();
     const auto oddCount = odd.size();
     auto *evenPtr = evenData.begin();
@@ -917,12 +907,8 @@ public:
     }
     const auto transformedEven = evenData.host();
     const auto transformedOdd = oddData.host();
-    std::vector<T> output(input.size());
-    size_t evenIndex = 0;
-    size_t oddIndex = 0;
-    for (size_t index = 0; index < output.size(); ++index)
-      output[index] = index % 2 == 0 ? transformedEven[evenIndex++] : transformedOdd[oddIndex++];
-    return output;
+    return iota(size_t{0}, input.size())
+           | map([&](size_t index) { return index % 2 == 0 ? transformedEven[index / 2] : transformedOdd[index / 2]; }) | to_vector();
   }
 
 private:

@@ -33,7 +33,7 @@ object Printer {
       case Bundle(Control.Maxwell(slots, reserved)) =>
         Either.cond(
           slots.size == 3,
-          s".bundle maxwell ${reserved.raw} " + slots.map(value => f"${value.raw}%06x").mkString(" "),
+          s".bundle maxwell $reserved " + slots.map(value => f"$value%06x").mkString(" "),
           Error.Printing(Error.detail("Maxwell bundle controls require three slots"))
         )
       case Bundle(Control.Modern) =>

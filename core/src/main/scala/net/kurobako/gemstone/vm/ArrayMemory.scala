@@ -37,7 +37,7 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
 
   def allocate(size: Long > 0): AllocationId = exclusive {
     val id = regions.keys.foldLeft(AllocationId(1L))((next, used) => if (used.raw >= next.raw) used.next else next)
-    allocate(id, Math.toIntExact(size.raw))
+    allocate(id, Math.toIntExact(size))
     id
   }
 
@@ -61,10 +61,10 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
   def bytes(id: AllocationId): Vec[Byte] = exclusive(Vec.unsafeWrapArray(regions(id).bytes.clone()))
 
   def getInt(id: AllocationId, offset: Int >= 0): Int =
-    exclusive(LittleEndian.decodeInt32(regions(id).bytes, offset.raw))
+    exclusive(LittleEndian.decodeInt32(regions(id).bytes, offset))
 
   def putInt(id: AllocationId, offset: Int >= 0, value: Int): Unit =
-    exclusive(LittleEndian.write(value.toLong, regions(id).bytes, offset.raw, 4))
+    exclusive(LittleEndian.write(value.toLong, regions(id).bytes, offset, 4))
 
   private def region(id: AllocationId): Either[Fault, Region] =
     regions.get(id).toRight(Fault.Memory(s"allocation ${id.raw} is not registered"))
@@ -72,8 +72,8 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
   private def range(id: AllocationId, offset: Long >= 0, size: Long): Either[Fault, (Array[Byte], Int)] =
     region(id).flatMap { value =>
       Either.cond(
-        ByteRange.contains(value.bytes.length, offset.raw, size),
-        (value.bytes, offset.raw.toInt),
+        ByteRange.contains(value.bytes.length, offset, size),
+        (value.bytes, offset.toInt),
         Fault.Memory(s"access $offset + $size exceeds allocation ${id.raw}")
       )
     }
@@ -81,8 +81,8 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
   override def address(id: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] = exclusive {
     region(id).flatMap { value =>
       Either.cond(
-        offset.raw <= value.bytes.length,
-        GuestAddress(value.base + offset.raw),
+        offset <= value.bytes.length,
+        GuestAddress(value.base + offset),
         Fault.Memory(s"offset $offset exceeds allocation ${id.raw}")
       )
     }
@@ -90,14 +90,14 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
 
   override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] = exclusive {
     regions.collectFirst {
-      case (id, value) if ByteRange.contains(value.bytes.length, address.raw - value.base, size.raw.toLong) =>
+      case (id, value) if ByteRange.contains(value.bytes.length, address.raw - value.base, size.toLong) =>
         AddressSpace.Location.Within(id, (address.raw - value.base).unsafe[Long >= 0])
     }.toRight(Fault.Memory(s"address ${address.show} is outside every allocation"))
   }
 
   override def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] = exclusive {
-    range(id, offset, size.raw.toLong).map((bytes, start) =>
-      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, start, start + size.raw))
+    range(id, offset, size.toLong).map((bytes, start) =>
+      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, start, start + size))
     )
   }
 
@@ -110,11 +110,8 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
   override def atomicModifyValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
       update: Long => Long
   ): Either[Fault, Long] = exclusive {
-    range(id, offset, size.raw.toLong).map { (bytes, start) =>
-      val width    = size.widen[Int in 0 ~ 8]
-      val previous = LittleEndian.decode(bytes, start, width)
-      LittleEndian.write(update(previous), bytes, start, width)
-      previous
-    }
+    range(id, offset, size.toLong).map((bytes, start) =>
+      LittleEndian.atomicModify(bytes, start, size.widen[Int in 0 ~ 8])(update)
+    )
   }
 }

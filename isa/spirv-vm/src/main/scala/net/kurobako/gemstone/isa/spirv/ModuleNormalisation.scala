@@ -33,4 +33,54 @@ private object ModuleNormalisation {
     })
   }
 
+  /** Folds SPV_INTEL_long_composites continuations into the instruction they continue, leaving an OpNop in each one's
+    * place so instruction positions hold.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def mergeContinuations(module: Module): Module = if (!module.instructions.exists(continuation(_))) module
+  else {
+    val instructions = module.instructions.toArray
+    var head         = -1
+    var index        = 0
+    while (index < instructions.length) {
+      (instructions(index), if (head >= 0) Some(instructions(head)) else None) match {
+        case (Instruction.TypeStructContinuedINTEL(members), Some(Instruction.TypeStruct(dest, previous))) =>
+          instructions(head) = Instruction.TypeStruct(dest, previous ++ members)
+          instructions(index) = Instruction.Nop()
+        case (
+              Instruction.ConstantCompositeContinuedINTEL(constituents),
+              Some(Instruction.ConstantComposite(resultType, dest, previous))
+            ) =>
+          instructions(head) = Instruction.ConstantComposite(resultType, dest, previous ++ constituents)
+          instructions(index) = Instruction.Nop()
+        case (
+              Instruction.SpecConstantCompositeContinuedINTEL(constituents),
+              Some(Instruction.SpecConstantComposite(resultType, dest, previous))
+            ) =>
+          instructions(head) = Instruction.SpecConstantComposite(resultType, dest, previous ++ constituents)
+          instructions(index) = Instruction.Nop()
+        case (
+              Instruction.CompositeConstructContinuedINTEL(constituents),
+              Some(Instruction.CompositeConstruct(resultType, dest, previous))
+            ) =>
+          instructions(head) = Instruction.CompositeConstruct(resultType, dest, previous ++ constituents)
+          instructions(index) = Instruction.Nop()
+        case (
+              Instruction.TypeStruct(_, _) | Instruction.ConstantComposite(_, _, _) |
+              Instruction.SpecConstantComposite(_, _, _) | Instruction.CompositeConstruct(_, _, _),
+              _
+            ) => head = index
+        case _ => head = -1
+      }
+      index += 1
+    }
+    module.copy(instructions = Vec.from(instructions))
+  }
+
+  private def continuation(instruction: Instruction): Boolean = instruction match {
+    case Instruction.TypeStructContinuedINTEL(_) | Instruction.ConstantCompositeContinuedINTEL(_) |
+        Instruction.SpecConstantCompositeContinuedINTEL(_) | Instruction.CompositeConstructContinuedINTEL(_) => true
+    case _ => false
+  }
+
 }

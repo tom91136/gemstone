@@ -5,6 +5,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.Event.*
+import scala.collection.mutable
 
 /** Renders a structured device-`printf` event into text. Mirrors the C `printf` subset the interpreter emits:
   * integer/pointer/text/floating conversions, optional flags, width, precision, and `%vN` lane expansion.
@@ -12,7 +13,7 @@ import net.kurobako.gemstone.vm.Event.*
 object PrintRenderer {
 
   def render(event: Print, maxOutputChars: Int > 0): Either[String, String] = {
-    val output = StringBuilder()
+    val output = mutable.StringBuilder()
     val format = event.format
 
     def literalEnd(from: Int): Int = {
@@ -24,7 +25,7 @@ object PrintRenderer {
     def loop(index: Int, argumentIndex: Int): Either[String, Int] = {
       val literal = literalEnd(index)
       if (literal > index) output.append(format.substring(index, literal))
-      if (output.length > maxOutputChars.raw) Left("device printf output exceeds the limit")
+      if (output.length > maxOutputChars) Left("device printf output exceeds the limit")
       else if (literal >= format.length) Right(argumentIndex)
       else if (literal + 1 < format.length && format.charAt(literal + 1) == '%') {
         output.append('%')
@@ -42,7 +43,7 @@ object PrintRenderer {
                   accumulated.flatMap { _ =>
                     renderArgument(value, flagsAndSize, lengthSpecifier, conversion, lane).flatMap { rendered =>
                       val separator = if (lane == 0) "" else ","
-                      if (rendered.length.toLong + output.length + separator.length > maxOutputChars.raw)
+                      if (rendered.length.toLong + output.length + separator.length > maxOutputChars)
                         Left("device printf output exceeds the limit")
                       else { val _ = output.append(separator).append(rendered); Right(()) }
                     }
@@ -69,7 +70,7 @@ object PrintRenderer {
         val width     = format.substring(flagsEnd, widthEnd)
         val precision = if (precisionEnd > widthEnd) format.substring(widthEnd + 1, precisionEnd) else ""
         def exceedsLimit(digits: String): Boolean =
-          digits.nonEmpty && digits.toIntOption.forall(_ > maxOutputChars.raw)
+          digits.nonEmpty && digits.toIntOption.forall(_ > maxOutputChars)
         if (exceedsLimit(width) || exceedsLimit(precision)) Left("device printf output exceeds the limit")
         else if (precisionError) Left("device printf precision is not supported")
         else {
@@ -104,12 +105,12 @@ object PrintRenderer {
       case Left(message)        => Left(message)
       case Right(argumentIndex) =>
         if (argumentIndex != event.arguments.size) Left("device printf has unused arguments")
-        else if (output.length > maxOutputChars.raw) Left("device printf output exceeds the limit")
+        else if (output.length > maxOutputChars) Left("device printf output exceeds the limit")
         else Right(output.result())
     }
   }
 
-  private def scanWhile(format: String, from: Int, predicate: Char => Boolean): Int = {
+  private inline def scanWhile(format: String, from: Int, inline predicate: Char => Boolean): Int = {
     val found = format.indexWhere(character => !predicate(character), from)
     if (found < 0) format.length else found
   }

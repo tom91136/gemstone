@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.isa.catalogue.*
 import scala.annotation.tailrec
 
 /** Binary structural decoding, independent of NVIDIA tools and handwritten execution semantics. Candidates retain
@@ -35,11 +36,11 @@ object FieldDecoder {
 
   def candidates(database: NVDisasm.Database, bytes: Array[Byte]): Either[String, Vec[Candidate]] =
     if (bytes.length * 8 != database.width.raw)
-      Left(s"instruction requires ${database.width.raw / 8} bytes, found ${bytes.length}")
+      Left(s"instruction requires ${database.width / 8} bytes, found ${bytes.length}")
     else candidates(database, BigInt(1, bytes.reverse))
 
   def candidates(database: NVDisasm.Database, word: BigInt): Either[String, Vec[Candidate]] =
-    if (word < 0 || word.bitLength > database.width.raw) Left(s"instruction exceeds ${database.width} bits")
+    if (word < 0 || word.bitLength > database.width) Left(s"instruction exceeds ${database.width} bits")
     else {
       val forms = database.opcodeGroups.flatMap { case (positions, group) =>
         group.getOrElse(extract(word, positions), Vec.empty[NVDisasm.Form])
@@ -101,7 +102,7 @@ object FieldDecoder {
     */
   def accepts(
       database: NVDisasm.Database,
-      expression: NVDisasm.Expression,
+      expression: Expression,
       value: BigInt,
       bindings: Map[String, BigInt]
   ): Boolean =
@@ -119,7 +120,7 @@ object FieldDecoder {
       values: Map[String, BigInt],
       issues: Vec[NVDisasm.MetadataIssue],
       floats: Map[String, FloatEncoding] = Map.empty
-  )
+  ) derives CanEqual
 
   private def resolve(
       database: NVDisasm.Database,
@@ -149,7 +150,7 @@ object FieldDecoder {
 
   private def invertFloat(
       database: NVDisasm.Database,
-      expression: NVDisasm.Expression,
+      expression: Expression,
       format: FloatEncoding,
       value: BigInt,
       state: Bindings
@@ -160,28 +161,28 @@ object FieldDecoder {
 
   private def invert(
       database: NVDisasm.Database,
-      expression: NVDisasm.Expression,
+      expression: Expression,
       value: BigInt,
       state: Bindings
   ): Option[Bindings] = expression match {
-    case NVDisasm.Expression.Constant(expected, relaxed) =>
+    case Expression.Constant(expected, relaxed) =>
       Option.when(relaxed || expected == value)(state)
-    case NVDisasm.Expression.Reference(name, attribute, _) =>
+    case Expression.Reference(name, attribute, _) =>
       merge(state, NVDisasm.bindingKey(name, attribute), value)
-    case NVDisasm.Expression.Scale(inner, factor)    => invert(database, inner, value * factor, state)
-    case NVDisasm.Expression.Multiply(inner, factor) =>
+    case Expression.Scale(inner, factor)    => invert(database, inner, value * factor, state)
+    case Expression.Multiply(inner, factor) =>
       Option.when(factor != 0 && value % factor == 0)(value / factor).flatMap(invert(database, inner, _, state))
-    case NVDisasm.Expression.Identity(first, second) =>
+    case Expression.Identity(first, second) =>
       invert(database, first, value, state).flatMap(invert(database, second, value, _))
-    case NVDisasm.Expression.Relaxed(inner)            => invert(database, inner, value, state)
-    case NVDisasm.Expression.FixedFloat(inner, format) => invertFloat(database, inner, format, value, state)
-    case NVDisasm.Expression.FloatConvert(inner, selector, cases, fallback) =>
+    case Expression.Relaxed(inner)                                 => invert(database, inner, value, state)
+    case Expression.FixedFloat(inner, format)                      => invertFloat(database, inner, format, value, state)
+    case Expression.FloatConvert(inner, selector, cases, fallback) =>
       state.values.get(selector).fold(Option(state.copy(issues =
         state.issues :+ NVDisasm.MetadataIssue.UnresolvedSelector(selector)
       ))) { selected =>
         invertFloat(database, inner, cases.find(_._1.contains(selected)).fold(fallback)(_._2), value, state)
       }
-    case NVDisasm.Expression.Lookup(name, arguments) =>
+    case Expression.Lookup(name, arguments) =>
       database.byTable.get(name).flatMap { table =>
         val rows      = table.byOutput.getOrElse(value, Vec.empty[NVDisasm.Row]).filter(_.inputs.size == arguments.size)
         val solutions = rows.flatMap { row =>

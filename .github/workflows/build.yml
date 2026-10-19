@@ -1,28 +1,263 @@
+# act (artefact steps are skipped, nektos/act#6022; target/ci stands in for them): `mkdir -p .cache target/{ci,native,conformance}`,
+# a="-P ubuntu-24.04=catthehacker/ubuntu:act-24.04 --pull=false --rm", v="--security-opt label=disable -v $PWD/target/ci:$PWD/target/ci".
+# Podman rejects act's copies through the image's absolute /var/run symlink; there, use an image built with
+# `printf 'FROM catthehacker/ubuntu:act-24.04\nRUN rm /var/run && ln -s ../run /var/run\n' | podman build -t act-24.04-podman -`.
+# build's sibling containers bind by host path, so move the host's target/native and target/conformance aside first; other
+# jobs run without `needs`, which act would otherwise follow back to build:
+#   act -j build $a --container-options "$v -v $PWD/.cache:$PWD/.cache -v $PWD/target/native:$PWD/target/native -v $PWD/target/conformance:$PWD/target/conformance"
+#   sed '/^    needs:/d' .github/workflows/build.yml > /tmp/ci.yml && act -W /tmp/ci.yml -j <job> $a --container-options "$v:ro -v $PWD/target/conformance:$PWD/target/conformance"
 name: Build
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      conformance:
+        description: Conformance scope
+        type: choice
+        options: [small, complete]
+        default: small
 permissions:
   contents: read
+env:
+  CONTAINER_EXECUTABLE: docker
+  # small is the soraws-uk hardware (CUDA sm_89, gfx1030, OpenCL, SYCL, Level Zero); complete is every CUDA and GFX target
+  CONFORMANCE_TARGET_SET: ${{ inputs.conformance == 'complete' && 'complete' || 'default' }}
+  CONFORMANCE_WORKLOAD: ${{ inputs.conformance == 'complete' && 'full' || 'compact' }}
+  CONFORMANCE_BACKENDS: cuda hip hsa opencl sycl levelzero
 jobs:
-  test:
+  build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    env:
-      GEMSTONE_EXECUTION_PARALLELISM: 2
-      CMAKE_BUILD_PARALLEL_LEVEL: 2
-      CONTAINER_EXECUTABLE: docker
+    timeout-minutes: 360
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - &free-disk
+        name: Free disk space
+        if: ${{ !env.ACT }}
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+      - &checkout
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      - &java
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
-      - uses: sbt/setup-sbt@82da71df4e122282484a99a8d70096bc2369dbd8 # v1
-      - name: Native build tools
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang cmake liblz4-dev libzstd-dev ninja-build python3 spirv-tools
+          cache: sbt
+      - &sbt
+        uses: sbt/setup-sbt@v1
+      - &tools-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/tools
+          key: tools-make-4.4.1-ninja-1.13.2
+      - &tools
+        name: Native tools
+        # the conformance jobserver needs make >= 4.4 and ninja >= 1.13; LLVM 22 matches the repository's formatting
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential clang-22 clang-format-22 clang-tidy-22 \
+            cmake liblz4-dev libzstd-dev zlib1g-dev python3 spirv-tools unzip zstd
+          for tool in clang clang++ clang-format clang-tidy; do sudo ln -sf "/usr/bin/$tool-22" "/usr/local/bin/$tool"; done
+          tools=~/.local/tools
+          if [ ! -x "$tools/bin/make" ] || [ ! -x "$tools/bin/ninja" ]; then
+            curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz | tar -xz -C "$RUNNER_TEMP"
+            (cd "$RUNNER_TEMP/make-4.4.1" && ./configure -q --prefix="$tools" && make -s -j"$(nproc)" install)
+            curl -fsSL -o "$RUNNER_TEMP/ninja.zip" https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip
+            unzip -q -o "$RUNNER_TEMP/ninja.zip" -d "$tools/bin"
+          fi
+          echo "$tools/bin" >> "$GITHUB_PATH"
+      - &references
+        name: Restore references
+        id: references
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/references
+          key: references-${{ hashFiles('tools/codegen/**/References.scala') }}
+          restore-keys: |
+            references-${{ hashFiles('tools/codegen/**/References.scala') }}-
+            references-
+      - &dependencies
+        name: Restore conformance dependencies
+        id: dependencies
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/conformance
+          key: conformance-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}
+          restore-keys: |
+            conformance-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
+            conformance-dependencies-
       - name: Generated sources
-        run: sbt --server --batch -J-Xmx3g codegen && git status --porcelain && test -z "$(git status --porcelain)"
-      - name: Lint and tests
-        run: sbt --server --batch -J-Xmx3g lint test
+        run: |
+          state() { git status --porcelain --untracked-files=all; git diff | sha256sum; }
+          before=$(state)
+          sbt --server --batch codegen
+          [ "$before" = "$(state)" ] || { git status --short; exit 1; }
+      - name: Compile
+        if: ${{ !cancelled() }}
+        run: sbt --server --batch Test/compile explorerJS/fullLinkJS native/build conformance/conformanceHost
+      - name: Conformance artifacts
+        if: ${{ !cancelled() }}
+        run: sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_BACKENDS"
+      - name: Download cache contents
+        id: downloads
+        if: always()
+        # saved keys name their contents, so a cache that grew after a partial save is saved again
+        run: |
+          for cache in references conformance; do
+            echo "$cache=$(find .cache/$cache -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          done
+      - name: Save references
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/references
+          key: ${{ steps.references.outputs.cache-primary-key }}-${{ steps.downloads.outputs.references }}
+      - name: Save conformance dependencies
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/conformance
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}-${{ steps.downloads.outputs.conformance }}
+      - name: Pack
+        if: ${{ !cancelled() }}
+        run: |
+          pack() { tar -cf - "${@:2}" | zstd -T0 -q -f -o "target/ci/$1.tar.zst"; }
+          mkdir -p target/ci
+          pack build target/native/build target/references/api-native target/references/level-zero \
+            target/conformance/host "target/conformance/build/$CONFORMANCE_TARGET_SET"
+          for backend in $CONFORMANCE_BACKENDS; do
+            pack "conformance-$backend" "target/conformance/artifacts/$backend"
+          done
+          ls -l target/ci
+      - name: Upload
+        if: ${{ !cancelled() && !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build
+          path: target/ci/build.tar.zst
+          compression-level: 0
+      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-cuda, path: target/ci/conformance-cuda.tar.zst, compression-level: 0}}
+      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-hip, path: target/ci/conformance-hip.tar.zst, compression-level: 0}}
+      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-hsa, path: target/ci/conformance-hsa.tar.zst, compression-level: 0}}
+      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-opencl, path: target/ci/conformance-opencl.tar.zst, compression-level: 0}}
+      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-sycl, path: target/ci/conformance-sycl.tar.zst, compression-level: 0}}
+      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-levelzero, path: target/ci/conformance-levelzero.tar.zst, compression-level: 0}}
+
+  test:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GEMSTONE_OFFLINE: 1
+    steps:
+      - *free-disk
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - *references
+      - *dependencies
+      - &download-build
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v8
+        with:
+          name: build
+          path: target/ci
+      - &unpack
+        name: Unpack
+        # sources older than the unpacked outputs keep CMake and Ninja from rebuilding them
+        run: |
+          git ls-files -z --cached --others --exclude-standard | xargs -0 touch -c -h -d "@$(git log -1 --format=%ct)"
+          for archive in target/ci/*.tar.zst; do zstd -dc "$archive" | tar -xf -; done
+      - name: Test
+        run: sbt --server --batch testFull
+      - name: CTest
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          ctest --test-dir target/native/build --output-on-failure --parallel "$(nproc)" || status=1
+          ctest --test-dir target/conformance/host --output-on-failure --parallel "$(nproc)" || status=1
+          exit $status
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: sbt --server --batch lint
+
+  semantics:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        isa: [PTX, SASS, SASSHopper, SASSBlackwell, AMDGPU, AMDGPUMatrix, AMDGPUResource, SPIRV]
+    env:
+      GEMSTONE_OFFLINE: 1
+      GEMSTONE_EXECUTION_PARALLELISM: 2
+    steps:
+      - *checkout
+      - *java
+      - *sbt
+      - run: sbt --server --batch 'semanticsCheck${{ matrix.isa }}/testOnly *'
+
+  conformance:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      # shards select backends, so each covers every architecture of the chosen target set
+      matrix:
+        include:
+          - {shard: cuda-ptx, routes: cuda-ptx, backends: cuda}
+          - {shard: cuda-sass, routes: cuda-sass, backends: cuda}
+          - {shard: amd, routes: hip hsa, backends: '{hip,hsa}'}
+          - {shard: spirv, routes: opencl levelzero sycl, backends: '{opencl,levelzero,sycl}'}
+    env:
+      GEMSTONE_OFFLINE: 1
+    steps:
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - *references
+      - *dependencies
+      - if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '{build,conformance-${{ matrix.backends }}}'
+          path: target/ci
+          merge-multiple: true
+      - *unpack
+      - name: Emulate
+        run: |
+          sbt --server --batch 'set conformance / conformanceJfr := false' \
+            "conformance/emulate --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
+      - if: ${{ !cancelled() && !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: report-${{ matrix.shard }}
+          path: target/conformance/emulated
+
+  conformance-summary:
+    needs: conformance
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: report-*
+          path: reports
+      - run: |
+          for report in $(find reports -name junit.xml | sort); do
+            echo "- ${report#reports/}: $(grep -om1 'tests="[0-9]*" failures="[0-9]*" skipped="[0-9]*"' "$report")"
+          done | tee -a "$GITHUB_STEP_SUMMARY"

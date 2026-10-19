@@ -27,6 +27,8 @@ private object LaneModifiers {
   private val Broadcast = Map(15 -> DPP.BCAST15, 31 -> DPP.BCAST31)
   private val Numeric   = Set("row_mask", "bank_mask", "bound_ctrl", "fi")
 
+  private val SubDwordSelectors = Vector(EncodingField.DST_SEL, EncodingField.SRC0_SEL, EncodingField.SRC1_SEL)
+
   // row_newbcast reuses row_share's encoding, so the target decides the spelling.
   private def rows(isa: ISA): Map[NonEmpty[String], Int] =
     if (DppControl.rowNewBroadcast(isa)) Rows - "row_share" + (("row_newbcast", DPP.ROW_NEWBCAST_FIRST))
@@ -39,8 +41,10 @@ private object LaneModifiers {
 
   def selected(instruction: Instruction, layout: InstructionLayout): Boolean = {
     val eight   = instruction.mods.exists(_.name == "dpp8")
-    val subword = instruction.mods.exists(mod => Set("sdwa", "src0_sel", "src1_sel", "dst_sel", "dst_unused")(mod.name))
-    val dpp     = instruction.mods.exists(mod =>
+    val subword = instruction.mods.exists(mod =>
+      PartialFunction.cond(mod.name) { case "sdwa" | "src0_sel" | "src1_sel" | "dst_sel" | "dst_unused" => true }
+    )
+    val dpp = instruction.mods.exists(mod =>
       mod.name == "dpp" || mod.name == "dpp8" || mod.name == "quad_perm" || Rows.contains(mod.name) ||
         Waves.contains(mod.name) || Mirrors.contains(mod.name) || mod.name == "row_bcast" || mod.name == "row_newbcast"
     )
@@ -52,7 +56,7 @@ private object LaneModifiers {
   def defaults(layout: InstructionLayout): Map[EncodingField, BigInt] =
     if (!supports(layout.format)) Map.empty
     else if (sdwa(layout)) Map(EncodingField.SRC0 -> BigInt(Fixed.SdwaSource)) ++
-      Vector(EncodingField.DST_SEL, EncodingField.SRC0_SEL, EncodingField.SRC1_SEL).filter(name =>
+      SubDwordSelectors.filter(name =>
         layout.byName.contains(name) && (name != EncodingField.SRC1_SEL || base(layout) != EncodingFormat.VOP1)
       ).map(_ -> BigInt(SubDwordSelection.DWord.encoding)).toMap
     else if (dpp8(layout)) Map(EncodingField.SRC0 -> BigInt(DPP8.DPP8_FI_0))
@@ -110,7 +114,7 @@ private object LaneModifiers {
   def modifiers(word: InstructionWord, layout: InstructionLayout): Vec[Modifier] = {
     def numeric(name: NonEmpty[String], value: Long): Modifier =
       Modifier(name, Some(value.toString.unsafe[NonEmpty[String]]))
-    def select(name: EncodingField, spelling: Int => Option[NonEmpty[String]]): Vec[Modifier] =
+    inline def select(name: EncodingField, inline spelling: Int => Option[NonEmpty[String]]): Vec[Modifier] =
       layout.byName.get(name).flatMap(field =>
         spelling(field.get(word).toInt)
       )

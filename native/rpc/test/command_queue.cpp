@@ -1,10 +1,12 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,12 +14,15 @@
 
 TEST_CASE("Queued completion retains arguments and orders streams without blocking submission", "[queue]") {
   gemstone::CommandQueue queue(999);
-  std::promise<void> release, started;
+  std::promise<void> release;
+  std::promise<void> started;
   auto gate = release.get_future().share();
   auto reached = started.get_future();
   auto owner = std::make_shared<int>(41);
-  std::weak_ptr<int> lifetime = owner;
-  int streamA{}, streamB{}, result{};
+  std::weak_ptr<int> const lifetime = owner;
+  int streamA{};
+  int streamB{};
+  int result{};
   const auto first = queue.submit(&streamA, [owner, gate, &started, &result] {
     started.set_value();
     if (gate.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return 1;
@@ -69,10 +74,12 @@ TEST_CASE("Queued failures reach synchronisation and later work still completes"
 
 TEST_CASE("Legacy stream dependencies leave nonblocking streams independently runnable", "[queue]") {
   gemstone::CommandQueue queue(999);
-  int blocking{}, independent{};
+  int blocking{};
+  int independent{};
   queue.configure(&blocking, false);
   queue.configure(&independent, true);
-  std::promise<void> release, ran;
+  std::promise<void> release;
+  std::promise<void> ran;
   auto gate = release.get_future().share();
   auto progressed = ran.get_future();
   std::atomic_int sequence{0};
@@ -99,7 +106,7 @@ TEST_CASE("Unordered work runs between barriers and host completions release dep
   gemstone::CommandQueue queue(999);
   int stream{};
   queue.configure(&stream, true);
-  const auto gate = queue.pending();
+  const auto gate = gemstone::CommandQueue::pending();
   std::atomic_int sequence{0};
   const auto blocked =
       queue.submit(&stream, [&] { return sequence.fetch_add(1) == 1 ? 0 : 1; }, {gate}, gemstone::CommandQueue::Order::Unordered);
@@ -116,7 +123,9 @@ TEST_CASE("Unordered work runs between barriers and host completions release dep
 
 TEST_CASE("Blocking waits on a worker let later queued work run", "[queue]") {
   gemstone::CommandQueue queue(999);
-  int first{}, second{}, third{};
+  int first{};
+  int second{};
+  int third{};
   std::mutex mutex;
   std::condition_variable changed;
   int signalled = 0;
@@ -130,7 +139,7 @@ TEST_CASE("Blocking waits on a worker let later queued work run", "[queue]") {
   const auto b = queue.submit(&second, wait);
   queue.submit(&third, [&] {
     {
-      std::lock_guard lock(mutex);
+      std::scoped_lock const lock(mutex);
       signalled = 1;
     }
     changed.notify_all();
@@ -156,11 +165,13 @@ TEST_CASE("Streams and events created by the queue order work and reject unknown
   queue.configure(&other, true);
   REQUIRE(queue.waitEvent(&other, event));
   const auto after = queue.submit(&other, [] { return 0; });
-  CHECK_FALSE(queue.ready(*queue.eventTicket(event)));
+  const auto ticket = queue.eventTicket(event).value_or(nullptr);
+  REQUIRE(ticket);
+  CHECK_FALSE(queue.ready(ticket));
   CHECK_FALSE(queue.ready(after));
   release.set_value();
   CHECK(queue.wait(after) == 0);
-  CHECK(queue.ready(*queue.eventTicket(event)));
+  CHECK(queue.ready(ticket));
   CHECK(queue.destroyEvent(event));
   CHECK_FALSE(queue.destroyEvent(event));
   CHECK_FALSE(queue.recordEvent(event, stream));

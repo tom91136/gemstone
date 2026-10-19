@@ -51,6 +51,26 @@ class RangeReductionSuite extends munit.FunSuite {
     intercept[IllegalArgumentException](LegacyRangeReduction.inputs(35, function, fullLayout))
   }
 
+  test("a wide load's address pair does not alias the reduced register through its width") {
+    val function =
+      Listing.program("RRO.SINCOS R4, R4; MUFU.SIN R5, R4; LDG.E.128 R8, [R2]; MUFU.COS R4, R4; EXIT").value
+    assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16, 48))
+  }
+
+  test("a shifted-add destination with a carry ends a consumed range reduction lifetime") {
+    val function = Listing.program("RRO.SINCOS R4, R4; MUFU.COS R6, R4; ISCADD R4.CC, R5, R6, 0x4; BRA 0x20").value
+    assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16))
+  }
+
+  for (sm <- Vec(35, 50, 60)) test(s"sm_$sm a wide load over the reduced register ends its lifetime") {
+    check(
+      sm,
+      "LDC.64 R10, c[0x0][0x160]; MOV R7, 9; STG.E [R10+8], R7; MOV R4, 0; RRO.SINCOS R6, R4; MUFU.COS R5, R6; " +
+        "STG.E [R10], R5; LD.E.128 R4, [R10]; STG.E [R10+4], R6; EXIT",
+      Vec(0x3f800000, 9, 9, 0)
+    )
+  }
+
   for (sm <- Vec(50, 60)) test(s"sm_$sm integer min/max ends a consumed range reduction lifetime") {
     check(
       sm,

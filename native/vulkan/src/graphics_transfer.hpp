@@ -8,19 +8,24 @@
 
 namespace gemstone::vulkan {
 inline gx::GraphicsRect graphicsRect(VkRect2D area) {
-  return {area.offset.x, area.offset.y, static_cast<int32_t>(area.extent.width), static_cast<int32_t>(area.extent.height)};
+  return {.x = area.offset.x,
+          .y = area.offset.y,
+          .width = {static_cast<int32_t>(area.extent.width)},
+          .height = {static_cast<int32_t>(area.extent.height)}};
 }
 inline gx::GraphicsExtent graphicsExtent(VkExtent3D extent) {
-  return {static_cast<int32_t>(extent.width), static_cast<int32_t>(extent.height), static_cast<int32_t>(extent.depth)};
+  return {.width = {static_cast<int32_t>(extent.width)},
+          .height = {static_cast<int32_t>(extent.height)},
+          .depth = {static_cast<int32_t>(extent.depth)}};
 }
-inline gx::GraphicsOffset graphicsOffset(VkOffset3D offset) { return {offset.x, offset.y, offset.z}; }
+inline gx::GraphicsOffset graphicsOffset(VkOffset3D offset) { return {.x = offset.x, .y = offset.y, .z = offset.z}; }
 inline gx::GraphicsLayers graphicsLayers(VkImageSubresourceLayers layers) {
-  return {static_cast<int32_t>(layers.mipLevel),
-          static_cast<int32_t>(layers.baseArrayLayer),
-          static_cast<int32_t>(layers.layerCount),
-          bool(layers.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT),
-          bool(layers.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT),
-          bool(layers.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT)};
+  return {.level = {static_cast<int32_t>(layers.mipLevel)},
+          .baseLayer = {static_cast<int32_t>(layers.baseArrayLayer)},
+          .layers = {static_cast<int32_t>(layers.layerCount)},
+          .colour = static_cast<bool>(layers.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT),
+          .depth = static_cast<bool>(layers.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT),
+          .stencil = static_cast<bool>(layers.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT)};
 }
 template <typename Region> gx::GraphicsImageCopy graphicsCopy(const Region &copy) {
   return {graphicsLayers(copy.srcSubresource), graphicsOffset(copy.srcOffset), graphicsLayers(copy.dstSubresource),
@@ -57,17 +62,24 @@ public:
       return {};
     }
     auto layout = imageLayoutOf(value);
-    return {range(value.memory, value.offset, layout.size),
-            {std::move(layout.levels)},
-            static_cast<int32_t>(value.layers),
-            static_cast<int32_t>(value.samples),
-            *format,
-            value.type == VK_IMAGE_TYPE_3D};
+    return {.memory = range(value.memory, value.offset, layout.size),
+            .levels = {std::move(layout.levels)},
+            .layers = {static_cast<int32_t>(value.layers)},
+            .samples = {static_cast<int32_t>(value.samples)},
+            .format = *format,
+            .volume = value.type == VK_IMAGE_TYPE_3D};
   }
   // Stage resources must outlive this transfer and its synchronous submit.
   gx::GraphicsShader shader(const gx::PreparedShader &stage, const StageResources &resources,
                             const std::array<uint8_t, gx::GraphicsPushConstantBytes> &push) {
-    gx::GraphicsShader result{stage.image, stage.entry.value, stage.interfaces, {}, {}, {}, stage.earlyFragmentTests, stage.fragmentQuads};
+    gx::GraphicsShader result{.image = stage.image,
+                              .entry = {stage.entry.value},
+                              .interfaces = stage.interfaces,
+                              .arguments = {},
+                              .relocations = {},
+                              .pushConstants = {},
+                              .earlyFragmentTests = stage.earlyFragmentTests,
+                              .fragmentQuads = stage.fragmentQuads};
     auto bound = bindStageResources(resources, [&](const StageResources::Allocation &allocation) {
       return allocation.memory ? range(allocation.memory, allocation.offset, allocation.size)
                                : this->resources.memory(allocation.data, allocation.size, false);

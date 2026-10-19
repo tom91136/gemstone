@@ -28,7 +28,7 @@ class VecRangeSuite extends munit.FunSuite {
   }
 
   test("indices produces nonnegative runtime indexes and an empty vector for zero") {
-    def acceptIndex(index: Int >= 0): Int = index.raw
+    def acceptIndex(index: Int >= 0): Int = index
     val indexes                           = Vec.indices(4)
     assertEquals(indexes.map(acceptIndex(_)), Vec(0, 1, 2, 3))
     assertEquals(Vec.indices(0), Vec.empty[Int >= 0])

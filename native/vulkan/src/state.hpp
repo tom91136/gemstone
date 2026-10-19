@@ -41,7 +41,7 @@ struct Memory {
   std::span<uint8_t> bytes;
 
   static uint8_t *allocateBacking(size_t size) {
-    host::Scope deviceStorage(nullptr);
+    host::Scope const deviceStorage(nullptr);
     return static_cast<uint8_t *>(::operator new(size, std::align_val_t{MemoryMapAlignment}));
   }
   explicit Memory(size_t size) : allocation(allocateBacking(size)), bytes(allocation.get(), size) {
@@ -55,7 +55,7 @@ struct Command {
   std::array<VkDescriptorSet, MaxBoundDescriptorSets> descriptors{};
   std::vector<recorded::Operation> operations;
   std::array<uint8_t, gx::GraphicsPushConstantBytes> pushConstants{};
-  std::map<DescriptorSlot, uint32_t> dynamicOffsets{};
+  std::map<DescriptorSlot, uint32_t> dynamicOffsets;
   bool recording = false;
   bool allocationFailed = false;
 };
@@ -83,7 +83,7 @@ struct Submission {
 struct DeviceState {
   bool stopping = false, lost = false;
   bool hostQueryResetExtension = false;
-  bool failed() const { return lost || stopping; }
+  [[nodiscard]] bool failed() const { return lost || stopping; }
   std::vector<std::shared_ptr<QueueState>> queues;
 };
 struct DescriptorPoolState {
@@ -126,8 +126,8 @@ inline VkPhysicalDevice physicalDeviceHandle(VkInstance instance) { return reint
 extern std::map<VkImage, Image> images;
 
 struct ImageSlice {
-  VkImage image;
-  uint32_t baseLayer, level = 0, levels = 1;
+  VkImage image{};
+  uint32_t baseLayer{}, level = 0, levels = 1;
   VkFormat format = VK_FORMAT_UNDEFINED;
   uint32_t layers = 1;
   VkImageAspectFlags aspects = 0;
@@ -149,7 +149,7 @@ struct QueryPool {
     uint64_t value = 0;
     bool available = false;
   };
-  VkQueryType type;
+  VkQueryType type{};
   std::vector<Slot> slots;
   std::weak_ptr<DeviceState> device;
 };
@@ -195,7 +195,7 @@ struct BufferRange {
   std::span<uint8_t> bytes;
 };
 // Called under stateMutex. VK_WHOLE_SIZE selects the remainder of the buffer.
-std::optional<BufferRange> bufferRange(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size);
+std::optional<BufferRange> bufferRange(VkBuffer handle, VkDeviceSize offset, VkDeviceSize size);
 
 CommandQueue &commandQueue();
 /** Stops every device and joins the queue workers; later submissions run on the submitting thread. */

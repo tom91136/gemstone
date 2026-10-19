@@ -12,7 +12,7 @@ enum SubDwordSelection(
     val width: Int in 1 ~ 64,
     val shift: Int in 0 ~ 24,
     val upperBit: Int in 1 ~ 64
-) {
+) derives CanEqual {
   case Byte0 extends SubDwordSelection(EncodingConstants.SDWA.BYTE_0, 8, 0, 8)
   case Byte1 extends SubDwordSelection(EncodingConstants.SDWA.BYTE_1, 8, 8, 16)
   case Byte2 extends SubDwordSelection(EncodingConstants.SDWA.BYTE_2, 8, 16, 24)

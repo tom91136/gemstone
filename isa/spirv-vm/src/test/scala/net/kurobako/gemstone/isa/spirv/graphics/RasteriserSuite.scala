@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.graphics
 
+import VertexStage.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*

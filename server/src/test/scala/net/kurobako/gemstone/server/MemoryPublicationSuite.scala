@@ -12,10 +12,12 @@ import scala.util.Using
 
 /** The same mixed-backing and pointer-publication scenarios run through every native API. */
 class MemoryPublicationSuite extends munit.FunSuite {
+  private val Booleans = List(false, true)
+
   override val munitTimeout: Duration = 150.seconds
   for {
     api  <- List("cuda", "hip", "hsa", "levelzero", "opencl")
-    unix <- List(false, true)
+    unix <- Booleans
   }
     test(s"$api mixed memory and pointer publication unix=$unix") {
       val directory = native.directory

@@ -2,18 +2,23 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, Kernel as _, *}
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class FloatSuite extends munit.FunSuite {
-  private def hex(bits: Int): String      = s"0x${Integer.toUnsignedString(bits, 16)}"
-  private def float(value: Float): Int    = java.lang.Float.floatToRawIntBits(value)
-  private def double(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)
+  private val Flags      = Vec(false, true)
+  private val Conditions = Vec(-1.0f, 0.0f, Float.NaN)
+  private val Divisors   = Vec(6.0, -6.0)
+
+  private def hex(bits: Int): String   = s"0x${Integer.toUnsignedString(bits, 16)}"
+  private def float(value: Float): Int = java.lang.Float.floatToRawIntBits(value)
 
   private def bits(exponent: Int, mantissa: Int = 0, negative: Boolean = false): Int =
     (if (negative) 0x80000000 else 0) | (exponent << 23) | mantissa
@@ -194,7 +199,7 @@ class FloatSuite extends munit.FunSuite {
     assertEquals(run.words(0), expected)
   }
 
-  for (unordered <- Vec(false, true))
+  for (unordered <- Flags)
     test(s"FSET matches ordered and unordered comparison cases, unordered=$unordered") {
       val opcode = if (unordered) "FSET.NEU.AND" else "FSET.EQ.AND"
       NumericCases.f32Comparisons.foreach { (left, right, equal, notEqualUnordered) =>
@@ -219,7 +224,7 @@ class FloatSuite extends munit.FunSuite {
 
   for {
     comparison <- Vec("LT", "GEU")
-    condition  <- Vec(-1.0f, 0.0f, Float.NaN)
+    condition  <- Conditions
   }
     test(s"floating compare/select applies $comparison to the condition $condition") {
       val selected = if (comparison == "LT") condition < 0.0f else condition >= 0.0f || condition.isNaN
@@ -237,8 +242,8 @@ class FloatSuite extends munit.FunSuite {
       "LDC.64 R10, c[0x0][0x160]; MOV R0, 0x3fc00000; FADD R4, R0, 1; STG.E [R10], R4; EXIT",
       Vec(0x40200000),
       rewrite = instruction =>
-        instruction.operation match {
-          case _: Instruction.Fadd =>
+        instruction.operation.form match {
+          case _: Form.Fadd =>
             val decoded = InstructionDecoder.decode(
               instruction.address,
               LittleEndian.toVec(0xc2c001fc001c0011L, 8).toArray,
@@ -263,7 +268,7 @@ class FloatSuite extends munit.FunSuite {
   private def roundingCases: Vec[(String, Boolean, Boolean)] =
     for {
       mode     <- Vec("RN", "RM", "RP", "RZ")
-      negative <- Vec(false, true)
+      negative <- Flags
     } yield (mode, negative, mode == "RN" || mode == (if (negative) "RM" else "RP"))
 
   test("FFMA preserves each rounding direction for positive and negative results") {
@@ -374,8 +379,8 @@ class FloatSuite extends munit.FunSuite {
 
   test("MUFU double high-word immediates accept numeric and raw binary operands") {
     for {
-      encoded <- Vec(false, true)
-      value   <- Vec(6.0, -6.0)
+      encoded <- Flags
+      value   <- Divisors
     }
       check(
         86,
@@ -471,7 +476,7 @@ class FloatSuite extends munit.FunSuite {
         parsed
       )
     }
-    for (binary <- Vec(false, true)) test(s"sm$sm FADD2 swaps first pair before aliased write binary=$binary") {
+    for (binary <- Flags) test(s"sm$sm FADD2 swaps first pair before aliased write binary=$binary") {
       pair("R6.F32x2.LO_HI", "R8.F32x2", Vec(0x41580000, 0xc0300000), sm = sm, binary = binary)
     }
     test(s"sm$sm executes MiniBUDE's binary FMUL2 with aliased operands") {
@@ -517,13 +522,12 @@ class FloatSuite extends munit.FunSuite {
     pair("R6.F32x2", "URZ.F32x2", Vec(0x3fa00000, 0x41280000))
   }
 
-  test("FADD2 rejects misaligned, out-of-range pairs and unsupported rounding") {
+  test("FADD2 rejects misaligned and out-of-range pairs") {
     Vec(
       "FADD2 R7, R6.F32x2, R8.F32x2",
       "FADD2 R6, R7.F32x2, R8.F32x2",
       "FADD2 R6, R254.F32x2, R8.F32x2",
-      "FADD2 R6, R6.F32x2, UR80.F32x2",
-      "FADD2.RM R6, R6.F32x2, R8.F32x2"
+      "FADD2 R6, R6.F32x2, UR80.F32x2"
     ).foreach(form => assert(program(100, s"$form; EXIT").lower().isLeft, form))
   }
 }

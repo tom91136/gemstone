@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import Op.*
 import VMInvocation.*
-import VMLowering.*
 import VMMemory.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
@@ -54,7 +53,7 @@ private object DeviceEnqueueOps {
                 memory,
                 returned,
                 memory.deviceQueue.enqueue(waitsOn, returned.address != 0L)(
-                  Command.Marker(_, waitsOn)
+                  Command(_, waitsOn, Action.Marker)
                 )
               )
             )
@@ -205,7 +204,7 @@ private object DeviceEnqueueOps {
               memory,
               returned,
               memory.deviceQueue.enqueue(waitsOn, returned.address != 0L)(event =>
-                Command.Kernel(event, waitsOn, id(invoke), ndrange, captured, align.toInt, sizes)
+                Command(event, waitsOn, Action.Kernel(id(invoke), ndrange, captured, align.toInt, sizes))
               )
             )
           )

@@ -17,7 +17,7 @@ object Target {
 }
 
 /** An architecture with recovered decoding tables. */
-case class Target private (sm: Int >= 35) {
+case class Target private (sm: Int >= 35) derives CanEqual {
   def name: String                = s"SM$sm"
   def generation: Generation      = Generation.of(sm)
   def database: NVDisasm.Database = NVDisasm.database(name)

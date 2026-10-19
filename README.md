@@ -17,14 +17,16 @@ checks every instruction's availability against the module's `.version` and `.ta
 | `native` | CMake-built API facades and RPC client |
 | `tools/codegen` | Generators for checked-in sources under `src/generated` and `native/generated` |
 | `tools/conformance` | Conformance run and emulation orchestration |
-| `tools/{isa,benchmarks,test-support}` | ISA tools, benchmarks, shared test utilities |
+| `tools/benchmarks` | Benchmarks |
+| `test-support` | Shared test utilities |
+| `explorer` | Instruction explorer: search, encodings, register files, assembly, and each form's semantics as an executable definition; models build for the JVM and Scala.js (`sbt explorerJS/explorerSite` writes `target/explorer/`) |
+| `isa/semantics-check` | Every definition the explorer shows, generated, compiled, and checked against the VM on random operands |
 | `samples` | Library API samples: assemble, run, disassemble and edit a kernel for each ISA (`sbt samples/run`) |
-| `tools/codestyle` | C and C++ format, convention, and naming checks; terminology and binary file checks |
 | `codestyle/publicapi` | Compiler plugin that limits the server to the public API of core and the ISAs; sbt-baumkuchen provides the Scalafix rules and cycle checks |
 | `conformance` | Independent CMake conformance project, see [its README](conformance/README.md) |
 
 `build.sbt` holds project wiring, `project/` generic build utilities, and `tools/codegen` the pinned references
-(`sbt codegen` prepares them under `target/references/`). Generic test fixtures live in `tools/test-support`; fixtures
+(`sbt codegen` prepares them under `target/references/`). Generic test fixtures live in `test-support`; fixtures
 built on core types (memories, workgroups, ELF images) live in core's test sources, which dependent modules share.
 
 ## Requirements
@@ -38,6 +40,7 @@ Docker with `CONTAINER_EXECUTABLE=docker`) for conformance and fixture builds. D
 ```console
 sbt compile | test | testFull | lint | codegen
 sbt '<project>/testOnly <suite-glob>'
+sbt semanticsCheckAll
 sbt scalafmtAll scalafmtSbt | '<project>/scalafixAll'
 sbt native/build | native/test | native/format | native/lint
 sbt conformance/test | conformance/format | conformance/lint
@@ -46,11 +49,16 @@ sbt coverageJvm | 'coverageOnly <project> <suite-glob>'
 sbt core/stryker | amdgpuAsm/stryker | spirvAsm/stryker
 ```
 
-`test` includes native and conformance CTest; `testFull` forces every Scala test on JVM and Native. `codegen`
-regenerates checked-in outputs and CI fails if it changes the tree. `lint` rejects binary files: embed binary data as
-text at its use site, with the commands that produce it in a comment. `native/lint` and `conformance/lint` check
-`clang-format`, project conventions, and `.clang-tidy` identifier naming against each build's compile database. Coverage
-writes `target/coverage/`; mutation writes each module's `target/stryker4s-report/`.
+`test` includes native and conformance CTest and runs the Scala suites on the JVM, Scala Native, and Scala.js; suites
+under `src/test/scalajvmnative` need threads, files, child processes, or class-path resources, so Scala.js skips them.
+`testFull` forces every Scala test on JVM and Native. The differential checks of every rendered definition against the
+VM sit outside `test`: `semanticsCheckAll` runs them one ISA project at a time and fails at the end, naming every
+failing project; CI runs each ISA project as its own job. A project regenerates its definitions only when the
+classes they render from change. `codegen` regenerates checked-in outputs and CI fails if it
+changes the tree. `baumkuchenAnalyse` rejects binary files: embed binary data as text at its use site, with the commands that produce
+it in a comment. `native/lint` and `conformance/lint` check `clang-format`, project conventions, and `.clang-tidy`
+identifier naming against each build's compile database. Coverage writes `target/coverage/`; mutation writes each
+module's `target/stryker4s-report/`.
 
 `codegen` recovers the SASS encoding tables from pinned NVIDIA `nvdisasm` releases, which needs Linux x86_64 and
 `gcc`; decoding and assembly use the checked-in tables and need no NVIDIA tools. PTX and SASS test fixtures record
@@ -115,24 +123,71 @@ for {
 - `Cubin.patchKernel`/`replaceKernel` and `CodeObject.patchKernel`/`replaceKernel` write edited kernels back into
   their containers, relinking when the code changes size.
 
-`samples/` assembles, runs, disassembles and edits a kernel for every ISA (`sbt samples/run`); `API.md` records the
-API's design and its known gaps. Versions follow early semantic versioning, and `lint` checks binary compatibility
-against `Publishing.previousRelease` with MiMa once a release exists.
+`samples/` assembles, runs, disassembles and edits a kernel for every ISA (`sbt samples/run`), from a package outside
+Gemstone's so only public API compiles. Versions follow early semantic versioning, and `lint` checks binary
+compatibility against `Publishing.previousRelease` with MiMa once a release exists. Nothing is released yet.
+
+The server uses only the public API of core and the ISAs; the `codestyle/publicapi` compiler plugin rejects any
+reference that reaches a private declaration through package nesting. Each ISA keeps its own model rather than a
+shared shape, and splits into an `asm` and a `vm` module, no finer. `NoPackagePrivate` admits `private[gemstone]` and
+`private[isa]` for internals that span modules.
+
+| | SPIR-V | PTX | SASS | AMDGPU |
+| --- | --- | --- | --- | --- |
+| Decode | `ISA.decode` to `Module`; `asm.Printer` | `Parser` to `Program`; `asm.Printer` | `asm.Disassembler(target)`; `InstructionDecoder` | `asm.Disassembler(target, wave)`; `Binary.decodeStatementAt` |
+| Encode | `asm.Parser`, `ISA.encode` | text only | `asm.Assembler(target)` | `asm.Assembler.encode` |
+| Round trip | byte-exact; ids numeric, names lost | canonical text, equal AST | byte-exact sections | byte-exact |
+| Rewriting | case-class `copy`, `Module.freshIds` | immutable AST, `Program.mapInstructions`, `mapBodies` | `DecodedInstruction.rewrite`, `Assembler.relaid` | rebuild through `Instruction.decode` |
+| Container | n/a | n/a | `Cubin`: `patchKernel`, `replaceKernel` | `CodeObject` (relocations applied): `patchKernel`, `replaceKernel` |
+| Execution | `SPIRVBackend` | `PTXBackend` | `CubinBackend` | `AMDGPUBackend` |
+| State view | `InvocationView` | `CohortView` | `CohortView` | `WaveView` |
+
+- `vm.Backend.load` returns a `Backend.Program` that `execute` runs in-process without the server. Backends name their
+  image format with the open `ProgramFormat`; `BackendRegistry` holds one backend per format. Over RPC only the six
+  Gemstone formats are reachable, through `ExecutionSession` in `core/rpc`.
+- `AddressSpace` is an open trait; atomics, deferred reads and host fences are optional. `ArrayMemory` keeps one byte
+  array per allocation behind one lock.
+- `TaskControl` provides cancellation and an instruction budget, charged per block (NVIDIA), per batch (SPIR-V) or per
+  instruction (AMDGPU). Unobserved launches cost at most one null check per instruction or cohort step.
+- Refinement types (`Int > 0`, `UInt[5] in (0 ~ 17) | (24 ~ 31)`, `NonEmpty`) and the `refine`/`unsafe` macros appear
+  in most signatures. Refined values convert implicitly to their carrier; only constructing one validates. They suit
+  Scala 3 callers and exclude Java, Kotlin and C.
+- Lowering, interpreters and register files are private in every ISA, and no ISA exposes serialisable execution state.
+  NVIDIA state views use lowered register slots, not PTX or SASS register names, and the observer reports no barrier
+  events yet.
+
+### Semantics
+
+Instruction semantics are written once against `semantics.Algebra`, whose operations are all inline. Each ISA's
+dispatcher (`NvidiaStaged.staged` for PTX and SASS, `AMDGPUStaged.staged`, `SPIRVStaged.core`, `glsl` and `openCL`)
+matches an instruction once and hands its kernel to a family of sinks:
+
+- Execution passes lane or op-class sinks (`LaneLoop`, `WaveRun`, `OpBuilder`, `ConstantFolder`), and `Execute` expands
+  the kernel into specialised lane code with no dispatch or boxing.
+- Rendering passes render sinks (`StepRenderer`, `LaneRenderer`, `IdRenderer`) that name each operand from the ISA's
+  lowering provenance. `ScalaBackend` writes the result as an executable Scala definition over `semantics.prelude`, for
+  example `def VIADD(Ra: UInt[32], Rb: UInt[32]): (Rd: UInt[32]) = (Rd = Ra + Rb)`.
+- Numerics the algebra does not decompose are primitives: static methods typed over the prelude's `Float16`, `Float32`
+  and `Float64`, which execution inlines and rendering calls by name.
+- `InstructionSemantics.describe` returns the definition or an `Unrendered` reason. The explorer shows them, and
+  `semanticsCheck` compiles every definition and checks it against the VM. Data movement, whole-vector algorithms and
+  machine mechanics stay hand-written.
 
 ## Conformance
 
 ```console
-sbt 'conformance/build [default|complete|legacy-gfx803]'
+sbt 'conformance/build [--target-set <set>] [--sycl-cts-full] [<backend>[/<arch>[/clang|gcc]] ...]'
 sbt 'conformance/run [--machine <profile>] [--workload <workload>] [<backend>[/<arch>[/clang|gcc]] ...]'
 sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [all|<backend>|<backend>/<arch>|cuda-ptx|cuda-sass[/<arch>] ...]'
 ```
 
-- Workloads: `compact` (default), `full`, `miniapps`, `cts-bounded`, `opencl-cts[-bounded]`, `sycl-cts[-bounded]`,
-  `vulkan-cts[-bounded]`, `vulkan-info`. The Vulkan workloads serve both API versions.
+- In the sbt shell, `Tab` completes target sets, workloads, profiles and routes, and an unknown name is rejected
+  before anything builds. `build` with routes builds just those artifacts; `cuda/sm_89` covers both of its compilers.
+- Workloads (default `compact`), suites and artifacts are described in [the conformance README](conformance/README.md).
 - Profiles are `conformance/profiles/<profile>.toml`; `--machine` defaults to the local short hostname.
-- `build` and `emulate` default to `conformanceTargetSet` (`default`: 11 routes); `emulate` builds its target set
-  first. `complete` adds every CUDA and GFX architecture: 123 routes sharing 97 artifacts. `cuda` and `cuda/sm_89`
-  select both code variants; `cuda-ptx` and `cuda-sass` select one.
+- `build` and `emulate` default to `conformanceTargetSet` (`default`); `emulate` builds its target set first.
+  `complete` adds every CUDA and GFX architecture. `cuda` and `cuda/sm_89` select both code variants; `cuda-ptx` and
+  `cuda-sass` select one.
 - Artifacts go to `target/conformance/artifacts`; reports to `target/conformance/{direct,emulated}`.
 - `emulate` runs one Gemstone server on a per-run Unix socket with an isolated client per test, and records JFR in
   `target/conformance/jfr/`, keeping the five newest recordings. Disable recording with
@@ -143,7 +198,7 @@ sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [all|<back
 | `CONFORMANCE_JOBS` | Concurrent emulated tests (default: half the cores, at most 16) |
 | `CMAKE_BUILD_PARALLEL_LEVEL` | Job budget shared across artifact containers |
 | `CONFORMANCE_ARTIFACT_PARALLELISM` | Concurrent artifact containers (default: cores / 8, at most 4) |
-| `SYCL_CTS_ENABLE_FULL_CONFORMANCE=ON` | Full SYCL CTS type matrices |
+| `SYCL_CTS_ENABLE_FULL_CONFORMANCE=ON` | Full SYCL CTS type matrices; the default for `build --sycl-cts-full` |
 
 ## Benchmarks
 
@@ -165,8 +220,8 @@ gfx1030 (wave32) `hsa-vector-copy.hsaco` fixture. Use `benchmarksNative` for Sca
 ## ISA tools
 
 ```console
-sbt 'isaTools/run disassemble --isa spirv|ptx|amdgpu|sass [--target gfx<n>|sm_<n>] [--wave-size 32|64] [--section <name>] [--output <file>] <input>'
-sbt 'isaTools/run assemble --isa spirv|ptx|amdgpu|sass [--target gfx<n>|sm_<n>] [--wave-size 32|64] --output <file> <input>'
+sbt 'server/run disassemble --isa spirv|ptx|amdgpu|sass [--target gfx<n>|sm_<n>] [--wave-size 32|64] [--section <name>] [--output <file>] <input>'
+sbt 'server/run assemble --isa spirv|ptx|amdgpu|sass [--target gfx<n>|sm_<n>] [--wave-size 32|64] --output <file> <input>'
 ```
 
 `--target` is required for AMDGPU and SASS; `--wave-size` applies to AMDGPU only; `--section` disassembles an ELF or

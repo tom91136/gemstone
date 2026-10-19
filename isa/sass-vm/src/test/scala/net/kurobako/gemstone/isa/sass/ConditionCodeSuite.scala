@@ -3,12 +3,16 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.testing.either.*
 
 class ConditionCodeSuite extends munit.FunSuite {
+  private val Flags     = Vec(false, true)
+  private val ZeroTests = Vec("Z", "NZ")
+
   private def probe(body: String): Kernel =
     program(35, s"LDC.64 R4, c[0x0][0x140]; MOV R0, c[0x0][0x148]; MOV R1, c[0x0][0x150]; $body", base = 0x140)
 
@@ -132,7 +136,7 @@ class ConditionCodeSuite extends munit.FunSuite {
       Vec(save, restore).foreach(roundTrips(_, sm))
     }
 
-    for (binary <- Vec(false, true))
+    for (binary <- Flags)
       test(s"sm$sm condition save/restore retains carry, zero, sign and overflow: binary=$binary") {
         Vec(("0xffffffff", 5, 1), ("0x7fffffff", 10, 0), ("1", 0, 0)).foreach { (input, cc, carry) =>
           check(
@@ -142,15 +146,15 @@ class ConditionCodeSuite extends munit.FunSuite {
             Vec(cc, carry),
             rewrite = instruction =>
               if (!binary) instruction
-              else instruction.operation match {
-                case _: Instruction.P2r =>
+              else instruction.operation.form match {
+                case _: Form.P2r =>
                   instruction.operands.head match {
                     case Operand.Register(_, index) =>
-                      decoded(0x38e8010000f7ff00L | index.raw, 0xff1L, instruction.address.raw, sm)
+                      decoded(0x38e8010000f7ff00L | index, 0xff1L, instruction.address, sm)
                     case other => fail(s"expected saved condition register, found $other")
                   }
-                case _: Instruction.R2p =>
-                  decoded(raw = 0x38f0010000f71d00L, control = 0x7f1L, instruction.address.raw, sm)
+                case _: Form.R2p =>
+                  decoded(raw = 0x38f0010000f71d00L, control = 0x7f1L, instruction.address, sm)
                 case _ => instruction
               }
           )
@@ -178,7 +182,7 @@ class ConditionCodeSuite extends munit.FunSuite {
 
   for {
     sm        <- Vec(50, 60)
-    condition <- Vec("Z", "NZ")
+    condition <- ZeroTests
   }
     test(s"sm$sm LOP.AND.X.$condition combines low and high zero tests") {
       check(

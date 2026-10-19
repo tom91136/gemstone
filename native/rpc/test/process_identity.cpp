@@ -32,6 +32,6 @@ TEST_CASE("process identity distinguishes process incarnations", "[rpc]") {
   }
   int status = 0;
   REQUIRE((waitpid(child, &status, 0) == child));
-  REQUIRE((WIFEXITED(status) && WEXITSTATUS(status) == 0));
+  REQUIRE((status == 0));
 #endif
 }

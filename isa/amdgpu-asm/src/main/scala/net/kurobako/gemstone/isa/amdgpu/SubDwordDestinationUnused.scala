@@ -7,7 +7,7 @@ object SubDwordDestinationUnused {
   def fromName(name: String): Option[SubDwordDestinationUnused]      = values.find(_.assemblyName == name)
 }
 
-enum SubDwordDestinationUnused(val encoding: Int) {
+enum SubDwordDestinationUnused(val encoding: Int) derives CanEqual {
   case Pad        extends SubDwordDestinationUnused(EncodingConstants.SDWAUnused.UNUSED_PAD)
   case SignExtend extends SubDwordDestinationUnused(EncodingConstants.SDWAUnused.UNUSED_SEXT)
   case Preserve   extends SubDwordDestinationUnused(EncodingConstants.SDWAUnused.UNUSED_PRESERVE)

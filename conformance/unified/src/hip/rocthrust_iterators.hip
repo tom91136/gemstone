@@ -6,10 +6,13 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+using namespace aspartame;
 using namespace unified::rocthrust_support;
 
+namespace {
 // rocThrust `testing/zip_function` port: unpacked calls over zip iterators
 // compared against the tuple base case, on both host and device.
 
@@ -17,15 +20,15 @@ struct SumThree {
   UNIFIED_ROCTHRUST_HOST_DEVICE int32_t operator()(int32_t left, int32_t middle, int32_t right) const { return left + middle + right; }
 };
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/zip-function/i32/n11", "[unified][rocthrust][compact]") {
   const size_t count = 5;
-  std::vector<int32_t> left(count), middle(count), right(count), expected(count);
-  for (size_t index = 0; index < count; ++index) {
-    left[index] = static_cast<int32_t>(index) + int32_t{1};
-    middle[index] = static_cast<int32_t>(2 * index);
-    right[index] = -static_cast<int32_t>(index);
-    expected[index] = left[index] + middle[index] + right[index];
-  }
+  const auto left = iota(size_t{0}, count) | map([](size_t index) { return static_cast<int32_t>(index) + int32_t{1}; }) | to_vector();
+  const auto middle = iota(size_t{0}, count) | map([](size_t index) { return static_cast<int32_t>(2 * index); }) | to_vector();
+  const auto right = iota(size_t{0}, count) | map([](size_t index) { return -static_cast<int32_t>(index); }) | to_vector();
+  const auto expected =
+      iota(size_t{0}, count) | map([&](size_t index) { return left[index] + middle[index] + right[index]; }) | to_vector();
   const thrust::device_vector<int32_t> deviceLeft(left.begin(), left.end());
   const thrust::device_vector<int32_t> deviceMiddle(middle.begin(), middle.end());
   const thrust::device_vector<int32_t> deviceRight(right.begin(), right.end());
@@ -45,16 +48,19 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-function/i32/n11", "[unified][roct
   }
 }
 
+namespace {
 struct SelectEqualPairs {
   UNIFIED_ROCTHRUST_HOST_DEVICE bool operator()(const thrust::tuple<uint32_t, uint32_t> &pair, const float &) const {
     return thrust::get<0>(pair) == thrust::get<1>(pair);
   }
 };
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/zip-function-remove-if/i32/n11", "[unified][rocthrust][compact]") {
   thrust::device_vector<uint32_t> a{0, 0, 2, 0};
   thrust::device_vector<uint32_t> b{0, 2, 2, 2};
-  thrust::device_vector<float> c{88.0f, 88.0f, 89.0f, 89.0f};
+  thrust::device_vector<float> c{88.0F, 88.0F, 89.0F, 89.0F};
   const auto first =
       thrust::make_zip_iterator(thrust::make_tuple(thrust::make_zip_iterator(thrust::make_tuple(a.begin(), b.begin())), c.begin()));
   const auto end = thrust::remove_if(first, first + 4, thrust::make_zip_function(SelectEqualPairs{}));
@@ -66,7 +72,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-function-remove-if/i32/n11", "[uni
   a.resize(count);
   b.resize(count);
   c.resize(count);
-  std::vector<float> expected{88.0f, 89.0f};
+  std::vector<float> expected{88.0F, 89.0F};
   {
     INFO("zip-function-remove-if");
     REQUIRE(std::vector<float>(c.begin(), c.end()) == expected);
@@ -85,12 +91,8 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-reduce/i32/n11", "[unifie
   const auto first = thrust::make_zip_iterator(thrust::make_tuple(deviceKeys.begin(), deviceValues.begin()));
   const auto last = thrust::make_zip_iterator(thrust::make_tuple(deviceKeys.end(), deviceValues.end()));
   const Tuple actual = thrust::reduce(thrust::device, first, last, thrust::make_tuple(int32_t{}, int32_t{}), TuplePlus<int32_t>{});
-  int32_t expectedKey = int32_t{};
-  int32_t expectedValue = 0;
-  for (size_t index = 0; index < keys.size(); ++index) {
-    expectedKey += keys[index];
-    expectedValue += values[index];
-  }
+  const int32_t expectedKey = keys ^ sum();
+  const int32_t expectedValue = values ^ sum();
   {
     INFO(fmt::format("zip-iterator-reduce mismatch (actual={},{}; expected={},{})", thrust::get<0>(actual), thrust::get<1>(actual),
                      expectedKey, expectedValue));
@@ -273,6 +275,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-manipulation/i32/n11", "[unified]
   }
 }
 
+namespace {
 struct PairFromValues {
   template <class X, class Y> UNIFIED_ROCTHRUST_HOST_DEVICE thrust::pair<X, Y> operator()(const X &left, const Y &right) const {
     return thrust::make_pair(left, right);
@@ -285,6 +288,8 @@ template <class P> struct PairSelfAdd {
   }
 };
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/pair-transform/i32/n11", "[unified][rocthrust][compact]") {
   using P = thrust::pair<int32_t, int32_t>;
   const std::vector<int32_t> first{int32_t{3}, int32_t{-1}, int32_t{2}, int32_t{5}};
@@ -294,17 +299,8 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-transform/i32/n11", "[unified][ro
   thrust::device_vector<P> devicePairs(first.size());
   thrust::transform(deviceFirst.begin(), deviceFirst.end(), deviceSecond.begin(), devicePairs.begin(), PairFromValues{});
   thrust::transform(devicePairs.begin(), devicePairs.end(), devicePairs.begin(), devicePairs.begin(), PairSelfAdd<P>{});
-  std::vector<P> expected(first.size());
-  for (size_t index = 0; index < first.size(); ++index) {
-    const std::pair<int32_t, int32_t> pair(first[index], second[index]);
-    expected[index].first = pair.first + pair.first;
-    expected[index].second = pair.second + pair.second;
-  }
-  std::vector<P> actual;
-  for (size_t index = 0; index < first.size(); ++index) {
-    const P element = devicePairs[index];
-    actual.push_back(element);
-  }
+  const auto expected = first ^ zip(second) ^ map([](int32_t head, int32_t tail) { return P(head + head, tail + tail); });
+  const auto actual = iota(size_t{0}, first.size()) | map([&](size_t index) -> P { return devicePairs[index]; }) | to_vector();
   {
     INFO("pair-transform: field association mismatch");
     REQUIRE(actual == expected);
@@ -356,9 +352,12 @@ TEST_CASE("algorithms/roc-thrust-semantic/tuple-construction/i32/n11", "[unified
   }
 }
 
+namespace {
 struct TupleSquareInPlace {
   template <class Value> UNIFIED_ROCTHRUST_HOST_DEVICE void operator()(Value &value) const { value = value * value; }
 };
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/tuple-algorithms/i32/n11", "[unified][rocthrust][compact]") {
   const auto subsetSource = std::make_tuple(int32_t{0}, int32_t{2}, 3.14);

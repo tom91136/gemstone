@@ -10,9 +10,10 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class IntegerOpSuite extends munit.FunSuite {
-  private val Widths   = Seq(8, 16, 32, 64)
-  private val Signs    = Seq(false, true)
-  private val TypeName = """%([usf])(8|16|32|64)(?:x([0-9]+))?\b""".r
+  private val Widths      = Seq(8, 16, 32, 64)
+  private val Signs       = Seq(false, true)
+  private val FloatWidths = Seq(16, 32, 64)
+  private val TypeName    = """%([usf])(8|16|32|64)(?:x([0-9]+))?\b""".r
 
   private def typ(signed: Boolean, width: Int, lanes: Int = 1): String =
     s"%${if (signed) "s" else "u"}$width${if (lanes == 1) "" else s"x$lanes"}"
@@ -192,6 +193,8 @@ class IntegerOpSuite extends munit.FunSuite {
       val modulus = BigInt(1) << width
       val samples =
         Seq((BigInt(7), BigInt(0)), (BigInt(9), BigInt(-2)), (-(modulus >> 1), BigInt(-1)), (BigInt(-9), BigInt(2)))
+      val lefts  = samples.map(_._1)
+      val rights = samples.map(_._2)
       for (opcode <- Divisions) {
         val signed                                               = opcode.startsWith("S")
         def value(raw: BigInt): BigInt                           = if (signed) raw else raw & (modulus - 1)
@@ -205,7 +208,7 @@ class IntegerOpSuite extends munit.FunSuite {
           s"%result = Op$opcode $t %x %y",
           Seq.empty,
           Some(samples.map((left, right) => divide(opcode, value(left), value(right)))),
-          declarations = constants("x", samples.map(_._1)) + "\n" + constants("y", samples.map(_._2)),
+          declarations = constants("x", lefts) + "\n" + constants("y", rights),
           vulkan = true
         )
       }
@@ -255,16 +258,19 @@ class IntegerOpSuite extends munit.FunSuite {
     )
   }
 
-  private val bitwise =
-    pairwise(Seq("BitwiseAnd", "BitwiseOr", "BitwiseXor", "Not"), Widths, Seq(1, 3, 4), Signs, Signs, Signs)
+  private val BitwiseOpcodes = Seq("BitwiseAnd", "BitwiseOr", "BitwiseXor", "Not")
+
+  private val bitwise = pairwise(BitwiseOpcodes, Widths, Seq(1, 3, 4), Signs, Signs, Signs)
+
+  private val bitwiseCovered = bitwise.map(row => (row._1, row._4, row._5, row._6)).toSet
 
   // every signedness triple per opcode
   private val bitwiseSignedness = for {
-    opcode       <- Seq("BitwiseAnd", "BitwiseOr", "BitwiseXor", "Not")
+    opcode       <- BitwiseOpcodes
     resultSigned <- Signs
     leftSigned   <- Signs
     rightSigned  <- Signs
-    if !bitwise.exists(row => (row._1, row._4, row._5, row._6) == (opcode, resultSigned, leftSigned, rightSigned))
+    if !bitwiseCovered((opcode, resultSigned, leftSigned, rightSigned))
   } yield (opcode, 32, 4, resultSigned, leftSigned, rightSigned)
 
   for ((opcode, width, lanes, resultSigned, leftSigned, rightSigned) <- bitwise ++ bitwiseSignedness)
@@ -356,7 +362,7 @@ class IntegerOpSuite extends munit.FunSuite {
 
   for {
     opcode <- Seq("FRem", "FMod")
-    width  <- Seq(16, 32, 64)
+    width  <- FloatWidths
   } test(s"Op$opcode takes the sign of the ${if (opcode == "FRem") "dividend" else "divisor"} at width $width") {
     def bits(value: Double): Long = floatingBits(value, width)
     val t                         = s"%f${width}x4"

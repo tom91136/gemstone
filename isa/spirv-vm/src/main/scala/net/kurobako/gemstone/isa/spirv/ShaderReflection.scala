@@ -28,7 +28,7 @@ private object ShaderReflection {
       require(!values.contains(Decoration.Sample), "sample interpolation is unsupported")
       require(!values.contains(Decoration.Index), "dual source interfaces are unsupported")
       val component = get(Decoration.Component).map(value =>
-        value.raw.refine[Int in 0 ~ 3].fold(
+        value.refine[Int in 0 ~ 3].fold(
           _ => throw IllegalArgumentException(s"interface component $value is out of range"),
           identity
         )
@@ -73,15 +73,16 @@ private object ShaderReflection {
       require(!ancestors.contains(value) && ancestors.size < 128, "recursive or excessively nested shader interface")
       if (!checked.contains(value)) {
         val children: Vec[Int] = program.types(value) match {
-          case RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_) => Vec.empty
-          case RuntimeType.VectorType(component, count)                               =>
-            require(count.raw >= 1 && count.raw <= 4, "invalid interface vector size")
+          case RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_) |
+              RuntimeType.Float8(_) => Vec.empty
+          case RuntimeType.VectorType(component, count) =>
+            require(count >= 1 && count <= 4, "invalid interface vector size")
             Vec(component)
           case RuntimeType.MatrixType(column, count) =>
-            require(count.raw >= 1 && count.raw <= 4, "invalid interface matrix size")
+            require(count >= 1 && count <= 4, "invalid interface matrix size")
             Vec(column)
           case RuntimeType.Array(element, count) =>
-            require(count.raw > 0 && count.raw <= MaximumRecordBytes, "invalid interface array size")
+            require(count > 0 && count <= MaximumRecordBytes, "invalid interface array size")
             Vec(element)
           case RuntimeType.Structure(fields) => fields
           case _                             => throw IllegalArgumentException("unsupported shader interface type")
@@ -119,7 +120,7 @@ private object ShaderReflection {
         ): Unit = {
           require(fields.size < MaximumFields, "too many shader interface fields")
           require(
-            (offset + size).raw <= recordSize.raw,
+            offset + size <= recordSize,
             "interface field exceeds record"
           )
           fields += ShaderField(offset, size, location, builtin, q)
@@ -144,9 +145,9 @@ private object ShaderReflection {
               types.zip(Vec.indices(types.nonNegativeSize)).foldLeft(location) { case (next, (member, index)) =>
                 located(
                   member,
-                  offset + program.structMemberOffset(value, types, index.raw),
+                  offset + program.structMemberOffset(value, types, index),
                   next,
-                  memberDecorations(value, index.raw).qualifiers(q)
+                  memberDecorations(value, index).qualifiers(q)
                 )
               }
             case scalarOrVector =>
@@ -159,7 +160,7 @@ private object ShaderReflection {
                 case RuntimeType.Integer(width, _) if external || q.flat => width
                 case _ => throw IllegalArgumentException("unsupported interpolated interface scalar")
               }
-              require(width.raw != 64 || q.flat, "64-bit interfaces require flat interpolation")
+              require(width != 64 || q.flat, "64-bit interfaces require flat interpolation")
               val spans = interfaceSpans(width, lanes, q.component)
               spans.zip(Vec.indices(spans.nonNegativeSize)).foreach { case ((byteOffset, bytes, component), index) =>
                 append(
@@ -186,7 +187,7 @@ private object ShaderReflection {
                         program.storageTypeSize(
                           member,
                           program.memberMatrixLayouts.get(pointee -> index)
-                        ).raw.unsafe[Int > 0],
+                        ).unsafe[Int > 0],
                         None,
                         d.get(Decoration.BuiltIn),
                         q
@@ -214,17 +215,17 @@ private object ShaderReflection {
       lanes: Int > 0,
       component: Int in 0 ~ 3
   ): Vec[(Int >= 0, Int > 0, Int in 0 ~ 3)] = {
-    require((width.raw == 32 || width.raw == 64) && lanes.raw <= 4, "invalid interface span")
+    require((width == 32 || width == 64) && lanes <= 4, "invalid interface span")
     val words = lanes.raw * (width.raw / 32)
-    require(width.raw != 32 || component.raw + words <= 4, "interface exceeds location")
+    require(width != 32 || component + words <= 4, "interface exceeds location")
     require(
-      width.raw != 64 || (component.raw % 2 == 0 && (component.raw == 0 || words <= 2)),
+      width != 64 || (component.raw % 2 == 0 && (component == 0 || words <= 2)),
       "misaligned wide interface"
     )
-    val first                                           = math.min(words, 4 - component.raw).unsafe[Int > 0]
+    val first                                           = math.min(words, 4 - component).unsafe[Int > 0]
     val bytes                                           = first * 4
     val initial: Vec[(Int >= 0, Int > 0, Int in 0 ~ 3)] = Vec((0, bytes, component))
     if (first.raw == words) initial
-    else initial :+ ((bytes, ((words - first.raw) * 4).unsafe[Int > 0], 0))
+    else initial :+ ((bytes, ((words - first) * 4).unsafe[Int > 0], 0))
   }
 }

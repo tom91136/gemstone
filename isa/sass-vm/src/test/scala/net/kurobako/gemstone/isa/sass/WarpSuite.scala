@@ -68,6 +68,23 @@ class WarpSuite extends munit.FunSuite {
       )
     }
 
+  // ptxas spells redux.sync.min.u32 and .max.u32 REDUX.MIN and REDUX.MAX, and the .s32 forms with .S32
+  for ((operation, expected) <- Vec("MIN" -> 0, "MAX" -> -1))
+    test(s"untyped warp REDUX.$operation compares unsigned") {
+      check(
+        89,
+        s"""S2R R0, SR_TID.X
+          |IADD3 R4, R0, -16, RZ
+          |REDUX.$operation UR4, R4
+          |MOV R4, UR4
+          |LDC.64 R2, c[0x0][0x160]
+          |IMAD.WIDE.U32 R2, R0, 4, R2
+          |STG.E [R2.64], R4
+          |EXIT""".stripMargin,
+        Vec.fill(32)(expected)
+      )
+    }
+
   test("collective ALL pairs its target with ENDCOLLECTIVE and includes every lane in the vote") {
     check(
       100,

@@ -27,7 +27,7 @@ private class VMBytes {
   private var writtenPage: Array[Byte] | Null = null
 
   private def page(index: Long): Array[Byte] | Null =
-    if (cachedPage != null && cachedIndex == index) cachedPage
+    if ((cachedPage ne null) && cachedIndex == index) cachedPage
     else
       pages.getOrNull(index) match {
         case null               => null
@@ -38,7 +38,7 @@ private class VMBytes {
       }
 
   private def writablePage(index: Long): Array[Byte] =
-    if (writtenPage != null && writtenIndex == index) writtenPage.nn
+    if ((writtenPage ne null) && writtenIndex == index) writtenPage.nn
     else {
       val target = page(index) match {
         case found: Array[Byte] => found
@@ -55,7 +55,7 @@ private class VMBytes {
 
   def read(address: Long, size: Int in 0 ~ 8): Long = {
     val offset = (address & PageMask).toInt
-    if (offset + size.raw <= PageSize) page(address >>> PageBits) match {
+    if (offset + size <= PageSize) page(address >>> PageBits) match {
       case null               => 0L
       case bytes: Array[Byte] => LittleEndian.decode(bytes, offset, size)
     }
@@ -64,8 +64,33 @@ private class VMBytes {
 
   def write(address: Long, value: Long, size: Int in 0 ~ 8): Unit = {
     val offset = (address & PageMask).toInt
-    if (offset + size.raw <= PageSize) LittleEndian.write(value, writablePage(address >>> PageBits), offset, size)
+    if (offset + size <= PageSize) LittleEndian.write(value, writablePage(address >>> PageBits), offset, size)
     else LittleEndian.write(value, size)((index, byte) => writeByte(address + index.toLong, byte))
+  }
+
+  def read(address: Long, into: Array[Byte], from: Int, count: Int): Unit = {
+    var done = 0
+    while (done < count) {
+      val at     = address + done
+      val offset = (at & PageMask).toInt
+      val chunk  = math.min(count - done, PageSize - offset)
+      page(at >>> PageBits) match {
+        case null               => java.util.Arrays.fill(into, from + done, from + done + chunk, 0.toByte)
+        case bytes: Array[Byte] => Array.copy(bytes, offset, into, from + done, chunk)
+      }
+      done += chunk
+    }
+  }
+
+  def write(address: Long, bytes: Array[Byte], from: Int, count: Int): Unit = {
+    var done = 0
+    while (done < count) {
+      val at     = address + done
+      val offset = (at & PageMask).toInt
+      val chunk  = math.min(count - done, PageSize - offset)
+      Array.copy(bytes, from + done, writablePage(at >>> PageBits), offset, chunk)
+      done += chunk
+    }
   }
 
   private def readByte(address: Long): Byte = page(address >>> PageBits) match {

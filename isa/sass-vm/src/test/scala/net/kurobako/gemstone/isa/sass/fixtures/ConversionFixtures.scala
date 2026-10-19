@@ -14,6 +14,16 @@ object ConversionFixtures {
       |}
       |""".stripMargin
 
+  val f2fF32F16Cuda: String =
+    """#include <cuda_fp16.h>
+      |#include <stdint.h>
+      |extern "C" __global__ void probe(uint32_t *out, const uint32_t *in) {
+      |  unsigned i = blockIdx.x;
+      |  uint16_t bits = static_cast<uint16_t>(in[i]);
+      |  out[i] = __float_as_uint(__half2float(*reinterpret_cast<__half *>(&bits)));
+      |}
+      |""".stripMargin
+
   def f2fF32F64Ptx(sm: Int): String =
     s""".version ${if (sm <= 70) "7.8" else "8.7"}
       |.target sm_$sm
@@ -259,6 +269,120 @@ object ConversionFixtures {
       |""".stripMargin
 
   val listings: Map[String, String] = Map(
+    "f2fF32F16Sm50" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                          /* 0x083fc400e3e007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;                 /* 0x4c98078000870001 */
+        |        /*0010*/                   S2R R0, SR_CTAID.X ;                   /* 0xf0c8000002570000 */
+        |        /*0018*/                   SHL R4, R0.reuse, 0x2 ;                /* 0x3848000000270004 */
+        |                                                                          /* 0x001fc840fec007f5 */
+        |        /*0028*/                   SHR.U32 R0, R0, 0x1e ;                 /* 0x3828000001e70000 */
+        |        /*0030*/                   IADD R2.CC, R4.reuse, c[0x0][0x148] ;  /* 0x4c10800005270402 */
+        |        /*0038*/                   IADD.X R3, R0, c[0x0][0x14c] ;         /* 0x4c10080005370003 */
+        |                                                                          /* 0x001fdc00fcc007b1 */
+        |        /*0048*/                   LDG.E.U16 R2, [R2] ;                   /* 0xeed2200000070202 */
+        |        /*0050*/                   IADD R4.CC, R4, c[0x0][0x140] ;        /* 0x4c10800005070404 */
+        |        /*0058*/                   IADD.X R5, R0, c[0x0][0x144] ;         /* 0x4c10080005170005 */
+        |                                                                          /* 0x001ffc01fe21071d */
+        |        /*0068*/                   F2F.F32.F16 R6, R2 ;                   /* 0x5ca8000000270606 */
+        |        /*0070*/                   STG.E [R4], R6 ;                       /* 0xeedc200000070406 */
+        |        /*0078*/                   EXIT ;                                 /* 0xe30000000007000f */
+        |.L_x_0:
+        |                                                                          /* 0x001f8000fc0007ff */
+        |        /*0088*/                   BRA `(.L_x_0) ;                        /* 0xe2400fffff07000f */
+        |        /*0090*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |        /*0098*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |                                                                          /* 0x001f8000fc0007e0 */
+        |        /*00a8*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |        /*00b0*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |        /*00b8*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |.L_x_1:
+        |""".stripMargin,
+    "f2fF16F32Sm50" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                          /* 0x083fc400e3e007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;                 /* 0x4c98078000870001 */
+        |        /*0010*/                   S2R R0, SR_CTAID.X ;                   /* 0xf0c8000002570000 */
+        |        /*0018*/                   SHL R4, R0.reuse, 0x2 ;                /* 0x3848000000270004 */
+        |                                                                          /* 0x001fc840fec007f5 */
+        |        /*0028*/                   SHR.U32 R0, R0, 0x1e ;                 /* 0x3828000001e70000 */
+        |        /*0030*/                   IADD R2.CC, R4.reuse, c[0x0][0x148] ;  /* 0x4c10800005270402 */
+        |        /*0038*/                   IADD.X R3, R0, c[0x0][0x14c] ;         /* 0x4c10080005370003 */
+        |                                                                          /* 0x001fdc00fcc007b1 */
+        |        /*0048*/                   LDG.E R2, [R2] ;                       /* 0xeed4200000070202 */
+        |        /*0050*/                   IADD R4.CC, R4, c[0x0][0x140] ;        /* 0x4c10800005070404 */
+        |        /*0058*/                   IADD.X R5, R0, c[0x0][0x144] ;         /* 0x4c10080005170005 */
+        |                                                                          /* 0x001ffc01fe21071d */
+        |        /*0068*/                   F2F.F16.F32 R6, R2 ;                   /* 0x5ca8000000270906 */
+        |        /*0070*/                   STG.E [R4], R6 ;                       /* 0xeedc200000070406 */
+        |        /*0078*/                   EXIT ;                                 /* 0xe30000000007000f */
+        |.L_x_0:
+        |                                                                          /* 0x001f8000fc0007ff */
+        |        /*0088*/                   BRA `(.L_x_0) ;                        /* 0xe2400fffff07000f */
+        |        /*0090*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |        /*0098*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |                                                                          /* 0x001f8000fc0007e0 */
+        |        /*00a8*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |        /*00b0*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |        /*00b8*/                   NOP;                                   /* 0x50b0000000070f00 */
+        |.L_x_1:
+        |""".stripMargin,
+    "f2fF16F32Sm60" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                    /* 0x083fc400e3e007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;           /* 0x4c98078000870001 */
+        |        /*0010*/                   S2R R0, SR_CTAID.X ;             /* 0xf0c8000002570000 */
+        |        /*0018*/                   SHL R4, R0.reuse, 0x2 ;          /* 0x3848000000270004 */
+        |                                                                    /* 0x001f8800fcc007e5 */
+        |        /*0028*/                   SHR.U32 R0, R0, 0x1e ;           /* 0x3828000001e70000 */
+        |        /*0030*/                   IADD R2.CC, R4, c[0x0][0x148] ;  /* 0x4c10800005270402 */
+        |        /*0038*/                   IADD.X R3, R0, c[0x0][0x14c] ;   /* 0x4c10080005370003 */
+        |                                                                    /* 0x001f9c00fcc007b1 */
+        |        /*0048*/                   LDG.E R2, [R2] ;                 /* 0xeed4200000070202 */
+        |        /*0050*/                   IADD R4.CC, R4, c[0x0][0x140] ;  /* 0x4c10800005070404 */
+        |        /*0058*/                   IADD.X R5, R0, c[0x0][0x144] ;   /* 0x4c10080005170005 */
+        |                                                                    /* 0x001ffc01fe21071d */
+        |        /*0068*/                   F2F.F16.F32 R6, R2 ;             /* 0x5ca8000000270906 */
+        |        /*0070*/                   STG.E [R4], R6 ;                 /* 0xeedc200000070406 */
+        |        /*0078*/                   EXIT ;                           /* 0xe30000000007000f */
+        |.L_x_0:
+        |                                                                    /* 0x001f8000fc0007ff */
+        |        /*0088*/                   BRA `(.L_x_0) ;                  /* 0xe2400fffff07000f */
+        |        /*0090*/                   NOP;                             /* 0x50b0000000070f00 */
+        |        /*0098*/                   NOP;                             /* 0x50b0000000070f00 */
+        |                                                                    /* 0x001f8000fc0007e0 */
+        |        /*00a8*/                   NOP;                             /* 0x50b0000000070f00 */
+        |        /*00b0*/                   NOP;                             /* 0x50b0000000070f00 */
+        |        /*00b8*/                   NOP;                             /* 0x50b0000000070f00 */
+        |.L_x_1:
+        |""".stripMargin,
     "f2fF16F32Sm70" ->
       """//--------------------- .text.probe               --------------------------
         |	.section	.text.probe,"ax",@progbits

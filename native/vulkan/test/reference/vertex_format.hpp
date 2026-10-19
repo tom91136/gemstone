@@ -22,9 +22,15 @@ struct VertexFormat {
 };
 inline std::optional<VertexFormat> vertexFormat(VkFormat format) {
   const auto uniform = [](VertexEncoding encoding, uint8_t bits, uint8_t components, bool bgra = false) {
-    return VertexFormat{encoding, {bits, bits, bits, bits}, components, static_cast<uint8_t>(bits / 8 * components), bgra};
+    return VertexFormat{.encoding = encoding,
+                        .widths = {bits, bits, bits, bits},
+                        .components = components,
+                        .bytes = static_cast<uint8_t>(bits / 8 * components),
+                        .bgra = bgra};
   };
-  const auto packed = [](VertexEncoding encoding, bool bgra) { return VertexFormat{encoding, {10, 10, 10, 2}, 4, 4, bgra}; };
+  const auto packed = [](VertexEncoding encoding, bool bgra) {
+    return VertexFormat{.encoding = encoding, .widths = {10, 10, 10, 2}, .components = 4, .bytes = 4, .bgra = bgra};
+  };
 #define GEMSTONE_VERTEX_NORMALISED(PREFIX, BITS, LANES, BGRA)                                                                              \
   case VK_FORMAT_##PREFIX##_UNORM: return uniform(VertexEncoding::Unorm, BITS, LANES, BGRA);                                               \
   case VK_FORMAT_##PREFIX##_SNORM: return uniform(VertexEncoding::Snorm, BITS, LANES, BGRA);                                               \
@@ -70,7 +76,8 @@ inline std::optional<VertexFormat> vertexFormat(VkFormat format) {
     case VK_FORMAT_A8B8G8R8_SINT_PACK32: return uniform(VertexEncoding::Sint, 8, 4);
     case VK_FORMAT_A8B8G8R8_USCALED_PACK32: return uniform(VertexEncoding::Uscaled, 8, 4);
     case VK_FORMAT_A8B8G8R8_SSCALED_PACK32: return uniform(VertexEncoding::Sscaled, 8, 4);
-    case VK_FORMAT_B10G11R11_UFLOAT_PACK32: return VertexFormat{VertexEncoding::Ufloat, {11, 11, 10, 0}, 3, 4};
+    case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+      return VertexFormat{.encoding = VertexEncoding::Ufloat, .widths = {11, 11, 10, 0}, .components = 3, .bytes = 4};
     default: return std::nullopt;
   }
 #undef GEMSTONE_VERTEX_NORMALISED
@@ -82,40 +89,43 @@ inline std::optional<VertexFormat> vertexFormat(VkFormat format) {
 // Missing components are (0,0,0,1), with an integer one for integer attributes.
 inline std::array<uint32_t, 4> decodeVertex(const VertexFormat &format, const uint8_t *source) {
   const bool integer = format.encoding == VertexEncoding::Uint || format.encoding == VertexEncoding::Sint;
-  std::array<uint32_t, 4> result{0, 0, 0, integer ? 1u : 0x3f800000u};
+  std::array<uint32_t, 4> result{0, 0, 0, integer ? 1U : 0x3f800000U};
   uint32_t bitOffset = 0;
   for (uint32_t lane = 0; lane < format.components; ++lane) {
     const uint32_t width = format.widths[lane];
     uint32_t bits = 0;
-    if (width % 8 == 0) std::memcpy(&bits, source + bitOffset / 8, width / 8);
-    else {
+    if (width % 8 == 0) {
+      std::memcpy(&bits, source + (bitOffset / 8), width / 8);
+    } else {
       std::memcpy(&bits, source, 4);
-      bits = (bits >> bitOffset) & ((1u << width) - 1);
+      bits = (bits >> bitOffset) & ((1U << width) - 1);
     }
     bitOffset += width;
     uint32_t decoded = bits;
     const auto signedValue = [&] {
       if (width == 32) return std::bit_cast<int32_t>(bits);
-      const uint32_t sign = 1u << (width - 1);
+      const uint32_t sign = 1U << (width - 1);
       return static_cast<int32_t>(bits ^ sign) - static_cast<int32_t>(sign);
     };
     const auto asBits = [](float value) { return std::bit_cast<uint32_t>(value); };
     switch (format.encoding) {
       case VertexEncoding::Uint: break;
       case VertexEncoding::Sint: decoded = static_cast<uint32_t>(signedValue()); break;
-      case VertexEncoding::Unorm: decoded = asBits(static_cast<float>(bits) / ((1u << width) - 1)); break;
-      case VertexEncoding::Snorm: decoded = asBits(std::max(-1.0f, static_cast<float>(signedValue()) / ((1u << (width - 1)) - 1))); break;
+      case VertexEncoding::Unorm: decoded = asBits(static_cast<float>(bits) / static_cast<float>((1U << width) - 1)); break;
+      case VertexEncoding::Snorm:
+        decoded = asBits(std::max(-1.0F, static_cast<float>(signedValue()) / static_cast<float>((1U << (width - 1)) - 1)));
+        break;
       case VertexEncoding::Uscaled: decoded = asBits(static_cast<float>(bits)); break;
       case VertexEncoding::Sscaled: decoded = asBits(static_cast<float>(signedValue())); break;
       case VertexEncoding::Float:
       case VertexEncoding::Ufloat: {
         if (width == 32) break;
         const uint32_t fractionBits = format.encoding == VertexEncoding::Float ? 10 : width - 5;
-        const uint32_t fraction = bits & ((1u << fractionBits) - 1);
+        const uint32_t fraction = bits & ((1U << fractionBits) - 1);
         const uint32_t exponent = (bits >> fractionBits) & 31;
-        const uint32_t sign = format.encoding == VertexEncoding::Float ? (bits & 0x8000u) << 16 : 0;
+        const uint32_t sign = format.encoding == VertexEncoding::Float ? (bits & 0x8000U) << 16 : 0;
         if (exponent == 0) decoded = asBits(std::ldexp(static_cast<float>(fraction), -14 - static_cast<int>(fractionBits))) | sign;
-        else if (exponent == 31) decoded = sign | 0x7f800000u | (fraction << (23 - fractionBits));
+        else if (exponent == 31) decoded = sign | 0x7f800000U | (fraction << (23 - fractionBits));
         else decoded = sign | ((exponent + 112) << 23) | (fraction << (23 - fractionBits));
         break;
       }

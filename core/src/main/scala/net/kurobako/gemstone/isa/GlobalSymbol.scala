@@ -20,7 +20,7 @@ object GlobalSymbol {
       )
       _ <- Either.cond[NonEmpty[String], Unit](
         pointerOffsets.forall(offset =>
-          size.raw >= abi.MachineWordSize && offset.raw.toLong <= size.raw - abi.MachineWordSize
+          size >= abi.MachineWordSize && offset.toLong <= size.raw - abi.MachineWordSize
         ),
         (),
         "program-global pointer offset lies outside its 64-bit storage slot"

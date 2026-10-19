@@ -15,13 +15,17 @@ object GraphicsProtocol {
   export GraphicsFormats.*
   final val PushConstantBytes: Int = 128
 
-  enum GraphicsTopology derives Codec { case PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan }
-  enum GraphicsCompare derives Codec { case Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always }
-  enum GraphicsStencilOp derives Codec {
+  enum GraphicsTopology derives Codec, CanEqual {
+    case PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan
+  }
+  enum GraphicsCompare derives Codec, CanEqual {
+    case Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always
+  }
+  enum GraphicsStencilOp derives Codec, CanEqual {
     case Keep, Zero, Replace, IncrementAndClamp, DecrementAndClamp, Invert, IncrementAndWrap, DecrementAndWrap
   }
-  enum GraphicsBlendOp derives Codec     { case Add, Subtract, ReverseSubtract, Min, Max }
-  enum GraphicsBlendFactor derives Codec {
+  enum GraphicsBlendOp derives Codec, CanEqual     { case Add, Subtract, ReverseSubtract, Min, Max }
+  enum GraphicsBlendFactor derives Codec, CanEqual {
     case Zero, One, SrcColor, OneMinusSrcColor, DstColor, OneMinusDstColor, SrcAlpha, OneMinusSrcAlpha,
       DstAlpha, OneMinusDstAlpha, ConstantColor, OneMinusConstantColor, ConstantAlpha, OneMinusConstantAlpha,
       SrcAlphaSaturate
@@ -32,16 +36,16 @@ object GraphicsProtocol {
   enum GraphicsBorderColour derives Codec {
     case FloatTransparentBlack, IntTransparentBlack, FloatOpaqueBlack, IntOpaqueBlack, FloatOpaqueWhite, IntOpaqueWhite
   }
-  enum GraphicsSwizzle derives Codec { case Identity, Zero, One, R, G, B, A }
+  enum GraphicsSwizzle derives Codec, CanEqual { case Identity, Zero, One, R, G, B, A }
   case class GraphicsComponents(r: GraphicsSwizzle, g: GraphicsSwizzle, b: GraphicsSwizzle, a: GraphicsSwizzle)
       derives Codec {
     def values: Vec[GraphicsSwizzle] = Vec(r, g, b, a)
   }
-  enum GraphicsResolve derives Codec        { case None, SampleZero, Average, Min, Max                       }
-  enum GraphicsVertexEncoding derives Codec { case Unorm, Snorm, Uint, Sint, Uscaled, Sscaled, Float, Ufloat }
+  enum GraphicsResolve derives Codec, CanEqual        { case None, SampleZero, Average, Min, Max                       }
+  enum GraphicsVertexEncoding derives Codec, CanEqual { case Unorm, Snorm, Uint, Sint, Uscaled, Sscaled, Float, Ufloat }
 
   case class GraphicsRange(allocation: AllocationId, offset: Long >= 0, size: Long > 0) derives Codec
-  case class GraphicsExtent(width: Int > 0, height: Int > 0, depth: Int > 0) derives Codec
+  case class GraphicsExtent(width: Int > 0, height: Int > 0, depth: Int > 0) derives Codec, CanEqual
   case class GraphicsOffset(x: Int, y: Int, z: Int) derives Codec
   case class GraphicsRect(x: Int, y: Int, width: Int >= 0, height: Int >= 0) derives Codec
   case class GraphicsViewport(x: Float, y: Float, width: Float, height: Float, minDepth: Float, maxDepth: Float)

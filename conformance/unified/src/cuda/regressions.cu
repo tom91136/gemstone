@@ -8,23 +8,20 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <numeric>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <vector>
 
+#include "cuda/support.cuh"
+#include <aspartame/all.hpp>
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <cuda_runtime_api.h>
 
-namespace cuda_regressions {
+using namespace aspartame;
 
-void check(cudaError_t error, std::string_view operation) {
-  if (error != cudaSuccess) throw std::runtime_error(std::string(operation) + ": " + cudaGetErrorString(error));
-}
+namespace {
 
 // CloverLeaf's CUDA field summary uses this exact reduction shape. Keep the
 // probe independent of CloverLeaf so it remains a small regression when the
@@ -53,14 +50,16 @@ template <uint32_t BlockSize> __global__ void cloverDivergentBarrier(double *out
   weights[thread] = 2.0;
   if (thread < BlockSize / 2) {
     __syncthreads();
-    values[thread] += values[thread + BlockSize / 2];
-    weights[thread] += weights[thread + BlockSize / 2];
+    values[thread] += values[thread + (BlockSize / 2)];
+    weights[thread] += weights[thread + (BlockSize / 2)];
   } else {
     __syncthreads();
   }
   __syncthreads();
   if (thread == 0) output[0] = values[0] + weights[0];
 }
+
+} // namespace
 
 TEST_CASE("regressions/miniapp/cloverleaf/cuda-divergent-barrier-id", "[unified][regression]") {
   constexpr uint32_t blockSize = 256;
@@ -77,22 +76,24 @@ TEST_CASE("regressions/miniapp/cloverleaf/cuda-divergent-barrier-id", "[unified]
   if (actual != 6.0) throw std::runtime_error(fmt::format("Clover divergent barrier mismatch: expected 6, got {}", actual));
 }
 
+namespace {
 template <uint32_t BlockSize> __global__ void cloverStyleReduction(const double *input, double *output, size_t size) {
   __shared__ double values[BlockSize];
   values[threadIdx.x] = 0.0;
-  for (size_t index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x; index < size;
+  for (size_t index = (static_cast<size_t>(blockIdx.x) * blockDim.x) + threadIdx.x; index < size;
        index += static_cast<size_t>(gridDim.x) * blockDim.x)
     values[threadIdx.x] += input[index];
   CloverStyleReduce<double, BlockSize / 2>::run(values, output, cloverStyleAdd);
 }
 
+} // namespace
+
 TEST_CASE("regressions/miniapp/cloverleaf/cuda-shared-reduction", "[unified][regression]") {
   constexpr uint32_t blockSize = 256;
   constexpr uint32_t blockCount = 256;
   constexpr size_t size = 1089;
-  std::vector<double> hostInput(size);
-  std::iota(hostInput.begin(), hostInput.end(), 1.0);
-  const double expected = std::accumulate(hostInput.begin(), hostInput.end(), 0.0);
+  const auto hostInput = iota(1.0) | take(size) | to_vector();
+  const double expected = hostInput ^ sum();
 
   unified::test_runtime::Cleanup cleanup;
   double *input = nullptr;
@@ -109,12 +110,10 @@ TEST_CASE("regressions/miniapp/cloverleaf/cuda-shared-reduction", "[unified][reg
 
   std::vector<double> partials(blockCount);
   check(cudaMemcpy(partials.data(), output, partials.size() * sizeof(double), cudaMemcpyDeviceToHost), "Clover-style reduction download");
-  const double actual = std::accumulate(partials.begin(), partials.end(), 0.0);
+  const double actual = partials ^ sum();
   if (!std::isfinite(actual) || std::abs(actual - expected) > 1.0e-10 * expected)
     throw std::runtime_error(fmt::format("Clover-style reduction mismatch: expected {}, got {}", expected, actual));
 }
-
-} // namespace cuda_regressions
 
 TEMPLATE_TEST_CASE_SIG("runtime/cuda/device-function", "[unified][runtime][compact]", ((bool Indirect), Indirect), false, true) {
   unified::gpu_calls::deviceFunction<Indirect>();

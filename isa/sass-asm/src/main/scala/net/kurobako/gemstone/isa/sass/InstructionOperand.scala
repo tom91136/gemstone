@@ -17,8 +17,14 @@ object InstructionOperand {
       refined: Operand => A
   ) {
     def from(value: Operand): Either[String, A] =
-      Either.cond(accepts(leaf(value)), refined(value), s"expected $description operand")
+      Either.cond(admits(value), refined(value), s"expected $description operand")
     def unapply(value: Operand): Option[A] = from(value).toOption
+
+    def admits(value: Operand): Boolean = accepts(leaf(value))
+
+    /** `value` as this kind, throwing IllegalArgumentException when it does not admit it. */
+    def unsafe(value: Operand): A =
+      if (admits(value)) refined(value) else throw IllegalArgumentException(s"expected $description operand")
   }
 
   @tailrec

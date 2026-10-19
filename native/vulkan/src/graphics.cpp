@@ -1,14 +1,24 @@
 #include <algorithm>
+#include <array>
 #include <bit>
-#include <cmath>
-#include <limits>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <mutex>
+#include <utility>
+#include <vector>
 
+#include <aspartame/vector.hpp>
+
+#include "gemstone_execution_rpc.hpp"
 #include "gemstone_image_formats.hpp"
 #include "gemstone_vulkan_adapter.hpp"
 #include "gemstone_vulkan_graphics.hpp"
 #include <gemstone/trace.hpp>
 
 #include "graphics_transfer.hpp"
+
+using namespace aspartame;
 
 namespace gemstone::vulkan {
 namespace {
@@ -21,9 +31,10 @@ void setStencilFaces(std::array<uint32_t, 2> &state, VkStencilFaceFlags faces, u
 }
 void recordIndirectDraw(VkCommandBuffer command, VkBuffer indirect, VkDeviceSize offset, uint32_t drawCount, uint32_t stride,
                         bool indexed) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto &state = commands.at(command).graphics;
-  commands.at(command).operations.emplace_back(recorded::DrawIndirect{state, indirect, offset, drawCount, stride, indexed});
+  commands.at(command).operations.emplace_back(recorded::DrawIndirect{
+      .state = state, .indirect = indirect, .offset = offset, .drawCount = drawCount, .stride = stride, .indexed = indexed});
 }
 
 void recordBufferImageCopy(VkCommandBuffer command, VkBuffer bufferHandle, VkImage imageHandle, uint32_t count,
@@ -31,12 +42,16 @@ void recordBufferImageCopy(VkCommandBuffer command, VkBuffer bufferHandle, VkIma
   std::vector<gx::GraphicsBufferImageCopy> copies;
   for (uint32_t i = 0; i < count; ++i) {
     const auto &copy = regions[i];
-    copies.push_back({static_cast<int64_t>(copy.bufferOffset), static_cast<int32_t>(copy.bufferRowLength),
-                      static_cast<int32_t>(copy.bufferImageHeight), graphicsLayers(copy.imageSubresource), graphicsOffset(copy.imageOffset),
-                      graphicsExtent(copy.imageExtent)});
+    copies.push_back({.bufferOffset = {static_cast<int64_t>(copy.bufferOffset)},
+                      .rowLength = {static_cast<int32_t>(copy.bufferRowLength)},
+                      .imageHeight = {static_cast<int32_t>(copy.bufferImageHeight)},
+                      .image = graphicsLayers(copy.imageSubresource),
+                      .offset = graphicsOffset(copy.imageOffset),
+                      .extent = graphicsExtent(copy.imageExtent)});
   }
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::CopyBufferImage{bufferHandle, imageHandle, std::move(copies), toImage});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(
+      recorded::CopyBufferImage{.bufferHandle = bufferHandle, .imageHandle = imageHandle, .copies = std::move(copies), .toImage = toImage});
 }
 } // namespace
 
@@ -111,8 +126,9 @@ VkResult implVkGetPhysicalDeviceImageFormatProperties(VkPhysicalDevice, VkFormat
       || (tiling != VK_IMAGE_TILING_OPTIMAL && tiling != VK_IMAGE_TILING_LINEAR))
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
   if (properties) {
-    properties->maxExtent =
-        type == VK_IMAGE_TYPE_3D ? VkExtent3D{2048, 2048, 2048} : VkExtent3D{16384, type == VK_IMAGE_TYPE_1D ? 1u : 16384u, 1};
+    properties->maxExtent = type == VK_IMAGE_TYPE_3D
+                                ? VkExtent3D{.width = 2048, .height = 2048, .depth = 2048}
+                                : VkExtent3D{.width = 16384, .height = type == VK_IMAGE_TYPE_1D ? 1U : 16384U, .depth = 1};
     properties->maxMipLevels = type == VK_IMAGE_TYPE_3D ? 12 : 15;
     properties->maxArrayLayers = type == VK_IMAGE_TYPE_3D ? 1 : 2048;
     properties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
@@ -131,7 +147,7 @@ VkResult implVkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice device, 
                                                   &properties->imageFormatProperties);
 }
 
-VkResult implVkCreateImage(VkDevice device, const VkImageCreateInfo *info, const VkAllocationCallbacks *, VkImage *image) {
+VkResult implVkCreateImage(VkDevice, const VkImageCreateInfo *info, const VkAllocationCallbacks *, VkImage *image) {
   if (!info || !image) return VK_ERROR_INITIALIZATION_FAILED;
   VkImageFormatProperties limits{};
   if (vkGetPhysicalDeviceImageFormatProperties(VK_NULL_HANDLE, info->format, info->imageType, info->tiling, info->usage, info->flags,
@@ -143,27 +159,33 @@ VkResult implVkCreateImage(VkDevice device, const VkImageCreateInfo *info, const
       || !info->extent.width || !info->extent.height || !info->extent.depth || info->extent.width > limits.maxExtent.width
       || info->extent.height > limits.maxExtent.height || info->extent.depth > limits.maxExtent.depth
       || (!info->mipLevels
-          || info->mipLevels
-                 > static_cast<uint32_t>(std::bit_width(std::max({info->extent.width, info->extent.height, info->extent.depth}))))
+          || std::cmp_greater(info->mipLevels, std::bit_width(std::max({info->extent.width, info->extent.height, info->extent.depth}))))
       || (info->samples != VK_SAMPLE_COUNT_1_BIT && info->mipLevels != 1)
       || (!info->arrayLayers || info->arrayLayers > limits.maxArrayLayers) || !std::has_single_bit(static_cast<uint32_t>(info->samples))
       || !(info->samples & limits.sampleCounts))
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
-  (void)device;
-  Image candidate{info->extent,    info->format,    VK_NULL_HANDLE, 0, info->arrayLayers, static_cast<uint32_t>(info->samples),
-                  info->mipLevels, info->imageType, info->flags,    {}};
+  Image candidate{.extent = info->extent,
+                  .format = info->format,
+                  .memory = VK_NULL_HANDLE,
+                  .offset = 0,
+                  .layers = info->arrayLayers,
+                  .samples = static_cast<uint32_t>(info->samples),
+                  .mipLevels = info->mipLevels,
+                  .type = info->imageType,
+                  .flags = info->flags,
+                  .viewFormats = {}};
   if (const auto *list = findChained<VkImageFormatListCreateInfo>(info->pNext, VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO))
     candidate.viewFormats.assign(list->pViewFormats, list->pViewFormats + list->viewFormatCount);
   if (imageSize(candidate) > MaxImageResourceSize) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
   *image = makeHandle<VkImage>();
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   images[*image] = std::move(candidate);
   return VK_SUCCESS;
 }
 
 void implVkDestroyImage(VkDevice, VkImage image, const VkAllocationCallbacks *) {
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     images.erase(image);
   }
   deleteHandle(image);
@@ -171,7 +193,7 @@ void implVkDestroyImage(VkDevice, VkImage image, const VkAllocationCallbacks *) 
 
 void implVkGetImageMemoryRequirements(VkDevice, VkImage image, VkMemoryRequirements *requirements) {
   if (!requirements) return;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   *requirements = {};
   const auto found = images.find(image);
   if (found == images.end()) return;
@@ -191,7 +213,7 @@ void implVkGetImageMemoryRequirements2(VkDevice device, const VkImageMemoryRequi
 void implVkGetImageSubresourceLayout(VkDevice, VkImage image, const VkImageSubresource *subresource, VkSubresourceLayout *layout) {
   if (!layout) return;
   *layout = {};
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto found = images.find(image);
   if (found == images.end() || !subresource
       || (!validAspects(found->second.format, subresource->aspectMask) || !std::has_single_bit(subresource->aspectMask))
@@ -203,11 +225,11 @@ void implVkGetImageSubresourceLayout(VkDevice, VkImage image, const VkImageSubre
   layout->depthPitch = mip.slicePitch.value;
   layout->size = mip.layerPitch.value;
   layout->arrayPitch = mip.layerPitch.value;
-  layout->offset = mip.offset.value + layout->arrayPitch * subresource->arrayLayer;
+  layout->offset = mip.offset.value + (layout->arrayPitch * subresource->arrayLayer);
 }
 
 VkResult implVkBindImageMemory(VkDevice, VkImage image, VkDeviceMemory memory, VkDeviceSize offset) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto found = images.find(image);
   if (found == images.end()) return VK_ERROR_INITIALIZATION_FAILED;
   auto candidate = found->second;
@@ -238,7 +260,7 @@ VkResult implVkCreateImageView(VkDevice, const VkImageViewCreateInfo *info, cons
       || static_cast<uint32_t>(info->components.b) > VK_COMPONENT_SWIZZLE_A
       || static_cast<uint32_t>(info->components.a) > VK_COMPONENT_SWIZZLE_A)
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   if (!images.contains(info->image)) return VK_ERROR_INITIALIZATION_FAILED;
   const auto &source = images.at(info->image);
   if ((source.type == VK_IMAGE_TYPE_1D) != (info->viewType == VK_IMAGE_VIEW_TYPE_1D || info->viewType == VK_IMAGE_VIEW_TYPE_1D_ARRAY))
@@ -251,7 +273,8 @@ VkResult implVkCreateImageView(VkDevice, const VkImageViewCreateInfo *info, cons
   const auto levels =
       info->subresourceRange.levelCount == VK_REMAINING_MIP_LEVELS ? source.mipLevels - baseLevel : info->subresourceRange.levelCount;
   // Uncompressed classes use texel size; compressed classes are format-family specific.
-  const auto sourceCompressed = compressedImageFormat(source.format), viewCompressed = compressedImageFormat(info->format);
+  const auto sourceCompressed = compressedImageFormat(source.format);
+  const auto viewCompressed = compressedImageFormat(info->format);
   const bool compatible = source.format == info->format
                           || ((source.flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT)
                               && ((sourceCompressed && viewCompressed && sourceCompressed->compatibility == viewCompressed->compatibility)
@@ -269,27 +292,26 @@ VkResult implVkCreateImageView(VkDevice, const VkImageViewCreateInfo *info, cons
       && (!(source.flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) || source.type != VK_IMAGE_TYPE_2D || source.samples != 1
           || source.extent.width != source.extent.height || layers % 6 || (!arrayed && layers != 6)))
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
-  const bool listed = source.viewFormats.empty()
-                      || std::find(source.viewFormats.begin(), source.viewFormats.end(), info->format) != source.viewFormats.end();
+  const bool listed = source.viewFormats.empty() || source.viewFormats ^ contains(info->format);
   if (!levels || levels > source.mipLevels - baseLevel || (depthSlices && levels != 1) || !compatible || !listed || !layers
       || layers > availableLayers - baseLayer || (!cube && !arrayed && layers != 1))
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
   *view = makeHandle<VkImageView>();
-  imageViews[*view] = {info->image,
-                       info->subresourceRange.baseArrayLayer,
-                       baseLevel,
-                       levels,
-                       info->format,
-                       layers,
-                       info->subresourceRange.aspectMask,
-                       {info->components.r, info->components.g, info->components.b, info->components.a},
-                       depthSlices};
+  imageViews[*view] = {.image = info->image,
+                       .baseLayer = info->subresourceRange.baseArrayLayer,
+                       .level = baseLevel,
+                       .levels = levels,
+                       .format = info->format,
+                       .layers = layers,
+                       .aspects = info->subresourceRange.aspectMask,
+                       .components = {info->components.r, info->components.g, info->components.b, info->components.a},
+                       .depthSlices = depthSlices};
   return VK_SUCCESS;
 }
 
 void implVkDestroyImageView(VkDevice, VkImageView view, const VkAllocationCallbacks *) {
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     imageViews.erase(view);
   }
   deleteHandle(view);
@@ -328,7 +350,7 @@ template <typename Info> VkResult createRenderPass(const Info *info, VkRenderPas
     Subpass value;
     if constexpr (requires { subpass.viewMask; }) value.viewMask = subpass.viewMask;
     else value.viewMask = multiview && multiview->subpassCount ? multiview->pViewMasks[index] : 0;
-    if (value.viewMask & ~63u) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (value.viewMask & ~63U) return VK_ERROR_FEATURE_NOT_PRESENT;
     for (uint32_t i = 0; i < subpass.colorAttachmentCount; ++i) {
       value.colours.push_back(attachmentReference(subpass.pColorAttachments[i]));
       if (subpass.pResolveAttachments) value.resolves.push_back(attachmentReference(subpass.pResolveAttachments[i]));
@@ -383,7 +405,7 @@ template <typename Info> VkResult createRenderPass(const Info *info, VkRenderPas
     }
   // Serialised subpasses satisfy view-local and view-global dependencies.
   *pass = makeHandle<VkRenderPass>();
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   renderPasses[*pass] = std::move(state);
   return VK_SUCCESS;
 }
@@ -396,21 +418,21 @@ VkResult implVkCreateRenderPass(VkDevice, const VkRenderPassCreateInfo *info, co
 
 void implVkDestroyRenderPass(VkDevice, VkRenderPass pass, const VkAllocationCallbacks *) {
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     renderPasses.erase(pass);
   }
   deleteHandle(pass);
 }
 
 void implVkGetRenderAreaGranularity(VkDevice, VkRenderPass, VkExtent2D *granularity) {
-  if (granularity) *granularity = {1, 1};
+  if (granularity) *granularity = {.width = 1, .height = 1};
 }
 
 VkResult implVkCreateFramebuffer(VkDevice, const VkFramebufferCreateInfo *info, const VkAllocationCallbacks *, VkFramebuffer *framebuffer) {
   if (!info || !framebuffer || !info->layers || info->layers > 2048 || !info->width || !info->height || info->width > 16384
       || info->height > 16384 || (info->flags & ~VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT))
     return VK_ERROR_FEATURE_NOT_PRESENT;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const bool imageless = info->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT;
   if (imageless) {
     const auto *attachments =
@@ -434,7 +456,7 @@ VkResult implVkCreateFramebuffer(VkDevice, const VkFramebufferCreateInfo *info, 
     }
   }
   *framebuffer = makeHandle<VkFramebuffer>();
-  Framebuffer state{{}, info->width, info->height, info->layers, imageless};
+  Framebuffer state{.attachments = {}, .width = info->width, .height = info->height, .layers = info->layers, .imageless = imageless};
   state.attachments.resize(info->attachmentCount);
   if (!imageless && info->attachmentCount) std::copy_n(info->pAttachments, info->attachmentCount, state.attachments.begin());
   framebuffers[*framebuffer] = std::move(state);
@@ -443,7 +465,7 @@ VkResult implVkCreateFramebuffer(VkDevice, const VkFramebufferCreateInfo *info, 
 
 void implVkDestroyFramebuffer(VkDevice, VkFramebuffer framebuffer, const VkAllocationCallbacks *) {
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     framebuffers.erase(framebuffer);
   }
   deleteHandle(framebuffer);
@@ -451,15 +473,19 @@ void implVkDestroyFramebuffer(VkDevice, VkFramebuffer framebuffer, const VkAlloc
 
 namespace {
 gx::GraphicsStencil graphicsStencil(const VkStencilOpState &value) {
-  return {graphicsStencilOp(value.failOp),      graphicsStencilOp(value.passOp),         graphicsStencilOp(value.depthFailOp),
-          graphicsCompare(value.compareOp),     static_cast<int32_t>(value.compareMask), static_cast<int32_t>(value.writeMask),
-          static_cast<int32_t>(value.reference)};
+  return {.fail = graphicsStencilOp(value.failOp),
+          .pass = graphicsStencilOp(value.passOp),
+          .depthFail = graphicsStencilOp(value.depthFailOp),
+          .compare = graphicsCompare(value.compareOp),
+          .compareMask = static_cast<int32_t>(value.compareMask),
+          .writeMask = static_cast<int32_t>(value.writeMask),
+          .reference = static_cast<int32_t>(value.reference)};
 }
 } // namespace
 
 VkResult implVkCreateGraphicsPipelines(VkDevice, VkPipelineCache, uint32_t count, const VkGraphicsPipelineCreateInfo *infos,
                                        const VkAllocationCallbacks *, VkPipeline *output) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   for (uint32_t i = 0; i < count; ++i)
     output[i] = VK_NULL_HANDLE;
   for (uint32_t i = 0; i < count; ++i) {
@@ -505,15 +531,14 @@ VkResult implVkCreateGraphicsPipelines(VkDevice, VkPipelineCache, uint32_t count
       pipeline.raster.alphaToCoverage = info.pMultisampleState->alphaToCoverageEnable;
       pipeline.raster.sampleShading = info.pMultisampleState->sampleShadingEnable && info.pMultisampleState->minSampleShading > 0;
       pipeline.raster.sampleMask = info.pMultisampleState->pSampleMask ? static_cast<int32_t>(info.pMultisampleState->pSampleMask[0]) : -1;
-      const bool hasColour = std::any_of(subpass.colours.begin(), subpass.colours.end(),
-                                         [](const auto &ref) { return ref.attachment != VK_ATTACHMENT_UNUSED; });
+      const bool hasColour = subpass.colours ^ exists([](const auto &ref) { return ref.attachment != VK_ATTACHMENT_UNUSED; });
       if (hasColour
           && (!info.pColorBlendState || info.pColorBlendState->logicOpEnable
               || info.pColorBlendState->attachmentCount != subpass.colours.size()))
         return unsupported(__LINE__);
       if (hasColour) {
         const auto *c = info.pColorBlendState->blendConstants;
-        pipeline.blendConstants = {c[0], c[1], c[2], c[3]};
+        pipeline.blendConstants = {.r = c[0], .g = c[1], .b = c[2], .a = c[3]};
       }
       for (size_t slot = 0; slot < subpass.colours.size(); ++slot) {
         const auto attachment = subpass.colours[slot].attachment;
@@ -533,14 +558,14 @@ VkResult implVkCreateGraphicsPipelines(VkDevice, VkPipelineCache, uint32_t count
           for (const auto factor :
                {blend.srcColorBlendFactor, blend.dstColorBlendFactor, blend.srcAlphaBlendFactor, blend.dstAlphaBlendFactor})
             if (factor > VK_BLEND_FACTOR_SRC_ALPHA_SATURATE) return unsupported(__LINE__);
-          converted = {true,
-                       graphicsBlendFactor(blend.srcColorBlendFactor),
-                       graphicsBlendFactor(blend.dstColorBlendFactor),
-                       graphicsBlendOp(blend.colorBlendOp),
-                       graphicsBlendFactor(blend.srcAlphaBlendFactor),
-                       graphicsBlendFactor(blend.dstAlphaBlendFactor),
-                       graphicsBlendOp(blend.alphaBlendOp),
-                       static_cast<int32_t>(blend.colorWriteMask)};
+          converted = {.enabled = true,
+                       .sourceColour = graphicsBlendFactor(blend.srcColorBlendFactor),
+                       .destinationColour = graphicsBlendFactor(blend.dstColorBlendFactor),
+                       .colourOp = graphicsBlendOp(blend.colorBlendOp),
+                       .sourceAlpha = graphicsBlendFactor(blend.srcAlphaBlendFactor),
+                       .destinationAlpha = graphicsBlendFactor(blend.dstAlphaBlendFactor),
+                       .alphaOp = graphicsBlendOp(blend.alphaBlendOp),
+                       .writeMask = static_cast<int32_t>(blend.colorWriteMask)};
         }
         pipeline.blends.push_back(converted);
       }
@@ -549,15 +574,15 @@ VkResult implVkCreateGraphicsPipelines(VkDevice, VkPipelineCache, uint32_t count
         return unsupported(__LINE__);
       if (info.pDepthStencilState) {
         const auto &depth = *info.pDepthStencilState;
-        pipeline.depthStencil = {bool(depth.depthTestEnable),
-                                 bool(depth.depthWriteEnable),
-                                 depth.depthTestEnable ? graphicsCompare(depth.depthCompareOp) : gx::GraphicsCompare::Always,
-                                 bool(depth.depthBoundsTestEnable),
-                                 depth.minDepthBounds,
-                                 depth.maxDepthBounds,
-                                 bool(depth.stencilTestEnable),
-                                 depth.stencilTestEnable ? graphicsStencil(depth.front) : gx::GraphicsStencil{},
-                                 depth.stencilTestEnable ? graphicsStencil(depth.back) : gx::GraphicsStencil{}};
+        pipeline.depthStencil = {.depthTest = static_cast<bool>(depth.depthTestEnable),
+                                 .depthWrite = static_cast<bool>(depth.depthWriteEnable),
+                                 .compare = depth.depthTestEnable ? graphicsCompare(depth.depthCompareOp) : gx::GraphicsCompare::Always,
+                                 .boundsTest = static_cast<bool>(depth.depthBoundsTestEnable),
+                                 .minBounds = depth.minDepthBounds,
+                                 .maxBounds = depth.maxDepthBounds,
+                                 .stencilTest = static_cast<bool>(depth.stencilTestEnable),
+                                 .front = depth.stencilTestEnable ? graphicsStencil(depth.front) : gx::GraphicsStencil{},
+                                 .back = depth.stencilTestEnable ? graphicsStencil(depth.back) : gx::GraphicsStencil{}};
       }
     }
     for (uint32_t j = 0; j < info.stageCount; ++j) {
@@ -579,23 +604,25 @@ VkResult implVkCreateGraphicsPipelines(VkDevice, VkPipelineCache, uint32_t count
         const auto &attribute = v.pVertexAttributeDescriptions[i];
         const auto format = vertexFormat(attribute.format);
         if (!format) return unsupported(__LINE__);
-        gx::GraphicsVertexFormat converted{format->encoding, {}, format->bytes, format->bgra};
+        gx::GraphicsVertexFormat converted{.encoding = format->encoding, .widths = {}, .bytes = {format->bytes}, .bgra = format->bgra};
         for (unsigned lane = 0; lane < format->components; ++lane)
           converted.widths.push_back({format->widths[lane]});
-        pipeline.attributes.push_back({static_cast<int32_t>(attribute.location), static_cast<int32_t>(attribute.binding),
-                                       static_cast<int32_t>(attribute.offset), std::move(converted)});
+        pipeline.attributes.push_back({.location = {static_cast<int32_t>(attribute.location)},
+                                       .binding = {static_cast<int32_t>(attribute.binding)},
+                                       .offset = {static_cast<int32_t>(attribute.offset)},
+                                       .format = std::move(converted)});
       }
       for (uint32_t i = 0; i < v.vertexBindingDescriptionCount; ++i) {
         const auto &binding = v.pVertexBindingDescriptions[i];
-        const bool used = std::any_of(pipeline.attributes.begin(), pipeline.attributes.end(), [&](const auto &attribute) {
-          return static_cast<uint32_t>(attribute.binding.value) == binding.binding
-                 && std::any_of(pipeline.vertex.interfaces.begin(), pipeline.vertex.interfaces.end(), [&](const auto &record) {
-                      return record.direction == gx::ShaderDirection::Input
-                             && std::any_of(record.fields.begin(), record.fields.end(), [&](const auto &field) {
-                                  return field.location && field.location->value == attribute.location.value;
-                                });
-                    });
-        });
+        const bool used = pipeline.attributes ^ exists([&](const auto &attribute) {
+                            return static_cast<uint32_t>(attribute.binding.value) == binding.binding
+                                   && pipeline.vertex.interfaces ^ exists([&](const auto &record) {
+                                        return record.direction == gx::ShaderDirection::Input
+                                               && record.fields ^ exists([&](const auto &field) {
+                                                    return field.location && field.location->value == attribute.location.value;
+                                                  });
+                                      });
+                          });
         if (used) pipeline.bindings.push_back(binding);
       }
     }
@@ -633,7 +660,7 @@ VkResult implVkCreateGraphicsPipelines(VkDevice, VkPipelineCache, uint32_t count
 
 void implVkCmdBindVertexBuffers(VkCommandBuffer command, uint32_t first, uint32_t count, const VkBuffer *values,
                                 const VkDeviceSize *offsets) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   auto &state = commands[command].graphics;
   for (uint32_t i = 0; i < count && first + i < state.vertexBuffers.size(); ++i) {
     state.vertexBuffers[first + i] = values[i];
@@ -643,26 +670,26 @@ void implVkCmdBindVertexBuffers(VkCommandBuffer command, uint32_t first, uint32_
 
 void implVkCmdSetViewport(VkCommandBuffer command, uint32_t first, uint32_t count, const VkViewport *viewports) {
   if (first || !count) return;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   commands[command].graphics.viewport = viewports[0];
   commands[command].graphics.viewportSet = true;
 }
 
 void implVkCmdSetScissor(VkCommandBuffer command, uint32_t first, uint32_t count, const VkRect2D *scissors) {
   if (first || !count) return;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   commands[command].graphics.scissor = scissors[0];
   commands[command].graphics.scissorSet = true;
 }
 
 void implVkCmdBeginRenderPass(VkCommandBuffer command, const VkRenderPassBeginInfo *info, VkSubpassContents) {
   if (!info) return;
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   auto &state = commands[command];
   std::vector<VkClearValue> clear;
   if (info->clearValueCount) clear.assign(info->pClearValues, info->pClearValues + info->clearValueCount);
-  const auto framebuffer = info->framebuffer;
-  const auto pass = info->renderPass;
+  auto *const framebuffer = info->framebuffer;
+  auto *const pass = info->renderPass;
   const auto area = info->renderArea;
   auto attachments = framebuffers.at(framebuffer).attachments;
   if (framebuffers.at(framebuffer).imageless) {
@@ -671,28 +698,35 @@ void implVkCmdBeginRenderPass(VkCommandBuffer command, const VkRenderPassBeginIn
     if (bound && bound->attachmentCount == attachments.size() && bound->pAttachments)
       std::copy_n(bound->pAttachments, bound->attachmentCount, attachments.begin());
   }
-  state.operations.emplace_back(recorded::BeginRenderPass{pass, framebuffer, area, std::move(clear), std::move(attachments)});
+  state.operations.emplace_back(recorded::BeginRenderPass{
+      .pass = pass, .framebuffer = framebuffer, .area = area, .clear = std::move(clear), .attachments = std::move(attachments)});
 }
 
 void implVkCmdNextSubpass(VkCommandBuffer command, VkSubpassContents) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   commands.at(command).operations.emplace_back(recorded::NextSubpass{});
 }
 
 void implVkCmdEndRenderPass(VkCommandBuffer command) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   auto &state = commands[command];
   state.operations.emplace_back(recorded::EndRenderPass{});
 }
 
 void implVkCmdDraw(VkCommandBuffer command, uint32_t vertices, uint32_t instances, uint32_t firstVertex, uint32_t firstInstance) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto &state = commands[command].graphics;
-  commands[command].operations.emplace_back(recorded::Draw{state, vertices, instances, firstVertex, firstInstance, false, 0});
+  commands[command].operations.emplace_back(recorded::Draw{.state = state,
+                                                           .vertices = vertices,
+                                                           .instances = instances,
+                                                           .firstVertex = firstVertex,
+                                                           .firstInstance = firstInstance,
+                                                           .indexed = false,
+                                                           .vertexOffset = 0});
 }
 
 void implVkCmdBindIndexBuffer(VkCommandBuffer command, VkBuffer buffer, VkDeviceSize offset, VkIndexType type) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   auto &state = commands.at(command).graphics;
   state.indexBuffer = buffer;
   state.indexOffset = offset;
@@ -701,9 +735,15 @@ void implVkCmdBindIndexBuffer(VkCommandBuffer command, VkBuffer buffer, VkDevice
 
 void implVkCmdDrawIndexed(VkCommandBuffer command, uint32_t indices, uint32_t instances, uint32_t firstIndex, int32_t vertexOffset,
                           uint32_t firstInstance) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   const auto &state = commands.at(command).graphics;
-  commands.at(command).operations.emplace_back(recorded::Draw{state, indices, instances, firstIndex, firstInstance, true, vertexOffset});
+  commands.at(command).operations.emplace_back(recorded::Draw{.state = state,
+                                                              .vertices = indices,
+                                                              .instances = instances,
+                                                              .firstVertex = firstIndex,
+                                                              .firstInstance = firstInstance,
+                                                              .indexed = true,
+                                                              .vertexOffset = vertexOffset});
 }
 
 void implVkCmdDrawIndirect(VkCommandBuffer command, VkBuffer buffer, VkDeviceSize offset, uint32_t count, uint32_t stride) {
@@ -728,65 +768,68 @@ void implVkCmdClearAttachments(VkCommandBuffer command, uint32_t attachmentCount
                                const VkClearRect *rectangles) {
   std::vector<VkClearAttachment> clears(attachments, attachments + attachmentCount);
   std::vector<VkClearRect> rects(rectangles, rectangles + rectCount);
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::ClearAttachments{std::move(clears), std::move(rects)});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(recorded::ClearAttachments{.clears = std::move(clears), .rects = std::move(rects)});
 }
 
 void implVkCmdClearColorImage(VkCommandBuffer command, VkImage handle, VkImageLayout, const VkClearColorValue *colour, uint32_t count,
                               const VkImageSubresourceRange *ranges) {
   const auto value = *colour;
   std::vector<VkImageSubresourceRange> regions(ranges, ranges + count);
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::ClearColour{handle, value, std::move(regions)});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(recorded::ClearColour{.handle = handle, .value = value, .regions = std::move(regions)});
 }
 
 void implVkCmdClearDepthStencilImage(VkCommandBuffer command, VkImage handle, VkImageLayout, const VkClearDepthStencilValue *value,
                                      uint32_t count, const VkImageSubresourceRange *ranges) {
   const VkClearDepthStencilValue clear = *value;
   std::vector<VkImageSubresourceRange> regions(ranges, ranges + count);
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::ClearDepthStencil{handle, clear, std::move(regions)});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(
+      recorded::ClearDepthStencil{.handle = handle, .clear = clear, .regions = std::move(regions)});
 }
 
 void implVkCmdCopyImage(VkCommandBuffer command, VkImage source, VkImageLayout, VkImage destination, VkImageLayout, uint32_t count,
                         const VkImageCopy *regions) {
   std::vector<gx::GraphicsImageCopy> copies;
+  copies.reserve(count);
   for (uint32_t i = 0; i < count; ++i)
     copies.push_back(graphicsCopy(regions[i]));
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::CopyImage{source, destination, std::move(copies)});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(
+      recorded::CopyImage{.source = source, .destination = destination, .copies = std::move(copies)});
 }
 
 // Only width-one lines are advertised; valid line-width commands carry no state.
 void implVkCmdSetLineWidth(VkCommandBuffer, float) {}
 
 void implVkCmdSetDepthBias(VkCommandBuffer command, float constant, float clamp, float slope) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   commands.at(command).graphics.depthBias = {constant, clamp, slope};
 }
 
 void implVkCmdSetBlendConstants(VkCommandBuffer command, const float values[4]) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   std::copy_n(values, 4, commands.at(command).graphics.blendConstants.begin());
 }
 
 void implVkCmdSetDepthBounds(VkCommandBuffer command, float minimum, float maximum) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   commands.at(command).graphics.depthBounds = {minimum, maximum};
 }
 
 void implVkCmdSetStencilCompareMask(VkCommandBuffer command, VkStencilFaceFlags faces, uint32_t value) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   setStencilFaces(commands.at(command).graphics.stencilCompareMask, faces, value);
 }
 
 void implVkCmdSetStencilWriteMask(VkCommandBuffer command, VkStencilFaceFlags faces, uint32_t value) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   setStencilFaces(commands.at(command).graphics.stencilWriteMask, faces, value);
 }
 
 void implVkCmdSetStencilReference(VkCommandBuffer command, VkStencilFaceFlags faces, uint32_t value) {
-  std::lock_guard lock(stateMutex);
+  std::scoped_lock const lock(stateMutex);
   setStencilFaces(commands.at(command).graphics.stencilReference, faces, value);
 }
 
@@ -807,10 +850,12 @@ void implVkCmdEndRenderPass2(VkCommandBuffer command, const VkSubpassEndInfo *) 
 void implVkCmdResolveImage(VkCommandBuffer command, VkImage source, VkImageLayout, VkImage destination, VkImageLayout, uint32_t count,
                            const VkImageResolve *regions) {
   std::vector<gx::GraphicsImageCopy> copies;
+  copies.reserve(count);
   for (uint32_t i = 0; i < count; ++i)
     copies.push_back(graphicsCopy(regions[i]));
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::Resolve{source, destination, std::move(copies)});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(
+      recorded::Resolve{.source = source, .destination = destination, .copies = std::move(copies)});
 }
 
 void implVkCmdBlitImage(VkCommandBuffer command, VkImage source, VkImageLayout, VkImage destination, VkImageLayout, uint32_t count,
@@ -818,10 +863,15 @@ void implVkCmdBlitImage(VkCommandBuffer command, VkImage source, VkImageLayout, 
   std::vector<gx::GraphicsBlit> copies;
   for (uint32_t i = 0; i < count; ++i) {
     const auto &copy = regions[i];
-    copies.push_back({graphicsLayers(copy.srcSubresource), graphicsOffset(copy.srcOffsets[0]), graphicsOffset(copy.srcOffsets[1]),
-                      graphicsLayers(copy.dstSubresource), graphicsOffset(copy.dstOffsets[0]), graphicsOffset(copy.dstOffsets[1])});
+    copies.push_back({.source = graphicsLayers(copy.srcSubresource),
+                      .sourceBegin = graphicsOffset(copy.srcOffsets[0]),
+                      .sourceEnd = graphicsOffset(copy.srcOffsets[1]),
+                      .destination = graphicsLayers(copy.dstSubresource),
+                      .destinationBegin = graphicsOffset(copy.dstOffsets[0]),
+                      .destinationEnd = graphicsOffset(copy.dstOffsets[1])});
   }
-  std::lock_guard lock(stateMutex);
-  commands.at(command).operations.emplace_back(recorded::Blit{source, destination, std::move(copies), filter});
+  std::scoped_lock const lock(stateMutex);
+  commands.at(command).operations.emplace_back(
+      recorded::Blit{.source = source, .destination = destination, .copies = std::move(copies), .filter = filter});
 }
 } // namespace gemstone::vulkan

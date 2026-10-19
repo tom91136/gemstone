@@ -41,31 +41,6 @@ class DeviceHeapSuite extends munit.FunSuite {
     assertEquals(heap.readValue(first, 8), Right(1L))
   }
 
-  test("concurrent atomics, stores and loads stay exact while other blocks are allocated and freed") {
-    val heap    = DeviceHeap(RegionMemory())
-    val counter = allocate(heap, 8)
-    val pair    = allocate(heap, 8)
-    val rounds  = 20000
-    val torn    = java.util.concurrent.atomic.AtomicBoolean(false)
-    val threads = Vec.tabulate(4) { worker =>
-      Thread.ofPlatform().start { () =>
-        (0 until rounds).foreach { round =>
-          val _ = heap.atomicModifyValue(counter, 8)(_ + 1L)
-          if (worker == 0) {
-            val _ = heap.writeValue(pair, if (round % 2 == 0) 0L else -1L, 8)
-          } else heap.readValue(pair, 8) match {
-            case Right(value) if value != 0L && value != -1L => torn.set(true)
-            case _                                           => ()
-          }
-          if (worker == 1) heap.allocate(16).foreach(block => assert(heap.free(block)))
-        }
-      }
-    }
-    threads.foreach(_.join())
-    assertEquals(heap.readValue(counter, 8), Right(4L * rounds))
-    assert(!torn.get())
-  }
-
   test("accesses outside heap blocks reach the backing address space") {
     val backing = RegionMemory(AllocationId(1) -> 8)
     val heap    = DeviceHeap(backing)

@@ -5,6 +5,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.either.*
+import scala.util.Using
 
 class DeviceSuite extends munit.FunSuite {
   private val format = ProgramFormat("test")
@@ -44,13 +45,13 @@ class DeviceSuite extends munit.FunSuite {
   ).value
 
   test("a device loads through the backend for the format and launches synchronously against its memory") {
-    val memory  = ArrayMemory()
-    val output  = memory.allocate(4L)
-    val device  = Device(BackendRegistry(Vec(EchoBackend(format))), memory)
-    val program = device.load(format, Vec[Byte](42)).value
-    assertEquals(device.launch(program, task(output)).map(_.size), Right(1))
-    assertEquals(memory.bytes(output), Vec[Byte](42, 0, 0, 0))
-    program.close()
+    val memory = ArrayMemory()
+    val output = memory.allocate(4L)
+    val device = Device(BackendRegistry(Vec(EchoBackend(format))), memory)
+    Using.resource(device.load(format, Vec[Byte](42)).value) { program =>
+      assertEquals(device.launch(program, task(output)).map(_.size), Right(1))
+      assertEquals(memory.bytes(output), Vec[Byte](42, 0, 0, 0))
+    }
   }
 
   test("launches report the events the program raised") {
@@ -66,9 +67,9 @@ class DeviceSuite extends munit.FunSuite {
   test("formats without a backend and rejected images fail the load") {
     val device = Device(BackendRegistry(Vec(EchoBackend(format))), ArrayMemory())
     assert(device.load(ProgramFormat("other"), Vec[Byte](1)).left.exists {
-      case _: Fault.Unsupported => true; case _ => false
+      case Fault.Unsupported(_) => true; case _ => false
     })
-    assert(device.load(format, Vec.empty).left.exists { case _: Fault.InvalidRequest => true; case _ => false })
+    assert(device.load(format, Vec.empty).left.exists { case Fault.InvalidRequest(_) => true; case _ => false })
   }
 
   test("every launch gets a fresh allowance from the device limits") {

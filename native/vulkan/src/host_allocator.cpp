@@ -2,11 +2,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <mutex>
+#include <new>
 
 #include <gemstone/environment.hpp>
+
+#include "environment_keys.hpp"
 
 namespace gemstone::vulkan::host {
 struct Block {
@@ -21,16 +26,16 @@ std::mutex registryMutex;
 std::array<Block *, 4096> registry{};
 size_t bucket(void *p) { return (reinterpret_cast<uintptr_t>(p) >> 4) % registry.size(); }
 void registerBlock(Block *block) {
-  std::lock_guard lock(registryMutex);
+  std::scoped_lock const lock(registryMutex);
   auto &head = registry[bucket(block->payload)];
   block->hashNext = head;
   head = block;
 }
 bool recycle(void *p) noexcept {
-  std::lock_guard lock(registryMutex);
+  std::scoped_lock const lock(registryMutex);
   for (auto *block = registry[bucket(p)]; block; block = block->hashNext) {
     if (block->payload != p) continue;
-    std::lock_guard arenaLock(block->arena->mutex);
+    std::scoped_lock const arenaLock(block->arena->mutex);
     block->used = false;
     block->freeNext = block->arena->freeBlocks;
     block->arena->freeBlocks = block;
@@ -38,22 +43,27 @@ bool recycle(void *p) noexcept {
   }
   return false;
 }
+VkAllocationCallbacks inheritedCallbacks(const VkAllocationCallbacks *provided, const Arena *parent) {
+  if (provided) return *provided;
+  return parent ? parent->callbacks : VkAllocationCallbacks{};
+}
 } // namespace
 Arena *Arena::create(const VkAllocationCallbacks *provided, Arena *parent, VkSystemAllocationScope lifetime) {
-  const auto callbacks = provided ? *provided : parent ? parent->callbacks : VkAllocationCallbacks{};
+  const auto callbacks = inheritedCallbacks(provided, parent);
   void *storage = callbacks.pfnAllocation ? callbacks.pfnAllocation(callbacks.pUserData, sizeof(Arena), alignof(Arena), lifetime)
                                           : ::operator new(sizeof(Arena));
   if (!storage) throw std::bad_alloc();
   auto *arena = new (storage) Arena;
   arena->callbacks = callbacks;
   arena->scope = lifetime;
-  arena->device = lifetime == VK_SYSTEM_ALLOCATION_SCOPE_DEVICE ? arena : parent ? parent->device : nullptr;
+  if (lifetime == VK_SYSTEM_ALLOCATION_SCOPE_DEVICE) arena->device = arena;
+  else arena->device = parent ? parent->device : nullptr;
   return arena;
 }
 void Arena::trim() noexcept {
   Block *released = nullptr;
   {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     freeBlocks = nullptr;
     for (auto **at = &blocks; *at;) {
       auto *block = *at;
@@ -69,7 +79,7 @@ void Arena::trim() noexcept {
   while (released) {
     auto *next = released->next;
     {
-      std::lock_guard lock(registryMutex);
+      std::scoped_lock const lock(registryMutex);
       auto **at = &registry[bucket(released->payload)];
       while (*at != released)
         at = &(*at)->hashNext;
@@ -89,7 +99,7 @@ void Arena::destroy(const VkAllocationCallbacks *provided) noexcept {
       std::abort();
     }
     {
-      std::lock_guard lock(registryMutex);
+      std::scoped_lock const lock(registryMutex);
       auto **at = &registry[bucket(block->payload)];
       while (*at != block)
         at = &(*at)->hashNext;
@@ -102,14 +112,14 @@ void Arena::destroy(const VkAllocationCallbacks *provided) noexcept {
   if (allocator.pfnFree) allocator.pfnFree(allocator.pUserData, this);
   else ::operator delete(this);
 }
-void *allocate(size_t size, size_t alignment, bool aligned = false) {
+static void *allocate(size_t size, size_t alignment, bool aligned = false) {
   auto *arena = current;
   if (!arena || !arena->callbacks.pfnAllocation) {
     return aligned ? ::operator new(size, std::align_val_t{alignment}) : ::operator new(size);
   }
   alignment = std::max(alignment, alignof(Block));
   {
-    std::lock_guard lock(arena->mutex);
+    std::scoped_lock const lock(arena->mutex);
     for (auto **at = &arena->freeBlocks; *at; at = &(*at)->freeNext) {
       auto *block = *at;
       if (block->size >= size && block->alignment >= alignment) {
@@ -124,16 +134,23 @@ void *allocate(size_t size, size_t alignment, bool aligned = false) {
   // Callbacks are deliberately outside our locks.
   auto *storage = arena->callbacks.pfnAllocation(arena->callbacks.pUserData, offset + std::max(size, size_t{1}), alignment, arena->scope);
   if (!storage) throw std::bad_alloc();
-  auto *block = new (storage) Block{nullptr, nullptr, nullptr, arena, static_cast<char *>(storage) + offset, size, alignment, true};
+  auto *block = new (storage) Block{.next = nullptr,
+                                    .hashNext = nullptr,
+                                    .freeNext = nullptr,
+                                    .arena = arena,
+                                    .payload = static_cast<char *>(storage) + offset,
+                                    .size = size,
+                                    .alignment = alignment,
+                                    .used = true};
   {
-    std::lock_guard lock(arena->mutex);
+    std::scoped_lock const lock(arena->mutex);
     block->next = arena->blocks;
     arena->blocks = block;
   }
   registerBlock(block);
   return block->payload;
 }
-void deallocate(void *p, size_t alignment = 0) noexcept {
+static void deallocate(void *p, size_t alignment = 0) noexcept {
   if (!p || recycle(p)) return;
   if (alignment) ::operator delete(p, std::align_val_t{alignment});
   else ::operator delete(p);

@@ -5,13 +5,14 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class VectorLayoutSuite extends munit.FunSuite {
   for {
     (width, count) <- Seq(32 -> 4, 32 -> 8, 32 -> 16, 64 -> 3, 64 -> 4, 64 -> 8)
-    byValue        <- Seq(false, true)
+    byValue        <- booleans
   } test(
     s"OpenCL struct of float$width and $count-lane vector keeps natural alignment and array stride" +
       s"${if (byValue) ", passed by value" else ""}"
@@ -20,7 +21,7 @@ class VectorLayoutSuite extends munit.FunSuite {
     val align                            = bytes * (if (count == 3) 4 else count)
     val size                             = align * 2
     def encode(value: Double): Vec[Byte] = LittleEndian.toVec(
-      if (width == 32) floatBits(value.toFloat) else doubleBits(value),
+      if (width == 32) single(value.toFloat) else double(value),
       bytes.refine[Int in 0 ~ 8].value
     )
     val element = encode(2.25) ++ Vec.fill(align - bytes)(0.toByte) ++

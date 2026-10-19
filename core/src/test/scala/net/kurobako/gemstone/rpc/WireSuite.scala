@@ -5,7 +5,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.rpc.Wire.*
-import net.kurobako.gemstone.vm.*
 
 class WireSuite extends munit.FunSuite {
   // Fixed bytes and boundary values below are independent expectations for the wire/bit representation.

@@ -17,7 +17,7 @@ object msgpack {
   /** Accumulates the first failure; later writes are ignored. */
   class Writer(val limits: Limits) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var mutableBytes = Array.ofDim[Byte](math.min(InitialCapacity, limits.maximumBytes.raw))
+    private var mutableBytes = Array.ofDim[Byte](math.min(InitialCapacity, limits.maximumBytes))
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var length = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -30,13 +30,13 @@ object msgpack {
 
     private def reserve(additional: Int): Boolean =
       if (failure.nonEmpty) false
-      else if (additional < 0 || additional > limits.maximumBytes.raw - length) {
+      else if (additional < 0 || additional > limits.maximumBytes - length) {
         reject(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
         false
       } else {
         val required = length + additional
         if (required > mutableBytes.length) {
-          val doubled = math.min(limits.maximumBytes.raw.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
+          val doubled = math.min(limits.maximumBytes.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
           mutableBytes = java.util.Arrays.copyOf(mutableBytes, math.max(required, doubled))
         }
         true
@@ -121,14 +121,14 @@ object msgpack {
       } else writeSized(size, marker16, marker32)
 
     def writeArrayHeader(size: Int >= 0): Unit =
-      if (size.raw > limits.maximumElements.raw)
+      if (size > limits.maximumElements)
         reject(s"collection exceeds the ${limits.maximumElements}-element limit")
-      else if (size.raw <= 15) writeRawByte(0x90 | size.raw)
-      else writeSized(size.raw, marker16 = 0xdc, marker32 = 0xdd)
+      else if (size <= 15) writeRawByte(0x90 | size)
+      else writeSized(size, marker16 = 0xdc, marker32 = 0xdd)
 
     def writeString(value: String): Unit = {
       val bytes = value.getBytes(StandardCharsets.UTF_8)
-      if (bytes.length > limits.maximumTextBytes.raw)
+      if (bytes.length > limits.maximumTextBytes)
         reject(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit")
       else {
         if (bytes.length <= 31) writeRawByte(0xa0 | bytes.length)
@@ -138,7 +138,7 @@ object msgpack {
     }
 
     def writeBytes(value: Array[Byte]): Unit =
-      if (value.length > limits.maximumBytes.raw)
+      if (value.length > limits.maximumBytes)
         reject(s"byte collection exceeds the ${limits.maximumBytes}-byte limit")
       else {
         writeSized8(value.length, marker8 = 0xc4, marker16 = 0xc5, marker32 = 0xc6)
@@ -149,6 +149,12 @@ object msgpack {
 
     def result(): Either[String, Array[Byte]] =
       failure.toLeft(java.util.Arrays.copyOf(mutableBytes, length))
+  }
+
+  object Reader {
+    private case class Container(name: String, fixed: Int, short: Int, long: Int)
+    private val ArrayHeader = Container("array", fixed = 0x90, short = 0xdc, long = 0xdd)
+    private val MapHeader   = Container("map", fixed = 0x80, short = 0xde, long = 0xdf)
   }
 
   class Reader(bytes: Array[Byte], start: Int, size: Int, limits: Limits = Limits.Unbounded) {
@@ -241,7 +247,7 @@ object msgpack {
     }
 
     private def readStringBody(size: Int, strict: Boolean): Either[String, String] =
-      if (size < 0 || size > limits.maximumTextBytes.raw)
+      if (size < 0 || size > limits.maximumTextBytes)
         Left(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit: $size")
       else take(size).flatMap(offset =>
         if (strict) decodeUtf8(bytes, offset, size).left.map(_ => "MessagePack string is not valid UTF-8")
@@ -256,20 +262,20 @@ object msgpack {
     }
 
     private def readBytesBody(size: Int): Either[String, Array[Byte]] =
-      if (size < 0 || size > limits.maximumBytes.raw)
+      if (size < 0 || size > limits.maximumBytes)
         Left(s"binary value exceeds the ${limits.maximumBytes}-byte limit: $size")
       else take(size).map(offset => java.util.Arrays.copyOfRange(bytes, offset, offset + size))
 
-    def readArrayHeader(): Either[String, Int >= 0] = containerHeader(array = true)
-    def readMapHeader(): Either[String, Int >= 0]   = containerHeader(array = false)
+    def readArrayHeader(): Either[String, Int >= 0] = containerHeader(Reader.ArrayHeader)
+    def readMapHeader(): Either[String, Int >= 0]   = containerHeader(Reader.MapHeader)
 
-    private def containerHeader(array: Boolean): Either[String, Int >= 0] = readRawByte().flatMap {
-      case tag if (tag & 0xf0) == (if (array) 0x90 else 0x80) => Right(tag & 0x0f)
-      case tag if tag == (if (array) 0xdc else 0xde)          => readRawShort()
-      case tag if tag == (if (array) 0xdd else 0xdf)          => readRawInt()
-      case other => Left(f"expected ${if (array) "array" else "map"}, found 0x$other%02x")
+    private def containerHeader(container: Reader.Container): Either[String, Int >= 0] = readRawByte().flatMap {
+      case tag if (tag & 0xf0) == container.fixed => Right(tag & 0x0f)
+      case tag if tag == container.short          => readRawShort()
+      case tag if tag == container.long           => readRawInt()
+      case other                                  => Left(f"expected ${container.name}, found 0x$other%02x")
     }.flatMap { count =>
-      if (count > limits.maximumElements.raw)
+      if (count > limits.maximumElements)
         Left(s"collection exceeds the ${limits.maximumElements}-element limit: $count")
       else count.refine[Int >= 0].left.map(_ => s"MessagePack container size is out of range: $count")
     }
@@ -295,10 +301,10 @@ object msgpack {
       def value(depth: Int): Either[String, Unit] =
         if (depth > maximumDepth) Left("MessagePack nesting is too deep")
         else if ((peek() & 0xf0) == 0x90 || peek() == 0xdc || peek() == 0xdd)
-          readArrayHeader().flatMap(count => children(count.raw, depth + 1))
+          readArrayHeader().flatMap(count => children(count, depth + 1))
         else if ((peek() & 0xf0) == 0x80 || peek() == 0xde || peek() == 0xdf)
           readMapHeader().flatMap { count =>
-            if (count.raw > Int.MaxValue / 2) Left("MessagePack map is too large")
+            if (count > Int.MaxValue / 2) Left("MessagePack map is too large")
             else children(count.raw * 2, depth + 1)
           }
         else readRawByte().flatMap { tag =>

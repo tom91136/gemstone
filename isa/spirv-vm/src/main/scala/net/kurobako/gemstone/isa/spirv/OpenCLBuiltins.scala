@@ -5,13 +5,13 @@ import VMCollectives.Kind as CollectiveKind
 import VMCollectives.Payload as CollectivePayload
 import VMCollectives.Request as CollectiveRequest
 import VMInvocation.*
-import VMLowering.*
 import VMProgram.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 /** OpenCL C builtins that compilers leave as calls to mangled, bodiless functions. They resolve when the call site
@@ -48,16 +48,10 @@ private object OpenCLBuiltins {
     "_Z18get_num_sub_groupsv"     -> (_.numSubgroups)
   )
 
-  // Intel's bfloat16 device library uses the high sixteen bits of an IEEE-754 binary32 value.
-  private def float32ToBfloat16Bits(value: Long): Long = {
-    val bits = value.toInt
-    ((bits + (0x7fff + ((bits >>> 16) & 1))) >>> 16).toLong & 0xffffL
-  }
-
   def lower(site: Site, name: String, resultType: Int, dest: Int, arguments: Vec[Int]): Option[Op] = {
     val program                              = site.program
     def integerScalar: Option[Int in 1 ~ 64] = program.integerShape(resultType).collect { case (width, 1) => width }
-    def scalarResult(label: String)(value: Invocation => Long): Op = integerScalar match {
+    inline def scalarResult(label: String)(inline value: Invocation => Long): Op = integerScalar match {
       case None        => Fail(Fault.InvalidRequest(s"OpenCL $label result type %$resultType is not an integer scalar"))
       case Some(width) =>
         step((execution, _) =>
@@ -125,7 +119,7 @@ private object OpenCLBuiltins {
           } yield execution.values.updateScalar(
             dest,
             resultType,
-            (if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right) & mask(width)
+            Execute.minimum(left, right, signed = false) & mask(width)
           )
         })
       case "_Z3ctzi" =>
@@ -134,9 +128,11 @@ private object OpenCLBuiltins {
           scalar(execution.values, arguments.head).flatMap { value =>
             (sourceWidth.filter(_ => program.scalarSlot(arguments.head)), integerScalar) match {
               case (Some(source), Some(width)) =>
-                val bits  = value & mask(source)
-                val count = if (bits == 0L) source.raw.toLong else java.lang.Long.numberOfTrailingZeros(bits).toLong
-                Right(execution.values.updateScalar(dest, resultType, count & mask(width)))
+                Right(execution.values.updateScalar(
+                  dest,
+                  resultType,
+                  Execute.trailingZeros(value, source) & mask(width)
+                ))
               case _ => Left(Fault.InvalidRequest("OpenCL ctz requires integer scalar arguments and result"))
             }
           }
@@ -151,11 +147,12 @@ private object OpenCLBuiltins {
             arguments(0),
             arguments(1),
             arguments(2),
-            up = true,
+            CollectiveOps.ShuffleDirection.Up,
             "OpenCL subgroup shuffle-up"
           )
         )
-      case "__devicelib_ConvertFToBF16INTEL" => Some(pointerArgument(name, 4)(float32ToBfloat16Bits(_)))
+      case "__devicelib_ConvertFToBF16INTEL" =>
+        Some(pointerArgument(name, 4)(raw => IEEE754.binary32ToBfloat16(Binary32.low(raw)).toLong))
       case "__devicelib_ConvertBF16ToFINTEL" => Some(pointerArgument(name, 2)(raw => (raw & 0xffffL) << 16))
       case "__to_global"                     => Some(step { (execution, _) =>
           (execution.values.get(arguments.head), program.runtimeType(resultType)) match {

@@ -7,7 +7,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** Hand-assembled kernels over dense register and predicate slots. */
-private object programs {
+private[isa] object programs {
   def r(index: Int): Register       = Register(index.unsafe[Int >= 0])
   def p(index: Int): Predicate      = Predicate(index.unsafe[Int >= 0])
   def register(index: Int): Value   = Value.Register(r(index))

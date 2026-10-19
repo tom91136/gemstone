@@ -14,7 +14,6 @@ target_link_libraries(gemstone_cuda PRIVATE
   gemstone_zstd
   gemstone_lz4
   gemstone_execution_client
-  Aspartame::Aspartame
   Threads::Threads
   m)
 gemstone_require_abi_implementations(
@@ -50,6 +49,13 @@ if(BUILD_TESTING)
   target_include_directories(cuda_code_mode_test PRIVATE "${CUDA_INCLUDE_DIR}")
   target_link_libraries(cuda_code_mode_test PRIVATE gemstone_cuda)
   gemstone_test_target(cuda_code_mode_test)
-  add_test(NAME cuda/code-mode COMMAND ${CMAKE_COMMAND} -E env
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:gemstone_cuda>" $<TARGET_FILE:cuda_code_mode_test>)
+  # The facade connects to the execution service once per process, so each case and its fixture run in their own.
+  gemstone_discover_tests(cuda_code_mode_test TEST_PREFIX "cuda/code-mode/")
+  add_executable(cuda_tensor_map_test test/tensor-map.cpp)
+  target_compile_features(cuda_tensor_map_test PRIVATE cxx_std_17)
+  target_include_directories(cuda_tensor_map_test PRIVATE "${CUDA_INCLUDE_DIR}")
+  target_link_libraries(cuda_tensor_map_test PRIVATE gemstone_cuda)
+  gemstone_test_target(cuda_tensor_map_test)
+  add_test(NAME cuda/tensor-map COMMAND ${CMAKE_COMMAND} -E env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:gemstone_cuda>" $<TARGET_FILE:cuda_tensor_map_test>)
 endif()

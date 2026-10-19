@@ -21,15 +21,15 @@ class VMMemoryAccessSuite extends munit.FunSuite {
     val systemReads: mutable.ArrayBuffer[Int]  = mutable.ArrayBuffer.empty
 
     override def writeValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] = {
-      scalarWrites += size.raw
+      scalarWrites += size
       super.writeValue(address, value, size)
     }
     override def readSystemValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] = {
-      systemReads += size.raw
+      systemReads += size
       super.readValue(address, size)
     }
     override def writeSystemValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] = {
-      systemWrites += size.raw
+      systemWrites += size
       super.writeValue(address, value, size)
     }
     def word(offset: Int >= 0): Int = getInt(allocation, offset)
@@ -177,8 +177,8 @@ class VMMemoryAccessSuite extends munit.FunSuite {
     val limit = base + VMAddressSpace.SharedWindowSize
     assert(VMAddressSpace.isShared(base))
     assert(VMAddressSpace.isShared(limit - 8, 8))
-    for (address <- Vec(base - 1, limit, limit - 4, Long.MaxValue)) {
-      assert(!VMAddressSpace.isShared(address, 8))
+    for (address <- Vec(base - 1, limit, limit - 4, Long.MaxValue)) assert(!VMAddressSpace.isShared(address, 8))
+    for (address <- Vec(base - 8, limit, Long.MaxValue & ~7L)) {
       val memory     = ObservedMemory()
       val operations = Vec(
         Instruction.Load(r(0), Value.Immediate(address), 64, false, MemoryAccess.Generic(false)),
@@ -344,8 +344,10 @@ class VMMemoryAccessSuite extends munit.FunSuite {
       )
     )
 
+  private val LaneFault = "lane (\\d+):".r
+
   private def faultLane(result: Either[Fault, Unit]): Option[String] = result match {
-    case Left(Fault.Memory(detail)) => "lane (\\d+):".r.findFirstMatchIn(detail).map(_.group(1))
+    case Left(Fault.Memory(detail)) => LaneFault.findFirstMatchIn(detail).map(_.group(1))
     case _                          => None
   }
 
@@ -356,7 +358,7 @@ class VMMemoryAccessSuite extends munit.FunSuite {
       PredicatedInstruction(instruction, Some(ExecutionPredicate(p(0), lane == 0)))
     val program = Vec(
       PredicatedInstruction(
-        Instruction.SetPredicate(p(0), Comparison.Equal, NumericFormat.Unsigned(32), Value.LaneId, immediate(1), false),
+        Instruction.SetPredicate(p(0), Comparison.Equal, NumericFormat.Unsigned(32), Value.LaneId, immediate(1)),
         None
       ),
       on(1, Instruction.Load(r(0), immediate(memory.base.raw), 32, false, MemoryAccess.Global(false))),

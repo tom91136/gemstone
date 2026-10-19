@@ -21,11 +21,11 @@ object CloverleafFluxFixture {
     memory
   }
 
-  def verify(memory: BenchmarkMemory, cells: Int > 0): Unit = (0 until cells.raw).foreach { index =>
+  def verify(memory: BenchmarkMemory, cells: Int > 0): Unit = (0 until cells).foreach { index =>
     val x         = java.lang.Double.longBitsToDouble(memory.getLong(memory.ids(6), index * 8))
     val y         = java.lang.Double.longBitsToDouble(memory.getLong(memory.ids(7), index * 8))
     val expectedX = 0.25 * dt * value(0, index) *
-      (value(2, index) + value(2, index + rowStride.raw) + value(4, index) + value(4, index + rowStride.raw))
+      (value(2, index) + value(2, index + rowStride) + value(4, index) + value(4, index + rowStride))
     val expectedY = 0.25 * dt * value(1, index) *
       (value(3, index) + value(3, index + 1) + value(5, index) + value(5, index + 1))
     if (

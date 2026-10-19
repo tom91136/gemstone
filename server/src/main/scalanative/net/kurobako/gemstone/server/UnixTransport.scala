@@ -37,9 +37,9 @@ private object UnixTransport {
   private class Descriptor(fd: Int) extends AutoCloseable {
     private val lock = ReentrantLock()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    @volatile private var closed = false
-    def isClosed: Boolean        = closed
-    def use[A](f: Int => A): A   = {
+    @volatile private var closed             = false
+    def isClosed: Boolean                    = closed
+    inline def use[A](inline f: Int => A): A = {
       val copy = lock.withLock {
         if (closed) throw IOException("Unix socket closed")
         checked(Bindings.duplicate(fd))
@@ -55,7 +55,7 @@ private object UnixTransport {
   private def open(path: Path, listener: Boolean, timeout: Int): Descriptor = Zone {
     Descriptor(checked(Bindings.open(toCString(path.toString), if (listener) 1 else 0, timeout)))
   }
-  def connect(path: Path, timeout: Int > 0): Channel = UnixChannel(open(path, listener = false, timeout.raw), timeout)
+  def connect(path: Path, timeout: Int > 0): Channel = UnixChannel(open(path, listener = false, timeout), timeout)
   def listen(path: Path): Listener                   = UnixSocketListener(open(path, listener = true, 0), path)
   private class UnixSocketListener(fd: Descriptor, path: Path) extends Listener {
     val endpoint: Endpoint = Endpoint.Unix(path)
@@ -79,7 +79,7 @@ private object UnixTransport {
     @volatile private var timeout                 = writeTimeout.raw
     def isClosed: Boolean                         = fd.isClosed
     def close(): Unit                             = fd.close()
-    def readTimeout(milliseconds: Int >= 0): Unit = timeout = milliseconds.raw
+    def readTimeout(milliseconds: Int >= 0): Unit = timeout = milliseconds
     private class ChannelInput extends InputStream {
       override def read(): Int = {
         val byte = Array.ofDim[Byte](1)
@@ -103,7 +103,7 @@ private object UnixTransport {
           @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
           var written = 0
           while (written < length) {
-            val count = checked(Bindings.write(socket, bytes.at(offset + written), length - written, writeTimeout.raw))
+            val count = checked(Bindings.write(socket, bytes.at(offset + written), length - written, writeTimeout))
             if (count == 0) throw IOException("Unix socket write made no progress")
             written += count
           }

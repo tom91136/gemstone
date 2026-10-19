@@ -9,7 +9,10 @@ import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
 class IntegerAddSuite extends munit.FunSuite {
-  private val Mask64 = (BigInt(1) << 64) - 1
+  private val Mask64     = (BigInt(1) << 64) - 1
+  private val Constants  = Vec(0x00000000ffffffffL, 0x12345678ffffffffL, 0xffffffffffffffffL)
+  private val Flags      = Vec(false, true)
+  private val Predicates = Vec("P0", "!P0")
 
   private def sum(values: Long*): Long = (values.map(value => BigInt(value) & Mask64).sum & Mask64).toLong
 
@@ -40,14 +43,18 @@ class IntegerAddSuite extends munit.FunSuite {
       (0x00000001ffffffffL, 0x00000001ffffffffL, 0x00000000fffffffeL),
       (0xffffffffffffffffL, 0xffffffffffffffffL, 0xfffffffffffffffeL)
     )
+    val first    = words(cases.map(_._1), 8)
+    val second   = words(cases.map(_._2), 8)
+    val third    = words(cases.map(_._3), 8)
+    val expected = cases.map(sum(_, _, _))
     for (sm <- Vec(50, 60)) {
       val run = iadd3("CarrySm", sm, "probe").launch(cases.size)(
         Arg.zeros(cases.size * 8),
-        Arg.Buffer(words(cases.map(_._1), 8)),
-        Arg.Buffer(words(cases.map(_._2), 8)),
-        Arg.Buffer(words(cases.map(_._3), 8))
+        Arg.Buffer(first),
+        Arg.Buffer(second),
+        Arg.Buffer(third)
       )
-      assertEquals(run.words(argument = 0, width = 8), cases.map(sum(_, _, _)), s"sm_$sm")
+      assertEquals(run.words(argument = 0, width = 8), expected, s"sm_$sm")
     }
   }
 
@@ -59,14 +66,16 @@ class IntegerAddSuite extends munit.FunSuite {
       0x0000000100000000L -> 0x00000000ffffffffL,
       0xffffffffffffffffL -> 0x0000000000000001L
     )
+    val first  = words(cases.map(_._1), 8)
+    val second = words(cases.map(_._2), 8)
     for {
       sm       <- Vec(50, 60)
-      constant <- Vec(0x00000000ffffffffL, 0x12345678ffffffffL, 0xffffffffffffffffL)
+      constant <- Constants
     } {
       val run = iadd3("ConstantSm", sm, "probe_constant").launch(cases.size)(
         Arg.zeros(cases.size * 8),
-        Arg.Buffer(words(cases.map(_._1), 8)),
-        Arg.Buffer(words(cases.map(_._2), 8)),
+        Arg.Buffer(first),
+        Arg.Buffer(second),
         Arg.u64(constant)
       )
       assertEquals(
@@ -97,14 +106,18 @@ class IntegerAddSuite extends munit.FunSuite {
       (0xdeadbeefffffffffL, 0x10203040ffffffffL, 0x99887766ffffffffL),
       (0x0000000000000001L, 0x0000000000000002L, 0x0000000000000003L)
     )
+    val first    = words(triples.map(_._1), 8)
+    val second   = words(triples.map(_._2), 8)
+    val third    = words(triples.map(_._3), 8)
+    val expected = triples.map(sum(_, _, _))
     for (sm <- Vec(50, 60)) {
       val run = iadd3("MultipairSm", sm, "probe_multi").launch(4)(
         Arg.zeros(triples.size * 8),
-        Arg.Buffer(words(triples.map(_._1), 8)),
-        Arg.Buffer(words(triples.map(_._2), 8)),
-        Arg.Buffer(words(triples.map(_._3), 8))
+        Arg.Buffer(first),
+        Arg.Buffer(second),
+        Arg.Buffer(third)
       )
-      assertEquals(run.words(argument = 0, width = 8), triples.map(sum(_, _, _)), s"sm_$sm")
+      assertEquals(run.words(argument = 0, width = 8), expected, s"sm_$sm")
     }
   }
 
@@ -183,38 +196,24 @@ class IntegerAddSuite extends munit.FunSuite {
       val run = kernel.launch(1, expected.size)((inputs.map(Arg.Buffer(_)) :+ Arg.zeros(expected.size * 8))*)
       assertEquals(run.words(inputs.size, 8), expected, s"sm_$sm $function")
     }
+    val wide             = words(constantCases.map(_._1), 8)
+    val narrow           = words(constantCases.map(c => u32(c._2)))
+    val constantInputs   = Vec(wide, narrow)
+    val addConstant      = constantCases.map((a, b) => sum(a, 0x3f00L, -u32(b)))
+    val addLargeConstant = constantCases.map((a, b) => sum(a, 0xfc100L, -u32(b)))
+    val negativeInputs   = Vec(words(negativeCases.map(_._1), 8), words(negativeCases.map(_._2), 8))
+    val negativeExpected =
+      negativeCases.map((a, b) => (((BigInt(a) & Mask64) - 0x3f00 - (BigInt(b) & Mask64)) & Mask64).toLong)
+    val subtractInputs =
+      Vec(words(subtractCases.map(_._1), 8), words(subtractCases.map(_._2), 8), words(subtractCases.map(_._3), 8))
+    val subtractExpected = subtractCases.map((a, b, c) =>
+      (((BigInt(a) & Mask64) + (BigInt(b) & Mask64) - (BigInt(c) & Mask64)) & Mask64).toLong
+    )
     for (sm <- Vec(50, 60)) {
-      val (wide, narrow) = (words(constantCases.map(_._1), 8), words(constantCases.map(c => u32(c._2))))
-      execute(
-        sm,
-        "add_constant_sub",
-        "AddConstantSub",
-        Vec(wide, narrow),
-        constantCases.map((a, b) => sum(a, 0x3f00L, -u32(b)))
-      )
-      execute(
-        sm,
-        "add_large_constant_sub",
-        "AddLargeConstantSub",
-        Vec(wide, narrow),
-        constantCases.map((a, b) => sum(a, 0xfc100L, -u32(b)))
-      )
-      execute(
-        sm,
-        "negative_constant_sub",
-        "NegativeConstantSub",
-        Vec(words(negativeCases.map(_._1), 8), words(negativeCases.map(_._2), 8)),
-        negativeCases.map((a, b) => (((BigInt(a) & Mask64) - 0x3f00 - (BigInt(b) & Mask64)) & Mask64).toLong)
-      )
-      execute(
-        sm,
-        "add_sub",
-        "AddSub",
-        Vec(words(subtractCases.map(_._1), 8), words(subtractCases.map(_._2), 8), words(subtractCases.map(_._3), 8)),
-        subtractCases.map((a, b, c) =>
-          (((BigInt(a) & Mask64) + (BigInt(b) & Mask64) - (BigInt(c) & Mask64)) & Mask64).toLong
-        )
-      )
+      execute(sm, "add_constant_sub", "AddConstantSub", constantInputs, addConstant)
+      execute(sm, "add_large_constant_sub", "AddLargeConstantSub", constantInputs, addLargeConstant)
+      execute(sm, "negative_constant_sub", "NegativeConstantSub", negativeInputs, negativeExpected)
+      execute(sm, "add_sub", "AddSub", subtractInputs, subtractExpected)
     }
   }
 
@@ -238,7 +237,7 @@ class IntegerAddSuite extends munit.FunSuite {
           instructions.indexWhere(i => i.mnemonic.raw == "IADD3" && i.modifiers.contains(Instruction.Modifier.RS))
         val rs       = instructions(index)
         val r7       = OperandParser.parse("R7").value
-        val previous = instructions.take(index).reverse.find(_.operands.headOption.exists(baseOperand(_) == r7)).get
+        val previous = instructions.take(index).findLast(_.operands.headOption.exists(baseOperand(_) == r7)).get
         assertEquals(previous.mnemonic.raw, "XMAD")
         assertEquals(previous.operands.drop(1).map(baseOperand(_)), OperandParser.parseMany("R2, R4, RZ").value)
         val kernel = enabled.fold(original) { execute =>
@@ -314,8 +313,8 @@ class IntegerAddSuite extends munit.FunSuite {
   }
 
   for {
-    predicate  <- Vec("P0", "!P0")
-    complement <- Vec(false, true)
+    predicate  <- Predicates
+    complement <- Flags
   }
     test(s"Blackwell IADD.X reads $predicate independently of hidden carry, complement=$complement") {
       check(
@@ -467,6 +466,16 @@ class IntegerAddSuite extends munit.FunSuite {
         |STG.E [R2.64], R6
         |EXIT""".stripMargin,
       Vec(2)
+    )
+  }
+
+  // clang's predicates kernel in conformance/unified/src/cuda/integer_forms.cu adds a flag through R9.H0 on sm_50
+  for (sm <- Vec(50, 60)) test(s"sm_$sm IADD3 zero-extends the half each source selects") {
+    check(
+      sm,
+      "MOV32I R5, 0x10; MOV32I R6, 0xfffe0003; MOV32I R7, 0x8001ffff; IADD3 R4, R5, R6.H1, R7.H0; " +
+        "MOV R2, c[0x0][0x160]; MOV R3, c[0x0][0x164]; STG.E [R2], R4; EXIT",
+      Vec(0x10 + 0xfffe + 0xffff)
     )
   }
 }

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import fixtures.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
@@ -97,6 +98,47 @@ class IntegerDotProductSuite extends munit.FunSuite {
     assertEquals(
       dot(results.size, program(results)),
       Vec(0x7fffffffL, 0xffffffffL, 0x80000000L, 0x7fffffffL, 0x05ff7f80L + 33440L)
+    )
+  }
+
+  test("accumulating dot products of 64-bit components read unsigned lanes as unsigned") {
+    val module = spv"""
+      OpCapability DotProductInputAll
+      OpCapability DotProduct
+      $openCL
+      OpEntryPoint Kernel %main "dot"
+      %void = OpTypeVoid
+      %ulong = OpTypeInt 64 0
+      %v2ulong = OpTypeVector %ulong 2
+      %ulong_ptr = OpTypePointer CrossWorkgroup %ulong
+      %fn = OpTypeFunction %void %ulong_ptr
+      %zero = OpConstant %ulong 0
+      %one = OpConstant %ulong 1
+      %two = OpConstant %ulong 2
+      %top = OpConstant %ulong 9223372036854775808
+      %high = OpConstantComposite %v2ulong %top %zero
+      %unit = OpConstantComposite %v2ulong %one %zero
+      %double = OpConstantComposite %v2ulong %two %zero
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %ulong_ptr
+      %entry = OpLabel
+      %exact = OpUDotAccSat %ulong %high %unit %zero
+      OpStore %out %exact
+      %saturated = OpUDotAccSat %ulong %high %double %zero
+      %second = OpInBoundsPtrAccessChain %ulong_ptr %out %one
+      OpStore %second %saturated
+      %mixed = OpSUDotAccSat %ulong %unit %high %zero
+      %third = OpInBoundsPtrAccessChain %ulong_ptr %out %two
+      OpStore %third %mixed
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(24L)
+    assertEquals(run(module, "dot", memory, Vec(buffer(out))), Right(()))
+    assertEquals(
+      Vec.tabulate(3)(index => LittleEndian.decodeInt64(memory.bytes(out), index * 8)),
+      Vec(Long.MinValue, -1L, Long.MaxValue)
     )
   }
 }

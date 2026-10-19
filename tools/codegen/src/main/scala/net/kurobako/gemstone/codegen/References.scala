@@ -14,7 +14,6 @@ import java.nio.file.StandardCopyOption
 import java.security.DigestInputStream
 import java.security.MessageDigest
 import java.time.Duration
-import java.util.HexFormat
 import java.util.regex.Pattern
 import java.util.zip.ZipInputStream
 import org.apache.commons.compress.archivers.ar.ArArchiveInputStream
@@ -156,6 +155,17 @@ object References {
       ),
       Source(
         Artifact(
+          "amd-clr",
+          s"clr-rocm-$HipVersion.tar.gz",
+          s"https://github.com/ROCm/clr/archive/refs/tags/rocm-$HipVersion.tar.gz",
+          "b09539ef53a775c03352f9843f3a346e4f2ad3941c1954e953d352e4984ee708"
+        ),
+        "amd/hip",
+        s"clr-rocm-$HipVersion/hipamd",
+        Vector("include/hip/amd_detail/**")
+      ),
+      Source(
+        Artifact(
           "amd-hsa",
           s"ROCR-Runtime-rocm-$HsaVersion.tar.gz",
           s"https://github.com/ROCm/ROCR-Runtime/archive/refs/tags/rocm-$HsaVersion.tar.gz",
@@ -196,7 +206,7 @@ object References {
         ),
         "khronos/vulkan",
         s"Vulkan-Headers-${VulkanHeadersVersion.stripPrefix("v")}",
-        Vector("LICENSE.md", "include/vulkan/**")
+        Vector("LICENSE.md", "include/vulkan/**", "include/vk_video/**")
       )
     ),
     Vector(
@@ -223,6 +233,7 @@ object References {
       Expect("nvidia/cuda/include/cuda.h"),
       Expect("nvidia/cuda/include/cuda_runtime_api.h"),
       Expect("amd/hip/include/hip/hip_runtime_api.h"),
+      Expect("amd/hip/include/hip/amd_detail/host_defines.h"),
       Expect("amd/hsa/runtime/hsa-runtime/inc/hsa.h"),
       Expect("khronos/opencl/CL/cl.h"),
       Expect("oneapi/level-zero/include/ze_api.h"),
@@ -521,8 +532,10 @@ object References {
     else Option.when(name.startsWith(s"$root/") && name.length > root.length + 1)(Path.of(name.drop(root.length + 1)))
   }
 
+  private val GlobToken = raw"\*\*/|\*\*|\*|\?|[^*?]+".r
+
   private def matcher(glob: String): Path => Boolean = {
-    val regex = raw"\*\*/|\*\*|\*|\?|[^*?]+".r.findAllMatchIn(glob).toVector.map(_.matched match {
+    val regex = GlobToken.findAllMatchIn(glob).toVector.map(_.matched match {
       case "**/"   => "(?:.*/)?"
       case "**"    => ".*"
       case "*"     => "[^/]*"
@@ -541,9 +554,9 @@ object References {
     val _      = Using.resource(DigestInputStream(Files.newInputStream(path), digest))(
       _.transferTo(OutputStream.nullOutputStream())
     )
-    HexFormat.of().formatHex(digest.digest())
+    java.util.HexFormat.of().formatHex(digest.digest())
   }
 
   private def sha256(bytes: Array[Byte]): String =
-    HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+    java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
 }

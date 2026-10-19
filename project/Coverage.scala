@@ -50,6 +50,14 @@ object Coverage {
     )
   }
 
+  private def agentJar(extracted: Extracted): File = {
+    val converter = extracted.get(fileConverter)
+    extracted.structure.units.values.iterator.flatMap(_.unit.plugins.pluginData.dependencyClasspath)
+      .map(entry => converter.toPath(entry.data).toFile)
+      .find(file => file.getName.startsWith("org.jacoco.agent-") && file.getName.endsWith("-runtime.jar"))
+      .getOrElse(sys.error("the build's own class path has no jacoco agent"))
+  }
+
   private def run(
       original: State,
       entries: Seq[Entry],
@@ -58,12 +66,13 @@ object Coverage {
       includes: Seq[String],
       destination: File
   ): State = destination.toPath.parent.get.withTempDirectory(".coverage-") { directory =>
-    val staging  = directory.toFile
-    val agent    = new File(classOf[org.jacoco.agent.rt.RT].getProtectionDomain.getCodeSource.getLocation.toURI)
-    val build    = Project.extract(original).currentRef.build
-    val runners  = entries.filter(_.tests)
-    val subjects = entries.filter(_.measure)
-    val settings = entries.flatMap { entry =>
+    val staging   = directory.toFile
+    val extracted = Project.extract(original)
+    val agent     = agentJar(extracted)
+    val build     = extracted.currentRef.build
+    val runners   = entries.filter(_.tests)
+    val subjects  = entries.filter(_.measure)
+    val settings  = entries.flatMap { entry =>
       val ref = ProjectRef(build, entry.project)
       Seq(ref / module := Def.uncached(Module(
         entry.project,

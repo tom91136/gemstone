@@ -5,14 +5,22 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class AsyncCopySuite extends munit.FunSuite {
-  test("cluster requirements cannot silently execute as independent workgroups") {
+  test("cluster requirements record the shape the kernel's launches must use") {
     def source(directive: String): String =
       s".version 8.0\n.target sm_90\n.address_size 64\n.visible .entry kernel() $directive { ret; }"
-    assert(VMCompiler.compile(source(".reqnctapercluster 1, 1, 1")).isRight)
-    assert(VMCompiler.compile(source(".reqnctapercluster 2, 1, 1")).isLeft)
-    assert(VMCompiler.compile(source(".explicitcluster")).isLeft)
+    assertEquals(
+      VMCompiler.compile(source(".reqnctapercluster 1, 1, 1")).map(_.cluster),
+      Right(Some(Dimensions(1, 1, 1)))
+    )
+    assertEquals(
+      VMCompiler.compile(source(".reqnctapercluster 2, 1, 2")).map(_.cluster),
+      Right(Some(Dimensions(2, 1, 2)))
+    )
+    assertEquals(VMCompiler.compile(source(".explicitcluster")).map(_.cluster), Right(None))
+    assert(VMCompiler.compile(source(".reqnctapercluster 17, 1, 1")).isLeft)
   }
 
   for (sourceSize <- Vec(0, 1, 4, 15, 16))

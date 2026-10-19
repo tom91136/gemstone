@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 
 class LegalitySuite extends munit.FunSuite {
-  import NVDisasm.ConditionExpression.*
+  import ConditionExpression.*
 
   private val database = NVDisasm.Database("test", 128, Vec.empty, Vec.empty)
 
@@ -21,12 +22,12 @@ class LegalitySuite extends munit.FunSuite {
 
   test("condition operators and helper calls resolve to semantic tokens while preserving unknown names") {
     assertEquals(
-      NVDisasm.BinaryOperator.from("->"),
-      NVDisasm.BinaryOperator.Implies
+      BinaryOperator.from("->"),
+      BinaryOperator.Implies
     )
-    assertEquals(NVDisasm.UnaryOperator.from("@"), NVDisasm.UnaryOperator.Unsupported("@"))
-    assertEquals(NVDisasm.BuiltinCall.from("VendorLookup"), NVDisasm.BuiltinCall.Table("VendorLookup"))
-    val unknown = Binary(NVDisasm.BinaryOperator.Unsupported("@"), Number(1), Number(2))
+    assertEquals(UnaryOperator.from("@"), UnaryOperator.Unsupported("@"))
+    assertEquals(BuiltinCall.from("VendorLookup"), BuiltinCall.Table("VendorLookup"))
+    val unknown = Binary(BinaryOperator.Unsupported("@"), Number(1), Number(2))
     assert(Legality.evaluate(
       database,
       unknown,
@@ -60,7 +61,7 @@ class LegalitySuite extends munit.FunSuite {
         Vec.empty,
         conditions =
           Vec.nonEmpty(NVDisasm.Condition(
-            Binary(NVDisasm.BinaryOperator.Equal, Number(0), Number(1)),
+            Binary(BinaryOperator.Equal, Number(0), Number(1)),
             message
           ))
       )
@@ -74,11 +75,11 @@ class LegalitySuite extends munit.FunSuite {
   }
 
   test("false implications do not require absent optional operands") {
-    val condition = Binary(NVDisasm.BinaryOperator.Implies, Number(0), Field("optional", None))
+    val condition = Binary(BinaryOperator.Implies, Number(0), Field("optional", None))
     assertEquals(Legality.evaluate(database, condition, Map.empty), Right(BigInt(1)))
     assert(Legality.evaluate(
       database,
-      Binary(NVDisasm.BinaryOperator.Implies, Number(1), Field("optional", None)),
+      Binary(BinaryOperator.Implies, Number(1), Field("optional", None)),
       Map.empty
     ).isLeft)
   }
@@ -86,8 +87,8 @@ class LegalitySuite extends munit.FunSuite {
   test("operand alignment constraints distinguish legal and illegal register groups") {
     val condition = NVDisasm.Condition(
       Binary(
-        NVDisasm.BinaryOperator.Equal,
-        Binary(NVDisasm.BinaryOperator.Remainder, Field("Ra", None), Number(4)),
+        BinaryOperator.Equal,
+        Binary(BinaryOperator.Remainder, Field("Ra", None), Number(4)),
         Number(0)
       ),
       "unaligned register group"
@@ -116,7 +117,7 @@ class LegalitySuite extends munit.FunSuite {
 
   test("FORMAT condition names resolve from normalised field bindings") {
     val condition = NVDisasm.Condition(
-      Binary(NVDisasm.BinaryOperator.Equal, Field("sync", None), Number(1)),
+      Binary(BinaryOperator.Equal, Field("sync", None), Number(1)),
       "requires sync"
     )
     val form = NVDisasm.Form(
@@ -142,40 +143,40 @@ class LegalitySuite extends munit.FunSuite {
 
   test("evaluates recovered integer parity predicates") {
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsEven, Vec.nonEmpty(Number(12))), Map.empty),
+      Legality.evaluate(database, Call(BuiltinCall.IsEven, Vec.nonEmpty(Number(12))), Map.empty),
       Right(BigInt(1))
     )
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsEven, Vec.nonEmpty(Number(13))), Map.empty),
+      Legality.evaluate(database, Call(BuiltinCall.IsEven, Vec.nonEmpty(Number(13))), Map.empty),
       Right(BigInt(0))
     )
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsOdd, Vec.nonEmpty(Number(-3))), Map.empty),
+      Legality.evaluate(database, Call(BuiltinCall.IsOdd, Vec.nonEmpty(Number(-3))), Map.empty),
       Right(BigInt(1))
     )
     assertEquals(
       Legality.evaluate(
         database,
-        Call(NVDisasm.BuiltinCall.IsOdd, Vec.nonEmpty(Field("Rd", None))),
+        Call(BuiltinCall.IsOdd, Vec.nonEmpty(Field("Rd", None))),
         Map("Rd" -> BigInt(8))
       ),
       Right(BigInt(0))
     )
     assert(Legality.evaluate(
       database,
-      Call(NVDisasm.BuiltinCall.IsEven, Vec.empty[NVDisasm.ConditionExpression]),
+      Call(BuiltinCall.IsEven, Vec.empty[ConditionExpression]),
       Map.empty
     ).isLeft)
     assert(Legality.evaluate(
       database,
-      Call(NVDisasm.BuiltinCall.IsOdd, Vec.nonEmpty(Number(1), Number(3))),
+      Call(BuiltinCall.IsOdd, Vec.nonEmpty(Number(1), Number(3))),
       Map.empty
     ).isLeft)
   }
 
   test("conditions on pre-encoding values apply only when the value is supplied") {
     val condition = NVDisasm.Condition(
-      Binary(NVDisasm.BinaryOperator.Equal, Field("dst_wr_sb", None), Number(7)),
+      Binary(BinaryOperator.Equal, Field("dst_wr_sb", None), Number(7)),
       "Illegal instruction encoding: Instruction type INST_TYPE_MIO_RD_SCBD can not have a wr scoreboard value other than 7 (no scbd)",
       requires = Some("dst_wr_sb")
     )
@@ -194,7 +195,7 @@ class LegalitySuite extends munit.FunSuite {
     val unrelated =
       form.copy(conditions =
         Vec.nonEmpty(condition.copy(
-          expression = Binary(NVDisasm.BinaryOperator.Equal, Field("other", None), Number(7)),
+          expression = Binary(BinaryOperator.Equal, Field("other", None), Number(7)),
           requires = None
         ))
       )

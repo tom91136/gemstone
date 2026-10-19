@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import Op.*
 import VMInvocation.*
-import VMLowering.*
 import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.binary.Bits.*
@@ -17,23 +16,27 @@ private object ControlOps {
 
   def lower(site: Site): PartialFunction[Instruction, Op] = {
     case Instruction.Nop() | _: Instruction.Line | Instruction.NoLine() | Instruction.FunctionParameter(_, _) |
-        Instruction.AssumeTrueKHR(_) => Next
+        Instruction.AssumeTrueKHR(_) | Instruction.LoopControlINTEL(_) => Next
     case Instruction.Label(label)                                         => Label(id(label))
     case Instruction.Phi(_, _, _)                                         => phi(site)
     case Instruction.Branch(target)                                       => Branch(site.label(target))
     case Instruction.BranchConditional(condition, whenTrue, whenFalse, _) =>
       Conditional(id(condition), site.label(whenTrue), site.label(whenFalse))
-    case Instruction.Switch(selector, default, targets) => switch(site, selector, default, targets)
-    case Instruction.LoopMerge(merge, _, _)             => Merge(id(merge), loop = true)
-    case Instruction.SelectionMerge(merge, _)           => Merge(id(merge), loop = false)
-    case Instruction.Return()                           => Return
-    case Instruction.ReturnValue(value)                 => ReturnValue(id(value))
-    case Instruction.Kill()                             => Kill
-    case Instruction.Undef(resultType, dest)            =>
-      zeroValue(site.program.types, id(resultType), id(dest), "OpUndef") match {
-        case Left(error)  => Fail(error)
-        case Right(value) => Define(id(dest), VMValue.fromConstant(value))
+    case Instruction.Switch(selector, default, targets)         => switch(site, selector, default, targets)
+    case Instruction.LoopMerge(merge, _, _)                     => Merge(id(merge), loop = true)
+    case Instruction.SelectionMerge(merge, _)                   => Merge(id(merge), loop = false)
+    case Instruction.Return()                                   => Return
+    case Instruction.ReturnValue(value)                         => ReturnValue(id(value))
+    case Instruction.Kill() | Instruction.TerminateInvocation() => Kill
+    case Instruction.Unreachable()        => Fail(Fault.InvalidRequest("OpUnreachable was reached"))
+    case Instruction.AbortKHR(_, message) =>
+      Dynamic { (execution, _) =>
+        val lanes =
+          Option(execution.values.lanes(id(message))).fold("")(_.map(java.lang.Long.toHexString(_)).mkString(" "))
+        Left(Fault.Backend(s"OpAbortKHR terminated the invocation with message [$lanes]"))
       }
+    case Instruction.PoisonKHR(resultType, dest)                       => zero(site, resultType, dest, "OpPoisonKHR")
+    case Instruction.Undef(resultType, dest)                           => zero(site, resultType, dest, "OpUndef")
     case Instruction.FunctionCall(resultType, dest, called, arguments) =>
       call(site, id(resultType), id(dest), id(called), arguments.map(id(_)))
     case Instruction.FunctionPointerCallINTEL(resultType, dest, sources) if sources.nonEmpty =>
@@ -112,6 +115,12 @@ private object ControlOps {
       }
     }
   }
+
+  private def zero(site: Site, resultType: Operand, dest: Operand, opcode: String): Op =
+    zeroValue(site.program.types, id(resultType), id(dest), opcode) match {
+      case Left(error)     => Fail(error)
+      case Right(constant) => Define(id(dest), constant.value)
+    }
 
   private def phi(site: Site): Op = {
     val instructions = site.program.module.instructions
@@ -297,7 +306,7 @@ private object ControlOps {
       else {
         val cleared = execution.sampleMask match {
           case Some(pointer) =>
-            memory.write(pointer, Array.ofDim[Byte](execution.values.program.typeSize(pointer.pointee).raw))
+            memory.write(pointer, Array.ofDim[Byte](execution.values.program.typeSize(pointer.pointee)))
           case None => Right(())
         }
         cleared.map { _ =>

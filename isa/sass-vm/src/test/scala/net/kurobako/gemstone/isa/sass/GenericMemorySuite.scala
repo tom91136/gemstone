@@ -45,6 +45,9 @@ class GenericMemorySuite extends munit.FunSuite {
       shared.unsafe[Int >= 0]
     )
 
+  private val Spaces      = Vec("shared", "local")
+  private val Operations  = Vec("load", "store")
+  private val Branches    = Vec("BRA.CC.EQ 0x70", "BRA CC.EQU, 0x70")
   private val values      = Vec(0x00000000, 0x7fc00001, 0x80000000, 0xffffffff, 0x12345678)
   private val carryBase   = 0x1fffffffcL
   private val carryTarget = 0x200000000L
@@ -100,7 +103,8 @@ class GenericMemorySuite extends munit.FunSuite {
           val kernel = generic(s"Address$pascal", sm, name, if (name.startsWith("shared")) 16 else 0)
           val high   = kernel.function.instructions.find(isHigh(_)).get
           val access = kernel.function.instructions.find(i =>
-            Set("LD", "ST")(i.mnemonic.raw) && i.modifiers.headOption.contains(Instruction.Modifier.E)
+            PartialFunction.cond(i.mnemonic.raw) { case "LD" | "ST" => true } &&
+              i.modifiers.headOption.contains(Instruction.Modifier.E)
           ).get
           assertEquals(access.operands.last, high.operands.head, name)
           assertEquals(kernel.function.instructions.count(isHigh(_)), 1, name)
@@ -108,7 +112,8 @@ class GenericMemorySuite extends munit.FunSuite {
           assertEquals(result.instructions.find(isHigh(_)).get.operands.head, high.operands(1), name)
           assert(
             !result.instructions.find(i =>
-              Set("LD", "ST")(i.mnemonic.raw) && i.modifiers.headOption.contains(Instruction.Modifier.E)
+              PartialFunction.cond(i.mnemonic.raw) { case "LD" | "ST" => true } &&
+                i.modifiers.headOption.contains(Instruction.Modifier.E)
             ).get
               .operands.contains(high.operands.head),
             name
@@ -129,8 +134,8 @@ class GenericMemorySuite extends munit.FunSuite {
         assertEquals(word(target), value, s"global store offset carry value=0x${value.toHexString}")
       }
       for {
-        space     <- Vec("shared", "local")
-        operation <- Vec("load", "store")
+        space     <- Spaces
+        operation <- Operations
         value     <- values
       } {
         val _ = kernels(s"${space}_$operation").launch(1, memory = memory)(Arg.Region(output), Arg.u32(value))
@@ -366,7 +371,7 @@ class GenericMemorySuite extends munit.FunSuite {
 
   for {
     sm     <- Vec(50, 60)
-    branch <- Vec("BRA.CC.EQ 0x70", "BRA CC.EQU, 0x70")
+    branch <- Branches
   } test(s"sm_$sm the auxiliary predicate proof follows the fallthrough of an unguarded $branch") {
     assertRejects(
       program(
@@ -840,7 +845,11 @@ class GenericMemorySuite extends munit.FunSuite {
   }
 
   /** Instructions following the global load's memory consumer, 8 bytes apart, plus the printed auxiliary predicate. */
-  private def tail(sm: Int)(build: (Int, String) => Vec[DecodedInstruction]): DecodedFunction = {
+  private trait TailBuilder {
+    def apply(start: Int, aux: String): Vec[DecodedInstruction]
+  }
+
+  private def tail(sm: Int)(build: TailBuilder): DecodedFunction = {
     val function    = generic("AddressGlobalLoad", sm, "global_load").function
     val memoryIndex = function.instructions.indexWhere(is(_, "LD", "E"))
     val highIndex   = function.instructions.indexWhere(isHigh(_))
@@ -955,7 +964,7 @@ class GenericMemorySuite extends munit.FunSuite {
         ),
         sm
       )
-      Vec(
+      Vec[TailBuilder](
         // branching on the auxiliary predicate exposes its value
         (start: Int, aux: String) => body(start, s"@$aux BRA ${hex(start + 16)}", kill(aux), "EXIT"),
         // P2R observes predicate state outside an explicit predicate operand

@@ -1,12 +1,11 @@
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <future>
 #include <string_view>
 
 #include <dlfcn.h>
-#include <stdint.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
@@ -19,32 +18,27 @@
 namespace {
 
 struct TargetCase {
-  std::string_view value;
+  const char *value;
   int major;
   int minor;
 };
 
 bool targetSelectionWorks() {
   constexpr std::array cases{
-      TargetCase{"sm_75", 7, 5},
-      TargetCase{"compute_89", 8, 9},
-      TargetCase{"sm89", 8, 9},
-      TargetCase{"compute90", 9, 0},
+      TargetCase{.value = "sm_75", .major = 7, .minor = 5},
+      TargetCase{.value = "compute_89", .major = 8, .minor = 9},
+      TargetCase{.value = "sm89", .major = 8, .minor = 9},
+      TargetCase{.value = "compute90", .major = 9, .minor = 0},
   };
   bool valid = true;
-  unsetenv(gemstone::environment::TargetArch);
   for (const auto &target : cases) {
-    if (setenv(gemstone::environment::TargetArch, target.value.data(), 1) != 0) {
-      std::fprintf(stderr, "cannot set target case %s\n", target.value.data());
-      valid = false;
-      continue;
-    }
+    const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, target.value);
     int major = -1;
     int minor = -1;
     const CUresult status = cuDeviceComputeCapability(&major, &minor, 0);
     if (status != CUDA_SUCCESS || major != target.major || minor != target.minor) {
-      std::fprintf(stderr, "target case %s returned status=%d capability=%d.%d, expected %d.%d\n", target.value.data(),
-                   static_cast<int>(status), major, minor, target.major, target.minor);
+      std::fprintf(stderr, "target case %s returned status=%d capability=%d.%d, expected %d.%d\n", target.value, static_cast<int>(status),
+                   major, minor, target.major, target.minor);
       valid = false;
     }
   }
@@ -76,69 +70,88 @@ constexpr const char *Unsupported = "cuCtxAttach";
 
 // Each row names the exported symbol cuGetProcAddress must return; the CUDA 3.2 split selects the legacy ABI.
 constexpr std::array Lookups{
-    Lookup{"cuMemAlloc", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAlloc_v2"},
-    Lookup{"cuMemAlloc", 3010, CU_GET_PROC_ADDRESS_SUCCESS, Unsupported},
-    Lookup{"cuMemAlloc_v2", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAlloc_v2"},
-    Lookup{"cuArrayCreate", 3010, CU_GET_PROC_ADDRESS_SUCCESS, "cuArrayCreate"},
-    Lookup{"cuArrayCreate", 3020, CU_GET_PROC_ADDRESS_SUCCESS, "cuArrayCreate_v2"},
-    Lookup{"cuArrayCreate", 0, CU_GET_PROC_ADDRESS_SUCCESS, "cuArrayCreate_v2"},
-    Lookup{"cuModuleGetGlobal", 2000, CU_GET_PROC_ADDRESS_SUCCESS, "cuModuleGetGlobal"},
-    Lookup{"cuModuleGetGlobal", 12000, CU_GET_PROC_ADDRESS_SUCCESS, "cuModuleGetGlobal_v2"},
-    Lookup{"cuMemcpy2D", 3000, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemcpy2D"},
-    Lookup{"cuMemcpy2D", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemcpy2D_v2"},
-    Lookup{"cuDeviceTotalMem", 3010, CU_GET_PROC_ADDRESS_SUCCESS, "cuDeviceTotalMem"},
-    Lookup{"cuDeviceTotalMem", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuDeviceTotalMem_v2"},
-    Lookup{"cuMemcpyHtoD", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemcpyHtoD_v2"},
-    Lookup{"cuMemcpyHtoDAsync", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemcpyHtoDAsync_v2"},
-    Lookup{"cuMemsetD8", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemsetD8_v2"},
-    Lookup{"cuMemAllocPitch", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAllocPitch_v2"},
-    Lookup{"cuMemHostGetDevicePointer", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemHostGetDevicePointer_v2"},
-    Lookup{"cuMemGetAddressRange", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemGetAddressRange_v2"},
-    Lookup{"cuCtxDestroy", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxDestroy_v2"},
-    Lookup{"cuEventDestroy", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuEventDestroy_v2"},
-    Lookup{"cuEventElapsedTime", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuEventElapsedTime_v2"},
-    Lookup{"cuLinkCreate", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLinkCreate_v2"},
-    Lookup{"cuLinkAddData", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLinkAddData_v2"},
-    Lookup{"cuCtxCreate_v2", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxCreate_v2"},
-    Lookup{"cuCtxCreate", 11030, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxCreate"},
-    Lookup{"cuCtxCreate", 11040, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxCreate_v3"},
-    Lookup{"cuCtxCreate", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxCreate_v4"},
-    Lookup{"cuGetProcAddress", 11030, CU_GET_PROC_ADDRESS_SUCCESS, "cuGetProcAddress"},
-    Lookup{"cuGetProcAddress", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuGetProcAddress_v2"},
-    Lookup{"cuCtxSynchronize", 12080, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxSynchronize"},
-    Lookup{"cuCtxSynchronize", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuCtxSynchronize_v2"},
-    Lookup{"cuMemAllocHost", 3010, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAllocHost"},
-    Lookup{"cuMemAllocHost", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAllocHost_v2"},
-    Lookup{"cuLaunchHostFunc", 13000, CU_GET_PROC_ADDRESS_SUCCESS, "cuLaunchHostFunc"},
-    Lookup{"cuLaunchHostFunc", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLaunchHostFunc_v2"},
-    Lookup{"cuCtxDestroy", 3020, CU_GET_PROC_ADDRESS_SUCCESS, Unsupported},
-    Lookup{"cuLaunchKernelEx", 11000, CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT, nullptr},
-    Lookup{"cuStreamDestroy", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamDestroy_v2"},
-    Lookup{"cuMemcpyHtoD_ptds", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemcpyHtoD_v2"},
-    Lookup{"cuStreamQuery_ptsz", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamQuery"},
-    Lookup{"cuGetProcAddress_v2", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuGetProcAddress_v2"},
-    Lookup{"cuLaunchKernel", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLaunchKernel"},
-    Lookup{"cuLaunchKernel_ptsz", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLaunchKernel_ptsz"},
-    Lookup{"cuLaunchKernelEx", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLaunchKernelEx"},
-    Lookup{"cuStreamGetCaptureInfo", 10000, CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT, nullptr},
-    Lookup{"cuStreamGetCaptureInfo", 10010, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamGetCaptureInfo"},
-    Lookup{"cuStreamGetCaptureInfo", 11030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamGetCaptureInfo_v2"},
-    Lookup{"cuStreamGetCaptureInfo", 12030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamGetCaptureInfo_v3"},
-    Lookup{"cuStreamGetCaptureInfo_ptsz", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamGetCaptureInfo_v3"},
-    Lookup{"cuStreamGetCaptureInfo_v2_ptsz", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamGetCaptureInfo_v2"},
-    Lookup{"cuStreamIsCapturing_ptsz", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuStreamIsCapturing"},
-    Lookup{"cuMemAllocAsync", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAllocAsync"},
-    Lookup{"cuMemsetD8Async", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemsetD8Async"},
-    Lookup{"cuEventRecordWithFlags", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuEventRecordWithFlags"},
-    Lookup{"cuLibraryLoadData", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuLibraryLoadData"},
-    Lookup{"cuGetExportTable", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuGetExportTable"},
-    Lookup{"cuGraphCreate", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuGraphCreate"},
-    Lookup{"cuMemAdvise", 12000, CU_GET_PROC_ADDRESS_SUCCESS, Unsupported},
-    Lookup{"cuMemAdvise", 12020, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAdvise_v2"},
-    Lookup{"cuMemAdvise", 13030, CU_GET_PROC_ADDRESS_SUCCESS, "cuMemAdvise_v2"},
-    Lookup{"cuDefinitelyMissing", 13030, CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, nullptr},
-    Lookup{"cudaMalloc", 13030, CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, nullptr},
-    Lookup{"", 13030, CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, nullptr},
+    Lookup{.symbol = "cuMemAlloc", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAlloc_v2"},
+    Lookup{.symbol = "cuMemAlloc", .version = 3010, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = Unsupported},
+    Lookup{.symbol = "cuMemAlloc_v2", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAlloc_v2"},
+    Lookup{.symbol = "cuArrayCreate", .version = 3010, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuArrayCreate"},
+    Lookup{.symbol = "cuArrayCreate", .version = 3020, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuArrayCreate_v2"},
+    Lookup{.symbol = "cuArrayCreate", .version = 0, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuArrayCreate_v2"},
+    Lookup{.symbol = "cuModuleGetGlobal", .version = 2000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuModuleGetGlobal"},
+    Lookup{.symbol = "cuModuleGetGlobal", .version = 12000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuModuleGetGlobal_v2"},
+    Lookup{.symbol = "cuMemcpy2D", .version = 3000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemcpy2D"},
+    Lookup{.symbol = "cuMemcpy2D", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemcpy2D_v2"},
+    Lookup{.symbol = "cuDeviceTotalMem", .version = 3010, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuDeviceTotalMem"},
+    Lookup{.symbol = "cuDeviceTotalMem", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuDeviceTotalMem_v2"},
+    Lookup{.symbol = "cuMemcpyHtoD", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemcpyHtoD_v2"},
+    Lookup{.symbol = "cuMemcpyHtoDAsync", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemcpyHtoDAsync_v2"},
+    Lookup{.symbol = "cuMemsetD8", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemsetD8_v2"},
+    Lookup{.symbol = "cuMemAllocPitch", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAllocPitch_v2"},
+    Lookup{.symbol = "cuMemHostGetDevicePointer",
+           .version = 13030,
+           .status = CU_GET_PROC_ADDRESS_SUCCESS,
+           .expected = "cuMemHostGetDevicePointer_v2"},
+    Lookup{
+        .symbol = "cuMemGetAddressRange", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemGetAddressRange_v2"},
+    Lookup{.symbol = "cuCtxDestroy", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxDestroy_v2"},
+    Lookup{.symbol = "cuEventDestroy", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuEventDestroy_v2"},
+    Lookup{.symbol = "cuEventElapsedTime", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuEventElapsedTime_v2"},
+    Lookup{.symbol = "cuLinkCreate", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLinkCreate_v2"},
+    Lookup{.symbol = "cuLinkAddData", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLinkAddData_v2"},
+    Lookup{.symbol = "cuCtxCreate_v2", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxCreate_v2"},
+    Lookup{.symbol = "cuCtxCreate", .version = 11030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxCreate"},
+    Lookup{.symbol = "cuCtxCreate", .version = 11040, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxCreate_v3"},
+    Lookup{.symbol = "cuCtxCreate", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxCreate_v4"},
+    Lookup{.symbol = "cuGetProcAddress", .version = 11030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGetProcAddress"},
+    Lookup{.symbol = "cuGetProcAddress", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGetProcAddress_v2"},
+    Lookup{.symbol = "cuCtxSynchronize", .version = 12080, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxSynchronize"},
+    Lookup{.symbol = "cuCtxSynchronize", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuCtxSynchronize_v2"},
+    Lookup{.symbol = "cuMemAllocHost", .version = 3010, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAllocHost"},
+    Lookup{.symbol = "cuMemAllocHost", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAllocHost_v2"},
+    Lookup{.symbol = "cuLaunchHostFunc", .version = 13000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLaunchHostFunc"},
+    Lookup{.symbol = "cuLaunchHostFunc", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLaunchHostFunc_v2"},
+    Lookup{.symbol = "cuCtxDestroy", .version = 3020, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = Unsupported},
+    Lookup{.symbol = "cuLaunchKernelEx", .version = 11000, .status = CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT, .expected = nullptr},
+    Lookup{.symbol = "cuStreamDestroy", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuStreamDestroy_v2"},
+    Lookup{.symbol = "cuMemcpyHtoD_ptds", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemcpyHtoD_v2"},
+    Lookup{.symbol = "cuStreamQuery_ptsz", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuStreamQuery"},
+    Lookup{.symbol = "cuGetProcAddress_v2", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGetProcAddress_v2"},
+    Lookup{.symbol = "cuLaunchKernel", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLaunchKernel"},
+    Lookup{.symbol = "cuLaunchKernel_ptsz", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLaunchKernel_ptsz"},
+    Lookup{.symbol = "cuLaunchKernelEx", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLaunchKernelEx"},
+    Lookup{.symbol = "cuStreamGetCaptureInfo", .version = 10000, .status = CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT, .expected = nullptr},
+    Lookup{
+        .symbol = "cuStreamGetCaptureInfo", .version = 10010, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuStreamGetCaptureInfo"},
+    Lookup{.symbol = "cuStreamGetCaptureInfo",
+           .version = 11030,
+           .status = CU_GET_PROC_ADDRESS_SUCCESS,
+           .expected = "cuStreamGetCaptureInfo_v2"},
+    Lookup{.symbol = "cuStreamGetCaptureInfo",
+           .version = 12030,
+           .status = CU_GET_PROC_ADDRESS_SUCCESS,
+           .expected = "cuStreamGetCaptureInfo_v3"},
+    Lookup{.symbol = "cuStreamGetCaptureInfo_ptsz",
+           .version = 13030,
+           .status = CU_GET_PROC_ADDRESS_SUCCESS,
+           .expected = "cuStreamGetCaptureInfo_v3"},
+    Lookup{.symbol = "cuStreamGetCaptureInfo_v2_ptsz",
+           .version = 13030,
+           .status = CU_GET_PROC_ADDRESS_SUCCESS,
+           .expected = "cuStreamGetCaptureInfo_v2"},
+    Lookup{
+        .symbol = "cuStreamIsCapturing_ptsz", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuStreamIsCapturing"},
+    Lookup{.symbol = "cuMemAllocAsync", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAllocAsync"},
+    Lookup{.symbol = "cuMemsetD8Async", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemsetD8Async"},
+    Lookup{
+        .symbol = "cuEventRecordWithFlags", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuEventRecordWithFlags"},
+    Lookup{.symbol = "cuLibraryLoadData", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLibraryLoadData"},
+    Lookup{.symbol = "cuGetExportTable", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGetExportTable"},
+    Lookup{.symbol = "cuGraphCreate", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGraphCreate"},
+    Lookup{.symbol = "cuMemAdvise", .version = 12000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = Unsupported},
+    Lookup{.symbol = "cuMemAdvise", .version = 12020, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAdvise_v2"},
+    Lookup{.symbol = "cuMemAdvise", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAdvise_v2"},
+    Lookup{.symbol = "cuDefinitelyMissing", .version = 13030, .status = CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, .expected = nullptr},
+    Lookup{.symbol = "cudaMalloc", .version = 13030, .status = CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, .expected = nullptr},
+    Lookup{.symbol = "", .version = 13030, .status = CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, .expected = nullptr},
 };
 
 bool driverEntryPointQueryWorks() {

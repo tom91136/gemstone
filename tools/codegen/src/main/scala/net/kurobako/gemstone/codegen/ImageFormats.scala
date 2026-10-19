@@ -2,200 +2,244 @@ package net.kurobako.gemstone.codegen
 
 import com.monovore.decline.*
 import java.nio.file.Path
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 
 /** Shared texel layout facts. Algorithms remain in the VM; frozen test references stay independent. */
+// the layout string names generated image format layouts, which are not types of the build
+@SuppressWarnings(Array("baumkuchen:stale-name-string"))
 object ImageFormats {
-  private enum Encoding { case Unorm, Half, Ufloat, SharedExponent }
-  private enum Layout   {
-    case Floating(components: Int)
-    case Integer(components: Int, componentBytes: Int, signed: Boolean, packed: Boolean)
-    case Normalised(components: Int, bits: Int, signed: Boolean, srgb: Boolean, bgra: Boolean)
-    case Narrow(components: Int, bytes: Int, encoding: Encoding, widths: Vector[Int], shifts: Vector[Int])
+  private enum Encoding derives CanEqual { case Unorm, Half, Ufloat, SharedExponent }
+  private enum Layout derives CanEqual   {
+    case Floating
+    case Integer(componentBytes: Int in (1, 2, 4), signed: Boolean, packed: Boolean)
+    case Normalised(bits: Int in (8, 16), signed: Boolean, srgb: Boolean, bgra: Boolean)
+    case Narrow(
+        bytes: Int in (2, 4, 8),
+        encoding: Encoding,
+        widths: Vector[Int in 1 ~ 32],
+        shifts: Vector[Int in 0 ~ 31]
+    )
   }
-  private case class Row(vulkan: Vector[String], shader: String, layout: Layout)
+  private case class Row(vulkan: Vector[String], shader: String, components: Int in 1 ~ 4, layout: Layout)
   import Layout.*
 
+  private val LayoutFamilies = Vector("Integer", "Normalised", "Narrow")
+
   private val rows = Vector(
-    Row(Vector("R32_SFLOAT"), "ImageFormat.R32f", Floating(1)),
-    Row(Vector("R32G32_SFLOAT"), "ImageFormat.Rg32f", Floating(2)),
-    Row(Vector("R32G32B32A32_SFLOAT"), "ImageFormat.Rgba32f", Floating(4)),
-    Row(Vector.empty, "ImageDescriptor.Format.DecodedRgb32f", Floating(3)),
+    Row(Vector("R32_SFLOAT"), "ImageFormat.R32f", 1, Floating),
+    Row(Vector("R32G32_SFLOAT"), "ImageFormat.Rg32f", 2, Floating),
+    Row(Vector("R32G32B32A32_SFLOAT"), "ImageFormat.Rgba32f", 4, Floating),
+    Row(Vector.empty, "ImageDescriptor.Format.DecodedRgb32f", 3, Floating),
     Row(
       Vector("A2B10G10R10_UINT_PACK32"),
       "ImageFormat.Rgb10a2ui",
-      Integer(components = 4, componentBytes = 4, signed = false, packed = true)
+      4,
+      Integer(componentBytes = 4, signed = false, packed = true)
     ),
     Row(
       Vector("R8_UINT"),
       "ImageFormat.R8ui",
-      Integer(components = 1, componentBytes = 1, signed = false, packed = false)
+      1,
+      Integer(componentBytes = 1, signed = false, packed = false)
     ),
     Row(
       Vector("R8_SINT"),
       "ImageFormat.R8i",
-      Integer(components = 1, componentBytes = 1, signed = true, packed = false)
+      1,
+      Integer(componentBytes = 1, signed = true, packed = false)
     ),
     Row(
       Vector("R8G8_UINT"),
       "ImageFormat.Rg8ui",
-      Integer(components = 2, componentBytes = 1, signed = false, packed = false)
+      2,
+      Integer(componentBytes = 1, signed = false, packed = false)
     ),
     Row(
       Vector("R8G8_SINT"),
       "ImageFormat.Rg8i",
-      Integer(components = 2, componentBytes = 1, signed = true, packed = false)
+      2,
+      Integer(componentBytes = 1, signed = true, packed = false)
     ),
     Row(
       Vector("A8B8G8R8_UINT_PACK32", "R8G8B8A8_UINT"),
       "ImageFormat.Rgba8ui",
-      Integer(components = 4, componentBytes = 1, signed = false, packed = false)
+      4,
+      Integer(componentBytes = 1, signed = false, packed = false)
     ),
     Row(
       Vector("A8B8G8R8_SINT_PACK32", "R8G8B8A8_SINT"),
       "ImageFormat.Rgba8i",
-      Integer(components = 4, componentBytes = 1, signed = true, packed = false)
+      4,
+      Integer(componentBytes = 1, signed = true, packed = false)
     ),
     Row(
       Vector("R16_UINT"),
       "ImageFormat.R16ui",
-      Integer(components = 1, componentBytes = 2, signed = false, packed = false)
+      1,
+      Integer(componentBytes = 2, signed = false, packed = false)
     ),
     Row(
       Vector("R16_SINT"),
       "ImageFormat.R16i",
-      Integer(components = 1, componentBytes = 2, signed = true, packed = false)
+      1,
+      Integer(componentBytes = 2, signed = true, packed = false)
     ),
     Row(
       Vector("R16G16_UINT"),
       "ImageFormat.Rg16ui",
-      Integer(components = 2, componentBytes = 2, signed = false, packed = false)
+      2,
+      Integer(componentBytes = 2, signed = false, packed = false)
     ),
     Row(
       Vector("R16G16_SINT"),
       "ImageFormat.Rg16i",
-      Integer(components = 2, componentBytes = 2, signed = true, packed = false)
+      2,
+      Integer(componentBytes = 2, signed = true, packed = false)
     ),
     Row(
       Vector("R16G16B16A16_UINT"),
       "ImageFormat.Rgba16ui",
-      Integer(components = 4, componentBytes = 2, signed = false, packed = false)
+      4,
+      Integer(componentBytes = 2, signed = false, packed = false)
     ),
     Row(
       Vector("R16G16B16A16_SINT"),
       "ImageFormat.Rgba16i",
-      Integer(components = 4, componentBytes = 2, signed = true, packed = false)
+      4,
+      Integer(componentBytes = 2, signed = true, packed = false)
     ),
     Row(
       Vector("R32_UINT"),
       "ImageFormat.R32ui",
-      Integer(components = 1, componentBytes = 4, signed = false, packed = false)
+      1,
+      Integer(componentBytes = 4, signed = false, packed = false)
     ),
     Row(
       Vector("R32_SINT"),
       "ImageFormat.R32i",
-      Integer(components = 1, componentBytes = 4, signed = true, packed = false)
+      1,
+      Integer(componentBytes = 4, signed = true, packed = false)
     ),
     Row(
       Vector("R32G32_UINT"),
       "ImageFormat.Rg32ui",
-      Integer(components = 2, componentBytes = 4, signed = false, packed = false)
+      2,
+      Integer(componentBytes = 4, signed = false, packed = false)
     ),
     Row(
       Vector("R32G32_SINT"),
       "ImageFormat.Rg32i",
-      Integer(components = 2, componentBytes = 4, signed = true, packed = false)
+      2,
+      Integer(componentBytes = 4, signed = true, packed = false)
     ),
     Row(
       Vector("R32G32B32A32_UINT"),
       "ImageFormat.Rgba32ui",
-      Integer(components = 4, componentBytes = 4, signed = false, packed = false)
+      4,
+      Integer(componentBytes = 4, signed = false, packed = false)
     ),
     Row(
       Vector("R32G32B32A32_SINT"),
       "ImageFormat.Rgba32i",
-      Integer(components = 4, componentBytes = 4, signed = true, packed = false)
+      4,
+      Integer(componentBytes = 4, signed = true, packed = false)
     ),
     Row(
       Vector("R8_UNORM"),
       "ImageFormat.R8",
-      Normalised(components = 1, bits = 8, signed = false, srgb = false, bgra = false)
+      1,
+      Normalised(bits = 8, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8_SNORM"),
       "ImageFormat.R8Snorm",
-      Normalised(components = 1, bits = 8, signed = true, srgb = false, bgra = false)
+      1,
+      Normalised(bits = 8, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8_UNORM"),
       "ImageFormat.Rg8",
-      Normalised(components = 2, bits = 8, signed = false, srgb = false, bgra = false)
+      2,
+      Normalised(bits = 8, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8_SNORM"),
       "ImageFormat.Rg8Snorm",
-      Normalised(components = 2, bits = 8, signed = true, srgb = false, bgra = false)
+      2,
+      Normalised(bits = 8, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8B8A8_UNORM", "A8B8G8R8_UNORM_PACK32"),
       "ImageFormat.Rgba8",
-      Normalised(components = 4, bits = 8, signed = false, srgb = false, bgra = false)
+      4,
+      Normalised(bits = 8, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8B8A8_SNORM", "A8B8G8R8_SNORM_PACK32"),
       "ImageFormat.Rgba8Snorm",
-      Normalised(components = 4, bits = 8, signed = true, srgb = false, bgra = false)
+      4,
+      Normalised(bits = 8, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8B8A8_SRGB", "A8B8G8R8_SRGB_PACK32"),
       "ImageDescriptor.Format.Rgba8Srgb",
-      Normalised(components = 4, bits = 8, signed = false, srgb = true, bgra = false)
+      4,
+      Normalised(bits = 8, signed = false, srgb = true, bgra = false)
     ),
     Row(
       Vector("B8G8R8A8_UNORM"),
       "ImageDescriptor.Format.Bgra8Unorm",
-      Normalised(components = 4, bits = 8, signed = false, srgb = false, bgra = true)
+      4,
+      Normalised(bits = 8, signed = false, srgb = false, bgra = true)
     ),
     Row(
       Vector("B8G8R8A8_SRGB"),
       "ImageDescriptor.Format.Bgra8Srgb",
-      Normalised(components = 4, bits = 8, signed = false, srgb = true, bgra = true)
+      4,
+      Normalised(bits = 8, signed = false, srgb = true, bgra = true)
     ),
     Row(
       Vector("R16_UNORM"),
       "ImageFormat.R16",
-      Normalised(components = 1, bits = 16, signed = false, srgb = false, bgra = false)
+      1,
+      Normalised(bits = 16, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R16_SNORM"),
       "ImageFormat.R16Snorm",
-      Normalised(components = 1, bits = 16, signed = true, srgb = false, bgra = false)
+      1,
+      Normalised(bits = 16, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R16G16_UNORM"),
       "ImageFormat.Rg16",
-      Normalised(components = 2, bits = 16, signed = false, srgb = false, bgra = false)
+      2,
+      Normalised(bits = 16, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R16G16_SNORM"),
       "ImageFormat.Rg16Snorm",
-      Normalised(components = 2, bits = 16, signed = true, srgb = false, bgra = false)
+      2,
+      Normalised(bits = 16, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R16G16B16A16_UNORM"),
       "ImageFormat.Rgba16",
-      Normalised(components = 4, bits = 16, signed = false, srgb = false, bgra = false)
+      4,
+      Normalised(bits = 16, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R16G16B16A16_SNORM"),
       "ImageFormat.Rgba16Snorm",
-      Normalised(components = 4, bits = 16, signed = true, srgb = false, bgra = false)
+      4,
+      Normalised(bits = 16, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("B4G4R4A4_UNORM_PACK16"),
       "ImageDescriptor.Format.B4G4R4A4Unorm",
+      4,
       Narrow(
-        components = 4,
         bytes = 2,
         encoding = Encoding.Unorm,
         widths = Vector(4, 4, 4, 4),
@@ -205,13 +249,14 @@ object ImageFormats {
     Row(
       Vector("R5G6B5_UNORM_PACK16"),
       "ImageDescriptor.Format.R5G6B5Unorm",
-      Narrow(components = 3, bytes = 2, encoding = Encoding.Unorm, widths = Vector(5, 6, 5), shifts = Vector(11, 5, 0))
+      3,
+      Narrow(bytes = 2, encoding = Encoding.Unorm, widths = Vector(5, 6, 5), shifts = Vector(11, 5, 0))
     ),
     Row(
       Vector("A1R5G5B5_UNORM_PACK16"),
       "ImageDescriptor.Format.A1R5G5B5Unorm",
+      4,
       Narrow(
-        components = 4,
         bytes = 2,
         encoding = Encoding.Unorm,
         widths = Vector(5, 5, 5, 1),
@@ -221,8 +266,8 @@ object ImageFormats {
     Row(
       Vector("A2B10G10R10_UNORM_PACK32"),
       "ImageFormat.Rgb10A2",
+      4,
       Narrow(
-        components = 4,
         bytes = 4,
         encoding = Encoding.Unorm,
         widths = Vector(10, 10, 10, 2),
@@ -232,23 +277,26 @@ object ImageFormats {
     Row(
       Vector("R16_SFLOAT"),
       "ImageFormat.R16f",
-      Narrow(components = 1, bytes = 2, encoding = Encoding.Half, widths = Vector.empty, shifts = Vector.empty)
+      1,
+      Narrow(bytes = 2, encoding = Encoding.Half, widths = Vector.empty, shifts = Vector.empty)
     ),
     Row(
       Vector("R16G16_SFLOAT"),
       "ImageFormat.Rg16f",
-      Narrow(components = 2, bytes = 4, encoding = Encoding.Half, widths = Vector.empty, shifts = Vector.empty)
+      2,
+      Narrow(bytes = 4, encoding = Encoding.Half, widths = Vector.empty, shifts = Vector.empty)
     ),
     Row(
       Vector("R16G16B16A16_SFLOAT"),
       "ImageFormat.Rgba16f",
-      Narrow(components = 4, bytes = 8, encoding = Encoding.Half, widths = Vector.empty, shifts = Vector.empty)
+      4,
+      Narrow(bytes = 8, encoding = Encoding.Half, widths = Vector.empty, shifts = Vector.empty)
     ),
     Row(
       Vector("B10G11R11_UFLOAT_PACK32"),
       "ImageFormat.R11fG11fB10f",
+      3,
       Narrow(
-        components = 3,
         bytes = 4,
         encoding = Encoding.Ufloat,
         widths = Vector(11, 11, 10),
@@ -258,8 +306,8 @@ object ImageFormats {
     Row(
       Vector("E5B9G9R9_UFLOAT_PACK32"),
       "ImageDescriptor.Format.E5B9G9R9Ufloat",
+      3,
       Narrow(
-        components = 3,
         bytes = 4,
         encoding = Encoding.SharedExponent,
         widths = Vector.empty,
@@ -272,40 +320,39 @@ object ImageFormats {
   require(rows.map(_.shader).distinct.size == rows.size, "duplicate shader format")
   rows.foreach { row =>
     row.layout match {
-      case Narrow(components, bytes, Encoding.Unorm | Encoding.Ufloat, widths, shifts) =>
+      case Narrow(bytes, Encoding.Unorm | Encoding.Ufloat, widths, shifts) =>
         require(
-          widths.size == components && shifts.size == components,
+          widths.size == row.components.raw && shifts.size == row.components.raw,
           "packed format needs a width and shift per component"
         )
         require(
-          widths.zip(shifts).forall((width, shift) => width > 0 && shift >= 0 && width + shift <= bytes * 8),
+          widths.zip(shifts).forall((width, shift) => width + shift <= bytes * 8),
           "packed component exceeds its texel"
         )
-      case Normalised(_, bits, _, srgb, bgra) =>
-        require(bits == 8 || (bits == 16 && !srgb && !bgra), "normalised channels are 8-bit, or 16-bit linear RGBA")
+      case Normalised(bits, _, srgb, bgra) =>
+        require(bits == 8 || (!srgb && !bgra), "normalised channels are 8-bit, or 16-bit linear RGBA")
       case _ => ()
     }
   }
 
   def narrowEncodingSource: String =
     GeneratedHeader.scala("from ImageFormats") +
-      s"package net.kurobako.gemstone.isa.spirv\n\n${GeneratedHeader.annotation()}private enum NarrowEncoding { case ${Encoding.values.mkString(", ")} }\n"
+      s"package net.kurobako.gemstone.isa.spirv\n\n${GeneratedHeader.annotation()}private enum NarrowEncoding derives CanEqual { case ${Encoding.values.mkString(", ")} }\n"
 
   def scalaSource: String = {
     def layout(row: Row): (String, String) = row.layout match {
-      case Floating(components)                       => ("Floating", components.toString)
-      case Integer(components, bytes, signed, packed) =>
-        ("Integer", s"$components, $bytes, $signed, $packed")
-      case Normalised(components, bits, signed, srgb, bgra) =>
-        ("Normalised", s"$components, $bits, $signed, $srgb, $bgra")
-      case Narrow(components, bytes, encoding, widths, shifts) =>
+      case Floating                             => ("Floating", row.components.toString)
+      case Integer(bytes, signed, packed)       => ("Integer", s"${row.components}, $bytes, $signed, $packed")
+      case Normalised(bits, signed, srgb, bgra) =>
+        ("Normalised", s"${row.components}, $bits, $signed, $srgb, $bgra")
+      case Narrow(bytes, encoding, widths, shifts) =>
         (
           "Narrow",
-          s"$components, $bytes, NarrowEncoding.$encoding, ${Emission.collection("Vector", widths.map(_.toString))}, " +
+          s"${row.components}, $bytes, NarrowEncoding.$encoding, ${Emission.collection("Vector", widths.map(_.toString))}, " +
             Emission.collection("Vector", shifts.map(_.toString))
         )
     }
-    val groups = Vector("Integer", "Normalised", "Narrow").map { family =>
+    val groups = LayoutFamilies.map { family =>
       val selected = rows.filter(row => layout(row)._1 == family)
       val values   = selected.zipWithIndex.map { (row, index) =>
         s"  private val ${family.toLowerCaseRoot}$index = Some(${family}ImageFormat.Layout(${layout(row)._2}))"
@@ -315,12 +362,12 @@ object ImageFormats {
       }.mkString("\n")
       s"$values\n  def ${family.toLowerCaseRoot}(format: Int): Option[${family}ImageFormat.Layout] = format match {\n$cases\n    case _ => None\n  }"
     }.mkString("\n\n")
-    val floatCases = rows.collect { case Row(_, shader, Floating(components)) =>
+    val floatCases = rows.collect { case Row(_, shader, components, Floating) =>
       s"    case $shader => $components"
     }.mkString("\n")
     val floats  = s"  def floatComponents(format: Int): Int = format match {\n$floatCases\n    case _ => 0\n  }"
     val storage = rows.collect {
-      case Row(_, shader, Floating(_) | Normalised(_, _, _, _, _) | Narrow(_, _, _, _, _))
+      case Row(_, shader, _, Floating | Normalised(_, _, _, _) | Narrow(_, _, _, _))
           if shader.startsWith("ImageFormat.") =>
         shader
     }
@@ -449,10 +496,10 @@ object ImageFormats {
   }.mkString
   private val storage = rows.map { row =>
     val bytes = row.layout match {
-      case Floating(components)                             => components * 4
-      case Integer(components, bytes, _, packed)            => if (packed) 4 else components * bytes
-      case Normalised(components = components, bits = bits) => components * bits / 8
-      case Narrow(bytes = bytes)                            => bytes
+      case Floating                  => row.components * 4
+      case Integer(bytes, _, packed) => if (packed) 4 else row.components * bytes
+      case Normalised(bits = bits)   => row.components * bits / 8
+      case Narrow(bytes = bytes)     => bytes.raw
     }
     val srgb = row.layout match {
       case Normalised(srgb = srgb) => srgb
@@ -528,14 +575,16 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.Wire.*
 
 ${GeneratedHeader.annotation()}object GraphicsFormats {
-  enum GraphicsDepthFormat { case None, Unorm16, Float32 }
-  enum GraphicsCompression {
+  enum GraphicsDepthFormat derives CanEqual { case None, Unorm16, Float32 }
+  enum GraphicsCompression derives CanEqual {
     case None, EtcRgb, EtcPunchthrough, EtcRgba, EacR, EacRg, EacSignedR, EacSignedRg
   }
   /** Shader texel interpretations. Numeric descriptor codes are generated in the SPIR-V module. */
-  enum GraphicsShaderFormat { case ${shaders.map(shaderName(_)).mkString(", ")} }
+  enum GraphicsShaderFormat derives CanEqual { case ${shaders.map(shaderName(_)).mkString(", ")} }
 
   /** Supported storage/view layouts. Metadata cannot be supplied independently of the format. */
+  // the cases are rows of one table, each a distinct value
+  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   enum GraphicsFormat(
       val shaderFormat: GraphicsShaderFormat,
       val texelBytes: Int > 0,
@@ -543,7 +592,7 @@ ${GeneratedHeader.annotation()}object GraphicsFormats {
       val stencilOffset: Int,
       val compression: GraphicsCompression,
       val srgb: Boolean
-  ) derives Codec {
+  ) derives Codec, CanEqual {
 $cases
     def decoded: GraphicsFormat = this match {
 $decoded
@@ -571,15 +620,15 @@ $decoded
     val capabilities = Vector(
       capability("colourFormat")(_ => true),
       capability("integerColourFormat")(_.layout match {
-        case Integer(_, _, _, _) => true
-        case _                   => false
+        case Integer(_, _, _) => true
+        case _                => false
       }),
       capability("colourAttachmentFormat")(_.layout match {
         case Narrow(encoding = Encoding.SharedExponent) => false
         case _                                          => true
       }),
       capability("blendColourFormat")(_.layout match {
-        case Floating(_) => true
+        case Floating => true
         // SNORM blending stays unadvertised; the CTS reference uses unclamped one-minus factors.
         case Normalised(signed = signed) => !signed
         case Narrow(encoding = encoding) => encoding != Encoding.SharedExponent

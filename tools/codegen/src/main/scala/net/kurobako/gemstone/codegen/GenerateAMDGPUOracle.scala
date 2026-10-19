@@ -61,6 +61,7 @@ object GenerateAMDGPUOracle {
   private val Quoted: Regex          = "'[^']*'|\"[^\"]*\"".r
   private val GPUName: Regex         = raw"(?i)\bgfx[0-9a-z]+\b".r
   private val OraclePath             = "net/kurobako/gemstone/isa/amdgpu/llvm-oracle"
+  private val OperandFree            = Set("v_nop", "v_clrexcp")
 
   private val command = Command("GenerateAMDGPUOracle", "Generate the bounded AMDGPU oracle")((
     Opts.argument[String]("prepared-references").map(Path.of(_)),
@@ -115,13 +116,13 @@ object GenerateAMDGPUOracle {
                 val (target, waveSize) = context
                 // LLVM printing loses swizzle bits and packed SDWA negation; use the original input for these checks.
                 val input = if (assembly.contains("offset:swizzle(") || assembly.startsWith("v_pk_fmac_f16_sdwa"))
-                  lines.take(index).reverse.find(line => line.trim.nonEmpty && !line.trim.startsWith("//"))
+                  lines.take(index).findLast(line => line.trim.nonEmpty && !line.trim.startsWith("//"))
                     .filter(line =>
                       line.trim.takeWhile(!_.isWhitespace) == assembly.trim.takeWhile(!_.isWhitespace)
                     ).getOrElse(assembly)
                 else assembly
                 // LLVM omits the width suffix when printing these operand-free instructions.
-                (if (bytes.size == 8 && Set("v_nop", "v_clrexcp")(assembly.trim)) s"${assembly.trim}_e64"
+                (if (bytes.size == 8 && OperandFree(assembly.trim)) s"${assembly.trim}_e64"
                  else input.trim)
                   .refine[NonEmpty[String]].toOption.fold(current) { canonical =>
                     val key = (target, canonical, bytes, waveSize)
@@ -171,29 +172,19 @@ object GenerateAMDGPUOracle {
     val positiveCoverage =
       firstBy(positives)(value => canonicalOpcode(value.opcode)) ++
         firstBy(positives)(_.sourceFile) ++
-        positives.groupBy(value => familyForTarget(value.target)).values.toVector.flatMap { familyCases =>
-          evenly(firstBy(familyCases.sorted(using goldenOrdering))(value => canonicalOpcode(value.opcode)), 128)
-        } ++
-        positives.groupBy(_.target).values.toVector.flatMap { targetCases =>
-          evenly(firstBy(targetCases.sorted(using goldenOrdering))(value => canonicalOpcode(value.opcode)), 16)
-        } ++
+        sampled(positives, value => familyForTarget(value.target), goldenOrdering, 128)(value =>
+          canonicalOpcode(value.opcode)
+        ) ++
+        sampled(positives, _.target, goldenOrdering, 16)(value => canonicalOpcode(value.opcode)) ++
         firstByMany(positives)(value => syntaxFeatures(value).map(feature => (value.target, feature)))
 
     val diagnosticCoverage =
       evenly(firstBy(diagnostics)(value => diagnosticCategory(value.message)), 256) ++
         firstBy(diagnostics)(_.sourceFile) ++
-        diagnostics.groupBy(value => familyForTarget(value.target)).values.toVector.flatMap { familyCases =>
-          evenly(
-            firstBy(familyCases.sorted(using diagnosticOrdering))(value => diagnosticCategory(value.message)),
-            32
-          )
-        } ++
-        diagnostics.groupBy(_.target).values.toVector.flatMap { targetCases =>
-          evenly(
-            firstBy(targetCases.sorted(using diagnosticOrdering))(value => diagnosticCategory(value.message)),
-            8
-          )
-        }
+        sampled(diagnostics, value => familyForTarget(value.target), diagnosticOrdering, 32)(value =>
+          diagnosticCategory(value.message)
+        ) ++
+        sampled(diagnostics, _.target, diagnosticOrdering, 8)(value => diagnosticCategory(value.message))
 
     Selection(
       positiveCoverage.distinctBy(value => (value.target, value.assembly, value.bytes, value.waveSize)).sorted(using
@@ -204,6 +195,13 @@ object GenerateAMDGPUOracle {
       )
     )
   }
+
+  /** From each group of `values`, `limit` of its first by `key`, spread evenly in `ordering`. */
+  private def sampled[A, G, K](values: Vector[A], group: A => G, ordering: Ordering[A], limit: Int)(
+      key: A => K
+  ): Vector[A] = values.groupBy(group).values.toVector.flatMap(members =>
+    evenly(firstBy(members.sorted(using ordering))(key), limit)
+  )
 
   private def firstBy[A, K](values: Vector[A])(key: A => K): Vector[A] =
     values.foldLeft((Set.empty[K], Chain.empty[A])) { case ((seen, selected), value) =>

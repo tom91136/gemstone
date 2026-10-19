@@ -3,7 +3,8 @@ package net.kurobako.gemstone.isa.spirv
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 
-private object LiteralString {
+/** A literal string operand: UTF-8, NUL-terminated and padded to whole words. */
+object LiteralString {
   def encode(text: String): Vec[Word] = {
     val bytes = text.getBytes(StandardCharsets.UTF_8) :+ 0.toByte
     Vec.from(bytes.grouped(4).map(group =>

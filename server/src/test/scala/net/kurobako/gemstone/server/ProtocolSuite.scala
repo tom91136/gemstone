@@ -15,6 +15,8 @@ import net.kurobako.gemstone.server.protocol.*
 import scala.util.Using
 
 class ProtocolSuite extends munit.FunSuite {
+  private val Booleans = Seq(false, true)
+
   private class FragmentedInput(source: InputStream) extends InputStream {
     def read(): Int                                                      = source.read()
     override def read(bytes: Array[Byte], offset: Int, length: Int): Int =
@@ -23,8 +25,8 @@ class ProtocolSuite extends munit.FunSuite {
   }
 
   for {
-    fully  <- Seq(false, true)
-    socket <- Seq(false, true)
+    fully  <- Booleans
+    socket <- Booleans
   }
     test(s"header parsing preserves fragmented large consecutive frames readFully=$fully socket=$socket") {
       val client = ClientId(0x0102030405060708L)
@@ -37,8 +39,8 @@ class ProtocolSuite extends munit.FunSuite {
         else {
           val listener = ServerSocket(0, 1, InetAddress.getLoopbackAddress)
           val sender   = Socket(InetAddress.getLoopbackAddress, listener.getLocalPort)
-          val receiver = listener.accept()
-          listener.close()
+          val receiver = try listener.accept()
+          finally listener.close()
           receiver.setSoTimeout(5000)
           val writer = Thread(() =>
             Using.resource(sender) { sender =>
@@ -82,7 +84,7 @@ class ProtocolSuite extends munit.FunSuite {
         (4, ExecutionRPC.MaximumPayload.raw + 1)
       )
     ) {
-      val prefix = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw - 4)
+      val prefix = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes - 4)
         .putLong(1L).putLong(1L).putLong(1L).putInt(tagSize).putInt(payloadSize).array()
       intercept[IllegalArgumentException](readHeader(DataInputStream(ByteArrayInputStream(prefix))))
     }
@@ -97,7 +99,7 @@ class ProtocolSuite extends munit.FunSuite {
   }
 
   test("malformed UTF-8 tags are rejected") {
-    val frame = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw - 4 + 1)
+    val frame = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes - 4 + 1)
       .putLong(1L).putLong(1L).putLong(1L).putInt(1).putInt(0).put(0xff.toByte).array()
     intercept[java.nio.charset.CharacterCodingException](readHeader(DataInputStream(ByteArrayInputStream(frame))))
   }
@@ -110,7 +112,7 @@ class ProtocolSuite extends munit.FunSuite {
 
   test("response framing rejects invalid headers before reading or allocating payloads") {
     for ((status, size, maximum) <- Seq((2, 0, 64), (0, -1, 64), (0, Int.MaxValue, 64), (0, 65, 64))) {
-      val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw)
+      val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes)
         .putInt(ExecutionRPC.ResponseMagic).putInt(status).putInt(size).array()
       val input = DataInputStream(ByteArrayInputStream(prefix))
       val error = intercept[java.io.IOException](Frame.readResponse(input, maximum))

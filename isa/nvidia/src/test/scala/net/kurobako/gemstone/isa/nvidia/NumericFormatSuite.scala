@@ -10,6 +10,11 @@ import programs.*
 import scala.compiletime.testing.typeCheckErrors
 
 class NumericFormatSuite extends munit.FunSuite {
+  private val Flags = Vec(false, true)
+
+  private val IntegralRoundings: Vec[ConversionRounding] =
+    Vec(ConversionRounding.RNI, ConversionRounding.RZI, ConversionRounding.RMI, ConversionRounding.RPI)
+
   private def run(instructions: Vec[Instruction]): Long = {
     val memory  = RegionMemory(AllocationId(1) -> 8)
     val program =
@@ -36,7 +41,7 @@ class NumericFormatSuite extends munit.FunSuite {
         FloatOperation.MinimumNumber -> true,
         FloatOperation.MaximumNumber -> true
       )
-      propagate <- Vec(false, true)
+      propagate <- Flags
     } {
       val result = run(Vec(Instruction.FloatBinary(
         operation,
@@ -118,20 +123,19 @@ class NumericFormatSuite extends munit.FunSuite {
 
   test("integral floating conversion preserves NaN for every IEEE destination") {
     Vec(NumericFormat.IEEE(16), NumericFormat.IEEE(32), NumericFormat.IEEE(64)).foreach { destination =>
-      Vec(ConversionRounding.RNI, ConversionRounding.RZI, ConversionRounding.RMI, ConversionRounding.RPI).foreach {
-        rounding =>
-          val result = run(Vec(
-            Instruction.Convert(r(1), Value.Immediate(-1L), NumericFormat.IEEE(32), destination, Some(rounding)),
-            Instruction.SetPredicate(
-              p(0),
-              Comparison.Unordered,
-              destination,
-              register(1),
-              Value.Immediate(0)
-            ),
-            Instruction.Select(r(0), Value.Immediate(1), Value.Immediate(0), p(0), 64)
-          ))
-          assertEquals(result, 1L, clues(destination, rounding))
+      IntegralRoundings.foreach { rounding =>
+        val result = run(Vec(
+          Instruction.Convert(r(1), Value.Immediate(-1L), NumericFormat.IEEE(32), destination, Some(rounding)),
+          Instruction.SetPredicate(
+            p(0),
+            Comparison.Unordered,
+            destination,
+            register(1),
+            Value.Immediate(0)
+          ),
+          Instruction.Select(r(0), Value.Immediate(1), Value.Immediate(0), p(0), 64)
+        ))
+        assertEquals(result, 1L, clues(destination, rounding))
       }
     }
   }

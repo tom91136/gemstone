@@ -62,7 +62,7 @@ class ForwardProgressSuite extends munit.FunSuite {
     OpFunctionEnd
   """
 
-  for (barrier <- Seq(false, true))
+  for (barrier <- booleans)
     test(
       s"a spinning subgroup lets another subgroup make progress${if (barrier) " across subgroup barriers" else ""}"
     ) {

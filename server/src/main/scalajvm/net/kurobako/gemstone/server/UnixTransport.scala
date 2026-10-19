@@ -65,7 +65,7 @@ private object UnixTransport {
     private val writable          = Readiness()
 
     def isClosed: Boolean                         = !socket.isOpen
-    def readTimeout(milliseconds: Int >= 0): Unit = timeout = milliseconds.raw
+    def readTimeout(milliseconds: Int >= 0): Unit = timeout = milliseconds
     def close(): Unit = throwables.closeAll(Vec(() => socket.close(), () => readable.close(), () => writable.close()))
 
     // Read and write wait independently; close never needs either operation lock.
@@ -122,8 +122,8 @@ private object UnixTransport {
     }
 
     def connect(milliseconds: Int > 0): Unit = writable.operationLock.withLock {
-      val deadline = platform.monotonicNanos + milliseconds.raw.toLong * 1000000L
-      while (!socket.finishConnect()) writable.await(SelectionKey.OP_CONNECT, milliseconds.raw, deadline)
+      val deadline = platform.monotonicNanos + milliseconds.toLong * 1000000L
+      while (!socket.finishConnect()) writable.await(SelectionKey.OP_CONNECT, milliseconds, deadline)
     }
 
     private class ChannelInput extends InputStream {
@@ -151,10 +151,10 @@ private object UnixTransport {
     private class ChannelOutput extends OutputStream {
       override def write(value: Int): Unit = write(Array(value.toByte), offset = 0, length = 1)
       override def write(bytes: Array[Byte], offset: Int, length: Int): Unit = writable.operationLock.withLock {
-        val deadline = platform.monotonicNanos + writeTimeout.raw.toLong * 1000000L
+        val deadline = platform.monotonicNanos + writeTimeout.toLong * 1000000L
         val buffer   = ByteBuffer.wrap(bytes, offset, length)
         while (buffer.hasRemaining)
-          if (socket.write(buffer) == 0) writable.await(SelectionKey.OP_WRITE, writeTimeout.raw, deadline)
+          if (socket.write(buffer) == 0) writable.await(SelectionKey.OP_WRITE, writeTimeout, deadline)
       }
       override def close(): Unit = UnixChannel.this.close()
     }

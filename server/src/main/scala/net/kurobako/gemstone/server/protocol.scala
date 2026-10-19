@@ -23,8 +23,8 @@ object protocol {
   def readExactly(input: DataInputStream, size: Int >= 0, failure: String => Throwable): Array[Byte] = {
     // Frame lengths are bounded by the caller. Read straight into the final array instead of
     // readNBytes(size)'s growing chunks and final concatenation for large module payloads.
-    val result   = Array.ofDim[Byte](size.raw)
-    val received = input.readNBytes(result, 0, size.raw)
+    val result   = Array.ofDim[Byte](size)
+    val received = input.readNBytes(result, 0, size)
     if (received != size.raw) throw failure(s"expected $size bytes, received $received")
     result
   }
@@ -52,32 +52,32 @@ object protocol {
     def integer(bytes: Array[Byte], offset: Int): Int = ByteBuffer.wrap(bytes, offset, 4).getInt()
 
     def operation(bytes: Array[Byte]): String = {
-      val size = integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw)
+      val size = integer(bytes, ExecutionRPC.RequestTagSizeOffset)
       StandardCharsets.UTF_8.newDecoder()
-        .decode(ByteBuffer.wrap(bytes, ExecutionRPC.RequestHeaderBytes.raw, size)).toString
+        .decode(ByteBuffer.wrap(bytes, ExecutionRPC.RequestHeaderBytes, size)).toString
     }
 
     def payload(bytes: Array[Byte]): Array[Byte] =
       java.util.Arrays.copyOfRange(
         bytes,
-        ExecutionRPC.RequestHeaderBytes.raw + integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw),
+        ExecutionRPC.RequestHeaderBytes.raw + integer(bytes, ExecutionRPC.RequestTagSizeOffset),
         bytes.length
       )
 
     /** Checks framing without requiring the payload to be retained. Callers impose their own size budget. */
     def validatePrefix(bytes: Array[Byte], frameSize: Long): Unit = {
       def check(value: Boolean): Unit = if (!value) throw IOException("invalid RPC frame")
-      check(bytes.length >= ExecutionRPC.ResponseHeaderBytes.raw && bytes.length <= frameSize)
+      check(bytes.length >= ExecutionRPC.ResponseHeaderBytes && bytes.length <= frameSize)
       val (header, payload) = magic(bytes) match {
         case ExecutionRPC.RequestMagic =>
-          check(bytes.length >= ExecutionRPC.RequestHeaderBytes.raw)
-          val tagSize = integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw)
+          check(bytes.length >= ExecutionRPC.RequestHeaderBytes)
+          val tagSize = integer(bytes, ExecutionRPC.RequestTagSizeOffset)
           check(validTagSize(tagSize))
-          (ExecutionRPC.RequestHeaderBytes.raw + tagSize, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset.raw))
+          (ExecutionRPC.RequestHeaderBytes.raw + tagSize, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset))
         case ExecutionRPC.ResponseMagic =>
-          val status = integer(bytes, ExecutionRPC.ResponseStatusOffset.raw)
+          val status = integer(bytes, ExecutionRPC.ResponseStatusOffset)
           check(status == 0 || status == 1)
-          (ExecutionRPC.ResponseHeaderBytes.raw, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset.raw))
+          (ExecutionRPC.ResponseHeaderBytes.raw, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset))
         case _ => throw IOException("invalid RPC frame magic")
       }
       check(payload >= 0 && header.toLong + payload == frameSize)
@@ -86,10 +86,10 @@ object protocol {
     def readResponse(input: DataInputStream, maximum: Int): Array[Byte] = {
       val receivedMagic = input.readInt()
       if (receivedMagic != ExecutionRPC.ResponseMagic) throw IOException("unexpected RPC response magic")
-      val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw).putInt(receivedMagic).array()
+      val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes).putInt(receivedMagic).array()
       input.readFully(prefix, Integer.BYTES, prefix.length - Integer.BYTES)
-      val payloadSize = integer(prefix, ExecutionRPC.ResponsePayloadSizeOffset.raw)
-      val frameSize   = ExecutionRPC.ResponseHeaderBytes.raw.toLong + payloadSize
+      val payloadSize = integer(prefix, ExecutionRPC.ResponsePayloadSizeOffset)
+      val frameSize   = ExecutionRPC.ResponseHeaderBytes.toLong + payloadSize
       validatePrefix(prefix, frameSize)
       if (frameSize > maximum) throw IOException("RPC response exceeds frame bounds")
       val frame = java.util.Arrays.copyOf(prefix, frameSize.toInt)
@@ -98,7 +98,7 @@ object protocol {
     }
   }
 
-  private def validTagSize(size: Int): Boolean = size > 0 && size <= ExecutionRPC.MaximumTagBytes.raw
+  private def validTagSize(size: Int): Boolean = size > 0 && size <= ExecutionRPC.MaximumTagBytes
 
   case class Header(client: ClientId, session: SessionId, operation: NonEmpty[String], payloadSize: Int >= 0)
 
@@ -111,10 +111,10 @@ object protocol {
       (process, incarnation).refine[SessionId].fold(message => throw IllegalArgumentException(message), identity)
     val tagSize = input.readInt().refine[Int > 0]
       .fold(message => throw IllegalArgumentException(s"invalid operation tag size: $message"), identity)
-    require(tagSize.raw <= ExecutionRPC.MaximumTagBytes.raw, s"invalid operation tag size: $tagSize")
+    require(tagSize <= ExecutionRPC.MaximumTagBytes, s"invalid operation tag size: $tagSize")
     val size = input.readInt().refine[Int >= 0]
       .fold(message => throw IllegalArgumentException(s"invalid execution payload size: $message"), identity)
-    require(size.raw <= ExecutionRPC.MaximumPayload.raw, s"invalid execution payload size: $size")
+    require(size <= ExecutionRPC.MaximumPayload, s"invalid execution payload size: $size")
     val tag       = readExactly(input, tagSize, EOFException(_))
     val operation = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(tag)).toString
       .refine[NonEmpty[String]].fold(message => throw IllegalArgumentException(message), identity)
@@ -132,7 +132,7 @@ object protocol {
           .fold(message => throw IllegalArgumentException(s"cannot encode execution failure: $message"), value => value)
         1 -> encoded
     }
-    if (payload.length > ExecutionRPC.MaximumPayload.raw)
+    if (payload.length > ExecutionRPC.MaximumPayload)
       throw IllegalArgumentException(s"execution response exceeds ${ExecutionRPC.MaximumPayload} bytes")
     output.writeInt(ExecutionRPC.ResponseMagic)
     output.writeInt(status)
@@ -144,7 +144,7 @@ object protocol {
   /** Establish exact schema agreement before any execution requests. */
   def hello(input: DataInputStream, output: DataOutputStream): Unit = {
     val schema = ExecutionRPC.Schema.canonical.getBytes(StandardCharsets.UTF_8)
-    require(schema.length <= ExecutionRPC.MaximumSchemaBytes.raw, "execution schema exceeds its byte limit")
+    require(schema.length <= ExecutionRPC.MaximumSchemaBytes, "execution schema exceeds its byte limit")
     output.writeInt(ExecutionRPC.HelloMagic)
     output.writeInt(schema.length)
     output.write(schema)
@@ -156,7 +156,7 @@ object protocol {
   def acceptHello(input: DataInputStream, output: DataOutputStream): Boolean = {
     val size = input.readInt().refine[Int > 0]
       .fold(message => throw IllegalArgumentException(s"invalid execution schema size: $message"), identity)
-    require(size.raw <= ExecutionRPC.MaximumSchemaBytes.raw, s"invalid execution schema size: $size")
+    require(size <= ExecutionRPC.MaximumSchemaBytes, s"invalid execution schema size: $size")
     val received = readExactly(input, size, EOFException(_))
     val accepted = java.util.Arrays.equals(received, ExecutionRPC.Schema.canonical.getBytes(StandardCharsets.UTF_8))
     output.writeInt(ExecutionRPC.HelloResponseMagic)

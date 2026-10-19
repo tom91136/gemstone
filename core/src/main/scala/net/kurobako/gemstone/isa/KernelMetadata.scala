@@ -44,20 +44,20 @@ object KernelMetadata {
   ): Either[NonEmpty[String], KernelMetadata] =
     for {
       _ <- Either.cond[NonEmpty[String], Unit](
-        explicitParameterCount.raw <= parameters.size,
+        explicitParameterCount <= parameters.size,
         (),
         "explicit parameter count exceeds the parameter count"
       )
       _ <- Either.cond[NonEmpty[String], Unit](
         parameters.forall(parameter =>
-          parameter.offset.raw.toLong + parameter.width.raw.toLong <= argumentBlockSize.raw.toLong
+          parameter.offset.toLong + parameter.width.toLong <= argumentBlockSize.toLong
         ),
         (),
         "kernel parameter lies outside the argument block"
       )
       _ <- Either.cond[NonEmpty[String], Unit](
         parameters.monotonic((previous, current) =>
-          previous.offset.raw.toLong + previous.width.raw.toLong <= current.offset.raw.toLong
+          previous.offset.toLong + previous.width.toLong <= current.offset.toLong
         ),
         (),
         "kernel parameters must be ordered and non-overlapping"

@@ -18,9 +18,9 @@ class MetadataSuite extends munit.FunSuite {
   }
 
   test("every opcode exposes metadata and an opcode lookup") {
-    Opcode.definitions.foreach { definition =>
+    InstructionDefs.definitions.foreach { definition =>
       assert(definition.meta.encodings.nonEmpty, definition.toString)
-      assertEquals(Opcode.forOpcode(definition.opcode).contains(definition), true)
+      assertEquals(InstructionDefs.forOpcode(definition.mnemonic).contains(definition), true)
     }
   }
   test("source selectors retain ISA-specific literal and inline-constant meanings") {

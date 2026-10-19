@@ -57,7 +57,7 @@ class ValidationSuite extends munit.FunSuite {
         "redux.sync.max.u32 %r0, %r1, -1;"
       )
     ) assertEquals(
-      Validation.validate(instruction(source), Version(9, 3), Target(100)),
+      validate(source),
       ValidationOutcome.Accepted,
       source
     )

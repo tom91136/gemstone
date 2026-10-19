@@ -6,11 +6,13 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class ConversionSuite extends munit.FunSuite {
-  private val roundings = Seq("RTE", "RTZ", "RTP", "RTN")
+  private val roundings  = Seq("RTE", "RTZ", "RTP", "RTN")
+  private val LaneCounts = Seq(1, 2)
 
   /** Kernel storing `%converted = opcode %result_type %input` for a by-value `%input`. */
   private def converter(opcode: String, source: String, result: String, lanes: Int = 1, decorations: String = "")
@@ -73,7 +75,7 @@ class ConversionSuite extends munit.FunSuite {
 
   for (
     (width, input, rhs, expected) <- Seq(
-      (32, Seq(0xfffffffeL, 3L), Seq(floatBits(0.5f), floatBits(1.5f)), Seq(floatBits(-2f), floatBits(3f))),
+      (32, Seq(0xfffffffeL, 3L), Seq(single(0.5f), single(1.5f)), Seq(single(-2f), single(3f))),
       (16, Seq(0L, 3L), Seq(0x0001L, 0x3e00L), Seq(0L, 0x4200L))
     )
   ) test(s"signed integer vectors survive a float$width arithmetic round trip") {
@@ -107,9 +109,45 @@ class ConversionSuite extends munit.FunSuite {
     }
   }
 
+  // SPIR-V 3.3.11: values outside the result's range clamp to its nearest representable value, at any width pair
+  for {
+    (opcode, sourceWidth, resultWidth, cases) <- Seq(
+      ("OpSatConvertSToU", 32, 32, Seq(-5L -> 0L, 0x7fffffffL -> 0x7fffffffL, 0x80000000L -> 0L)),
+      ("OpSatConvertSToU", 32, 8, Seq(300L -> 255L, 100L -> 100L, -1L -> 0L)),
+      ("OpSatConvertSToU", 8, 16, Seq(0x80L -> 0L, 0x7fL -> 0x7fL)),
+      ("OpSatConvertSToU", 64, 32, Seq(0x100000000L -> 0xffffffffL, Long.MinValue -> 0L, 9L -> 9L)),
+      ("OpSatConvertSToU", 16, 64, Seq(0xffffL -> 0L, 0x7fffL -> 0x7fffL)),
+      ("OpSatConvertUToS", 32, 32, Seq(0x80000000L -> 0x7fffffffL, 5L -> 5L)),
+      ("OpSatConvertUToS", 32, 8, Seq(200L -> 127L, 127L -> 127L, 0xffffffffL -> 127L)),
+      ("OpSatConvertUToS", 8, 32, Seq(0xffL -> 0xffL)),
+      ("OpSatConvertUToS", 64, 32, Seq(-1L -> 0x7fffffffL, 0x7fffffffL -> 0x7fffffffL)),
+      ("OpSatConvertUToS", 64, 64, Seq(Long.MinValue -> Long.MaxValue, 1L -> 1L))
+    )
+    lanes <- LaneCounts
+  } test(s"$opcode clamps int$sourceWidth to int$resultWidth, $lanes lanes") {
+    val source = converter(opcode, s"OpTypeInt $sourceWidth 0", s"OpTypeInt $resultWidth 0", lanes)
+    cases.foreach { (input, expected) =>
+      val inputs = Seq.tabulate(lanes)(lane => if (lane == 0) input else lane.toLong)
+      val wanted = Seq.tabulate(lanes)(lane => if (lane == 0) expected else lane.toLong)
+      assertEquals(
+        convert(source, littleEndian(inputs, sourceWidth), lanes * resultWidth / 8),
+        Right(littleEndian(wanted, resultWidth)),
+        s"$input"
+      )
+    }
+  }
+
+  // SPV_EXT_arithmetic_fence: icpx -fsycl -fprotect-parens fences parenthesised expressions; the value passes through
+  for (lanes <- Seq(1, 2))
+    test(s"OpArithmeticFenceEXT passes its operand through, $lanes lanes") {
+      val source = converter("OpArithmeticFenceEXT", "OpTypeFloat 32", "OpTypeFloat 32", lanes)
+      val input  = littleEndian(Seq(single(1.5f), single(-0f)).take(lanes), 32)
+      assertEquals(convert(source, input, lanes * 4), Right(input))
+    }
+
   test("OpConvertFToU converts doubles without signed narrowing") {
     val source                  = converter("OpConvertFToU", "OpTypeFloat 64", "OpTypeInt 64 0")
-    def unsigned(value: Double) = convert(source, LittleEndian.toVec(doubleBits(value), 8), 8)
+    def unsigned(value: Double) = convert(source, LittleEndian.toVec(double(value), 8), 8)
     assertEquals(unsigned(255.75), Right(LittleEndian.toVec(255L, 8)))
     assertEquals(unsigned(Math.scalb(1.0, 63)), Right(LittleEndian.toVec(Long.MinValue, 8)))
     assertEquals(unsigned(-0.75), Right(LittleEndian.toVec(0L, 8)))
@@ -125,6 +163,23 @@ class ConversionSuite extends munit.FunSuite {
       loadUnchecked(assemble(malformed)).flatMap(execute(_, task("convert", Vec(buffer(out), scalar(0L, 8))), memory)),
       Left(Fault.InvalidRequest("OpConvertFToU result type %4 is not an integer scalar or vector"))
     )
+  }
+
+  test("OpConvertFToU faults on the first vector lane outside the unsigned range") {
+    val source                  = converter("OpConvertFToU", "OpTypeFloat 32", "OpTypeInt 32 0", 4)
+    def unsigned(lanes: Float*) = convert(source, littleEndian(lanes.map(single(_)), 32), 16)
+    assertEquals(unsigned(1.5f, 2f, 3.75f, -0.5f), Right(littleEndian(Seq(1L, 2L, 3L, 0L), 32)))
+    for (
+      (
+        lanes,
+        lane
+      ) <- Seq(Seq(1f, 2f, -3f, Float.NaN) -> 2, Seq(Float.NaN, 1f, 2f, 3f) -> 0, Seq(0f, 1f, 2f, 5e9f) -> 3)
+    )
+      unsigned(lanes*) match {
+        case Left(Fault.InvalidRequest(message)) =>
+          assert(message.startsWith(s"OpConvertFToU source lane $lane cannot be represented"), message)
+        case result => fail(s"expected a range failure at lane $lane, found $result")
+      }
   }
 
   for ((sourceWidth, resultWidth, lanes) <- pairwise(Seq(16, 32, 64), Seq(8, 16, 32, 64), Seq(1, 4)))
@@ -150,7 +205,7 @@ class ConversionSuite extends munit.FunSuite {
       for {
         mode     <- roundings.indices
         start    <- if (lanes == 1) samples.indices else Seq(0)
-        saturate <- Seq(false, true)
+        saturate <- booleans
       } check(
         roundings(mode),
         saturate,
@@ -169,12 +224,12 @@ class ConversionSuite extends munit.FunSuite {
   test("saturated OpConvertFToS maps NaN to zero") {
     val saturated = "OpDecorate %converted SaturatedConversion"
     val source    = converter("OpConvertFToS", "OpTypeFloat 32", "OpTypeInt 32 1", decorations = saturated)
-    assertEquals(convert(source, LittleEndian.toVec(floatBits(Float.NaN), 4), 4), Right(LittleEndian.toVec(0L, 4)))
+    assertEquals(convert(source, LittleEndian.toVec(single(Float.NaN), 4), 4), Right(LittleEndian.toVec(0L, 4)))
   }
 
   for {
     width  <- Seq(32, 64)
-    signed <- Seq(false, true)
+    signed <- booleans
   } test(s"GLCompute OpConvertFTo${if (signed) "S" else "U"} saturates float$width infinities and maps NaN to zero") {
     val module = spv"""
       ${if (width == 64) "OpCapability Float64" else ""}
@@ -266,7 +321,7 @@ class ConversionSuite extends munit.FunSuite {
     val source = converter("OpFConvert", s"OpTypeFloat $sourceWidth", s"OpTypeFloat $width", lanes, decorations)
     for {
       (value, expected) <- cases
-      negative          <- Seq(false, true)
+      negative          <- booleans
     } {
       val input     = if (negative) -value else value
       val magnitude = expected(if (negative && mode >= 2) 5 - mode else mode)
@@ -312,7 +367,7 @@ class ConversionSuite extends munit.FunSuite {
         val source     = converter(opcode, "OpTypeInt 32 0", "OpTypeFloat 32", decorations = decoration)
         assertEquals(
           convert(source, littleEndian(Seq(input), 32), 4),
-          Right(littleEndian(Seq(floatBits(value)), 32)),
+          Right(littleEndian(Seq(single(value)), 32)),
           rounding
         )
       }
@@ -350,7 +405,12 @@ class ConversionSuite extends munit.FunSuite {
     }
   }
 
-  private def halfModule(instruction: String, load: Boolean): Module = spv"""
+  private def halfLoadModule(instruction: String): Module =
+    halfModule(instruction, "OpTypePointer CrossWorkgroup %float3", "OpStore %data %loaded")
+
+  private def halfStoreModule(instruction: String): Module = halfModule(instruction, "OpTypeVector %float 3", "")
+
+  private def halfModule(instruction: String, dataType: String, epilogue: String): Module = spv"""
     $openCL
     OpEntryPoint Kernel %main "half_memory"
     %void = OpTypeVoid
@@ -359,7 +419,7 @@ class ConversionSuite extends munit.FunSuite {
     %float = OpTypeFloat 32
     %float3 = OpTypeVector %float 3
     %half_ptr = OpTypePointer CrossWorkgroup %half
-    %data_type = ${if (load) "OpTypePointer CrossWorkgroup %float3" else "OpTypeVector %float 3"}
+    %data_type = $dataType
     %fn = OpTypeFunction %void %half_ptr %data_type
     %offset = OpConstant %ulong 1
     %main = OpFunction %void None %fn
@@ -367,7 +427,7 @@ class ConversionSuite extends munit.FunSuite {
     %data = OpFunctionParameter %data_type
     %entry = OpLabel
     $instruction
-    ${if (load) "OpStore %data %loaded" else ""}
+    $epilogue
     OpReturn
     OpFunctionEnd
   """
@@ -385,7 +445,7 @@ class ConversionSuite extends munit.FunSuite {
       val sentinel = Vec.fill(48)(0x55.toByte)
       val halves   = littleEndian(Seq(0x8000L, 1L, 0xc100L), 16)
       val initial  = sentinel.take(start) ++ halves ++ sentinel.drop(start + halves.size)
-      val module   = halfModule(s"%loaded = OpExtInst %float3 %opencl $instruction %offset %halves 3", load = true)
+      val module   = halfLoadModule(s"%loaded = OpExtInst %float3 %opencl $instruction %offset %halves 3")
       // float3 storage may overwrite its fourth, padding component
       assertEquals(
         runHalf(module, initial, buffer(_, 32L)).take(44),
@@ -396,9 +456,8 @@ class ConversionSuite extends munit.FunSuite {
   private def store(instruction: String, rounding: Option[Int], input: Seq[Long], expected: Seq[Long], start: Int)
       : Unit = {
     val initial = Vec.fill(24)(0x55.toByte)
-    val module  = halfModule(
-      s"%stored = OpExtInst %void %opencl $instruction %data %offset %halves${rounding.fold("")(mode => s" !$mode")}",
-      load = false
+    val module  = halfStoreModule(
+      s"%stored = OpExtInst %void %opencl $instruction %data %offset %halves${rounding.fold("")(mode => s" !$mode")}"
     )
     val bytes = littleEndian(expected, 16)
     assertEquals(
@@ -416,7 +475,7 @@ class ConversionSuite extends munit.FunSuite {
   for {
     (layout, instruction, start) <- Seq(("packed", "vstore_halfn_r", 6), ("aligned", "vstorea_halfn_r", 8))
     mode                         <- roundings.indices
-    overflow                     <- Seq(false, true)
+    overflow                     <- booleans
   } test(s"$layout half3 store rounds ${if (overflow) "overflow and underflow" else "ties"} ${roundings(mode)}") {
     val (ties, limits) = halfRoundings(mode)
     if (overflow) store(instruction, Some(mode), Seq(0x477ff000L, 0xc77ff000L, 0x33000000L), limits, start)
@@ -430,5 +489,65 @@ class ConversionSuite extends munit.FunSuite {
 
   test("half store without a rounding operand defaults to nearest even at overflow") {
     store("vstore_halfn", None, Seq(0x477ff000L, 0xc77ff000L, 0x80000000L), Seq(0x7c00L, 0xfc00L, 0x8000L), 6)
+  }
+
+  private def vectorMemory(offset: BigInt, instruction: String): Module = spv"""
+    $openCL
+    OpEntryPoint Kernel %main "vector_memory"
+    %void = OpTypeVoid
+    %ulong = OpTypeInt 64 0
+    %uint = OpTypeInt 32 0
+    %half = OpTypeFloat 16
+    %float = OpTypeFloat 32
+    %float4 = OpTypeVector %float 4
+    %uint4 = OpTypeVector %uint 4
+    %half_ptr = OpTypePointer CrossWorkgroup %half
+    %uint_ptr = OpTypePointer CrossWorkgroup %uint
+    %fn = OpTypeFunction %void %half_ptr %uint_ptr
+    %offset = OpConstant %ulong $offset
+    %one = OpConstant %float 1
+    %ones = OpConstantComposite %float4 %one %one %one %one
+    %word = OpConstant %uint 1
+    %words = OpConstantComposite %uint4 %word %word %word %word
+    %main = OpFunction %void None %fn
+    %halves = OpFunctionParameter %half_ptr
+    %data = OpFunctionParameter %uint_ptr
+    %entry = OpLabel
+    %result = $instruction
+    OpReturn
+    OpFunctionEnd
+  """
+
+  // OpenCL.std 2.6 addresses p + offset * n elements; the power-of-two offsets wrap it back to p
+  for {
+    (instruction, offset) <- Seq(
+      "OpExtInst %float %opencl vload_half %offset %halves"              -> (BigInt(1) << 63),
+      "OpExtInst %float4 %opencl vload_halfn %offset %halves 4"          -> (BigInt(1) << 61),
+      "OpExtInst %float4 %opencl vloada_halfn %offset %halves 4"         -> (BigInt(1) << 61),
+      "OpExtInst %void %opencl vstore_half %one %offset %halves"         -> (BigInt(1) << 63),
+      "OpExtInst %void %opencl vstore_half_r %one %offset %halves !0"    -> (BigInt(1) << 63),
+      "OpExtInst %void %opencl vstore_halfn %ones %offset %halves"       -> (BigInt(1) << 61),
+      "OpExtInst %void %opencl vstore_halfn_r %ones %offset %halves !1"  -> (BigInt(1) << 61),
+      "OpExtInst %void %opencl vstorea_halfn %ones %offset %halves"      -> (BigInt(1) << 61),
+      "OpExtInst %void %opencl vstorea_halfn_r %ones %offset %halves !2" -> (BigInt(1) << 61),
+      "OpExtInst %uint4 %opencl vloadn %offset %data 4"                  -> (BigInt(1) << 60),
+      "OpExtInst %void %opencl vstoren %words %offset %data"             -> (BigInt(1) << 60),
+      "OpExtInst %float4 %opencl vload_halfn %offset %halves 4"          -> ((BigInt(1) << 63) / 8 + 1),
+      "OpExtInst %void %opencl vstoren %words %offset %data"             -> ((BigInt(1) << 63) / 16 + 3)
+    )
+  } test(s"${instruction.split(' ')(3)} at offset 0x${offset.toString(16)} past the address space faults") {
+    val memory = RegionMemory()
+    val halves = memory.allocate(Vec.fill(64)(0x55.toByte))
+    val data   = memory.allocate(Vec.fill(64)(0x55.toByte))
+    val result = run(vectorMemory(offset, instruction), "vector_memory", memory, Vec(buffer(halves), buffer(data)))
+    assert(
+      result.leftValue match {
+        case Fault.Memory(_) => true
+        case _               => false
+      },
+      result
+    )
+    assertEquals(memory.bytes(halves), Vec.fill(64)(0x55.toByte))
+    assertEquals(memory.bytes(data), Vec.fill(64)(0x55.toByte))
   }
 }

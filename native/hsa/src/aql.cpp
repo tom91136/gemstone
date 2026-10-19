@@ -1,5 +1,9 @@
 #include "gemstone/hsa/aql.hpp"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
 #include <gemstone/bytes.hpp>
 
 namespace gemstone::hsa {
@@ -23,7 +27,7 @@ DecodeStatus decodeAqlPacket(const void *packet, size_t size, AqlPacket &decoded
     for (size_t offset = 24; offset < 56; offset += sizeof(uint64_t))
       if (readNative<uint64_t>(bytes, offset) != 0) return DecodeStatus::ReservedBits;
     for (size_t index = 0; index < 4; ++index)
-      decoded.indirectBufferCommands[index] = readNative<uint32_t>(bytes, 4 + index * 4);
+      decoded.indirectBufferCommands[index] = readNative<uint32_t>(bytes, 4 + (index * 4));
     return DecodeStatus::Success;
   }
 
@@ -42,13 +46,13 @@ DecodeStatus decodeAqlPacket(const void *packet, size_t size, AqlPacket &decoded
       const bool unused = axis >= dimensions;
       if (grid[axis] < workgroup[axis] || (unused && grid[axis] != 1)) return DecodeStatus::InvalidGrid;
     }
-    decoded.dispatch = KernelDispatch{dimensions,
-                                      workgroup,
-                                      grid,
-                                      readNative<uint32_t>(bytes, 24),
-                                      readNative<uint32_t>(bytes, 28),
-                                      readNative<uint64_t>(bytes, 32),
-                                      readNative<uint64_t>(bytes, 40)};
+    decoded.dispatch = KernelDispatch{.dimensions = dimensions,
+                                      .workgroupSize = workgroup,
+                                      .gridSize = grid,
+                                      .privateSegmentSize = readNative<uint32_t>(bytes, 24),
+                                      .groupSegmentSize = readNative<uint32_t>(bytes, 28),
+                                      .kernelObject = readNative<uint64_t>(bytes, 32),
+                                      .kernargAddress = readNative<uint64_t>(bytes, 40)};
     return DecodeStatus::Success;
   }
 
@@ -56,7 +60,7 @@ DecodeStatus decodeAqlPacket(const void *packet, size_t size, AqlPacket &decoded
     if (readNative<uint16_t>(bytes, 2) != 0 || readNative<uint32_t>(bytes, 4) != 0 || readNative<uint64_t>(bytes, 48) != 0)
       return DecodeStatus::ReservedBits;
     for (size_t index = 0; index < 5; ++index)
-      decoded.dependencySignals[index] = readNative<uint64_t>(bytes, 8 + index * 8);
+      decoded.dependencySignals[index] = readNative<uint64_t>(bytes, 8 + (index * 8));
     return DecodeStatus::Success;
   }
 

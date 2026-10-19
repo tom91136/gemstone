@@ -12,5 +12,5 @@ class SPIRVBackend(
 
   override def load(image: Vec[Byte]): Either[Fault, Backend.Program] =
     decoder.decode(image).left.map(error => Fault.InvalidRequest(error.message))
-      .flatMap(VMProgram.load(_, environment, workgroups))
+      .flatMap(LoadedProgram.load(_, environment, workgroups))
 }

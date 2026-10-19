@@ -47,17 +47,17 @@ pinned_dependency(levelzero_headers SOURCE_ONLY
   URL https://codeload.github.com/oneapi-src/level-zero/tar.gz/934714b278f850d164627eeaaa043eee02785a9e
   URL_HASH SHA256=ec16e5f6a21443080494fe9ebeae5ea36de003124211d58ae3e3ae5eccfd1940)
 pinned_dependency(babelstream SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/17ab377b0e919e14fd3df2b67268761fdac8abb3
-  URL_HASH SHA256=1600b92c6cefc09e0c61c1571da0f1807a0f5f2c96b47e52fbba0891c9b5da00)
+  URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/5cb9445483786f3502b12b8faab8414f8c5873b1
+  URL_HASH SHA256=3f6d3e600feed6933254f28bd135cef9b068e0186d0942f3089d42f24d0a39d9)
 pinned_dependency(minibude SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/570f66c1fd0c29b7f3ab6fa96fba87f4561aa44c
-  URL_HASH SHA256=4c1d349785771c1fca818a7abd69dc789d6f5b77990c76ea29a94f1fdec5aa9e)
+  URL https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/2b23c27e80792f48fdf12a3ed232620160979e4c
+  URL_HASH SHA256=5a24663d101873a376fdae03126e7778f361cddd5b65b4bc124414a8839d8543)
 pinned_dependency(cloverleaf SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/97ede8243a23811c565289f61f256d6383028c3f
-  URL_HASH SHA256=577b484a98e32629947eb66f90a68a4137543b6ff073f4e59aea5b0189a82b61)
+  URL https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/e9afc2b0efd8b13210a862c67eb2bb86d4dba599
+  URL_HASH SHA256=2ba78ec28d6204d328adc4ce07c9755f743ae1f98bde0b292d4a0895531031a5)
 pinned_dependency(tealeaf SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/e70261c0be40537da75b258108ed2898f84f3c58
-  URL_HASH SHA256=f454ab1cc89e750e0a6695bf65ce41cd3ebd64ba3e109a5109d02ae534bc6d16)
+  URL https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/883b811fbd17888c5071e951776ede1ab8783542
+  URL_HASH SHA256=2df6600eebda0d880fbb65b1e79f92414f2defb32c704c55064233e3b62f3500)
 pinned_dependency(kokkos SOURCE_ONLY
   URL https://codeload.github.com/kokkos/kokkos/tar.gz/62d2b6c879b74b6ae7bd06eb3e5e80139c4708e6
   URL_HASH SHA256=2738406dba3a8edd57c9da845009807d9c5f6ce64d6c098d479470a39bbb3ff9)

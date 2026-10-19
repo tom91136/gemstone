@@ -15,6 +15,8 @@ import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class ProgramGlobalBindingSuite extends munit.FunSuite {
+  private val Booleans = List(false, true)
+
   // gfx900: load through linked 0x3000, increment/store through kernarg pointer, reload linked global,
   // write value and pointer-equality flag to output. Assembly recorded in the bring-up report.
   private val code = Vec[Long](
@@ -157,7 +159,7 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
   test("allocated custom ELF data sections expose globals while nonallocated sections do not") {
     for {
       kind      <- List(1, 8)
-      allocated <- List(false, true)
+      allocated <- Booleans
     } {
       val bytes  = image()
       val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)

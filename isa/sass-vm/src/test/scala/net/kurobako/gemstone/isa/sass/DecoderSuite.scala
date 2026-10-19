@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -8,11 +10,11 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class DecoderSuite extends munit.FunSuite {
-  private def reference(name: String): NVDisasm.Expression = NVDisasm.Expression.Reference(name, None, relaxed = false)
+  private def reference(name: String): Expression = Expression.Reference(name, None, relaxed = false)
   private def form(name: String, fields: Vec[NVDisasm.Assignment]): NVDisasm.Form = NVDisasm.Form(
     name,
     alternate = false,
-    Vec(NVDisasm.OpcodeValue("ADD", BigInt(5))),
+    Vec(NVDisasm.SymbolValue("ADD", BigInt(5))),
     NVDisasm.Assignment("opcode", Vec(0, 2, 7), reference("Opcode")) +: fields
   )
   private def fixture(
@@ -31,6 +33,18 @@ class DecoderSuite extends munit.FunSuite {
     assert(Target.parse("SM73").isLeft)
   }
 
+  // ptxas 11.8 for sm_60 (__heq2 in conformance/unified/src/cuda/intrinsics.cu): HSET2.BF.EQ.AND R0, R6.reuse, R0, PT
+  test("sm_60 packed-half forms decode their form-specific register fields as registers") {
+    val words = Vec(0x001fc001fe400730L, 0x5d1a039000070600L, 0x50b0000000070f00L, 0x50b0000000070f00L)
+    val bytes = words.flatMap(word => Vec.tabulate(8)(index => (word >>> (index * 8)).toByte))
+    val first = CodeSection.decode(bytes.toArray, Target.parse("sm_60").value).value.instructions.head
+    assertEquals(first.modifiers.map(_.name), Vec("BF", "EQ", "AND"))
+    assertEquals(
+      first.operands.take(3),
+      Vec(0, 6, 0).map(index => Operand.Register(RegisterBank.R, index.unsafe[Int in 0 ~ 255]))
+    )
+  }
+
   test("discontiguous fields use physical bit order") {
     val data   = fixture(Vec(form("add", Vec(NVDisasm.Assignment("dst", Vec(4, 5), reference("Rd"))))))
     val result = FieldDecoder.candidates(data, BigInt(0x91)).fold(fail(_), identity)
@@ -44,8 +58,8 @@ class DecoderSuite extends munit.FunSuite {
   }
 
   test("strict constants discriminate forms while starred defaults do not") {
-    val strict  = NVDisasm.Assignment("mode", Vec(4), NVDisasm.Expression.Constant(BigInt(1), relaxed = false))
-    val relaxed = NVDisasm.Assignment("schedule", Vec(5), NVDisasm.Expression.Constant(BigInt(1), relaxed = true))
+    val strict  = NVDisasm.Assignment("mode", Vec(4), Expression.Constant(BigInt(1), relaxed = false))
+    val relaxed = NVDisasm.Assignment("schedule", Vec(5), Expression.Constant(BigInt(1), relaxed = true))
     val data    = fixture(Vec(form("add", Vec(strict, relaxed))))
     assert(FieldDecoder.candidates(data, BigInt(0x81)).isLeft)
     assert(FieldDecoder.candidates(data, BigInt(0x91)).isRight)
@@ -64,7 +78,7 @@ class DecoderSuite extends munit.FunSuite {
     val field = NVDisasm.Assignment(
       "mode",
       Vec(4, 5),
-      NVDisasm.Expression.Lookup("modes", Vec(reference("a"), reference("b")))
+      Expression.Lookup("modes", Vec(reference("a"), reference("b")))
     )
     val data      = fixture(Vec(form("add", Vec(field))), Vec(lookup))
     val ambiguous = FieldDecoder.candidates(data, BigInt(0x81)).fold(fail(_), identity).head
@@ -88,7 +102,7 @@ class DecoderSuite extends munit.FunSuite {
       NVDisasm.Assignment(
         "relation",
         Vec(3),
-        NVDisasm.Expression.Lookup("relation", Vec(reference("a"), reference("b")))
+        Expression.Lookup("relation", Vec(reference("a"), reference("b")))
       ),
       NVDisasm.Assignment("a", Vec(4), reference("a")),
       NVDisasm.Assignment("b", Vec(5), reference("b"))
@@ -105,7 +119,7 @@ class DecoderSuite extends munit.FunSuite {
     val unknown = NVDisasm.Assignment(
       "future",
       Vec(4),
-      NVDisasm.Expression.FloatConvert(reference("value"), "format", Vec.empty, FloatEncoding.F32Imm)
+      Expression.FloatConvert(reference("value"), "format", Vec.empty, FloatEncoding.F32Imm)
     )
     val data   = fixture(Vec(form("first", Vec(unknown)), form("second", Vec.empty)))
     val result = FieldDecoder.candidates(data, BigInt(0x81)).fold(fail(_), identity)
@@ -233,9 +247,10 @@ class DecoderSuite extends munit.FunSuite {
   test("SM35 names DSETP comparisons and branch condition tests as nvdisasm does") {
     val comparisons =
       Vec("F", "LT", "EQ", "LE", "GT", "NE", "GE", "NUM", "NAN", "LTU", "EQU", "LEU", "GTU", "NEU", "GEU")
+    val operands = Vec("P0", "PT", "R6", "RZ", "PT")
     comparisons.zipWithIndex.foreach { (comparison, value) =>
       val word = f"${0xdc001c007f9c181eL | (value.toLong << 51)}%016x".grouped(2).toVector.reverse.mkString
-      assertInstruction(target(35), word, s"DSETP.$comparison.AND", Vec("P0", "PT", "R6", "RZ", "PT"))
+      assertInstruction(target(35), word, s"DSETP.$comparison.AND", operands)
     }
     Vec(16 -> "OFF", 18 -> "SFF", 21 -> "SFT", 23 -> "OFT", 30 -> "RLE", 31 -> "RGT").foreach { (value, test) =>
       val word        = f"${0x1200000000000000L | (value.toLong << 2)}%016x".grouped(2).toVector.reverse.mkString

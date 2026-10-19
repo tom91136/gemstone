@@ -1,5 +1,14 @@
 #include "state.hpp"
 
+#include <condition_variable>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include "gemstone_execution_rpc.hpp"
+
 namespace gemstone::vulkan {
 std::mutex stateMutex;
 std::mutex rpcExecutionMutex;
@@ -33,6 +42,9 @@ namespace {
 // Defined after the state above and constructed with the library, so it stops the workers after teardown registered
 // later and before that state is destroyed.
 struct SchedulerShutdown {
+  SchedulerShutdown() = default;
+  SchedulerShutdown(const SchedulerShutdown &) = delete;
+  SchedulerShutdown &operator=(const SchedulerShutdown &) = delete;
   ~SchedulerShutdown() { shutdownQueues(); }
 } schedulerShutdown;
 } // namespace

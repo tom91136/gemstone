@@ -15,6 +15,7 @@ class ComparisonSuite extends munit.FunSuite {
       "FOrdEqual"              -> Seq(0, 0, 1, 0, 0),
       "FUnordEqual"            -> Seq(1, 1, 1, 0, 0),
       "FOrdNotEqual"           -> Seq(0, 0, 0, 1, 1),
+      "LessOrGreater"          -> Seq(0, 0, 0, 1, 1),
       "FUnordNotEqual"         -> Seq(1, 1, 0, 1, 1),
       "FOrdLessThan"           -> Seq(0, 0, 0, 1, 0),
       "FUnordLessThan"         -> Seq(1, 1, 0, 1, 0),

@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import LaneOps.*
 import Op.*
-import VMLowering.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -14,7 +13,15 @@ private object CompositeOps {
 
   def lower(site: Site): PartialFunction[Instruction, Op] = {
     case Instruction.CompositeExtract(t, d, composite, indexes) => extract(site, id(t), id(d), id(composite), indexes)
+    // a cooperative matrix is constructed from one scalar that fills it
+    case Instruction.CompositeConstruct(t, d, Vec(constituent)) if site.program.cooperativeMatrices.contains(id(t)) =>
+      val matrix = site.program.cooperativeMatrices(id(t))
+      construct(site, id(t), id(d), Vec.fill(matrix.rows * matrix.columns)(id(constituent)))
     case Instruction.CompositeConstruct(t, d, constituents) => construct(site, id(t), id(d), constituents.map(id(_)))
+    case Instruction.CompositeConstructReplicateEXT(t, d, value) =>
+      VMLoader.constituentCount(site.program.types, id(t)).fold(
+        Fail(Fault.InvalidRequest(s"OpCompositeConstructReplicateEXT result type %${id(t)} is not a composite"))
+      )(count => construct(site, id(t), id(d), Vec.fill(count)(id(value))))
     case Instruction.CompositeInsert(t, d, source, composite, indexes) =>
       insert(site, id(t), id(d), id(source), id(composite), indexes)
     case Instruction.VectorExtractDynamic(t, d, vector, index) => extractDynamic(id(t), id(d), id(vector), id(index))
@@ -35,18 +42,18 @@ private object CompositeOps {
       val selected                                                 = unsigned(indexes(index))
       def advance(element: Int, before: Long): Either[Fault, Unit] =
         program.scalarLeafCount(element).map { leaves =>
-          offset = Math.addExact(offset, Math.toIntExact(before * leaves.raw.toLong))
+          offset = Math.addExact(offset, Math.toIntExact(before * leaves.toLong))
           current = element
         }
       val step = program.runtimeType(current) match {
-        case Some(RuntimeType.VectorType(component, count)) if selected < count.raw.toLong =>
+        case Some(RuntimeType.VectorType(component, count)) if selected < count.toLong =>
           advance(component, selected)
-        case Some(RuntimeType.MatrixType(column, count)) if selected < count.raw.toLong => advance(column, selected)
-        case Some(RuntimeType.Array(element, count)) if selected < count.raw            => advance(element, selected)
-        case Some(RuntimeType.Structure(members)) if selected < members.size.toLong     =>
+        case Some(RuntimeType.MatrixType(column, count)) if selected < count.toLong => advance(column, selected)
+        case Some(RuntimeType.Array(element, count)) if selected < count            => advance(element, selected)
+        case Some(RuntimeType.Structure(members)) if selected < members.size.toLong =>
           members.take(selected.toInt).foldLeft[Either[Fault, Unit]](Right(())) { (result, member) =>
             result.flatMap(_ =>
-              program.scalarLeafCount(member).map(leaves => offset = Math.addExact(offset, leaves.raw))
+              program.scalarLeafCount(member).map(leaves => offset = Math.addExact(offset, leaves))
             )
           }.map(_ => current = members(selected.toInt))
         case Some(value) =>
@@ -66,12 +73,8 @@ private object CompositeOps {
     val program = site.program
     val typeId  = program.valueType(composite)
     if (typeId < 0) Fail(undefined(composite))
-    else if (
-      !program.scalarSlot(composite) && program.runtimeType(typeId).exists {
-        case RuntimeType.Pointer(_, _) => true
-        case _                         => false
-      }
-    ) Fail(Fault.Unsupported("composite extraction requires scalar data"))
+    else if (!program.scalarSlot(composite) && program.runtimeType(typeId).exists(isPointer))
+      Fail(Fault.Unsupported("composite extraction requires scalar data"))
     else
       leafRange(program, typeId, indexes) match {
         case Left(error)            => Fail(error)
@@ -79,11 +82,11 @@ private object CompositeOps {
           step { (execution, _) =>
             val values = execution.values
             Option(values.lanes(composite)) match {
-              case None                                                             => Left(undefined(composite))
-              case Some(lanes) if offset >= 0 && offset + count.raw <= lanes.length =>
+              case None                                                         => Left(undefined(composite))
+              case Some(lanes) if offset >= 0 && offset + count <= lanes.length =>
                 Right(
-                  if (count.raw == 1) values.updateScalar(dest, resultType, lanes(offset))
-                  else values.update(dest, VMValue.Bits(resultType, lanes.slice(offset, offset + count.raw)))
+                  if (count == 1) values.updateScalar(dest, resultType, lanes(offset))
+                  else values.update(dest, VMValue.Bits(resultType, lanes.slice(offset, offset + count)))
                 )
               case Some(lanes) =>
                 Left(
@@ -113,7 +116,7 @@ private object CompositeOps {
           val parts = constituents.toArray
           step { (execution, _) =>
             val values = execution.values
-            val result = Array.ofDim[Long](expected.raw)
+            val result = Array.ofDim[Long](expected)
             var cursor = 0
             var index  = 0
             var absent = -1
@@ -151,7 +154,7 @@ private object CompositeOps {
               case (Some(inserted), Some(lanes))
                   if inserted.length == count.raw && offset + count.raw <= lanes.length =>
                 val result = lanes.clone()
-                Array.copy(inserted, 0, result, offset, count.raw)
+                Array.copy(inserted, 0, result, offset, count)
                 Right(values.update(dest, VMValue.Bits(resultType, result)))
               case (Some(inserted), Some(_)) =>
                 Left(Fault.InvalidRequest(
@@ -200,7 +203,7 @@ private object CompositeOps {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def shuffle(site: Site, resultType: Int, dest: Int, left: Int, right: Int, components: Vec[Operand]): Op = {
     val program                        = site.program
-    def lanes(value: Int): Option[Int] = program.scalarLeafCount(program.valueType(value)).toOption.map(_.raw)
+    def lanes(value: Int): Option[Int] = program.scalarLeafCount(program.valueType(value)).toOption.rawElements
     (program.valueType(left), program.valueType(right), program.scalarLeafCount(resultType)) match {
       case (-1, _, _)                                                 => Fail(undefined(left))
       case (_, -1, _)                                                 => Fail(undefined(right))

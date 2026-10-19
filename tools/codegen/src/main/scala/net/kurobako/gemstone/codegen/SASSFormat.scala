@@ -18,12 +18,9 @@ object SASSFormat {
   ) extends Node
   case class Group(open: Char, close: Char, children: Vector[Node])   extends Node
   case class Optional(marker: Option[String], children: Vector[Node]) extends Node
-  case class ParseError(message: String, offset: Int)
 
   /** A field, kind or binding name. */
-  val identifier: Parser[String] =
-    (Parser.charWhere(c => c.isLetter || c == '_') ~
-      Parser.charWhere(c => c.isLetterOrDigit || "_.$-".contains(c)).rep0).string
+  val identifier: Parser[String]        = SASSConditions.identifierOf("_.$-")
   private val kindName: Parser[String]  = identifier
   private val arguments: Parser[String] =
     (Parser.char('(') *> Parser.charWhere(_ != ')').rep0 <* Parser.char(')')).string

@@ -138,14 +138,16 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     assertEquals(executeKernel(second, dispatch, RegionMemory()), Right(()))
   }
 
+  private val trapIds = List(2, 0x3141)
+
   for (architecture <- List("gfx900", "gfx1030"))
-    for (trapId <- List(2, 0x3141)) test(s"$architecture executed s_trap $trapId is a runtime fault") {
+    for (trapId <- trapIds) test(s"$architecture executed s_trap $trapId is a runtime fault") {
       val code   = words(0xbf920000 | trapId, 0xbf810000)
       val kernel = codeKernel(target = architecture.unsafe[Target], entry = 0x1000L, textAddress = 0x1000L, code = code)
       val dispatch = singleTask()
       assertEquals(
         executeKernel(compileKernel(kernel), dispatch, RegionMemory()),
-        Left(Fault.Backend(s"AMDGPU s_trap $trapId at pc 0x1000"))
+        Left(Fault.Trap(s"AMDGPU s_trap $trapId at pc 0x1000"))
       )
     }
 
@@ -195,8 +197,10 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       VMCompiler.decodeInstruction(code, Target("gfx1030")),
       Right(Instruction.Store(0, MemoryAddress.Buffer(Some(1), 4, None, 0), 2, false))
     )
-    // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1.
-    val dwords = Vec[Int](0xbe840380, 0xbe8503ff, 0x00004000, 0xbe860388, 0xbe870380,
+    // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1. s_brev_b32 s7, 12 selects
+    // raw bounds checking (OOB_SELECT 3), as runtime descriptors do; RDNA checks a zero stride and drops the store
+    // under OOB_SELECT 0.
+    val dwords = Vec[Int](0xbe840380, 0xbe8503ff, 0x00004000, 0xbe860388, 0xbe870b8c,
       0x7e0002ff, 0x12345678, 0x7e020281, 0xe0681000, 0x80010001, 0xbf810000)
     val kernel     = codeKernel(target = Target("gfx1030"), code = words(dwords*))
     val memory     = RegionMemory()
@@ -226,7 +230,7 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       code = words(
         0xbe8403ff, 0x00020080, 0x7e0002ff, 0x12345678, 0xe0700000, 0x04000000, 0x7e0002ff, 0x0fedcba9, 0xe0700004,
         0x04000000, 0xe0300000, 0x04000100, 0xe0300004, 0x04000200, 0xbf8c3f70, 0xbe800380, 0xbe8103ff, 0x00004000,
-        0xbe820388, 0xbe830380, 0xe0700000, 0x80000100, 0xe0700004, 0x80000200, 0xbf810000
+        0xbe820388, 0xbe830b8c, 0xe0700000, 0x80000100, 0xe0700004, 0x80000200, 0xbf810000
       )
     )
     val memory     = RegionMemory()
@@ -246,8 +250,9 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       ("f32 to f64 conversion", 0xd5900102, Seq(0xe0740000, 0x80000200), Seq(0, 0x40180000))
     )
   ) test(s"gfx1030 VOP3 $name applies the absolute source modifier") {
-    val prefix     = Seq(0x7e0002ff, 0xc0c00000, conversion, 0x00000100, 0xbe800380, 0xbe8103ff, 0x00004000, 0xbe820388)
-    val code       = words((prefix ++ Seq(0xbe830380) ++ store :+ 0xbf810000)*)
+    val prefix = Seq(0x7e0002ff, 0xc0c00000, conversion, 0x00000100, 0xbe800380, 0xbe8103ff, 0x00004000, 0xbe820388)
+    // s_brev_b32 s3, 12 selects raw bounds checking
+    val code       = words((prefix ++ Seq(0xbe830b8c) ++ store :+ 0xbf810000)*)
     val memory     = RegionMemory()
     val allocation = AllocationId(1L)
     memory.allocate(allocation, 8)
@@ -285,9 +290,11 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     assertEquals(executeKernel(compileKernel(kernel), dispatch, RegionMemory()), Right(()))
   }
 
+  private val laneCounts = List(1, 33, 64)
+
   for {
     rawPointers <- List(false, true)
-    activeLanes <- List(1, 33, 64)
+    activeLanes <- laneCounts
   } test(s"gfx900 vector copy batches external addresses: raw=$rawPointers active=$activeLanes") {
 
     val code = words(

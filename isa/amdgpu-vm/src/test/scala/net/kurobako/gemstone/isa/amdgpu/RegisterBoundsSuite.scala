@@ -82,13 +82,16 @@ class RegisterBoundsSuite extends munit.FunSuite {
     assert(!valid(Instruction.VPackedMove32(255, zero, zero, false, false)))
     assert(!valid(Instruction.VShiftLeftAdd64(0, InstructionSource.VectorRegister(255), zero, zero)))
     // ACC and VGPR banks each have 256 entries; the mask changes the bank, never the span.
-    for (bank <- Vec[Int in 0 ~ 7](0, 7)) {
-      assert(valid(Instruction.VMatrixF32(240, zero, zero, zero, 32, 0, 0, bank, 0)))
-      assert(!valid(Instruction.VMatrixF32(241, zero, zero, zero, 32, 0, 0, bank, 0)))
+    val mfma = MatrixShape.of("v_mfma_f32_32x32x2f32", ISA.CDNA2, 64).toOption.get
+    for (bank <- Vec(0, 7)) {
+      assert(valid(Instruction.VMatrix(240, zero, zero, zero, mfma, MatrixControls(banks = bank))))
+      assert(!valid(Instruction.VMatrix(241, zero, zero, zero, mfma, MatrixControls(banks = bank))))
     }
-    assert(valid(Instruction.VWaveMatrixF16(248, 248, 248, zero, false, false, 0, 0), 32))
-    assert(!valid(Instruction.VWaveMatrixF16(249, 248, 248, zero, false, false, 0, 0), 32))
-    assert(!valid(Instruction.VWaveMatrixF16(252, 249, 248, zero, false, false, 0, 0), 64))
+    def wmma(waveSize: Int) = MatrixShape.of("v_wmma_f32_16x16x16_f16", ISA.RDNA3, waveSize).toOption.get
+    def register(index: VectorRegisterIndex) = InstructionSource.VectorRegister(index)
+    assert(valid(Instruction.VMatrix(248, register(248), register(248), zero, wmma(32), MatrixControls()), 32))
+    assert(!valid(Instruction.VMatrix(249, register(248), register(248), zero, wmma(32), MatrixControls()), 32))
+    assert(!valid(Instruction.VMatrix(252, register(249), register(248), zero, wmma(64), MatrixControls()), 64))
     assert(valid(Instruction.SMove64(126, InstructionSource.Constant(1))))
     for (register <- Seq[ScalarRegisterIndex](106, 107, 126, 127))
       assert(valid(Instruction.SMove64(4, InstructionSource.Scalar(register))))
@@ -117,7 +120,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
     assert(
       unsatisfied(typeCheckErrors("Instruction.Atomic(AtomicOperation.Add, 0, MemoryAddress.Flat(0, 0), 0, 5, true)"))
     )
-    assert(unsatisfied(typeCheckErrors("Instruction.CompareSwap(0, MemoryAddress.Flat(0, 0), 0, 6, true)")))
+    assert(unsatisfied(typeCheckErrors("Instruction.CompareSwap(0, MemoryAddress.Flat(0, 0), 0, 1, 6, true)")))
     assert(unsatisfied(typeCheckErrors("VMState.ScratchMemory(65, 1)")))
     assert(unsatisfied(typeCheckErrors("VMState.ScratchMemory(1, -1)")))
     val scratch = VMState.ScratchMemory(64, 4)
@@ -153,13 +156,10 @@ class RegisterBoundsSuite extends munit.FunSuite {
   test("lane bounds prevent shift aliasing and access outside a partial wave") {
     val full = VMState.LaneBits(64, 1L)
     full.update(63, true)
-    assert(full(0))
-    assert(full(63))
+    assertEquals(full.bits, 1L | (1L << 63))
     assertEquals(full.count, 2)
     assert(unsatisfied(typeCheckErrors("VMState.LaneBits(64, 1L).update(64, false)")))
-    assert(unsatisfied(typeCheckErrors("VMState.LaneBits(64, 1L)(-1)")))
     val partial = VMState.LaneBits(32, 1L)
-    val _       = intercept[IllegalArgumentException](partial(40))
     val _       = intercept[IllegalArgumentException](partial.update(40, true))
     assertEquals(partial.bits, 1L)
     assertEquals(partial.count, 1)

@@ -29,7 +29,7 @@ class ObserverSuite extends munit.FunSuite {
   """
 
   private val store = module.instructions.indexWhere { case Instruction.Store(_, _, _) => true; case _ => false }
-  private val lane  = module.instructions.collectFirst { case Instruction.Load(_, dest, _, _) =>
+  private val lane  = module.instructions.collectFirst { case Instruction.Load(dest = dest) =>
     dest.words.head.raw
   }.get
 

@@ -16,18 +16,22 @@ import scala.reflect.ClassTag
 import scala.util.NotGiven
 
 object Wire {
-  enum Constraint {
+  enum Constraint derives CanEqual {
     case Positive
     case Positive0
     case IntInterval(minimum: Int, maximum: Int)
     case LongInterval(minimum: Long, maximum: Long)
+    case DoubleInterval(minimum: Double, maximum: Double)
     case OneOf(values: Vector[Long])
     case MultipleOf(divisor: Long)
     case MinimumLength(minimum: Int)
     case NotContains(value: String)
+
+    /** Satisfying every constraint of any one alternative. */
+    case AnyOf(alternatives: Vector[Vector[Constraint]])
   }
 
-  enum Shape {
+  enum Shape derives CanEqual {
     case UnitValue
     case BooleanValue
     case Int8
@@ -39,16 +43,15 @@ object Wire {
     case Text
     case Sequence(element: Shape)
     case Optional(element: Shape)
-    case Product(name: String, fields: Vector[Field])
-    case Sum(name: String, alternatives: Vector[Alternative])
+    case Product(name: String, fields: Vector[Named])
+    case Sum(name: String, alternatives: Vector[Named])
     case Alias(name: String, underlying: Shape, constraints: Vector[Constraint])
   }
 
-  case class Field(name: String, shape: Shape)
-  case class Alternative(name: String, shape: Shape)
+  case class Named(name: String, shape: Shape)
 
   private def decodeAll[A](bytes: Array[Byte], limits: Limits)(read: Reader => Either[String, A]): Either[String, A] =
-    if (bytes.length > limits.maximumBytes.raw) Left(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
+    if (bytes.length > limits.maximumBytes) Left(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
     else {
       val reader = Reader(bytes, 0, bytes.length, limits)
       read(reader).flatMap { value =>
@@ -87,7 +90,7 @@ object Wire {
       (writer, _) => writer.writeArrayHeader(0),
       reader =>
         reader.readArrayHeader().flatMap { count =>
-          Either.cond(count.raw == 0, (), s"expected unit array of size 0, got $count")
+          Either.cond(count == 0, (), s"expected unit array of size 0, got $count")
         }
     )
 
@@ -218,7 +221,7 @@ object Wire {
     ): Codec[A] = {
       val arity = labels.size.unsafe[Int >= 0]
       instance(
-        Shape.Product(name, labels.zip(codecs.map(_.shape)).map { case (label, codec) => Field(label, codec) }),
+        Shape.Product(name, labels.zip(codecs.map(_.shape)).map { case (label, codec) => Named(label, codec) }),
         (writer, value) =>
           value match {
             case product: Product =>
@@ -230,7 +233,7 @@ object Wire {
           },
         reader =>
           reader.readArrayHeader().flatMap { count =>
-            if (count.raw != arity.raw) Left(s"expected $name product array of size $arity, got $count")
+            if (count != arity) Left(s"expected $name product array of size $arity, got $count")
             else {
               val mutableValues = Array.ofDim[Any](codecs.length)
               @scala.annotation.tailrec
@@ -253,23 +256,23 @@ object Wire {
     private inline def sumCodec[A](mirror: Mirror.SumOf[A]): Codec[A] = {
       val name  = constValue[mirror.MirroredLabel]
       val cases = casesOf[mirror.MirroredElemTypes]
-      sumCodecRuntime(name, cases, mirror.ordinal)
+      sumCodecRuntime(name, cases, mirror)
     }
 
     @publicInBinary
     private[Codec] def sumCodecRuntime[A](
         name: String,
         cases: Vector[(String, Codec[Any])],
-        ordinal: A => Int
+        mirror: Mirror.SumOf[A]
     ): Codec[A] = {
       val singletons = cases.flatMap(_._2.nullary)
       val allNullary = singletons.length == cases.length
       instance(
-        Shape.Sum(name, cases.map(value => Alternative(value._1, value._2.shape))),
+        Shape.Sum(name, cases.map(value => Named(value._1, value._2.shape))),
         (writer, value) =>
-          if (allNullary) writer.writeInt(ordinal(value))
+          if (allNullary) writer.writeInt(mirror.ordinal(value))
           else {
-            val (caseName, codec) = cases(ordinal(value))
+            val (caseName, codec) = cases(mirror.ordinal(value))
             writer.writeArrayHeader(2)
             writer.writeString(caseName)
             codec.write(writer, value)
@@ -281,7 +284,7 @@ object Wire {
             }
           else
             reader.readArrayHeader().flatMap { count =>
-              if (count.raw != 2) Left(s"expected $name sum array of size 2, got $count")
+              if (count != 2) Left(s"expected $name sum array of size 2, got $count")
               else
                 reader.readString().flatMap { tag =>
                   cases.find(_._1 == tag)
@@ -359,7 +362,7 @@ object Wire {
                   (writer, _) => writer.writeArrayHeader(0),
                   reader =>
                     reader.readArrayHeader().flatMap { count =>
-                      if (count.raw == 0) Right($value) else Left(s"expected empty operation array, got $count")
+                      if (count == 0) Right($value) else Left(s"expected empty operation array, got $count")
                     }
                 )
               }
@@ -389,16 +392,12 @@ object Wire {
       '{ Protocol.runtime[F](${ Expr(name) }, Vector(${ Expr.ofSeq(cases) }*)) }
     }
 
-    private class DecodedValue[F[_], A](override val value: F[A]) extends Decoded[F] {
-      override type Reply = A
-    }
-
     private class ProtocolImpl[F[_]](
         name: String,
         cases: Vector[ProtocolCase[F]]
     ) extends Protocol[F] {
       override val operations: Vector[OperationShape] =
-        cases.map(value => OperationShape(Alternative(value.name, value.codec.shape), value.reply))
+        cases.map(value => OperationShape(Named(value.name, value.codec.shape), value.reply))
 
       override val shape: Shape.Sum = Shape.Sum(name, operations.map(_.request))
 
@@ -419,9 +418,9 @@ object Wire {
           tag: String,
           bytes: Array[Byte],
           limits: Limits
-      ): Either[String, Decoded[F]] = decodeAll(bytes, limits)(reader => readCase(tag, reader))
+      ): Either[String, Decoded[F, ?]] = decodeAll(bytes, limits)(reader => readCase(tag, reader))
 
-      private def readCase(tag: String, reader: Reader): Either[String, Decoded[F]] =
+      private def readCase(tag: String, reader: Reader): Either[String, Decoded[F, ?]] =
         cases.find(_.name == tag)
           .toRight(s"unknown $name operation tag: $tag")
           .flatMap(_.decode(reader))
@@ -431,7 +430,7 @@ object Wire {
         val name: String,
         val codec: Codec[Any],
         val reply: Shape,
-        val decode: Reader => Either[String, Decoded[F]]
+        val decode: Reader => Either[String, Decoded[F, ?]]
     )
 
     @publicInBinary
@@ -450,7 +449,7 @@ object Wire {
       codec.erased,
       reply,
       reader =>
-        codec.read(reader).map { case decoded: F[A] @unchecked => DecodedValue[F, A](decoded) }
+        codec.read(reader).map { case decoded: F[A] @unchecked => Decoded[F, A](decoded) }
     )
   }
 
@@ -462,16 +461,13 @@ object Wire {
         tag: String,
         bytes: Array[Byte],
         limits: Limits
-    ): Either[String, Decoded[F]]
+    ): Either[String, Decoded[F, ?]]
 
     final def schema[Failure: Codec](name: NonEmpty[String]): ProtocolShape =
       ProtocolShape(name, operations, Codec[Failure].shape)
   }
 
-  sealed trait Decoded[F[_]] {
-    type Reply
-    val value: F[Reply]
-  }
+  class Decoded[F[_], A](val value: F[A])
 
   trait Codec[A] {
     def shape: Shape
@@ -504,13 +500,15 @@ object Wire {
 
   }
 
-  case class OperationShape(request: Alternative, reply: Shape)
+  case class OperationShape(request: Named, reply: Shape)
   case class ProtocolShape(
       name: NonEmpty[String],
       operations: Vector[OperationShape],
       failure: Shape
   ) {
     val canonical: String = {
+      // Double.toString differs between platforms, and a signed zero bound admits the same values as an unsigned one
+      def bits(value: Double): String  = f"${java.lang.Double.doubleToRawLongBits(value + 0.0)}%016x"
       def render(shape: Shape): String = shape match {
         case Shape.UnitValue                        => "unit"
         case Shape.BooleanValue                     => "bool"
@@ -524,19 +522,22 @@ object Wire {
         case Shape.Sequence(element)                => s"seq[${render(element)}]"
         case Shape.Optional(element)                => s"option[${render(element)}]"
         case Shape.Alias(alias, value, constraints) =>
-          val rendered = constraints.map {
-            case Constraint.Positive                       => "positive"
-            case Constraint.Positive0                      => "positive0"
-            case Constraint.IntInterval(minimum, maximum)  => s"int-interval[$minimum,$maximum]"
-            case Constraint.LongInterval(minimum, maximum) => s"long-interval[$minimum,$maximum]"
-            case Constraint.OneOf(values)                  => s"one-of[${values.mkString(",")}]"
-            case Constraint.MultipleOf(divisor)            => s"multiple-of[$divisor]"
-            case Constraint.MinimumLength(minimum)         => s"minimum-length[$minimum]"
-            case Constraint.NotContains(excluded)          =>
+          def constraint(value: Constraint): String = value match {
+            case Constraint.Positive                         => "positive"
+            case Constraint.Positive0                        => "positive0"
+            case Constraint.IntInterval(minimum, maximum)    => s"int-interval[$minimum,$maximum]"
+            case Constraint.LongInterval(minimum, maximum)   => s"long-interval[$minimum,$maximum]"
+            case Constraint.DoubleInterval(minimum, maximum) => s"double-interval[${bits(minimum)},${bits(maximum)}]"
+            case Constraint.OneOf(values)                    => s"one-of[${values.mkString(",")}]"
+            case Constraint.MultipleOf(divisor)              => s"multiple-of[$divisor]"
+            case Constraint.MinimumLength(minimum)           => s"minimum-length[$minimum]"
+            case Constraint.NotContains(excluded)            =>
               val encoded = excluded.getBytes(StandardCharsets.UTF_8).map(byte => f"${byte & 0xff}%02x").mkString
               s"not-contains[$encoded]"
-          }.mkString(",")
-          s"alias($alias,${render(value)})[$rendered]"
+            case Constraint.AnyOf(alternatives) =>
+              alternatives.map(_.map(constraint(_)).mkString("[", ",", "]")).mkString("any-of[", ",", "]")
+          }
+          s"alias($alias,${render(value)})[${constraints.map(constraint(_)).mkString(",")}]"
         case Shape.Product(product, fields) =>
           fields.map(field => s"${field.name}:${render(field.shape)}").mkString(s"product($product){", ",", "}")
         case Shape.Sum(sum, alternatives) =>

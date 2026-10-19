@@ -1,3 +1,8 @@
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <new>
 #include <string_view>
 
 #include "gemstone_vulkan_adapter.hpp"
@@ -7,7 +12,7 @@
 using namespace gemstone::vulkan;
 
 namespace gemstone::vulkan {
-PFN_vkVoidFunction supportedFunction(const char *name) {
+static PFN_vkVoidFunction supportedFunction(const char *name) {
   const auto version = configuredApiVersion().value_or(VK_API_VERSION_1_0);
 #include "gemstone_vulkan_lookup.inc"
 
@@ -20,7 +25,7 @@ extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice
   if (!device || !name) return nullptr;
   const std::string_view function(name);
   if (function == "vkResetQueryPoolEXT") {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     const auto found = devices.find(device);
     return found != devices.end() && found->second->hostQueryResetExtension ? supportedFunction(name) : nullptr;
   }
@@ -51,7 +56,7 @@ extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInst
   // physical device supports the extension; device lookup still checks enablement.
   if (function == "vkResetQueryPoolEXT") return supportedFunction(name);
   if (function.ends_with("KHR") || function.ends_with("EXT")) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     const auto found = instanceProperties2.find(instance);
     if (!function.starts_with("vkGetPhysicalDevice") || !function.ends_with("2KHR") || found == instanceProperties2.end() || !found->second)
       return nullptr;
@@ -73,8 +78,9 @@ VkResult createPipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
       host::Creation creation(allocator, handleArena(device), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
       try {
         const auto status = create(device, cache, 1, infos + i, allocator, output + i);
-        if (status == VK_SUCCESS) creation.commit();
-        else {
+        if (status == VK_SUCCESS) {
+          creation.commit();
+        } else {
           implVkDestroyPipeline(device, output[i], allocator);
           output[i] = VK_NULL_HANDLE;
           result = status;
@@ -95,7 +101,7 @@ VkResult createPipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
 // Ownership boundaries with specialised allocation or rollback behaviour.
 
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(VkDevice device, VkDescriptorPool pool, VkDescriptorPoolResetFlags arg2) {
-  host::Scope scope(handleArena(pool));
+  host::Scope const scope(handleArena(pool));
   try {
     return implVkResetDescriptorPool(device, pool, arg2);
   } catch (const std::bad_alloc &) {
@@ -106,7 +112,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(VkDevice device,
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo *info,
                                                                    VkDescriptorSet *sets) {
   if (info && sets) std::fill_n(sets, info->descriptorSetCount, VK_NULL_HANDLE);
-  host::Scope scope(info ? handleArena(info->descriptorPool) : nullptr);
+  host::Scope const scope(info ? handleArena(info->descriptorPool) : nullptr);
   try {
     return implVkAllocateDescriptorSets(device, info, sets);
   } catch (const std::bad_alloc &) {
@@ -125,7 +131,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice devi
 }
 
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(VkDevice device, VkCommandPool pool, VkCommandPoolResetFlags arg2) {
-  host::Scope scope(handleArena(pool));
+  host::Scope const scope(handleArena(pool));
   try {
     const auto result = implVkResetCommandPool(device, pool, arg2);
     if (result == VK_SUCCESS && (arg2 & VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT))
@@ -139,7 +145,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(VkDevice device, Vk
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(VkDevice device, const VkCommandBufferAllocateInfo *info,
                                                                    VkCommandBuffer *output) {
   if (info && output) std::fill_n(output, info->commandBufferCount, VK_NULL_HANDLE);
-  host::Scope scope(info ? handleArena(info->commandPool) : nullptr);
+  host::Scope const scope(info ? handleArena(info->commandPool) : nullptr);
   try {
     return implVkAllocateCommandBuffers(device, info, output);
   } catch (const std::bad_alloc &) {
@@ -152,7 +158,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(VkDevice devi
 }
 
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer command, VkCommandBufferResetFlags arg1) {
-  host::Scope scope(handleArena(command));
+  host::Scope const scope(handleArena(command));
   try {
     const auto result = implVkResetCommandBuffer(command, arg1);
     if (result == VK_SUCCESS && (arg1 & VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT))
@@ -164,12 +170,12 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer c
 }
 
 extern "C" VKAPI_ATTR void VKAPI_CALL vkTrimCommandPool(VkDevice device, VkCommandPool pool, VkCommandPoolTrimFlags arg2) {
-  host::Scope scope(handleArena(pool));
+  host::Scope const scope(handleArena(pool));
   try {
     implVkTrimCommandPool(device, pool, arg2);
     if (auto *arena = handleArena(pool)) arena->trim();
   } catch (const std::bad_alloc &) {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     const auto found = devices.find(device);
     if (found != devices.end()) found->second->lost = true;
     stateChanged.notify_all();

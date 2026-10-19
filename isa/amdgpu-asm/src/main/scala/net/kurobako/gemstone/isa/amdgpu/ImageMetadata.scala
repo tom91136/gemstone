@@ -4,9 +4,22 @@ import net.kurobako.gemstone.*
 import upickle.default.*
 
 object ImageMetadata {
+
+  /** GFX12's spellings of image atomics whose LLVM base opcode keeps the earlier name. */
+  private val Renamed = Map(
+    "image_atomic_add"  -> "image_atomic_add_uint",
+    "image_atomic_sub"  -> "image_atomic_sub_uint",
+    "image_atomic_smin" -> "image_atomic_min_int",
+    "image_atomic_umin" -> "image_atomic_min_uint",
+    "image_atomic_smax" -> "image_atomic_max_int",
+    "image_atomic_umax" -> "image_atomic_max_uint",
+    "image_atomic_inc"  -> "image_atomic_inc_uint",
+    "image_atomic_dec"  -> "image_atomic_dec_uint"
+  )
+
   private lazy val instructions: Map[Opcode, ImageMetadata] =
     resources.json[Map[String, ImageMetadata]](getClass, "images.json").flatMap { case (name, properties) =>
-      Opcode.forOpcode(name).map(_ -> properties)
+      (name +: Renamed.get(name).toVector).flatMap(InstructionDefs.forOpcode(_).map(_ -> properties))
     }
 
   def forOpcode(opcode: Opcode): Option[ImageMetadata] = instructions.get(opcode)

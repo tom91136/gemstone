@@ -6,7 +6,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
@@ -19,14 +18,13 @@ class LoadedProgram(
     decoded: Map[NonEmpty[String], Vec[DecodedFunction]],
     workgroups: Workgroups
 ) extends Backend.Program {
-  private case class Bound(binding: GlobalBinding, memory: AddressSpace)
 
   private val banks    = Cubin.constantSections(module).map(section => Cubin.constantSymbol(section.index) -> section)
   private val bank     = banks.toMap
   private val compiled = ConcurrentHashMap[NonEmpty[String], Kernel]()
-  private val bindings = ConcurrentHashMap[NonEmpty[String], Bound]()
-  private val relocations = Cubin.constantRelocations(module).left.map(Fault.Unsupported(_))
-  private val relocated   = ConcurrentHashMap[Cubin.ConstantRelocation, (Bound, Bound)]()
+  private val bindings = ConcurrentHashMap[NonEmpty[String], BoundGlobal]()
+  private val relocations = Cubin.constantRelocations(module).left.map(Fault.InvalidProgram(_))
+  private val relocated   = ConcurrentHashMap[Cubin.ConstantRelocation, (BoundGlobal, BoundGlobal)]()
 
   private def relocateBoundConstants(): Either[Fault, Unit] = relocations.flatMap(_.traverse_ { relocation =>
     (Option(bindings.get(Cubin.constantSymbol(relocation.section))), Option(bindings.get(relocation.target))) match {
@@ -34,12 +32,20 @@ class LoadedProgram(
         source.memory.address(source.binding.region, source.binding.offset).flatMap { address =>
           destination.memory.write(
             destination.binding.region,
-            destination.binding.offset + relocation.offset.toLong,
+            destination.binding.offset + relocation.offset.widen[Long >= 0],
             LittleEndian.toVec(address.offset(relocation.addend).raw, 8)
           )
         }.map { _ =>
           val _ = relocated.put(relocation, destination -> source)
         }
+      case (Some(destination), None) =>
+        Cubin.DriverFunctions.get(relocation.target).fold(Right(()))(address =>
+          destination.memory.write(
+            destination.binding.region,
+            destination.binding.offset + relocation.offset.widen[Long >= 0],
+            LittleEndian.toVec(address + relocation.addend, 8)
+          )
+        )
       case _ => Right(())
     }
   })
@@ -49,10 +55,10 @@ class LoadedProgram(
 
   override def symbols: Either[Fault, ProgramSymbols] = {
     val (aliased, independent) = module.globals.partition(_.constantSection.nonEmpty)
-    val globals                = independent.map(global => global.name -> global.bytes.nonNegativeSize.toLong) ++
-      banks.filter(_._2.size.raw > 0).map((name, section) => name -> section.size.toLong) ++
-      aliased.map(global => global.name -> global.bytes.nonNegativeSize.toLong)
-    globals.traverse((name, size) => symbol(name, size.widen[Long >= 0])).map(values =>
+    val globals = independent.map(global => global.name -> global.bytes.nonNegativeSize.widen[Long >= 0]) ++
+      banks.filter(_._2.size > 0).map((name, section) => name -> section.size.widen[Long >= 0]) ++
+      aliased.map(global => global.name -> global.bytes.nonNegativeSize.widen[Long >= 0])
+    globals.traverse((name, size) => symbol(name, size)).map(values =>
       ProgramSymbols(module.kernels.map(kernel => KernelSymbol(kernel.name, kernel.name)), values)
     )
   }
@@ -78,16 +84,16 @@ class LoadedProgram(
   override def global(name: NonEmpty[String]): Either[Fault, ProgramGlobal] =
     bank.get(name) match {
       case Some(section) =>
-        ProgramGlobal.validated(section.size.toLong.widen[Long >= 0], section.bytes).left.map(Fault.InvalidRequest(_))
+        ProgramGlobal.validated(section.size.widen[Long >= 0], section.bytes).left.map(Fault.InvalidRequest(_))
       case None =>
         module.globals.find(_.name == name).toRight(Fault.NotFound(s"cubin global '$name' is not present")).flatMap {
           global =>
-            val size = global.bytes.nonNegativeSize.toLong.widen[Long >= 0]
+            val size = global.bytes.nonNegativeSize.widen[Long >= 0]
             global.constantSection.fold(ProgramGlobal.validated(size, global.bytes))(section =>
               ProgramGlobal.validated(
                 size,
                 Vec.empty,
-                Some(ProgramGlobalAlias(Cubin.constantSymbol(section), global.offset.toLong.widen[Long >= 0]))
+                Some(ProgramGlobalAlias(Cubin.constantSymbol(section), global.offset.widen[Long >= 0]))
               )
             ).left.map(Fault.InvalidRequest(_))
         }
@@ -97,7 +103,7 @@ class LoadedProgram(
     if (!bank.contains(name) && !module.globals.exists(_.name == name))
       Left(Fault.NotFound(s"cubin global '$name' is not present"))
     else memory.address(binding.region, binding.offset).flatMap { _ =>
-      val next = Bound(binding, memory)
+      val next = BoundGlobal(binding, memory)
       GlobalBinding.rebind(name, Option(bindings.putIfAbsent(name, next)), next).flatMap { first =>
         if (!first) Right(())
         else {
@@ -113,21 +119,19 @@ class LoadedProgram(
     }
 
   override def writeGlobal(name: NonEmpty[String], offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
-    Option(bindings.get(name)).toRight(Fault.InvalidRequest(s"cubin global '$name' is not bound")).flatMap { bound =>
-      if (!bound.binding.contains(offset, bytes.nonNegativeSize.toLong))
-        Left(Fault.InvalidRequest(s"write exceeds cubin global '$name'"))
-      else bound.memory.write(bound.binding.region, bound.binding.offset + offset, bytes)
-    }
+    Option(bindings.get(name)).toRight(Fault.InvalidRequest(s"cubin global '$name' is not bound")).flatMap(
+      _.write(offset, bytes)(Fault.InvalidRequest(s"write exceeds cubin global '$name'"))
+    )
 
   private def compile(name: NonEmpty[String]): Either[Fault, Kernel] =
     Option(compiled.get(name)).fold {
       module.kernels.find(_.name == name).toRight(Fault.NotFound(s"cubin kernel '$name' is not present")).flatMap {
         kernel =>
           val functions = decoded.get(name).fold {
-            val code = module.sections(kernel.section.raw).bytes
-            if (code.isEmpty) Left(Fault.Unsupported("empty SASS code section"))
+            val code = module.sections(kernel.section).bytes
+            if (code.isEmpty) Left(Fault.InvalidProgram("empty SASS code section"))
             else Target.of(module.sm).flatMap(CodeSection.decode(Vec.toArray(code), _))
-              .left.map(error => Fault.Unsupported(s"${kernel.name} sm_${module.sm} $error"))
+              .left.map(error => Fault.InvalidProgram(s"${kernel.name} sm_${module.sm} $error"))
               .map(section => Vec(DecodedFunction(kernel.name, section.instructions)))
           }(Right(_))
           functions.flatMap { functions =>
@@ -136,8 +140,9 @@ class LoadedProgram(
             ).toMap
             for {
               _        <- relocateBoundConstants()
-              resolved <- Cubin.relocateConstants(module, globalSymbols).left.map(Fault.Unsupported(_))
-              lowered  <- VMCompiler.compile(resolved, kernel, functions, globalSymbols).left.map(Fault.Unsupported(_))
+              resolved <- Cubin.relocateConstants(module, globalSymbols).left.map(Fault.InvalidProgram(_))
+              lowered  <-
+                VMCompiler.compile(resolved, kernel, functions, globalSymbols).left.map(Fault.InvalidProgram(_))
             } yield lowered
           }
       }.map(kernel => Option(compiled.putIfAbsent(name, kernel)).getOrElse(kernel))

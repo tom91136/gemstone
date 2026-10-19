@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.CodeWords.BundleControl as Control
 import net.kurobako.gemstone.isa.sass.asm.Program.Statement.*
@@ -54,14 +55,14 @@ object Assembler {
                   field.category == NVDisasm.FieldKind.PredicateRegister
               )
             )
-              Instruction.decode(
+              InstructionDefinitions.decode(
                 instruction.mnemonic.raw,
                 instruction.modifiers,
                 instruction.operands.patch(1, Vec(Operand.Symbol("PR")), 0),
                 instruction.guard
               ).flatMap(Printer.print(_))
             else Right(text)
-          bindings <- FormatParser.parse(database, form, address.raw, encodingText)
+          bindings <- FormatParser.parse(database, form, address, encodingText)
           opcode   <- form.opcodes.find(value => bindings.get("Opcode").contains(value.value))
             .toRight(s"missing opcode binding for ${form.name}")
           bytes <- Encoder.encode(database, form, opcode.name, bindings)
@@ -117,6 +118,11 @@ object Assembler {
 
   private def equivalentOperand(left: Operand, right: Operand): Boolean =
     left == right ||
+      ((left, right) match {
+        case (Operand.Qualified(leftValue, leftSelectors), Operand.Qualified(rightValue, rightSelectors)) =>
+          leftSelectors == rightSelectors && equivalentOperand(leftValue, rightValue)
+        case _ => false
+      }) ||
       ((OperandQueries.integer(left), OperandQueries.integer(right)) match {
         case (Some(a), Some(b)) => a == b
         case _                  =>
@@ -129,9 +135,9 @@ object Assembler {
       })
 
   private def floatingBits(operand: Operand): Option[(FloatEncoding, Int, BigInt)] = operand match {
-    case Operand.FloatingBits(format, width, bits)                                    => Some((format, width.raw, bits))
+    case Operand.FloatingBits(format, width, bits)                                    => Some((format, width, bits))
     case Operand.Unary(Operand.FloatingBits(format, width, bits), true, false, false) =>
-      Some((format, width.raw, bits ^ (BigInt(1) << (width.raw - 1))))
+      Some((format, width, bits ^ (BigInt(1) << (width - 1))))
     case _ => None
   }
 
@@ -242,9 +248,9 @@ class Assembler(target: Target) {
               case Control.Maxwell(values, _) => validateControl(word.bytes, values(slot), address, word.operation)
               case _                          => Right(())
             }
-          } yield CodeWords.CodeWord(address, word.bytes.take(generation.instructionBytes.raw))
+          } yield CodeWords.CodeWord(address, word.bytes.take(generation.instructionBytes))
         }
-        base = index * generation.bundleBytes.raw
+        base = index * generation.bundleBytes
       } yield CodeWords.CodeBundle(base.unsafe[CodeWords.Address], control, located)
     }
     bytes <- CodeWords.join(CodeWords.Layout(generation, bundles)).left.map(assembly(_))
@@ -275,7 +281,7 @@ class Assembler(target: Target) {
     (operations, _, _) = layout
     addresses <- operations.indices.toVec.traverse(addressOf(_))
     moved = operations.zip(addresses).collect { case (Operation(_, Some(preserved), _), address) =>
-      BigInt(preserved.address.raw) -> BigInt(address.raw)
+      BigInt(preserved.address) -> BigInt(address)
     }.toMap
     rebuilt <-
       program.statements.foldLeft[Either[Error, (Vec[Program.Statement], Int)]](Right(Vec.empty[Program.Statement] ->
@@ -292,11 +298,16 @@ class Assembler(target: Target) {
               if (ControlFlow.directTarget(instruction)) instruction.operands.map(retarget) else instruction.operands
             val rebuilt =
               if (operands == instruction.operands) Right(instruction)
-              else Instruction.decode(instruction.mnemonic.raw, instruction.modifiers, operands, instruction.guard)
+              else InstructionDefinitions.decode(
+                instruction.mnemonic.raw,
+                instruction.modifiers,
+                operands,
+                instruction.guard
+              )
                 .left.map(assembly(_))
             rebuilt.map { updated =>
               val kept = preserved.filter(old =>
-                updated == instruction || moved.get(BigInt(old.address.raw)).exists(now =>
+                updated == instruction || moved.get(BigInt(old.address)).exists(now =>
                   instruction.operands.zip(operands).forall {
                     case (before, after) if before == after => true
                     case (before, after)                    =>
@@ -314,8 +325,8 @@ class Assembler(target: Target) {
 
   private def addressOf(index: Int): Either[Error, Int >= 0] = {
     val slots   = generation.slots
-    val address = index.toLong / slots * generation.bundleBytes.raw + generation.controlBytes +
-      index % slots * generation.instructionBytes.raw
+    val address = index.toLong / slots * generation.bundleBytes + generation.controlBytes +
+      index % slots * generation.instructionBytes
     Either.cond(
       address <= Int.MaxValue,
       address.toInt.unsafe[Int >= 0],
@@ -373,10 +384,10 @@ class Assembler(target: Target) {
         _       <- Parser.symbolicReference(operation).left.map(assembly(_))
         address <- labels.get(reference.name.raw).toRight(Error.UndefinedLabel(reference.name))
         instruction = operation.instruction
-        resolved <- Instruction.decode(
+        resolved <- InstructionDefinitions.decode(
           instruction.mnemonic.raw,
           instruction.modifiers,
-          instruction.operands.updated(reference.operand.raw, Operand.Integer(BigInt(address.raw))),
+          instruction.operands.updated(reference.operand, Operand.Integer(BigInt(address))),
           instruction.guard
         ).left.map(assembly(_))
       } yield resolved

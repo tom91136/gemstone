@@ -1,11 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
-#include <iterator>
 #include <map>
 #include <string>
 #include <string_view>
+
+#include "cuda_architecture.hpp"
+#include <aspartame/all.hpp>
 
 namespace conformance::driver {
 
@@ -20,13 +23,15 @@ inline std::string_view suiteBlasSkip(std::string_view backend, std::string_view
                     || identity == "edge/blas/f32/compact/beta_zero_gemm" || identity == "edge/blas/f32/compact/padded_gemm";
   const bool gemv = operation == "gemv" || operation == "gemv_transpose";
   if (backend == "cuda" && code == "ptx") {
-    if (library == "libcublas.so.11.11.3.6" && (architecture == "sm_35" || architecture == "sm_50" || architecture == "sm_60")
-        && (gemm || (architecture == "sm_35" && operation == "gemm_strided_batched")))
+    // cuBLAS selects kernels by the device's compute capability, which suffixed routes share with their base.
+    const auto cuda = CudaArchitecture::parse(architecture);
+    const int sm = cuda ? cuda->capability : 0;
+    if (library == "libcublas.so.11.11.3.6" && (sm == 35 || sm == 50 || sm == 60)
+        && (gemm || (sm == 35 && operation == "gemm_strided_batched")))
       return "cuBLAS 11.11.3.6: selected kernel has no PTX payload; SASS remains supported";
     if (library == "libcublas.so.13.6.0.2") {
-      const bool allGemm = architecture == "sm_80" || architecture == "sm_86" || architecture == "sm_87" || architecture == "sm_89"
-                           || architecture == "sm_90" || architecture == "sm_120";
-      const bool transposedGemm = architecture == "sm_100" || architecture == "sm_103";
+      const bool allGemm = sm == 80 || sm == 86 || sm == 87 || sm == 89 || sm == 90 || sm == 120;
+      const bool transposedGemm = sm == 100 || sm == 103;
       if ((allGemm && (gemm || gemv)) || (transposedGemm && (operation == "gemm_tn" || operation == "gemm_tt" || gemv)))
         return "cuBLAS 13.6.0.2: selected kernel has no PTX payload; SASS remains supported";
     }
@@ -64,12 +69,13 @@ inline void applySuiteIsolatedEnvironment(std::map<std::string, std::string> &en
 }
 
 // Suite knobs a machine profile or the invoking environment may set.
-inline constexpr std::string_view SuiteEnvironmentKeys[]{
-    "CONFORMANCE_VULKAN_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_ELEMENTS",          "CONFORMANCE_OPENCL_CTS_TIMEOUT",
-    "CONFORMANCE_OPENCL_CTS_WIMPY",   "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"};
+inline constexpr auto SuiteEnvironmentKeys = std::to_array<std::string_view>(
+    {"CONFORMANCE_VULKAN_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_ELEMENTS", "CONFORMANCE_OPENCL_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_WIMPY",
+     "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"});
 
 inline bool suiteEnvironmentKey(std::string_view key) {
-  return std::find(std::begin(SuiteEnvironmentKeys), std::end(SuiteEnvironmentKeys), key) != std::end(SuiteEnvironmentKeys);
+  using namespace aspartame;
+  return SuiteEnvironmentKeys ^ contains(key);
 }
 
 } // namespace conformance::driver

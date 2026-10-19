@@ -55,7 +55,7 @@ class ISASuite extends munit.FunSuite {
 
   test("RDNA1 and RDNA2 retain distinct instruction availability and opcode lookup") {
     val instruction = parse("v_fma_legacy_f32 v0, v1, v2, v3")
-    assert(Metadata.encodingsFor(instruction.definition, Target("gfx1010")).isEmpty)
+    assert(instruction.definition.encodings(Target("gfx1010")).isEmpty)
     val code = encoded(instruction, Target("gfx1030"))
     assertEquals(disassembled(code, Target("gfx1030")).definition, instruction.definition)
     assert(!Binary.decode(code, Target("gfx1010")).exists(_.definition == instruction.definition))

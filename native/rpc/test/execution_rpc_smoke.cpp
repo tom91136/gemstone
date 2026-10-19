@@ -1,10 +1,10 @@
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
-
-#include <stdint.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,7 +22,7 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   const auto allocation = allocationResult.value();
   REQUIRE((memoryClient->call(WriteAllocation{allocation, 0, {1, 2, 3, 4}})));
 
-  auto programResult = executionClient->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, {3, 2, 35, 7}});
+  auto programResult = executionClient->call(LoadProgram{.encoding = ProgramEncoding::SPIRVOpenCLCompute, .image = {3, 2, 35, 7}});
   REQUIRE((programResult));
   const auto program = programResult.value();
   auto catalogue = executionClient->call(DescribeProgram{program});
@@ -32,22 +32,22 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   REQUIRE((catalogue.value().kernels[0].linkageName.value == "add.kd"));
 
   std::vector<Argument> arguments{
-      ArgumentMemory{AllocationId{allocation.value}, 2},
+      ArgumentMemory{.region = AllocationId{allocation.value}, .offset = {2}},
       ArgumentScalar{{{9, 8}}},
       ArgumentLocal{64},
   };
   auto completionResult = executionClient->call(Launch{
-      program,
-      "write",
-      {1, 1, 1},
-      {1, 1, 1},
-      GlobalDimensions{1, 1, 1},
-      3,
-      {0, 0, 0},
-      0,
-      0,
-      std::move(arguments),
-      {},
+      .program = program,
+      .kernelName = {"write"},
+      .groupSize = {.x = {1}, .y = {1}, .z = {1}},
+      .groupCount = {.x = {1}, .y = {1}, .z = {1}},
+      .globalSize = GlobalDimensions{.x = {1}, .y = {1}, .z = {1}},
+      .workDim = {3},
+      .globalOffset = {.x = {0}, .y = {0}, .z = {0}},
+      .privateSegmentBytes = {0},
+      .groupSegmentBytes = {0},
+      .arguments = std::move(arguments),
+      .pointerRelocations = {},
   });
   REQUIRE((completionResult));
   const auto completion = completionResult.value();
@@ -65,27 +65,28 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
     break;
   }
 
-  auto relocations = executionClient->call(CompletionPointerRelocations{completion});
+  auto relocations = executionClient->call(CompletionPointerRelocations{.completion = completion});
   REQUIRE((relocations && relocations.value().empty()));
-  auto dirtyRanges = memoryClient->call(CompletionDirtyRanges{completion, 0});
+  auto dirtyRanges = memoryClient->call(CompletionDirtyRanges{.completion = completion, .offset = {0}});
   REQUIRE((dirtyRanges && dirtyRanges.value().size() == 1));
   const auto &dirty = dirtyRanges.value()[0];
   REQUIRE((dirty.allocation.value == allocation.value && dirty.offset.value == 0 && dirty.size.value == 8));
 
-  auto bytes = memoryClient->call(ReadAllocation{allocation, 0, 8});
+  auto bytes = memoryClient->call(ReadAllocation{.allocation = allocation, .offset = {0}, .size = {8}});
   REQUIRE((bytes));
   REQUIRE((bytes.value() == std::vector<uint8_t>({1, 2, 9, 8, 0, 0, 0, 0})));
 
-  constexpr size_t largeSize = 16U * 1024U * 1024U + 37U;
+  constexpr size_t largeSize = (16U * 1024U * 1024U) + 37U;
   std::vector<uint8_t> expected(largeSize);
   for (size_t index = 0; index < expected.size(); ++index)
-    expected[index] = static_cast<uint8_t>((index * 131U + 17U) & 0xffU);
+    expected[index] = static_cast<uint8_t>(((index * 131U) + 17U) & 0xffU);
   auto largeAllocationResult = memoryClient->call(RegisterAllocation{{largeSize}});
   REQUIRE((largeAllocationResult));
   const auto largeAllocation = largeAllocationResult.value();
   REQUIRE((executionClient->call(WriteAllocation{largeAllocation, 0, expected})));
   for (unsigned round = 0; round < 4; ++round) {
-    auto actual = executionClient->call(ReadAllocation{largeAllocation, 0, static_cast<int32_t>(largeSize)});
+    auto actual =
+        executionClient->call(ReadAllocation{.allocation = largeAllocation, .offset = {0}, .size = {static_cast<int32_t>(largeSize)}});
     REQUIRE((actual && actual.value() == expected));
   }
 

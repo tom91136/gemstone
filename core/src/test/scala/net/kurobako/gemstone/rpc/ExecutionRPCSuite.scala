@@ -270,7 +270,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
   }
 
   test("maximum-sized element collections decode without consuming the call stack") {
-    val values = Vec.fill(ExecutionRPC.MaximumElements.raw)(1)
+    val values = Vec.fill(ExecutionRPC.MaximumElements)(1)
     assertEquals(
       Wire.Codec[Vec[Int]].encode(values, ExecutionRPC.Limits)
         .flatMap(Wire.Codec[Vec[Int]].decode(_, ExecutionRPC.Limits)),
@@ -461,15 +461,40 @@ class ExecutionRPCSuite extends munit.FunSuite {
   }
 
   test("nested failure details fit the wire instead of failing to encode") {
-    val long    = "\u00e9" * ExecutionRPC.MaximumTextBytes.raw
+    val long    = "\u00e9" * ExecutionRPC.MaximumTextBytes
     val status  = CompletionStatus.Failed(ExecutionFailure.Failed(s"fault\u0000at $long"))
     val decoded = Codec[CompletionStatus].encode(status, ExecutionRPC.Limits)
       .flatMap(bytes => Codec[CompletionStatus].decode(bytes, ExecutionRPC.Limits))
     decoded match {
       case Right(CompletionStatus.Failed(ExecutionFailure.Failed(detail))) =>
         assert(detail.raw.startsWith("fault?at \u00e9"))
-        assert(detail.raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= ExecutionRPC.MaximumTextBytes.raw)
+        assert(detail.raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= ExecutionRPC.MaximumTextBytes)
       case other => fail(s"unexpected decode: $other")
+    }
+  }
+
+  test("every failure kind keeps its kind when its detail is fitted to the wire") {
+    val long     = ("x" * (ExecutionRPC.MaximumTextBytes.raw + 1)).refine[NonEmpty[String]].toOption.get
+    val failures = Vec[NonEmpty[String] => ExecutionFailure](
+      ExecutionFailure.InvalidRequest(_),
+      ExecutionFailure.NotFound(_),
+      ExecutionFailure.Unsupported(_),
+      ExecutionFailure.Failed(_),
+      ExecutionFailure.InvalidProgram(_),
+      ExecutionFailure.InvalidConfiguration(_),
+      ExecutionFailure.OutOfResources(_),
+      ExecutionFailure.IllegalAddress(_),
+      ExecutionFailure.MisalignedAddress(_),
+      ExecutionFailure.IllegalInstruction(_),
+      ExecutionFailure.Trapped(_),
+      ExecutionFailure.AssertionFailed(_),
+      ExecutionFailure.TimedOut(_)
+    )
+    failures.foreach { make =>
+      val decoded = Codec[ExecutionFailure].encode(make(long), ExecutionRPC.Limits)
+        .flatMap(bytes => Codec[ExecutionFailure].decode(bytes, ExecutionRPC.Limits))
+      assertEquals(decoded.map(_.productPrefix), Right(make("x").productPrefix))
+      assertEquals(decoded.map(_.message.raw.length), Right(ExecutionRPC.MaximumTextBytes.raw))
     }
   }
 }

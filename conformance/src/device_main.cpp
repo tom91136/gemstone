@@ -8,7 +8,8 @@
 int main() {
   try {
     const auto &selection = conformance::deviceSelection();
-    const conformance::DeviceProbeResult result{conformance::physicalDeviceKey(selection.device), selection.environment};
+    const conformance::DeviceProbeResult result{.device = conformance::physicalDeviceKey(selection.device),
+                                                .environment = selection.environment};
     std::cout << glz::write_json(result).value() << '\n';
     return 0;
   } catch (const std::exception &error) {

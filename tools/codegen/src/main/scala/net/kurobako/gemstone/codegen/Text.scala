@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.codegen
 
+import scala.collection.mutable
 object Text {
   def normaliseWhitespace(value: String): String = {
-    val result = StringBuilder()
+    val result = mutable.StringBuilder()
     value.foreach { character =>
       if (character.isWhitespace) {
         if (result.nonEmpty && result.last != ' ') {
@@ -33,7 +34,7 @@ object Text {
 
   def splitDelimited(value: String, separator: Char): Vector[String] = {
     val result  = Vector.newBuilder[String]
-    val current = StringBuilder()
+    val current = mutable.StringBuilder()
     value.foreach { character =>
       if (character == separator) {
         result += current.result()
@@ -70,9 +71,9 @@ object Text {
     case unsigned  => unsigned
   }
 
-  private def nonEmptyWords(value: String)(separator: Char => Boolean): Vector[String] = {
+  private inline def nonEmptyWords(value: String)(inline separator: Char => Boolean): Vector[String] = {
     val result  = Vector.newBuilder[String]
-    val current = StringBuilder()
+    val current = mutable.StringBuilder()
     value.foreach { character =>
       if (separator(character)) {
         if (current.nonEmpty) {

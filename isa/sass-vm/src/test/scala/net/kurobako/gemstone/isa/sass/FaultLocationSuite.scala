@@ -15,7 +15,7 @@ class FaultLocationSuite extends munit.FunSuite {
           ("cache_probe", Some("cache_probe"), Some(Coordinates.origin), Some(0))
         )
         val faulting = kernel.function.instructions.find(instruction =>
-          location.instruction.exists(_.raw == instruction.address.raw.toLong)
+          location.instruction.exists(_.raw == instruction.address.toLong)
         ).getOrElse(fail(s"no instruction at ${location.instruction}"))
         assert(faulting.mnemonic.raw.startsWith("ST"), faulting.mnemonic)
       case Right(_) => fail("an undersized output buffer must fault")

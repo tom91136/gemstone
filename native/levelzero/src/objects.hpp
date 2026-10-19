@@ -41,15 +41,19 @@ public:
   }
   HandleUse(const HandleUse &other) : HandleUse(other.handle) {}
   HandleUse(HandleUse &&other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
-  HandleUse &operator=(HandleUse other) noexcept {
-    swap(other);
+  HandleUse &operator=(const HandleUse &other) noexcept {
+    HandleUse(other).swap(*this);
+    return *this;
+  }
+  HandleUse &operator=(HandleUse &&other) noexcept {
+    HandleUse(std::move(other)).swap(*this);
     return *this;
   }
   ~HandleUse() {
     if (!handle) return;
     bool reclaim = false;
     {
-      std::lock_guard lock(handle->usersMutex);
+      std::lock_guard const lock(handle->usersMutex);
       const bool last = handle->users.fetch_sub(1, std::memory_order_acq_rel) == 1;
       reclaim = last && handle->destroyRequested.load(std::memory_order_acquire);
       // A waiter may destroy the handle as soon as this lock is released.
@@ -57,7 +61,7 @@ public:
     }
     if (reclaim) delete handle;
   }
-  T *get() const { return handle; }
+  [[nodiscard]] T *get() const { return handle; }
   T *operator->() const { return handle; }
   explicit operator bool() const { return handle; }
   void swap(HandleUse &other) noexcept { std::swap(handle, other.handle); }
@@ -69,7 +73,7 @@ private:
 template <class T> ze_result_t destroyHandle(T *value) {
   if (!value) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   {
-    std::lock_guard lock(value->usersMutex);
+    std::lock_guard const lock(value->usersMutex);
     if (value->users.load(std::memory_order_acquire) != 0) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   }
   delete value;
@@ -153,10 +157,11 @@ struct AsyncStream {
   /** `job` receives the first failure so far; its captures are released before the returned ticket completes. */
   template <class Job> gemstone::CommandQueue::Ticket submit(Job job) {
     return commandQueue().submit(stream, [this, job = std::move(job)]() mutable {
-      ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
+      ze_result_t result{};
       try {
         result = job(failure.load(std::memory_order_acquire));
       } catch (...) {
+        result = ZE_RESULT_ERROR_UNKNOWN;
       }
       auto expected = ZE_RESULT_SUCCESS;
       if (result != ZE_RESULT_SUCCESS) failure.compare_exchange_strong(expected, result, std::memory_order_acq_rel);
@@ -165,8 +170,10 @@ struct AsyncStream {
   }
 
   /** Waits for work submitted so far; `0` polls and `UINT64_MAX` blocks. */
-  bool idle(uint64_t timeout) { return !stream || commandQueue().waitFor(commandQueue().snapshot(stream), timeout).has_value(); }
-  ze_result_t waitFor(uint64_t timeout) { return idle(timeout) ? failure.load(std::memory_order_acquire) : ZE_RESULT_NOT_READY; }
+  [[nodiscard]] bool idle(uint64_t timeout) const {
+    return !stream || commandQueue().waitFor(commandQueue().snapshot(stream), timeout).has_value();
+  }
+  [[nodiscard]] ze_result_t waitFor(uint64_t timeout) const { return idle(timeout) ? failure.load(std::memory_order_acquire) : ZE_RESULT_NOT_READY; }
 
   void *const stream;
   std::atomic<ze_result_t> failure{ZE_RESULT_SUCCESS};
@@ -174,14 +181,12 @@ struct AsyncStream {
 
 struct CommandList final : Handle {
   static constexpr Kind HandleKind = Kind::List;
-  CommandList(bool immediateValue, Context *contextValue, Device *deviceValue,
-              ze_command_queue_mode_t modeValue = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS)
-      : Handle(HandleKind), immediate(immediateValue), context(contextValue), device(deviceValue),
+  CommandList(bool immediateValue, Context *contextValue, ze_command_queue_mode_t modeValue = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS)
+      : Handle(HandleKind), immediate(immediateValue), context(contextValue),
         async(immediate && modeValue != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {}
   bool immediate;
   bool closed = false;
   HandleUse<Context> context;
-  Device *device;
   std::vector<RecordedCommand> commands;
   // Declared last so outstanding work drains before the other members are destroyed.
   AsyncStream async;
@@ -189,12 +194,9 @@ struct CommandList final : Handle {
 
 struct Queue final : Handle {
   static constexpr Kind HandleKind = Kind::Queue;
-  Queue(Context *contextValue, Device *deviceValue, const ze_command_queue_desc_t &value)
-      : Handle(HandleKind), context(contextValue), device(deviceValue), desc(value), async(desc.mode != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {
-  }
+  Queue(Context *contextValue, ze_command_queue_mode_t modeValue)
+      : Handle(HandleKind), context(contextValue), async(modeValue != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {}
   HandleUse<Context> context;
-  Device *device;
-  ze_command_queue_desc_t desc;
   std::mutex synchronousMutex;
   // Declared last so outstanding work drains before the other members are destroyed.
   AsyncStream async;
@@ -271,7 +273,6 @@ using AllocationRef = std::shared_ptr<Allocation>;
 
 struct KernelLaunch {
   std::shared_ptr<HandleUse<Kernel>> lifetime;
-  Context *context;
   uint64_t programId;
   std::string name;
   uint32_t groupX;

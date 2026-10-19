@@ -6,13 +6,13 @@ import net.kurobako.gemstone.rpc.Wire.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 object GraphicsFormats {
-  enum GraphicsDepthFormat { case None, Unorm16, Float32 }
-  enum GraphicsCompression {
+  enum GraphicsDepthFormat derives CanEqual { case None, Unorm16, Float32 }
+  enum GraphicsCompression derives CanEqual {
     case None, EtcRgb, EtcPunchthrough, EtcRgba, EacR, EacRg, EacSignedR, EacSignedRg
   }
 
   /** Shader texel interpretations. Numeric descriptor codes are generated in the SPIR-V module. */
-  enum GraphicsShaderFormat {
+  enum GraphicsShaderFormat derives CanEqual {
     case R32f, Rg32f, Rgba32f, DecodedRgb32f, Rgb10a2ui, R8ui, R8i, Rg8ui, Rg8i, Rgba8ui, Rgba8i, R16ui, R16i, Rg16ui,
       Rg16i, Rgba16ui, Rgba16i, R32ui, R32i, Rg32ui, Rg32i, Rgba32ui, Rgba32i, R8, R8Snorm, Rg8, Rg8Snorm, Rgba8,
       Rgba8Snorm, Rgba8Srgb, Bgra8Unorm, Bgra8Srgb, R16, R16Snorm, Rg16, Rg16Snorm, Rgba16, Rgba16Snorm, B4G4R4A4Unorm,
@@ -21,6 +21,8 @@ object GraphicsFormats {
   }
 
   /** Supported storage/view layouts. Metadata cannot be supplied independently of the format. */
+  // the cases are rows of one table, each a distinct value
+  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   enum GraphicsFormat(
       val shaderFormat: GraphicsShaderFormat,
       val texelBytes: Int > 0,
@@ -28,7 +30,7 @@ object GraphicsFormats {
       val stencilOffset: Int,
       val compression: GraphicsCompression,
       val srgb: Boolean
-  ) derives Codec {
+  ) derives Codec, CanEqual {
     case R32f extends GraphicsFormat(
           GraphicsShaderFormat.R32f,
           4,

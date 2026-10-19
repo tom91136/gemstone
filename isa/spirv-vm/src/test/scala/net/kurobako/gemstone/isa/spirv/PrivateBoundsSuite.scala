@@ -5,10 +5,12 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 
 class PrivateBoundsSuite extends munit.FunSuite {
+  private val OutOfRange = Seq(-1, 4)
+
   for {
     storage <- Seq("Private", "Function")
-    index   <- Seq(-1, 4)
-    shader  <- Seq(false, true)
+    index   <- OutOfRange
+    shader  <- booleans
   } test(s"$storage vector index $index ${if (shader) "is robust in GLCompute" else "faults in a Kernel"}") {
     val output = if (shader) "Uniform" else "CrossWorkgroup"
     val local  = "%local = OpVariable %local_ptr " + storage

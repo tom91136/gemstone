@@ -157,10 +157,11 @@ private object OperandDecoder {
       kinds: Map[OperandKind, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
     val value       = words(offset).toUnsigned.toLong
-    val allowedMask = info.enumerants.foldLeft(0L)(_ | _.value)
+    val enumerants  = ExtensionEnumerants.of(info)
+    val allowedMask = enumerants.foldLeft(0L)(_ | _.value)
     if ((value & ~allowedMask) != 0L) Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
     else {
-      val parameterKinds = info.enumerants.filter { enumerant =>
+      val parameterKinds = enumerants.filter { enumerant =>
         if (enumerant.value == 0L) value == 0L else (value & enumerant.value) == enumerant.value
       }.flatMap(_.parameterKinds)
       decodeSpan(opcode, info.kind, words, offset, offset + 1, parameterKinds, kinds)

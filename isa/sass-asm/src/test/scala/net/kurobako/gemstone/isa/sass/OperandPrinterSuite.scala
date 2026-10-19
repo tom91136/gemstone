@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class OperandPrinterSuite extends munit.FunSuite {
@@ -26,6 +27,16 @@ class OperandPrinterSuite extends munit.FunSuite {
     assertEquals(
       roundTrip(Operand.Qualified(Operand.Register(RegisterBank.R, 3), Vec.nonEmpty(OperandSelector.H0_H0))),
       "R3.H0_H0"
+    )
+  }
+
+  test("prints a selector after an immediate and reads it back") {
+    val half = Vec.nonEmpty(OperandSelector.H0)
+    assertEquals(roundTrip(Operand.Qualified(Operand.Integer(1), half)), "1.H0")
+    assertEquals(roundTrip(Operand.Qualified(Operand.Bits(0x3f80, 0), half)), "0x3f80.H0")
+    assertEquals(
+      roundTrip(Operand.Qualified(Operand.FloatingBits(FloatEncoding.F32Imm, 32, 0x3f800000L), half)),
+      "bits<F32Imm>:32(0x3f800000).H0"
     )
   }
 

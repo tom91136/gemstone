@@ -2,7 +2,7 @@ package net.kurobako.gemstone.codegen
 
 /** Vulkan implementation policies for every function in the pinned headers. */
 object VulkanAdapter {
-  private enum Policy {
+  private enum Policy derives CanEqual {
     case Global, Device, Query, DeviceVoid, CommandResult, Record, Destroy, Manual, Unsupported
     case Create(destroy: String, scope: String)
     case Alias(target: String)
@@ -13,7 +13,10 @@ object VulkanAdapter {
       policy: Policy,
       names: String,
       minimumVersion: Option[String] = Some("VK_API_VERSION_1_0")
-  ): Vector[(String, Entry)] = names.trim.split("\\s+").toVector.map(_ -> Entry(policy, minimumVersion))
+  ): Vector[(String, Entry)] = {
+    val entry = Entry(policy, minimumVersion)
+    names.trim.split("\\s+").toVector.map(_ -> entry)
+  }
   private def aliases(names: String): Vector[(String, Entry)] = names.trim.split("\\s+").toVector.map { name =>
     name -> Entry(Alias(name.stripSuffix("KHR").stripSuffix("EXT")), Some("VK_API_VERSION_1_0"))
   }
@@ -331,7 +334,7 @@ vkGetBufferOpaqueCaptureAddress vkGetDeviceMemoryOpaqueCaptureAddress""",
       val result = function.returnType.raw
       val body   = if (result == "VkResult") "return VK_ERROR_FEATURE_NOT_PRESENT;"
       else if (result == "void") "std::abort();" else "return 0;"
-      declaration(function, named = false) + s" { $body }"
+      declaration(function) + s" { $body }"
     }.mkString("\n")
     val lookup = functions.flatMap { function =>
       val name = function.name.raw
@@ -359,12 +362,14 @@ vkGetBufferOpaqueCaptureAddress vkGetDeviceMemoryOpaqueCaptureAddress""",
 
   private def implementation(name: String): String = s"impl${name.capitalize}"
 
-  private def declaration(function: GenerateOfficialAPIManifest.Function, named: Boolean): String = {
-    val parameters = function.parameters.zipWithIndex.map { (parameter, index) =>
-      parameter + (if (named) s" p$index" else "")
-    }.mkString(", ")
-    s"extern \"C\" VKAPI_ATTR ${function.returnType.raw} VKAPI_CALL ${function.name}($parameters)"
-  }
+  private def declaration(function: GenerateOfficialAPIManifest.Function): String =
+    signature(function, function.parameters)
+
+  private def definition(function: GenerateOfficialAPIManifest.Function): String =
+    signature(function, function.parameters.zipWithIndex.map((parameter, index) => s"$parameter p$index"))
+
+  private def signature(function: GenerateOfficialAPIManifest.Function, parameters: Vector[String]): String =
+    s"extern \"C\" VKAPI_ATTR ${function.returnType.raw} VKAPI_CALL ${function.name}(${parameters.mkString(", ")})"
 
   private def boundary(function: GenerateOfficialAPIManifest.Function, policy: Policy): String = {
     val arguments = function.parameters.indices.map(index => s"p$index").mkString(", ")
@@ -411,6 +416,6 @@ try {
         val result = if (function.returnType.raw == "void") "" else "return "
         s"host::Scope scope($arena);\ntry { $result$invoke; } catch (const std::bad_alloc &) { $failure }"
     }
-    declaration(function, named = true) + s" {\n$body\n}"
+    definition(function) + s" {\n$body\n}"
   }
 }

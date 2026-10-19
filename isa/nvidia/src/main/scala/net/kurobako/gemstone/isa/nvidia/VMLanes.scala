@@ -9,7 +9,7 @@ private object VMLanes {
 /** Lane storage of one frame, taken per lane on first use from `pool`. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
 private class VMLanes(laneCount: Int in 1 ~ 1024, pool: VMFramePool) {
-  private val lanes          = java.util.Arrays.copyOf(VMLanes.NoLanes, laneCount.raw)
+  private val lanes          = java.util.Arrays.copyOf(VMLanes.NoLanes, laneCount)
   private var registerCount  = 0: Int >= 0
   private var predicateCount = 0: Int >= 0
 

@@ -22,7 +22,7 @@ object Sockets {
     socket.setTcpNoDelay(true)
     def input: InputStream                        = socket.getInputStream
     def output: OutputStream                      = socket.getOutputStream
-    def readTimeout(milliseconds: Int >= 0): Unit = socket.setSoTimeout(milliseconds.raw)
+    def readTimeout(milliseconds: Int >= 0): Unit = socket.setSoTimeout(milliseconds)
     def isClosed: Boolean                         = socket.isClosed
     def close(): Unit                             = socket.close()
   }
@@ -31,7 +31,7 @@ object Sockets {
     case Endpoint.Tcp(host, port) =>
       val socket = Socket()
       try {
-        socket.connect(InetSocketAddress(host, port.raw), timeoutMillis.raw)
+        socket.connect(InetSocketAddress(host, port.raw), timeoutMillis)
         val channel = TcpChannel(socket)
         channel.readTimeout(timeoutMillis.widen[Int >= 0])
         channel
@@ -45,7 +45,7 @@ object Sockets {
     case Bind.Tcp(host, port) =>
       val socket = ServerSocket()
       try {
-        socket.bind(InetSocketAddress(host, port.raw))
+        socket.bind(InetSocketAddress(host, port))
         TcpListener(socket, host)
       } catch { case NonFatal(error) => socket.close(); throw error }
     case Bind.Unix(path) =>
@@ -85,7 +85,10 @@ object Sockets {
       finally
         if (
           owner != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS) &&
-          Files.readAttributes(path, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).fileKey() == owner
+          java.util.Objects.equals(
+            Files.readAttributes(path, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).fileKey(),
+            owner
+          )
         )
           Files.deleteIfExists(path): Unit
     }

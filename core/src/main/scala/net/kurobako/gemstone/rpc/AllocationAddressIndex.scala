@@ -112,13 +112,13 @@ private class AllocationAddressIndex private (
   /** The entry backing the whole range, preferring an alias; null when none does. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def resolve(address: GuestAddress, size: Int >= 0): Entry | Null = {
-    val alias = search(aliases, aliasBases, address.raw, size.raw)
-    if (alias != null) alias else search(synthetic, syntheticBases, address.raw, size.raw)
+    val alias = search(aliases, aliasBases, address.raw, size)
+    if (alias != null) alias else search(synthetic, syntheticBases, address.raw, size)
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def findAlias(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] = {
-    val entry = search(aliases, aliasBases, address.raw, size.raw)
+    val entry = search(aliases, aliasBases, address.raw, size)
     if (entry == null) None else Some(entry.id -> entry.offsetOf(address))
   }
 
@@ -130,7 +130,7 @@ private class AllocationAddressIndex private (
       var index = math.max(0, upperBound(bases, begin) - 1)
       while (index < entries.length && bases(index) < end) {
         val start = bases(index)
-        val limit = start + entries(index).size.raw
+        val limit = start + entries(index).size
         if (start > begin) into.addOne(start)
         if (limit > begin && limit < end) into.addOne(limit)
         index += 1

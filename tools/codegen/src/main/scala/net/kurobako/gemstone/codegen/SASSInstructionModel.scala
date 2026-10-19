@@ -17,6 +17,7 @@ object SASSInstructionModel {
     "SpecialRegister",
     "UImm",
     "SImm",
+    "SSImm",
     "RSImm",
     "BITSET",
     "F16Imm",
@@ -42,7 +43,7 @@ object SASSInstructionModel {
     val nodes = form.section("FORMAT").toVector.flatMap(section =>
       SASSFormat.parse(section.body).fold(error => throw IllegalArgumentException(error.toString), identity)
     )
-    val fields = allFields(nodes).filterNot(field => Set("Pg", "UPg")(field.binding))
+    val fields = allFields(nodes).filterNot(field => PartialFunction.cond(field.binding) { case "Pg" | "UPg" => true })
     // R2P also accepts its bank as a qualifier (R2P.PR).
     fields.takeWhile(field => !isOperandField(field)).map(_.kind) ++
       fields.collect { case field if field.kind == "CCPR" => field.kind }
@@ -53,10 +54,13 @@ object SASSInstructionModel {
     if (kind == "C") "Symbol"
     else if (kind == "DESC" || kind == "SpecialRegister") "SpecialRegister"
     else if (kind.contains("Predicate")) "Predicate"
-    else if (Set("CBU_STATE", "CBU_STATE_DIST")(kind)) "Register|Symbol"
-    else if (kind.contains("Register") || Set("B", "BD", "CBU_STATE", "CBU_STATE_DIST", "Scoreboard")(kind)) "Register"
+    else if (PartialFunction.cond(kind) { case "CBU_STATE" | "CBU_STATE_DIST" => true }) "Register|Symbol"
+    else if (
+      kind.contains("Register") ||
+      PartialFunction.cond(kind) { case "B" | "BD" | "CBU_STATE" | "CBU_STATE_DIST" | "Scoreboard" => true }
+    ) "Register"
     else if (kind == "BITSET") "Immediate|Group"
-    else if (Set("UImm", "SImm", "RSImm", "F16Imm", "F32Imm", "F64Imm")(kind)) "Immediate"
+    else if (Set("UImm", "SImm", "SSImm", "RSImm", "F16Imm", "F32Imm", "F64Imm")(kind)) "Immediate"
     else if (Set("CC", "optCC", "Partsel", "PR", "CCPR")(kind)) "Symbol"
     else "Any"
   }
@@ -68,7 +72,7 @@ object SASSInstructionModel {
 
   private def groupSlot(open: Char, children: Vector[SASSFormat.Node], allowCC: Boolean): Vector[Slot] = {
     val fields = allFields(children).filter(field => isOperandField(field) || field.kind == "CC").filterNot(field =>
-      Set("Pg", "UPg")(field.binding)
+      PartialFunction.cond(field.binding) { case "Pg" | "UPg" => true }
     )
     if (fields.isEmpty) Vector.empty
     else if (open == '(') slotsInNodes(children, depth = 1, allowCC = allowCC)
@@ -76,13 +80,13 @@ object SASSInstructionModel {
       val hasConstantSelector = fields.exists(_.kind == "C")
       val register            = fields.find(field =>
         field.kind.contains("Register") ||
-          Set("B", "BD", "CBU_STATE", "CBU_STATE_DIST", "Scoreboard")(field.kind)
+          PartialFunction.cond(field.kind) { case "B" | "BD" | "CBU_STATE" | "CBU_STATE_DIST" | "Scoreboard" => true }
       )
       if (hasConstantSelector && fields.count(_.kind != "C") >= 2)
         fields.find(_.kind == "C").map(field => Vector(Slot(field.binding, "ConstantBank", optional = false)))
           .getOrElse(Vector.empty)
       else register match {
-        case Some(field) if Set("CBU_STATE", "CBU_STATE_DIST")(field.kind) =>
+        case Some(field) if PartialFunction.cond(field.kind) { case "CBU_STATE" | "CBU_STATE_DIST" => true } =>
           Vector(Slot(field.binding, "Address|Symbol", optional = false))
         case Some(field) => Vector(Slot(field.binding, "Address", optional = false))
         case None        => slotsInNodes(children, depth = 1, allowCC = allowCC)
@@ -141,7 +145,7 @@ object SASSInstructionModel {
         val next = node match {
           case field: SASSFormat.Field
               if (isOperandField(field) || (allowCC && field.kind == "CC")) &&
-                !Set("Pg", "UPg")(field.binding) =>
+                !PartialFunction.cond(field.binding) { case "Pg" | "UPg" => true } =>
             val slashQualifier = chunk.lift(index - 1).exists {
               case SASSFormat.Text(raw)         => raw.trim.endsWith("/")
               case SASSFormat.Literal(_, value) => value.trim.endsWith("/")
@@ -185,8 +189,8 @@ object SASSInstructionModel {
       identity
     )
     val operandSyntax = afterOpcode(syntax).filter {
-      case SASSFormat.Optional(Some(marker), _) if Set("&", "?")(marker) => false
-      case _                                                             => true
+      case SASSFormat.Optional(Some("&" | "?"), _) => false
+      case _                                       => true
     }
     val projected = splitComma(operandSyntax).zipWithIndex.flatMap { (chunk, index) =>
       slotsInNodes(chunk, depth = 0, allowCC = index > 0)

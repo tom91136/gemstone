@@ -4,11 +4,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <sycl/sycl.hpp>
 
+#include "support.hpp"
 #include "test_support.hpp"
 #include <fmt/format.h>
 
 TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][runtime][compact]") {
-  constexpr size_t size = 128, local = 32;
+  constexpr size_t size = 128;
+  constexpr size_t local = 32;
   const auto values = unified::test_runtime::input(size);
   std::vector<int32_t> output(size, 0);
   sycl::queue queue(sycl::gpu_selector_v);
@@ -20,7 +22,8 @@ TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][
       auto out = destination.get_access<sycl::access::mode::write>(handler);
       sycl::local_accessor<int32_t> tile(sycl::range<1>(local), handler);
       handler.parallel_for(sycl::nd_range<1>(size, local), [=](sycl::nd_item<1> item) {
-        const auto i = item.get_global_linear_id(), lane = item.get_local_linear_id();
+        const auto i = item.get_global_linear_id();
+        const auto lane = item.get_local_linear_id();
         tile[lane] = input[i];
         item.barrier(sycl::access::fence_space::local_space);
         out[i] = tile[(lane + 1) % local] + static_cast<int32_t>(item.get_group_linear_id());
@@ -30,19 +33,14 @@ TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][
   } // Buffer destruction must publish the result into host storage.
   for (size_t i = 0; i < size; ++i) {
     INFO(fmt::format("SYCL accessor/local barrier mismatch at {}", i));
-    REQUIRE(output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local));
+    REQUIRE(output[i] == values[((i / local) * local) + ((i + 1) % local)] + static_cast<int32_t>(i / local));
   }
 }
 
 TEST_CASE("edge-cases/runtime/sycl/usm-event-offset/i32/n33", "[unified][runtime][compact]") {
   sycl::queue queue(sycl::gpu_selector_v); // No in-order property: dependencies must be explicit.
   unified::test_runtime::Cleanup cleanup;
-  auto *memory = sycl::malloc_device<int32_t>(35, queue);
-  {
-    INFO("device USM allocation failed");
-    REQUIRE(memory != nullptr);
-  }
-  cleanup.add([&] { sycl::free(memory, queue); });
+  auto *memory = sycl_usm::device<int32_t>(queue, cleanup, 35);
   std::vector<int32_t> values(35, -12345);
   for (size_t i = 0; i < 33; ++i)
     values[i + 1] = static_cast<int32_t>(i) - 16;

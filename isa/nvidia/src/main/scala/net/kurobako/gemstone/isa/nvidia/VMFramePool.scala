@@ -10,9 +10,10 @@ private object VMFramePool {
 /** Frame storage of one workgroup, reused by later frames and, after a reset, by later workgroups. Cleared lanes are
   * kept by lane index, so a frame reuses a lane whichever frame last held it.
   */
-@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
+// the pool creates VMLanes and VMLanes returns to it; one file per type forbids merging them
+@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var", "baumkuchen:acyclic"))
 private class VMFramePool(laneCount: Int in 1 ~ 1024) {
-  private val idle        = java.util.Arrays.copyOf(VMFramePool.NoLists, laneCount.raw)
+  private val idle        = java.util.Arrays.copyOf(VMFramePool.NoLists, laneCount)
   private val spare       = mutable.ArrayBuffer.empty[VMLanes]
   private val all         = mutable.ArrayBuffer.empty[VMLanes]
   private var outstanding = 0

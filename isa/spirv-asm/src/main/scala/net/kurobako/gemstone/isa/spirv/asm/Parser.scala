@@ -11,6 +11,10 @@ import scala.collection.mutable
 import scala.util.control.NoStackTrace
 
 object Parser {
+  private val Digits = "[0-9]+".r
+
+  private val Identifier = "%[0-9]+".r
+
   def parse(source: String): Either[SourceError, Module] =
     try {
       val (tokens, comments) = lex(source)
@@ -111,7 +115,7 @@ object Parser {
       } else Instruction.operandKinds.get(kind) match {
         case Some(info) =>
           val selected = token.text.split("\\|", -1).toVector.map { name =>
-            info.enumerants.find(value => value.name == name || value.aliases.contains(name))
+            ExtensionEnumerants.of(info).find(value => value.name == name || value.aliases.contains(name))
               .getOrElse(fail(token, s"unknown $kind enumerant '$name'"))
           }
           if (info.kind.category == OperandKind.Category.ValueEnum && selected.size != 1)
@@ -134,7 +138,7 @@ object Parser {
       }
     }
     def read(): Module = {
-      tokens.filter(token => !token.quoted && token.text.matches("%[0-9]+")).foreach { token =>
+      tokens.filter(token => !token.quoted && Identifier.matches(token.text)).foreach { token =>
         val numeric = token.copy(text = token.text.drop(1))
         val value   = integer(numeric)
         if (value <= 0 || value >= 0xffffffffL) fail(token, "ID must be between 1 and 4294967294")
@@ -194,16 +198,16 @@ object Parser {
       var before: Int >= 0 = 0
       comments.foreach { comment =>
         while (
-          before.raw < starts.size &&
-          (starts(before.raw).position.line.raw < comment.position.line.raw ||
-            (starts(before.raw).position.line.raw == comment.position.line.raw &&
-              starts(before.raw).position.column.raw <= comment.position.column.raw))
+          before < starts.size &&
+          (starts(before).position.line < comment.position.line ||
+            (starts(before).position.line == comment.position.line &&
+              starts(before).position.column <= comment.position.column))
         ) before += 1
         val fields   = comment.text.split(":", 2)
-        val metadata = before.raw == 0 && fields.length == 2 &&
-          (Set("Version", "Bound", "Schema", "Endianness").contains(fields(0)) ||
-            (fields(0) == "Generator" && fields(1).trim.matches("[0-9]+")))
-        if (!metadata && !(before.raw == 0 && comment.text == "SPIR-V"))
+        val metadata = before == 0 && fields.length == 2 &&
+          (PartialFunction.cond(fields(0)) { case "Version" | "Bound" | "Schema" | "Endianness" => true } ||
+            (fields(0) == "Generator" && Digits.matches(fields(1).trim)))
+        if (!metadata && !(before == 0 && comment.text == "SPIR-V"))
           retained += Module.Comment(before, comment.text)
         if (metadata) {
           val value = comment.copy(text = fields(1).trim)
@@ -216,10 +220,10 @@ object Parser {
               if (major <= 0 || major > 255 || minor < 0 || minor > 255)
                 fail(value, "version components are outside 1..255/0..255")
               header = header.copy(version = Version(major.toInt.unsafe, minor.toInt.unsafe))
-            case "Generator" if value.text.matches("[0-9]+") => header = header.copy(generator = word(value))
-            case "Bound"                                     => header = header.copy(bound = word(value))
-            case "Schema"                                    => header = header.copy(schema = word(value))
-            case "Endianness"                                => order = value.text match {
+            case "Generator" if Digits.matches(value.text) => header = header.copy(generator = word(value))
+            case "Bound"                                   => header = header.copy(bound = word(value))
+            case "Schema"                                  => header = header.copy(schema = word(value))
+            case "Endianness"                              => order = value.text match {
                 case "Little" => Endianness.Little
                 case "Big"    => Endianness.Big
                 case _        => fail(value, "expected Little or Big endianness")
@@ -245,6 +249,8 @@ object Parser {
     if (value < Int.MinValue || value > 0xffffffffL) fail(token, "integer does not fit a SPIR-V word")
     Word(value.toInt)
   }
+  private val hex = "([+-]?)0[xX]1(?:\\.([0-9a-fA-F]*))?[pP]([+-]?[0-9]+)".r
+
   private def floatingBits(token: Token, width: Int): BigInt = {
     val (mantissa, maximumExponent) = width match {
       case 16 => (10, 16)
@@ -252,7 +258,6 @@ object Parser {
       case 64 => (52, 1024)
       case _  => fail(token, s"unsupported floating width $width; use raw !words")
     }
-    val hex = "([+-]?)0[xX]1(?:\\.([0-9a-fA-F]*))?[pP]([+-]?[0-9]+)".r
     token.text match {
       // SPIR-V spells infinities and NaN payloads using the otherwise overflowing exponent.
       case hex(sign, fraction, exponent) if BigInt(exponent) == maximumExponent =>
@@ -287,7 +292,7 @@ object Parser {
       if (cursor.char().isWhitespace) { val _ = advance() }
       else {
         val start = Token("", cursor.at('"'), cursor.position)
-        val value = StringBuilder()
+        val value = mutable.StringBuilder()
         if (cursor.at(';')) {
           val _ = advance()
           while (!cursor.atEnd && !cursor.at('\n')) value.append(advance())

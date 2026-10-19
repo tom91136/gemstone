@@ -3,6 +3,7 @@ package net.kurobako.gemstone.binary
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.*
 import scala.util.Try
 
 class BinarySuite extends munit.FunSuite {
@@ -81,12 +82,14 @@ class BinarySuite extends munit.FunSuite {
     assertEquals(IEEE754.floatToBinary16(1.5f).toLong, 0x3e00L)
     assertEquals(IEEE754.binary16ToFloat(Binary16(0x3e00L)), 1.5f)
     assertEquals(IEEE754.floatToBinary32(-0.0f).toLong, 0x80000000L)
-    assertEquals(java.lang.Float.floatToRawIntBits(IEEE754.binary32ToFloat(Binary32(0x7fc01234L))), 0x7fc01234)
     assertEquals(IEEE754.doubleToBinary64(-0.0), Long.MinValue)
-    assertEquals(
-      java.lang.Double.doubleToRawLongBits(IEEE754.binary64ToDouble(0x7ff8000000001234L)),
-      0x7ff8000000001234L
-    )
+    if (floating.NaNPayloads) {
+      assertEquals(java.lang.Float.floatToRawIntBits(IEEE754.binary32ToFloat(Binary32(0x7fc01234L))), 0x7fc01234)
+      assertEquals(
+        java.lang.Double.doubleToRawLongBits(IEEE754.binary64ToDouble(0x7ff8000000001234L)),
+        0x7ff8000000001234L
+      )
+    }
     val unsupported = Integer.parseInt("8")
     assert(Try(unsupported.unsafe[Int in (16, 32, 64)]).isFailure)
   }

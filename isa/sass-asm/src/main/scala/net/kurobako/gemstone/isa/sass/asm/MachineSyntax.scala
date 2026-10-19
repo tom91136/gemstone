@@ -30,7 +30,7 @@ private object MachineSyntax {
       word <- instruction.encodingWord.toRight("lossless assembly requires encoding information")
     } yield Annotation(
       machine.target.name,
-      instruction.address.raw,
+      instruction.address,
       form.name,
       machine.opcode,
       machine.bindings,
@@ -67,7 +67,7 @@ private object MachineSyntax {
     val form = resolved.form
     for {
       _ <- Either.cond(
-        annotation.residual >= 0 && annotation.residual.bitLength <= resolved.database.width.raw &&
+        annotation.residual >= 0 && annotation.residual.bitLength <= resolved.database.width &&
           (annotation.residual & form.assignedMask) == 0,
         (),
         "invalid residual instruction bits"

@@ -7,9 +7,12 @@
 #include <vector>
 
 #include <CL/cl.h>
+#include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "opencl/session.hpp"
+
+using namespace aspartame;
 
 namespace {
 using namespace unified::opencl;
@@ -113,7 +116,7 @@ public:
   cl_command_queue device{};
 
   Enqueue() {
-    if (session.standard != "-cl-std=CL2.0") {
+    if (!session.cl20()) {
       cl_device_device_enqueue_capabilities capabilities = 0;
       check(clGetDeviceInfo(session.device, CL_DEVICE_DEVICE_ENQUEUE_CAPABILITIES, sizeof(capabilities), &capabilities, nullptr),
             "device enqueue capabilities");
@@ -123,7 +126,7 @@ public:
   }
 
   ~Enqueue() {
-    for (auto created : queues)
+    for (auto *created : queues)
       clReleaseCommandQueue(created);
   }
 
@@ -132,7 +135,7 @@ public:
                                               | (fallback ? CL_QUEUE_ON_DEVICE_DEFAULT : 0);
     const cl_queue_properties properties[] = {CL_QUEUE_PROPERTIES, flags, 0};
     cl_int status = CL_SUCCESS;
-    auto created = clCreateCommandQueueWithProperties(session.context, session.device, properties, &status);
+    auto *created = clCreateCommandQueueWithProperties(session.context, session.device, properties, &status);
     check(status, "device queue");
     queues.push_back(created);
     return created;
@@ -140,10 +143,10 @@ public:
 
   cl_kernel kernel(const char *name) { return session.kernel(EnqueueSource, "", name); }
 
-  template <class T> std::vector<T> launch(const char *name, std::vector<T> initial, size_t items, size_t local) {
-    auto kernel = this->kernel(name);
+  template <class T> std::vector<T> launch(const char *name, const std::vector<T> &initial, size_t items, size_t local) {
+    auto *kernel = this->kernel(name);
     auto out = session.buffer(initial);
-    check(clSetKernelArg(kernel, 0, sizeof(out), &out), "output argument");
+    arg(kernel, 0, out, "output argument");
     const Shape group{local, 1, 1};
     session.run(kernel, 1, {items, 1, 1}, &group);
     return session.read<T>(out, initial.size());
@@ -155,22 +158,22 @@ private:
 
 void ndrange() {
   Enqueue enqueue;
-  auto kernel = enqueue.kernel("spawn_ndrange");
-  auto out = enqueue.session.buffer(std::vector<int32_t>(97, -1));
+  auto *kernel = enqueue.kernel("spawn_ndrange");
+  auto *out = enqueue.session.buffer(std::vector<int32_t>(97, -1));
   const cl_int bias = 5;
-  check(clSetKernelArg(kernel, 0, sizeof(out), &out), "output argument");
-  check(clSetKernelArg(kernel, 1, sizeof(bias), &bias), "bias argument");
+  arg(kernel, 0, out, "output argument");
+  arg(kernel, 1, bias, "bias argument");
   const Shape one{1, 1, 1};
   enqueue.session.run(kernel, 1, one, &one);
   const auto values = enqueue.session.read<int32_t>(out, 97);
   for (int id = 0; id < 64; ++id) {
     INFO(fmt::format("1D work-item {}", id));
-    CHECK(values[id] == id * 3 + bias + 16);
+    CHECK(values[id] == (id * 3) + bias + 16);
   }
   for (int y = 0; y < 4; ++y)
     for (int x = 0; x < 8; ++x) {
       INFO(fmt::format("2D work-item {}x{}", x, y));
-      CHECK(values[64 + y * 8 + x] == x / 4 * 10 + y / 2);
+      CHECK(values[64 + (y * 8) + x] == (x / 4 * 10) + (y / 2));
     }
   CHECK(values[96] == 0);
 }
@@ -180,7 +183,7 @@ void each() {
   const auto values = enqueue.launch("spawn_each", std::vector<int32_t>(192, -1), 64, 16);
   for (int group = 0; group < 4; ++group) {
     INFO(fmt::format("group {}", group));
-    CHECK(values[64 + group] == 16 * (group * 16) + 120);
+    CHECK(values[64 + group] == (16 * (group * 16)) + 120);
   }
   for (int id = 0; id < 64; ++id) {
     INFO(fmt::format("work-item {}", id));
@@ -200,8 +203,9 @@ void local() {
   const auto values = enqueue.launch("spawn_local", std::vector<int32_t>(32, -1), 1, 1);
   for (int id = 0; id < 32; ++id) {
     INFO(fmt::format("work-item {}", id));
-    const int base = id / 16 * 16, lid = id % 16;
-    CHECK(values[id] == base + (lid + 1) % 16 + 100 * (base + 15 - lid));
+    const int base = id / 16 * 16;
+    const int lid = id % 16;
+    CHECK(values[id] == base + ((lid + 1) % 16) + (100 * (base + 15 - lid)));
   }
 }
 
@@ -218,11 +222,11 @@ void argument() {
   Enqueue enqueue;
   cl_uint queues = 0;
   check(clGetDeviceInfo(enqueue.session.device, CL_DEVICE_MAX_ON_DEVICE_QUEUES, sizeof(queues), &queues, nullptr), "device queue limit");
-  auto other = queues > 1 ? enqueue.queue(false) : enqueue.device;
-  auto kernel = enqueue.kernel("spawn_on");
-  auto out = enqueue.session.buffer(std::vector<int32_t>{0, -1});
-  check(clSetKernelArg(kernel, 0, sizeof(other), &other), "queue argument");
-  check(clSetKernelArg(kernel, 1, sizeof(out), &out), "output argument");
+  auto *other = queues > 1 ? enqueue.queue(false) : enqueue.device;
+  auto *kernel = enqueue.kernel("spawn_on");
+  auto *out = enqueue.session.buffer(std::vector<int32_t>{0, -1});
+  arg(kernel, 0, other, "queue argument");
+  arg(kernel, 1, out, "output argument");
   const Shape one{1, 1, 1};
   enqueue.session.run(kernel, 1, one, &one);
   CHECK(enqueue.session.read<int32_t>(out, 2) == std::vector<int32_t>{10, 0});
@@ -232,10 +236,10 @@ void sized() {
   Enqueue enqueue;
   size_t limit = 0;
   check(clGetDeviceInfo(enqueue.session.device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(limit), &limit, nullptr), "work-group limit");
-  const auto values = enqueue.launch("spawn_sized", std::vector<int32_t>(3 + 2 * limit, -1), 1, 1);
+  const auto values = enqueue.launch("spawn_sized", std::vector<int32_t>(3 + (2 * limit), -1), 1, 1);
   const auto size = values[0];
   REQUIRE(size >= 1);
-  CHECK(static_cast<size_t>(size) <= limit);
+  CHECK(std::cmp_less_equal(size, limit));
   CHECK(values[1] >= 1);
   CHECK(values[2] == 0);
   for (int id = 0; id < size * 2; ++id) {
@@ -247,7 +251,7 @@ void sized() {
 void profiled() {
   Enqueue enqueue;
   const auto values = enqueue.launch("spawn_profiled", std::vector<uint64_t>(18, 0), 1, 1);
-  CHECK(std::vector<uint64_t>(values.begin(), values.begin() + 16) == std::vector<uint64_t>(16, 1));
+  CHECK((values ^ take(16)) == std::vector<uint64_t>(16, 1));
   CHECK(values[16] > 0);
   CHECK(values[17] >= values[16]);
 }

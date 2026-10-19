@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -13,7 +14,7 @@ class AssemblerSuite extends munit.FunSuite {
 
   test("parsing creates generated cases and printing preserves typed operands") {
     val parsed = Parser.parse("@!P0 MOV R1, 0x7;").fold(fail(_), identity)
-    assert(parsed match { case _: Instruction.Mov => true; case _ => false })
+    assert(parsed.form match { case _: Form.Mov => true; case _ => false })
     assertEquals(Parser.parse(Printer.print(parsed).fold(fail(_), identity)), Right(parsed))
   }
 
@@ -31,7 +32,7 @@ class AssemblerSuite extends munit.FunSuite {
     val encoded = Assembler.assemble(source, target(89)).fold(fail(_), identity)
     val decoded = disassemble(encoded, 89).fold(fail(_), identity)
     assertEquals(decoded.operation, Parser.parse(source).fold(fail(_), identity))
-    assert(decoded.operation match { case _: Instruction.Mov => true; case _ => false })
+    assert(decoded.operation.form match { case _: Form.Mov => true; case _ => false })
   }
 
   Vec.nonEmpty(
@@ -79,7 +80,7 @@ class AssemblerSuite extends munit.FunSuite {
         val floating = Assembler.assemble(s"FADD R3, R7, $literal;", target(sm)).fold(fail(_), identity)
         val decoded  = disassemble(floating, sm).fold(fail(_), identity)
         assert(decoded.operands.last match {
-          case Operand.FloatingBits(FloatEncoding.F32Imm, width, bits) => width.raw == 32 && bits == expectedBits
+          case Operand.FloatingBits(FloatEncoding.F32Imm, width, bits) => width == 32 && bits == expectedBits
           case _                                                       => false
         })
       }
@@ -90,7 +91,7 @@ class AssemblerSuite extends munit.FunSuite {
     val bytes   = Assembler.assemble("DADD R2, R4, 1.0;", target(89)).fold(fail(_), identity)
     val decoded = disassemble(bytes, 89).fold(fail(_), identity)
     assert(decoded.operands.last match {
-      case Operand.FloatingBits(FloatEncoding.F64Imm, width, bits) => width.raw == 64 &&
+      case Operand.FloatingBits(FloatEncoding.F64Imm, width, bits) => width == 64 &&
         bits == BigInt("3ff0000000000000", 16)
       case _ => false
     })

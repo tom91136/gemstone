@@ -12,6 +12,8 @@ import net.kurobako.gemstone.string.*
 
 /** Maps instruction operands and modifiers to the generated machine layouts. */
 private object InstructionCodec {
+  private val InterpolationParameters = Vector("p10", "p20", "p0")
+
   private val Supported = Set(
     EncodingFormat.SOP1,
     EncodingFormat.SOP2,
@@ -146,10 +148,12 @@ private object InstructionCodec {
   ): Vec[OperandInfo] = {
     val original = value.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC).map { info =>
       val matrix = value.groups.exists(group => group == InstructionGroup.WMMA || group == InstructionGroup.SWMMAC)
-      val halve  = waveSize.raw == 64 && matrix && (Set(ISA.GFX11_7, ISA.RDNA4)(target.isa) ||
-        (Set(ISA.RDNA3, ISA.RDNA3_5)(target.isa) && info.field.exists(field =>
-          field == EncodingField.VDST || field == EncodingField.SRC2
-        )))
+      val halve  = waveSize == 64 && matrix && (target.isa match {
+        case ISA.GFX11_7 | ISA.RDNA4 => true
+        case ISA.RDNA3 | ISA.RDNA3_5 =>
+          info.field.exists(field => field == EncodingField.VDST || field == EncodingField.SRC2)
+        case _ => false
+      })
       val sized      = if (halve) info.copy(bits = (info.bits.raw / 2).max(32).unsafe[Int >= 0]) else info
       val normalised =
         if (info.field.contains(EncodingField.IOFFSET)) sized.copy(field = Some(EncodingField.OFFSET)) else sized
@@ -157,7 +161,7 @@ private object InstructionCodec {
       if (
         target.isa == ISA.GFX8 && target.name != "gfx810" && opcode.contains("d16") && info.field.contains(
           EncodingField.VDATA
-        ) && Set("x", "xy", "xyz", "xyzw")(components)
+        ) && PartialFunction.cond(components) { case "x" | "xy" | "xyz" | "xyzw" => true }
       )
         info.copy(bits = (32 * components.length).unsafe[Int >= 0])
       else if (opcode.startsWith("ds_gws_") && info.field.contains(EncodingField.ADDR))
@@ -169,7 +173,9 @@ private object InstructionCodec {
       BigInt(0)
     ) != 0 || fields.getOrElse(EncodingField.TH, BigInt(0)).testBit(0)
     val memory =
-      value.format.isFlat || Set(EncodingFormat.VFLAT, EncodingFormat.VGLOBAL, EncodingFormat.VSCRATCH)(value.format)
+      value.format.isFlat || PartialFunction.cond(value.format) {
+        case EncodingFormat.VFLAT | EncodingFormat.VGLOBAL | EncodingFormat.VSCRATCH => true
+      }
     val data =
       if (
         memory && ((opcode.contains("atomic") && !returning) || fields.getOrElse(
@@ -204,7 +210,7 @@ private object InstructionCodec {
 
   def encode(instruction: Instruction, target: Target, waveSize: Int in (32, 64)): Either[CodecError, Vec[Byte]] = {
     val candidates =
-      Metadata.encodingsFor(instruction.definition, target).flatMap(value => layout(value).map(value -> _))
+      instruction.definition.encodings(target).flatMap(value => layout(value).map(value -> _))
         .sortBy(_._2.bits)
     candidates.view.flatMap { case (value, layout) => encode(instruction, target, value, layout, waveSize) }.headOption
       .toRight(
@@ -247,8 +253,17 @@ private object InstructionCodec {
             case _            => None
           }
         )
+      else if (name == "NEG" && negatesDouble(instruction.opcode.raw, layout))
+        modifier.value.flatMap(bitList(_)).filter(_ < 8).map(bits => Map(EncodingField.BLGP -> bits))
+      else if (name == "INDEX_KEY" && sparseWave(instruction.definition, layout))
+        modifier.value.flatMap(value => parseBigIntLiteral(value)).filter(key => key >= 0 && key < 4)
+          .map(key => Map(EncodingField.OP_SEL -> key))
       else EncodingField.fromName(if (name == "NEG_LO") "NEG" else name).flatMap { name =>
-        if (Set(EncodingField.OP_SEL, EncodingField.OP_SEL_HI, EncodingField.NEG, EncodingField.NEG_HI)(name)) {
+        if (
+          PartialFunction.cond(name) {
+            case EncodingField.OP_SEL | EncodingField.OP_SEL_HI | EncodingField.NEG | EncodingField.NEG_HI => true
+          }
+        ) {
           val field = name
           modifier.value.flatMap(bitList(_)).flatMap { raw =>
             val sources = sourceCount(operands)
@@ -271,10 +286,9 @@ private object InstructionCodec {
         else if (name == EncodingField.FORMAT && modifier.value.exists(_.startsWith("[")))
           modifier.value.flatMap(SymbolicOperandEncoder.bufferFormat(_, layout.isa))
         else if (
-          NumericModifiers(name) && (layout.byName.contains(name) || (name == EncodingField.OFFSET && Set(
-            EncodingFormat.DS,
-            EncodingFormat.VDS
-          )(layout.format)))
+          NumericModifiers(
+            name
+          ) && (layout.byName.contains(name) || (name == EncodingField.OFFSET && layout.format.isDataShare))
         )
           modifier.value.flatMap(value =>
             parseBigIntLiteral(value).orElse(Option.when(name == EncodingField.OFFSET)(SymbolicOperandEncoder.swizzle(
@@ -284,17 +298,13 @@ private object InstructionCodec {
           ).flatMap { raw =>
             val field  = layout.byName.get(name)
             val signed =
-              name == EncodingField.OFFSET && Set(
-                EncodingFormat.FLAT_GLBL,
-                EncodingFormat.FLAT_GLOBAL,
-                EncodingFormat.FLAT_SCRATCH,
-                EncodingFormat.VGLOBAL,
-                EncodingFormat.VFLAT,
-                EncodingFormat.VSCRATCH
-              )(layout.format)
-            val value = if (signed && raw < 0) field.map(f => raw + (BigInt(1) << f.width)).getOrElse(raw) else raw
+              name == EncodingField.OFFSET && PartialFunction.cond(layout.format) {
+                case EncodingFormat.FLAT_GLBL | EncodingFormat.FLAT_GLOBAL | EncodingFormat.FLAT_SCRATCH |
+                    EncodingFormat.VGLOBAL | EncodingFormat.VFLAT | EncodingFormat.VSCRATCH => true
+              }
+            val value = if (signed && raw < 0) field.fold(raw)(f => raw + (BigInt(1) << f.width)) else raw
             Option.when(raw >= 0 || (signed && field.exists(f => raw >= -(BigInt(1) << (f.width - 1))))) {
-              if (name == EncodingField.OFFSET && Set(EncodingFormat.DS, EncodingFormat.VDS)(layout.format))
+              if (name == EncodingField.OFFSET && layout.format.isDataShare)
                 Map(EncodingField.OFFSET0 -> (value & 255), EncodingField.OFFSET1 -> (value >> 8))
               else Map(name               -> value)
             }
@@ -335,7 +345,7 @@ private object InstructionCodec {
       Some(instruction.operands.size)
     )
     if (
-      (target.isa == ISA.CDNA5 && waveSize.raw == 64 && value.groups.exists(group =>
+      (target.isa == ISA.CDNA5 && waveSize == 64 && value.groups.exists(group =>
         group == InstructionGroup.WMMA || group == InstructionGroup.SWMMAC
       )) ||
       (layout.format.isLiteral32 && !operands.exists(info =>
@@ -347,13 +357,7 @@ private object InstructionCodec {
         EncodingField.ACC
       ) && !layout.format.isVector && operands.zip(instruction.operands).collect {
         case (info, Operand.Register(file, _, _))
-            if info.field.exists(Set(
-              EncodingField.VDST,
-              EncodingField.VDATA,
-              EncodingField.DATA,
-              EncodingField.DATA0,
-              EncodingField.DATA1
-            )) => file
+            if info.field.exists(_.isDataOperand) => file
       }.distinct.size > 1
     ) None
     else for {
@@ -375,12 +379,7 @@ private object InstructionCodec {
       if !layout.byName.contains(EncodingField.LITERAL) || literals.forall(literal =>
         fields.exists(_._1.get(EncodingField.LITERAL).contains(BigInt(literal.value)))
       )
-      if literals.size <= 1 && !(literals.nonEmpty && Set(
-        ISA.GFX6,
-        ISA.GFX7,
-        ISA.GFX8,
-        ISA.GFX9
-      )(layout.isa) && layout.format.isVOP3)
+      if literals.size <= 1 && !(literals.nonEmpty && layout.isa.isGFX6To9 && layout.format.isVOP3)
       merged <-
         fields.foldLeft(Option(
           mods ++ Option.when(layout.byName.contains(EncodingField.OP))(EncodingField.OP -> BigInt(value.opcode))
@@ -396,7 +395,7 @@ private object InstructionCodec {
               }
             }
         }
-      noAddresses = layout.format == EncodingFormat.FLAT_SCRATCH && Set(ISA.RDNA1, ISA.RDNA2)(layout.isa) &&
+      noAddresses = layout.format == EncodingFormat.FLAT_SCRATCH && layout.isa.isGFX10 &&
         operands.zip(instruction.operands).filter { case (info, _) =>
           info.field.contains(EncodingField.ADDR) || info.field.contains(EncodingField.SADDR)
         }
@@ -406,10 +405,9 @@ private object InstructionCodec {
       addressFields = if (noAddresses) merged.updated(EncodingField.SADDR, BigInt(127)) else merged
       scratch       =
         if (
-          Set(
-            EncodingFormat.FLAT_SCRATCH,
-            EncodingFormat.VSCRATCH
-          )(layout.format) && layout.byName.contains(EncodingField.SVE) && !operands.zip(instruction.operands).exists {
+          layout.format.isScratch && layout.byName.contains(
+            EncodingField.SVE
+          ) && !operands.zip(instruction.operands).exists {
             case (info, operand) =>
               info.field.exists(field =>
                 field == EncodingField.ADDR || field == EncodingField.VADDR
@@ -417,17 +415,16 @@ private object InstructionCodec {
           }
         ) Map(EncodingField.SVE -> BigInt(1))
         else Map.empty[EncodingField, BigInt]
-      buffer = if (Set(EncodingFormat.MTBUF, EncodingFormat.VBUFFER)(layout.format))
+      buffer = if (PartialFunction.cond(layout.format) { case EncodingFormat.MTBUF | EncodingFormat.VBUFFER => true })
         Map(
           (if (layout.byName.contains(EncodingField.FORMAT)) EncodingField.FORMAT else EncodingField.DFMT) -> BigInt(1)
         )
       else Map.empty[EncodingField, BigInt]
       defaults = LaneModifiers.defaults(layout) ++
         (if (
-           Set(ISA.RDNA3, ISA.RDNA3_5, ISA.RDNA4, ISA.GFX11_7)(layout.isa) && Set[Opcode](
-             VDot4I32I8,
-             VDot8I32I4
-           )(instruction.definition)
+           layout.isa.isGFX11OrLaterGraphics && PartialFunction.cond(instruction.definition) {
+             case VDot4I32I8 | VDot8I32I4 => true
+           }
          )
            Map(EncodingField.NEG -> BigInt(3))
          else Map.empty[
@@ -442,15 +439,14 @@ private object InstructionCodec {
                                                    else Map.empty[EncodingField, BigInt]) ++
         (if (layout.format == EncodingFormat.VINTERP) Map(EncodingField.WAIT_EXP -> BigInt(7))
          else Map.empty[EncodingField, BigInt]) ++
-        (if (Set(EncodingFormat.LDSDIR, EncodingFormat.VDSDIR)(layout.format))
+        (if (PartialFunction.cond(layout.format) { case EncodingFormat.LDSDIR | EncodingFormat.VDSDIR => true })
            Map((if (layout.format == EncodingFormat.VDSDIR) EncodingField.WAIT_VA_VDST
                 else EncodingField.WAIT_VDST) -> BigInt(15))
          else Map.empty[EncodingField, BigInt]) ++
         (if (
-           layout.format.isVOP3 && (layout.isa.isRDNA || Set(
-             ISA.CDNA5,
-             ISA.GFX11_7
-           )(layout.isa)) && (!LaneModifiers.supports(
+           layout.format.isVOP3 && (layout.isa.isRDNA || PartialFunction.cond(layout.isa) {
+             case ISA.CDNA5 | ISA.GFX11_7 => true
+           }) && (!LaneModifiers.supports(
              layout.format
            ) || value.operands.exists(_.kind == OperandKind.EXEC))
          )
@@ -459,15 +455,9 @@ private object InstructionCodec {
            ).map(_ -> BigInt(128)).toMap
          else Map.empty[EncodingField, BigInt]) ++
         (if (
-           (Set(
-             EncodingFormat.FLAT,
-             EncodingFormat.VFLAT,
-             EncodingFormat.VGLOBAL,
-             EncodingFormat.VSCRATCH
-           )(layout.format)) && (layout.isa.isRDNA || Set(
-             ISA.CDNA5,
-             ISA.GFX11_7
-           )(layout.isa))
+           (PartialFunction.cond(layout.format) {
+             case EncodingFormat.FLAT | EncodingFormat.VFLAT | EncodingFormat.VGLOBAL | EncodingFormat.VSCRATCH => true
+           }) && (layout.isa.isRDNA || PartialFunction.cond(layout.isa) { case ISA.CDNA5 | ISA.GFX11_7 => true })
          )
            Map(EncodingField.SADDR -> BigInt(nullRegister(layout)))
          else Map.empty[EncodingField, BigInt])
@@ -512,24 +502,37 @@ private object InstructionCodec {
     )
 
   private def packedFormat(layout: InstructionLayout): Boolean =
-    LaneModifiers.base(layout) == EncodingFormat.VOP3P || (layout.isa == ISA.CDNA5 && Set(
-      EncodingFormat.VOP3PX2,
-      EncodingFormat.VOP3PX3
-    )(layout.format))
+    LaneModifiers.base(layout) == EncodingFormat.VOP3P || (layout.isa == ISA.CDNA5 && layout.format.isVOP3PX)
+
+  /** The f64 MFMA from gfx940 on, whose BLGP negates A, B and C and which LLVM spells `neg:[a,b,c]`. */
+  private def negatesDouble(opcode: String, layout: InstructionLayout): Boolean =
+    layout.format == EncodingFormat.VOP3P_MFMA && (layout.isa == ISA.CDNA3 || layout.isa == ISA.CDNA4) &&
+      opcode.startsWith("v_mfma_f64_")
+
+  /** SWMMAC, whose OP_SEL selects the sparse index set and which LLVM spells `index_key`. */
+  private def sparseWave(definition: Opcode, layout: InstructionLayout): Boolean =
+    layout.format == EncodingFormat.VOP3P && definition.meta.encodings.exists(
+      _.groups.contains(InstructionGroup.SWMMAC)
+    )
+
+  /** Whether a matrix operand is C or D, which ACC_CD places; SMFMAC's SRC2 is its sparse index, a VGPR. */
+  private def matrixResult(field: EncodingField, info: OperandInfo): Boolean =
+    field == EncodingField.VDST || (field == EncodingField.SRC2 && info.kind.acceptsAccumulator)
+
+  /** CDNA4's f8f6f4 MFMA, scaled or not, takes A's and B's formats from CBSZ and BLGP; only they have 256-bit A. */
+  private def selectsFormats(info: OperandInfo, layout: InstructionLayout): Boolean =
+    layout.isa == ISA.CDNA4 && info.field.exists(field => field == EncodingField.SRC0 || field == EncodingField.SRC1) &&
+      (layout.format == EncodingFormat.VOP3PX2 || (layout.format == EncodingFormat.VOP3P_MFMA && info.bits == 256))
 
   private def registerWidth(info: OperandInfo, layout: InstructionLayout, fields: Map[EncodingField, BigInt]): Int =
-    if (
-      layout.format == EncodingFormat.VOP3PX2 && layout.isa == ISA.CDNA4 && info.field.exists(field =>
-        field == EncodingField.SRC0 || field == EncodingField.SRC1
-      )
-    ) {
+    if (selectsFormats(info, layout)) {
       val format = fields.getOrElse(
         if (info.field.contains(EncodingField.SRC0)) EncodingField.CBSZ else EncodingField.BLGP,
         BigInt(0)
       ).toInt
       (if (format <= 1) 8 else if (format <= 3) 6 else 4) * 32
     } else if (
-      layout.isa == ISA.CDNA5 && Set(EncodingFormat.VOP3PX2, EncodingFormat.VOP3PX3)(layout.format) && fields.getOrElse(
+      layout.isa == ISA.CDNA5 && layout.format.isVOP3PX && fields.getOrElse(
         EncodingField.OP_SEL_HI,
         BigInt(0)
       ) < 5 && info.field.exists(field => field == EncodingField.SRC0 || field == EncodingField.SRC1)
@@ -540,69 +543,44 @@ private object InstructionCodec {
       ).toInt
       val bits = if (format <= 1) 8 else if (format <= 3) 6 else 4
       info.bits.raw * bits / 8
-    } else if (
-      info.field.contains(EncodingField.VDATA) && Set(
-        EncodingFormat.MUBUF,
-        EncodingFormat.MTBUF,
-        EncodingFormat.VBUFFER
-      )(layout.format)
-    ) info.bits.raw.max(32) +
+    } else if (info.field.contains(EncodingField.VDATA) && layout.format.isBuffer) info.bits.raw.max(32) +
       (if (fields.get(EncodingField.TFE).contains(BigInt(1))) 32 else 0)
-    else if (
-      info.field.contains(EncodingField.VADDR) && Set(
-        EncodingFormat.MUBUF,
-        EncodingFormat.MTBUF,
-        EncodingFormat.VBUFFER
-      )(layout.format)
-    )
+    else if (info.field.contains(EncodingField.VADDR) && layout.format.isBuffer)
       if (fields.get(EncodingField.ADDR64).contains(BigInt(1))) 64
       else 32 * (fields.getOrElse(
         EncodingField.OFFEN,
         BigInt(0)
       ).toInt + fields.getOrElse(EncodingField.IDXEN, BigInt(0)).toInt).max(1)
     else if (
-      info.field.exists(field => field == EncodingField.ADDR || field == EncodingField.VADDR) && Set(
-        EncodingFormat.FLAT_SCRATCH,
-        EncodingFormat.VSCRATCH
-      )(layout.format)
+      info.field.exists(field => field == EncodingField.ADDR || field == EncodingField.VADDR) && layout.format.isScratch
     ) 32
     else if (
-      info.field.exists(field => field == EncodingField.ADDR || field == EncodingField.VADDR) && Set(
-        EncodingFormat.FLAT_GLBL,
-        EncodingFormat.FLAT_GLOBAL,
-        EncodingFormat.VGLOBAL,
-        EncodingFormat.VFLAT
-      )(layout.format) &&
+      info.field.exists(field => field == EncodingField.ADDR || field == EncodingField.VADDR) && PartialFunction.cond(
+        layout.format
+      ) { case EncodingFormat.FLAT_GLBL | EncodingFormat.FLAT_GLOBAL | EncodingFormat.VGLOBAL | EncodingFormat.VFLAT =>
+        true
+      } &&
       fields.get(EncodingField.SADDR).exists(_ != nullRegister(layout))
     ) 32
     else info.bits.raw.max(32)
 
   private def nullRegister(layout: InstructionLayout): Int =
-    if ((layout.isa.isCDNA && layout.isa != ISA.CDNA5) || Set(ISA.GFX6, ISA.GFX7, ISA.GFX8, ISA.GFX9)(layout.isa)) 127
-    else if (Set(ISA.RDNA3, ISA.RDNA3_5, ISA.RDNA4, ISA.CDNA5, ISA.GFX11_7)(layout.isa)) Fixed.M0 else Fixed.NullSgpr
+    if (layout.isa.isGFX9OrEarlier) 127
+    else if (layout.isa.isGFX11OrLater) Fixed.M0 else Fixed.NullSgpr
 
   private def scalarRegister(kind: OperandKind): Boolean =
     kind.isScalarRegister || kind.isScalarSource || kind.isScalarDestination ||
-      Set(
-        OperandKind.SRC,
-        OperandKind.SRC_SIMPLE,
-        OperandKind.SRC_NOLIT,
-        OperandKind.SRC_NOLDS,
-        OperandKind.SRC_NOINLINE,
-        OperandKind.SMEM_OFFSET_NOK
-      )(kind)
+      PartialFunction.cond(kind) {
+        case OperandKind.SRC | OperandKind.SRC_SIMPLE | OperandKind.SRC_NOLIT | OperandKind.SRC_NOLDS |
+            OperandKind.SRC_NOINLINE | OperandKind.SMEM_OFFSET_NOK => true
+      }
 
   private def vectorRegister(kind: OperandKind): Boolean =
     kind.isVector ||
-      Set(
-        OperandKind.SRC,
-        OperandKind.SRC_SIMPLE,
-        OperandKind.SRC_NOLIT,
-        OperandKind.SRC_NOLDS,
-        OperandKind.SRC_NOINLINE,
-        OperandKind.SRC_VGPR,
-        OperandKind.SRC_VGPR_OR_INLINE
-      )(kind)
+      PartialFunction.cond(kind) {
+        case OperandKind.SRC | OperandKind.SRC_SIMPLE | OperandKind.SRC_NOLIT | OperandKind.SRC_NOLDS |
+            OperandKind.SRC_NOINLINE | OperandKind.SRC_VGPR | OperandKind.SRC_VGPR_OR_INLINE => true
+      }
 
   private def encodeOperand(
       operand: Operand,
@@ -622,13 +600,9 @@ private object InstructionCodec {
           (Map(field -> BigInt(value)), literal)
         }
         if (
-          layout.byName.contains(EncodingField.ACC) && !layout.format.isVector && (Set(
-            EncodingField.VDST,
-            EncodingField.VDATA,
-            EncodingField.DATA,
-            EncodingField.DATA0,
-            EncodingField.DATA1
-          )(field) || info.kind == OperandKind.VGPR_OR_ACCVGPR)
+          layout.byName.contains(
+            EncodingField.ACC
+          ) && !layout.format.isVector && (field.isDataOperand || info.kind == OperandKind.VGPR_OR_ACCVGPR)
         ) operand match {
           case Operand.Register(RegisterFile.Accumulator, first, last) =>
             encodeOperand(
@@ -659,8 +633,8 @@ private object InstructionCodec {
                 mods
               ) + 31) / 32 =>
             val accumulator = file == RegisterFile.Accumulator
-            val cd          = field == EncodingField.VDST || field == EncodingField.SRC2
-            if ((accumulator && !info.kind.acceptsAccumulator) || (!accumulator && info.kind.isAccumulator)) None
+            val cd          = matrixResult(field, info)
+            if ((accumulator && !info.kind.acceptsAccumulator) || (!accumulator && info.kind.isBareAccumulator)) None
             else if (cd && !layout.byName.contains(EncodingField.ACC_CD) && !accumulator) None
             else Some((
               Map(field -> BigInt(first + (if (SourceFields(field)) 256 else 0))) ++
@@ -686,20 +660,22 @@ private object InstructionCodec {
           case _ => None
         }
         else if (info.kind == OperandKind.PARAM) operand match {
-          case Operand.Identifier(name) => Vector("p10", "p20", "p0").indexOf(name) match {
+          case Operand.Identifier(name) => InterpolationParameters.indexOf(name) match {
               case index if index >= 0 => result(index)
               case _                   => None
             }
           case _ => None
         }
         else if (field == EncodingField.SDST && LaneModifiers.sdwa(layout)) {
-          OperandCodec.encode(operand, info, target).map { case (value, literal) =>
-            (
-              if (value == Fixed.VccLo) Map(EncodingField.SD -> BigInt(0))
-              else Map(EncodingField.SDST                    -> BigInt(value), EncodingField.SD -> BigInt(1)),
-              literal
-            )
-          }
+          // a wave32 lane mask is a single register
+          OperandCodec.encode(operand, info, target).orElse(OperandCodec.encode(operand, info.copy(bits = 32), target))
+            .map { case (value, literal) =>
+              (
+                if (value == Fixed.VccLo) Map(EncodingField.SD -> BigInt(0))
+                else Map(EncodingField.SDST                    -> BigInt(value), EncodingField.SD -> BigInt(1)),
+                literal
+              )
+            }
         } else if (
           field == EncodingField.SOFFSET && layout.format == EncodingFormat.VBUFFER && operand == Operand.SpecialRegister(
             "src_scc"
@@ -778,24 +754,21 @@ private object InstructionCodec {
           ) == 0 && mods.getOrElse(EncodingField.IDXEN, BigInt(0)) == 0)((Map(field -> BigInt(0)), None))
         else operand match {
           case Operand.Register(RegisterFile.Accumulator, first, last)
-              if Set(
-                OperandKind.ACCVGPR,
-                OperandKind.SRC_ACCVGPR
-              )(info.kind) && first == last && first >= 0 && first < 256 =>
+              if info.kind.isAccumulatorOnly && first == last && first >= 0 && first < 256 =>
             result(first + (if (SourceFields(field)) 256 else 0))
           case Operand.Register(RegisterFile.Scalar, first, last)
-              if info.bits.raw == 64 && first == last && first >= 0 && first < 128 && (field == EncodingField.SDST || (field == EncodingField.VDST && scalarRegister(
+              if info.bits == 64 && first == last && first >= 0 && first < 128 && (field == EncodingField.SDST || (field == EncodingField.VDST && scalarRegister(
                 info.kind
               )) || (field == EncodingField.SRC2 && info.kind == OperandKind.SREG)) => result(first)
           case Operand.SpecialRegister("vcc_lo" | "vcc_hi" | "exec_lo" | "exec_hi")
-              if info.bits.raw == 64 && (field == EncodingField.SDST || field == EncodingField.VDST || (field == EncodingField.SRC2 && info.kind == OperandKind.SREG)) =>
+              if info.bits == 64 && (field == EncodingField.SDST || field == EncodingField.VDST || (field == EncodingField.SRC2 && info.kind == OperandKind.SREG)) =>
             OperandCodec.encode(operand, info.copy(bits = 32), target).flatMap { case (value, literal) =>
               result(value, literal)
             }
           case Operand.Half(Operand.Register(RegisterFile.VectorRegister, first, last), high)
               if !layout.byName.contains(
                 EncodingField.OP_SEL
-              ) && first == last && first >= 0 && first < 128 && info.bits.raw == 16 =>
+              ) && first == last && first >= 0 && first < 128 && info.bits == 16 =>
             result(first | (if (high) 128 else 0) | (if (SourceFields(field)) 256 else 0))
           case Operand.Half(inner, high) if layout.byName.contains(EncodingField.OP_SEL) =>
             val index =
@@ -855,7 +828,7 @@ private object InstructionCodec {
               if scalarRegister(info.kind) && first >= 0 && last < 128 &&
                 last - first + 1 ==
                 (info.bits.raw + 31) / 32 &&
-                (info.bits.raw <= 32 || first % 2 == 0) =>
+                (info.bits <= 32 || first % 2 == 0) =>
             if (LaneModifiers.sdwa(layout) && field.isVectorSource)
               Some((Map(field -> BigInt(first), EncodingField.ScalarSelectors(field.index) -> BigInt(1)), None))
             else result(first)
@@ -900,7 +873,7 @@ private object InstructionCodec {
       .filter(candidate => supportsLayout(candidate.layout))
       .flatMap(decodeOperands(bytes, offset, target, _, waveSize).toVec).distinct
     val canonical = OpcodeIndex.canonical(candidates, target)(_.instruction.definition).filterNot(value =>
-      value.instruction.opcode.raw.startsWith("v_wmma_ld_scale") && candidates.exists(_.size.raw == 16)
+      value.instruction.opcode.raw.startsWith("v_wmma_ld_scale") && candidates.exists(_.size == 16)
     )
     canonical match {
       case Vec(value) => Right(value)
@@ -925,7 +898,7 @@ private object InstructionCodec {
     val definition = decoded.definition
     val value      = decoded.encoding
     val fields     = layout.fields.map(field => field.name -> BigInt(field.get(word))).toMap
-    val operands   = schema(value, definition.opcode.raw, fields, target, waveSize)
+    val operands   = schema(value, definition.mnemonic.raw, fields, target, waveSize)
     val literal    = decoded.literal.flatMap(bits =>
       decoded.literalBytes.refine[Int in (4, 8)].toOption.map(OperandCodec.Literal(bits, _))
     )
@@ -937,6 +910,14 @@ private object InstructionCodec {
         value == 0 && field.name != EncodingField.OP_SEL_HI && field.name != EncodingField.DFMT &&
         field.name != EncodingField.FORMAT && !field.name.isWait
       ) Vec.empty[Modifier]
+      else if (field.name == EncodingField.BLGP && negatesDouble(definition.mnemonic.raw, layout))
+        Vec(Modifier(
+          "neg",
+          Some((0 until 3).map(index => if (bit(value, index)) "1" else "0").mkString("[", ",", "]")
+            .unsafe[NonEmpty[String]])
+        ))
+      else if (field.name == EncodingField.OP_SEL && sparseWave(definition, layout))
+        Vec(Modifier("index_key", Some(value.toString.unsafe[NonEmpty[String]])))
       else if (Flags(field.name)) Vec(Modifier(field.name.assemblyName))
       else if (NumericModifiers(field.name))
         Vec(Modifier(field.name.assemblyName, Some(value.toString.unsafe[NonEmpty[String]])))
@@ -979,7 +960,7 @@ private object InstructionCodec {
         case Some(field) =>
           val number = layout.get(word, field).toInt
           val bits   = registerWidth(info, layout, fields)
-          val base   = if (Set(OperandKind.ACCVGPR, OperandKind.SRC_ACCVGPR)(info.kind)) Some(Operand.Register(
+          val base   = if (info.kind.isAccumulatorOnly) Some(Operand.Register(
             RegisterFile.Accumulator,
             if (SourceFields(field)) number - 256 else number,
             (if (SourceFields(field)) number - 256 else number) + (bits + 31) / 32 - 1
@@ -989,7 +970,7 @@ private object InstructionCodec {
               (layout.format == EncodingFormat.VOP3PX2 && layout.isa == ISA.CDNA4)) && !field.isScale &&
             (field == EncodingField.VDST || number >= 256)
           ) {
-            val cd          = field == EncodingField.VDST || field == EncodingField.SRC2
+            val cd          = matrixResult(field, info)
             val accumulator =
               if (cd) !layout.byName.contains(EncodingField.ACC_CD) || layout.get(word, EncodingField.ACC_CD) != 0
               else bit(layout.get(word, EncodingField.ACC), field.index)
@@ -1005,7 +986,7 @@ private object InstructionCodec {
               if (field == EncodingField.ATTR) layout.get(word, EncodingField.ATTR_CHAN).toInt else number >> 6
             Some(Operand.Identifier(s"attr$index.${"xyzw" (channel)}"))
           } else if (info.kind == OperandKind.PARAM)
-            Vector("p10", "p20", "p0").lift(number).map(Operand.Identifier(_))
+            InterpolationParameters.lift(number).map(Operand.Identifier(_))
           else if (field == EncodingField.SDST && LaneModifiers.sdwa(layout) && layout.get(word, EncodingField.SD) == 0)
             Some(Operand.SpecialRegister("vcc"))
           else if (LaneModifiers.sdwa(layout) && field.isVectorSource) {
@@ -1052,23 +1033,23 @@ private object InstructionCodec {
             Some(Operand.IntegerLiteral(BigInt(layout.get(word, EncodingField.OFFSET)), 10))
           else if (
             (field == EncodingField.ADDR || field == EncodingField.VADDR) &&
-            Set(EncodingFormat.VSCRATCH, EncodingFormat.FLAT_SCRATCH)(layout.format) &&
+            layout.format.isScratch &&
             layout.byName.contains(EncodingField.SVE) && layout.get(word, EncodingField.SVE) == 0
           ) Some(Operand.Identifier("off"))
           else if (
-            layout.format == EncodingFormat.FLAT_SCRATCH && Set(ISA.RDNA1, ISA.RDNA2)(layout.isa) &&
+            layout.format == EncodingFormat.FLAT_SCRATCH && layout.isa.isGFX10 &&
             layout.get(word, EncodingField.SADDR) == 127 &&
             (field == EncodingField.SADDR || field == EncodingField.ADDR)
           ) Some(Operand.Identifier("off"))
           else if (field == EncodingField.SADDR && number == nullRegister(layout)) Some(Operand.Identifier("off"))
           else if (
             field == EncodingField.VADDR &&
-            Set(EncodingFormat.MUBUF, EncodingFormat.MTBUF, EncodingFormat.VBUFFER)(layout.format) &&
+            layout.format.isBuffer &&
             layout.get(word, EncodingField.OFFEN) == 0 && layout.get(word, EncodingField.IDXEN) == 0 &&
             layout.get(word, EncodingField.ADDR64) == 0
           ) Some(Operand.Identifier("off"))
           else if (
-            info.bits.raw == 16 && !layout.byName.contains(EncodingField.OP_SEL) &&
+            info.bits == 16 && !layout.byName.contains(EncodingField.OP_SEL) &&
             (info.kind.isVector || (SourceFields(field) && number >= 256))
           )
             Some(Operand.Half(
@@ -1089,7 +1070,7 @@ private object InstructionCodec {
             info.copy(
               bits =
                 if (
-                  info.bits.raw == 64 && number % 2 != 0 &&
+                  info.bits == 64 && number % 2 != 0 &&
                   (field == EncodingField.SDST || field == EncodingField.VDST ||
                     (field == EncodingField.SRC2 && info.kind == OperandKind.SREG))
                 ) 32
@@ -1106,13 +1087,7 @@ private object InstructionCodec {
             val operand = rawOperand match {
               case Operand.Register(RegisterFile.VectorRegister, first, last)
                   if !layout.format.isVector && layout.get(word, EncodingField.ACC) != 0 &&
-                    (Set(
-                      EncodingField.VDST,
-                      EncodingField.VDATA,
-                      EncodingField.DATA,
-                      EncodingField.DATA0,
-                      EncodingField.DATA1
-                    )(field) || info.kind == OperandKind.VGPR_OR_ACCVGPR) =>
+                    (field.isDataOperand || info.kind == OperandKind.VGPR_OR_ACCVGPR) =>
                 Operand.Register(RegisterFile.Accumulator, first, last)
               case _ => rawOperand
             }
@@ -1146,7 +1121,7 @@ private object InstructionCodec {
         else mods
       Instruction.decode(definition, args, filtered).toOption.flatMap { instruction =>
         encode(instruction, target, value, layout, waveSize)
-          .filter(_ == Vec.unsafeWrapArray(bytes.slice(offset, offset + decoded.size.raw)))
+          .filter(_ == Vec.unsafeWrapArray(bytes.slice(offset, offset + decoded.size)))
           .map(_ => DecodedInstruction(instruction, decoded.size))
       }
     }
@@ -1191,8 +1166,13 @@ private object InstructionCodec {
       val maximum = (BigInt(1) << field.width) - 1
       val minimum = -(BigInt(1) << (field.width - 1))
       val named   = definition.operands.find(!_.implicitOperand).flatMap { info =>
-        if (Set(OperandKind.WAITCNT, OperandKind.WAITCNT_DEPCTR, OperandKind.WAIT_ALU)(info.kind))
+        if (
+          PartialFunction.cond(info.kind) {
+            case OperandKind.WAITCNT | OperandKind.WAITCNT_DEPCTR | OperandKind.WAIT_ALU => true
+          }
+        )
           SymbolicOperandEncoder.counters(instruction, info.kind, target)
+        else if (info.kind == OperandKind.DELAY) SymbolicOperandEncoder.delay(instruction, target)
         else if (instruction.mods.isEmpty && instruction.operands.size == 1)
           SymbolicOperandEncoder.encode(instruction.operands.head, info.kind, target)
         else None

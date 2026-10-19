@@ -1,11 +1,13 @@
-#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
+#include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
 #include <cuda_fp16.h>
@@ -14,6 +16,9 @@
 #include "conformance/device.hpp"
 
 #include "memory_files.hpp"
+#include "test_support.hpp"
+
+using namespace aspartame;
 
 namespace {
 void check(CUresult status, const char *operation) {
@@ -30,10 +35,14 @@ struct DeviceBuffer {
   DeviceBuffer &operator=(const DeviceBuffer &) = delete;
 };
 
+// The embedded image follows CONFORMANCE_CUDA_CODE, so a launcher whose strict code mode disagrees rejects it.
 CUmodule loadModule() {
   const auto code = image("mma884.ptx");
+  const char *mode = std::getenv("CONFORMANCE_CUDA_CODE");
   CUmodule module{};
-  check(cuModuleLoadData(&module, code.data()), "cuModuleLoadData");
+  check(cuModuleLoadData(&module, code.data()), mode && std::string_view(mode) == "sass"
+                                                    ? "cuModuleLoadData of the SASS image"
+                                                    : "cuModuleLoadData of the PTX image (CONFORMANCE_CUDA_CODE is not sass)");
   return module;
 }
 
@@ -43,25 +52,21 @@ uint16_t halfBits(int value) {
   std::memcpy(&bits, &half, sizeof(bits));
   return bits;
 }
-uint32_t floatBits(float value) {
-  uint32_t bits{};
-  std::memcpy(&bits, &value, sizeof(bits));
-  return bits;
-}
+using unified::support::floatBits;
 uint32_t tile(unsigned lane) { return lane % 16 / 4; }
 std::pair<unsigned, unsigned> aCoordinate(unsigned lane, unsigned item, bool col) {
   const auto thread = lane % 4;
-  const auto high = lane < 16 ? 0u : 4u;
-  return col ? std::pair{item % 4 + high, thread} : std::pair{thread + high, item};
+  const auto high = lane < 16 ? 0U : 4U;
+  return col ? std::pair{(item % 4) + high, thread} : std::pair{thread + high, item};
 }
 std::pair<unsigned, unsigned> bCoordinate(unsigned lane, unsigned item, bool col) {
   const auto thread = lane % 4;
-  const auto high = lane < 16 ? 0u : 4u;
+  const auto high = lane < 16 ? 0U : 4U;
   return col ? std::pair{item, thread + high} : std::pair{thread, item + high};
 }
 std::pair<unsigned, unsigned> cCoordinate(unsigned lane, unsigned item, bool f32) {
-  if (f32) return {(lane & 1) + (item & 2) + (lane < 16 ? 0u : 4u), (item & 4) + (lane & 2) + (item & 1)};
-  return {lane % 4 + (lane < 16 ? 0u : 4u), item};
+  if (f32) return {(lane & 1) + (item & 2) + (lane < 16 ? 0U : 4U), (item & 4) + (lane & 2) + (item & 1)};
+  return {(lane % 4) + (lane < 16 ? 0U : 4U), item};
 }
 
 void runVariant(const char *accum, const char *aLayout, const char *bLayout, const char *mode, CUmodule module) {
@@ -71,68 +76,79 @@ void runVariant(const char *accum, const char *aLayout, const char *bLayout, con
   const bool alias = std::string(mode) != "plain";
   const bool zeroC = std::string(mode) == "zeroalias";
   const unsigned registers = f32 ? 8 : 4;
-  std::array<int, 4 * 8 * 4> a{};
-  std::array<int, 4 * 4 * 8> b{};
-  std::array<uint32_t, 64> aw{}, bw{};
+  std::array<int, size_t{4} * 8 * 4> a{};
+  std::array<int, size_t{4} * 4 * 8> b{};
+  std::array<uint32_t, 64> aw{};
+  std::array<uint32_t, 64> bw{};
   for (unsigned lane = 0; lane < 32; ++lane)
     for (unsigned item = 0; item < 4; ++item) {
       const auto group = tile(lane);
       const auto [ar, ac] = aCoordinate(lane, item, aCol);
       const auto [br, bc] = bCoordinate(lane, item, bCol);
-      const int av = static_cast<int>((group * 5 + ar * 3 + ac * 2) % 7) - 3;
-      const int bv = static_cast<int>((group * 3 + br * 2 + bc * 5) % 7) - 3;
-      a[(group * 8 + ar) * 4 + ac] = av;
-      b[(group * 4 + br) * 8 + bc] = bv;
-      aw[lane * 2 + item / 2] |= static_cast<uint32_t>(halfBits(av)) << ((item % 2) * 16);
-      bw[lane * 2 + item / 2] |= static_cast<uint32_t>(halfBits(bv)) << ((item % 2) * 16);
+      const int av = static_cast<int>(((group * 5) + (ar * 3) + (ac * 2)) % 7) - 3;
+      const int bv = static_cast<int>(((group * 3) + (br * 2) + (bc * 5)) % 7) - 3;
+      a[(((group * 8) + ar) * 4) + ac] = av;
+      b[(((group * 4) + br) * 8) + bc] = bv;
+      aw[(lane * 2) + (item / 2)] |= static_cast<uint32_t>(halfBits(av)) << ((item % 2) * 16);
+      bw[(lane * 2) + (item / 2)] |= static_cast<uint32_t>(halfBits(bv)) << ((item % 2) * 16);
     }
-  std::array<uint32_t, 256> cwords{}, expected{};
-  std::array<int, 4 * 8 * 8> c{};
+  std::array<uint32_t, 256> cwords{};
+  std::array<uint32_t, 256> expected{};
+  std::array<int, size_t{4} * 8 * 8> c{};
   for (unsigned lane = 0; lane < 32; ++lane)
     for (unsigned item = 0; item < 8; ++item) {
       const auto group = tile(lane);
       const auto [row, col] = cCoordinate(lane, item, f32);
-      const int value = zeroC ? 0
-                              : (f32 ? static_cast<int>(group * 19 + row * 3) - static_cast<int>(col * 2)
-                                     : static_cast<int>(group * 7 + row) - static_cast<int>(col));
-      c[(group * 8 + row) * 8 + col] = value;
-      const auto word = lane * registers + (f32 ? item : item / 2);
+      int value = 0;
+      if (!zeroC)
+        value = f32 ? static_cast<int>((group * 19) + (row * 3)) - static_cast<int>(col * 2)
+                    : static_cast<int>((group * 7) + row) - static_cast<int>(col);
+      c[(((group * 8) + row) * 8) + col] = value;
+      const auto word = (lane * registers) + (f32 ? item : item / 2);
       if (f32) cwords[word] = floatBits(static_cast<float>(value));
       else cwords[word] |= static_cast<uint32_t>(halfBits(value)) << ((item % 2) * 16);
     }
   for (unsigned group = 0; group < 4; ++group)
     for (unsigned row = 0; row < 8; ++row)
       for (unsigned col = 0; col < 8; ++col) {
-        int value = c[(group * 8 + row) * 8 + col];
+        int value = c[(((group * 8) + row) * 8) + col];
         for (unsigned k = 0; k < 4; ++k)
-          value += a[(group * 8 + row) * 4 + k] * b[(group * 4 + k) * 8 + col];
-        c[(group * 8 + row) * 8 + col] = value;
+          value += a[(((group * 8) + row) * 4) + k] * b[(((group * 4) + k) * 8) + col];
+        c[(((group * 8) + row) * 8) + col] = value;
       }
   for (unsigned lane = 0; lane < 32; ++lane)
     for (unsigned item = 0; item < 8; ++item) {
       const auto [row, col] = cCoordinate(lane, item, f32);
-      const auto value = c[(tile(lane) * 8 + row) * 8 + col];
-      const auto word = lane * registers + (f32 ? item : item / 2);
+      const auto value = c[(((tile(lane) * 8) + row) * 8) + col];
+      const auto word = (lane * registers) + (f32 ? item : item / 2);
       if (f32) expected[word] = floatBits(static_cast<float>(value));
       else expected[word] |= static_cast<uint32_t>(halfBits(value)) << ((item % 2) * 16);
     }
   std::array<uint32_t, 256> output{};
-  DeviceBuffer da(sizeof(aw)), db(sizeof(bw)), dc(registers * 32 * sizeof(uint32_t)), dd(registers * 32 * sizeof(uint32_t));
+  const auto bytes = static_cast<size_t>(registers) * 32 * sizeof(uint32_t);
+  DeviceBuffer da(sizeof(aw));
+  DeviceBuffer db(sizeof(bw));
+  DeviceBuffer dc(bytes);
+  DeviceBuffer dd(bytes);
   check(cuMemcpyHtoD(da.value, aw.data(), sizeof(aw)), "upload A");
   check(cuMemcpyHtoD(db.value, bw.data(), sizeof(bw)), "upload B");
-  check(cuMemcpyHtoD(dc.value, cwords.data(), registers * 32 * sizeof(uint32_t)), "upload C");
-  check(cuMemcpyHtoD(dd.value, cwords.data(), registers * 32 * sizeof(uint32_t)), "initialise D");
+  check(cuMemcpyHtoD(dc.value, cwords.data(), bytes), "upload C");
+  check(cuMemcpyHtoD(dd.value, cwords.data(), bytes), "initialise D");
   CUfunction function{};
   const auto name = std::string("mma884_") + accum + "_" + aLayout + "_" + bLayout + "_" + mode;
   check(cuModuleGetFunction(&function, module, name.c_str()), "cuModuleGetFunction");
-  auto aPtr = da.value, bPtr = db.value, cPtr = dc.value, dPtr = alias ? dc.value : dd.value;
+  auto aPtr = da.value;
+  auto bPtr = db.value;
+  auto cPtr = dc.value;
+  auto dPtr = alias ? dc.value : dd.value;
   void *arguments[] = {&aPtr, &bPtr, &cPtr, &dPtr};
   check(cuLaunchKernel(function, 1, 1, 1, 32, 1, 1, 0, nullptr, arguments, nullptr), "cuLaunchKernel");
   check(cuCtxSynchronize(), "cuCtxSynchronize");
   const auto result = alias ? dc.value : dd.value;
-  check(cuMemcpyDtoH(output.data(), result, registers * 32 * sizeof(uint32_t)), "download result");
+  check(cuMemcpyDtoH(output.data(), result, bytes), "download result");
   CAPTURE(accum, aLayout, bLayout, mode);
-  REQUIRE(std::equal(expected.begin(), expected.begin() + registers * 32, output.begin()));
+  const auto words = static_cast<size_t>(registers) * 32;
+  REQUIRE((expected ^ take(words)) == (output ^ take(words)));
 }
 } // namespace
 

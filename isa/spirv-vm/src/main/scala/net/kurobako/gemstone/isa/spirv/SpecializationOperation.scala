@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.semantics.*
 import scala.collection.mutable
 
 /** Evaluates `OpSpecConstantOp` over constant operands at load time. */
@@ -21,9 +22,10 @@ private object SpecializationOperation {
       constants.get(Math.toIntExact(value)).collect { case Constant.Bits(t, lanes) => (t, lanes) }
     }
     def shape(t: Int): Option[(RuntimeType, Int)] = types.get(t).flatMap {
-      case RuntimeType.VectorType(component, count) => types.get(component).map((_, count.raw))
-      case scalar @ (RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_)) => Some((scalar, 1))
-      case _                                                                                 => None
+      case RuntimeType.VectorType(component, count) => types.get(component).map((_, count))
+      case scalar @ (RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_) | RuntimeType.Float8(_)) =>
+        Some((scalar, 1))
+      case _ => None
     }
     def integer(t: Int): Option[(Int in 1 ~ 64, Int)] = shape(t).collect { case (RuntimeType.Integer(width, _), n) =>
       (width, n)
@@ -42,7 +44,7 @@ private object SpecializationOperation {
 
         def homogeneous(element: Int, count: Long) =
           if (index >= 0 && index < count)
-            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n.raw)))
+            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n)))
           else None
         val child = types.get(t) match {
           case Some(RuntimeType.Structure(members)) if index >= 0 && index < members.size =>
@@ -52,7 +54,7 @@ private object SpecializationOperation {
             else None
           case Some(RuntimeType.VectorType(element, count)) => homogeneous(element, count.raw)
           case Some(RuntimeType.MatrixType(element, count)) => homogeneous(element, count.raw)
-          case Some(RuntimeType.Array(element, count))      => homogeneous(element, count.raw)
+          case Some(RuntimeType.Array(element, count))      => homogeneous(element, count)
           case _                                            => None
         }
         child.flatMap { case (element, offset) =>
@@ -66,7 +68,7 @@ private object SpecializationOperation {
           selected  <- component(composite._1, operands.drop(1))
           if selected._1 == resultType
           count <- scalarLeafCount(types, resultType).toOption
-          value <- result(composite._2.slice(selected._2, selected._2 + count.raw))
+          value <- result(composite._2.slice(selected._2, selected._2 + count))
         } yield value
       case SPIRV.Opcode.CompositeInsert if operands.size >= 3 =>
         for {
@@ -109,13 +111,15 @@ private object SpecializationOperation {
           value <-
             if (opcode == SPIRV.Opcode.LogicalNot)
               boolean(a._1).filter(boolean(resultType).contains).flatMap(_ =>
-                result(lanes(a._2, a._2, ComparisonOps.integerComparisons(SPIRV.Opcode.LogicalNot)(1)))
+                ComparisonOps.comparisonKernel(SPIRV.Opcode.LogicalNot, 1).flatMap(kernel =>
+                  result(lanes(a._2, a._2, kernel))
+                )
               )
             else integer(a._1).filter(integer(resultType).contains).flatMap { case (width, _) =>
-              result(lanes(a._2, a._2, ArithmeticOps.integerKernels(opcode.toInt)(width)))
+              ArithmeticOps.integerKernel(opcode.toInt, width).flatMap(kernel => result(lanes(a._2, a._2, kernel)))
             }
         } yield value
-      case op if ComparisonOps.integerComparisons.contains(op.toInt) && operands.size == 2 =>
+      case op if operands.size == 2 && ComparisonOps.comparisonKernel(op.toInt, 1).nonEmpty =>
         for {
           a           <- source(0)
           b           <- source(1)
@@ -126,10 +130,11 @@ private object SpecializationOperation {
               Some(1: Int in 1 ~ 64)
             case _ => None
           }
-          if (op <= SPIRV.Opcode.LogicalNot) == (width.raw == 1 && integer(a._1).isEmpty)
-          value <- result(lanes(a._2, b._2, ComparisonOps.integerComparisons(op.toInt)(width)))
+          if (op <= SPIRV.Opcode.LogicalNot) == (width == 1 && integer(a._1).isEmpty)
+          kernel <- ComparisonOps.comparisonKernel(op.toInt, width)
+          value  <- result(lanes(a._2, b._2, kernel))
         } yield value
-      case op if ArithmeticOps.integerKernels.contains(op.toInt) && operands.size == 2 =>
+      case op if operands.size == 2 && ArithmeticOps.integerKernel(op.toInt, 64).nonEmpty =>
         val shifts = op >= SPIRV.Opcode.ShiftRightLogical && op <= SPIRV.Opcode.ShiftLeftLogical
         for {
           a              <- source(0)
@@ -137,15 +142,20 @@ private object SpecializationOperation {
           (width, count) <- integer(resultType)
           if integer(a._1).contains((width, count))
           amount <- integer(b._1).filter((bWidth, bCount) => bCount == count && (shifts || bWidth == width))
-          value  <- result(lanes(a._2, b._2.map(_ & mask(amount._1)), ArithmeticOps.integerKernels(op.toInt)(width)))
+          kernel <- ArithmeticOps.integerKernel(op.toInt, width)
+          value  <- result(lanes(a._2, b._2.map(_ & mask(amount._1)), kernel))
         } yield value
       case SPIRV.Opcode.UConvert | SPIRV.Opcode.SConvert if operands.size == 1 =>
         for {
           a         <- source(0)
           (from, _) <- integer(a._1)
           (to, _)   <- integer(resultType)
-          value     <- result(a._2.map(bits =>
-            (if (opcode == SPIRV.Opcode.SConvert) signExtend(bits, from) else bits & mask(from)) & mask(to)
+          value     <- result(lanes(
+            a._2,
+            a._2,
+            ConversionSemantics.integer(Execute, ConstantFolder, opcode.toInt, from, to)(OperandIds.none)(
+              throw IllegalArgumentException(s"opcode $opcode has no conversion semantics")
+            )
           ))
         } yield value
       case SPIRV.Opcode.FConvert if operands.size == 1 =>
@@ -153,13 +163,19 @@ private object SpecializationOperation {
           a         <- source(0)
           (from, _) <- floating(a._1)
           (to, _)   <- floating(resultType)
-          value     <- result(a._2.map(bits => IEEE754.fromDouble(IEEE754.toDouble(bits, from), to)))
+          value     <- result(lanes(
+            a._2,
+            a._2,
+            ConversionSemantics.toFloatingWidth(Execute, ConstantFolder, from, to, IEEE754.Rounding.NearestEven)(
+              OperandIds.none
+            )
+          ))
         } yield value
       case SPIRV.Opcode.QuantizeToF16 if operands.size == 1 =>
         for {
           a <- source(0)
-          if a._1 == resultType && floating(resultType).exists(_._1.raw == 32)
-          value <- result(a._2.map(ConversionOps.quantizeToF16(_)))
+          if a._1 == resultType && floating(resultType).exists(_._1 == 32)
+          value <- result(lanes(a._2, a._2, ConversionSemantics.quantize(Execute, ConstantFolder)(OperandIds.none)))
         } yield value
       case _ => None
     }

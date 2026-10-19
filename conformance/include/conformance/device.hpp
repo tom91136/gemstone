@@ -45,7 +45,7 @@ struct DeviceProbeResult {
 const DeviceSelection &deviceSelection();
 
 inline PhysicalDevice makePciDevice(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
-  PhysicalDevice result{PhysicalDeviceScheme::Pci, {}};
+  PhysicalDevice result{.scheme = PhysicalDeviceScheme::Pci, .value = {}};
   result.value[0] = static_cast<uint8_t>(domain >> 24);
   result.value[1] = static_cast<uint8_t>(domain >> 16);
   result.value[2] = static_cast<uint8_t>(domain >> 8);
@@ -57,7 +57,7 @@ inline PhysicalDevice makePciDevice(uint32_t domain, uint8_t bus, uint8_t device
 }
 
 inline PhysicalDevice makeUuidDevice(const uint8_t *uuid) {
-  PhysicalDevice result{PhysicalDeviceScheme::Uuid, {}};
+  PhysicalDevice result{.scheme = PhysicalDeviceScheme::Uuid, .value = {}};
   std::memcpy(result.value, uuid, sizeof(result.value));
   return result;
 }

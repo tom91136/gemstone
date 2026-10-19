@@ -10,14 +10,16 @@
 #include <utility>
 #include <vector>
 
+#include "gemstone_execution_rpc.hpp"
+
 namespace gemstone::execution {
 namespace {
 
 template <typename Function> decltype(auto) visitAtomicWidth(size_t width, Function &&function) {
-  if (width == 1) return function.template operator()<uint8_t>();
-  if (width == 2) return function.template operator()<uint16_t>();
-  if (width == 4) return function.template operator()<uint32_t>();
-  return function.template operator()<uint64_t>();
+  if (width == 1) return std::forward<Function>(function).template operator()<uint8_t>();
+  if (width == 2) return std::forward<Function>(function).template operator()<uint16_t>();
+  if (width == 4) return std::forward<Function>(function).template operator()<uint32_t>();
+  return std::forward<Function>(function).template operator()<uint64_t>();
 }
 
 template <typename T>
@@ -33,6 +35,8 @@ uint64_t applyAtomicRequest(uintptr_t address, HostMemoryAtomicOperation operati
   reference.compare_exchange_strong(observed, static_cast<T>(desired), std::memory_order_seq_cst);
   return observed;
 }
+
+bool validAtomicWidth(int32_t width) { return width == 1 || width == 2 || width == 4 || width == 8; }
 
 template <typename T> void atomicStore(uintptr_t address, uint64_t value, std::memory_order order) {
   auto &cell = *reinterpret_cast<T *>(address);
@@ -58,39 +62,47 @@ bool collectPages(Client &client, CompletionId completion, std::vector<Record> &
   }
 }
 
+bool reject(const Error &cause, std::string &error, FailureKind *kind) {
+  error = cause.detail;
+  if (kind) *kind = cause.kind;
+  return false;
+}
+
+bool reject(std::string detail, FailureKind cause, std::string &error, FailureKind *kind) {
+  error = std::move(detail);
+  if (kind) *kind = cause;
+  return false;
+}
+
+FailureKind atomicFailure(uintptr_t address, int32_t width) {
+  if (!address) return FailureKind::IllegalAddress;
+  return validAtomicWidth(width) && address % width != 0 ? FailureKind::MisalignedAddress : FailureKind::Transport;
+}
+
 } // namespace
 
-bool awaitCompletion(Client &client, CompletionId completion, std::string &error) {
+bool awaitCompletion(Client &client, CompletionId completion, std::string &error, FailureKind *kind) {
   for (;;) {
-    auto batch = client.call(PollHostMemory{completion});
-    if (!batch) {
-      error = batch.error().detail;
-      return false;
-    }
+    const auto polled = client.call(PollHostMemory{completion});
+    if (!polled) return reject(polled.error(), error, kind);
+    const auto &batch = polled.value();
     // Only exact interpreter-requested ranges are touched. Never round to pages.
     std::vector<HostMemoryBytes> replies;
-    for (const auto &range : batch.value().reads) {
+    for (const auto &range : batch.reads) {
       const auto address = static_cast<uintptr_t>(range.address.value);
       const auto size = static_cast<size_t>(range.size.value);
-      if (!address || size > UINTPTR_MAX - address) {
-        error = "invalid host read range";
-        return false;
-      }
+      if (!address || size > UINTPTR_MAX - address) return reject("invalid host read range", FailureKind::IllegalAddress, error, kind);
       const auto *begin = reinterpret_cast<const uint8_t *>(address);
-      replies.push_back({range.address, std::vector<uint8_t>(begin, begin + size)});
+      replies.push_back({.address = range.address, .bytes = std::vector<uint8_t>(begin, begin + size)});
     }
-    for (const auto &range : batch.value().writes) {
+    for (const auto &range : batch.writes) {
       const auto address = static_cast<uintptr_t>(range.address.value);
-      if (!address || range.bytes.size() > UINTPTR_MAX - address) {
-        error = "invalid host write range";
-        return false;
-      }
+      if (!address || range.bytes.size() > UINTPTR_MAX - address)
+        return reject("invalid host write range", FailureKind::IllegalAddress, error, kind);
       const auto width = range.atomicWidth.value;
       if (width != 0) {
-        if ((width != 1 && width != 2 && width != 4 && width != 8) || address % width || range.bytes.size() % width) {
-          error = "invalid host atomic store range";
-          return false;
-        }
+        if (!validAtomicWidth(width) || address % width || range.bytes.size() % width)
+          return reject("invalid host atomic store range", atomicFailure(address, width), error, kind);
         for (size_t offset = 0; offset < range.bytes.size(); offset += width) {
           visitAtomicWidth(width, [&]<typename T>() {
             T value;
@@ -98,46 +110,39 @@ bool awaitCompletion(Client &client, CompletionId completion, std::string &error
             atomicStore<T>(address + offset, value, std::memory_order_seq_cst);
           });
         }
-      } else std::memcpy(reinterpret_cast<void *>(address), range.bytes.data(), range.bytes.size());
+      } else {
+        std::memcpy(reinterpret_cast<void *>(address), range.bytes.data(), range.bytes.size());
+      }
     }
-    if (batch.value().sync) {
-      const auto &sync = *batch.value().sync;
+    if (batch.sync) {
+      const auto &sync = *batch.sync;
       uint64_t observed = 0;
       if (sync.atomic) {
         const auto &request = *sync.atomic;
         const auto address = static_cast<uintptr_t>(request.address.value);
         observed = static_cast<uint64_t>(request.expected);
         const auto width = request.size.value;
-        if (!address || (width != 1 && width != 2 && width != 4 && width != 8) || address % width != 0) {
-          error = "invalid host atomic range";
-          return false;
-        }
+        if (!address || !validAtomicWidth(width) || address % width != 0)
+          return reject("invalid host atomic range", atomicFailure(address, width), error, kind);
         observed = visitAtomicWidth(
             width, [&]<typename T>() { return applyAtomicRequest<T>(address, request.operation, observed, request.desired); });
       }
       for (const auto &request : sync.atomicStores) {
         const auto address = static_cast<uintptr_t>(request.address.value);
         const auto width = request.size.value;
-        if (!address || (width != 1 && width != 2 && width != 4 && width != 8) || address % width != 0) {
-          error = "invalid host atomic store range";
-          return false;
-        }
+        if (!address || !validAtomicWidth(width) || address % width != 0)
+          return reject("invalid host atomic store range", atomicFailure(address, width), error, kind);
         visitAtomicWidth(width, [&]<typename T>() { atomicStore<T>(address, request.desired, std::memory_order_relaxed); });
       }
       if (!sync.relaxed && !sync.atomic && sync.publish.empty()) std::atomic_thread_fence(std::memory_order_seq_cst);
-      auto supplied = client.call(SupplyHostSync{completion, sync.ticket, static_cast<int64_t>(observed)});
-      if (!supplied) {
-        error = supplied.error().detail;
-        return false;
-      }
+      auto supplied =
+          client.call(SupplyHostSync{.completion = completion, .ticket = sync.ticket, .observed = static_cast<int64_t>(observed)});
+      if (!supplied) return reject(supplied.error(), error, kind);
     }
-    if (batch.value().completed) return true;
+    if (batch.completed) return true;
     if (replies.empty()) continue;
-    auto supplied = client.call(SupplyHostMemory{completion, std::move(replies)});
-    if (!supplied) {
-      error = supplied.error().detail;
-      return false;
-    }
+    auto supplied = client.call(SupplyHostMemory{.completion = completion, .ranges = std::move(replies)});
+    if (!supplied) return reject(supplied.error(), error, kind);
   }
 }
 
@@ -154,10 +159,11 @@ bool collectCompletion(Client &client, CompletionId completion, CompletionResult
   result.pointerRelocations.clear();
   error.clear();
 
-  bool succeeded = awaitCompletion(client, completion, error);
+  result.failure = FailureKind::Transport;
+  bool succeeded = awaitCompletion(client, completion, error, &result.failure);
   if (succeeded && graphics) {
     const auto statistics = client.call(ReadGraphicsStatistics{completion});
-    succeeded = bool(statistics);
+    succeeded = static_cast<bool>(statistics);
     if (succeeded) *graphics = statistics.value();
     else error = statistics.error().detail;
   }
@@ -168,7 +174,9 @@ bool collectCompletion(Client &client, CompletionId completion, CompletionResult
     succeeded = static_cast<bool>(prints);
     if (succeeded) {
       if (!prints.value().empty()) std::fwrite(prints.value().data(), 1, prints.value().size(), stdout);
-    } else error = prints.error().detail;
+    } else {
+      error = prints.error().detail;
+    }
   }
 
   const auto released = client.call(ReleaseCompletion{completion});

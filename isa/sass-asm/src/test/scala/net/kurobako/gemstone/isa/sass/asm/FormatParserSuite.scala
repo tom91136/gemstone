@@ -1,18 +1,19 @@
 package net.kurobako.gemstone.isa.sass.asm
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 
 class FormatParserSuite extends munit.FunSuite {
+  import Expression.*
   import NVDisasm.*
-  import NVDisasm.Expression.*
   import NVDisasm.Syntax.*
 
   private def makeDatabase(
       format: Vec[Syntax],
       fields: Vec[Assignment],
-      opcodes: Vec[OpcodeValue],
+      opcodes: Vec[SymbolValue],
       symbols: Vec[Vocabulary] = Vec.empty
   ): (Database, Form) = {
     val form = Form("test", alternate = false, opcodes, fields, format)
@@ -31,7 +32,7 @@ class FormatParserSuite extends munit.FunSuite {
         Assignment("predicate", Vec.empty, Reference("Pg", None, relaxed = false)),
         Assignment("not", Vec.empty, Reference("Pg", Some("not"), relaxed = false))
       ),
-      Vec(OpcodeValue("MOV", 3)),
+      Vec(SymbolValue("MOV", 3)),
       Vec(Vocabulary("Predicate", Vec(SymbolValue("P2", 2), SymbolValue("PT", 7))))
     )
 
@@ -52,7 +53,7 @@ class FormatParserSuite extends munit.FunSuite {
         Assignment("opcode", Vec.empty, Reference("Opcode", None, relaxed = false)),
         Assignment("offset", Vec.empty, Reference("offset", None, relaxed = false))
       ),
-      Vec(OpcodeValue("ADDI", 1))
+      Vec(SymbolValue("ADDI", 1))
     )
     assertEquals(
       FormatParser.parse(database, form, 0, "ADDI -0x1"),
@@ -65,7 +66,7 @@ class FormatParserSuite extends munit.FunSuite {
         Assignment("opcode", Vec.empty, Reference("Opcode", None, relaxed = false)),
         Assignment("selector", Vec.empty, Reference("selector", None, relaxed = false))
       ),
-      Vec(OpcodeValue("NOP", 2))
+      Vec(SymbolValue("NOP", 2))
     )
     assertEquals(
       FormatParser.parse(defaultDatabase, defaultForm, 0, "NOP"),
@@ -80,7 +81,7 @@ class FormatParserSuite extends munit.FunSuite {
         Assignment("opcode", Vec.empty, Reference("Opcode", None, relaxed = false)),
         Assignment("target", Vec.empty, Reference("target", None, relaxed = false))
       ),
-      Vec(OpcodeValue("BRA", 4))
+      Vec(SymbolValue("BRA", 4))
     )
     assertEquals(
       FormatParser.parse(database, form, 8, "BRA 0x20"),
@@ -143,7 +144,7 @@ class FormatParserSuite extends munit.FunSuite {
         Assignment("opcode", Vec.empty, Reference("Opcode", None, relaxed = false)),
         Assignment("mode", Vec.empty, Reference("mode", None, relaxed = false))
       ),
-      Vec(OpcodeValue("MOV", 3)),
+      Vec(SymbolValue("MOV", 3)),
       Vec(Vocabulary("Mode", Vec(SymbolValue("OFF", 0), SymbolValue("ON", 1))))
     )
     assertEquals(
@@ -160,6 +161,19 @@ class FormatParserSuite extends munit.FunSuite {
     assert(FormatParser.parse(database, form, 0, "MOV R3, R7;").isRight)
   }
 
+  test("a register operand reads only its own bank, so a stray modifier does not join the register after it") {
+    val database = decoder(89)
+    val form     = database.forms.find(_.name == "bmov_pquad_bar__RBR").getOrElse(fail("missing SM89 BMOV form"))
+    assertEquals(
+      FormatParser.parse(database, form, 0, "BMOV.32 B1, B10;").map(_.get("cbu_state")),
+      Right(Some(BigInt(1)))
+    )
+    assert(FormatParser.parse(database, form, 0, "BMOV.32.FOO B1, B10;").isLeft)
+    assert(FormatParser.parse(database, form, 0, "BMOV.32.PQUAD B1, B10;").isLeft)
+    val move = database.forms.find(form => form.name == "mov__RR" && form.opcodes.exists(_.name == "MOV")).get
+    assert(FormatParser.parse(database, move, 0, "MOV R3, UR7;").isLeft)
+  }
+
   test("floating immediates round once from the parsed decimal") {
     def immediate(kind: String, category: FieldKind) = makeDatabase(
       Vec(Text("Opcode "), Field(kind, "imm", None, None, category)),
@@ -167,7 +181,7 @@ class FormatParserSuite extends munit.FunSuite {
         Assignment("opcode", Vec.empty, Reference("Opcode", None, relaxed = false)),
         Assignment("imm", Vec.empty, Reference("imm", None, relaxed = false))
       ),
-      Vec(OpcodeValue("IMM", 1))
+      Vec(SymbolValue("IMM", 1))
     )
     // 1 + 2^-11 + 2^-40 lies just above the binary16 midpoint, which rounding through binary32 would erase.
     val (half, halfForm) = immediate("F16Imm", FieldKind.FloatingImmediate(FloatEncoding.F16Imm))

@@ -7,14 +7,14 @@ import scala.sys.process.ProcessLogger
 
 object CMake {
   def build(source: Path, directory: Path, arguments: Seq[String], log: String => Unit): Path =
-    build(source, directory, arguments, log, None, Seq.empty)
+    build(source, directory, arguments, log, Seq.empty, Seq.empty)
 
   def build(
       source: Path,
       directory: Path,
       arguments: Seq[String],
       log: String => Unit,
-      buildTarget: Option[String],
+      buildTargets: Seq[String],
       launcher: Seq[String]
   ): Path = {
     val configure = Seq("cmake", "-S", s"$source", "-B", s"$directory", "-G", "Ninja") ++
@@ -28,7 +28,8 @@ object CMake {
       val _ = Files.writeString(signature, configure.mkString("\n"))
     }
     run(
-      launcher ++ Seq("cmake", "--build", s"$directory") ++ buildTarget.toSeq.flatMap(Seq("--target", _)) ++
+      launcher ++ Seq("cmake", "--build", s"$directory") ++
+        (if (buildTargets.isEmpty) Seq.empty else "--target" +: buildTargets) ++
         Seq("--", "--quiet"),
       source,
       log

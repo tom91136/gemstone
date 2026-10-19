@@ -16,7 +16,7 @@ object RegisterBank {
   }
 }
 
-enum RegisterBank(val spellingValue: NonEmpty[String]) {
+enum RegisterBank(val spellingValue: NonEmpty[String]) derives CanEqual {
   inline def spelling: String = spellingValue
   case R                                         extends RegisterBank("R")
   case UR                                        extends RegisterBank("UR")

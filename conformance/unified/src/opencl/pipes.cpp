@@ -2,16 +2,17 @@
 #include <fmt/format.h>
 
 #define CL_TARGET_OPENCL_VERSION 300
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <numeric>
 #include <vector>
 
 #include <CL/cl.h>
+#include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "opencl/session.hpp"
+
+using namespace aspartame;
 
 namespace {
 using namespace unified::opencl;
@@ -64,15 +65,15 @@ constexpr const char *PipeSource = R"cl(
 
 cl_mem createPipe(Session &session, cl_uint packetSize, cl_uint packets) {
   cl_int status = CL_SUCCESS;
-  auto pipe = clCreatePipe(session.context, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, packetSize, packets, nullptr, &status);
+  auto *pipe = clCreatePipe(session.context, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, packetSize, packets, nullptr, &status);
   check(status, "pipe");
   return pipe;
 }
 
 void run(Session &session, const char *name, cl_mem pipe, cl_mem out, size_t items, size_t local) {
-  auto kernel = session.kernel(PipeSource, "", name);
-  check(clSetKernelArg(kernel, 0, sizeof(pipe), &pipe), "pipe argument");
-  if (out) check(clSetKernelArg(kernel, 1, sizeof(out), &out), "output argument");
+  auto *kernel = session.kernel(PipeSource, "", name);
+  arg(kernel, 0, pipe, "pipe argument");
+  if (out) arg(kernel, 1, out, "output argument");
   const Shape group{local, 1, 1};
   session.run(kernel, 1, {items, 1, 1}, &group);
 }
@@ -80,20 +81,19 @@ void run(Session &session, const char *name, cl_mem pipe, cl_mem out, size_t ite
 void producerConsumer(const char *producer, const char *consumer) {
   Session session;
   session.require(Capability::Pipes);
-  constexpr size_t items = 64, local = 16;
-  auto pipe = createPipe(session, sizeof(int32_t), items);
+  constexpr size_t items = 64;
+  constexpr size_t local = 16;
+  auto *pipe = createPipe(session, sizeof(int32_t), items);
   run(session, producer, pipe, nullptr, items, local);
-  auto counts = session.buffer(std::vector<uint32_t>(2, 0));
+  auto *counts = session.buffer(std::vector<uint32_t>(2, 0));
   run(session, "count", pipe, counts, 1, 1);
   const auto reported = session.read<uint32_t>(counts, 2);
   CHECK(reported[0] == items);
   CHECK(reported[1] >= items);
-  auto out = session.buffer(std::vector<int32_t>(items, -2));
+  auto *out = session.buffer(std::vector<int32_t>(items, -2));
   run(session, consumer, pipe, out, items, local);
-  auto values = session.read<int32_t>(out, items);
-  std::sort(values.begin(), values.end());
-  std::vector<int32_t> expected(items);
-  std::iota(expected.begin(), expected.end(), 0);
+  const auto values = session.read<int32_t>(out, items) ^ sort();
+  const auto expected = iota<int32_t>(0, items) | to_vector();
   CHECK(values == expected);
   clReleaseMemObject(pipe);
 }
@@ -102,14 +102,14 @@ void structPackets() {
   Session session;
   session.require(Capability::Pipes);
   constexpr size_t items = 32;
-  auto pipe = createPipe(session, 16, items);
+  auto *pipe = createPipe(session, 16, items);
   run(session, "produce_struct", pipe, nullptr, items, 8);
-  auto out = session.buffer(std::vector<int64_t>(items, -1));
+  auto *out = session.buffer(std::vector<int64_t>(items, -1));
   run(session, "consume_struct", pipe, out, items, 8);
   const auto values = session.read<int64_t>(out, items);
   for (size_t id = 0; id < items; ++id) {
     INFO(fmt::format("packet {}", id));
-    CHECK(values[id] == static_cast<int64_t>(id * id + id * 2));
+    CHECK(std::cmp_equal(values[id], (id * id) + (id * 2)));
   }
   clReleaseMemObject(pipe);
 }

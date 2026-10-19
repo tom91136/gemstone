@@ -5,6 +5,10 @@ import net.kurobako.gemstone.constraint.*
 import scala.util.Random
 
 class IntegerFloatingSuite extends munit.FunSuite {
+  private val booleans          = Vec(false, true)
+  private val widths            = Vec[Int in (32, 64)](32, 64)
+  private val directedRoundings = IEEE754.Rounding.values.filterNot(_ == IEEE754.Rounding.NearestAway)
+
   private def exactParts(value: Double): (BigInt, Int) = {
     val bits        = IEEE754.doubleToBinary64(value)
     val encoded     = ((bits >>> 52) & 0x7ffL).toInt
@@ -29,25 +33,27 @@ class IntegerFloatingSuite extends munit.FunSuite {
       Vec.fill(500)(random.nextLong())
     for {
       value    <- inputs
-      unsigned <- Vec(false, true)
-      width    <- Vec[Int in (32, 64)](32, 64)
-      rounding <- IEEE754.Rounding.values
+      unsigned <- booleans
+      width    <- widths
+      // the oracle below models directed and even rounding only
+      rounding <- directedRoundings
     } {
       val integer   = if (unsigned) BigInt(value) & ((BigInt(1) << 64) - 1) else BigInt(value)
-      val nearest   = if (width.raw == 32) integer.toFloat.toDouble else integer.toDouble
+      val nearest   = if (width == 32) integer.toFloat.toDouble else integer.toDouble
       val exact     = BigInt(java.math.BigDecimal(nearest).toBigIntegerExact)
       val direction = rounding match {
         case IEEE754.Rounding.NearestEven => 0
         case IEEE754.Rounding.Up          => 1
         case IEEE754.Rounding.Down        => -1
         case IEEE754.Rounding.TowardZero  => -integer.signum
+        case IEEE754.Rounding.NearestAway => 0
       }
       val adjusted = if (direction > 0 && exact < integer) {
-        if (width.raw == 32) Math.nextUp(nearest.toFloat).toDouble else Math.nextUp(nearest)
+        if (width == 32) Math.nextUp(nearest.toFloat).toDouble else Math.nextUp(nearest)
       } else if (direction < 0 && exact > integer) {
-        if (width.raw == 32) Math.nextDown(nearest.toFloat).toDouble else Math.nextDown(nearest)
+        if (width == 32) Math.nextDown(nearest.toFloat).toDouble else Math.nextDown(nearest)
       } else nearest
-      val expected = if (width.raw == 32) IEEE754.floatToBinary32(adjusted.toFloat).toLong
+      val expected = if (width == 32) IEEE754.floatToBinary32(adjusted.toFloat).toLong
       else IEEE754.doubleToBinary64(adjusted)
       assertEquals(
         IEEE754.integerToBinary(value, unsigned, width.widen[Int in (16, 32, 64)], rounding),

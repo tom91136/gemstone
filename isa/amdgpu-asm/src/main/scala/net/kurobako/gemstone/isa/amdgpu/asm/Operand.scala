@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu.asm
 
 import net.kurobako.gemstone.collection.*
 
-enum Operand {
+enum Operand derives CanEqual {
   case Register(file: RegisterFile, first: Int, last: Int)
   case SpecialRegister(name: String)
   case IntegerLiteral(value: BigInt, radix: Int)

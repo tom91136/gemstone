@@ -5,6 +5,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class InputAttachmentSuite extends munit.FunSuite {
@@ -50,6 +51,7 @@ class InputAttachmentSuite extends munit.FunSuite {
       layer: Option[Int]
   )
 
+  private val interior      = (2, 1)
   private val sampleIndices = Seq((1, 0), (4, 0), (4, 3), (4, -1), (4, 4))
   private val pixels        = Seq((0, 0), (2, 1), (-1, 0), (3, 0), (0, 2))
   private val layers        = Seq(None, Some(0), Some(1), Some(-1), Some(2))
@@ -57,8 +59,8 @@ class InputAttachmentSuite extends munit.FunSuite {
   // every format at an in-range address, then the bounds of each address dimension with formats in rotation
   private val reads = variants.zipWithIndex.flatMap { (variant, index) =>
     Seq(
-      Read(variant, sampled = false, if (index % 2 == 0) 1 else 4, if (index % 2 == 0) 0 else 3, (2, 1), None),
-      Read(variant, sampled = true, 4, 3, (2, 1), Option.when(index % 2 == 1)(1))
+      Read(variant, sampled = false, if (index % 2 == 0) 1 else 4, if (index % 2 == 0) 0 else 3, interior, None),
+      Read(variant, sampled = true, 4, 3, interior, Option.when(index % 2 == 1)(1))
     )
   } ++ pairwise(sampleIndices.size, pixels.size).zipWithIndex.map { (row, index) =>
     val (samples, sample) = sampleIndices(row(0))
@@ -74,7 +76,7 @@ class InputAttachmentSuite extends munit.FunSuite {
     "Bgra8Unorm"         -> None,
     "S8Uint"             -> None,
     "D32SfloatS8Stencil" -> None
-  ).map((name, extension) => Read(formats.find(_.name == name).get -> extension, sampled = false, 1, 0, (2, 1), None))
+  ).map((name, extension) => Read(formats.find(_.name == name).get -> extension, sampled = false, 1, 0, interior, None))
 
   for (read <- reads.distinct) {
     val (format, extension) = read.variant
@@ -169,13 +171,13 @@ class InputAttachmentSuite extends munit.FunSuite {
       val base = imageLayer * 96 + pixel * 16 + slot * 4 + 1
       format.value match {
         case ImageFormat.Rgba32f | ImageFormat.R32f | ImageFormat.Rg32f | ImageDescriptor.Format.D32SfloatS8Depth =>
-          for (lane <- 0 until format.components) put(at + lane * 4, floatBits((base + lane).toFloat / 8))
+          for (lane <- 0 until format.components) put(at + lane * 4, single((base + lane).toFloat / 8))
         case ImageFormat.Rgba32i | ImageFormat.Rgba32ui | ImageFormat.R32ui | ImageFormat.Rg32ui =>
           for (lane <- 0 until format.components) put(at + lane * 4, 0x80000000L + base + lane)
         case ImageDescriptor.Format.D16Unorm           => put(at, base * 257L, 2)
         case ImageDescriptor.Format.S8Uint             => put(at, base.toLong, 1)
         case ImageDescriptor.Format.D32SfloatS8Stencil =>
-          put(at, floatBits(.75f)); put(at + 4, base.toLong, 1); put(at + 5, 0xa5L, 1)
+          put(at, single(.75f)); put(at + 4, base.toLong, 1); put(at + 5, 0xa5L, 1)
         case _ => put(at, (0 until 4).foldLeft(0L)((word, lane) => word | ((base + lane).toLong << (lane * 8))))
       }
     }
@@ -191,7 +193,7 @@ class InputAttachmentSuite extends munit.FunSuite {
     val relocation = writeImage(memory, descriptor, 0, view, texels)
     val out        = memory.allocate(40L)
     val fragCoord  = memory.allocate(Vec.from(
-      Seq(x + .5f, y + .5f, .5f, 1f).flatMap(value => LittleEndian.toVec(floatBits(value), 4))
+      Seq(x + .5f, y + .5f, .5f, 1f).flatMap(value => LittleEndian.toVec(single(value), 4))
     ))
     val arguments = Vec(buffer(descriptor, range = Some(size)), buffer(out), buffer(fragCoord))
     assertEquals(run(module, "main", memory, arguments, relocations = Vec(relocation)), Right(()))
@@ -207,7 +209,7 @@ class InputAttachmentSuite extends munit.FunSuite {
         case ImageFormat.Rgba8ui => (base + lane).toLong
         case _ => if (lane < format.components) 0x80000000L + base + lane else if (lane == 3) 1L else 0L
       }
-      else floatBits(
+      else single(
         if (lane >= format.components) { if (lane == 3) 1f else 0f }
         else format.value match {
           case ImageDescriptor.Format.D16Unorm   => base * 257f / 65535f

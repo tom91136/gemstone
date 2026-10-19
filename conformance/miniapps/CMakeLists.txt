@@ -1,7 +1,7 @@
-set(miniapp_supported_cuda cuda)
+set(miniapp_supported_cuda cuda cuda-tuned)
 set(miniapp_supported_hip hip omp-target kokkos)
 set(miniapp_supported_opencl ocl)
-set(miniapp_supported_sycl sycl sycl-usm sycl-acc)
+set(miniapp_supported_sycl sycl sycl-usm sycl-acc sycl2020-usm sycl2020-acc)
 set(miniapp_supported_openacc acc)
 set(miniapp_supported_vulkan vulkan)
 if(CONFORMANCE_COMPILER STREQUAL "gcc")
@@ -139,10 +139,6 @@ function(conformance_add_miniapp app model)
   # empty string as the input to the upstream flag-cleaning macro.
   patch_exact("${staging}/cmake/register_models.cmake"
     [=[ ${VAR} ${${VAR}})]=] [=[ ${VAR} "${${VAR}}")]=])
-  if(model STREQUAL "cuda" AND NOT app STREQUAL "cloverleaf")
-    patch_exact("${staging}/src/cuda/model.cmake"
-      "cmake_policy(SET CMP0104 OLD)" "cmake_policy(SET CMP0104 NEW)")
-  endif()
   set(arguments ${MINIAPP_ARGUMENTS})
   if(MINIAPP_ADAPT)
     cmake_language(CALL "${MINIAPP_ADAPT}" "${model}" "${staging}")
@@ -151,7 +147,7 @@ function(conformance_add_miniapp app model)
     patch_exact("${staging}/src/kokkos/model.cmake"
       [=[        add_subdirectory(${KOKKOS_IN_TREE} ${CMAKE_BINARY_DIR}/kokkos)]=]
       [=[        if(NOT TARGET Kokkos::kokkos)
-            add_subdirectory(${KOKKOS_IN_TREE} ${CMAKE_BINARY_DIR}/kokkos)
+            add_subdirectory(${KOKKOS_IN_TREE} ${CMAKE_BINARY_DIR}/kokkos SYSTEM)
         endif()]=])
   endif()
   set(primary_model_${CONFORMANCE_BACKEND} "${CONFORMANCE_BACKEND}")
@@ -314,26 +310,6 @@ function(configure_miniapp app model stage target_output)
   # BabelStream, otherwise force the complete target back to C++14.
   target_compile_features("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE cxx_std_17)
   target_link_libraries("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE Catch2::Catch2WithMain conformance_device)
-  # The miniapp sources and Kokkos are vendored third-party code; silence their
-  # diagnostics so only project code is checked.
-  target_compile_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE
-    "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-unused-result;-Wno-unused-variable;-Wno-maybe-uninitialized>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-pass-failed>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-vla-cxx-extension>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-inconsistent-missing-override>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-unused-result>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-unused-variable>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-nan-infinity-disabled>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-sometimes-uninitialized>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-deprecated-declarations>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-deprecated-attributes>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-sycl-strict>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-user-defined-warnings>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-cpp>")
-  # Device LTO passes (notably OpenMP offload) report the same pass-failed
-  # remark through ld.lld.
-  target_link_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE
-    "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-pass-failed>")
   if(CONFORMANCE_BACKEND STREQUAL "hip" AND model MATCHES "^(hip|kokkos)$")
     target_compile_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:-x;hip>")
@@ -347,6 +323,10 @@ function(configure_miniapp app model stage target_output)
   endif()
   if(model STREQUAL "omp-target")
     target_compile_definitions("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE CONFORMANCE_OPENMP_TARGET=1)
+    # Clang puts the simd vectorisation request on the outer loop it generates
+    # for combined distribute constructs. GCC offload maps simd to SIMD lanes,
+    # so the clause stays.
+    target_compile_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE "$<$<COMPILE_LANG_AND_ID:CXX,Clang>:-Wno-pass-failed>")
   endif()
   set(${target_output} "${CONFORMANCE_MINIAPP_TARGET}" PARENT_SCOPE)
 endfunction()

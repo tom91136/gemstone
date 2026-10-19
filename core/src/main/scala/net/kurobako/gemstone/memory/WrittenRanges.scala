@@ -18,10 +18,10 @@ class WrittenRanges {
   private var lastNext: Int >= 0 = 0
 
   def add(offset: Int >= 0, size: Int >= 0): Unit =
-    if (size.raw > 0) {
+    if (size > 0) {
       val limit = offset + size
-      if (offset.raw >= lastStart.raw && limit.raw <= lastEnd.raw) ()
-      else if (offset.raw >= lastStart.raw && offset.raw <= lastEnd.raw && limit.raw < lastNext.raw) {
+      if (offset >= lastStart && limit <= lastEnd) ()
+      else if (offset >= lastStart && offset <= lastEnd && limit < lastNext) {
         val _ = intervals.put(lastStart, limit)
         lastEnd = limit
       } else insert(offset, limit)
@@ -62,7 +62,7 @@ class WrittenRanges {
     intervals.forEach { (begin, end) =>
       var offset = begin
       while (offset < end) {
-        val remaining = (end - offset).raw.unsafe[Int > 0]
+        val remaining = (end - offset).unsafe[Int > 0]
         val size      = maxChunkSize.min(remaining)
         result += ((offset, size))
         offset += size

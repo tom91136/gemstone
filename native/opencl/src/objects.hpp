@@ -102,15 +102,17 @@ struct AllocationUses {
   explicit AllocationUses(std::vector<std::shared_ptr<Allocation>> values) : allocations(std::move(values)) {
     for (const auto &allocation : allocations) {
       if (!allocation) continue;
-      std::lock_guard lock(allocation->useMutex);
+      std::scoped_lock const lock(allocation->useMutex);
       ++allocation->pendingUses;
     }
   }
+  AllocationUses(const AllocationUses &) = delete;
+  AllocationUses &operator=(const AllocationUses &) = delete;
   ~AllocationUses() {
     for (const auto &allocation : allocations) {
       if (!allocation) continue;
       {
-        std::lock_guard lock(allocation->useMutex);
+        std::scoped_lock const lock(allocation->useMutex);
         --allocation->pendingUses;
       }
       allocation->usesFinished.notify_all();

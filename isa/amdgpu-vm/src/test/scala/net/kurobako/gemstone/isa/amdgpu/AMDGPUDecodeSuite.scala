@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
 import fixtures.*
+import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -30,6 +31,20 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
     ).foreach { case ((target, bytes), expected) => assertEquals(decoded(target, bytes*), expected) }
   }
 
+  test("s_sendmsg_rtn_b64 with MSG_RTN_GET_REALTIME reads the real-time clock, and no other reply is modelled") {
+    // llvm-mc -arch=amdgcn -mcpu=<target> -show-encoding: s_sendmsg_rtn_b64 s[0:1], sendmsg(MSG_RTN_GET_REALTIME)
+    val realTime = Instruction.SReadClock(0, Clock.RealTime)
+    for (target <- Vec(Target("gfx1100"), Target("gfx1150"), Target("gfx1170"), Target("gfx1200"))) {
+      assertEquals(
+        decoded(target, 0x83, 0x4d, 0x80, 0xbe),
+        realTime,
+        target.name
+      )
+      assert(VMCompiler.decodeInstruction(octets(0x80, 0x4d, 0x80, 0xbe), target).isLeft, target.name)
+      assert(VMCompiler.decodeInstruction(octets(0x83, 0x4c, 0x80, 0xbe), target).isLeft, target.name)
+    }
+  }
+
   test("scheduling hints, explicit waits and code-end padding decode as waits") {
     // s_waitcnt_lgkmcnt null, 0 (Tensile gfx1030 GEMM), s_code_end, s_setprio.
     Vec(
@@ -37,6 +52,63 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
       Target("gfx1036") -> Vec(0x00, 0x00, 0x9f, 0xbf),
       Target("gfx900")  -> Vec(0x41, 0x31, 0x8f, 0xbf)
     ).foreach { case (target, bytes) => assertEquals(decoded(target, bytes*), Instruction.Wait) }
+  }
+
+  test("trace, performance-level, wake-up and cache-maintenance hints decode as waits (CDNA3 ISA 12.5, 12.6)") {
+    // LLVM gfx900: s_ttracedata, s_icache_inv, s_incperflevel 1, s_decperflevel 1, s_wakeup, s_sethalt 0,
+    // s_setkill 0, s_cbranch_cdbgsys 2, s_cbranch_cdbguser 2, s_cbranch_cdbgsys_or_user 2,
+    // s_cbranch_cdbgsys_and_user 2 (taken only under a debugger), s_dcache_wb, s_dcache_wb_vol,
+    // s_dcache_discard s[2:3], 0x0, s_dcache_discard_x2 s[2:3], 0x0, s_atc_probe 0, s[2:3], 0x0,
+    // s_atc_probe_buffer 0, s[4:7], 0x0, ds_nop, v_nop, v_clrexcp; gfx1030: s_ttracedata_imm 1, s_version 0,
+    // s_waitcnt_vmcnt null, 0, s_waitcnt_expcnt null, 0, v_pipeflush; gfx1100: s_wait_event 0, s_wait_idle.
+    Vec(
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x96, 0xbf),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x93, 0xbf),
+      Target("gfx900")  -> Vec(0x01, 0x00, 0x94, 0xbf),
+      Target("gfx900")  -> Vec(0x01, 0x00, 0x95, 0xbf),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x83, 0xbf),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x8d, 0xbf),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x8b, 0xbf),
+      Target("gfx900")  -> Vec(0x02, 0x00, 0x97, 0xbf),
+      Target("gfx900")  -> Vec(0x02, 0x00, 0x98, 0xbf),
+      Target("gfx900")  -> Vec(0x02, 0x00, 0x99, 0xbf),
+      Target("gfx900")  -> Vec(0x02, 0x00, 0x9a, 0xbf),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x84, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x8c, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x01, 0x00, 0xa2, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x01, 0x00, 0xa6, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x01, 0x00, 0x9a, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x02, 0x00, 0x9e, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x28, 0xd8, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x00, 0x7e),
+      Target("gfx900")  -> Vec(0x00, 0x6a, 0x00, 0x7e),
+      Target("gfx1030") -> Vec(0x01, 0x00, 0xa8, 0xbf),
+      Target("gfx1030") -> Vec(0x00, 0x00, 0x80, 0xb0),
+      Target("gfx1030") -> Vec(0x00, 0x00, 0x7d, 0xbc),
+      Target("gfx1030") -> Vec(0x00, 0x00, 0xfd, 0xbc),
+      Target("gfx1030") -> Vec(0x00, 0x36, 0x00, 0x7e),
+      Target("gfx1100") -> Vec(0x00, 0x00, 0x8b, 0xbf),
+      Target("gfx1100") -> Vec(0x00, 0x00, 0x8a, 0xbf)
+    ).foreach { case (target, bytes) => assertEquals(decoded(target, bytes*), Instruction.Wait, clues(target, bytes)) }
+    // LLVM gfx900: s_dcache_inv, s_dcache_inv_vol; gfx1030: s_gl1_inv. Scalar loads after them must not reuse
+    // bytes read before.
+    Vec(
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x80, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx900")  -> Vec(0x00, 0x00, 0x88, 0xc0, 0x00, 0x00, 0x00, 0x00),
+      Target("gfx1030") -> Vec(0x00, 0x00, 0x7c, 0xf4, 0x00, 0x00, 0x00, 0x00)
+    ).foreach { case (target, bytes) =>
+      assertEquals(decoded(target, bytes*), Instruction.CacheInvalidate, clues(target, bytes))
+    }
+    // LLVM gfx1030 and gfx1100: s_round_mode 0x1 writes MODE's FP_ROUND field.
+    Vec(Target("gfx1030") -> Vec(0x01, 0x00, 0xa4, 0xbf), Target("gfx1100") -> Vec(0x01, 0x00, 0x91, 0xbf)).foreach {
+      case (target, bytes) =>
+        assertEquals(decoded(target, bytes*), Instruction.SSetMode(0, 4, InstructionSource.Constant(1L)))
+    }
+    // LLVM gfx900: s_sethalt 1 halts the wave, which nothing resumes.
+    assert(VMCompiler.decodeInstruction(Vec(0x01, 0x00, 0x8d, 0xbf).map(_.toByte), Target("gfx900")).exists {
+      case Instruction.Halt(_) => true
+      case _                   => false
+    })
   }
 
   test("gfx1036 global atomics and stores retain their operand, width and return bit") {

@@ -9,41 +9,69 @@ import scala.quoted.*
 object WireCodecMacros {
   def refined[A: Type, P: Type](base: Expr[Codec[A]])(using Quotes): Expr[Codec[A where P]] = {
     import quotes.reflect.*
-    val int                                 = !(TypeRepr.of[A] =:= TypeRepr.of[Long])
-    val (minimum, maximum, _)               = macros.numericDomain[A, Any].head
-    val ranges                              = macros.numericDomain[A, P]
-    val constraints: List[Expr[Constraint]] = ranges match {
-      case List((low, high, step)) if step == 1 && high == maximum && low == 1 => List('{ Constraint.Positive })
-      case List((low, high, step)) if step == 1 && high == maximum && low == 0 => List('{ Constraint.Positive0 })
-      case List((low, high, step)) if step <= BigInt(Long.MaxValue)            =>
-        val bounds = if (low == minimum && high == maximum) Nil
-        else if (int) List('{ Constraint.IntInterval(${ Expr(low.toInt) }, ${ Expr(high.toInt) }) })
-        else List('{ Constraint.LongInterval(${ Expr(low.toLong) }, ${ Expr(high.toLong) }) })
-        bounds ++ (if (step == 1) Nil else List('{ Constraint.MultipleOf(${ Expr(step.toLong) }) }))
-      case other =>
-        // Finite choices, or a divisor wider than Long (at most two representable multiples).
-        val values = other.flatMap { (low, high, step) =>
-          if (low == high) List(low.toLong)
-          else if (step > BigInt(Long.MaxValue))
-            List(low, low + step).collect { case value if value <= high => value.toLong }
-          else report.errorAndAbort("unsupported disjoint wire predicate ranges")
-        }.distinct.sorted
-        val encoded = Expr.ofSeq(values.map(Expr(_)))
-        List('{ Constraint.OneOf($encoded.toVector) })
+    val constraints: List[Expr[Constraint]] = macros.numericDomain[A, P] match {
+      case macros.Domain.Integers(spans)                => integers[A](spans)
+      case macros.Domain.Reals(_, None)                 => Nil
+      case macros.Domain.Reals(_, Some(List(interval))) => List(real(interval))
+      case macros.Domain.Reals(_, Some(intervals))      =>
+        List('{
+          Constraint.AnyOf(${ Expr.ofSeq(intervals.map(interval => '{ Vector(${ real(interval) }) })) }.toVector)
+        })
     }
     val metadata = Expr.ofSeq(constraints)
     val name     = Expr(Type.of[A] match {
-      case '[Byte]  => "Byte"
-      case '[Short] => "Short"
-      case '[Int]   => "Int"
-      case '[Long]  => "Long"
-      case _        => report.errorAndAbort(s"unsupported numeric carrier ${Type.show[A]}")
+      case '[Byte]   => "Byte"
+      case '[Short]  => "Short"
+      case '[Int]    => "Int"
+      case '[Long]   => "Long"
+      case '[Float]  => "Float"
+      case '[Double] => "Double"
+      case _         => report.errorAndAbort(s"unsupported numeric carrier ${Type.show[A]}")
     })
     '{
       Codec.domain[A where P, A]($name, $base, $metadata.toVector)(
         value => value.refine[A where P],
-        _.raw
+        value => value
       )
+    }
+  }
+
+  private def real(interval: (low: Double, high: Double))(using Quotes): Expr[Constraint] =
+    '{ Constraint.DoubleInterval(${ Expr(interval.low) }, ${ Expr(interval.high) }) }
+
+  /** The values of a span holding at most two: a point, or one whose divisor is wider than `Long`. */
+  private def finite(span: macros.Span): Option[List[Long]] =
+    if (span.low == span.high) Some(List(span.low.toLong))
+    else Option.when(span.step > BigInt(Long.MaxValue))(List(span.low.toLong, span.high.toLong))
+
+  private def integers[A: Type](spans: List[macros.Span])(using Quotes): List[Expr[Constraint]] = {
+    import quotes.reflect.*
+    val int    = !(TypeRepr.of[A] =:= TypeRepr.of[Long])
+    val limits = macros.numericDomain[A, Any] match {
+      case macros.Domain.Integers(List(limits)) => limits
+      case _                                    => report.errorAndAbort(s"unsupported numeric carrier ${Type.show[A]}")
+    }
+    def span(span: macros.Span): List[Expr[Constraint]] =
+      if (span.step > BigInt(Long.MaxValue)) List('{
+        Constraint.OneOf(${ Expr(finite(span).toList.flatten) }.toVector)
+      })
+      else {
+        val bounds =
+          if (span.low == limits.low && span.high == limits.high) Nil
+          else if (int) List('{ Constraint.IntInterval(${ Expr(span.low.toInt) }, ${ Expr(span.high.toInt) }) })
+          else List('{ Constraint.LongInterval(${ Expr(span.low.toLong) }, ${ Expr(span.high.toLong) }) })
+        bounds ++ (if (span.step == 1) Nil else List('{ Constraint.MultipleOf(${ Expr(span.step.toLong) }) }))
+      }
+    spans match {
+      case List(only) if only.step == 1 && only.high == limits.high && only.low == 1 => List('{ Constraint.Positive })
+      case List(only) if only.step == 1 && only.high == limits.high && only.low == 0 => List('{ Constraint.Positive0 })
+      case List(only) if only.step <= BigInt(Long.MaxValue)                          => span(only)
+      case _ if spans.forall(finite(_).nonEmpty)                                     =>
+        val values = Expr.ofSeq(spans.flatMap(finite(_).toList.flatten).distinct.sorted.map(Expr(_)))
+        List('{ Constraint.OneOf($values.toVector) })
+      case _ =>
+        val alternatives = Expr.ofSeq(spans.map(only => '{ Vector(${ Expr.ofSeq(span(only)) }*) }))
+        List('{ Constraint.AnyOf($alternatives.toVector) })
     }
   }
 

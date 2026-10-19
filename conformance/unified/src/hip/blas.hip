@@ -1,4 +1,4 @@
-#if defined(CONFORMANCE_HIP_HAS_ROCBLAS)
+#ifdef CONFORMANCE_HIP_HAS_ROCBLAS
   #include "backend_blas.hpp"
   #include "cases/blas.inl"
 

@@ -9,16 +9,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
+#include "session.hpp"
+
+using gemstone_opencl_test::gpu;
 
 namespace {
-cl_device_id gpu() {
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
-  return device;
-}
-
 struct Freed {
   void operator()(void *pointer) const { std::free(pointer); }
 };
@@ -37,8 +32,8 @@ struct Session {
     REQUIRE((context && error == CL_SUCCESS));
     queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
     REQUIRE((queue && error == CL_SUCCESS));
-    server.programCatalogue({{"groups", "groups"}}, {});
-    program = clCreateProgramWithIL(context, server.Spirv, sizeof(server.Spirv), &error);
+    server.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
+    program = clCreateProgramWithIL(context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
     REQUIRE((program && error == CL_SUCCESS));
     REQUIRE((clBuildProgram(program, 1, &device, "", nullptr, nullptr) == CL_SUCCESS));
     kernel = clCreateKernel(program, "groups", &error);
@@ -53,8 +48,9 @@ struct Session {
   }
   void launch(uint32_t seed) {
     REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
-    server.expect({4, 1, 4, 0, seed});
-    const size_t global = 4, local = 4;
+    server.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
+    const size_t global = 4;
+    const size_t local = 4;
     REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &global, &local, 0, nullptr, nullptr) == CL_SUCCESS));
     REQUIRE((clFinish(queue) == CL_SUCCESS));
     server.check();
@@ -63,7 +59,7 @@ struct Session {
 } // namespace
 
 TEST_CASE("OpenCL advertises fine-grained system SVM and Intel shared system memory", "[opencl][svm]") {
-  const auto device = gpu();
+  auto *const device = gpu();
   cl_device_svm_capabilities svm = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES, sizeof(svm), &svm, nullptr) == CL_SUCCESS));
   CHECK((svm & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM) != 0);
@@ -77,7 +73,7 @@ TEST_CASE("OpenCL advertises fine-grained system SVM and Intel shared system mem
 
 TEST_CASE("OpenCL kernels write through ordinary heap and stack pointers", "[opencl][svm]") {
   Session session;
-  std::unique_ptr<uint32_t, Freed> heap(static_cast<uint32_t *>(std::aligned_alloc(64, 64)));
+  std::unique_ptr<uint32_t, Freed> const heap(static_cast<uint32_t *>(std::aligned_alloc(64, 64)));
   std::memset(heap.get(), 0, 64);
   REQUIRE((clSetKernelArgSVMPointer(session.kernel, 0, heap.get() + 2) == CL_SUCCESS));
   session.launch(11);
@@ -101,7 +97,7 @@ TEST_CASE("OpenCL kernels write through ordinary heap and stack pointers", "[ope
 TEST_CASE("OpenCL launches over device buffers leave host memory access disabled", "[opencl][svm]") {
   Session session;
   cl_int error = CL_SUCCESS;
-  auto buffer = clCreateBuffer(session.context, CL_MEM_READ_WRITE, 16, nullptr, &error);
+  auto *buffer = clCreateBuffer(session.context, CL_MEM_READ_WRITE, 16, nullptr, &error);
   REQUIRE((buffer && error == CL_SUCCESS));
   REQUIRE((clSetKernelArg(session.kernel, 0, sizeof(buffer), &buffer) == CL_SUCCESS));
   session.launch(5);
@@ -110,9 +106,9 @@ TEST_CASE("OpenCL launches over device buffers leave host memory access disabled
 }
 
 TEST_CASE("OpenCL SVM commands and execution info accept ordinary host pointers", "[opencl][svm]") {
-  Session session;
-  std::unique_ptr<uint32_t, Freed> source(static_cast<uint32_t *>(std::malloc(16)));
-  std::unique_ptr<uint32_t, Freed> target(static_cast<uint32_t *>(std::malloc(16)));
+  Session const session;
+  std::unique_ptr<uint32_t, Freed> const source(static_cast<uint32_t *>(std::malloc(16)));
+  std::unique_ptr<uint32_t, Freed> const target(static_cast<uint32_t *>(std::malloc(16)));
   void *pointers[] = {source.get(), target.get()};
   CHECK(clSetKernelExecInfo(session.kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, sizeof(pointers), pointers) == CL_SUCCESS);
   const cl_bool system = CL_TRUE;

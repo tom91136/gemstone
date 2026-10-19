@@ -7,7 +7,7 @@ TEMPLATE_TEST_CASE_SIG("runtime/hip/device-function", "[unified][runtime][compac
   unified::gpu_calls::deviceFunction<Indirect>();
 }
 
-#if defined(CONFORMANCE_HIP_HAS_ROCBLAS)
+#ifdef CONFORMANCE_HIP_HAS_ROCBLAS
   #include "backend_blas.hpp"
 
 TEST_CASE("regressions/rocblas/gfx1036/f16/all", "[unified][regression][f16]") {

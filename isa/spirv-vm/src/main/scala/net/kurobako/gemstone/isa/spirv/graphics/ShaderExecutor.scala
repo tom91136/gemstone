@@ -29,10 +29,10 @@ private class ShaderExecutor(
   def execute(count: Int >= 0, records: Array[Array[Byte]]): Unit = {
     require(!shader.fragmentQuads || count.raw % 4 == 0, "invalid shader invocation count")
     require(records.length == shader.interfaces.size, "shader interface record count mismatch")
-    if (count.raw > 0) {
+    if (count > 0) {
       val regions = records.zipWithIndex.map { (bytes, index) =>
         require(
-          bytes.length.toLong == (count.toLong.widen[Long >= 0] * shader.interfaces(index).size.toLong).raw,
+          bytes.length.toLong == (count.widen[Long >= 0] * shader.interfaces(index).size.widen[Long >= 0]).raw,
           "shader record storage size mismatch"
         )
         memory.allocate(bytes)._1
@@ -40,13 +40,13 @@ private class ShaderExecutor(
       val leading         = descriptors ++ push
       var start: Int >= 0 = 0
       while (start < count) {
-        val batch          = (count - start).raw.unsafe[Int > 0].min(1024)
+        val batch          = (count - start).unsafe[Int > 0].min(1024)
         val group: Int > 0 = if (shader.fragmentQuads) 4 else 1
         val arguments      = leading ++ Vec.from(regions.zipWithIndex.map { (region, index) =>
           KernelTask.Argument.Memory(
             region,
-            start.toLong.widen[Long >= 0] * shader.interfaces(index).size.toLong,
-            Some(batch.toLong.widen[Long > 0] * shader.interfaces(index).size.toLong)
+            start.widen[Long >= 0] * shader.interfaces(index).size.widen[Long >= 0],
+            Some(batch.widen[Long > 0] * shader.interfaces(index).size.widen[Long > 0])
           )
         })
         val task = KernelTask.validated(
@@ -60,7 +60,7 @@ private class ShaderExecutor(
           .fold(error => throw GraphicsAccess.Failure(Fault.InvalidRequest(error)), identity)
         program.execute(task, memory, memory.control, handler)
           .fold(fault => throw GraphicsAccess.Failure(fault), _ => ())
-        start = start + batch
+        start += batch
       }
     }
   }

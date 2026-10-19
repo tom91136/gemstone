@@ -82,7 +82,7 @@ object Replay {
     }
     private def identified(frame: Array[Byte], client: Journal.RecordedClientId): Array[Byte] = {
       val result = frame.clone()
-      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset.raw, assignedClient(client).raw)
+      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset, assignedClient(client).raw)
       result
     }
     private def isQuery(frame: Array[Byte]): Boolean = {
@@ -97,11 +97,11 @@ object Replay {
     }
     private def completion(frame: Array[Byte]): Option[CompletionStatus] =
       Option.when(
-        frame.length >= ExecutionRPC.ResponseHeaderBytes.raw &&
+        frame.length >= ExecutionRPC.ResponseHeaderBytes &&
           Frame.magic(frame) == ExecutionRPC.ResponseMagic &&
-          Frame.integer(frame, ExecutionRPC.ResponseStatusOffset.raw) == 0
+          Frame.integer(frame, ExecutionRPC.ResponseStatusOffset) == 0
       ) {
-        val payload = java.util.Arrays.copyOfRange(frame, ExecutionRPC.ResponseHeaderBytes.raw, frame.length)
+        val payload = java.util.Arrays.copyOfRange(frame, ExecutionRPC.ResponseHeaderBytes, frame.length)
         summon[Wire.Codec[CompletionStatus]].decode(payload, ExecutionRPC.Limits).toOption
       }.flatten
     private def compare(event: Journal.Event, expected: Array[Byte], active: Active): Unit = {
@@ -109,7 +109,7 @@ object Replay {
       var actual = Frame.readResponse(active.wire.input, options.limits.maxFrameBytes.raw)
       if (event.kind == Journal.Kind.Response && isQuery(active.request)) {
         if (!completion(expected).contains(CompletionStatus.Pending)) {
-          val deadline = platform.monotonicNanos + options.timeoutMillis.raw.toLong * 1000000L
+          val deadline = platform.monotonicNanos + options.timeoutMillis.toLong * 1000000L
           while (completion(actual).contains(CompletionStatus.Pending)) {
             if (platform.monotonicNanos >= deadline)
               throw IOException(s"RPC replay: completion remained pending at event ${event.sequence}")

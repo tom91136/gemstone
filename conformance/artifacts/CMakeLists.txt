@@ -72,7 +72,7 @@ if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
     conformance_toolchain("${CONFORMANCE_BACKEND}" "${CONFORMANCE_ARCHITECTURE}" image toolchain_stamp unused_support)
     file(RELATIVE_PATH source_relative "${CONFORMANCE_SOURCE_DIRECTORY}" "${source}")
     conformance_opencl_commands("${CONFORMANCE_BACKEND}" "${CONFORMANCE_ARCHITECTURE}"
-      "/source/conformance/${source_relative}" "/output/${filename}" compile translate ${options})
+      "/source/conformance/${source_relative}" "/output/${filename}" compile TRANSLATE translate ${options})
     set(commands)
     foreach(step IN ITEMS compile translate)
       if(${step})
@@ -200,6 +200,8 @@ set(CONFORMANCE_WORK_DIRECTORY "${CMAKE_BINARY_DIR}/work" CACHE PATH
   "Persistent per-artifact build directory")
 option(CONFORMANCE_KEEP_WORK "Keep artifact build trees for incremental rebuilds" ON)
 option(SYCL_CTS_ENABLE_FULL_CONFORMANCE "Build the complete upstream SYCL CTS type and operation matrices" OFF)
+set(CONFORMANCE_LINT_CUDA_ARCHITECTURE sm_90a CACHE STRING "Device architecture the CUDA unified sources are linted for")
+set(CONFORMANCE_LINT_AMDGPU_ARCHITECTURE gfx950 CACHE STRING "Device architecture the HIP unified sources are linted for")
 
 include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake")
 set(dependency_manifest "${CONFORMANCE_SOURCE_DIRECTORY}/dependencies.cmake")
@@ -369,4 +371,59 @@ foreach(route IN LISTS conformance_routes)
 endforeach()
 
 add_custom_target(artifacts ALL DEPENDS ${artifact_outputs})
+
+# The repository root is mounted so clang-tidy finds the shared .clang-tidy above /source/conformance.
+function(add_lint backend architecture compiler)
+  conformance_toolchain("${backend}" "${architecture}" image toolchain_stamp support "${compiler}" LINT)
+  artifact_arguments("${backend}" "${architecture}" "${compiler}" lint arguments)
+  list(APPEND arguments
+    -DBUILD_CTS=OFF
+    -DBUILD_MINIAPPS=OFF
+    "-DCLANG_TIDY_VERSION=${conformance_clang_version}"
+    "-DCONFORMANCE_SUPPORT_KEY=${support}"
+    "-DCONFORMANCE_DEPENDENCY_CACHE=/conformance-deps"
+    "-DCONFORMANCE_OFFLINE=ON"
+    "-DCONFORMANCE_WORK_DIRECTORY=/work")
+  set(name "lint-${backend}")
+  if(NOT compiler STREQUAL "vendor")
+    string(APPEND name "-${compiler}")
+  endif()
+  if(architecture)
+    string(APPEND name "-${architecture}")
+  endif()
+  set(work_directory "${CONFORMANCE_WORK_DIRECTORY}/${name}")
+  set(dependencies "${toolchain_stamp}")
+  if(NOT CONFORMANCE_OFFLINE)
+    list(APPEND dependencies "${conformance_dependency_stamp}")
+  endif()
+  get_filename_component(repository "${CONFORMANCE_SOURCE_DIRECTORY}/.." ABSOLUTE)
+  container_command(container_command
+    EXECUTABLE "${CONTAINER_EXECUTABLE}"
+    IMAGE "${image}"
+    SOURCE "${repository}"
+    SOURCE_TARGET /source
+    DEPENDENCIES "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+    WORK "${work_directory}"
+    NETWORK none
+    IDENTITY "${identity}"
+    COMMAND cmake ${arguments} -P /source/conformance/artifacts/Assemble.cmake)
+  add_custom_target("${name}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${work_directory}"
+    COMMAND ${container_command}
+    DEPENDS ${dependencies}
+    COMMENT "Linting ${backend} unified sources"
+    JOB_POOL container_build
+    VERBATIM)
+  set_property(GLOBAL APPEND PROPERTY CONFORMANCE_LINT_TARGETS "${name}")
+endfunction()
+
+add_lint(cuda "${CONFORMANCE_LINT_CUDA_ARCHITECTURE}" clang)
+add_lint(hip "${CONFORMANCE_LINT_AMDGPU_ARCHITECTURE}" vendor)
+add_lint(hsa "${CONFORMANCE_LINT_AMDGPU_ARCHITECTURE}" vendor)
+add_lint(opencl "" vendor)
+add_lint(levelzero "" vendor)
+add_lint(sycl "" vendor)
+get_property(lint_targets GLOBAL PROPERTY CONFORMANCE_LINT_TARGETS)
+add_custom_target(lint DEPENDS ${lint_targets})
+
 container_prune_target(prune-images EXECUTABLE "${CONTAINER_EXECUTABLE}")

@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv
 
-import VMProgram.*
 import cats.syntax.all.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -17,6 +17,7 @@ import scala.collection.mutable
   * workgroup and private bytes) sits in apertures above every guest address, selected by the top byte.
   */
 private object VMMemory {
+  case class MatrixLayout(stride: Int > 0, rowMajor: Boolean)
 
   /** A typed address. Bounds, descriptor arrays, samplers and matrix layouts are descriptor and type metadata. */
   case class Pointer(
@@ -79,7 +80,7 @@ private object VMMemory {
       else append(Vec.unsafeWrapArray(Array.ofDim[Byte](bytes.toInt)), alignment)
 
     /** Overwrites bytes already appended at `address` once the image is produced. */
-    def patch(address: Long, bytes: Array[Byte]): Unit = patches += (offsetOf(address).raw.toInt -> bytes)
+    def patch(address: Long, bytes: Array[Byte]): Unit = patches += (offsetOf(address).toInt -> bytes)
 
     def result(): Array[Byte] = {
       val bytes = image.result()
@@ -137,7 +138,7 @@ private object VMMemory {
       val table = ConcurrentHashMap[(AllocationId, Long), (AllocationId, Long)]()
       relocations.foreach {
         case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), offset, target, targetOffset) =>
-          val _ = table.put(source -> offset.raw, target -> targetOffset.raw)
+          val _ = table.put(source -> offset, target -> targetOffset)
         case _ => ()
       }
       table
@@ -210,11 +211,11 @@ private object VMMemory {
     }
 
     def read(pointer: Pointer, size: Int >= 0): AddressSpace.ReadResult[Array[Byte]] =
-      if (outsideBounds(pointer, size.raw)) Right(Array.ofDim[Byte](size.raw))
+      if (outsideBounds(pointer, size.raw)) Right(Array.ofDim[Byte](size))
       else {
         val bytes = storage(pointer.address)
         if (bytes != null)
-          start(bytes, pointer.address, size.raw).map(at => java.util.Arrays.copyOfRange(bytes, at, at + size.raw))
+          start(bytes, pointer.address, size).map(at => java.util.Arrays.copyOfRange(bytes, at, at + size))
         else
           guest(pointer.address, size, "read through") match {
             case Left(fault)                                     => Left(fault)
@@ -228,7 +229,7 @@ private object VMMemory {
       !outsideBounds(pointer, size.raw) && {
         val bytes = storage(pointer.address)
         bytes != null && {
-          val at = offsetIn(bytes, pointer.address, size.raw)
+          val at = offsetIn(bytes, pointer.address, size)
           at >= 0 && {
             registers(slot) = LittleEndian.decode(bytes, at, size.widen[Int in 0 ~ 8])
             true
@@ -242,14 +243,14 @@ private object VMMemory {
     private def load(address: Long, size: Int in 1 ~ 8): AddressSpace.ReadResult[Long] = {
       val bytes = storage(address)
       if (bytes != null) {
-        val at = offsetIn(bytes, address, size.raw)
+        val at = offsetIn(bytes, address, size)
         if (at >= 0) Right(LittleEndian.decode(bytes, at, size.widen[Int in 0 ~ 8]))
-        else Left(outOfRange(bytes, address, size.raw))
+        else Left(outOfRange(bytes, address, size))
       } else
         guest(address, size.widen[Int >= 0], "read through") match {
           case Left(fault)                                     => Left(fault)
           case Right(AddressSpace.Location.Within(id, offset)) =>
-            (if (size.raw == 8) relocation(id, offset.raw) else None) match {
+            (if (size == 8) relocation(id, offset) else None) match {
               case Some(target) => addressOf(target)
               case None         => memory.readValueDeferred(id, offset, size)
             }
@@ -281,7 +282,7 @@ private object VMMemory {
     def descriptorPointer(record: Pointer, pointee: Int, storageClass: Int): Either[Fault, Option[Pointer]] =
       guest(record.address, 8, "read through").flatMap {
         case AddressSpace.Location.Within(id, offset) =>
-          Option(shared.pointers.get(id -> offset.raw)) match {
+          Option(shared.pointers.get(id -> offset)) match {
             case Some(target) => addressOf(target).map(address => Some(Pointer(address, pointee, storageClass)))
             case None         => Right(None)
           }
@@ -307,8 +308,8 @@ private object VMMemory {
       else {
         val target = storage(pointer.address)
         if (target != null) {
-          val at = offsetIn(target, pointer.address, size.raw)
-          if (at < 0) Left(outOfRange(target, pointer.address, size.raw))
+          val at = offsetIn(target, pointer.address, size)
+          if (at < 0) Left(outOfRange(target, pointer.address, size))
           else {
             LittleEndian.write(value, target, at, size.widen[Int in 0 ~ 8])
             AddressSpace.Ready
@@ -366,7 +367,7 @@ private object VMMemory {
       */
     def copy(destination: Pointer, origin: Pointer, size: Int >= 0): AddressSpace.ReadResult[Unit] =
       read(origin, size).flatMap(write(destination, _)).flatMap { _ =>
-        val span = size.raw.toLong - 8L
+        val span = size.toLong - 8L
         if (
           span < 0L || suppressed(destination) || outsideBounds(destination, size.raw) ||
           outsideBounds(origin, size.raw)
@@ -387,7 +388,7 @@ private object VMMemory {
           else
             memory.locate(GuestAddress(origin.address), size) match {
               case Right(AddressSpace.Location.Within(id, offset)) if !memory.hasNativePointers(id) =>
-                relocations(id, offset.raw, span).traverse_ { case (at, target) =>
+                relocations(id, offset, span).traverse_ { case (at, target) =>
                   addressOf(target).flatMap(address =>
                     writePointer(moved(at), Pointer(address, 0, StorageClass.CrossWorkgroup))
                   )
@@ -399,7 +400,7 @@ private object VMMemory {
 
     /** Client relocations no longer describe a pointer slot that a plain write overlaps, even in part. */
     private def forgetRelocations(address: Long, size: Int >= 0): Unit =
-      if (!shared.pointers.isEmpty && size.raw > 0)
+      if (!shared.pointers.isEmpty && size > 0)
         memory.locate(GuestAddress(address), size) match {
           case Right(AddressSpace.Location.Within(id, offset)) if !memory.hasNativePointers(id) =>
             val first = offset.raw - 7L
@@ -420,30 +421,228 @@ private object VMMemory {
       }
 
     def atomicReadScalar(pointer: Pointer, size: Int in 1 ~ 8): Either[Fault, Long] =
-      atomicModifyScalar(pointer, size, write = false)(identity)
+      if (outsideBounds(pointer, size.raw)) Right(0L)
+      else if (misaligned(pointer, size)) Left(misalignedAtomic(pointer, size))
+      else {
+        val target = storage(pointer.address)
+        if (target != null) {
+          def read(): Either[Fault, Long] =
+            start(target, pointer.address, size).map(at =>
+              LittleEndian.decode(target, at, size.widen[Int in 0 ~ 8])
+            )
+          if (aperture(pointer.address) == GlobalAperture) shared.lock.withLock(read()) else read()
+        } else
+          guest(pointer.address, size.widen[Int >= 0], "atomically access").flatMap { _ =>
+            memory.atomicModifyValue(GuestAddress(pointer.address), size)(identity)
+          }
+      }
+
+    /** No GPU this VM stands for performs an atomic that is not aligned to its size: NVIDIA reports a misaligned
+      * address and AMD a memory violation. Ordinary loads and stores are not checked: producers declare packed accesses
+      * with `Aligned` operands, and AMD GPUs perform misaligned ones.
+      */
+    private def misaligned(pointer: Pointer, size: Int in 1 ~ 8): Boolean = (pointer.address & (size - 1).toLong) != 0L
+
+    private def misalignedAtomic(pointer: Pointer, size: Int in 1 ~ 8): Fault =
+      Fault.Misaligned(s"$size-byte atomic at 0x${pointer.address.toHexString}")
 
     def atomicWriteScalar(pointer: Pointer, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
       atomicModifyScalar(pointer, size)(_ => value).map(_ => ())
 
-    def atomicModifyScalar(pointer: Pointer, size: Int in 1 ~ 8, write: Boolean = true)(
-        update: Long => Long
-    ): Either[Fault, Long] =
-      if ((write && suppressed(pointer)) || outsideBounds(pointer, size.raw)) Right(0L)
+    def atomicModifyScalar(pointer: Pointer, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
+      if (suppressed(pointer) || outsideBounds(pointer, size.raw)) Right(0L)
+      else if (misaligned(pointer, size)) Left(misalignedAtomic(pointer, size))
       else {
         val target = storage(pointer.address)
         if (target != null) {
-          def modify(): Either[Fault, Long] = start(target, pointer.address, size.raw).map { at =>
+          def modify(): Either[Fault, Long] = start(target, pointer.address, size).map { at =>
             val width    = size.widen[Int in 0 ~ 8]
             val previous = LittleEndian.decode(target, at, width)
-            if (write) LittleEndian.write(update(previous), target, at, width)
+            LittleEndian.write(update(previous), target, at, width)
             previous
           }
           if (aperture(pointer.address) == GlobalAperture) shared.lock.withLock(modify()) else modify()
         } else
           guest(pointer.address, size.widen[Int >= 0], "atomically access").flatMap { _ =>
-            if (write) forgetRelocations(pointer.address, size.widen)
+            forgetRelocations(pointer.address, size.widen)
             memory.atomicModifyValue(GuestAddress(pointer.address), size)(update)
           }
       }
+  }
+
+  object DeviceQueue {
+    type Write = (Pointer, Array[Byte]) => Either[Fault, Unit]
+
+    inline val Complete       = 0
+    inline val Running        = 1
+    inline val Submitted      = 2
+    inline val Queued         = 3
+    inline val FailedWaitList = -14
+
+    inline val Success              = 0
+    inline val InvalidQueue         = -102
+    inline val InvalidNDRange       = -160
+    inline val InvalidEventWaitList = -57
+    inline val InvalidArgSize       = -51
+
+    private enum Origin derives CanEqual {
+      case Command, User
+    }
+
+    case class NDRange(dimensions: Int, offset: Vector[Long], global: Vector[Long], local: Vector[Long])
+
+    case class Command(event: Long, waits: Vector[Long], action: Action)
+
+    enum Action derives CanEqual {
+      case Kernel(function: Int, range: NDRange, literal: Array[Byte], literalAlignment: Int, locals: Vector[Long])
+      case Marker
+    }
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private class EventState(
+        var status: Int,
+        var references: Int,
+        val user: Boolean,
+        val parent: Option[Long],
+        val queued: Long
+    ) {
+      var children: Int                          = 0
+      var executed: Boolean                      = false
+      var start: Long                            = 0L
+      var end: Long                              = 0L
+      var complete: Long                         = 0L
+      val captures: mutable.ArrayBuffer[Pointer] = mutable.ArrayBuffer.empty
+    }
+  }
+
+  /** Commands that work-items enqueue to device queues. A dispatch runs them once its own work-items finish, in an
+    * order that respects their wait lists; an event completes once its command and every command that command enqueued
+    * have completed.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  class DeviceQueue {
+    import DeviceQueue.*
+
+    private val lock                  = ReentrantLock()
+    private val pending               = mutable.ArrayBuffer.empty[Command]
+    private val events                = mutable.LongMap.empty[EventState]
+    private var nextEvent             = 1L
+    private var running: Option[Long] = None
+
+    def isEmpty: Boolean = lock.withLock(pending.isEmpty)
+
+    private def allocate(origin: Origin, references: Int): Long = {
+      val handle = nextEvent
+      nextEvent += 1
+      val user   = origin == Origin.User
+      val parent = if (user) None else running
+      parent.foreach(events(_).children += 1)
+      events.update(
+        handle,
+        EventState(if (user) Submitted else Queued, references, user, parent, platform.monotonicNanos)
+      )
+      handle
+    }
+
+    private def waitable(waits: Vector[Long]): Boolean = waits.forall(events.contains)
+
+    /** Queues a command and returns its event, or the enqueue status that rejected it. */
+    inline def enqueue(waits: Vector[Long], returned: Boolean)(inline command: Long => Command): Either[Int, Long] =
+      lock.withLock {
+        if (!waitable(waits)) Left(InvalidEventWaitList)
+        else {
+          val handle = allocate(Origin.Command, if (returned) 1 else 0)
+          pending += command(handle)
+          Right(handle)
+        }
+      }
+
+    def userEvent(): Long = lock.withLock(allocate(Origin.User, 1))
+
+    def valid(handle: Long): Boolean = lock.withLock(events.get(handle).exists(_.references > 0))
+
+    def retain(handle: Long): Unit = lock.withLock(events.get(handle).foreach(_.references += 1))
+
+    def release(handle: Long): Unit = lock.withLock(events.get(handle).foreach(event =>
+      event.references = math.max(0, event.references - 1)
+    ))
+
+    def setStatus(handle: Long, status: Int, write: Write): Either[Fault, Unit] = lock.withLock {
+      events.get(handle) match {
+        case Some(event) if event.user && event.status > Complete =>
+          complete(handle, if (status < Complete) status else Complete, write)
+        case Some(_) => Left(Fault.InvalidRequest("set_user_event_status requires a user event that has not completed"))
+        case None    => Left(Fault.InvalidRequest(s"device event $handle does not exist"))
+      }
+    }
+
+    def capture(handle: Long, pointer: Pointer, write: Write): Either[Fault, Unit] = lock.withLock {
+      events.get(handle) match {
+        case Some(event) if event.status <= Complete => profile(event, pointer, write)
+        case Some(event)                             =>
+          event.captures += pointer
+          Right(())
+        case None => Left(Fault.InvalidRequest(s"device event $handle does not exist"))
+      }
+    }
+
+    /** The next command whose wait list has completed. Commands waiting on failed events fail in turn. */
+    def next(write: Write): Either[Fault, Option[Command]] = lock.withLock {
+      def loop(): Either[Fault, Option[Command]] =
+        pending.indexWhere(_.waits.forall(events(_).status <= Complete)) match {
+          case -1    => Right(None)
+          case index =>
+            val command = pending.remove(index)
+            if (command.waits.exists(events(_).status < Complete))
+              executed(command.event, FailedWaitList, write).flatMap(_ => loop())
+            else Right(Some(command))
+        }
+      loop()
+    }
+
+    def begin(command: Command): Unit = lock.withLock {
+      val event = events(command.event)
+      event.status = Running
+      event.start = platform.monotonicNanos
+      running = Some(command.event)
+    }
+
+    def finish(command: Command, write: Write): Either[Fault, Unit] = lock.withLock {
+      running = None
+      executed(command.event, Complete, write)
+    }
+
+    private def executed(handle: Long, status: Int, write: Write): Either[Fault, Unit] = {
+      val event = events(handle)
+      event.end = platform.monotonicNanos
+      event.executed = true
+      event.status = if (status < Complete) status else Running
+      if (event.children == 0) complete(handle, status, write) else Right(())
+    }
+
+    private def complete(handle: Long, status: Int, write: Write): Either[Fault, Unit] = {
+      val event = events(handle)
+      event.status = status
+      if (event.end == 0L) event.end = platform.monotonicNanos
+      event.complete = platform.monotonicNanos
+      for {
+        _ <- event.captures.toVector.traverse_(profile(event, _, write))
+        _ <- event.parent.fold[Either[Fault, Unit]](Right(())) { parentHandle =>
+          val parent = events(parentHandle)
+          parent.children -= 1
+          if (parent.executed && parent.children == 0) complete(parentHandle, parent.status.min(Complete), write)
+          else Right(())
+        }
+      } yield ()
+    }
+
+    private def profile(event: EventState, pointer: Pointer, write: Write): Either[Fault, Unit] = {
+      val start     = if (event.start == 0L) event.queued else event.start
+      val execution = math.max(1L, event.end - start)
+      val bytes     = Array.ofDim[Byte](16)
+      LittleEndian.write(execution, bytes, 0, 8)
+      LittleEndian.write(math.max(execution, event.complete - start), bytes, 8, 8)
+      write(pointer, bytes)
+    }
   }
 }

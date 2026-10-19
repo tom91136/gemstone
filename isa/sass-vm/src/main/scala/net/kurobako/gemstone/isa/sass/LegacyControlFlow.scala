@@ -8,18 +8,20 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 
 private object LegacyControlFlow {
-  enum Kind { case Break, Synchronisation }
+  enum Kind derives CanEqual { case Break, Continue, Synchronisation }
   case class Setup(instruction: DecodedInstruction, kind: Kind, slot: Int in 0 ~ 15, target: Int >= 0)
 
-  def setupKind(instruction: DecodedInstruction): Option[Kind] = instruction.operation match {
-    case _: Instruction.Ssy => Some(Kind.Synchronisation)
-    case _: Instruction.Pbk => Some(Kind.Break)
-    case _                  => None
+  def setupKind(instruction: DecodedInstruction): Option[Kind] = instruction.operation.form match {
+    case _: Form.Ssy  => Some(Kind.Synchronisation)
+    case _: Form.Pbk  => Some(Kind.Break)
+    case _: Form.Pcnt => Some(Kind.Continue)
+    case _            => None
   }
 
-  def transferKind(instruction: DecodedInstruction): Option[Kind] = instruction.operation match {
-    case _: Instruction.Brk                                                     => Some(Kind.Break)
-    case _: Instruction.Sync                                                    => Some(Kind.Synchronisation)
+  def transferKind(instruction: DecodedInstruction): Option[Kind] = instruction.operation.form match {
+    case _: Form.Brk                                                            => Some(Kind.Break)
+    case _: Form.Cont                                                           => Some(Kind.Continue)
+    case _: Form.Sync                                                           => Some(Kind.Synchronisation)
     case _ if instruction.modifiers.lastOption.contains(Instruction.Modifier.S) => Some(Kind.Synchronisation)
     case _                                                                      => None
   }
@@ -31,22 +33,22 @@ private object LegacyControlFlow {
     * a branch conditional and a breakpoint without `TRAP` resumes; control-stack transfers are classified separately.
     */
   def terminates(instruction: DecodedInstruction): Boolean = instruction.guard.isEmpty &&
-    (instruction.operation match {
-      case _: Instruction.Bra =>
+    (instruction.operation.form match {
+      case _: Form.Bra =>
         !instruction.modifiers.contains(Instruction.Modifier.`CC`) && instruction.operands.size == 1
-      case _: Instruction.Jmp | _: Instruction.Exit | _: Instruction.Ret | _: Instruction.Kill | _: Instruction.Brx |
-          _: Instruction.Brxu | _: Instruction.Jmx => true
-      case _: Instruction.Bpt => instruction.modifiers == Vec(Instruction.Modifier.TRAP)
-      case _                  => false
+      case _: Form.Jmp | _: Form.Exit | _: Form.Ret | _: Form.Kill | _: Form.Brx |
+          _: Form.Brxu | _: Form.Jmx => true
+      case _: Form.Bpt => instruction.modifiers == Vec(Instruction.Modifier.TRAP)
+      case _           => false
     })
 
   /** `PRET` of the following instruction, then `BRX`: a call through a register. */
   def isIndirectCall(instructions: Vec[DecodedInstruction], index: Int): Boolean =
     index > 0 && index + 1 < instructions.size && instructions(index).guard.isEmpty &&
-      OperandQueries.is[Instruction.Brx](instructions(index).operation) && instructions(index - 1).guard.isEmpty &&
-      OperandQueries.is[Instruction.Pret](instructions(index - 1).operation) &&
+      OperandQueries.is[Form.Brx](instructions(index).operation) && instructions(index - 1).guard.isEmpty &&
+      OperandQueries.is[Form.Pret](instructions(index - 1).operation) &&
       instructions(index - 1).operands.flatMap(OperandQueries.integer(_)) ==
-      Vec(BigInt(instructions(index + 1).address.raw))
+      Vec(BigInt(instructions(index + 1).address))
 
   /** Indirect calls enter functions, and every function after the first follows an unconditional terminator; trailing
     * NOP padding is not a function.
@@ -54,7 +56,7 @@ private object LegacyControlFlow {
   def functionEntries(instructions: Vec[DecodedInstruction]): Vec[Int] =
     if (!instructions.indices.exists(isIndirectCall(instructions, _))) Vec.empty
     else instructions.indices.drop(1).toVec.filter(index =>
-      !instructions.drop(index).forall(instruction => OperandQueries.is[Instruction.Nop](instruction.operation)) &&
+      !instructions.drop(index).forall(instruction => OperandQueries.is[Form.Nop](instruction.operation)) &&
         terminates(instructions(index - 1))
     )
 
@@ -89,15 +91,15 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
     val target = OperandQueries.integer(instruction.operands.head).filter(_.isValidInt)
       .flatMap(_.toInt.refine[Int >= 0].toOption)
       .getOrElse(throw IllegalArgumentException("invalid legacy convergence target"))
-    if (target <= instruction.address || !indices.contains(target.raw))
+    if (target <= instruction.address || !indices.contains(target))
       throw IllegalArgumentException("legacy convergence target must be a forward instruction")
     target
   }
 
   private val calls: Vec[(Int, Int)] = instructions.indices.toVec.flatMap { index =>
-    instructions(index).operation match {
-      case _: Instruction.Cal => destination(instructions(index)).map(index -> _)
-      case _                  => None
+    instructions(index).operation.form match {
+      case _: Form.Cal | _: Form.Jcal => destination(instructions(index)).map(index -> _)
+      case _                          => None
     }
   }
 
@@ -164,11 +166,11 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
           val position = stack.indexWhere(token => token == Divergent || tokens(token)._1 == kind)
           if (position < 0) throw IllegalArgumentException("legacy control-stack transfer has no enclosing setup")
           if (stack(position) == Divergent) inconsistent(index)
-          follow(indices(tokens(stack(position))._2.raw), stack.drop(position + 1))
+          follow(indices(tokens(stack(position))._2), stack.drop(position + 1))
           if (instruction.guard.nonEmpty) next()
         case _ =>
-          instruction.operation match {
-            case _: Instruction.Bra | _: Instruction.Jmp | _: Instruction.Pret => follow(
+          instruction.operation.form match {
+            case _: Form.Bra | _: Form.Jmp | _: Form.Pret => follow(
                 destination(instruction).getOrElse(
                   throw IllegalArgumentException("legacy branch targets an unknown address")
                 ),
@@ -210,7 +212,7 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
         tokens.keys.filter(other => stacks(other).contains(index) || bypassed(other)(index))
       val occupied = overlapping.view.flatMap(slots.get).map(_.raw).toSet ++
         inherited.getOrElse(routines(index), Set.empty)
-      slots(index) = Vec.range[0, 16].find(slot => !occupied(slot.raw))
+      slots(index) = Vec.range[0, 16].find(slot => !occupied(slot))
         .getOrElse(throw IllegalArgumentException("legacy convergence nesting exceeds 16 tokens"))
     }
     Analysis(
@@ -223,18 +225,36 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
     )
   }
 
+  /** Whether the routine making the call at `site` can be reached again from the routine it calls. */
+  private def recursive(result: Analysis, site: Int, entry: Int): Boolean = {
+    val callees = result.calls.groupMap((caller, _) => result.routines(caller))(_._2)
+    @tailrec def reach(pending: List[Int], seen: Set[Int]): Boolean = pending match {
+      case Nil                                        => false
+      case head :: _ if head == result.routines(site) => true
+      case head :: rest                               =>
+        val next = callees.getOrElse(head, Vec.empty[Int]).filterNot(seen)
+        reach(next.toList ++ rest, seen ++ next)
+    }
+    reach(List(entry), Set(entry))
+  }
+
+  /** The tokens live at `site`, which its callee may overwrite. */
+  private def live(result: Analysis, site: Int): Vec[Int] =
+    (Vec.from(result.stacks(site).filter(_ != Divergent)) ++ Vec.from(result.bypassed(site))).distinct
+
   private val analysis: Option[Analysis] = Option.when(
     instructions.exists(instruction => setupKind(instruction).nonEmpty || transferKind(instruction).nonEmpty)
   ) {
-    // a callee's tokens share the warp's stack with every token live at its call sites, so they take other slots
+    // a callee's tokens share the warp's stack with every token live at its call sites, so they take other slots;
+    // a recursive call cannot avoid its own routine's slots and saves them instead
     @tailrec def settle(inherited: Map[Int, Set[Int]]): Analysis = {
       val result  = analyse(inherited)
       val widened = result.calls.foldLeft(inherited) { case (slots, (site, entry)) =>
         slots.updated(
           entry,
           slots.getOrElse(entry, Set.empty) ++
-            (result.stacks(site).filter(_ != Divergent) ++ result.bypassed(site)).map(result.setups(_).slot.raw) ++
-            slots.getOrElse(result.routines(site), Set.empty)
+            (if (recursive(result, site, entry)) Set.empty[Int] else live(result, site).map(result.setups(_).slot.raw))
+              .toSet ++ slots.getOrElse(result.routines(site), Set.empty)
         )
       }
       if (widened == inherited) result else settle(widened)
@@ -242,12 +262,23 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
     settle(Map.empty)
   }
 
+  /** Tokens a recursive call saves on the lane's return stack and restores when its callee returns, by call address.
+    */
+  val saved: Map[Int, Vec[Setup]] = analysis.fold(Map.empty[Int, Vec[Setup]]) { result =>
+    result.calls.filter((site, entry) => recursive(result, site, entry) && live(result, site).nonEmpty)
+      .map(_._1).distinct.map { site =>
+        if (!calls.exists(_._1 == site))
+          throw IllegalArgumentException("recursive indirect calls inside a convergence region are not supported")
+        instructions(site).address.raw -> live(result, site).map(result.setups).distinctBy(_.slot)
+      }.toMap
+  }
+
   val setups: Vec[Setup] = analysis.fold(Vec.empty[Setup])(_.setups.toVec.sortBy(_._1).map(_._2))
 
   private def popped(instruction: DecodedInstruction): Option[(Setup, Vec[Setup])] =
     transferKind(instruction).filterNot(_ => never(instruction)).flatMap(kind =>
       analysis.map { result =>
-        val stack    = result.stacks(indices(instruction.address.raw))
+        val stack    = result.stacks(indices(instruction.address))
         val position = stack.indexWhere(token => token != Divergent && result.setups(token).kind == kind)
         if (position < 0) throw IllegalArgumentException("legacy control-stack transfer has no enclosing setup")
         (result.setups(stack(position)), Vec.from(stack.take(position)).map(result.setups))

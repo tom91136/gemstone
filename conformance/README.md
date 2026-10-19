@@ -31,7 +31,7 @@ backend's support unless their runtime closure differs, as GCC's offload plugins
 | Target set | Matrix |
 | --- | --- |
 | `default` | CUDA `sm_89`, HIP/HSA `gfx1030`, OpenCL, SYCL, Level Zero, Vulkan |
-| `complete` | CUDA `sm_35`-`sm_120` (11.8 up to `sm_70`, 13.3 after) and AMD `gfx803`-`gfx1201` |
+| `complete` | CUDA `sm_35`-`sm_120` (11.8 up to `sm_70`, 13.3 after), the architecture-specific `sm_90a`, `sm_100a`, `sm_103a`, and `sm_120a`, the family-specific `sm_100f`, `sm_103f`, and `sm_120f`, and AMD `gfx803`-`gfx1201` |
 | `legacy-gfx803` | HIP and HSA `gfx803`, without rocBLAS |
 
 Select a set with `-DCONFORMANCE_TARGET_SET=<name>`, or override parts of it with `-DCONFORMANCE_BACKENDS`,
@@ -43,6 +43,14 @@ Select a set with `-DCONFORMANCE_TARGET_SET=<name>`, or override parts of it wit
 | `vendor` | All | Every suite |
 | `clang` | CUDA | Clang 22 CUDA frontend; unified tests and CUDA miniapps |
 | `gcc` | CUDA, HSA | GCC 14 OpenMP target miniapps; CUDA routes are PTX only |
+
+CUDA architectures are `sm_<capability>` with an optional `a` or `f` suffix. An `a` route compiles
+architecture-specific code (`compute_90a`, `.target sm_90a`), which runs only on that compute capability; an `f` route
+compiles family-specific code, which also runs on later minor revisions of the same major. Both use CUDA 13.3, take the
+numeric capability wherever one is compared, and pass the suffixed name to `ptxas -arch` for the explicit fixtures and
+to the device probe. Gemstone runs them as the plain capability, so `GEMSTONE_TARGET_ARCH=sm_90a` reports compute
+capability 9.0 and loads both the suffixed PTX and its cubin. Clang 22 accepts `a` targets but not `f` ones, so the
+`clang` compiler omits the `f` routes.
 
 Unsupported compiler and architecture combinations are omitted; a selection with none left fails. The GCC images
 rebuild libgomp 14.2.0 with a default-device fix, and the runner sets `OMP_TARGET_OFFLOAD=MANDATORY` so CPU

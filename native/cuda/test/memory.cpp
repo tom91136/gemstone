@@ -1,12 +1,19 @@
 // Native memory transport and scheduling regression client.
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <dlfcn.h>
 
 #include "../../rpc/test/memory_patterns.hpp"
 
-namespace memory_patterns {
-struct MemoryClient {
-  std::string kind;
-  std::string allocationKind() const { return kind; }
+namespace memory_patterns { namespace {
+struct MemoryClient : MemoryClientBase<MemoryClient> {
   void *library, *context{}, *module{}, *function{};
   template <class F> F symbol(const char *name) {
     auto *p = dlsym(library, name);
@@ -14,7 +21,7 @@ struct MemoryClient {
     return reinterpret_cast<F>(p);
   }
   explicit MemoryClient(std::string kind, uint64_t selected = 0, const char *fixture = "kernel.ptx")
-      : kind(std::move(kind)), library(dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL)) {
+      : MemoryClientBase(std::move(kind)), library(dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL)) {
     require(library != nullptr, "CUDA library");
     check(symbol<int (*)(unsigned)>("cuInit")(0));
     check(symbol<int (*)(void **, unsigned, int)>("cuCtxCreate_v2")(&context, 0, static_cast<int>(selected)));
@@ -23,8 +30,8 @@ struct MemoryClient {
     check(symbol<int (*)(void **, void *, const char *)>("cuModuleGetFunction")(&function, module, "probe"));
   }
   ~MemoryClient() {
-    symbol<int (*)(void *)>("cuModuleUnload")(module);
-    symbol<int (*)(void *)>("cuCtxDestroy_v2")(context);
+    if (auto *unload = reinterpret_cast<int (*)(void *)>(dlsym(library, "cuModuleUnload"))) unload(module);
+    if (auto *destroy = reinterpret_cast<int (*)(void *)>(dlsym(library, "cuCtxDestroy_v2"))) destroy(context);
     dlclose(library);
   }
   void *overlapStreams[2]{};
@@ -33,7 +40,7 @@ struct MemoryClient {
     enqueue(input, output, reinterpret_cast<uint32_t *>(input), mode, 1, overlapStreams[i]);
   }
   void overlapFinish() {
-    for (auto stream : overlapStreams) {
+    for (auto *stream : overlapStreams) {
       check(symbol<int (*)(void *)>("cuStreamSynchronize")(stream));
       check(symbol<int (*)(void *)>("cuStreamDestroy_v2")(stream));
     }
@@ -52,7 +59,6 @@ struct MemoryClient {
     check(symbol<int (*)(void *, uint64_t, size_t)>("cuMemcpyDtoH_v2")(bytes, reinterpret_cast<uintptr_t>(p), size));
   }
   void *allocateBacking(size_t size) {
-    const auto kind = allocationKind();
     if (kind == "registered") {
       auto *p = ordinary(size);
       check(symbol<int (*)(void *, size_t, unsigned)>("cuMemHostRegister_v2")(p, size, 2));
@@ -71,12 +77,14 @@ struct MemoryClient {
     return reinterpret_cast<void *>(p);
   }
   void releaseBacking(void *p) {
-    const auto kind = allocationKind();
     if (kind == "registered") {
       check(symbol<int (*)(void *)>("cuMemHostUnregister")(p));
       std::free(p);
-    } else if (kind == "pinned") check(symbol<int (*)(void *)>("cuMemFreeHost")(p));
-    else check(symbol<int (*)(uint64_t)>("cuMemFree_v2")(reinterpret_cast<uintptr_t>(p)));
+    } else if (kind == "pinned") {
+      check(symbol<int (*)(void *)>("cuMemFreeHost")(p));
+    } else {
+      check(symbol<int (*)(uint64_t)>("cuMemFree_v2")(reinterpret_cast<uintptr_t>(p)));
+    }
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, void *stream) {
     void *args[]{&input, &output, &indices, &mode};
@@ -87,21 +95,17 @@ struct MemoryClient {
     enqueue(input, output, indices, mode, count, nullptr);
     check(symbol<int (*)()>("cuCtxSynchronize")());
   }
+  static const char *probeFixture() {
+    if (memory_patterns::probeEnabled("multilane")) return "contended.ptx";
+    if (memory_patterns::probeEnabled("fence")) return "fence.ptx";
+    if (memory_patterns::probeEnabled("atomic")) return "atomic.ptx";
+    if (memory_patterns::probeEnabled("review")) return "exchange.ptx";
+    return "kernel.ptx";
+  }
   explicit MemoryClient(bool raw = false)
       : MemoryClient(memory_patterns::allocationKind(concurrencyMode() && !memory_patterns::probeEnabled("atomic") ? "pinned" : "managed"),
-                     0,
-                     memory_patterns::probeEnabled("multilane") ? "contended.ptx"
-                     : memory_patterns::probeEnabled("fence")   ? "fence.ptx"
-                     : memory_patterns::probeEnabled("atomic")  ? "atomic.ptx"
-                     : memory_patterns::probeEnabled("review")  ? "exchange.ptx"
-                                                                : "kernel.ptx") {
+                     0, probeFixture()) {
     this->raw = raw;
-  }
-  bool raw = false;
-  void *allocate(size_t size) { return raw ? ordinary(size) : allocateBacking(size); }
-  void release(void *p) {
-    if (raw) std::free(p);
-    else releaseBacking(p);
   }
   void *submittedEvent{}, *submittedOutput{};
   std::vector<uint8_t> copiedOutput;
@@ -112,7 +116,7 @@ struct MemoryClient {
     require(symbol<int (*)(void *)>("cuEventQuery")(submittedEvent) == 600, "CUDA pending event reported complete");
     require(symbol<int (*)(void *)>("cuStreamQuery")(nullptr) == 600, "CUDA pending stream reported complete");
     submittedOutput = output;
-    copiedOutput.resize(32 * (mode == 5 ? 4 : 8));
+    copiedOutput.resize(size_t{32} * (mode == 5 ? 4 : 8));
     check(symbol<int (*)(void *, uint64_t, size_t, void *)>("cuMemcpyDtoHAsync_v2")(
         copiedOutput.data(), reinterpret_cast<uintptr_t>(output), copiedOutput.size(), nullptr));
     check(symbol<int (*)(void *, void *)>("cuEventRecord")(submittedEvent, nullptr));
@@ -136,14 +140,6 @@ struct MemoryClient {
     return true;
   }
 };
-} // namespace memory_patterns
+}} // namespace memory_patterns
 
-int main(int argc, char **) {
-  try {
-    memory_patterns::MemoryClient backend(argc > 1);
-    return run(backend);
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << '\n';
-    return 1;
-  }
-}
+int main(int argc, char **) { return memory_patterns::runMain<memory_patterns::MemoryClient>(argc); }

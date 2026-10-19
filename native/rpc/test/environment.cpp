@@ -1,25 +1,25 @@
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <utility>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/environment.hpp>
+#include <gemstone/test_support.hpp>
 #include <gemstone/trace.hpp>
 
+#include "environment_keys.hpp"
+
 namespace {
-// Restore process state even when an assertion throws.
 class Override {
   const char *name;
-  std::optional<std::string> previous;
+  std::optional<gemstone_test::Environment> value;
 
 public:
-  explicit Override(const char *name) : name(name) {
-    if (const auto *value = std::getenv(name)) previous = value;
-    unsetenv(name);
-  }
-  ~Override() {
-    if (previous) setenv(name, previous->c_str(), 1);
-    else unsetenv(name);
-  }
-  void set(const char *value) { REQUIRE(setenv(name, value, 1) == 0); }
+  explicit Override(const char *name) : name(name), value(std::in_place, name, nullptr) {}
+  void set(const char *raw) { value.emplace(name, raw); }
 };
 } // namespace
 
@@ -60,7 +60,7 @@ TEST_CASE("paging honours false and malformed values instead of presence", "[rpc
 TEST_CASE("HSA paging inherits RPC timeout and independently validates overrides", "[rpc]") {
   Override rpc(RpcTimeoutSeconds);
   Override hsa(HsaPagingTimeoutSeconds);
-  CHECK(rpcTimeoutSeconds() == RpcTimeoutSecondsDefault);
+  CHECK(std::cmp_equal(rpcTimeoutSeconds(), RpcTimeoutSecondsDefault));
   CHECK(hsaPagingTimeoutSeconds() == rpcTimeoutSeconds());
   rpc.set("7");
   CHECK(rpcTimeoutSeconds() == 7);
@@ -72,7 +72,7 @@ TEST_CASE("HSA paging inherits RPC timeout and independently validates overrides
     CHECK(hsaPagingTimeoutSeconds() == 7);
   }
   rpc.set("2147484"); // First second count that overflows a signed 32-bit millisecond timeout.
-  CHECK(rpcTimeoutSeconds() == RpcTimeoutSecondsDefault);
+  CHECK(std::cmp_equal(rpcTimeoutSeconds(), RpcTimeoutSecondsDefault));
 }
 
 TEST_CASE("trace scopes and categories match exactly", "[rpc]") {

@@ -2,11 +2,11 @@
 package net.kurobako.gemstone.isa.spirv
 
 object OperandKind {
-  enum Category { case BitEnum, Composite, Id, Literal, ValueEnum }
+  enum Category derives CanEqual { case BitEnum, Composite, Id, Literal, ValueEnum }
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum OperandKind(val category: OperandKind.Category, val components: Vector[OperandKind]) {
+enum OperandKind(val category: OperandKind.Category, val components: Vector[OperandKind]) derives CanEqual {
   case ImageOperands extends OperandKind(OperandKind.Category.BitEnum, Vector.empty)
   case FPFastMathMode extends OperandKind(OperandKind.Category.BitEnum, Vector.empty)
   case SelectionControl extends OperandKind(OperandKind.Category.BitEnum, Vector.empty)

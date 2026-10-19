@@ -14,7 +14,7 @@ object LaunchObserver {
   * from the threads running workgroups; under the sequential scheduler they arrive in execution order on one thread, so
   * blocking in [[instruction]] single-steps the launch.
   */
-trait LaunchObserver {
+trait LaunchObserver derives CanEqual {
 
   /** Called before the instruction at `at` executes; a fault ends the launch with it. */
   def instruction(at: Fault.Location, state: ArchitecturalState): Either[Fault, Unit]

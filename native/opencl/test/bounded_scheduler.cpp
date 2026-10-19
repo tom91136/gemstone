@@ -1,6 +1,5 @@
 #include <chrono>
 #include <cstdlib>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -10,15 +9,12 @@
 #include <gemstone/test_support.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
-#include <environment_keys.hpp>
+#include "session.hpp"
 
 TEST_CASE("OpenCL deferred work uses a bounded scheduler", "[opencl]") {
-  gemstone_test::RpcFixture server;
+  gemstone_test::RpcFixture const server;
   const gemstone_test::RpcEnvironment environment(server);
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
-  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_device_id device = gemstone_opencl_test::gpu();
   cl_int error = CL_SUCCESS;
   cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
@@ -28,7 +24,7 @@ TEST_CASE("OpenCL deferred work uses a bounded scheduler", "[opencl]") {
   std::vector<cl_command_queue> queues;
   std::vector<cl_event> events;
   for (size_t index = 0; index < 64; ++index) {
-    auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+    auto *queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
     REQUIRE((queue && error == CL_SUCCESS));
     cl_event event = nullptr;
     REQUIRE((clEnqueueMarkerWithWaitList(queue, 1, &gate, &event) == CL_SUCCESS));
@@ -39,9 +35,9 @@ TEST_CASE("OpenCL deferred work uses a bounded scheduler", "[opencl]") {
   REQUIRE((gemstone_test::processThreadCount() <= before + 2));
   REQUIRE((clSetUserEventStatus(gate, CL_COMPLETE) == CL_SUCCESS));
   REQUIRE((clWaitForEvents(static_cast<cl_uint>(events.size()), events.data()) == CL_SUCCESS));
-  for (auto event : events)
+  for (auto *event : events)
     REQUIRE((clReleaseEvent(event) == CL_SUCCESS));
-  for (auto queue : queues)
+  for (auto *queue : queues)
     REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
   REQUIRE((clReleaseEvent(gate) == CL_SUCCESS));
   REQUIRE((clReleaseContext(context) == CL_SUCCESS));

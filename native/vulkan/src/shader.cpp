@@ -1,12 +1,15 @@
 #include "shader.hpp"
 
+#include <cstdint>
 #include <cstdio>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/trace.hpp>
 
 #include "client.hpp"
-#include "completion.hpp"
 #include "host_allocator.hpp"
 
 namespace gemstone::vulkan {
@@ -14,7 +17,7 @@ std::optional<execution::PreparedShader> prepareShader(const std::vector<uint8_t
                                                        execution::ShaderStageKind kind, const VkSpecializationInfo *specialization) {
   if (!entry || !*entry) return std::nullopt;
   // Transport buffers must outlive neither this call nor its ordinary host arena.
-  host::Scope rpcScope(nullptr);
+  host::Scope const rpcScope(nullptr);
   execution::ClientManager connection;
   auto *client = connection.client();
   if (!client) return std::nullopt;
@@ -31,10 +34,10 @@ std::optional<execution::PreparedShader> prepareShader(const std::vector<uint8_t
         const auto *begin = static_cast<const uint8_t *>(spec.pData) + entry.offset;
         value.assign(begin, begin + entry.size);
       }
-      constants.push_back({execution::Binary32{static_cast<int64_t>(entry.constantID)}, std::move(value)});
+      constants.push_back({.specId = execution::Binary32{static_cast<int64_t>(entry.constantID)}, .value = std::move(value)});
     }
   }
-  auto reply = client->call(execution::PrepareShader{image, {entry}, kind, constants});
+  auto reply = client->call(execution::PrepareShader{.image = image, .entry = {entry}, .stage = kind, .constants = constants});
   if (!reply) {
     if (gemstone::traceEnabled("vulkan"))
       std::fprintf(stderr, "Gemstone Vulkan: prepare shader %s: %s\n", entry, reply.error().detail.c_str());
@@ -42,9 +45,9 @@ std::optional<execution::PreparedShader> prepareShader(const std::vector<uint8_t
   }
   const auto &prepared = reply.value();
   for (const auto &descriptor : prepared.descriptors)
-    if (static_cast<uint32_t>(descriptor.set.value) >= MaxBoundDescriptorSets) return std::nullopt;
+    if (std::cmp_greater_equal(descriptor.set.value, MaxBoundDescriptorSets)) return std::nullopt;
   // The retained generated value belongs to the pipeline's allocation arena.
-  host::Scope resultScope(rpcScope.previous);
+  host::Scope const resultScope(rpcScope.previous);
   return prepared;
 }
 } // namespace gemstone::vulkan

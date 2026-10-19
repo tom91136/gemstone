@@ -42,7 +42,7 @@ class WorkerPool(
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var failure: Option[Fault] = None
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    @volatile var finished: Boolean           = count.raw == 0L
+    @volatile var finished: Boolean           = count == 0L
     val observed: Option[mutable.Set[String]] = measurement.map(_ => mutable.Set.empty[String])
   }
   private val lock        = ReentrantLock()
@@ -54,7 +54,7 @@ class WorkerPool(
   @volatile private var closed = false
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var failure: Option[Throwable] = None
-  private val threads                              = Array.tabulate(parallelism.raw) { index =>
+  private val threads                              = Array.tabulate(parallelism) { index =>
     val thread = Thread(() => workerLoop(), s"gemstone-worker-$index")
     thread.setDaemon(true)
     thread.start()
@@ -63,9 +63,9 @@ class WorkerPool(
 
   /** Bound each claim so a large dispatch cannot monopolise workers while another client waits. */
   private def grainFor(count: Long >= 0): Int in 1 ~ 128 = {
-    val perWorker = parallelism.raw.toLong * 4L
-    val grain     = if (count.raw <= perWorker) 1L else (count.raw - 1L) / perWorker + 1L
-    math.max(1L, math.min(count.raw, math.min(grain, 128L))).toInt.unsafe[Int in 1 ~ 128]
+    val perWorker = parallelism.toLong * 4L
+    val grain     = if (count <= perWorker) 1L else (count.raw - 1L) / perWorker + 1L
+    math.max(1L, math.min(count, math.min(grain, 128L))).toInt.unsafe[Int in 1 ~ 128]
   }
 
   private def enqueue(
@@ -75,7 +75,7 @@ class WorkerPool(
   ): Job = lock.withLock {
     if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed", failure.orNull)
     val job = Job(count, grainFor(count), task, rejected)
-    if (count.raw > 0L) {
+    if (count > 0L) {
       queue.append(job)
       workReady.signalAll()
     }
@@ -91,7 +91,7 @@ class WorkerPool(
     else {
       val job    = queue.remove(eligible)
       val start  = job.next
-      val length = (job.count - start).min(job.grain.toLong)
+      val length = (job.count - start).min(job.grain)
       val end    = start + length
       job.next = end
       job.active += 1
@@ -111,7 +111,7 @@ class WorkerPool(
     try {
       var offset: Int >= 0 = 0
       while (offset < length && outcome.isRight) {
-        outcome = job.task(start + offset.toLong)
+        outcome = job.task(start + offset.widen[Long >= 0])
         offset += 1
       }
     } catch {
@@ -208,7 +208,7 @@ class WorkerPool(
   override def reportFailure(cause: Throwable): Unit = reporter(cause)
 
   override def shouldParallel(taskCount: Long >= 0, workItemsPerTask: Long >= 0): Boolean =
-    parallelism.raw > 1 && taskCount.raw > 1L &&
+    parallelism > 1 && taskCount > 1L &&
       (taskCount >= minGroups || workItemsPerTask >= minWorkItems)
 
   override def parallelFor(taskCount: Long >= 0)(

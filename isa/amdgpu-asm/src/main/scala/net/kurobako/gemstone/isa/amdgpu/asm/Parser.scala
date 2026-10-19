@@ -71,14 +71,8 @@ object Parser {
               )
           })
           .flatMap { case (operands, modifiers) =>
-            Instruction.decode(opcode, Vec.from(operands.toVector.view), Vec.from(modifiers.toVector.view)).leftMap {
-              case Instruction.DecodeError.UnknownOpcode(value) =>
-                error(line, offset, s"unknown AMDGPU opcode '$value'")
-              case Instruction.DecodeError.InvalidOperandCount(value, expected, actual) =>
-                error(line, offset, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
-              case Instruction.DecodeError.AmbiguousForms(value, definitions) =>
-                error(line, offset, s"$value ambiguously matched ${definitions.mkString(", ")}")
-            }
+            Instruction.decode(opcode, Vec.from(operands.toVector.view), Vec.from(modifiers.toVector.view))
+              .leftMap(failure => error(line, offset, failure.message("AMDGPU")))
           }
       }
     }
@@ -87,24 +81,19 @@ object Parser {
   /** Comma-separated operand groups, each split into whitespace-separated words with their line offsets. */
   private def operandWords(text: String, offset: Int, line: Int > 0): Either[SourceError, Vec[Vec[(Int, String)]]] =
     if (text.trim.isEmpty) Right(Vec.empty)
-    else split(text, offset, line, _ == ',').flatMap(_.traverse { (start, part) =>
+    else split(text, offset, line).flatMap(_.traverse { (start, part) =>
       Delimited.splitTopLevel(part, _.isWhitespace)
-        .leftMap(unbalanced => error(line, start + unbalanced.offset.raw, unbalanced.message))
-        .map(_.filter(_.text.nonEmpty).map(word => (start + word.offset.raw, word.text)))
+        .leftMap(unbalanced => error(line, start + unbalanced.offset, unbalanced.message))
+        .map(_.filter(_.text.nonEmpty).map(word => (start + word.offset, word.text)))
     })
 
   /** Top-level parts with their line offsets after leading whitespace; empty parts are rejected. */
-  private def split(
-      text: String,
-      offset: Int,
-      line: Int > 0,
-      separator: Char => Boolean
-  ): Either[SourceError, Vec[(Int, String)]] =
-    Delimited.splitTopLevel(text, separator)
-      .leftMap(unbalanced => error(line, offset + unbalanced.offset.raw, unbalanced.message))
+  private def split(text: String, offset: Int, line: Int > 0): Either[SourceError, Vec[(Int, String)]] =
+    Delimited.splitTopLevel(text, _ == ',')
+      .leftMap(unbalanced => error(line, offset + unbalanced.offset, unbalanced.message))
       .flatMap(_.traverse { segment =>
         val start = segment.text.indexWhere(_ > ' ')
-        val at    = offset + segment.offset.raw
+        val at    = offset + segment.offset
         if (start < 0) Left(error(line, at, "empty operand")) else Right((at + start, segment.text.trim))
       })
 
@@ -135,7 +124,7 @@ object Parser {
       parseOperand(text.slice(5, text.length - 1), offset + 5, line).map(Operand.SignExtended(_))
     else if (text.startsWith("[") && text.endsWith("]")) {
       val inner = text.slice(1, text.length - 1)
-      (if (inner.trim.isEmpty) Right(Vec.empty[(Int, String)]) else split(inner, offset + 1, line, _ == ','))
+      (if (inner.trim.isEmpty) Right(Vec.empty[(Int, String)]) else split(inner, offset + 1, line))
         .flatMap(_.traverse((start, part) => parseOperand(part, start, line))).map { values =>
           if (
             values.nonEmpty && values.forall {

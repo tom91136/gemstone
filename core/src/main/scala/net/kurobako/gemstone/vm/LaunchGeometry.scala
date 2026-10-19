@@ -15,12 +15,12 @@ object LaunchGeometry {
       x: Int > 0,
       y: Int > 0,
       z: Int > 0
-  ) derives Codec {
+  ) derives Codec, CanEqual {
     def toGlobalDimensions: GlobalDimensions =
-      GlobalDimensions(x.toLong, y.toLong, z.toLong)
+      GlobalDimensions(x, y, z)
 
     def volume: Either[NonEmpty[String], Long > 0] =
-      try Right(x.toLong.widen[Long > 0] * y.toLong.widen[Long > 0] * z.toLong.widen[Long > 0])
+      try Right(x.widen[Long > 0] * y.widen[Long > 0] * z.widen[Long > 0])
       catch {
         case _: ArithmeticException =>
           Left(s"dimension volume overflows 64 bits: ($x, $y, $z)")
@@ -28,14 +28,14 @@ object LaunchGeometry {
 
     def volumeInt: Either[NonEmpty[String], Int > 0] =
       volume.flatMap(size =>
-        if (size.raw <= Int.MaxValue.toLong) Right(size.toIntExact)
+        if (size <= Int.MaxValue.toLong) Right(size.toIntExact)
         else Left(s"dimension volume exceeds Int range: $size")
       )
 
     /** Coordinates of a linear `index` below the volume, with x varying fastest. */
     def coordinates(index: Long >= 0): Coordinates = {
-      val width: Long > 0  = x.toLong.widen[Long > 0]
-      val height: Long > 0 = y.toLong.widen[Long > 0]
+      val width: Long > 0  = x.widen[Long > 0]
+      val height: Long > 0 = y.widen[Long > 0]
       val rows             = index / width
       Coordinates((index % width).toIntExact, (rows % height).toIntExact, (rows / height).toIntExact)
     }
@@ -55,7 +55,7 @@ object LaunchGeometry {
 
   case class LongCoordinates(x: Long >= 0, y: Long >= 0, z: Long >= 0)
 
-  enum Axis {
+  enum Axis derives CanEqual {
     case X, Y, Z
 
     def select(value: Coordinates): Int >= 0 = this match {
@@ -90,7 +90,7 @@ object LaunchGeometry {
       groupTotal  <- groupCount.volume
       exact = globalSize.getOrElse(padded)
       _ <- Either.cond[NonEmpty[String], Unit](
-        exact.x.raw <= padded.x.raw && exact.y.raw <= padded.y.raw && exact.z.raw <= padded.z.raw,
+        exact.x <= padded.x && exact.y <= padded.y && exact.z <= padded.z,
         (),
         s"global size $exact exceeds padded dispatch size $padded"
       )
@@ -100,9 +100,9 @@ object LaunchGeometry {
     try
       Right(
         GlobalDimensions(
-          groupSize.x.toLong.widen[Long > 0] * groupCount.x.toLong.widen[Long > 0],
-          groupSize.y.toLong.widen[Long > 0] * groupCount.y.toLong.widen[Long > 0],
-          groupSize.z.toLong.widen[Long > 0] * groupCount.z.toLong.widen[Long > 0]
+          groupSize.x.widen[Long > 0] * groupCount.x.widen[Long > 0],
+          groupSize.y.widen[Long > 0] * groupCount.y.widen[Long > 0],
+          groupSize.z.widen[Long > 0] * groupCount.z.widen[Long > 0]
         )
       )
     catch {
@@ -126,11 +126,11 @@ case class LaunchGeometry private (
 
   /** Every work-item of every group lies inside the global extent. */
   val uniform: Boolean =
-    globalExtent.x.raw == groupSize.x.raw.toLong * groupCount.x.raw &&
-      globalExtent.y.raw == groupSize.y.raw.toLong * groupCount.y.raw &&
-      globalExtent.z.raw == groupSize.z.raw.toLong * groupCount.z.raw
+    globalExtent.x.raw == groupSize.x.toLong * groupCount.x &&
+      globalExtent.y.raw == groupSize.y.toLong * groupCount.y &&
+      globalExtent.z.raw == groupSize.z.toLong * groupCount.z
 
-  def localCoordinates(index: Int >= 0): Coordinates = groupSize.coordinates(index.toLong.widen[Long >= 0])
+  def localCoordinates(index: Int >= 0): Coordinates = groupSize.coordinates(index.widen[Long >= 0])
 
   def groupCoordinates(index: Long >= 0): Coordinates = groupCount.coordinates(index)
 
@@ -145,9 +145,9 @@ case class LaunchGeometry private (
     LongCoordinates(global(Axis.X, group, local), global(Axis.Y, group, local), global(Axis.Z, group, local))
 
   def containsGlobal(coordinates: LongCoordinates): Boolean =
-    contains(coordinates.x.raw, globalOffset.x.raw.toLong, globalExtent.x.raw) &&
-      contains(coordinates.y.raw, globalOffset.y.raw.toLong, globalExtent.y.raw) &&
-      contains(coordinates.z.raw, globalOffset.z.raw.toLong, globalExtent.z.raw)
+    contains(coordinates.x, globalOffset.x.toLong, globalExtent.x) &&
+      contains(coordinates.y, globalOffset.y.toLong, globalExtent.y) &&
+      contains(coordinates.z, globalOffset.z.toLong, globalExtent.z)
 
   /** Whether `local` within `group` lies inside the global extent. */
   def contains(group: Coordinates, local: Coordinates): Boolean =
@@ -164,31 +164,31 @@ case class LaunchGeometry private (
     else {
       var mask           = 0L
       var lane: Int >= 0 = 0
-      while (lane.raw < count.raw) {
-        if (contains(group, localCoordinates(start + lane))) mask |= 1L << lane.raw
+      while (lane < count) {
+        if (contains(group, localCoordinates(start + lane))) mask |= 1L << lane
         lane += 1
       }
       mask
     }
 
   private def global(axis: Axis, group: Coordinates, local: Coordinates): Long >= 0 =
-    axis.select(globalOffset).toLong.widen[Long >= 0] +
-      axis.select(group).toLong.widen[Long >= 0] * axis.select(groupSize).toLong.widen[Long >= 0] +
-      axis.select(local).toLong.widen[Long >= 0]
+    axis.select(globalOffset).widen[Long >= 0] +
+      axis.select(group).widen[Long >= 0] * axis.select(groupSize).widen[Long >= 0] +
+      axis.select(local).widen[Long >= 0]
 
   private def origin(axis: Axis, group: Coordinates): Long =
-    axis.select(group).raw.toLong * axis.select(groupSize).raw
+    axis.select(group).toLong * axis.select(groupSize)
 
   private def inside(axis: Axis, group: Coordinates, local: Coordinates): Boolean =
-    origin(axis, group) + axis.select(local).raw < axis.select(globalExtent).raw
+    origin(axis, group) + axis.select(local) < axis.select(globalExtent)
 
   private def full(axis: Axis, group: Coordinates): Boolean =
-    origin(axis, group) + axis.select(groupSize).raw <= axis.select(globalExtent).raw
+    origin(axis, group) + axis.select(groupSize) <= axis.select(globalExtent)
 
   private def activeSize(axis: Axis, group: Coordinates): Either[NonEmpty[String], Int > 0] = {
     val remaining = axis.select(globalExtent).raw - origin(axis, group)
     if (remaining <= 0L) Left(s"work-group coordinate $group has no active work-items on axis $axis")
-    else Right(math.min(axis.select(groupSize).raw.toLong, remaining).toInt.unsafe[Int > 0])
+    else Right(math.min(axis.select(groupSize).toLong, remaining).toInt.unsafe[Int > 0])
   }
 
   private def contains(value: Long, offset: Long, extent: Long): Boolean =

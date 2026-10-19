@@ -1,0 +1,17 @@
+InheritParentConfig: true
+# The template-heavy suites take the static analyzer minutes per translation unit for no findings, and the textual
+# cases/*.inl fragments use headers on behalf of their includers, which include-cleaner cannot attribute.
+# Device and host compilations see different code, and HIP's threadIdx is an object with static members, so the
+# const-parameter, static-member and static-access checks propose edits that break the other compilation or CUDA.
+# The shared suite headers also compile as C++17 for CUDA, so the C++20 library rewrites stay off, and
+# const-correctness cannot see writes through inline asm outputs.
+Checks: >
+  -clang-analyzer-*,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -modernize-use-ranges,
+  -modernize-use-starts-ends-with,
+  -readability-container-contains,
+  -readability-convert-member-functions-to-static,
+  -readability-non-const-parameter,
+  -readability-static-accessed-through-instance

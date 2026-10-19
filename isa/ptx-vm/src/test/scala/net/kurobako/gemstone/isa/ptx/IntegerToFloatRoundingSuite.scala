@@ -12,7 +12,7 @@ import net.kurobako.gemstone.memory.*
 class IntegerToFloatRoundingSuite extends munit.FunSuite {
   private def run(source: String, input: Long, width: ScalarBitWidth): Vec[Long] = {
     val kernel = compileKernel(source)
-    val bytes  = width.toScalarByteWidth * (4: Int > 0)
+    val bytes  = width.toScalarByteWidth.widen[Int > 0] * 4
     val memory = DeviceMemory(bytes)
     val start  = memory.start
     assertEquals(
@@ -30,7 +30,7 @@ class IntegerToFloatRoundingSuite extends munit.FunSuite {
     )
     (0 until 4).map { index =>
       memory.readLittleEndian(
-        start.offset(index.toLong * width.toScalarByteWidth.raw),
+        start.offset(index.toLong * width.toScalarByteWidth),
         width.toScalarByteWidth
       ).toOption.get
     }.toVec

@@ -40,7 +40,7 @@ private case class CodeObjectKernel(
 ) {
   val waveSize: Int in (32, 64) =
     if (
-      TargetDefaults.waveSize(target).raw == 32 &&
+      TargetDefaults.waveSize(target) == 32 &&
       (kernelCodeProperties & KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32) != 0
     ) 32
     else 64

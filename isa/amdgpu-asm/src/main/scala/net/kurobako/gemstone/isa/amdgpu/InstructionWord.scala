@@ -17,7 +17,7 @@ private object InstructionWord {
 }
 
 /** Up to 192 instruction bits as little-endian 64-bit words. */
-private case class InstructionWord(low: Long, middle: Long, high: Long) {
+private case class InstructionWord(low: Long, middle: Long, high: Long) derives CanEqual {
   def bits(offset: Int, count: Int): Long = {
     val index = offset >>> 6
     val shift = offset & 63

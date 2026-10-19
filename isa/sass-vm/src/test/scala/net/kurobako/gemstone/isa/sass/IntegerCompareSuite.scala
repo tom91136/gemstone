@@ -137,8 +137,9 @@ class IntegerCompareSuite extends munit.FunSuite {
   for (sm <- Vec(50, 60))
     test(s"sm_$sm decoded PSET predicate mask agrees with the source selection") {
       val kernel      = load(sm, Fixture.listing(s"psetSm${sm}Patched"), "probe")
+      val modifiers   = Vec("AND", "AND")
       val instruction = kernel.function.instructions
-        .find(i => i.mnemonic.raw == "PSET" && i.modifiers.map(_.name) == Vec("AND", "AND")).get
+        .find(i => i.mnemonic.raw == "PSET" && i.modifiers.map(_.name) == modifiers).get
       assertEquals(instruction.operands, OperandParser.parseMany("R0, P0, PT, PT").value)
       Vec(0, 1, Int.MinValue, -1, 0).foreach { input =>
         assertEquals(kernel.launch(1)(Arg.zeros(4), Arg.u32(input)).words(0), mask(input != 0))

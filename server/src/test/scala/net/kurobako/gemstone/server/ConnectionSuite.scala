@@ -235,7 +235,7 @@ class ConnectionSuite extends munit.FunSuite {
   test("unknown string tags fail without executing an operation") {
     val factories = AtomicInteger()
     val request   = frame.clone()
-    val tagOffset = helloFrame(ExecutionRPC.Schema.canonical).length + ExecutionRPC.RequestHeaderBytes.raw
+    val tagOffset = helloFrame(ExecutionRPC.Schema.canonical).length + ExecutionRPC.RequestHeaderBytes
     request(tagOffset) = 'X'.toByte
     val input = DataInputStream(ByteArrayInputStream(serveBytes(request, factories)))
     assertEquals(input.readInt(), ExecutionRPC.HelloResponseMagic)

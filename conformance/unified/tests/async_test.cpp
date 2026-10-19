@@ -5,13 +5,13 @@
 #include "cases/hip_async.inl"
 #include "reference_async.hpp"
 
-#define REFERENCE_ASYNC(name, function, prefix, family)                                                                                    \
-  TEMPLATE_TEST_CASE(prefix #name, "[unit][async]", int32_t, float) {                                                                      \
+#define REFERENCE_ASYNC(name, function, label, family)                                                                                     \
+  TEMPLATE_TEST_CASE("reference " #label " async/" #name, "[unit][async]", int32_t, float) {                                               \
     const auto size = GENERATE(0, 1, 7, 33);                                                                                               \
     CAPTURE(size);                                                                                                                         \
     unified::test::ReferenceAsync backend;                                                                                                 \
     unified::family::function<TestType>(backend, size);                                                                                    \
   }
 
-UNIFIED_ASYNC_CASES(REFERENCE_ASYNC, "reference portable async/", async)
-UNIFIED_HIP_ASYNC_CASES(REFERENCE_ASYNC, "reference HIP async/", hip_async)
+UNIFIED_ASYNC_CASES(REFERENCE_ASYNC, portable, async)
+UNIFIED_HIP_ASYNC_CASES(REFERENCE_ASYNC, HIP, hip_async)

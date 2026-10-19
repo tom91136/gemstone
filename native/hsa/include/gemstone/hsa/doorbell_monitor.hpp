@@ -23,13 +23,13 @@ public:
   AqlQueue(const AqlQueue &) = delete;
   AqlQueue &operator=(const AqlQueue &) = delete;
 
-  uint64_t id() const;
+  [[nodiscard]] uint64_t id() const;
   /** Stable, naturally aligned address for ROCr's ordinary doorbell stores. */
-  uint64_t *doorbell() const;
-  uint64_t *readIndex() const;
-  uint64_t *writeIndex() const;
+  [[nodiscard]] uint64_t *doorbell() const;
+  [[nodiscard]] uint64_t *readIndex() const;
+  [[nodiscard]] uint64_t *writeIndex() const;
   /** False once a fatal packet halts the ring or `inactivate` stops it; no later packet is consumed. */
-  bool active() const;
+  [[nodiscard]] bool active() const;
   void inactivate();
 
 private:

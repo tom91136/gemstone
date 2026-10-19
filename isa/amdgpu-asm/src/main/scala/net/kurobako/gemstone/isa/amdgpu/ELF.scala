@@ -65,18 +65,18 @@ private object ELF {
     private val materialised    = ConcurrentHashMap[String, CodeObjectKernel]()
     private val globalImageLock = ReentrantLock()
     private lazy val readOnly   = readOnlySection.fold(0L -> Array.emptyByteArray) { section =>
-      section.address -> globalImages.getOrElse(section.index.raw, Array.emptyByteArray)
+      section.address -> globalImages.getOrElse(section.index, Array.emptyByteArray)
     }
     private lazy val globalImages: Map[Int, Array[Byte]] = {
       val images = globalSections.view.map { case (index, section) =>
         index ->
-          (if (section.sectionType == SectionType.NoBits) Array.ofDim[Byte](section.size.raw)
+          (if (section.sectionType == SectionType.NoBits) Array.ofDim[Byte](section.size)
            else Vec.toArray(image.contents(section)))
       }.toMap
       globalRelocations.foreach { case (address, value) =>
         globalSections.view.collectFirst {
           case (index, section)
-              if address >= section.address && address - section.address <= section.size.raw.toLong - 8L =>
+              if address >= section.address && address - section.address <= section.size.toLong - 8L =>
             LittleEndian.write(value, images(index), (address - section.address).toInt, 8)
         }
       }
@@ -86,11 +86,11 @@ private object ELF {
       globalSections.keys.view.toArray.sorted.map(index => globalSections(index).address -> globalImages(index))
 
     private def kernelCodeSize(record: KernelRecord): Int =
-      if (record.inferredSize) unpaddedCodeSize(text, record.textOffset.raw, record.symbol.size.raw)
-      else record.symbol.size.raw
+      if (record.inferredSize) unpaddedCodeSize(text, record.textOffset, record.symbol.size)
+      else record.symbol.size
 
     private def kernelCode(record: KernelRecord): Vec[Byte] =
-      text.slice(record.textOffset.raw, record.textOffset.raw + kernelCodeSize(record))
+      text.slice(record.textOffset, record.textOffset.raw + kernelCodeSize(record))
 
     private def missingKernel(name: String) = CodeObjectError.Invalid(s"AMDGPU code object has no kernel symbol $name")
 
@@ -148,12 +148,12 @@ private object ELF {
     private def storage(name: NonEmpty[String]): Either[CodeObjectError, (elf.Symbol, elf.Section, Long)] =
       for {
         symbol <- globalSymbols.get(name).toRight(CodeObjectError.Invalid(s"AMDGPU global symbol $name is not present"))
-        section <- globalSections.get(symbol.section.raw)
+        section <- globalSections.get(symbol.section)
           .toRight(CodeObjectError.Invalid(s"AMDGPU global symbol $name has no storage"))
         relative = symbol.value - section.address
         _ <- Either.cond(
-          relative >= 0L && relative <= section.size.raw.toLong &&
-            symbol.size.raw.toLong <= section.size.raw.toLong - relative,
+          relative >= 0L && relative <= section.size.toLong &&
+            symbol.size.toLong <= section.size.toLong - relative,
           (),
           CodeObjectError.Invalid(s"AMDGPU global symbol $name exceeds its section")
         )
@@ -170,7 +170,7 @@ private object ELF {
           val start = relative.toInt
           GuestAddress(symbol.value) ->
             Vec.unsafeWrapArray(
-              java.util.Arrays.copyOfRange(globalImages(section.index.raw), start, start + symbol.size.raw)
+              java.util.Arrays.copyOfRange(globalImages(section.index), start, start + symbol.size)
             )
         }
       }
@@ -179,12 +179,12 @@ private object ELF {
     def writeGlobal(name: NonEmpty[String], offset: Long, value: Vec[Byte]): Either[CodeObjectError, Unit] =
       globalImageLock.withLock {
         storage(name).flatMap { case (symbol, section, relative) =>
-          if (offset < 0L || offset > symbol.size.raw.toLong || value.size.toLong > symbol.size.raw.toLong - offset)
+          if (offset < 0L || offset > symbol.size.toLong || value.size.toLong > symbol.size.toLong - offset)
             Left(CodeObjectError.Invalid(
               s"AMDGPU global write $name offset=$offset size=${value.size} exceeds symbol size ${symbol.size}"
             ))
           else {
-            val _ = value.copyToArray(globalImages(section.index.raw), (relative + offset).toInt, value.size)
+            val _ = value.copyToArray(globalImages(section.index), (relative + offset).toInt, value.size)
             Right(())
           }
         }
@@ -202,7 +202,7 @@ private object ELF {
   ): Vec[CodeObjectGlobal] = Vec.from(
     globalSymbols.view.map { case (name, symbol) =>
       val pointerOffsets = globalRelocations.collect {
-        case (address, _) if address >= symbol.value && address - symbol.value <= symbol.size.raw.toLong - 8L =>
+        case (address, _) if address >= symbol.value && address - symbol.value <= symbol.size.toLong - 8L =>
           (address - symbol.value).toInt.unsafe[Int >= 0]
       }.distinct.sorted
       CodeObjectGlobal(name, GuestAddress(symbol.value), symbol.size, pointerOffsets)
@@ -233,14 +233,14 @@ private object ELF {
   /** Constant-space validation suitable for a lazy loader. Full validation remains in [[index]]. */
   def validateHeader(image: Vec[Byte]): Either[CodeObjectError, Unit] =
     elf.header(image).leftMap(CodeObjectError.Invalid(_)).flatMap { header =>
-      Either.cond(header.machine.raw == 224, (), CodeObjectError.Invalid("ELF machine is not AMDGPU"))
+      Either.cond(header.machine == 224, (), CodeObjectError.Invalid("ELF machine is not AMDGPU"))
     }
 
   private def parse(image: Vec[Byte]): Either[CodeObjectError, elf.Image] =
     validateHeader(image).flatMap(_ => elf.Image.parse(image).leftMap(CodeObjectError.Invalid(_)))
 
   private def isFunction(symbol: elf.Symbol): Boolean =
-    symbol.kind.raw == SymbolKind.Function && symbol.section.raw > 0 && symbol.size.raw > 0
+    symbol.kind.raw == SymbolKind.Function && symbol.section > 0 && symbol.size > 0
 
   def index(bytes: Vec[Byte]): Either[CodeObjectError, Index] =
     for {
@@ -272,14 +272,14 @@ private object ELF {
       _ <- Either.cond(records.nonEmpty, (), CodeObjectError.Invalid("AMDGPU code object has no kernel symbols"))
       globalSections = image.sections.collect {
         case section
-            if Set(".rodata", ".data", ".bss", ".got")(section.name) ||
+            if PartialFunction.cond(section.name) { case ".rodata" | ".data" | ".bss" | ".got" => true } ||
               ((section.flags & SectionFlag.Allocate) != 0 &&
                 (section.sectionType == SectionType.ProgramBits || section.sectionType == SectionType.NoBits)) =>
           section.index.raw -> section
       }.toMap
       globalSymbols = rawSymbols.collect {
         case symbol @ elf.Symbol(Some(name), kind, section, _, _)
-            if kind.raw == SymbolKind.Object && globalSections.contains(section.raw) =>
+            if kind.raw == SymbolKind.Object && globalSections.contains(section) =>
           name -> symbol
       }.toMap
       globalRelocations <- readGlobalRelocations(image)
@@ -315,7 +315,7 @@ private object ELF {
           )
           relocated <- relocateText(image, section)
           entries   <- symbols.collect {
-            case symbol @ elf.Symbol(Some(name), _, index, _, _) if index.raw == section.index.raw =>
+            case symbol @ elf.Symbol(Some(name), _, index, _, _) if index == section.index =>
               image.symbolOffset(symbol)
                 .leftMap(_ => CodeObjectError.Invalid(s"symbol $name exceeds section ${section.name}"))
                 .map { case (_, offset) => ExecutableSection.Symbol(name, offset, symbol.size) }
@@ -341,7 +341,7 @@ private object ELF {
     val relocatable = image.header.imageType.raw == ImageType.Relocatable
     val output      = Vec.toArray(image.contents(code))
     def resolve(table: elf.Section, symbolIndex: Long): Either[CodeObjectError, BigInt] = for {
-      symbols <- image.symbolTables.get(table.link.raw)
+      symbols <- image.symbolTables.get(table.link)
         .toRight(CodeObjectError.Invalid("relocation has no valid symbol table"))
       symbol <- Option.when(symbolIndex < symbols.size.toLong)(symbols(symbolIndex.toInt))
         .toRight(CodeObjectError.Invalid("relocation symbol index exceeds table"))
@@ -352,7 +352,7 @@ private object ELF {
           Left(CodeObjectError.Unsupported(s"undefined relocation symbol '$name'"))
         else if (symbol.section.raw == SectionIndex.Absolute) Right(BigInt(symbol.value))
         else
-          image.sections.lift(symbol.section.raw)
+          image.sections.lift(symbol.section)
             .toRight(CodeObjectError.Invalid(s"invalid section for relocation symbol '$name'"))
             .flatMap { section =>
               if (!relocatable) Right(BigInt(symbol.value))
@@ -366,8 +366,8 @@ private object ELF {
       image.relocations(table).leftMap(_ => CodeObjectError.Invalid("invalid relocation table")).flatMap(_.traverse {
         relocation =>
           val offset = relocation.offset - (if (relocatable && table.info != 0) 0 else code.address)
-          val kind   = relocation.kind.raw.toInt
-          if (kind == R_AMDGPU_NONE || (table.info == 0 && (offset < 0 || offset >= code.size.raw))) Right(())
+          val kind   = relocation.kind.toInt
+          if (kind == R_AMDGPU_NONE || (table.info == 0 && (offset < 0 || offset >= code.size))) Right(())
           else {
             val width: Int in 0 ~ 8 = if (kind == R_AMDGPU_ABS64 || kind == R_AMDGPU_REL64) 8 else 4
             for {
@@ -377,14 +377,14 @@ private object ELF {
                 CodeObjectError.Unsupported(s"unsupported AMDGPU relocation type $kind")
               )
               _ <- Either.cond(
-                offset >= 0 && offset <= code.size.raw - width.raw,
+                offset >= 0 && offset <= code.size.raw - width,
                 (),
                 CodeObjectError.Invalid("text relocation exceeds section")
               )
-              resolved <- resolve(table, relocation.symbol.raw)
+              resolved <- resolve(table, relocation.symbol)
               implicitAddend = LittleEndian.decode(output, offset.toInt, width)
               addend         = BigInt(relocation.addend.getOrElse(
-                if (width.raw == 8) implicitAddend else implicitAddend.toInt.toLong
+                if (width == 8) implicitAddend else implicitAddend.toInt.toLong
               ))
               value = resolved + addend - (if (RelativeTextRelocations(kind)) BigInt(code.address) + offset else 0)
               _ <- Either.cond(
@@ -413,16 +413,16 @@ private object ELF {
   }
 
   private def inferFunctionSizes(symbols: Vec[elf.Symbol], sections: Vec[elf.Section]): Vec[(elf.Symbol, Boolean)] = {
-    def candidate(symbol: elf.Symbol) = symbol.kind.raw == SymbolKind.Function && symbol.section.raw > 0
+    def candidate(symbol: elf.Symbol) = symbol.kind.raw == SymbolKind.Function && symbol.section > 0
     val functionValuesBySection       = symbols.filter(candidate(_)).groupMap(_.section.raw)(_.value)
     symbols.map { symbol =>
-      if (!candidate(symbol) || symbol.size.raw != 0) symbol -> false
+      if (!candidate(symbol) || symbol.size != 0) symbol -> false
       else
-        sections.lift(symbol.section.raw).flatMap { section =>
+        sections.lift(symbol.section).flatMap { section =>
           inferredFunctionSize(
             symbol.value,
-            section.address + section.size.raw.toLong,
-            functionValuesBySection(symbol.section.raw)
+            section.address + section.size.toLong,
+            functionValuesBySection(symbol.section)
           )
         }.fold(symbol -> false)(size => symbol.copy(size = size) -> true)
     }
@@ -451,8 +451,8 @@ private object ELF {
         relocation.kind.raw.toInt match {
           case R_AMDGPU_RELATIVE64 => Right(Vec(relocation.offset -> addend))
           case R_AMDGPU_ABS64      =>
-            image.symbolTables.get(table.link.raw)
-              .flatMap(_.lift(relocation.symbol.raw.toInt).filter(_ => relocation.symbol.raw <= Int.MaxValue))
+            image.symbolTables.get(table.link)
+              .flatMap(_.lift(relocation.symbol.toInt).filter(_ => relocation.symbol <= Int.MaxValue))
               .map(symbol => Vec(relocation.offset -> (symbol.value + addend)))
               .toRight(CodeObjectError.Invalid(s"unresolved AMDGPU relocation symbol ${relocation.symbol}"))
           case _ => Right(Vec.empty)
@@ -504,7 +504,7 @@ private object ELF {
       privateSegmentSize,
       LittleEndian.decodeInt32(descriptor, 48),
       LittleEndian.decodeInt32(descriptor, 52),
-      LittleEndian.decodeUInt16(descriptor, 56).raw
+      LittleEndian.decodeUInt16(descriptor, 56)
     )
   }
 

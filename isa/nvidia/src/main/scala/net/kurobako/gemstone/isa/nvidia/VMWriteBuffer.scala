@@ -22,12 +22,6 @@ private object VMWriteBuffer {
     case Fault.Memory(detail) => Fault.Memory(s"pc $pc, lane $lane: $detail")
     case other                => other
   }
-
-  private def update(previous: Long, width: ScalarBitWidth, update: AtomicUpdate): Long = update match {
-    case AtomicUpdate.Operation(operation, value)        => operation(previous, value, width)
-    case AtomicUpdate.CompareExchange(comparator, value) =>
-      if (Bits.truncate(previous, width) == Bits.truncate(comparator, width)) value else previous
-  }
 }
 
 /** Effects of one instruction, staged so that every lane reads its operands before any destination changes. Register
@@ -37,15 +31,15 @@ private object VMWriteBuffer {
 private class VMWriteBuffer(capacity: Int > 0 = 64) {
   import VMWriteBuffer.*
 
-  private var kinds      = Array.ofDim[Byte](capacity.raw)
-  private var writes     = Array.ofDim[VMWrite | Null](capacity.raw)
-  private var lanes      = Array.ofDim[WorkgroupLane](capacity.raw)
-  private var registers  = Array.ofDim[Register](capacity.raw)
-  private var parameters = Array.ofDim[Parameter](capacity.raw)
-  private var offsets    = Array.ofDim[Int >= 0](capacity.raw)
-  private var values     = Array.ofDim[Long](capacity.raw)
-  private var addresses  = Array.ofDim[Long](capacity.raw)
-  private var widths     = Array.ofDim[ScalarBitWidth](capacity.raw)
+  private var kinds      = Array.ofDim[Byte](capacity)
+  private var writes     = Array.ofDim[VMWrite | Null](capacity)
+  private var lanes      = Array.ofDim[WorkgroupLane](capacity)
+  private var registers  = Array.ofDim[Register](capacity)
+  private var parameters = Array.ofDim[Parameter](capacity)
+  private var offsets    = Array.ofDim[Int >= 0](capacity)
+  private var values     = Array.ofDim[Long](capacity)
+  private var addresses  = Array.ofDim[Long](capacity)
+  private var widths     = Array.ofDim[ScalarBitWidth](capacity)
   private var pending    = 0
   private var system     = false
   // Object writes staged since the last clear; only they hold references that clearing must drop.
@@ -77,9 +71,9 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
     // Coalesce identical non-atomic stores within a warp. Repeated unlock writes
     // must not clear a lock reacquired by another workgroup between lane writes.
     val duplicate = previous >= 0 && kinds(previous) == MemoryWrite &&
-      (lanes(previous).raw >>> 5) ==
-      (lane.raw >>> 5) &&
-      addresses(previous) == address.raw && widths(previous).raw == width.raw && values(previous) == value
+      (lanes(previous) >>> 5) ==
+      (lane >>> 5) &&
+      addresses(previous) == address.raw && widths(previous) == width && values(previous) == value
     if (!duplicate) {
       ensureCapacity()
       kinds(pending) = MemoryWrite
@@ -138,13 +132,13 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
       widths = Array.copyOf(widths, capacity)
     }
 
-  private def validate(memory: AddressSpace, address: Long, size: Int >= 0): Either[Fault, Unit] =
+  private def validate(memory: DeviceHeap, address: Long, size: Int >= 0): Either[Fault, Unit] =
     memory.locate(GuestAddress(address), size) match {
       case Left(fault) => Left(fault)
       case _           => Completed
     }
 
-  private def validate(memory: AddressSpace, write: VMWrite, pc: Pc): Either[Fault, Unit] = write match {
+  private def validate(memory: DeviceHeap, write: VMWrite, pc: Pc): Either[Fault, Unit] = write match {
     case VMWrite.Memory(lane, address, width, _, _) =>
       validate(memory, address.raw, width.toScalarByteWidth).left.map(located(_, pc, lane))
     case VMWrite.MemoryBytes(lane, address, bytes) =>
@@ -154,12 +148,12 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
     case _ => Completed
   }
 
-  private def apply(frame: VMLanes, workgroup: VMWorkgroup, memory: AddressSpace, write: VMWrite): Either[Fault, Unit] =
+  private def apply(frame: VMLanes, workgroup: VMWorkgroup, memory: DeviceHeap, write: VMWrite): Either[Fault, Unit] =
     write match {
       case VMWrite.Memory(_, address, width, value, false) => memory.writeValue(address, value, width.toScalarByteWidth)
       case VMWrite.MemoryBytes(_, address, bytes)          => memory.write(address, bytes)
       case VMWrite.Atomic(lane, destination, address, width, false, change) =>
-        memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth)(update(_, width, change)) match {
+        memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth)(change(_)) match {
           case Left(fault)     => Left(fault)
           case Right(previous) =>
             destination.foreach(frame(lane).setRegister(_, Bits.truncate(previous, width)))
@@ -180,13 +174,13 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
       )(())
     case VMWrite.Atomic(lane, destination, address, width, true, change) =>
       val previous = Bits.truncate(workgroup.readShared(address, width), width)
-      workgroup.writeShared(address, width, update(previous, width, change))
+      workgroup.writeShared(address, width, change(previous))
       destination.foreach(frame(lane).setRegister(_, previous))
     case VMWrite.Memory(_, _, _, _, _) | VMWrite.MemoryBytes(_, _, _) | VMWrite.Atomic(shared = false) => ()
   }
 
   /** Validates every memory destination before applying anything, so a faulting instruction has no effect. */
-  def commit(frame: VMLanes, workgroup: VMWorkgroup, memory: AddressSpace, pc: Pc): Either[Fault, Unit] = {
+  def commit(frame: VMLanes, workgroup: VMWorkgroup, memory: DeviceHeap, pc: Pc): Either[Fault, Unit] = {
     val count = pending
     pending = 0
     var index = 0

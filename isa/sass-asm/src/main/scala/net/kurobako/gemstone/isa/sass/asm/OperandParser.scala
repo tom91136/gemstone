@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass.asm
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.text.*
@@ -22,7 +23,7 @@ object OperandParser {
       Right(value)
     } catch {
       case failure: SourceCursor.Failure =>
-        Left(s"invalid SASS operand '$source' at ${reader.failedAt(failure).raw}")
+        Left(s"invalid SASS operand '$source' at ${reader.failedAt(failure)}")
       case NonFatal(error) => Left(s"invalid SASS operand '$source': ${error.getMessage}")
     }
   }
@@ -38,7 +39,7 @@ object OperandParser {
         Right(values)
       } catch {
         case failure: SourceCursor.Failure =>
-          Left(s"invalid SASS operand list at ${reader.failedAt(failure).raw}")
+          Left(s"invalid SASS operand list at ${reader.failedAt(failure)}")
         case NonFatal(error) => Left(s"invalid SASS operand list: ${error.getMessage}")
       }
     }
@@ -49,10 +50,10 @@ object OperandParser {
     private var furthest: Int >= 0 = cursor.offset
 
     def failedAt(failure: SourceCursor.Failure): Int >= 0 =
-      if (furthest.raw > failure.mark.offset.raw) furthest else failure.mark.offset
+      if (furthest > failure.mark.offset) furthest else failure.mark.offset
 
     private def record(offset: Int >= 0): Unit =
-      if (offset.raw >= furthest.raw) furthest = offset
+      if (offset >= furthest) furthest = offset
 
     def fail(expectation: NonEmpty[String]): Nothing = {
       record(cursor.offset)
@@ -76,7 +77,7 @@ object OperandParser {
       }
     }
 
-    private def readWhile(predicate: Char => Boolean): String = {
+    private inline def readWhile(inline predicate: Char => Boolean): String = {
       val start = cursor.offset
       cursor.skipWhile(predicate)
       cursor.slice(start)
@@ -133,15 +134,21 @@ object OperandParser {
     private def tryRegister(): Option[(Operand.Register, Vec[String])] = attempt(register())
 
     def operandList(): Vec[Operand] = {
-      val values = Vec.newBuilder[Operand]
-      values += operand()
+      val values       = Vec.newBuilder[Operand]
+      def next(): Unit = {
+        val value = operand()
+        values += value
+        // the offset of `cx[URa][offset]` follows its bank directly
+        if (OperandQueries.indexedBank(value) && cursor.consume('[')) values += address()
+      }
+      next()
       var more = true
       while (more) {
         val separatorStart = cursor.offset
         cursor.skipWhitespace()
         if (cursor.consume(',')) {
           cursor.skipWhitespace()
-          values += operand()
+          next()
         } else {
           if (cursor.offset != separatorStart) fail("comma after whitespace")
           more = false
@@ -166,15 +173,26 @@ object OperandParser {
     }
 
     private def atom(): Operand =
-      if (cursor.startsWith("bits<")) rawBits()
+      if (cursor.startsWith("bits<")) selected(rawBits())
       else if (cursor.startsWith("desc[")) descriptorAddress()
+      else if (cursor.startsWith("gdesc[") || cursor.startsWith("GDESC[")) matrixDescriptors()
+      else if (cursor.startsWith("cx[")) indexedBank()
       else if (cursor.startsWith("c[")) constantBank()
       else if (cursor.consume('[')) address()
       else if (cursor.consume('{')) group()
       else if (cursor.consume('|')) absolute()
-      else if (!cursor.atEnd && cursor.char().isDigit) magnitude()
+      else if (!cursor.atEnd && cursor.char().isDigit) selected(magnitude())
       else if (!cursor.atEnd && identifierStart(cursor.char())) wordOperand()
       else fail("operand")
+
+    private def selected(value: Operand): Operand = {
+      val selectors = dottedSuffixes()
+      if (selectors.isEmpty) value else Operand.Qualified(value, OperandSelector.fromSpellings(selectors))
+    }
+
+    private def selectorFollows(): Boolean =
+      cursor.at('.') && cursor.has(1) && identifierStart(cursor.char(1)) &&
+        !(Set('e', 'E')(cursor.char(1)) && cursor.has(2) && (cursor.char(2).isDigit || "+-".contains(cursor.char(2))))
 
     private def rawBits(): Operand = {
       expect("bits<")
@@ -218,7 +236,7 @@ object OperandParser {
       cursor.advance()
       cursor.skipWhile(character => isDigit(character, radix) || character == '_')
       parseBigIntLiteral(cursor.slice(start), binary = true, separators = true)
-        .getOrElse(fail(if (radix.raw == 16) "hexadecimal digit" else "binary digit"))
+        .getOrElse(fail(if (radix == 16) "hexadecimal digit" else "binary digit"))
     }
 
     private def exponent(): Unit = {
@@ -232,7 +250,7 @@ object OperandParser {
       else if (cursor.startsWith("0b") || cursor.startsWith("0B")) Operand.Bits(integer(2), 0)
       else {
         val whole = digits()
-        if (cursor.consume('.')) {
+        if (!selectorFollows() && cursor.consume('.')) {
           val fraction      = readWhile(_.isDigit)
           val exponentStart = cursor.offset
           if (cursor.at('e') || cursor.at('E')) exponent()
@@ -283,14 +301,37 @@ object OperandParser {
       if (selectors.isEmpty) value else Operand.Qualified(value, OperandSelector.fromSpellings(selectors))
     }
 
+    private def indexedBank(): Operand = {
+      expect("cx[")
+      val terms = addressTerms()
+      expect(']')
+      buildAddress(terms, Some(OperandQueries.IndexedBank))
+    }
+
     private def descriptorAddress(): Operand = {
       expect("desc[")
       val descriptor = operand()
       expect(']')
-      expect('[')
+      if (cursor.consume('[')) {
+        val terms = addressTerms()
+        expect(']')
+        buildAddress(terms, Some(descriptor))
+      } else
+        descriptor match {
+          // a lone cache-policy descriptor, such as a bulk copy's, reads as the decoder reads it: an address
+          case register: Operand.Register => buildAddress(Vec(AddressTerm.Register(register, Vec.empty)))
+          case _                          => fail("'['")
+        }
+    }
+
+    /** The uniform registers holding a GMMA's matrix descriptors, which the decoder reads as an address. */
+    private def matrixDescriptors(): Operand = {
+      if (!cursor.consume("gdesc[")) expect("GDESC[")
       val terms = addressTerms()
       expect(']')
-      buildAddress(terms, Some(descriptor))
+      val value     = buildAddress(terms)
+      val selectors = dottedSuffixes()
+      if (selectors.isEmpty) value else Operand.Qualified(value, OperandSelector.fromSpellings(selectors))
     }
 
     private def group(): Operand = {

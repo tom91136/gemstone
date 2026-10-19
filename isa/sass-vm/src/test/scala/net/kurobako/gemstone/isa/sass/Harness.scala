@@ -7,6 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction as VMInstruction
+import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
@@ -50,7 +51,7 @@ object Harness extends munit.Assertions {
       functions: Vec[DecodedFunction],
       boundSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty
   ): Either[NonEmpty[String], Vec[VMAssembler.Statement]] =
-    VMCompiler.lowerKernel(module, kernel, functions, boundSymbols).map(_._1)
+    VMCompiler.lowerKernel(module, kernel, functions, boundSymbols).left.map(_.message).map(_._1)
 
   def parameterBase(sm: Int): Int = if (sm < 70) 0x140 else if (sm < 90) 0x160 else if (sm < 100) 0x210 else 0x380
 
@@ -59,14 +60,23 @@ object Harness extends munit.Assertions {
       parameterBase: Int >= 0,
       parameters: Vec[Int > 0],
       registers: Int = 0,
-      shared: Int >= 0 = 0
+      shared: Int >= 0 = 0,
+      cluster: Int > 0 = 1
   ) {
-    def offsets: Vec[Int >= 0] = parameters.foldLeft(Vec.empty[Int >= 0]) { (offsets, size) =>
-      val end = offsets.lastOption.fold(0)(offset => offset.raw + parameters(offsets.size - 1).raw)
-      offsets :+ ((end + size.raw - 1) / size.raw * size.raw).unsafe[Int >= 0]
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def offsets: Vec[Int >= 0] = {
+      val builder = Vec.newBuilder[Int >= 0]
+      var end     = 0
+      parameters.foreach { size =>
+        val offset = (end + size - 1) / size * size
+        val _      = builder += offset.unsafe[Int >= 0]
+        end = offset + size
+      }
+      builder.result()
     }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def module(
       sm: Int,
       entries: Vec[Entry],
@@ -80,31 +90,60 @@ object Harness extends munit.Assertions {
       val size = parameters.foldLeft[Int >= 0](0)((size, parameter) => size.max(parameter.offset + parameter.size))
       (entry, parameters, size)
     }
-    val sections = layouts.foldLeft(Vec.empty[Cubin.Section]) { case (sections, (entry, _, size)) =>
-      val text =
-        sections :+
-          Cubin.Section(sections.nonNegativeSize, s".text.${entry.name}", 1, 0L, 0, 0, entry.registers << 24, Vec.empty)
-      val shared = if (entry.shared.raw > 0)
-        text :+ Cubin.Section(text.nonNegativeSize, s".nv.shared.${entry.name}", 8, 3L, entry.shared, 0, 0, Vec.empty)
-      else text
+    val sectionBuilder = Vec.newBuilder[Cubin.Section]
+    var sectionCount   = 0
+    layouts.foreach { (entry, _, size) =>
+      val _ = sectionBuilder += Cubin.Section(
+        sectionCount.unsafe[Int >= 0],
+        s".text.${entry.name}",
+        1,
+        0L,
+        0,
+        0,
+        entry.registers << 24,
+        Vec.empty
+      )
+      sectionCount += 1
+      if (entry.shared > 0) {
+        val _ = sectionBuilder += Cubin.Section(
+          sectionCount.unsafe[Int >= 0],
+          s".nv.shared.${entry.name}",
+          8,
+          3L,
+          entry.shared,
+          0,
+          0,
+          Vec.empty
+        )
+        sectionCount += 1
+      }
       val bank = entry.parameterBase + size
-      if (bank.raw > 0)
-        shared :+ Cubin.Section(
-          shared.nonNegativeSize,
+      if (bank > 0) {
+        val _ = sectionBuilder += Cubin.Section(
+          sectionCount.unsafe[Int >= 0],
           s".nv.constant0.${entry.name}",
           1,
           2L,
           bank,
           0,
           0,
-          Vec.fill(bank.raw)(0.toByte)
+          Vec.fill(bank)(0.toByte)
         )
-      else shared
+        sectionCount += 1
+      }
     }
-    val kernels = layouts.map { (entry, parameters, size) =>
+    val sections = sectionBuilder.result()
+    val kernels  = layouts.map { (entry, parameters, size) =>
       val text =
         sections.indexWhere(_.name == s".text.${entry.name}").refine[Int >= 0].fold(error => fail(error.raw), identity)
-      Cubin.Kernel(entry.name, text, entry.parameterBase, size, parameters)
+      Cubin.Kernel(
+        entry.name,
+        text,
+        entry.parameterBase,
+        size,
+        parameters,
+        requiredCluster = LaunchGeometry.Dimensions(entry.cluster, 1, 1)
+      )
     }
     val banks = constants.zip(Vec.indices(constants.nonNegativeSize)).map { case ((name, bytes), index) =>
       Cubin.Section(sections.nonNegativeSize + index, name, 1, 2L, bytes.nonNegativeSize, 0, 0, bytes)
@@ -120,7 +159,8 @@ object Harness extends munit.Assertions {
       shared: Int >= 0 = 0,
       base: Int >= 0 = 0x160,
       constants: Vec[(String, Vec[Byte])] = Vec.empty,
-      globals: Vec[Cubin.Global] = Vec.empty
+      globals: Vec[Cubin.Global] = Vec.empty,
+      cluster: Int > 0 = 1
   ) {
     def function: DecodedFunction = functions.head
 
@@ -134,7 +174,8 @@ object Harness extends munit.Assertions {
         base,
         parameters.map(_.refine[Int > 0].fold(error => fail(error.raw), identity)),
         registers,
-        shared
+        shared,
+        cluster
       )),
       constants,
       globals
@@ -205,10 +246,12 @@ object Harness extends munit.Assertions {
       case x: Int => LaunchGeometry.Dimensions(x.refine[Int > 0].fold(error => fail(error.raw), identity), 1, 1)
     }
 
+  private val RegisterCount = """SHI_REGISTERS=(\d+)""".r
+
   /** Registers come from the kernel's `SHI_REGISTERS` and the parameter base from the architecture. */
   def load(sm: Int, listing: String, kernel: String, shared: Int >= 0 = 0)(using munit.Location): Kernel = {
     val section   = listing.linesIterator.dropWhile(!_.contains(s".text.$kernel ")).take(4).mkString("\n")
-    val registers = """SHI_REGISTERS=(\d+)""".r.findFirstMatchIn(section).fold(0)(_.group(1).toInt)
+    val registers = RegisterCount.findFirstMatchIn(section).fold(0)(_.group(1).toInt)
     Kernel(
       sm,
       kernel.refine[NonEmpty[String]].value,
@@ -216,6 +259,17 @@ object Harness extends munit.Assertions {
       registers,
       shared,
       parameterBase(sm).unsafe[Int >= 0]
+    )
+  }
+
+  /** The kernel `name` from its `sm` machine code in hex, decoded as Gemstone loads a cubin. */
+  def fromHex(code: String, sm: Int, name: String)(using munit.Location): Kernel = {
+    val words = codeWords(bytes.hex(code), sm).value
+    Kernel(
+      sm,
+      name.unsafe[NonEmpty[String]],
+      Vec(DecodedFunction(name, words.map((address, word) => disassemble(word, sm, address).value))),
+      base = parameterBase(sm).unsafe[Int >= 0]
     )
   }
 
@@ -256,7 +310,9 @@ object Harness extends munit.Assertions {
 
   class Memory extends RegionMemory() {
     def readWords(region: AllocationId, count: Int >= 0, width: Int in 1 ~ 8 = 4)(using munit.Location): Vec[Long] =
-      Vec.indices(count).map(index => readValue(region, index.toLong.widen[Long >= 0] * width.toLong, width).value)
+      Vec.indices(count).map(index =>
+        readValue(region, index.widen[Long >= 0] * width.widen[Long >= 0], width).value
+      )
 
     def run(program: VMIR.Kernel, task: KernelTask): Either[Fault, Unit] =
       VMKernelLaunch.execute(program, task, this, TaskControl(), Workgroups.Sequential)

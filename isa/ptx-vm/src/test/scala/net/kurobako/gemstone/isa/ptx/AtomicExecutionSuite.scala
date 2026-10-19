@@ -8,9 +8,14 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class AtomicExecutionSuite extends munit.FunSuite {
+  private val casTargets = Vec("generic", "global", "acquire.sys.global", "shared", "generic-shared")
+  private val widths     = Vec(32, 64)
+  private val minGroups  = Vec[Int > 0](1, 5)
+  private val spaces     = Vec("global", "shared")
+
   for {
-    width  <- Vec(32, 64)
-    target <- Vec("generic", "global", "acquire.sys.global", "shared", "generic-shared")
+    width  <- widths
+    target <- casTargets
   } test(s"$target $width-bit CAS returns old bits on success and failure") {
     val size      = width / 8
     val shared    = target == "shared" || target == "generic-shared"
@@ -57,7 +62,7 @@ class AtomicExecutionSuite extends munit.FunSuite {
     assertEquals(memory.readLittleEndian(start.offset(2L * size), byteWidth).toOption.get, 7L)
   }
 
-  for (width <- Vec(32, 64)) test(s"$width-bit CAS has exactly one winner across lanes") {
+  for (width <- widths) test(s"$width-bit CAS has exactly one winner across lanes") {
     val size   = width / 8
     val source = s""".version 8.0
       .target sm_80
@@ -231,9 +236,9 @@ class AtomicExecutionSuite extends munit.FunSuite {
   }
 
   for {
-    space  <- Vec("global", "shared")
-    width  <- Vec(32, 64)
-    groups <- Vec[Int > 0](1, 5)
+    space  <- spaces
+    width  <- widths
+    groups <- minGroups
   }
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
       val memory                  = DeviceMemory((groups * 2 + 1) * 8, GuestAddress(0x100000L))
@@ -273,14 +278,67 @@ ret;
         memory
       )
       assert(result.isRight, result.toString)
-      for (group <- 0 until groups.raw)
+      for (group <- 0 until groups)
         assertEquals(memory.readLittleEndian(memory.start.offset(8 + group * 16), byteWidth), Right(1L))
-      val previous = Vec.tabulate(groups.raw) { group =>
+      val previous = Vec.tabulate(groups) { group =>
         memory.readLittleEndian(memory.start.offset(16 + group * 16), byteWidth).toOption.get
       }
-      val expected = if (space == "shared") Vec.fill(groups.raw)(max)
-      else Vec.tabulate(groups.raw)(group => if (group == 0) max else 1L)
+      val expected = if (space == "shared") Vec.fill(groups)(max)
+      else Vec.tabulate(groups)(group => if (group == 0) max else 1L)
       assertEquals(previous.sorted, expected.sorted)
     }
 
+  // atomicAdd on __half, __half2, __nv_bfloat16 and __nv_bfloat162 (cuda_fp16.hpp, cuda_bf16.hpp): inline
+  // atom.add.noftz on a generic address, red when the result is unused.
+  for {
+    (kind, register, one, half, total) <- Vec(
+      ("f16", "b16", 0x3c00L, 0x3800L, 0x4a00L),
+      ("bf16", "b16", 0x3f80L, 0x3f00L, 0x4140L),
+      ("f16x2", "b32", 0x38003c00L, 0x38003800L, 0x48004a00L),
+      ("bf16x2", "b32", 0x3f003f80L, 0x3f003f00L, 0x41004140L)
+    )
+    space <- spaces
+  } test(s"atom.add.noftz.$kind and red.add.noftz.$kind sum $space values and fetch distinct running totals") {
+    val width   = if (register == "b16") 2 else 4
+    val address = "%p"
+    val setup   =
+      if (space == "shared") s"mov.u64 %p, scratch; cvta.shared.u64 %p, %p; st.shared.$register [scratch], 0;"
+      else "mov.u64 %p, %q;"
+    val source = s""".version 8.7
+      .target sm_90
+      .address_size 64
+      .visible .entry accumulate(.param .u64 output) {
+        .shared .align 8 .b8 scratch[8];
+        .reg .u64 %p, %q, %o, %t;
+        .reg .$register %old, %value;
+        .reg .b32 %id;
+        ld.param.u64 %q, [output];
+        $setup
+        bar.sync 0;
+        mov.u32 %id, %tid.x;
+        atom.add.noftz.$kind %old, [$address], $one;
+        red.add.noftz.$kind [$address], $half;
+        mul.wide.u32 %t, %id, $width;
+        add.u64 %o, %q, %t;
+        st.global.$register [%o+$width], %old;
+        bar.sync 0;
+        setp.ne.u32 %pr, %id, 0;
+        @%pr bra DONE;
+        ld.$register %value, [$address];
+        st.global.$register [%q], %value;
+        DONE:
+        ret;
+      }""".replace(".reg .b32 %id;", ".reg .b32 %id;\n        .reg .pred %pr;")
+    val kernel = compileKernel(source)
+    val memory = DeviceMemory(((8 + 1) * width).unsafe[Int >= 0])
+    assertEquals(
+      execute(kernel, 1, 8, Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)), memory),
+      Right(())
+    )
+    val byteWidth        = width.unsafe[Int in 1 ~ 8]
+    def word(index: Int) = memory.readLittleEndian(memory.start.offset(index.toLong * width), byteWidth).toOption.get
+    assertEquals(word(0), total)
+    // every fetch is a running total of whole ones and halves, so its low element is a distinct multiple of 0.5
+    assertEquals(Vec.tabulate(8)(index => word(index + 1)).distinct.size, 8)
+  }
 }

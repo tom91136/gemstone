@@ -7,6 +7,8 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class ArithmeticExecutionSuite extends munit.FunSuite {
+  private val convertedOffsets = Vec(0L, 4L, 8L)
+
   for (space <- Vec("const", "global"))
     test(s"cvta $space preserves bound symbol offsets and round trips generic addresses") {
       val source = s""".version 8.0
@@ -81,7 +83,7 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
         ("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)
       )
       assertEquals(execute(kernel, 1, 1, arguments, memory), Right(()))
-      for (offset <- Vec(0L, 4L, 8L))
+      for (offset <- convertedOffsets)
         assertEquals(memory.readInt32(memory.start.offset(offset)), Right(expected))
     }
   }
@@ -522,17 +524,19 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
     )
   )
 
+  private val saturatingConversionInputs = Vec[(String, String, Int in 1 ~ 8, String, Long)](
+    ("s32", "b32", 4, "0f4f32d05e", 0x7fffffffL),
+    ("s32", "b32", 4, "0fcf32d05e", 0x80000000L),
+    ("s32", "b32", 4, "0f7fc00000", 0L),
+    ("u32", "b32", 4, "0f4f800000", 0xffffffffL),
+    ("u32", "b32", 4, "0fc0000000", 0L),
+    ("u32", "b32", 4, "0fffc00000", 0L),
+    ("s16", "b16", 2, "0f47800000", 0x7fffL),
+    ("s64", "b64", 8, "0f7f000000", Long.MaxValue)
+  )
+
   private val saturatingConversionCases = Vec("rni", "rzi", "rmi", "rpi").flatMap { rounding =>
-    Vec[(String, String, Int in 1 ~ 8, String, Long)](
-      ("s32", "b32", 4, "0f4f32d05e", 0x7fffffffL),
-      ("s32", "b32", 4, "0fcf32d05e", 0x80000000L),
-      ("s32", "b32", 4, "0f7fc00000", 0L),
-      ("u32", "b32", 4, "0f4f800000", 0xffffffffL),
-      ("u32", "b32", 4, "0fc0000000", 0L),
-      ("u32", "b32", 4, "0fffc00000", 0L),
-      ("s16", "b16", 2, "0f47800000", 0x7fffL),
-      ("s64", "b64", 8, "0f7f000000", Long.MaxValue)
-    ).map { (destination, registerType, bytes, input, expected) =>
+    saturatingConversionInputs.map { (destination, registerType, bytes, input, expected) =>
       (
         s"cvt.$rounding.$destination.f32 saturates $input",
         registerType,
@@ -543,13 +547,14 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
     }
   }
 
+  private val logicalNegationFixedInputs = Vec(
+    ("zero", "0", 1L),
+    ("one", "1", 0L),
+    ("negative", "-1", 0L)
+  )
+
   private val logicalNegationCases = Vec(16, 32, 64).flatMap { width =>
-    Vec(
-      ("zero", "0", 1L),
-      ("one", "1", 0L),
-      ("negative", "-1", 0L),
-      ("high bit", s"0x${(BigInt(1) << (width - 1)).toString(16)}", 0L)
-    ).map {
+    logicalNegationFixedInputs.appended(("high bit", s"0x${(BigInt(1) << (width - 1)).toString(16)}", 0L)).map {
       case (name, input, expected) =>
         (
           s"cnot.b$width maps $name to $expected with aliased operands",
@@ -594,7 +599,7 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
          |  .reg .$registerType %value;
          |  ld.param.u64 %out, [output];
          |  $instruction
-         |  st.global.b${bytes.raw * 8} [%out], %value;
+         |  st.global.b${bytes * 8} [%out], %value;
          |  ret;
          |}
          |""".stripMargin
@@ -619,9 +624,7 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
       "add.rz.f16 %value, 0x3c00, 0x3c00;",
       "add.rz.sat.f64 %value, 0d3ff0000000000000, 0d3ff0000000000000;",
       "mul.rm.ftz.f64 %value, 0d3ff0000000000000, 0d3ff0000000000000;",
-      "fma.rn.relu.f32 %value, 0f3f800000, 0fbf800000, 0f00000000;",
-      "min.f32 %value, 0f3f800000, 0f40000000, 0f40400000;",
-      "add.sat.f16x2 %value, 0x3c003c00, 0x3c003c00;"
+      "fma.rn.relu.f32 %value, 0f3f800000, 0fbf800000, 0f00000000;"
     )
   ) test(s"unsupported floating form is rejected: $instruction") {
     val source =

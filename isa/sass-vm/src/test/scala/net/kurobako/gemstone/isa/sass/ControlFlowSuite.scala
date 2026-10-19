@@ -5,8 +5,11 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.testing.either.*
+import net.kurobako.gemstone.vm.*
 
 class ControlFlowSuite extends munit.FunSuite {
+  private val Flags = Vec(false, true)
+
   for (sm <- Vec(35, 50, 60)) {
     test(s"sm_$sm loop backedges retain the enclosing break token across divergent exits") {
       check(
@@ -200,6 +203,32 @@ class ControlFlowSuite extends munit.FunSuite {
         rewrite = instruction => instruction.copy(address = addresses(instruction.address.raw / 16).unsafe)
       )
     }
+
+    // The shape CUDA 11.8 ptxas -O3 -arch=sm_35 gives a non-inlined recursive device function: its own break token is
+    // live across the recursive CAL, so each level restores it when the callee returns.
+    test(s"sm_$sm recursive calls inside a break region restore the caller's token on return") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |MOV R4, R0
+          |MOV R5, RZ
+          |CAL 0x90
+          |LDC.64 R2, c[0x0][0x160]
+          |ISCADD R2.CC, R0, R2, 2
+          |IADD.X R3, RZ, R3
+          |STG.E [R2], R5
+          |EXIT
+          |PBK 0x100
+          |ISETP.EQ.U32.AND P0, PT, R4, RZ, PT
+          |@P0 BRK
+          |IADD R5, R5, R4
+          |IADD32I R4, R4, -0x1
+          |CAL 0x90
+          |BRK
+          |RET""".stripMargin,
+        Vec.tabulate(20)(depth => depth * (depth + 1) / 2)
+      )
+    }
   }
 
   test("only unconditional terminators that end execution start an indirectly called function") {
@@ -216,7 +245,7 @@ class ControlFlowSuite extends munit.FunSuite {
   for ((sm, bundle) <- Vec(35 -> 64, 50 -> 32, 60 -> 32))
     test(s"sm_$sm branches can target the control word preceding an instruction") {
       def branch(target: Int) = program(sm, s"BRA 0x${target.toHexString}; EXIT", base = 0)
-        .map(i => i.copy(address = (if (i.address.raw == 0) 8 else bundle + 8).unsafe))
+        .map(i => i.copy(address = (if (i.address == 0) 8 else bundle + 8).unsafe))
       assert(branch(bundle).compile().isRight)
       assert(branch(bundle + 4).compile().isLeft)
     }
@@ -229,7 +258,7 @@ class ControlFlowSuite extends munit.FunSuite {
       if (indirect) assert(calls.exists(_.mnemonic.raw == "PRET"))
       else {
         assertEquals(calls.count(_.mnemonic.raw == "CAL"), 3)
-        if (sm == 35) assert(calls.exists(i => i.address.raw == 0xb8 && i.mnemonic.raw == "CAL"))
+        if (sm == 35) assert(calls.exists(i => i.address == 0xb8 && i.mnemonic.raw == "CAL"))
       }
       val expected = Vec.tabulate(64) { index =>
         val lane = index % 32
@@ -307,7 +336,7 @@ class ControlFlowSuite extends munit.FunSuite {
 
   for {
     lanes     <- Vec(1, 16, 32)
-    divergent <- Vec(false, true)
+    divergent <- Flags
   } test(s"convergence branches exclude unlaunched lanes: count=$lanes DIV=$divergent") {
     check(
       90,
@@ -414,6 +443,108 @@ class ControlFlowSuite extends munit.FunSuite {
         |RET.ABS R16, 0x20""".stripMargin,
       Vec(7)
     )
+  }
+
+  test("JMP and JMX branch to absolute code addresses") {
+    check(
+      86,
+      "MOV R4, 1; JMP 0x30; MOV R4, 2; MOV R0, 0x20; JMX R0, 0x40; MOV R4, 3; LDC.64 R2, c[0x0][0x160]; STG.E [R2.64], R4; EXIT",
+      Vec(1)
+    )
+  }
+
+  test("absolute calls reach code addresses through an immediate or a register") {
+    check(
+      86,
+      """MOV R5, 1
+        |LEPC R16
+        |CALL.ABS.NOINC 0x90
+        |MOV R6, 0x90
+        |LEPC R16
+        |CALL.ABS R6
+        |LDC.64 R2, c[0x0][0x160]
+        |STG.E [R2.64], R5
+        |EXIT
+        |IADD3 R5, R5, 4, RZ
+        |RET.ABS R16, 0x20""".stripMargin,
+      Vec(9)
+    )
+  }
+
+  test("WARPSYNC synchronises each warp on its own member mask") {
+    check(
+      89,
+      """S2R R0, SR_TID.X
+        |ISETP.GE.U32.AND P0, PT, R0, 48, PT
+        |@P0 EXIT
+        |ISETP.LT.U32.AND P1, PT, R0, 32, PT
+        |MOV R9, 0xffff
+        |@P1 MOV R9, 0xffffffff
+        |WARPSYNC R9
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R9
+        |EXIT""".stripMargin,
+      Vec.tabulate(64)(lane => if (lane < 32) -1 else if (lane < 48) 0xffff else 0)
+    )
+  }
+
+  test("driver vprintf returns 0 and a failed __assertfail fails the launch") {
+    check(
+      89,
+      "MOV R4, 5; MOV R2, 0x10; MOV R3, 0xffffff00; CALL.ABS.NOINC R2; LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R4; EXIT",
+      Vec(0)
+    )
+    val failed = program(89, "MOV R2, 0x40; MOV R3, 0xffffff00; CALL.ABS.NOINC R2; EXIT").run(1)(Arg.zeros(4))
+    assert(failed.left.exists { case Fault.Assertion(_) => true; case _ => false }, failed)
+  }
+
+  test("LEPC and ULEPC write the instruction's 64-bit address") {
+    check(
+      90,
+      "MOV R17, 7; LEPC R16; ULEPC UR4; MOV R18, UR4; MOV R19, UR5; LDC.64 R2, c[0x0][0x160]; STG.E.128 [R2.64], R16; EXIT",
+      Vec(0x10, 0, 0x20, 0)
+    )
+  }
+
+  for (sm <- Vec(35, 50, 60)) {
+    test(s"sm_$sm JCAL calls a subroutine that returns with RET") {
+      check(
+        sm,
+        """MOV32I R4, 0x1
+          |JCAL 0x60
+          |IADD32I R4, R4, 0x2
+          |LDC.64 R2, c[0x0][0x160]
+          |STG.E [R2], R4
+          |EXIT
+          |IADD32I R4, R4, 0x4
+          |RET""".stripMargin,
+        Vec(7)
+      )
+    }
+
+    test(s"sm_$sm CONT leaves an iteration for the PCNT target, where the lanes reconverge") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |MOV R4, RZ
+          |MOV R5, RZ
+          |PCNT 0x80
+          |ISETP.LT.U32.AND P0, PT, R0, 16, PT
+          |@P0 CONT
+          |IADD R4, R4, R5
+          |CONT
+          |IADD32I R5, R5, 0x1
+          |ISETP.LT.U32.AND P1, PT, R5, 4, PT
+          |@P1 BRA 0x30
+          |LDC.64 R2, c[0x0][0x160]
+          |ISCADD R2.CC, R0, R2, 2
+          |IADD.X R3, RZ, R3
+          |STG.E [R2], R4
+          |EXIT""".stripMargin,
+        Vec.tabulate(32)(lane => if (lane < 16) 0 else 6)
+      )
+    }
   }
 
   test("BRX adds its register and displacement to the following instruction address") {

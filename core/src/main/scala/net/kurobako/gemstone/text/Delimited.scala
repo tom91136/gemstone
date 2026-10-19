@@ -12,7 +12,7 @@ object Delimited {
   /** Splits at separators outside `()`, `[]`, and `{}` nesting. Segments keep their input offset and surrounding
     * whitespace; an input without separators is one segment. An unclosed delimiter is reported at its opening.
     */
-  def splitTopLevel(text: String, separator: Char => Boolean): Either[Unbalanced, Vec[Segment]] = {
+  inline def splitTopLevel(text: String, inline separator: Char => Boolean): Either[Unbalanced, Vec[Segment]] = {
     def segment(start: Int, end: Int): Segment = Segment(start.unsafe[Int >= 0], text.substring(start, end))
     def closing(open: Int): Char               = text.charAt(open) match {
       case '(' => ')'

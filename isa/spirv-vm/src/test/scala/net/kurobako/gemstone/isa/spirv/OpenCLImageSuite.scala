@@ -6,6 +6,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.vm.*
 
 class OpenCLImageSuite extends munit.FunSuite {
@@ -45,9 +46,9 @@ class OpenCLImageSuite extends munit.FunSuite {
 
   private def bytes(values: Int*): Vec[Byte] = Vec.from(values.map(_.toByte))
 
-  private def float(value: Float): Long = floatBits(value)
+  private def float(value: Float): Long = single(value)
 
-  private def unorm8(value: Int): Long = floatBits(value / 255f)
+  private def unorm8(value: Int): Long = single(value / 255f)
 
   private case class Format(
       name: String,
@@ -572,6 +573,118 @@ class OpenCLImageSuite extends munit.FunSuite {
     assertEquals(words(memory, destination.texels, offset = 0, count = 8), Vec.from((0 until 8).map(_ * 1000L)))
   }
 
+  test("media block reads and writes run a region's rows, padded to powers of two, through the subgroup's values") {
+    val module = spv"""
+      OpCapability SubgroupImageMediaBlockIOINTEL
+      OpExtension "SPV_INTEL_media_block_io"
+      $header
+      OpEntryPoint Kernel %main "media" %lid
+      OpDecorate %lid BuiltIn LocalInvocationIndex
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %v2uint = OpTypeVector %uint 2
+      %ro = OpTypeImage %void 2D 0 0 0 0 Unknown ReadOnly
+      %wo = OpTypeImage %void 2D 0 0 0 0 Unknown WriteOnly
+      %v2uint_ptr = OpTypePointer CrossWorkgroup %v2uint
+      %lid_ptr = OpTypePointer Input %uint
+      %lid = OpVariable %lid_ptr Input
+      %fn = OpTypeFunction %void %ro %wo %v2uint_ptr
+      %uint_0 = OpConstant %uint 0
+      %uint_1 = OpConstant %uint 1
+      %uint_2 = OpConstant %uint 2
+      %uint_3 = OpConstant %uint 3
+      %uint_4 = OpConstant %uint 4
+      %uint_1000 = OpConstant %uint 1000
+      %second_texel = OpConstantComposite %v2uint %uint_4 %uint_0
+      %second_row = OpConstantComposite %v2uint %uint_0 %uint_1
+      %main = OpFunction %void None %fn
+      %src = OpFunctionParameter %ro
+      %dst = OpFunctionParameter %wo
+      %out = OpFunctionParameter %v2uint_ptr
+      %entry = OpLabel
+      %lane = OpLoad %uint %lid
+      %pair = OpSubgroupImageMediaBlockReadINTEL %v2uint %src %second_texel %uint_4 %uint_3
+      %slot = OpPtrAccessChain %v2uint_ptr %out %lane
+      OpStore %slot %pair
+      %scaled = OpIMul %uint %lane %uint_1000
+      OpSubgroupImageMediaBlockWriteINTEL %dst %second_row %uint_2 %uint_2 %scaled
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory      = RegionMemory()
+    val texels      = (0 until 3).flatMap(row => (0 until 8).map(column => row * 100L + column))
+    val source      = image(memory, ImageFormat.R32ui, 4, 8, height = 3, contents = littleEndian(texels, 32))
+    val destination = image(memory, ImageFormat.R32ui, texelBytes = 4, width = 8, height = 3)
+    val out         = memory.allocate(64L)
+    assertEquals(
+      run(
+        module,
+        "media",
+        memory,
+        Vec(source.argument, destination.argument, buffer(out)),
+        local = testDimensions(8),
+        relocations = Vec(source.relocation, destination.relocation)
+      ),
+      Right(())
+    )
+    // four texels a row from the second: lanes 0 to 3 take row 0 then row 2, lanes 4 to 7 row 1 then a fourth row
+    // past the region
+    assertEquals(
+      words(memory, out, offset = 0, count = 16),
+      Vec.from((0 until 8).flatMap(lane =>
+        Seq(100L * (lane / 4) + 1 + lane % 4, if (lane < 4) 201L + lane else 0L)
+      ))
+    )
+    assertEquals(words(memory, destination.texels, offset = 32, count = 8), Vec(0L, 1000L, 0L, 0L, 0L, 0L, 0L, 0L))
+    assertEquals(words(memory, destination.texels, offset = 64, count = 2), Vec(2000L, 3000L))
+  }
+
+  test("bindless image handles address the descriptors their arguments bind") {
+    val module = spv"""
+      OpCapability BindlessImagesINTEL
+      OpExtension "SPV_INTEL_bindless_images"
+      $header
+      OpEntryPoint Kernel %main "bindless"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %v2uint = OpTypeVector %uint 2
+      %v4uint = OpTypeVector %uint 4
+      %ro = OpTypeImage %void 2D 0 0 0 0 Unknown ReadOnly
+      %descriptor_ptr = OpTypePointer CrossWorkgroup %uint
+      %v4uint_ptr = OpTypePointer CrossWorkgroup %v4uint
+      %fn = OpTypeFunction %void %descriptor_ptr %v4uint_ptr
+      %uint_1 = OpConstant %uint 1
+      %uint_2 = OpConstant %uint 2
+      %where = OpConstantComposite %v2uint %uint_1 %uint_2
+      %main = OpFunction %void None %fn
+      %descriptor = OpFunctionParameter %descriptor_ptr
+      %out = OpFunctionParameter %v4uint_ptr
+      %entry = OpLabel
+      %handle = OpConvertPtrToU %ulong %descriptor
+      %image = OpConvertHandleToImageINTEL %ro %handle
+      %texel = OpImageRead %v4uint %image %where
+      OpStore %out %texel
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val texels = (0 until 3).flatMap(row => (0 until 4).map(column => row * 100L + column))
+    val source = image(memory, ImageFormat.R32ui, 4, 4, height = 3, contents = littleEndian(texels, 32))
+    val out    = memory.allocate(16L)
+    assertEquals(
+      run(
+        module,
+        "bindless",
+        memory,
+        Vec(source.argument, buffer(out)),
+        relocations = Vec(source.relocation)
+      ),
+      Right(())
+    )
+    assertEquals(words(memory, out, offset = 0, count = 1), Vec(201L))
+  }
+
   test("read-write 3D images observe their own writes") {
     val module = spv"""
       $header
@@ -599,7 +712,7 @@ class OpenCLImageSuite extends munit.FunSuite {
       OpFunctionEnd
     """
     val memory = RegionMemory()
-    val volume = image(memory, ImageFormat.Rgba8ui, texelBytes = 4, width = 2, height = 1, slices = 2, volume = true)
+    val volume = image(memory, ImageFormat.Rgba8ui, texelBytes = 4, width = 2, slices = 2, volume = true)
     memory.array(volume.texels).indices.foreach(index => memory.array(volume.texels)(index) = index.toByte)
     val out = memory.allocate(16L)
     assertEquals(

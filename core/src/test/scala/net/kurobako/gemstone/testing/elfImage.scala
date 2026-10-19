@@ -23,7 +23,8 @@ object elfImage {
 
   case class Relocation(offset: Long, symbol: Long, kind: Long, addend: Option[Long] = None)
 
-  private val SectionNames = ".shstrtab"
+  private val SectionNames   = ".shstrtab"
+  private val Identification = Array[Byte](0x7f, 'E', 'L', 'F', 2, 1, 1)
 
   /** A string table and the offset of each name in it. */
   def strings(names: Seq[String]): (table: Vec[Byte], offsets: Map[String, Int]) = {
@@ -76,7 +77,7 @@ object elfImage {
     val offsets                  = resolved.scanLeft(64)((offset, section) => aligned(offset + section.contents.length))
     val table                    = offsets.last
     val buffer                   = ByteBuffer.allocate(table + (resolved.size + 1) * 64).order(ByteOrder.LITTLE_ENDIAN)
-    buffer.put(Array[Byte](0x7f, 'E', 'L', 'F', 2, 1, 1)).put(8, abiVersion.toByte)
+    buffer.put(Identification).put(8, abiVersion.toByte)
     buffer.putShort(16, imageType.toShort).putShort(18, machine.toShort).putInt(20, 1).putLong(40, table.toLong)
       .putInt(48, flags).putShort(52, 64.toShort).putShort(58, 64.toShort).putShort(60, (resolved.size + 1).toShort)
       .putShort(62, (resolved.indexWhere(_.name == SectionNames) + 1).toShort)

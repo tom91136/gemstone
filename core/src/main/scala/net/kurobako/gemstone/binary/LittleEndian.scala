@@ -8,7 +8,7 @@ object LittleEndian {
   inline def decode(size: Int in 0 ~ 8)(inline byteAt: Int => Byte): Long = {
     var result = 0L
     var index  = 0
-    while (index < size.raw) {
+    while (index < size) {
       result |= (byteAt(index).toLong & 0xffL) << (index * 8)
       index += 1
     }
@@ -46,7 +46,7 @@ object LittleEndian {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def write(value: Long, size: Int in 0 ~ 8)(inline writeByte: (Int, Byte) => Unit): Unit = {
     var index = 0
-    while (index < size.raw) {
+    while (index < size) {
       writeByte(index, (value >>> (index * 8)).toByte)
       index += 1
     }
@@ -65,13 +65,13 @@ object LittleEndian {
   }
 
   def toArray(value: Long, size: Int in 0 ~ 8): Array[Byte] = {
-    val mutableBytes = Array.ofDim[Byte](size.raw)
+    val mutableBytes = Array.ofDim[Byte](size)
     write(value, mutableBytes, 0, size)
     mutableBytes
   }
 
   def toVec(value: Long, size: Int in 0 ~ 8): Vec[Byte] =
-    Vec.tabulate(size.raw)(index => (value >>> (index * 8)).toByte)
+    Vec.tabulate(size)(index => (value >>> (index * 8)).toByte)
 
   def toNonEmptyVec(value: Long, size: Int in 1 ~ 8): NonEmpty[Vec[Byte]] =
     Vec.tabulateNonEmpty(size.widen[Int > 0])(index => (value >>> (index.raw * 8)).toByte)
@@ -83,7 +83,7 @@ object LittleEndian {
   ): Unit =
     // Validate the complete dependent range once; a non-negative offset alone could not prove that the access fits.
     require(
-      offset >= 0 && size.raw >= 0 && offset <= length - size.raw,
-      s"range [$offset, ${offset + size.raw}) exceeds bounds [0, $length)"
+      offset >= 0 && size >= 0 && offset <= length - size,
+      s"range [$offset, ${offset + size}) exceeds bounds [0, $length)"
     )
 }

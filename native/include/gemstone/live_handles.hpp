@@ -11,15 +11,15 @@ namespace gemstone {
 template <class Kind> class LiveHandles {
 public:
   void insert(const void *value, Kind kind) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     values.insert_or_assign(value, kind);
   }
   void erase(const void *value) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     values.erase(value);
   }
   [[nodiscard]] bool contains(const void *value, Kind kind) const {
-    std::lock_guard lock(mutex);
+    std::scoped_lock const lock(mutex);
     const auto found = values.find(value);
     return found != values.end() && found->second == kind;
   }

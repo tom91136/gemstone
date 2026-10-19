@@ -4,10 +4,13 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import programs.*
 
 class VMStateSuite extends munit.FunSuite {
+  import ConditionCodeReads.*
+
   test("lane registers and predicates grow on demand and distinguish undefined predicates") {
     val lane = VMLane(0, 0)
     assertEquals(lane.register(r(6143)), 0L)
@@ -78,7 +81,7 @@ class VMStateSuite extends munit.FunSuite {
     used(last).writeParameter(VMIR.Parameter(0), 0, 32, 7L)
     used(last).conditionCodes.write(VMConditionCodes.Flag.Zero, Some(true))
     used(last).carry = true
-    val _ = used(last).returnStack += 19L
+    used(last).returnStack.push(19L)
     workgroup.writeLocal(last, 0L, 32, 11L)
     workgroup.writeShared(VMAddressSpace.SharedBase, 32, 13L)
     val token = workgroup.createConvergence(992, 1L)
@@ -91,7 +94,7 @@ class VMStateSuite extends munit.FunSuite {
       assertEquals(lanes(lane).readParameter(VMIR.Parameter(0), 0, 4), 0L)
       assertEquals(lanes(lane).conditionCodes.read(VMConditionCodes.Flag.Zero), None)
       assert(!lanes(lane).carry)
-      assert(lanes(lane).returnStack.isEmpty)
+      assert(!lanes(lane).returnStack.nonEmpty)
       assertEquals(workgroup.readLocal(lane, 0L, 32), 0L)
     }
     assertEquals(workgroup.readShared(VMAddressSpace.SharedBase, 32), 0L)
@@ -113,6 +116,49 @@ class VMStateSuite extends munit.FunSuite {
     }
   }
 
+  test("a bulk shared write forgets the mbarriers it covers and keeps the others") {
+    val workgroup = VMWorkgroup(1)
+    val base      = VMAddressSpace.SharedBase
+    for (offset <- Vec(0L, 8L, 16L, 24L)) workgroup.mbarriers(base + offset) = MBarrier.create(1L).value
+    workgroup.invalidatedMBarriers(base + 32L) = ()
+    workgroup.invalidatedMBarriers(base + 40L) = ()
+    workgroup.writeSharedBytes(base + 12L, Array.fill[Byte](24)(1), 0, 21)
+    assert(workgroup.mbarriers.contains(base))
+    assert(!workgroup.mbarriers.contains(base + 8L))
+    assert(!workgroup.mbarriers.contains(base + 16L))
+    assert(!workgroup.mbarriers.contains(base + 24L))
+    assert(!workgroup.invalidatedMBarriers.contains(base + 32L))
+    assert(workgroup.invalidatedMBarriers.contains(base + 40L))
+    assertEquals(workgroup.readShared(base + 12L, 32), 0x01010101L)
+    assertEquals(workgroup.readShared(base + 33L, 8), 0L)
+  }
+
+  test("an empty bulk shared write forgets no mbarrier") {
+    val workgroup = VMWorkgroup(1)
+    val base      = VMAddressSpace.SharedBase
+    workgroup.mbarriers(base) = MBarrier.create(1L).value
+    workgroup.writeSharedBytes(base + 3L, Array.emptyByteArray, 0, 0)
+    assert(workgroup.mbarriers.contains(base))
+  }
+
+  test("shared reads and writes reach the cluster rank an address names") {
+    val first  = VMWorkgroup(1)
+    val second = VMWorkgroup(1)
+    val shared = Array[VMWorkgroup | Null](first, second)
+    first.cluster = shared
+    second.cluster = shared
+    second.clusterRank = 1
+    val remote = VMAddressSpace.clusterAddress(VMAddressSpace.SharedBase + 0x20L, 1)
+    first.writeShared(remote, 32, 0x55L)
+    assertEquals(second.readShared(VMAddressSpace.SharedBase + 0x20L, 32), 0x55L)
+    assertEquals(first.readShared(remote, 32), 0x55L)
+    assertEquals(first.readShared(VMAddressSpace.SharedBase + 0x20L, 32), 0L)
+    val outside = VMAddressSpace.clusterAddress(VMAddressSpace.SharedBase, 5)
+    first.writeShared(outside, 32, 1L)
+    assertEquals(first.readShared(outside, 32), 0L)
+    assertEquals(Option(first.sharedOwner(outside)), None)
+  }
+
   test("an invalid memory write prevents staged register writes from committing") {
     val workgroup = VMWorkgroup(1)
     val lanes     = frame(1)
@@ -120,9 +166,9 @@ class VMStateSuite extends munit.FunSuite {
     val memory    = RegionMemory(AllocationId(1) -> 4)
     effects.stageRegister(0, r(0), 42L)
     effects.stageMemory(0, GuestAddress(RegionMemory.Base + 4L), 32, 7L)
-    assert(effects.commit(lanes, workgroup, memory, VMIR.Pc.Entry).isLeft)
+    assert(effects.commit(lanes, workgroup, DeviceHeap(memory), VMIR.Pc.Entry).isLeft)
     assertEquals(lanes(0).register(r(0)), 0L)
-    assertEquals(effects.commit(lanes, workgroup, memory, VMIR.Pc.Entry), Right(()))
+    assertEquals(effects.commit(lanes, workgroup, DeviceHeap(memory), VMIR.Pc.Entry), Right(()))
   }
 
   test("the reusable effect buffer grows and preserves write order for the highest lane") {
@@ -131,12 +177,12 @@ class VMStateSuite extends munit.FunSuite {
     val effects   = VMWriteBuffer()
     val memory    = RegionMemory()
     (0 until 129).foreach(value => effects.stageRegister(1023, r(0), value.toLong))
-    assertEquals(effects.commit(lanes, workgroup, memory, VMIR.Pc.Entry), Right(()))
+    assertEquals(effects.commit(lanes, workgroup, DeviceHeap(memory), VMIR.Pc.Entry), Right(()))
     assertEquals(lanes(1023).register(r(0)), 128L)
     assertEquals(lanes(0).register(r(0)), 0L)
     effects.stageRegister(1023, r(0), 200L)
     effects.clear()
-    assertEquals(effects.commit(lanes, workgroup, memory, VMIR.Pc.Entry), Right(()))
+    assertEquals(effects.commit(lanes, workgroup, DeviceHeap(memory), VMIR.Pc.Entry), Right(()))
     assertEquals(lanes(1023).register(r(0)), 128L)
   }
 
@@ -147,9 +193,9 @@ class VMStateSuite extends munit.FunSuite {
     effects.stage(VMWrite.ConditionFlag(0, VMConditionCodes.Flag.Carry, Some(true)))
     effects.stage(VMWrite.AddThreeCarry(0, Some(2)))
     effects.stage(VMWrite.ConditionFlag(1, VMConditionCodes.Flag.Carry, Some(false)))
-    assertEquals(effects.commit(lanes, workgroup, RegionMemory(), VMIR.Pc.Entry), Right(()))
+    assertEquals(effects.commit(lanes, workgroup, DeviceHeap(RegionMemory()), VMIR.Pc.Entry), Right(()))
     assertEquals(lanes(1).conditionCodes.read(VMConditionCodes.Flag.Carry), Some(false))
-    assertEquals(lanes(0).conditionCodes.readThreeInputCarry.map(_.raw), Some(2))
+    assertEquals(lanes(0).conditionCodes.readThreeInputCarry, Some(2))
     assertEquals(lanes(0).conditionCodes.read(VMConditionCodes.Flag.Carry), None)
     assertEquals(lanes(1).conditionCodes.readThreeInputCarry, None)
   }

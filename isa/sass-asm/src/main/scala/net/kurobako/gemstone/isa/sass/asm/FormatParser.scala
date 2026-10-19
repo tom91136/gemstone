@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass.asm
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.string.*
@@ -18,13 +19,36 @@ object FormatParser {
 
   private case class State(offset: Int, bindings: Map[String, BigInt])
 
-  def parse(
-      database: NVDisasm.Database,
-      form: NVDisasm.Form,
-      address: Int,
-      text: String
-  ): Either[String, Map[String, BigInt]] = {
-    val source   = normalise(text.stripSuffix(";"))
+  /** What parsing a form needs of the form and its database alone, found once. */
+  private case class Prepared(
+      pieces: Either[String, Vec[Piece]],
+      required: Set[String],
+      names: Map[(String, String), String],
+      defaults: Map[String, BigInt],
+      descriptorField: Option[String],
+      explicitDescriptor: Option[(String, BigInt)]
+  )
+
+  // forms and databases are large and never copied, so the caches compare them by identity
+  private val layouts =
+    java.util.Collections.synchronizedMap(java.util.IdentityHashMap[NVDisasm.Form, Either[String, Vec[Piece]]]())
+  private val prepared =
+    java.util.Collections.synchronizedMap(java.util.IdentityHashMap[
+      NVDisasm.Database,
+      java.util.Map[NVDisasm.Form, Prepared]
+    ]())
+
+  private def layout(form: NVDisasm.Form): Either[String, Vec[Piece]] =
+    layouts.computeIfAbsent(form, _ => flatten(form))
+
+  private def prepare(database: NVDisasm.Database, form: NVDisasm.Form): Prepared =
+    prepared.computeIfAbsent(
+      database,
+      _ => java.util.Collections.synchronizedMap(java.util.IdentityHashMap[NVDisasm.Form, Prepared]())
+    )
+      .computeIfAbsent(form, _ => build(database, form))
+
+  private def build(database: NVDisasm.Database, form: NVDisasm.Form): Prepared = {
     val declared = NVDisasm.Syntax.fields(form.syntax, includeMarkedOptionals = true) ++
       Option.when(form.syntax.exists {
         case NVDisasm.Syntax.Text(raw) => raw.contains("Opcode")
@@ -54,7 +78,18 @@ object FormatParser {
       database.vocabulary(field).find(entry => !defaultValue(database, field).contains(entry.value))
         .map(encodedBinding(field) -> _.value)
     ).orElse(Option.when(required("e_desc"))("e_desc" -> BigInt(1)))
-    def described(bindings: Map[String, BigInt]): Map[String, BigInt] =
+    Prepared(layout(form), required, names, defaults, descriptorField, explicitDescriptor)
+  }
+
+  def parse(
+      database: NVDisasm.Database,
+      form: NVDisasm.Form,
+      address: Int,
+      text: String
+  ): Either[String, Map[String, BigInt]] = {
+    val source = normalise(text.stripSuffix(";"))
+    val Prepared(pieces, required, names, defaults, descriptorField, explicitDescriptor) = prepare(database, form)
+    def described(bindings: Map[String, BigInt]): Map[String, BigInt]                    =
       (descriptorField, explicitDescriptor) match {
         case (Some(descriptor), Some((name, value))) if bindings.contains(descriptor) =>
           bindings.updated(name, value)
@@ -62,7 +97,7 @@ object FormatParser {
       }
     def legality(bindings: Map[String, BigInt]) =
       Legality.check(database, form, Legality.completeBindings(form, bindings))
-    flatten(form).flatMap(consume(database, form, _, source, address, names)).flatMap { parsed =>
+    pieces.flatMap(consume(database, form, _, source, address, names)).flatMap { parsed =>
       val complete =
         parsed.filter(_.offset == source.length).map(state => defaults ++ described(state.bindings)).distinct
       val bound = complete.filter(bindings => required.subsetOf(bindings.keySet))
@@ -76,12 +111,83 @@ object FormatParser {
         legal match {
           case Vec(bindings) => Right(bindings)
           case Vec()         => Left(bound.flatMap(legality(_).left.toOption).head.message)
-          case _             => Left(s"ambiguous ${form.name} FORMAT: ${legal.size} binding sets")
+          case _             =>
+            // fields whose values print the same text read as their default
+            legal.filter(bindings =>
+              legal.forall(other =>
+                other.keySet.forall(key =>
+                  other.get(key) == bindings.get(key) || bindings.get(key).exists(defaults.get(key).contains)
+                )
+              )
+            ) match {
+              case Vec(bindings) => Right(bindings)
+              case _             => Left(s"ambiguous ${form.name} FORMAT: ${legal.size} binding sets")
+            }
         }
     }
   }
 
   private val opcodeField = NVDisasm.Syntax.field("Opcode", "Opcode", None, None)
+
+  /** Text of `form` in its canonical layout with each field `spell` spells, or why the FORMAT cannot be laid out. A
+    * field left unspelled takes its default, and optional text appears only where the field it introduces is spelled.
+    * The opcode is spelled `opcode`, and a space sets the operands apart from it and its modifiers.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def render(
+      form: NVDisasm.Form,
+      opcode: String,
+      spell: NVDisasm.Syntax.Field => Option[String],
+      braced: Boolean = true
+  ): Either[String, String] = layout(form).map { pieces =>
+    def spelled(piece: Piece): Option[String] = piece match {
+      case Piece.Field(field, _, _) if field.binding == "Opcode" => Some(opcode)
+      case Piece.Field(field, _, _)                              => spell(field).filter(_.nonEmpty)
+      case _                                                     => None
+    }
+    def omitted(from: Int, size: Int): Boolean = !pieces.slice(from + 1, from + 1 + size).exists(spelled(_).nonEmpty)
+    @annotation.tailrec
+    def introduces(from: Int): Boolean = pieces.lift(from) match {
+      case Some(Piece.OptionalGroup(size)) if omitted(from, size) => introduces(from + size + 1)
+      case Some(piece: Piece.Field)                               => spelled(piece).nonEmpty
+      case Some(_)                                                => introduces(from + 1)
+      case None                                                   => false
+    }
+    val text     = mutable.StringBuilder()
+    var operands = false
+    var adjacent = false
+    var index    = 0
+    while (index < pieces.size) {
+      pieces(index) match {
+        case Piece.OptionalGroup(size) =>
+          if (omitted(index, size)) index += size
+        case Piece.Fixed("{" | "}", _) if !braced => ()
+        case Piece.Fixed(value, optional)         =>
+          if (!optional || introduces(index + 1)) {
+            if (operands && !value.startsWith(".") && !text.endsWith(" ")) {
+              text ++= " "
+              operands = false
+            }
+            text ++= (if (value == ",") ", " else value)
+            adjacent = false
+          }
+        case piece @ Piece.Field(field, _, qualifier) =>
+          spelled(piece).foreach { value =>
+            if (field.binding == "Opcode") {
+              if (text.nonEmpty) text ++= " "
+              operands = true
+            } else if ((operands || adjacent) && !qualifier) {
+              text ++= " "
+              operands = false
+            }
+            text ++= value
+            adjacent = field.binding != "Opcode"
+          }
+      }
+      index += 1
+    }
+    text.result()
+  }
 
   /** The register fields inside the `[...]` that follows a memory descriptor field. */
   private def descriptorRegisters(syntax: Vec[NVDisasm.Syntax]): Vec[NVDisasm.Syntax.Field] = {
@@ -159,6 +265,14 @@ object FormatParser {
           rest     <- loop(tail, depth, None)
           descriptor = Piece.Field(field, depth, qualifier = false) +: register
         } yield Piece.OptionalGroup(descriptor.size) +: (descriptor ++ rest)
+      // nvdisasm prints `[RZ + offset]` as `[offset]`, so a defaulted zero register may go with its `+`.
+      case (field: Field) +: Text(plus) +: tail
+          if field.category == NVDisasm.FieldKind.ZeroRegister && field.default.nonEmpty &&
+            formatText(plus).trim == "+" =>
+        loop(tail, depth, None).map { rest =>
+          val group = Vec[Piece](Piece.Field(field, depth, qualifier = false), Piece.Fixed(formatText(plus)))
+          Piece.OptionalGroup(group.size) +: (group ++ rest)
+        }
       case (field: Field) +: tail =>
         val omittedPredicate = afterComma(tail).filter(_ =>
           field.default.nonEmpty && field.category.isPredicate &&
@@ -202,11 +316,24 @@ object FormatParser {
           inner <- loop(children, depth, previousText)
           rest  <- loop(tail, depth, None)
         } yield inner ++ rest
-      case Optional(Some(marker), _) +: tail if Set("&", "?")(marker) => loop(tail, depth, None)
+      case Optional(Some("&" | "?"), _) +: tail => loop(tail, depth, None)
       case Optional(marker, _) +: _ => Left(s"unsupported optional FORMAT syntax ${marker.getOrElse("<none>")}")
       case _                        => Left("unsupported FORMAT sequence")
     }
-    loop(form.syntax, 0, None)
+    // A form's statement ends at its `;`; a FORMAT_ALIAS after it derives a field and is not written.
+    val statement = form.syntax.indexWhere {
+      case Text(raw) => raw.contains(';')
+      case _         => false
+    } match {
+      case -1 => form.syntax
+      case at =>
+        form.syntax.take(at) ++
+          (form.syntax(at) match {
+            case Text(raw) => Vec(Text(raw.takeWhile(_ != ';')))
+            case _         => Vec.empty[NVDisasm.Syntax]
+          })
+    }
+    loop(statement, 0, None)
   }
 
   private def consume(
@@ -231,13 +358,13 @@ object FormatParser {
           else Vec.empty[State]
           if (optional) matched ++ run(index + 1, state) else matched
         case Piece.Field(field, depth, qualifier) =>
+          val encoded      = encodedNames.getOrElse((field.kind, field.binding), field.binding)
           val capturedEnds = (state.offset to source.length).view
           capturedEnds.flatMap { end =>
             if (visited.size > maximumWork) Vec.empty[State]
             else {
               val spelling = source.substring(state.offset, end)
               decodeField(database, field, spelling, address, form, depth, qualifier).toVec.flatMap { parsed =>
-                val encoded = encodedNames.getOrElse((field.kind, field.binding), field.binding)
                 val updates = parsed.map { case (suffix, value) =>
                   (if (suffix.isEmpty) encoded else s"$encoded@$suffix") -> value
                 }.toMap
@@ -284,16 +411,21 @@ object FormatParser {
     }
   }
 
-  private def parseRegister(category: NVDisasm.FieldKind, token: String): Option[BigInt] =
-    if (
-      !category.isRegister && !Set(
-        NVDisasm.FieldKind.BarrierRegister,
-        NVDisasm.FieldKind.Scoreboard,
-        NVDisasm.FieldKind.CbuState
-      )(category)
-    ) None
-    else if (token.endsWith("Z")) None // Zero-register encodings come from the architecture vocabulary.
-    else OperandParser.parse(token).toOption.collect { case Operand.Register(_, index) => BigInt(index.raw) }
+  private def parseRegister(category: NVDisasm.FieldKind, token: String): Option[BigInt] = {
+    import NVDisasm.FieldKind.*
+    val bank = category match {
+      case Register | ZeroRegister | NonZeroRegister                      => Some(RegisterBank.R)
+      case UniformRegister | ZeroUniformRegister | NonZeroUniformRegister => Some(RegisterBank.UR)
+      case BarrierRegister | CbuState                                     => Some(RegisterBank.B)
+      case Scoreboard                                                     => Some(RegisterBank.SB)
+      case _                                                              => None
+    }
+    // Zero-register encodings come from the architecture vocabulary.
+    if (token.endsWith("Z")) None
+    else bank.flatMap(expected =>
+      OperandParser.parse(token).toOption.collect { case Operand.Register(`expected`, index) => BigInt(index) }
+    )
+  }
 
   private def parseImmediate(
       database: NVDisasm.Database,
@@ -318,7 +450,7 @@ object FormatParser {
         }
       case NVDisasm.FieldKind.RelativeImmediate => numeric.flatMap { target =>
           val bits  = width.getOrElse(0)
-          val delta = target - (BigInt(address) + (if (database.width.raw == 128) 16 else 8))
+          val delta = target - (BigInt(address) + (if (database.width == 128) 16 else 8))
           if (bits > 0 && delta >= -(BigInt(1) << (bits - 1)) && delta < (BigInt(1) << (bits - 1)))
             Some(if (delta < 0) (BigInt(1) << bits) + delta else delta)
           else None
@@ -335,7 +467,7 @@ object FormatParser {
     else database.byVocabulary.get(field.kind).flatMap(_.default)
 
   private def floatingBits(kind: FloatEncoding, token: String, shift: Int): Option[BigInt] = {
-    val expectedWidth = kind.width.map(_.raw).getOrElse(0)
+    val expectedWidth = kind.width.rawElements.getOrElse(0)
     val rawBits       = token match {
       case s"bits<$format>:$bits(0x$hex)" if format == kind.spelling && bits.toIntOption.contains(expectedWidth) =>
         parseBigIntLiteral(s"0x$hex")
@@ -380,14 +512,13 @@ object FormatParser {
   }
 
   private def decorations(raw: String): (String, Vec[(String, Int)]) = {
-    val marks  = raw.takeWhile("!-~".contains)
-    val parsed = marks.foldLeft((raw.drop(marks.length), Vec.empty[(String, Int)])) {
-      case ((remaining, attributes), '!') => remaining -> (attributes :+ ("not"    -> 1))
-      case ((remaining, attributes), '-') => remaining -> (attributes :+ ("negate" -> 1))
-      case ((remaining, attributes), '~') => remaining -> (attributes :+ ("invert" -> 1))
-      case (state, _)                     => state
-    }
-    val (remaining, attributes) = parsed
+    val marks      = raw.takeWhile("!-~".contains)
+    val remaining  = raw.drop(marks.length)
+    val attributes = marks.collect {
+      case '!' => "not"    -> 1
+      case '-' => "negate" -> 1
+      case '~' => "invert" -> 1
+    }.toVec
     if (remaining.startsWith("|") && remaining.endsWith("|") && remaining.length >= 2)
       remaining.drop(1).dropRight(1) -> (attributes :+ ("absolute" -> 1))
     else remaining                   -> attributes

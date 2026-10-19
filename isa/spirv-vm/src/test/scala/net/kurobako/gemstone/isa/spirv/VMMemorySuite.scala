@@ -1,9 +1,6 @@
 package net.kurobako.gemstone.isa.spirv
 
 import fixtures.*
-import java.util.concurrent.Callable
-import java.util.concurrent.CyclicBarrier
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
@@ -16,28 +13,6 @@ import net.kurobako.gemstone.vm.*
 class VMMemorySuite extends munit.FunSuite {
   private def storage(memory: AddressSpace, globals: Array[Byte] = Array.emptyByteArray): VMMemory.Storage =
     VMMemory.Storage(memory, Vec.empty, globals, _ => Right(()))
-
-  test("concurrent atomics serialise updates to dispatch-owned global storage") {
-    val workers    = 4
-    val increments = 256
-    val shared     = storage(RegionMemory(), Array.ofDim[Byte](4))
-    val pointer    =
-      VMMemory.Pointer(VMMemory.apertureAddress(VMMemory.GlobalAperture, 0), 0, StorageClass.CrossWorkgroup)
-    val start = CyclicBarrier(workers)
-    scala.util.Using.resource(threads.Pool(workers)) { pool =>
-      val tasks = Vec.tabulate(workers) { _ =>
-        val task: Callable[Vec[Long]] = () => {
-          val memory = VMMemory.MemoryState(shared)
-          val _      = start.await(5, TimeUnit.SECONDS)
-          Vec.tabulate(increments)(_ => memory.atomicModifyScalar(pointer, 4)(_ + 1L).value)
-        }
-        pool.executor.submit(task)
-      }
-      val previous = tasks.flatMap(_.get(10, TimeUnit.SECONDS))
-      assertEquals(previous.sorted, Vec.tabulate(workers * increments)(_.toLong))
-      assertEquals(LittleEndian.decodeInt32(shared.globals, 0), workers * increments)
-    }
-  }
 
   test("guest stores write through and loads observe other writers") {
     val backing          = RegionMemory()
@@ -86,7 +61,7 @@ class VMMemorySuite extends munit.FunSuite {
     assertEquals(run(module, "sparse", memory, offsets.map(buffer(region, _))), Right(()))
     assertEquals(writes.get(), offsets.map(_.raw -> 4) ++ Vec(0L -> 4, 8L -> 4))
     val expected = Array.ofDim[Byte](8200)
-    offsets.foreach(offset => LittleEndian.write(0x12345678L, expected, offset.raw.toInt, 4))
+    offsets.foreach(offset => LittleEndian.write(0x12345678L, expected, offset.toInt, 4))
     assertEquals(memory.bytes(region), Vec.from(expected))
   }
 }

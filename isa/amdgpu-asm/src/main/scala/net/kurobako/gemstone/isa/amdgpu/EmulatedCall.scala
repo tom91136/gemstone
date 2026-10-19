@@ -7,7 +7,7 @@ private object EmulatedCall {
 
   def matching(name: String): Vec[EmulatedCall] = calls.filter(call => name.contains(call.pattern))
 
-  enum Function {
+  enum Function derives CanEqual {
     case Log, Asinh, Acos, Atan, Acosh, Atanh, Sinh, Cosh, Tanh, Exp
 
     def apply(real: Double, imaginary: Double): (Double, Double) = this match {
@@ -59,7 +59,8 @@ private object EmulatedCall {
 /** Device-library complex functions evaluated on the host, recognised by a mangled-name fragment. Operands and results
   * occupy v0-v1 (binary32) or v[0:1] and v[2:3] (binary64).
   */
-private enum EmulatedCall(val pattern: String, val function: EmulatedCall.Function, val double: Boolean) {
+private enum EmulatedCall(val pattern: String, val function: EmulatedCall.Function, val double: Boolean)
+    derives CanEqual {
   case LogF32   extends EmulatedCall("logIf", EmulatedCall.Function.Log, double = false)
   case LogF64   extends EmulatedCall("logId", EmulatedCall.Function.Log, double = true)
   case AsinhF32 extends EmulatedCall("casinhf", EmulatedCall.Function.Asinh, double = false)

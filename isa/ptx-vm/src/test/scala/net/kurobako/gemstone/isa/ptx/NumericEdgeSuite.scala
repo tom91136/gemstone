@@ -10,13 +10,15 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class NumericEdgeSuite extends munit.FunSuite {
+  private val flags = Vec(false, true)
+
   for {
     (opcode, operation) <- Vec(
       Opcode.Add -> ((a: Float, b: Float) => a + b),
       Opcode.Sub -> ((a: Float, b: Float) => a - b),
       Opcode.Mul -> ((a: Float, b: Float) => a * b)
     )
-    flush <- Vec(false, true)
+    flush <- flags
   }
     test(s"packed float32 ${opcode.name} rounds each half independently, flush=$flush") {
       val inputs = Vec(
@@ -82,7 +84,7 @@ class NumericEdgeSuite extends munit.FunSuite {
       | .reg .$outputType %result;
       | ld.param.u64 %out, [output];
       | $body
-      | st.global.b${width.raw * 8} [%out], %result;
+      | st.global.b${width * 8} [%out], %result;
       | ret;
       |}
       |""".stripMargin
@@ -122,7 +124,7 @@ class NumericEdgeSuite extends munit.FunSuite {
 
   for {
     (opcode, cases) <- Vec("add" -> NumericCases.packedAdd, "mul" -> NumericCases.packedMultiply)
-    alias           <- Vec(false, true)
+    alias           <- flags
   }
     test(s"packed half $opcode preserves independent lanes and special values, alias=$alias") {
       cases.foreach { (left, right, expected) =>
@@ -135,8 +137,8 @@ class NumericEdgeSuite extends munit.FunSuite {
     }
 
   for {
-    maximum <- Vec(false, true)
-    alias   <- Vec(false, true)
+    maximum <- flags
+    alias   <- flags
   }
     test(s"float extrema preserve NaN selection and zero signs, maximum=$maximum alias=$alias") {
       NumericCases.f32Extrema.foreach { (left, right, minimum, max) =>
@@ -158,7 +160,7 @@ class NumericEdgeSuite extends munit.FunSuite {
       }
     }
 
-  for (maximum <- Vec(false, true))
+  for (maximum <- flags)
     test(s"binary64 extrema select numbers over NaNs and retain zero signs, maximum=$maximum") {
       val opcode = if (maximum) "max" else "min"
       val cases  = Vec(
@@ -175,14 +177,14 @@ class NumericEdgeSuite extends munit.FunSuite {
       }
     }
 
-  for (maximum <- Vec(false, true))
+  for (maximum <- flags)
     test(s"packed half extrema apply NaN selection separately to each lane, maximum=$maximum") {
       val opcode = if (maximum) "max" else "min"
       val body   = s"mov.b32 %a, 0x7e008000; mov.b32 %b, 0x3c000000; $opcode.f16x2 %result, %a, %b;"
       assertEquals(run(body, "b32", 4), if (maximum) 0x3c000000L else 0x3c008000L)
     }
 
-  for (unordered <- Vec(false, true))
+  for (unordered <- flags)
     test(s"float comparisons retain ordered and unordered NaN behaviour, unordered=$unordered") {
       NumericCases.f32Comparisons.foreach { (left, right, equal, notEqualUnordered) =>
         val comparison = if (unordered) "neu" else "eq"

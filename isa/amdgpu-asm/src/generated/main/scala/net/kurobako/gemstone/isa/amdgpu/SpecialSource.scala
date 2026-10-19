@@ -11,7 +11,7 @@ object SpecialSource {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum SpecialSource {
+enum SpecialSource derives CanEqual {
   case `src_execz`
   case `src_flat_scratch_base`
   case `src_flat_scratch_base_hi`

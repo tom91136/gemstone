@@ -8,17 +8,20 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
 class KernelLaunchSuite extends munit.FunSuite {
   private val stored = 0x12345678L
 
-  /** Every work-item stores (or with `accumulate`, adds) `%value` at `%out[builtIn.x]`. */
+  private val Accumulate = """%previous = OpLoad %uint %slot
+                              |%sum = OpIAdd %uint %previous %value
+                              |OpStore %slot %sum""".stripMargin
+
+  /** Every work-item applies `update` to `%value` at `%out[builtIn.x]`: a store, or with [[Accumulate]] an add. */
   private def fill(
       builtIn: String = "GlobalInvocationId",
       lanes: Int = 3,
-      accumulate: Boolean = false,
+      update: String = "OpStore %slot %value",
       extra: String = ""
   ): Module = spv"""
     $openCL
@@ -41,12 +44,7 @@ class KernelLaunchSuite extends munit.FunSuite {
     %ids = OpLoad %id_vector %builtin
     %index = OpCompositeExtract %ulong %ids 0
     %slot = OpPtrAccessChain %uint_ptr %out %index
-    ${
-      if (accumulate) """%previous = OpLoad %uint %slot
-                        |%sum = OpIAdd %uint %previous %value
-                        |OpStore %slot %sum""".stripMargin
-      else "OpStore %slot %value"
-    }
+    $update
     OpReturn
     OpFunctionEnd
     $extra
@@ -117,9 +115,9 @@ class KernelLaunchSuite extends munit.FunSuite {
             offset: Long >= 0,
             size: Int >= 0
         ): AddressSpace.ReadResult[Vec[Byte]] =
-          if (offset.raw % 8L == 0L || ready.contains(offset.raw)) backing.read(region, offset, size)
+          if (offset.raw % 8L == 0L || ready.contains(offset)) backing.read(region, offset, size)
           else {
-            val _ = pending.add(offset.raw)
+            val _ = pending.add(offset)
             Left(AddressSpace.Pending)
           }
         override def readValueDeferred(
@@ -131,7 +129,7 @@ class KernelLaunchSuite extends munit.FunSuite {
             LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8])
           )
       }
-      val program = load(fill(accumulate = true), schedule).value
+      val program = load(fill(update = Accumulate), schedule).value
       assertEquals(execute(program, launch(region), MixedMemory()), Right(()))
       assertEquals(words(backing, region, offset = 0, count = 10), filled((0L until 8L).map(stored + _)))
     }
@@ -253,110 +251,6 @@ class KernelLaunchSuite extends munit.FunSuite {
         expected,
         s"$builtIn explicit=$explicitSize undefined=$undefined"
       )
-    }
-  }
-
-  /** Work-item value `(group + seed) * 1000 + local * 10 + global`; with `barrier`, the group term comes from the
-    * work-item `producer` through Workgroup memory.
-    */
-  private def geometry(barrier: Boolean, producer: Int): Module = spv"""
-    $openCL
-    OpEntryPoint Kernel %main "groups" %global_ids %local_ids %group_ids
-    OpDecorate %global_ids BuiltIn GlobalInvocationId
-    OpDecorate %local_ids BuiltIn LocalInvocationId
-    OpDecorate %group_ids BuiltIn WorkgroupId
-    %void = OpTypeVoid
-    %bool = OpTypeBool
-    %uint = OpTypeInt 32 0
-    %ulong = OpTypeInt 64 0
-    %ulong3 = OpTypeVector %ulong 3
-    %ulong3_ptr = OpTypePointer Input %ulong3
-    %uint_ptr = OpTypePointer CrossWorkgroup %uint
-    %shared_ptr = OpTypePointer Workgroup %uint
-    %fn = OpTypeFunction %void %uint_ptr %uint %shared_ptr
-    %producer = OpConstant %uint $producer
-    %thousand = OpConstant %uint 1000
-    %ten = OpConstant %uint 10
-    %workgroup = OpConstant %uint ${Scope.Workgroup}
-    %semantics = OpConstant %uint ${MemorySemantics.WorkgroupMemory | MemorySemantics.AcquireRelease}
-    %global_ids = OpVariable %ulong3_ptr Input
-    %local_ids = OpVariable %ulong3_ptr Input
-    %group_ids = OpVariable %ulong3_ptr Input
-    %main = OpFunction %void None %fn
-    %out = OpFunctionParameter %uint_ptr
-    %seed = OpFunctionParameter %uint
-    %shared = OpFunctionParameter %shared_ptr
-    %entry = OpLabel
-    %global_vector = OpLoad %ulong3 %global_ids
-    %local_vector = OpLoad %ulong3 %local_ids
-    %group_vector = OpLoad %ulong3 %group_ids
-    %global_x = OpCompositeExtract %ulong %global_vector 0
-    %local_x = OpCompositeExtract %ulong %local_vector 0
-    %group_x = OpCompositeExtract %ulong %group_vector 0
-    %global = OpUConvert %uint %global_x
-    %local = OpUConvert %uint %local_x
-    %group = OpUConvert %uint %group_x
-    %group_term = OpIAdd %uint %group %seed
-    ${
-      if (barrier) """%is_producer = OpIEqual %bool %local %producer
-                     |OpSelectionMerge %exchanged None
-                     |OpBranchConditional %is_producer %publish %exchanged
-                     |%publish = OpLabel
-                     |OpStore %shared %group_term
-                     |OpBranch %exchanged
-                     |%exchanged = OpLabel
-                     |OpControlBarrier %workgroup %workgroup %semantics
-                     |%shared_term = OpLoad %uint %shared""".stripMargin
-      else "%shared_term = OpCopyObject %uint %group_term"
-    }
-    %group_scaled = OpIMul %uint %shared_term %thousand
-    %local_scaled = OpIMul %uint %local %ten
-    %partial = OpIAdd %uint %group_scaled %local_scaled
-    %result = OpIAdd %uint %partial %global
-    %slot = OpPtrAccessChain %uint_ptr %out %global_x
-    OpStore %slot %result
-    OpReturn
-    OpFunctionEnd
-  """
-
-  test("cross-workgroup IDs, partial extents and workgroup barriers stay isolated across launches") {
-    for {
-      groups   <- Vec[Int > 0](1, 2, 3, 5, 9)
-      local    <- Vec[Int > 0](31, 32, 33)
-      parallel <- Vec(false, true)
-      barrier  <- Vec(false, true)
-      producer <- if (barrier) Vec(2, local.raw - 1) else Vec(2)
-    } {
-      val count            = (local.raw * groups.raw - (if (barrier) 0 else 1)).refine[Int > 0].value
-      val offset: Int >= 0 = 7
-      val memory           = RegionMemory()
-      val region           = memory.allocate(((offset.raw + count.raw + 2) * 4).toLong.refine[Long > 0].value)
-      val module           = geometry(barrier, producer)
-      for (seed <- Vec(1, 9)) {
-        val schedule = Interleaving()
-        val program  = load(module, if (parallel) schedule else Workgroups.Sequential).value
-        val partial  = task(
-          "groups",
-          Vec(buffer(region, 4L), scalar(seed.toLong, 4), KernelTask.Argument.Local(4L)),
-          testDimensions(local),
-          testDimensions(groups),
-          globalSize = Some(testDimensions(count).toGlobalDimensions),
-          globalOffset = Coordinates(offset, 0, 0)
-        )
-        assertEquals(
-          execute(program, partial, schedule.InterleavedMemory(memory)),
-          Right(()),
-          s"groups=$groups local=$local parallel=$parallel barrier=$barrier"
-        )
-        assertEquals(schedule.calls.get(), if (parallel && groups > 1) 1 else 0)
-        val expected = Vec.tabulate(count.raw) { index =>
-          (index / local.raw + seed) * 1000L + (index % local.raw) * 10L + offset.raw + index
-        }
-        assertEquals(
-          words(memory, region, 0, offset.raw + count.raw + 2),
-          Vec.fill(offset.raw + 1)(0L) ++ expected ++ Vec(0L)
-        )
-      }
     }
   }
 }

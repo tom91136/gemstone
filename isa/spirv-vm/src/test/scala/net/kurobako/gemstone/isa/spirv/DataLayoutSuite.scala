@@ -180,6 +180,7 @@ class DataLayoutSuite extends munit.FunSuite {
       OpReturn
       OpFunctionEnd
     """
+    val copied = Vec(99L, 0L, 7L, 0L)
     for (
       (needle, output) <- Seq(
         AllocationId(1L)                -> AllocationId(3L),
@@ -199,7 +200,7 @@ class DataLayoutSuite extends munit.FunSuite {
         ),
         Right(())
       )
-      assertEquals(words(memory, output, offset = 0, count = 4), Vec(99L, 0L, 7L, 0L))
+      assertEquals(words(memory, output, offset = 0, count = 4), copied)
       assertEquals(word(memory, needle, 0), 7L)
     }
   }

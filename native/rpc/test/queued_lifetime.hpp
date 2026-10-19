@@ -12,21 +12,23 @@ namespace gemstone_test {
 // A bounded callback gate makes the lifetime assertion independent of kernel speed.
 template <class Allocate, class Copy, class Callback, class Free>
 void queuedLifetime(Allocate allocate, Copy copy, Callback callback, Free free) {
-  std::array<uint32_t, 32> source{}, observed{};
+  std::array<uint32_t, 32> source{};
+  std::array<uint32_t, 32> observed{};
   for (unsigned i = 0; i < source.size(); ++i)
     source[i] = 71 + i;
   auto memory = allocate(sizeof(source));
   copy(memory, source.data(), sizeof(source), true);
-  std::promise<void> release, started;
+  std::promise<void> release;
+  std::promise<void> started;
   struct Gate {
     std::shared_future<void> release;
-    std::promise<void> &started;
-  } gate{release.get_future().share(), started};
+    std::promise<void> *started = nullptr;
+  } gate{release.get_future().share(), &started};
   auto reached = started.get_future();
   callback(
       [](void *data) {
         auto &gate = *static_cast<Gate *>(data);
-        gate.started.set_value();
+        gate.started->set_value();
         gate.release.wait_for(std::chrono::seconds(5));
       },
       &gate);

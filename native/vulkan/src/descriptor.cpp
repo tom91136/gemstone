@@ -1,11 +1,21 @@
 #include "descriptor.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <optional>
+#include <span>
 #include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <aspartame/vector.hpp>
+
+using namespace aspartame;
 
 namespace gemstone::vulkan {
 
@@ -17,10 +27,7 @@ DescriptorState::Set::Set(const std::vector<VkDescriptorSetLayoutBinding> &bindi
       const auto type = binding.descriptorType;
       if (type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER || type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER)
         slots.emplace(key, VkBufferView{});
-      else if (type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT || type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-               || type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-               || type == VK_DESCRIPTOR_TYPE_SAMPLER)
-        slots.emplace(key, VkDescriptorImageInfo{});
+      else if (imageDescriptorType(type)) slots.emplace(key, VkDescriptorImageInfo{});
       else slots.emplace(key, VkDescriptorBufferInfo{});
     }
   }
@@ -45,7 +52,7 @@ void DescriptorState::updateTemplate(VkDescriptorSet set, std::span<const VkDesc
     for (uint32_t i = 0; i < entry.descriptorCount; ++i) {
       auto *destination = slot(set, entry.dstBinding, entry.dstArrayElement, i);
       if (!destination) break;
-      const auto *source = static_cast<const uint8_t *>(data) + entry.offset + i * entry.stride;
+      const auto *source = static_cast<const uint8_t *>(data) + entry.offset + (i * entry.stride);
       // Template data may be unaligned. Slots already carry the layout's type.
       std::visit([&](auto &value) { std::memcpy(&value, source, sizeof(value)); }, *destination);
     }
@@ -58,7 +65,7 @@ void DescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *wr
   for (uint32_t i = 0; i < writeCount; ++i) {
     const auto &write = writes[i];
     for (uint32_t j = 0; j < write.descriptorCount; ++j) {
-      const auto destination = slot(write.dstSet, write.dstBinding, write.dstArrayElement, j);
+      auto *const destination = slot(write.dstSet, write.dstBinding, write.dstArrayElement, j);
       if (!destination) break;
       std::visit(
           [&](auto &value) {
@@ -67,7 +74,9 @@ void DescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *wr
               if (write.pTexelBufferView) value = write.pTexelBufferView[j];
             } else if constexpr (std::is_same_v<T, VkDescriptorImageInfo>) {
               if (write.pImageInfo) value = write.pImageInfo[j];
-            } else if (write.pBufferInfo) value = write.pBufferInfo[j];
+            } else if (write.pBufferInfo) {
+              value = write.pBufferInfo[j];
+            }
           },
           *destination);
     }
@@ -79,8 +88,8 @@ void DescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *wr
         copy.srcSet == copy.dstSet && std::pair{copy.dstBinding, copy.dstArrayElement} > std::pair{copy.srcBinding, copy.srcArrayElement};
     for (uint32_t index = 0; index < copy.descriptorCount; ++index) {
       const uint32_t j = reverse ? copy.descriptorCount - 1 - index : index;
-      const auto source = slot(copy.srcSet, copy.srcBinding, copy.srcArrayElement, j);
-      const auto destination = slot(copy.dstSet, copy.dstBinding, copy.dstArrayElement, j);
+      auto *const source = slot(copy.srcSet, copy.srcBinding, copy.srcArrayElement, j);
+      auto *const destination = slot(copy.dstSet, copy.dstBinding, copy.dstArrayElement, j);
       if (!source || !destination) break;
       *destination = *source;
     }
@@ -98,8 +107,8 @@ DescriptorAllocationLayout descriptorAllocationLayout(const std::vector<Descript
   DescriptorAllocationLayout layout;
   layout.arguments.resize(ranges.size());
   std::vector<size_t> order(ranges.size());
-  std::iota(order.begin(), order.end(), 0);
-  std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+  std::iota(order.begin(), order.end(), size_t{0});
+  order ^= sort([&](size_t a, size_t b) {
     if (ranges[a].memory != ranges[b].memory) return std::less<VkDeviceMemory>{}(ranges[a].memory, ranges[b].memory);
     return ranges[a].offset < ranges[b].offset;
   });
@@ -108,13 +117,13 @@ DescriptorAllocationLayout descriptorAllocationLayout(const std::vector<Descript
   for (const auto index : order) {
     const auto &range = ranges[index];
     if (layout.allocations.empty() || layout.allocations.back().memory != range.memory
-        || range.offset >= layout.allocations.back().offset + layout.allocations.back().size)
+        || range.offset >= layout.allocations.back().offset + layout.allocations.back().size) {
       layout.allocations.push_back(range);
-    else {
+    } else {
       auto &allocation = layout.allocations.back();
       allocation.size = static_cast<size_t>(std::max(allocation.offset + allocation.size, range.offset + range.size) - allocation.offset);
     }
-    layout.arguments[index] = {layout.allocations.size() - 1, range.offset - layout.allocations.back().offset};
+    layout.arguments[index] = {.allocation = layout.allocations.size() - 1, .offset = range.offset - layout.allocations.back().offset};
   }
   return layout;
 }

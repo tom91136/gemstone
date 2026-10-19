@@ -2,26 +2,14 @@ package net.kurobako.gemstone.codegen
 
 import cats.parse.Parser
 import cats.parse.Parser0
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import scala.annotation.tailrec
-import upickle.default.ReadWriter
 
 /** Compiles the bit-layout and simple value expressions in an extracted SASS description. */
 object SASSEncoding {
-  enum Expr derives ReadWriter {
-    case Constant(value: BigInt, relaxed: Boolean)
-    case Reference(name: String, attribute: Option[String], relaxed: Boolean)
-    case Scale(value: Expr, factor: BigInt)
-    case Multiply(value: Expr, factor: BigInt)
-    case Identity(first: Expr, second: Expr)
-    case FloatConvert(value: Expr, selector: String, cases: Vector[(Vector[BigInt], String)], fallback: String)
-    case FixedFloat(value: Expr, format: String)
-    case Lookup(name: String, arguments: Vector[Expr])
-    case Relaxed(value: Expr)
-    case Unsupported(source: String)
-  }
-
-  case class Assignment(name: String, positions: Vector[Int], expression: Expr)
+  case class Assignment(name: String, positions: Vector[Int], expression: Either[String, Expression])
   case class Form(
       name: String,
       alternate: Boolean,
@@ -32,7 +20,7 @@ object SASSEncoding {
   case class LookupTable(name: String, rows: Vector[(Vector[BigInt], BigInt)], issues: Vector[String] = Vector.empty)
   case class Compiled(width: Int in (64, 88, 128), forms: Vector[Form], tables: Vector[LookupTable])
 
-  private enum TableAtom {
+  private enum TableAtom derives CanEqual {
     case Number(value: BigInt)
     case Character(value: BigInt)
     case Symbol(table: String, value: String)
@@ -117,16 +105,15 @@ object SASSEncoding {
   private def expressionParser(
       enums: Map[String, Map[String, BigInt]],
       tableNames: Set[String]
-  ): Parser[String => Expr] = Parser.recursive { expression =>
-    val signedNumber = integer.map(value => (_: String) => Expr.Constant(value, relaxed = false))
-    val star         = Parser.char('*') *> whitespace *>
-      (integer.map(value => (_: String) => Expr.Constant(value, relaxed = true)) |
-        (identifier ~ (Parser.char('@') *> identifier).?).map { case (name, attribute) =>
-          (_: String) => Expr.Reference(name, attribute, relaxed = true)
-        })
-    val reference = (identifier ~ (Parser.char('@') *> identifier).?).map { case (name, attribute) =>
-      (_: String) => Expr.Reference(name, attribute, relaxed = false)
-    }
+  ): Parser[Option[Expression]] = Parser.recursive { expression =>
+    val signedNumber = integer.map(value => Option(Expression.Constant(value, relaxed = false)))
+    def referenceOf(relaxed: Boolean): Parser[Option[Expression]] =
+      (identifier ~ (Parser.char('@') *> identifier).?).map {
+        case (name, attribute) => Option(Expression.Reference(name, attribute, relaxed))
+      }
+    val star = Parser.char('*') *> whitespace *>
+      (integer.map(value => Option(Expression.Constant(value, relaxed = true))) | referenceOf(relaxed = true))
+    val reference                               = referenceOf(relaxed = false)
     val enumReference: Parser[(String, String)] =
       (Parser.char('`') *> identifier) ~ (Parser.char('@') *> (quotedLabel | identifier))
     val enumSelector: Parser[FloatSelector] =
@@ -143,102 +130,96 @@ object SASSEncoding {
         ((whitespace.with1 *> Parser.string("||") <* whitespace) *> floatSelector).backtrack.rep0).map {
         case (head, tail) => head +: tail.toVector
       }
-    val comma                                    = whitespace.with1 *> Parser.char(',') <* whitespace
-    val conditionalFormat                        = floatCondition ~ (comma *> identifier)
-    val floatConvertCall: Parser[String => Expr] =
+    val comma                                        = whitespace.with1 *> Parser.char(',') <* whitespace
+    val conditionalFormat                            = floatCondition ~ (comma *> identifier)
+    val floatConvertCall: Parser[Option[Expression]] =
       (Parser.string("convertFloatType") *> whitespace *> Parser.char('(') *> whitespace *>
         (conditionalFormat ~ (comma *> conditionalFormat).backtrack.rep0 ~ (comma *> identifier)) <*
         whitespace <* Parser.char(')')).map { case ((first, rest), fallback) =>
-        val build: String => Expr = (raw: String) => {
-          val alternatives     = first +: rest.toVector
-          val selectors        = alternatives.flatMap(_._1)
-          val dynamicSelectors = selectors.filter(_.constant.isEmpty)
-          val selectorNames    = dynamicSelectors.flatMap(selector =>
-            selector.reference.zip(selector.table)
-          ).distinct
-          val unresolved = alternatives.flatMap { case (conditions, _) =>
-            conditions.filter(condition =>
-              condition.constant.isEmpty &&
-                !condition.table.zip(condition.value).exists { case (table, value) =>
-                  enums.get(table).exists(_.contains(value))
-                }
-            )
-          }
-          if (dynamicSelectors.isEmpty) {
-            val selected = alternatives.find(_._1.exists(_.constant.contains(true))).map(_._2).getOrElse(fallback)
-            Expr.FixedFloat(Expr.Reference("$value", None, relaxed = false), selected)
-          } else if (selectors.exists(_.constant.nonEmpty) || selectorNames.size != 1 || unresolved.nonEmpty)
-            Expr.Unsupported(raw)
-          else {
-            val selector = selectorNames.head._1
-            val cases    = alternatives.map { case (conditions, format) =>
-              conditions.flatMap(condition =>
-                condition.table.zip(condition.value).flatMap { case (table, value) =>
-                  enums.get(table).flatMap(_.get(value))
-                }
-              ).distinct -> format
-            }
-            Expr.FloatConvert(Expr.Reference("$value", None, relaxed = false), selector, cases, fallback)
-          }
+        val alternatives     = first +: rest.toVector
+        val selectors        = alternatives.flatMap(_._1)
+        val dynamicSelectors = selectors.filter(_.constant.isEmpty)
+        val selectorNames    = dynamicSelectors.flatMap(selector =>
+          selector.reference.zip(selector.table)
+        ).distinct
+        val unresolved = alternatives.flatMap { case (conditions, _) =>
+          conditions.filter(condition =>
+            condition.constant.isEmpty &&
+              !condition.table.zip(condition.value).exists { case (table, value) =>
+                enums.get(table).exists(_.contains(value))
+              }
+          )
         }
-        build
+        if (dynamicSelectors.isEmpty) {
+          val selected = alternatives.find(_._1.exists(_.constant.contains(true))).map(_._2).getOrElse(fallback)
+          Some(Expression.FixedFloat(
+            Expression.Reference("$value", None, relaxed = false),
+            FloatEncoding.fromSpelling(selected)
+          ))
+        } else if (selectors.exists(_.constant.nonEmpty) || selectorNames.size != 1 || unresolved.nonEmpty) None
+        else {
+          val selector = selectorNames.head._1
+          val cases    = Vec.from(alternatives.map { case (conditions, format) =>
+            Vec.from(conditions.flatMap(condition =>
+              condition.table.zip(condition.value).flatMap { case (table, value) =>
+                enums.get(table).flatMap(_.get(value))
+              }
+            ).distinct) -> FloatEncoding.fromSpelling(format)
+          })
+          Some(Expression.FloatConvert(
+            Expression.Reference("$value", None, relaxed = false),
+            selector,
+            cases,
+            FloatEncoding.fromSpelling(fallback)
+          ))
+        }
       }
-    val functionCall: Parser[String => Expr] =
+    val functionCall: Parser[Option[Expression]] =
       (identifier ~
         (whitespace *>
           Parser.char('(') *>
           whitespace *> expression.repSep((whitespace *> Parser.char(',') <* whitespace).backtrack) <*
           whitespace <* Parser.char(')')))
         .map { case (name, args) =>
-          val build: String => Expr = (raw: String) => {
-            val parsedArgs = args.toList.map(_(raw)).toVector
+          val parsedArgs = args.toList.toVector
+          Option.when(parsedArgs.forall(_.nonEmpty))(parsedArgs.flatten).flatMap[Expression] { arguments =>
             name match {
-              case table if table.startsWith("TABLES_") || tableNames.contains(table) => Expr.Lookup(table, parsedArgs)
-              case "IDENTICAL" if parsedArgs.size == 2 => Expr.Identity(parsedArgs(0), parsedArgs(1))
-              case _                                   => Expr.Unsupported(raw)
+              case table if table.startsWith("TABLES_") || tableNames.contains(table) =>
+                Some(Expression.Lookup(table, Vec.from(arguments)))
+              case "IDENTICAL" if arguments.size == 2 => Some(Expression.Identity(arguments(0), arguments(1)))
+              case _                                  => None
             }
           }
-          build
         }
-    val relaxedFunctionCall: Parser[String => Expr] = (Parser.char('*') *> whitespace *> functionCall).map { make =>
-      val build: String => Expr = (raw: String) => Expr.Relaxed(make(raw))
-      build
+    val relaxedFunctionCall: Parser[Option[Expression]] = (Parser.char('*') *> whitespace *> functionCall).map(_.map(
+      Expression.Relaxed(_)
+    ))
+    val enumConstant: Parser[Option[Expression]] = enumReference.map { case (kind, name) =>
+      enums.get(kind).flatMap(_.get(name)).map(Expression.Constant(_, relaxed = false))
     }
-    val enumConstant = enumReference.map { case (kind, name) =>
-      (raw: String) =>
-        enums.get(kind).flatMap(_.get(name)).fold[Expr](Expr.Unsupported(raw))(Expr.Constant(_, relaxed = false))
-    }
-    val relaxedEnum = (Parser.char('*') *> whitespace *> enumConstant).map { make => (raw: String) =>
-      make(raw) match {
-        case Expr.Constant(value, _) => Expr.Constant(value, relaxed = true)
-        case other                   => other
-      }
-    }
+    val relaxedEnum = (Parser.char('*') *> whitespace *> enumConstant).map(_.collect {
+      case Expression.Constant(value, _) => Expression.Constant(value, relaxed = true)
+    })
     val atom = relaxedFunctionCall.backtrack | relaxedEnum.backtrack | enumConstant | functionCall.backtrack | star |
       signedNumber | reference
-    val valueAtom = (atom ~ (whitespace1 *> floatConvertCall).backtrack.?).map { case (make, conversion) =>
-      val build: String => Expr = (raw: String) => {
-        val value = make(raw)
-        conversion.map(_(raw)) match {
-          case Some(Expr.FloatConvert(_, selector, cases, fallback)) =>
-            Expr.FloatConvert(value, selector, cases, fallback)
-          case Some(Expr.FixedFloat(_, format)) => Expr.FixedFloat(value, format)
-          case Some(Expr.Unsupported(source))   => Expr.Unsupported(source)
-          case Some(_)                          => Expr.Unsupported(raw)
-          case None                             => value
-        }
-      }
-      build
+    val valueAtom = (atom ~ (whitespace1 *> floatConvertCall).backtrack.?).map { case (value, conversion) =>
+      conversion.fold(value)(converted =>
+        value.flatMap(inner =>
+          converted.collect {
+            case Expression.FloatConvert(_, selector, cases, fallback) =>
+              Expression.FloatConvert(inner, selector, cases, fallback)
+            case Expression.FixedFloat(_, format) => Expression.FixedFloat(inner, format)
+          }
+        )
+      )
     }
     val transform = whitespace1 *> (Parser.string("SCALE").as(false) | Parser.string("MULTIPLY").as(true)) <*
       whitespace1
     (valueAtom ~ (transform ~ integer).backtrack.rep0).map {
-      case (make, factors) =>
-        val build: String => Expr = (raw: String) =>
-          factors.foldLeft(make(raw)) { case (value, (multiply, factor)) =>
-            if (multiply) Expr.Multiply(value, factor) else Expr.Scale(value, factor)
-          }
-        build
+      case (head, factors) =>
+        factors.foldLeft(head) { case (value, (multiply, factor)) =>
+          value.map(inner => if (multiply) Expression.Multiply(inner, factor) else Expression.Scale(inner, factor))
+        }
     }
   }
 
@@ -246,9 +227,9 @@ object SASSEncoding {
       source: String,
       enums: Map[String, Map[String, BigInt]] = Map.empty,
       tableNames: Set[String] = Set.empty
-  ): Expr = {
+  ): Either[String, Expression] = {
     val complete = whitespace *> expressionParser(enums, tableNames) <* whitespace
-    complete.parseAll(source).fold(_ => Expr.Unsupported(source), parse => parse(source))
+    complete.parseAll(source).toOption.flatten.toRight(source)
   }
 
   def compile(description: SASSDescription.Description): Compiled = {
@@ -263,71 +244,60 @@ object SASSEncoding {
     val enums        = parseEnums(description.preamble)
     val vocabularies = if (description.preamble.linesIterator.exists(_.trim == "REGISTERS")) {
       SASSSymbols.compile(description).map(vocabulary =>
-        vocabulary.name -> vocabulary.values.map(value => value.name -> value.value).toMap
+        vocabulary.name -> vocabulary.values.map(value => value.name -> value.number).toMap
       ).toMap
     } else Map.empty[String, Map[String, BigInt]]
     val symbols    = enums ++ vocabularies
     val tables     = parseTables(description.preamble, symbols)
     val tableNames = tables.map(_.name).toSet
-    val forms      = description.classes.map { instruction =>
-      val issues  = Vector.newBuilder[String]
-      val opcodes = instruction.opcodeEntries.flatMap { entry =>
-        parseInteger(entry.value).map(entry.name -> _).orElse {
-          issues += s"opcode ${entry.name} has unsupported value ${entry.value}"
-          None
+    val forms      = Vector.newBuilder[Form]
+    description.classes.foreach { instruction =>
+      val issues      = Vector.newBuilder[String]
+      val opcodes     = Vector.newBuilder[(String, BigInt)]
+      val assignments = Vector.newBuilder[Assignment]
+      def assigned(name: String, expression: Either[String, Expression], prefix: String = ""): Unit = {
+        val positions = unitMasks.get(name)
+        if (positions.isEmpty) issues += s"$prefix$name has no matching FUNIT mask"
+        assignments += Assignment(s"$prefix$name", positions.getOrElse(Vector.empty), expression)
+      }
+      instruction.opcodeEntries.foreach { entry =>
+        parseInteger(entry.value) match {
+          case Some(value) => opcodes += entry.name -> value
+          case None        => issues += s"opcode ${entry.name} has unsupported value ${entry.value}"
         }
       }
-      val assignments = instruction.section("ENCODING").toVector.flatMap { section =>
-        val encoded = section.entries.map { entry =>
-          val positions = unitMasks.get(entry.name)
-          if (positions.isEmpty) issues += s"${entry.name} has no matching FUNIT mask"
+      instruction.section("ENCODING").foreach { section =>
+        section.entries.foreach { entry =>
           val value = parseExpression(entry.value, symbols, tableNames)
-          value match {
-            case Expr.Unsupported(source) => issues += s"${entry.name} has unsupported expression: $source"
-            case _                        => ()
-          }
-          expressionIssues(value, tables).foreach(message => issues += s"${entry.name}: $message")
-          Assignment(entry.name, positions.getOrElse(Vector.empty), value)
+          assigned(entry.name, value)
+          value.left.foreach(source => issues += s"${entry.name} has unsupported expression: $source")
+          value.foreach(expressionIssues(_, tables).foreach(message => issues += s"${entry.name}: $message"))
         }
-        val opaqueAssignments = section.body.split("\n", -1).view.flatMap { line =>
+        section.body.split("\n", -1).foreach { line =>
           val text      = line.trim
           val separator = text.indexOf('=')
-          Option.when(separator >= 0 && !text.startsWith("//")) {
+          if (separator >= 0 && !text.startsWith("//")) {
             val name  = text.substring(0, separator).trim
             val value = text.substring(separator + 1).trim.stripSuffix(";").trim
-            (name, value)
+            if (!section.entries.exists(_.name == name)) parseCompound(name, value) match {
+              case Some((first, second, bank, address, factor)) =>
+                assigned(first, Right(Expression.Reference(bank, None, relaxed = false)))
+                assigned(second, Right(Expression.Scale(Expression.Reference(address, None, relaxed = false), factor)))
+              case None =>
+                issues += s"$name has an unsupported compound or malformed assignment"
+                assigned(name, Left(value))
+            }
           }
-        }.filterNot { case (name, _) => section.entries.exists(_.name == name) }.flatMap { case (name, value) =>
-          parseCompound(name, value) match {
-            case Some((first, second, bank, address, factor)) =>
-              Vector(
-                first  -> Expr.Reference(bank, None, relaxed = false),
-                second -> Expr.Scale(Expr.Reference(address, None, relaxed = false), factor)
-              ).map { case (field, fieldExpression) =>
-                val positions = unitMasks.get(field)
-                if (positions.isEmpty) issues += s"$field has no matching FUNIT mask"
-                Assignment(field, positions.getOrElse(Vector.empty), fieldExpression)
-              }
-            case None =>
-              val positions = unitMasks.get(name)
-              issues += s"$name has an unsupported compound or malformed assignment"
-              if (positions.isEmpty) issues += s"$name has no matching FUNIT mask"
-              Vector(Assignment(name, positions.getOrElse(Vector.empty), Expr.Unsupported(value)))
-          }
-        }.toVector
-        val unused = section.body.split("\n", -1).view.flatMap { line =>
+        }
+        section.body.split("\n", -1).foreach { line =>
           val text = line.trim
-          Option.when(text.startsWith("!") && text.endsWith(";"))(text.drop(1).dropRight(1).trim)
-        }.map { name =>
-          val positions = unitMasks.get(name)
-          if (positions.isEmpty) issues += s"!$name has no matching FUNIT mask"
-          Assignment(s"!$name", positions.getOrElse(Vector.empty), Expr.Constant(0, relaxed = true))
-        }.toVector
-        encoded ++ opaqueAssignments ++ unused
+          if (text.startsWith("!") && text.endsWith(";"))
+            assigned(text.drop(1).dropRight(1).trim, Right(Expression.Constant(0, relaxed = true)), prefix = "!")
+        }
       }
-      Form(instruction.name, instruction.alternate, opcodes, assignments, issues.result())
+      forms += Form(instruction.name, instruction.alternate, opcodes.result(), assignments.result(), issues.result())
     }
-    Compiled(width, forms, tables)
+    Compiled(width, forms.result(), tables)
   }
 
   private def parseWidth(source: String): Option[Int] =
@@ -428,8 +398,8 @@ object SASSEncoding {
       .map { case (name, values) => name -> values.toMap }
       .toMap
 
-  private def expressionIssues(expression: Expr, tables: Vector[LookupTable]): Vector[String] = expression match {
-    case Expr.Lookup(name, arguments) =>
+  private def expressionIssues(expression: Expression, tables: Vector[LookupTable]): Vector[String] = expression match {
+    case Expression.Lookup(name, arguments) =>
       val tableIssue = tables.find(_.name == name) match {
         case None        => Vector(s"lookup table $name is undefined")
         case Some(table) =>
@@ -443,13 +413,13 @@ object SASSEncoding {
           tableIssues ++ arityIssue
       }
       tableIssue ++ arguments.flatMap(expressionIssues(_, tables))
-    case Expr.Scale(value, _)             => expressionIssues(value, tables)
-    case Expr.Multiply(value, _)          => expressionIssues(value, tables)
-    case Expr.Identity(first, second)     => expressionIssues(first, tables) ++ expressionIssues(second, tables)
-    case Expr.FloatConvert(value = value) => expressionIssues(value, tables)
-    case Expr.FixedFloat(value, _)        => expressionIssues(value, tables)
-    case Expr.Relaxed(value)              => expressionIssues(value, tables)
-    case _                                => Vector.empty
+    case Expression.Scale(value, _)             => expressionIssues(value, tables)
+    case Expression.Multiply(value, _)          => expressionIssues(value, tables)
+    case Expression.Identity(first, second)     => expressionIssues(first, tables) ++ expressionIssues(second, tables)
+    case Expression.FloatConvert(value = value) => expressionIssues(value, tables)
+    case Expression.FixedFloat(value, _)        => expressionIssues(value, tables)
+    case Expression.Relaxed(value)              => expressionIssues(value, tables)
+    case _                                      => Vector.empty
   }
 
   private def parseCompound(

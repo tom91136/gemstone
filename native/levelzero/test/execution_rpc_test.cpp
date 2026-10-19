@@ -1,14 +1,20 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <span>
 #include <string>
 #include <thread>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <poll.h>
-#include <stdint.h>
 #include <unistd.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,9 +23,8 @@
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "../../rpc/test/wire.hpp"
-#include <arpa/inet.h>
-#include <environment_keys.hpp>
 #include <netinet/in.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 
 namespace {
@@ -62,8 +67,8 @@ void respond(int socket, const std::vector<uint8_t> &payload = {}, bool failed =
 }
 
 struct MockServer {
-  MockServer() {
-    listener = socket(AF_INET, SOCK_STREAM, 0);
+  MockServer() : listener(socket(AF_INET, SOCK_STREAM, 0)) {
+
     REQUIRE((listener >= 0));
     sockaddr_in address{};
     address.sin_family = AF_INET;
@@ -87,19 +92,20 @@ struct MockServer {
   uint64_t allocationId = 0;
   std::atomic<uint32_t> writeRequests{0};
   std::atomic<bool> failNextCompletion{false};
+  std::atomic<FailureKind> completionFailure{FailureKind::Failed};
   std::atomic<bool> pauseCompletion{false};
   std::atomic<bool> completionEntered{false};
   std::atomic<uint8_t> lastLaunchByte8{0};
 
 private:
   void serve() {
-    std::vector<pollfd> peers{{listener, POLLIN, 0}};
+    std::vector<pollfd> peers{{.fd = listener, .events = POLLIN, .revents = 0}};
     bool running = true;
     while (running) {
       REQUIRE(poll(peers.data(), peers.size(), 30000) > 0);
       if (peers[0].revents & POLLIN) {
         const auto connection = accept(listener, nullptr, nullptr);
-        REQUIRE(connection >= 0);
+        if (connection < 0) FAIL("accept failed");
         std::array<uint8_t, 8> hello{};
         receiveAll(connection, hello.data(), hello.size());
         REQUIRE(gemstone_test::wire::readBigEndian<uint32_t>(hello.data()) == HelloMagic);
@@ -111,7 +117,7 @@ private:
         gemstone_test::wire::appendBigEndian<uint32_t>(accepted, HelloResponseMagic);
         gemstone_test::wire::appendBigEndian<uint32_t>(accepted, 0);
         sendAll(connection, accepted.data(), accepted.size());
-        peers.push_back({connection, POLLIN, 0});
+        peers.push_back({.fd = connection, .events = POLLIN, .revents = 0});
         continue;
       }
       size_t ready = 1;
@@ -158,7 +164,7 @@ private:
         loadProgram(connection, payload);
       } else if (operationTag == operation::UnloadProgram) {
         const auto request = gemstone_test::decodePayload<UnloadProgram>(payload);
-        REQUIRE((request.program.value == static_cast<int64_t>(TestProgramId)));
+        REQUIRE((std::cmp_equal(request.program.value, TestProgramId)));
         respond(connection);
       } else if (operationTag == operation::DescribeKernel) {
         describeKernel(connection, payload);
@@ -170,19 +176,19 @@ private:
         pollHostMemory(connection, payload);
       } else if (operationTag == operation::ReleaseCompletion) {
         const auto request = gemstone_test::decodePayload<ReleaseCompletion>(payload);
-        REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
+        REQUIRE((std::cmp_equal(request.completion.value, TestCompletionId)));
         respond(connection);
       } else if (operationTag == operation::CompletionDirtyRanges) {
         dirtyRanges(connection, payload);
       } else if (operationTag == operation::CompletionPointerRelocations) {
         const auto request = gemstone_test::decodePayload<CompletionPointerRelocations>(payload);
-        REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
+        REQUIRE((std::cmp_equal(request.completion.value, TestCompletionId)));
         std::vector<uint8_t> response;
         gemstone_test::encodePayload(response, std::vector<PointerRelocation>{});
         respond(connection, response);
       } else if (operationTag == operation::CompletionPrints) {
         const auto request = gemstone_test::decodePayload<CompletionPrints>(payload);
-        REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
+        REQUIRE((std::cmp_equal(request.completion.value, TestCompletionId)));
         std::vector<uint8_t> response;
         gemstone_test::encodePayload(response, std::string{});
         respond(connection, response);
@@ -220,7 +226,7 @@ private:
     // The unrelated allocation is live but unreachable from this non-indirect
     // kernel, so it must not be mirrored for the launch.
     const auto request = gemstone_test::decodePayload<WriteAllocation>(payload);
-    REQUIRE((static_cast<uint64_t>(request.allocation.value) == allocationId));
+    REQUIRE((std::cmp_equal(request.allocation.value, allocationId)));
     const auto offset = static_cast<uint64_t>(request.offset.value);
     const auto size = request.bytes.size();
     REQUIRE((offset + size <= allocation.size()));
@@ -230,26 +236,27 @@ private:
 
   void readAllocation(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<ReadAllocation>(payload);
-    REQUIRE((static_cast<uint64_t>(request.allocation.value) == allocationId));
+    REQUIRE((std::cmp_equal(request.allocation.value, allocationId)));
     const auto offset = static_cast<uint64_t>(request.offset.value);
     const auto size = static_cast<size_t>(request.size.value);
     REQUIRE((offset == 4));
     REQUIRE((size == sizeof(uint32_t)));
     REQUIRE((offset + size <= allocation.size()));
     std::vector<uint8_t> response;
-    gemstone_test::encodePayload(response, std::vector<uint8_t>(allocation.begin() + offset, allocation.begin() + offset + size));
+    gemstone_test::encodePayload(response, std::vector<uint8_t>(allocation.data() + offset, allocation.data() + offset + size));
     respond(connection, response);
   }
 
-  void dirtyRanges(int connection, const std::vector<uint8_t> &payload) {
+  void dirtyRanges(int connection, const std::vector<uint8_t> &payload) const {
     gemstone_test::decodePayload<CompletionDirtyRanges>(payload);
     std::vector<uint8_t> response;
     gemstone_test::encodePayload(
-        response, std::vector<DirtyRange>{DirtyRange{AllocationId{static_cast<int64_t>(allocationId)}, LongPositive0{4}, IntPositive{4}}});
+        response, std::vector<DirtyRange>{DirtyRange{
+                      .allocation = AllocationId{static_cast<int64_t>(allocationId)}, .offset = LongPositive0{4}, .size = IntPositive{4}}});
     respond(connection, response);
   }
 
-  void loadProgram(int connection, const std::vector<uint8_t> &payload) {
+  static void loadProgram(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<LoadProgram>(payload);
     REQUIRE((request.encoding == ProgramEncoding::SPIRVOpenCLCompute));
     REQUIRE((request.image.size() >= 4));
@@ -259,9 +266,9 @@ private:
     respond(connection, response);
   }
 
-  void describeKernel(int connection, const std::vector<uint8_t> &payload) {
+  static void describeKernel(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<DescribeKernel>(payload);
-    REQUIRE((request.program.value == static_cast<int64_t>(TestProgramId)));
+    REQUIRE((std::cmp_equal(request.program.value, TestProgramId)));
     if (request.name.value != "write") {
       std::vector<uint8_t> failure;
       gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureNotFound{{"unknown kernel"}}});
@@ -276,7 +283,9 @@ private:
       Parameter entry{};
       entry.width = IntPositive{parameter[0]};
       entry.offset = IntPositive0{parameter[1]};
-      entry.kind = parameter[2] == 1 ? ParameterKind::Scalar : parameter[2] == 2 ? ParameterKind::Allocation : ParameterKind::Local;
+      if (parameter[2] == 1) entry.kind = ParameterKind::Scalar;
+      else if (parameter[2] == 2) entry.kind = ParameterKind::Allocation;
+      else entry.kind = ParameterKind::Local;
       entry.containsPointers = parameter[3] != 0;
       metadata.parameters.push_back(entry);
     }
@@ -288,7 +297,7 @@ private:
 
   void launch(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<Launch>(payload);
-    REQUIRE((request.program.value == static_cast<int64_t>(TestProgramId)));
+    REQUIRE((std::cmp_equal(request.program.value, TestProgramId)));
     REQUIRE((request.kernelName.value == "write"));
     REQUIRE((request.groupSize.x.value == 4 && request.groupSize.y.value == 1 && request.groupSize.z.value == 1));
     REQUIRE((request.groupCount.x.value == 2 && request.groupCount.y.value == 1 && request.groupCount.z.value == 1));
@@ -297,8 +306,8 @@ private:
     REQUIRE((request.globalOffset.x.value == 0 && request.globalOffset.y.value == 0 && request.globalOffset.z.value == 0));
     REQUIRE((request.privateSegmentBytes.value == 0 && request.groupSegmentBytes.value == 0));
     REQUIRE((request.arguments.size() == 4));
-    const auto *memory = std::get_if<ArgumentMemory>(&request.arguments[0]);
-    REQUIRE((memory != nullptr && static_cast<uint64_t>(memory->region.value) == allocationId));
+    const auto *memory = std::get_if<ArgumentMemory>(request.arguments.data());
+    REQUIRE((memory != nullptr && std::cmp_equal(memory->region.value, allocationId)));
     REQUIRE((memory->offset.value == 4));
     REQUIRE(!memory->range);
     const auto *seed = std::get_if<ArgumentScalar>(&request.arguments[1]);
@@ -316,9 +325,9 @@ private:
     respond(connection, response);
   }
 
-  void queryCompletion(int connection, const std::vector<uint8_t> &payload) {
+  static void queryCompletion(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<QueryCompletion>(payload);
-    REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
+    REQUIRE((std::cmp_equal(request.completion.value, TestCompletionId)));
     std::vector<uint8_t> response;
     gemstone_test::encodePayload(response, CompletionStatus{CompletionStatusSucceeded{}});
     respond(connection, response);
@@ -326,13 +335,13 @@ private:
 
   void pollHostMemory(int connection, const std::vector<uint8_t> &payload) {
     const auto completion = gemstone_test::decodePayload<PollHostMemory>(payload).completion;
-    REQUIRE((completion.value == static_cast<int64_t>(TestCompletionId)));
+    REQUIRE((std::cmp_equal(completion.value, TestCompletionId)));
     completionEntered = true;
     while (pauseCompletion.load())
       std::this_thread::yield();
     if (failNextCompletion.exchange(false)) {
       std::vector<uint8_t> failure;
-      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureFailed{{"completion failed"}}});
+      gemstone_test::encodePayload(failure, gemstone_test::executionFailure(completionFailure.load(), "completion failed"));
       respond(connection, failure, true);
       return;
     }
@@ -355,12 +364,12 @@ ze_device_handle_t gemstoneDevice(ze_driver_handle_t *selectedDriver) {
   REQUIRE((zeDriverGet(&driverCount, nullptr) == ZE_RESULT_SUCCESS));
   std::vector<ze_driver_handle_t> drivers(driverCount);
   REQUIRE((zeDriverGet(&driverCount, drivers.data()) == ZE_RESULT_SUCCESS));
-  for (const auto driver : drivers) {
+  for (auto *const driver : drivers) {
     uint32_t deviceCount = 0;
     REQUIRE((zeDeviceGet(driver, &deviceCount, nullptr) == ZE_RESULT_SUCCESS));
     std::vector<ze_device_handle_t> devices(deviceCount);
     REQUIRE((zeDeviceGet(driver, &deviceCount, devices.data()) == ZE_RESULT_SUCCESS));
-    for (const auto device : devices) {
+    for (auto *const device : devices) {
       ze_device_properties_t properties{};
       properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
       REQUIRE((zeDeviceGetProperties(device, &properties) == ZE_RESULT_SUCCESS));
@@ -378,7 +387,7 @@ void crossWorkgroupApi() {
   const gemstone_test::RpcEnvironment environment(server);
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
   ze_driver_handle_t driver = nullptr;
-  auto device = gemstoneDevice(&driver);
+  auto *device = gemstoneDevice(&driver);
   REQUIRE((device));
   ze_context_desc_t contextDesc{};
   contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
@@ -389,14 +398,14 @@ void crossWorkgroupApi() {
   ze_host_mem_alloc_desc_t hostDesc{};
   hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
   uint32_t *memory = nullptr;
-  constexpr size_t capacity = 9 * 33 + 2;
+  constexpr size_t capacity = (9 * 33) + 2;
   REQUIRE((zeMemAllocShared(context, &deviceDesc, &hostDesc, capacity * 4, 8, device, reinterpret_cast<void **>(&memory))
            == ZE_RESULT_SUCCESS));
   ze_module_desc_t moduleDesc{};
   moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
-  moduleDesc.inputSize = sizeof(server.Spirv);
-  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.Spirv);
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
   ze_module_handle_t module = nullptr;
   REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS));
   ze_kernel_desc_t kernelDesc{};
@@ -423,33 +432,34 @@ void crossWorkgroupApi() {
   eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
   ze_event_handle_t event = nullptr;
   REQUIRE((zeEventCreate(pool, &eventDesc, &event) == ZE_RESULT_SUCCESS));
-  for (bool immediate : {false, true}) {
+  for (bool const immediate : {false, true}) {
     ze_command_queue_desc_t queueDesc{};
     queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     queueDesc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
     ze_command_queue_handle_t queue = nullptr;
     ze_command_list_handle_t list = nullptr;
-    if (immediate) REQUIRE((zeCommandListCreateImmediate(context, device, &queueDesc, &list) == ZE_RESULT_SUCCESS));
-    else {
+    if (immediate) {
+      REQUIRE((zeCommandListCreateImmediate(context, device, &queueDesc, &list) == ZE_RESULT_SUCCESS));
+    } else {
       REQUIRE((zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS));
       ze_command_list_desc_t listDesc{};
       listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
       REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
     }
-    for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
-      for (uint32_t local : {31U, 32U, 33U})
+    for (uint32_t const groups : {1U, 2U, 3U, 5U, 9U})
+      for (uint32_t const local : {31U, 32U, 33U})
         for (uint32_t seed : {17U, 91U}) {
           const auto count = groups * local;
           const uint32_t offset = seed == 17U ? 7U : 0U;
           std::fill(memory, memory + capacity, 0U);
-          server.expect({local, groups, count, offset, seed});
+          server.expect({.local = local, .groups = groups, .global = count, .offset = offset, .seed = seed});
           REQUIRE((zeEventHostReset(event) == ZE_RESULT_SUCCESS));
           REQUIRE((zeEventQueryStatus(event) == ZE_RESULT_NOT_READY));
           REQUIRE((zeKernelSetGroupSize(kernel, local, 1, 1) == ZE_RESULT_SUCCESS));
           REQUIRE(((offset == 0 ? setGlobalOffset(kernel, offset, 0, 0) : zeKernelSetGlobalOffsetExp(kernel, offset, 0, 0))
                    == ZE_RESULT_SUCCESS));
           REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(seed), &seed) == ZE_RESULT_SUCCESS));
-          const ze_group_count_t geometry{groups, 1, 1};
+          const ze_group_count_t geometry{.groupCountX = groups, .groupCountY = 1, .groupCountZ = 1};
           REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &geometry, event, 0, nullptr) == ZE_RESULT_SUCCESS));
           if (!immediate) {
             REQUIRE((zeEventQueryStatus(event) == ZE_RESULT_NOT_READY));
@@ -485,12 +495,12 @@ void crossWorkgroupApi() {
   replayListDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
   ze_command_list_handle_t replayList = nullptr;
   REQUIRE((zeCommandListCreate(context, device, &replayListDesc, &replayList) == ZE_RESULT_SUCCESS));
-  const ze_group_count_t replayGroups{1, 1, 1};
+  const ze_group_count_t replayGroups{.groupCountX = 1, .groupCountY = 1, .groupCountZ = 1};
   REQUIRE((zeCommandListAppendLaunchKernel(replayList, kernel, &replayGroups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListClose(replayList) == ZE_RESULT_SUCCESS));
   for (unsigned replay = 0; replay < 2; ++replay) {
     std::fill(ordinary, ordinary + 16, 0U);
-    server.expect({4, 1, 4, 0, replaySeed});
+    server.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = replaySeed});
     REQUIRE((zeCommandQueueExecuteCommandLists(replayQueue, 1, &replayList, nullptr) == ZE_RESULT_SUCCESS));
     for (uint32_t index = 0; index < 4; ++index)
       REQUIRE((ordinary[index] == replaySeed + index));
@@ -517,7 +527,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
   ze_driver_handle_t driver = nullptr;
-  const auto device = gemstoneDevice(&driver);
+  auto *const device = gemstoneDevice(&driver);
   REQUIRE((device && driver));
   const char *driverError = nullptr;
   REQUIRE((zeDriverGetLastErrorDescription(driver, &driverError) == ZE_RESULT_SUCCESS));
@@ -622,7 +632,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((moduleProperties.flags == 0));
   size_t nativeBinarySize = 0;
   REQUIRE((zeModuleGetNativeBinary(module, &nativeBinarySize, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((nativeBinarySize == sizeof(image)));
+  REQUIRE((nativeBinarySize == std::span(image).size_bytes()));
   std::vector<uint8_t> nativeBinary(nativeBinarySize);
   REQUIRE((zeModuleGetNativeBinary(module, &nativeBinarySize, nativeBinary.data()) == ZE_RESULT_SUCCESS));
   const auto *imageBytes = reinterpret_cast<const uint8_t *>(image);
@@ -676,7 +686,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
   ze_command_list_handle_t list = nullptr;
   REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
-  const ze_group_count_t groups{2, 1, 1};
+  const ze_group_count_t groups{.groupCountX = 2, .groupCountY = 1, .groupCountZ = 1};
   REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemFree(context, memory) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
   REQUIRE((zeMemFree(context, unrelatedMemory) == ZE_RESULT_SUCCESS));
@@ -730,7 +740,30 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeFenceDestroy(failedFence) == ZE_RESULT_SUCCESS));
   const char *launchError = nullptr;
   REQUIRE((zeDriverGetLastErrorDescription(driver, &launchError) == ZE_RESULT_SUCCESS));
-  CHECK((launchError && std::string(launchError).find("completion failed") != std::string::npos));
+  CHECK((launchError && std::string(launchError).contains("completion failed")));
+
+  const struct {
+    FailureKind kind;
+    ze_result_t expected;
+  } failures[]{
+      {.kind = FailureKind::InvalidProgram, .expected = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE},
+      {.kind = FailureKind::InvalidConfiguration, .expected = ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION},
+      {.kind = FailureKind::Unsupported, .expected = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE},
+      {.kind = FailureKind::OutOfResources, .expected = ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY},
+      {.kind = FailureKind::IllegalAddress, .expected = ZE_RESULT_ERROR_DEVICE_LOST},
+      {.kind = FailureKind::IllegalInstruction, .expected = ZE_RESULT_ERROR_DEVICE_LOST},
+      {.kind = FailureKind::TimedOut, .expected = ZE_RESULT_ERROR_DEVICE_LOST},
+  };
+  for (const auto &[kind, expected] : failures) {
+    CAPTURE(static_cast<int>(kind));
+    ze_fence_handle_t fence = nullptr;
+    REQUIRE((zeFenceCreate(queue, &fenceDesc, &fence) == ZE_RESULT_SUCCESS));
+    server.completionFailure.store(kind);
+    server.failNextCompletion.store(true);
+    CHECK((zeCommandQueueExecuteCommandLists(queue, 1, &list, fence) == expected));
+    REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
+  }
+  server.completionFailure.store(FailureKind::Failed);
 
   REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(expected), &expected) == ZE_RESULT_SUCCESS));
@@ -757,16 +790,20 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
     ze_command_queue_desc_t asyncDesc{};
     asyncDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     asyncDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
-    ze_command_queue_handle_t producerQueue = nullptr, consumerQueue = nullptr;
+    ze_command_queue_handle_t producerQueue = nullptr;
+    ze_command_queue_handle_t consumerQueue = nullptr;
     REQUIRE((zeCommandQueueCreate(context, device, &asyncDesc, &producerQueue) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandQueueCreate(context, device, &asyncDesc, &consumerQueue) == ZE_RESULT_SUCCESS));
-    ze_command_list_handle_t producer = nullptr, consumer = nullptr, outer = nullptr;
+    ze_command_list_handle_t producer = nullptr;
+    ze_command_list_handle_t consumer = nullptr;
+    ze_command_list_handle_t outer = nullptr;
     if (mode >= 2) REQUIRE((zeCommandListCreateImmediate(context, device, &asyncDesc, &outer) == ZE_RESULT_SUCCESS));
     if (immediate) REQUIRE((zeCommandListCreateImmediate(context, device, &asyncDesc, &producer) == ZE_RESULT_SUCCESS));
     else REQUIRE((zeCommandListCreate(context, device, &listDesc, &producer) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandListCreate(context, device, &listDesc, &consumer) == ZE_RESULT_SUCCESS));
     const uint32_t source = 0xabcdef01;
-    uint32_t cancelled = 0, destination = 0;
+    uint32_t cancelled = 0;
+    uint32_t destination = 0;
     REQUIRE(
         (zeCommandListAppendMemoryCopy(consumer, &destination, &source, sizeof(source), events[2], 1, &events[1]) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandListClose(consumer) == ZE_RESULT_SUCCESS));
@@ -802,7 +839,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
     REQUIRE((zeCommandListDestroy(consumer) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandQueueDestroy(producerQueue) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandQueueDestroy(consumerQueue) == ZE_RESULT_SUCCESS));
-    for (const auto event : events) {
+    for (auto *const event : events) {
       REQUIRE((zeEventHostReset(event) == ZE_RESULT_SUCCESS));
       CHECK((zeEventQueryStatus(event) == ZE_RESULT_NOT_READY));
       REQUIRE((zeEventHostSignal(event) == ZE_RESULT_SUCCESS));
@@ -829,7 +866,7 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
   ze_driver_handle_t driver = nullptr;
-  const auto device = gemstoneDevice(&driver);
+  auto *const device = gemstoneDevice(&driver);
   REQUIRE((device));
   ze_context_desc_t contextDesc{};
   contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
@@ -841,8 +878,8 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
   // The Scala backend describes work-group requirements through the shared RPC metadata.
   if (requiredGroupSize) server.kernelWorkGroup({4, 1, 1});
-  moduleDesc.inputSize = sizeof(server.Spirv);
-  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.Spirv);
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
   ze_module_handle_t module = nullptr;
   REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS));
   ze_kernel_desc_t kernelDesc{};
@@ -855,7 +892,9 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   static std::array<uint32_t, 16> global{};
   std::unique_ptr<uint32_t, decltype(&std::free)> heap(nullptr, &std::free);
   if (storageKind == 0 || storageKind == 3) heap.reset(static_cast<uint32_t *>(std::malloc(storageKind == 3 ? 2 * 1024 * 1024 : 64)));
-  auto *base = storageKind == 1 ? stack.data() : storageKind == 2 ? global.data() : heap.get();
+  auto *base = heap.get();
+  if (storageKind == 1) base = stack.data();
+  else if (storageKind == 2) base = global.data();
   REQUIRE((base));
   std::fill(base, base + 16, 0U);
   auto *interior = base + 1;
@@ -873,11 +912,11 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
   ze_command_list_handle_t list = nullptr;
   REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
-  const ze_group_count_t groups{1, 1, 1};
+  const ze_group_count_t groups{.groupCountX = 1, .groupCountY = 1, .groupCountZ = 1};
   if (primeBase) {
     REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
-    server.expect({4, 1, 4, 0, seed});
+    server.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
     REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
     for (uint32_t index = 0; index < 4; ++index)
       REQUIRE((base[index] == seed + index));
@@ -889,7 +928,7 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   REQUIRE((zeKernelSetArgumentValue(kernel, 0, sizeof(interior), &interior) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
-  server.expect({4, 1, 4, 0, seed});
+  server.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((base[0] == 0));
   for (uint32_t index = 0; index < 4; ++index)

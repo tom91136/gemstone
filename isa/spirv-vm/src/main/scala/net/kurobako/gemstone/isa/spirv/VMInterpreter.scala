@@ -22,6 +22,8 @@ import scala.util.control.NonFatal
 /** Typed SPIR-V kernel execution. Guest memory is accessed through the address space; unbound program globals,
   * Workgroup and private storage use dispatch-, group- and invocation-owned apertures.
   */
+// ops and address spaces are polymorphic by design, and the loops run per dispatch or per instruction of one kind
+@SuppressWarnings(Array("baumkuchen:megamorphic-call"))
 private object VMInterpreter {
   import Operand.*
 
@@ -29,6 +31,7 @@ private object VMInterpreter {
 
   def execute(
       program: VMProgram,
+      ops: Array[Op],
       dispatch: KernelTask,
       memory: AddressSpace,
       control: TaskControl,
@@ -45,7 +48,7 @@ private object VMInterpreter {
             program.functions.get(functionId)
               .toRight(Fault.InvalidRequest(s"SPIR-V entry point ${dispatch.kernelName} has no function body"))
           )
-          .flatMap(executeDispatch(program, _, dispatch, memory, control, workgroups, handler))
+          .flatMap(executeDispatch(program, ops, _, dispatch, memory, control, workgroups, handler))
     catch {
       case NonFatal(error) =>
         Left(Fault.InvalidRequest(s"malformed SPIR-V execution state: ${throwables.detail(error)}"))
@@ -77,7 +80,7 @@ private object VMInterpreter {
               memory.address(binding.region, binding.offset).map(address =>
                 Pointer(address.raw, pointee, global.storageClass)
               )
-            case None => layout.append(image.bytes, program.typeAlignment(pointee).raw).map { address =>
+            case None => layout.append(image.bytes, program.typeAlignment(pointee)).map { address =>
                 val bounded = program.vulkan && global.storageClass == StorageClass.Private
                 Pointer(
                   address,
@@ -104,7 +107,7 @@ private object VMInterpreter {
   private def placeSamplers(program: VMProgram, layout: Layout): Either[Fault, Map[Int, VMValue]] =
     program.samplerConstants.traverse { (id, typeId, words) =>
       val bytes = Array.ofDim[Byte](words.size * 4)
-      words.zipWithIndex.foreach((word, index) => LittleEndian.write(word, bytes, index * 4, 4))
+      words.indices.foreach(index => LittleEndian.write(words(index), bytes, index * 4, 4))
       layout.append(Vec.unsafeWrapArray(bytes), 4).map(address =>
         id -> VMValue.Address(
           typeId,
@@ -118,6 +121,7 @@ private object VMInterpreter {
 
   private def executeDispatch(
       program: VMProgram,
+      ops: Array[Op],
       function: Function,
       dispatch: KernelTask,
       memory: AddressSpace,
@@ -150,7 +154,7 @@ private object VMInterpreter {
         if (!shader) Right(initialGlobals)
         else descriptorValues(program, memory, arguments.zip(dispatch.arguments), initialGlobals)
       storage  = Storage(memory, dispatch.pointerRelocations, globalLayout.result(), handler)
-      launcher = Launcher(program, memory, control, workgroups, globalValues, storage)
+      launcher = Launcher(program, ops, memory, control, workgroups, globalValues, storage)
       _ <- launcher.launch(function, dispatch, shader) { (workgroupLayout, privateLayout) =>
         if (shader) Right(Map.empty[Int, VMValue])
         else bindParameters(program, function, dispatch, memory, workgroupLayout, privateLayout)
@@ -164,6 +168,7 @@ private object VMInterpreter {
     */
   private class Launcher(
       program: VMProgram,
+      ops: Array[Op],
       memory: AddressSpace,
       control: TaskControl,
       workgroups: Workgroups,
@@ -182,11 +187,13 @@ private object VMInterpreter {
         workgroupGlobals <- placeGlobals(program, memory, workgroupLayout, _ == StorageClass.Workgroup)
         privateBuiltins  <- privateBuiltins(program, dispatch.kernelName, shader, globalValues, privateLayout)
         bound            <- parameters(workgroupLayout, privateLayout)
-        template = program.registers(
+        template = InvocationValues.registers(
+          program,
           globalValues ++ privateGlobals ++ workgroupGlobals ++ privateBuiltins.map(_._1) ++ bound
         )
         _ <- run(
           program,
+          ops,
           function,
           dispatch,
           memory,
@@ -213,9 +220,9 @@ private object VMInterpreter {
           Left(Fault.InvalidRequest("enqueued commands wait on events that never complete"))
         case Right(Some(command)) =>
           queue.begin(command)
-          val ran = command match {
-            case kernel: DeviceQueue.Command.Kernel => enqueued(kernel)
-            case DeviceQueue.Command.Marker(_, _)   => Right(())
+          val ran = command.action match {
+            case kernel: DeviceQueue.Action.Kernel => enqueued(kernel)
+            case DeviceQueue.Action.Marker         => Right(())
           }
           ran.flatMap(_ => queue.finish(command, state.write)) match {
             case Left(error) => Left(error)
@@ -224,7 +231,7 @@ private object VMInterpreter {
       }
     }
 
-    private def enqueued(kernel: DeviceQueue.Command.Kernel): Either[Fault, Unit] =
+    private def enqueued(kernel: DeviceQueue.Action.Kernel): Either[Fault, Unit] =
       for {
         function <- program.functions.get(kernel.function)
           .toRight(Fault.InvalidRequest(s"enqueued block %${kernel.function} has no function body"))
@@ -298,7 +305,7 @@ private object VMInterpreter {
           address <- memory.address(allocation, offset).map(_.raw)
         } yield {
           val pointee = program.pointerPointee(global.pointerType)
-          val leaf = Pointer(address, pointee, global.storageClass, range.map(size => address -> (address + size.raw)))
+          val leaf    = Pointer(address, pointee, global.storageClass, range.map(size => address -> (address + size)))
           val pointer = program.runtimeType(pointee) match {
             case Some(RuntimeType.Array(member, _)) if program.descriptorBindings.contains(variable) =>
               val previous = values.get(variable).collect {
@@ -327,7 +334,7 @@ private object VMInterpreter {
         interfaces.contains(variable))
     }.traverse { case (variable, global) =>
       val pointee = program.pointerPointee(global.pointerType)
-      layout.reserve(program.typeSize(pointee).raw.toLong, program.typeAlignment(pointee).raw).map(address =>
+      layout.reserve(program.typeSize(pointee).toLong, program.typeAlignment(pointee)).map(address =>
         (
           variable -> VMValue.Address(global.pointerType, Pointer(address, pointee, global.storageClass)),
           PrivateBuiltin(offsetOf(address), pointee, program.builtins(variable))
@@ -348,12 +355,12 @@ private object VMInterpreter {
       function.parameters.zipWithIndex.toVector.traverse { case ((parameterId, parameterType), index) =>
         val relocatedAtZero = dispatch.pointerRelocations.exists {
           case KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(source), offset, _, _) =>
-            source.raw == index && offset.raw == 0L
+            source.raw == index && offset == 0L
           case _ => false
         }
         val bound = resolved(index) match {
           case KernelArguments.Resolved.Local(size) =>
-            workgroupLayout.reserve(size.raw, LocalArgumentAlignment).map(address =>
+            workgroupLayout.reserve(size, LocalArgumentAlignment).map(address =>
               Array.emptyByteArray -> Some(address)
             )
           case KernelArguments.Resolved.Bytes(bytes) => Right(Vec.toArray(bytes.raw) -> None)
@@ -381,6 +388,7 @@ private object VMInterpreter {
   ))
   private def run(
       program: VMProgram,
+      programOps: Array[Op],
       function: Function,
       dispatch: KernelTask,
       memory: AddressSpace,
@@ -419,10 +427,10 @@ private object VMInterpreter {
     val enqueuedSubgroups    = (totalLocal.toLong + subgroup.toLong - 1L) / subgroup.toLong
     val hasStaticCollectives = program.collectiveFunctions.contains(function.id)
     val hasCollectives       = hasStaticCollectives || memory.defersHostReads
-    val parallel             = workgroups.shouldParallel(geometry.groupTotal, geometry.groupVolume.toLong)
+    val parallel             = workgroups.shouldParallel(geometry.groupTotal, geometry.groupVolume.widen[Long >= 0])
     val state                = MemoryState(storage)
     val sequential           = Reuse(totalLocal)
-    val ops                  = instrumented(program, dispatch.kernelName, control.observer)
+    val ops                  = instrumented(programOps, dispatch.kernelName, control.observer)
 
     def runGroup(group: Coordinates, groupState: MemoryState, reuse: Reuse): Either[Fault, Unit] = {
       val activeGroupSize = geometry.activeGroupSize(group) match {
@@ -431,7 +439,7 @@ private object VMInterpreter {
       }
       val activeLocalCount = activeGroupSize.volumeInt match {
         case Left(message) => return Left(Fault.InvalidRequest(message))
-        case Right(value)  => value.raw
+        case Right(value)  => value
       }
       groupState.workgroup = if (workgroupImage.isEmpty) workgroupImage else workgroupImage.clone()
       val executions   = mutable.ArrayBuffer.empty[InvocationState]
@@ -449,7 +457,7 @@ private object VMInterpreter {
             global,
             geometry,
             activeGroupSize,
-            if (program.vulkan) subgroup else math.min(subgroup, activeLocalCount - subgroupIndex * subgroup),
+            if (program.vulkan) subgroup else math.min(subgroup, activeLocalCount.raw - subgroupIndex * subgroup),
             subgroup,
             numSubgroups,
             enqueuedSubgroups,
@@ -461,7 +469,7 @@ private object VMInterpreter {
             globalValues.get(variable).collect { case VMValue.Address(pointerType, pointer) =>
               variable -> VMValue.Address(
                 pointerType,
-                pointer.copy(address = pointer.address + global.x.raw * program.typeSize(pointer.pointee).raw)
+                pointer.copy(address = pointer.address + global.x.raw * program.typeSize(pointer.pointee))
               )
             }
           }.toMap
@@ -496,7 +504,7 @@ private object VMInterpreter {
           execution.sampleMask = maskVariable.flatMap(stageValues.get).collect { case VMValue.Address(_, pointer) =>
             pointer
           }
-          execution.fragmentQuad = fragment && groupSize.x.raw == 4 && groupSize.y.raw == 1 && groupSize.z.raw == 1
+          execution.fragmentQuad = fragment && groupSize.x == 4 && groupSize.y == 1 && groupSize.z == 1
           execution.subgroupReconvergence = program.usesNonUniformCollectives && !fragment
           execution.helperInvocation = helperVariable.flatMap(stageValues.get) match {
             case Some(VMValue.Address(_, pointer)) => memory.awaitRead(groupState.readScalar(pointer, 1)) match {
@@ -611,8 +619,9 @@ private object VMInterpreter {
     while (execution.pc < execution.currentFunction.end) {
       val result = ops(execution.pc).run(execution, memory)
       executed += 1
+      execution.issued += 1L
       result match {
-        case Left(AddressSpace.Pending) =>
+        case Left(_: AddressSpace.Pending.type) =>
           execution.awaitMemory()
           return charge()
         case Left(error: Fault) => return charge().flatMap(_ => Left(error))
@@ -655,8 +664,8 @@ private object VMInterpreter {
     fault.at(location(kernel, execution))
 
   /** The program's ops, each preceded by a call to `observer` when one is attached. */
-  private def instrumented(program: VMProgram, kernel: NonEmpty[String], observer: Option[LaunchObserver]): Array[Op] =
-    observer.fold(program.ops)(observer => program.ops.map(Observed(_, kernel, observer)))
+  private def instrumented(ops: Array[Op], kernel: NonEmpty[String], observer: Option[LaunchObserver]): Array[Op] =
+    observer.fold(ops)(observer => ops.map(Observed(_, kernel, observer)))
 
   private class Observed(op: Op, kernel: NonEmpty[String], observer: LaunchObserver) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
@@ -777,19 +786,15 @@ private object VMInterpreter {
           )
         )
       case maskKind @ (BuiltIn.SubgroupEqMask | BuiltIn.SubgroupGeMask | BuiltIn.SubgroupGtMask | BuiltIn.SubgroupLeMask | BuiltIn.SubgroupLtMask) =>
-        Right(Array.tabulate(4) { word =>
-          (0 until 32).foldLeft(0L) { (bits, bit) =>
-            val lane     = word * 32 + bit
-            val selected = maskKind match {
-              case BuiltIn.SubgroupEqMask => lane == invocation.subgroupLocal
-              case BuiltIn.SubgroupGeMask => lane >= invocation.subgroupLocal
-              case BuiltIn.SubgroupGtMask => lane > invocation.subgroupLocal
-              case BuiltIn.SubgroupLeMask => lane <= invocation.subgroupLocal
-              case _                      => lane < invocation.subgroupLocal
-            }
-            if (lane < invocation.maxSubgroupSize && selected) bits | (1L << bit) else bits
-          }
-        })
+        val local         = invocation.subgroupLocal
+        val (from, until) = maskKind match {
+          case BuiltIn.SubgroupEqMask => (local, local + 1)
+          case BuiltIn.SubgroupGeMask => (local, invocation.maxSubgroupSize)
+          case BuiltIn.SubgroupGtMask => (local + 1, invocation.maxSubgroupSize)
+          case BuiltIn.SubgroupLeMask => (0, local + 1)
+          case _                      => (0, local)
+        }
+        Right(Array.tabulate(4)(CollectiveOps.ballotLanes(from, Math.min(until, invocation.maxSubgroupSize), _)))
       // The Vulkan runtime exposes one physical device in each device group.
       case BuiltIn.DeviceIndex if program.vulkan => Right(Array(0L))
       case BuiltIn.SubgroupSize                  => Right(Array(invocation.subgroupSize.toLong))

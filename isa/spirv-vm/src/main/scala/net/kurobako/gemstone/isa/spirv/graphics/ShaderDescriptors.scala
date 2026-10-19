@@ -26,27 +26,27 @@ private object ShaderDescriptors {
   }
   private def validateImage(image: GraphicsImage): Unit = {
     if (image.format.compression != GraphicsCompression.None) {
-      require(image.samples.raw == 1, "compressed image cannot be multisampled")
+      require(image.samples == 1, "compressed image cannot be multisampled")
       val _ = decodedLayout(image)
     } else {
       // The shader descriptor ABI has implicit tight pitches. Padded transfer images must not use it.
       image.levels.foreach { level =>
         val row = Math.multiplyExact(
-          Math.multiplyExact(level.extent.width.raw.toLong, image.format.texelBytes.raw.toLong),
-          image.samples.raw.toLong
+          Math.multiplyExact(level.extent.width.toLong, image.format.texelBytes.toLong),
+          image.samples.toLong
         )
-        val slice = Math.multiplyExact(row, level.extent.height.raw.toLong)
-        val layer = Math.multiplyExact(slice, level.extent.depth.raw.toLong)
+        val slice = Math.multiplyExact(row, level.extent.height.toLong)
+        val layer = Math.multiplyExact(slice, level.extent.depth.toLong)
         require(
           level.rowPitch.raw == row && level.slicePitch.raw == slice && level.layerPitch.raw == layer,
           "shader image storage must have tight pitches"
         )
       }
     }
-    require(image.volume || image.levels.forall(_.extent.depth.raw == 1), "array image has volume depth")
+    require(image.volume || image.levels.forall(_.extent.depth == 1), "array image has volume depth")
     image.levels.zipWithIndex.foreach { (level, index) =>
       require(
-        index < 32 && level.extent.depth.raw == math.max(1, image.extent.depth.raw >>> index),
+        index < 32 && level.extent.depth.raw == math.max(1, image.extent.depth >>> index),
         "shader image mip depth is inconsistent"
       )
     }
@@ -54,20 +54,20 @@ private object ShaderDescriptors {
   // Compute and validate the entire decoded allocation before allocating any pixels.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def decodedLayout(image: GraphicsImage): (NonEmpty[Vec[GraphicsImageLevel]], Int > 0) = {
-    val unit              = image.format.decoded.texelBytes.toLong
+    val unit              = image.format.decoded.texelBytes.widen[Long > 0]
     var offset: Long >= 0 = 0L
     val levels            = image.levels.mapNonEmpty { level =>
-      val row   = level.extent.width.toLong.widen[Long > 0] * unit
-      val slice = row * level.extent.height.toLong
-      val layer = slice * level.extent.depth.toLong
-      val end   = offset + layer * image.layers.toLong
-      require(end.raw <= Int.MaxValue, "decoded image exceeds allocation limit")
+      val row   = level.extent.width.widen[Long > 0] * unit
+      val slice = row * level.extent.height.widen[Long > 0]
+      val layer = slice * level.extent.depth.widen[Long > 0]
+      val end   = offset + layer * image.layers.widen[Long > 0]
+      require(end <= Int.MaxValue, "decoded image exceeds allocation limit")
       val result = GraphicsImageLevel(level.extent, offset, row, slice, layer)
       offset = end
       result
     }
     val last = levels.last
-    val size = last.layerPitch * image.layers.toLong + last.offset
+    val size = last.layerPitch * image.layers.widen[Long > 0] + last.offset
     (levels, size.toIntExact)
   }
 }
@@ -89,7 +89,7 @@ private class ShaderDescriptors(memory: GraphicsAccess) {
   private def point(source: GraphicsRange, offset: Int >= 0, target: GraphicsRange): Unit =
     pointers += PointerRelocation(
       RelocationSource.Memory(source.allocation),
-      offset.toLong,
+      offset.widen[Long >= 0],
       target.allocation,
       target.offset
     )
@@ -98,7 +98,7 @@ private class ShaderDescriptors(memory: GraphicsAccess) {
     image, {
       val (levels, size) = ShaderDescriptors.decodedLayout(image)
       val result         = image.copy(
-        memory = allocate(Array.ofDim[Byte](size.raw)),
+        memory = allocate(Array.ofDim[Byte](size)),
         levels = levels,
         format = image.format.decoded
       )
@@ -124,14 +124,14 @@ private class ShaderDescriptors(memory: GraphicsAccess) {
           image.format.shaderFormat.code.toLong | Flags.LevelTable |
             (if (image.volume) Flags.Volume else 0L) | (if (swizzled) Flags.Swizzle else 0L)
         )
-        LittleEndian.write(image.memory.size.raw, bytes, Layout.TexelBytes, 8)
+        LittleEndian.write(image.memory.size, bytes, Layout.TexelBytes, 8)
         word(Layout.Levels, image.levels.size)
-        word(Layout.Samples, if (image.samples.raw == 1) 0 else image.samples.raw)
+        word(Layout.Samples, if (image.samples == 1) 0 else image.samples.raw)
         image.levels.zipWithIndex.foreach { (level, index) =>
           val base = Layout.LevelTable + index * Layout.LevelBytes
           word(base + Layout.LevelWidth, level.extent.width.raw)
           word(base + Layout.LevelHeight, level.extent.height.raw)
-          LittleEndian.write(level.offset.raw, bytes, base + Layout.LevelOffset, 8)
+          LittleEndian.write(level.offset, bytes, base + Layout.LevelOffset, 8)
         }
         if (swizzled) components.values.zipWithIndex.foreach((value, lane) => word(tableEnd + lane * 4, value.ordinal))
         val result = allocate(bytes)
@@ -159,7 +159,7 @@ private class ShaderDescriptors(memory: GraphicsAccess) {
   }
   private def samplerDescriptor(sampler: GraphicsSampler, image: Option[GraphicsRange]): GraphicsRange = {
     val bytes = samplerBytes(sampler, if (image.nonEmpty) Layout.InlineHeaderBytes else 0)
-    image.foreach(range => LittleEndian.write(range.size.raw, bytes, 8, 8))
+    image.foreach(range => LittleEndian.write(range.size, bytes, 8, 8))
     val result = allocate(bytes)
     image.foreach(point(result, 0, _))
     result

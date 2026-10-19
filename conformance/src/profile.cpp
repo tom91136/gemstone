@@ -1,20 +1,25 @@
 #include "profile.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cstddef>
+#include <cstdlib>
+#include <filesystem>
+#include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <unistd.h>
 
+#include "cuda_architecture.hpp"
 #include <aspartame/all.hpp>
 #include <glaze/toml.hpp>
 
 #include "environment.hpp"
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 
 namespace conformance::profile {
 using namespace aspartame;
@@ -24,32 +29,33 @@ constexpr std::array<std::string_view, 8> SupportedBackends{"cuda", "hip", "hsa"
 
 std::string targetId(const ProfileTarget &target) { return target.name.value_or(target.backend); }
 
-bool supported(std::string_view backend) { return std::ranges::find(SupportedBackends, backend) != SupportedBackends.end(); }
+bool supported(std::string_view backend) { return SupportedBackends ^ contains(backend); }
 
 bool profileName(std::string_view value) {
   const auto isAlphaNumeric = [](char character) {
     return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
   };
   if (value.empty() || !isAlphaNumeric(value.front())) return false;
-  return std::ranges::all_of(value.substr(1), [&](char character) {
-    return isAlphaNumeric(character) || character == '.' || character == '_' || character == '-';
-  });
+  return value.substr(1)
+         ^ forall([&](char character) { return isAlphaNumeric(character) || character == '.' || character == '_' || character == '-'; });
 }
 
-bool architecture(std::string_view value, std::string_view prefix, bool hexadecimal) {
-  if (!value.starts_with(prefix) || value.size() == prefix.size()) return false;
-  return std::ranges::all_of(value.substr(prefix.size()), [hexadecimal](char character) {
-    return (character >= '0' && character <= '9') || (hexadecimal && character >= 'a' && character <= 'f');
-  });
+bool gfxArchitecture(std::string_view value) {
+  if (!value.starts_with("gfx") || value.size() == 3) return false;
+  return value.substr(3)
+         ^ forall([](char character) { return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'); });
 }
 
 void validateRoute(std::string_view backend, const std::optional<std::string> &arch) {
   if (!supported(backend)) throw std::invalid_argument(fmt::format("unknown backend: {}", backend));
   if (backend == "cuda" || backend == "openacc") {
-    if (!arch || !architecture(*arch, "sm_", false)) throw std::invalid_argument(fmt::format("{} requires an sm_ architecture", backend));
+    if (!arch || !arch->starts_with("sm_") || !CudaArchitecture::parse(*arch))
+      throw std::invalid_argument(fmt::format("{} requires an sm_ architecture", backend));
   } else if (backend == "hip" || backend == "hsa") {
-    if (!arch || !architecture(*arch, "gfx", true)) throw std::invalid_argument(fmt::format("{} requires a gfx architecture", backend));
-  } else if (arch) throw std::invalid_argument(fmt::format("{} cannot set an architecture", backend));
+    if (!arch || !gfxArchitecture(*arch)) throw std::invalid_argument(fmt::format("{} requires a gfx architecture", backend));
+  } else if (arch) {
+    throw std::invalid_argument(fmt::format("{} cannot set an architecture", backend));
+  }
 }
 
 void validateCompiler(std::string_view backend, std::string_view compiler) {
@@ -62,16 +68,18 @@ void validateCompiler(std::string_view backend, std::string_view compiler) {
 // CONFORMANCE_CUDA_CODE is the single CUDA code-mode setting; the driver JIT policy follows from it.
 void applyCudaCode(ResolvedTarget &target) {
   if (target.backend != "cuda") return;
-  auto code = target.environment.find("CONFORMANCE_CUDA_CODE");
+  const auto code = [&] { return target.environment ^ get_maybe(std::string("CONFORMANCE_CUDA_CODE")); };
   if (target.compiler == "gcc") {
-    if (code != target.environment.end() && code->second != "ptx") throw std::invalid_argument("GCC CUDA offload requires PTX execution");
-    code = target.environment.insert_or_assign("CONFORMANCE_CUDA_CODE", "ptx").first;
+    if (code() ^ exists([](const std::string &mode) { return mode != "ptx"; }))
+      throw std::invalid_argument("GCC CUDA offload requires PTX execution");
+    target.environment["CONFORMANCE_CUDA_CODE"] = "ptx";
   }
-  if (code == target.environment.end()) return;
-  if (code->second != "ptx" && code->second != "sass") throw std::invalid_argument("CONFORMANCE_CUDA_CODE must be ptx or sass");
-  const bool ptx = code->second == "ptx";
-  target.environment["CUDA_FORCE_PTX_JIT"] = ptx ? "1" : "0";
-  target.environment["CUDA_DISABLE_PTX_JIT"] = ptx ? "0" : "1";
+  code() ^ for_each([&](const std::string &mode) {
+    if (mode != "ptx" && mode != "sass") throw std::invalid_argument("CONFORMANCE_CUDA_CODE must be ptx or sass");
+    const bool ptx = mode == "ptx";
+    target.environment["CUDA_FORCE_PTX_JIT"] = ptx ? "1" : "0";
+    target.environment["CUDA_DISABLE_PTX_JIT"] = ptx ? "0" : "1";
+  });
 }
 
 std::string normaliseName(std::string value) {
@@ -113,12 +121,10 @@ void validate(std::string_view name, const Profile &profile) {
     validateSkips(name, "target " + id, target.skips);
   }
 
-  for (const auto &[backend, targets] : byBackend) {
-    if (targets.size() > 1) {
-      if (std::ranges::any_of(targets, [](const ProfileTarget *target) { return !target->name; }))
-        throw std::invalid_argument(fmt::format("machine profile {} requires explicit names for repeated backend: {}", name, backend));
-    }
-  }
+  if (const auto repeated = byBackend ^ find([](const std::string &, const std::vector<const ProfileTarget *> &targets) {
+                              return targets.size() > 1 && targets ^ exists([](const ProfileTarget *target) { return !target->name; });
+                            }))
+    throw std::invalid_argument(fmt::format("machine profile {} requires explicit names for repeated backend: {}", name, repeated->first));
   for (const auto &[key, value] : profile.environment) {
     if (!validEnvironmentEntry(key, value))
       throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable", name));
@@ -138,12 +144,15 @@ Profile load(const std::filesystem::path &file) {
 }
 
 std::string localHostname() {
-  if (const char *configured = std::getenv("HOSTNAME"); configured && *configured)
-    return std::string(configured).substr(0, std::string(configured).find('.'));
-  std::array<char, 256> result{};
-  if (gethostname(result.data(), result.size()) != 0) throw std::runtime_error("cannot determine the local hostname");
-  result.back() = '\0';
-  const std::string hostname(result.data());
+  std::string hostname;
+  if (const char *configured = std::getenv("HOSTNAME"); configured && *configured) {
+    hostname = configured;
+  } else {
+    std::array<char, 256> result{};
+    if (gethostname(result.data(), result.size()) != 0) throw std::runtime_error("cannot determine the local hostname");
+    result.back() = '\0';
+    hostname = result.data();
+  }
   return hostname.substr(0, hostname.find('.'));
 }
 
@@ -154,7 +163,7 @@ Profile resolveProfile(const std::filesystem::path &directory, const std::option
   const auto name = normaliseName(requested ? *requested : hostname.value_or(localHostname()));
   const auto file = std::filesystem::absolute(directory / (name + ".toml")).lexically_normal();
   if (!std::filesystem::is_regular_file(file)) {
-    const auto source = requested ? "requested" : "local-machine";
+    const auto *const source = requested ? "requested" : "local-machine";
     throw std::invalid_argument(std::string(source) + " conformance machine profile does not exist: " + file.string());
   }
   auto profile = load(file);
@@ -167,20 +176,23 @@ std::vector<ResolvedTarget> resolveTargets(const Profile &profile, const std::ve
   const auto matches = [](const ProfileTarget &target, const std::string &selector) {
     return selector == target.backend || selector == targetId(target);
   };
-  for (const auto &selector : selectors)
-    if (std::ranges::none_of(profile.targets, [&](const ProfileTarget &target) { return matches(target, selector); }))
-      throw std::invalid_argument(
-          fmt::format("machine profile {} provides targets: {}", profile.name,
-                      fmt::join(profile.targets ^ map([](const ProfileTarget &target) { return targetId(target); }), ", ")));
+  if (selectors ^ exists([&](const std::string &selector) {
+        return profile.targets ^ none_match([&](const ProfileTarget &target) { return matches(target, selector); });
+      }))
+    throw std::invalid_argument(
+        fmt::format("machine profile {} provides targets: {}", profile.name,
+                    profile.targets ^ map([](const ProfileTarget &target) { return targetId(target); }) ^ mk_string(", ")));
   const auto selected = [&](const ProfileTarget &target) {
-    return selectors.empty() || std::ranges::any_of(selectors, [&](const std::string &selector) { return matches(target, selector); });
+    return selectors.empty() || selectors ^ exists([&](const std::string &selector) { return matches(target, selector); });
   };
   return profile.targets | filter(selected) | map([&](const ProfileTarget &target) {
-           ResolvedTarget resolved{
-               targetId(target), target.backend, target.architecture, profile.environment, concat(profile.skips, target.skips) ^ distinct(),
-               target.compiler};
-           for (const auto &[key, value] : target.environment)
-             resolved.environment[key] = value;
+           ResolvedTarget resolved{.id = targetId(target),
+                                   .backend = target.backend,
+                                   .architecture = target.architecture,
+                                   .environment = profile.environment,
+                                   .skips = concat(profile.skips, target.skips) ^ distinct(),
+                                   .compiler = target.compiler};
+           target.environment ^ for_each([&](const std::string &key, const std::string &value) { resolved.environment[key] = value; });
            applyCudaCode(resolved);
            resolved.environment["CONFORMANCE_DEVICE"] = target.device.value_or("");
            return resolved;
@@ -208,14 +220,26 @@ std::vector<ResolvedTarget> directTargets(const std::vector<std::string> &routes
     validateCompiler(backend, compiler);
     const auto suffix = compiler == "vendor" ? "" : "-" + compiler;
     if (compiler == "gcc" && selector == "cuda-sass") throw std::invalid_argument("GCC CUDA offload requires PTX execution");
-    if (backend == "cuda") {
+    if (backend == "cuda" && arch) {
       for (const auto *mode : {"ptx", "sass"}) {
         const auto name = std::string("cuda-") + mode;
         if (selector != "cuda" && selector != name) continue;
         if (compiler == "gcc" && std::string_view(mode) != "ptx") continue;
-        append({name + "-" + *arch + suffix, backend, arch, {{"CONFORMANCE_CUDA_CODE", mode}}, {}, compiler});
+        append({.id = fmt::format("{}-{}{}", name, *arch, suffix),
+                .backend = backend,
+                .architecture = arch,
+                .environment = {{"CONFORMANCE_CUDA_CODE", mode}},
+                .skips = {},
+                .compiler = compiler});
       }
-    } else append({backend + (arch ? "-" + *arch : "") + suffix, backend, arch, {}, {}, compiler});
+    } else {
+      append({.id = arch ? fmt::format("{}-{}{}", backend, *arch, suffix) : backend + suffix,
+              .backend = backend,
+              .architecture = arch,
+              .environment = {},
+              .skips = {},
+              .compiler = compiler});
+    }
   }
   return result;
 }
@@ -223,15 +247,17 @@ std::vector<ResolvedTarget> directTargets(const std::vector<std::string> &routes
 void validateAll(const std::filesystem::path &directory) {
   if (!std::filesystem::is_directory(directory))
     throw std::invalid_argument(fmt::format("conformance profile directory does not exist: {}", directory.string()));
-  size_t count = 0;
-  for (const auto &entry : std::filesystem::directory_iterator(directory)) {
-    if (!entry.is_regular_file() || entry.path().extension() != ".toml") continue;
+  const std::vector<std::filesystem::directory_entry> entries{std::filesystem::directory_iterator(directory),
+                                                              std::filesystem::directory_iterator{}};
+  const auto profiles = entries ^ filter([](const std::filesystem::directory_entry &entry) {
+                          return entry.is_regular_file() && entry.path().extension() == ".toml";
+                        });
+  profiles ^ for_each([](const std::filesystem::directory_entry &entry) {
     const auto name = normaliseName(entry.path().filename().string());
-    auto profile = load(entry.path());
-    validate(name, profile);
-    ++count;
-  }
-  if (count == 0) throw std::invalid_argument(fmt::format("conformance profile directory contains no .toml files: {}", directory.string()));
+    validate(name, load(entry.path()));
+  });
+  if (profiles.empty())
+    throw std::invalid_argument(fmt::format("conformance profile directory contains no .toml files: {}", directory.string()));
 }
 
 } // namespace conformance::profile

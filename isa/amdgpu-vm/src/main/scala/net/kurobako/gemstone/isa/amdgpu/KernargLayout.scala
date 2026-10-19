@@ -15,19 +15,19 @@ private case class KernargLayout(
     hidden: Vec[CodeObjectMetadata.HiddenArgument]
 ) {
   def hiddenValue(kind: String, geometry: LaunchGeometry): Long = kind match {
-    case "hidden_block_count_x"   => geometry.groupCount.x.raw.toLong
-    case "hidden_block_count_y"   => geometry.groupCount.y.raw.toLong
-    case "hidden_block_count_z"   => geometry.groupCount.z.raw.toLong
-    case "hidden_group_size_x"    => geometry.groupSize.x.raw.toLong
-    case "hidden_group_size_y"    => geometry.groupSize.y.raw.toLong
-    case "hidden_group_size_z"    => geometry.groupSize.z.raw.toLong
-    case "hidden_remainder_x"     => geometry.globalExtent.x.raw % geometry.groupSize.x.raw
-    case "hidden_remainder_y"     => geometry.globalExtent.y.raw % geometry.groupSize.y.raw
-    case "hidden_remainder_z"     => geometry.globalExtent.z.raw % geometry.groupSize.z.raw
-    case "hidden_global_offset_x" => geometry.globalOffset.x.raw.toLong
-    case "hidden_global_offset_y" => geometry.globalOffset.y.raw.toLong
-    case "hidden_global_offset_z" => geometry.globalOffset.z.raw.toLong
-    case "hidden_grid_dims"       => geometry.workDim.raw.toLong
+    case "hidden_block_count_x"   => geometry.groupCount.x.toLong
+    case "hidden_block_count_y"   => geometry.groupCount.y.toLong
+    case "hidden_block_count_z"   => geometry.groupCount.z.toLong
+    case "hidden_group_size_x"    => geometry.groupSize.x.toLong
+    case "hidden_group_size_y"    => geometry.groupSize.y.toLong
+    case "hidden_group_size_z"    => geometry.groupSize.z.toLong
+    case "hidden_remainder_x"     => geometry.globalExtent.x % geometry.groupSize.x
+    case "hidden_remainder_y"     => geometry.globalExtent.y % geometry.groupSize.y
+    case "hidden_remainder_z"     => geometry.globalExtent.z % geometry.groupSize.z
+    case "hidden_global_offset_x" => geometry.globalOffset.x.toLong
+    case "hidden_global_offset_y" => geometry.globalOffset.y.toLong
+    case "hidden_global_offset_z" => geometry.globalOffset.z.toLong
+    case "hidden_grid_dims"       => geometry.workDim.toLong
     case _                        => 0L
   }
 
@@ -44,23 +44,23 @@ private case class KernargLayout(
       _ <- explicit.zip(parameters).zipWithIndex.foldLeft[Either[Fault, Unit]](Right(())) {
         case (result, ((bytes, parameter), index)) => result.flatMap { _ =>
             Either.cond(
-              bytes.size <= parameter.width.raw && fits(parameter.offset.raw, parameter.width.raw),
+              bytes.size <= parameter.width && fits(parameter.offset, parameter.width),
               (),
               Fault.InvalidRequest(
                 s"argument $index takes ${bytes.size} bytes, but its parameter holds ${parameter.width} at ${parameter.offset}"
               )
-            ).map(_ => bytes.copyToArray(packed, parameter.offset.raw)).map(_ => ())
+            ).map(_ => bytes.copyToArray(packed, parameter.offset)).map(_ => ())
           }
       }
       _ <- hidden.foldLeft[Either[Fault, Unit]](Right(())) { (result, argument) =>
         result.flatMap { _ =>
           Either.cond(
-            fits(argument.offset.raw, argument.width.raw),
+            fits(argument.offset, argument.width),
             LittleEndian.write(
               hiddenValue(argument.valueKind, geometry),
               packed,
-              argument.offset.raw,
-              math.min(argument.width.raw, 8).unsafe[Int in 0 ~ 8]
+              argument.offset,
+              math.min(argument.width, 8).unsafe[Int in 0 ~ 8]
             ),
             Fault.InvalidRequest(s"hidden argument ${argument.valueKind} lies outside the $size-byte kernarg segment")
           )

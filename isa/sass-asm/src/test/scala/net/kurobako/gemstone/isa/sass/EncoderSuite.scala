@@ -1,15 +1,16 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class EncoderSuite extends munit.FunSuite {
   private val opcodeField = NVDisasm.Assignment(
     "opcode",
     Vec(0, 1, 2, 3),
-    NVDisasm.Expression.Reference("Opcode", None, relaxed = false)
+    Expression.Reference("Opcode", None, relaxed = false)
   )
-  private val opcodeValue = NVDisasm.OpcodeValue("TEST", 0xa)
+  private val opcodeValue = NVDisasm.SymbolValue("TEST", 0xa)
 
   private def database(form: NVDisasm.Form, tables: Vec[NVDisasm.LookupTable] = Vec.empty): NVDisasm.Database =
     NVDisasm.Database("", 64, Vec(form), tables)
@@ -23,12 +24,12 @@ class EncoderSuite extends munit.FunSuite {
       Vec(opcodeValue),
       Vec(
         opcodeField,
-        NVDisasm.Assignment("A", Vec(4, 5, 6, 7), NVDisasm.Expression.Reference("A", None, relaxed = false)),
+        NVDisasm.Assignment("A", Vec(4, 5, 6, 7), Expression.Reference("A", None, relaxed = false)),
         NVDisasm.Assignment(
           "B",
           Vec(8, 9),
-          NVDisasm.Expression.Scale(
-            NVDisasm.Expression.Reference("B", None, relaxed = false),
+          Expression.Scale(
+            Expression.Reference("B", None, relaxed = false),
             2
           )
         )
@@ -48,12 +49,12 @@ class EncoderSuite extends munit.FunSuite {
       Vec(opcodeValue),
       Vec(
         opcodeField,
-        NVDisasm.Assignment("A", Vec(4, 5, 6, 7), NVDisasm.Expression.Reference("A", None, relaxed = false)),
+        NVDisasm.Assignment("A", Vec(4, 5, 6, 7), Expression.Reference("A", None, relaxed = false)),
         NVDisasm.Assignment(
           "B",
           Vec(8, 9),
-          NVDisasm.Expression.Scale(
-            NVDisasm.Expression.Reference("B", None, relaxed = false),
+          Expression.Scale(
+            Expression.Reference("B", None, relaxed = false),
             2
           )
         )
@@ -79,32 +80,32 @@ class EncoderSuite extends munit.FunSuite {
         NVDisasm.Assignment(
           "twice",
           Vec(4, 5, 6, 7),
-          NVDisasm.Expression.Multiply(
-            NVDisasm.Expression.Reference("twice", None, relaxed = false),
+          Expression.Multiply(
+            Expression.Reference("twice", None, relaxed = false),
             2
           )
         ),
         NVDisasm.Assignment(
           "same",
           Vec(8, 9, 10, 11),
-          NVDisasm.Expression.Identity(
-            NVDisasm.Expression.Reference("same", None, relaxed = false),
-            NVDisasm.Expression.Scale(NVDisasm.Expression.Reference("scaled", None, relaxed = false), 2)
+          Expression.Identity(
+            Expression.Reference("same", None, relaxed = false),
+            Expression.Scale(Expression.Reference("scaled", None, relaxed = false), 2)
           )
         ),
         NVDisasm.Assignment(
           "half",
           Vec(12, 13, 14, 15, 16, 17, 18, 19),
-          NVDisasm.Expression.FixedFloat(
-            NVDisasm.Expression.Reference("half", None, relaxed = false),
+          Expression.FixedFloat(
+            Expression.Reference("half", None, relaxed = false),
             FloatEncoding.F16Imm
           )
         ),
         NVDisasm.Assignment(
           "converted",
           Vec(20, 21, 22, 23, 24, 25, 26, 27),
-          NVDisasm.Expression.FloatConvert(
-            NVDisasm.Expression.Reference("converted", None, relaxed = false),
+          Expression.FloatConvert(
+            Expression.Reference("converted", None, relaxed = false),
             "format",
             Vec(Vec(BigInt(0)) -> FloatEncoding.F16Imm),
             FloatEncoding.F32Imm
@@ -135,12 +136,12 @@ class EncoderSuite extends munit.FunSuite {
       Vec(opcodeValue),
       Vec(
         opcodeField,
-        NVDisasm.Assignment("A", Vec(4, 5, 6, 7), NVDisasm.Expression.Reference("A", None, relaxed = false)),
+        NVDisasm.Assignment("A", Vec(4, 5, 6, 7), Expression.Reference("A", None, relaxed = false)),
         NVDisasm.Assignment(
           "B",
           Vec(8, 9),
-          NVDisasm.Expression.Scale(
-            NVDisasm.Expression.Reference("B", None, relaxed = false),
+          Expression.Scale(
+            Expression.Reference("B", None, relaxed = false),
             2
           )
         )
@@ -161,9 +162,9 @@ class EncoderSuite extends munit.FunSuite {
         NVDisasm.Assignment(
           "mapped",
           Vec(4, 5),
-          NVDisasm.Expression.Lookup(
+          Expression.Lookup(
             "ambiguous",
-            Vec(NVDisasm.Expression.Reference("input", None, relaxed = false))
+            Vec(Expression.Reference("input", None, relaxed = false))
           )
         )
       )
@@ -194,7 +195,7 @@ class EncoderSuite extends munit.FunSuite {
       Vec(opcodeValue),
       Vec(
         opcodeField,
-        NVDisasm.Assignment("reserved", Vec(4, 5, 6, 7), NVDisasm.Expression.Constant(BigInt(1), relaxed = true))
+        NVDisasm.Assignment("reserved", Vec(4, 5, 6, 7), Expression.Constant(BigInt(1), relaxed = true))
       )
     )
     val encoded = Encoder.encode(database(relaxed), relaxed, "TEST", Map.empty, Some(BigInt("7a", 16))).toOption.get
@@ -208,7 +209,7 @@ class EncoderSuite extends munit.FunSuite {
       Vec(opcodeValue),
       Vec(
         opcodeField,
-        NVDisasm.Assignment("A", Vec(3, 4, 5, 6), NVDisasm.Expression.Reference("A", None, relaxed = false))
+        NVDisasm.Assignment("A", Vec(3, 4, 5, 6), Expression.Reference("A", None, relaxed = false))
       )
     )
     assert(Encoder.encode(database(overlapping), overlapping, "TEST", Map("A" -> BigInt(0))).isLeft)
@@ -220,7 +221,7 @@ class EncoderSuite extends munit.FunSuite {
         "INVALID",
         alternate = false,
         Vec(opcodeValue),
-        Vec(opcodeField, NVDisasm.Assignment("A", positions, NVDisasm.Expression.Constant(BigInt(0), relaxed = false)))
+        Vec(opcodeField, NVDisasm.Assignment("A", positions, Expression.Constant(BigInt(0), relaxed = false)))
       )
       assert(Encoder.encode(database(form), form, "TEST", Map.empty).isLeft)
     }

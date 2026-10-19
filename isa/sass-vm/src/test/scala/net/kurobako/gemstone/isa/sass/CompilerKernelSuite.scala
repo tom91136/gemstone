@@ -8,12 +8,14 @@ import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.testing.either.*
 
 class CompilerKernelSuite extends munit.FunSuite {
+  private val Flags = Vec(false, true)
+
   private def floats(values: Vec[Float]): Vec[Long] =
     values.map(v => java.lang.Float.floatToRawIntBits(v).toLong & 0xffffffffL)
 
   for {
     sm        <- Vec(35, 50, 60, 70, 75, 80, 86, 87, 89, 90, 100, 103, 120)
-    generated <- Vec(false, true)
+    generated <- Flags
   }
     test(
       s"compiler-produced sm_$sm SAXPY executes predicated tails and aliased register pairs (generated=$generated)"

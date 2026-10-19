@@ -5,13 +5,13 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <utility>
 #include <vector>
-
-#include <stdint.h>
 
 #include <aspartame/vector.hpp>
 
@@ -57,21 +57,23 @@ struct QueueState {
 namespace {
 
 struct ScanGuard {
-  explicit ScanGuard(QueueState &state) : queue(state) { queue.scans.fetch_add(1, std::memory_order_acq_rel); }
+  explicit ScanGuard(QueueState &state) : queue(&state) { queue->scans.fetch_add(1, std::memory_order_acq_rel); }
+  ScanGuard(const ScanGuard &) = delete;
+  ScanGuard &operator=(const ScanGuard &) = delete;
 
   ~ScanGuard() {
-    if (queue.scans.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      std::lock_guard<std::mutex> guard(queue.scanLock);
-      queue.scanFinished.notify_all();
+    if (queue->scans.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      std::scoped_lock const guard(queue->scanLock);
+      queue->scanFinished.notify_all();
     }
   }
 
-  QueueState &queue;
+  QueueState *queue;
 };
 
 bool scan(QueueState &queue) {
-  ScanGuard guard(queue);
-  std::unique_lock consumeGuard(queue.consumeLock, std::try_to_lock);
+  ScanGuard const guard(queue);
+  std::unique_lock const consumeGuard(queue.consumeLock, std::try_to_lock);
   if (!consumeGuard.owns_lock() || !queue.active.load(std::memory_order_acquire)) return false;
 
   // KFD doorbells are MMIO and notify hardware on every write. A userspace
@@ -82,7 +84,7 @@ bool scan(QueueState &queue) {
   if (doorbell == UnrungDoorbell) return false;
 
   const auto packetAt = [&](uint64_t index) {
-    return static_cast<unsigned char *>(queue.ring) + (index & (queue.ringPackets - 1)) * AqlPacketSize;
+    return static_cast<unsigned char *>(queue.ring) + ((index & (queue.ringPackets - 1)) * AqlPacketSize);
   };
   uint64_t next = __atomic_load_n(queue.readIndex, __ATOMIC_ACQUIRE);
   uint64_t end = __atomic_load_n(queue.writeIndex, __ATOMIC_ACQUIRE);
@@ -156,7 +158,7 @@ DoorbellMonitor::DoorbellMonitor() : impl(std::make_unique<Impl>()) {
 
 DoorbellMonitor::~DoorbellMonitor() {
   {
-    std::lock_guard<std::mutex> guard(impl->lock);
+    std::scoped_lock const guard(impl->lock);
     impl->stopping = true;
   }
   impl->changed.notify_all();
@@ -177,9 +179,11 @@ void DoorbellMonitor::run() {
     bool progressed = false;
     for (const auto &queue : snapshot)
       if (queue->active.load(std::memory_order_acquire) && scan(*queue)) progressed = true;
-    if (progressed) emptyPasses = 0;
-    else if (emptyPasses++ < SpinPasses) std::this_thread::yield();
-    else {
+    if (progressed) {
+      emptyPasses = 0;
+    } else if (emptyPasses++ < SpinPasses) {
+      std::this_thread::yield();
+    } else {
       emptyPasses = 0;
       std::this_thread::sleep_for(MaximumSleep);
     }
@@ -199,8 +203,8 @@ std::unique_ptr<AqlQueue> DoorbellMonitor::registerQueue(void *ring, size_t ring
     if (writeIndex) state->writeIndex = writeIndex;
     std::unique_ptr<AqlQueue> queue(new AqlQueue(*this, state));
     {
-      std::lock_guard<std::mutex> guard(impl->lock);
-      const auto free = std::find(impl->used.begin(), impl->used.end(), false);
+      std::scoped_lock const guard(impl->lock);
+      auto *const free = std::find(impl->used.begin(), impl->used.end(), false);
       if (free == impl->used.end() || impl->stopping) return nullptr;
       state->slot = static_cast<size_t>(free - impl->used.begin());
       *free = true;
@@ -219,7 +223,7 @@ void DoorbellMonitor::unregister(const std::shared_ptr<QueueState> &state) {
   if (!state->doorbell) return;
   state->active.store(false, std::memory_order_release);
   {
-    std::lock_guard<std::mutex> guard(impl->lock);
+    std::scoped_lock const guard(impl->lock);
     impl->queues ^= filter([&](const auto &candidate) { return candidate != state; });
     impl->used[state->slot] = false;
   }

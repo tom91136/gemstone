@@ -48,7 +48,7 @@ bool applyPointerRelocations(const std::vector<PointerRelocation> &relocations, 
 /** Calls `visit(offset, value)` for every 8-byte pointer candidate in `bytes`, at 4-byte stride. */
 template <class Visit> void scanPointers(const void *bytes, size_t size, Visit visit) {
   for (size_t offset = 0; offset + sizeof(uint64_t) <= size; offset += sizeof(uint32_t)) {
-    uint64_t value;
+    uint64_t value = 0;
     std::memcpy(&value, static_cast<const uint8_t *>(bytes) + offset, sizeof(value));
     visit(offset, value);
   }

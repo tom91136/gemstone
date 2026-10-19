@@ -12,7 +12,7 @@ import scala.util.Using
 object BenchmarkRunner {
   case class Options(warmups: Int >= 0, samples: Int > 0, name: String, arguments: Vector[String], jfr: Boolean)
 
-  enum Action {
+  enum Action derives CanEqual {
     case List
     case Run(options: Options, measure: () => BenchmarkSample)
   }
@@ -40,7 +40,7 @@ object BenchmarkRunner {
     case Right(Action.List)                  => PlatformBenchmarks.cases.foreach((name, _) => Console.out.println(name))
     case Right(Action.Run(options, measure)) =>
       Using.resource(PlatformMetrics.startRecording(options.name, options.jfr)) { _ =>
-        (0 until options.warmups.raw).foreach(_ => measure())
+        (0 until options.warmups).foreach(_ => measure())
         Vec.indices(options.samples.widen[Int >= 0]).foreach { sample =>
           val started = platform.epochMillis
           Console.out.println(ujson.write(result(options, sample, measure(), started)))
@@ -61,10 +61,10 @@ object BenchmarkRunner {
     "started_epoch_millis" -> startedEpochMillis.toString,
     "sample"               -> sample.raw,
     "warmups"              -> options.warmups.raw,
-    "operation_count"      -> measurement.operations.raw.toString,
-    "elapsed_nanos"        -> measurement.elapsedNanos.raw.toString,
+    "operation_count"      -> measurement.operations.toString,
+    "elapsed_nanos"        -> measurement.elapsedNanos.toString,
     "allocated_bytes"      ->
-      measurement.allocatedBytes.fold[ujson.Value](ujson.Null)(bytes => ujson.Str(bytes.raw.toString)),
+      measurement.allocatedBytes.fold[ujson.Value](ujson.Null)(bytes => ujson.Str(bytes.toString)),
     "allocation_scope" ->
       (measurement.allocationScope match {
         case BenchmarkSample.AllocationScope.CallingThread => "calling-thread"

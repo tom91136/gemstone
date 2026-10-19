@@ -13,9 +13,9 @@ import scala.runtime.LongRef
 private object VMDispatchMemory {
 
   /** A code-object global of `size` bytes at `address`, backed by bound external storage. */
-  case class GlobalMapping(address: GuestAddress, size: Int >= 0, binding: GlobalBinding) {
-    def contains(value: Long): Boolean               = value >= address.raw && value - address.raw < size.raw
-    def overlaps(start: Long, length: Long): Boolean = start < address.raw + size.raw && address.raw < start + length
+  case class GlobalMapping(address: GuestAddress, size: Int >= 0, binding: GlobalBinding) derives CanEqual {
+    def contains(value: Long): Boolean               = value >= address.raw && value - address.raw < size
+    def overlaps(start: Long, length: Long): Boolean = start < address.raw + size && address.raw < start + length
     def offsetOf(value: Long): Long >= 0             = binding.offset + (value - address.raw).unsafe[Long >= 0]
   }
 
@@ -61,18 +61,18 @@ private class VMDispatchMemory(
   // Heap and stack addresses lie outside the ELF image; reject them before scanning its symbols and sections.
   private val aliasStart = allocations.view.map(_.address.raw).minOption.getOrElse(Long.MaxValue)
   private val aliasEnd   = allocations.view.map(region =>
-    if (region.address.raw > Long.MaxValue - region.size.raw) Long.MaxValue else region.address.raw + region.size.raw
+    if (region.address.raw > Long.MaxValue - region.size) Long.MaxValue else region.address.raw + region.size
   ).maxOption.getOrElse(Long.MinValue)
   private val globalStart = globalMemory.view.map(_._1).minOption.getOrElse(Long.MaxValue)
   private val globalEnd   = globalMemory.view.map { case (base, bytes) =>
     if (base > Long.MaxValue - bytes.length) Long.MaxValue else base + bytes.length
   }.maxOption.getOrElse(Long.MinValue)
 
-  def isImmutable(address: Long, size: Int >= 0): Boolean = immutableIndex(address, size.raw) >= 0
+  def isImmutable(address: Long, size: Int >= 0): Boolean = immutableIndex(address, size) >= 0
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def isExternal(address: Long, size: Int >= 0): Boolean =
-    aliasedRegion(address) == null && !isImmutable(address, size) && globalRegionIndex(address, size.raw) < 0
+    aliasedRegion(address) == null && !isImmutable(address, size) && globalRegionIndex(address, size) < 0
 
   // These memory-instruction helpers consume the allocation-free null sentinel returned by aliasedRegion.
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -80,12 +80,12 @@ private class VMDispatchMemory(
     val binding = aliasedRegion(address)
     if (binding != null) memory.read(binding.binding.region, binding.offsetOf(address), size)
     else {
-      val image = localImage(address, size.raw)
-      if (image == null) annotate("memory read", address, size.raw, memory.read(GuestAddress(address), size))
+      val image = localImage(address, size)
+      if (image == null) annotate("memory read", address, size, memory.read(GuestAddress(address), size))
       else {
         val (base, bytes) = image
         val offset        = (address - base).toInt
-        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size.raw)))
+        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
       }
     }
   }
@@ -95,10 +95,10 @@ private class VMDispatchMemory(
     val binding = aliasedRegion(address)
     if (binding != null) memory.readValueInto(binding.binding.region, binding.offsetOf(address), size, into)
     else {
-      val image = localImage(address, size.raw)
+      val image = localImage(address, size)
       if (image == null) memory.readValueInto(GuestAddress(address), size, into) match {
         case null         => null
-        case fault: Fault => annotated("memory read", address, size.raw, fault)
+        case fault: Fault => annotated("memory read", address, size, fault)
       }
       else {
         into.elem = LittleEndian.decode(image._2, (address - image._1).toInt, size)
@@ -128,8 +128,8 @@ private class VMDispatchMemory(
     val binding = aliasedRegion(address)
     if (binding != null) memory.writeValue(binding.binding.region, binding.offsetOf(address), value, size)
     else {
-      val index = globalRegionIndex(address, size.raw)
-      if (index < 0) annotate("memory write", address, size.raw, memory.writeValue(GuestAddress(address), value, size))
+      val index = globalRegionIndex(address, size)
+      if (index < 0) annotate("memory write", address, size, memory.writeValue(GuestAddress(address), value, size))
       else {
         val (base, bytes) = globalMemory(index)
         LittleEndian.write(value, bytes, (address - base).toInt, size)
@@ -143,9 +143,9 @@ private class VMDispatchMemory(
     val binding = aliasedRegion(address)
     if (binding != null) memory.atomicModifyValue(binding.binding.region, binding.offsetOf(address), size)(update)
     else {
-      val index = globalRegionIndex(address, size.raw)
+      val index = globalRegionIndex(address, size)
       if (index < 0)
-        annotate("atomic", address, size.raw, memory.atomicModifyValue(GuestAddress(address), size)(update))
+        annotate("atomic", address, size, memory.atomicModifyValue(GuestAddress(address), size)(update))
       else {
         val (base, bytes) = globalMemory(index)
         globalMemoryLocks(index).withLock {

@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import FloatPrimitives.*
+import IntegerSemantics.*
 import VMIR.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.semantics.*
 
 class AMDGPUModifierSuite extends munit.FunSuite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
@@ -170,10 +173,15 @@ class AMDGPUModifierSuite extends munit.FunSuite {
   }
 
   test("VOP3 floating-point clamp uses the [0, 1] range and preserves NaN") {
-    assertEquals(VMArithmetic.clampF32(-2.0f), 0.0f)
-    assertEquals(VMArithmetic.clampF32(0.5f), 0.5f)
-    assertEquals(VMArithmetic.clampF32(2.0f), 1.0f)
-    assert(VMArithmetic.clampF32(Float.NaN).isNaN)
+    def clamp(value: Float): Float = IEEE754.binary32ToFloat(Bits.low32(
+      Execute.saturate(IEEE754.floatToBinary32(value).toLong, 32)
+    ))
+    assertEquals(clamp(-2.0f), 0.0f)
+    assertEquals(clamp(-0.0f), 0.0f)
+    assertEquals(java.lang.Float.floatToRawIntBits(clamp(-0.0f)), 0)
+    assertEquals(clamp(0.5f), 0.5f)
+    assertEquals(clamp(2.0f), 1.0f)
+    assert(clamp(Float.NaN).isNaN)
   }
 
   test("gfx900 VOPC SDWA unsigned 16-bit less-than-or-equal is supported") {
@@ -229,36 +237,6 @@ class AMDGPUModifierSuite extends munit.FunSuite {
 
   for (
     (name, target, bytes, message) <- Seq(
-      (
-        "unsupported VOP1 DPP operations",
-        Target("gfx900"),
-        Vec(0xfa, 0x0a, 0x0a, 0x7e, 0x01, 0xe4, 0x00, 0x30),
-        "v_cvt_f32_i32 DPP execution is not implemented"
-      ),
-      (
-        "VOP3 DPP16 instructions",
-        Target("gfx1100"),
-        Vec(0x05, 0x00, 0x55, 0xd6, 0xfa, 0x04, 0x0e, 0x04, 0x01, 0x1b, 0x00, 0xff),
-        "v_add3_u32 DPP execution is not implemented"
-      ),
-      (
-        "VOP3 DPP8 instructions",
-        Target("gfx1100"),
-        Vec(0x05, 0x00, 0x55, 0xd6, 0xe9, 0x04, 0x0e, 0x04, 0x01, 0x77, 0x39, 0x05),
-        "v_add3_u32 DPP execution is not implemented"
-      ),
-      (
-        "VOP3P DPP16 instructions",
-        Target("gfx1100"),
-        Vec(0x00, 0x00, 0x20, 0xcc, 0xfa, 0x04, 0x0e, 0x04, 0x01, 0xb1, 0x00, 0xff),
-        "v_fma_mix_f32 DPP execution is not implemented"
-      ),
-      (
-        "VOP3P DPP8 instructions",
-        Target("gfx1100"),
-        Vec(0x00, 0x00, 0x20, 0xcc, 0xe9, 0x04, 0x0e, 0x04, 0x01, 0x77, 0x39, 0x05),
-        "v_fma_mix_f32 DPP execution is not implemented"
-      ),
       (
         "op_sel on VOP3-encoded f16 operations before GFX11",
         Target("gfx900"),
@@ -410,17 +388,17 @@ class AMDGPUModifierSuite extends munit.FunSuite {
 
   test("DPP routes quad, row-rotate, and row-broadcast source lanes") {
     assertEquals(
-      Vec.range[0, 8].map(lane => VMArithmetic.dppQuadSourceLane(lane, 0xb1).raw),
+      Vec.range[0, 8].map(lane => Execute.dppSource(0xb1, lane.toLong).toInt),
       Vec(1, 0, 3, 2, 5, 4, 7, 6)
     )
-    assert(Vec.range[0, 64].forall(lane => VMArithmetic.dppLaneEnabled(lane, rowMask = 0xf, bankMask = 0xf)))
-    assert(!VMArithmetic.dppLaneEnabled(0, 0xe, 0xf))
-    assert(VMArithmetic.dppLaneEnabled(1, 0xf, 0xd))
-    assert(!VMArithmetic.dppLaneEnabled(4, 0xf, 0xd))
+    assert(Vec.range[0, 64].forall(lane => VMInterpreter.dppLaneEnabled(lane, rowMask = 0xf, bankMask = 0xf)))
+    assert(!VMInterpreter.dppLaneEnabled(0, 0xe, 0xf))
+    assert(VMInterpreter.dppLaneEnabled(1, 0xf, 0xd))
+    assert(!VMInterpreter.dppLaneEnabled(4, 0xf, 0xd))
     def sources(lanes: Vec[VMState.Lane], control: Int): Vec[Option[Int]] =
       lanes.map { lane =>
-        val source = VMArithmetic.dppSourceLane(lane, control)
-        Option.when(source.isValid)(source.lane.raw)
+        val source = Execute.dppSource(control, lane.toLong)
+        Option.when(source >= 0L)(source.toInt)
       }
     assertEquals(sources(Vec(0, 4, 15, 16), 0x124), Vec(Some(12), Some(0), Some(11), Some(28)))
     assertEquals(sources(Vec(0, 16, 32, 48), 0x142), Vec(None, Some(15), Some(31), Some(47)))

@@ -5,14 +5,13 @@ import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Bounded OpenCL CTS async-copy paths, measured after SPIR-V loading. */
 object OpenCLCTSCopyBenchmark {
-  private enum Direction {
+  private enum Direction derives CanEqual {
     case GlobalToLocal, LocalToGlobal
   }
 
@@ -37,8 +36,8 @@ object OpenCLCTSCopyBenchmark {
   private val Unwritten = 0x5a.toByte
 
   private def run(options: Options): BenchmarkSample = {
-    val copied = Math.multiplyExact(Math.multiplyExact(options.groups.raw, options.localSize.raw), 3)
-    val bytes  = Math.multiplyExact(Math.multiplyExact(copied, options.stride.raw), 4)
+    val copied = Math.multiplyExact(Math.multiplyExact(options.groups, options.localSize), 3)
+    val bytes  = Math.multiplyExact(Math.multiplyExact(copied, options.stride), 4)
     val memory = BenchmarkMemory(bytes, bytes)
     val input  = memory.ids(0)
     val output = memory.ids(1)
@@ -57,8 +56,8 @@ object OpenCLCTSCopyBenchmark {
       Vec(
         KernelTask.Argument.Memory(input, 0L),
         KernelTask.Argument.Memory(output, 0L),
-        KernelTask.Argument.Local(options.localSize.toLong.widen[Long > 0] * 3L * 4L),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(options.stride.raw.toLong, 4).unsafe)
+        KernelTask.Argument.Local(options.localSize.widen[Long > 0] * 3L * 4L),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(options.stride.toLong, 4).unsafe)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
     val image  = Vec.unsafeWrapArray(BenchmarkResources.bytes("opencl-cts-async-copy.spv", "opencl"))
@@ -71,7 +70,7 @@ object OpenCLCTSCopyBenchmark {
     val destination = memory.array(output)
     destination.indices.foreach { index =>
       val element  = index / 4
-      val expected = if (element % options.stride.raw == 0 && element / options.stride.raw < copied) source(index)
+      val expected = if (element % options.stride == 0 && element / options.stride < copied) source(index)
       else Unwritten
       if (destination(index) != expected)
         throw IllegalStateException(s"async copy mismatch at byte $index: ${destination(index)} != $expected")

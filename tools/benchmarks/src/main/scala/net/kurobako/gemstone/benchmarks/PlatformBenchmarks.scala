@@ -10,7 +10,9 @@ import net.kurobako.gemstone.isa.sass.*
 object PlatformBenchmarks {
   val cases: Vector[(String, Case)] = Vector(
     "ptx-vector-add"           -> PTXVectorAddBenchmark.benchmark,
+    "ptx-integer-alu"          -> PTXIntegerALUBenchmark.benchmark,
     "ptx-calls"                -> PTXCallBenchmark.benchmark,
+    "ptx-tensor"               -> PTXTensorBenchmark.benchmark,
     "nvidia-control-flow"      -> NVIDIAControlFlowBenchmark.benchmark,
     "cuda-cloverleaf-flux"     -> CUDACloverleafFluxBenchmark.benchmark,
     "ptx-program-lifecycle"    -> PTXProgramLifecycleBenchmark.benchmark,

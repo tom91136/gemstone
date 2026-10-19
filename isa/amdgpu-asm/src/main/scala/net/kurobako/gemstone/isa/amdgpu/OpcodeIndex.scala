@@ -30,7 +30,9 @@ private object OpcodeIndex {
     "v_add_u32"    -> "v_add_co_u32",
     "v_sub_u32"    -> "v_sub_co_u32",
     "v_subrev_u32" -> "v_subrev_co_u32",
-    "v_mad_u16"    -> "v_mad_legacy_u16"
+    "v_mad_u16"    -> "v_mad_legacy_u16",
+    "v_mad_i16"    -> "v_mad_legacy_i16",
+    "v_fma_f16"    -> "v_fma_legacy_f16"
   )
   private val gfx900Aliases = Vector("f32", "lo_f16", "hi_f16").map { suffix =>
     val fma = s"v_fma_mix${if (suffix == "f32") "_" else ""}$suffix"
@@ -48,7 +50,7 @@ private object OpcodeIndex {
   }
 
   private lazy val entries: Map[(ISA, EncodingFormat), IntMap[Vec[(Opcode, Metadata.Encoding)]]] =
-    Opcode.definitions.flatMap(definition => definition.meta.encodings.map(definition -> _))
+    InstructionDefs.definitions.flatMap(definition => definition.meta.encodings.map(definition -> _))
       .groupBy { case (_, encoding) => (encoding.isa, encoding.format) }
       .view.mapValues(values => IntMap.from(values.groupBy(_._2.opcode))).toMap
 
@@ -58,8 +60,8 @@ private object OpcodeIndex {
 
   def canonical[A](values: Vec[A], target: Target)(definition: A => Opcode): Vec[A] =
     values.filterNot(value =>
-      preferredName(definition(value).opcode, target).exists(name =>
-        values.exists(value => definition(value).opcode == name)
+      preferredName(definition(value).mnemonic, target).exists(name =>
+        values.exists(value => definition(value).mnemonic == name)
       )
     )
 }

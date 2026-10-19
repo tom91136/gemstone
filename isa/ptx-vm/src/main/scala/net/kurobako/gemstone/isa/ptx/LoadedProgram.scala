@@ -70,25 +70,25 @@ object LoadedProgram {
       initialiser: Vec[Operand]
   ): Either[Fault, GlobalDefinition] = {
     val elementBytes = elementType.byteCount
-    if (count.raw > Int.MaxValue / elementBytes.raw)
+    if (count > Int.MaxValue / elementBytes)
       return Left(Fault.InvalidRequest(
         s"PTX global '$name' exceeds the supported size"
       ))
-    if (elementBytes.raw > 8 && initialiser.nonEmpty)
+    if (elementBytes > 8 && initialiser.nonEmpty)
       return Left(Fault.Unsupported(
         s"PTX global '$name' has an initialiser wider than 64 bits"
       ))
 
-    if (initialiser.size > count.raw)
+    if (initialiser.size > count)
       return Left(Fault.InvalidRequest(s"too many initialisers for PTX global '$name'"))
     val size  = elementBytes * count
-    val bytes = Array.ofDim[Byte](size.raw)
+    val bytes = Array.ofDim[Byte](size)
     if (initialiser.isEmpty) return Right(GlobalDefinition(size, Vec.from(bytes).unsafe, Vec.empty))
-    val scalarWidth     = elementBytes.raw.unsafe[Int in 1 ~ 8]
+    val scalarWidth     = elementBytes.unsafe[Int in 1 ~ 8]
     val relocations     = Vec.newBuilder[Relocation]
     var index: Int >= 0 = 0
-    while (index.raw < initialiser.size) {
-      val operand = initialiser(index.raw)
+    while (index < initialiser.size) {
+      val operand = initialiser(index)
       val offset  = index * elementBytes
       val bits    = operand match {
         case Operand.Immediate(raw)                 => initialiserBits(raw, elementType)
@@ -99,7 +99,7 @@ object LoadedProgram {
       bits match {
         case Some(value) =>
           var byte = 0
-          while (byte < elementBytes.raw) {
+          while (byte < elementBytes) {
             bytes(offset.raw + byte) = (value >>> (byte * 8)).toByte
             byte += 1
           }
@@ -137,7 +137,7 @@ object LoadedProgram {
   }
 
   private def initialiserBits(raw: NonEmpty[String], elementType: DataType): Option[Long] =
-    NumericLiteral.initialiser(raw, elementType.kind, elementType.widthBits.raw)
+    NumericLiteral.initialiser(raw, elementType.kind, elementType.widthBits)
 }
 
 class LoadedProgram private (
@@ -156,14 +156,16 @@ class LoadedProgram private (
 
   override val symbols: Either[Fault, ProgramSymbols] =
     globals.toVec.sortBy(_._1).traverse((name, definition) =>
-      GlobalSymbol.validated(name, None, definition.size.toLong, Vec.empty).leftMap(Fault.InvalidRequest(_))
+      GlobalSymbol.validated(name, None, definition.size.widen[Long >= 0], Vec.empty).leftMap(Fault.InvalidRequest(_))
     ).map(globalMetadata =>
       ProgramSymbols(module.entries.keys.toVec.sorted.map(name => KernelSymbol(name, name)), globalMetadata)
     )
 
   override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
     module.entries.get(name).toRight(Fault.NotFound(s"PTX kernel '$name' is not present"))
-      .flatMap(entry => VMCompiler.parameterLayout(entry.parameters).leftMap(error => Fault.Unsupported(error.message)))
+      .flatMap(entry =>
+        VMCompiler.parameterLayout(entry.parameters).leftMap(error => Fault.InvalidProgram(error.message))
+      )
       .flatMap { layout =>
         val parameters = layout.map(parameter =>
           KernelMetadata.Parameter(
@@ -173,7 +175,7 @@ class LoadedProgram private (
             containsPointers = false
           )
         )
-        val blockSize = layout.lastOption.fold(0L)(parameter => parameter.offset.raw.toLong + parameter.widthBytes.raw)
+        val blockSize = layout.lastOption.fold(0L)(parameter => parameter.offset.toLong + parameter.widthBytes)
         for {
           size <- Either.cond(
             blockSize <= Int.MaxValue.toLong,
@@ -192,7 +194,7 @@ class LoadedProgram private (
       s"PTX global '$name' is not present"
     )).flatMap { definition =>
       ProgramGlobal.validated(
-        definition.size.toLong,
+        definition.size.widen[Long >= 0],
         definition.initial.toVec
       ).left.map(Fault.InvalidRequest(_))
     }
@@ -218,7 +220,7 @@ class LoadedProgram private (
               (bound.get(source), target) match {
                 case (Some(destination), Some(targetAddress)) if source == name || relocation.symbol == name =>
                   addresses.writeValue(
-                    destination.offset(relocation.offset.raw.toLong),
+                    destination.offset(relocation.offset.toLong),
                     targetAddress + relocation.addend,
                     relocation.width
                   )
@@ -250,7 +252,7 @@ class LoadedProgram private (
       case Some(kernel) => kernel
       case None         =>
         val kernel = module.entries.get(name).toRight(Fault.NotFound(s"PTX kernel '$name' is not present")).flatMap(_ =>
-          VMCompiler.compile(module, name, state.globalAddresses).leftMap(error => Fault.Unsupported(error.message))
+          VMCompiler.compile(module, name, state.globalAddresses).leftMap(error => Fault.InvalidProgram(error.message))
         )
         val updated = state.copy(kernels = state.kernels.updated(name, kernel))
         if (compilationState.compareAndSet(state, updated)) kernel else compiled(name)

@@ -5,7 +5,6 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
-import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -15,7 +14,7 @@ object PTXCallBenchmark {
     iterations(5),
     positive("calls", "Nested calls per lane", 8),
     positive("lanes", "Even lane count per group, at most 1024", 128)
-      .validate("lanes must be even and at most 1024")(value => value.raw <= 1024 && value.raw % 2 == 0),
+      .validate("lanes must be even and at most 1024")(value => value <= 1024 && value % 2 == 0),
     positive("groups", "Workgroups per dispatch", 16),
     workers
   ).mapN((iterations, calls, lanes, groups, workers) => () => run(iterations, calls, lanes, groups, workers))
@@ -102,20 +101,17 @@ object PTXCallBenchmark {
       VMCompiler.compile(source(lanes)).fold(error => throw IllegalArgumentException(error.message), identity)
     val geometry = LaunchGeometry.forLaunch(Dimensions(lanes, 1, 1), Dimensions(groups, 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
-    val count      = Math.multiplyExact(lanes.raw, groups.raw)
+    val count      = Math.multiplyExact(lanes, groups)
     val memory     = BenchmarkMemory(Math.multiplyExact(count, 8))
     val output     = memory.ids(0)
-    val parameters = Map(
-      ("output": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
-      ("count": NonEmpty[String])  -> Argument.fromLong(calls.raw.toLong)
-    )
-    val sample = Measurement.repeatPooled(iterations, workers)(pool =>
+    val parameters = PTXParameters.output(memory, output, "count": NonEmpty[String], calls.toLong)
+    val sample     = Measurement.repeatPooled(iterations, workers)(pool =>
       VMInterpreter.execute(kernel, geometry, parameters, memory, workgroups = pool)
     )
-    val oddCalls = calls.raw & 1
+    val oddCalls = calls & 1
     (0 until count).foreach { lane =>
       val actual   = memory.getLong(output, lane * 8)
-      val expected = (lane ^ oddCalls).toLong + calls.raw.toLong / 2 * 3 +
+      val expected = (lane ^ oddCalls).toLong + calls.toLong / 2 * 3 +
         (if (oddCalls == 0) 0 else if ((lane & 1) == 0) 2 else 1)
       require(actual == expected, s"lane $lane: expected $expected, got $actual")
     }

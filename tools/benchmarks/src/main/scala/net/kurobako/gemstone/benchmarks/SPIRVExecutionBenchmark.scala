@@ -4,14 +4,13 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Arithmetic or call-heavy dispatches representative of the SPIR-V interpreter's instruction loop. */
 object SPIRVExecutionBenchmark {
-  private enum Mode {
+  private enum Mode derives CanEqual {
     case Arithmetic, Calls
   }
 
@@ -27,14 +26,14 @@ object SPIRVExecutionBenchmark {
 
   private def run(mode: Mode, iterations: Int > 0, groups: Int > 0, instructions: Int > 0, workers: Int > 0)
       : BenchmarkSample = {
-    val memory = BenchmarkMemory(Math.multiplyExact(Math.multiplyExact(iterations.raw, groups.raw), 4))
+    val memory = BenchmarkMemory(Math.multiplyExact(Math.multiplyExact(iterations, groups), 4))
     val output = memory.ids(0)
-    val tasks  = Vec.tabulate(iterations.raw) { iteration =>
+    val tasks  = Vec.tabulate(iterations) { iteration =>
       KernelTask.validated(
         kernelName = "arithmetic",
         groupSize = LaunchGeometry.Dimensions.One,
         groupCount = LaunchGeometry.Dimensions(groups, 1, 1),
-        arguments = Vec(KernelTask.Argument.Memory(output, (iteration.toLong * groups.raw * 4L).unsafe[Long >= 0]))
+        arguments = Vec(KernelTask.Argument.Memory(output, (iteration.toLong * groups * 4L).unsafe[Long >= 0]))
       ).fold(error => throw IllegalArgumentException(error), identity)
     }
     val sample = Using.resource(WorkerPool(workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
@@ -44,11 +43,11 @@ object SPIRVExecutionBenchmark {
       val measurement = Measurement {
         tasks.foreach(task => Measurement.succeeded(program.execute(task, memory, TaskControl(), _ => Right(()))))
       }
-      measurement.sample(iterations.toLong)
+      measurement.sample(iterations.widen[Long > 0])
     }
-    (0 until iterations.raw * groups.raw).foreach { invocation =>
+    (0 until iterations.raw * groups).foreach { invocation =>
       val actual   = memory.getInt(output, invocation * 4)
-      val expected = invocation % groups.raw + instructions.raw
+      val expected = invocation % groups + instructions
       if (actual != expected)
         throw IllegalStateException(s"SPIR-V result mismatch at invocation $invocation: $actual != $expected")
     }
@@ -57,7 +56,7 @@ object SPIRVExecutionBenchmark {
 
   private def module(instructions: Int > 0, mode: Mode): Module = {
     val calls = mode == Mode.Calls
-    val chain = (1 to instructions.raw).map { index =>
+    val chain = (1 to instructions).map { index =>
       if (calls) s"%r$index = OpFunctionCall %uint %helper %r${index - 1}"
       else s"%r$index = OpIAdd %uint %r${index - 1} %one"
     }
@@ -94,7 +93,7 @@ object SPIRVExecutionBenchmark {
                     |%r0 = OpUConvert %uint %x
                     |${chain.mkString("\n")}
                     |%pointer = OpPtrAccessChain %global %output %x
-                    |OpStore %pointer %r${instructions.raw}
+                    |OpStore %pointer %r$instructions
                     |OpReturn
                     |OpFunctionEnd
                     |$helper""".stripMargin

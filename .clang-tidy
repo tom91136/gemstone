@@ -1,13 +1,110 @@
-Checks: '-*,readability-identifier-naming'
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-branch-clone,
+  -bugprone-dynamic-static-initializers,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-invalid-enum-default-initialization,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-random-generator-seed,
+  -bugprone-signed-char-misuse,
+  -bugprone-throwing-static-initialization,
+  cert-dcl58-cpp,
+  cert-err60-cpp,
+  cert-flp30-c,
+  cert-oop57-cpp,
+  clang-analyzer-*,
+  -clang-analyzer-optin.*,
+  concurrency-*,
+  cppcoreguidelines-avoid-const-or-ref-data-members,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-missing-std-forward,
+  cppcoreguidelines-no-suspend-with-lock,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-rvalue-reference-param-not-moved,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-use-enum-class,
+  cppcoreguidelines-virtual-class-destructor,
+  custom-*,
+  google-build-namespaces,
+  google-explicit-constructor,
+  google-global-names-in-headers,
+  google-readability-casting,
+  hicpp-exception-baseclass,
+  hicpp-ignored-remove-result,
+  hicpp-multiway-paths-covered,
+  misc-*,
+  -misc-unused-parameters,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
+  modernize-*,
+  -modernize-avoid-c-arrays,
+  -modernize-use-auto,
+  -modernize-use-ranges,
+  -modernize-use-std-print,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  -performance-enum-size,
+  -performance-no-int-to-ptr,
+  portability-*,
+  -portability-avoid-pragma-once,
+  readability-*,
+  -readability-braces-around-statements,
+  -readability-function-cognitive-complexity,
+  -readability-function-size,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-non-const-parameter
 WarningsAsErrors: '*'
+CustomChecks:
+  - Name: unqualified-c-types
+    Query: |
+      match typeLoc(anyOf(loc(usingType(throughUsingDecl(usingShadowDecl(hasAnyName("size_t", "ptrdiff_t", "max_align_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t", "intptr_t", "uintptr_t", "intmax_t", "uintmax_t", "int_least8_t", "int_least16_t", "int_least32_t", "int_least64_t", "uint_least8_t", "uint_least16_t", "uint_least32_t", "uint_least64_t", "int_fast8_t", "int_fast16_t", "int_fast32_t", "int_fast64_t", "uint_fast8_t", "uint_fast16_t", "uint_fast32_t", "uint_fast64_t"), isInStdNamespace())))), loc(typedefType(hasDeclaration(typedefNameDecl(hasAnyName("size_t", "ptrdiff_t", "max_align_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t", "intptr_t", "uintptr_t", "intmax_t", "uintmax_t", "int_least8_t", "int_least16_t", "int_least32_t", "int_least64_t", "uint_least8_t", "uint_least16_t", "uint_least32_t", "uint_least64_t", "int_fast8_t", "int_fast16_t", "int_fast32_t", "int_fast64_t", "uint_fast8_t", "uint_fast16_t", "uint_fast32_t", "uint_fast64_t"), isInStdNamespace()))))), unless(isExpandedFromMacro("CATCH_INTERNAL_LINEINFO"))).bind("type")
+    Diagnostic:
+      - BindName: type
+        Message: use the unqualified C type
+        Level: Warning
+  - Name: brace-numeric-literals
+    Query: |
+      match cxxStaticCastExpr(anyOf(hasDestinationType(isInteger()), hasDestinationType(realFloatingPointType())), hasSourceExpression(ignoringParenImpCasts(anyOf(integerLiteral(), floatLiteral(), unaryOperator(hasOperatorName("-"), hasUnaryOperand(ignoringParenImpCasts(anyOf(integerLiteral(), floatLiteral()))))))), unless(hasDestinationType(hasUnqualifiedDesugaredType(enumType()))), unless(isInTemplateInstantiation()), unless(isExpandedFromMacro("CATCH_INTERNAL_LINEINFO"))).bind("cast")
+    Diagnostic:
+      - BindName: cast
+        Message: write a typed numeric constant as T{n}
+        Level: Warning
+  - Name: aspartame-over-ranges
+    Query: |
+      match declRefExpr(to(namedDecl(matchesName("^::std::(__[A-Za-z0-9_]+::)?ranges::"), unless(cxxMethodDecl()))), unless(isExpandedFromMacro("CATCH_INTERNAL_LINEINFO"))).bind("ranges")
+    Diagnostic:
+      - BindName: ranges
+        Message: write this as an aspartame pipeline instead of std::ranges
+        Level: Warning
 HeaderFilterRegex: '.*/(native|conformance)/.*'
 ExcludeHeaderFilterRegex: '.*/(target|generated|third_party)/.*'
 CheckOptions:
+  bugprone-reserved-identifier.AllowedIdentifiers: '^__(cuda|hip)[A-Za-z]+$;^__CUDA_API_VERSION_INTERNAL$;^__SYCLKernel$;^_ZTS'
+  bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate: false
+  concurrency-mt-unsafe.FunctionSet: glibc
+  cppcoreguidelines-init-variables.MathHeader: '<cmath>'
+  misc-const-correctness.WarnPointersAsPointers: false
+  modernize-loop-convert.UseCxx20ReverseRanges: false
+  cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  misc-include-cleaner.IgnoreHeaders: 'bits/.*;signal\.h;stdlib\.h;CL/.*;vulkan/.*;vk_video/.*;cuda.*;cu[A-Za-z_]*\.h;crt/.*;driver_types\.h;vector_types\.h;builtin_types\.h;surface_types\.h;texture_types\.h;library_types\.h;channel_descriptor\.h;mma\.h;cooperative_groups.*;hip/.*;hsa/.*;hsakmt/.*;ze_.*;zes_.*;zet_.*;level_zero/.*;loader/.*;catch2/.*;glaze/.*;fmt/.*;toml.*;magic_enum/.*;thrust/.*;cub/.*;cuda/.*;rocprim/.*;rocthrust/.*;rocblas/.*;hipcub/.*;cublas.*;lz4.*;zstd.*;reproc.*;fire\.hpp;sycl/.*;spirv.*;llvm/.*;clang/.*;lld/.*;mlir/.*;oneapi/.*;aspartame/.*;\.inl;\.inc'
   readability-identifier-naming.ClassCase: CamelCase
   readability-identifier-naming.StructCase: CamelCase
   readability-identifier-naming.UnionCase: CamelCase
   readability-identifier-naming.EnumCase: CamelCase
   readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypeAliasIgnoredRegexp: '^(type|value_type|difference_type|size_type|pointer|reference|element_type|iterator_category|iterator_concept)$'
   readability-identifier-naming.TypedefCase: CamelCase
   readability-identifier-naming.TemplateParameterCase: CamelCase
   readability-identifier-naming.ConceptCase: CamelCase
@@ -21,9 +118,10 @@ CheckOptions:
   readability-identifier-naming.LocalConstexprVariableCase: camelBack
   readability-identifier-naming.LocalConstantCase: camelBack
   readability-identifier-naming.FunctionCase: camelBack
-  readability-identifier-naming.FunctionIgnoredRegexp: '^(gemstone_[a-z0-9_]+|__(cuda|hip)[A-Za-z]+|cu[A-Za-z0-9]+_(v[0-9]+|ptds|ptsz)|enum_name)$'
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(gemstone_[a-z0-9_]+|__(cuda|hip)[A-Za-z]+|cu[A-Za-z0-9]+_(v[0-9]+|ptds|ptsz)|enum_name|_ZTS.*)$'
   readability-identifier-naming.MethodCase: camelBack
   readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.VariableIgnoredRegexp: '^__SYCLKernel$'
   readability-identifier-naming.ParameterCase: camelBack
   readability-identifier-naming.MemberCase: camelBack
   readability-identifier-naming.MemberIgnoredRegexp: '^structs_as_arrays$'

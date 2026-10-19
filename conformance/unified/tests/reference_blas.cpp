@@ -3,16 +3,21 @@
 #include <string_view>
 #include <vector>
 
+#include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
+
 #include "cases/blas.inl"
 
-namespace unified::test {
+using namespace aspartame;
+
+namespace unified::test { namespace {
 template <ScalarType Kind> class ReferenceBlas {
 public:
   struct Buffer {
     std::vector<long double> values;
   };
 
-  bool supports(std::string_view) const { return true; }
+  [[nodiscard]] bool supports(std::string_view) const { return true; }
   Buffer allocate(size_t size) { return {std::vector<long double>(size)}; }
   void upload(Buffer &buffer, const std::vector<long double> &host) { buffer.values = host; }
   std::vector<long double> download(const Buffer &buffer, size_t size) {
@@ -34,25 +39,17 @@ public:
       y.values[index(size, i, incy)] = x.values[index(size, i, incx)];
   }
   long double dot(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    long double result = 0;
     const auto size = static_cast<size_t>(n);
-    for (size_t i = 0; i < size; ++i)
-      result += x.values[index(size, i, incx)] * y.values[index(size, i, incy)];
-    return result;
+    return iota(size_t{0}, size) | sum_by([&](size_t i) { return x.values[index(size, i, incx)] * y.values[index(size, i, incy)]; });
   }
   long double nrm2(int n, Buffer &x, int incx) {
-    long double result = 0;
     const auto size = static_cast<size_t>(n);
-    for (size_t i = 0; i < size; ++i)
-      result += x.values[index(size, i, incx)] * x.values[index(size, i, incx)];
-    return std::sqrt(result);
+    return std::sqrt(iota(size_t{0}, size)
+                     | sum_by([&](size_t i) { return x.values[index(size, i, incx)] * x.values[index(size, i, incx)]; }));
   }
   long double asum(int n, Buffer &x, int incx) {
-    long double result = 0;
     const auto size = static_cast<size_t>(n);
-    for (size_t i = 0; i < size; ++i)
-      result += std::fabs(x.values[index(size, i, incx)]);
-    return result;
+    return iota(size_t{0}, size) | sum_by([&](size_t i) { return std::fabs(x.values[index(size, i, incx)]); });
   }
   void gemv(blas::Transpose transpose, int m, int n, long double alpha, Buffer &a, int lda, Buffer &x, int incx, long double beta,
             Buffer &y, int incy) {
@@ -67,10 +64,10 @@ public:
       for (size_t input = 0; input < inputSize; ++input) {
         const auto row = transpose == blas::Transpose::None ? output : input;
         const auto column = transpose == blas::Transpose::None ? input : output;
-        sum += a.values[row + column * leadingDimension] * x.values[index(inputSize, input, incx)];
+        sum += a.values[row + (column * leadingDimension)] * x.values[index(inputSize, input, incx)];
       }
       const auto outputIndex = index(outputSize, output, incy);
-      y.values[outputIndex] = alpha * sum + beta * initial[outputIndex];
+      y.values[outputIndex] = (alpha * sum) + (beta * initial[outputIndex]);
     }
   }
   void gemm(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
@@ -86,10 +83,10 @@ public:
       for (size_t row = 0; row < rows; ++row) {
         long double sum = 0;
         for (size_t inner = 0; inner < innerSize; ++inner)
-          sum += a.values[transposeA == blas::Transpose::None ? row + inner * leadingA : inner + row * leadingA]
-                 * b.values[transposeB == blas::Transpose::None ? inner + column * leadingB : column + inner * leadingB];
-        const auto output = row + column * leadingC;
-        c.values[output] = beta == 0 ? alpha * sum : alpha * sum + beta * initial[output];
+          sum += a.values[transposeA == blas::Transpose::None ? row + (inner * leadingA) : inner + (row * leadingA)]
+                 * b.values[transposeB == blas::Transpose::None ? inner + (column * leadingB) : column + (inner * leadingB)];
+        const auto output = row + (column * leadingC);
+        c.values[output] = beta == 0 ? alpha * sum : (alpha * sum) + (beta * initial[output]);
       }
   }
   void gemmStridedBatched(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a,
@@ -108,12 +105,12 @@ public:
         for (size_t row = 0; row < rows; ++row) {
           long double sum = 0;
           for (size_t inner = 0; inner < innerSize; ++inner) {
-            const auto aIndex = transposeA == blas::Transpose::None ? row + inner * leadingA : inner + row * leadingA;
-            const auto bIndex = transposeB == blas::Transpose::None ? inner + column * leadingB : column + inner * leadingB;
-            sum += a.values[batch * strideA + aIndex] * b.values[batch * strideB + bIndex];
+            const auto aIndex = transposeA == blas::Transpose::None ? row + (inner * leadingA) : inner + (row * leadingA);
+            const auto bIndex = transposeB == blas::Transpose::None ? inner + (column * leadingB) : column + (inner * leadingB);
+            sum += a.values[(batch * strideA) + aIndex] * b.values[(batch * strideB) + bIndex];
           }
-          const auto cIndex = batch * strideC + row + column * leadingC;
-          c.values[cIndex] = beta == 0 ? alpha * sum : alpha * sum + beta * initial[cIndex];
+          const auto cIndex = (batch * strideC) + row + (column * leadingC);
+          c.values[cIndex] = beta == 0 ? alpha * sum : (alpha * sum) + (beta * initial[cIndex]);
         }
   }
 
@@ -123,11 +120,11 @@ private:
     return (increment < 0 ? count - 1 - position : position) * stride;
   }
 };
-} // namespace unified::test
+}} // namespace unified::test
 
-UNIFIED_BLAS_CASES("reference/blas/f32/", "[unit][unified][blas][f32][compact]", F32, unified::test::ReferenceBlas,
+UNIFIED_BLAS_CASES("reference/blas/f32/", "[unit][unified][blas][f32][compact]", F32,
+                   unified::test::ReferenceBlas<unified::ScalarType::F32>, unified::full::BlasSizes, unified::full::MatrixShapes)
+UNIFIED_BLAS_CASES("reference/blas/f64/", "[unit][unified][blas][f64]", F64, unified::test::ReferenceBlas<unified::ScalarType::F64>,
                    unified::full::BlasSizes, unified::full::MatrixShapes)
-UNIFIED_BLAS_CASES("reference/blas/f64/", "[unit][unified][blas][f64]", F64, unified::test::ReferenceBlas, unified::full::BlasSizes,
-                   unified::full::MatrixShapes)
-UNIFIED_BLAS_CASES("reference/blas/f16/", "[unit][unified][blas][f16]", F16, unified::test::ReferenceBlas, unified::full::BlasSizes,
-                   unified::full::MatrixShapes)
+UNIFIED_BLAS_CASES("reference/blas/f16/", "[unit][unified][blas][f16]", F16, unified::test::ReferenceBlas<unified::ScalarType::F16>,
+                   unified::full::BlasSizes, unified::full::MatrixShapes)

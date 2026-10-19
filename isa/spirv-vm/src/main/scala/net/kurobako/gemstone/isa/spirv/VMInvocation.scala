@@ -12,6 +12,21 @@ private object VMInvocation {
   /** One invocation's register file. Scalar numeric values live unboxed; every other value is a [[VMValue]]. A file
     * starts as a copy of its dispatch template, so constants and dispatch globals are never copied per invocation.
     */
+  object InvocationValues {
+
+    /** A register file holding every constant of `program`; dispatches copy it and add their globals. */
+    def registers(program: VMProgram, globals: Map[Int, VMValue]): InvocationValues = {
+      val values =
+        InvocationValues(program, Array.ofDim[Long](program.idBound), Array.ofDim[VMValue | Null](program.idBound))
+      program.constants.foreach { case (id, value) => values.update(id, value) }
+      program.functionPointerConstants.foreach((id, typeId, function) =>
+        values.update(id, VMValue.Bits(typeId, Array(program.functionPointer(function))))
+      )
+      globals.foreach { case (id, value) => values.update(id, value) }
+      values
+    }
+  }
+
   class InvocationValues(val program: VMProgram, val scalars: Array[Long], val objects: Array[VMValue | Null]) {
     def copy(): InvocationValues = InvocationValues(program, scalars.clone(), objects.clone())
 
@@ -70,19 +85,19 @@ private object VMInvocation {
       subgroupIndex: Int,
       subgroupLocal: Int
   ) {
-    def group(axis: Int): Long  = axisOf(axis).select(groupId).raw.toLong
-    def local(axis: Int): Long  = axisOf(axis).select(localId).raw.toLong
+    def group(axis: Int): Long  = axisOf(axis).select(groupId).toLong
+    def local(axis: Int): Long  = axisOf(axis).select(localId).toLong
     def global(axis: Int): Long = axis match {
-      case 0 => globalId.x.raw
-      case 1 => globalId.y.raw
-      case _ => globalId.z.raw
+      case 0 => globalId.x
+      case 1 => globalId.y
+      case _ => globalId.z
     }
-    def globalSize(axis: Int): Long              = axisOf(axis).select(geometry.globalExtent).raw
-    def globalOffset(axis: Int): Long            = axisOf(axis).select(geometry.globalOffset).raw.toLong
-    def numWorkgroups(axis: Int): Long           = axisOf(axis).select(geometry.groupCount).raw.toLong
-    def workgroupSize(axis: Int): Long           = axisOf(axis).select(activeGroupSize).raw.toLong
-    def enqueuedWorkgroupSize(axis: Int): Long   = axisOf(axis).select(geometry.groupSize).raw.toLong
-    def workDim: Int                             = geometry.workDim.raw
+    def globalSize(axis: Int): Long              = axisOf(axis).select(geometry.globalExtent)
+    def globalOffset(axis: Int): Long            = axisOf(axis).select(geometry.globalOffset).toLong
+    def numWorkgroups(axis: Int): Long           = axisOf(axis).select(geometry.groupCount).toLong
+    def workgroupSize(axis: Int): Long           = axisOf(axis).select(activeGroupSize).toLong
+    def enqueuedWorkgroupSize(axis: Int): Long   = axisOf(axis).select(geometry.groupSize).toLong
+    def workDim: Int                             = geometry.workDim
     def vector(select: Int => Long): Array[Long] = Array(select(0), select(1), select(2))
   }
 
@@ -103,7 +118,7 @@ private object VMInvocation {
   )
 
   /** Coarse derivatives take both differences from the quad's first lane; gradients feed implicit-LOD sampling. */
-  enum Derivative(val coarse: Boolean) {
+  enum Derivative(val coarse: Boolean) derives CanEqual {
     case Dx          extends Derivative(false)
     case Dy          extends Derivative(false)
     case Width       extends Derivative(false)
@@ -130,8 +145,8 @@ private object VMInvocation {
       var currentLabel: Int,
       var predecessor: Int,
       val calls: mutable.ArrayDeque[CallFrame]
-  ) {
-    private enum Status {
+  ) derives CanEqual {
+    private enum Status derives CanEqual {
       case Running
       case WaitingMemory
       case WaitingCollective(request: CollectiveRequest)
@@ -168,6 +183,9 @@ private object VMInvocation {
     var fragmentKilled              = false
     var sampleMask: Option[Pointer] = None
 
+    /** Instructions the invocation has issued, its subgroup clock. */
+    var issued = 0L
+
     // An OpPhi group stages its incoming values here so the group's copies take effect together.
     private var stagedBits   = Array.ofDim[Long](4)
     private var stagedValues = Array.ofDim[VMValue | Null](4)
@@ -201,6 +219,7 @@ private object VMInvocation {
       fragmentInvocation = false
       fragmentKilled = false
       sampleMask = None
+      issued = 0L
     }
   }
 }

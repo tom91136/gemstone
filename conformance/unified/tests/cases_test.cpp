@@ -1,14 +1,15 @@
-#include <algorithm>
 #include <limits>
 
+#include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "blas_cases.hpp"
 #include "test_support.hpp"
 
 TEST_CASE("byte reference values remain sorted", "[unit][unified]") {
+  using namespace aspartame;
   const auto values = unified::support::sortedValues<int8_t>(4096, 3);
-  CHECK(std::is_sorted(values.begin(), values.end()));
+  CHECK((values ^ is_sorted()));
 }
 
 TEST_CASE("BLAS matcher preserves inactive canaries exactly", "[unit][unified]") {
@@ -20,7 +21,10 @@ TEST_CASE("BLAS matcher preserves inactive canaries exactly", "[unit][unified]")
 }
 
 TEST_CASE("key permutation matcher rejects lost or repeated payloads", "[unit][unified]") {
-  const std::vector<int32_t> keys{3, 3}, source{3, 3}, duplicate{0, 0}, valid{1, 0};
+  const std::vector<int32_t> keys{3, 3};
+  const std::vector<int32_t> source{3, 3};
+  const std::vector<int32_t> duplicate{0, 0};
+  const std::vector<int32_t> valid{1, 0};
   CHECK_FALSE(unified::KeyPermutation(duplicate, source).match(keys));
   CHECK(unified::KeyPermutation(valid, source).match(keys));
 }
@@ -28,5 +32,5 @@ TEST_CASE("key permutation matcher rejects lost or repeated payloads", "[unit][u
 TEST_CASE("BLAS dimensions reject integer overflow", "[unit][unified]") {
   CHECK_THROWS_AS(unified::support::checkedAdd(SIZE_MAX, 1, "size"), std::invalid_argument);
   CHECK_THROWS_AS(unified::support::checkedMultiply(SIZE_MAX, 2, "size"), std::invalid_argument);
-  CHECK_THROWS_AS(unified::support::checkedInt(static_cast<size_t>(INT_MAX) + 1, "size"), std::invalid_argument);
+  CHECK_THROWS_AS(unified::support::checkedInt(size_t{INT_MAX} + 1, "size"), std::invalid_argument);
 }

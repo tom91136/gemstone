@@ -11,23 +11,23 @@ private object VMExecution {
 
   case class WorkgroupArrival(id: BarrierId, count: BarrierCount, lanes: VMLaneMask)
 
-  case class BarrierReduction(
-      destination: Predicate,
-      predicate: Predicate,
-      operation: PredicateOperation,
-      negated: Boolean
-  )
+  case class BarrierReduction(result: BarrierResult, predicate: Predicate, negated: Boolean)
 
   case class DeviceCall(function: DeviceFunction, lanes: VMLaneMask)
+
+  case class Arm(target: Pc, lanes: VMLaneMask)
 
   // Shared results keep the per-instruction path from allocating one per step.
   val Completed: Either[Fault, Unit] = Right(())
   val Advanced: Either[Fault, Step]  = Right(Step.Advance)
 
-  enum Step {
+  enum Step derives CanEqual {
     case Advance
     case Jump(target: Pc)
-    case WarpSync(memberMask: Long)
+
+    /** Each arm's lanes continue at its target, in order, and `fallThrough` at the next instruction. */
+    case Branches(arms: Vec[Arm], fallThrough: VMLaneMask)
+    case WarpSync(memberMask: Value)
     case ConvergenceSync(token: Register)
     case ClusterBarrier(arrive: Boolean)
     case WorkgroupBarrier(arrivals: Vec[WorkgroupArrival], blocking: Boolean, reduction: Option[BarrierReduction])

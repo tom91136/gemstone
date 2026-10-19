@@ -2,14 +2,24 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import scala.reflect.TypeTest
 
 /** Structural operand queries shared by the decoder, the assembler and the compiler families. */
 private object OperandQueries {
-  def is[A <: Instruction](instruction: Instruction)(using test: TypeTest[Instruction, A]): Boolean =
-    test.unapply(instruction).isDefined
+  def is[A <: Form](instruction: Instruction)(using test: TypeTest[Form, A]): Boolean =
+    test.unapply(instruction.form).isDefined
 
   /** Vendor extensions can be preserved by the decoder and printer without acquiring execution semantics. */
+  /** The `cx` marker of a constant bank chosen by a uniform register, `cx[URa][offset]`. */
+  val IndexedBank: Operand = Operand.Symbol("cx")
+
+  /** Whether `value` is the `cx[URa]` half of an indexed constant bank, which the next operand addresses. */
+  def indexedBank(value: Operand): Boolean = value match {
+    case Operand.Address(descriptor = Some(IndexedBank)) => true
+    case _                                               => false
+  }
+
   def hasUnknownDomain(value: Operand): Boolean = value match {
     case Operand.Register(RegisterBank.Unknown(_), _)         => true
     case Operand.SpecialRegister(SpecialRegister.Unknown(_))  => true
@@ -54,10 +64,22 @@ private object OperandQueries {
   }
 
   def has(value: Operand, selector: OperandSelector): Boolean = selectors(value).contains(selector)
-  def isZero(value: Operand): Boolean                         = base(value) == Zero || base(value) == UniformZero
+
+  /** Whether `value` is a GMMA scoreboard such as `gsb0`, which reads as a register of an unknown bank. */
+  def isScoreboard(value: Operand): Boolean = value match {
+    case Operand.Register(RegisterBank.Unknown(bank), _) => bank.raw == "gsb"
+    case _                                               => false
+  }
+
+  /** The spelling of a GMMA scoreboard operand. */
+  def scoreboard(value: Operand): String = value match {
+    case Operand.Register(bank, index) => s"${bank.spelling}$index"
+    case other                         => throw IllegalArgumentException(s"expected scoreboard, found $other")
+  }
+  def isZero(value: Operand): Boolean = base(value) == Zero || base(value) == UniformZero
   def isRegister(value: Operand, bank: RegisterBank = RegisterBank.R, allowZero: Boolean = false): Boolean =
     base(value) match {
-      case Operand.Register(actual, index) => actual == bank && index.raw < RegisterBank.capacity(bank).getOrElse(0) &&
+      case Operand.Register(actual, index) => actual == bank && index < RegisterBank.capacity(bank).getOrElse(0) &&
         (allowZero || !isZero(value))
       case _ => false
     }
@@ -84,10 +106,21 @@ private object OperandQueries {
     case Operand.Register(_, index) => index
     case _                          => throw IllegalArgumentException(s"expected register, found $value")
   }
-  def isPredicate(value: Operand, allowNegated: Boolean = false, allowUniform: Boolean = false): Boolean = value match {
-    case Operand.Predicate(_, uniform, negated) =>
-      (allowNegated || !negated) && (allowUniform || !uniform)
-    case _ => false
+  def isPredicate(value: Operand): Boolean = value match {
+    case Operand.Predicate(_, uniform, negated) => !negated && !uniform
+    case _                                      => false
+  }
+  def isPredicateAllowingNegated(value: Operand): Boolean = value match {
+    case Operand.Predicate(_, uniform, _) => !uniform
+    case _                                => false
+  }
+  def isPredicateAllowingUniform(value: Operand): Boolean = value match {
+    case Operand.Predicate(_, _, negated) => !negated
+    case _                                => false
+  }
+  def isPredicateAllowingBoth(value: Operand): Boolean = value match {
+    case _: Operand.Predicate => true
+    case _                    => false
   }
   def isAlwaysPredicate(value: Operand): Boolean = value match {
     case Operand.Predicate(None, _, false) => true
@@ -108,14 +141,9 @@ private object OperandQueries {
   @annotation.tailrec
   def numericFloating(value: Operand): Boolean = value match {
     case Operand.Integer(_) | _: Operand.Floating | Operand.FloatingSymbol(_) => true
-    case Operand.FloatingBits(_, width, _) if width.raw == 64                 => true
+    case Operand.FloatingBits(_, width, _) if width == 64                     => true
     case Operand.Unary(value = inner)                                         => numericFloating(inner)
     case _                                                                    => false
-  }
-  def plainAddress(value: Operand): Boolean = value match {
-    case Operand.Address(Some(reg), None, displacement, scale, None, None) if scale.raw == 1 =>
-      displacement == 0 && isRegister(reg)
-    case _ => false
   }
 
 }

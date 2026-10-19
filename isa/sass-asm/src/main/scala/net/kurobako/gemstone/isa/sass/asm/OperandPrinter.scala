@@ -18,23 +18,23 @@ object OperandPrinter {
 
   private def render(operand: Operand): Either[String, String] = operand match {
     case Operand.Register(bank, index) =>
-      if (bank == RegisterBank.R && index.raw == 255) Right("RZ")
-      else if (bank == RegisterBank.UR && index.raw == 255) Right("URZ")
-      else if (RegisterBank.capacity(bank).nonEmpty || identifier(bank.spelling)) Right(s"${bank.spelling}${index.raw}")
+      if (bank == RegisterBank.R && index == 255) Right("RZ")
+      else if (bank == RegisterBank.UR && index == 255) Right("URZ")
+      else if (RegisterBank.capacity(bank).nonEmpty || identifier(bank.spelling)) Right(s"${bank.spelling}$index")
       else Left(s"unsupported SASS register bank $bank")
     case Operand.Integer(value)     => Right(value.toString)
     case Operand.Bits(value, width) =>
       if (value < 0) Left("bit-pattern immediates must be nonnegative")
-      else if (width.raw == 0) Right(hex(value))
-      else if (value.bitLength > width.raw) Left(s"bit pattern does not fit ${width.raw} bits")
-      else Right(s"bits<${width.raw}>(${hex(value)})")
+      else if (width == 0) Right(hex(value))
+      else if (value.bitLength > width) Left(s"bit pattern does not fit $width bits")
+      else Right(s"bits<$width>(${hex(value)})")
     case Operand.Symbol(value) =>
       if (identifier(value)) Right(value) else Left(s"invalid SASS symbol $value")
     case Operand.Group(values) =>
       values.toVec.traverse(render(_)).map(_.mkString("{", ", ", "}"))
     case Operand.Predicate(index, uniform, negated) =>
       val prefix = if (uniform) "UP" else "P"
-      val name   = index.fold(if (uniform) "UPT" else "PT")(value => s"$prefix${value.raw}")
+      val name   = index.fold(if (uniform) "UPT" else "PT")(value => s"$prefix$value")
       Right((if (negated) "!" else "") + name)
     case Operand.SpecialRegister(name) =>
       if (specialRegister(name.spelling)) Right(name.spelling)
@@ -42,9 +42,9 @@ object OperandPrinter {
     case Operand.FloatingBits(format, width, bits) =>
       val expectedWidth = format.width
       if (expectedWidth.exists(_.raw != width.raw))
-        Left(s"unsupported floating format and width ${format.spelling}:${width.raw}")
-      else if (bits < 0 || bits.bitLength > width.raw) Left(s"floating payload does not fit ${width.raw} bits")
-      else Right(s"bits<${format.spelling}>:${width.raw}(${hex(bits)})")
+        Left(s"unsupported floating format and width ${format.spelling}:$width")
+      else if (bits < 0 || bits.bitLength > width) Left(s"floating payload does not fit $width bits")
+      else Right(s"bits<${format.spelling}>:$width(${hex(bits)})")
     case Operand.Floating(value, spelling, negativeZero) =>
       if (negativeZero && value != 0) Left("negative-zero marker requires a zero value")
       else {
@@ -72,26 +72,34 @@ object OperandPrinter {
   }
 
   private def renderConstantOffset(value: Operand): Either[String, String] = value match {
-    case address: Operand.Address                               => renderAddress(address, bracket = false)
+    case address: Operand.Address                               => renderBareAddress(address)
     case Operand.Qualified(address: Operand.Address, selectors) =>
-      renderAddress(address, bracket = false).map(text => s"$text.${selectors.map(_.spelling).mkString(".")}")
+      renderBareAddress(address).map(text => s"$text.${selectors.map(_.spelling).mkString(".")}")
     case other => render(other)
   }
 
-  private def renderAddress(address: Operand.Address, bracket: Boolean = true): Either[String, String] = {
+  private def renderAddress(address: Operand.Address): Either[String, String] =
+    renderedAddress(address, Brackets.Square)
+
+  private def renderBareAddress(address: Operand.Address): Either[String, String] =
+    renderedAddress(address, Brackets.None)
+
+  private enum Brackets derives CanEqual { case Square, None }
+
+  private def renderedAddress(address: Operand.Address, brackets: Brackets): Either[String, String] = {
     val mode = address.mode match {
-      case Some(value) if AddressMode.scale(value).contains(address.scale.raw) => Right(Some(value.spelling))
-      case Some(value)                    => Left(s"unsupported or inconsistent SASS address mode ${value.spelling}")
-      case None if address.scale.raw == 1 => Right(None)
-      case None                           => Left(s"SASS address scale ${address.scale.raw} has no textual mode")
+      case Some(value) if AddressMode.scale(value).contains(address.scale) => Right(Some(value.spelling))
+      case Some(value)                => Left(s"unsupported or inconsistent SASS address mode ${value.spelling}")
+      case None if address.scale == 1 => Right(None)
+      case None                       => Left(s"SASS address scale ${address.scale} has no textual mode")
     }
     if (address.base.isEmpty && address.index.nonEmpty)
       Left("SASS address index cannot be represented without a base register")
     else mode.flatMap { selectedMode =>
       val base = address.base.map { register =>
-        s"${register.bank.spelling}${register.index.raw}" + selectedMode.fold("")(value => s".$value")
+        s"${register.bank.spelling}${register.index}" + selectedMode.fold("")(value => s".$value")
       }
-      val terms = base.toVec ++ address.index.map(register => s"${register.bank.spelling}${register.index.raw}").toVec
+      val terms      = base.toVec ++ address.index.map(register => s"${register.bank.spelling}${register.index}").toVec
       val registers  = terms.mkString("+")
       val expression =
         if (address.displacement == 0 && terms.nonEmpty) registers
@@ -100,9 +108,10 @@ object OperandPrinter {
         else hex(address.displacement)
       val body = if (expression.isEmpty) "0" else expression
       address.descriptor match {
-        case Some(descriptor) =>
+        case Some(OperandQueries.IndexedBank) => Right(s"cx[$body]")
+        case Some(descriptor)                 =>
           render(descriptor).map(printedDescriptor => s"desc[$printedDescriptor][$body]")
-        case None => Right(if (bracket) s"[$body]" else body)
+        case None => Right(if (brackets == Brackets.Square) s"[$body]" else body)
       }
     }
   }

@@ -8,13 +8,16 @@ import net.kurobako.gemstone.isa.nvidia.VMIR as NvidiaIR
 import net.kurobako.gemstone.memory.*
 
 class WarpReductionSuite extends munit.FunSuite {
+  private val reductionMasks = Vec(0xffffffffL, 0x55555555L, 1L)
+  private val flags          = Vec(false, true)
+
   for (threads <- Vec[Int > 0](1, 32))
     test(s"unsupported warp reduction operations fail for $threads participating lanes") {
       val instructions = Vec(
         NvidiaIR.Instruction.WarpReduce(
           Register(0),
           Value.Immediate(7),
-          Value.Immediate(if (threads.raw == 1) 1 else 0xffffffffL),
+          Value.Immediate(if (threads == 1) 1 else 0xffffffffL),
           IntegerOperation.Subtract,
           32
         ),
@@ -42,7 +45,7 @@ class WarpReductionSuite extends munit.FunSuite {
         ("or", false, false),
         ("xor", false, false)
       )
-    mask <- Vec(0xffffffffL, 0x55555555L, 1L)
+    mask <- reductionMasks
   }
     test(s"redux $operation signed=$signed negative=$negative mask=$mask") {
       val suffix = if (Set("and", "or", "xor")(operation)) "b32" else if (signed) "s32" else "u32"
@@ -102,7 +105,7 @@ ret;
     }
   for {
     mask    <- Vec(0xffffffffL, 0xaaaaaaa0L)
-    discard <- Vec(false, true)
+    discard <- flags
   }
     test(s"elect selects one participating lane per warp, including a partial warp: mask=$mask discard=$discard") {
       val destination = if (discard) "_" else "%leader"

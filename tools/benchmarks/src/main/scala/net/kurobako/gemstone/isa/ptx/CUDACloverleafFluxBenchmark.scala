@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.vm.*
@@ -26,8 +25,8 @@ object CUDACloverleafFluxBenchmark {
       s"clover_flux_param_$index".unsafe[NonEmpty[String]] -> Argument.fromLong(memory.base(id).raw)
     )
     val parameters = arrays.toMap ++ Map(
-      ("clover_flux_param_8": NonEmpty[String])  -> Argument.fromLong(cells.raw.toLong),
-      ("clover_flux_param_9": NonEmpty[String])  -> Argument.fromLong(CloverleafFluxFixture.rowStride.raw.toLong),
+      ("clover_flux_param_8": NonEmpty[String])  -> Argument.fromLong(cells.toLong),
+      ("clover_flux_param_9": NonEmpty[String])  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong),
       ("clover_flux_param_10": NonEmpty[String]) ->
         Argument.fromLong(java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.dt))
     )

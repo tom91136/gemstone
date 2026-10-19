@@ -4,11 +4,11 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.isa.catalogue.*
 import upickle.default.*
 
 private object InstructionLayout {
-  case class Range(offset: Int, bits: Int, padding: Int) derives ReadWriter
-  case class Field(name: EncodingField, ranges: Vector[Range]) derives ReadWriter {
+  case class Field(name: EncodingField, ranges: Vector[BitRange]) derives ReadWriter {
     val width: Int   = ranges.map(range => range.bits + range.padding).sum
     val mask: BigInt =
       ranges.foldLeft(BigInt(0))((result, range) => result | (((BigInt(1) << range.bits) - 1) << range.offset))

@@ -2,24 +2,27 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <iterator>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
-#include <fcntl.h>
-#include <glob.h>
-#include <stddef.h>
 #include <unistd.h>
 
 #include <aspartame/string.hpp>
+#include <aspartame/string_view.hpp>
 #include <aspartame/vector.hpp>
 
 #include <gemstone/environment.hpp>
@@ -85,24 +88,32 @@ std::string findOnPath(const std::string &name) {
   return {};
 }
 
+// Patterns hold at most one `*`, matching within a single path component.
+std::vector<std::string> expandPattern(std::string_view pattern) {
+  const auto star = pattern.find('*');
+  if (star == std::string_view::npos) return {std::string(pattern)};
+  const auto slash = pattern.rfind('/', star);
+  const auto end = pattern.find('/', star);
+  const auto prefix = pattern.substr(slash + 1, star - slash - 1);
+  const auto suffix = pattern.substr(star + 1, end - star - 1);
+  const auto rest = end == std::string_view::npos ? std::string_view{} : pattern.substr(end);
+  std::vector<std::string> matches;
+  std::error_code error;
+  std::filesystem::directory_iterator entry(std::filesystem::path(pattern.substr(0, slash)), error);
+  for (; !error && entry != std::filesystem::directory_iterator(); entry.increment(error)) {
+    const auto name = entry->path().filename().string();
+    if (name.size() >= prefix.size() + suffix.size() && name.starts_with(prefix) && name.ends_with(suffix))
+      matches.push_back(entry->path().string().append(rest));
+  }
+  return matches;
+}
+
 // Newest match wins: toolchain directories are conventionally version ordered,
 // so sorting the expansion keeps a rolling `latest` install ahead of an older one.
 std::string findFirstGlob(const std::vector<std::string> &patterns) {
   for (const auto &pattern : patterns) {
-    glob_t matches{};
-    const int status = glob(pattern.c_str(), GLOB_NOSORT, nullptr, &matches);
-    std::vector<std::string> candidates;
-    if (status == 0) {
-      for (size_t index = 0; index < matches.gl_pathc; ++index) {
-        std::string candidate(matches.gl_pathv[index]);
-        if (executable(candidate)) candidates.push_back(std::move(candidate));
-      }
-    }
-    globfree(&matches);
-    if (!candidates.empty()) {
-      std::sort(candidates.begin(), candidates.end());
-      return candidates.back();
-    }
+    const auto newest = expandPattern(pattern) ^ filter([](const std::string &candidate) { return executable(candidate); }) ^ max();
+    if (newest) return *newest;
   }
   return {};
 }
@@ -146,7 +157,58 @@ const std::string &bitcodeLinkerPath() {
 
 // Only the SPIR-V extensions the interpreter executes.
 constexpr const char *SpirvExtensions =
-    "--spirv-ext=+SPV_KHR_subgroup_rotate,+SPV_KHR_bit_instructions,+SPV_INTEL_subgroups,+SPV_KHR_linkonce_odr";
+    "--spirv-ext=+SPV_KHR_subgroup_rotate,+SPV_KHR_bit_instructions,+SPV_INTEL_subgroups,+SPV_KHR_linkonce_odr,+SPV_KHR_shader_clock,"
+    "+SPV_INTEL_bfloat16_conversion,+SPV_INTEL_split_barrier,+SPV_INTEL_media_block_io,"
+    "+SPV_INTEL_subgroup_matrix_multiply_accumulate,+SPV_INTEL_2d_block_io,+SPV_INTEL_tensor_float32_conversion,"
+    "+SPV_INTEL_ternary_bitwise_function,+SPV_INTEL_masked_gather_scatter,+SPV_INTEL_variable_length_array";
+
+// Declarations of the Intel builtins the driver provides beyond clang's headers, which llvm-spirv translates by name
+// or through the __spirv_ functions they call.
+constexpr const char *IntelBuiltins = R"cl(
+#define cl_intel_split_work_group_barrier 1
+#define cl_intel_media_block_io 1
+#define cl_intel_subgroup_matrix_multiply_accumulate 1
+#define GEMSTONE_OVERLOAD __attribute__((overloadable))
+void GEMSTONE_OVERLOAD intel_work_group_barrier_arrive(cl_mem_fence_flags flags);
+void GEMSTONE_OVERLOAD intel_work_group_barrier_wait(cl_mem_fence_flags flags);
+#if __OPENCL_C_VERSION__ == 200 || defined(__opencl_c_read_write_images)
+#define GEMSTONE_MEDIA_READ_WRITE(T, S)                                                                                 \
+  T GEMSTONE_OVERLOAD intel_sub_group_media_block_read_##S(int2 src_offset, int width, int height, read_write image2d_t image); \
+  void GEMSTONE_OVERLOAD intel_sub_group_media_block_write_##S(int2 src_offset, int width, int height, T pixels,          \
+                                                               read_write image2d_t image);
+#else
+#define GEMSTONE_MEDIA_READ_WRITE(T, S)
+#endif
+#define GEMSTONE_MEDIA(T, S)                                                                                            \
+  T GEMSTONE_OVERLOAD intel_sub_group_media_block_read_##S(int2 src_offset, int width, int height, read_only image2d_t image); \
+  void GEMSTONE_OVERLOAD intel_sub_group_media_block_write_##S(int2 src_offset, int width, int height, T pixels,          \
+                                                               write_only image2d_t image);                              \
+  GEMSTONE_MEDIA_READ_WRITE(T, S)
+GEMSTONE_MEDIA(uchar, uc) GEMSTONE_MEDIA(uchar2, uc2) GEMSTONE_MEDIA(uchar4, uc4) GEMSTONE_MEDIA(uchar8, uc8)
+GEMSTONE_MEDIA(uchar16, uc16) GEMSTONE_MEDIA(ushort, us) GEMSTONE_MEDIA(ushort2, us2) GEMSTONE_MEDIA(ushort4, us4)
+GEMSTONE_MEDIA(ushort8, us8) GEMSTONE_MEDIA(ushort16, us16) GEMSTONE_MEDIA(uint, ui) GEMSTONE_MEDIA(uint2, ui2)
+GEMSTONE_MEDIA(uint4, ui4) GEMSTONE_MEDIA(uint8, ui8)
+#define GEMSTONE_MAD(NAME, R, A, K, OPERANDS)                                                                           \
+  R GEMSTONE_OVERLOAD __spirv_SubgroupMatrixMultiplyAccumulateINTEL(int k, A a, int8 b, R c, int operands);           \
+  R GEMSTONE_OVERLOAD NAME(A a, int8 b, R acc) {                                                                      \
+    return __spirv_SubgroupMatrixMultiplyAccumulateINTEL(K, a, b, acc, OPERANDS);                                     \
+  }
+#define GEMSTONE_MADS(NAME, R1, R2, R4, R8, K, OPERANDS)                                                                \
+  GEMSTONE_MAD(NAME, R1, int, K, OPERANDS) GEMSTONE_MAD(NAME, R2, int2, K, OPERANDS)                                  \
+  GEMSTONE_MAD(NAME, R4, int4, K, OPERANDS) GEMSTONE_MAD(NAME, R8, int8, K, OPERANDS)                                 \
+  GEMSTONE_MAD(NAME, R1, short, K, OPERANDS) GEMSTONE_MAD(NAME, R2, short2, K, OPERANDS)                              \
+  GEMSTONE_MAD(NAME, R4, short4, K, OPERANDS) GEMSTONE_MAD(NAME, R8, short8, K, OPERANDS)
+GEMSTONE_MADS(intel_sub_group_i8_i8_matrix_mad_k32, int, int2, int4, int8, 32, 0x33)
+GEMSTONE_MADS(intel_sub_group_i8_u8_matrix_mad_k32, int, int2, int4, int8, 32, 0x31)
+GEMSTONE_MADS(intel_sub_group_u8_i8_matrix_mad_k32, int, int2, int4, int8, 32, 0x32)
+GEMSTONE_MADS(intel_sub_group_u8_u8_matrix_mad_k32, int, int2, int4, int8, 32, 0x30)
+GEMSTONE_MADS(intel_sub_group_f16_f16_matrix_mad_k16, float, float2, float4, float8, 16, 0xc00)
+GEMSTONE_MADS(intel_sub_group_bf16_bf16_matrix_mad_k16, float, float2, float4, float8, 16, 0x3000)
+#define GEMSTONE_BFLOAT16(N)                                                                                            \
+  ushort##N GEMSTONE_OVERLOAD intel_convert_bfloat16##N##_as_ushort##N(float##N source);                             \
+  float##N GEMSTONE_OVERLOAD intel_convert_as_bfloat16##N##_float##N(ushort##N source);
+GEMSTONE_BFLOAT16() GEMSTONE_BFLOAT16(2) GEMSTONE_BFLOAT16(3) GEMSTONE_BFLOAT16(4) GEMSTONE_BFLOAT16(8) GEMSTONE_BFLOAT16(16)
+)cl";
 
 // llvm-spirv is the historical translator, but current clang and icpx embed the
 // same LLVM-to-SPIR-V backend and can consume bitcode directly. Falling back to
@@ -167,8 +229,8 @@ bool bitcodeToSpirv(const std::string &input, const std::string &output, std::st
   return conversion.status == 0;
 }
 
-std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
-  std::vector<std::string> result;
+// Calls visit(open, close, balanced) for each vload3/vstore3 call; visit returns false to stop scanning that builtin.
+template <class Visit> void forEachVectorBuiltin(std::string_view source, Visit visit) {
   for (const std::string_view builtin : {"vload3", "vstore3"}) {
     size_t position = 0;
     while ((position = source.find(builtin, position)) != std::string_view::npos) {
@@ -185,62 +247,55 @@ std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
         if (source[close] == '(') ++depth;
         else if (source[close] == ')') --depth;
       }
-      if (depth != 0) break;
-      const size_t comma = source.rfind(',', close - 1);
-      if (comma != std::string_view::npos && comma > open) {
-        size_t begin = comma + 1, end = close - 1;
-        while (begin < end && std::isspace(static_cast<unsigned char>(source[begin])))
-          ++begin;
-        while (end > begin && std::isspace(static_cast<unsigned char>(source[end - 1])))
-          --end;
-        if (begin < end && (std::isalpha(static_cast<unsigned char>(source[begin])) || source[begin] == '_')
-            && std::all_of(
-                source.begin() + begin + 1, source.begin() + end,
-                [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }))
-          result.emplace_back(source.substr(begin, end - begin));
-      }
+      if (!visit(open, close, depth == 0)) break;
       position = close;
     }
   }
+}
+
+std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
+  std::vector<std::string> result;
+  forEachVectorBuiltin(source, [&](size_t open, size_t close, bool balanced) {
+    if (!balanced) return false;
+    const size_t comma = source.rfind(',', close - 1);
+    if (comma != std::string_view::npos && comma > open) {
+      size_t begin = comma + 1;
+      size_t end = close - 1;
+      while (begin < end && std::isspace(static_cast<unsigned char>(source[begin])))
+        ++begin;
+      while (end > begin && std::isspace(static_cast<unsigned char>(source[end - 1])))
+        --end;
+      if (begin < end && (std::isalpha(static_cast<unsigned char>(source[begin])) || source[begin] == '_')
+          && (source.substr(begin + 1, end - begin - 1)
+              ^ forall([](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; })))
+        result.emplace_back(source.substr(begin, end - begin));
+    }
+    return true;
+  });
   return result;
 }
 
 // Whether a source position falls inside a vload3/vstore3 argument list, whose
 // pointers must stay non-volatile.
 bool insideVectorBuiltin(std::string_view source, size_t position) {
-  for (const std::string_view builtin : {"vload3", "vstore3"}) {
-    size_t cursor = 0;
-    while ((cursor = source.find(builtin, cursor)) != std::string_view::npos) {
-      size_t open = cursor + builtin.size();
-      while (open < source.size() && std::isspace(static_cast<unsigned char>(source[open])))
-        ++open;
-      if (open == source.size() || source[open] != '(') {
-        cursor += builtin.size();
-        continue;
-      }
-      int depth = 1;
-      size_t close = open + 1;
-      for (; close < source.size() && depth != 0; ++close) {
-        if (source[close] == '(') ++depth;
-        else if (source[close] == ')') --depth;
-      }
-      if (position > open && position < close) return true;
-      cursor = close;
-    }
-  }
-  return false;
+  bool inside = false;
+  forEachVectorBuiltin(source, [&](size_t open, size_t close, bool) {
+    inside = position > open && position < close;
+    return !inside;
+  });
+  return inside;
 }
 
 std::string makeGlobalMemoryVolatile(const std::string &source) {
   static constexpr const char marker[] = "__global";
   const auto builtinPointers = vectorBuiltinPointers(source);
   std::string result;
-  result.reserve(source.size() + source.size() / 32);
+  result.reserve(source.size() + (source.size() / 32));
   size_t position = 0;
   while (position < source.size()) {
     const size_t found = source.find(marker, position);
     if (found == std::string::npos) {
-      result.append(source, position, std::string::npos);
+      result.append(source, position);
       break;
     }
     const bool startsWord = found == 0 || (!std::isalnum(static_cast<unsigned char>(source[found - 1])) && source[found - 1] != '_');
@@ -281,7 +336,7 @@ std::string makeGlobalMemoryVolatile(const std::string &source) {
             ++cursor;
           variable = source.substr(begin, cursor - begin);
         }
-        usedByVectorBuiltin = std::find(builtinPointers.begin(), builtinPointers.end(), variable) != builtinPointers.end();
+        usedByVectorBuiltin = builtinPointers ^ contains(variable);
       }
       if (!alreadyVolatile && !usedByVectorBuiltin && !castPointer) result.append(" volatile");
     }
@@ -306,7 +361,7 @@ bool hasVectorComponentSwizzle(std::string_view source) {
       }
     } else {
       const std::string_view components = "xyzwrgba";
-      while (end < source.size() && components.find(source[end]) != std::string_view::npos)
+      while (end < source.size() && components.contains(source[end]))
         ++end;
       if (end == position + 1) {
         ++position;
@@ -358,8 +413,13 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
                                 || (source ^ contains_slice(".odd")) || hasVectorComponentSwizzle(source);
   const bool usesEnqueuedLocalSize = source ^ contains_slice("get_enqueued_local_size");
   const bool usesIntelSubgroups = source ^ contains_slice("intel_sub_group");
+  const bool usesIntelBuiltins = (source ^ contains_slice("intel_work_group_barrier_"))
+                                 || (source ^ contains_slice("intel_sub_group_media_block_")) || (source ^ contains_slice("_matrix_mad_k"))
+                                 || (source ^ contains_slice("intel_convert_"));
   const std::string compilerSource = hasVectorSwizzle ? makeGlobalMemoryVolatile(source) : source;
-  bool success = writeFile(input, compilerSource.data(), compilerSource.size());
+  const std::string prelude = directory.file("intel.h");
+  bool success = writeFile(input, compilerSource.data(), compilerSource.size())
+                 && (!usesIntelBuiltins || writeFile(prelude, IntelBuiltins, std::strlen(IntelBuiltins)));
   std::string diagnostic;
   if (success) {
     // LLVM's SLP pass can pack four scalar boolean comparisons into i4,
@@ -383,12 +443,14 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
       command.emplace_back("-U");
       command.emplace_back(feature);
     }
-    command.insert(command.end(), {"-Xclang", "-cl-ext=+cl_intel_subgroups"});
-    // The driver's built-in declaration tables omit the Intel subgroup functions; only the full header declares them,
-    // at several times the compile cost.
+    command.insert(command.end(), {"-Xclang", "-cl-ext=+cl_intel_subgroups,+cl_khr_kernel_clock,+__opencl_c_kernel_clock_scope_device,"
+                                              "+__opencl_c_kernel_clock_scope_work_group,+__opencl_c_kernel_clock_scope_sub_group,"
+                                              "+cl_intel_bfloat16_conversions"});
+    if (usesIntelBuiltins) command.insert(command.end(), {"-include", prelude});
+    // The driver's built-in declaration tables omit the Intel subgroup functions; only the full header declares them, at
+    // several times the compile cost.
     if (usesIntelSubgroups) command.insert(command.end(), {"-cl-no-stdinc", "-Xclang", "-finclude-default-header"});
-    for (const auto &argument : optionArguments)
-      if (argument != "-cl-no-subgroup-ifp") command.push_back(argument);
+    optionArguments ^ filter([](const std::string &argument) { return argument != "-cl-no-subgroup-ifp"; }) ^ append_to(command);
     // Some OpenCL 3.0 CTS cases use 2.0 built-ins while the device advertises
     // the optional 1.2 C language profile. Compile those source strings as
     // CL3.0 so their conditional built-in code is present.
@@ -441,7 +503,7 @@ bool compileSource(const std::string &source, const std::string &options, std::v
     return true;
   };
   bool success = convert(bitcode, "");
-  if (!success && diagnostic.find("InvalidBitWidth:") != std::string::npos) {
+  if (!success && diagnostic.contains("InvalidBitWidth:")) {
     // Optimised LLVM IR can contain unusual integer widths (for example i33
     // from a closed-form loop sum) that the converter rejects. Preserve the
     // optimised path for ordinary programs and retry this converter failure.
@@ -573,9 +635,8 @@ std::string sourceKernelText(const std::string &source, const std::string &name)
     }
     const size_t priorSemicolon = source.rfind(';', position);
     const size_t priorBrace = source.rfind('}', position);
-    const size_t prior = priorSemicolon == std::string::npos ? priorBrace
-                         : priorBrace == std::string::npos   ? priorSemicolon
-                                                             : std::max(priorSemicolon, priorBrace);
+    const bool bothFound = priorSemicolon != std::string::npos && priorBrace != std::string::npos;
+    const size_t prior = bothFound ? std::max(priorSemicolon, priorBrace) : std::min(priorSemicolon, priorBrace);
     const size_t start = prior == std::string::npos ? 0 : prior + 1;
     const size_t underscoredKernel = source.find("__kernel", start);
     const size_t plainKernel = source.find("kernel", start);
@@ -599,8 +660,9 @@ std::string sourceKernelText(const std::string &source, const std::string &name)
     size_t bodyEnd = body;
     depth = 0;
     for (; bodyEnd < source.size(); ++bodyEnd) {
-      if (source[bodyEnd] == '{') ++depth;
-      else if (source[bodyEnd] == '}' && --depth == 0) {
+      if (source[bodyEnd] == '{') {
+        ++depth;
+      } else if (source[bodyEnd] == '}' && --depth == 0) {
         ++bodyEnd;
         break;
       }
@@ -624,9 +686,9 @@ size_t openclElementSize(const std::string &type) {
   }
   if (width == 0) width = 1;
   size_t baseSize = 4;
-  if (base.find("char") != std::string::npos) baseSize = 1;
-  else if (base.find("short") != std::string::npos || base == "half") baseSize = 2;
-  else if (base.find("long") != std::string::npos || base.find("double") != std::string::npos) baseSize = 8;
+  if (base.contains("char")) baseSize = 1;
+  else if (base.contains("short") || base == "half") baseSize = 2;
+  else if (base.contains("long") || base.contains("double")) baseSize = 8;
   return baseSize * width;
 }
 } // namespace
@@ -643,7 +705,7 @@ size_t sourceStaticLocalMemory(const std::string &source) {
       while (digit < close && std::isspace(static_cast<unsigned char>(source[digit])))
         ++digit;
       while (digit < close && std::isdigit(static_cast<unsigned char>(source[digit]))) {
-        count = count * 10 + static_cast<size_t>(source[digit] - '0');
+        count = (count * 10) + static_cast<size_t>(source[digit] - '0');
         ++digit;
       }
       size_t typeStart = position + 7;
@@ -718,19 +780,30 @@ std::vector<KernelArgumentInfo> sourceKernelArgumentInfo(const std::string &sour
       bool unsignedType = false;
       bool signedType = false;
       for (auto word : words) {
-        if (word.rfind("__", 0) == 0) word.erase(0, 2);
-        if (word == "global") info.address = CL_KERNEL_ARG_ADDRESS_GLOBAL;
-        else if (word == "local") info.address = CL_KERNEL_ARG_ADDRESS_LOCAL;
-        else if (word == "constant") info.address = CL_KERNEL_ARG_ADDRESS_CONSTANT;
-        else if (word == "private") info.address = CL_KERNEL_ARG_ADDRESS_PRIVATE;
-        else if (word == "read_only") info.access = CL_KERNEL_ARG_ACCESS_READ_ONLY;
-        else if (word == "write_only") info.access = CL_KERNEL_ARG_ACCESS_WRITE_ONLY;
-        else if (word == "read_write") info.access = CL_KERNEL_ARG_ACCESS_READ_WRITE;
-        else if (word == "const") info.type |= CL_KERNEL_ARG_TYPE_CONST;
-        else if (word == "volatile") info.type |= CL_KERNEL_ARG_TYPE_VOLATILE;
-        else if (word == "restrict") info.type |= CL_KERNEL_ARG_TYPE_RESTRICT;
-        else if (word == "pipe") info.type |= CL_KERNEL_ARG_TYPE_PIPE;
-        else {
+        if (word.starts_with("__")) word.erase(0, 2);
+        if (word == "global") {
+          info.address = CL_KERNEL_ARG_ADDRESS_GLOBAL;
+        } else if (word == "local") {
+          info.address = CL_KERNEL_ARG_ADDRESS_LOCAL;
+        } else if (word == "constant") {
+          info.address = CL_KERNEL_ARG_ADDRESS_CONSTANT;
+        } else if (word == "private") {
+          info.address = CL_KERNEL_ARG_ADDRESS_PRIVATE;
+        } else if (word == "read_only") {
+          info.access = CL_KERNEL_ARG_ACCESS_READ_ONLY;
+        } else if (word == "write_only") {
+          info.access = CL_KERNEL_ARG_ACCESS_WRITE_ONLY;
+        } else if (word == "read_write") {
+          info.access = CL_KERNEL_ARG_ACCESS_READ_WRITE;
+        } else if (word == "const") {
+          info.type |= CL_KERNEL_ARG_TYPE_CONST;
+        } else if (word == "volatile") {
+          info.type |= CL_KERNEL_ARG_TYPE_VOLATILE;
+        } else if (word == "restrict") {
+          info.type |= CL_KERNEL_ARG_TYPE_RESTRICT;
+        } else if (word == "pipe") {
+          info.type |= CL_KERNEL_ARG_TYPE_PIPE;
+        } else {
           if (word ^ contains('*')) pointer = true;
           word ^= filter([](char value) { return value != '*'; });
           if (word == "unsigned") unsignedType = true;
@@ -741,8 +814,8 @@ std::vector<KernelArgumentInfo> sourceKernelArgumentInfo(const std::string &sour
       std::string base = typeWords.empty() ? "int" : typeWords.back();
       if (base == "signed") base = "int";
       if (base == "unsigned") base = "int";
-      if (unsignedType && base.rfind("u", 0) != 0) base = "u" + base;
-      if (signedType && base == "") base = "int";
+      if (unsignedType && !base.starts_with('u')) base.insert(0, 1, 'u');
+      if (signedType && base.empty()) base = "int";
       info.typeName = base + (pointer ? "*" : "");
       if (imageTypeName(info.typeName)) {
         info.address = CL_KERNEL_ARG_ADDRESS_GLOBAL;
@@ -759,8 +832,7 @@ std::vector<KernelArgumentInfo> sourceKernelArgumentInfo(const std::string &sour
 }
 
 bool imageTypeName(const std::string &name) {
-  return name.size() >= 9 && name.rfind("image", 0) == 0 && name[5] >= '1' && name[5] <= '3' && name[6] == 'd'
-         && name.compare(name.size() - 2, 2, "_t") == 0;
+  return name.size() >= 9 && name.starts_with("image") && name[5] >= '1' && name[5] <= '3' && name[6] == 'd' && name.ends_with("_t");
 }
 
 std::string withoutLibraryOption(const std::string &options) {
@@ -810,13 +882,16 @@ bool expandFilesystemIncludes(const std::string &source, const std::string &opti
     while (nameStart < line.size() && std::isspace(static_cast<unsigned char>(line[nameStart])))
       ++nameStart;
     const bool quoted = nameStart < line.size() && (line[nameStart] == '"' || line[nameStart] == '<');
-    const char terminator = quoted ? (line[nameStart] == '"' ? '"' : '>') : '\0';
+    char terminator = '\0';
+    if (quoted) terminator = line[nameStart] == '"' ? '"' : '>';
     const size_t nameEnd = quoted ? line.find(terminator, nameStart + 1) : std::string::npos;
     bool replaced = false;
     if (quoted && nameEnd != std::string::npos && nameEnd > nameStart + 1) {
       const std::string name = line.substr(nameStart + 1, nameEnd - nameStart - 1);
       for (const auto &directory : directories) {
-        const std::string path = (directory.empty() || directory.back() == '/') ? directory + name : directory + "/" + name;
+        std::string path = directory;
+        if (!path.empty() && path.back() != '/') path += '/';
+        path += name;
         std::ifstream header(path);
         if (!header) continue;
         const std::string contents{std::istreambuf_iterator<char>(header), std::istreambuf_iterator<char>()};

@@ -6,6 +6,9 @@ import net.kurobako.gemstone.memory.*
 class AllocationAddressIndexSuite extends munit.FunSuite {
   private type Allocations = Map[AllocationId, StoredAllocation]
 
+  private val CoarseSizes = List(0, 1, 4, 32, 33, Int.MaxValue)
+  private val FineSizes   = List(0, 1, 8)
+
   private def stored(base: Long, size: Int > 0, aliased: Boolean): StoredAllocation =
     StoredAllocation(StoredAllocation.Storage(size), GuestAddress(base), aliased)
 
@@ -25,8 +28,8 @@ class AllocationAddressIndexSuite extends munit.FunSuite {
       case (id, allocation)
           if allocation.aliased == aliased &&
             java.lang.Long.compareUnsigned(address, allocation.base.raw) >= 0 &&
-            address - allocation.base.raw >= 0L && size <= allocation.size.raw &&
-            address - allocation.base.raw <= allocation.size.raw.toLong - size =>
+            address - allocation.base.raw >= 0L && size <= allocation.size &&
+            address - allocation.base.raw <= allocation.size.toLong - size =>
         id -> allocation.base.raw
     }.maxByOption(_._2)(using Ordering.fromLessThan[Long](java.lang.Long.compareUnsigned(_, _) < 0))
       .map((id, base) => id -> (address - base).unsafe[Long >= 0])
@@ -38,9 +41,9 @@ class AllocationAddressIndexSuite extends munit.FunSuite {
     Vector(
       base - 1L,
       base,
-      base + allocation.size.raw - 1L,
-      base + allocation.size.raw,
-      base + allocation.size.raw + 1L
+      base + allocation.size - 1L,
+      base + allocation.size,
+      base + allocation.size + 1L
     )
   }
 
@@ -59,7 +62,7 @@ class AllocationAddressIndexSuite extends munit.FunSuite {
       Vector.fill(128)(random.nextLong())
     for {
       address <- addresses
-      size    <- List(0, 1, 4, 32, 33, Int.MaxValue)
+      size    <- CoarseSizes
     } assertEquals(find(index, address, size), scan(allocations, address, size), s"$address / $size")
   }
 
@@ -82,7 +85,7 @@ class AllocationAddressIndexSuite extends munit.FunSuite {
     assertEquals(incremental.hasHostBacked, expected.values.exists(_.hostBacked))
     for {
       address <- probes(initial) ++ probes(expected)
-      size    <- List(0, 1, 8)
+      size    <- FineSizes
     } assertEquals(find(incremental, address, size), scan(expected, address, size), s"$address / $size")
     initial.keys.foreach(id => assertEquals(Option(incremental.entry(id)).map(_.allocation), expected.get(id)))
   }

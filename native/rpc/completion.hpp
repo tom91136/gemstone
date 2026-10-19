@@ -11,13 +11,15 @@ namespace gemstone::execution {
 struct CompletionResult {
   std::vector<DirtyRange> dirtyRanges;
   std::vector<PointerRelocation> pointerRelocations;
+  /** What the service reported for a failed dispatch; `Transport` when the failure did not come from it. */
+  FailureKind failure = FailureKind::Transport;
 };
 
 /** Reads all dirty-range pages without releasing the completion. */
 bool completionDirtyRanges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error);
 
-/** Waits while servicing host-memory requests; the caller retains the completion. */
-bool awaitCompletion(Client &client, CompletionId completion, std::string &error);
+/** Waits while servicing host-memory requests; the caller retains the completion. A failure's kind is stored in `kind`. */
+bool awaitCompletion(Client &client, CompletionId completion, std::string &error, FailureKind *kind = nullptr);
 
 /** Waits, copies stable result records and optional graphics statistics, then releases the completion.
  * The first transport/execution error is preserved even when release also
@@ -30,7 +32,8 @@ bool collectCompletion(Client &client, CompletionId completion, CompletionResult
  * services host-memory requests. `launched` runs once the service accepts the launch.
  */
 template <class Launched = decltype([] {})>
-bool launchAndCollect(Launch launch, CompletionResult &result, std::string &error, Launched launched = {}) {
+bool launchAndCollect(const Launch &launch, CompletionResult &result, std::string &error, Launched launched = {}) {
+  result.failure = FailureKind::Transport;
   const auto client = Client::fromEnvironment();
   if (!client) {
     error = "Gemstone execution RPC client is not configured";
@@ -39,6 +42,7 @@ bool launchAndCollect(Launch launch, CompletionResult &result, std::string &erro
   auto completion = client->call(launch);
   if (!completion) {
     error = completion.error().detail;
+    result.failure = completion.error().kind;
     return false;
   }
   launched();

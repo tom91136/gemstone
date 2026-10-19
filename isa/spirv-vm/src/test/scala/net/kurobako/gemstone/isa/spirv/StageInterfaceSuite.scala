@@ -4,6 +4,7 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class StageInterfaceSuite extends munit.FunSuite {
@@ -34,12 +35,12 @@ class StageInterfaceSuite extends munit.FunSuite {
   for (model <- Seq("Vertex", "Fragment")) test(s"$model keeps invocation input and output records distinct") {
     val memory = RegionMemory()
     val region = memory.allocate(24L)
-    writeWords(memory, region, 0, floatBits(2f), floatBits(3f), floatBits(4f))
+    writeWords(memory, region, 0, single(2f), single(3f), single(4f))
     assertEquals(
       run(square(model), "main", memory, Vec(buffer(region), buffer(region, 12L)), groups = testDimensions(3)),
       Right(())
     )
-    assertEquals(words(memory, region, offset = 12, count = 3), Vec(floatBits(4f), floatBits(9f), floatBits(16f)))
+    assertEquals(words(memory, region, offset = 12, count = 3), Vec(single(4f), single(9f), single(16f)))
   }
 
   test("VulkanCompute validation rejects graphics entry points") {
@@ -86,7 +87,7 @@ class StageInterfaceSuite extends munit.FunSuite {
     for (_ <- 0 until 2) {
       java.util.Arrays.fill(memory.array(region), 0x5a.toByte)
       assertEquals(execute(program, launch, memory), Right(()))
-      assertEquals(words(memory, region, 4, 3 * count), Vec.fill(3 * count)(floatBits(1f)))
+      assertEquals(words(memory, region, 4, 3 * count), Vec.fill(3 * count)(single(1f)))
       assertEquals(word(memory, region, 0), 0x5a5a5a5aL)
       assertEquals(word(memory, region, size - 4), 0x5a5a5a5aL)
     }

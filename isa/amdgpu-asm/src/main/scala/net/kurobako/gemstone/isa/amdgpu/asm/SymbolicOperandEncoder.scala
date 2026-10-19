@@ -7,6 +7,9 @@ import net.kurobako.gemstone.isa.amdgpu.OperandEncoding.*
 import net.kurobako.gemstone.string.*
 
 private object SymbolicOperandEncoder {
+  private val MessageFields = Vector(EncodingField.MSG, EncodingField.GSOP, EncodingField.STREAMID)
+  private val IndexModes    = Map("SRC0" -> 0, "SRC1" -> 1, "SRC2" -> 2, "DST" -> 3)
+
   private def fields(kind: OperandKind, target: Target): Vector[NamedField] =
     OperandEncoding.Catalogue.forKind(target.isa, kind).toVector.flatMap(_.fields)
 
@@ -48,28 +51,27 @@ private object SymbolicOperandEncoder {
         case _ => None
       }
       else if (kind.isMessage) arguments(text, "sendmsg").flatMap { args =>
-        Option.when(args.nonEmpty && args.size <= 3)(Vector(
-          EncodingField.MSG,
-          EncodingField.GSOP,
-          EncodingField.STREAMID
-        ).zip(args))
+        Option.when(args.nonEmpty && args.size <= 3)(MessageFields.zip(args))
           .flatMap(pack(_))
       }
       else arguments(text, "gpr_idx").flatMap { args =>
-        val indices = Map("SRC0" -> 0, "SRC1" -> 1, "SRC2" -> 2, "DST" -> 3)
-        Option.when(args.distinct.size == args.size && args.forall(indices.contains))(
-          args.foldLeft(BigInt(0))((bits, name) => bits.setBit(indices(name)))
+        Option.when(args.distinct.size == args.size && args.forall(IndexModes.contains))(
+          args.foldLeft(BigInt(0))((bits, name) => bits.setBit(IndexModes(name)))
         )
       }
     case _ => None
   }
 
+  private val Counter = "([a-z_]+)\\(([0-9]+)\\)".r
+
+  private def expressions(instruction: Instruction): Vector[String] =
+    instruction.operands.toVector.collect { case Operand.Expression(text) => text } ++
+      instruction.mods.toVector.filter(_.value.isEmpty).map(_.name.raw)
+
   def counters(instruction: Instruction, kind: OperandKind, target: Target): Option[BigInt] = {
     val schema = fields(kind, target)
-    val parts  = instruction.operands.toVector.collect { case Operand.Expression(text) => text } ++
-      instruction.mods.toVector.filter(_.value.isEmpty).map(_.name.raw)
-    val Counter = "([a-z_]+)\\(([0-9]+)\\)".r
-    val values  = parts.traverse {
+    val parts  = expressions(instruction)
+    val values = parts.traverse {
       case Counter(name, value) =>
         val field =
           (if (kind == OperandKind.WAITCNT) name.stripSuffix("cnt") else name.stripPrefix("depctr_")).toUpperCaseRoot
@@ -81,10 +83,33 @@ private object SymbolicOperandEncoder {
     values.filter(_.map(_._1.name).distinct.size == parts.size).filter(_.nonEmpty).map { values =>
       // Unspecified counters disable their waits.
       val initial =
-        schema.foldLeft(if (kind == OperandKind.WAITCNT && Set(ISA.GFX6, ISA.GFX7, ISA.GFX8)(target.isa)) BigInt(0x3000)
+        schema.foldLeft(if (kind == OperandKind.WAITCNT && target.isa.isPreGFX9) BigInt(0x3000)
         else BigInt(0))((bits, info) => bits | info.field.mask)
       values.foldLeft(initial) { case (bits, (field, value)) => (bits & ~field.mask) | value }
     }
+  }
+
+  private val Delay = "([a-z0-9]+)\\(([A-Za-z0-9_]+)\\)".r
+
+  /** `instid0(VALU_DEP_1) | instskip(NEXT) | instid1(SALU_CYCLE_1)`: each field at most once, its value named without
+    * the field's prefix.
+    */
+  def delay(instruction: Instruction, target: Target): Option[BigInt] = {
+    val schema = fields(OperandKind.DELAY, target)
+    val parts  = expressions(instruction).flatMap(_.split('|')).map(_.trim).filter(_.nonEmpty)
+    val values = parts.traverse {
+      case Delay(name, value) =>
+        val field = name.toUpperCaseRoot
+        for {
+          named <- EncodingField.fromName(field)
+          info  <- schema.find(_.field.name == named)
+          code  <- info.names.get(s"${field.reverse.dropWhile(_.isDigit).reverse}_${value.toUpperCaseRoot}")
+          bits  <- parseBigIntLiteral(code).flatMap(info.field.put(_))
+        } yield named -> bits
+      case _ => None
+    }
+    values.filter(found => found.nonEmpty && found.map(_._1).distinct.size == found.size)
+      .map(_.foldLeft(BigInt(0))(_ | _._2))
   }
 
   def matrix(name: String, text: String): Option[(EncodingField, BigInt)] = {
@@ -141,9 +166,9 @@ private object SymbolicOperandEncoder {
         (n & (n - 1)) == 0 && (if (mode == "SWAP") n >= 1 && n <= 16 else n >= 2 && n <= 32)
       )
         .map(n => BigInt(31) | ((if (mode == "SWAP") n else n - 1) << 10))
-    case Vector("FFT", value) if !Set(ISA.GFX6, ISA.GFX7, ISA.GFX8)(isa) =>
+    case Vector("FFT", value) if !isa.isPreGFX9 =>
       parseBigIntLiteral(value).filter(n => n >= 0 && n <= Swizzle.FFT_SWIZZLE_MAX).map(_ | Swizzle.FFT_MODE_ENC)
-    case Vector("ROTATE", direction, size) if !Set(ISA.GFX6, ISA.GFX7, ISA.GFX8)(isa) =>
+    case Vector("ROTATE", direction, size) if !isa.isPreGFX9 =>
       for {
         dir   <- parseBigIntLiteral(direction).filter(n => n >= 0 && n <= 1)
         count <- parseBigIntLiteral(size).filter(n => n >= 0 && n <= Swizzle.ROTATE_MAX_SIZE)

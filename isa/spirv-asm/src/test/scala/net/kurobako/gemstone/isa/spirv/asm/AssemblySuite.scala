@@ -106,7 +106,7 @@ class AssemblySuite extends munit.FunSuite {
     )
     val actual = module.instructions.flatMap { instruction =>
       val raw = Instruction.encode(instruction)
-      Vec((raw.wordCount.raw << 16) | raw.opcodeNumber.toInt) ++ raw.operandWords.map(_.raw)
+      Vec((raw.wordCount << 16) | raw.opcodeNumber.toInt) ++ raw.operandWords.map(_.raw)
     }
     assertEquals(actual, expected)
     assertEquals(module.header.bound, Word(5))
@@ -161,9 +161,8 @@ class AssemblySuite extends munit.FunSuite {
     assertEquals(module.instructions(2).operands.last.words, Vec(Word(Int.MinValue)))
     assertEquals(module.instructions(4).operands.last.words, Vec(Word(-1), Word(-1)))
     assertEquals(module.instructions(6).operands.last.words, Vec(Word(-1)))
-    Seq(Endianness.Little, Endianness.Big).foreach { order =>
-      roundTrip(module.copy(header = Header(Version(1, 3), Word(0xdeadbeef), Word(128), Word(0)), endianness = order))
-    }
+    val header = Header(Version(1, 3), Word(0xdeadbeef), Word(128), Word(0))
+    Seq(Endianness.Little, Endianness.Big).foreach(order => roundTrip(module.copy(header = header, endianness = order)))
   }
 
   test("extended instruction names and specialization opcodes use generated tables") {

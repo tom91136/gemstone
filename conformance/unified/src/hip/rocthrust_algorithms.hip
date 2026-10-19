@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <magic_enum/magic_enum.hpp>
@@ -22,8 +23,10 @@ magic_enum::customize::enum_name<unified::rocthrust_support::SetKind>(unified::r
   return invalid_tag;
 }
 
+using namespace aspartame;
 using namespace unified::rocthrust_support;
 
+namespace {
 template <class Value> inline void checkSetByKey(SetKind kind, bool descending) {
   const auto base = descending ? descendingKeys<Value>() : ascendingKeys<Value>();
   auto left = descendingKeyValues(base, 100);
@@ -89,6 +92,8 @@ template <class Value> inline void checkPairSet(SetKind kind) {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/set-operations-duplicate-heavy/i32/n11", "[unified][rocthrust][compact]") {
   const std::vector<int32_t> left{int32_t{0}, int32_t{0}, int32_t{0}, int32_t{0}, int32_t{1}, int32_t{1},
                                   int32_t{3}, int32_t{3}, int32_t{3}, int32_t{3}, int32_t{3}};
@@ -133,9 +138,10 @@ TEST_CASE("algorithms/roc-thrust-semantic/binary-search-descending/i32/n11", "[u
   }
 }
 
+namespace {
 template <class Value> inline void checkBinarySearchVector(bool descending) {
   auto sorted = ascendingKeys<Value>();
-  if (descending) std::reverse(sorted.begin(), sorted.end());
+  if (descending) sorted ^= reverse();
   const std::vector<Value> needles{Value{-6}, Value{-5}, Value{-2}, Value{-1}, Value{2}, Value{6}, Value{7}};
   const thrust::device_vector<Value> values(sorted.begin(), sorted.end());
   const thrust::device_vector<Value> queries(needles.begin(), needles.end());
@@ -144,29 +150,28 @@ template <class Value> inline void checkBinarySearchVector(bool descending) {
     thrust::binary_search(values.begin(), values.end(), queries.begin(), queries.end(), output.begin(),
                           unified::algorithms::Greater<Value>{});
   else thrust::binary_search(values.begin(), values.end(), queries.begin(), queries.end(), output.begin());
-  std::vector<int32_t> expected;
-  expected.reserve(needles.size());
-  for (const auto needle : needles) {
-    const bool found = descending ? std::binary_search(sorted.begin(), sorted.end(), needle, unified::algorithms::Greater<Value>{})
-                                  : std::binary_search(sorted.begin(), sorted.end(), needle, unified::algorithms::Less<Value>{});
-    expected.push_back(found ? 1 : 0);
-  }
+  const auto expected = needles ^ map([&](Value needle) {
+                          const bool found =
+                              descending ? std::binary_search(sorted.begin(), sorted.end(), needle, unified::algorithms::Greater<Value>{})
+                                         : std::binary_search(sorted.begin(), sorted.end(), needle, unified::algorithms::Less<Value>{});
+                          return found ? 1 : 0;
+                        });
   {
     INFO((descending ? "binary-search-vector-descending" : "binary-search-vector"));
     REQUIRE(std::vector<int32_t>(output.begin(), output.end()) == expected);
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/gather-repeated/i32/n11", "[unified][rocthrust][compact]") {
   const std::vector<int32_t> input{int32_t{11}, int32_t{22}, int32_t{33}, int32_t{44}, int32_t{55}, int32_t{66}, int32_t{77}, int32_t{88}};
   const std::vector<size_t> indices{7, 2, 2, 0, 6, 3, 7, 1};
   const thrust::device_vector<int32_t> source(input.begin(), input.end());
-  const thrust::device_vector<size_t> map(indices.begin(), indices.end());
+  const thrust::device_vector<size_t> positions(indices.begin(), indices.end());
   thrust::device_vector<int32_t> output(indices.size());
-  thrust::gather(map.begin(), map.end(), source.begin(), output.begin());
-  std::vector<int32_t> expected;
-  for (const auto index : indices)
-    expected.push_back(input[index]);
+  thrust::gather(positions.begin(), positions.end(), source.begin(), output.begin());
+  const auto expected = indices ^ map([&](size_t index) { return input[index]; });
   {
     INFO("gather-repeated");
     REQUIRE(std::vector<int32_t>(output.begin(), output.end()) == expected);
@@ -177,13 +182,11 @@ TEST_CASE("algorithms/roc-thrust-semantic/permutation-iterator/i32/n11", "[unifi
   const std::vector<int32_t> input{int32_t{13}, int32_t{21}, int32_t{34}, int32_t{55}, int32_t{89}, int32_t{144}};
   const std::vector<size_t> indices{4, 1, 5, 1, 3, 0, 2};
   const thrust::device_vector<int32_t> source(input.begin(), input.end());
-  const thrust::device_vector<size_t> map(indices.begin(), indices.end());
-  const auto first = thrust::make_permutation_iterator(source.begin(), map.begin());
+  const thrust::device_vector<size_t> positions(indices.begin(), indices.end());
+  const auto first = thrust::make_permutation_iterator(source.begin(), positions.begin());
   thrust::device_vector<int32_t> output(indices.size());
   thrust::copy(first, first + static_cast<ptrdiff_t>(indices.size()), output.begin());
-  std::vector<int32_t> expected;
-  for (const auto index : indices)
-    expected.push_back(input[index]);
+  const auto expected = indices ^ map([&](size_t index) { return input[index]; });
   {
     INFO("permutation-iterator");
     REQUIRE(std::vector<int32_t>(output.begin(), output.end()) == expected);
@@ -199,9 +202,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator/i32/n11", "[unified][roct
   const auto last = first + static_cast<ptrdiff_t>(keys.size());
   thrust::device_vector<int64_t> output(keys.size());
   thrust::transform(first, last, output.begin(), TupleCode<int32_t>{});
-  std::vector<int64_t> expected;
-  for (size_t index = 0; index < keys.size(); ++index)
-    expected.push_back(static_cast<int64_t>(keys[index]) * 1000 + values[index]);
+  const auto expected = keys ^ zip(values) ^ map([](int32_t key, int32_t value) { return (static_cast<int64_t>(key) * 1000) + value; });
   {
     INFO("zip-iterator");
     REQUIRE(std::vector<int64_t>(output.begin(), output.end()) == expected);
@@ -215,22 +216,22 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-sort/i32/n11", "[unified]
   thrust::device_vector<int32_t> deviceValues(values.begin(), values.end());
   const auto first = thrust::make_zip_iterator(thrust::make_tuple(deviceKeys.begin(), deviceValues.begin()));
   thrust::sort(first, first + static_cast<ptrdiff_t>(keys.size()), TupleLess<int32_t>{});
-  std::vector<Pair<int32_t>> actual;
-  for (size_t index = 0; index < keys.size(); ++index)
-    actual.emplace_back(deviceKeys[index], deviceValues[index]);
-  std::vector<Pair<int32_t>> expected;
-  for (size_t index = 0; index < keys.size(); ++index)
-    expected.emplace_back(keys[index], values[index]);
-  std::sort(expected.begin(), expected.end(), PairLess<int32_t>{});
+  const auto actual =
+      iota(size_t{0}, keys.size()) | map([&](size_t index) { return Pair<int32_t>(deviceKeys[index], deviceValues[index]); }) | to_vector();
+  const auto expected =
+      keys ^ zip(values) ^ map([](int32_t key, int32_t value) { return Pair<int32_t>(key, value); }) ^ sort(PairLess<int32_t>{});
   {
     INFO("zip-iterator-sort");
     REQUIRE(actual == expected);
   }
 }
 
+namespace {
 template <class Value> struct TupleSquare {
   UNIFIED_ROCTHRUST_HOST_DEVICE Value operator()(Value value) const { return value * value; }
 };
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/tuple-transform/i32/n11", "[unified][rocthrust][compact]") {
   const auto input = std::make_tuple(int32_t{-3}, int32_t{2}, int32_t{5});
@@ -304,10 +305,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-sort-by-key/i32/n11", "[unified][
     INFO("pair-sort-by-key: keys are not sorted");
     REQUIRE(std::is_sorted(actualKeys.begin(), actualKeys.end()));
   }
-  std::vector<std::pair<int32_t, int32_t>> expected;
-  for (size_t index = 0; index < keys.size(); ++index)
-    expected.emplace_back(keys[index], values[index]);
-  std::sort(expected.begin(), expected.end());
+  const auto expected = keys ^ zip(values) ^ sort();
   for (size_t index = 0; index < expected.size(); ++index) {
     {
       INFO("pair-sort-by-key: key association mismatch");
@@ -325,12 +323,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-scan/i32/n11", "[unified][rocthru
   const thrust::device_vector<Pair<int32_t>> source(input.begin(), input.end());
   thrust::device_vector<Pair<int32_t>> output(input.size());
   thrust::inclusive_scan(source.begin(), source.end(), output.begin(), PairPlus<int32_t>{});
-  std::vector<Pair<int32_t>> expected(input.size());
-  Pair<int32_t> running{int32_t{}, 0};
-  for (size_t index = 0; index < input.size(); ++index) {
-    running = PairPlus<int32_t>{}(running, input[index]);
-    expected[index] = running;
-  }
+  const auto expected = input ^ scan_left(Pair<int32_t>{int32_t{}, 0}, PairPlus<int32_t>{}) ^ drop(1);
   {
     INFO("pair-scan");
     REQUIRE((std::vector<Pair<int32_t>>(output.begin(), output.end())) == expected);
@@ -341,9 +334,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-reduce/i32/n11", "[unified][rocth
   const std::vector<Pair<int32_t>> input{{int32_t{1}, 2}, {int32_t{-3}, 4}, {int32_t{5}, -1}, {int32_t{2}, 7}};
   const thrust::device_vector<Pair<int32_t>> source(input.begin(), input.end());
   const auto actual = thrust::reduce(source.begin(), source.end(), Pair<int32_t>{int32_t{}, 0}, PairPlus<int32_t>{});
-  Pair<int32_t> expected{int32_t{}, 0};
-  for (const auto value : input)
-    expected = PairPlus<int32_t>{}(expected, value);
+  const auto expected = input ^ fold_left(Pair<int32_t>{int32_t{}, 0}, PairPlus<int32_t>{});
   {
     INFO("pair-reduce mismatch");
     REQUIRE((actual.first == expected.first && actual.second == expected.second));
@@ -416,9 +407,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/transform-iterator/i32/n11", "[unified
   thrust::device_vector<int32_t> output(input.size());
   const auto first = thrust::make_transform_iterator(source.begin(), Square<int32_t>{});
   thrust::copy(first, first + static_cast<ptrdiff_t>(input.size()), output.begin());
-  std::vector<int32_t> expected;
-  for (const auto value : input)
-    expected.push_back(value * value);
+  const auto expected = input ^ map([](int32_t value) { return value * value; });
   {
     INFO("transform-iterator");
     REQUIRE(std::vector<int32_t>(output.begin(), output.end()) == expected);
@@ -431,9 +420,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/transform-output-iterator/i32/n11", "[
   thrust::device_vector<int32_t> output(input.size());
   const auto destination = thrust::make_transform_output_iterator(output.begin(), Square<int32_t>{});
   thrust::copy(source.begin(), source.end(), destination);
-  std::vector<int32_t> expected;
-  for (const auto value : input)
-    expected.push_back(value * value);
+  const auto expected = input ^ map([](int32_t value) { return value * value; });
   {
     INFO("transform-output-iterator");
     REQUIRE(std::vector<int32_t>(output.begin(), output.end()) == expected);
@@ -448,7 +435,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/transform-input-output-iterator/i32/n1
   thrust::copy(first, first + static_cast<ptrdiff_t>(size), io);
   for (size_t index = 0; index < size; ++index) {
     INFO(fmt::format("transform-input-output write mismatch at {}", index));
-    REQUIRE(values[index] == static_cast<int32_t>((index + 1) * (index + 1)));
+    REQUIRE(std::cmp_equal(static_cast<int32_t>(values[index]), (index + 1) * (index + 1)));
   }
   thrust::device_vector<int32_t> readback(size);
   thrust::copy(io, io + static_cast<ptrdiff_t>(size), readback.begin());

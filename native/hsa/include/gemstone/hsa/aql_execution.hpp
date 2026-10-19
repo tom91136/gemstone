@@ -48,6 +48,9 @@ enum class PacketFailure : int32_t {
   MalformedPacket = -6,
   InvalidDimensions = -7,
   InvalidGrid = -8,
+  IllegalInstruction = -9,
+  OutOfResources = -10,
+  InvalidCodeObject = -11,
 };
 
 /** Completion-signal access; ROCr and the public HSA runtime store signals differently. */
@@ -96,8 +99,10 @@ public:
   /** Drains the exact service-written ranges of completed dispatches in completion order. */
   std::vector<execution::DirtyRange> takeDirtyRanges();
 
-  /** Executes one `AqlPacketSize`-byte packet, publishing its completion signal through `Signals`. */
-  PacketResult consume(const void *packet);
+  /** Executes one `AqlPacketSize`-byte packet, publishing its completion signal through `Signals`. Dispatches from a
+   * cooperative queue keep all their workgroups resident.
+   */
+  PacketResult consume(const void *packet, bool cooperative = false);
 
 private:
   struct Kernel {
@@ -123,7 +128,7 @@ private:
                    std::vector<execution::PointerRelocation> &relocations);
   PacketResult failPacket(uint64_t completionSignal, PacketFailure failure, std::string message);
   PacketResult barrier(const AqlPacket &packet);
-  PacketResult dispatch(const AqlPacket &packet);
+  PacketResult dispatch(const AqlPacket &packet, bool cooperative);
 
   std::unique_ptr<Signals> signals;
   mutable std::mutex lock;

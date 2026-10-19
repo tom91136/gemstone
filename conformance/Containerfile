@@ -63,6 +63,18 @@ COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/lib/clang /
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
+FROM toolchain-opencl AS lint-opencl
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+RUN apt-get update && apt-get install --no-install-recommends --yes ca-certificates curl gpg \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
+       > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
+
 FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28ec222ea13f2aed2110b8a6 AS toolchain-levelzero
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
@@ -77,6 +89,13 @@ COPY --from=toolchain-opencl /opt/intel/oneapi/compiler /opt/intel/oneapi/compil
 
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
+FROM toolchain-levelzero AS lint-levelzero
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+# clang-tidy selects the newest GCC installation its own dependencies bring in, so that one needs its C++ headers.
+RUN apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} libstdc++-16-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM ubuntu-build-base AS rocm-repository
 ARG DEBIAN_FRONTEND=noninteractive
@@ -118,6 +137,17 @@ RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
+# ROCm's LLVM ships no clang-tidy; upstream parses HIP against the same ROCm tree.
+FROM toolchain-hip AS lint-hip
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
+       > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
+
 FROM rocm-repository AS toolchain-hsa
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -135,6 +165,16 @@ RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
 
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
+FROM toolchain-hsa AS lint-hsa
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
+       > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM ${CUDA_IMAGE} AS cuda-sdk
 USER root
@@ -176,6 +216,10 @@ ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:${PATH}" \
     LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib \
     LD_LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib:/usr/local/cuda/compat
 
+# Make toolkit runtimes discoverable by both the loader and CMake dependency scanning.
+RUN printf '%s\n' /usr/local/cuda/targets/x86_64-linux/lib \
+    > /etc/ld.so.conf.d/conformance.conf && ldconfig
+
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
@@ -213,6 +257,12 @@ RUN curl -fsSL "https://codeload.github.com/NVIDIA/cccl/tar.gz/refs/tags/v${CCCL
 ENV PATH=/usr/lib/llvm-${LLVM_VERSION}/bin:${PATH} \
     CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ CUDACXX=/usr/local/bin/clang++ \
     CPATH=/opt/cuda-clang-headers:/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include
+
+FROM toolchain-clang-cuda AS lint-clang-cuda
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+RUN apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
 
 # GCC 14 looks up launch ICVs using the unresolved default-device sentinel.
 # Rebuild only the host runtime; retain distribution offload plugins/device libraries.
@@ -297,6 +347,10 @@ RUN printf '%s\n' /opt/intel/oneapi/compiler/latest/lib /opt/intel/oneapi/mkl/la
 
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
+# oneAPI's own clang-tidy understands the DPC++ frontend that upstream clang-tidy cannot parse.
+FROM toolchain-sycl AS lint-sycl
+RUN ln -s /opt/intel/oneapi/compiler/latest/bin/compiler/clang-tidy /usr/local/bin/clang-tidy
 
 FROM ${NVHPC_IMAGE} AS toolchain-openacc
 USER root

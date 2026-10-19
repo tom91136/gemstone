@@ -8,32 +8,36 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.string.*
 
 object Codegen {
-  enum Request {
-    case Prepare(root: Path, bundles: Vector[String])
-    case Generate(root: Path)
-    case CheckEnvironment(root: Path)
+  case class Request(root: Path, action: Action)
+
+  enum Action derives CanEqual {
+    case Prepare(bundles: Vector[String])
+    case Generate
+    case CheckEnvironment
   }
 
   private val rootOption = Opts.option[String]("root", "Repository root").map(Path.of(_).toAbsolutePath.normalize)
 
   private val command = Command("codegen", "Prepare pinned references and regenerate checked-in sources")(
     Opts.subcommand("prepare", "Prepare reference bundles and print their directories")(
-      (rootOption, Opts.arguments[String]("bundle").map(_.toList.toVector)).mapN(Request.Prepare(_, _))
-    ).orElse(Opts.subcommand("generate", "Regenerate every checked-in source")(rootOption.map(Request.Generate(_))))
-      .orElse(Opts.subcommand("check-environment", "Check environment outputs and names")(
-        rootOption.map(Request.CheckEnvironment(_))
-      ))
+      (rootOption, Opts.arguments[String]("bundle").map(_.toList.toVector))
+        .mapN((root, bundles) => Request(root, Action.Prepare(bundles)))
+    ).orElse(Opts.subcommand("generate", "Regenerate every checked-in source")(
+      rootOption.map(Request(_, Action.Generate))
+    )).orElse(Opts.subcommand("check-environment", "Check environment outputs and names")(
+      rootOption.map(Request(_, Action.CheckEnvironment))
+    ))
   )
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
-    case Request.Prepare(root, names) =>
+    case Request(root, Action.Prepare(names)) =>
       names.foreach { name =>
         val bundle = References.Bundles.find(_.name == name)
           .getOrElse(throw IllegalArgumentException(s"unknown reference bundle $name"))
         Console.out.println(prepare(root, bundle))
       }
-    case Request.Generate(root)         => generate(root)
-    case Request.CheckEnvironment(root) => GenerateEnvironment.main(Array(s"$root", "--check"))
+    case Request(root, Action.Generate)         => generate(root)
+    case Request(root, Action.CheckEnvironment) => GenerateEnvironment.main(Array(s"$root", "--check"))
   }
 
   // Mirrors `offlineMode` in build.sbt.

@@ -8,36 +8,35 @@
 #include <limits>
 #include <new>
 
+#include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+using namespace aspartame;
 using namespace unified::rocthrust_support;
 
+namespace {
 template <class Value> inline void checkReduceLarge() {
   constexpr size_t size = 4096;
-  std::vector<Value> input(size);
-  for (size_t index = 0; index < size; ++index)
-    input[index] = static_cast<Value>(index % 17) - Value{8};
+  const auto input =
+      iota(size_t{0}, size) | map([](size_t index) -> Value { return static_cast<Value>(index % 17) - Value{8}; }) | to_vector();
   const thrust::device_vector<Value> source(input.begin(), input.end());
   const auto actual = thrust::reduce(source.begin(), source.end(), Value{}, thrust::plus<Value>{});
-  Value expected = Value{};
-  for (const auto value : input)
-    expected += value;
+  const Value expected = input ^ sum();
   {
     INFO("reduce-large mismatch");
     REQUIRE(actual == expected);
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/reduce-large/i32/n4096", "[unified][rocthrust][compact]") { checkReduceLarge<int32_t>(); }
 
+namespace {
 template <class Value> inline void checkStableSortByKeyLarge() {
   constexpr size_t size = 257;
-  std::vector<Value> keys(size);
-  std::vector<int32_t> values(size);
-  for (size_t index = 0; index < size; ++index) {
-    keys[index] = static_cast<Value>((index * 13 + 5) % 19);
-    values[index] = static_cast<int32_t>(index);
-  }
+  const auto keys = iota(size_t{0}, size) | map([](size_t index) { return static_cast<Value>(((index * 13) + 5) % 19); }) | to_vector();
+  const auto values = iota(size_t{0}, size) | map([](size_t index) { return static_cast<int32_t>(index); }) | to_vector();
   const thrust::device_vector<Value> originalKeys(keys.begin(), keys.end());
   const thrust::device_vector<int32_t> originalValues(values.begin(), values.end());
   thrust::device_vector<Value> deviceKeys = originalKeys;
@@ -61,6 +60,8 @@ template <class Value> inline void checkStableSortByKeyLarge() {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/stable-sort-by-key-large/i32/n257", "[unified][rocthrust][compact]") {
   checkStableSortByKeyLarge<int32_t>();
 }
@@ -71,7 +72,8 @@ TEST_CASE("algorithms/roc-thrust-semantic/stable-sort-by-key-large/i32/n257", "[
 // operator*.  `testing/device_delete.cu` itself is marked KNOWN_FAILURE
 // upstream, so only this brand of device dereference is live.
 
-#if defined(__HIPCC__)
+namespace {
+#ifdef __HIPCC__
 template <typename Source, typename Destination>
 __global__ void unifiedDereferenceCopy(Source sourceFirst, Source sourceLast, Destination outputFirst) {
   while (sourceFirst != sourceLast)
@@ -80,7 +82,7 @@ __global__ void unifiedDereferenceCopy(Source sourceFirst, Source sourceLast, De
 #endif
 
 template <class Value> inline void checkDereference() {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
   const std::vector<Value> input{Value{16}, Value{-23}, Value{5}, Value{101}, Value{-7}};
   thrust::device_vector<Value> source(input.begin(), input.end());
   thrust::device_vector<Value> output(5, Value{0});
@@ -139,9 +141,7 @@ template <class Value> inline void checkDereference() {
     unifiedDereferenceCopy<<<1, 1>>>(thrust::make_transform_iterator(source.begin(), Square<Value>{}),
                                      thrust::make_transform_iterator(source.end(), Square<Value>{}), output.begin());
     run("dereference-transform-iterator");
-    std::vector<Value> expected;
-    for (const auto value : input)
-      expected.push_back(value * value);
+    const auto expected = input ^ map([](Value value) -> Value { return value * value; });
     {
       INFO("dereference-transform-iterator");
       const auto &deviceValues = output;
@@ -152,6 +152,8 @@ template <class Value> inline void checkDereference() {
   SKIP("dereference requires the HIP backend");
 #endif
 }
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/dereference/i32/n5", "[unified][rocthrust][compact]") { checkDereference<int32_t>(); }
 
@@ -164,8 +166,9 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-delete/i32/n11", "[unified][roc
        "KNOWN_FAILURE on rocThrust");
 }
 
+namespace {
 template <class Value> inline void checkUniversalVector() {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
   void *probe = nullptr;
   if (hipMallocManaged(&probe, sizeof(Value)) == hipSuccess) REQUIRE(hipFree(probe) == hipSuccess);
   else
@@ -188,6 +191,8 @@ template <class Value> inline void checkUniversalVector() {
 #endif
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/universal-memory-vector/i32/n11", "[unified][rocthrust][compact]") {
   checkUniversalVector<int32_t>();
 }
@@ -196,6 +201,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/universal-memory-vector/i32/n11", "[un
 // arithmetic and the complex math transforms, mirrored against std::complex
 // host evaluation of the same expressions.
 
+namespace {
 template <class Number>
 inline void requireAlmostEqual(const std::vector<Number> &actual, const std::vector<Number> &expected, Number tolerance,
                                const std::string &where) {
@@ -210,11 +216,11 @@ inline void requireAlmostEqual(const std::vector<Number> &actual, const std::vec
 }
 
 template <class C> struct ComplexAbs {
-  UNIFIED_ROCTHRUST_HOST_DEVICE typename C::value_type operator()(const C &value) const { return thrust::abs(value); }
+  UNIFIED_ROCTHRUST_HOST_DEVICE C::value_type operator()(const C &value) const { return thrust::abs(value); }
 };
 
 template <class C> struct ComplexNorm {
-  UNIFIED_ROCTHRUST_HOST_DEVICE typename C::value_type operator()(const C &value) const { return thrust::norm(value); }
+  UNIFIED_ROCTHRUST_HOST_DEVICE C::value_type operator()(const C &value) const { return thrust::norm(value); }
 };
 
 template <class C> struct ComplexConjugate {
@@ -287,11 +293,8 @@ template <class Number> inline void checkComplexArithmetic() {
   const std::vector<Std> aStd = toStd(first);
   const std::vector<Std> bStd = toStd(second);
 
-  std::vector<Number> magnitudes, norms;
-  for (const auto &value : aStd) {
-    magnitudes.push_back(std::abs(value));
-    norms.push_back(std::norm(value));
-  }
+  const auto magnitudes = aStd ^ map([](const Std &value) { return std::abs(value); });
+  const auto norms = aStd ^ map([](const Std &value) { return std::norm(value); });
   thrust::device_vector<Number> deviceMagnitudes(first.size());
   thrust::transform(a.begin(), a.end(), deviceMagnitudes.begin(), ComplexAbs<Complex>{});
   requireAlmostEqual(std::vector<Number>(deviceMagnitudes.begin(), deviceMagnitudes.end()), magnitudes, tolerance,
@@ -300,8 +303,7 @@ template <class Number> inline void checkComplexArithmetic() {
   thrust::transform(a.begin(), a.end(), deviceNorms.begin(), ComplexNorm<Complex>{});
   requireAlmostEqual(std::vector<Number>(deviceNorms.begin(), deviceNorms.end()), norms, tolerance, "complex-arithmetic.norm");
 
-  std::vector<Std> conjugates(first.size());
-  std::transform(aStd.begin(), aStd.end(), conjugates.begin(), [](const Std &value) { return std::conj(value); });
+  const auto conjugates = aStd ^ map([](const Std &value) { return std::conj(value); });
   thrust::device_vector<Complex> deviceConjugates(first.size());
   thrust::transform(a.begin(), a.end(), deviceConjugates.begin(), ComplexConjugate<Complex>{});
   requireComplexEqual(std::vector<Complex>(deviceConjugates.begin(), deviceConjugates.end()), conjugates, tolerance,
@@ -312,21 +314,22 @@ template <class Number> inline void checkComplexArithmetic() {
     thrust::transform(a.begin(), a.end(), b.begin(), deviceScalars.begin(), functor);
     requireComplexEqual(std::vector<Complex>(deviceScalars.begin(), deviceScalars.end()), expected, tolerance, where);
   };
-  std::vector<Std> sum(first.size()), difference(first.size()), product(first.size()), quotient(first.size());
-  for (size_t index = 0; index < first.size(); ++index) {
-    sum[index] = aStd[index] + bStd[index];
-    difference[index] = aStd[index] - bStd[index];
-    product[index] = aStd[index] * bStd[index];
-    quotient[index] = aStd[index] / bStd[index];
-  }
+  const auto pairs = aStd ^ zip(bStd);
+  const auto sum = pairs ^ map([](const Std &left, const Std &right) { return left + right; });
+  const auto difference = pairs ^ map([](const Std &left, const Std &right) { return left - right; });
+  const auto product = pairs ^ map([](const Std &left, const Std &right) { return left * right; });
+  const auto quotient = pairs ^ map([](const Std &left, const Std &right) { return left / right; });
   checkBinary(ComplexSum<Complex>{}, "complex-arithmetic-sum", sum);
   checkBinary(ComplexDifference<Complex>{}, "complex-arithmetic-difference", difference);
   checkBinary(ComplexProduct<Complex>{}, "complex-arithmetic-product", product);
   checkBinary(ComplexQuotient<Complex>{}, "complex-arithmetic-quotient", quotient);
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/complex-arithmetic/f64/n5", "[unified][rocthrust][compact]") { checkComplexArithmetic<double>(); }
 
+namespace {
 template <class Number> inline void checkComplexMathTransform() {
   using Complex = thrust::complex<Number>;
   using Std = std::complex<Number>;
@@ -337,11 +340,10 @@ template <class Number> inline void checkComplexMathTransform() {
   const auto checkUnary = [&](auto functor, const std::string &where) {
     thrust::device_vector<Complex> result(source.size());
     thrust::transform(source.begin(), source.end(), result.begin(), functor);
-    std::vector<Std> expected(source.size());
-    for (size_t index = 0; index < source.size(); ++index) {
-      const Complex reference = functor(input[index]);
-      expected[index] = Std(reference.real(), reference.imag());
-    }
+    const auto expected = input ^ map([&](const Complex &value) {
+                            const Complex reference = functor(value);
+                            return Std(reference.real(), reference.imag());
+                          });
     requireComplexEqual(std::vector<Complex>(result.begin(), result.end()), expected, tolerance, where);
   };
   checkUnary(ComplexExp<Complex>{}, "complex-math-transform-exp");
@@ -350,10 +352,13 @@ template <class Number> inline void checkComplexMathTransform() {
   checkUnary(ComplexSine<Complex>{}, "complex-math-transform-sin");
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/complex-math-transform/f32/n5", "[unified][rocthrust][compact]") {
   checkComplexMathTransform<float>();
 }
 
+namespace {
 template <class Number> inline void checkComplexStdInterop() {
   const std::vector<std::complex<Number>> expected{std::complex<Number>(1.0, -2.0), std::complex<Number>(-3.0, 4.5),
                                                    std::complex<Number>(0.5, 0.25), std::complex<Number>(7.0, 0.0)};
@@ -371,15 +376,18 @@ template <class Number> inline void checkComplexStdInterop() {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/complex-std-interop/f32/n4", "[unified][rocthrust][compact]") { checkComplexStdInterop<float>(); }
 
 // rocThrust `testing/sort_permutation_iterator` port: the strided range packs a
 // permutation iterator over a counting/transform layer, and sorting that slice
 // has to leave the untouched lanes untouched.
 
+namespace {
 template <class Iterator> class StridedRange {
 public:
-  using difference_type = typename thrust::iterator_difference<Iterator>::type;
+  using difference_type = thrust::iterator_difference<Iterator>::type;
 
   struct StrideFunctor {
     difference_type stride;
@@ -387,14 +395,14 @@ public:
     UNIFIED_ROCTHRUST_HOST_DEVICE difference_type operator()(const difference_type &index) const { return stride * index; }
   };
 
-  using Counting = typename thrust::counting_iterator<difference_type>;
-  using Transformed = typename thrust::transform_iterator<StrideFunctor, Counting>;
-  using Permuted = typename thrust::permutation_iterator<Iterator, Transformed>;
+  using Counting = thrust::counting_iterator<difference_type>;
+  using Transformed = thrust::transform_iterator<StrideFunctor, Counting>;
+  using Permuted = thrust::permutation_iterator<Iterator, Transformed>;
 
   StridedRange(Iterator first, Iterator last, difference_type stride) : first(first), last(last), stride(stride) {}
 
-  Permuted begin() const { return Permuted(first, Transformed(Counting(0), StrideFunctor{stride})); }
-  Permuted end() const { return begin() + ((last - first) + (stride - 1)) / stride; }
+  [[nodiscard]] Permuted begin() const { return Permuted(first, Transformed(Counting(0), StrideFunctor{stride})); }
+  [[nodiscard]] Permuted end() const { return begin() + ((last - first) + (stride - 1)) / stride; }
 
 private:
   Iterator first;
@@ -421,10 +429,13 @@ template <class Value> inline void checkSortPermutationIterator() {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/sort-permutation-iterator/i32/n10", "[unified][rocthrust][compact]") {
   checkSortPermutationIterator<int32_t>();
 }
 
+namespace {
 template <class Value> inline void checkSortByKeyPermutationIterator() {
   const std::vector<Value> keys{Value{2}, Value{9}, Value{0}, Value{1}, Value{5}, Value{3}, Value{8}, Value{6}, Value{7}, Value{4}};
   const std::vector<Value> values{Value{0}, Value{1}, Value{2}, Value{3}, Value{4}, Value{5}, Value{6}, Value{7}, Value{8}, Value{9}};
@@ -447,6 +458,8 @@ template <class Value> inline void checkSortByKeyPermutationIterator() {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/sort-by-key-permutation-iterator/i32/n10", "[unified][rocthrust][compact]") {
   checkSortByKeyPermutationIterator<int32_t>();
 }
@@ -454,6 +467,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/sort-by-key-permutation-iterator/i32/n
 // rocThrust `testing/reverse_iterator` port: copies and scans through reverse
 // iterators with an exact host reference.
 
+namespace {
 template <class Value> inline void checkReverseIterator() {
   const std::vector<Value> source{Value{10}, Value{20}, Value{30}, Value{40}};
   const thrust::device_vector<Value> deviceSource(source.begin(), source.end());
@@ -479,10 +493,13 @@ template <class Value> inline void checkReverseIterator() {
   }
 }
 
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/reverse-iterator/i32/n5", "[unified][rocthrust][compact]") { checkReverseIterator<int32_t>(); }
 
 // rocThrust `testing/tabulate_output_iterator` port.
 
+namespace {
 template <class Iterator> struct TabulatePayload {
   Iterator output;
 
@@ -514,13 +531,15 @@ template <class Value> inline void checkTabulateOutputIterator() {
   }
   std::vector<Value> expected(count, Value{42});
   for (size_t index = 0; index < selected; ++index)
-    expected[index] = static_cast<Value>(index * stride + 1);
+    expected[index] = static_cast<Value>((index * stride) + 1);
   {
     INFO("tabulate-output-iterator");
     const auto &deviceValues = output;
     REQUIRE(std::vector<Value>(deviceValues.begin(), deviceValues.end()) == expected);
   }
 }
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/tabulate-output-iterator/i32/n17", "[unified][rocthrust][compact]") {
   checkTabulateOutputIterator<int32_t>();
@@ -540,9 +559,12 @@ TEST_CASE("algorithms/roc-thrust-semantic/out-of-memory-recovery/i32/n11", "[uni
 // rocThrust `testing/async_for_each`, `testing/async_reduce{,_into}` port,
 // compared against a host-side reference of the same operations.
 
+namespace {
 template <class Value> struct Halve {
   UNIFIED_ROCTHRUST_HOST_DEVICE void operator()(Value &value) const { value /= Value{2}; }
 };
+
+} // namespace
 
 TEST_CASE("algorithms/roc-thrust-semantic/async-for-each/i32/n11", "[unified][rocthrust][compact]") {
   const std::vector<int32_t> input{int32_t{32}, int32_t{14}, int32_t{8}, int32_t{64}, int32_t{2}, int32_t{100}};
@@ -572,9 +594,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/async-for-each/i32/n11", "[unified][ro
 TEST_CASE("algorithms/roc-thrust-semantic/async-reduce/i32/n11", "[unified][rocthrust][compact]") {
   const std::vector<int32_t> input{int32_t{1}, int32_t{-3}, int32_t{5}, int32_t{2}, int32_t{0}, int32_t{-2}};
   const thrust::device_vector<int32_t> device(input.begin(), input.end());
-  int32_t expected = int32_t{};
-  for (const auto value : input)
-    expected += value;
+  const int32_t expected = input ^ sum();
   UNIFIED_THRUST_ASYNC_BEGIN
   auto defaultFuture = thrust::async::reduce(device.begin(), device.end());
   UNIFIED_THRUST_ASYNC_END
@@ -605,9 +625,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/async-reduce-into/i32/n11", "[unified]
   auto done = thrust::async::reduce_into(device.begin(), device.end(), output.begin());
   UNIFIED_THRUST_ASYNC_END
   done.wait();
-  int32_t expected = int32_t{};
-  for (const auto value : input)
-    expected += value;
+  const int32_t expected = input ^ sum();
   {
     INFO("async-reduce-into");
     REQUIRE(output[0] == expected);

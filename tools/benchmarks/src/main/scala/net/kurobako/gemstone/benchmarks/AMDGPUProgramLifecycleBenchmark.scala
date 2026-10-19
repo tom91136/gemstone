@@ -7,7 +7,6 @@ import java.nio.file.Path
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.amdgpu.*
 
 /** Repeated module initialisation using a real AMDGPU code object. */
@@ -28,9 +27,9 @@ object AMDGPUProgramLifecycleBenchmark {
     val expected = symbolCount()
     require(expected > 0L, "benchmark image has no symbols")
     val measured = Measurement {
-      (0 until iterations.raw).foldLeft(0L)((total, _) => total + symbolCount())
+      (0 until iterations).foldLeft(0L)((total, _) => total + symbolCount())
     }
-    require(measured.value == expected * iterations.raw, "module symbols changed between loads")
-    measured.sample(iterations.toLong)
+    require(measured.value == expected * iterations, "module symbols changed between loads")
+    measured.sample(iterations.widen[Long > 0])
   }
 }

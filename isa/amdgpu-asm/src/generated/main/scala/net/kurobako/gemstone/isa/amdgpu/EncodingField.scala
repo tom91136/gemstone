@@ -31,7 +31,7 @@ object EncodingField {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum EncodingField {
+enum EncodingField derives CanEqual {
   case `A16`
   case `ABID`
   case `ABS`
@@ -298,6 +298,8 @@ enum EncodingField {
   def extensionModifier: Option[EncodingField] =
     this match { case `VSRC0` => Some(`SRC0_SEXT`); case `VSRC1` => Some(`SRC1_SEXT`); case _ => None }
   def isVectorDestination: Boolean = this match { case `VDST` | `VDSTX` | `VDSTY` => true; case _ => false }
+  def isDataOperand: Boolean =
+    this match { case `DATA` | `DATA0` | `DATA1` | `VDATA` | `VDST` => true; case _ => false }
   def isScale: Boolean = this match {
     case `SCALE_CLAMP` | `SCALE_FMT` | `SCALE_NEG` | `SCALE_NEG_HI` | `SCALE_OFFSET` | `SCALE_OP_SEL` | `SCALE_OP_SEL_HI` | `SCALE_SRC0` | `SCALE_SRC1` | `SCALE_SRC2` =>
       true;

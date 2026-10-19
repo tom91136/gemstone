@@ -24,11 +24,16 @@ object SpecialRegister {
     UR_CTAID_Z,
     SR_LANEID,
     SR_CgaCtaId,
+    SR_CgaSize,
+    SR_CgaLinearMemorySlot,
     SR_WARPID,
     SR_CLOCKLO,
     SR_CLOCKHI,
     SR_PM0,
     SR_SMID,
+    SR_VIRTUALSMID,
+    SR_VIRTID,
+    SR_VIRTCFG,
     SR_GRIDID,
     SR_LMEMHIOFF,
     SR_SWINHI,
@@ -45,31 +50,37 @@ object SpecialRegister {
   def fromSpelling(value: String): SpecialRegister = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
 }
 
-enum SpecialRegister(val spellingValue: NonEmpty[String]) {
+enum SpecialRegister(val spellingValue: NonEmpty[String]) derives CanEqual {
   inline def spelling: String = spellingValue
-  case SRZ                                       extends SpecialRegister("SRZ")
-  case SR_TID_X                                  extends SpecialRegister("SR_TID.X")
-  case SR_TID_Y                                  extends SpecialRegister("SR_TID.Y")
-  case SR_TID_Z                                  extends SpecialRegister("SR_TID.Z")
-  case SR_CTAID_X                                extends SpecialRegister("SR_CTAID.X")
-  case SR_CTAID_Y                                extends SpecialRegister("SR_CTAID.Y")
-  case SR_CTAID_Z                                extends SpecialRegister("SR_CTAID.Z")
-  case SR_NTID_X                                 extends SpecialRegister("SR_NTID.X")
-  case SR_NTID_Y                                 extends SpecialRegister("SR_NTID.Y")
-  case SR_NTID_Z                                 extends SpecialRegister("SR_NTID.Z")
-  case UR_TID_X                                  extends SpecialRegister("UR_TID.X")
-  case UR_TID_Y                                  extends SpecialRegister("UR_TID.Y")
-  case UR_TID_Z                                  extends SpecialRegister("UR_TID.Z")
-  case UR_CTAID_X                                extends SpecialRegister("UR_CTAID.X")
-  case UR_CTAID_Y                                extends SpecialRegister("UR_CTAID.Y")
-  case UR_CTAID_Z                                extends SpecialRegister("UR_CTAID.Z")
-  case SR_CgaCtaId                               extends SpecialRegister("SR_CgaCtaId")
+  case SRZ         extends SpecialRegister("SRZ")
+  case SR_TID_X    extends SpecialRegister("SR_TID.X")
+  case SR_TID_Y    extends SpecialRegister("SR_TID.Y")
+  case SR_TID_Z    extends SpecialRegister("SR_TID.Z")
+  case SR_CTAID_X  extends SpecialRegister("SR_CTAID.X")
+  case SR_CTAID_Y  extends SpecialRegister("SR_CTAID.Y")
+  case SR_CTAID_Z  extends SpecialRegister("SR_CTAID.Z")
+  case SR_NTID_X   extends SpecialRegister("SR_NTID.X")
+  case SR_NTID_Y   extends SpecialRegister("SR_NTID.Y")
+  case SR_NTID_Z   extends SpecialRegister("SR_NTID.Z")
+  case UR_TID_X    extends SpecialRegister("UR_TID.X")
+  case UR_TID_Y    extends SpecialRegister("UR_TID.Y")
+  case UR_TID_Z    extends SpecialRegister("UR_TID.Z")
+  case UR_CTAID_X  extends SpecialRegister("UR_CTAID.X")
+  case UR_CTAID_Y  extends SpecialRegister("UR_CTAID.Y")
+  case UR_CTAID_Z  extends SpecialRegister("UR_CTAID.Z")
+  case SR_CgaCtaId extends SpecialRegister("SR_CgaCtaId")
+  case SR_CgaSize  extends SpecialRegister("SR_CgaSize")
+  // The decoding tables' name for the register nvdisasm prints as SR_CgaSize.
+  case SR_CgaLinearMemorySlot                    extends SpecialRegister("SR_CgaLinearMemorySlot")
   case SR_LANEID                                 extends SpecialRegister("SR_LANEID")
   case SR_WARPID                                 extends SpecialRegister("SR_WARPID")
   case SR_CLOCKLO                                extends SpecialRegister("SR_CLOCKLO")
   case SR_CLOCKHI                                extends SpecialRegister("SR_CLOCKHI")
   case SR_PM0                                    extends SpecialRegister("SR_PM0")
   case SR_SMID                                   extends SpecialRegister("SR_SMID")
+  case SR_VIRTUALSMID                            extends SpecialRegister("SR_VIRTUALSMID")
+  case SR_VIRTID                                 extends SpecialRegister("SR_VIRTID")
+  case SR_VIRTCFG                                extends SpecialRegister("SR_VIRTCFG")
   case SR_GRIDID                                 extends SpecialRegister("SR_GRIDID")
   case SR_SWINHI                                 extends SpecialRegister("SR_SWINHI")
   case SR_LMEMHIOFF                              extends SpecialRegister("SR_LMEMHIOFF")

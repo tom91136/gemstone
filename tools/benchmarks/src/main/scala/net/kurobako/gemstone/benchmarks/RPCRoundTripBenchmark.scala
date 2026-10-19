@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
@@ -16,7 +15,7 @@ import scala.util.Using
 
 /** Persistent RPC round trips; server startup and connection setup are outside the measurement. */
 object RPCRoundTripBenchmark {
-  private enum SocketKind {
+  private enum SocketKind derives CanEqual {
     case TCP, UDS
   }
 

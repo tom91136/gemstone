@@ -53,7 +53,17 @@ object Cubin {
     val VoltaImmediateHigh32  = 0x39L
     val ImmediateLow32        = 0x2bL
     val ImmediateHigh32       = 0x2cL
+    val KeplerCall            = 0x0cL
+    val MaxwellCall           = 0x2aL
+    val VoltaCall             = 0x3aL
   }
+
+  /** CUDA device-runtime functions the driver links into a module, by the address the VM binds each to: an address no
+    * allocation reaches, which calls through it recognise.
+    */
+  val DriverFunctions: Map[NonEmpty[String], Long] =
+    Vec[NonEmpty[String]]("vprintf", "malloc", "free", "__assertfail").zipWithIndex
+      .map((name, index) => name -> (0xffffff0000000000L | ((index + 1).toLong << 4))).toMap
 
   private val MaximumImageSize = 64 * 1024 * 1024
 
@@ -64,28 +74,32 @@ object Cubin {
     if (!section.isRelocation || section.bytes.size != section.size.raw) Left("invalid cubin relocation table")
     else elf.relocations(section.bytes, section.kind == SectionType.RelocationWithAddend, 0)
 
+  private def relocationSymbols(module: Module, table: Section): Either[NonEmpty[String], Vec[elf.Symbol]] = for {
+    symbols <- module.sections.lift(table.link).filter(_.kind == SectionType.SymbolTable)
+      .toRight[NonEmpty[String]]("invalid cubin relocation symbol table")
+    strings <- module.sections.lift(symbols.link).filter(_.kind == SectionType.StringTable)
+      .toRight[NonEmpty[String]]("invalid cubin relocation string table")
+    entries <- elf.symbols(symbols.bytes, strings.bytes, 0)
+  } yield entries
+
   private def relocationGlobals(
       module: Module,
       table: Section
   ): Either[NonEmpty[String], (Long >= 0) => Either[NonEmpty[String], Global]] = for {
-    symbols <- module.sections.lift(table.link.raw).filter(_.kind == SectionType.SymbolTable)
-      .toRight[NonEmpty[String]]("invalid cubin relocation symbol table")
-    strings <- module.sections.lift(symbols.link.raw).filter(_.kind == SectionType.StringTable)
-      .toRight[NonEmpty[String]]("invalid cubin relocation string table")
-    entries <- elf.symbols(symbols.bytes, strings.bytes, 0)
+    entries <- relocationSymbols(module, table)
   } yield symbolIndex =>
     for {
-      symbol <- Option.when(symbolIndex.raw < entries.size.toLong)(entries(symbolIndex.raw.toInt))
+      symbol <- Option.when(symbolIndex < entries.size.toLong)(entries(symbolIndex.toInt))
         .toRight[NonEmpty[String]]("invalid cubin relocation symbol")
       name <- symbol.name.toRight[NonEmpty[String]]("invalid cubin relocation symbol")
       _    <- check(
-        symbol.kind.raw == SymbolKind.Object && symbol.section.raw > 0 &&
-          module.sections.lift(symbol.section.raw).exists(section =>
+        symbol.kind.raw == SymbolKind.Object && symbol.section > 0 &&
+          module.sections.lift(symbol.section).exists(section =>
             section.name.startsWith(".nv.global") || section.name.startsWith(".nv.constant")
           ),
         s"unsupported cubin relocation target '$name'"
       )
-      global <- module.globals.find(global => global.name == name && global.offset.raw.toLong == symbol.value)
+      global <- module.globals.find(global => global.name == name && global.offset.toLong == symbol.value)
         .toRight[NonEmpty[String]](s"unsupported cubin relocation target '$name'")
     } yield global
 
@@ -97,7 +111,9 @@ object Cubin {
       else relocationGlobals(module, table).flatMap(globals => entries.traverse(resolve(_, globals)))
     }
 
-  /** Symbolic CUDA address halves attached to immediate moves, before VM register lowering. */
+  /** Symbolic CUDA address halves attached to immediate moves, and calls to the driver's device runtime, before VM
+    * register lowering. An address half of this kernel's own code is a code address, an offset in its section.
+    */
   object TextRelocation {
     def resolve(
         module: Cubin.Module,
@@ -105,9 +121,9 @@ object Cubin {
         function: DecodedFunction,
         boundSymbols: Set[NonEmpty[String]]
     ): Either[NonEmpty[String], Map[Int >= 0, TextRelocation]] = {
-      val text             = module.sections(kernel.section.raw)
+      val text             = module.sections(kernel.section)
       val generation       = Generation.of(module.sm)
-      val instructionBytes = generation.instructionBytes.raw
+      val instructionBytes = generation.instructionBytes
       val instructions     = function.instructions.map(instruction => instruction.address -> instruction).toMap
       def high(kind: Long): Either[NonEmpty[String], Boolean] = kind match {
         case RelocationKind.KeplerImmediateLow32 if generation == Generation.Kepler  => Right(false)
@@ -118,40 +134,74 @@ object Cubin {
         case RelocationKind.ImmediateHigh32 if generation == Generation.Maxwell      => Right(true)
         case kind => Left(s"unsupported cubin text relocation kind 0x${kind.toHexString}")
       }
+      def call(kind: Long): Boolean = kind match {
+        case RelocationKind.KeplerCall  => generation == Generation.Kepler
+        case RelocationKind.MaxwellCall => generation == Generation.Maxwell
+        case RelocationKind.VoltaCall   => generation == Generation.Modern
+        case _                          => false
+      }
+      def move(instruction: DecodedInstruction): Boolean =
+        instruction.modifiers.isEmpty && instruction.operands.size == 2 &&
+          ((instruction.operation.form, instruction.operands.head) match {
+            case (_: Form.Mov | _: Form.Mov32i, Operand.Register(RegisterBank.R, _)) => true
+            case (_: Form.Umov, Operand.Register(RegisterBank.UR, _))                => true
+            case _                                                                   => false
+          })
       module.sections.filter(section => section.isRelocation && section.info == kernel.section.raw).flatTraverse {
         table =>
-          resolvedRelocations(module, table) { (relocation, globals) =>
-            for {
-              upper <- high(relocation.kind.raw)
-              _     <- check(
-                relocation.offset >= 0 && relocation.offset <= text.bytes.size.toLong - instructionBytes &&
-                  relocation.offset % instructionBytes == 0,
-                "cubin text relocation exceeds or misaligns its instruction"
-              )
-              offset      <- relocation.offset.toInt.refine[Int >= 0]
-              instruction <- instructions.get(offset)
-                .toRight[NonEmpty[String]]("cubin text relocation has no decoded instruction")
-              _ <- check(
-                instruction.modifiers.isEmpty && instruction.operands.size == 2 &&
-                  (instruction.operation match {
-                    case _: Instruction.Mov | _: Instruction.Mov32i => true
-                    case _                                          => false
-                  }) && instruction.operands.headOption.exists {
-                    case Operand.Register(RegisterBank.R, _) => true
-                    case _                                   => false
-                  },
-                "cubin text relocation requires an immediate 32-bit MOV or MOV32I"
-              )
-              immediate <- OperandQueries.integer(instruction.operands(1))
-                .toRight[NonEmpty[String]]("cubin text relocation requires an immediate move source")
-              _ <- check(
-                relocation.addend.nonEmpty || immediate == 0,
-                "nonzero implicit cubin text relocation addend is not implemented"
-              )
-              global <- globals(relocation.symbol)
-              _      <- check(boundSymbols(global.name), s"unbound cubin text relocation target '${global.name}'")
-            } yield offset -> TextRelocation(global.name, relocation.addend.getOrElse(0L), upper)
-          }
+          for {
+            entries <- relocationEntries(table)
+            symbols <- if (entries.isEmpty) Right(Vec.empty[elf.Symbol]) else relocationSymbols(module, table)
+            globals <- if (entries.isEmpty) Right((_: Long >= 0) => Left[NonEmpty[String], Global]("no symbols"))
+            else relocationGlobals(module, table)
+            resolved <- entries.traverse { relocation =>
+              val symbol =
+                Option.when(relocation.symbol < symbols.size.toLong)(symbols(relocation.symbol.toInt))
+                  .filter(_.kind.raw == SymbolKind.Function)
+              for {
+                _ <- check(
+                  relocation.offset >= 0 && relocation.offset <= text.bytes.size.toLong - instructionBytes &&
+                    relocation.offset % instructionBytes == 0,
+                  "cubin text relocation exceeds or misaligns its instruction"
+                )
+                offset      <- relocation.offset.toInt.refine[Int >= 0]
+                instruction <- instructions.get(offset)
+                  .toRight[NonEmpty[String]]("cubin text relocation has no decoded instruction")
+                found <- symbol.flatMap(found => found.name.map(found -> _)) match {
+                  case Some((_, name)) if call(relocation.kind) =>
+                    check(
+                      DriverFunctions.contains(name) &&
+                        (instruction.operation.form match {
+                          case _: Form.Jcal | _: Form.Call => true
+                          case _                           => false
+                        }),
+                      s"calls to device function '$name' outside the kernel are not linked"
+                    ).map(_ => TextRelocation(name, 0L, high = false, call = true))
+                  case Some((found, _)) if found.section > 0 && found.section == kernel.section =>
+                    for {
+                      upper <- high(relocation.kind)
+                      _     <- check(move(instruction), "cubin text relocation requires an immediate 32-bit MOV")
+                    } yield TextRelocation(kernel.name, found.value + relocation.addend.getOrElse(0L), upper)
+                  case _ =>
+                    for {
+                      upper <- high(relocation.kind)
+                      _     <- check(
+                        move(instruction),
+                        "cubin text relocation requires an immediate 32-bit MOV, MOV32I or UMOV"
+                      )
+                      immediate <- OperandQueries.integer(instruction.operands(1))
+                        .toRight[NonEmpty[String]]("cubin text relocation requires an immediate move source")
+                      _ <- check(
+                        relocation.addend.nonEmpty || immediate == 0,
+                        "nonzero implicit cubin text relocation addend is not implemented"
+                      )
+                      global <- globals(relocation.symbol)
+                      _ <- check(boundSymbols(global.name), s"unbound cubin text relocation target '${global.name}'")
+                    } yield TextRelocation(global.name, relocation.addend.getOrElse(0L), upper)
+                }
+              } yield offset -> found
+            }
+          } yield resolved
       }.flatMap { entries =>
         check(entries.map(_._1).distinct.size == entries.size, "overlapping cubin text relocations")
           .map(_ => entries.toMap)
@@ -159,36 +209,65 @@ object Cubin {
     }
   }
 
-  case class TextRelocation(symbol: NonEmpty[String], addend: Long, high: Boolean)
+  /** An address half of `symbol` plus `addend`, or with `call`, a call to the driver function `symbol`. */
+  case class TextRelocation(symbol: NonEmpty[String], addend: Long, high: Boolean, call: Boolean = false)
+
+  private val ConstantSection = "\\.nv\\.constant[1-9][0-9]*(?:\\..*)?".r
 
   /** CUDA ELF R_CUDA_64 data pointers stored in constant banks. */
   def constantRelocations(module: Module): Either[NonEmpty[String], Vec[ConstantRelocation]] =
     module.sections.filter(section =>
       section.isRelocation &&
         module.sections.lift(section.info).exists(target =>
-          target.name.matches("\\.nv\\.constant[1-9][0-9]*(?:\\..*)?")
+          ConstantSection.matches(target.name)
         )
     ).flatTraverse { table =>
       val bank = module.sections(table.info)
+      // ptxas binds driver system calls, such as sm_120's copies into other cluster CTAs, through bank 4; the VM
+      // provides none, and reaching a call through one traps.
+      val symbols  = relocationSymbols(module, table).getOrElse(Vec.empty[elf.Symbol])
+      val syscalls =
+        symbols.indices.filter(index => symbols(index).name.exists(_.raw.startsWith("__cuda_syscall_")))
+          .map(_.toLong).toSet
+      val drivers = symbols.indices.flatMap(index =>
+        symbols(index).name.filter(name =>
+          DriverFunctions.contains(name) && symbols(index).kind.raw == SymbolKind.Function &&
+            symbols(index).section == 0
+        ).map(index.toLong -> _)
+      ).toMap
       resolvedRelocations(module, table) { (entry, globals) =>
-        for {
-          _ <- check(entry.kind.raw == RelocationKind.Address64, "unsupported constant relocation kind")
-          _ <-
-            check(entry.offset >= 0 && entry.offset <= bank.bytes.size.toLong - 8L, "constant relocation exceeds bank")
-          offset <- entry.offset.toInt.refine[Int >= 0]
-          global <- globals(entry.symbol)
-        } yield ConstantRelocation(
-          bank.index,
-          offset,
-          global.name,
-          entry.addend.getOrElse(LittleEndian.decodeInt64(bank.bytes, offset.raw))
-        )
-      }
+        if (syscalls(entry.symbol)) Right(Option.empty[ConstantRelocation])
+        else if (drivers.contains(entry.symbol))
+          for {
+            _ <- check(entry.kind.raw == RelocationKind.Address64, "unsupported constant relocation kind")
+            _ <- check(
+              entry.offset >= 0 && entry.offset <= bank.bytes.size.toLong - 8L,
+              "constant relocation exceeds bank"
+            )
+            offset <- entry.offset.toInt.refine[Int >= 0]
+          } yield Some(ConstantRelocation(bank.index, offset, drivers(entry.symbol), 0L))
+        else
+          for {
+            _ <- check(entry.kind.raw == RelocationKind.Address64, "unsupported constant relocation kind")
+            _ <-
+              check(
+                entry.offset >= 0 && entry.offset <= bank.bytes.size.toLong - 8L,
+                "constant relocation exceeds bank"
+              )
+            offset <- entry.offset.toInt.refine[Int >= 0]
+            global <- globals(entry.symbol)
+          } yield Some(ConstantRelocation(
+            bank.index,
+            offset,
+            global.name,
+            entry.addend.getOrElse(LittleEndian.decodeInt64(bank.bytes, offset))
+          ))
+      }.map(_.flatten)
     }.flatMap { result =>
       check(
         result.groupBy(_.section).values.forall { entries =>
           entries.sortBy(_.offset).sliding(2).forall(pair =>
-            pair.size < 2 || pair(0).offset.raw + 8 <= pair(1).offset.raw
+            pair.size < 2 || pair(0).offset.raw + 8 <= pair(1).offset
           )
         },
         "overlapping constant relocations"
@@ -200,7 +279,9 @@ object Cubin {
       addresses: Map[NonEmpty[String], GuestAddress]
   ): Either[NonEmpty[String], Module] =
     constantRelocations(module).flatMap { relocations =>
-      relocations.find(relocation => !addresses.contains(relocation.target)) match {
+      def address(target: NonEmpty[String]): Option[Long] =
+        addresses.get(target).map(_.raw).orElse(DriverFunctions.get(target))
+      relocations.find(relocation => address(relocation.target).isEmpty) match {
         case Some(relocation) => Left(s"unbound constant relocation target '${relocation.target}'")
         case None             =>
           val banks = relocations.groupBy(_.section)
@@ -209,7 +290,9 @@ object Cubin {
               case Some(entries) =>
                 val data = Vec.toArray(section.bytes)
                 entries.foreach(entry =>
-                  LittleEndian.write(addresses(entry.target).raw + entry.addend, data, entry.offset.raw, 8)
+                  address(entry.target).foreach(found =>
+                    LittleEndian.write(found + entry.addend, data, entry.offset, 8)
+                  )
                 )
                 section.copy(bytes = Vec.unsafeWrapArray(data))
               case None if section.isRelocation && section.info.refine[Int >= 0].toOption.exists(banks.contains(_)) =>
@@ -251,11 +334,11 @@ object Cubin {
       else {
         val format    = info(offset) & 255
         val attribute = info(offset + 1) & 255
-        val size      = LittleEndian.decodeUInt16(info, offset + 2).raw
+        val size      = LittleEndian.decodeUInt16(info, offset + 2)
         if (format < 1 || format > 4 || (format == 4 && size > info.size - offset - 4)) Left("invalid cubin attribute")
         else {
           val value = if (format == 4) info.slice(offset + 4, offset + 4 + size) else info.slice(offset + 2, offset + 4)
-          loop(offset + 4 + (if (format == 4) size else 0), result :+ (attribute -> value))
+          loop(offset + 4 + (if (format == 4) size.raw else 0), result :+ (attribute -> value))
         }
       }
     loop(0, Vec.empty)
@@ -269,7 +352,7 @@ object Cubin {
       module  <- decode(image)
       target  <- module.kernels.find(_.name == kernel).toRight(s"kernel $kernel is not in the cubin": NonEmpty[String])
       parsed  <- Image.parse(image)
-      section <- parsed.sections.lift(target.section.raw)
+      section <- parsed.sections.lift(target.section)
         .toRight(s"kernel $kernel names a missing section": NonEmpty[String])
       patched <- parsed.patched(section, text)
     } yield patched.bytes
@@ -294,7 +377,7 @@ object Cubin {
       else if (offset + 4 > info.size) Left("truncated cubin attribute")
       else {
         val format = info(offset) & 255
-        val size   = LittleEndian.decodeUInt16(info, offset + 2).raw
+        val size   = LittleEndian.decodeUInt16(info, offset + 2)
         if (format < 1 || format > 4 || (format == 4 && size > info.size - offset - 4)) Left("invalid cubin attribute")
         else if (format == 4) loop(
           offset + 4 + size,
@@ -306,12 +389,12 @@ object Cubin {
   }
 
   private def offsets(code: CodeSection)(selected: DecodedInstruction => Boolean): Vec[Byte] =
-    code.instructions.filter(selected).flatMap(instruction => LittleEndian.toVec(instruction.address.raw.toLong, 4))
+    code.instructions.filter(selected).flatMap(instruction => LittleEndian.toVec(instruction.address.toLong, 4))
 
   private def encode(relocations: Vec[Relocation], explicitAddend: Boolean): Vec[Byte] = relocations.flatMap {
     relocation =>
       LittleEndian.toVec(relocation.offset, 8) ++
-        LittleEndian.toVec((relocation.symbol.raw << 32) | relocation.kind.raw, 8) ++
+        LittleEndian.toVec((relocation.symbol << 32) | relocation.kind, 8) ++
         (if (explicitAddend) LittleEndian.toVec(relocation.addend.getOrElse(0L), 8) else Vec.empty)
   }
 
@@ -340,16 +423,16 @@ object Cubin {
           s"kernel $kernel lists instruction offsets in EIATTR 0x${record.attribute.toHexString}": NonEmpty[String]
       )
       textSection <-
-        parsed.sections.lift(target.section.raw).toRight(s"kernel $kernel names a missing section": NonEmpty[String])
+        parsed.sections.lift(target.section).toRight(s"kernel $kernel names a missing section": NonEmpty[String])
       grown   <- parsed.resized(textSection, text)
       symbols <- grown.sections.find(
         _.sectionType == SectionType.SymbolTable
       ).toRight("cubin has no symbol table": NonEmpty[String])
-      index <- grown.symbolTables(symbols.index.raw).indexWhere(symbol =>
+      index <- grown.symbolTables(symbols.index).indexWhere(symbol =>
         symbol.name.contains(kernel) && symbol.kind.raw == SymbolKind.Function
       ).refine[Int >= 0].left.map(_ => s"kernel $kernel has no function symbol": NonEmpty[String])
-      symbol = grown.symbolTables(symbols.index.raw)(index.raw)
-      sized <- grown.withSymbol(symbols, index.raw, symbol.value, text.size.toLong)
+      symbol = grown.symbolTables(symbols.index)(index)
+      sized <- grown.withSymbol(symbols, index, symbol.value, text.size.toLong)
       noted <- info.fold[Either[NonEmpty[String], Image]](Right(sized)) { records =>
         val updated = records.map {
           case record if record.attribute == ExitOffsets =>
@@ -384,7 +467,7 @@ object Cubin {
         for {
           frame   <- named(relocated, ".debug_frame")
           entries <- relocated.relocations(table)
-          ranges = entries.filter(_.symbol.raw == index.raw.toLong).map(_.offset.toInt + 8)
+          ranges = entries.filter(_.symbol.raw == index.toLong).map(_.offset.toInt + 8)
           bytes  = ranges.foldLeft(relocated.contents(frame))((contents, at) =>
             if (at + 8 <= contents.size) contents.patch(at, LittleEndian.toVec(text.size.toLong, 8), 8) else contents
           )
@@ -399,15 +482,15 @@ object Cubin {
     _      <- check(image.size <= MaximumImageSize, "cubin image exceeds 64 MiB")
     parsed <- elf.Image.parse(image)
     header = parsed.header
-    _ <- check(header.machine.raw == 190, "expected little-endian ELF64 CUDA cubin")
+    _ <- check(header.machine == 190, "expected little-endian ELF64 CUDA cubin")
     _ <- check(Set(1, 2)(header.imageType.raw), "unsupported CUDA ELF image type")
     _ <- check(Set(7, 8)(header.abiVersion.raw), "unsupported CUDA ELF ABI version")
-    architecture = if (header.abiVersion.raw >= 8) (header.flags >>> 8) & 255 else header.flags & 255
+    architecture = if (header.abiVersion >= 8) (header.flags >>> 8) & 255 else header.flags & 255
     sm <- architecture.refine[Int in 35 ~ 121]
       .leftMap[NonEmpty[String]](_ => s"unsupported cubin metadata architecture sm_$architecture")
     count = parsed.sections.size
-    _ <- check(count > 0 && header.names.raw > 0, "invalid cubin section table")
-    _ <- check(parsed.sections.forall(_.size.raw <= MaximumImageSize), "cubin section is too large")
+    _ <- check(count > 0 && header.names > 0, "invalid cubin section table")
+    _ <- check(parsed.sections.forall(_.size <= MaximumImageSize), "cubin section is too large")
     sections = parsed.sections.map(section =>
       Section(
         section.index,
@@ -429,18 +512,18 @@ object Cubin {
             registers <- LittleEndian.decodeInt32(value, 4).refine[Int >= 0]
             // Some cuBLAS images retain a stale symbol-table link in both metadata and text.
             // Resolve it only when the table and matching function are unambiguous.
-            entries <- parsed.symbolTables.get(section.link.raw).orElse {
-              Option.when(section.link.raw > 0 && parsed.symbolTables.size == 1)(parsed.symbolTables.head._2)
+            entries <- parsed.symbolTables.get(section.link).orElse {
+              Option.when(section.link > 0 && parsed.symbolTables.size == 1)(parsed.symbolTables.head._2)
             }.toRight[NonEmpty[String]]("invalid cubin metadata symbol table")
             _ <- check(symbol > 0 && symbol < entries.size, "invalid cubin register count")
             entry = entries(symbol)
             _ <- check(
-              entry.kind.raw == SymbolKind.Function && entry.section.raw > 0 && entry.section.raw < count,
+              entry.kind.raw == SymbolKind.Function && entry.section > 0 && entry.section < count,
               "invalid cubin kernel symbol"
             )
-            text = sections(entry.section.raw)
+            text = sections(entry.section)
             _ <- check(
-              entry.name.exists(name => text.name == s".text.$name") && text.link.raw == section.link.raw &&
+              entry.name.exists(name => text.name == s".text.$name") && text.link == section.link &&
                 (text.info & 0x00ffffff) == symbol,
               "cubin register count does not match its kernel"
             )
@@ -451,13 +534,13 @@ object Cubin {
       section.name.startsWith(".text.") && sections.exists(_.name == s".nv.info.${section.name.stripPrefix(".text.")}")
     ).traverse(section => kernel(section, sections, registerCounts))
     globals <- sections.filter(_.kind == SectionType.SymbolTable)
-      .flatMap(table => parsed.symbolTables.getOrElse(table.index.raw, Vec.empty[elf.Symbol]))
+      .flatMap(table => parsed.symbolTables.getOrElse(table.index, Vec.empty[elf.Symbol]))
       .traverse(global(_, sections))
       .map(_.flatten)
   } yield Module(sm.widen[Int >= 35], sections, kernels, globals)
 
   private def global(symbol: elf.Symbol, sections: Vec[Section]): Either[NonEmpty[String], Option[Global]] = {
-    val target = symbol.section.raw
+    val target = symbol.section
     val size   = symbol.size.raw
     if (
       symbol.kind.raw == SymbolKind.Object && target > 0 && target < sections.size &&
@@ -466,7 +549,7 @@ object Cubin {
       val start = symbol.value
       for {
         _ <- check(
-          start >= 0 && start <= sections(target).size.raw && size <= sections(target).size.raw - start,
+          start >= 0 && start <= sections(target).size && size <= sections(target).size.raw - start,
           "invalid cubin global range"
         )
         name   <- symbol.name.filter(validName(_)).toRight[NonEmpty[String]]("invalid cubin global name")
@@ -507,7 +590,7 @@ object Cubin {
           .map(_ => LittleEndian.decodeUInt16(value, 4) -> LittleEndian.decodeUInt16(value, 6))
       }.getOrElse(Right((0x160: Int in 0 ~ 65535) -> (0: Int in 0 ~ 65535)))
       _ <- check(
-        parameters.zipWithIndex.forall((p, i) => p.ordinal.raw == i && p.offset.raw + p.size.raw <= bank._2.raw),
+        parameters.zipWithIndex.forall((p, i) => p.ordinal.raw == i && p.offset.raw + p.size <= bank._2),
         "invalid cubin parameter layout"
       )
       requiredCluster <- attrs.collectFirst { case (0x3d, value) =>

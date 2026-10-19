@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.compiletime.constValue
 import scala.compiletime.erasedValue
@@ -10,8 +11,23 @@ type Target = Target.Type
 object Target extends Newtype[NonEmpty[String]] {
   // Both literal acceptance and runtime lookup derive from this one table.
   private type Processors = (
-      (ISA.GFX6.type, ("tahiti", "verde", "gfx600", "gfx601")),
-      (ISA.GFX7.type, ("bonaire", "hawaii", "kabini", "kaveri", "gfx700", "gfx701")),
+      (ISA.GFX6.type, ("tahiti", "verde", "gfx600", "gfx601", "pitcairn", "oland", "hainan", "gfx602")),
+      (
+          ISA.GFX7.type,
+          (
+              "bonaire",
+              "hawaii",
+              "kabini",
+              "kaveri",
+              "gfx700",
+              "gfx701",
+              "mullins",
+              "gfx702",
+              "gfx703",
+              "gfx704",
+              "gfx705"
+          )
+      ),
       (
           ISA.GFX8.type,
           (
@@ -63,6 +79,9 @@ object Target extends Newtype[NonEmpty[String]] {
     }
 
   private val classifications = entries[Processors].toMap
+
+  /** Every accepted processor name and alias, in catalogue order. */
+  lazy val all: Vec[Target] = Vec.from(entries[Processors].map((name, _) => apply(name.unsafe[NonEmpty[String]])))
 
   override protected def violation(value: NonEmpty[String]): Option[NonEmpty[String]] =
     Option.unless[NonEmpty[String]](classifications.contains(value))(s"unsupported AMDGPU processor target: $value")

@@ -1,35 +1,66 @@
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <thread>
 
 #include <CL/cl.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
-#include <environment_keys.hpp>
 
-void deferred(const std::string &command) {
+namespace {
+
+uint32_t expectedReplacement(const std::string &command) {
+  if (command == "command-copy" || command == "command-copy-release" || command == "command-copy-rect" || command == "command-svm-copy"
+      || command == "command-intel-copy" || command == "command-barrier-ooo")
+    return 7;
+  if (command == "command-fill" || command == "command-svm-fill" || command == "command-intel-fill") return 13;
+  if (command == "command-write-rect") return 17;
+  return 0;
+}
+
+struct RemoteFailure {
+  gemstone::execution::FailureKind kind;
+  cl_int status;
+};
+
+std::optional<RemoteFailure> remoteFailureOf(const std::string &command) {
+  using gemstone::execution::FailureKind;
+  if (command == "remote-error") return RemoteFailure{.kind = FailureKind::Failed, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-illegal-address") return RemoteFailure{.kind = FailureKind::IllegalAddress, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-invalid-program")
+    return RemoteFailure{.kind = FailureKind::InvalidProgram, .status = CL_INVALID_PROGRAM_EXECUTABLE};
+  if (command == "remote-invalid-configuration")
+    return RemoteFailure{.kind = FailureKind::InvalidConfiguration, .status = CL_INVALID_WORK_GROUP_SIZE};
+  return std::nullopt;
+}
+
+} // namespace
+
+static void deferred(const std::string &command) {
   gemstone_test::RpcFixture server;
-  server.programCatalogue({{"groups", "groups"}}, {});
+  server.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(server);
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
   REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
   cl_int error = 0;
-  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  auto *context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
   REQUIRE((context && error == CL_SUCCESS));
   const bool outOfOrder = command == "out-of-order" || command == "command-marker-ooo" || command == "command-barrier-ooo"
                           || command == "command-blocking-rect-ooo" || command == "command-blocking-svm-ooo";
   const cl_queue_properties properties[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, 0};
-  auto queue = clCreateCommandQueueWithProperties(context, device, outOfOrder ? properties : nullptr, &error);
+  auto *queue = clCreateCommandQueueWithProperties(context, device, outOfOrder ? properties : nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  auto program = clCreateProgramWithIL(context, server.Spirv, sizeof(server.Spirv), &error);
+  auto *program = clCreateProgramWithIL(context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
-  auto kernel = clCreateKernel(program, "groups", &error);
+  auto *kernel = clCreateKernel(program, "groups", &error);
   REQUIRE((kernel && error == CL_SUCCESS));
   auto *original = static_cast<uint32_t *>(clSVMAlloc(context, CL_MEM_READ_WRITE, 4, 8));
   auto *replacement = static_cast<uint32_t *>(clSVMAlloc(context, CL_MEM_READ_WRITE, 4, 8));
@@ -37,12 +68,12 @@ void deferred(const std::string &command) {
   *original = 0;
   *replacement = 0;
   std::atomic_uint destroyed{0};
-  auto memory = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 4, original, &error);
+  auto *memory = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 4, original, &error);
   REQUIRE((memory && error == CL_SUCCESS));
   REQUIRE((clSetMemObjectDestructorCallback(
                memory, [](cl_mem, void *data) { static_cast<std::atomic_uint *>(data)->fetch_add(1); }, &destroyed)
            == CL_SUCCESS));
-  auto other = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 4, replacement, &error);
+  auto *other = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 4, replacement, &error);
   REQUIRE((other && error == CL_SUCCESS));
   void *mapped = nullptr;
   if ((command == "command-unmap" || command == "command-unmap-error")) {
@@ -51,20 +82,23 @@ void deferred(const std::string &command) {
   }
   if ((command == "command-svm-unmap" || command == "command-svm-unmap-error"))
     REQUIRE((clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, original, 4, 0, nullptr, nullptr) == CL_SUCCESS));
-  auto gate = clCreateUserEvent(context, &error);
+  auto *gate = clCreateUserEvent(context, &error);
   REQUIRE((gate && error == CL_SUCCESS));
-  const bool remoteFailure = command == "remote-error";
+  const auto remote = remoteFailureOf(command);
+  const bool remoteFailure = remote.has_value();
   const bool noEvent = command == "error-no-event";
   const bool teardown = command == "teardown";
-  if (remoteFailure || noEvent) server.failNextCompletion();
+  if (remoteFailure || noEvent) server.failNextCompletion(remote ? remote->kind : gemstone::execution::FailureKind::Failed);
   uint32_t seed = 7;
   REQUIRE((clSetKernelArg(kernel, 0, sizeof(memory), &memory) == CL_SUCCESS));
   REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
-  server.expect({1, 1, 1, 0, 7});
+  server.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 7});
   const size_t one = 1;
-  cl_event first = nullptr, second = nullptr, third = nullptr;
+  cl_event first = nullptr;
+  cl_event second = nullptr;
+  cl_event third = nullptr;
   if (command == "validation") {
-    const size_t tooLarge = size_t(UINT32_MAX) + 1;
+    const size_t tooLarge = size_t{UINT32_MAX} + 1;
     REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &tooLarge, &one, 1, &gate, &first) == CL_INVALID_GLOBAL_WORK_SIZE));
     REQUIRE((!first));
   }
@@ -104,14 +138,18 @@ void deferred(const std::string &command) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       } while (std::chrono::steady_clock::now() < until);
       REQUIRE((secondStatus == CL_COMPLETE && server.launches.load() == 1));
-    } else REQUIRE((server.launches.load() == 0));
+    } else {
+      REQUIRE((server.launches.load() == 0));
+    }
   }
   if (transfer) {
     REQUIRE((clEnqueueReadBuffer(queue, memory, CL_FALSE, 0, 4, &readback, 0, nullptr, &second) == CL_SUCCESS));
     REQUIRE((readback == 0 && server.launches.load() == 0));
   }
-  size_t origin[3]{0, 0, 0}, region[3]{4, 1, 1};
-  uint32_t pattern = 13, input = 17;
+  size_t origin[3]{0, 0, 0};
+  size_t region[3]{4, 1, 1};
+  uint32_t pattern = 13;
+  uint32_t input = 17;
   if (command == "command-copy" || command == "command-copy-release")
     REQUIRE((clEnqueueCopyBuffer(queue, memory, other, 0, 0, 4, 0, nullptr, &second) == CL_SUCCESS));
   if (command == "command-fill") REQUIRE((clEnqueueFillBuffer(queue, other, &pattern, 4, 0, 4, 0, nullptr, &second) == CL_SUCCESS));
@@ -127,7 +165,7 @@ void deferred(const std::string &command) {
     mapped = clEnqueueMapBuffer(queue, memory, CL_FALSE, CL_MAP_READ, 0, 4, failure ? 1 : 0, failure ? &gate : nullptr, &second, &error);
     REQUIRE((mapped && error == CL_SUCCESS));
     if (command == "command-map-twice") {
-      auto again = clEnqueueMapBuffer(queue, memory, CL_FALSE, CL_MAP_READ, 0, 4, 0, nullptr, &third, &error);
+      auto *again = clEnqueueMapBuffer(queue, memory, CL_FALSE, CL_MAP_READ, 0, 4, 0, nullptr, &third, &error);
       REQUIRE((again == mapped && error == CL_SUCCESS));
     }
   }
@@ -208,21 +246,14 @@ void deferred(const std::string &command) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     } while (std::chrono::steady_clock::now() < deadline);
   if (!noEvent)
-    REQUIRE((status == (failure ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : remoteFailure ? CL_OUT_OF_RESOURCES : CL_COMPLETE)));
+    REQUIRE((status == (failure ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : remoteFailure ? remote->status : CL_COMPLETE)));
   if (waitedFailure) REQUIRE((clWaitForEvents(1, &first) == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
   if (queue)
     REQUIRE((clFinish(queue)
              == ((failure && !waitedFailure) || remoteFailure || noEvent ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS)));
   REQUIRE((server.launches.load() == (failure ? 0U : consecutive ? 2U : 1U)));
   REQUIRE((*original == (failure || remoteFailure || noEvent ? 0U : 7U)));
-  const uint32_t expectedReplacement = command == "command-copy" || command == "command-copy-release" || command == "command-copy-rect"
-                                               || command == "command-svm-copy" || command == "command-intel-copy"
-                                               || command == "command-barrier-ooo"
-                                           ? 7
-                                       : command == "command-fill" || command == "command-svm-fill" || command == "command-intel-fill" ? 13
-                                       : command == "command-write-rect"                                                               ? 17
-                                                                                                                                       : 0;
-  REQUIRE((*replacement == expectedReplacement));
+  REQUIRE((*replacement == expectedReplacement(command)));
   if (command == "command-read-rect") REQUIRE((readback == 7));
   if (command == "command-map" || command == "command-map-twice") {
     if (command == "command-map-twice") {
@@ -276,6 +307,9 @@ OPENCL_DEFERRED_CASE("waited-error")
 OPENCL_DEFERRED_CASE("out-of-order")
 OPENCL_DEFERRED_CASE("transfer")
 OPENCL_DEFERRED_CASE("remote-error")
+OPENCL_DEFERRED_CASE("remote-illegal-address")
+OPENCL_DEFERRED_CASE("remote-invalid-program")
+OPENCL_DEFERRED_CASE("remote-invalid-configuration")
 OPENCL_DEFERRED_CASE("error-no-event")
 OPENCL_DEFERRED_CASE("teardown")
 OPENCL_DEFERRED_CASE("validation")

@@ -7,10 +7,17 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class SpecializationSuite extends munit.FunSuite {
+  private val KindWidths = Seq(
+    "OpTypeBool"  -> Seq[Int in (8, 16, 32, 64)](8),
+    "OpTypeInt"   -> Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64),
+    "OpTypeFloat" -> Seq[Int in (8, 16, 32, 64)](16, 32, 64)
+  )
+
   private def specialize(image: Vec[Byte], values: (Long, Vec[Byte])*): Either[Fault, Vec[Byte]] =
     Specialization.specialize(
       image,
@@ -95,27 +102,23 @@ class SpecializationSuite extends munit.FunSuite {
 
   for {
     specId         <- Seq[Long in 0L ~ 4294967295L](100L, 0x80000000L, 0xffffffffL)
-    (kind, widths) <- Seq(
-      "OpTypeBool"  -> Seq[Int in (8, 16, 32, 64)](8),
-      "OpTypeInt"   -> Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64),
-      "OpTypeFloat" -> Seq[Int in (8, 16, 32, 64)](16, 32, 64)
-    )
-    width <- widths
+    (kind, widths) <- KindWidths
+    width          <- widths
     byteWidth = width.toMemoryValueByteWidth
-  } test(s"specialize updates every SpecId alias for spec $specId, $kind and width ${width.raw}") {
+  } test(s"specialize updates every SpecId alias for spec $specId, $kind and width $width") {
     val boolean                     = kind == "OpTypeBool"
     def literal(bits: Long): String =
-      if (width.raw == 64) s"!0x${(bits & 0xffffffffL).toHexString} !0x${(bits >>> 32).toHexString}"
+      if (width == 64) s"!0x${(bits & 0xffffffffL).toHexString} !0x${(bits >>> 32).toHexString}"
       else s"!0x${bits.toHexString}"
     def module(first: Option[Long], second: Option[Long]): Vec[Byte] = {
       def constant(bits: Option[Long], default: Long): String =
         if (boolean) if (bits.getOrElse(default) == 0L) "OpSpecConstantFalse %t" else "OpSpecConstantTrue %t"
         else s"OpSpecConstant %t ${literal(bits.getOrElse(default))}"
       image(spv"""
-        OpDecorate %first SpecId ${specId.raw}
-        OpDecorate %second SpecId ${specId.raw}
+        OpDecorate %first SpecId $specId
+        OpDecorate %second SpecId $specId
         OpDecorate %other SpecId 101
-        %t = $kind ${if (boolean) "" else width.raw.toString} ${if (kind == "OpTypeInt") "0" else ""}
+        %t = $kind ${if (boolean) "" else width.toString} ${if (kind == "OpTypeInt") "0" else ""}
         %first = ${constant(first, 0L)}
         %second = ${constant(second, 1L)}
         %other = ${constant(None, 0L)}
@@ -129,8 +132,8 @@ class SpecializationSuite extends munit.FunSuite {
         SpecializationInfo(Binary32(101L), byteWidth.widen[Int > 0])
       ).sortBy(_.specId.toLong))
     )
-    for (zero <- Seq(false, true)) {
-      val replacement = Vec.tabulate(byteWidth.raw)(i => if (zero) 0.toByte else (0xa0 + i).toByte)
+    for (zero <- booleans) {
+      val replacement = Vec.tabulate(byteWidth)(i => if (zero) 0.toByte else (0xa0 + i).toByte)
       val bits        = LittleEndian.decode(replacement, 0, byteWidth.widen[Int in 0 ~ 8])
       assertEquals(specialize(source, specId.raw -> replacement), Right(module(Some(bits), Some(bits))))
     }
@@ -203,8 +206,8 @@ class SpecializationSuite extends munit.FunSuite {
     offsets.map(LittleEndian.decode(bytes, _, width))
 
   for (width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64))
-    test(s"integer specialization arithmetic wraps to width ${width.raw}") {
-      val mask  = if (width.raw == 64) -1L else (1L << width.raw) - 1
+    test(s"integer specialization arithmetic wraps to width $width") {
+      val mask  = if (width == 64) -1L else (1L << width) - 1
       val cases = Seq(
         ("IAdd", mask, Some(2L), 1L),
         ("ISub", 0L, Some(1L), mask),
@@ -219,12 +222,12 @@ class SpecializationSuite extends munit.FunSuite {
         ("SMod", 5L, Some(mask - 1), mask), // 5 mod -2 == -1
         ("ShiftRightLogical", mask, Some(1L), mask >>> 1),
         ("ShiftRightArithmetic", mask, Some(1L), mask),
-        ("ShiftLeftLogical", 1L, Some(width.raw - 1L), 1L << (width.raw - 1)),
+        ("ShiftLeftLogical", 1L, Some(width - 1L), 1L << (width - 1)),
         ("BitwiseOr", 5L, Some(3L), 7L),
         ("BitwiseXor", 5L, Some(3L), 6L),
         ("BitwiseAnd", 5L, Some(3L), 1L)
       )
-      val declarations = s"%word = OpTypeInt ${width.raw} 1\n" + cases.zipWithIndex.map {
+      val declarations = s"%word = OpTypeInt $width 1\n" + cases.zipWithIndex.map {
         case ((_, left, right, _), i) =>
           s"%left_$i = OpSpecConstant %word 0x${left.toHexString}\n" +
             right.fold("")(value => s"%right_$i = OpSpecConstant %word 0x${value.toHexString}")
@@ -330,7 +333,7 @@ class SpecializationSuite extends munit.FunSuite {
     )
     assertEquals(
       results.zip(Seq(8, 8, 4, 8, 4)).map((bytes, width) => lanes(bytes, width.refine[Int in 0 ~ 8].value, 0).head),
-      Seq(-1L, 0xffffffffL, 3L, doubleBits(1.5), 0xc0200000L)
+      Seq(-1L, 0xffffffffL, 3L, double(1.5), 0xc0200000L)
     )
   }
 

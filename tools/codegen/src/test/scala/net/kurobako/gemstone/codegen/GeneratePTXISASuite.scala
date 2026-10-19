@@ -46,12 +46,13 @@ class GeneratePTXISASuite extends munit.FunSuite {
       val actual    = source(output, "Instruction")
       val modifiers = source(output, "Modifier")
       val opcodes   = source(output, "Opcode")
-      assert(actual.contains("case Add("), actual.take(500))
-      assert(actual.contains("dest: Operand, srcA: Operand, srcB: Operand"), actual.takeRight(1500))
-      assert(actual.contains("Version(7, 2), Target(80)"))
+      val forms     = source(output, "Form")
+      assert(forms.contains("case Add("), forms.take(500))
+      assert(forms.contains("dest: Operand, srcA: Operand, srcB: Operand"), forms.takeRight(1500))
+      assert(actual.contains("7.2 80 "))
       assert(actual.contains("Opcode.Add"))
-      assert(actual.contains("ModifierGroup(Modifier.S32, Modifier.U32)"))
-      assert(actual.contains("Set(Modifier.Sat)"))
+      assert(actual.contains(";s32,u32;"))
+      assert(actual.contains(";sat;"))
       assert(modifiers.contains("case U32 extends Modifier(\"u32\")"))
       assert(modifiers.contains("case Unrecognised(spelling: NonEmpty[String])"))
       assert(opcodes.contains("case Add extends Opcode(\"add\")"))
@@ -88,12 +89,8 @@ class GeneratePTXISASuite extends munit.FunSuite {
       val output = root.resolve("output")
       generate("instructions", input, output)
       val actual = source(output, "Instruction")
-      val group  = "ModifierGroup(Modifier.F32, Modifier.U32)"
-      assert(
-        actual.filterNot(_.isWhitespace).contains(s"Vec($group,$group)".filterNot(_.isWhitespace)),
-        actual.takeRight(2500)
-      )
-      assert(!actual.contains("Modifier.Dtype"))
+      assert(actual.contains(";f32,u32/f32,u32;"), actual.takeRight(2500))
+      assert(!actual.contains("dtype"))
     }
   }
 
@@ -114,7 +111,7 @@ class GeneratePTXISASuite extends munit.FunSuite {
       for (size <- List(64, 128, 256))
         assert(modifiers.contains(s"extends Modifier(\"L2::${size}B\")"))
       val instructions = source(output, "Instruction")
-      assert(instructions.contains("Modifier.L2128B"))
+      assert(instructions.contains("L2::128B"))
     }
   }
 
@@ -153,17 +150,15 @@ class GeneratePTXISASuite extends munit.FunSuite {
       val output = root.resolve("output")
       generate("instructions", input, output)
       val actual                 = source(output, "Instruction")
-      val compact                = actual.filterNot(_.isWhitespace)
-      def contains(text: String) = compact.contains(text.filterNot(_.isWhitespace))
-      assert(contains("case Ld(dest: Operand, address: Operand, cachePolicy: Option[Operand]"), actual.take(800))
-      assert(contains("Modifier.Param, Modifier.ParamEntry, Modifier.ParamFunc"), actual.takeRight(2500))
-      assert(contains("InstructionForm(Vec(OperandConstraint.Register, OperandConstraint.Address), "))
-      assert(contains(
-        "InstructionForm(Vec(OperandConstraint.Register, OperandConstraint.Address, OperandConstraint.Value), "
-      ))
-      assert(!actual.contains("OperandConstraint.Unknown"))
-      for (kind <- List("B32", "Bf16"))
-        assert(contains(s"Set(Modifier.$kind, Modifier.ParamFunc) -> Target(90)"), actual.takeRight(2500))
+      val forms                  = source(output, "Form").filterNot(_.isWhitespace)
+      def contains(text: String) = forms.contains(text.filterNot(_.isWhitespace))
+      assert(contains("case Ld(dest: Operand, address: Operand, cachePolicy: Option[Operand]"), forms.take(800))
+      assert(actual.contains("global,param,param::entry,param::func"), actual.takeRight(2500))
+      assert(actual.contains(" RA;"))
+      assert(actual.contains(" RAX;"))
+      assert(" [RAVSX]*U[RAVSXU]*;".r.findFirstIn(actual).isEmpty)
+      for (kind <- List("b32", "bf16"))
+        assert(actual.contains(s"$kind+param::func=90"), actual.takeRight(2500))
     }
   }
 
@@ -192,14 +187,13 @@ class GeneratePTXISASuite extends munit.FunSuite {
       )
       val output = root.resolve("output")
       generate("instructions", input, output)
-      val compact                = source(output, "Instruction").filterNot(_.isWhitespace)
-      val modifiers              = source(output, "Modifier")
-      def contains(text: String) = compact.contains(text.filterNot(_.isWhitespace))
-      assert(contains("Set(Modifier.Shared, Modifier.SharedCta, Modifier.Trans)"), compact.take(500))
-      assert(contains("Set(Modifier.M8n8, Modifier.Trans, Modifier.X1, Modifier.X2, Modifier.X4)"))
+      val actual    = source(output, "Instruction")
+      val modifiers = source(output, "Modifier")
+      assert(actual.contains(";shared,shared::cta,trans;"), actual.take(500))
+      assert(actual.contains(";m8n8,trans,x1,x2,x4;"))
       assert(modifiers.contains("case N2d extends Modifier(\"2d\")"))
-      assert(contains("ModifierGroup(Modifier.N1d, Modifier.N2d)"))
-      assert(contains("ModifierGroup(Modifier.Cc), ModifierGroup(Modifier.U32)"))
+      assert(actual.contains(";1d,2d/"))
+      assert(actual.contains(";cc/u32;"))
     }
   }
 

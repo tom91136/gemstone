@@ -40,7 +40,7 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
     val _ = sequence.getAndIncrement()
     try body
     finally {
-      sequence.setRelease(sequence.get() + 1)
+      PlatformConcurrency.setRelease(sequence, sequence.get() + 1)
       lock.unlock()
     }
   }
@@ -53,11 +53,11 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
 
   def allocate(size: Int > 0): Either[Fault, GuestAddress] = exclusive {
     next match {
-      case Some(start) if java.lang.Long.compareUnsigned(start + size.raw.toLong - 1L, start) >= 0 =>
-        val following = start + ((size.raw.toLong + 255L) & -256L)
+      case Some(start) if java.lang.Long.compareUnsigned(start + size.toLong - 1L, start) >= 0 =>
+        val following = start + size.toLong.alignUp(256L)
         // Starts only increase, so the new block sorts last.
         val current = index
-        index = Index(current.starts :+ start, current.blocks :+ Array.ofDim[Byte](size.raw))
+        index = Index(current.starts :+ start, current.blocks :+ Array.ofDim[Byte](size))
         // A final block may consume the remaining address space, alignment padding included.
         next = Option.when(java.lang.Long.compareUnsigned(following, start) > 0)(following)
         Right(GuestAddress(start))
@@ -140,17 +140,17 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
   private inline def route[A](address: GuestAddress, size: Int >= 0, inline mutating: Boolean)(
       inline heap: (Array[Byte], Int) => A
   )(inline delegated: Either[Fault, A]): Either[Fault, A] =
-    if (outside(address, size.raw.toLong)) delegated
+    if (outside(address, size.toLong)) delegated
     else {
       val routed =
-        if (mutating) exclusive(inHeap(address, size.raw.toLong)(heap))
+        if (mutating) exclusive(inHeap(address, size.toLong)(heap))
         else {
-          val version                                  = sequence.getAcquire()
+          val version                                  = PlatformConcurrency.getAcquire(sequence)
           val attempt: Either[Fault, Option[A]] | Null =
-            if ((version & 1) == 0) inHeap(address, size.raw.toLong)(heap) else null
+            if ((version & 1) == 0) inHeap(address, size.toLong)(heap) else null
           PlatformFence.acquire()
           if (attempt != null && sequence.get() == version) attempt
-          else lock.withLock(inHeap(address, size.raw.toLong)(heap))
+          else lock.withLock(inHeap(address, size.toLong)(heap))
         }
       routed match {
         case Left(fault)        => Left(fault)
@@ -162,16 +162,16 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def external(ranges: AddressSpace.ReadRanges)(prepare: AddressSpace.ReadRanges => Either[Fault, Unit])
       : Either[Fault, Unit] =
-    if (ranges.forall((address, size) => outside(address, size.raw.toLong))) prepare(ranges)
+    if (ranges.forall((address, size) => outside(address, size.toLong))) prepare(ranges)
     else {
       val kept                = AddressSpace.ReadRangeBuffer()
       val snapshot            = index
       var fault: Fault | Null = null
       ranges.foreach { (address, size) =>
         if (fault == null) {
-          val located = locate(snapshot, address, size.raw.toLong)
+          val located = locate(snapshot, address, size.toLong)
           if (located == Backing) kept.add(address, size)
-          else if (located == Straddle) fault = straddles(address, size.raw.toLong)
+          else if (located == Straddle) fault = straddles(address, size.toLong)
         }
       }
       if (fault == null) prepare(kept) else Left(fault)
@@ -181,7 +181,7 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
   private inline def routeValue(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef)(
       inline delegated: Fault | Null
   ): Fault | Null =
-    if (outside(address, size.raw.toLong)) delegated
+    if (outside(address, size.toLong)) delegated
     else
       route(address, size.widen[Int >= 0], mutating = false)((bytes, offset) =>
         Option(LittleEndian.decode(bytes, offset, size.widen[Int in 0 ~ 8]))
@@ -250,12 +250,12 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
 
   override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] =
     route(address, size, mutating = false)((bytes, offset) =>
-      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size.raw))
+      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size))
     )(backing.read(address, size))
 
   override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
     route(address, size, mutating = false)((bytes, offset) =>
-      Option(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size.raw)))
+      Option(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
     )(Right(None)) match {
       case Left(fault)        => Left(fault)
       case Right(Some(bytes)) => Right(bytes)
@@ -286,13 +286,13 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
     routeValueWrite(address, value, size)(backing.writeSystemValue(address, value, size))
 
   override def writeSystemBatch(writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]): Either[Fault, Unit] =
-    if (writes.forall((address, _, size) => outside(address, size.raw.toLong))) backing.writeSystemBatch(writes)
+    if (writes.forall((address, _, size) => outside(address, size.toLong))) backing.writeSystemBatch(writes)
     else exclusive {
       val snapshot = index
       writes.traverseFilter { (address, value, size) =>
-        val located = locate(snapshot, address, size.raw.toLong)
+        val located = locate(snapshot, address, size.toLong)
         if (located == Backing) Right(Some((address, value, size)))
-        else if (located == Straddle) Left(straddles(address, size.raw.toLong))
+        else if (located == Straddle) Left(straddles(address, size.toLong))
         else {
           LittleEndian.write(value, snapshot.blocks((located >>> 32).toInt), located.toInt, size.widen[Int in 0 ~ 8])
           Right(None)

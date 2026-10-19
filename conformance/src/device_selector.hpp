@@ -5,51 +5,34 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <aspartame/all.hpp>
+
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 
 namespace conformance {
 
-inline bool globMatches(const char *pattern, const char *value) {
-  const char *star = nullptr;
-  const char *retry = nullptr;
-  while (*value) {
-    if (*pattern == '?' || *pattern == *value) {
-      ++pattern;
-      ++value;
-    } else if (*pattern == '*') {
-      star = pattern++;
-      retry = value;
-    } else if (star) {
-      pattern = star + 1;
-      value = ++retry;
-    } else {
-      return false;
-    }
-  }
-  while (*pattern == '*')
-    ++pattern;
-  return *pattern == '\0';
+inline bool globMatches(std::string_view pattern, std::string_view value) {
+  using namespace aspartame;
+  return value ^ glob_matches(pattern);
 }
 
 inline size_t selectDevice(const std::vector<std::string> &descriptions) {
+  using namespace aspartame;
   if (descriptions.empty()) throw std::runtime_error("no GPU devices were discovered");
   const char *configured = std::getenv("CONFORMANCE_DEVICE");
   if (!configured || !*configured) return 0;
-  std::vector<size_t> matches;
-  for (size_t index = 0; index < descriptions.size(); ++index)
-    if (globMatches(configured, descriptions[index].c_str())) matches.push_back(index);
-  if (matches.size() == 1) return matches.front();
+  const auto matches = descriptions ^ zip_with_index()
+                       ^ filter([&](const std::string &description, size_t) { return globMatches(configured, description); });
+  if (matches.size() == 1) return matches.front().second;
   if (matches.empty())
     throw std::runtime_error(
-        fmt::format("device selector '{}' matched no devices; discovered: {}", configured, fmt::join(descriptions, ", ")));
-  std::vector<std::string> matched;
-  matched.reserve(matches.size());
-  for (const auto index : matches)
-    matched.push_back(descriptions[index]);
-  throw std::runtime_error(fmt::format("device selector '{}' is ambiguous; matched: {}", configured, fmt::join(matched, ", ")));
+        fmt::format("device selector '{}' matched no devices; discovered: {}", configured, descriptions ^ mk_string(", ")));
+  throw std::runtime_error(
+      fmt::format("device selector '{}' is ambiguous; matched: {}", configured,
+                  matches ^ map([](const std::string &description, size_t) { return description; }) ^ mk_string(", ")));
 }
 
 inline std::string pciDescription(uint32_t domain, uint32_t bus, uint32_t device, uint32_t function) {

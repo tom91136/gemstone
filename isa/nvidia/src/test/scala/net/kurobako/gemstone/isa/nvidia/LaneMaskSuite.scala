@@ -13,7 +13,7 @@ class LaneMaskSuite extends munit.FunSuite {
     def contents(mask: VMLaneMask): Set[Int] = {
       val result = Set.newBuilder[Int]
       mask.foreachLane { lane =>
-        val _ = result += lane.raw.toInt
+        val _ = result += lane.toInt
       }
       result.result()
     }
@@ -21,13 +21,13 @@ class LaneMaskSuite extends munit.FunSuite {
       left  <- sets
       right <- sets
     } {
-      val a       = full.filterLanes(lane => left.contains(lane.raw.toInt))
-      val b       = full.filterLanes(lane => right.contains(lane.raw.toInt))
+      val a       = full.filterLanes(lane => left.contains(lane.toInt))
+      val b       = full.filterLanes(lane => right.contains(lane.toInt))
       val results = Vector(
-        a.intersect(b)                                        -> (left.intersect(right)),
-        a.union(b)                                            -> (left.union(right)),
-        a.subtract(b)                                         -> (left.diff(right)),
-        a.filterLanes(lane => right.contains(lane.raw.toInt)) -> (left.intersect(right))
+        a.intersect(b)                                    -> (left.intersect(right)),
+        a.union(b)                                        -> (left.union(right)),
+        a.subtract(b)                                     -> (left.diff(right)),
+        a.filterLanes(lane => right.contains(lane.toInt)) -> (left.intersect(right))
       )
       results.foreach { case (mask, expected) =>
         assertEquals(contents(mask), expected)

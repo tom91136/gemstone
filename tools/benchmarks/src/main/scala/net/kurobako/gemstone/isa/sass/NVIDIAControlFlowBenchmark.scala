@@ -17,7 +17,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** Equivalent PTX and encoded SASS kernels exercise divergent branches, predicate guards, loops and memory. */
 object NVIDIAControlFlowBenchmark {
-  private enum ISA { case PTX, SASS }
+  private enum ISA derives CanEqual { case PTX, SASS }
 
   val benchmark: Case = (
     choice("isa", "ptx" -> ISA.PTX, "sass" -> ISA.SASS),
@@ -90,7 +90,7 @@ object NVIDIAControlFlowBenchmark {
       info = 0,
       bytes = bytes
     )
-    val constantBytes = Vec.fill((entry.parameterBase + entry.parameterSize).raw)(0.toByte)
+    val constantBytes = Vec.fill(entry.parameterBase + entry.parameterSize)(0.toByte)
     val constants     = Cubin.Section(
       index = 1,
       name = ".nv.constant0.control",
@@ -122,18 +122,15 @@ object NVIDIAControlFlowBenchmark {
     }
     val geometry = LaunchGeometry.forLaunch(Dimensions(lanes, 1, 1), Dimensions(groups, 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
-    val count      = Math.multiplyExact(lanes.raw, groups.raw)
+    val count      = Math.multiplyExact(lanes, groups)
     val memory     = BenchmarkMemory((count + 1) * 4)
     val output     = memory.ids(0)
     val parameters = isa match {
-      case ISA.PTX => Map(
-          ("output": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
-          ("rounds": NonEmpty[String]) -> Argument.fromLong(rounds.raw.toLong)
-        )
+      case ISA.PTX  => PTX.PTXParameters.output(memory, output, "rounds": NonEmpty[String], rounds.toLong)
       case ISA.SASS => Map(
           ("param0": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
-          ("param1": NonEmpty[String]) -> Argument(LittleEndian.toVec(rounds.raw.toLong, 4).unsafe),
-          ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(lanes.raw.toLong, 4).unsafe)
+          ("param1": NonEmpty[String]) -> Argument(LittleEndian.toVec(rounds.toLong, 4).unsafe),
+          ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(lanes.toLong, 4).unsafe)
         )
     }
     val sample = Measurement.repeatPooled(iterations, workers)(pool =>
@@ -141,7 +138,7 @@ object NVIDIAControlFlowBenchmark {
     )
     (0 until count).foreach { lane =>
       val actual    = memory.getInt(output, (lane + 1) * 4)
-      val increment = if ((lane % lanes.raw & 1) == 0) 1 else 2
+      val increment = if ((lane % lanes & 1) == 0) 1 else 2
       val expected  = lane + rounds.raw * (increment + 1) - 1
       require(actual == expected, s"lane $lane: expected $expected, got $actual")
     }

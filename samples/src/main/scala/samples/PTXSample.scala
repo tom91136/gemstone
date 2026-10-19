@@ -40,28 +40,30 @@ object PTXSample {
   /** Every `add` of the immediate `from`, now adding `to`. */
   private def replaceConstant(program: Program, from: String, to: NonEmpty[String]): Program =
     program.mapInstructions {
-      case add @ Instruction.Add(_, _, Operand.Immediate(raw), _, _) if raw.raw == from =>
-        add.copy(srcB = Operand.Immediate(to))
+      case add @ Instruction(Form.Add(dest, srcA, Operand.Immediate(raw)), _, _) if raw.raw == from =>
+        add.copy(form = Form.Add(dest, srcA, Operand.Immediate(to)))
       case other => other
     }
 
   /** `extra` placed after each `add` of an immediate. */
   private def insertAfterAdd(program: Program, extra: Instruction): Program = program.mapBodies(_.flatMap {
-    case statement @ Statement.Instruction(Instruction.Add(_, _, Operand.Immediate(_), _, _)) =>
+    case statement @ Statement.Instruction(Instruction(Form.Add(_, _, Operand.Immediate(_)), _, _)) =>
       Vec(statement, Statement.Instruction(extra))
     case statement => Vec(statement)
   })
 
   def run(): Either[String, Outcome] = for {
-    program  <- Parser.parse(source).left.map(_.message.raw)
-    original <- run(program)
-    edited   <- run(replaceConstant(program, "3", "5"))
-    add      <- program.statements.collectFirst { case Statement.Entry(body = Some(body)) =>
-      body.collectFirst { case Statement.Instruction(add @ Instruction.Add(_, _, Operand.Immediate(_), _, _)) => add }
+    program     <- Parser.parse(source).left.map(_.message.raw)
+    original    <- run(program)
+    edited      <- run(replaceConstant(program, "3", "5"))
+    (add, dest) <- program.statements.collectFirst { case Statement.Entry(body = Some(body)) =>
+      body.collectFirst {
+        case Statement.Instruction(add @ Instruction(Form.Add(dest, _, Operand.Immediate(_)), _, _)) => (add, dest)
+      }
     }.flatten.toRight("the kernel has no add")
     extended <- run(insertAfterAdd(
       replaceConstant(program, "3", "5"),
-      add.copy(srcA = add.dest, srcB = Operand.Immediate("1"))
+      add.copy(form = Form.Add(dest, dest, Operand.Immediate("1")))
     ))
   } yield Outcome(original, asm.Printer.render(program), edited, extended)
 }

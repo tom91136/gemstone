@@ -15,11 +15,11 @@ private object VMLaneMask {
   def all(laneCount: Int in 1 ~ 1024): VMLaneMask = {
     val words = Array.fill(WordCount)(0L)
     var lane  = 0
-    while (lane < laneCount.raw) {
+    while (lane < laneCount) {
       words(lane >>> 6) |= 1L << (lane & 63)
       lane += 1
     }
-    VMLaneMask(words, laneCount.widen, (laneCount.raw + 63) >>> 6)
+    VMLaneMask(words, laneCount.widen, (laneCount + 63) >>> 6)
   }
 
   /** Collect lane groups without allocating an immutable mask for each arrival. */
@@ -30,8 +30,8 @@ private object VMLaneMask {
     private var limit = 0
 
     def add(lane: WorkgroupLane): Unit = {
-      val index = lane.raw >>> 6
-      val bit   = 1L << (lane.raw & 63)
+      val index = lane >>> 6
+      val bit   = 1L << (lane & 63)
       if ((words(index) & bit) == 0L) {
         words(index) |= bit
         count += 1
@@ -50,10 +50,10 @@ private class VMLaneMask @scala.annotation.publicInBinary private (
     private val words: Array[Long],
     private val count: Int in 0 ~ 1024,
     private val limit: Int
-) {
-  def isEmpty: Boolean                      = count.raw == 0
-  def nonEmpty: Boolean                     = count.raw != 0
-  def positiveSize: Option[Int in 1 ~ 1024] = VMLaneMask.PositiveSizes(count.raw)
+) derives CanEqual {
+  def isEmpty: Boolean                      = count == 0
+  def nonEmpty: Boolean                     = count != 0
+  def positiveSize: Option[Int in 1 ~ 1024] = VMLaneMask.PositiveSizes(count)
   def headOption: Option[WorkgroupLane]     = {
     val wordIndex = words.indexWhere(_ != 0L)
     Option.when(wordIndex >= 0)(WorkgroupLane.fromIndex((wordIndex << 6) +
@@ -68,30 +68,30 @@ private class VMLaneMask @scala.annotation.publicInBinary private (
     else (words(lane >>> 6) >>> (lane & 32)) & 0xffffffffL
 
   def intersect(other: VMLaneMask): VMLaneMask =
-    if (count.raw == 0 || other.count.raw == 0) VMLaneMask.Empty
+    if (count == 0 || other.count == 0) VMLaneMask.Empty
     else if (this eq other) this
     else combine(other, (left, right) => left & right)
 
   def union(other: VMLaneMask): VMLaneMask =
-    if (count.raw == 0) other
-    else if (other.count.raw == 0 || (this eq other)) this
+    if (count == 0) other
+    else if (other.count == 0 || (this eq other)) this
     else combine(other, (left, right) => left | right)
 
   def subtract(other: VMLaneMask): VMLaneMask =
-    if (count.raw == 0 || other.count.raw == 0) this
+    if (count == 0 || other.count == 0) this
     else if (this eq other) VMLaneMask.Empty
     else combine(other, (left, right) => left & ~right)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def filterLanes(inline predicate: WorkgroupLane => Boolean): VMLaneMask =
-    if (count.raw == 0) VMLaneMask.Empty
+    if (count == 0) VMLaneMask.Empty
     else {
       var filtered = words
       var size     = count.raw
       foreachLane { lane =>
         if (!predicate(lane)) {
           if (filtered eq words) filtered = words.clone()
-          filtered(lane.raw >>> 6) &= ~(1L << (lane.raw & 63))
+          filtered(lane >>> 6) &= ~(1L << (lane & 63))
           size -= 1
         }
       }
@@ -141,9 +141,9 @@ private class VMLaneMask @scala.annotation.publicInBinary private (
   }
 
   override def equals(other: Any): Boolean = other match {
-    case that: VMLaneMask => count.raw == that.count.raw && java.util.Arrays.equals(words, that.words)
+    case that: VMLaneMask => count == that.count && java.util.Arrays.equals(words, that.words)
     case _                => false
   }
 
-  override def hashCode(): Int = 31 * count.raw + java.util.Arrays.hashCode(words)
+  override def hashCode(): Int = 31 * count + java.util.Arrays.hashCode(words)
 }

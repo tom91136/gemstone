@@ -5,9 +5,13 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
 class MatrixSuite extends munit.FunSuite {
+  private case class Scenario(left: Input, right: Input, out: String, expected: Vector[Double], body: Seq[String])
+  private case class Access(pointer: String, value: String, indexes: String)
+
   private val operations =
     Seq(
       "transpose",
@@ -44,27 +48,40 @@ class MatrixSuite extends munit.FunSuite {
       def scalar(value: Double) = Input("%float", Vector(value))
       def dot(p: Seq[Double], q: Seq[Double]): Double = p.zip(q).map(_ * _).sum
       def binary(opcode: String, out: String)         = Seq(s"%result = $opcode $out %left %right")
-      val (left, right, out, expected, body)          = operation match {
+      val Scenario(left, right, out, expected, body)  = operation match {
         case "transpose" =>
-          (matrix, scalar(0), "%transposed", flatten(a.transpose), Seq("%result = OpTranspose %transposed %left"))
+          Scenario(
+            matrix,
+            scalar(0),
+            "%transposed",
+            flatten(a.transpose),
+            Seq("%result = OpTranspose %transposed %left")
+          )
         case "scale" =>
-          (matrix, scalar(-2), "%matrix", flatten(a.map(_.map(_ * -2))), binary("OpMatrixTimesScalar", "%matrix"))
+          Scenario(
+            matrix,
+            scalar(-2),
+            "%matrix",
+            flatten(a.map(_.map(_ * -2))),
+            binary("OpMatrixTimesScalar", "%matrix")
+          )
         case "multiply" =>
           val product = a.map(r => b.transpose.map(dot(r, _)))
           val right   = Input("%transposed", flatten(b))
-          (matrix, right, "%square", flatten(product), binary("OpMatrixTimesMatrix", "%square"))
-        case "matrix_vector" => (matrix, row, "%column", a.map(dot(_, y)), binary("OpMatrixTimesVector", "%column"))
+          Scenario(matrix, right, "%square", flatten(product), binary("OpMatrixTimesMatrix", "%square"))
+        case "matrix_vector" =>
+          Scenario(matrix, row, "%column", a.map(dot(_, y)), binary("OpMatrixTimesVector", "%column"))
         case "vector_matrix" =>
-          (column, matrix, "%row", a.transpose.map(dot(_, x)), binary("OpVectorTimesMatrix", "%row"))
+          Scenario(column, matrix, "%row", a.transpose.map(dot(_, x)), binary("OpVectorTimesMatrix", "%row"))
         case "outer" =>
-          (column, row, "%matrix", flatten(x.map(p => y.map(p * _))), binary("OpOuterProduct", "%matrix"))
+          Scenario(column, row, "%matrix", flatten(x.map(p => y.map(p * _))), binary("OpOuterProduct", "%matrix"))
         case "indexed" =>
           // Matrices are vectors of boxed doubles, so updating a cell boxes it.
           @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
           val changed = a.updated(rows - 1, a.last.updated(columns - 1, x.last))
           @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
           val stored = changed.zip(x).map(_.updated(0, _))
-          (
+          Scenario(
             matrix,
             column,
             "%matrix",
@@ -79,8 +96,8 @@ class MatrixSuite extends munit.FunSuite {
             )
           )
         case "array_extract" =>
-          (matrices, column, "%matrix", flatten(a), Seq("%result = OpCompositeExtract %matrix %left 1"))
-        case _ => (
+          Scenario(matrices, column, "%matrix", flatten(a), Seq("%result = OpCompositeExtract %matrix %left 1"))
+        case _ => Scenario(
             matrices,
             column,
             "%matrix",
@@ -131,8 +148,6 @@ class MatrixSuite extends munit.FunSuite {
   }
 
   for (width <- Seq(16, 32, 64)) test(s"Determinant of a $width-bit singular matrix keeps the negative zero") {
-    // Vector(-0.0) loses its sign on Scala Native, which zero-fills all-zero literal arrays
-    val negativeZero = java.lang.Double.longBitsToDouble(Long.MinValue)
     assertEquals(determinant(width, 2, Vector(0.0, 0.0, 2.0, -3.0)), encode(width, Vector(negativeZero)))
   }
 
@@ -176,7 +191,7 @@ class MatrixSuite extends munit.FunSuite {
       def offset(matrix: Int, row: Int, column: Int, major: String, stride: Int): Int =
         16 + matrix * 128 + (if (major == "RowMajor") row * stride + column * 4 else column * stride + row * 4)
       def put(bytes: Array[Byte], offset: Int, value: Float): Unit =
-        LittleEndian.write(floatBits(value), bytes, offset, 4)
+        LittleEndian.write(single(value), bytes, offset, 4)
       put(first, 0, 13.0f)
       if (mode == "structure") put(expected, 0, 13.0f)
       if (mode == "initialiser") put(expected, 0, 1.0f)
@@ -195,11 +210,11 @@ class MatrixSuite extends munit.FunSuite {
         }
         if (selected) put(expected, offset(m, r, c, destination, 32), if (mode == "initialiser") 1.0f else value)
       }
-      val (pointer, value, indexes) = mode match {
-        case "array"           => ("%matrices_ptr", "%matrices", "%one")
-        case "matrix" | "copy" => ("%matrix_ptr", "%matrix", "%one %one")
-        case "column"          => ("%column_ptr", "%column", "%one %one %one")
-        case _                 => ("%float_ptr", "%float", "%one %one %one %last_row")
+      val Access(pointer, value, indexes) = mode match {
+        case "array"           => Access("%matrices_ptr", "%matrices", "%one")
+        case "matrix" | "copy" => Access("%matrix_ptr", "%matrix", "%one %one")
+        case "column"          => Access("%column_ptr", "%column", "%one %one %one")
+        case _                 => Access("%float_ptr", "%float", "%one %one %one %last_row")
       }
       val body = mode match {
         case "structure" | "initialiser" =>

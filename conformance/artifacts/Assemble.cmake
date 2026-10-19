@@ -57,9 +57,11 @@ elseif(BACKEND STREQUAL "cuda")
     "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
   if(CONFORMANCE_COMPILER STREQUAL "clang")
     list(APPEND backend_cmake_arguments "-DCMAKE_CUDA_COMPILER=$ENV{CUDACXX}"
-      "-DCMAKE_CUDA_FLAGS=--cuda-path=$ENV{CUDAToolkit_ROOT} --cuda-gpu-arch=${CUDA_ARCHITECTURES}")
+      "-DCMAKE_CUDA_FLAGS=--cuda-path=$ENV{CUDAToolkit_ROOT} --cuda-gpu-arch=${CUDA_ARCHITECTURES} -Wno-unknown-cuda-version")
   elseif(CONFORMANCE_COMPILER STREQUAL "vendor")
-    list(APPEND backend_cmake_arguments "-DCMAKE_CUDA_HOST_COMPILER=$ENV{CUDAHOSTCXX}")
+    # The matrix deliberately keeps architectures nvcc deprecates.
+    list(APPEND backend_cmake_arguments "-DCMAKE_CUDA_HOST_COMPILER=$ENV{CUDAHOSTCXX}"
+      "-DCMAKE_CUDA_FLAGS=-Wno-deprecated-gpu-targets")
   endif()
 elseif(BACKEND STREQUAL "sycl")
   if(NOT DEFINED SYCL_CTS_ENABLE_FULL_CONFORMANCE)
@@ -71,7 +73,7 @@ endif()
 
 if(BACKEND MATCHES "^(cuda|openacc)$")
   if(NOT DEFINED CUDA_ARCHITECTURES OR
-      NOT CUDA_ARCHITECTURES MATCHES "^sm_[0-9]+$")
+      NOT CUDA_ARCHITECTURES MATCHES "^sm_[0-9]+[af]?$")
     message(FATAL_ERROR "Invalid CUDA architecture: ${CUDA_ARCHITECTURES}")
   endif()
   set(architecture "${CUDA_ARCHITECTURES}")
@@ -114,7 +116,7 @@ file(MAKE_DIRECTORY "$ENV{HOME}")
 
 find_program(artifact_ninja NAMES ninja REQUIRED)
 set(rocm_argument)
-if(BACKEND MATCHES "^(hip|hsa)$")
+if(BACKEND STREQUAL "hip")
   set(rocm_argument "-DROCM_VERSION=${ROCM_VERSION}")
 endif()
 
@@ -138,8 +140,63 @@ execute_process(
     "-DCONFORMANCE_DEPENDENCY_CACHE=${CONFORMANCE_DEPENDENCY_CACHE}"
     -DCONFORMANCE_OFFLINE=${CONFORMANCE_OFFLINE}
     -DBUILD_TESTING=OFF
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     ${backend_cmake_arguments}
   COMMAND_ERROR_IS_FATAL ANY)
+
+if(CONFORMANCE_OUTPUT STREQUAL "lint")
+  find_program(run_clang_tidy NAMES run-clang-tidy-${CLANG_TIDY_VERSION} run-clang-tidy REQUIRED)
+  find_program(clang_tidy NAMES clang-tidy-${CLANG_TIDY_VERSION} clang-tidy REQUIRED)
+  # run-clang-tidy cannot forward clang-tidy flags; the wrapper enables the query-based checks in .clang-tidy.
+  file(WRITE "${work}/clang-tidy" "#!/bin/sh\nexec \"${clang_tidy}\" --experimental-custom-checks \"$@\"\n")
+  file(CHMOD "${work}/clang-tidy" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+  execute_process(COMMAND "${artifact_ninja}" -C "${build}" -t targets all
+    OUTPUT_VARIABLE targets COMMAND_ERROR_IS_FATAL ANY)
+  string(REGEX MATCHALL "[^\n]+\\.hpp: CUSTOM_COMMAND" generated "${targets}")
+  list(TRANSFORM generated REPLACE ": CUSTOM_COMMAND$" "")
+  if(generated)
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build "${build}" --target ${generated}
+      COMMAND_ERROR_IS_FATAL ANY)
+  endif()
+  # Template-heavy translation units take several GiB each, so memory bounds parallelism before cores do.
+  cmake_host_system_information(RESULT cores QUERY NUMBER_OF_LOGICAL_CORES)
+  cmake_host_system_information(RESULT memory QUERY AVAILABLE_PHYSICAL_MEMORY)
+  math(EXPR tidy_jobs "${memory} / 4096")
+  if(tidy_jobs GREATER cores)
+    set(tidy_jobs ${cores})
+  elseif(tidy_jobs LESS 1)
+    set(tidy_jobs 1)
+  endif()
+  # Each side of an offload source sees different preprocessor branches, and CUDA and HIP default to opposite sides.
+  set(errors)
+  set(failed FALSE)
+  foreach(pass IN ITEMS "-extra-arg=-w;^/source/conformance/(unified/.*|src/device_[a-z_]+)\\.(c|cc|cpp|cxx)$"
+      "-extra-arg=-w;-extra-arg=--offload-device-only;^/source/conformance/unified/.*\\.(cu|hip)$"
+      "-extra-arg=-w;-extra-arg=--offload-host-only;^/source/conformance/unified/.*\\.(cu|hip)$")
+    execute_process(
+      COMMAND "${run_clang_tidy}" -quiet -hide-progress -j ${tidy_jobs} "-clang-tidy-binary=${work}/clang-tidy" -p "${build}" ${pass}
+      WORKING_DIRECTORY /source/conformance
+      OUTPUT_VARIABLE output ERROR_VARIABLE output RESULT_VARIABLE status)
+    if(NOT status EQUAL 0)
+      set(failed TRUE)
+      string(REGEX MATCHALL "[^\n]*: error: [^\n]*" pass_errors "${output}")
+      if(NOT pass_errors)
+        message("${output}")
+      endif()
+      list(APPEND errors ${pass_errors})
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES errors)
+  list(SORT errors)
+  list(TRANSFORM errors REPLACE "^/source/" "")
+  list(JOIN errors "\n" errors)
+  if(failed)
+    message("${errors}")
+    message(FATAL_ERROR "clang-tidy rejected the ${artifact_base} unified sources")
+  endif()
+  return()
+endif()
+
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${build}"
     --target conformance-artifact

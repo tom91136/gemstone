@@ -16,7 +16,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake")
 
 add_executable(unified src/main.cpp)
 target_include_directories(unified PRIVATE src)
-target_link_libraries(unified PRIVATE Catch2::Catch2 conformance_device magic_enum::magic_enum fmt::fmt-header-only)
+target_link_libraries(unified PRIVATE Catch2::Catch2 conformance_device magic_enum::magic_enum Aspartame::Aspartame fmt::fmt-header-only)
 target_compile_definitions(unified PRIVATE
   CONFORMANCE_BACKEND_NAME="${CONFORMANCE_BACKEND}")
 target_link_libraries(unified PRIVATE ${CMAKE_DL_LIBS})
@@ -26,10 +26,27 @@ set_target_properties(unified PROPERTIES
   CXX_EXTENSIONS NO
   OUTPUT_NAME unified)
 
+# Compiles an OpenCL C kernel for the HSA architecture and embeds the code object as `<name>_image` in
+# `<name>_image.hpp`.
+function(conformance_embed_opencl name source)
+  set(object "${CMAKE_CURRENT_BINARY_DIR}/${name}.hsaco")
+  set(header "${CMAKE_CURRENT_BINARY_DIR}/${name}_image.hpp")
+  conformance_opencl_commands(hsa "${CMAKE_HIP_ARCHITECTURES}" "${CMAKE_CURRENT_SOURCE_DIR}/${source}" "${object}" compile
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=." "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build")
+  add_custom_command(OUTPUT "${object}"
+    COMMAND ${compile}
+    DEPENDS "${source}" "${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake" VERBATIM)
+  add_custom_command(OUTPUT "${header}"
+    COMMAND ${CMAKE_COMMAND} "-DINPUT=${object}" "-DOUTPUT=${header}" "-DSYMBOL=${name}_image"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake"
+    DEPENDS "${object}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake" VERBATIM)
+  target_sources(unified PRIVATE "${header}")
+endfunction()
+
 if(CONFORMANCE_BACKEND STREQUAL "opencl")
   target_compile_definitions(unified PRIVATE UNIFIED_API_OPENCL=1)
   find_package(OpenCL REQUIRED)
-  target_sources(unified PRIVATE src/opencl/runtime.cpp src/opencl/features.cpp src/opencl/images.cpp src/opencl/pipes.cpp src/opencl/device_enqueue.cpp src/opencl/memory.cpp)
+  target_sources(unified PRIVATE src/opencl/runtime.cpp src/opencl/features.cpp src/opencl/images.cpp src/opencl/pipes.cpp src/opencl/device_enqueue.cpp src/opencl/memory.cpp src/opencl/instructions.cpp src/opencl/vendor.cpp src/opencl/struct_alignment.cpp)
   target_link_libraries(unified PRIVATE OpenCL::OpenCL)
 
 elseif(CONFORMANCE_BACKEND STREQUAL "hsa")
@@ -40,22 +57,10 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hsa")
   endif()
   find_path(HSA_INCLUDE_DIR hsa/hsa.h PATHS /opt/rocm/include REQUIRED)
   find_library(HSA_LIBRARY hsa-runtime64 PATHS /opt/rocm/lib REQUIRED)
-  conformance_opencl_commands(hsa "${CMAKE_HIP_ARCHITECTURES}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/hsa/vector_copy.cl" "${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco"
-    dispatch_compile unused_translate
-    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=." "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build")
-  add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco"
-    COMMAND ${dispatch_compile}
-    DEPENDS src/hsa/vector_copy.cl "${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake" VERBATIM)
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp
-    COMMAND ${CMAKE_COMMAND}
-      -DINPUT=${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
-      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
-      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake VERBATIM)
-  target_sources(unified PRIVATE src/hsa/runtime.cpp src/hsa/memory.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp)
+  conformance_embed_opencl(dispatch src/hsa/vector_copy.cl)
+  conformance_embed_opencl(images src/hsa/images.cl)
+  conformance_embed_opencl(struct_alignment src/hsa/struct_alignment.cl)
+  target_sources(unified PRIVATE src/hsa/runtime.cpp src/hsa/memory.cpp src/hsa/images.cpp src/hsa/struct_alignment.cpp)
   target_include_directories(unified PRIVATE ${HSA_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
   target_compile_definitions(unified PRIVATE
     CONFORMANCE_DEVICE_TARGETS="${CMAKE_HIP_ARCHITECTURES}")
@@ -75,10 +80,40 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
     src/cuda/blas.cu
     src/cuda/tensor.cu
     src/cuda/mma884.cu
+    src/cuda/mma.cu
+    src/cuda/mma_sparse.cu
+    src/cuda/wgmma.cu
+    src/cuda/wmma.cu
+    src/cuda/matrix_moves.cu
     src/cuda/edge.cu
     src/cuda/async.cu
     src/cuda/stress.cu
-    src/cuda/regressions.cu)
+    src/cuda/intrinsics.cu
+    src/cuda/regressions.cu
+    src/cuda/stack.cu
+    src/cuda/half_atomics.cu
+    src/cuda/memory_atomics.cu
+    src/cuda/conversions.cu
+    src/cuda/integer_forms.cu
+    src/cuda/control.cu
+    src/cuda/video.cu
+    src/cuda/floating.cu
+    src/cuda/struct_alignment.cu)
+  # Bulk asynchronous copies use the CUDA 12 tensor-map and cuda::ptx interfaces.
+  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12)
+    target_sources(unified PRIVATE src/cuda/async_bulk.cu)
+  endif()
+  # tcgen05 and the sm_100 tensor copy modes need PTX ISA 8.6.
+  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.8)
+    target_sources(unified PRIVATE src/cuda/blackwell.cu)
+  endif()
+  # These kernels exercise recursion and runtime stack allocation, whose stack size ptxas cannot bound.
+  if(CONFORMANCE_COMPILER STREQUAL "clang")
+    set(stack_size_option -Xcuda-ptxas --suppress-stack-size-warning)
+  else()
+    set(stack_size_option "-Xptxas=--suppress-stack-size-warning")
+  endif()
+  set_source_files_properties(src/cuda/stack.cu src/cuda/control.cu PROPERTIES COMPILE_OPTIONS "${stack_size_option}")
   target_link_libraries(unified PRIVATE CUDA::cudart_static CUDA::cublas)
   if(CONFORMANCE_COMPILER STREQUAL "clang" AND NOT CONFORMANCE_CUDA_CUBIN_ONLY)
     target_compile_options(unified PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:--cuda-include-ptx=sm_${conformance_cuda_architecture}>")
@@ -128,6 +163,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     src/hip/rocthrust_iterators.hip
     src/hip/rocthrust_complex_async.hip
     src/hip/blas.hip
+    src/hip/cooperative.hip
     src/hip/edge.hip
     src/hip/edge_stress_i8.hip
     src/hip/edge_stress_i32.hip
@@ -135,8 +171,20 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     src/hip/edge_stress_f32.hip
     src/hip/edge_stress_f64.hip
     src/hip/async.hip
-    src/hip/regressions.hip)
+    src/hip/intrinsics.hip
+    src/hip/narrow_floats.hip
+    src/hip/dot_products.hip
+    src/hip/scaled_floats.hip
+    src/hip/transposed_loads.hip
+    src/hip/matrix.hip
+    src/hip/matrix_wave64.hip
+    src/hip/regressions.hip
+    src/hip/resources.hip
+    src/hip/arrays.hip
+    src/hip/struct_alignment.hip
+    src/hip/struct_alignment_bytewise.hip)
   target_compile_definitions(unified PRIVATE __HIP_PLATFORM_AMD__=1)
+  set_source_files_properties(src/hip/matrix_wave64.hip PROPERTIES COMPILE_OPTIONS -mwavefrontsize64)
   string(REPLACE ";" "," hip_device_targets "${CMAKE_HIP_ARCHITECTURES}")
   target_compile_definitions(unified PRIVATE CONFORMANCE_DEVICE_TARGETS="${hip_device_targets}")
   if(CONFORMANCE_HIP_ENABLE_ROCBLAS)
@@ -176,7 +224,12 @@ elseif(CONFORMANCE_BACKEND STREQUAL "sycl")
     src/sycl/edge.cpp
     src/sycl/async.cpp
     src/sycl/stress.cpp
-    src/sycl/runtime.cpp)
+    src/sycl/runtime.cpp
+    src/sycl/clock.cpp
+    src/sycl/matrix.cpp
+    src/sycl/struct_alignment.cpp)
+  # icpx defaults to fast math, which would make the exact host reference non-IEEE.
+  set_source_files_properties(src/sycl/struct_alignment.cpp PROPERTIES COMPILE_OPTIONS -ffp-model=precise)
   target_link_libraries(unified PRIVATE
     mkl_sycl_blas
     mkl_intel_lp64
@@ -208,7 +261,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
     find_program(conformance_cuda_ptxas ptxas HINTS "${CUDAToolkit_BIN_DIR}" REQUIRED)
     foreach(fixture IN ITEMS kernel exchange atomic fence contended)
       set(memory_cubin_architecture "${conformance_cuda_architecture}")
-      if(NOT fixture STREQUAL "kernel" AND memory_cubin_architecture LESS 70)
+      if(NOT fixture STREQUAL "kernel" AND conformance_cuda_capability LESS 70)
         set(memory_cubin_architecture 70)
       endif()
       set(cubin "${memory_output}/${fixture}.cubin")
@@ -229,7 +282,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
     set(mma884_cubin "${memory_output}/mma884.cubin")
     set(mma884_sass_header "${memory_output}/mma884_sass_image.hpp")
     set(mma884_cubin_architecture "${conformance_cuda_architecture}")
-    if(mma884_cubin_architecture LESS 70)
+    if(conformance_cuda_capability LESS 70)
       set(mma884_cubin_architecture 70)
     endif()
     add_custom_command(OUTPUT "${mma884_ptx_header}"
@@ -260,7 +313,8 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
       set(memory_image "${memory_output}/kernel.spv")
     endif()
     conformance_opencl_commands("${memory_backend}" "${CMAKE_HIP_ARCHITECTURES}"
-      "${memory_source}/memory_kernel.cl" "${memory_image}" memory_compile memory_translate ${memory_options})
+      "${memory_source}/memory_kernel.cl" "${memory_image}" memory_compile TRANSLATE memory_translate
+      ${memory_options})
     set(memory_commands COMMAND ${memory_compile})
     set(memory_byproducts)
     if(memory_translate)
@@ -281,7 +335,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
   elseif(CONFORMANCE_BACKEND MATCHES "^(opencl|levelzero)$")
     set(memory64_image "${memory_output}/kernel64.spv")
     conformance_opencl_commands(opencl "" "${memory_source}/memory_kernel.cl" "${memory64_image}"
-      memory64_compile memory64_translate -O1)
+      memory64_compile TRANSLATE memory64_translate -O1)
     add_custom_command(OUTPUT "${memory64_image}"
       COMMAND ${memory64_compile} COMMAND ${memory64_translate}
       BYPRODUCTS "${memory64_image}.bc"

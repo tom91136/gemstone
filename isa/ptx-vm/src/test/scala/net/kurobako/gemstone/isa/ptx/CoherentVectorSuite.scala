@@ -9,17 +9,18 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 class CoherentVectorSuite extends munit.FunSuite {
   private val packed = (668L << 32) | 101L
+  private val scopes = Vec("cta", "gpu")
+  private val spaces = Vec("", ".global")
 
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class InterleavingMemory extends DeviceMemory(32, GuestAddress(0x10000000000L)) {
-    val base                        = start
-    val observed: ArrayBuffer[Long] = mutable.ArrayBuffer.empty[Long]
-    var changeAfterRead             = false
+    val base                                = start
+    val observed: mutable.ArrayBuffer[Long] = mutable.ArrayBuffer.empty[Long]
+    var changeAfterRead                     = false
     override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] = {
       val result = readLittleEndian(address, size)
       if (changeAfterRead && address == base) writeLittleEndian(base, (1234L << 32) | 100L, 8).toOption.get
@@ -33,16 +34,16 @@ class CoherentVectorSuite extends munit.FunSuite {
   }
 
   for {
-    scope <- Vec("cta", "gpu")
-    space <- Vec("", ".global")
+    scope <- scopes
+    space <- spaces
   }
     test(s"relaxed $scope$space b128 descriptors retain two-word coherence") {
       class DescriptorMemory extends DeviceMemory(32, GuestAddress(0x10000000000L)) {
-        val base                                      = start
-        val publications: ArrayBuffer[ArraySeq[Byte]] = ArrayBuffer.empty[Vec[Byte]]
-        val reads: ArrayBuffer[Int]                   = ArrayBuffer.empty[Int]
+        val base                                              = start
+        val publications: mutable.ArrayBuffer[ArraySeq[Byte]] = mutable.ArrayBuffer.empty[Vec[Byte]]
+        val reads: mutable.ArrayBuffer[Int]                   = mutable.ArrayBuffer.empty[Int]
         override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] = {
-          reads += size.raw
+          reads += size
           val snapshot = readBytes(address, size)
           // A second descriptor is published immediately after taking the coherent snapshot.
           assertEquals(writeLittleEndian(base.offset(8), 999L, 8), Right(()))
@@ -90,7 +91,9 @@ class CoherentVectorSuite extends munit.FunSuite {
         | $instruction
         | ret;
         |}""".stripMargin)
-      assert(result.left.exists(_.message.contains("b128 memory access requires relaxed CTA or GPU scope")))
+      assert(
+        result.left.exists(_.message.contains("b128 memory access requires a memory state space below system scope"))
+      )
     }
 
   test("explicit global vectors do not use local addressing for low global addresses") {

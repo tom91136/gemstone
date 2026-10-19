@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.rpc
 
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.locks.Condition
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -18,12 +18,16 @@ import net.kurobako.gemstone.vm.*
   */
 private class HostCoherence(
     lock: ReentrantLock,
-    changed: Condition,
+    changed: PlatformConcurrency.Condition,
     completions: CompletionId => Option[Completion],
     closed: () => Boolean,
     hostBackedAt: (GuestAddress, Int >= 0) => Boolean,
     hostBackedAllocations: () => Boolean
 ) {
+  private enum Strictness derives CanEqual {
+    case Strict, Relaxed
+  }
+
   private val syncLock = ReentrantLock()
   // A CAS guess only; native storage validates it after host writes or address reuse.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -40,7 +44,7 @@ private class HostCoherence(
   def accessible(address: GuestAddress, size: Int >= 0): Boolean = everything || hostBackedAt(address, size)
 
   private def available(address: GuestAddress, size: Int >= 0): Boolean =
-    address.raw > 0 && address.raw <= Long.MaxValue - size.raw && accessible(address, size)
+    address.raw > 0 && address.raw <= Long.MaxValue - size && accessible(address, size)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def poll(id: CompletionId): Either[ExecutionFailure, HostMemoryBatch] = lock.withLock {
@@ -60,16 +64,15 @@ private class HostCoherence(
             case CompletionStatus.Pending =>
               completion.hostSync match {
                 case Some(exchange) if exchange.awaitingIssue =>
-                  val request        = exchange.request
-                  val (writes, sync) =
-                    if (request.relaxed && request.publish.isEmpty) (Vec.empty[HostMemoryBytes], Some(exchange.issue()))
-                    else if (request.publish.nonEmpty) {
-                      val selected = memory.takeDirty(request.publish)
-                      (selected, if (memory.hasDirty(request.publish)) None else Some(exchange.issue()))
-                    } else {
-                      val pending = memory.takeDirty()
-                      (pending, if (memory.hasDirty) None else Some(exchange.issue()))
-                    }
+                  val request     = exchange.request
+                  val relaxedOnly = request.relaxed && request.publish.isEmpty
+                  val writes      =
+                    if (relaxedOnly) Vec.empty[HostMemoryBytes]
+                    else if (request.publish.nonEmpty) memory.takeDirty(request.publish)
+                    else memory.takeDirty()
+                  val dirty = !relaxedOnly &&
+                    (if (request.publish.nonEmpty) memory.hasDirty(request.publish) else memory.hasDirty)
+                  val sync = if (dirty) None else Some(exchange.issue())
                   result = Some(Right(HostMemoryBatch(Vec.empty, writes, false, sync)))
                 case Some(_) => changed.await()
                 case None    =>
@@ -109,15 +112,15 @@ private class HostCoherence(
       address: GuestAddress,
       size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
-    if ((size.raw != 4 && size.raw != 8) || address.raw % size.raw != 0)
+    if ((size != 4 && size != 8) || address.raw % size != 0)
       Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
     else if (!available(address, size.widen[Int >= 0]))
       Left(Fault.Memory("host atomic address is unavailable or overflows"))
     else syncLock.withLock {
-      val atomicSize: Int in (1, 2, 4, 8) = if (size.raw == 4) 4 else 8
-      val mask                            = if (size.raw == 4) 0xffffffffL else -1L
+      val atomicSize: Int in (1, 2, 4, 8) = if (size == 4) 4 else 8
+      val mask                            = if (size == 4) 0xffffffffL else -1L
       var expected                        =
-        lastAtomic.filter(request => request.address == address && request.size.raw == size.raw).fold(0L)(_.desired) &
+        lastAtomic.filter(request => request.address == address && request.size == size).fold(0L)(_.desired) &
           mask
       var result: Option[Either[Fault, Long]] = None
       while (result.isEmpty) {
@@ -135,7 +138,7 @@ private class HostCoherence(
     }
 
   def atomicLoad(completion: Completion, address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
-    size.raw.refine[Int in (1, 2, 4, 8)].toOption.filter(width => address.raw % width.raw == 0)
+    size.refine[Int in (1, 2, 4, 8)].toOption.filter(width => address.raw % width == 0)
       .toRight(Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage"))
       .flatMap { atomicSize =>
         if (!available(address, size.widen[Int >= 0]))
@@ -143,8 +146,13 @@ private class HostCoherence(
         else syncLock.withLock {
           val request =
             HostMemoryAtomic(address, atomicSize, expected = 0L, desired = 0L, HostMemoryAtomicOperation.Load)
-          synchronise(completion, Some(request), Vec(HostMemoryRange(address, size)), relaxed = true).map { observed =>
-            val value = observed & (if (size.raw == 8) -1L else (1L << (size.raw * 8)) - 1L)
+          synchronise(
+            completion,
+            Some(request),
+            Vec(HostMemoryRange(address, size)),
+            strictness = Strictness.Relaxed
+          ).map { observed =>
+            val value = observed & (if (size == 8) -1L else (1L << (size * 8)) - 1L)
             lock.withLock(completion.hostMemory.observeAtomic(
               address,
               LittleEndian.toVec(value, size.widen[Int in 0 ~ 8])
@@ -157,7 +165,7 @@ private class HostCoherence(
   /** Publish `ranges` and perform `stores` natively, then record the stored values as observed. */
   def store(completion: Completion, ranges: Vec[HostMemoryRange], stores: Vec[HostMemoryAtomic]): Either[Fault, Unit] =
     syncLock.withLock {
-      synchronise(completion, None, ranges, stores, relaxed = true).map { _ =>
+      synchronise(completion, None, ranges, stores, Strictness.Relaxed).map { _ =>
         lock.withLock(stores.foreach(atom =>
           completion.hostMemory.observeAtomic(atom.address, LittleEndian.toVec(atom.desired, atom.size))
         ))
@@ -171,8 +179,9 @@ private class HostCoherence(
       atomic: Option[HostMemoryAtomic],
       publish: Vec[HostMemoryRange] = Vec.empty,
       atomicStores: Vec[HostMemoryAtomic] = Vec.empty,
-      relaxed: Boolean = false
+      strictness: Strictness = Strictness.Strict
   ): Either[Fault, Long] = lock.withLock {
+    val relaxed  = strictness == Strictness.Relaxed
     val exchange =
       Completion.HostSync(HostMemorySync(nextTicket.incrementAndGet(), atomic, publish, atomicStores, relaxed))
     completion.beginHostSync(exchange)
@@ -203,7 +212,7 @@ private class HostCoherence(
   def read(completion: Completion, address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
     lock.withLock {
       if (!available(address, size))
-        Left(Fault.Memory(s"host memory read at ${address.show} (${size.raw} bytes) is unavailable or overflows"))
+        Left(Fault.Memory(s"host memory read at ${address.show} ($size bytes) is unavailable or overflows"))
       else completion.hostMemory.read(address, size).toRight(AddressSpace.Pending)
     }
 
@@ -212,7 +221,7 @@ private class HostCoherence(
       Left(Fault.Memory(s"host memory write at ${address.show} (${bytes.size} bytes) is unavailable or overflows"))
     else {
       val atomicWidth: Int in (0, 1, 2, 4, 8) = bytes.size.refine[Int in (1, 2, 4, 8)].toOption
-        .filter(width => address.raw % width.raw == 0).fold[Int in (0, 1, 2, 4, 8)](0)(identity)
+        .filter(width => address.raw % width == 0).fold[Int in (0, 1, 2, 4, 8)](0)(identity)
       completion.hostMemory.write(address, bytes, atomicWidth)
       Right(())
     }

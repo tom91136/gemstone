@@ -1,10 +1,12 @@
+#include <algorithm>
 #include <array>
+#include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <future>
 #include <limits>
-#include <string>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -17,6 +19,7 @@
 #include <gemstone/bytes.hpp>
 #include <gemstone/test_support.hpp>
 
+#include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../hsa/test/code_object_fixture.hpp"
 #include "../../rpc/test/queued_lifetime.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
@@ -24,11 +27,16 @@
 
 namespace {
 
+// hip_runtime_api.h spells these sentinels as C-style casts
+void *const LaunchParamBufferPointer = std::bit_cast<void *>(uintptr_t{0x01});
+void *const LaunchParamBufferSize = std::bit_cast<void *>(uintptr_t{0x02});
+void *const LaunchParamEnd = std::bit_cast<void *>(uintptr_t{0x03});
+
 TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   using LegacyProperties = hipError_t (*)(void *, int);
   const auto query = reinterpret_cast<LegacyProperties>(dlsym(RTLD_DEFAULT, "hipGetDeviceProperties"));
   REQUIRE((query != nullptr));
-  REQUIRE((setenv(gemstone::environment::TargetArch, "gfx1036", 1) == 0));
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1036");
   std::array<unsigned char, 792> properties{};
   REQUIRE((query(properties.data(), 0) == hipSuccess));
   auto word = [&](size_t offset) {
@@ -40,9 +48,10 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((word(276) == 32));      // warpSize in the unversioned HIP ABI
   REQUIRE((word(336) == 1));       // multiProcessorCount
   REQUIRE((word(392) == 1036));    // gcnArch
+  REQUIRE((word(656) == 1));       // cooperativeLaunch
   REQUIRE((word(356) & (1 << 7))); // arch.hasDoubles
   REQUIRE((word(356) & (1 << 5))); // arch.hasGlobalInt64Atomics
-  REQUIRE((setenv(gemstone::environment::SystemPaging, "1", 1) == 0));
+  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, "1");
   REQUIRE((query(properties.data(), 0) == hipSuccess));
   REQUIRE((word(784) == 1)); // pageableMemoryAccess in Polyregion's 792-byte ABI
   hipDeviceProp_tR0600 current{};
@@ -57,8 +66,6 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((current.hostNativeAtomicSupported == 1));
   REQUIRE((word(772) == current.managedMemory));
   REQUIRE((word(780) == current.concurrentManagedAccess));
-  REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
-  REQUIRE((unsetenv(gemstone::environment::TargetArch) == 0));
 }
 
 TEST_CASE("HIP wave size follows the selected processor", "[hip]") {
@@ -76,7 +83,7 @@ TEST_CASE("HIP wave size follows the selected processor", "[hip]") {
 }
 
 TEST_CASE("HIP primary context can be pushed", "[hip]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((hipInit(0) == hipSuccess));
   hipCtx_t context = nullptr;
@@ -103,7 +110,7 @@ TEST_CASE("HIP stream callback reports completed work", "[hip]") {
 }
 
 TEST_CASE("HIP driver-style asynchronous copies use the stream", "[hip]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   void *first = nullptr;
   void *second = nullptr;
@@ -125,8 +132,14 @@ TEST_CASE("HIP driver-style asynchronous copies use the stream", "[hip]") {
 
 struct LaunchShape {
   dim3 global, requested, local, groups;
-  bool extended;
+  bool extended{};
 };
+
+uint16_t dimensions(const dim3 &global) {
+  if (global.z > 1) return 3;
+  if (global.y > 1) return 2;
+  return 1;
+}
 
 std::vector<uint8_t> implicitArguments(const dim3 &global, const dim3 &local) {
   std::vector<uint8_t> bytes(76, 0);
@@ -139,12 +152,13 @@ std::vector<uint8_t> implicitArguments(const dim3 &global, const dim3 &local) {
   gemstone::writeNative(bytes.data(), 22, static_cast<uint16_t>(global.x % local.x));
   gemstone::writeNative(bytes.data(), 24, static_cast<uint16_t>(global.y % local.y));
   gemstone::writeNative(bytes.data(), 26, static_cast<uint16_t>(global.z % local.z));
-  gemstone::writeNative(bytes.data(), 68, static_cast<uint16_t>(global.z > 1 ? 3 : (global.y > 1 ? 2 : 1)));
+  gemstone::writeNative(bytes.data(), 68, dimensions(global));
   return bytes;
 }
 
 gemstone_test::RpcFixture::Expected expectedShape(const LaunchShape &shape, uint32_t seed, bool geometryOnly = false) {
-  gemstone_test::RpcFixture::Expected expected{shape.local.x, shape.groups.x, shape.global.x, 0, seed};
+  gemstone_test::RpcFixture::Expected expected{
+      .local = shape.local.x, .groups = shape.groups.x, .global = shape.global.x, .offset = 0, .seed = seed};
   expected.localYz = {shape.local.y, shape.local.z};
   expected.groupsYz = {shape.groups.y, shape.groups.z};
   expected.globalYz = {shape.global.y, shape.global.z};
@@ -162,20 +176,21 @@ hipError_t launchShape(hipFunction_t function, const LaunchShape &shape, void **
 
 void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFunction_t function) {
   // Block-only y/z extents still select a two- or three-dimensional dispatch.
-  const std::array<LaunchShape, 11> shapes{{{{8, 15, 1}, {4, 5, 1}, {4, 5, 1}, {2, 3, 1}, false},
-                                            {{56, 4, 1}, {8, 4, 1}, {8, 4, 1}, {7, 1, 1}, false},
-                                            {{56, 4, 2}, {8, 4, 2}, {8, 4, 2}, {7, 1, 1}, false},
-                                            {{8, 9, 10}, {4, 3, 2}, {4, 3, 2}, {2, 3, 5}, false},
-                                            {{32, 32, 1}, {32, 32, 1}, {32, 32, 1}, {1, 1, 1}, false},
-                                            {{16, 8, 8}, {16, 8, 8}, {16, 8, 8}, {1, 1, 1}, false},
-                                            {{9, 13, 1}, {4, 5, 1}, {4, 5, 1}, {3, 3, 1}, true},
-                                            {{10, 11, 1}, {3, 4, 1}, {3, 4, 1}, {4, 3, 1}, true},
-                                            {{9, 7, 5}, {4, 3, 2}, {4, 3, 2}, {3, 3, 3}, true},
-                                            {{2, 8, 3}, {4, 3, 5}, {2, 3, 3}, {1, 3, 1}, true},
-                                            {{7, 2, 9}, {3, 5, 4}, {3, 2, 4}, {3, 1, 3}, true}}};
+  const std::array<LaunchShape, 11> shapes{
+      {{.global = {8, 15, 1}, .requested = {4, 5, 1}, .local = {4, 5, 1}, .groups = {2, 3, 1}, .extended = false},
+       {.global = {56, 4, 1}, .requested = {8, 4, 1}, .local = {8, 4, 1}, .groups = {7, 1, 1}, .extended = false},
+       {.global = {56, 4, 2}, .requested = {8, 4, 2}, .local = {8, 4, 2}, .groups = {7, 1, 1}, .extended = false},
+       {.global = {8, 9, 10}, .requested = {4, 3, 2}, .local = {4, 3, 2}, .groups = {2, 3, 5}, .extended = false},
+       {.global = {32, 32, 1}, .requested = {32, 32, 1}, .local = {32, 32, 1}, .groups = {1, 1, 1}, .extended = false},
+       {.global = {16, 8, 8}, .requested = {16, 8, 8}, .local = {16, 8, 8}, .groups = {1, 1, 1}, .extended = false},
+       {.global = {9, 13, 1}, .requested = {4, 5, 1}, .local = {4, 5, 1}, .groups = {3, 3, 1}, .extended = true},
+       {.global = {10, 11, 1}, .requested = {3, 4, 1}, .local = {3, 4, 1}, .groups = {4, 3, 1}, .extended = true},
+       {.global = {9, 7, 5}, .requested = {4, 3, 2}, .local = {4, 3, 2}, .groups = {3, 3, 3}, .extended = true},
+       {.global = {2, 8, 3}, .requested = {4, 3, 5}, .local = {2, 3, 3}, .groups = {1, 3, 1}, .extended = true},
+       {.global = {7, 2, 9}, .requested = {3, 5, 4}, .local = {3, 2, 4}, .groups = {3, 1, 3}, .extended = true}}};
   for (const auto &shape : shapes)
     for (uint32_t seed : {11U, 37U}) {
-      const size_t count = size_t(shape.global.x) * shape.global.y * shape.global.z;
+      const size_t count = static_cast<size_t>(shape.global.x) * shape.global.y * shape.global.z;
       void *allocation = nullptr;
       REQUIRE((hipMalloc(&allocation, (count + 2) * 4) == hipSuccess));
       auto *output = static_cast<uint32_t *>(allocation) + 1;
@@ -200,10 +215,11 @@ void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFuncti
   void *arguments[] = {&output, &seed};
   constexpr uint32_t maximum = std::numeric_limits<uint32_t>::max();
   constexpr uint32_t signedMax = std::numeric_limits<int32_t>::max();
-  for (const auto &shape : std::array<LaunchShape, 4>{{{{signedMax, 1, 1}, {4, 1, 1}, {4, 1, 1}, {536870912U, 1, 1}, true},
-                                                       {{1, signedMax, 1}, {1, 4, 1}, {1, 4, 1}, {1, 536870912U, 1}, true},
-                                                       {{1, 1, signedMax}, {1, 1, 4}, {1, 1, 4}, {1, 1, 536870912U}, true},
-                                                       {{signedMax, 1, 1}, {1, 1, 1}, {1, 1, 1}, {signedMax, 1, 1}, false}}}) {
+  for (const auto &shape : std::array<LaunchShape, 4>{
+           {{.global = {signedMax, 1, 1}, .requested = {4, 1, 1}, .local = {4, 1, 1}, .groups = {536870912U, 1, 1}, .extended = true},
+            {.global = {1, signedMax, 1}, .requested = {1, 4, 1}, .local = {1, 4, 1}, .groups = {1, 536870912U, 1}, .extended = true},
+            {.global = {1, 1, signedMax}, .requested = {1, 1, 4}, .local = {1, 1, 4}, .groups = {1, 1, 536870912U}, .extended = true},
+            {.global = {signedMax, 1, 1}, .requested = {1, 1, 1}, .local = {1, 1, 1}, .groups = {signedMax, 1, 1}, .extended = false}}}) {
     fixture.expect(expectedShape(shape, seed, true));
     fixture.expectTrailingArguments(implicitArguments(shape.global, shape.local));
     REQUIRE((launchShape(function, shape, arguments) == hipSuccess));
@@ -217,10 +233,10 @@ void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFuncti
   REQUIRE(
       (caps.maxThreadsPerBlock == 1024 && caps.maxThreadsDim[0] == 1024 && caps.maxThreadsDim[1] == 1024 && caps.maxThreadsDim[2] == 1024));
   const auto before = fixture.launches.load();
-  for (bool extended : {false, true}) {
+  for (bool const extended : {false, true}) {
     for (const dim3 local :
          {dim3{1025, 1, 1}, dim3{1, 1025, 1}, dim3{1, 1, 1025}, dim3{33, 33, 1}, dim3{65536, 65536, 1}, dim3{maximum, 1, 1}}) {
-      LaunchShape invalid{local, local, local, {1, 1, 1}, extended};
+      LaunchShape const invalid{.global = local, .requested = local, .local = local, .groups = {1, 1, 1}, .extended = extended};
       fixture.expect(expectedShape(invalid, seed, true));
       const auto status = launchShape(function, invalid, arguments);
       if (status != hipErrorInvalidConfiguration)
@@ -237,27 +253,29 @@ void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFuncti
       else result.z = value;
       return result;
     };
-    dim3 zero = axisValue(0);
-    LaunchShape localZero{{1, 1, 1}, zero, zero, {1, 1, 1}, false};
-    LaunchShape gridZero{zero, {1, 1, 1}, {1, 1, 1}, zero, false};
+    dim3 const zero = axisValue(0);
+    LaunchShape localZero{.global = {1, 1, 1}, .requested = zero, .local = zero, .groups = {1, 1, 1}, .extended = false};
+    LaunchShape gridZero{.global = zero, .requested = {1, 1, 1}, .local = {1, 1, 1}, .groups = zero, .extended = false};
     REQUIRE((launchShape(function, localZero, arguments) == hipErrorInvalidConfiguration));
     REQUIRE((launchShape(function, gridZero, arguments) == hipErrorInvalidConfiguration));
     localZero.extended = true;
     gridZero.extended = true;
     REQUIRE((launchShape(function, localZero, arguments) == hipErrorInvalidConfiguration));
     REQUIRE((launchShape(function, gridZero, arguments) == hipErrorInvalidConfiguration));
-    dim3 grid = axisValue(signedMax);
-    dim3 block = axisValue(4);
-    LaunchShape overflow{{1, 1, 1}, block, block, grid, false};
+    dim3 const grid = axisValue(signedMax);
+    dim3 const block = axisValue(4);
+    LaunchShape const overflow{.global = {1, 1, 1}, .requested = block, .local = block, .groups = grid, .extended = false};
     REQUIRE((launchShape(function, overflow, arguments) == hipErrorInvalidConfiguration));
-    LaunchShape excessiveGrid{axisValue(maximum), {1, 1, 1}, {1, 1, 1}, axisValue(maximum), false};
+    LaunchShape excessiveGrid{
+        .global = axisValue(maximum), .requested = {1, 1, 1}, .local = {1, 1, 1}, .groups = axisValue(maximum), .extended = false};
     fixture.expect(expectedShape(excessiveGrid, seed, true));
     REQUIRE((launchShape(function, excessiveGrid, arguments) == hipErrorInvalidConfiguration));
     excessiveGrid.extended = true;
     REQUIRE((launchShape(function, excessiveGrid, arguments) == hipErrorInvalidConfiguration));
   }
   for (uint32_t width : {1025U, 2048U}) {
-    LaunchShape oversizedNominal{{1, 1, 1}, {width, 1, 1}, {1, 1, 1}, {1, 1, 1}, true};
+    LaunchShape const oversizedNominal{
+        .global = {1, 1, 1}, .requested = {width, 1, 1}, .local = {1, 1, 1}, .groups = {1, 1, 1}, .extended = true};
     fixture.expect(expectedShape(oversizedNominal, seed, true));
     REQUIRE((launchShape(function, oversizedNominal, arguments) == hipErrorInvalidConfiguration));
   }
@@ -269,23 +287,23 @@ void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFuncti
 void crossWorkgroupLaunchAndCopyback() {
   gemstone_test::RpcFixture fixture;
   fixture.kernelMetadata(88, 2,
-                         {{8, 0, 2, 0},
-                          {4, 8, 1, 1},
-                          {4, 16, 1, 1},
-                          {4, 20, 1, 1},
-                          {4, 24, 1, 1},
-                          {2, 28, 1, 1},
-                          {2, 30, 1, 1},
-                          {2, 32, 1, 1},
-                          {2, 34, 1, 1},
-                          {2, 36, 1, 1},
-                          {2, 38, 1, 1},
-                          {2, 80, 1, 1}});
+                         {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0},
+                          {.width = 4, .offset = 8, .kind = 1, .containsPointers = 1},
+                          {.width = 4, .offset = 16, .kind = 1, .containsPointers = 1},
+                          {.width = 4, .offset = 20, .kind = 1, .containsPointers = 1},
+                          {.width = 4, .offset = 24, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 28, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 30, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 32, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 34, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 36, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 38, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 80, .kind = 1, .containsPointers = 1}});
   const gemstone_test::RpcEnvironment environment(fixture);
   void *managed = nullptr;
   REQUIRE((hipMallocManaged(&managed, 256) == hipSuccess));
   hipPointerAttribute_t attributes{};
-  for (size_t offset : {size_t(0), size_t(128), size_t(255)}) {
+  for (size_t const offset : {size_t{0}, size_t{128}, size_t{255}}) {
     REQUIRE((hipPointerGetAttributes(&attributes, static_cast<uint8_t *>(managed) + offset) == hipSuccess));
     REQUIRE((attributes.isManaged == 1 && attributes.type == hipMemoryTypeManaged));
   }
@@ -303,12 +321,12 @@ void crossWorkgroupLaunchAndCopyback() {
   REQUIRE((hipModuleGetFunctionCount(&functionCount, module) == hipSuccess));
   REQUIRE((functionCount == 1));
   REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
-  for (bool packed : {false, true})
-    for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
-      for (uint32_t width : {31U, 32U, 33U})
-        for (uint32_t tail : {0U, 1U}) {
+  for (bool const packed : {false, true})
+    for (uint32_t const groups : {1U, 2U, 3U, 5U, 9U})
+      for (uint32_t const width : {31U, 32U, 33U})
+        for (uint32_t const tail : {0U, 1U}) {
           if (tail && !packed) continue;
-          const uint32_t count = width * groups - tail;
+          const uint32_t count = (width * groups) - tail;
           const uint32_t effectiveWidth = std::min(width, count);
           void *allocation = nullptr;
           REQUIRE((hipMalloc(&allocation, (count + 2) * sizeof(uint32_t)) == hipSuccess));
@@ -316,7 +334,7 @@ void crossWorkgroupLaunchAndCopyback() {
           for (uint32_t seed : {7U, 29U}) {
             std::vector<uint32_t> observed(count + 2, 0xa5a5a5a5U);
             REQUIRE((hipMemcpy(allocation, observed.data(), observed.size() * sizeof(uint32_t), hipMemcpyHostToDevice) == hipSuccess));
-            fixture.expect({effectiveWidth, groups, count, 0, seed});
+            fixture.expect({.local = effectiveWidth, .groups = groups, .global = count, .offset = 0, .seed = seed});
             // Bytes after output+seed include alignment, V5 implicit fields, and untouched reserved bytes.
             std::vector<uint8_t> implicit(76, 0);
             gemstone::writeNative(implicit.data(), 4, count / effectiveWidth);
@@ -334,8 +352,7 @@ void crossWorkgroupLaunchAndCopyback() {
               std::memcpy(arguments.data(), &output, 8);
               std::memcpy(arguments.data() + 8, &seed, 4);
               size_t size = arguments.size();
-              void *extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, arguments.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                               HIP_LAUNCH_PARAM_END};
+              void *extra[] = {LaunchParamBufferPointer, arguments.data(), LaunchParamBufferSize, &size, LaunchParamEnd};
               REQUIRE((hipExtModuleLaunchKernel(function, count, 1, 1, width, 1, 1, 0, nullptr, nullptr, extra, nullptr, nullptr, 0)
                        == hipSuccess));
             } else {
@@ -356,10 +373,10 @@ void crossWorkgroupLaunchAndCopyback() {
     // Packed buffers must name both pointer and size, and cover the declared explicit arguments.
     std::array<uint8_t, 12> arguments{};
     size_t size = arguments.size() - 1;
-    void *truncated[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, arguments.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
-    void *malformed[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, arguments.data(), HIP_LAUNCH_PARAM_END};
+    void *truncated[] = {LaunchParamBufferPointer, arguments.data(), LaunchParamBufferSize, &size, LaunchParamEnd};
+    void *malformed[] = {LaunchParamBufferPointer, arguments.data(), LaunchParamEnd};
     size_t complete = arguments.size();
-    void *absent[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, nullptr, HIP_LAUNCH_PARAM_BUFFER_SIZE, &complete, HIP_LAUNCH_PARAM_END};
+    void *absent[] = {LaunchParamBufferPointer, nullptr, LaunchParamBufferSize, &complete, LaunchParamEnd};
     for (void **extra : {truncated, malformed, absent})
       REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra) == hipErrorInvalidValue));
   }
@@ -368,33 +385,34 @@ void crossWorkgroupLaunchAndCopyback() {
   REQUIRE((fixture.launches.load() == 116));
   // HIP advertises pageable host access to Polyregion. A stream wait must
   // expose writes to an ordinary host allocation before it returns.
-  REQUIRE((setenv(gemstone::environment::SystemPaging, "1", 1) == 0));
-  for (uint32_t seed = 1; seed <= 32; ++seed) {
-    std::array<uint32_t, 4> host{0, 0, 0, 0};
-    auto *output = host.data();
-    void *arguments[] = {&output, &seed};
-    fixture.expect({4, 1, 4, 0, seed});
-    fixture.expectTrailingArguments(implicitArguments(dim3{4, 1, 1}, dim3{4, 1, 1}));
-    REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 4, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
-    REQUIRE((hipStreamSynchronize(nullptr) == hipSuccess));
-    for (uint32_t index = 0; index < host.size(); ++index)
-      REQUIRE((host[index] == seed + index));
-    fixture.check();
+  {
+    const gemstone_test::Environment paging(gemstone::environment::SystemPaging, "1");
+    for (uint32_t seed = 1; seed <= 32; ++seed) {
+      std::array<uint32_t, 4> host{0, 0, 0, 0};
+      auto *output = host.data();
+      void *arguments[] = {&output, &seed};
+      fixture.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
+      fixture.expectTrailingArguments(implicitArguments(dim3{4, 1, 1}, dim3{4, 1, 1}));
+      REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 4, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
+      REQUIRE((hipStreamSynchronize(nullptr) == hipSuccess));
+      for (uint32_t index = 0; index < host.size(); ++index)
+        REQUIRE((host[index] == seed + index));
+      fixture.check();
+    }
   }
-  REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
   REQUIRE((fixture.launches.load() == 148));
   {
     // Packed records may omit hidden arguments, or extend past the kernarg segment like Tensile's four-byte trailer.
     // Only the explicit arguments are consumed either way.
     void *allocation = nullptr;
     REQUIRE((hipMalloc(&allocation, 4 * sizeof(uint32_t)) == hipSuccess));
-    for (size_t size : {size_t(12), size_t(92)}) {
+    for (size_t size : {size_t{12}, size_t{92}}) {
       std::vector<uint8_t> arguments(size, 0xa5);
       const auto seed = static_cast<uint32_t>(size);
       std::memcpy(arguments.data(), &allocation, 8);
       std::memcpy(arguments.data() + 8, &seed, 4);
-      void *extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, arguments.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
-      fixture.expect({4, 1, 4, 0, seed});
+      void *extra[] = {LaunchParamBufferPointer, arguments.data(), LaunchParamBufferSize, &size, LaunchParamEnd};
+      fixture.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
       fixture.expectTrailingArguments(implicitArguments(dim3{4, 1, 1}, dim3{4, 1, 1}));
       REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 4, 1, 1, 0, nullptr, nullptr, extra) == hipSuccess));
       REQUIRE((hipStreamSynchronize(nullptr) == hipSuccess));
@@ -408,17 +426,18 @@ void crossWorkgroupLaunchAndCopyback() {
 }
 
 void registeredHostCopy() {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  for (bool pinned : {false, true}) {
+  for (bool const pinned : {false, true}) {
     std::array<uint32_t, 4> ordinary{};
     uint32_t *host = ordinary.data();
     if (pinned) REQUIRE((hipHostMalloc(reinterpret_cast<void **>(&host), sizeof(ordinary), 0) == hipSuccess));
     else REQUIRE((hipHostRegister(host, sizeof(ordinary), 0) == hipSuccess));
-    void *device = nullptr, *copy = nullptr;
+    void *device = nullptr;
+    void *copy = nullptr;
     REQUIRE((hipMalloc(&device, sizeof(ordinary)) == hipSuccess));
     REQUIRE((hipMalloc(&copy, sizeof(ordinary)) == hipSuccess));
-    for (uint32_t seed : {0x11223344U, 0x8899aabbU}) {
+    for (uint32_t const seed : {0x11223344U, 0x8899aabbU}) {
       for (unsigned i = 0; i < 4; ++i)
         host[i] = seed + i;
       REQUIRE((hipMemcpy(device, host, sizeof(ordinary), hipMemcpyHostToDevice) == hipSuccess));
@@ -439,13 +458,13 @@ void registeredHostCopy() {
 }
 
 void pointerAttributes() {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   uint8_t ordinary[32]{};
   hipPointerAttribute_t info{};
   REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipErrorInvalidValue));
   REQUIRE((hipHostRegister(ordinary, sizeof(ordinary), 0) == hipSuccess));
-  for (size_t offset : {size_t(0), size_t(7), sizeof(ordinary) - 1}) {
+  for (size_t const offset : {size_t{0}, size_t{7}, sizeof(ordinary) - 1}) {
     REQUIRE((hipPointerGetAttributes(&info, ordinary + offset) == hipSuccess));
     REQUIRE((info.type == hipMemoryTypeHost && info.isManaged == 0 && info.hostPointer == ordinary + offset));
   }
@@ -456,7 +475,7 @@ void pointerAttributes() {
     if (kind == hipMemoryTypeHost) REQUIRE((hipHostMalloc(&pointer, 32, 0) == hipSuccess));
     else if (kind == hipMemoryTypeManaged) REQUIRE((hipMallocManaged(&pointer, 32) == hipSuccess));
     else REQUIRE((hipMalloc(&pointer, 32) == hipSuccess));
-    for (size_t offset : {size_t(0), size_t(7), size_t(31)}) {
+    for (size_t const offset : {size_t{0}, size_t{7}, size_t{31}}) {
       REQUIRE((hipPointerGetAttributes(&info, static_cast<uint8_t *>(pointer) + offset) == hipSuccess));
       REQUIRE((info.type == kind && info.isManaged == (kind == hipMemoryTypeManaged)));
     }
@@ -468,7 +487,7 @@ void pointerAttributes() {
 }
 
 void deviceResetLifetime() {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   void *memory = nullptr;
   hipStream_t stream = nullptr;
@@ -498,7 +517,7 @@ void deviceResetLifetime() {
 } // namespace
 
 TEST_CASE("HIP launch-buffer and runtime behaviour", "[hip]") {
-  REQUIRE((setenv(gemstone::environment::TargetArch, "gfx1010", 1) == 0));
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1010");
   int major = 0;
   int minor = 0;
   REQUIRE((hipDeviceComputeCapability(&major, &minor, 0) == hipSuccess));
@@ -512,13 +531,14 @@ TEST_CASE("HIP launch-buffer and runtime behaviour", "[hip]") {
   REQUIRE((properties.major == 10 && properties.minor == 1));
   REQUIRE((properties.unifiedAddressing == 1));
   REQUIRE((properties.canMapHostMemory == 1));
-  int unified{}, mapped{};
+  int unified{};
+  int mapped{};
   REQUIRE((hipDeviceGetAttribute(&unified, hipDeviceAttributeUnifiedAddressing, 0) == hipSuccess));
   REQUIRE((hipDeviceGetAttribute(&mapped, hipDeviceAttributeCanMapHostMemory, 0) == hipSuccess));
   REQUIRE((unified == properties.unifiedAddressing));
   REQUIRE((mapped == properties.canMapHostMemory));
   REQUIRE((properties.maxThreadsPerMultiProcessor == 1024));
-  REQUIRE((properties.maxSharedMemoryPerMultiProcessor == 64U * 1024U));
+  REQUIRE((properties.maxSharedMemoryPerMultiProcessor == size_t{64} * 1024));
 
   int count = -1;
   REQUIRE((hipGetDeviceCount(&count) == hipErrorNoDevice));
@@ -532,6 +552,53 @@ TEST_CASE("HIP launch-buffer and runtime behaviour", "[hip]") {
 
 TEST_CASE("HIP registered host copies", "[hip]") { registeredHostCopy(); }
 
+TEST_CASE("HIP cooperative launches fit every block on the device at once", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1030");
+  int cooperative = 0;
+  int units = 0;
+  REQUIRE((hipDeviceGetAttribute(&cooperative, hipDeviceAttributeCooperativeLaunch, 0) == hipSuccess));
+  REQUIRE((hipDeviceGetAttribute(&units, hipDeviceAttributeMultiprocessorCount, 0) == hipSuccess));
+  hipDeviceProp_tR0600 properties{};
+  REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
+  REQUIRE((cooperative == 1 && properties.cooperativeLaunch == 1));
+  REQUIRE((units == 1 && properties.multiProcessorCount == units));
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module{};
+  hipFunction_t function{};
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  // 1024 work-items a multiprocessor, in whole wave32 waves, and 64 KiB of LDS
+  int blocks = 0;
+  REQUIRE((hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, function, 256, 0) == hipSuccess));
+  REQUIRE((blocks == 4));
+  REQUIRE((hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, function, 33, 0) == hipSuccess));
+  REQUIRE((blocks == 16));
+  REQUIRE((hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, function, 64, size_t{32} * 1024) == hipSuccess));
+  REQUIRE((blocks == 2));
+  REQUIRE((hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, function, 2048, 0) == hipSuccess));
+  REQUIRE((blocks == 0));
+  void *output = nullptr;
+  REQUIRE((hipMalloc(&output, 1024 * sizeof(uint32_t)) == hipSuccess));
+  uint32_t seed = 3;
+  void *arguments[] = {&output, &seed};
+  REQUIRE((hipModuleLaunchCooperativeKernel(function, 5, 1, 1, 256, 1, 1, 0, nullptr, arguments) == hipErrorCooperativeLaunchTooLarge));
+  REQUIRE((std::strcmp(hipGetErrorName(hipGetLastError()), "hipErrorCooperativeLaunchTooLarge") == 0));
+  fixture.opaqueLaunches();
+  for (const bool resident : {true, false}) {
+    REQUIRE(((resident ? hipModuleLaunchCooperativeKernel(function, 2, 2, 1, 256, 1, 1, 0, nullptr, arguments)
+                       : hipModuleLaunchKernel(function, 2, 2, 1, 256, 1, 1, 0, nullptr, arguments, nullptr))
+             == hipSuccess));
+    REQUIRE((hipDeviceSynchronize() == hipSuccess));
+    const auto launch = fixture.lastLaunch();
+    REQUIRE((launch.cooperative == resident));
+    REQUIRE((launch.groupCount.x.value == 2 && launch.groupCount.y.value == 2 && launch.groupSize.x.value == 256));
+  }
+  REQUIRE((hipFree(output) == hipSuccess));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
 TEST_CASE("HIP queued failures are reported to the synchronising thread", "[hip]") {
   gemstone_test::RpcFixture fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
@@ -544,9 +611,8 @@ TEST_CASE("HIP queued failures are reported to the synchronising thread", "[hip]
   REQUIRE((hipMalloc(&output, sizeof(uint32_t)) == hipSuccess));
   // Queue workers are pooled, so repeat until a callback is likely to share the failed launch's worker.
   for (uint32_t seed = 1; seed <= 16; ++seed) {
-    fixture.expect({1, 1, 1, 0, seed});
-    fixture.expectTrailingArguments(implicitArguments(dim3{1, 1, 1}, dim3{1, 1, 1}));
-    fixture.failNextCompletion();
+    fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = seed});
+    fixture.failNextCompletion(gemstone::execution::FailureKind::IllegalAddress);
     void *arguments[] = {&output, &seed};
     REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
     hipError_t observed = hipErrorUnknown;
@@ -554,10 +620,51 @@ TEST_CASE("HIP queued failures are reported to the synchronising thread", "[hip]
         (hipStreamAddCallback(
              nullptr, [](hipStream_t, hipError_t, void *data) { *static_cast<hipError_t *>(data) = hipPeekAtLastError(); }, &observed, 0)
          == hipSuccess));
-    REQUIRE((hipDeviceSynchronize() == hipErrorLaunchFailure));
+    REQUIRE((hipDeviceSynchronize() == hipErrorIllegalAddress));
     REQUIRE((observed == hipSuccess));
-    REQUIRE((hipGetLastError() == hipErrorLaunchFailure));
+    REQUIRE((hipGetLastError() == hipErrorIllegalAddress));
     REQUIRE((hipGetLastError() == hipSuccess));
+    fixture.check();
+  }
+  REQUIRE((hipFree(output) == hipSuccess));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+TEST_CASE("HIP queued failures report the error the failure kind names", "[hip]") {
+  using gemstone::execution::FailureKind;
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module{};
+  hipFunction_t function{};
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  void *output = nullptr;
+  REQUIRE((hipMalloc(&output, sizeof(uint32_t)) == hipSuccess));
+  const struct {
+    FailureKind kind;
+    hipError_t expected;
+  } cases[]{
+      {.kind = FailureKind::IllegalAddress, .expected = hipErrorIllegalAddress},
+      {.kind = FailureKind::MisalignedAddress, .expected = hipErrorIllegalAddress},
+      {.kind = FailureKind::OutOfResources, .expected = hipErrorLaunchOutOfResources},
+      {.kind = FailureKind::InvalidProgram, .expected = hipErrorInvalidImage},
+      {.kind = FailureKind::InvalidConfiguration, .expected = hipErrorInvalidConfiguration},
+      {.kind = FailureKind::IllegalInstruction, .expected = hipErrorLaunchFailure},
+      {.kind = FailureKind::Trapped, .expected = hipErrorLaunchFailure},
+      {.kind = FailureKind::Failed, .expected = hipErrorLaunchFailure},
+  };
+  uint32_t seed = 1;
+  for (const auto &[kind, expected] : cases) {
+    CAPTURE(static_cast<int>(kind));
+    fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = seed});
+    fixture.failNextCompletion(kind);
+    void *arguments[] = {&output, &seed};
+    REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
+    CHECK((hipDeviceSynchronize() == expected));
+    CHECK((hipGetLastError() == expected));
+    fixture.check();
+    ++seed;
   }
   REQUIRE((hipFree(output) == hipSuccess));
   REQUIRE((hipModuleUnload(module) == hipSuccess));
@@ -568,9 +675,9 @@ TEST_CASE("HIP pointer attributes", "[hip]") { pointerAttributes(); }
 TEST_CASE("HIP device-reset lifetime", "[hip]") { deviceResetLifetime(); }
 
 TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
+  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, nullptr);
   std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
   REQUIRE((hipHostRegister(host.data(), sizeof(host), hipHostRegisterMapped) == hipSuccess));
   void *device = nullptr;
@@ -585,7 +692,7 @@ TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unifie
 }
 
 TEST_CASE("HIP allocated mapped host memory exposes its device pointer", "[hip][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   void *host = nullptr;
   REQUIRE((hipHostMalloc(&host, 64, hipHostMallocMapped) == hipSuccess));
@@ -596,7 +703,7 @@ TEST_CASE("HIP allocated mapped host memory exposes its device pointer", "[hip][
 }
 
 TEST_CASE("HIP registered host flags round trip", "[hip][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   std::array<uint32_t, 8> host{};
   const unsigned requested = hipHostRegisterMapped | hipHostRegisterPortable;
@@ -608,9 +715,9 @@ TEST_CASE("HIP registered host flags round trip", "[hip][unified-memory]") {
 }
 
 TEST_CASE("HIP registered subranges retain ownership and permit address reuse", "[hip][unified-memory]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
+  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, nullptr);
   std::array<uint32_t, 16> host{};
   for (unsigned iteration = 0; iteration < 3; ++iteration) {
     REQUIRE((hipHostRegister(host.data() + 1, 4 * sizeof(uint32_t), 0) == hipSuccess));
@@ -628,9 +735,10 @@ TEST_CASE("HIP registered subranges retain ownership and permit address reuse", 
 namespace {
 void unifiedMemoryRoundTrip(unsigned kind) {
   gemstone_test::RpcFixture fixture;
-  fixture.kernelMetadata(12, 2, {{8, 0, 2, 0}, {4, 8, 1, 0}});
+  fixture.kernelMetadata(
+      12, 2, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}, {.width = 4, .offset = 8, .kind = 1, .containsPointers = 0}});
   const gemstone_test::RpcEnvironment environment(fixture);
-  REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
+  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, nullptr);
   std::array<uint32_t, 16> storage{};
   void *memory = storage.data();
   if (kind == 0) REQUIRE((hipMallocManaged(&memory, sizeof(storage)) == hipSuccess));
@@ -645,11 +753,11 @@ void unifiedMemoryRoundTrip(unsigned kind) {
   auto *host = static_cast<uint32_t *>(memory);
   for (uint32_t seed : {11U, 71U, 93U}) {
     std::fill_n(host, 16, 0xa5a5a5a5U);
-    const uint64_t input = uint64_t(seed) * 0x100000001ULL;
+    const uint64_t input = static_cast<uint64_t>(seed) * 0x100000001ULL;
     std::memcpy(host + 8, &input, sizeof(input));
     auto *interior = host + 1;
     void *arguments[] = {&interior, &seed};
-    fixture.expect({4, 1, 4, 0, seed});
+    fixture.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
     REQUIRE((hipModuleLaunchKernel(kernel, 1, 1, 1, 4, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
     REQUIRE((hipDeviceSynchronize() == hipSuccess));
     for (unsigned index = 0; index < 4; ++index)
@@ -672,7 +780,7 @@ TEST_CASE("HIP pinned interior kernel writes and host edits round trip", "[hip][
 TEST_CASE("HIP registered interior kernel writes and host edits round trip", "[hip][unified-memory]") { unifiedMemoryRoundTrip(2); }
 
 TEST_CASE("HIP free waits for queued memory uses", "[hip]") {
-  gemstone_test::RpcFixture fixture;
+  gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   gemstone_test::queuedLifetime(
       [](size_t size) {
@@ -688,7 +796,7 @@ TEST_CASE("HIP free waits for queued memory uses", "[hip]") {
           void (*function)(void *);
           void *data;
         };
-        auto *owned = new Callback{callback, data};
+        auto *owned = new Callback{.function = callback, .data = data};
         REQUIRE(hipStreamAddCallback(
                     nullptr,
                     [](hipStream_t, hipError_t, void *p) {

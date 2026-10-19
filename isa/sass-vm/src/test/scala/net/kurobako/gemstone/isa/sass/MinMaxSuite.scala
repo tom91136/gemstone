@@ -10,6 +10,42 @@ import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
 class MinMaxSuite extends munit.FunSuite {
+  private trait Reduction {
+    def apply(a: Int, b: Int, c: Int): Int
+  }
+
+  private case class NestedKernel(function: String, listing: String, modifiers: Vec[String], expected: Reduction)
+
+  private val Flags = Vec(false, true)
+
+  private val SelectorCases = Vec(
+    ("", "PT", Int.MinValue),
+    ("", "!PT", Int.MaxValue),
+    (".U32", "PT", Int.MaxValue),
+    (".U32", "!PT", -1)
+  )
+
+  private val FloatPairs = Vec(
+    (Float.NaN, 2.0f),
+    (2.0f, Float.NaN),
+    (Float.NaN, Float.NaN),
+    (-0.0f, 0.0f),
+    (3.0f, -2.0f),
+    (Float.PositiveInfinity, 2.0f)
+  )
+
+  private val DoublePairs = Vec(
+    (3.0, 2.0),
+    (-0.0, 0.0),
+    (Double.NaN, 2.0),
+    (2.0, Double.NaN),
+    (Double.NaN, Double.NaN),
+    (Double.PositiveInfinity, 2.0)
+  )
+
+  private val WrappingInputs  = Vec(Int.MaxValue, -1)
+  private val ThresholdValues = Vec(Long.MinValue, -1L, 0L, 3583L, 3585L, Long.MaxValue)
+
   private def hex(bits: Long): String = s"0x${java.lang.Long.toHexString(bits)}"
 
   test("CUDA 11.8 sm_35 extended IMNMX implements signed and unsigned 64-bit min/max") {
@@ -67,7 +103,7 @@ class MinMaxSuite extends munit.FunSuite {
       (Int.MinValue, Int.MinValue, -1),
       (-1, -2, -3)
     ).foreach { (a, b, c) =>
-      val expected = Vec(false, true).flatMap { unsigned =>
+      val expected = Flags.flatMap { unsigned =>
         def widen(value: Int): Long = if (unsigned) value.toLong & 0xffffffffL else value.toLong
         Vec(math.min(widen(a), widen(b)), math.max(widen(a), widen(b))).flatMap(value =>
           Vec(math.min(value, widen(c)), math.max(value, widen(c)), value + widen(c)).map(_ & 0xffffffffL)
@@ -108,6 +144,11 @@ class MinMaxSuite extends munit.FunSuite {
     unpadded ++ Vec.fill((128 - unpadded.size % 128) % 128)((0, 0, 0))
   }
 
+  private val NestedKernels = Vec(
+    NestedKernel("nested_min", "videoMinMaxNestedMinSm50", Vec("MIN"), (a, b, c) => math.min(math.min(a, b), c)),
+    NestedKernel("nested_max", "videoMinMaxNestedMaxSm50", Vec("MX", "MAX"), (a, b, c) => math.max(math.max(a, b), c))
+  )
+
   test("CUDA 11.8 sm_50/sm_60 signed nested VMNMX kernels match scalar min/max") {
     def nested(kernel: Kernel): Run = kernel.launch(128, nestedCases.size / 128)(
       Arg.Buffer(words(nestedCases.map(_._1.toLong))),
@@ -116,20 +157,16 @@ class MinMaxSuite extends munit.FunSuite {
       Arg.zeros(nestedCases.size * 4)
     )
     for (sm <- Vec(50, 60))
-      Vec(
-        ("nested_min", "videoMinMaxNestedMinSm50", Vec("MIN"), (a: Int, b: Int, c: Int) => math.min(math.min(a, b), c)),
-        (
-          "nested_max",
-          "videoMinMaxNestedMaxSm50",
-          Vec("MX", "MAX"),
-          (a: Int, b: Int, c: Int) => math.max(math.max(a, b), c)
-        )
-      ).foreach { (function, listing, modifiers, expected) =>
+      NestedKernels.foreach { case NestedKernel(function, listing, modifiers, expected) =>
         val kernel = load(sm, Fixture.listing(listing), function)
         val vmnmx  = kernel.function.instructions.filter(_.mnemonic.raw == "VMNMX")
         assertEquals(vmnmx.map(_.modifiers.map(_.name)), Vec(modifiers), s"sm_$sm $function")
         assertEquals(vmnmx.head.operands.size, 4, s"sm_$sm $function")
-        assertEquals(nested(kernel).words(3).map(_.toInt), nestedCases.map(expected.tupled), s"sm_$sm $function")
+        assertEquals(
+          nested(kernel).words(3).map(_.toInt),
+          nestedCases.map((a, b, c) => expected(a, b, c)),
+          s"sm_$sm $function"
+        )
         if (function == "nested_min") {
           val instruction = vmnmx.head
           val sentinel    = 0x13579bdf
@@ -153,12 +190,7 @@ class MinMaxSuite extends munit.FunSuite {
 
   for {
     sm                             <- Vec(100, 103)
-    (modifier, selector, expected) <- Vec(
-      ("", "PT", Int.MinValue),
-      ("", "!PT", Int.MaxValue),
-      (".U32", "PT", Int.MaxValue),
-      (".U32", "!PT", -1)
-    )
+    (modifier, selector, expected) <- SelectorCases
   }
     test(s"sm$sm VIMNMX3$modifier selector=$selector retains signed boundaries and an aliased third source") {
       check(
@@ -170,34 +202,26 @@ class MinMaxSuite extends munit.FunSuite {
     }
 
   for {
-    propagate <- Vec(false, true)
-    minimum   <- Vec(false, true)
+    propagate <- Flags
+    minimum   <- Flags
   }
     test(s"floating min/max NaN propagation=$propagate minimum=$minimum") {
-      Vec(
-        (Float.NaN, 2.0f),
-        (2.0f, Float.NaN),
-        (Float.NaN, Float.NaN),
-        (-0.0f, 0.0f),
-        (3.0f, -2.0f),
-        (Float.PositiveInfinity, 2.0f)
-      )
-        .foreach { (a, b) =>
-          val numeric = if (a.isNaN) b else if (b.isNaN) a else if (minimum) Math.min(a, b) else Math.max(a, b)
-          // SASS emits the canonical all-mantissa-bits NaN
-          val expected =
-            if (numeric.isNaN || (propagate && (a.isNaN || b.isNaN))) 0x7fffffff
-            else java.lang.Float.floatToRawIntBits(numeric)
-          check(
-            90,
-            s"LDC.64 R10, c[0x0][0x160]; MOV R4, ${hex(java.lang.Float.floatToRawIntBits(a).toLong & 0xffffffffL)}; " +
-              s"UMOV UR6, ${hex(java.lang.Float.floatToRawIntBits(b).toLong & 0xffffffffL)}; " +
-              s"${if (propagate) "FMNMX.NAN" else "FMNMX"} R4, R4, UR6, ${
-                  if (minimum) "PT" else "!PT"
-                }; STG.E [R10], R4; EXIT",
-            Vec(expected)
-          )
-        }
+      FloatPairs.foreach { (a, b) =>
+        val numeric = if (a.isNaN) b else if (b.isNaN) a else if (minimum) Math.min(a, b) else Math.max(a, b)
+        // SASS emits the canonical all-mantissa-bits NaN
+        val expected =
+          if (numeric.isNaN || (propagate && (a.isNaN || b.isNaN))) 0x7fffffff
+          else java.lang.Float.floatToRawIntBits(numeric)
+        check(
+          90,
+          s"LDC.64 R10, c[0x0][0x160]; MOV R4, ${hex(java.lang.Float.floatToRawIntBits(a).toLong & 0xffffffffL)}; " +
+            s"UMOV UR6, ${hex(java.lang.Float.floatToRawIntBits(b).toLong & 0xffffffffL)}; " +
+            s"${if (propagate) "FMNMX.NAN" else "FMNMX"} R4, R4, UR6, ${
+                if (minimum) "PT" else "!PT"
+              }; STG.E [R10], R4; EXIT",
+          Vec(expected)
+        )
+      }
     }
 
   private val fmnmx = load(86, Fixture.listing("fmnmxSm86"), "probe")
@@ -221,7 +245,7 @@ class MinMaxSuite extends munit.FunSuite {
       if (opcode == "FMNMX" && instruction.operands.lastOption.contains(truePredicate))
         instruction.rewrite(operands = instruction.operands.updated(0, OperandParser.parse("R4").value))
       else if (opcode == "FMNMX") instruction.rewrite(nop)
-      else if (opcode == "STG" && instruction.address.raw == 0xf0)
+      else if (opcode == "STG" && instruction.address == 0xf0)
         instruction.rewrite(operands = OperandParser.parseMany("[R2.64], R4").value)
       else if (opcode == "STG") instruction.rewrite(nop)
       else instruction
@@ -232,15 +256,15 @@ class MinMaxSuite extends munit.FunSuite {
     )
   }
 
-  test("FMNMX fails closed for unmeasured modifier and selector forms") {
+  // A predicate selector picks the minimum where it holds and the maximum otherwise, as PT and !PT do.
+  test("FMNMX fails closed for unmeasured modifiers and selects by a predicate selector") {
     def minimum(f: DecodedInstruction => DecodedInstruction): Kernel =
       fmnmx.map(i => if (i.mnemonic.raw == "FMNMX" && i.operands.lastOption.contains(truePredicate)) f(i) else i)
-    assert(minimum(i => i.rewrite(modifiers = i.modifiers :+ Instruction.Modifier("FTZ"))).lower(8, 8, 8)
+    assert(minimum(i => i.rewrite(modifiers = i.modifiers :+ Instruction.Modifier("IS_A"))).lower(8, 8, 8)
       .left.exists(_.contains("unsupported modifiers")))
     assert(minimum(i =>
       i.rewrite(operands = i.operands.updated(3, Operand.Predicate(Some(0), uniform = false, negated = false)))
-    )
-      .lower(8, 8, 8).left.exists(_.contains("FMNMX selector must be PT or !PT")))
+    ).lower(8, 8, 8).isRight)
   }
 
   test("compiler-produced sm_89 DSETP.MAX/MIN preserve NaN and signed-zero selection") {
@@ -274,15 +298,8 @@ class MinMaxSuite extends munit.FunSuite {
   }
 
   for {
-    minimum <- Vec(false, true)
-    values  <- Vec(
-      (3.0, 2.0),
-      (-0.0, 0.0),
-      (Double.NaN, 2.0),
-      (2.0, Double.NaN),
-      (Double.NaN, Double.NaN),
-      (Double.PositiveInfinity, 2.0)
-    )
+    minimum <- Flags
+    values  <- DoublePairs
   }
     test(s"double min/max preserves pairs and numeric NaN handling: $values minimum=$minimum") {
       val (a, b)   = values
@@ -299,8 +316,8 @@ class MinMaxSuite extends munit.FunSuite {
     }
 
   for {
-    unsigned <- Vec(false, true)
-    minimum  <- Vec(false, true)
+    unsigned <- Flags
+    minimum  <- Flags
   }
     test(s"64-bit integer min/max retains high words unsigned=$unsigned minimum=$minimum") {
       val value = if (unsigned == minimum) 1L else Long.MinValue
@@ -315,9 +332,9 @@ class MinMaxSuite extends munit.FunSuite {
     }
 
   for {
-    unsigned <- Vec(false, true)
-    minimum  <- Vec(false, true)
-    input    <- Vec(Int.MaxValue, -1)
+    unsigned <- Flags
+    minimum  <- Flags
+    input    <- WrappingInputs
   }
     test(s"Hopper fused add/minmax preserves wrapping addition unsigned=$unsigned minimum=$minimum input=$input") {
       val sum  = input + 1
@@ -333,9 +350,9 @@ class MinMaxSuite extends munit.FunSuite {
     }
 
   for {
-    signed  <- Vec(false, true)
-    value   <- Vec(Long.MinValue, -1L, 0L, 3583L, 3585L, Long.MaxValue)
-    minimum <- Vec(false, true)
+    signed  <- Flags
+    value   <- ThresholdValues
+    minimum <- Flags
   }
     test(s"sm_120 uniform 64-bit min/max signed=$signed value=$value minimum=$minimum") {
       val compare  = if (signed) java.lang.Long.compare(value, 3584L) else java.lang.Long.compareUnsigned(value, 3584L)

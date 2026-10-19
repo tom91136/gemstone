@@ -2,203 +2,156 @@ package net.kurobako.gemstone.isa.spirv
 
 import LaneOps.*
 import Op.*
-import VMLowering.*
+import OpBuilder.*
 import VMProgram.*
-import net.kurobako.gemstone.binary.*
-import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 /** Integer and floating-point arithmetic, bitwise operations, shifts, bit fields and the linear algebra opcodes. Each
   * family pairs a shape rule, checked once at load, with a lane kernel.
   */
+// result type, site and operand ids are the raw operands of each opcode; a holder would allocate per instruction
+@SuppressWarnings(Array("baumkuchen:data-clump"))
 private object ArithmeticOps {
   import Operand.*
 
   def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.IAdd(t, d, a, b)             => wrapping(site, t, d, a, b, SPIRV.Opcode.IAdd)
-    case Instruction.ISub(t, d, a, b)             => wrapping(site, t, d, a, b, SPIRV.Opcode.ISub)
-    case Instruction.IMul(t, d, a, b)             => wrapping(site, t, d, a, b, SPIRV.Opcode.IMul)
-    case Instruction.UDiv(t, d, a, b)             => division(site, "OpUDiv", t, d, a, b, SPIRV.Opcode.UDiv)
-    case Instruction.UMod(t, d, a, b)             => division(site, "OpUMod", t, d, a, b, SPIRV.Opcode.UMod)
-    case Instruction.SDiv(t, d, a, b)             => division(site, "OpSDiv", t, d, a, b, SPIRV.Opcode.SDiv)
-    case Instruction.SRem(t, d, a, b)             => division(site, "OpSRem", t, d, a, b, SPIRV.Opcode.SRem)
-    case Instruction.SMod(t, d, a, b)             => division(site, "OpSMod", t, d, a, b, SPIRV.Opcode.SMod)
-    case Instruction.SNegate(t, d, a)             => negate(site, t, d, a)
-    case Instruction.ShiftLeftLogical(t, d, a, b) =>
-      shift(site, "OpShiftLeftLogical", t, d, a, b, SPIRV.Opcode.ShiftLeftLogical)
-    case Instruction.ShiftRightLogical(t, d, a, b) =>
-      shift(site, "OpShiftRightLogical", t, d, a, b, SPIRV.Opcode.ShiftRightLogical)
-    case Instruction.ShiftRightArithmetic(t, d, a, b) =>
-      shift(site, "OpShiftRightArithmetic", t, d, a, b, SPIRV.Opcode.ShiftRightArithmetic)
-    case Instruction.BitwiseOr(t, d, a, b) =>
-      bitwise(site, "OpBitwiseOr", t, d, a, b)(integerKernels(SPIRV.Opcode.BitwiseOr))
-    case Instruction.BitwiseXor(t, d, a, b) =>
-      bitwise(site, "OpBitwiseXor", t, d, a, b)(integerKernels(SPIRV.Opcode.BitwiseXor))
-    case Instruction.BitwiseAnd(t, d, a, b) =>
-      bitwise(site, "OpBitwiseAnd", t, d, a, b)(integerKernels(SPIRV.Opcode.BitwiseAnd))
-    case Instruction.Not(t, d, a)                                => not(site, t, d, a)
-    case Instruction.BitCount(t, d, a)                           => bitCount(site, t, d, a)
-    case Instruction.BitFieldUExtract(t, d, base, offset, count) =>
-      bitField(
-        site,
-        resultType = t,
-        dest = d,
-        base,
-        insert = None,
-        offset = Some(offset),
-        count = Some(count),
-        BitField.UnsignedExtract
-      )
-    case Instruction.BitFieldSExtract(t, d, base, offset, count) =>
-      bitField(
-        site,
-        resultType = t,
-        dest = d,
-        base,
-        insert = None,
-        offset = Some(offset),
-        count = Some(count),
-        BitField.SignedExtract
-      )
-    case Instruction.BitFieldInsert(t, d, base, insert, offset, count) =>
-      bitField(
-        site,
-        resultType = t,
-        dest = d,
-        base,
-        insert = Some(insert),
-        offset = Some(offset),
-        count = Some(count),
-        BitField.Insert
-      )
-    case Instruction.BitReverse(t, d, base) =>
-      bitField(site, resultType = t, dest = d, base, insert = None, offset = None, count = None, BitField.Reverse)
-    case Instruction.IAddCarry(t, d, a, b)         => extended(site, t, d, a, b, Extended.AddCarry)
-    case Instruction.ISubBorrow(t, d, a, b)        => extended(site, t, d, a, b, Extended.SubtractBorrow)
-    case Instruction.UMulExtended(t, d, a, b)      => extended(site, t, d, a, b, Extended.UnsignedMultiply)
-    case Instruction.SMulExtended(t, d, a, b)      => extended(site, t, d, a, b, Extended.SignedMultiply)
-    case Instruction.FAdd(t, d, a, b)              => floating(site, FloatingOperation.Add, t, d, a, b)
-    case Instruction.FSub(t, d, a, b)              => floating(site, FloatingOperation.Subtract, t, d, a, b)
-    case Instruction.FMul(t, d, a, b)              => floating(site, FloatingOperation.Multiply, t, d, a, b)
-    case Instruction.FDiv(t, d, a, b)              => floating(site, FloatingOperation.Divide, t, d, a, b)
-    case Instruction.FRem(t, d, a, b)              => floating(site, FloatingOperation.Remainder, t, d, a, b)
-    case Instruction.FMod(t, d, a, b)              => floating(site, FloatingOperation.Modulo, t, d, a, b)
-    case Instruction.FNegate(t, d, a)              => floatingNegate(site, t, d, a)
-    case Instruction.VectorTimesScalar(t, d, a, b) => vectorTimesScalar(site, t, d, a, b)
-    case Instruction.Dot(t, d, a, b)               => dot(site, t, d, a, b)
-    case Instruction.Transpose(t, d, a)            => matrix(site, t, d, MatrixOperation.Transpose, Vec(a))
-    case Instruction.MatrixTimesScalar(t, d, a, b) => matrix(site, t, d, MatrixOperation.Scale, Vec(a, b))
-    case Instruction.VectorTimesMatrix(t, d, a, b) => matrix(site, t, d, MatrixOperation.VectorMatrix, Vec(a, b))
-    case Instruction.MatrixTimesVector(t, d, a, b) => matrix(site, t, d, MatrixOperation.MatrixVector, Vec(a, b))
-    case Instruction.MatrixTimesMatrix(t, d, a, b) => matrix(site, t, d, MatrixOperation.Multiply, Vec(a, b))
-    case Instruction.OuterProduct(t, d, a, b)      => matrix(site, t, d, MatrixOperation.OuterProduct, Vec(a, b))
+    case instruction @ Instruction.IAdd(_, _, a, b) =>
+      wrapping(site, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.ISub(_, _, a, b) =>
+      wrapping(site, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.IMul(_, _, a, b) =>
+      wrapping(site, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.UDiv(t, _, a, b) =>
+      division(site, "OpUDiv", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.UMod(t, _, a, b) =>
+      division(site, "OpUMod", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SDiv(t, _, a, b) =>
+      division(site, "OpSDiv", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SRem(t, _, a, b) =>
+      division(site, "OpSRem", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SMod(t, _, a, b) =>
+      division(site, "OpSMod", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SNegate(t, _, a) => negate(site, t, a)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.ShiftLeftLogical(t, _, a, b) =>
+      shift(site, "OpShiftLeftLogical", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.ShiftRightLogical(t, _, a, b) =>
+      shift(site, "OpShiftRightLogical", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.ShiftRightArithmetic(t, _, a, b) =>
+      shift(site, "OpShiftRightArithmetic", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitwiseOr(t, _, a, b) =>
+      bitwiseOperands(site, "OpBitwiseOr", t, a, b)(_ => staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitwiseXor(t, _, a, b) =>
+      bitwiseOperands(site, "OpBitwiseXor", t, a, b)(_ => staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitwiseAnd(t, _, a, b) =>
+      bitwiseOperands(site, "OpBitwiseAnd", t, a, b)(_ => staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.Not(t, _, a)      => not(site, t, a)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitCount(t, _, a) =>
+      bitCount(site, t, a)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitReverse(t, _, a) =>
+      bitField(site, t, a, None)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitFieldUExtract(resultType = t, base = base) =>
+      bitField(site, t, base, None)(staged(site, instruction, CoreFamily.BitField))
+    case instruction @ Instruction.BitFieldSExtract(resultType = t, base = base) =>
+      bitField(site, t, base, None)(staged(site, instruction, CoreFamily.BitField))
+    case instruction @ Instruction.BitFieldInsert(resultType = t, base = base, insert = insert) =>
+      bitField(site, t, base, Some(insert))(staged(site, instruction, CoreFamily.BitField))
+    case instruction @ Instruction.IAddCarry(t, _, a, b)    => extended(site, instruction, t, a, b)
+    case instruction @ Instruction.ISubBorrow(t, _, a, b)   => extended(site, instruction, t, a, b)
+    case instruction @ Instruction.UMulExtended(t, _, a, b) => extended(site, instruction, t, a, b)
+    case instruction @ Instruction.SMulExtended(t, _, a, b) => extended(site, instruction, t, a, b)
+    // binary16 operands are exact in binary32, and binary32 holds 2p + 2 bits of a binary16 result, so the basic
+    // operations round once into binary16; remainders are exact.
+    case instruction @ Instruction.FAdd(t, _, a, b) =>
+      floating(site, "OpFAdd", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FSub(t, _, a, b) =>
+      floating(site, "OpFSub", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FMul(t, _, a, b) =>
+      floating(site, "OpFMul", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FDiv(t, _, a, b) =>
+      floating(site, "OpFDiv", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FRem(t, _, a, b) =>
+      floating(site, "OpFRem", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FMod(t, _, a, b) =>
+      floating(site, "OpFMod", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FNegate(t, _, a) =>
+      floatingNegate(site, t, a)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FmaKHR(t, _, a, b, c) =>
+      def fused = staged(site, instruction, CoreFamily.FusedMultiplyAdd)
+      floating(site, "OpFmaKHR", t, a, b)(floating(site, "OpFmaKHR", t, b, c)(fused))
+    case instruction @ Instruction.VectorTimesScalar(t, _, a, b) =>
+      vectorTimesScalar(site, t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.Dot(t, _, a, b) => dot(site, t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.Transpose(t, d, a) =>
+      matrix(site, t, d, MatrixOperation.Transpose, Vec(a))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.MatrixTimesScalar(t, _, a, b) if site.program.cooperativeMatrices.contains(id(t)) =>
+      vectorTimesScalar(site, t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.MatrixTimesScalar(t, d, a, b) =>
+      matrix(site, t, d, MatrixOperation.Scale, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.VectorTimesMatrix(t, d, a, b) =>
+      matrix(site, t, d, MatrixOperation.VectorMatrix, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.MatrixTimesVector(t, d, a, b) =>
+      matrix(site, t, d, MatrixOperation.MatrixVector, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.MatrixTimesMatrix(t, d, a, b) =>
+      matrix(site, t, d, MatrixOperation.Multiply, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.OuterProduct(t, d, a, b) =>
+      matrix(site, t, d, MatrixOperation.OuterProduct, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
   }
 
   /** Data operands, or the fault the first absent or opaque one raises. */
   private def data(site: Site, operands: Vec[Operand], opaque: Typed.Opaque => Fault): Either[Fault, Vec[Typed.Data]] =
-    operands.map(typed(site, _)).foldLeft[Either[Fault, Vec[Typed.Data]]](Right(Vec.empty)) {
-      case (Right(found), value: Typed.Data)  => Right(found :+ value)
-      case (Right(_), value: Typed.Opaque)    => Left(opaque(value))
-      case (Right(_), value: Typed.Undefined) => Left(undefined(value.id))
-      case (failure, _)                       => failure
-    }
-
-  /** Integer lane kernels by opcode and width, shared with `OpSpecConstantOp` folding. Unary kernels ignore their
-    * second operand; shift amounts arrive masked to their own width. Division by zero, which OpenCL leaves unspecified
-    * without trapping, yields zero.
-    */
-  val integerKernels: Map[Int, (Int in 1 ~ 64) => Kernel2] = {
-    def masked(operation: (Long, Long) => Long)(width: Int in 1 ~ 64): Kernel2 = {
-      val bits = mask(width)
-      (a, b) => operation(a, b) & bits
-    }
-    def unsigned(operation: (Long, Long) => Long)(width: Int in 1 ~ 64): Kernel2 = {
-      val bits = mask(width)
-      (a, b) => {
-        val divisor = b & bits
-        if (divisor == 0L) 0L else operation(a & bits, divisor) & bits
-      }
-    }
-    def signed(operation: (Long, Long) => Long)(width: Int in 1 ~ 64): Kernel2 = {
-      val bits = mask(width)
-      (a, b) => {
-        val divisor = signExtend(b, width)
-        if (divisor == 0L) 0L else operation(signExtend(a, width), divisor) & bits
-      }
-    }
-    def shift(operation: (Long, Int, Int in 1 ~ 64) => Long)(width: Int in 1 ~ 64): Kernel2 = {
-      val bits = mask(width)
-      (value, amount) =>
-        if (java.lang.Long.compareUnsigned(amount, width.raw.toLong) >= 0) operation(value, -1, width) & bits
-        else operation(value, amount.toInt, width) & bits
-    }
-    def modulo(dividend: Long, divisor: Long): Long = {
-      val remainder = dividend % divisor
-      if (remainder != 0 && (remainder < 0) != (divisor < 0)) remainder + divisor else remainder
-    }
-    Map(
-      SPIRV.Opcode.IAdd              -> masked(_ + _),
-      SPIRV.Opcode.ISub              -> masked(_ - _),
-      SPIRV.Opcode.IMul              -> masked(_ * _),
-      SPIRV.Opcode.SNegate           -> masked((a, _) => -a),
-      SPIRV.Opcode.Not               -> masked((a, _) => ~a),
-      SPIRV.Opcode.BitwiseOr         -> masked(_ | _),
-      SPIRV.Opcode.BitwiseXor        -> masked(_ ^ _),
-      SPIRV.Opcode.BitwiseAnd        -> masked(_ & _),
-      SPIRV.Opcode.UDiv              -> unsigned(java.lang.Long.divideUnsigned(_, _)),
-      SPIRV.Opcode.UMod              -> unsigned(java.lang.Long.remainderUnsigned(_, _)),
-      SPIRV.Opcode.SDiv              -> signed(_ / _),
-      SPIRV.Opcode.SRem              -> signed(_ % _),
-      SPIRV.Opcode.SMod              -> signed(modulo(_, _)),
-      SPIRV.Opcode.ShiftLeftLogical  -> shift((value, amount, _) => if (amount < 0) 0L else value << amount),
-      SPIRV.Opcode.ShiftRightLogical ->
-        shift((value, amount, width) => if (amount < 0) 0L else (value & mask(width)) >>> amount),
-      SPIRV.Opcode.ShiftRightArithmetic -> shift { (value, amount, width) =>
-        val signed = signExtend(value, width)
-        if (amount < 0) { if (signed < 0L) -1L else 0L }
-        else signed >> amount
+    Traversal.traverse(operands)(operand =>
+      typed(site, operand) match {
+        case value: Typed.Data      => Right(value)
+        case value: Typed.Opaque    => Left(opaque(value))
+        case value: Typed.Undefined => Left(undefined(value.id))
       }
     )
-  }
+
+  /** The integer lane kernel of `opcode` at `width` for `OpSpecConstantOp` folding, from the same semantics the ops
+    * run, or None outside them. Unary kernels ignore their second operand.
+    */
+  def integerKernel(opcode: Int, width: Int in 1 ~ 64): Option[Kernel2] = ConstantFolder.matched(
+    IntegerSemantics.binary(Execute, ConstantFolder, opcode, width, -1L)(OperandIds.none)(
+      IntegerSemantics.unary(Execute, ConstantFolder, opcode, width)(OperandIds.none)(ConstantFolder.unmatched)
+    )
+  )
 
   // Wrapping addition, subtraction and multiplication take their width from the result and broadcast operands.
-  private def wrapping(site: Site, resultType: Operand, dest: Operand, left: Operand, right: Operand, opcode: Int): Op =
+  private def wrapping(site: Site, left: Operand, right: Operand)(staged: => Op): Op =
     lowered(
-      data(site, Vec(left, right), value => Fault.InvalidRequest(s"SPIR-V value %${value.id} is not numeric")).map { _ =>
-        binary(
-          site,
-          id(resultType),
-          id(dest),
-          id(left),
-          id(right)
-        )(integerKernels(opcode)(site.program.scalarWidth(id(resultType))))
-      }
+      data(site, Vec(left, right), value => Fault.InvalidRequest(s"SPIR-V value %${value.id} is not numeric")).map(_ =>
+        staged
+      )
     )
 
-  private def sameIntegerShapes(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)
-      : Either[Fault, (Int in 1 ~ 64, Int)] =
+  private inline def sameShapes[S](
+      site: Site,
+      opcode: String,
+      resultType: Operand,
+      left: Operand,
+      right: Operand,
+      inline shape: Int => Option[S],
+      resultKind: String,
+      operandKind: String
+  )(using CanEqual[S, S]): Either[Fault, S] =
     data(
       site,
       Vec(left, right),
       value => Fault.InvalidRequest(s"$opcode ${side(value.id, left)} operand %${value.id} is a pointer")
     )
       .flatMap { operands =>
-        (
-          site.program.integerShape(id(resultType)),
-          site.program.integerShape(operands(0).typeId),
-          site.program.integerShape(operands(1).typeId)
-        ) match {
+        (shape(id(resultType)), shape(operands(0).typeId), shape(operands(1).typeId)) match {
           case (Some(result), Some(leftShape), Some(rightShape)) if result == leftShape && result == rightShape =>
             Right(result)
           case (None, _, _) =>
-            Left(Fault.InvalidRequest(s"$opcode result type %${id(resultType)} is not an integer scalar or vector"))
+            Left(Fault.InvalidRequest(s"$opcode result type %${id(resultType)} is not $resultKind"))
           case (_, None, _) =>
-            Left(Fault.InvalidRequest(s"$opcode left operand %${id(left)} is not an integer scalar or vector"))
+            Left(Fault.InvalidRequest(s"$opcode left operand %${id(left)} is not $operandKind"))
           case (_, _, None) =>
-            Left(Fault.InvalidRequest(s"$opcode right operand %${id(right)} is not an integer scalar or vector"))
+            Left(Fault.InvalidRequest(s"$opcode right operand %${id(right)} is not $operandKind"))
           case (Some(result), Some(leftShape), Some(rightShape)) =>
             Left(
               Fault.InvalidRequest(
@@ -208,42 +161,34 @@ private object ArithmeticOps {
         }
       }
 
+  private def sameIntegerShapes(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)
+      : Either[Fault, (Int in 1 ~ 64, Int)] = sameShapes(
+    site,
+    opcode,
+    resultType,
+    left,
+    right,
+    site.program.integerShape,
+    resultKind = "an integer scalar or vector",
+    operandKind = "an integer scalar or vector"
+  )
+
   private def side(value: Int, left: Operand): String = if (value == id(left)) "left" else "right"
 
-  private def division(
-      site: Site,
-      name: String,
-      resultType: Operand,
-      dest: Operand,
-      left: Operand,
-      right: Operand,
-      opcode: Int
-  ): Op =
-    lowered(sameIntegerShapes(site, name, resultType, left, right).map { case (width, _) =>
-      binary(site, id(resultType), id(dest), id(left), id(right))(integerKernels(opcode)(width))
-    })
+  private def division(site: Site, name: String, resultType: Operand, left: Operand, right: Operand)(staged: => Op)
+      : Op = lowered(sameIntegerShapes(site, name, resultType, left, right).map(_ => staged))
 
-  private def negate(site: Site, resultType: Operand, dest: Operand, source: Operand): Op = lowered(
+  private def negate(site: Site, resultType: Operand, source: Operand)(staged: => Op): Op = lowered(
     data(site, Vec(source), _ => Fault.InvalidRequest("OpSNegate source is a pointer")).flatMap { operands =>
       (site.program.integerShape(operands(0).typeId), site.program.integerShape(id(resultType))) match {
-        case (Some(shape @ (width, _)), Some(result)) if shape == result =>
-          val kernel = integerKernels(SPIRV.Opcode.SNegate)(width)
-          Right(unary(site, id(resultType), id(dest), id(source))(kernel(_, 0L)))
-        case _ =>
+        case (Some(shape), Some(result)) if shape == result => Right(staged)
+        case _                                              =>
           Left(Fault.InvalidRequest("OpSNegate requires matching integer scalar/vector operand and result types"))
       }
     }
   )
 
-  private def shift(
-      site: Site,
-      name: String,
-      resultType: Operand,
-      dest: Operand,
-      base: Operand,
-      shift: Operand,
-      opcode: Int
-  )
+  private def shift(site: Site, name: String, resultType: Operand, base: Operand, shift: Operand)(staged: => Op)
       : Op = lowered(
     data(
       site,
@@ -256,13 +201,9 @@ private object ArithmeticOps {
           site.program.integerShape(operands(0).typeId),
           site.program.integerShape(operands(1).typeId)
         ) match {
-          case (Some(result @ (width, count)), Some(baseShape), Some((shiftWidth, shiftCount)))
+          case (Some(result @ (_, count)), Some(baseShape), Some((_, shiftCount)))
               if baseShape == result && shiftCount == count =>
-            val kernel    = integerKernels(opcode)(width)
-            val shiftBits = mask(shiftWidth)
-            Right(binary(site, id(resultType), id(dest), id(base), id(shift))((value, amount) =>
-              kernel(value, amount & shiftBits)
-            ))
+            Right(staged)
           case _ =>
             Left(Fault.InvalidRequest(
               s"$name requires an integer scalar/vector result and base of the same type, " +
@@ -273,8 +214,8 @@ private object ArithmeticOps {
   )
 
   /** Integer operands whose type is the result type or has its integer shape. */
-  def bitwise(site: Site, opcode: String, resultType: Operand, dest: Operand, left: Operand, right: Operand)(
-      operation: (Int in 1 ~ 64) => Kernel2
+  def bitwiseOperands(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)(
+      op: (Int in 1 ~ 64) => Op
   ): Op = site.program.integerShape(id(resultType)) match {
     case None =>
       Fail(Fault.InvalidRequest(s"$opcode result type %${id(resultType)} is not an integer scalar or vector"))
@@ -283,121 +224,58 @@ private object ArithmeticOps {
       (typed(site, left), typed(site, right)) match {
         case (Typed.Undefined(value), _) => Fail(undefined(value))
         case (_, Typed.Undefined(value)) => Fail(undefined(value))
-        case (Typed.Data(_, leftType), Typed.Data(_, rightType)) if matches(leftType) && matches(rightType) =>
-          val bits   = mask(width)
-          val kernel = operation(width)
-          binary(site, id(resultType), id(dest), id(left), id(right))((a, b) => kernel(a, b) & bits)
-        case _ =>
+        case (Typed.Data(_, leftType), Typed.Data(_, rightType)) if matches(leftType) && matches(rightType) => op(width)
+        case _                                                                                              =>
           Fail(Fault.InvalidRequest(s"$opcode requires matching integer scalar or vector operand and result types"))
       }
   }
 
-  private def not(site: Site, resultType: Operand, dest: Operand, source: Operand): Op =
+  private def not(site: Site, resultType: Operand, source: Operand)(staged: => Op): Op =
     site.program.integerShape(id(resultType)) match {
       case None =>
         Fail(Fault.InvalidRequest(s"OpNot result type %${id(resultType)} is not an integer scalar or vector"))
-      case Some(shape @ (width, _)) =>
+      case Some(shape) =>
         typed(site, source) match {
           case Typed.Undefined(value) => Fail(undefined(value))
           case Typed.Data(_, sourceType)
               if sourceType == id(resultType) || site.program.integerShape(sourceType).contains(shape) =>
-            val kernel = integerKernels(SPIRV.Opcode.Not)(width)
-            unary(site, id(resultType), id(dest), id(source))(kernel(_, 0L))
+            staged
           case _ =>
             Fail(Fault.InvalidRequest("OpNot requires matching integer scalar or vector operand and result types"))
         }
     }
 
-  private def bitCount(site: Site, resultType: Operand, dest: Operand, base: Operand): Op = lowered(
+  private def bitCount(site: Site, resultType: Operand, base: Operand)(staged: => Op): Op = lowered(
     data(site, Vec(base), _ => Fault.InvalidRequest("OpBitCount base is not an integer value")).flatMap { operands =>
       (site.program.integerShape(id(resultType)), site.program.integerShape(operands(0).typeId)) match {
-        case (Some((resultWidth, count)), Some((baseWidth, baseCount))) if count == baseCount =>
-          val bits = mask(resultWidth)
-          Right(unary(site, id(resultType), id(dest), id(base))(value =>
-            Bits.bitCount(value, baseWidth).raw.toLong & bits
-          ))
-        case _ =>
+        case (Some((_, count)), Some((_, baseCount))) if count == baseCount => Right(staged)
+        case _                                                              =>
           Left(Fault.InvalidRequest("OpBitCount requires integer operands and results with equal component counts"))
       }
     }
   )
 
-  private enum BitField {
-    case UnsignedExtract, SignedExtract, Insert, Reverse
-  }
-
-  private def bitField(
-      site: Site,
-      resultType: Operand,
-      dest: Operand,
-      base: Operand,
-      insert: Option[Operand],
-      offset: Option[Operand],
-      count: Option[Operand],
-      operation: BitField
-  ): Op = site.program.integerShape(id(resultType)) match {
-    case None                     => Fail(Fault.InvalidRequest("bit-field result requires integer components"))
-    case Some(shape @ (width, _)) =>
-      def matching(operand: Operand, message: NonEmpty[String]): Either[Fault, Int] = typed(site, operand) match {
-        case Typed.Data(key, typeId) if site.program.integerShape(typeId).contains(shape) => Right(key)
-        case _ => Left(Fault.InvalidRequest(message))
-      }
-      lowered(for {
-        source <- matching(base, "bit-field base shape does not match result")
-        added  <- insert.fold[Either[Fault, Int]](Right(-1))(matching(
-          _,
-          "bit-field inserted value shape does not match result"
-        ))
-      } yield {
-        val bits   = mask(width)
-        val vulkan = site.program.vulkan
-        step { (execution, _) =>
-          val values = execution.values
-          for {
-            off <- offset.fold[Either[Fault, Long]](Right(0L))(operand => scalar(values, id(operand)))
-            len <- count.fold[Either[Fault, Long]](Right(0L))(operand => scalar(values, id(operand)))
-            validRange = off >= 0 && len >= 0 && off <= width.raw && len <= width.raw - off
-            _ <- Either.cond(validRange || vulkan, (), Fault.InvalidRequest("bit-field range exceeds component width"))
-            words    <- Option(values.lanes(source)).toRight(undefined(source))
-            inserted <-
-              if (added < 0) Right(Array.emptyLongArray) else Option(values.lanes(added)).toRight(undefined(added))
-          } yield {
-            val fieldMask = if (!validRange) 0L else if (len == 64) -1L else (1L << len.toInt) - 1L
-            // Invalid shader ranges have undefined results; keep them local to the result instead of losing the device.
-            val result = Array.tabulate(words.length) { lane =>
-              val word  = words(lane) & bits
-              val value =
-                if (!validRange) { if (operation == BitField.Insert) word else 0L }
-                else if (operation == BitField.Reverse) java.lang.Long.reverse(word) >>> (64 - width.raw)
-                else if (len == 0) { if (operation == BitField.Insert) word else 0L }
-                else if (operation == BitField.Insert)
-                  (word & ~(fieldMask << off.toInt)) | ((inserted(lane) & fieldMask) << off.toInt)
-                else {
-                  val extracted = (word >>> off.toInt) & fieldMask
-                  if (operation == BitField.SignedExtract) (extracted << (64 - len.toInt)) >> (64 - len.toInt)
-                  else extracted
-                }
-              value & bits
-            }
-            values.write(id(dest), id(resultType), result)
-          }
+  /** Bit reversal and bit-field instructions, whose base and inserted value have the result's integer shape. */
+  private def bitField(site: Site, resultType: Operand, base: Operand, insert: Option[Operand])(staged: => Op): Op =
+    site.program.integerShape(id(resultType)) match {
+      case None        => Fail(Fault.InvalidRequest("bit-field result requires integer components"))
+      case Some(shape) =>
+        def matching(operand: Operand, message: NonEmpty[String]): Either[Fault, Unit] = typed(site, operand) match {
+          case Typed.Data(_, typeId) if site.program.integerShape(typeId).contains(shape) => Right(())
+          case _ => Left(Fault.InvalidRequest(message))
         }
-      })
-  }
+        lowered(for {
+          _ <- matching(base, "bit-field base shape does not match result")
+          _ <- insert.fold[Either[Fault, Unit]](Right(()))(matching(
+            _,
+            "bit-field inserted value shape does not match result"
+          ))
+        } yield staged)
+    }
 
-  private enum Extended {
-    case AddCarry, SubtractBorrow, UnsignedMultiply, SignedMultiply
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def extended(
-      site: Site,
-      resultType: Operand,
-      dest: Operand,
-      left: Operand,
-      right: Operand,
-      operation: Extended
-  ): Op = {
+  private def extended(site: Site, instruction: Instruction, resultType: Operand, left: Operand, right: Operand)
+      : Op = {
+    val opcode = instruction.opcodeNumber.toInt
     val member = site.program.runtimeType(id(resultType)) match {
       case Some(RuntimeType.Structure(members)) if members.size == 2 && members(0) == members(1) => Some(members(0))
       case _                                                                                     => None
@@ -406,168 +284,43 @@ private object ArithmeticOps {
       site.program.runtimeType(typeId) match {
         case Some(RuntimeType.Integer(width, signed))       => Some((width.widen[Int in 1 ~ 64], 1, signed))
         case Some(RuntimeType.VectorType(component, count)) => site.program.runtimeType(component).collect {
-            case RuntimeType.Integer(width, signed) => (width.widen[Int in 1 ~ 64], count.raw, signed)
+            case RuntimeType.Integer(width, signed) => (width.widen[Int in 1 ~ 64], count, signed)
           }
         case _ => None
       }
     )
+    val mismatch =
+      Fault.InvalidRequest("extended integer arithmetic requires a two-member integer structure and matching operands")
     (typed(site, left), typed(site, right), shape) match {
       case (Typed.Undefined(value), _, _) => Fail(undefined(value))
       case (_, Typed.Undefined(value), _) => Fail(undefined(value))
-      case (Typed.Data(_, leftType), Typed.Data(_, rightType), Some((width, count, signed)))
-          if member.contains(leftType) && leftType == rightType &&
-            (operation == Extended.SignedMultiply || !signed) =>
-        val wordMask = mask(width)
-        step { (execution, _) =>
-          val values = execution.values
-          (Option(values.lanes(id(left))), Option(values.lanes(id(right)))) match {
-            case (Some(a), Some(b)) if a.length == count && b.length == count =>
-              val result = Array.ofDim[Long](count * 2)
-              var lane   = 0
-              while (lane < count) {
-                val x   = a(lane) & wordMask
-                val y   = b(lane) & wordMask
-                val low =
-                  (operation match {
-                    case Extended.AddCarry       => x + y
-                    case Extended.SubtractBorrow => x - y
-                    case _                       => x * y
-                  }) & wordMask
-                val high = operation match {
-                  case Extended.AddCarry       => if (java.lang.Long.compareUnsigned(low, x) < 0) 1L else 0L
-                  case Extended.SubtractBorrow => if (java.lang.Long.compareUnsigned(x, y) < 0) 1L else 0L
-                  case Extended.SignedMultiply if width.raw < 64 =>
-                    (signExtend(x, width) * signExtend(y, width)) >> width.raw
-                  case Extended.SignedMultiply => Math.multiplyHigh(x, y)
-                  case _ if width.raw < 64     => (x * y) >>> width.raw
-                  case _                       => Math.unsignedMultiplyHigh(x, y)
-                }
-                result(lane) = low
-                result(count + lane) = high & wordMask
-                lane += 1
-              }
-              Right(values.update(id(dest), VMValue.Bits(id(resultType), result)))
-            case _ =>
-              Left(Fault.InvalidRequest(
-                "extended integer arithmetic requires a two-member integer structure and matching operands"
-              ))
-          }
-        }
-      case _ =>
-        Fail(
-          Fault.InvalidRequest(
-            "extended integer arithmetic requires a two-member integer structure and matching operands"
-          )
-        )
+      case (Typed.Data(_, leftType), Typed.Data(_, rightType), Some((_, _, signed)))
+          if member.contains(leftType) && leftType == rightType && (opcode == SPIRV.Opcode.SMulExtended || !signed) =>
+        staged(site, instruction, CoreFamily.Extended)
+      case _ => Fail(mismatch)
     }
   }
 
-  enum FloatingOperation(val opcode: String) {
-    case Add       extends FloatingOperation("OpFAdd")
-    case Subtract  extends FloatingOperation("OpFSub")
-    case Multiply  extends FloatingOperation("OpFMul")
-    case Divide    extends FloatingOperation("OpFDiv")
-    case Remainder extends FloatingOperation("OpFRem")
-    case Modulo    extends FloatingOperation("OpFMod")
-    case Minimum   extends FloatingOperation("OpenCL.std fmin")
-    case Maximum   extends FloatingOperation("OpenCL.std fmax")
-  }
-
-  // binary16 operands are exact in binary32, and binary32 holds 2p + 2 bits of a binary16 result, so the basic
-  // operations round once into binary16; remainders are exact.
-  private def floatingKernel(operation: FloatingOperation, width: Int in (16, 32, 64)): Kernel2 = {
-    def evaluate(a: Double, b: Double): Double = operation match {
-      case FloatingOperation.Add       => a + b
-      case FloatingOperation.Subtract  => a - b
-      case FloatingOperation.Multiply  => a * b
-      case FloatingOperation.Divide    => a / b
-      case FloatingOperation.Remainder => a % b
-      case FloatingOperation.Modulo    =>
-        val remainder = a % b
-        if (remainder != 0 && (remainder < 0) != (b < 0)) remainder + b else remainder
-      case _ => Double.NaN
-    }
-    def evaluateFloat(a: Float, b: Float): Float = operation match {
-      case FloatingOperation.Add       => a + b
-      case FloatingOperation.Subtract  => a - b
-      case FloatingOperation.Multiply  => a * b
-      case FloatingOperation.Divide    => a / b
-      case FloatingOperation.Remainder => a % b
-      case FloatingOperation.Modulo    =>
-        val remainder = a % b
-        if (remainder != 0 && (remainder < 0) != (b < 0)) remainder + b else remainder
-      case _ => Float.NaN
-    }
-    operation match {
-      case FloatingOperation.Minimum => (a, b) => IEEE754.minNum(a, b, width)
-      case FloatingOperation.Maximum => (a, b) => IEEE754.maxNum(a, b, width)
-      case _                         => width.raw match {
-          case 16 =>
-            (a, b) =>
-              IEEE754.floatToBinary16(evaluateFloat(
-                IEEE754.binary16ToFloat(Binary16.low(a)),
-                IEEE754.binary16ToFloat(Binary16.low(b))
-              )).toLong
-          case 32 =>
-            (a, b) =>
-              IEEE754.floatToBinary32(evaluateFloat(
-                IEEE754.binary32ToFloat(Binary32.low(a)),
-                IEEE754.binary32ToFloat(Binary32.low(b))
-              )).toLong
-          case _ =>
-            (a, b) => IEEE754.doubleToBinary64(evaluate(IEEE754.binary64ToDouble(a), IEEE754.binary64ToDouble(b)))
-        }
-    }
-  }
-
-  def floating(
-      site: Site,
-      operation: FloatingOperation,
-      resultType: Operand,
-      dest: Operand,
-      left: Operand,
-      right: Operand
-  ): Op =
+  /** Floating-point operands and result of one shape, named `opcode` in faults. */
+  def floating(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)(staged: => Op): Op =
     lowered(
-      data(
+      sameShapes(
         site,
-        Vec(left, right),
-        value =>
-          Fault.InvalidRequest(s"${operation.opcode} ${side(value.id, left)} operand %${value.id} is a pointer")
-      ).flatMap { operands =>
-        (
-          site.program.floatingShape(id(resultType)),
-          site.program.floatingShape(operands(0).typeId),
-          site.program.floatingShape(operands(1).typeId)
-        ) match {
-          case (Some(result @ (width, _)), Some(leftShape), Some(rightShape))
-              if result == leftShape && result == rightShape =>
-            Right(binary(site, id(resultType), id(dest), id(left), id(right))(floatingKernel(operation, width)))
-          case (None, _, _) =>
-            Left(Fault.InvalidRequest(
-              s"${operation.opcode} result type %${id(resultType)} is not a floating-point scalar or vector"
-            ))
-          case (_, None, _) =>
-            Left(Fault.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is not floating-point"))
-          case (_, _, None) =>
-            Left(Fault.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is not floating-point"))
-          case (Some(result), Some(leftShape), Some(rightShape)) =>
-            Left(Fault.InvalidRequest(
-              s"${operation.opcode} type shapes do not match: result $result, left $leftShape, right $rightShape"
-            ))
-        }
-      }
+        opcode,
+        resultType,
+        left,
+        right,
+        site.program.floatingShape,
+        resultKind = "a floating-point scalar or vector",
+        operandKind = "floating-point"
+      ).map(_ => staged)
     )
 
-  def signMask(width: Int in (16, 32, 64)): Long = 1L << (width.raw - 1)
-
-  private def floatingNegate(site: Site, resultType: Operand, dest: Operand, source: Operand): Op = lowered(
+  private def floatingNegate(site: Site, resultType: Operand, source: Operand)(staged: => Op): Op = lowered(
     data(site, Vec(source), _ => Fault.InvalidRequest("OpFNegate source is a pointer")).flatMap { operands =>
       (site.program.floatingShape(operands(0).typeId), site.program.floatingShape(id(resultType))) match {
-        case (Some(shape @ (width, _)), Some(result)) if shape == result =>
-          val sign = signMask(width)
-          Right(unary(site, id(resultType), id(dest), id(source))(_ ^ sign))
-        case _ =>
+        case (Some(shape), Some(result)) if shape == result => Right(staged)
+        case _                                              =>
           Left(
             Fault.InvalidRequest("OpFNegate requires matching floating-point scalar/vector operand and result types")
           )
@@ -575,7 +328,7 @@ private object ArithmeticOps {
     }
   )
 
-  private def vectorTimesScalar(site: Site, resultType: Operand, dest: Operand, vector: Operand, scalar: Operand): Op =
+  private def vectorTimesScalar(site: Site, resultType: Operand, vector: Operand, scalar: Operand)(staged: => Op): Op =
     (typed(site, vector), typed(site, scalar)) match {
       case (Typed.Undefined(value), _)                            => Fail(undefined(value))
       case (_, Typed.Undefined(value))                            => Fail(undefined(value))
@@ -587,21 +340,13 @@ private object ArithmeticOps {
         ) match {
           case (Some((width, count)), Some((scalarWidth, 1)), Some((resultWidth, resultCount)))
               if width == scalarWidth && width == resultWidth && count == resultCount && count > 1 =>
-            Lanes2(
-              id(dest),
-              id(resultType),
-              id(vector),
-              id(scalar),
-              (a, b) =>
-                IEEE754.fromDouble(IEEE754.toDouble(a, width) * IEEE754.toDouble(b, width), width)
-            )
+            staged
           case _ => Fail(Fault.InvalidRequest("OpVectorTimesScalar requires a floating vector and matching scalar"))
         }
       case _ => Fail(Fault.InvalidRequest("OpVectorTimesScalar requires a floating vector and scalar"))
     }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def dot(site: Site, resultType: Operand, dest: Operand, left: Operand, right: Operand): Op =
+  private def dot(site: Site, resultType: Operand, left: Operand, right: Operand)(staged: => Op): Op =
     (typed(site, left), typed(site, right)) match {
       case (Typed.Undefined(value), _)                         => Fail(undefined(value))
       case (_, Typed.Undefined(value))                         => Fail(undefined(value))
@@ -613,36 +358,15 @@ private object ArithmeticOps {
         ) match {
           case (Some((width, count)), Some((rightWidth, rightCount)), Some((resultWidth, 1)))
               if width == rightWidth && width == resultWidth && count == rightCount =>
-            step { (execution, _) =>
-              val values = execution.values
-              (Option(values.lanes(id(left))), Option(values.lanes(id(right)))) match {
-                case (Some(a), Some(b)) =>
-                  var accumulated = IEEE754.fromDouble(0.0, width)
-                  var lane        = 0
-                  while (lane < count) {
-                    accumulated = IEEE754.add(accumulated, IEEE754.multiply(a(lane), b(lane), width), width)
-                    lane += 1
-                  }
-                  Right(values.updateScalar(id(dest), id(resultType), accumulated))
-                case (None, _) => Left(undefined(id(left)))
-                case (_, None) => Left(undefined(id(right)))
-              }
-            }
+            staged
           case _ => Fail(Fault.InvalidRequest("OpDot requires matching floating vectors and a scalar result"))
         }
       case _ => Fail(Fault.InvalidRequest("OpDot operands are not floating-point vectors"))
     }
 
-  private enum MatrixOperation {
+  private enum MatrixOperation derives CanEqual {
     case Transpose, Scale, VectorMatrix, MatrixVector, Multiply, OuterProduct
   }
-
-  def matrixShape(program: VMProgram, typeId: Int): Option[(Int in (16, 32, 64), Int, Int)] =
-    program.runtimeType(typeId) match {
-      case Some(RuntimeType.MatrixType(column, columns)) =>
-        program.floatingShape(column).map { case (width, rows) => (width, rows, columns.raw) }
-      case _ => None
-    }
 
   // Every matrix is a sequence of columns; storage padding is not part of a value's lanes.
   private def matrix(
@@ -651,115 +375,80 @@ private object ArithmeticOps {
       dest: Operand,
       operation: MatrixOperation,
       sources: Vec[Operand]
-  ): Op =
+  )(staged: => Op): Op =
     lowered(data(site, sources, _ => Fault.InvalidRequest(s"matrix $operation requires data operands")).flatMap {
       operands =>
         val program      = site.program
         val resultId     = id(resultType)
         val leftType     = operands(0).typeId
         val rightType    = if (operands.size == 2) operands(1).typeId else leftType
-        val resultMatrix = matrixShape(program, resultId)
-        val leftMatrix   = matrixShape(program, leftType)
-        val rightMatrix  = matrixShape(program, rightType)
+        val resultMatrix = program.matrixShape(resultId)
+        val leftMatrix   = program.matrixShape(leftType)
+        val rightMatrix  = program.matrixShape(rightType)
         val resultVector = program.floatingShape(resultId)
         val leftVector   = program.floatingShape(leftType)
         val rightVector  = program.floatingShape(rightType)
-        def product(width: Int in (16, 32, 64), rows: Int, columns: Int, inner: Int)(
-            a: (Int, Int) => Long,
-            b: (Int, Int) => Long
-        )
-            : Array[Long] =
-          Array.tabulate(rows * columns) { lane =>
-            val row    = lane % rows
-            val column = lane / rows
-            (0 until inner).foldLeft(IEEE754.fromDouble(0.0, width)) { (sum, k) =>
-              IEEE754.add(sum, IEEE754.multiply(a(row, k), b(k, column), width), width)
-            }
-          }
-        // Each kernel receives the left and right lanes, validated against the static shapes.
-        val kernel: Option[(Int, Int, (Array[Long], Array[Long]) => Array[Long])] = operation match {
+        val mismatch     = Fault.InvalidRequest(s"matrix $operation operand/result shapes do not match")
+        val valid        = operation match {
           case MatrixOperation.Transpose => (leftMatrix, resultMatrix) match {
-              case (Some((width, rows, columns)), Some((outWidth, outRows, outColumns)))
-                  if width == outWidth && rows == outColumns && columns == outRows =>
-                Some((
-                  rows * columns,
-                  rows * columns,
-                  (left, _) => Array.tabulate(left.length)(lane => left((lane % outRows) * rows + lane / outRows))
-                ))
-              case _ => None
+              case (Some((width, rows, columns)), Some((outWidth, outRows, outColumns))) =>
+                width == outWidth && rows == outColumns && columns == outRows
+              case _ => false
             }
           case MatrixOperation.Scale => (leftMatrix, rightVector) match {
-              case (Some(shape @ (width, rows, columns)), Some((scalarWidth, 1)))
-                  if resultMatrix.contains(shape) && width == scalarWidth =>
-                Some((rows * columns, 1, (left, right) => left.map(IEEE754.multiply(_, right(0), width))))
-              case _ => None
+              case (Some(shape @ (width, _, _)), Some((scalarWidth, 1))) =>
+                resultMatrix.contains(shape) && width == scalarWidth
+              case _ => false
             }
           case MatrixOperation.Multiply => (leftMatrix, rightMatrix, resultMatrix) match {
               case (
                     Some((width, rows, inner)),
                     Some((rightWidth, rightRows, columns)),
                     Some((outWidth, outRows, outColumns))
-                  )
-                  if width == rightWidth && width == outWidth && inner == rightRows && outRows == rows &&
-                    outColumns == columns =>
-                Some((
-                  rows * inner,
-                  inner * columns,
-                  (left, right) =>
-                    product(width, rows, columns, inner)((r, k) => left(k * rows + r), (k, c) => right(c * inner + k))
-                ))
-              case _ => None
+                  ) =>
+                width == rightWidth && width == outWidth && inner == rightRows && outRows == rows &&
+                outColumns == columns
+              case _ => false
             }
           case MatrixOperation.MatrixVector => (leftMatrix, rightVector, resultVector) match {
-              case (Some((width, rows, columns)), Some((rightWidth, count)), Some((outWidth, outCount)))
-                  if width == rightWidth && width == outWidth && columns == count && rows == outCount =>
-                Some((
-                  rows * columns,
-                  count,
-                  (left, right) =>
-                    product(width, rows, 1, columns)((r, k) => left(k * rows + r), (k, _) => right(k))
-                ))
-              case _ => None
+              case (Some((width, rows, columns)), Some((rightWidth, count)), Some((outWidth, outCount))) =>
+                width == rightWidth && width == outWidth && columns == count && rows == outCount
+              case _ => false
             }
           case MatrixOperation.VectorMatrix => (leftVector, rightMatrix, resultVector) match {
-              case (Some((width, count)), Some((rightWidth, rows, columns)), Some((outWidth, outCount)))
-                  if width == rightWidth && width == outWidth && rows == count && columns == outCount =>
-                Some((
-                  count,
-                  rows * columns,
-                  (left, right) =>
-                    product(width, 1, columns, rows)((_, k) => left(k), (k, c) => right(c * rows + k))
-                ))
-              case _ => None
+              case (Some((width, count)), Some((rightWidth, rows, columns)), Some((outWidth, outCount))) =>
+                width == rightWidth && width == outWidth && rows == count && columns == outCount
+              case _ => false
             }
           case MatrixOperation.OuterProduct => (leftVector, rightVector, resultMatrix) match {
-              case (Some((width, rows)), Some((rightWidth, columns)), Some((outWidth, outRows, outColumns)))
-                  if width == rightWidth && width == outWidth && rows == outRows && columns == outColumns =>
-                Some((
-                  rows,
-                  columns,
-                  (left, right) =>
-                    Array.tabulate(rows * columns)(lane =>
-                      IEEE754.multiply(left(lane % rows), right(lane / rows), width)
-                    )
-                ))
-              case _ => None
+              case (Some((width, rows)), Some((rightWidth, columns)), Some((outWidth, outRows, outColumns))) =>
+                width == rightWidth && width == outWidth && rows == outRows && columns == outColumns
+              case _ => false
             }
         }
-        kernel.toRight(Fault.InvalidRequest(s"matrix $operation operand/result shapes do not match")).map {
-          case (leftLanes, rightLanes, evaluate) =>
-            val leftId  = operands(0).id
-            val rightId = if (operands.size == 2) operands(1).id else leftId
-            step { (execution, _) =>
-              val values = execution.values
-              (Option(values.lanes(leftId)), Option(values.lanes(rightId))) match {
-                case (Some(left), Some(right)) if left.length == leftLanes && right.length == rightLanes =>
-                  Right(values.update(id(dest), VMValue.Bits(resultId, evaluate(left, right))))
-                case (None, _) => Left(undefined(leftId))
-                case (_, None) => Left(undefined(rightId))
-                case _         => Left(Fault.InvalidRequest(s"matrix $operation operand/result shapes do not match"))
-              }
-            }
+        (operation, leftMatrix) match {
+          case (_, _) if !valid                                      => Left(mismatch)
+          case (MatrixOperation.Transpose, Some((_, rows, columns))) =>
+            Right(transpose(resultId, id(dest), operands(0).id, rows, columns, mismatch))
+          case _ => Right(staged)
         }
     })
+
+  /** Transposition only moves lanes: result lane `row + columns * column` is source lane `column + rows * row`. */
+  private def transpose(resultType: Int, dest: Int, source: Int, rows: Int, columns: Int, mismatch: Fault): Op =
+    step { (execution, _) =>
+      val values = execution.values
+      Option(values.lanes(source)) match {
+        case Some(lanes) if lanes.length == rows * columns =>
+          Right(values.update(
+            dest,
+            VMValue.Bits(
+              resultType,
+              Array.tabulate(lanes.length)(lane => lanes((lane % columns) * rows + lane / columns))
+            )
+          ))
+        case None => Left(undefined(source))
+        case _    => Left(mismatch)
+      }
+    }
 }

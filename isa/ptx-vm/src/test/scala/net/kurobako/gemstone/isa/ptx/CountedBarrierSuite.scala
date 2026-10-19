@@ -89,8 +89,17 @@ class CountedBarrierSuite extends munit.FunSuite {
         |}""".stripMargin)
       assert(execute(kernel, 1, 32, Map.empty, DeviceMemory(4)).isLeft)
     }
-  test("nonblocking arrivals publish data, synchronise a subset and reuse the barrier") {
-    val kernel = compileKernel(""".version 8.0
+  for (
+    (sync, arrive) <- Vec(
+      "bar.sync"                 -> "bar.arrive",
+      "bar.cta.sync"             -> "bar.cta.arrive",
+      "barrier.sync"             -> "barrier.arrive",
+      "barrier.sync.aligned"     -> "barrier.arrive.aligned",
+      "barrier.cta.sync.aligned" -> "barrier.cta.arrive.aligned"
+    )
+  )
+    test(s"nonblocking $arrive publishes data, $sync synchronises a subset and the barrier is reused") {
+      val kernel = compileKernel(s""".version 8.0
       |.target sm_80
       |.address_size 64
       |.visible .entry producer_consumer(.param .u64 output) {
@@ -111,7 +120,7 @@ class CountedBarrierSuite extends munit.FunSuite {
       | ld.volatile.global.u32 %flag, [%out];
       | setp.lt.u32 %waiting, %flag, %iteration;
       | @%waiting bra poll;
-      | bar.sync 0, 64;
+      | $sync 0, 64;
       | sub.u32 %peer, %lane, 32;
       | mul.wide.u32 %offset, %peer, 4;
       | add.u64 %slot, values, %offset;
@@ -123,10 +132,10 @@ class CountedBarrierSuite extends munit.FunSuite {
       | mul.wide.u32 %offset, %lane, 4;
       | add.u64 %slot, values, %offset;
       | st.shared.u32 [%slot], %value;
-      | bar.arrive 0, 64;
+      | $arrive 0, 64;
       | st.volatile.global.u32 [%out], %iteration;
       |join:
-      | bar.sync 1;
+      | $sync 1;
       | add.u32 %iteration, %iteration, 1;
       | setp.le.u32 %again, %iteration, 2;
       | @%again bra loop;
@@ -135,22 +144,22 @@ class CountedBarrierSuite extends munit.FunSuite {
       | st.global.u32 [%slot+4], %result;
       | ret;
       |}""".stripMargin)
-    val memory = DeviceMemory(97 * 4)
-    assertEquals(
-      execute(
-        kernel,
-        1,
-        96,
-        Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    assertEquals(
-      Vec.tabulate(96)(lane => memory.readInt32(memory.start.offset((lane.toLong + 1) * 4)).toOption.get),
-      Vec.tabulate(96)(lane => if (lane >= 32 && lane < 64) lane - 32 + 200 else 999)
-    )
-  }
+      val memory = DeviceMemory(97 * 4)
+      assertEquals(
+        execute(
+          kernel,
+          1,
+          96,
+          Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
+          memory
+        ),
+        Right(())
+      )
+      assertEquals(
+        Vec.tabulate(96)(lane => memory.readInt32(memory.start.offset((lane.toLong + 1) * 4)).toOption.get),
+        Vec.tabulate(96)(lane => if (lane >= 32 && lane < 64) lane - 32 + 200 else 999)
+      )
+    }
 
   test("a nonblocking lane cannot contribute twice to one barrier generation") {
     val kernel = compileKernel(""".version 8.0

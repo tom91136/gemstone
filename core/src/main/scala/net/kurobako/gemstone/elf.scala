@@ -62,7 +62,7 @@ object elf {
       entrySize: Int >= 0,
       alignment: Long = 0L
   ) {
-    def end: Int = offset.raw + size.raw
+    def end: Int = offset.raw + size
 
     def isRelocation: Boolean = sectionType == SectionType.RelocationWithAddend || sectionType == SectionType.Relocation
   }
@@ -120,7 +120,7 @@ object elf {
       symbolTables <- sections.filter(section =>
         section.sectionType == SectionType.SymbolTable || section.sectionType == SectionType.DynamicSymbolTable
       ).traverse { table =>
-        sections.lift(table.link.raw).filter(_.sectionType == SectionType.StringTable)
+        sections.lift(table.link).filter(_.sectionType == SectionType.StringTable)
           .toRight[NonEmpty[String]](s"symbol table ${table.name} has no string table")
           .flatMap(strings => symbols(slice(bytes, table), slice(bytes, strings), table.entrySize))
           .map(table.index.raw -> _)
@@ -143,7 +143,7 @@ object elf {
     def symbols: Option[Vec[Symbol]] =
       sections.find(_.sectionType == SectionType.SymbolTable)
         .orElse(sections.find(_.sectionType == SectionType.DynamicSymbolTable))
-        .flatMap(table => symbolTables.get(table.index.raw))
+        .flatMap(table => symbolTables.get(table.index))
 
     def relocations(table: Section): Either[NonEmpty[String], Vec[Relocation]] =
       elf.relocations(contents(table), table.sectionType == SectionType.RelocationWithAddend, table.entrySize)
@@ -151,13 +151,13 @@ object elf {
     /** Offset of `symbol` within its section: values are section offsets in relocatable images and addresses otherwise.
       */
     def symbolOffset(symbol: Symbol): Either[NonEmpty[String], (Section, Int >= 0)] = for {
-      section  <- sections.lift(symbol.section.raw).toRight[NonEmpty[String]]("symbol has an invalid section index")
+      section  <- sections.lift(symbol.section).toRight[NonEmpty[String]]("symbol has an invalid section index")
       relative <- intValue(
         if (header.imageType.raw == ImageType.Relocatable) symbol.value else symbol.value - section.address,
         "symbol section offset"
       )
       _ <- Either.cond(
-        relative.raw <= section.size.raw && symbol.size.raw <= section.size.raw - relative.raw,
+        relative <= section.size && symbol.size <= section.size.raw - relative,
         (),
         s"symbol ${symbol.name.getOrElse("")} exceeds section ${section.name}": NonEmpty[String]
       )
@@ -168,7 +168,7 @@ object elf {
       */
     def patched(section: Section, contents: Vec[Byte]): Either[NonEmpty[String], Image] = for {
       _ <- Either.cond(
-        sections.lift(section.index.raw).contains(section),
+        sections.lift(section.index).contains(section),
         (),
         s"section ${section.name} is not in this image": NonEmpty[String]
       )
@@ -182,7 +182,7 @@ object elf {
         (),
         s"section ${section.name} holds ${section.size} bytes, not ${contents.size}": NonEmpty[String]
       )
-      image <- Image.parse(bytes.patch(section.offset.raw, contents, contents.size))
+      image <- Image.parse(bytes.patch(section.offset, contents, contents.size))
     } yield image
 
     /** This image with `section` holding `contents` of any size, reparsed. The file contents after the section move by
@@ -191,19 +191,20 @@ object elf {
       * offsets follow the move; symbols, relocations and other contents that describe the section are the caller's.
       */
     def resized(section: Section, contents: Vec[Byte]): Either[NonEmpty[String], Image] = {
-      val growth = contents.size - section.size.raw
-      val later  = sections.filter(other => other.index != section.index && other.offset.raw >= section.end)
+      val growth = contents.size - section.size
+      val later  = sections.filter(other => other.index != section.index && other.offset >= section.end)
       val shift  = if (growth <= 0) 0L
       else {
         val alignment = (later.map(_.alignment) ++ segments.filter(_.offset >= section.end).map(_.alignment) :+ 8L)
           .filter(_ > 0).max
-        (growth + alignment - 1) / alignment * alignment
+        growth.toLong.alignUp(alignment)
       }
-      def contains(segment: Segment): Boolean = segment.offset <= section.offset.raw &&
+      def contains(segment: Segment): Boolean = segment.offset <= section.offset &&
         segment.offset + segment.fileSize >= section.end
+      val holding = segments.filter(contains(_))
       for {
         _ <- Either.cond(
-          sections.lift(section.index.raw).contains(section) && section.sectionType != SectionType.NoBits,
+          sections.lift(section.index).contains(section) && section.sectionType != SectionType.NoBits,
           (),
           s"section ${section.name} has no contents in this image": NonEmpty[String]
         )
@@ -218,10 +219,10 @@ object elf {
         )
         _ <- Either.cond(
           growth <= 0 ||
-            segments.filter(contains(_)).forall(segment => segment.offset + segment.fileSize == section.end) ||
+            holding.forall(segment => segment.offset + segment.fileSize == section.end) ||
             later.forall(other =>
-              other.address == 0L || segments.filter(contains(_)).forall(segment =>
-                other.offset.raw >= segment.offset + segment.fileSize
+              other.address == 0L || holding.forall(segment =>
+                other.offset >= segment.offset + segment.fileSize
               )
             ),
           (),
@@ -230,21 +231,21 @@ object elf {
         _     <- intValue(bytes.size.toLong + shift, "image size")
         image <- Image.parse {
           val result                    = Array.ofDim[Byte](bytes.size + shift.toInt)
-          val _                         = bytes.slice(0, section.offset.raw).copyToArray(result, 0)
-          val _                         = contents.copyToArray(result, section.offset.raw)
+          val _                         = bytes.slice(0, section.offset).copyToArray(result, 0)
+          val _                         = contents.copyToArray(result, section.offset)
           val _                         = bytes.drop(section.end).copyToArray(result, section.end + shift.toInt)
           def moved(offset: Long): Long = if (offset >= section.end) offset + shift else offset
           LittleEndian.write(moved(LittleEndian.decodeInt64(bytes, 32)), result, 32, 8)
           LittleEndian.write(moved(LittleEndian.decodeInt64(bytes, 40)), result, 40, 8)
           val sectionTable = moved(LittleEndian.decodeInt64(bytes, 40)).toInt
-          val sectionEntry = LittleEndian.decodeUInt16(bytes, 58).raw
+          val sectionEntry = LittleEndian.decodeUInt16(bytes, 58)
           sections.foreach { other =>
             val start = sectionTable + other.index.raw * sectionEntry
             if (other.index == section.index) LittleEndian.write(contents.size.toLong, result, start + 32, 8)
-            else LittleEndian.write(moved(other.offset.raw.toLong), result, start + 24, 8)
+            else LittleEndian.write(moved(other.offset.toLong), result, start + 24, 8)
           }
           val segmentTable = moved(LittleEndian.decodeInt64(bytes, 32)).toInt
-          val segmentEntry = LittleEndian.decodeUInt16(bytes, 54).raw
+          val segmentEntry = LittleEndian.decodeUInt16(bytes, 54)
           segments.foreach { segment =>
             val start = segmentTable + segment.index.raw * segmentEntry
             if (segment.offset >= section.end) LittleEndian.write(segment.offset + shift, result, start + 8, 8)
@@ -261,10 +262,10 @@ object elf {
 
     /** This image with symbol `index` of `table` given `value` and `size`, reparsed. */
     def withSymbol(table: Section, index: Int, value: Long, size: Long): Either[NonEmpty[String], Image] = {
-      val stride = if (table.entrySize.raw == 0) SymbolEntrySize else table.entrySize.raw
+      val stride = if (table.entrySize == 0) SymbolEntrySize else table.entrySize.raw
       for {
         _ <- Either.cond(
-          symbolTables.contains(table.index.raw) && index >= 0 && index < symbolTables(table.index.raw).size,
+          symbolTables.contains(table.index) && index >= 0 && index < symbolTables(table.index).size,
           (),
           s"symbol $index is not in ${table.name}": NonEmpty[String]
         )
@@ -280,8 +281,8 @@ object elf {
 
     def symbolBytes(symbol: Symbol): Either[NonEmpty[String], Vec[Byte]] =
       symbolOffset(symbol).map { case (section, relative) =>
-        if (section.sectionType == SectionType.NoBits) Vec.fill(symbol.size.raw)(0.toByte)
-        else bytes.slice(section.offset.raw + relative.raw, section.offset.raw + relative.raw + symbol.size.raw)
+        if (section.sectionType == SectionType.NoBits) Vec.fill(symbol.size)(0.toByte)
+        else bytes.slice(section.offset.raw + relative, section.offset.raw + relative + symbol.size)
       }
   }
 
@@ -312,7 +313,7 @@ object elf {
   private val SymbolEntrySize = 24
 
   def symbols(bytes: Vec[Byte], strings: Vec[Byte], entrySize: Int >= 0): Either[NonEmpty[String], Vec[Symbol]] = {
-    val stride = if (entrySize.raw == 0) SymbolEntrySize else entrySize.raw
+    val stride = if (entrySize == 0) SymbolEntrySize else entrySize.raw
     if (stride < SymbolEntrySize || bytes.size % stride != 0) Left("invalid ELF64 symbol table stride")
     else
       Vec.tabulate(bytes.size / stride) { index =>
@@ -336,7 +337,7 @@ object elf {
       entrySize: Int >= 0
   ): Either[NonEmpty[String], Vec[Relocation]] = {
     val width  = if (explicitAddend) 24 else 16
-    val stride = if (entrySize.raw == 0) width else entrySize.raw
+    val stride = if (entrySize == 0) width else entrySize.raw
     if (stride < width || bytes.size % stride != 0) Left("invalid ELF64 relocation table size")
     else
       Right(Vec.tabulate(bytes.size / stride) { index =>
@@ -367,14 +368,14 @@ object elf {
 
   private def programHeaders(bytes: Vec[Byte]): Either[NonEmpty[String], Vec[Segment]] = {
     val tableOffset = LittleEndian.decodeInt64(bytes, 32)
-    val entrySize   = LittleEndian.decodeUInt16(bytes, 54).raw
+    val entrySize   = LittleEndian.decodeUInt16(bytes, 54)
     val count       = LittleEndian.decodeUInt16(bytes, 56)
-    if (count.raw == 0) Right(Vec.empty)
-    else if (entrySize < 56 || !ByteRange.contains(bytes.size, tableOffset, entrySize.toLong * count.raw.toLong))
+    if (count == 0) Right(Vec.empty)
+    else if (entrySize < 56 || !ByteRange.contains(bytes.size, tableOffset, entrySize.toLong * count.toLong))
       Left("invalid ELF program header table")
     else
       Right(Vec.indices(count.widen[Int >= 0]).map { index =>
-        val start = Math.toIntExact(tableOffset + index.raw.toLong * entrySize)
+        val start = Math.toIntExact(tableOffset + index.toLong * entrySize)
         Segment(
           index = index,
           segmentType = LittleEndian.decodeInt32(bytes, start),
@@ -390,7 +391,7 @@ object elf {
 
   private def slice(bytes: Vec[Byte], section: Section): Vec[Byte] =
     if (section.sectionType == SectionType.NoBits) Vec.empty
-    else bytes.slice(section.offset.raw, section.offset.raw + section.size.raw)
+    else bytes.slice(section.offset, section.offset.raw + section.size)
 
   private def sectionNames(
       bytes: Vec[Byte],
@@ -399,24 +400,24 @@ object elf {
   ): Either[NonEmpty[String], Vec[String]] =
     if (sections.isEmpty) Right(Vec.empty)
     else
-      sections.lift(header.names.raw).filter(_.sectionType == SectionType.StringTable)
+      sections.lift(header.names).filter(_.sectionType == SectionType.StringTable)
         .toRight[NonEmpty[String]]("invalid ELF section-name table index")
         .flatMap { table =>
-          val names = bytes.slice(table.offset.raw, table.offset.raw + table.size.raw)
+          val names = bytes.slice(table.offset, table.offset.raw + table.size)
           sections.traverse(section => stringAt(names, section.nameOffset))
         }
 
   private def sectionHeaders(bytes: Vec[Byte]): Either[NonEmpty[String], Vec[RawSection]] = {
     val tableOffset = LittleEndian.decodeInt64(bytes, 40)
-    val entrySize   = LittleEndian.decodeUInt16(bytes, 58).raw
+    val entrySize   = LittleEndian.decodeUInt16(bytes, 58)
     val count       = LittleEndian.decodeUInt16(bytes, 60)
-    val tableSize   = entrySize.toLong * count.raw.toLong
-    if (tableOffset == 0 && count.raw == 0) Right(Vec.empty)
-    else if (entrySize < 64 || count.raw == 0 || !ByteRange.contains(bytes.size, tableOffset, tableSize))
+    val tableSize   = entrySize.toLong * count.toLong
+    if (tableOffset == 0 && count == 0) Right(Vec.empty)
+    else if (entrySize < 64 || count == 0 || !ByteRange.contains(bytes.size, tableOffset, tableSize))
       Left("invalid ELF section table")
     else
       Vec.indices(count.widen[Int >= 0]).traverse { index =>
-        val start       = Math.toIntExact(tableOffset + index.raw.toLong * entrySize)
+        val start       = Math.toIntExact(tableOffset + index.toLong * entrySize)
         val sectionType = LittleEndian.decodeInt32(bytes, start + 4)
         val offset      = LittleEndian.decodeInt64(bytes, start + 24)
         val size        = LittleEndian.decodeInt64(bytes, start + 32)

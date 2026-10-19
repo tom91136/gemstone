@@ -9,7 +9,6 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 class WideDescriptorSuite extends munit.FunSuite {
   private val values = (0 until 4096).map { index =>
@@ -30,10 +29,10 @@ class WideDescriptorSuite extends munit.FunSuite {
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class DescriptorMemory extends DeviceMemory(64, GuestAddress(0x10000000000L)) {
-    val base                                     = start
-    var transition                               = false
-    val observed: ArrayBuffer[(Long, Double)]    = mutable.ArrayBuffer.empty[(Long, Double)]
-    def set(status: Long, payload: Double): Unit = {
+    val base                                          = start
+    var transition                                    = false
+    val observed: mutable.ArrayBuffer[(Long, Double)] = mutable.ArrayBuffer.empty[(Long, Double)]
+    def set(status: Long, payload: Double): Unit      = {
       writeLittleEndian(base, status, 8).toOption.get
       writeLittleEndian(base.offset(8), bits(payload), 8).toOption.get
     }

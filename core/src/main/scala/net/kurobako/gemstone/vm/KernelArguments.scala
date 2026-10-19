@@ -21,37 +21,52 @@ object KernelArguments {
   def resolve(
       task: KernelTask,
       address: (AllocationId, Long >= 0) => Either[Fault, GuestAddress]
-  ): Either[Fault, Vec[Resolved]] =
-    task.arguments.zipWithIndex.foldLeft[Either[Fault, Vec[Resolved]]](Right(Vec.empty)) {
-      case (result, (argument, index)) =>
-        result.flatMap { resolved =>
-          val relocations = task.pointerRelocations.filter {
-            case KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(source), _, _, _) =>
-              source.raw == index
-            case _ => false
-          }
-          val bytes = argument match {
-            case KernelTask.Argument.Scalar(bytes)             => Right(Vec.toArray(bytes))
-            case KernelTask.Argument.Memory(region, offset, _) =>
-              address(region, offset).map(target => LittleEndian.toArray(target.raw, 8))
-            case KernelTask.Argument.Local(_) =>
-              Either.cond(
-                relocations.isEmpty,
-                Array.emptyByteArray,
-                Fault.InvalidRequest(s"pointer relocation targets local kernel argument $index")
-              )
-            case KernelTask.Argument.Descriptor =>
-              Left(Fault.InvalidRequest(s"kernel argument $index has no descriptor binding"))
-          }
-          bytes.flatMap(relocate(index, _, relocations, address)).map { relocated =>
-            resolved :+
-              (argument match {
-                case KernelTask.Argument.Local(size) => Resolved.Local(size)
-                case _ => Resolved.Bytes(Vec.unsafeWrapArray(relocated).unsafe[NonEmpty[Vec[Byte]]])
-              })
-          }
+  ): Either[Fault, Vec[Resolved]] = {
+    val resolved = Vec.newBuilder[Resolved]
+    @scala.annotation.tailrec
+    def loop(index: Int): Either[Fault, Vec[Resolved]] =
+      if (index == task.arguments.length) Right(resolved.result())
+      else
+        resolveArgument(task, index, address) match {
+          case Left(fault)  => Left(fault)
+          case Right(value) =>
+            val _ = resolved += value
+            loop(index + 1)
         }
+    loop(0)
+  }
+
+  private def resolveArgument(
+      task: KernelTask,
+      index: Int,
+      address: (AllocationId, Long >= 0) => Either[Fault, GuestAddress]
+  ): Either[Fault, Resolved] = {
+    val argument    = task.arguments(index)
+    val relocations = task.pointerRelocations.filter {
+      case KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(source), _, _, _) =>
+        source.raw == index
+      case _ => false
     }
+    val bytes = argument match {
+      case KernelTask.Argument.Scalar(bytes)             => Right(Vec.toArray(bytes))
+      case KernelTask.Argument.Memory(region, offset, _) =>
+        address(region, offset).map(target => LittleEndian.toArray(target.raw, 8))
+      case KernelTask.Argument.Local(_) =>
+        Either.cond(
+          relocations.isEmpty,
+          Array.emptyByteArray,
+          Fault.InvalidRequest(s"pointer relocation targets local kernel argument $index")
+        )
+      case KernelTask.Argument.Descriptor =>
+        Left(Fault.InvalidRequest(s"kernel argument $index has no descriptor binding"))
+    }
+    bytes.flatMap(relocate(index, _, relocations, address)).map { relocated =>
+      argument match {
+        case KernelTask.Argument.Local(size) => Resolved.Local(size)
+        case _ => Resolved.Bytes(Vec.unsafeWrapArray(relocated).unsafe[NonEmpty[Vec[Byte]]])
+      }
+    }
+  }
 
   private def relocate(
       index: Int,
@@ -63,13 +78,13 @@ object KernelArguments {
       for {
         relocated <- result
         _         <- Either.cond(
-          relocation.sourceOffset.raw <= relocated.length - 8L,
+          relocation.sourceOffset <= relocated.length - 8L,
           (),
           Fault.InvalidRequest(s"pointer relocation exceeds kernel argument $index")
         )
         target <- address(relocation.target, relocation.targetOffset)
       } yield {
-        LittleEndian.write(target.raw, relocated, relocation.sourceOffset.raw.toInt, 8)
+        LittleEndian.write(target.raw, relocated, relocation.sourceOffset.toInt, 8)
         relocated
       }
     }

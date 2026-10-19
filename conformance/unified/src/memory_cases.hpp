@@ -4,23 +4,29 @@
 namespace memory_patterns {
 // Release partially constructed cases on assertion/API failure as well as success.
 template <class Backend> struct AllocationScope {
-  Backend &backend;
+  Backend *backend;
   std::vector<void *> pointers;
-  explicit AllocationScope(Backend &backend) : backend(backend) {}
+  explicit AllocationScope(Backend &backend) : backend(&backend) {}
+  AllocationScope(const AllocationScope &) = delete;
+  AllocationScope &operator=(const AllocationScope &) = delete;
   void *allocate(size_t size) {
-    auto *p = backend.allocate(size);
+    auto *p = backend->allocate(size);
     pointers.push_back(p);
     return p;
   }
   void release(void *p) {
-    backend.release(p);
-    pointers.erase(std::find(pointers.begin(), pointers.end(), p));
+    backend->release(p);
+    if (const auto found = std::find(pointers.begin(), pointers.end(), p); found != pointers.end()) {
+      *found = pointers.back();
+      pointers.pop_back();
+    }
   }
   ~AllocationScope() {
     for (auto *p : pointers) {
       try {
-        backend.release(p);
+        backend->release(p);
       } catch (...) {
+        std::cerr << "memory pattern release failed during cleanup\n";
       }
     }
   }
@@ -38,25 +44,33 @@ template <class Backend> int ordered(Backend &backend, bool crossQueue, unsigned
     std::fill_n(middle, items + 2, 0xa5a5a5a5U);
     std::fill_n(output, items + 2, 0xa5a5a5a5U);
     for (unsigned i = 0; i < items; ++i)
-      input[i + 1] = 1000 * pass + i;
+      input[i + 1] = (1000 * pass) + i;
     backend.ordered(input + 1, middle + 1, output + 1, items, crossQueue);
     for (unsigned i = 0; i < items; ++i) {
-      require(middle[i + 1] == 1000 * pass + i + 1, "producer result was not visible after event wait");
-      require(output[i + 1] == 1000 * pass + i + 2, "consumer ran with stale producer data");
+      require(middle[i + 1] == (1000 * pass) + i + 1, "producer result was not visible after event wait");
+      require(output[i + 1] == (1000 * pass) + i + 2, "consumer ran with stale producer data");
     }
     require(middle[0] == 0xa5a5a5a5U && middle[items + 1] == 0xa5a5a5a5U && output[0] == 0xa5a5a5a5U && output[items + 1] == 0xa5a5a5a5U,
             "ordered kernel changed guards");
-    std::cout << "verified queue dependency pass=" << pass << " cross-queue=" << (crossQueue) << std::endl;
+    std::cout << "verified queue dependency pass=" << pass << " cross-queue=" << crossQueue << '\n' << std::flush;
   }
   allocations.release(output);
   allocations.release(middle);
   allocations.release(input);
   return 0;
 }
+inline const char *accessName(unsigned mode) {
+  switch (mode) {
+    case 0: return "contiguous";
+    case 1: return "strided";
+    case 2: return "gather";
+    default: return "linked";
+  }
+}
 template <class Backend> void accessPattern(Backend &backend, unsigned mode) {
   AllocationScope allocations(backend);
-  const char *name = mode == 0 ? "contiguous" : mode == 1 ? "strided" : mode == 2 ? "gather" : "linked";
-  const size_t inputSize = mode == 3 ? Count * sizeof(Node) : Count * 17 * sizeof(uint32_t);
+  const char *name = accessName(mode);
+  const size_t inputSize = mode == 3 ? Count * sizeof(Node) : static_cast<size_t>(Count) * 17 * sizeof(uint32_t);
   auto *storage = static_cast<unsigned char *>(allocations.allocate(inputSize + 128));
   auto *input = storage + 64; // Every kernel sees an interior pointer, including first use.
   auto *out = static_cast<uint32_t *>(allocations.allocate((Count + 2) * sizeof(uint32_t)));
@@ -76,22 +90,24 @@ template <class Backend> void accessPattern(Backend &backend, unsigned mode) {
     } else {
       auto *values = reinterpret_cast<uint32_t *>(input);
       for (unsigned i = 0; i < Count * 17; ++i)
-        values[i] = i * 3 + 7 + pass;
+        values[i] = (i * 3) + 7 + pass;
     }
     const auto start = std::chrono::steady_clock::now();
-    std::cout << "start " << name << " nodes/items=" << Count << " pass=" << pass << std::endl;
+    std::cout << "start " << name << " nodes/items=" << Count << " pass=" << pass << '\n' << std::flush;
     backend.launch(input, out + 1, indices, mode, mode == 3 ? 1 : Count);
-    if (mode == 3) require(out[1] == Count * (Count + 1) / 2 + Count * pass, "linked sum mismatch");
+    if (mode == 3) require(out[1] == (Count * (Count + 1) / 2) + (Count * pass), "linked sum mismatch");
     else
       for (unsigned i = 0; i < Count; ++i) {
-        const unsigned index = mode == 0 ? i : mode == 1 ? i * 17 : indices[i];
-        require(out[i + 1] == index * 3 + 8 + pass, "regular/gather mismatch");
+        unsigned index = i;
+        if (mode == 1) index = i * 17;
+        else if (mode == 2) index = indices[i];
+        require(out[i + 1] == (index * 3) + 8 + pass, "regular/gather mismatch");
       }
     require(out[0] == 0xa5a5a5a5U && out[Count + 1] == 0xa5a5a5a5U, "output guard changed");
     for (unsigned i = 0; i < 64; ++i)
       require(storage[i] == 0x5a && storage[inputSize + 64 + i] == 0x5a, "input guard changed");
     const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    std::cout << "verified " << name << " pass=" << pass << " seconds=" << seconds << std::endl;
+    std::cout << "verified " << name << " pass=" << pass << " seconds=" << seconds << '\n' << std::flush;
   }
   allocations.release(indices);
   allocations.release(out);
@@ -143,7 +159,7 @@ template <class Word, class Backend> void atomicValues(Backend &backend) {
   auto *output = static_cast<Word *>(allocations.allocate(lanes * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, lanes, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n' << std::flush;
   backend.launch(input, reinterpret_cast<uint32_t *>(output), reinterpret_cast<uint32_t *>(input), sizeof(Word) == 4 ? 9 : 10, lanes);
   require(input[2] == Word(lanes), "multi-workgroup RMW lost an update");
   std::sort(output, output + lanes);
@@ -151,7 +167,7 @@ template <class Word, class Backend> void atomicValues(Backend &backend) {
     require(output[lane] == Word(lane), "multi-workgroup atomic returned a stale or duplicate old value");
   allocations.release(output);
   allocations.release(input);
-  std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4" << std::endl;
+  std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4\n" << std::flush;
 }
 // Both sides synchronise through the native atomic word during execution.
 // Repeated payload changes verify visibility after every acquire.
@@ -161,7 +177,7 @@ template <class Word, class Backend> void atomicPublication(Backend &backend, bo
   auto *output = static_cast<Word *>(allocations.allocate(32 * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, 32, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n' << std::flush;
   std::atomic_bool cancelled{false};
   auto host = std::async(std::launch::async, [&] {
     auto state = std::atomic_ref<Word>(input[0]);
@@ -180,7 +196,7 @@ template <class Word, class Backend> void atomicPublication(Backend &backend, bo
       try {
         require(input[1] == 2 * (73 + round), "GPU release did not publish payload");
         require(output[round] == 73 + round, "GPU acquire read stale CPU payload");
-        require(std::atomic_ref<Word>(input[2]).load(std::memory_order_relaxed) == Word(round + 1), "CPU/GPU atomic RMW lost an update");
+        require(std::atomic_ref<Word>(input[2]).load(std::memory_order_relaxed) == Word(round) + 1, "CPU/GPU atomic RMW lost an update");
       } catch (...) {
         if (!failure) failure = std::current_exception();
       }
@@ -198,7 +214,7 @@ template <class Word, class Backend> void atomicPublication(Backend &backend, bo
   host.get();
   allocations.release(output);
   allocations.release(input);
-  std::cout << "verified live system atomics bits=" << sizeof(Word) * 8 << " rounds=32 fences=" << fenced << std::endl;
+  std::cout << "verified live system atomics bits=" << sizeof(Word) * 8 << " rounds=32 fences=" << fenced << '\n' << std::flush;
 }
 
 // Publish through one atomic location and acknowledge through another. The
@@ -209,7 +225,7 @@ template <class Word, class Backend> int compareFailure(Backend &backend) {
   auto *output = static_cast<Word *>(allocations.allocate(96 * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
   std::fill_n(output, 96, Word{});
-  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
+  std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n' << std::flush;
   std::atomic_bool cancelled{false};
   auto host = std::async(std::launch::async, [&] {
     auto published = std::atomic_ref<Word>(input[0]);
@@ -218,8 +234,8 @@ template <class Word, class Backend> int compareFailure(Backend &backend) {
     std::exception_ptr failure;
     for (unsigned round = 0; round < 32; ++round) {
       // High bits exercise unsigned values across the full word width.
-      const Word value = (Word{1} << (sizeof(Word) * 8 - 1)) + 73 + round;
-      const Word token = (Word{1} << (sizeof(Word) * 8 - 1)) + round + 1;
+      const Word value = (Word{1} << ((sizeof(Word) * 8) - 1)) + 73 + round;
+      const Word token = (Word{1} << ((sizeof(Word) * 8) - 1)) + round + 1;
       input[1] = value;
       published.store(token, std::memory_order_release);
       while (acknowledged.load(std::memory_order_acquire) != token) {
@@ -228,9 +244,10 @@ template <class Word, class Backend> int compareFailure(Backend &backend) {
         std::this_thread::yield();
       }
       try {
-        require(output[3 * round] == value, "failed acquire CAS read a stale payload");
-        require(output[3 * round + 1] == token, "failed CAS did not return the observed value");
-        require(output[3 * round + 2] == 0, "mismatched compare-exchange reported success");
+        const auto slot = 3 * static_cast<size_t>(round);
+        require(output[slot] == value, "failed acquire CAS read a stale payload");
+        require(output[slot + 1] == token, "failed CAS did not return the observed value");
+        require(output[slot + 2] == 0, "mismatched compare-exchange reported success");
         require(published.load(std::memory_order_relaxed) == token, "failed CAS changed its target");
       } catch (...) {
         if (!failure) failure = std::current_exception();
@@ -248,21 +265,24 @@ template <class Word, class Backend> int compareFailure(Backend &backend) {
   host.get();
   allocations.release(output);
   allocations.release(input);
-  std::cout << "verified failed compare-exchange bits=" << sizeof(Word) * 8 << " rounds=32 atomic-locations=2" << std::endl;
+  std::cout << "verified failed compare-exchange bits=" << sizeof(Word) * 8 << " rounds=32 atomic-locations=2\n" << std::flush;
   return 0;
 }
 template <class Backend> void runScenario(Backend &backend, unsigned scenario) {
   const bool wide = scenario >= 11;
-  if (scenario < 4) accessPattern(backend, scenario);
-  else if (scenario < 6) ordered(backend, scenario == 5, scenario == 5 ? 2 : 1);
-  else if (scenario == 6) pointerReplacement(backend);
-  else {
+  if (scenario < 4) {
+    accessPattern(backend, scenario);
+  } else if (scenario < 6) {
+    ordered(backend, scenario == 5, scenario == 5 ? 2 : 1);
+  } else if (scenario == 6) {
+    pointerReplacement(backend);
+  } else {
     auto atomic = [&]<class Word>() {
       switch ((scenario - 7) % 4) {
         case 0:
         case 1: atomicPublication<Word>(backend, (scenario - 7) % 4 == 1); break;
         case 2: atomicValues<Word>(backend); break;
-        case 3: compareFailure<Word>(backend); break;
+        default: compareFailure<Word>(backend); break;
       }
     };
     if (wide) atomic.template operator()<uint64_t>();

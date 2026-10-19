@@ -9,6 +9,8 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class AMDGPUIntegerClampSuite extends munit.FunSuite {
+  private val clamps = Seq(false, true)
+
   // Fixed LLVM gfx803 VOP3 encodings: v2, s[8:9], v3, v4, optionally s[10:11].
   for {
     (opcode, name, left, right, input, saturated, wrapped, carry) <- Seq(
@@ -25,7 +27,7 @@ class AMDGPUIntegerClampSuite extends munit.FunSuite {
       (0x1e, "reverse subtract incoming borrow", 1L, 1L, 1, 0L, 0xffffffffL, 1),
       (0x1e, "reverse subtract without incoming borrow", 1L, 1L, 0, 0L, 0L, 0)
     )
-    clamp <- Seq(false, true)
+    clamp <- clamps
   }
     test(s"gfx803 $name clamp=$clamp retains the carry mask") {
       import InstructionSource.*

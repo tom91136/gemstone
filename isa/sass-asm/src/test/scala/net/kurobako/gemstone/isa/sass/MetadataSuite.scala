@@ -6,6 +6,9 @@ import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class MetadataSuite extends munit.FunSuite {
+  private def movRegReg: Instruction.Definition =
+    Instruction.Definition.forMnemonic("MOV").find(_.name == "MovRegReg").getOrElse(fail("missing MovRegReg"))
+
   test("modifier decoding preserves order, repetitions and unknown vendor spellings") {
     val instruction = Parser.parse("F2F.F32.F32 R0, R1;").fold(fail(_), identity)
     assertEquals(instruction.modifiers, Vec(Instruction.Modifier.F32, Instruction.Modifier.F32))
@@ -14,6 +17,18 @@ class MetadataSuite extends munit.FunSuite {
     val vendor = Parser.parse("MOV.FUTURE R0, R1;").fold(fail(_), identity)
     assertEquals(vendor.modifiers, Vec(Instruction.Modifier.Vendor("FUTURE")))
     assertEquals(Printer.print(vendor), Right("MOV.FUTURE R0, R1;"))
+  }
+
+  test("a float immediate with a half selector assembles to the word nvdisasm 13.3 prints back") {
+    // spliced into a ptxas sm_100a cubin, nvdisasm prints "F2FP.BF16.E5M2.UNPACK_B R0, R4, 1.H0"
+    val source  = "F2FP.BF16.E5M2.UNPACK_B R0, R4, 1.H0;"
+    val encoded = Assembler.assemble(source, target(100)).fold(fail(_), identity)
+    assertEquals(encoded.map(byte => f"${byte & 0xff}%02x").mkString, "3e7e00000000803f0414000200c00f00")
+    val decoded = disassemble(encoded, 100).fold(fail(_), identity)
+    assertEquals(
+      Printer.print(decoded.operation),
+      Right("F2FP.BF16.E5M2.UNPACK_B R0, R4, bits<F32Imm>:32(0x3f800000).H0;")
+    )
   }
 
   test("targets sharing a description share decoder data") {
@@ -28,7 +43,7 @@ class MetadataSuite extends munit.FunSuite {
     assert(definitions.forall(_.mnemonic == "MOV"))
     assert(Instruction.Definition.forMnemonic("NO_SUCH_INSTRUCTION").isEmpty)
     assertEquals(Instruction.Definition.all.map(_.name).distinct.size, Instruction.Definition.all.size)
-    val registerForms = Instruction.MovRegRegDefinition.forms.toSet
+    val registerForms = movRegReg.forms.toSet
     Vec(35, 89).foreach { sm =>
       assert(decoder(sm).forms.exists(form =>
         registerForms(form.name) && form.opcodes.exists(_.name == "MOV")
@@ -65,7 +80,9 @@ class MetadataSuite extends munit.FunSuite {
       "Symbol"  -> Operand.Symbol("CC")
     )
     val shape = s"(.*?)(NoOperands|(?:${kinds.keys.mkString("|")})+)".r
-    Instruction.Definition.all.foreach { definition =>
+    assertEquals(InstructionDefinitions.decoders.map(_.definition), Instruction.Definition.all)
+    InstructionDefinitions.decoders.foreach { decoder =>
+      val definition   = decoder.definition
       val name: String = definition.name.raw
       val operands     = name match {
         case shape(prefix: String, suffix: String)
@@ -74,23 +91,29 @@ class MetadataSuite extends munit.FunSuite {
           else Vec.from(s"(${kinds.keys.mkString("|")})".r.findAllIn(suffix)).map(kinds)
         case _ => fail(s"$name does not name its operand shape")
       }
-      val instruction = definition.decode(Vec.empty, operands, None).getOrElse(fail(definition.name.raw))
+      val instruction = decoder.decode(Vec.empty, operands, None).getOrElse(fail(definition.name.raw))
       assert(instruction.definition eq definition, definition)
       assertEquals(instruction.operands, operands, definition)
-      assertEquals(Instruction.decode(definition.mnemonic.raw, Vec.empty, operands, None), Right(instruction))
+      assertEquals(
+        InstructionDefinitions.decode(definition.mnemonic.raw, Vec.empty, operands, None),
+        Right(instruction)
+      )
     }
   }
 
   test("MOV carries named checked operands and its shared definition") {
-    val dst = InstructionOperand.Register.from(Operand.Register(RegisterBank.R, 1)).fold(fail(_), identity)
-    val src = InstructionOperand.Register.from(Operand.Register(RegisterBank.R, 2)).fold(fail(_), identity)
-    val instruction: Instruction.MovRegReg = Instruction.MovRegReg(dst, src)
-    assertEquals(instruction.dst, dst)
+    val dst         = InstructionOperand.Register.from(Operand.Register(RegisterBank.R, 1)).fold(fail(_), identity)
+    val src         = InstructionOperand.Register.from(Operand.Register(RegisterBank.R, 2)).fold(fail(_), identity)
+    val instruction = Instruction(Form.MovRegReg(dst, src))
+    instruction.form match {
+      case Form.MovRegReg(dst = named) => assertEquals(named, dst)
+      case other                       => fail(s"unexpected form $other")
+    }
     assertEquals(instruction.operands, Vec[Operand](dst, src))
-    assert(instruction.definition eq Instruction.MovRegRegDefinition)
-    assertEquals(Instruction.decode("MOV", Vec.empty, instruction.operands, None), Right(instruction))
-    assert(Instruction.decode("MOV", Vec.empty, Vec.empty, None).isLeft)
-    assert(Instruction.decode(
+    assert(instruction.definition eq movRegReg)
+    assertEquals(InstructionDefinitions.decode("MOV", Vec.empty, instruction.operands, None), Right(instruction))
+    assert(InstructionDefinitions.decode("MOV", Vec.empty, Vec.empty, None).isLeft)
+    assert(InstructionDefinitions.decode(
       "MOV",
       Vec.empty,
       Vec(Operand.Register(RegisterBank.R, 1), Operand.Predicate(None, uniform = false, negated = false)),

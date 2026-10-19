@@ -15,13 +15,13 @@ object Instruction {
       val opcode: NonEmpty[java.lang.String],
       val opcodeNumber: SPIRVOpcodeNumber,
       decode: Definition => Decoder,
-      val shapes: Vec[OperandShape]
-  ) {
+      operands: java.lang.String
+  ) derives CanEqual {
     case Nop extends Definition(
           "OpNop",
           SPIRVOpcodeNumber(0),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Nop()),
-          InstructionMetadata0.m0
+          ""
         )
     case Undef extends Definition(
           "OpUndef",
@@ -33,7 +33,7 @@ object Instruction {
                 raw,
                 values => Instruction.Undef(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m1
+          "IdResultType IdResult"
         )
     case SourceContinued extends Definition(
           "OpSourceContinued",
@@ -41,7 +41,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.SourceContinued(values.required(0))),
-          InstructionMetadata0.m2
+          "LiteralString"
         )
     case Source extends Definition(
           "OpSource",
@@ -54,7 +54,7 @@ object Instruction {
                 values =>
                   Instruction.Source(values.required(0), values.required(1), values.optional(2), values.optional(3))
               ),
-          InstructionMetadata0.m3
+          "SourceLanguage LiteralInteger IdRef? LiteralString?"
         )
     case SourceExtension extends Definition(
           "OpSourceExtension",
@@ -62,7 +62,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.SourceExtension(values.required(0))),
-          InstructionMetadata0.m4
+          "LiteralString"
         )
     case Name extends Definition(
           "OpName",
@@ -74,7 +74,7 @@ object Instruction {
                 raw,
                 values => Instruction.Name(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m5
+          "IdRef LiteralString"
         )
     case MemberName extends Definition(
           "OpMemberName",
@@ -86,7 +86,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemberName(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m6
+          "IdRef LiteralInteger LiteralString"
         )
     case String extends Definition(
           "OpString",
@@ -98,7 +98,7 @@ object Instruction {
                 raw,
                 values => Instruction.String(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m7
+          "IdResult LiteralString"
         )
     case Line extends Definition(
           "OpLine",
@@ -110,14 +110,14 @@ object Instruction {
                 raw,
                 values => Instruction.Line(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m8
+          "IdRef LiteralInteger LiteralInteger"
         )
     case Extension extends Definition(
           "OpExtension",
           SPIRVOpcodeNumber(10),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Extension(values.required(0))),
-          InstructionMetadata0.m9
+          "LiteralString"
         )
     case ExtInstImport extends Definition(
           "OpExtInstImport",
@@ -129,7 +129,7 @@ object Instruction {
                 raw,
                 values => Instruction.ExtInstImport(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m10
+          "IdResult LiteralString"
         )
     case ExtInst extends Definition(
           "OpExtInst",
@@ -141,14 +141,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ExtInst(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    set = values.required(2),
+                    inst = values.required(3),
+                    srcs = values.repeated(4)
                   )
               ),
-          InstructionMetadata0.m11
+          "IdResultType IdResult IdRef LiteralExtInstInteger IdRef*"
         )
     case MemoryModel extends Definition(
           "OpMemoryModel",
@@ -160,7 +160,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemoryModel(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m12
+          "AddressingModel MemoryModel"
         )
     case EntryPoint extends Definition(
           "OpEntryPoint",
@@ -173,7 +173,7 @@ object Instruction {
                 values =>
                   Instruction.EntryPoint(values.required(0), values.required(1), values.required(2), values.repeated(3))
               ),
-          InstructionMetadata0.m13
+          "ExecutionModel IdRef LiteralString IdRef*"
         )
     case ExecutionMode extends Definition(
           "OpExecutionMode",
@@ -185,28 +185,28 @@ object Instruction {
                 raw,
                 values => Instruction.ExecutionMode(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m14
+          "IdRef ExecutionMode"
         )
     case Capability extends Definition(
           "OpCapability",
           SPIRVOpcodeNumber(17),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Capability(values.required(0))),
-          InstructionMetadata0.m15
+          "Capability"
         )
     case TypeVoid extends Definition(
           "OpTypeVoid",
           SPIRVOpcodeNumber(19),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeVoid(values.required(0))),
-          InstructionMetadata0.m16
+          "IdResult"
         )
     case TypeBool extends Definition(
           "OpTypeBool",
           SPIRVOpcodeNumber(20),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeBool(values.required(0))),
-          InstructionMetadata0.m17
+          "IdResult"
         )
     case TypeInt extends Definition(
           "OpTypeInt",
@@ -218,7 +218,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeInt(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m18
+          "IdResult LiteralInteger LiteralInteger"
         )
     case TypeFloat extends Definition(
           "OpTypeFloat",
@@ -230,7 +230,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeFloat(values.required(0), values.required(1), values.optional(2))
               ),
-          InstructionMetadata0.m19
+          "IdResult LiteralInteger FPEncoding?"
         )
     case TypeVector extends Definition(
           "OpTypeVector",
@@ -242,7 +242,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeVector(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m20
+          "IdResult IdRef LiteralInteger"
         )
     case TypeMatrix extends Definition(
           "OpTypeMatrix",
@@ -254,7 +254,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeMatrix(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m21
+          "IdResult IdRef LiteralInteger"
         )
     case TypeImage extends Definition(
           "OpTypeImage",
@@ -266,25 +266,25 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TypeImage(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.optional(8)
+                    dest = values.required(0),
+                    sampledType = values.required(1),
+                    dim = values.required(2),
+                    depth = values.required(3),
+                    arrayed = values.required(4),
+                    mS = values.required(5),
+                    sampled = values.required(6),
+                    imageFormat = values.required(7),
+                    accessQualifier = values.optional(8)
                   )
               ),
-          InstructionMetadata0.m22
+          "IdResult IdRef Dim LiteralInteger LiteralInteger LiteralInteger LiteralInteger ImageFormat AccessQualifier?"
         )
     case TypeSampler extends Definition(
           "OpTypeSampler",
           SPIRVOpcodeNumber(26),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeSampler(values.required(0))),
-          InstructionMetadata0.m23
+          "IdResult"
         )
     case TypeSampledImage extends Definition(
           "OpTypeSampledImage",
@@ -296,7 +296,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeSampledImage(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m24
+          "IdResult IdRef"
         )
     case TypeArray extends Definition(
           "OpTypeArray",
@@ -308,7 +308,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeArray(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m25
+          "IdResult IdRef IdRef"
         )
     case TypeRuntimeArray extends Definition(
           "OpTypeRuntimeArray",
@@ -320,7 +320,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeRuntimeArray(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m26
+          "IdResult IdRef"
         )
     case TypeStruct extends Definition(
           "OpTypeStruct",
@@ -332,7 +332,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeStruct(values.required(0), values.repeated(1))
               ),
-          InstructionMetadata0.m27
+          "IdResult IdRef*"
         )
     case TypeOpaque extends Definition(
           "OpTypeOpaque",
@@ -344,7 +344,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeOpaque(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m28
+          "IdResult LiteralString"
         )
     case TypePointer extends Definition(
           "OpTypePointer",
@@ -356,7 +356,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypePointer(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m29
+          "IdResult StorageClass IdRef"
         )
     case TypeFunction extends Definition(
           "OpTypeFunction",
@@ -368,14 +368,14 @@ object Instruction {
                 raw,
                 values => Instruction.TypeFunction(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata0.m30
+          "IdResult IdRef IdRef*"
         )
     case TypeEvent extends Definition(
           "OpTypeEvent",
           SPIRVOpcodeNumber(34),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeEvent(values.required(0))),
-          InstructionMetadata0.m31
+          "IdResult"
         )
     case TypeDeviceEvent extends Definition(
           "OpTypeDeviceEvent",
@@ -383,7 +383,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypeDeviceEvent(values.required(0))),
-          InstructionMetadata0.m32
+          "IdResult"
         )
     case TypeReserveId extends Definition(
           "OpTypeReserveId",
@@ -391,14 +391,14 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypeReserveId(values.required(0))),
-          InstructionMetadata0.m33
+          "IdResult"
         )
     case TypeQueue extends Definition(
           "OpTypeQueue",
           SPIRVOpcodeNumber(37),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeQueue(values.required(0))),
-          InstructionMetadata0.m34
+          "IdResult"
         )
     case TypePipe extends Definition(
           "OpTypePipe",
@@ -410,7 +410,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypePipe(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m35
+          "IdResult AccessQualifier"
         )
     case TypeForwardPointer extends Definition(
           "OpTypeForwardPointer",
@@ -422,7 +422,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeForwardPointer(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m36
+          "IdRef StorageClass"
         )
     case ConstantTrue extends Definition(
           "OpConstantTrue",
@@ -434,7 +434,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantTrue(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m37
+          "IdResultType IdResult"
         )
     case ConstantFalse extends Definition(
           "OpConstantFalse",
@@ -446,7 +446,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantFalse(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m38
+          "IdResultType IdResult"
         )
     case Constant extends Definition(
           "OpConstant",
@@ -458,7 +458,7 @@ object Instruction {
                 raw,
                 values => Instruction.Constant(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m39
+          "IdResultType IdResult LiteralContextDependentNumber"
         )
     case ConstantComposite extends Definition(
           "OpConstantComposite",
@@ -470,7 +470,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantComposite(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata0.m40
+          "IdResultType IdResult IdRef*"
         )
     case ConstantSampler extends Definition(
           "OpConstantSampler",
@@ -482,14 +482,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ConstantSampler(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    samplerAddressingMode = values.required(2),
+                    param = values.required(3),
+                    samplerFilterMode = values.required(4)
                   )
               ),
-          InstructionMetadata0.m41
+          "IdResultType IdResult SamplerAddressingMode LiteralInteger SamplerFilterMode"
         )
     case ConstantNull extends Definition(
           "OpConstantNull",
@@ -501,7 +501,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantNull(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m42
+          "IdResultType IdResult"
         )
     case SpecConstantTrue extends Definition(
           "OpSpecConstantTrue",
@@ -513,7 +513,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstantTrue(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m43
+          "IdResultType IdResult"
         )
     case SpecConstantFalse extends Definition(
           "OpSpecConstantFalse",
@@ -525,7 +525,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstantFalse(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m44
+          "IdResultType IdResult"
         )
     case SpecConstant extends Definition(
           "OpSpecConstant",
@@ -537,7 +537,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstant(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m45
+          "IdResultType IdResult LiteralContextDependentNumber"
         )
     case SpecConstantComposite extends Definition(
           "OpSpecConstantComposite",
@@ -549,7 +549,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstantComposite(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata0.m46
+          "IdResultType IdResult IdRef*"
         )
     case SpecConstantOp extends Definition(
           "OpSpecConstantOp",
@@ -567,7 +567,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata0.m47
+          "IdResultType IdResult LiteralSpecConstantOpInteger LiteralInteger*"
         )
     case Function extends Definition(
           "OpFunction",
@@ -580,7 +580,7 @@ object Instruction {
                 values =>
                   Instruction.Function(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m48
+          "IdResultType IdResult FunctionControl IdRef"
         )
     case FunctionParameter extends Definition(
           "OpFunctionParameter",
@@ -592,13 +592,13 @@ object Instruction {
                 raw,
                 values => Instruction.FunctionParameter(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m49
+          "IdResultType IdResult"
         )
     case FunctionEnd extends Definition(
           "OpFunctionEnd",
           SPIRVOpcodeNumber(56),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.FunctionEnd()),
-          InstructionMetadata0.m50
+          ""
         )
     case FunctionCall extends Definition(
           "OpFunctionCall",
@@ -616,7 +616,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata0.m51
+          "IdResultType IdResult IdRef IdRef*"
         )
     case Variable extends Definition(
           "OpVariable",
@@ -629,7 +629,7 @@ object Instruction {
                 values =>
                   Instruction.Variable(values.required(0), values.required(1), values.required(2), values.optional(3))
               ),
-          InstructionMetadata0.m52
+          "IdResultType IdResult StorageClass IdRef?"
         )
     case ImageTexelPointer extends Definition(
           "OpImageTexelPointer",
@@ -641,14 +641,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageTexelPointer(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    sample = values.required(4)
                   )
               ),
-          InstructionMetadata0.m53
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case Load extends Definition(
           "OpLoad",
@@ -661,7 +661,7 @@ object Instruction {
                 values =>
                   Instruction.Load(values.required(0), values.required(1), values.required(2), values.optional(3))
               ),
-          InstructionMetadata0.m54
+          "IdResultType IdResult IdRef MemoryAccess?"
         )
     case Store extends Definition(
           "OpStore",
@@ -673,7 +673,7 @@ object Instruction {
                 raw,
                 values => Instruction.Store(values.required(0), values.required(1), values.optional(2))
               ),
-          InstructionMetadata0.m55
+          "IdRef IdRef MemoryAccess?"
         )
     case CopyMemory extends Definition(
           "OpCopyMemory",
@@ -686,7 +686,7 @@ object Instruction {
                 values =>
                   Instruction.CopyMemory(values.required(0), values.required(1), values.optional(2), values.optional(3))
               ),
-          InstructionMetadata0.m56
+          "IdRef IdRef MemoryAccess? MemoryAccess?"
         )
     case CopyMemorySized extends Definition(
           "OpCopyMemorySized",
@@ -698,14 +698,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CopyMemorySized(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.optional(3),
-                    values.optional(4)
+                    target = values.required(0),
+                    src = values.required(1),
+                    size = values.required(2),
+                    modsA = values.optional(3),
+                    modsB = values.optional(4)
                   )
               ),
-          InstructionMetadata0.m57
+          "IdRef IdRef IdRef MemoryAccess? MemoryAccess?"
         )
     case AccessChain extends Definition(
           "OpAccessChain",
@@ -723,7 +723,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata0.m58
+          "IdResultType IdResult IdRef IdRef*"
         )
     case InBoundsAccessChain extends Definition(
           "OpInBoundsAccessChain",
@@ -741,7 +741,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata0.m59
+          "IdResultType IdResult IdRef IdRef*"
         )
     case PtrAccessChain extends Definition(
           "OpPtrAccessChain",
@@ -753,14 +753,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.PtrAccessChain(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    base = values.required(2),
+                    element = values.required(3),
+                    indexes = values.repeated(4)
                   )
               ),
-          InstructionMetadata0.m60
+          "IdResultType IdResult IdRef IdRef IdRef*"
         )
     case ArrayLength extends Definition(
           "OpArrayLength",
@@ -778,7 +778,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m61
+          "IdResultType IdResult IdRef LiteralInteger"
         )
     case GenericPtrMemSemantics extends Definition(
           "OpGenericPtrMemSemantics",
@@ -790,7 +790,7 @@ object Instruction {
                 raw,
                 values => Instruction.GenericPtrMemSemantics(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m62
+          "IdResultType IdResult IdRef"
         )
     case InBoundsPtrAccessChain extends Definition(
           "OpInBoundsPtrAccessChain",
@@ -802,14 +802,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.InBoundsPtrAccessChain(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    base = values.required(2),
+                    element = values.required(3),
+                    indexes = values.repeated(4)
                   )
               ),
-          InstructionMetadata0.m63
+          "IdResultType IdResult IdRef IdRef IdRef*"
         )
     case Decorate extends Definition(
           "OpDecorate",
@@ -821,7 +821,7 @@ object Instruction {
                 raw,
                 values => Instruction.Decorate(values.required(0), values.required(1))
               ),
-          InstructionMetadata0.m64
+          "IdRef Decoration"
         )
     case MemberDecorate extends Definition(
           "OpMemberDecorate",
@@ -833,7 +833,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemberDecorate(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m65
+          "IdRef LiteralInteger Decoration"
         )
     case DecorationGroup extends Definition(
           "OpDecorationGroup",
@@ -841,7 +841,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.DecorationGroup(values.required(0))),
-          InstructionMetadata0.m66
+          "IdResult"
         )
     case GroupDecorate extends Definition(
           "OpGroupDecorate",
@@ -853,7 +853,7 @@ object Instruction {
                 raw,
                 values => Instruction.GroupDecorate(values.required(0), values.repeated(1))
               ),
-          InstructionMetadata0.m67
+          "IdRef IdRef*"
         )
     case GroupMemberDecorate extends Definition(
           "OpGroupMemberDecorate",
@@ -865,7 +865,7 @@ object Instruction {
                 raw,
                 values => Instruction.GroupMemberDecorate(values.required(0), values.repeated(1))
               ),
-          InstructionMetadata0.m68
+          "IdRef PairIdRefLiteralInteger*"
         )
     case VectorExtractDynamic extends Definition(
           "OpVectorExtractDynamic",
@@ -883,7 +883,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m69
+          "IdResultType IdResult IdRef IdRef"
         )
     case VectorInsertDynamic extends Definition(
           "OpVectorInsertDynamic",
@@ -895,14 +895,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.VectorInsertDynamic(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector = values.required(2),
+                    component = values.required(3),
+                    index = values.required(4)
                   )
               ),
-          InstructionMetadata0.m70
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case VectorShuffle extends Definition(
           "OpVectorShuffle",
@@ -914,14 +914,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.VectorShuffle(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    components = values.repeated(4)
                   )
               ),
-          InstructionMetadata0.m71
+          "IdResultType IdResult IdRef IdRef LiteralInteger*"
         )
     case CompositeConstruct extends Definition(
           "OpCompositeConstruct",
@@ -933,7 +933,7 @@ object Instruction {
                 raw,
                 values => Instruction.CompositeConstruct(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata0.m72
+          "IdResultType IdResult IdRef*"
         )
     case CompositeExtract extends Definition(
           "OpCompositeExtract",
@@ -951,7 +951,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata0.m73
+          "IdResultType IdResult IdRef LiteralInteger*"
         )
     case CompositeInsert extends Definition(
           "OpCompositeInsert",
@@ -963,14 +963,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CompositeInsert(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    src = values.required(2),
+                    composite = values.required(3),
+                    indexes = values.repeated(4)
                   )
               ),
-          InstructionMetadata0.m74
+          "IdResultType IdResult IdRef IdRef LiteralInteger*"
         )
     case CopyObject extends Definition(
           "OpCopyObject",
@@ -982,7 +982,7 @@ object Instruction {
                 raw,
                 values => Instruction.CopyObject(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m75
+          "IdResultType IdResult IdRef"
         )
     case Transpose extends Definition(
           "OpTranspose",
@@ -994,7 +994,7 @@ object Instruction {
                 raw,
                 values => Instruction.Transpose(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m76
+          "IdResultType IdResult IdRef"
         )
     case SampledImage extends Definition(
           "OpSampledImage",
@@ -1012,7 +1012,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m77
+          "IdResultType IdResult IdRef IdRef"
         )
     case ImageSampleImplicitLod extends Definition(
           "OpImageSampleImplicitLod",
@@ -1024,14 +1024,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata0.m78
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageSampleExplicitLod extends Definition(
           "OpImageSampleExplicitLod",
@@ -1043,14 +1043,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.required(4)
                   )
               ),
-          InstructionMetadata0.m79
+          "IdResultType IdResult IdRef IdRef ImageOperands"
         )
     case ImageSampleDrefImplicitLod extends Definition(
           "OpImageSampleDrefImplicitLod",
@@ -1062,15 +1062,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleDrefImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata0.m80
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageSampleDrefExplicitLod extends Definition(
           "OpImageSampleDrefExplicitLod",
@@ -1082,15 +1082,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleDrefExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.required(5)
                   )
               ),
-          InstructionMetadata0.m81
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands"
         )
     case ImageSampleProjImplicitLod extends Definition(
           "OpImageSampleProjImplicitLod",
@@ -1102,14 +1102,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleProjImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata0.m82
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageSampleProjExplicitLod extends Definition(
           "OpImageSampleProjExplicitLod",
@@ -1121,14 +1121,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleProjExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.required(4)
                   )
               ),
-          InstructionMetadata0.m83
+          "IdResultType IdResult IdRef IdRef ImageOperands"
         )
     case ImageSampleProjDrefImplicitLod extends Definition(
           "OpImageSampleProjDrefImplicitLod",
@@ -1140,15 +1140,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleProjDrefImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata0.m84
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageSampleProjDrefExplicitLod extends Definition(
           "OpImageSampleProjDrefExplicitLod",
@@ -1160,15 +1160,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleProjDrefExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.required(5)
                   )
               ),
-          InstructionMetadata0.m85
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands"
         )
     case ImageFetch extends Definition(
           "OpImageFetch",
@@ -1180,14 +1180,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageFetch(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata0.m86
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageGather extends Definition(
           "OpImageGather",
@@ -1199,15 +1199,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageGather(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    component = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata0.m87
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageDrefGather extends Definition(
           "OpImageDrefGather",
@@ -1219,15 +1219,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageDrefGather(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata0.m88
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageRead extends Definition(
           "OpImageRead",
@@ -1239,14 +1239,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageRead(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata0.m89
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageWrite extends Definition(
           "OpImageWrite",
@@ -1259,7 +1259,7 @@ object Instruction {
                 values =>
                   Instruction.ImageWrite(values.required(0), values.required(1), values.required(2), values.optional(3))
               ),
-          InstructionMetadata0.m90
+          "IdRef IdRef IdRef ImageOperands?"
         )
     case Image extends Definition(
           "OpImage",
@@ -1271,7 +1271,7 @@ object Instruction {
                 raw,
                 values => Instruction.Image(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m91
+          "IdResultType IdResult IdRef"
         )
     case ImageQueryFormat extends Definition(
           "OpImageQueryFormat",
@@ -1283,7 +1283,7 @@ object Instruction {
                 raw,
                 values => Instruction.ImageQueryFormat(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m92
+          "IdResultType IdResult IdRef"
         )
     case ImageQueryOrder extends Definition(
           "OpImageQueryOrder",
@@ -1295,7 +1295,7 @@ object Instruction {
                 raw,
                 values => Instruction.ImageQueryOrder(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m93
+          "IdResultType IdResult IdRef"
         )
     case ImageQuerySizeLod extends Definition(
           "OpImageQuerySizeLod",
@@ -1313,7 +1313,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m94
+          "IdResultType IdResult IdRef IdRef"
         )
     case ImageQuerySize extends Definition(
           "OpImageQuerySize",
@@ -1325,7 +1325,7 @@ object Instruction {
                 raw,
                 values => Instruction.ImageQuerySize(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m95
+          "IdResultType IdResult IdRef"
         )
     case ImageQueryLod extends Definition(
           "OpImageQueryLod",
@@ -1343,7 +1343,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m96
+          "IdResultType IdResult IdRef IdRef"
         )
     case ImageQueryLevels extends Definition(
           "OpImageQueryLevels",
@@ -1355,7 +1355,7 @@ object Instruction {
                 raw,
                 values => Instruction.ImageQueryLevels(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m97
+          "IdResultType IdResult IdRef"
         )
     case ImageQuerySamples extends Definition(
           "OpImageQuerySamples",
@@ -1367,7 +1367,7 @@ object Instruction {
                 raw,
                 values => Instruction.ImageQuerySamples(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m98
+          "IdResultType IdResult IdRef"
         )
     case ConvertFToU extends Definition(
           "OpConvertFToU",
@@ -1379,7 +1379,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertFToU(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m99
+          "IdResultType IdResult IdRef"
         )
     case ConvertFToS extends Definition(
           "OpConvertFToS",
@@ -1391,7 +1391,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertFToS(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m100
+          "IdResultType IdResult IdRef"
         )
     case ConvertSToF extends Definition(
           "OpConvertSToF",
@@ -1403,7 +1403,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertSToF(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m101
+          "IdResultType IdResult IdRef"
         )
     case ConvertUToF extends Definition(
           "OpConvertUToF",
@@ -1415,7 +1415,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertUToF(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m102
+          "IdResultType IdResult IdRef"
         )
     case UConvert extends Definition(
           "OpUConvert",
@@ -1427,7 +1427,7 @@ object Instruction {
                 raw,
                 values => Instruction.UConvert(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m103
+          "IdResultType IdResult IdRef"
         )
     case SConvert extends Definition(
           "OpSConvert",
@@ -1439,7 +1439,7 @@ object Instruction {
                 raw,
                 values => Instruction.SConvert(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m104
+          "IdResultType IdResult IdRef"
         )
     case FConvert extends Definition(
           "OpFConvert",
@@ -1451,7 +1451,7 @@ object Instruction {
                 raw,
                 values => Instruction.FConvert(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m105
+          "IdResultType IdResult IdRef"
         )
     case QuantizeToF16 extends Definition(
           "OpQuantizeToF16",
@@ -1463,7 +1463,7 @@ object Instruction {
                 raw,
                 values => Instruction.QuantizeToF16(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m106
+          "IdResultType IdResult IdRef"
         )
     case ConvertPtrToU extends Definition(
           "OpConvertPtrToU",
@@ -1475,7 +1475,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertPtrToU(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m107
+          "IdResultType IdResult IdRef"
         )
     case SatConvertSToU extends Definition(
           "OpSatConvertSToU",
@@ -1487,7 +1487,7 @@ object Instruction {
                 raw,
                 values => Instruction.SatConvertSToU(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m108
+          "IdResultType IdResult IdRef"
         )
     case SatConvertUToS extends Definition(
           "OpSatConvertUToS",
@@ -1499,7 +1499,7 @@ object Instruction {
                 raw,
                 values => Instruction.SatConvertUToS(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m109
+          "IdResultType IdResult IdRef"
         )
     case ConvertUToPtr extends Definition(
           "OpConvertUToPtr",
@@ -1511,7 +1511,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertUToPtr(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m110
+          "IdResultType IdResult IdRef"
         )
     case PtrCastToGeneric extends Definition(
           "OpPtrCastToGeneric",
@@ -1523,7 +1523,7 @@ object Instruction {
                 raw,
                 values => Instruction.PtrCastToGeneric(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m111
+          "IdResultType IdResult IdRef"
         )
     case GenericCastToPtr extends Definition(
           "OpGenericCastToPtr",
@@ -1535,7 +1535,7 @@ object Instruction {
                 raw,
                 values => Instruction.GenericCastToPtr(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m112
+          "IdResultType IdResult IdRef"
         )
     case GenericCastToPtrExplicit extends Definition(
           "OpGenericCastToPtrExplicit",
@@ -1553,7 +1553,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m113
+          "IdResultType IdResult IdRef StorageClass"
         )
     case Bitcast extends Definition(
           "OpBitcast",
@@ -1565,7 +1565,7 @@ object Instruction {
                 raw,
                 values => Instruction.Bitcast(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m114
+          "IdResultType IdResult IdRef"
         )
     case SNegate extends Definition(
           "OpSNegate",
@@ -1577,7 +1577,7 @@ object Instruction {
                 raw,
                 values => Instruction.SNegate(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m115
+          "IdResultType IdResult IdRef"
         )
     case FNegate extends Definition(
           "OpFNegate",
@@ -1589,7 +1589,7 @@ object Instruction {
                 raw,
                 values => Instruction.FNegate(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m116
+          "IdResultType IdResult IdRef"
         )
     case IAdd extends Definition(
           "OpIAdd",
@@ -1602,7 +1602,7 @@ object Instruction {
                 values =>
                   Instruction.IAdd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m117
+          "IdResultType IdResult IdRef IdRef"
         )
     case FAdd extends Definition(
           "OpFAdd",
@@ -1615,7 +1615,7 @@ object Instruction {
                 values =>
                   Instruction.FAdd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m118
+          "IdResultType IdResult IdRef IdRef"
         )
     case ISub extends Definition(
           "OpISub",
@@ -1628,7 +1628,7 @@ object Instruction {
                 values =>
                   Instruction.ISub(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m119
+          "IdResultType IdResult IdRef IdRef"
         )
     case FSub extends Definition(
           "OpFSub",
@@ -1641,7 +1641,7 @@ object Instruction {
                 values =>
                   Instruction.FSub(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m120
+          "IdResultType IdResult IdRef IdRef"
         )
     case IMul extends Definition(
           "OpIMul",
@@ -1654,7 +1654,7 @@ object Instruction {
                 values =>
                   Instruction.IMul(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m121
+          "IdResultType IdResult IdRef IdRef"
         )
     case FMul extends Definition(
           "OpFMul",
@@ -1667,7 +1667,7 @@ object Instruction {
                 values =>
                   Instruction.FMul(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m122
+          "IdResultType IdResult IdRef IdRef"
         )
     case UDiv extends Definition(
           "OpUDiv",
@@ -1680,7 +1680,7 @@ object Instruction {
                 values =>
                   Instruction.UDiv(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m123
+          "IdResultType IdResult IdRef IdRef"
         )
     case SDiv extends Definition(
           "OpSDiv",
@@ -1693,7 +1693,7 @@ object Instruction {
                 values =>
                   Instruction.SDiv(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m124
+          "IdResultType IdResult IdRef IdRef"
         )
     case FDiv extends Definition(
           "OpFDiv",
@@ -1706,7 +1706,7 @@ object Instruction {
                 values =>
                   Instruction.FDiv(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m125
+          "IdResultType IdResult IdRef IdRef"
         )
     case UMod extends Definition(
           "OpUMod",
@@ -1719,7 +1719,7 @@ object Instruction {
                 values =>
                   Instruction.UMod(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m126
+          "IdResultType IdResult IdRef IdRef"
         )
     case SRem extends Definition(
           "OpSRem",
@@ -1732,7 +1732,7 @@ object Instruction {
                 values =>
                   Instruction.SRem(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m127
+          "IdResultType IdResult IdRef IdRef"
         )
     case SMod extends Definition(
           "OpSMod",
@@ -1745,7 +1745,7 @@ object Instruction {
                 values =>
                   Instruction.SMod(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m128
+          "IdResultType IdResult IdRef IdRef"
         )
     case FRem extends Definition(
           "OpFRem",
@@ -1758,7 +1758,7 @@ object Instruction {
                 values =>
                   Instruction.FRem(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m129
+          "IdResultType IdResult IdRef IdRef"
         )
     case FMod extends Definition(
           "OpFMod",
@@ -1771,7 +1771,7 @@ object Instruction {
                 values =>
                   Instruction.FMod(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m130
+          "IdResultType IdResult IdRef IdRef"
         )
     case VectorTimesScalar extends Definition(
           "OpVectorTimesScalar",
@@ -1789,7 +1789,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m131
+          "IdResultType IdResult IdRef IdRef"
         )
     case MatrixTimesScalar extends Definition(
           "OpMatrixTimesScalar",
@@ -1807,7 +1807,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m132
+          "IdResultType IdResult IdRef IdRef"
         )
     case VectorTimesMatrix extends Definition(
           "OpVectorTimesMatrix",
@@ -1825,7 +1825,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m133
+          "IdResultType IdResult IdRef IdRef"
         )
     case MatrixTimesVector extends Definition(
           "OpMatrixTimesVector",
@@ -1843,7 +1843,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m134
+          "IdResultType IdResult IdRef IdRef"
         )
     case MatrixTimesMatrix extends Definition(
           "OpMatrixTimesMatrix",
@@ -1861,7 +1861,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m135
+          "IdResultType IdResult IdRef IdRef"
         )
     case OuterProduct extends Definition(
           "OpOuterProduct",
@@ -1879,7 +1879,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m136
+          "IdResultType IdResult IdRef IdRef"
         )
     case Dot extends Definition(
           "OpDot",
@@ -1892,7 +1892,7 @@ object Instruction {
                 values =>
                   Instruction.Dot(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m137
+          "IdResultType IdResult IdRef IdRef"
         )
     case IAddCarry extends Definition(
           "OpIAddCarry",
@@ -1905,7 +1905,7 @@ object Instruction {
                 values =>
                   Instruction.IAddCarry(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m138
+          "IdResultType IdResult IdRef IdRef"
         )
     case ISubBorrow extends Definition(
           "OpISubBorrow",
@@ -1918,7 +1918,7 @@ object Instruction {
                 values =>
                   Instruction.ISubBorrow(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m139
+          "IdResultType IdResult IdRef IdRef"
         )
     case UMulExtended extends Definition(
           "OpUMulExtended",
@@ -1936,7 +1936,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m140
+          "IdResultType IdResult IdRef IdRef"
         )
     case SMulExtended extends Definition(
           "OpSMulExtended",
@@ -1954,7 +1954,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m141
+          "IdResultType IdResult IdRef IdRef"
         )
     case Any extends Definition(
           "OpAny",
@@ -1966,7 +1966,7 @@ object Instruction {
                 raw,
                 values => Instruction.Any(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m142
+          "IdResultType IdResult IdRef"
         )
     case All extends Definition(
           "OpAll",
@@ -1978,7 +1978,7 @@ object Instruction {
                 raw,
                 values => Instruction.All(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m143
+          "IdResultType IdResult IdRef"
         )
     case IsNan extends Definition(
           "OpIsNan",
@@ -1990,7 +1990,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsNan(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m144
+          "IdResultType IdResult IdRef"
         )
     case IsInf extends Definition(
           "OpIsInf",
@@ -2002,7 +2002,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsInf(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m145
+          "IdResultType IdResult IdRef"
         )
     case IsFinite extends Definition(
           "OpIsFinite",
@@ -2014,7 +2014,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsFinite(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m146
+          "IdResultType IdResult IdRef"
         )
     case IsNormal extends Definition(
           "OpIsNormal",
@@ -2026,7 +2026,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsNormal(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m147
+          "IdResultType IdResult IdRef"
         )
     case SignBitSet extends Definition(
           "OpSignBitSet",
@@ -2038,7 +2038,7 @@ object Instruction {
                 raw,
                 values => Instruction.SignBitSet(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m148
+          "IdResultType IdResult IdRef"
         )
     case LessOrGreater extends Definition(
           "OpLessOrGreater",
@@ -2056,7 +2056,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m149
+          "IdResultType IdResult IdRef IdRef"
         )
     case Ordered extends Definition(
           "OpOrdered",
@@ -2069,7 +2069,7 @@ object Instruction {
                 values =>
                   Instruction.Ordered(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m150
+          "IdResultType IdResult IdRef IdRef"
         )
     case Unordered extends Definition(
           "OpUnordered",
@@ -2082,7 +2082,7 @@ object Instruction {
                 values =>
                   Instruction.Unordered(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m151
+          "IdResultType IdResult IdRef IdRef"
         )
     case LogicalEqual extends Definition(
           "OpLogicalEqual",
@@ -2100,7 +2100,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m152
+          "IdResultType IdResult IdRef IdRef"
         )
     case LogicalNotEqual extends Definition(
           "OpLogicalNotEqual",
@@ -2118,7 +2118,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m153
+          "IdResultType IdResult IdRef IdRef"
         )
     case LogicalOr extends Definition(
           "OpLogicalOr",
@@ -2131,7 +2131,7 @@ object Instruction {
                 values =>
                   Instruction.LogicalOr(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m154
+          "IdResultType IdResult IdRef IdRef"
         )
     case LogicalAnd extends Definition(
           "OpLogicalAnd",
@@ -2144,7 +2144,7 @@ object Instruction {
                 values =>
                   Instruction.LogicalAnd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m155
+          "IdResultType IdResult IdRef IdRef"
         )
     case LogicalNot extends Definition(
           "OpLogicalNot",
@@ -2156,7 +2156,7 @@ object Instruction {
                 raw,
                 values => Instruction.LogicalNot(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m156
+          "IdResultType IdResult IdRef"
         )
     case Select extends Definition(
           "OpSelect",
@@ -2168,14 +2168,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.Select(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pred = values.required(2),
+                    object1 = values.required(3),
+                    object2 = values.required(4)
                   )
               ),
-          InstructionMetadata0.m157
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case IEqual extends Definition(
           "OpIEqual",
@@ -2188,7 +2188,7 @@ object Instruction {
                 values =>
                   Instruction.IEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m158
+          "IdResultType IdResult IdRef IdRef"
         )
     case INotEqual extends Definition(
           "OpINotEqual",
@@ -2201,7 +2201,7 @@ object Instruction {
                 values =>
                   Instruction.INotEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m159
+          "IdResultType IdResult IdRef IdRef"
         )
     case UGreaterThan extends Definition(
           "OpUGreaterThan",
@@ -2219,7 +2219,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m160
+          "IdResultType IdResult IdRef IdRef"
         )
     case SGreaterThan extends Definition(
           "OpSGreaterThan",
@@ -2237,7 +2237,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m161
+          "IdResultType IdResult IdRef IdRef"
         )
     case UGreaterThanEqual extends Definition(
           "OpUGreaterThanEqual",
@@ -2255,7 +2255,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m162
+          "IdResultType IdResult IdRef IdRef"
         )
     case SGreaterThanEqual extends Definition(
           "OpSGreaterThanEqual",
@@ -2273,7 +2273,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m163
+          "IdResultType IdResult IdRef IdRef"
         )
     case ULessThan extends Definition(
           "OpULessThan",
@@ -2286,7 +2286,7 @@ object Instruction {
                 values =>
                   Instruction.ULessThan(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m164
+          "IdResultType IdResult IdRef IdRef"
         )
     case SLessThan extends Definition(
           "OpSLessThan",
@@ -2299,7 +2299,7 @@ object Instruction {
                 values =>
                   Instruction.SLessThan(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m165
+          "IdResultType IdResult IdRef IdRef"
         )
     case ULessThanEqual extends Definition(
           "OpULessThanEqual",
@@ -2317,7 +2317,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m166
+          "IdResultType IdResult IdRef IdRef"
         )
     case SLessThanEqual extends Definition(
           "OpSLessThanEqual",
@@ -2335,7 +2335,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m167
+          "IdResultType IdResult IdRef IdRef"
         )
     case FOrdEqual extends Definition(
           "OpFOrdEqual",
@@ -2348,7 +2348,7 @@ object Instruction {
                 values =>
                   Instruction.FOrdEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m168
+          "IdResultType IdResult IdRef IdRef"
         )
     case FUnordEqual extends Definition(
           "OpFUnordEqual",
@@ -2366,7 +2366,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m169
+          "IdResultType IdResult IdRef IdRef"
         )
     case FOrdNotEqual extends Definition(
           "OpFOrdNotEqual",
@@ -2384,7 +2384,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m170
+          "IdResultType IdResult IdRef IdRef"
         )
     case FUnordNotEqual extends Definition(
           "OpFUnordNotEqual",
@@ -2402,7 +2402,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m171
+          "IdResultType IdResult IdRef IdRef"
         )
     case FOrdLessThan extends Definition(
           "OpFOrdLessThan",
@@ -2420,7 +2420,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m172
+          "IdResultType IdResult IdRef IdRef"
         )
     case FUnordLessThan extends Definition(
           "OpFUnordLessThan",
@@ -2438,7 +2438,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m173
+          "IdResultType IdResult IdRef IdRef"
         )
     case FOrdGreaterThan extends Definition(
           "OpFOrdGreaterThan",
@@ -2456,7 +2456,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m174
+          "IdResultType IdResult IdRef IdRef"
         )
     case FUnordGreaterThan extends Definition(
           "OpFUnordGreaterThan",
@@ -2474,7 +2474,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m175
+          "IdResultType IdResult IdRef IdRef"
         )
     case FOrdLessThanEqual extends Definition(
           "OpFOrdLessThanEqual",
@@ -2492,7 +2492,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m176
+          "IdResultType IdResult IdRef IdRef"
         )
     case FUnordLessThanEqual extends Definition(
           "OpFUnordLessThanEqual",
@@ -2510,7 +2510,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m177
+          "IdResultType IdResult IdRef IdRef"
         )
     case FOrdGreaterThanEqual extends Definition(
           "OpFOrdGreaterThanEqual",
@@ -2528,7 +2528,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m178
+          "IdResultType IdResult IdRef IdRef"
         )
     case FUnordGreaterThanEqual extends Definition(
           "OpFUnordGreaterThanEqual",
@@ -2546,7 +2546,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m179
+          "IdResultType IdResult IdRef IdRef"
         )
     case ShiftRightLogical extends Definition(
           "OpShiftRightLogical",
@@ -2564,7 +2564,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m180
+          "IdResultType IdResult IdRef IdRef"
         )
     case ShiftRightArithmetic extends Definition(
           "OpShiftRightArithmetic",
@@ -2582,7 +2582,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m181
+          "IdResultType IdResult IdRef IdRef"
         )
     case ShiftLeftLogical extends Definition(
           "OpShiftLeftLogical",
@@ -2600,7 +2600,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata0.m182
+          "IdResultType IdResult IdRef IdRef"
         )
     case BitwiseOr extends Definition(
           "OpBitwiseOr",
@@ -2613,7 +2613,7 @@ object Instruction {
                 values =>
                   Instruction.BitwiseOr(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m183
+          "IdResultType IdResult IdRef IdRef"
         )
     case BitwiseXor extends Definition(
           "OpBitwiseXor",
@@ -2626,7 +2626,7 @@ object Instruction {
                 values =>
                   Instruction.BitwiseXor(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m184
+          "IdResultType IdResult IdRef IdRef"
         )
     case BitwiseAnd extends Definition(
           "OpBitwiseAnd",
@@ -2639,7 +2639,7 @@ object Instruction {
                 values =>
                   Instruction.BitwiseAnd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata0.m185
+          "IdResultType IdResult IdRef IdRef"
         )
     case Not extends Definition(
           "OpNot",
@@ -2651,7 +2651,7 @@ object Instruction {
                 raw,
                 values => Instruction.Not(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m186
+          "IdResultType IdResult IdRef"
         )
     case BitFieldInsert extends Definition(
           "OpBitFieldInsert",
@@ -2663,15 +2663,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.BitFieldInsert(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    base = values.required(2),
+                    insert = values.required(3),
+                    offset = values.required(4),
+                    count = values.required(5)
                   )
               ),
-          InstructionMetadata0.m187
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case BitFieldSExtract extends Definition(
           "OpBitFieldSExtract",
@@ -2683,14 +2683,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.BitFieldSExtract(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    base = values.required(2),
+                    offset = values.required(3),
+                    count = values.required(4)
                   )
               ),
-          InstructionMetadata0.m188
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case BitFieldUExtract extends Definition(
           "OpBitFieldUExtract",
@@ -2702,14 +2702,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.BitFieldUExtract(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    base = values.required(2),
+                    offset = values.required(3),
+                    count = values.required(4)
                   )
               ),
-          InstructionMetadata0.m189
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case BitReverse extends Definition(
           "OpBitReverse",
@@ -2721,7 +2721,7 @@ object Instruction {
                 raw,
                 values => Instruction.BitReverse(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m190
+          "IdResultType IdResult IdRef"
         )
     case BitCount extends Definition(
           "OpBitCount",
@@ -2733,7 +2733,7 @@ object Instruction {
                 raw,
                 values => Instruction.BitCount(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m191
+          "IdResultType IdResult IdRef"
         )
     case DPdx extends Definition(
           "OpDPdx",
@@ -2745,7 +2745,7 @@ object Instruction {
                 raw,
                 values => Instruction.DPdx(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m192
+          "IdResultType IdResult IdRef"
         )
     case DPdy extends Definition(
           "OpDPdy",
@@ -2757,7 +2757,7 @@ object Instruction {
                 raw,
                 values => Instruction.DPdy(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m193
+          "IdResultType IdResult IdRef"
         )
     case Fwidth extends Definition(
           "OpFwidth",
@@ -2769,7 +2769,7 @@ object Instruction {
                 raw,
                 values => Instruction.Fwidth(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m194
+          "IdResultType IdResult IdRef"
         )
     case DPdxFine extends Definition(
           "OpDPdxFine",
@@ -2781,7 +2781,7 @@ object Instruction {
                 raw,
                 values => Instruction.DPdxFine(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m195
+          "IdResultType IdResult IdRef"
         )
     case DPdyFine extends Definition(
           "OpDPdyFine",
@@ -2793,7 +2793,7 @@ object Instruction {
                 raw,
                 values => Instruction.DPdyFine(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m196
+          "IdResultType IdResult IdRef"
         )
     case FwidthFine extends Definition(
           "OpFwidthFine",
@@ -2805,7 +2805,7 @@ object Instruction {
                 raw,
                 values => Instruction.FwidthFine(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m197
+          "IdResultType IdResult IdRef"
         )
     case DPdxCoarse extends Definition(
           "OpDPdxCoarse",
@@ -2817,7 +2817,7 @@ object Instruction {
                 raw,
                 values => Instruction.DPdxCoarse(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m198
+          "IdResultType IdResult IdRef"
         )
     case DPdyCoarse extends Definition(
           "OpDPdyCoarse",
@@ -2829,7 +2829,7 @@ object Instruction {
                 raw,
                 values => Instruction.DPdyCoarse(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata0.m199
+          "IdResultType IdResult IdRef"
         )
     case FwidthCoarse extends Definition(
           "OpFwidthCoarse",
@@ -2841,19 +2841,19 @@ object Instruction {
                 raw,
                 values => Instruction.FwidthCoarse(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m0
+          "IdResultType IdResult IdRef"
         )
     case EmitVertex extends Definition(
           "OpEmitVertex",
           SPIRVOpcodeNumber(218),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.EmitVertex()),
-          InstructionMetadata1.m1
+          ""
         )
     case EndPrimitive extends Definition(
           "OpEndPrimitive",
           SPIRVOpcodeNumber(219),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.EndPrimitive()),
-          InstructionMetadata1.m2
+          ""
         )
     case EmitStreamVertex extends Definition(
           "OpEmitStreamVertex",
@@ -2861,7 +2861,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.EmitStreamVertex(values.required(0))),
-          InstructionMetadata1.m3
+          "IdRef"
         )
     case EndStreamPrimitive extends Definition(
           "OpEndStreamPrimitive",
@@ -2873,7 +2873,7 @@ object Instruction {
                 raw,
                 values => Instruction.EndStreamPrimitive(values.required(0))
               ),
-          InstructionMetadata1.m4
+          "IdRef"
         )
     case ControlBarrier extends Definition(
           "OpControlBarrier",
@@ -2885,7 +2885,7 @@ object Instruction {
                 raw,
                 values => Instruction.ControlBarrier(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m5
+          "IdScope IdScope IdMemorySemantics"
         )
     case MemoryBarrier extends Definition(
           "OpMemoryBarrier",
@@ -2897,7 +2897,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemoryBarrier(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m6
+          "IdScope IdMemorySemantics"
         )
     case AtomicLoad extends Definition(
           "OpAtomicLoad",
@@ -2909,14 +2909,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicLoad(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4)
                   )
               ),
-          InstructionMetadata1.m7
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics"
         )
     case AtomicStore extends Definition(
           "OpAtomicStore",
@@ -2934,7 +2934,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m8
+          "IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicExchange extends Definition(
           "OpAtomicExchange",
@@ -2946,15 +2946,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicExchange(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m9
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicCompareExchange extends Definition(
           "OpAtomicCompareExchange",
@@ -2966,17 +2966,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicCompareExchange(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    equal = values.required(4),
+                    unequal = values.required(5),
+                    value = values.required(6),
+                    comparator = values.required(7)
                   )
               ),
-          InstructionMetadata1.m10
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdMemorySemantics IdRef IdRef"
         )
     case AtomicCompareExchangeWeak extends Definition(
           "OpAtomicCompareExchangeWeak",
@@ -2988,17 +2988,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicCompareExchangeWeak(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    equal = values.required(4),
+                    unequal = values.required(5),
+                    value = values.required(6),
+                    comparator = values.required(7)
                   )
               ),
-          InstructionMetadata1.m11
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdMemorySemantics IdRef IdRef"
         )
     case AtomicIIncrement extends Definition(
           "OpAtomicIIncrement",
@@ -3010,14 +3010,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicIIncrement(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4)
                   )
               ),
-          InstructionMetadata1.m12
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics"
         )
     case AtomicIDecrement extends Definition(
           "OpAtomicIDecrement",
@@ -3029,14 +3029,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicIDecrement(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4)
                   )
               ),
-          InstructionMetadata1.m13
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics"
         )
     case AtomicIAdd extends Definition(
           "OpAtomicIAdd",
@@ -3048,15 +3048,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicIAdd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m14
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicISub extends Definition(
           "OpAtomicISub",
@@ -3068,15 +3068,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicISub(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m15
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicSMin extends Definition(
           "OpAtomicSMin",
@@ -3088,15 +3088,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicSMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m16
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicUMin extends Definition(
           "OpAtomicUMin",
@@ -3108,15 +3108,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicUMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m17
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicSMax extends Definition(
           "OpAtomicSMax",
@@ -3128,15 +3128,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicSMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m18
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicUMax extends Definition(
           "OpAtomicUMax",
@@ -3148,15 +3148,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicUMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m19
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicAnd extends Definition(
           "OpAtomicAnd",
@@ -3168,15 +3168,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicAnd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m20
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicOr extends Definition(
           "OpAtomicOr",
@@ -3188,15 +3188,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicOr(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m21
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicXor extends Definition(
           "OpAtomicXor",
@@ -3208,15 +3208,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicXor(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata1.m22
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case Phi extends Definition(
           "OpPhi",
@@ -3228,7 +3228,7 @@ object Instruction {
                 raw,
                 values => Instruction.Phi(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata1.m23
+          "IdResultType IdResult PairIdRefIdRef*"
         )
     case LoopMerge extends Definition(
           "OpLoopMerge",
@@ -3240,7 +3240,7 @@ object Instruction {
                 raw,
                 values => Instruction.LoopMerge(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m24
+          "IdRef IdRef LoopControl"
         )
     case SelectionMerge extends Definition(
           "OpSelectionMerge",
@@ -3252,21 +3252,21 @@ object Instruction {
                 raw,
                 values => Instruction.SelectionMerge(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m25
+          "IdRef SelectionControl"
         )
     case Label extends Definition(
           "OpLabel",
           SPIRVOpcodeNumber(248),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Label(values.required(0))),
-          InstructionMetadata1.m26
+          "IdResult"
         )
     case Branch extends Definition(
           "OpBranch",
           SPIRVOpcodeNumber(249),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Branch(values.required(0))),
-          InstructionMetadata1.m27
+          "IdRef"
         )
     case BranchConditional extends Definition(
           "OpBranchConditional",
@@ -3284,7 +3284,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata1.m28
+          "IdRef IdRef IdRef LiteralInteger*"
         )
     case Switch extends Definition(
           "OpSwitch",
@@ -3296,32 +3296,32 @@ object Instruction {
                 raw,
                 values => Instruction.Switch(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata1.m29
+          "IdRef IdRef PairLiteralIntegerIdRef*"
         )
     case Kill extends Definition(
           "OpKill",
           SPIRVOpcodeNumber(252),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Kill()),
-          InstructionMetadata1.m30
+          ""
         )
     case Return extends Definition(
           "OpReturn",
           SPIRVOpcodeNumber(253),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Return()),
-          InstructionMetadata1.m31
+          ""
         )
     case ReturnValue extends Definition(
           "OpReturnValue",
           SPIRVOpcodeNumber(254),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.ReturnValue(values.required(0))),
-          InstructionMetadata1.m32
+          "IdRef"
         )
     case Unreachable extends Definition(
           "OpUnreachable",
           SPIRVOpcodeNumber(255),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Unreachable()),
-          InstructionMetadata1.m33
+          ""
         )
     case LifetimeStart extends Definition(
           "OpLifetimeStart",
@@ -3333,7 +3333,7 @@ object Instruction {
                 raw,
                 values => Instruction.LifetimeStart(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m34
+          "IdRef LiteralInteger"
         )
     case LifetimeStop extends Definition(
           "OpLifetimeStop",
@@ -3345,7 +3345,7 @@ object Instruction {
                 raw,
                 values => Instruction.LifetimeStop(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m35
+          "IdRef LiteralInteger"
         )
     case GroupAsyncCopy extends Definition(
           "OpGroupAsyncCopy",
@@ -3357,17 +3357,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupAsyncCopy(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    destination = values.required(3),
+                    src = values.required(4),
+                    numElements = values.required(5),
+                    stride = values.required(6),
+                    event = values.required(7)
                   )
               ),
-          InstructionMetadata1.m36
+          "IdResultType IdResult IdScope IdRef IdRef IdRef IdRef IdRef"
         )
     case GroupWaitEvents extends Definition(
           "OpGroupWaitEvents",
@@ -3379,7 +3379,7 @@ object Instruction {
                 raw,
                 values => Instruction.GroupWaitEvents(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m37
+          "IdScope IdRef IdRef"
         )
     case GroupAll extends Definition(
           "OpGroupAll",
@@ -3392,7 +3392,7 @@ object Instruction {
                 values =>
                   Instruction.GroupAll(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata1.m38
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupAny extends Definition(
           "OpGroupAny",
@@ -3405,7 +3405,7 @@ object Instruction {
                 values =>
                   Instruction.GroupAny(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata1.m39
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupBroadcast extends Definition(
           "OpGroupBroadcast",
@@ -3417,14 +3417,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupBroadcast(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    localId = values.required(4)
                   )
               ),
-          InstructionMetadata1.m40
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupIAdd extends Definition(
           "OpGroupIAdd",
@@ -3436,14 +3436,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupIAdd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m41
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFAdd extends Definition(
           "OpGroupFAdd",
@@ -3455,14 +3455,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFAdd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m42
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFMin extends Definition(
           "OpGroupFMin",
@@ -3474,14 +3474,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m43
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupUMin extends Definition(
           "OpGroupUMin",
@@ -3493,14 +3493,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupUMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m44
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupSMin extends Definition(
           "OpGroupSMin",
@@ -3512,14 +3512,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupSMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m45
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFMax extends Definition(
           "OpGroupFMax",
@@ -3531,14 +3531,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m46
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupUMax extends Definition(
           "OpGroupUMax",
@@ -3550,14 +3550,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupUMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m47
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupSMax extends Definition(
           "OpGroupSMax",
@@ -3569,14 +3569,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupSMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata1.m48
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case ReadPipe extends Definition(
           "OpReadPipe",
@@ -3588,15 +3588,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ReadPipe(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    pointer = values.required(3),
+                    packetSize = values.required(4),
+                    packetAlignment = values.required(5)
                   )
               ),
-          InstructionMetadata1.m49
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case WritePipe extends Definition(
           "OpWritePipe",
@@ -3608,15 +3608,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.WritePipe(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    pointer = values.required(3),
+                    packetSize = values.required(4),
+                    packetAlignment = values.required(5)
                   )
               ),
-          InstructionMetadata1.m50
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case ReservedReadPipe extends Definition(
           "OpReservedReadPipe",
@@ -3628,17 +3628,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ReservedReadPipe(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    reserveId = values.required(3),
+                    index = values.required(4),
+                    pointer = values.required(5),
+                    packetSize = values.required(6),
+                    packetAlignment = values.required(7)
                   )
               ),
-          InstructionMetadata1.m51
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case ReservedWritePipe extends Definition(
           "OpReservedWritePipe",
@@ -3650,17 +3650,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ReservedWritePipe(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    reserveId = values.required(3),
+                    index = values.required(4),
+                    pointer = values.required(5),
+                    packetSize = values.required(6),
+                    packetAlignment = values.required(7)
                   )
               ),
-          InstructionMetadata1.m52
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case ReserveReadPipePackets extends Definition(
           "OpReserveReadPipePackets",
@@ -3672,15 +3672,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ReserveReadPipePackets(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    numPackets = values.required(3),
+                    packetSize = values.required(4),
+                    packetAlignment = values.required(5)
                   )
               ),
-          InstructionMetadata1.m53
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case ReserveWritePipePackets extends Definition(
           "OpReserveWritePipePackets",
@@ -3692,15 +3692,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ReserveWritePipePackets(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    numPackets = values.required(3),
+                    packetSize = values.required(4),
+                    packetAlignment = values.required(5)
                   )
               ),
-          InstructionMetadata1.m54
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case CommitReadPipe extends Definition(
           "OpCommitReadPipe",
@@ -3718,7 +3718,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m55
+          "IdRef IdRef IdRef IdRef"
         )
     case CommitWritePipe extends Definition(
           "OpCommitWritePipe",
@@ -3736,7 +3736,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m56
+          "IdRef IdRef IdRef IdRef"
         )
     case IsValidReserveId extends Definition(
           "OpIsValidReserveId",
@@ -3748,7 +3748,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsValidReserveId(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m57
+          "IdResultType IdResult IdRef"
         )
     case GetNumPipePackets extends Definition(
           "OpGetNumPipePackets",
@@ -3760,14 +3760,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetNumPipePackets(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    packetSize = values.required(3),
+                    packetAlignment = values.required(4)
                   )
               ),
-          InstructionMetadata1.m58
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case GetMaxPipePackets extends Definition(
           "OpGetMaxPipePackets",
@@ -3779,14 +3779,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetMaxPipePackets(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pipe = values.required(2),
+                    packetSize = values.required(3),
+                    packetAlignment = values.required(4)
                   )
               ),
-          InstructionMetadata1.m59
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case GroupReserveReadPipePackets extends Definition(
           "OpGroupReserveReadPipePackets",
@@ -3798,16 +3798,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupReserveReadPipePackets(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    pipe = values.required(3),
+                    numPackets = values.required(4),
+                    packetSize = values.required(5),
+                    packetAlignment = values.required(6)
                   )
               ),
-          InstructionMetadata1.m60
+          "IdResultType IdResult IdScope IdRef IdRef IdRef IdRef"
         )
     case GroupReserveWritePipePackets extends Definition(
           "OpGroupReserveWritePipePackets",
@@ -3819,16 +3819,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupReserveWritePipePackets(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    pipe = values.required(3),
+                    numPackets = values.required(4),
+                    packetSize = values.required(5),
+                    packetAlignment = values.required(6)
                   )
               ),
-          InstructionMetadata1.m61
+          "IdResultType IdResult IdScope IdRef IdRef IdRef IdRef"
         )
     case GroupCommitReadPipe extends Definition(
           "OpGroupCommitReadPipe",
@@ -3840,14 +3840,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupCommitReadPipe(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    execution = values.required(0),
+                    pipe = values.required(1),
+                    reserveId = values.required(2),
+                    packetSize = values.required(3),
+                    packetAlignment = values.required(4)
                   )
               ),
-          InstructionMetadata1.m62
+          "IdScope IdRef IdRef IdRef IdRef"
         )
     case GroupCommitWritePipe extends Definition(
           "OpGroupCommitWritePipe",
@@ -3859,14 +3859,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupCommitWritePipe(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    execution = values.required(0),
+                    pipe = values.required(1),
+                    reserveId = values.required(2),
+                    packetSize = values.required(3),
+                    packetAlignment = values.required(4)
                   )
               ),
-          InstructionMetadata1.m63
+          "IdScope IdRef IdRef IdRef IdRef"
         )
     case EnqueueMarker extends Definition(
           "OpEnqueueMarker",
@@ -3878,15 +3878,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.EnqueueMarker(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    queue = values.required(2),
+                    numEvents = values.required(3),
+                    waitEvents = values.required(4),
+                    retEvent = values.required(5)
                   )
               ),
-          InstructionMetadata1.m64
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case EnqueueKernel extends Definition(
           "OpEnqueueKernel",
@@ -3898,22 +3898,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.EnqueueKernel(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.repeated(12)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    queue = values.required(2),
+                    flags = values.required(3),
+                    nDRange = values.required(4),
+                    numEvents = values.required(5),
+                    waitEvents = values.required(6),
+                    retEvent = values.required(7),
+                    invoke = values.required(8),
+                    param = values.required(9),
+                    paramSize = values.required(10),
+                    paramAlign = values.required(11),
+                    localSize = values.repeated(12)
                   )
               ),
-          InstructionMetadata1.m65
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef*"
         )
     case GetKernelNDrangeSubGroupCount extends Definition(
           "OpGetKernelNDrangeSubGroupCount",
@@ -3925,16 +3925,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetKernelNDrangeSubGroupCount(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    nDRange = values.required(2),
+                    invoke = values.required(3),
+                    param = values.required(4),
+                    paramSize = values.required(5),
+                    paramAlign = values.required(6)
                   )
               ),
-          InstructionMetadata1.m66
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case GetKernelNDrangeMaxSubGroupSize extends Definition(
           "OpGetKernelNDrangeMaxSubGroupSize",
@@ -3946,16 +3946,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetKernelNDrangeMaxSubGroupSize(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    nDRange = values.required(2),
+                    invoke = values.required(3),
+                    param = values.required(4),
+                    paramSize = values.required(5),
+                    paramAlign = values.required(6)
                   )
               ),
-          InstructionMetadata1.m67
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case GetKernelWorkGroupSize extends Definition(
           "OpGetKernelWorkGroupSize",
@@ -3967,15 +3967,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetKernelWorkGroupSize(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    invoke = values.required(2),
+                    param = values.required(3),
+                    paramSize = values.required(4),
+                    paramAlign = values.required(5)
                   )
               ),
-          InstructionMetadata1.m68
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case GetKernelPreferredWorkGroupSizeMultiple extends Definition(
           "OpGetKernelPreferredWorkGroupSizeMultiple",
@@ -3987,22 +3987,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetKernelPreferredWorkGroupSizeMultiple(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    invoke = values.required(2),
+                    param = values.required(3),
+                    paramSize = values.required(4),
+                    paramAlign = values.required(5)
                   )
               ),
-          InstructionMetadata1.m69
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case RetainEvent extends Definition(
           "OpRetainEvent",
           SPIRVOpcodeNumber(297),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, values => Instruction.RetainEvent(values.required(0))),
-          InstructionMetadata1.m70
+          "IdRef"
         )
     case ReleaseEvent extends Definition(
           "OpReleaseEvent",
@@ -4010,7 +4010,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.ReleaseEvent(values.required(0))),
-          InstructionMetadata1.m71
+          "IdRef"
         )
     case CreateUserEvent extends Definition(
           "OpCreateUserEvent",
@@ -4022,7 +4022,7 @@ object Instruction {
                 raw,
                 values => Instruction.CreateUserEvent(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m72
+          "IdResultType IdResult"
         )
     case IsValidEvent extends Definition(
           "OpIsValidEvent",
@@ -4034,7 +4034,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsValidEvent(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m73
+          "IdResultType IdResult IdRef"
         )
     case SetUserEventStatus extends Definition(
           "OpSetUserEventStatus",
@@ -4046,7 +4046,7 @@ object Instruction {
                 raw,
                 values => Instruction.SetUserEventStatus(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m74
+          "IdRef IdRef"
         )
     case CaptureEventProfilingInfo extends Definition(
           "OpCaptureEventProfilingInfo",
@@ -4059,7 +4059,7 @@ object Instruction {
                 values =>
                   Instruction.CaptureEventProfilingInfo(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m75
+          "IdRef IdRef IdRef"
         )
     case GetDefaultQueue extends Definition(
           "OpGetDefaultQueue",
@@ -4071,7 +4071,7 @@ object Instruction {
                 raw,
                 values => Instruction.GetDefaultQueue(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m76
+          "IdResultType IdResult"
         )
     case BuildNDRange extends Definition(
           "OpBuildNDRange",
@@ -4083,14 +4083,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.BuildNDRange(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    globalWorkSize = values.required(2),
+                    localWorkSize = values.required(3),
+                    globalWorkOffset = values.required(4)
                   )
               ),
-          InstructionMetadata1.m77
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case ImageSparseSampleImplicitLod extends Definition(
           "OpImageSparseSampleImplicitLod",
@@ -4102,14 +4102,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m78
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageSparseSampleExplicitLod extends Definition(
           "OpImageSparseSampleExplicitLod",
@@ -4121,14 +4121,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.required(4)
                   )
               ),
-          InstructionMetadata1.m79
+          "IdResultType IdResult IdRef IdRef ImageOperands"
         )
     case ImageSparseSampleDrefImplicitLod extends Definition(
           "OpImageSparseSampleDrefImplicitLod",
@@ -4140,15 +4140,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleDrefImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m80
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageSparseSampleDrefExplicitLod extends Definition(
           "OpImageSparseSampleDrefExplicitLod",
@@ -4160,15 +4160,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleDrefExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.required(5)
                   )
               ),
-          InstructionMetadata1.m81
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands"
         )
     case ImageSparseSampleProjImplicitLod extends Definition(
           "OpImageSparseSampleProjImplicitLod",
@@ -4180,14 +4180,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleProjImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m82
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageSparseSampleProjExplicitLod extends Definition(
           "OpImageSparseSampleProjExplicitLod",
@@ -4199,14 +4199,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleProjExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.required(4)
                   )
               ),
-          InstructionMetadata1.m83
+          "IdResultType IdResult IdRef IdRef ImageOperands"
         )
     case ImageSparseSampleProjDrefImplicitLod extends Definition(
           "OpImageSparseSampleProjDrefImplicitLod",
@@ -4218,15 +4218,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleProjDrefImplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m84
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageSparseSampleProjDrefExplicitLod extends Definition(
           "OpImageSparseSampleProjDrefExplicitLod",
@@ -4238,15 +4238,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseSampleProjDrefExplicitLod(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.required(5)
                   )
               ),
-          InstructionMetadata1.m85
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands"
         )
     case ImageSparseFetch extends Definition(
           "OpImageSparseFetch",
@@ -4258,14 +4258,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseFetch(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m86
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case ImageSparseGather extends Definition(
           "OpImageSparseGather",
@@ -4277,15 +4277,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseGather(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    component = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m87
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageSparseDrefGather extends Definition(
           "OpImageSparseDrefGather",
@@ -4297,15 +4297,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseDrefGather(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    dref = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m88
+          "IdResultType IdResult IdRef IdRef IdRef ImageOperands?"
         )
     case ImageSparseTexelsResident extends Definition(
           "OpImageSparseTexelsResident",
@@ -4318,13 +4318,13 @@ object Instruction {
                 values =>
                   Instruction.ImageSparseTexelsResident(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m89
+          "IdResultType IdResult IdRef"
         )
     case NoLine extends Definition(
           "OpNoLine",
           SPIRVOpcodeNumber(317),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.NoLine()),
-          InstructionMetadata1.m90
+          ""
         )
     case AtomicFlagTestAndSet extends Definition(
           "OpAtomicFlagTestAndSet",
@@ -4336,14 +4336,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicFlagTestAndSet(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4)
                   )
               ),
-          InstructionMetadata1.m91
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics"
         )
     case AtomicFlagClear extends Definition(
           "OpAtomicFlagClear",
@@ -4355,7 +4355,7 @@ object Instruction {
                 raw,
                 values => Instruction.AtomicFlagClear(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m92
+          "IdRef IdScope IdMemorySemantics"
         )
     case ImageSparseRead extends Definition(
           "OpImageSparseRead",
@@ -4367,14 +4367,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSparseRead(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m93
+          "IdResultType IdResult IdRef IdRef ImageOperands?"
         )
     case SizeOf extends Definition(
           "OpSizeOf",
@@ -4386,7 +4386,7 @@ object Instruction {
                 raw,
                 values => Instruction.SizeOf(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m94
+          "IdResultType IdResult IdRef"
         )
     case TypePipeStorage extends Definition(
           "OpTypePipeStorage",
@@ -4394,7 +4394,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypePipeStorage(values.required(0))),
-          InstructionMetadata1.m95
+          "IdResult"
         )
     case ConstantPipeStorage extends Definition(
           "OpConstantPipeStorage",
@@ -4406,14 +4406,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ConstantPipeStorage(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    packetSize = values.required(2),
+                    packetAlignment = values.required(3),
+                    capacity = values.required(4)
                   )
               ),
-          InstructionMetadata1.m96
+          "IdResultType IdResult LiteralInteger LiteralInteger LiteralInteger"
         )
     case CreatePipeFromPipeStorage extends Definition(
           "OpCreatePipeFromPipeStorage",
@@ -4426,7 +4426,7 @@ object Instruction {
                 values =>
                   Instruction.CreatePipeFromPipeStorage(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m97
+          "IdResultType IdResult IdRef"
         )
     case GetKernelLocalSizeForSubgroupCount extends Definition(
           "OpGetKernelLocalSizeForSubgroupCount",
@@ -4438,16 +4438,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetKernelLocalSizeForSubgroupCount(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    subgroupCount = values.required(2),
+                    invoke = values.required(3),
+                    param = values.required(4),
+                    paramSize = values.required(5),
+                    paramAlign = values.required(6)
                   )
               ),
-          InstructionMetadata1.m98
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case GetKernelMaxNumSubgroups extends Definition(
           "OpGetKernelMaxNumSubgroups",
@@ -4459,15 +4459,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GetKernelMaxNumSubgroups(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    invoke = values.required(2),
+                    param = values.required(3),
+                    paramSize = values.required(4),
+                    paramAlign = values.required(5)
                   )
               ),
-          InstructionMetadata1.m99
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case TypeNamedBarrier extends Definition(
           "OpTypeNamedBarrier",
@@ -4475,7 +4475,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypeNamedBarrier(values.required(0))),
-          InstructionMetadata1.m100
+          "IdResult"
         )
     case NamedBarrierInitialize extends Definition(
           "OpNamedBarrierInitialize",
@@ -4487,7 +4487,7 @@ object Instruction {
                 raw,
                 values => Instruction.NamedBarrierInitialize(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m101
+          "IdResultType IdResult IdRef"
         )
     case MemoryNamedBarrier extends Definition(
           "OpMemoryNamedBarrier",
@@ -4499,7 +4499,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemoryNamedBarrier(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m102
+          "IdRef IdScope IdMemorySemantics"
         )
     case ModuleProcessed extends Definition(
           "OpModuleProcessed",
@@ -4507,7 +4507,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.ModuleProcessed(values.required(0))),
-          InstructionMetadata1.m103
+          "LiteralString"
         )
     case ExecutionModeId extends Definition(
           "OpExecutionModeId",
@@ -4519,7 +4519,7 @@ object Instruction {
                 raw,
                 values => Instruction.ExecutionModeId(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m104
+          "IdRef ExecutionMode"
         )
     case DecorateId extends Definition(
           "OpDecorateId",
@@ -4531,7 +4531,7 @@ object Instruction {
                 raw,
                 values => Instruction.DecorateId(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m105
+          "IdRef Decoration"
         )
     case GroupNonUniformElect extends Definition(
           "OpGroupNonUniformElect",
@@ -4543,7 +4543,7 @@ object Instruction {
                 raw,
                 values => Instruction.GroupNonUniformElect(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m106
+          "IdResultType IdResult IdScope"
         )
     case GroupNonUniformAll extends Definition(
           "OpGroupNonUniformAll",
@@ -4561,7 +4561,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m107
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformAny extends Definition(
           "OpGroupNonUniformAny",
@@ -4579,7 +4579,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m108
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformAllEqual extends Definition(
           "OpGroupNonUniformAllEqual",
@@ -4597,7 +4597,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m109
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformBroadcast extends Definition(
           "OpGroupNonUniformBroadcast",
@@ -4609,14 +4609,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformBroadcast(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    invocationId = values.required(4)
                   )
               ),
-          InstructionMetadata1.m110
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformBroadcastFirst extends Definition(
           "OpGroupNonUniformBroadcastFirst",
@@ -4634,7 +4634,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m111
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformBallot extends Definition(
           "OpGroupNonUniformBallot",
@@ -4652,7 +4652,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m112
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformInverseBallot extends Definition(
           "OpGroupNonUniformInverseBallot",
@@ -4670,7 +4670,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m113
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformBallotBitExtract extends Definition(
           "OpGroupNonUniformBallotBitExtract",
@@ -4682,14 +4682,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformBallotBitExtract(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    index = values.required(4)
                   )
               ),
-          InstructionMetadata1.m114
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformBallotBitCount extends Definition(
           "OpGroupNonUniformBallotBitCount",
@@ -4701,14 +4701,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformBallotBitCount(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4)
                   )
               ),
-          InstructionMetadata1.m115
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupNonUniformBallotFindLSB extends Definition(
           "OpGroupNonUniformBallotFindLSB",
@@ -4726,7 +4726,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m116
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformBallotFindMSB extends Definition(
           "OpGroupNonUniformBallotFindMSB",
@@ -4744,7 +4744,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m117
+          "IdResultType IdResult IdScope IdRef"
         )
     case GroupNonUniformShuffle extends Definition(
           "OpGroupNonUniformShuffle",
@@ -4756,14 +4756,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformShuffle(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    invocationId = values.required(4)
                   )
               ),
-          InstructionMetadata1.m118
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformShuffleXor extends Definition(
           "OpGroupNonUniformShuffleXor",
@@ -4775,14 +4775,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformShuffleXor(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    mask = values.required(4)
                   )
               ),
-          InstructionMetadata1.m119
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformShuffleUp extends Definition(
           "OpGroupNonUniformShuffleUp",
@@ -4794,14 +4794,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformShuffleUp(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    delta = values.required(4)
                   )
               ),
-          InstructionMetadata1.m120
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformShuffleDown extends Definition(
           "OpGroupNonUniformShuffleDown",
@@ -4813,14 +4813,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformShuffleDown(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    delta = values.required(4)
                   )
               ),
-          InstructionMetadata1.m121
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformIAdd extends Definition(
           "OpGroupNonUniformIAdd",
@@ -4832,15 +4832,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformIAdd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m122
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformFAdd extends Definition(
           "OpGroupNonUniformFAdd",
@@ -4852,15 +4852,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformFAdd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m123
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformIMul extends Definition(
           "OpGroupNonUniformIMul",
@@ -4872,15 +4872,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformIMul(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m124
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformFMul extends Definition(
           "OpGroupNonUniformFMul",
@@ -4892,15 +4892,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformFMul(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m125
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformSMin extends Definition(
           "OpGroupNonUniformSMin",
@@ -4912,15 +4912,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformSMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m126
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformUMin extends Definition(
           "OpGroupNonUniformUMin",
@@ -4932,15 +4932,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformUMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m127
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformFMin extends Definition(
           "OpGroupNonUniformFMin",
@@ -4952,15 +4952,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformFMin(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m128
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformSMax extends Definition(
           "OpGroupNonUniformSMax",
@@ -4972,15 +4972,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformSMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m129
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformUMax extends Definition(
           "OpGroupNonUniformUMax",
@@ -4992,15 +4992,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformUMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m130
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformFMax extends Definition(
           "OpGroupNonUniformFMax",
@@ -5012,15 +5012,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformFMax(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m131
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformBitwiseAnd extends Definition(
           "OpGroupNonUniformBitwiseAnd",
@@ -5032,15 +5032,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformBitwiseAnd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m132
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformBitwiseOr extends Definition(
           "OpGroupNonUniformBitwiseOr",
@@ -5052,15 +5052,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformBitwiseOr(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m133
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformBitwiseXor extends Definition(
           "OpGroupNonUniformBitwiseXor",
@@ -5072,15 +5072,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformBitwiseXor(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m134
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformLogicalAnd extends Definition(
           "OpGroupNonUniformLogicalAnd",
@@ -5092,15 +5092,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformLogicalAnd(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m135
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformLogicalOr extends Definition(
           "OpGroupNonUniformLogicalOr",
@@ -5112,15 +5112,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformLogicalOr(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m136
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformLogicalXor extends Definition(
           "OpGroupNonUniformLogicalXor",
@@ -5132,15 +5132,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformLogicalXor(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    value = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m137
+          "IdResultType IdResult IdScope GroupOperation IdRef IdRef?"
         )
     case GroupNonUniformQuadBroadcast extends Definition(
           "OpGroupNonUniformQuadBroadcast",
@@ -5152,14 +5152,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformQuadBroadcast(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    index = values.required(4)
                   )
               ),
-          InstructionMetadata1.m138
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case GroupNonUniformQuadSwap extends Definition(
           "OpGroupNonUniformQuadSwap",
@@ -5171,14 +5171,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformQuadSwap(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    direction = values.required(4)
                   )
               ),
-          InstructionMetadata1.m139
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case CopyLogical extends Definition(
           "OpCopyLogical",
@@ -5190,7 +5190,7 @@ object Instruction {
                 raw,
                 values => Instruction.CopyLogical(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m140
+          "IdResultType IdResult IdRef"
         )
     case PtrEqual extends Definition(
           "OpPtrEqual",
@@ -5203,7 +5203,7 @@ object Instruction {
                 values =>
                   Instruction.PtrEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata1.m141
+          "IdResultType IdResult IdRef IdRef"
         )
     case PtrNotEqual extends Definition(
           "OpPtrNotEqual",
@@ -5221,7 +5221,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m142
+          "IdResultType IdResult IdRef IdRef"
         )
     case PtrDiff extends Definition(
           "OpPtrDiff",
@@ -5234,7 +5234,7 @@ object Instruction {
                 values =>
                   Instruction.PtrDiff(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata1.m143
+          "IdResultType IdResult IdRef IdRef"
         )
     case ColorAttachmentReadEXT extends Definition(
           "OpColorAttachmentReadEXT",
@@ -5252,7 +5252,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata1.m144
+          "IdResultType IdResult IdRef IdRef?"
         )
     case DepthAttachmentReadEXT extends Definition(
           "OpDepthAttachmentReadEXT",
@@ -5264,7 +5264,7 @@ object Instruction {
                 raw,
                 values => Instruction.DepthAttachmentReadEXT(values.required(0), values.required(1), values.optional(2))
               ),
-          InstructionMetadata1.m145
+          "IdResultType IdResult IdRef?"
         )
     case StencilAttachmentReadEXT extends Definition(
           "OpStencilAttachmentReadEXT",
@@ -5277,7 +5277,7 @@ object Instruction {
                 values =>
                   Instruction.StencilAttachmentReadEXT(values.required(0), values.required(1), values.optional(2))
               ),
-          InstructionMetadata1.m146
+          "IdResultType IdResult IdRef?"
         )
     case TypeTensorARM extends Definition(
           "OpTypeTensorARM",
@@ -5295,7 +5295,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata1.m147
+          "IdResult IdRef IdRef? IdRef?"
         )
     case TensorReadARM extends Definition(
           "OpTensorReadARM",
@@ -5307,14 +5307,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TensorReadARM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    tensor = values.required(2),
+                    coordinates = values.required(3),
+                    tensorOperands = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m148
+          "IdResultType IdResult IdRef IdRef TensorOperands?"
         )
     case TensorWriteARM extends Definition(
           "OpTensorWriteARM",
@@ -5332,7 +5332,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata1.m149
+          "IdRef IdRef IdRef TensorOperands?"
         )
     case TensorQuerySizeARM extends Definition(
           "OpTensorQuerySizeARM",
@@ -5350,7 +5350,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m150
+          "IdResultType IdResult IdRef IdRef"
         )
     case GraphConstantARM extends Definition(
           "OpGraphConstantARM",
@@ -5362,7 +5362,7 @@ object Instruction {
                 raw,
                 values => Instruction.GraphConstantARM(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m151
+          "IdResultType IdResult LiteralInteger"
         )
     case GraphEntryPointARM extends Definition(
           "OpGraphEntryPointARM",
@@ -5374,7 +5374,7 @@ object Instruction {
                 raw,
                 values => Instruction.GraphEntryPointARM(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata1.m152
+          "IdRef LiteralString IdRef*"
         )
     case GraphARM extends Definition(
           "OpGraphARM",
@@ -5386,7 +5386,7 @@ object Instruction {
                 raw,
                 values => Instruction.GraphARM(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m153
+          "IdResultType IdResult"
         )
     case GraphInputARM extends Definition(
           "OpGraphInputARM",
@@ -5404,7 +5404,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata1.m154
+          "IdResultType IdResult IdRef IdRef*"
         )
     case GraphSetOutputARM extends Definition(
           "OpGraphSetOutputARM",
@@ -5416,13 +5416,13 @@ object Instruction {
                 raw,
                 values => Instruction.GraphSetOutputARM(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata1.m155
+          "IdRef IdRef IdRef*"
         )
     case GraphEndARM extends Definition(
           "OpGraphEndARM",
           SPIRVOpcodeNumber(4186),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.GraphEndARM()),
-          InstructionMetadata1.m156
+          ""
         )
     case TypeGraphARM extends Definition(
           "OpTypeGraphARM",
@@ -5434,7 +5434,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeGraphARM(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata1.m157
+          "IdResult LiteralInteger IdRef*"
         )
     case BitcastExtractEXT extends Definition(
           "OpBitcastExtractEXT",
@@ -5452,13 +5452,13 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m158
+          "IdResultType IdResult IdRef IdRef"
         )
     case TerminateInvocation extends Definition(
           "OpTerminateInvocation",
           SPIRVOpcodeNumber(4416),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.TerminateInvocation()),
-          InstructionMetadata1.m159
+          ""
         )
     case TypeUntypedPointerKHR extends Definition(
           "OpTypeUntypedPointerKHR",
@@ -5470,7 +5470,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeUntypedPointerKHR(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m160
+          "IdResult StorageClass"
         )
     case UntypedVariableKHR extends Definition(
           "OpUntypedVariableKHR",
@@ -5482,14 +5482,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedVariableKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.optional(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    storageClass = values.required(2),
+                    dataType = values.optional(3),
+                    initializer = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m161
+          "IdResultType IdResult StorageClass IdRef? IdRef?"
         )
     case UntypedAccessChainKHR extends Definition(
           "OpUntypedAccessChainKHR",
@@ -5501,14 +5501,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedAccessChainKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    baseType = values.required(2),
+                    base = values.required(3),
+                    indexes = values.repeated(4)
                   )
               ),
-          InstructionMetadata1.m162
+          "IdResultType IdResult IdRef IdRef IdRef*"
         )
     case UntypedInBoundsAccessChainKHR extends Definition(
           "OpUntypedInBoundsAccessChainKHR",
@@ -5520,14 +5520,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedInBoundsAccessChainKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    baseType = values.required(2),
+                    base = values.required(3),
+                    indexes = values.repeated(4)
                   )
               ),
-          InstructionMetadata1.m163
+          "IdResultType IdResult IdRef IdRef IdRef*"
         )
     case SubgroupBallotKHR extends Definition(
           "OpSubgroupBallotKHR",
@@ -5539,7 +5539,7 @@ object Instruction {
                 raw,
                 values => Instruction.SubgroupBallotKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m164
+          "IdResultType IdResult IdRef"
         )
     case SubgroupFirstInvocationKHR extends Definition(
           "OpSubgroupFirstInvocationKHR",
@@ -5552,7 +5552,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupFirstInvocationKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m165
+          "IdResultType IdResult IdRef"
         )
     case UntypedPtrAccessChainKHR extends Definition(
           "OpUntypedPtrAccessChainKHR",
@@ -5564,15 +5564,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedPtrAccessChainKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.repeated(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    baseType = values.required(2),
+                    base = values.required(3),
+                    element = values.required(4),
+                    indexes = values.repeated(5)
                   )
               ),
-          InstructionMetadata1.m166
+          "IdResultType IdResult IdRef IdRef IdRef IdRef*"
         )
     case UntypedInBoundsPtrAccessChainKHR extends Definition(
           "OpUntypedInBoundsPtrAccessChainKHR",
@@ -5584,15 +5584,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedInBoundsPtrAccessChainKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.repeated(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    baseType = values.required(2),
+                    base = values.required(3),
+                    element = values.required(4),
+                    indexes = values.repeated(5)
                   )
               ),
-          InstructionMetadata1.m167
+          "IdResultType IdResult IdRef IdRef IdRef IdRef*"
         )
     case UntypedArrayLengthKHR extends Definition(
           "OpUntypedArrayLengthKHR",
@@ -5604,14 +5604,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedArrayLengthKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    structure = values.required(2),
+                    pointer = values.required(3),
+                    arrayMember = values.required(4)
                   )
               ),
-          InstructionMetadata1.m168
+          "IdResultType IdResult IdRef IdRef LiteralInteger"
         )
     case UntypedPrefetchKHR extends Definition(
           "OpUntypedPrefetchKHR",
@@ -5623,14 +5623,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedPrefetchKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.optional(2),
-                    values.optional(3),
-                    values.optional(4)
+                    pointerType = values.required(0),
+                    numBytes = values.required(1),
+                    rW = values.optional(2),
+                    locality = values.optional(3),
+                    cacheType = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m169
+          "IdRef IdRef IdRef? IdRef? IdRef?"
         )
     case FmaKHR extends Definition(
           "OpFmaKHR",
@@ -5642,14 +5642,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FmaKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcA = values.required(2),
+                    srcB = values.required(3),
+                    srcC = values.required(4)
                   )
               ),
-          InstructionMetadata1.m170
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAllKHR extends Definition(
           "OpSubgroupAllKHR",
@@ -5661,7 +5661,7 @@ object Instruction {
                 raw,
                 values => Instruction.SubgroupAllKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m171
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAnyKHR extends Definition(
           "OpSubgroupAnyKHR",
@@ -5673,7 +5673,7 @@ object Instruction {
                 raw,
                 values => Instruction.SubgroupAnyKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m172
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAllEqualKHR extends Definition(
           "OpSubgroupAllEqualKHR",
@@ -5685,7 +5685,7 @@ object Instruction {
                 raw,
                 values => Instruction.SubgroupAllEqualKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m173
+          "IdResultType IdResult IdRef"
         )
     case GroupNonUniformRotateKHR extends Definition(
           "OpGroupNonUniformRotateKHR",
@@ -5697,15 +5697,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupNonUniformRotateKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    value = values.required(3),
+                    delta = values.required(4),
+                    clusterSize = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m174
+          "IdResultType IdResult IdScope IdRef IdRef IdRef?"
         )
     case SubgroupReadInvocationKHR extends Definition(
           "OpSubgroupReadInvocationKHR",
@@ -5723,7 +5723,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata1.m175
+          "IdResultType IdResult IdRef IdRef"
         )
     case ExtInstWithForwardRefsKHR extends Definition(
           "OpExtInstWithForwardRefsKHR",
@@ -5735,14 +5735,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ExtInstWithForwardRefsKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    set = values.required(2),
+                    inst = values.required(3),
+                    srcs = values.repeated(4)
                   )
               ),
-          InstructionMetadata1.m176
+          "IdResultType IdResult IdRef LiteralExtInstInteger IdRef*"
         )
     case UntypedGroupAsyncCopyKHR extends Definition(
           "OpUntypedGroupAsyncCopyKHR",
@@ -5754,20 +5754,20 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedGroupAsyncCopyKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.optional(9),
-                    values.optional(10)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    destination = values.required(3),
+                    src = values.required(4),
+                    elementNumBytes = values.required(5),
+                    numElements = values.required(6),
+                    stride = values.required(7),
+                    event = values.required(8),
+                    modsA = values.optional(9),
+                    modsB = values.optional(10)
                   )
               ),
-          InstructionMetadata1.m177
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef MemoryAccess? MemoryAccess?"
         )
     case TraceRayKHR extends Definition(
           "OpTraceRayKHR",
@@ -5779,20 +5779,20 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TraceRayKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10)
+                    accel = values.required(0),
+                    rayFlags = values.required(1),
+                    cullMask = values.required(2),
+                    sBTOffset = values.required(3),
+                    sBTStride = values.required(4),
+                    missIndex = values.required(5),
+                    rayOrigin = values.required(6),
+                    rayTmin = values.required(7),
+                    rayDirection = values.required(8),
+                    rayTmax = values.required(9),
+                    payload = values.required(10)
                   )
               ),
-          InstructionMetadata1.m178
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case ExecuteCallableKHR extends Definition(
           "OpExecuteCallableKHR",
@@ -5804,7 +5804,7 @@ object Instruction {
                 raw,
                 values => Instruction.ExecuteCallableKHR(values.required(0), values.required(1))
               ),
-          InstructionMetadata1.m179
+          "IdRef IdRef"
         )
     case ConvertUToAccelerationStructureKHR extends Definition(
           "OpConvertUToAccelerationStructureKHR",
@@ -5821,19 +5821,19 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata1.m180
+          "IdResultType IdResult IdRef"
         )
     case IgnoreIntersectionKHR extends Definition(
           "OpIgnoreIntersectionKHR",
           SPIRVOpcodeNumber(4448),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.IgnoreIntersectionKHR()),
-          InstructionMetadata1.m181
+          ""
         )
     case TerminateRayKHR extends Definition(
           "OpTerminateRayKHR",
           SPIRVOpcodeNumber(4449),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.TerminateRayKHR()),
-          InstructionMetadata1.m182
+          ""
         )
     case SDot extends Definition(
           "OpSDot",
@@ -5845,14 +5845,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SDot(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    packedVectorFormat = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m183
+          "IdResultType IdResult IdRef IdRef PackedVectorFormat?"
         )
     case UDot extends Definition(
           "OpUDot",
@@ -5864,14 +5864,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UDot(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    packedVectorFormat = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m184
+          "IdResultType IdResult IdRef IdRef PackedVectorFormat?"
         )
     case SUDot extends Definition(
           "OpSUDot",
@@ -5883,14 +5883,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SUDot(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    packedVectorFormat = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m185
+          "IdResultType IdResult IdRef IdRef PackedVectorFormat?"
         )
     case SDotAccSat extends Definition(
           "OpSDotAccSat",
@@ -5902,15 +5902,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SDotAccSat(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    accumulator = values.required(4),
+                    packedVectorFormat = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m186
+          "IdResultType IdResult IdRef IdRef IdRef PackedVectorFormat?"
         )
     case UDotAccSat extends Definition(
           "OpUDotAccSat",
@@ -5922,15 +5922,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UDotAccSat(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    accumulator = values.required(4),
+                    packedVectorFormat = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m187
+          "IdResultType IdResult IdRef IdRef IdRef PackedVectorFormat?"
         )
     case SUDotAccSat extends Definition(
           "OpSUDotAccSat",
@@ -5942,15 +5942,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SUDotAccSat(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    accumulator = values.required(4),
+                    packedVectorFormat = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m188
+          "IdResultType IdResult IdRef IdRef IdRef PackedVectorFormat?"
         )
     case TypeCooperativeMatrixKHR extends Definition(
           "OpTypeCooperativeMatrixKHR",
@@ -5962,15 +5962,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TypeCooperativeMatrixKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    dest = values.required(0),
+                    componentType = values.required(1),
+                    scope = values.required(2),
+                    rows = values.required(3),
+                    columns = values.required(4),
+                    use = values.required(5)
                   )
               ),
-          InstructionMetadata1.m189
+          "IdResult IdRef IdScope IdRef IdRef IdRef"
         )
     case CooperativeMatrixLoadKHR extends Definition(
           "OpCooperativeMatrixLoadKHR",
@@ -5982,15 +5982,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixLoadKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memoryLayout = values.required(3),
+                    stride = values.optional(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m190
+          "IdResultType IdResult IdRef IdRef IdRef? MemoryAccess?"
         )
     case CooperativeMatrixStoreKHR extends Definition(
           "OpCooperativeMatrixStoreKHR",
@@ -6002,14 +6002,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixStoreKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.optional(3),
-                    values.optional(4)
+                    pointer = values.required(0),
+                    src = values.required(1),
+                    memoryLayout = values.required(2),
+                    stride = values.optional(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata1.m191
+          "IdRef IdRef IdRef IdRef? MemoryAccess?"
         )
     case CooperativeMatrixMulAddKHR extends Definition(
           "OpCooperativeMatrixMulAddKHR",
@@ -6021,15 +6021,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixMulAddKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    b = values.required(3),
+                    c = values.required(4),
+                    cooperativeMatrixOperands = values.optional(5)
                   )
               ),
-          InstructionMetadata1.m192
+          "IdResultType IdResult IdRef IdRef IdRef CooperativeMatrixOperands?"
         )
     case CooperativeMatrixLengthKHR extends Definition(
           "OpCooperativeMatrixLengthKHR",
@@ -6042,7 +6042,7 @@ object Instruction {
                 values =>
                   Instruction.CooperativeMatrixLengthKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m193
+          "IdResultType IdResult IdRef"
         )
     case ConstantCompositeReplicateEXT extends Definition(
           "OpConstantCompositeReplicateEXT",
@@ -6055,7 +6055,7 @@ object Instruction {
                 values =>
                   Instruction.ConstantCompositeReplicateEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m194
+          "IdResultType IdResult IdRef"
         )
     case SpecConstantCompositeReplicateEXT extends Definition(
           "OpSpecConstantCompositeReplicateEXT",
@@ -6072,7 +6072,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata1.m195
+          "IdResultType IdResult IdRef"
         )
     case CompositeConstructReplicateEXT extends Definition(
           "OpCompositeConstructReplicateEXT",
@@ -6085,7 +6085,7 @@ object Instruction {
                 values =>
                   Instruction.CompositeConstructReplicateEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata1.m196
+          "IdResultType IdResult IdRef"
         )
     case TypeRayQueryKHR extends Definition(
           "OpTypeRayQueryKHR",
@@ -6093,7 +6093,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypeRayQueryKHR(values.required(0))),
-          InstructionMetadata1.m197
+          "IdResult"
         )
     case RayQueryInitializeKHR extends Definition(
           "OpRayQueryInitializeKHR",
@@ -6105,17 +6105,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.RayQueryInitializeKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    rayQuery = values.required(0),
+                    accel = values.required(1),
+                    rayFlags = values.required(2),
+                    cullMask = values.required(3),
+                    rayOrigin = values.required(4),
+                    rayTMin = values.required(5),
+                    rayDirection = values.required(6),
+                    rayTMax = values.required(7)
                   )
               ),
-          InstructionMetadata1.m198
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case RayQueryTerminateKHR extends Definition(
           "OpRayQueryTerminateKHR",
@@ -6127,7 +6127,7 @@ object Instruction {
                 raw,
                 values => Instruction.RayQueryTerminateKHR(values.required(0))
               ),
-          InstructionMetadata1.m199
+          "IdRef"
         )
     case RayQueryGenerateIntersectionKHR extends Definition(
           "OpRayQueryGenerateIntersectionKHR",
@@ -6139,7 +6139,7 @@ object Instruction {
                 raw,
                 values => Instruction.RayQueryGenerateIntersectionKHR(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m0
+          "IdRef IdRef"
         )
     case RayQueryConfirmIntersectionKHR extends Definition(
           "OpRayQueryConfirmIntersectionKHR",
@@ -6151,7 +6151,7 @@ object Instruction {
                 raw,
                 values => Instruction.RayQueryConfirmIntersectionKHR(values.required(0))
               ),
-          InstructionMetadata2.m1
+          "IdRef"
         )
     case RayQueryProceedKHR extends Definition(
           "OpRayQueryProceedKHR",
@@ -6163,7 +6163,7 @@ object Instruction {
                 raw,
                 values => Instruction.RayQueryProceedKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m2
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetIntersectionTypeKHR extends Definition(
           "OpRayQueryGetIntersectionTypeKHR",
@@ -6181,7 +6181,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m3
+          "IdResultType IdResult IdRef IdRef"
         )
     case ImageSampleWeightedQCOM extends Definition(
           "OpImageSampleWeightedQCOM",
@@ -6193,14 +6193,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleWeightedQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    texture = values.required(2),
+                    coordinates = values.required(3),
+                    weights = values.required(4)
                   )
               ),
-          InstructionMetadata2.m4
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case ImageBoxFilterQCOM extends Definition(
           "OpImageBoxFilterQCOM",
@@ -6212,14 +6212,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBoxFilterQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    texture = values.required(2),
+                    coordinates = values.required(3),
+                    boxSize = values.required(4)
                   )
               ),
-          InstructionMetadata2.m5
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case ImageBlockMatchSSDQCOM extends Definition(
           "OpImageBlockMatchSSDQCOM",
@@ -6231,16 +6231,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBlockMatchSSDQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    target = values.required(2),
+                    targetCoordinates = values.required(3),
+                    reference = values.required(4),
+                    referenceCoordinates = values.required(5),
+                    blockSize = values.required(6)
                   )
               ),
-          InstructionMetadata2.m6
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case ImageBlockMatchSADQCOM extends Definition(
           "OpImageBlockMatchSADQCOM",
@@ -6252,16 +6252,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBlockMatchSADQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    target = values.required(2),
+                    targetCoordinates = values.required(3),
+                    reference = values.required(4),
+                    referenceCoordinates = values.required(5),
+                    blockSize = values.required(6)
                   )
               ),
-          InstructionMetadata2.m7
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case BitCastArrayQCOM extends Definition(
           "OpBitCastArrayQCOM",
@@ -6273,7 +6273,7 @@ object Instruction {
                 raw,
                 values => Instruction.BitCastArrayQCOM(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m8
+          "IdResultType IdResult IdRef"
         )
     case ImageBlockMatchWindowSSDQCOM extends Definition(
           "OpImageBlockMatchWindowSSDQCOM",
@@ -6285,16 +6285,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBlockMatchWindowSSDQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    targetSampledImage = values.required(2),
+                    targetCoordinates = values.required(3),
+                    referenceSampledImage = values.required(4),
+                    referenceCoordinates = values.required(5),
+                    blockSize = values.required(6)
                   )
               ),
-          InstructionMetadata2.m9
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case ImageBlockMatchWindowSADQCOM extends Definition(
           "OpImageBlockMatchWindowSADQCOM",
@@ -6306,16 +6306,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBlockMatchWindowSADQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    targetSampledImage = values.required(2),
+                    targetCoordinates = values.required(3),
+                    referenceSampledImage = values.required(4),
+                    referenceCoordinates = values.required(5),
+                    blockSize = values.required(6)
                   )
               ),
-          InstructionMetadata2.m10
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case ImageBlockMatchGatherSSDQCOM extends Definition(
           "OpImageBlockMatchGatherSSDQCOM",
@@ -6327,16 +6327,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBlockMatchGatherSSDQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    targetSampledImage = values.required(2),
+                    targetCoordinates = values.required(3),
+                    referenceSampledImage = values.required(4),
+                    referenceCoordinates = values.required(5),
+                    blockSize = values.required(6)
                   )
               ),
-          InstructionMetadata2.m11
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case ImageBlockMatchGatherSADQCOM extends Definition(
           "OpImageBlockMatchGatherSADQCOM",
@@ -6348,16 +6348,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageBlockMatchGatherSADQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    targetSampledImage = values.required(2),
+                    targetCoordinates = values.required(3),
+                    referenceSampledImage = values.required(4),
+                    referenceCoordinates = values.required(5),
+                    blockSize = values.required(6)
                   )
               ),
-          InstructionMetadata2.m12
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case CompositeConstructCoopMatQCOM extends Definition(
           "OpCompositeConstructCoopMatQCOM",
@@ -6370,7 +6370,7 @@ object Instruction {
                 values =>
                   Instruction.CompositeConstructCoopMatQCOM(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m13
+          "IdResultType IdResult IdRef"
         )
     case CompositeExtractCoopMatQCOM extends Definition(
           "OpCompositeExtractCoopMatQCOM",
@@ -6383,7 +6383,7 @@ object Instruction {
                 values =>
                   Instruction.CompositeExtractCoopMatQCOM(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m14
+          "IdResultType IdResult IdRef"
         )
     case ExtractSubArrayQCOM extends Definition(
           "OpExtractSubArrayQCOM",
@@ -6401,7 +6401,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m15
+          "IdResultType IdResult IdRef IdRef"
         )
     case ImageGatherQCOM extends Definition(
           "OpImageGatherQCOM",
@@ -6413,16 +6413,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageGatherQCOM(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.optional(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    component = values.required(4),
+                    mode = values.required(5),
+                    mods = values.optional(6)
                   )
               ),
-          InstructionMetadata2.m16
+          "IdResultType IdResult IdRef IdRef IdRef IdRef ImageOperands?"
         )
     case GroupIAddNonUniformAMD extends Definition(
           "OpGroupIAddNonUniformAMD",
@@ -6434,14 +6434,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupIAddNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m17
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFAddNonUniformAMD extends Definition(
           "OpGroupFAddNonUniformAMD",
@@ -6453,14 +6453,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFAddNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m18
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFMinNonUniformAMD extends Definition(
           "OpGroupFMinNonUniformAMD",
@@ -6472,14 +6472,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFMinNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m19
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupUMinNonUniformAMD extends Definition(
           "OpGroupUMinNonUniformAMD",
@@ -6491,14 +6491,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupUMinNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m20
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupSMinNonUniformAMD extends Definition(
           "OpGroupSMinNonUniformAMD",
@@ -6510,14 +6510,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupSMinNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m21
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFMaxNonUniformAMD extends Definition(
           "OpGroupFMaxNonUniformAMD",
@@ -6529,14 +6529,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFMaxNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m22
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupUMaxNonUniformAMD extends Definition(
           "OpGroupUMaxNonUniformAMD",
@@ -6548,14 +6548,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupUMaxNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m23
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupSMaxNonUniformAMD extends Definition(
           "OpGroupSMaxNonUniformAMD",
@@ -6567,14 +6567,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupSMaxNonUniformAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata2.m24
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case FragmentMaskFetchAMD extends Definition(
           "OpFragmentMaskFetchAMD",
@@ -6592,7 +6592,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m25
+          "IdResultType IdResult IdRef IdRef"
         )
     case FragmentFetchAMD extends Definition(
           "OpFragmentFetchAMD",
@@ -6604,14 +6604,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FragmentFetchAMD(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    fragmentIndex = values.required(4)
                   )
               ),
-          InstructionMetadata2.m26
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case ReadClockKHR extends Definition(
           "OpReadClockKHR",
@@ -6623,7 +6623,7 @@ object Instruction {
                 raw,
                 values => Instruction.ReadClockKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m27
+          "IdResultType IdResult IdScope"
         )
     case AllocateNodePayloadsAMDX extends Definition(
           "OpAllocateNodePayloadsAMDX",
@@ -6635,14 +6635,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AllocateNodePayloadsAMDX(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    visibility = values.required(2),
+                    payloadCount = values.required(3),
+                    nodeIndex = values.required(4)
                   )
               ),
-          InstructionMetadata2.m28
+          "IdResultType IdResult IdScope IdRef IdRef"
         )
     case EnqueueNodePayloadsAMDX extends Definition(
           "OpEnqueueNodePayloadsAMDX",
@@ -6654,7 +6654,7 @@ object Instruction {
                 raw,
                 values => Instruction.EnqueueNodePayloadsAMDX(values.required(0))
               ),
-          InstructionMetadata2.m29
+          "IdRef"
         )
     case TypeNodePayloadArrayAMDX extends Definition(
           "OpTypeNodePayloadArrayAMDX",
@@ -6666,7 +6666,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeNodePayloadArrayAMDX(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m30
+          "IdResult IdRef"
         )
     case FinishWritingNodePayloadAMDX extends Definition(
           "OpFinishWritingNodePayloadAMDX",
@@ -6679,7 +6679,7 @@ object Instruction {
                 values =>
                   Instruction.FinishWritingNodePayloadAMDX(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m31
+          "IdResultType IdResult IdRef"
         )
     case NodePayloadArrayLengthAMDX extends Definition(
           "OpNodePayloadArrayLengthAMDX",
@@ -6692,7 +6692,7 @@ object Instruction {
                 values =>
                   Instruction.NodePayloadArrayLengthAMDX(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m32
+          "IdResultType IdResult IdRef"
         )
     case IsNodePayloadValidAMDX extends Definition(
           "OpIsNodePayloadValidAMDX",
@@ -6710,7 +6710,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m33
+          "IdResultType IdResult IdRef IdRef"
         )
     case ConstantStringAMDX extends Definition(
           "OpConstantStringAMDX",
@@ -6722,7 +6722,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantStringAMDX(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m34
+          "IdResult LiteralString"
         )
     case SpecConstantStringAMDX extends Definition(
           "OpSpecConstantStringAMDX",
@@ -6734,7 +6734,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstantStringAMDX(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m35
+          "IdResult LiteralString"
         )
     case GroupNonUniformQuadAllKHR extends Definition(
           "OpGroupNonUniformQuadAllKHR",
@@ -6747,7 +6747,7 @@ object Instruction {
                 values =>
                   Instruction.GroupNonUniformQuadAllKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m36
+          "IdResultType IdResult IdRef"
         )
     case GroupNonUniformQuadAnyKHR extends Definition(
           "OpGroupNonUniformQuadAnyKHR",
@@ -6760,7 +6760,7 @@ object Instruction {
                 values =>
                   Instruction.GroupNonUniformQuadAnyKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m37
+          "IdResultType IdResult IdRef"
         )
     case TypeBufferEXT extends Definition(
           "OpTypeBufferEXT",
@@ -6772,7 +6772,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeBufferEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m38
+          "IdResult StorageClass"
         )
     case BufferPointerEXT extends Definition(
           "OpBufferPointerEXT",
@@ -6784,7 +6784,7 @@ object Instruction {
                 raw,
                 values => Instruction.BufferPointerEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m39
+          "IdResultType IdResult IdRef"
         )
     case AbortKHR extends Definition(
           "OpAbortKHR",
@@ -6796,7 +6796,7 @@ object Instruction {
                 raw,
                 values => Instruction.AbortKHR(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m40
+          "IdRef IdRef"
         )
     case UntypedImageTexelPointerEXT extends Definition(
           "OpUntypedImageTexelPointerEXT",
@@ -6808,15 +6808,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.UntypedImageTexelPointerEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    imageType = values.required(2),
+                    image = values.required(3),
+                    coordinate = values.required(4),
+                    sample = values.required(5)
                   )
               ),
-          InstructionMetadata2.m41
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case MemberDecorateIdEXT extends Definition(
           "OpMemberDecorateIdEXT",
@@ -6828,7 +6828,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemberDecorateIdEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m42
+          "IdRef LiteralInteger Decoration"
         )
     case ConstantSizeOfEXT extends Definition(
           "OpConstantSizeOfEXT",
@@ -6840,7 +6840,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantSizeOfEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m43
+          "IdResultType IdResult IdRef"
         )
     case ConstantDataKHR extends Definition(
           "OpConstantDataKHR",
@@ -6852,7 +6852,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantDataKHR(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata2.m44
+          "IdResultType IdResult LiteralInteger*"
         )
     case SpecConstantDataKHR extends Definition(
           "OpSpecConstantDataKHR",
@@ -6864,7 +6864,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstantDataKHR(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata2.m45
+          "IdResultType IdResult LiteralInteger*"
         )
     case PoisonKHR extends Definition(
           "OpPoisonKHR",
@@ -6876,7 +6876,7 @@ object Instruction {
                 raw,
                 values => Instruction.PoisonKHR(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m46
+          "IdResultType IdResult"
         )
     case FreezeKHR extends Definition(
           "OpFreezeKHR",
@@ -6888,7 +6888,7 @@ object Instruction {
                 raw,
                 values => Instruction.FreezeKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m47
+          "IdResultType IdResult IdRef"
         )
     case HitObjectRecordHitMotionNV extends Definition(
           "OpHitObjectRecordHitMotionNV",
@@ -6900,23 +6900,23 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordHitMotionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12),
-                    values.required(13)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    instanceId = values.required(2),
+                    primitiveId = values.required(3),
+                    geometryIndex = values.required(4),
+                    hitKind = values.required(5),
+                    sBTRecordOffset = values.required(6),
+                    sBTRecordStride = values.required(7),
+                    origin = values.required(8),
+                    tMin = values.required(9),
+                    direction = values.required(10),
+                    tMax = values.required(11),
+                    currentTime = values.required(12),
+                    hitObjectAttributes = values.required(13)
                   )
               ),
-          InstructionMetadata2.m48
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordHitWithIndexMotionNV extends Definition(
           "OpHitObjectRecordHitWithIndexMotionNV",
@@ -6928,22 +6928,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordHitWithIndexMotionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    instanceId = values.required(2),
+                    primitiveId = values.required(3),
+                    geometryIndex = values.required(4),
+                    hitKind = values.required(5),
+                    sBTRecordIndex = values.required(6),
+                    origin = values.required(7),
+                    tMin = values.required(8),
+                    direction = values.required(9),
+                    tMax = values.required(10),
+                    currentTime = values.required(11),
+                    hitObjectAttributes = values.required(12)
                   )
               ),
-          InstructionMetadata2.m49
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordMissMotionNV extends Definition(
           "OpHitObjectRecordMissMotionNV",
@@ -6955,16 +6955,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordMissMotionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    hitObject = values.required(0),
+                    sBTIndex = values.required(1),
+                    origin = values.required(2),
+                    tMin = values.required(3),
+                    direction = values.required(4),
+                    tMax = values.required(5),
+                    currentTime = values.required(6)
                   )
               ),
-          InstructionMetadata2.m50
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectGetWorldToObjectNV extends Definition(
           "OpHitObjectGetWorldToObjectNV",
@@ -6977,7 +6977,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetWorldToObjectNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m51
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetObjectToWorldNV extends Definition(
           "OpHitObjectGetObjectToWorldNV",
@@ -6990,7 +6990,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetObjectToWorldNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m52
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetObjectRayDirectionNV extends Definition(
           "OpHitObjectGetObjectRayDirectionNV",
@@ -7007,7 +7007,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m53
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetObjectRayOriginNV extends Definition(
           "OpHitObjectGetObjectRayOriginNV",
@@ -7020,7 +7020,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetObjectRayOriginNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m54
+          "IdResultType IdResult IdRef"
         )
     case HitObjectTraceRayMotionNV extends Definition(
           "OpHitObjectTraceRayMotionNV",
@@ -7032,22 +7032,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectTraceRayMotionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    rayFlags = values.required(2),
+                    cullmask = values.required(3),
+                    sBTRecordOffset = values.required(4),
+                    sBTRecordStride = values.required(5),
+                    missIndex = values.required(6),
+                    origin = values.required(7),
+                    tMin = values.required(8),
+                    direction = values.required(9),
+                    tMax = values.required(10),
+                    time = values.required(11),
+                    payload = values.required(12)
                   )
               ),
-          InstructionMetadata2.m55
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectGetShaderRecordBufferHandleNV extends Definition(
           "OpHitObjectGetShaderRecordBufferHandleNV",
@@ -7064,7 +7064,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m56
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetShaderBindingTableRecordIndexNV extends Definition(
           "OpHitObjectGetShaderBindingTableRecordIndexNV",
@@ -7081,7 +7081,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m57
+          "IdResultType IdResult IdRef"
         )
     case HitObjectRecordEmptyNV extends Definition(
           "OpHitObjectRecordEmptyNV",
@@ -7093,7 +7093,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectRecordEmptyNV(values.required(0))
               ),
-          InstructionMetadata2.m58
+          "IdRef"
         )
     case HitObjectTraceRayNV extends Definition(
           "OpHitObjectTraceRayNV",
@@ -7105,21 +7105,21 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectTraceRayNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    rayFlags = values.required(2),
+                    cullmask = values.required(3),
+                    sBTRecordOffset = values.required(4),
+                    sBTRecordStride = values.required(5),
+                    missIndex = values.required(6),
+                    origin = values.required(7),
+                    tMin = values.required(8),
+                    direction = values.required(9),
+                    tMax = values.required(10),
+                    payload = values.required(11)
                   )
               ),
-          InstructionMetadata2.m59
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordHitNV extends Definition(
           "OpHitObjectRecordHitNV",
@@ -7131,22 +7131,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordHitNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    instanceId = values.required(2),
+                    primitiveId = values.required(3),
+                    geometryIndex = values.required(4),
+                    hitKind = values.required(5),
+                    sBTRecordOffset = values.required(6),
+                    sBTRecordStride = values.required(7),
+                    origin = values.required(8),
+                    tMin = values.required(9),
+                    direction = values.required(10),
+                    tMax = values.required(11),
+                    hitObjectAttributes = values.required(12)
                   )
               ),
-          InstructionMetadata2.m60
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordHitWithIndexNV extends Definition(
           "OpHitObjectRecordHitWithIndexNV",
@@ -7158,21 +7158,21 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordHitWithIndexNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    instanceId = values.required(2),
+                    primitiveId = values.required(3),
+                    geometryIndex = values.required(4),
+                    hitKind = values.required(5),
+                    sBTRecordIndex = values.required(6),
+                    origin = values.required(7),
+                    tMin = values.required(8),
+                    direction = values.required(9),
+                    tMax = values.required(10),
+                    hitObjectAttributes = values.required(11)
                   )
               ),
-          InstructionMetadata2.m61
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordMissNV extends Definition(
           "OpHitObjectRecordMissNV",
@@ -7184,15 +7184,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordMissNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    hitObject = values.required(0),
+                    sBTIndex = values.required(1),
+                    origin = values.required(2),
+                    tMin = values.required(3),
+                    direction = values.required(4),
+                    tMax = values.required(5)
                   )
               ),
-          InstructionMetadata2.m62
+          "IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectExecuteShaderNV extends Definition(
           "OpHitObjectExecuteShaderNV",
@@ -7204,7 +7204,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectExecuteShaderNV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m63
+          "IdRef IdRef"
         )
     case HitObjectGetCurrentTimeNV extends Definition(
           "OpHitObjectGetCurrentTimeNV",
@@ -7217,7 +7217,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetCurrentTimeNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m64
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetAttributesNV extends Definition(
           "OpHitObjectGetAttributesNV",
@@ -7229,7 +7229,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetAttributesNV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m65
+          "IdRef IdRef"
         )
     case HitObjectGetHitKindNV extends Definition(
           "OpHitObjectGetHitKindNV",
@@ -7241,7 +7241,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetHitKindNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m66
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetPrimitiveIndexNV extends Definition(
           "OpHitObjectGetPrimitiveIndexNV",
@@ -7254,7 +7254,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetPrimitiveIndexNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m67
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetGeometryIndexNV extends Definition(
           "OpHitObjectGetGeometryIndexNV",
@@ -7267,7 +7267,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetGeometryIndexNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m68
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetInstanceIdNV extends Definition(
           "OpHitObjectGetInstanceIdNV",
@@ -7280,7 +7280,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetInstanceIdNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m69
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetInstanceCustomIndexNV extends Definition(
           "OpHitObjectGetInstanceCustomIndexNV",
@@ -7297,7 +7297,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m70
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetWorldRayDirectionNV extends Definition(
           "OpHitObjectGetWorldRayDirectionNV",
@@ -7314,7 +7314,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m71
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetWorldRayOriginNV extends Definition(
           "OpHitObjectGetWorldRayOriginNV",
@@ -7327,7 +7327,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetWorldRayOriginNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m72
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetRayTMaxNV extends Definition(
           "OpHitObjectGetRayTMaxNV",
@@ -7339,7 +7339,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetRayTMaxNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m73
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetRayTMinNV extends Definition(
           "OpHitObjectGetRayTMinNV",
@@ -7351,7 +7351,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetRayTMinNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m74
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsEmptyNV extends Definition(
           "OpHitObjectIsEmptyNV",
@@ -7363,7 +7363,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsEmptyNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m75
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsHitNV extends Definition(
           "OpHitObjectIsHitNV",
@@ -7375,7 +7375,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsHitNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m76
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsMissNV extends Definition(
           "OpHitObjectIsMissNV",
@@ -7387,7 +7387,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsMissNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m77
+          "IdResultType IdResult IdRef"
         )
     case ReorderThreadWithHitObjectNV extends Definition(
           "OpReorderThreadWithHitObjectNV",
@@ -7400,7 +7400,7 @@ object Instruction {
                 values =>
                   Instruction.ReorderThreadWithHitObjectNV(values.required(0), values.optional(1), values.optional(2))
               ),
-          InstructionMetadata2.m78
+          "IdRef IdRef? IdRef?"
         )
     case ReorderThreadWithHintNV extends Definition(
           "OpReorderThreadWithHintNV",
@@ -7412,7 +7412,7 @@ object Instruction {
                 raw,
                 values => Instruction.ReorderThreadWithHintNV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m79
+          "IdRef IdRef"
         )
     case TypeHitObjectNV extends Definition(
           "OpTypeHitObjectNV",
@@ -7420,7 +7420,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypeHitObjectNV(values.required(0))),
-          InstructionMetadata2.m80
+          "IdResult"
         )
     case ImageSampleFootprintNV extends Definition(
           "OpImageSampleFootprintNV",
@@ -7432,16 +7432,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ImageSampleFootprintNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.optional(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    sampledImage = values.required(2),
+                    coordinate = values.required(3),
+                    granularity = values.required(4),
+                    coarse = values.required(5),
+                    mods = values.optional(6)
                   )
               ),
-          InstructionMetadata2.m81
+          "IdResultType IdResult IdRef IdRef IdRef IdRef ImageOperands?"
         )
     case TypeVectorIdEXT extends Definition(
           "OpTypeVectorIdEXT",
@@ -7453,7 +7453,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeVectorIdEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m82
+          "IdResult IdRef IdRef"
         )
     case CooperativeVectorMatrixMulNV extends Definition(
           "OpCooperativeVectorMatrixMulNV",
@@ -7465,22 +7465,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeVectorMatrixMulNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.optional(11),
-                    values.optional(12)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    inputInterpretation = values.required(3),
+                    matrix = values.required(4),
+                    matrixOffset = values.required(5),
+                    matrixInterpretation = values.required(6),
+                    m = values.required(7),
+                    k = values.required(8),
+                    memoryLayout = values.required(9),
+                    transpose = values.required(10),
+                    matrixStride = values.optional(11),
+                    cooperativeMatrixOperands = values.optional(12)
                   )
               ),
-          InstructionMetadata2.m83
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef? CooperativeMatrixOperands?"
         )
     case CooperativeVectorOuterProductAccumulateNV extends Definition(
           "OpCooperativeVectorOuterProductAccumulateNV",
@@ -7492,16 +7492,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeVectorOuterProductAccumulateNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.optional(6)
+                    pointer = values.required(0),
+                    offset = values.required(1),
+                    a = values.required(2),
+                    b = values.required(3),
+                    memoryLayout = values.required(4),
+                    matrixInterpretation = values.required(5),
+                    matrixStride = values.optional(6)
                   )
               ),
-          InstructionMetadata2.m84
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef?"
         )
     case CooperativeVectorReduceSumAccumulateNV extends Definition(
           "OpCooperativeVectorReduceSumAccumulateNV",
@@ -7518,7 +7518,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m85
+          "IdRef IdRef IdRef"
         )
     case CooperativeVectorMatrixMulAddNV extends Definition(
           "OpCooperativeVectorMatrixMulAddNV",
@@ -7530,25 +7530,25 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeVectorMatrixMulAddNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12),
-                    values.required(13),
-                    values.optional(14),
-                    values.optional(15)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    inputInterpretation = values.required(3),
+                    matrix = values.required(4),
+                    matrixOffset = values.required(5),
+                    matrixInterpretation = values.required(6),
+                    bias = values.required(7),
+                    biasOffset = values.required(8),
+                    biasInterpretation = values.required(9),
+                    m = values.required(10),
+                    k = values.required(11),
+                    memoryLayout = values.required(12),
+                    transpose = values.required(13),
+                    matrixStride = values.optional(14),
+                    cooperativeMatrixOperands = values.optional(15)
                   )
               ),
-          InstructionMetadata2.m86
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef? CooperativeMatrixOperands?"
         )
     case CooperativeMatrixConvertNV extends Definition(
           "OpCooperativeMatrixConvertNV",
@@ -7561,7 +7561,7 @@ object Instruction {
                 values =>
                   Instruction.CooperativeMatrixConvertNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m87
+          "IdResultType IdResult IdRef"
         )
     case EmitMeshTasksEXT extends Definition(
           "OpEmitMeshTasksEXT",
@@ -7579,7 +7579,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata2.m88
+          "IdRef IdRef IdRef IdRef?"
         )
     case SetMeshOutputsEXT extends Definition(
           "OpSetMeshOutputsEXT",
@@ -7591,7 +7591,7 @@ object Instruction {
                 raw,
                 values => Instruction.SetMeshOutputsEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m89
+          "IdRef IdRef"
         )
     case GroupNonUniformPartitionEXT extends Definition(
           "OpGroupNonUniformPartitionEXT",
@@ -7604,7 +7604,7 @@ object Instruction {
                 values =>
                   Instruction.GroupNonUniformPartitionEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m90
+          "IdResultType IdResult IdRef"
         )
     case WritePackedPrimitiveIndices4x8NV extends Definition(
           "OpWritePackedPrimitiveIndices4x8NV",
@@ -7616,7 +7616,7 @@ object Instruction {
                 raw,
                 values => Instruction.WritePackedPrimitiveIndices4x8NV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m91
+          "IdRef IdRef"
         )
     case FetchMicroTriangleVertexPositionNV extends Definition(
           "OpFetchMicroTriangleVertexPositionNV",
@@ -7628,16 +7628,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FetchMicroTriangleVertexPositionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    accel = values.required(2),
+                    instanceId = values.required(3),
+                    geometryIndex = values.required(4),
+                    primitiveIndex = values.required(5),
+                    barycentric = values.required(6)
                   )
               ),
-          InstructionMetadata2.m92
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case FetchMicroTriangleVertexBarycentricNV extends Definition(
           "OpFetchMicroTriangleVertexBarycentricNV",
@@ -7649,16 +7649,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FetchMicroTriangleVertexBarycentricNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    accel = values.required(2),
+                    instanceId = values.required(3),
+                    geometryIndex = values.required(4),
+                    primitiveIndex = values.required(5),
+                    barycentric = values.required(6)
                   )
               ),
-          InstructionMetadata2.m93
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case CooperativeVectorLoadNV extends Definition(
           "OpCooperativeVectorLoadNV",
@@ -7670,14 +7670,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeVectorLoadNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    offset = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata2.m94
+          "IdResultType IdResult IdRef IdRef MemoryAccess?"
         )
     case CooperativeVectorStoreNV extends Definition(
           "OpCooperativeVectorStoreNV",
@@ -7695,7 +7695,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata2.m95
+          "IdRef IdRef IdRef MemoryAccess?"
         )
     case HitObjectRecordFromQueryEXT extends Definition(
           "OpHitObjectRecordFromQueryEXT",
@@ -7707,14 +7707,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordFromQueryEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    hitObject = values.required(0),
+                    rayQuery = values.required(1),
+                    sBTRecordIndex = values.required(2),
+                    hitObjectAttributes = values.required(3),
+                    hitKind = values.optional(4)
                   )
               ),
-          InstructionMetadata2.m96
+          "IdRef IdRef IdRef IdRef IdRef?"
         )
     case HitObjectRecordMissEXT extends Definition(
           "OpHitObjectRecordMissEXT",
@@ -7726,16 +7726,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordMissEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    hitObject = values.required(0),
+                    rayFlags = values.required(1),
+                    missIndex = values.required(2),
+                    rayOrigin = values.required(3),
+                    rayTmin = values.required(4),
+                    rayDirection = values.required(5),
+                    rayTmax = values.required(6)
                   )
               ),
-          InstructionMetadata2.m97
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordMissMotionEXT extends Definition(
           "OpHitObjectRecordMissMotionEXT",
@@ -7747,17 +7747,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectRecordMissMotionEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    hitObject = values.required(0),
+                    rayFlags = values.required(1),
+                    missIndex = values.required(2),
+                    rayOrigin = values.required(3),
+                    rayTmin = values.required(4),
+                    rayDirection = values.required(5),
+                    rayTmax = values.required(6),
+                    currentTime = values.required(7)
                   )
               ),
-          InstructionMetadata2.m98
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectGetIntersectionTriangleVertexPositionsEXT extends Definition(
           "OpHitObjectGetIntersectionTriangleVertexPositionsEXT",
@@ -7774,7 +7774,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m99
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetRayFlagsEXT extends Definition(
           "OpHitObjectGetRayFlagsEXT",
@@ -7787,7 +7787,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetRayFlagsEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m100
+          "IdResultType IdResult IdRef"
         )
     case HitObjectSetShaderBindingTableRecordIndexEXT extends Definition(
           "OpHitObjectSetShaderBindingTableRecordIndexEXT",
@@ -7800,7 +7800,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectSetShaderBindingTableRecordIndexEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m101
+          "IdRef IdRef"
         )
     case HitObjectReorderExecuteShaderEXT extends Definition(
           "OpHitObjectReorderExecuteShaderEXT",
@@ -7818,7 +7818,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata2.m102
+          "IdRef IdRef IdRef? IdRef?"
         )
     case HitObjectTraceReorderExecuteEXT extends Definition(
           "OpHitObjectTraceReorderExecuteEXT",
@@ -7830,23 +7830,23 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectTraceReorderExecuteEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.optional(12),
-                    values.optional(13)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    rayFlags = values.required(2),
+                    cullMask = values.required(3),
+                    sBTOffset = values.required(4),
+                    sBTStride = values.required(5),
+                    missIndex = values.required(6),
+                    rayOrigin = values.required(7),
+                    rayTmin = values.required(8),
+                    rayDirection = values.required(9),
+                    rayTmax = values.required(10),
+                    payload = values.required(11),
+                    hint = values.optional(12),
+                    bits = values.optional(13)
                   )
               ),
-          InstructionMetadata2.m103
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef? IdRef?"
         )
     case HitObjectTraceMotionReorderExecuteEXT extends Definition(
           "OpHitObjectTraceMotionReorderExecuteEXT",
@@ -7858,24 +7858,24 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectTraceMotionReorderExecuteEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12),
-                    values.optional(13),
-                    values.optional(14)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    rayFlags = values.required(2),
+                    cullMask = values.required(3),
+                    sBTOffset = values.required(4),
+                    sBTStride = values.required(5),
+                    missIndex = values.required(6),
+                    rayOrigin = values.required(7),
+                    rayTmin = values.required(8),
+                    rayDirection = values.required(9),
+                    rayTmax = values.required(10),
+                    currentTime = values.required(11),
+                    payload = values.required(12),
+                    hint = values.optional(13),
+                    bits = values.optional(14)
                   )
               ),
-          InstructionMetadata2.m104
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef? IdRef?"
         )
     case TypeHitObjectEXT extends Definition(
           "OpTypeHitObjectEXT",
@@ -7883,7 +7883,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.TypeHitObjectEXT(values.required(0))),
-          InstructionMetadata2.m105
+          "IdResult"
         )
     case ReorderThreadWithHintEXT extends Definition(
           "OpReorderThreadWithHintEXT",
@@ -7895,7 +7895,7 @@ object Instruction {
                 raw,
                 values => Instruction.ReorderThreadWithHintEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m106
+          "IdRef IdRef"
         )
     case ReorderThreadWithHitObjectEXT extends Definition(
           "OpReorderThreadWithHitObjectEXT",
@@ -7908,7 +7908,7 @@ object Instruction {
                 values =>
                   Instruction.ReorderThreadWithHitObjectEXT(values.required(0), values.optional(1), values.optional(2))
               ),
-          InstructionMetadata2.m107
+          "IdRef IdRef? IdRef?"
         )
     case HitObjectTraceRayEXT extends Definition(
           "OpHitObjectTraceRayEXT",
@@ -7920,21 +7920,21 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectTraceRayEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    rayFlags = values.required(2),
+                    cullMask = values.required(3),
+                    sBTOffset = values.required(4),
+                    sBTStride = values.required(5),
+                    missIndex = values.required(6),
+                    rayOrigin = values.required(7),
+                    rayTmin = values.required(8),
+                    rayDirection = values.required(9),
+                    rayTmax = values.required(10),
+                    payload = values.required(11)
                   )
               ),
-          InstructionMetadata2.m108
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectTraceRayMotionEXT extends Definition(
           "OpHitObjectTraceRayMotionEXT",
@@ -7946,22 +7946,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.HitObjectTraceRayMotionEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12)
+                    hitObject = values.required(0),
+                    accelerationStructure = values.required(1),
+                    rayFlags = values.required(2),
+                    cullMask = values.required(3),
+                    sBTOffset = values.required(4),
+                    sBTStride = values.required(5),
+                    missIndex = values.required(6),
+                    rayOrigin = values.required(7),
+                    rayTmin = values.required(8),
+                    rayDirection = values.required(9),
+                    rayTmax = values.required(10),
+                    currentTime = values.required(11),
+                    payload = values.required(12)
                   )
               ),
-          InstructionMetadata2.m109
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case HitObjectRecordEmptyEXT extends Definition(
           "OpHitObjectRecordEmptyEXT",
@@ -7973,7 +7973,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectRecordEmptyEXT(values.required(0))
               ),
-          InstructionMetadata2.m110
+          "IdRef"
         )
     case HitObjectExecuteShaderEXT extends Definition(
           "OpHitObjectExecuteShaderEXT",
@@ -7985,7 +7985,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectExecuteShaderEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m111
+          "IdRef IdRef"
         )
     case HitObjectGetCurrentTimeEXT extends Definition(
           "OpHitObjectGetCurrentTimeEXT",
@@ -7998,7 +7998,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetCurrentTimeEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m112
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetAttributesEXT extends Definition(
           "OpHitObjectGetAttributesEXT",
@@ -8010,7 +8010,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetAttributesEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m113
+          "IdRef IdRef"
         )
     case HitObjectGetHitKindEXT extends Definition(
           "OpHitObjectGetHitKindEXT",
@@ -8022,7 +8022,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetHitKindEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m114
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetPrimitiveIndexEXT extends Definition(
           "OpHitObjectGetPrimitiveIndexEXT",
@@ -8035,7 +8035,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetPrimitiveIndexEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m115
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetGeometryIndexEXT extends Definition(
           "OpHitObjectGetGeometryIndexEXT",
@@ -8048,7 +8048,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetGeometryIndexEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m116
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetInstanceIdEXT extends Definition(
           "OpHitObjectGetInstanceIdEXT",
@@ -8061,7 +8061,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetInstanceIdEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m117
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetInstanceCustomIndexEXT extends Definition(
           "OpHitObjectGetInstanceCustomIndexEXT",
@@ -8078,7 +8078,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m118
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetObjectRayOriginEXT extends Definition(
           "OpHitObjectGetObjectRayOriginEXT",
@@ -8091,7 +8091,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetObjectRayOriginEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m119
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetObjectRayDirectionEXT extends Definition(
           "OpHitObjectGetObjectRayDirectionEXT",
@@ -8108,7 +8108,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m120
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetWorldRayDirectionEXT extends Definition(
           "OpHitObjectGetWorldRayDirectionEXT",
@@ -8125,7 +8125,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m121
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetWorldRayOriginEXT extends Definition(
           "OpHitObjectGetWorldRayOriginEXT",
@@ -8138,7 +8138,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetWorldRayOriginEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m122
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetObjectToWorldEXT extends Definition(
           "OpHitObjectGetObjectToWorldEXT",
@@ -8151,7 +8151,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetObjectToWorldEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m123
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetWorldToObjectEXT extends Definition(
           "OpHitObjectGetWorldToObjectEXT",
@@ -8164,7 +8164,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetWorldToObjectEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m124
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetRayTMaxEXT extends Definition(
           "OpHitObjectGetRayTMaxEXT",
@@ -8176,7 +8176,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetRayTMaxEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m125
+          "IdResultType IdResult IdRef"
         )
     case ReportIntersectionKHR extends Definition(
           "OpReportIntersectionKHR",
@@ -8194,19 +8194,19 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m126
+          "IdResultType IdResult IdRef IdRef"
         )
     case IgnoreIntersectionNV extends Definition(
           "OpIgnoreIntersectionNV",
           SPIRVOpcodeNumber(5335),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.IgnoreIntersectionNV()),
-          InstructionMetadata2.m127
+          ""
         )
     case TerminateRayNV extends Definition(
           "OpTerminateRayNV",
           SPIRVOpcodeNumber(5336),
           definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.TerminateRayNV()),
-          InstructionMetadata2.m128
+          ""
         )
     case TraceNV extends Definition(
           "OpTraceNV",
@@ -8218,20 +8218,20 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TraceNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10)
+                    accel = values.required(0),
+                    rayFlags = values.required(1),
+                    cullMask = values.required(2),
+                    sBTOffset = values.required(3),
+                    sBTStride = values.required(4),
+                    missIndex = values.required(5),
+                    rayOrigin = values.required(6),
+                    rayTmin = values.required(7),
+                    rayDirection = values.required(8),
+                    rayTmax = values.required(9),
+                    payloadId = values.required(10)
                   )
               ),
-          InstructionMetadata2.m129
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case TraceMotionNV extends Definition(
           "OpTraceMotionNV",
@@ -8243,21 +8243,21 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TraceMotionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11)
+                    accel = values.required(0),
+                    rayFlags = values.required(1),
+                    cullMask = values.required(2),
+                    sBTOffset = values.required(3),
+                    sBTStride = values.required(4),
+                    missIndex = values.required(5),
+                    rayOrigin = values.required(6),
+                    rayTmin = values.required(7),
+                    rayDirection = values.required(8),
+                    rayTmax = values.required(9),
+                    time = values.required(10),
+                    payloadId = values.required(11)
                   )
               ),
-          InstructionMetadata2.m130
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case TraceRayMotionNV extends Definition(
           "OpTraceRayMotionNV",
@@ -8269,21 +8269,21 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TraceRayMotionNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11)
+                    accel = values.required(0),
+                    rayFlags = values.required(1),
+                    cullMask = values.required(2),
+                    sBTOffset = values.required(3),
+                    sBTStride = values.required(4),
+                    missIndex = values.required(5),
+                    rayOrigin = values.required(6),
+                    rayTmin = values.required(7),
+                    rayDirection = values.required(8),
+                    rayTmax = values.required(9),
+                    time = values.required(10),
+                    payload = values.required(11)
                   )
               ),
-          InstructionMetadata2.m131
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case RayQueryGetIntersectionTriangleVertexPositionsKHR extends Definition(
           "OpRayQueryGetIntersectionTriangleVertexPositionsKHR",
@@ -8301,7 +8301,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m132
+          "IdResultType IdResult IdRef IdRef"
         )
     case TypeAccelerationStructureKHR extends Definition(
           "OpTypeAccelerationStructureKHR",
@@ -8313,7 +8313,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAccelerationStructureKHR(values.required(0))
               ),
-          InstructionMetadata2.m133
+          "IdResult"
         )
     case ExecuteCallableNV extends Definition(
           "OpExecuteCallableNV",
@@ -8325,7 +8325,7 @@ object Instruction {
                 raw,
                 values => Instruction.ExecuteCallableNV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m134
+          "IdRef IdRef"
         )
     case RayQueryGetIntersectionClusterIdNV extends Definition(
           "OpRayQueryGetIntersectionClusterIdNV",
@@ -8343,7 +8343,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m135
+          "IdResultType IdResult IdRef IdRef"
         )
     case HitObjectGetClusterIdNV extends Definition(
           "OpHitObjectGetClusterIdNV",
@@ -8356,7 +8356,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetClusterIdNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m136
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetRayTMinEXT extends Definition(
           "OpHitObjectGetRayTMinEXT",
@@ -8368,7 +8368,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetRayTMinEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m137
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetShaderBindingTableRecordIndexEXT extends Definition(
           "OpHitObjectGetShaderBindingTableRecordIndexEXT",
@@ -8385,7 +8385,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m138
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetShaderRecordBufferHandleEXT extends Definition(
           "OpHitObjectGetShaderRecordBufferHandleEXT",
@@ -8402,7 +8402,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata2.m139
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsEmptyEXT extends Definition(
           "OpHitObjectIsEmptyEXT",
@@ -8414,7 +8414,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsEmptyEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m140
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsHitEXT extends Definition(
           "OpHitObjectIsHitEXT",
@@ -8426,7 +8426,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsHitEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m141
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsMissEXT extends Definition(
           "OpHitObjectIsMissEXT",
@@ -8438,7 +8438,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsMissEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m142
+          "IdResultType IdResult IdRef"
         )
     case TypeCooperativeMatrixNV extends Definition(
           "OpTypeCooperativeMatrixNV",
@@ -8450,14 +8450,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TypeCooperativeMatrixNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    dest = values.required(0),
+                    componentType = values.required(1),
+                    execution = values.required(2),
+                    rows = values.required(3),
+                    columns = values.required(4)
                   )
               ),
-          InstructionMetadata2.m143
+          "IdResult IdRef IdScope IdRef IdRef"
         )
     case CooperativeMatrixLoadNV extends Definition(
           "OpCooperativeMatrixLoadNV",
@@ -8469,15 +8469,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixLoadNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    stride = values.required(3),
+                    columnMajor = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata2.m144
+          "IdResultType IdResult IdRef IdRef IdRef MemoryAccess?"
         )
     case CooperativeMatrixStoreNV extends Definition(
           "OpCooperativeMatrixStoreNV",
@@ -8489,14 +8489,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixStoreNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.optional(4)
+                    pointer = values.required(0),
+                    src = values.required(1),
+                    stride = values.required(2),
+                    columnMajor = values.required(3),
+                    mods = values.optional(4)
                   )
               ),
-          InstructionMetadata2.m145
+          "IdRef IdRef IdRef IdRef MemoryAccess?"
         )
     case CooperativeMatrixMulAddNV extends Definition(
           "OpCooperativeMatrixMulAddNV",
@@ -8508,14 +8508,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixMulAddNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    b = values.required(3),
+                    c = values.required(4)
                   )
               ),
-          InstructionMetadata2.m146
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case CooperativeMatrixLengthNV extends Definition(
           "OpCooperativeMatrixLengthNV",
@@ -8528,21 +8528,21 @@ object Instruction {
                 values =>
                   Instruction.CooperativeMatrixLengthNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m147
+          "IdResultType IdResult IdRef"
         )
     case BeginInvocationInterlockEXT extends Definition(
           "OpBeginInvocationInterlockEXT",
           SPIRVOpcodeNumber(5364),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.BeginInvocationInterlockEXT()),
-          InstructionMetadata2.m148
+          ""
         )
     case EndInvocationInterlockEXT extends Definition(
           "OpEndInvocationInterlockEXT",
           SPIRVOpcodeNumber(5365),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.EndInvocationInterlockEXT()),
-          InstructionMetadata2.m149
+          ""
         )
     case CooperativeMatrixReduceNV extends Definition(
           "OpCooperativeMatrixReduceNV",
@@ -8554,14 +8554,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixReduceNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    matrix = values.required(2),
+                    reduce = values.required(3),
+                    combineFunc = values.required(4)
                   )
               ),
-          InstructionMetadata2.m150
+          "IdResultType IdResult IdRef CooperativeMatrixReduce IdRef"
         )
     case CooperativeMatrixLoadTensorNV extends Definition(
           "OpCooperativeMatrixLoadTensorNV",
@@ -8573,16 +8573,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixLoadTensorNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    src = values.required(3),
+                    tensorLayout = values.required(4),
+                    mods = values.required(5),
+                    tensorAddressingOperands = values.required(6)
                   )
               ),
-          InstructionMetadata2.m151
+          "IdResultType IdResult IdRef IdRef IdRef MemoryAccess TensorAddressingOperands"
         )
     case CooperativeMatrixStoreTensorNV extends Definition(
           "OpCooperativeMatrixStoreTensorNV",
@@ -8594,14 +8594,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixStoreTensorNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    pointer = values.required(0),
+                    src = values.required(1),
+                    tensorLayout = values.required(2),
+                    mods = values.required(3),
+                    tensorAddressingOperands = values.required(4)
                   )
               ),
-          InstructionMetadata2.m152
+          "IdRef IdRef IdRef MemoryAccess TensorAddressingOperands"
         )
     case CooperativeMatrixPerElementOpNV extends Definition(
           "OpCooperativeMatrixPerElementOpNV",
@@ -8613,14 +8613,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.CooperativeMatrixPerElementOpNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    matrix = values.required(2),
+                    func = values.required(3),
+                    srcs = values.repeated(4)
                   )
               ),
-          InstructionMetadata2.m153
+          "IdResultType IdResult IdRef IdRef IdRef*"
         )
     case TypeTensorLayoutNV extends Definition(
           "OpTypeTensorLayoutNV",
@@ -8632,7 +8632,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeTensorLayoutNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m154
+          "IdResult IdRef IdRef"
         )
     case TypeTensorViewNV extends Definition(
           "OpTypeTensorViewNV",
@@ -8650,7 +8650,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m155
+          "IdResult IdRef IdRef IdRef*"
         )
     case CreateTensorLayoutNV extends Definition(
           "OpCreateTensorLayoutNV",
@@ -8662,7 +8662,7 @@ object Instruction {
                 raw,
                 values => Instruction.CreateTensorLayoutNV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m156
+          "IdResultType IdResult"
         )
     case TensorLayoutSetDimensionNV extends Definition(
           "OpTensorLayoutSetDimensionNV",
@@ -8680,7 +8680,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m157
+          "IdResultType IdResult IdRef IdRef*"
         )
     case TensorLayoutSetStrideNV extends Definition(
           "OpTensorLayoutSetStrideNV",
@@ -8698,7 +8698,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m158
+          "IdResultType IdResult IdRef IdRef*"
         )
     case TensorLayoutSliceNV extends Definition(
           "OpTensorLayoutSliceNV",
@@ -8716,7 +8716,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m159
+          "IdResultType IdResult IdRef IdRef*"
         )
     case TensorLayoutSetClampValueNV extends Definition(
           "OpTensorLayoutSetClampValueNV",
@@ -8734,7 +8734,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m160
+          "IdResultType IdResult IdRef IdRef"
         )
     case CreateTensorViewNV extends Definition(
           "OpCreateTensorViewNV",
@@ -8746,7 +8746,7 @@ object Instruction {
                 raw,
                 values => Instruction.CreateTensorViewNV(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m161
+          "IdResultType IdResult"
         )
     case TensorViewSetDimensionNV extends Definition(
           "OpTensorViewSetDimensionNV",
@@ -8764,7 +8764,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m162
+          "IdResultType IdResult IdRef IdRef*"
         )
     case TensorViewSetStrideNV extends Definition(
           "OpTensorViewSetStrideNV",
@@ -8782,14 +8782,14 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m163
+          "IdResultType IdResult IdRef IdRef*"
         )
     case DemoteToHelperInvocation extends Definition(
           "OpDemoteToHelperInvocation",
           SPIRVOpcodeNumber(5380),
           definition =>
             raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.DemoteToHelperInvocation()),
-          InstructionMetadata2.m164
+          ""
         )
     case IsHelperInvocationEXT extends Definition(
           "OpIsHelperInvocationEXT",
@@ -8801,7 +8801,7 @@ object Instruction {
                 raw,
                 values => Instruction.IsHelperInvocationEXT(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m165
+          "IdResultType IdResult"
         )
     case TensorViewSetClipNV extends Definition(
           "OpTensorViewSetClipNV",
@@ -8813,16 +8813,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TensorViewSetClipNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    tensorView = values.required(2),
+                    clipRowOffset = values.required(3),
+                    clipRowSpan = values.required(4),
+                    clipColOffset = values.required(5),
+                    clipColSpan = values.required(6)
                   )
               ),
-          InstructionMetadata2.m166
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case TensorLayoutSetBlockSizeNV extends Definition(
           "OpTensorLayoutSetBlockSizeNV",
@@ -8840,7 +8840,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata2.m167
+          "IdResultType IdResult IdRef IdRef*"
         )
     case CooperativeMatrixTransposeNV extends Definition(
           "OpCooperativeMatrixTransposeNV",
@@ -8853,7 +8853,7 @@ object Instruction {
                 values =>
                   Instruction.CooperativeMatrixTransposeNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m168
+          "IdResultType IdResult IdRef"
         )
     case ConvertUToImageNV extends Definition(
           "OpConvertUToImageNV",
@@ -8865,7 +8865,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertUToImageNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m169
+          "IdResultType IdResult IdRef"
         )
     case ConvertUToSamplerNV extends Definition(
           "OpConvertUToSamplerNV",
@@ -8877,7 +8877,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertUToSamplerNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m170
+          "IdResultType IdResult IdRef"
         )
     case ConvertImageToUNV extends Definition(
           "OpConvertImageToUNV",
@@ -8889,7 +8889,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertImageToUNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m171
+          "IdResultType IdResult IdRef"
         )
     case ConvertSamplerToUNV extends Definition(
           "OpConvertSamplerToUNV",
@@ -8901,7 +8901,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertSamplerToUNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m172
+          "IdResultType IdResult IdRef"
         )
     case ConvertUToSampledImageNV extends Definition(
           "OpConvertUToSampledImageNV",
@@ -8914,7 +8914,7 @@ object Instruction {
                 values =>
                   Instruction.ConvertUToSampledImageNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m173
+          "IdResultType IdResult IdRef"
         )
     case ConvertSampledImageToUNV extends Definition(
           "OpConvertSampledImageToUNV",
@@ -8927,7 +8927,7 @@ object Instruction {
                 values =>
                   Instruction.ConvertSampledImageToUNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m174
+          "IdResultType IdResult IdRef"
         )
     case SamplerImageAddressingModeNV extends Definition(
           "OpSamplerImageAddressingModeNV",
@@ -8939,7 +8939,7 @@ object Instruction {
                 raw,
                 values => Instruction.SamplerImageAddressingModeNV(values.required(0))
               ),
-          InstructionMetadata2.m175
+          "LiteralInteger"
         )
     case RawAccessChainNV extends Definition(
           "OpRawAccessChainNV",
@@ -8951,16 +8951,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.RawAccessChainNV(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.optional(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    base = values.required(2),
+                    byteStride = values.required(3),
+                    elementIndex = values.required(4),
+                    byteOffset = values.required(5),
+                    rawAccessChainOperands = values.optional(6)
                   )
               ),
-          InstructionMetadata2.m176
+          "IdResultType IdResult IdRef IdRef IdRef IdRef RawAccessChainOperands?"
         )
     case RayQueryGetIntersectionSpherePositionNV extends Definition(
           "OpRayQueryGetIntersectionSpherePositionNV",
@@ -8978,7 +8978,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m177
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionSphereRadiusNV extends Definition(
           "OpRayQueryGetIntersectionSphereRadiusNV",
@@ -8996,7 +8996,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m178
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionLSSPositionsNV extends Definition(
           "OpRayQueryGetIntersectionLSSPositionsNV",
@@ -9014,7 +9014,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m179
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionLSSRadiiNV extends Definition(
           "OpRayQueryGetIntersectionLSSRadiiNV",
@@ -9032,7 +9032,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m180
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionLSSHitValueNV extends Definition(
           "OpRayQueryGetIntersectionLSSHitValueNV",
@@ -9050,7 +9050,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m181
+          "IdResultType IdResult IdRef IdRef"
         )
     case HitObjectGetSpherePositionNV extends Definition(
           "OpHitObjectGetSpherePositionNV",
@@ -9063,7 +9063,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetSpherePositionNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m182
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetSphereRadiusNV extends Definition(
           "OpHitObjectGetSphereRadiusNV",
@@ -9076,7 +9076,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetSphereRadiusNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m183
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetLSSPositionsNV extends Definition(
           "OpHitObjectGetLSSPositionsNV",
@@ -9089,7 +9089,7 @@ object Instruction {
                 values =>
                   Instruction.HitObjectGetLSSPositionsNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m184
+          "IdResultType IdResult IdRef"
         )
     case HitObjectGetLSSRadiiNV extends Definition(
           "OpHitObjectGetLSSRadiiNV",
@@ -9101,7 +9101,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectGetLSSRadiiNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m185
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsSphereHitNV extends Definition(
           "OpHitObjectIsSphereHitNV",
@@ -9113,7 +9113,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsSphereHitNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m186
+          "IdResultType IdResult IdRef"
         )
     case HitObjectIsLSSHitNV extends Definition(
           "OpHitObjectIsLSSHitNV",
@@ -9125,7 +9125,7 @@ object Instruction {
                 raw,
                 values => Instruction.HitObjectIsLSSHitNV(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m187
+          "IdResultType IdResult IdRef"
         )
     case RayQueryIsSphereHitNV extends Definition(
           "OpRayQueryIsSphereHitNV",
@@ -9143,7 +9143,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m188
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryIsLSSHitNV extends Definition(
           "OpRayQueryIsLSSHitNV",
@@ -9161,7 +9161,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m189
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupShuffleINTEL extends Definition(
           "OpSubgroupShuffleINTEL",
@@ -9179,7 +9179,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m190
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupShuffleDownINTEL extends Definition(
           "OpSubgroupShuffleDownINTEL",
@@ -9191,14 +9191,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupShuffleDownINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    current = values.required(2),
+                    next = values.required(3),
+                    delta = values.required(4)
                   )
               ),
-          InstructionMetadata2.m191
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupShuffleUpINTEL extends Definition(
           "OpSubgroupShuffleUpINTEL",
@@ -9210,14 +9210,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupShuffleUpINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    previous = values.required(2),
+                    current = values.required(3),
+                    delta = values.required(4)
                   )
               ),
-          InstructionMetadata2.m192
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupShuffleXorINTEL extends Definition(
           "OpSubgroupShuffleXorINTEL",
@@ -9235,7 +9235,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m193
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupBlockReadINTEL extends Definition(
           "OpSubgroupBlockReadINTEL",
@@ -9247,7 +9247,7 @@ object Instruction {
                 raw,
                 values => Instruction.SubgroupBlockReadINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m194
+          "IdResultType IdResult IdRef"
         )
     case SubgroupBlockWriteINTEL extends Definition(
           "OpSubgroupBlockWriteINTEL",
@@ -9259,7 +9259,7 @@ object Instruction {
                 raw,
                 values => Instruction.SubgroupBlockWriteINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata2.m195
+          "IdRef IdRef"
         )
     case SubgroupImageBlockReadINTEL extends Definition(
           "OpSubgroupImageBlockReadINTEL",
@@ -9277,7 +9277,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata2.m196
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupImageBlockWriteINTEL extends Definition(
           "OpSubgroupImageBlockWriteINTEL",
@@ -9290,7 +9290,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupImageBlockWriteINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata2.m197
+          "IdRef IdRef IdRef"
         )
     case SubgroupImageMediaBlockReadINTEL extends Definition(
           "OpSubgroupImageMediaBlockReadINTEL",
@@ -9302,15 +9302,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupImageMediaBlockReadINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    image = values.required(2),
+                    coordinate = values.required(3),
+                    width = values.required(4),
+                    height = values.required(5)
                   )
               ),
-          InstructionMetadata2.m198
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupImageMediaBlockWriteINTEL extends Definition(
           "OpSubgroupImageMediaBlockWriteINTEL",
@@ -9322,14 +9322,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupImageMediaBlockWriteINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    image = values.required(0),
+                    coordinate = values.required(1),
+                    width = values.required(2),
+                    height = values.required(3),
+                    data = values.required(4)
                   )
               ),
-          InstructionMetadata2.m199
+          "IdRef IdRef IdRef IdRef IdRef"
         )
     case UCountLeadingZerosINTEL extends Definition(
           "OpUCountLeadingZerosINTEL",
@@ -9342,7 +9342,7 @@ object Instruction {
                 values =>
                   Instruction.UCountLeadingZerosINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata3.m0
+          "IdResultType IdResult IdRef"
         )
     case UCountTrailingZerosINTEL extends Definition(
           "OpUCountTrailingZerosINTEL",
@@ -9355,7 +9355,7 @@ object Instruction {
                 values =>
                   Instruction.UCountTrailingZerosINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata3.m1
+          "IdResultType IdResult IdRef"
         )
     case AbsISubINTEL extends Definition(
           "OpAbsISubINTEL",
@@ -9373,7 +9373,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m2
+          "IdResultType IdResult IdRef IdRef"
         )
     case AbsUSubINTEL extends Definition(
           "OpAbsUSubINTEL",
@@ -9391,7 +9391,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m3
+          "IdResultType IdResult IdRef IdRef"
         )
     case IAddSatINTEL extends Definition(
           "OpIAddSatINTEL",
@@ -9409,7 +9409,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m4
+          "IdResultType IdResult IdRef IdRef"
         )
     case UAddSatINTEL extends Definition(
           "OpUAddSatINTEL",
@@ -9427,7 +9427,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m5
+          "IdResultType IdResult IdRef IdRef"
         )
     case IAverageINTEL extends Definition(
           "OpIAverageINTEL",
@@ -9445,7 +9445,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m6
+          "IdResultType IdResult IdRef IdRef"
         )
     case UAverageINTEL extends Definition(
           "OpUAverageINTEL",
@@ -9463,7 +9463,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m7
+          "IdResultType IdResult IdRef IdRef"
         )
     case IAverageRoundedINTEL extends Definition(
           "OpIAverageRoundedINTEL",
@@ -9481,7 +9481,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m8
+          "IdResultType IdResult IdRef IdRef"
         )
     case UAverageRoundedINTEL extends Definition(
           "OpUAverageRoundedINTEL",
@@ -9499,7 +9499,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m9
+          "IdResultType IdResult IdRef IdRef"
         )
     case ISubSatINTEL extends Definition(
           "OpISubSatINTEL",
@@ -9517,7 +9517,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m10
+          "IdResultType IdResult IdRef IdRef"
         )
     case USubSatINTEL extends Definition(
           "OpUSubSatINTEL",
@@ -9535,7 +9535,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m11
+          "IdResultType IdResult IdRef IdRef"
         )
     case IMul32x16INTEL extends Definition(
           "OpIMul32x16INTEL",
@@ -9553,7 +9553,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m12
+          "IdResultType IdResult IdRef IdRef"
         )
     case UMul32x16INTEL extends Definition(
           "OpUMul32x16INTEL",
@@ -9571,7 +9571,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m13
+          "IdResultType IdResult IdRef IdRef"
         )
     case ConstantFunctionPointerINTEL extends Definition(
           "OpConstantFunctionPointerINTEL",
@@ -9584,7 +9584,7 @@ object Instruction {
                 values =>
                   Instruction.ConstantFunctionPointerINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata3.m14
+          "IdResultType IdResult IdRef"
         )
     case FunctionPointerCallINTEL extends Definition(
           "OpFunctionPointerCallINTEL",
@@ -9597,7 +9597,7 @@ object Instruction {
                 values =>
                   Instruction.FunctionPointerCallINTEL(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata3.m15
+          "IdResultType IdResult IdRef*"
         )
     case AsmTargetINTEL extends Definition(
           "OpAsmTargetINTEL",
@@ -9609,7 +9609,7 @@ object Instruction {
                 raw,
                 values => Instruction.AsmTargetINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m16
+          "IdResult LiteralString"
         )
     case AsmINTEL extends Definition(
           "OpAsmINTEL",
@@ -9621,15 +9621,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AsmINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    asmType = values.required(2),
+                    target = values.required(3),
+                    asmInsts = values.required(4),
+                    constraints = values.required(5)
                   )
               ),
-          InstructionMetadata3.m17
+          "IdResultType IdResult IdRef IdRef LiteralString LiteralString"
         )
     case AsmCallINTEL extends Definition(
           "OpAsmCallINTEL",
@@ -9647,7 +9647,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata3.m18
+          "IdResultType IdResult IdRef IdRef*"
         )
     case AtomicFMinEXT extends Definition(
           "OpAtomicFMinEXT",
@@ -9659,15 +9659,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicFMinEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata3.m19
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AtomicFMaxEXT extends Definition(
           "OpAtomicFMaxEXT",
@@ -9679,15 +9679,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicFMaxEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata3.m20
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case AssumeTrueKHR extends Definition(
           "OpAssumeTrueKHR",
@@ -9695,7 +9695,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.AssumeTrueKHR(values.required(0))),
-          InstructionMetadata3.m21
+          "IdRef"
         )
     case ExpectKHR extends Definition(
           "OpExpectKHR",
@@ -9708,7 +9708,7 @@ object Instruction {
                 values =>
                   Instruction.ExpectKHR(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
-          InstructionMetadata3.m22
+          "IdResultType IdResult IdRef IdRef"
         )
     case DecorateString extends Definition(
           "OpDecorateString",
@@ -9720,7 +9720,7 @@ object Instruction {
                 raw,
                 values => Instruction.DecorateString(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m23
+          "IdRef Decoration"
         )
     case MemberDecorateString extends Definition(
           "OpMemberDecorateString",
@@ -9732,7 +9732,7 @@ object Instruction {
                 raw,
                 values => Instruction.MemberDecorateString(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata3.m24
+          "IdRef LiteralInteger Decoration"
         )
     case VmeImageINTEL extends Definition(
           "OpVmeImageINTEL",
@@ -9750,7 +9750,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m25
+          "IdResultType IdResult IdRef IdRef"
         )
     case TypeVmeImageINTEL extends Definition(
           "OpTypeVmeImageINTEL",
@@ -9762,7 +9762,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeVmeImageINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m26
+          "IdResult IdRef"
         )
     case TypeAvcImePayloadINTEL extends Definition(
           "OpTypeAvcImePayloadINTEL",
@@ -9774,7 +9774,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcImePayloadINTEL(values.required(0))
               ),
-          InstructionMetadata3.m27
+          "IdResult"
         )
     case TypeAvcRefPayloadINTEL extends Definition(
           "OpTypeAvcRefPayloadINTEL",
@@ -9786,7 +9786,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcRefPayloadINTEL(values.required(0))
               ),
-          InstructionMetadata3.m28
+          "IdResult"
         )
     case TypeAvcSicPayloadINTEL extends Definition(
           "OpTypeAvcSicPayloadINTEL",
@@ -9798,7 +9798,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcSicPayloadINTEL(values.required(0))
               ),
-          InstructionMetadata3.m29
+          "IdResult"
         )
     case TypeAvcMcePayloadINTEL extends Definition(
           "OpTypeAvcMcePayloadINTEL",
@@ -9810,7 +9810,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcMcePayloadINTEL(values.required(0))
               ),
-          InstructionMetadata3.m30
+          "IdResult"
         )
     case TypeAvcMceResultINTEL extends Definition(
           "OpTypeAvcMceResultINTEL",
@@ -9822,7 +9822,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcMceResultINTEL(values.required(0))
               ),
-          InstructionMetadata3.m31
+          "IdResult"
         )
     case TypeAvcImeResultINTEL extends Definition(
           "OpTypeAvcImeResultINTEL",
@@ -9834,7 +9834,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcImeResultINTEL(values.required(0))
               ),
-          InstructionMetadata3.m32
+          "IdResult"
         )
     case TypeAvcImeResultSingleReferenceStreamoutINTEL extends Definition(
           "OpTypeAvcImeResultSingleReferenceStreamoutINTEL",
@@ -9846,7 +9846,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcImeResultSingleReferenceStreamoutINTEL(values.required(0))
               ),
-          InstructionMetadata3.m33
+          "IdResult"
         )
     case TypeAvcImeResultDualReferenceStreamoutINTEL extends Definition(
           "OpTypeAvcImeResultDualReferenceStreamoutINTEL",
@@ -9858,7 +9858,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcImeResultDualReferenceStreamoutINTEL(values.required(0))
               ),
-          InstructionMetadata3.m34
+          "IdResult"
         )
     case TypeAvcImeSingleReferenceStreaminINTEL extends Definition(
           "OpTypeAvcImeSingleReferenceStreaminINTEL",
@@ -9870,7 +9870,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcImeSingleReferenceStreaminINTEL(values.required(0))
               ),
-          InstructionMetadata3.m35
+          "IdResult"
         )
     case TypeAvcImeDualReferenceStreaminINTEL extends Definition(
           "OpTypeAvcImeDualReferenceStreaminINTEL",
@@ -9882,7 +9882,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcImeDualReferenceStreaminINTEL(values.required(0))
               ),
-          InstructionMetadata3.m36
+          "IdResult"
         )
     case TypeAvcRefResultINTEL extends Definition(
           "OpTypeAvcRefResultINTEL",
@@ -9894,7 +9894,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcRefResultINTEL(values.required(0))
               ),
-          InstructionMetadata3.m37
+          "IdResult"
         )
     case TypeAvcSicResultINTEL extends Definition(
           "OpTypeAvcSicResultINTEL",
@@ -9906,7 +9906,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeAvcSicResultINTEL(values.required(0))
               ),
-          InstructionMetadata3.m38
+          "IdResult"
         )
     case SubgroupAvcMceGetDefaultInterBaseMultiReferencePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultInterBaseMultiReferencePenaltyINTEL",
@@ -9924,7 +9924,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m39
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceSetInterBaseMultiReferencePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceSetInterBaseMultiReferencePenaltyINTEL",
@@ -9942,7 +9942,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m40
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultInterShapePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultInterShapePenaltyINTEL",
@@ -9960,7 +9960,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m41
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceSetInterShapePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceSetInterShapePenaltyINTEL",
@@ -9978,7 +9978,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m42
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultInterDirectionPenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultInterDirectionPenaltyINTEL",
@@ -9996,7 +9996,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m43
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceSetInterDirectionPenaltyINTEL extends Definition(
           "OpSubgroupAvcMceSetInterDirectionPenaltyINTEL",
@@ -10014,7 +10014,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m44
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultIntraLumaShapePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultIntraLumaShapePenaltyINTEL",
@@ -10032,7 +10032,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m45
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultInterMotionVectorCostTableINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultInterMotionVectorCostTableINTEL",
@@ -10050,7 +10050,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m46
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultHighPenaltyCostTableINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultHighPenaltyCostTableINTEL",
@@ -10063,7 +10063,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultHighPenaltyCostTableINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m47
+          "IdResultType IdResult"
         )
     case SubgroupAvcMceGetDefaultMediumPenaltyCostTableINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultMediumPenaltyCostTableINTEL",
@@ -10079,7 +10079,7 @@ object Instruction {
                     values.required(1)
                   )
               ),
-          InstructionMetadata3.m48
+          "IdResultType IdResult"
         )
     case SubgroupAvcMceGetDefaultLowPenaltyCostTableINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultLowPenaltyCostTableINTEL",
@@ -10092,7 +10092,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultLowPenaltyCostTableINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m49
+          "IdResultType IdResult"
         )
     case SubgroupAvcMceSetMotionVectorCostFunctionINTEL extends Definition(
           "OpSubgroupAvcMceSetMotionVectorCostFunctionINTEL",
@@ -10104,15 +10104,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcMceSetMotionVectorCostFunctionINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    packedCostCenterDelta = values.required(2),
+                    packedCostTable = values.required(3),
+                    costPrecision = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m50
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultIntraLumaModePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultIntraLumaModePenaltyINTEL",
@@ -10130,7 +10130,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m51
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceGetDefaultNonDcLumaIntraPenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultNonDcLumaIntraPenaltyINTEL",
@@ -10143,7 +10143,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultNonDcLumaIntraPenaltyINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m52
+          "IdResultType IdResult"
         )
     case SubgroupAvcMceGetDefaultIntraChromaModeBasePenaltyINTEL extends Definition(
           "OpSubgroupAvcMceGetDefaultIntraChromaModeBasePenaltyINTEL",
@@ -10159,7 +10159,7 @@ object Instruction {
                     values.required(1)
                   )
               ),
-          InstructionMetadata3.m53
+          "IdResultType IdResult"
         )
     case SubgroupAvcMceSetAcOnlyHaarINTEL extends Definition(
           "OpSubgroupAvcMceSetAcOnlyHaarINTEL",
@@ -10176,7 +10176,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m54
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceSetSourceInterlacedFieldPolarityINTEL extends Definition(
           "OpSubgroupAvcMceSetSourceInterlacedFieldPolarityINTEL",
@@ -10194,7 +10194,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m55
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceSetSingleReferenceInterlacedFieldPolarityINTEL extends Definition(
           "OpSubgroupAvcMceSetSingleReferenceInterlacedFieldPolarityINTEL",
@@ -10212,7 +10212,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m56
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcMceSetDualReferenceInterlacedFieldPolaritiesINTEL extends Definition(
           "OpSubgroupAvcMceSetDualReferenceInterlacedFieldPolaritiesINTEL",
@@ -10224,14 +10224,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcMceSetDualReferenceInterlacedFieldPolaritiesINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    forwardReferenceFieldPolarity = values.required(2),
+                    backwardReferenceFieldPolarity = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m57
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcMceConvertToImePayloadINTEL extends Definition(
           "OpSubgroupAvcMceConvertToImePayloadINTEL",
@@ -10248,7 +10248,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m58
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceConvertToImeResultINTEL extends Definition(
           "OpSubgroupAvcMceConvertToImeResultINTEL",
@@ -10265,7 +10265,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m59
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceConvertToRefPayloadINTEL extends Definition(
           "OpSubgroupAvcMceConvertToRefPayloadINTEL",
@@ -10282,7 +10282,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m60
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceConvertToRefResultINTEL extends Definition(
           "OpSubgroupAvcMceConvertToRefResultINTEL",
@@ -10299,7 +10299,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m61
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceConvertToSicPayloadINTEL extends Definition(
           "OpSubgroupAvcMceConvertToSicPayloadINTEL",
@@ -10316,7 +10316,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m62
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceConvertToSicResultINTEL extends Definition(
           "OpSubgroupAvcMceConvertToSicResultINTEL",
@@ -10333,7 +10333,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m63
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetMotionVectorsINTEL extends Definition(
           "OpSubgroupAvcMceGetMotionVectorsINTEL",
@@ -10350,7 +10350,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m64
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterDistortionsINTEL extends Definition(
           "OpSubgroupAvcMceGetInterDistortionsINTEL",
@@ -10367,7 +10367,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m65
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetBestInterDistortionsINTEL extends Definition(
           "OpSubgroupAvcMceGetBestInterDistortionsINTEL",
@@ -10384,7 +10384,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m66
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterMajorShapeINTEL extends Definition(
           "OpSubgroupAvcMceGetInterMajorShapeINTEL",
@@ -10401,7 +10401,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m67
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterMinorShapeINTEL extends Definition(
           "OpSubgroupAvcMceGetInterMinorShapeINTEL",
@@ -10418,7 +10418,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m68
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterDirectionsINTEL extends Definition(
           "OpSubgroupAvcMceGetInterDirectionsINTEL",
@@ -10435,7 +10435,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m69
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterMotionVectorCountINTEL extends Definition(
           "OpSubgroupAvcMceGetInterMotionVectorCountINTEL",
@@ -10452,7 +10452,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m70
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterReferenceIdsINTEL extends Definition(
           "OpSubgroupAvcMceGetInterReferenceIdsINTEL",
@@ -10469,7 +10469,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m71
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcMceGetInterReferenceInterlacedFieldPolaritiesINTEL extends Definition(
           "OpSubgroupAvcMceGetInterReferenceInterlacedFieldPolaritiesINTEL",
@@ -10481,14 +10481,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcMceGetInterReferenceInterlacedFieldPolaritiesINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    packedReferenceIds = values.required(2),
+                    packedReferenceParameterFieldPolarities = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m72
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeInitializeINTEL extends Definition(
           "OpSubgroupAvcImeInitializeINTEL",
@@ -10500,14 +10500,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeInitializeINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcCoord = values.required(2),
+                    partitionMask = values.required(3),
+                    sADAdjustment = values.required(4)
                   )
               ),
-          InstructionMetadata3.m73
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeSetSingleReferenceINTEL extends Definition(
           "OpSubgroupAvcImeSetSingleReferenceINTEL",
@@ -10519,14 +10519,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeSetSingleReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    refOffset = values.required(2),
+                    searchWindowConfig = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m74
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeSetDualReferenceINTEL extends Definition(
           "OpSubgroupAvcImeSetDualReferenceINTEL",
@@ -10538,15 +10538,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeSetDualReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    fwdRefOffset = values.required(2),
+                    bwdRefOffset = values.required(3),
+                    searchWindowConfig = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m75
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeRefWindowSizeINTEL extends Definition(
           "OpSubgroupAvcImeRefWindowSizeINTEL",
@@ -10564,7 +10564,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m76
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeAdjustRefOffsetINTEL extends Definition(
           "OpSubgroupAvcImeAdjustRefOffsetINTEL",
@@ -10576,15 +10576,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeAdjustRefOffsetINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    refOffset = values.required(2),
+                    srcCoord = values.required(3),
+                    refWindowSize = values.required(4),
+                    imageSize = values.required(5)
                   )
               ),
-          InstructionMetadata3.m77
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeConvertToMcePayloadINTEL extends Definition(
           "OpSubgroupAvcImeConvertToMcePayloadINTEL",
@@ -10601,7 +10601,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m78
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeSetMaxMotionVectorCountINTEL extends Definition(
           "OpSubgroupAvcImeSetMaxMotionVectorCountINTEL",
@@ -10619,7 +10619,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m79
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeSetUnidirectionalMixDisableINTEL extends Definition(
           "OpSubgroupAvcImeSetUnidirectionalMixDisableINTEL",
@@ -10636,7 +10636,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m80
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeSetEarlySearchTerminationThresholdINTEL extends Definition(
           "OpSubgroupAvcImeSetEarlySearchTerminationThresholdINTEL",
@@ -10654,7 +10654,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m81
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeSetWeightedSadINTEL extends Definition(
           "OpSubgroupAvcImeSetWeightedSadINTEL",
@@ -10672,7 +10672,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m82
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithSingleReferenceINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithSingleReferenceINTEL",
@@ -10684,14 +10684,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    refImage = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m83
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithDualReferenceINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithDualReferenceINTEL",
@@ -10703,15 +10703,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    fwdRefImage = values.required(3),
+                    bwdRefImage = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m84
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithSingleReferenceStreaminINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithSingleReferenceStreaminINTEL",
@@ -10723,15 +10723,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceStreaminINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    refImage = values.required(3),
+                    payload = values.required(4),
+                    streaminComponents = values.required(5)
                   )
               ),
-          InstructionMetadata3.m85
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithDualReferenceStreaminINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithDualReferenceStreaminINTEL",
@@ -10743,16 +10743,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceStreaminINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    fwdRefImage = values.required(3),
+                    bwdRefImage = values.required(4),
+                    payload = values.required(5),
+                    streaminComponents = values.required(6)
                   )
               ),
-          InstructionMetadata3.m86
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithSingleReferenceStreamoutINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithSingleReferenceStreamoutINTEL",
@@ -10764,14 +10764,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceStreamoutINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    refImage = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m87
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithDualReferenceStreamoutINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithDualReferenceStreamoutINTEL",
@@ -10783,15 +10783,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceStreamoutINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    fwdRefImage = values.required(3),
+                    bwdRefImage = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m88
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithSingleReferenceStreaminoutINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithSingleReferenceStreaminoutINTEL",
@@ -10803,15 +10803,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceStreaminoutINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    refImage = values.required(3),
+                    payload = values.required(4),
+                    streaminComponents = values.required(5)
                   )
               ),
-          InstructionMetadata3.m89
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeEvaluateWithDualReferenceStreaminoutINTEL extends Definition(
           "OpSubgroupAvcImeEvaluateWithDualReferenceStreaminoutINTEL",
@@ -10823,16 +10823,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceStreaminoutINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    fwdRefImage = values.required(3),
+                    bwdRefImage = values.required(4),
+                    payload = values.required(5),
+                    streaminComponents = values.required(6)
                   )
               ),
-          InstructionMetadata3.m90
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcImeConvertToMceResultINTEL extends Definition(
           "OpSubgroupAvcImeConvertToMceResultINTEL",
@@ -10849,7 +10849,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m91
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeGetSingleReferenceStreaminINTEL extends Definition(
           "OpSubgroupAvcImeGetSingleReferenceStreaminINTEL",
@@ -10866,7 +10866,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m92
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeGetDualReferenceStreaminINTEL extends Definition(
           "OpSubgroupAvcImeGetDualReferenceStreaminINTEL",
@@ -10883,7 +10883,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m93
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeStripSingleReferenceStreamoutINTEL extends Definition(
           "OpSubgroupAvcImeStripSingleReferenceStreamoutINTEL",
@@ -10900,7 +10900,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m94
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeStripDualReferenceStreamoutINTEL extends Definition(
           "OpSubgroupAvcImeStripDualReferenceStreamoutINTEL",
@@ -10917,7 +10917,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m95
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeGetStreamoutSingleReferenceMajorShapeMotionVectorsINTEL extends Definition(
           "OpSubgroupAvcImeGetStreamoutSingleReferenceMajorShapeMotionVectorsINTEL",
@@ -10935,7 +10935,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m96
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeGetStreamoutSingleReferenceMajorShapeDistortionsINTEL extends Definition(
           "OpSubgroupAvcImeGetStreamoutSingleReferenceMajorShapeDistortionsINTEL",
@@ -10953,7 +10953,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m97
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeGetStreamoutSingleReferenceMajorShapeReferenceIdsINTEL extends Definition(
           "OpSubgroupAvcImeGetStreamoutSingleReferenceMajorShapeReferenceIdsINTEL",
@@ -10971,7 +10971,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m98
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeGetStreamoutDualReferenceMajorShapeMotionVectorsINTEL extends Definition(
           "OpSubgroupAvcImeGetStreamoutDualReferenceMajorShapeMotionVectorsINTEL",
@@ -10983,14 +10983,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutDualReferenceMajorShapeMotionVectorsINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    payload = values.required(2),
+                    majorShape = values.required(3),
+                    direction = values.required(4)
                   )
               ),
-          InstructionMetadata3.m99
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeGetStreamoutDualReferenceMajorShapeDistortionsINTEL extends Definition(
           "OpSubgroupAvcImeGetStreamoutDualReferenceMajorShapeDistortionsINTEL",
@@ -11002,14 +11002,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutDualReferenceMajorShapeDistortionsINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    payload = values.required(2),
+                    majorShape = values.required(3),
+                    direction = values.required(4)
                   )
               ),
-          InstructionMetadata3.m100
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeGetStreamoutDualReferenceMajorShapeReferenceIdsINTEL extends Definition(
           "OpSubgroupAvcImeGetStreamoutDualReferenceMajorShapeReferenceIdsINTEL",
@@ -11021,14 +11021,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutDualReferenceMajorShapeReferenceIdsINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    payload = values.required(2),
+                    majorShape = values.required(3),
+                    direction = values.required(4)
                   )
               ),
-          InstructionMetadata3.m101
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcImeGetBorderReachedINTEL extends Definition(
           "OpSubgroupAvcImeGetBorderReachedINTEL",
@@ -11046,7 +11046,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m102
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcImeGetTruncatedSearchIndicationINTEL extends Definition(
           "OpSubgroupAvcImeGetTruncatedSearchIndicationINTEL",
@@ -11063,7 +11063,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m103
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeGetUnidirectionalEarlySearchTerminationINTEL extends Definition(
           "OpSubgroupAvcImeGetUnidirectionalEarlySearchTerminationINTEL",
@@ -11080,7 +11080,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m104
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeGetWeightingPatternMinimumMotionVectorINTEL extends Definition(
           "OpSubgroupAvcImeGetWeightingPatternMinimumMotionVectorINTEL",
@@ -11097,7 +11097,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m105
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcImeGetWeightingPatternMinimumDistortionINTEL extends Definition(
           "OpSubgroupAvcImeGetWeightingPatternMinimumDistortionINTEL",
@@ -11114,7 +11114,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m106
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcFmeInitializeINTEL extends Definition(
           "OpSubgroupAvcFmeInitializeINTEL",
@@ -11126,18 +11126,18 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcFmeInitializeINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcCoord = values.required(2),
+                    motionVectors = values.required(3),
+                    majorShapes = values.required(4),
+                    minorShapes = values.required(5),
+                    direction = values.required(6),
+                    pixelResolution = values.required(7),
+                    sadAdjustment = values.required(8)
                   )
               ),
-          InstructionMetadata3.m107
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcBmeInitializeINTEL extends Definition(
           "OpSubgroupAvcBmeInitializeINTEL",
@@ -11149,19 +11149,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcBmeInitializeINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcCoord = values.required(2),
+                    motionVectors = values.required(3),
+                    majorShapes = values.required(4),
+                    minorShapes = values.required(5),
+                    direction = values.required(6),
+                    pixelResolution = values.required(7),
+                    bidirectionalWeight = values.required(8),
+                    sadAdjustment = values.required(9)
                   )
               ),
-          InstructionMetadata3.m108
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcRefConvertToMcePayloadINTEL extends Definition(
           "OpSubgroupAvcRefConvertToMcePayloadINTEL",
@@ -11178,7 +11178,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m109
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcRefSetBidirectionalMixDisableINTEL extends Definition(
           "OpSubgroupAvcRefSetBidirectionalMixDisableINTEL",
@@ -11195,7 +11195,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m110
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcRefSetBilinearFilterEnableINTEL extends Definition(
           "OpSubgroupAvcRefSetBilinearFilterEnableINTEL",
@@ -11212,7 +11212,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m111
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcRefEvaluateWithSingleReferenceINTEL extends Definition(
           "OpSubgroupAvcRefEvaluateWithSingleReferenceINTEL",
@@ -11224,14 +11224,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithSingleReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    refImage = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m112
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcRefEvaluateWithDualReferenceINTEL extends Definition(
           "OpSubgroupAvcRefEvaluateWithDualReferenceINTEL",
@@ -11243,15 +11243,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithDualReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    fwdRefImage = values.required(3),
+                    bwdRefImage = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m113
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcRefEvaluateWithMultiReferenceINTEL extends Definition(
           "OpSubgroupAvcRefEvaluateWithMultiReferenceINTEL",
@@ -11263,14 +11263,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithMultiReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    packedReferenceIds = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m114
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcRefEvaluateWithMultiReferenceInterlacedINTEL extends Definition(
           "OpSubgroupAvcRefEvaluateWithMultiReferenceInterlacedINTEL",
@@ -11282,15 +11282,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithMultiReferenceInterlacedINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    packedReferenceIds = values.required(3),
+                    packedReferenceFieldPolarities = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m115
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcRefConvertToMceResultINTEL extends Definition(
           "OpSubgroupAvcRefConvertToMceResultINTEL",
@@ -11307,7 +11307,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m116
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicInitializeINTEL extends Definition(
           "OpSubgroupAvcSicInitializeINTEL",
@@ -11320,7 +11320,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupAvcSicInitializeINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata3.m117
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicConfigureSkcINTEL extends Definition(
           "OpSubgroupAvcSicConfigureSkcINTEL",
@@ -11332,17 +11332,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicConfigureSkcINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    skipBlockPartitionType = values.required(2),
+                    skipMotionVectorMask = values.required(3),
+                    motionVectors = values.required(4),
+                    bidirectionalWeight = values.required(5),
+                    sadAdjustment = values.required(6),
+                    payload = values.required(7)
                   )
               ),
-          InstructionMetadata3.m118
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcSicConfigureIpeLumaINTEL extends Definition(
           "OpSubgroupAvcSicConfigureIpeLumaINTEL",
@@ -11354,19 +11354,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicConfigureIpeLumaINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    lumaIntraPartitionMask = values.required(2),
+                    intraNeighbourAvailabilty = values.required(3),
+                    leftEdgeLumaPixels = values.required(4),
+                    upperLeftCornerLumaPixel = values.required(5),
+                    upperEdgeLumaPixels = values.required(6),
+                    upperRightEdgeLumaPixels = values.required(7),
+                    sadAdjustment = values.required(8),
+                    payload = values.required(9)
                   )
               ),
-          InstructionMetadata3.m119
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcSicConfigureIpeLumaChromaINTEL extends Definition(
           "OpSubgroupAvcSicConfigureIpeLumaChromaINTEL",
@@ -11378,22 +11378,22 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicConfigureIpeLumaChromaINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9),
-                    values.required(10),
-                    values.required(11),
-                    values.required(12)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    lumaIntraPartitionMask = values.required(2),
+                    intraNeighbourAvailabilty = values.required(3),
+                    leftEdgeLumaPixels = values.required(4),
+                    upperLeftCornerLumaPixel = values.required(5),
+                    upperEdgeLumaPixels = values.required(6),
+                    upperRightEdgeLumaPixels = values.required(7),
+                    leftEdgeChromaPixels = values.required(8),
+                    upperLeftCornerChromaPixel = values.required(9),
+                    upperEdgeChromaPixels = values.required(10),
+                    sadAdjustment = values.required(11),
+                    payload = values.required(12)
                   )
               ),
-          InstructionMetadata3.m120
+          "IdResultType IdResult IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcSicGetMotionVectorMaskINTEL extends Definition(
           "OpSubgroupAvcSicGetMotionVectorMaskINTEL",
@@ -11411,7 +11411,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m121
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcSicConvertToMcePayloadINTEL extends Definition(
           "OpSubgroupAvcSicConvertToMcePayloadINTEL",
@@ -11428,7 +11428,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m122
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicSetIntraLumaShapePenaltyINTEL extends Definition(
           "OpSubgroupAvcSicSetIntraLumaShapePenaltyINTEL",
@@ -11446,7 +11446,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m123
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcSicSetIntraLumaModeCostFunctionINTEL extends Definition(
           "OpSubgroupAvcSicSetIntraLumaModeCostFunctionINTEL",
@@ -11458,15 +11458,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicSetIntraLumaModeCostFunctionINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    lumaModePenalty = values.required(2),
+                    lumaPackedNeighborModes = values.required(3),
+                    lumaPackedNonDcPenalty = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m124
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcSicSetIntraChromaModeCostFunctionINTEL extends Definition(
           "OpSubgroupAvcSicSetIntraChromaModeCostFunctionINTEL",
@@ -11484,7 +11484,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m125
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcSicSetBilinearFilterEnableINTEL extends Definition(
           "OpSubgroupAvcSicSetBilinearFilterEnableINTEL",
@@ -11501,7 +11501,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m126
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicSetSkcForwardTransformEnableINTEL extends Definition(
           "OpSubgroupAvcSicSetSkcForwardTransformEnableINTEL",
@@ -11519,7 +11519,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m127
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcSicSetBlockBasedRawSkipSadINTEL extends Definition(
           "OpSubgroupAvcSicSetBlockBasedRawSkipSadINTEL",
@@ -11537,7 +11537,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m128
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcSicEvaluateIpeINTEL extends Definition(
           "OpSubgroupAvcSicEvaluateIpeINTEL",
@@ -11555,7 +11555,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata3.m129
+          "IdResultType IdResult IdRef IdRef"
         )
     case SubgroupAvcSicEvaluateWithSingleReferenceINTEL extends Definition(
           "OpSubgroupAvcSicEvaluateWithSingleReferenceINTEL",
@@ -11567,14 +11567,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithSingleReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    refImage = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m130
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcSicEvaluateWithDualReferenceINTEL extends Definition(
           "OpSubgroupAvcSicEvaluateWithDualReferenceINTEL",
@@ -11586,15 +11586,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithDualReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    fwdRefImage = values.required(3),
+                    bwdRefImage = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m131
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcSicEvaluateWithMultiReferenceINTEL extends Definition(
           "OpSubgroupAvcSicEvaluateWithMultiReferenceINTEL",
@@ -11606,14 +11606,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithMultiReferenceINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    packedReferenceIds = values.required(3),
+                    payload = values.required(4)
                   )
               ),
-          InstructionMetadata3.m132
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case SubgroupAvcSicEvaluateWithMultiReferenceInterlacedINTEL extends Definition(
           "OpSubgroupAvcSicEvaluateWithMultiReferenceInterlacedINTEL",
@@ -11625,15 +11625,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithMultiReferenceInterlacedINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    srcImage = values.required(2),
+                    packedReferenceIds = values.required(3),
+                    packedReferenceFieldPolarities = values.required(4),
+                    payload = values.required(5)
                   )
               ),
-          InstructionMetadata3.m133
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case SubgroupAvcSicConvertToMceResultINTEL extends Definition(
           "OpSubgroupAvcSicConvertToMceResultINTEL",
@@ -11650,7 +11650,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m134
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetIpeLumaShapeINTEL extends Definition(
           "OpSubgroupAvcSicGetIpeLumaShapeINTEL",
@@ -11667,7 +11667,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m135
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetBestIpeLumaDistortionINTEL extends Definition(
           "OpSubgroupAvcSicGetBestIpeLumaDistortionINTEL",
@@ -11684,7 +11684,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m136
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetBestIpeChromaDistortionINTEL extends Definition(
           "OpSubgroupAvcSicGetBestIpeChromaDistortionINTEL",
@@ -11701,7 +11701,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m137
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetPackedIpeLumaModesINTEL extends Definition(
           "OpSubgroupAvcSicGetPackedIpeLumaModesINTEL",
@@ -11718,7 +11718,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m138
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetIpeChromaModeINTEL extends Definition(
           "OpSubgroupAvcSicGetIpeChromaModeINTEL",
@@ -11735,7 +11735,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m139
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetPackedSkcLumaCountThresholdINTEL extends Definition(
           "OpSubgroupAvcSicGetPackedSkcLumaCountThresholdINTEL",
@@ -11752,7 +11752,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m140
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetPackedSkcLumaSumThresholdINTEL extends Definition(
           "OpSubgroupAvcSicGetPackedSkcLumaSumThresholdINTEL",
@@ -11769,7 +11769,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m141
+          "IdResultType IdResult IdRef"
         )
     case SubgroupAvcSicGetInterRawSadsINTEL extends Definition(
           "OpSubgroupAvcSicGetInterRawSadsINTEL",
@@ -11786,7 +11786,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata3.m142
+          "IdResultType IdResult IdRef"
         )
     case VariableLengthArrayINTEL extends Definition(
           "OpVariableLengthArrayINTEL",
@@ -11799,7 +11799,7 @@ object Instruction {
                 values =>
                   Instruction.VariableLengthArrayINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata3.m143
+          "IdResultType IdResult IdRef"
         )
     case SaveMemoryINTEL extends Definition(
           "OpSaveMemoryINTEL",
@@ -11811,7 +11811,7 @@ object Instruction {
                 raw,
                 values => Instruction.SaveMemoryINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata3.m144
+          "IdResultType IdResult"
         )
     case RestoreMemoryINTEL extends Definition(
           "OpRestoreMemoryINTEL",
@@ -11823,7 +11823,7 @@ object Instruction {
                 raw,
                 values => Instruction.RestoreMemoryINTEL(values.required(0))
               ),
-          InstructionMetadata3.m145
+          "IdRef"
         )
     case ArbitraryFloatSinCosPiALTERA extends Definition(
           "OpArbitraryFloatSinCosPiALTERA",
@@ -11835,17 +11835,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatSinCosPiALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mResult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    roundingAccuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m146
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatCastALTERA extends Definition(
           "OpArbitraryFloatCastALTERA",
@@ -11857,17 +11857,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatCastALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m147
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatCastFromIntALTERA extends Definition(
           "OpArbitraryFloatCastFromIntALTERA",
@@ -11879,17 +11879,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatCastFromIntALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    mresult = values.required(3),
+                    fromSign = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m148
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatCastToIntALTERA extends Definition(
           "OpArbitraryFloatCastToIntALTERA",
@@ -11901,17 +11901,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatCastToIntALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    toSign = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m149
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatAddALTERA extends Definition(
           "OpArbitraryFloatAddALTERA",
@@ -11923,19 +11923,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatAddALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mResult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m150
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatSubALTERA extends Definition(
           "OpArbitraryFloatSubALTERA",
@@ -11947,19 +11947,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatSubALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m151
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatMulALTERA extends Definition(
           "OpArbitraryFloatMulALTERA",
@@ -11971,19 +11971,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatMulALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m152
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatDivALTERA extends Definition(
           "OpArbitraryFloatDivALTERA",
@@ -11995,19 +11995,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatDivALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m153
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatGTALTERA extends Definition(
           "OpArbitraryFloatGTALTERA",
@@ -12019,15 +12019,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatGTALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5)
                   )
               ),
-          InstructionMetadata3.m154
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger"
         )
     case ArbitraryFloatGEALTERA extends Definition(
           "OpArbitraryFloatGEALTERA",
@@ -12039,15 +12039,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatGEALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5)
                   )
               ),
-          InstructionMetadata3.m155
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger"
         )
     case ArbitraryFloatLTALTERA extends Definition(
           "OpArbitraryFloatLTALTERA",
@@ -12059,15 +12059,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatLTALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5)
                   )
               ),
-          InstructionMetadata3.m156
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger"
         )
     case ArbitraryFloatLEALTERA extends Definition(
           "OpArbitraryFloatLEALTERA",
@@ -12079,15 +12079,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatLEALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5)
                   )
               ),
-          InstructionMetadata3.m157
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger"
         )
     case ArbitraryFloatEQALTERA extends Definition(
           "OpArbitraryFloatEQALTERA",
@@ -12099,15 +12099,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatEQALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5)
                   )
               ),
-          InstructionMetadata3.m158
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger"
         )
     case ArbitraryFloatRecipALTERA extends Definition(
           "OpArbitraryFloatRecipALTERA",
@@ -12119,17 +12119,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatRecipALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m159
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatRSqrtALTERA extends Definition(
           "OpArbitraryFloatRSqrtALTERA",
@@ -12141,17 +12141,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatRSqrtALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m160
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatCbrtALTERA extends Definition(
           "OpArbitraryFloatCbrtALTERA",
@@ -12163,17 +12163,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatCbrtALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m161
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatHypotALTERA extends Definition(
           "OpArbitraryFloatHypotALTERA",
@@ -12185,19 +12185,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatHypotALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m162
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatSqrtALTERA extends Definition(
           "OpArbitraryFloatSqrtALTERA",
@@ -12209,17 +12209,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatSqrtALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m163
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatLogINTEL extends Definition(
           "OpArbitraryFloatLogINTEL",
@@ -12231,17 +12231,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatLogINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m164
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatLog2INTEL extends Definition(
           "OpArbitraryFloatLog2INTEL",
@@ -12253,17 +12253,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatLog2INTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m165
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatLog10INTEL extends Definition(
           "OpArbitraryFloatLog10INTEL",
@@ -12275,17 +12275,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatLog10INTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m166
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatLog1pINTEL extends Definition(
           "OpArbitraryFloatLog1pINTEL",
@@ -12297,17 +12297,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatLog1pINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m167
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatExpINTEL extends Definition(
           "OpArbitraryFloatExpINTEL",
@@ -12319,17 +12319,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatExpINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m168
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatExp2INTEL extends Definition(
           "OpArbitraryFloatExp2INTEL",
@@ -12341,17 +12341,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatExp2INTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m169
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatExp10INTEL extends Definition(
           "OpArbitraryFloatExp10INTEL",
@@ -12363,17 +12363,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatExp10INTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m170
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatExpm1INTEL extends Definition(
           "OpArbitraryFloatExpm1INTEL",
@@ -12385,17 +12385,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatExpm1INTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m171
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatSinINTEL extends Definition(
           "OpArbitraryFloatSinINTEL",
@@ -12407,17 +12407,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatSinINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m172
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatCosINTEL extends Definition(
           "OpArbitraryFloatCosINTEL",
@@ -12429,17 +12429,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatCosINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m173
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatSinCosINTEL extends Definition(
           "OpArbitraryFloatSinCosINTEL",
@@ -12451,17 +12451,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatSinCosINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m174
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatSinPiINTEL extends Definition(
           "OpArbitraryFloatSinPiINTEL",
@@ -12473,17 +12473,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatSinPiINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m175
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatCosPiINTEL extends Definition(
           "OpArbitraryFloatCosPiINTEL",
@@ -12495,17 +12495,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatCosPiINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m176
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatASinINTEL extends Definition(
           "OpArbitraryFloatASinINTEL",
@@ -12517,17 +12517,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatASinINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m177
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatASinPiINTEL extends Definition(
           "OpArbitraryFloatASinPiINTEL",
@@ -12539,17 +12539,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatASinPiINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m178
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatACosINTEL extends Definition(
           "OpArbitraryFloatACosINTEL",
@@ -12561,17 +12561,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatACosINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    m1 = values.required(3),
+                    mout = values.required(4),
+                    enableSubnormals = values.required(5),
+                    roundingMode = values.required(6),
+                    roundingAccuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m179
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatACosPiINTEL extends Definition(
           "OpArbitraryFloatACosPiINTEL",
@@ -12583,17 +12583,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatACosPiINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m180
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatATanINTEL extends Definition(
           "OpArbitraryFloatATanINTEL",
@@ -12605,17 +12605,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatATanINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m181
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatATanPiINTEL extends Definition(
           "OpArbitraryFloatATanPiINTEL",
@@ -12627,17 +12627,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatATanPiINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    mresult = values.required(4),
+                    subnormal = values.required(5),
+                    rounding = values.required(6),
+                    accuracy = values.required(7)
                   )
               ),
-          InstructionMetadata3.m182
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatATan2INTEL extends Definition(
           "OpArbitraryFloatATan2INTEL",
@@ -12649,19 +12649,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatATan2INTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m183
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatPowINTEL extends Definition(
           "OpArbitraryFloatPowINTEL",
@@ -12673,19 +12673,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatPowINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m184
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatPowRINTEL extends Definition(
           "OpArbitraryFloatPowRINTEL",
@@ -12697,19 +12697,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatPowRINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    mb = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m185
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case ArbitraryFloatPowNINTEL extends Definition(
           "OpArbitraryFloatPowNINTEL",
@@ -12721,19 +12721,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ArbitraryFloatPowNINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    ma = values.required(3),
+                    b = values.required(4),
+                    signOfB = values.required(5),
+                    mresult = values.required(6),
+                    subnormal = values.required(7),
+                    rounding = values.required(8),
+                    accuracy = values.required(9)
                   )
               ),
-          InstructionMetadata3.m186
+          "IdResultType IdResult IdRef LiteralInteger IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case LoopControlINTEL extends Definition(
           "OpLoopControlINTEL",
@@ -12741,7 +12741,7 @@ object Instruction {
           definition =>
             raw =>
               Instruction.decodeDefinition(definition, raw, values => Instruction.LoopControlINTEL(values.repeated(0))),
-          InstructionMetadata3.m187
+          "LiteralInteger*"
         )
     case AliasDomainDeclINTEL extends Definition(
           "OpAliasDomainDeclINTEL",
@@ -12753,7 +12753,7 @@ object Instruction {
                 raw,
                 values => Instruction.AliasDomainDeclINTEL(values.required(0), values.optional(1))
               ),
-          InstructionMetadata3.m188
+          "IdResult IdRef?"
         )
     case AliasScopeDeclINTEL extends Definition(
           "OpAliasScopeDeclINTEL",
@@ -12765,7 +12765,7 @@ object Instruction {
                 raw,
                 values => Instruction.AliasScopeDeclINTEL(values.required(0), values.required(1), values.optional(2))
               ),
-          InstructionMetadata3.m189
+          "IdResult IdRef IdRef?"
         )
     case AliasScopeListDeclINTEL extends Definition(
           "OpAliasScopeListDeclINTEL",
@@ -12777,7 +12777,7 @@ object Instruction {
                 raw,
                 values => Instruction.AliasScopeListDeclINTEL(values.required(0), values.repeated(1))
               ),
-          InstructionMetadata3.m190
+          "IdResult IdRef*"
         )
     case FixedSqrtALTERA extends Definition(
           "OpFixedSqrtALTERA",
@@ -12789,17 +12789,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedSqrtALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m191
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedRecipALTERA extends Definition(
           "OpFixedRecipALTERA",
@@ -12811,17 +12811,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedRecipALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m192
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedRsqrtALTERA extends Definition(
           "OpFixedRsqrtALTERA",
@@ -12833,17 +12833,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedRsqrtALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m193
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedSinALTERA extends Definition(
           "OpFixedSinALTERA",
@@ -12855,17 +12855,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedSinALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m194
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedCosALTERA extends Definition(
           "OpFixedCosALTERA",
@@ -12877,17 +12877,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedCosALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m195
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedSinCosALTERA extends Definition(
           "OpFixedSinCosALTERA",
@@ -12899,17 +12899,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedSinCosALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m196
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedSinPiALTERA extends Definition(
           "OpFixedSinPiALTERA",
@@ -12921,17 +12921,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedSinPiALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m197
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedCosPiALTERA extends Definition(
           "OpFixedCosPiALTERA",
@@ -12943,17 +12943,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedCosPiALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m198
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedSinCosPiALTERA extends Definition(
           "OpFixedSinCosPiALTERA",
@@ -12965,17 +12965,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedSinCosPiALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata3.m199
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedLogALTERA extends Definition(
           "OpFixedLogALTERA",
@@ -12987,17 +12987,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedLogALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata4.m0
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case FixedExpALTERA extends Definition(
           "OpFixedExpALTERA",
@@ -13009,17 +13009,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FixedExpALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    input = values.required(2),
+                    s = values.required(3),
+                    i = values.required(4),
+                    rI = values.required(5),
+                    q = values.required(6),
+                    o = values.required(7)
                   )
               ),
-          InstructionMetadata4.m1
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case PtrCastToCrossWorkgroupALTERA extends Definition(
           "OpPtrCastToCrossWorkgroupALTERA",
@@ -13032,7 +13032,7 @@ object Instruction {
                 values =>
                   Instruction.PtrCastToCrossWorkgroupALTERA(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m2
+          "IdResultType IdResult IdRef"
         )
     case CrossWorkgroupCastToPtrALTERA extends Definition(
           "OpCrossWorkgroupCastToPtrALTERA",
@@ -13045,7 +13045,7 @@ object Instruction {
                 values =>
                   Instruction.CrossWorkgroupCastToPtrALTERA(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m3
+          "IdResultType IdResult IdRef"
         )
     case ReadPipeBlockingALTERA extends Definition(
           "OpReadPipeBlockingALTERA",
@@ -13063,7 +13063,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m4
+          "IdRef IdRef IdRef IdRef"
         )
     case WritePipeBlockingALTERA extends Definition(
           "OpWritePipeBlockingALTERA",
@@ -13081,7 +13081,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m5
+          "IdRef IdRef IdRef IdRef"
         )
     case FPGARegALTERA extends Definition(
           "OpFPGARegALTERA",
@@ -13093,7 +13093,7 @@ object Instruction {
                 raw,
                 values => Instruction.FPGARegALTERA(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m6
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetRayTMinKHR extends Definition(
           "OpRayQueryGetRayTMinKHR",
@@ -13105,7 +13105,7 @@ object Instruction {
                 raw,
                 values => Instruction.RayQueryGetRayTMinKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m7
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetRayFlagsKHR extends Definition(
           "OpRayQueryGetRayFlagsKHR",
@@ -13117,7 +13117,7 @@ object Instruction {
                 raw,
                 values => Instruction.RayQueryGetRayFlagsKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m8
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetIntersectionTKHR extends Definition(
           "OpRayQueryGetIntersectionTKHR",
@@ -13135,7 +13135,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m9
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionInstanceCustomIndexKHR extends Definition(
           "OpRayQueryGetIntersectionInstanceCustomIndexKHR",
@@ -13153,7 +13153,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m10
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionInstanceIdKHR extends Definition(
           "OpRayQueryGetIntersectionInstanceIdKHR",
@@ -13171,7 +13171,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m11
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR extends Definition(
           "OpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR",
@@ -13189,7 +13189,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m12
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionGeometryIndexKHR extends Definition(
           "OpRayQueryGetIntersectionGeometryIndexKHR",
@@ -13207,7 +13207,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m13
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionPrimitiveIndexKHR extends Definition(
           "OpRayQueryGetIntersectionPrimitiveIndexKHR",
@@ -13225,7 +13225,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m14
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionBarycentricsKHR extends Definition(
           "OpRayQueryGetIntersectionBarycentricsKHR",
@@ -13243,7 +13243,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m15
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionFrontFaceKHR extends Definition(
           "OpRayQueryGetIntersectionFrontFaceKHR",
@@ -13261,7 +13261,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m16
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionCandidateAABBOpaqueKHR extends Definition(
           "OpRayQueryGetIntersectionCandidateAABBOpaqueKHR",
@@ -13278,7 +13278,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata4.m17
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetIntersectionObjectRayDirectionKHR extends Definition(
           "OpRayQueryGetIntersectionObjectRayDirectionKHR",
@@ -13296,7 +13296,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m18
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionObjectRayOriginKHR extends Definition(
           "OpRayQueryGetIntersectionObjectRayOriginKHR",
@@ -13314,7 +13314,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m19
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetWorldRayDirectionKHR extends Definition(
           "OpRayQueryGetWorldRayDirectionKHR",
@@ -13331,7 +13331,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata4.m20
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetWorldRayOriginKHR extends Definition(
           "OpRayQueryGetWorldRayOriginKHR",
@@ -13344,7 +13344,7 @@ object Instruction {
                 values =>
                   Instruction.RayQueryGetWorldRayOriginKHR(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m21
+          "IdResultType IdResult IdRef"
         )
     case RayQueryGetIntersectionObjectToWorldKHR extends Definition(
           "OpRayQueryGetIntersectionObjectToWorldKHR",
@@ -13362,7 +13362,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m22
+          "IdResultType IdResult IdRef IdRef"
         )
     case RayQueryGetIntersectionWorldToObjectKHR extends Definition(
           "OpRayQueryGetIntersectionWorldToObjectKHR",
@@ -13380,7 +13380,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m23
+          "IdResultType IdResult IdRef IdRef"
         )
     case AtomicFAddEXT extends Definition(
           "OpAtomicFAddEXT",
@@ -13392,15 +13392,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.AtomicFAddEXT(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    memory = values.required(3),
+                    semantics = values.required(4),
+                    value = values.required(5)
                   )
               ),
-          InstructionMetadata4.m24
+          "IdResultType IdResult IdRef IdScope IdMemorySemantics IdRef"
         )
     case TypeBufferSurfaceINTEL extends Definition(
           "OpTypeBufferSurfaceINTEL",
@@ -13412,7 +13412,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeBufferSurfaceINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata4.m25
+          "IdResult AccessQualifier"
         )
     case TypeStructContinuedINTEL extends Definition(
           "OpTypeStructContinuedINTEL",
@@ -13424,7 +13424,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeStructContinuedINTEL(values.repeated(0))
               ),
-          InstructionMetadata4.m26
+          "IdRef*"
         )
     case ConstantCompositeContinuedINTEL extends Definition(
           "OpConstantCompositeContinuedINTEL",
@@ -13436,7 +13436,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConstantCompositeContinuedINTEL(values.repeated(0))
               ),
-          InstructionMetadata4.m27
+          "IdRef*"
         )
     case SpecConstantCompositeContinuedINTEL extends Definition(
           "OpSpecConstantCompositeContinuedINTEL",
@@ -13448,7 +13448,7 @@ object Instruction {
                 raw,
                 values => Instruction.SpecConstantCompositeContinuedINTEL(values.repeated(0))
               ),
-          InstructionMetadata4.m28
+          "IdRef*"
         )
     case CompositeConstructContinuedINTEL extends Definition(
           "OpCompositeConstructContinuedINTEL",
@@ -13460,7 +13460,7 @@ object Instruction {
                 raw,
                 values => Instruction.CompositeConstructContinuedINTEL(values.repeated(0))
               ),
-          InstructionMetadata4.m29
+          "IdRef*"
         )
     case ConvertFToBF16INTEL extends Definition(
           "OpConvertFToBF16INTEL",
@@ -13472,7 +13472,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertFToBF16INTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m30
+          "IdResultType IdResult IdRef"
         )
     case ConvertBF16ToFINTEL extends Definition(
           "OpConvertBF16ToFINTEL",
@@ -13484,7 +13484,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConvertBF16ToFINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m31
+          "IdResultType IdResult IdRef"
         )
     case ControlBarrierArriveEXT extends Definition(
           "OpControlBarrierArriveEXT",
@@ -13497,7 +13497,7 @@ object Instruction {
                 values =>
                   Instruction.ControlBarrierArriveEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m32
+          "IdScope IdScope IdMemorySemantics"
         )
     case ControlBarrierWaitEXT extends Definition(
           "OpControlBarrierWaitEXT",
@@ -13509,7 +13509,7 @@ object Instruction {
                 raw,
                 values => Instruction.ControlBarrierWaitEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m33
+          "IdScope IdScope IdMemorySemantics"
         )
     case ArithmeticFenceEXT extends Definition(
           "OpArithmeticFenceEXT",
@@ -13521,7 +13521,7 @@ object Instruction {
                 raw,
                 values => Instruction.ArithmeticFenceEXT(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m34
+          "IdResultType IdResult IdRef"
         )
     case TaskSequenceCreateALTERA extends Definition(
           "OpTaskSequenceCreateALTERA",
@@ -13533,16 +13533,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.TaskSequenceCreateALTERA(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    function = values.required(2),
+                    pipelined = values.required(3),
+                    useStallEnableClusters = values.required(4),
+                    getCapacity = values.required(5),
+                    asyncCapacity = values.required(6)
                   )
               ),
-          InstructionMetadata4.m35
+          "IdResultType IdResult IdRef LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case TaskSequenceAsyncALTERA extends Definition(
           "OpTaskSequenceAsyncALTERA",
@@ -13554,7 +13554,7 @@ object Instruction {
                 raw,
                 values => Instruction.TaskSequenceAsyncALTERA(values.required(0), values.repeated(1))
               ),
-          InstructionMetadata4.m36
+          "IdRef IdRef*"
         )
     case TaskSequenceGetALTERA extends Definition(
           "OpTaskSequenceGetALTERA",
@@ -13566,7 +13566,7 @@ object Instruction {
                 raw,
                 values => Instruction.TaskSequenceGetALTERA(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m37
+          "IdResultType IdResult IdRef"
         )
     case TaskSequenceReleaseALTERA extends Definition(
           "OpTaskSequenceReleaseALTERA",
@@ -13578,7 +13578,7 @@ object Instruction {
                 raw,
                 values => Instruction.TaskSequenceReleaseALTERA(values.required(0))
               ),
-          InstructionMetadata4.m38
+          "IdRef"
         )
     case TypeTaskSequenceALTERA extends Definition(
           "OpTypeTaskSequenceALTERA",
@@ -13590,7 +13590,7 @@ object Instruction {
                 raw,
                 values => Instruction.TypeTaskSequenceALTERA(values.required(0))
               ),
-          InstructionMetadata4.m39
+          "IdResult"
         )
     case SubgroupBlockPrefetchINTEL extends Definition(
           "OpSubgroupBlockPrefetchINTEL",
@@ -13603,7 +13603,7 @@ object Instruction {
                 values =>
                   Instruction.SubgroupBlockPrefetchINTEL(values.required(0), values.required(1), values.optional(2))
               ),
-          InstructionMetadata4.m40
+          "IdRef IdRef MemoryAccess?"
         )
     case Subgroup2DBlockLoadINTEL extends Definition(
           "OpSubgroup2DBlockLoadINTEL",
@@ -13615,19 +13615,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.Subgroup2DBlockLoadINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    elementSize = values.required(0),
+                    blockWidth = values.required(1),
+                    blockHeight = values.required(2),
+                    blockCount = values.required(3),
+                    srcBasePointer = values.required(4),
+                    memoryWidth = values.required(5),
+                    memoryHeight = values.required(6),
+                    memoryPitch = values.required(7),
+                    coordinate = values.required(8),
+                    dstPointer = values.required(9)
                   )
               ),
-          InstructionMetadata4.m41
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case Subgroup2DBlockLoadTransformINTEL extends Definition(
           "OpSubgroup2DBlockLoadTransformINTEL",
@@ -13639,19 +13639,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.Subgroup2DBlockLoadTransformINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    elementSize = values.required(0),
+                    blockWidth = values.required(1),
+                    blockHeight = values.required(2),
+                    blockCount = values.required(3),
+                    srcBasePointer = values.required(4),
+                    memoryWidth = values.required(5),
+                    memoryHeight = values.required(6),
+                    memoryPitch = values.required(7),
+                    coordinate = values.required(8),
+                    dstPointer = values.required(9)
                   )
               ),
-          InstructionMetadata4.m42
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case Subgroup2DBlockLoadTransposeINTEL extends Definition(
           "OpSubgroup2DBlockLoadTransposeINTEL",
@@ -13663,19 +13663,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.Subgroup2DBlockLoadTransposeINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    elementSize = values.required(0),
+                    blockWidth = values.required(1),
+                    blockHeight = values.required(2),
+                    blockCount = values.required(3),
+                    srcBasePointer = values.required(4),
+                    memoryWidth = values.required(5),
+                    memoryHeight = values.required(6),
+                    memoryPitch = values.required(7),
+                    coordinate = values.required(8),
+                    dstPointer = values.required(9)
                   )
               ),
-          InstructionMetadata4.m43
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case Subgroup2DBlockPrefetchINTEL extends Definition(
           "OpSubgroup2DBlockPrefetchINTEL",
@@ -13687,18 +13687,18 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.Subgroup2DBlockPrefetchINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8)
+                    elementSize = values.required(0),
+                    blockWidth = values.required(1),
+                    blockHeight = values.required(2),
+                    blockCount = values.required(3),
+                    srcBasePointer = values.required(4),
+                    memoryWidth = values.required(5),
+                    memoryHeight = values.required(6),
+                    memoryPitch = values.required(7),
+                    coordinate = values.required(8)
                   )
               ),
-          InstructionMetadata4.m44
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case Subgroup2DBlockStoreINTEL extends Definition(
           "OpSubgroup2DBlockStoreINTEL",
@@ -13710,19 +13710,19 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.Subgroup2DBlockStoreINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.required(6),
-                    values.required(7),
-                    values.required(8),
-                    values.required(9)
+                    elementSize = values.required(0),
+                    blockWidth = values.required(1),
+                    blockHeight = values.required(2),
+                    blockCount = values.required(3),
+                    srcPointer = values.required(4),
+                    dstBasePointer = values.required(5),
+                    memoryWidth = values.required(6),
+                    memoryHeight = values.required(7),
+                    memoryPitch = values.required(8),
+                    coordinate = values.required(9)
                   )
               ),
-          InstructionMetadata4.m45
+          "IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef IdRef"
         )
     case SubgroupMatrixMultiplyAccumulateINTEL extends Definition(
           "OpSubgroupMatrixMultiplyAccumulateINTEL",
@@ -13734,16 +13734,16 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SubgroupMatrixMultiplyAccumulateINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5),
-                    values.optional(6)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    kDim = values.required(2),
+                    matrixA = values.required(3),
+                    matrixB = values.required(4),
+                    matrixC = values.required(5),
+                    matrixMultiplyAccumulateOperands = values.optional(6)
                   )
               ),
-          InstructionMetadata4.m46
+          "IdResultType IdResult IdRef IdRef IdRef IdRef MatrixMultiplyAccumulateOperands?"
         )
     case BitwiseFunctionINTEL extends Definition(
           "OpBitwiseFunctionINTEL",
@@ -13755,15 +13755,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.BitwiseFunctionINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    a = values.required(2),
+                    b = values.required(3),
+                    c = values.required(4),
+                    lUTIndex = values.required(5)
                   )
               ),
-          InstructionMetadata4.m47
+          "IdResultType IdResult IdRef IdRef IdRef IdRef"
         )
     case UntypedVariableLengthArrayINTEL extends Definition(
           "OpUntypedVariableLengthArrayINTEL",
@@ -13781,7 +13781,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m48
+          "IdResultType IdResult IdRef IdRef"
         )
     case ConditionalExtensionINTEL extends Definition(
           "OpConditionalExtensionINTEL",
@@ -13793,7 +13793,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConditionalExtensionINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata4.m49
+          "IdRef LiteralString"
         )
     case ConditionalEntryPointINTEL extends Definition(
           "OpConditionalEntryPointINTEL",
@@ -13805,14 +13805,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.ConditionalEntryPointINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.repeated(4)
+                    pred = values.required(0),
+                    executionModel = values.required(1),
+                    entryPoint = values.required(2),
+                    name = values.required(3),
+                    interface = values.repeated(4)
                   )
               ),
-          InstructionMetadata4.m50
+          "IdRef ExecutionModel IdRef LiteralString IdRef*"
         )
     case ConditionalCapabilityINTEL extends Definition(
           "OpConditionalCapabilityINTEL",
@@ -13824,7 +13824,7 @@ object Instruction {
                 raw,
                 values => Instruction.ConditionalCapabilityINTEL(values.required(0), values.required(1))
               ),
-          InstructionMetadata4.m51
+          "IdRef Capability"
         )
     case SpecConstantTargetINTEL extends Definition(
           "OpSpecConstantTargetINTEL",
@@ -13842,7 +13842,7 @@ object Instruction {
                     values.repeated(3)
                   )
               ),
-          InstructionMetadata4.m52
+          "IdResultType IdResult LiteralInteger LiteralInteger*"
         )
     case SpecConstantArchitectureINTEL extends Definition(
           "OpSpecConstantArchitectureINTEL",
@@ -13854,15 +13854,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.SpecConstantArchitectureINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    category = values.required(2),
+                    family = values.required(3),
+                    instructionOpcode = values.required(4),
+                    architecture = values.required(5)
                   )
               ),
-          InstructionMetadata4.m53
+          "IdResultType IdResult LiteralInteger LiteralInteger LiteralInteger LiteralInteger"
         )
     case SpecConstantCapabilitiesINTEL extends Definition(
           "OpSpecConstantCapabilitiesINTEL",
@@ -13875,7 +13875,7 @@ object Instruction {
                 values =>
                   Instruction.SpecConstantCapabilitiesINTEL(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata4.m54
+          "IdResultType IdResult Capability*"
         )
     case ConditionalCopyObjectINTEL extends Definition(
           "OpConditionalCopyObjectINTEL",
@@ -13888,7 +13888,7 @@ object Instruction {
                 values =>
                   Instruction.ConditionalCopyObjectINTEL(values.required(0), values.required(1), values.repeated(2))
               ),
-          InstructionMetadata4.m55
+          "IdResultType IdResult IdRef*"
         )
     case PredicatedLoadINTEL extends Definition(
           "OpPredicatedLoadINTEL",
@@ -13900,15 +13900,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.PredicatedLoadINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.optional(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    pointer = values.required(2),
+                    pred = values.required(3),
+                    defaultValue = values.required(4),
+                    mods = values.optional(5)
                   )
               ),
-          InstructionMetadata4.m56
+          "IdResultType IdResult IdRef IdRef IdRef MemoryAccess?"
         )
     case PredicatedStoreINTEL extends Definition(
           "OpPredicatedStoreINTEL",
@@ -13926,7 +13926,7 @@ object Instruction {
                     values.optional(3)
                   )
               ),
-          InstructionMetadata4.m57
+          "IdRef IdRef IdRef MemoryAccess?"
         )
     case GroupIMulKHR extends Definition(
           "OpGroupIMulKHR",
@@ -13938,14 +13938,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupIMulKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m58
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupFMulKHR extends Definition(
           "OpGroupFMulKHR",
@@ -13957,14 +13957,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupFMulKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m59
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupBitwiseAndKHR extends Definition(
           "OpGroupBitwiseAndKHR",
@@ -13976,14 +13976,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupBitwiseAndKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m60
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupBitwiseOrKHR extends Definition(
           "OpGroupBitwiseOrKHR",
@@ -13995,14 +13995,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupBitwiseOrKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m61
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupBitwiseXorKHR extends Definition(
           "OpGroupBitwiseXorKHR",
@@ -14014,14 +14014,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupBitwiseXorKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m62
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupLogicalAndKHR extends Definition(
           "OpGroupLogicalAndKHR",
@@ -14033,14 +14033,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupLogicalAndKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m63
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupLogicalOrKHR extends Definition(
           "OpGroupLogicalOrKHR",
@@ -14052,14 +14052,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupLogicalOrKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m64
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case GroupLogicalXorKHR extends Definition(
           "OpGroupLogicalXorKHR",
@@ -14071,14 +14071,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.GroupLogicalXorKHR(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    execution = values.required(2),
+                    operation = values.required(3),
+                    x = values.required(4)
                   )
               ),
-          InstructionMetadata4.m65
+          "IdResultType IdResult IdScope GroupOperation IdRef"
         )
     case RoundFToTF32INTEL extends Definition(
           "OpRoundFToTF32INTEL",
@@ -14090,7 +14090,7 @@ object Instruction {
                 raw,
                 values => Instruction.RoundFToTF32INTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m66
+          "IdResultType IdResult IdRef"
         )
     case MaskedGatherINTEL extends Definition(
           "OpMaskedGatherINTEL",
@@ -14102,15 +14102,15 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.MaskedGatherINTEL(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4),
-                    values.required(5)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    ptrVector = values.required(2),
+                    alignment = values.required(3),
+                    mask = values.required(4),
+                    fillEmpty = values.required(5)
                   )
               ),
-          InstructionMetadata4.m67
+          "IdResultType IdResult IdRef LiteralInteger IdRef IdRef"
         )
     case MaskedScatterINTEL extends Definition(
           "OpMaskedScatterINTEL",
@@ -14128,7 +14128,7 @@ object Instruction {
                     values.required(3)
                   )
               ),
-          InstructionMetadata4.m68
+          "IdRef IdRef LiteralInteger IdRef"
         )
     case ConvertHandleToImageINTEL extends Definition(
           "OpConvertHandleToImageINTEL",
@@ -14141,7 +14141,7 @@ object Instruction {
                 values =>
                   Instruction.ConvertHandleToImageINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m69
+          "IdResultType IdResult IdRef"
         )
     case ConvertHandleToSamplerINTEL extends Definition(
           "OpConvertHandleToSamplerINTEL",
@@ -14154,7 +14154,7 @@ object Instruction {
                 values =>
                   Instruction.ConvertHandleToSamplerINTEL(values.required(0), values.required(1), values.required(2))
               ),
-          InstructionMetadata4.m70
+          "IdResultType IdResult IdRef"
         )
     case ConvertHandleToSampledImageINTEL extends Definition(
           "OpConvertHandleToSampledImageINTEL",
@@ -14171,7 +14171,7 @@ object Instruction {
                     values.required(2)
                   )
               ),
-          InstructionMetadata4.m71
+          "IdResultType IdResult IdRef"
         )
     case FDot2MixAcc32VALVE extends Definition(
           "OpFDot2MixAcc32VALVE",
@@ -14183,14 +14183,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FDot2MixAcc32VALVE(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    accumulator = values.required(4)
                   )
               ),
-          InstructionMetadata4.m72
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case FDot2MixAcc16VALVE extends Definition(
           "OpFDot2MixAcc16VALVE",
@@ -14202,14 +14202,14 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FDot2MixAcc16VALVE(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    accumulator = values.required(4)
                   )
               ),
-          InstructionMetadata4.m73
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
     case FDot4MixAcc32VALVE extends Definition(
           "OpFDot4MixAcc32VALVE",
@@ -14221,16 +14221,17 @@ object Instruction {
                 raw,
                 values =>
                   Instruction.FDot4MixAcc32VALVE(
-                    values.required(0),
-                    values.required(1),
-                    values.required(2),
-                    values.required(3),
-                    values.required(4)
+                    resultType = values.required(0),
+                    dest = values.required(1),
+                    vector1 = values.required(2),
+                    vector2 = values.required(3),
+                    accumulator = values.required(4)
                   )
               ),
-          InstructionMetadata4.m74
+          "IdResultType IdResult IdRef IdRef IdRef"
         )
 
+    val shapes: Vec[OperandShape] = OperandShape.parse(operands)
     lazy val decoder: Decoder = decode(this)
   }
 
@@ -14240,1644 +14241,14 @@ object Instruction {
   )
   val definitions: Vec[Definition] = Definition.values.toVec
 
-  private def operandEnumerants0: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("Invocations", 0L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("SpacingEqual", 1L, Vec(), Vec()),
-    OperandEnumerant("SpacingFractionalEven", 2L, Vec(), Vec()),
-    OperandEnumerant("SpacingFractionalOdd", 3L, Vec(), Vec()),
-    OperandEnumerant("VertexOrderCw", 4L, Vec(), Vec()),
-    OperandEnumerant("VertexOrderCcw", 5L, Vec(), Vec()),
-    OperandEnumerant("PixelCenterInteger", 6L, Vec(), Vec()),
-    OperandEnumerant("OriginUpperLeft", 7L, Vec(), Vec()),
-    OperandEnumerant("OriginLowerLeft", 8L, Vec(), Vec()),
-    OperandEnumerant("EarlyFragmentTests", 9L, Vec(), Vec()),
-    OperandEnumerant("PointMode", 10L, Vec(), Vec()),
-    OperandEnumerant("Xfb", 11L, Vec(), Vec()),
-    OperandEnumerant("DepthReplacing", 12L, Vec(), Vec()),
-    OperandEnumerant("DepthGreater", 14L, Vec(), Vec()),
-    OperandEnumerant("DepthLess", 15L, Vec(), Vec()),
-    OperandEnumerant("DepthUnchanged", 16L, Vec(), Vec()),
-    OperandEnumerant(
-      "LocalSize",
-      17L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LiteralInteger, OperandKind.LiteralInteger),
-      Vec()
-    ),
-    OperandEnumerant(
-      "LocalSizeHint",
-      18L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LiteralInteger, OperandKind.LiteralInteger),
-      Vec()
-    ),
-    OperandEnumerant("InputPoints", 19L, Vec(), Vec()),
-    OperandEnumerant("InputLines", 20L, Vec(), Vec()),
-    OperandEnumerant("InputLinesAdjacency", 21L, Vec(), Vec()),
-    OperandEnumerant("Triangles", 22L, Vec(), Vec()),
-    OperandEnumerant("InputTrianglesAdjacency", 23L, Vec(), Vec()),
-    OperandEnumerant("Quads", 24L, Vec(), Vec()),
-    OperandEnumerant("Isolines", 25L, Vec(), Vec()),
-    OperandEnumerant("OutputVertices", 26L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("OutputPoints", 27L, Vec(), Vec()),
-    OperandEnumerant("OutputLineStrip", 28L, Vec(), Vec()),
-    OperandEnumerant("OutputTriangleStrip", 29L, Vec(), Vec()),
-    OperandEnumerant("VecTypeHint", 30L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("ContractionOff", 31L, Vec(), Vec()),
-    OperandEnumerant("Initializer", 33L, Vec(), Vec()),
-    OperandEnumerant("Finalizer", 34L, Vec(), Vec()),
-    OperandEnumerant("SubgroupSize", 35L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("SubgroupsPerWorkgroup", 36L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("SubgroupsPerWorkgroupId", 37L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("LocalSizeId", 38L, Vec(OperandKind.IdRef, OperandKind.IdRef, OperandKind.IdRef), Vec()),
-    OperandEnumerant("LocalSizeHintId", 39L, Vec(OperandKind.IdRef, OperandKind.IdRef, OperandKind.IdRef), Vec()),
-    OperandEnumerant("NonCoherentColorAttachmentReadEXT", 4169L, Vec(), Vec()),
-    OperandEnumerant("NonCoherentDepthAttachmentReadEXT", 4170L, Vec(), Vec()),
-    OperandEnumerant("NonCoherentStencilAttachmentReadEXT", 4171L, Vec(), Vec()),
-    OperandEnumerant("SubgroupUniformControlFlowKHR", 4421L, Vec(), Vec()),
-    OperandEnumerant("PostDepthCoverage", 4446L, Vec(), Vec()),
-    OperandEnumerant("DenormPreserve", 4459L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("DenormFlushToZero", 4460L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("SignedZeroInfNanPreserve", 4461L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("RoundingModeRTE", 4462L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("RoundingModeRTZ", 4463L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("NonCoherentTileAttachmentReadQCOM", 4489L, Vec(), Vec()),
-    OperandEnumerant(
-      "TileShadingRateQCOM",
-      4490L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LiteralInteger, OperandKind.LiteralInteger),
-      Vec()
-    ),
-    OperandEnumerant("EarlyAndLateFragmentTestsAMD", 5017L, Vec(), Vec()),
-    OperandEnumerant("StencilRefReplacingEXT", 5027L, Vec(), Vec()),
-    OperandEnumerant("CoalescingAMDX", 5069L, Vec(), Vec()),
-    OperandEnumerant("IsApiEntryAMDX", 5070L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("MaxNodeRecursionAMDX", 5071L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant(
-      "StaticNumWorkgroupsAMDX",
-      5072L,
-      Vec(OperandKind.IdRef, OperandKind.IdRef, OperandKind.IdRef),
-      Vec()
-    ),
-    OperandEnumerant("ShaderIndexAMDX", 5073L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant(
-      "MaxNumWorkgroupsAMDX",
-      5077L,
-      Vec(OperandKind.IdRef, OperandKind.IdRef, OperandKind.IdRef),
-      Vec()
-    ),
-    OperandEnumerant("StencilRefUnchangedFrontAMD", 5079L, Vec(), Vec()),
-    OperandEnumerant("StencilRefGreaterFrontAMD", 5080L, Vec(), Vec()),
-    OperandEnumerant("StencilRefLessFrontAMD", 5081L, Vec(), Vec()),
-    OperandEnumerant("StencilRefUnchangedBackAMD", 5082L, Vec(), Vec()),
-    OperandEnumerant("StencilRefGreaterBackAMD", 5083L, Vec(), Vec()),
-    OperandEnumerant("StencilRefLessBackAMD", 5084L, Vec(), Vec())
-  )
-
-  private def operandEnumerants1: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("QuadDerivativesKHR", 5088L, Vec(), Vec()),
-    OperandEnumerant("RequireFullQuadsKHR", 5089L, Vec(), Vec()),
-    OperandEnumerant("SharesInputWithAMDX", 5102L, Vec(OperandKind.IdRef, OperandKind.IdRef), Vec()),
-    OperandEnumerant("ArithmeticPoisonKHR", 5157L, Vec(), Vec()),
-    OperandEnumerant("OutputLinesEXT", 5269L, Vec(), Vec("OutputLinesNV")),
-    OperandEnumerant("OutputPrimitivesEXT", 5270L, Vec(OperandKind.LiteralInteger), Vec("OutputPrimitivesNV")),
-    OperandEnumerant("DerivativeGroupQuadsKHR", 5289L, Vec(), Vec("DerivativeGroupQuadsNV")),
-    OperandEnumerant("DerivativeGroupLinearKHR", 5290L, Vec(), Vec("DerivativeGroupLinearNV")),
-    OperandEnumerant("OutputTrianglesEXT", 5298L, Vec(), Vec("OutputTrianglesNV")),
-    OperandEnumerant("PixelInterlockOrderedEXT", 5366L, Vec(), Vec()),
-    OperandEnumerant("PixelInterlockUnorderedEXT", 5367L, Vec(), Vec()),
-    OperandEnumerant("SampleInterlockOrderedEXT", 5368L, Vec(), Vec()),
-    OperandEnumerant("SampleInterlockUnorderedEXT", 5369L, Vec(), Vec()),
-    OperandEnumerant("ShadingRateInterlockOrderedEXT", 5370L, Vec(), Vec()),
-    OperandEnumerant("ShadingRateInterlockUnorderedEXT", 5371L, Vec(), Vec()),
-    OperandEnumerant("Shader64BitIndexingEXT", 5427L, Vec(), Vec()),
-    OperandEnumerant("SharedLocalMemorySizeINTEL", 5618L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("RoundingModeRTPINTEL", 5620L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("RoundingModeRTNINTEL", 5621L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("FloatingPointModeALTINTEL", 5622L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("FloatingPointModeIEEEINTEL", 5623L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant(
-      "MaxWorkgroupSizeINTEL",
-      5893L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LiteralInteger, OperandKind.LiteralInteger),
-      Vec()
-    ),
-    OperandEnumerant("MaxWorkDimINTEL", 5894L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("NoGlobalOffsetINTEL", 5895L, Vec(), Vec()),
-    OperandEnumerant("NumSIMDWorkitemsINTEL", 5896L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("SchedulerTargetFmaxMhzINTEL", 5903L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("MaximallyReconvergesKHR", 6023L, Vec(), Vec()),
-    OperandEnumerant("FPFastMathDefault", 6028L, Vec(OperandKind.IdRef, OperandKind.IdRef), Vec()),
-    OperandEnumerant("OpacityMicromapIdKHR", 6031L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("StreamingInterfaceINTEL", 6154L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("RegisterMapInterfaceINTEL", 6160L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("NamedBarrierCountINTEL", 6417L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("MaximumRegistersINTEL", 6461L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("MaximumRegistersIdINTEL", 6462L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("NamedMaximumRegistersINTEL", 6463L, Vec(OperandKind.NamedMaximumNumberOfRegisters), Vec())
-  )
-
-  private def operandEnumerants2: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("RelaxedPrecision", 0L, Vec(), Vec()),
-    OperandEnumerant("SpecId", 1L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Block", 2L, Vec(), Vec()),
-    OperandEnumerant("BufferBlock", 3L, Vec(), Vec()),
-    OperandEnumerant("RowMajor", 4L, Vec(), Vec()),
-    OperandEnumerant("ColMajor", 5L, Vec(), Vec()),
-    OperandEnumerant("ArrayStride", 6L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("MatrixStride", 7L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("GLSLShared", 8L, Vec(), Vec()),
-    OperandEnumerant("GLSLPacked", 9L, Vec(), Vec()),
-    OperandEnumerant("CPacked", 10L, Vec(), Vec()),
-    OperandEnumerant("BuiltIn", 11L, Vec(OperandKind.BuiltIn), Vec()),
-    OperandEnumerant("NoPerspective", 13L, Vec(), Vec()),
-    OperandEnumerant("Flat", 14L, Vec(), Vec()),
-    OperandEnumerant("Patch", 15L, Vec(), Vec()),
-    OperandEnumerant("Centroid", 16L, Vec(), Vec()),
-    OperandEnumerant("Sample", 17L, Vec(), Vec()),
-    OperandEnumerant("Invariant", 18L, Vec(), Vec()),
-    OperandEnumerant("Restrict", 19L, Vec(), Vec()),
-    OperandEnumerant("Aliased", 20L, Vec(), Vec()),
-    OperandEnumerant("Volatile", 21L, Vec(), Vec()),
-    OperandEnumerant("Constant", 22L, Vec(), Vec()),
-    OperandEnumerant("Coherent", 23L, Vec(), Vec()),
-    OperandEnumerant("NonWritable", 24L, Vec(), Vec()),
-    OperandEnumerant("NonReadable", 25L, Vec(), Vec()),
-    OperandEnumerant("Uniform", 26L, Vec(), Vec()),
-    OperandEnumerant("UniformId", 27L, Vec(OperandKind.IdScope), Vec()),
-    OperandEnumerant("SaturatedConversion", 28L, Vec(), Vec()),
-    OperandEnumerant("Stream", 29L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Location", 30L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Component", 31L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Index", 32L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Binding", 33L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("DescriptorSet", 34L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Offset", 35L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("XfbBuffer", 36L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("XfbStride", 37L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("FuncParamAttr", 38L, Vec(OperandKind.FunctionParameterAttribute), Vec()),
-    OperandEnumerant("FPRoundingMode", 39L, Vec(OperandKind.FPRoundingMode), Vec()),
-    OperandEnumerant("FPFastMathMode", 40L, Vec(OperandKind.FPFastMathMode), Vec()),
-    OperandEnumerant("LinkageAttributes", 41L, Vec(OperandKind.LiteralString, OperandKind.LinkageType), Vec()),
-    OperandEnumerant("NoContraction", 42L, Vec(), Vec()),
-    OperandEnumerant("InputAttachmentIndex", 43L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("Alignment", 44L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("MaxByteOffset", 45L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("AlignmentId", 46L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("MaxByteOffsetId", 47L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("SaturatedToLargestFloat8NormalConversionEXT", 4216L, Vec(), Vec()),
-    OperandEnumerant("NoSignedWrap", 4469L, Vec(), Vec()),
-    OperandEnumerant("NoUnsignedWrap", 4470L, Vec(), Vec()),
-    OperandEnumerant("WeightTextureQCOM", 4487L, Vec(), Vec()),
-    OperandEnumerant("BlockMatchTextureQCOM", 4488L, Vec(), Vec()),
-    OperandEnumerant("BlockMatchSamplerQCOM", 4499L, Vec(), Vec()),
-    OperandEnumerant("ExplicitInterpAMD", 4999L, Vec(), Vec()),
-    OperandEnumerant("NodeSharesPayloadLimitsWithAMDX", 5019L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("NodeMaxPayloadsAMDX", 5020L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("TrackFinishWritingAMDX", 5078L, Vec(), Vec()),
-    OperandEnumerant("PayloadNodeNameAMDX", 5091L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("PayloadNodeBaseIndexAMDX", 5098L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("PayloadNodeSparseArrayAMDX", 5099L, Vec(), Vec()),
-    OperandEnumerant("PayloadNodeArraySizeAMDX", 5100L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("PayloadDispatchIndirectAMDX", 5105L, Vec(), Vec()),
-    OperandEnumerant("ArrayStrideIdEXT", 5124L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("OffsetIdEXT", 5125L, Vec(OperandKind.IdRef), Vec())
-  )
-
-  private def operandEnumerants3: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("UTFEncodedKHR", 5145L, Vec(), Vec()),
-    OperandEnumerant("OverrideCoverageNV", 5248L, Vec(), Vec()),
-    OperandEnumerant("PassthroughNV", 5250L, Vec(), Vec()),
-    OperandEnumerant("ViewportRelativeNV", 5252L, Vec(), Vec()),
-    OperandEnumerant("SecondaryViewportRelativeNV", 5256L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("PerPrimitiveEXT", 5271L, Vec(), Vec("PerPrimitiveNV")),
-    OperandEnumerant("PerViewNV", 5272L, Vec(), Vec()),
-    OperandEnumerant("PerTaskNV", 5273L, Vec(), Vec()),
-    OperandEnumerant("PerVertexKHR", 5285L, Vec(), Vec("PerVertexNV")),
-    OperandEnumerant("NonUniform", 5300L, Vec(), Vec("NonUniformEXT")),
-    OperandEnumerant("RestrictPointer", 5355L, Vec(), Vec("RestrictPointerEXT")),
-    OperandEnumerant("AliasedPointer", 5356L, Vec(), Vec("AliasedPointerEXT")),
-    OperandEnumerant("MemberOffsetNV", 5358L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("HitObjectShaderRecordBufferNV", 5386L, Vec(), Vec()),
-    OperandEnumerant("HitObjectShaderRecordBufferEXT", 5389L, Vec(), Vec()),
-    OperandEnumerant("BankNV", 5397L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("BindlessSamplerNV", 5398L, Vec(), Vec()),
-    OperandEnumerant("BindlessImageNV", 5399L, Vec(), Vec()),
-    OperandEnumerant("BoundSamplerNV", 5400L, Vec(), Vec()),
-    OperandEnumerant("BoundImageNV", 5401L, Vec(), Vec()),
-    OperandEnumerant("SIMTCallINTEL", 5599L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("ReferencedIndirectlyINTEL", 5602L, Vec(), Vec()),
-    OperandEnumerant("ClobberINTEL", 5607L, Vec(OperandKind.LiteralString), Vec()),
-    OperandEnumerant("SideEffectsINTEL", 5608L, Vec(), Vec()),
-    OperandEnumerant("VectorComputeVariableINTEL", 5624L, Vec(), Vec()),
-    OperandEnumerant("FuncParamIOKindINTEL", 5625L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("VectorComputeFunctionINTEL", 5626L, Vec(), Vec()),
-    OperandEnumerant("StackCallINTEL", 5627L, Vec(), Vec()),
-    OperandEnumerant("GlobalVariableOffsetINTEL", 5628L, Vec(OperandKind.LiteralInteger), Vec()),
-    OperandEnumerant("CounterBuffer", 5634L, Vec(OperandKind.IdRef), Vec("HlslCounterBufferGOOGLE")),
-    OperandEnumerant("UserSemantic", 5635L, Vec(OperandKind.LiteralString), Vec("HlslSemanticGOOGLE")),
-    OperandEnumerant("UserTypeGOOGLE", 5636L, Vec(OperandKind.LiteralString), Vec()),
-    OperandEnumerant(
-      "FunctionRoundingModeINTEL",
-      5822L,
-      Vec(OperandKind.LiteralInteger, OperandKind.FPRoundingMode),
-      Vec()
-    ),
-    OperandEnumerant(
-      "FunctionDenormModeINTEL",
-      5823L,
-      Vec(OperandKind.LiteralInteger, OperandKind.FPDenormMode),
-      Vec()
-    ),
-    OperandEnumerant("RegisterALTERA", 5825L, Vec(), Vec("RegisterINTEL")),
-    OperandEnumerant("MemoryALTERA", 5826L, Vec(OperandKind.LiteralString), Vec("MemoryINTEL")),
-    OperandEnumerant("NumbanksALTERA", 5827L, Vec(OperandKind.LiteralInteger), Vec("NumbanksINTEL")),
-    OperandEnumerant("BankwidthALTERA", 5828L, Vec(OperandKind.LiteralInteger), Vec("BankwidthINTEL")),
-    OperandEnumerant("MaxPrivateCopiesALTERA", 5829L, Vec(OperandKind.LiteralInteger), Vec("MaxPrivateCopiesINTEL")),
-    OperandEnumerant("SinglepumpALTERA", 5830L, Vec(), Vec("SinglepumpINTEL")),
-    OperandEnumerant("DoublepumpALTERA", 5831L, Vec(), Vec("DoublepumpINTEL")),
-    OperandEnumerant("MaxReplicatesALTERA", 5832L, Vec(OperandKind.LiteralInteger), Vec("MaxReplicatesINTEL")),
-    OperandEnumerant("SimpleDualPortALTERA", 5833L, Vec(), Vec("SimpleDualPortINTEL")),
-    OperandEnumerant(
-      "MergeALTERA",
-      5834L,
-      Vec(OperandKind.LiteralString, OperandKind.LiteralString),
-      Vec("MergeINTEL")
-    ),
-    OperandEnumerant("BankBitsALTERA", 5835L, Vec(OperandKind.LiteralInteger), Vec("BankBitsINTEL")),
-    OperandEnumerant("ForcePow2DepthALTERA", 5836L, Vec(OperandKind.LiteralInteger), Vec("ForcePow2DepthINTEL")),
-    OperandEnumerant("StridesizeALTERA", 5883L, Vec(OperandKind.LiteralInteger), Vec("StridesizeINTEL")),
-    OperandEnumerant("WordsizeALTERA", 5884L, Vec(OperandKind.LiteralInteger), Vec("WordsizeINTEL")),
-    OperandEnumerant("TrueDualPortALTERA", 5885L, Vec(), Vec("TrueDualPortINTEL")),
-    OperandEnumerant("BurstCoalesceALTERA", 5899L, Vec(), Vec("BurstCoalesceINTEL")),
-    OperandEnumerant("CacheSizeALTERA", 5900L, Vec(OperandKind.LiteralInteger), Vec("CacheSizeINTEL")),
-    OperandEnumerant("DontStaticallyCoalesceALTERA", 5901L, Vec(), Vec("DontStaticallyCoalesceINTEL")),
-    OperandEnumerant("PrefetchALTERA", 5902L, Vec(OperandKind.LiteralInteger), Vec("PrefetchINTEL")),
-    OperandEnumerant("StallEnableALTERA", 5905L, Vec(), Vec("StallEnableINTEL")),
-    OperandEnumerant("FuseLoopsInFunctionALTERA", 5907L, Vec(), Vec("FuseLoopsInFunctionINTEL")),
-    OperandEnumerant(
-      "MathOpDSPModeALTERA",
-      5909L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LiteralInteger),
-      Vec("MathOpDSPModeINTEL")
-    ),
-    OperandEnumerant("AliasScopeINTEL", 5914L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant("NoAliasINTEL", 5915L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant(
-      "InitiationIntervalALTERA",
-      5917L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("InitiationIntervalINTEL")
-    ),
-    OperandEnumerant("MaxConcurrencyALTERA", 5918L, Vec(OperandKind.LiteralInteger), Vec("MaxConcurrencyINTEL")),
-    OperandEnumerant("PipelineEnableALTERA", 5919L, Vec(OperandKind.LiteralInteger), Vec("PipelineEnableINTEL")),
-    OperandEnumerant("BufferLocationALTERA", 5921L, Vec(OperandKind.LiteralInteger), Vec("BufferLocationINTEL")),
-    OperandEnumerant("IOPipeStorageALTERA", 5944L, Vec(OperandKind.LiteralInteger), Vec("IOPipeStorageINTEL")),
-    OperandEnumerant(
-      "FunctionFloatingPointModeINTEL",
-      6080L,
-      Vec(OperandKind.LiteralInteger, OperandKind.FPOperationMode),
-      Vec()
-    )
-  )
-
-  private def operandEnumerants4: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("SingleElementVectorINTEL", 6085L, Vec(), Vec()),
-    OperandEnumerant("VectorComputeCallableFunctionINTEL", 6087L, Vec(), Vec()),
-    OperandEnumerant("MediaBlockIOINTEL", 6140L, Vec(), Vec()),
-    OperandEnumerant("StallFreeALTERA", 6151L, Vec(), Vec("StallFreeINTEL")),
-    OperandEnumerant("FPMaxErrorDecorationINTEL", 6170L, Vec(OperandKind.LiteralFloat), Vec()),
-    OperandEnumerant(
-      "LatencyControlLabelALTERA",
-      6172L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("LatencyControlLabelINTEL")
-    ),
-    OperandEnumerant(
-      "LatencyControlConstraintALTERA",
-      6173L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LiteralInteger, OperandKind.LiteralInteger),
-      Vec("LatencyControlConstraintINTEL")
-    ),
-    OperandEnumerant("ConduitKernelArgumentALTERA", 6175L, Vec(), Vec("ConduitKernelArgumentINTEL")),
-    OperandEnumerant("RegisterMapKernelArgumentALTERA", 6176L, Vec(), Vec("RegisterMapKernelArgumentINTEL")),
-    OperandEnumerant(
-      "MMHostInterfaceAddressWidthALTERA",
-      6177L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("MMHostInterfaceAddressWidthINTEL")
-    ),
-    OperandEnumerant(
-      "MMHostInterfaceDataWidthALTERA",
-      6178L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("MMHostInterfaceDataWidthINTEL")
-    ),
-    OperandEnumerant(
-      "MMHostInterfaceLatencyALTERA",
-      6179L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("MMHostInterfaceLatencyINTEL")
-    ),
-    OperandEnumerant(
-      "MMHostInterfaceReadWriteModeALTERA",
-      6180L,
-      Vec(OperandKind.AccessQualifier),
-      Vec("MMHostInterfaceReadWriteModeINTEL")
-    ),
-    OperandEnumerant(
-      "MMHostInterfaceMaxBurstALTERA",
-      6181L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("MMHostInterfaceMaxBurstINTEL")
-    ),
-    OperandEnumerant(
-      "MMHostInterfaceWaitRequestALTERA",
-      6182L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("MMHostInterfaceWaitRequestINTEL")
-    ),
-    OperandEnumerant("StableKernelArgumentALTERA", 6183L, Vec(), Vec("StableKernelArgumentINTEL")),
-    OperandEnumerant("HostAccessINTEL", 6188L, Vec(OperandKind.HostAccessQualifier, OperandKind.LiteralString), Vec()),
-    OperandEnumerant("InitModeALTERA", 6190L, Vec(OperandKind.InitializationModeQualifier), Vec("InitModeINTEL")),
-    OperandEnumerant(
-      "ImplementInRegisterMapALTERA",
-      6191L,
-      Vec(OperandKind.LiteralInteger),
-      Vec("ImplementInRegisterMapINTEL")
-    ),
-    OperandEnumerant("ConditionalINTEL", 6247L, Vec(OperandKind.IdRef), Vec()),
-    OperandEnumerant(
-      "CacheControlLoadINTEL",
-      6442L,
-      Vec(OperandKind.LiteralInteger, OperandKind.LoadCacheControl),
-      Vec()
-    ),
-    OperandEnumerant(
-      "CacheControlStoreINTEL",
-      6443L,
-      Vec(OperandKind.LiteralInteger, OperandKind.StoreCacheControl),
-      Vec()
-    ),
-    OperandEnumerant("IntrinsicSAMSUNG", 7040L, Vec(OperandKind.LiteralInteger), Vec())
-  )
-
-  private def operandEnumerants5: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("Position", 0L, Vec(), Vec()),
-    OperandEnumerant("PointSize", 1L, Vec(), Vec()),
-    OperandEnumerant("ClipDistance", 3L, Vec(), Vec()),
-    OperandEnumerant("CullDistance", 4L, Vec(), Vec()),
-    OperandEnumerant("VertexId", 5L, Vec(), Vec()),
-    OperandEnumerant("InstanceId", 6L, Vec(), Vec()),
-    OperandEnumerant("PrimitiveId", 7L, Vec(), Vec()),
-    OperandEnumerant("InvocationId", 8L, Vec(), Vec()),
-    OperandEnumerant("Layer", 9L, Vec(), Vec()),
-    OperandEnumerant("ViewportIndex", 10L, Vec(), Vec()),
-    OperandEnumerant("TessLevelOuter", 11L, Vec(), Vec()),
-    OperandEnumerant("TessLevelInner", 12L, Vec(), Vec()),
-    OperandEnumerant("TessCoord", 13L, Vec(), Vec()),
-    OperandEnumerant("PatchVertices", 14L, Vec(), Vec()),
-    OperandEnumerant("FragCoord", 15L, Vec(), Vec()),
-    OperandEnumerant("PointCoord", 16L, Vec(), Vec()),
-    OperandEnumerant("FrontFacing", 17L, Vec(), Vec()),
-    OperandEnumerant("SampleId", 18L, Vec(), Vec()),
-    OperandEnumerant("SamplePosition", 19L, Vec(), Vec()),
-    OperandEnumerant("SampleMask", 20L, Vec(), Vec()),
-    OperandEnumerant("FragDepth", 22L, Vec(), Vec()),
-    OperandEnumerant("HelperInvocation", 23L, Vec(), Vec()),
-    OperandEnumerant("NumWorkgroups", 24L, Vec(), Vec()),
-    OperandEnumerant("WorkgroupSize", 25L, Vec(), Vec()),
-    OperandEnumerant("WorkgroupId", 26L, Vec(), Vec()),
-    OperandEnumerant("LocalInvocationId", 27L, Vec(), Vec()),
-    OperandEnumerant("GlobalInvocationId", 28L, Vec(), Vec()),
-    OperandEnumerant("LocalInvocationIndex", 29L, Vec(), Vec()),
-    OperandEnumerant("WorkDim", 30L, Vec(), Vec()),
-    OperandEnumerant("GlobalSize", 31L, Vec(), Vec()),
-    OperandEnumerant("EnqueuedWorkgroupSize", 32L, Vec(), Vec()),
-    OperandEnumerant("GlobalOffset", 33L, Vec(), Vec()),
-    OperandEnumerant("GlobalLinearId", 34L, Vec(), Vec()),
-    OperandEnumerant("WorkgroupLinearId", 35L, Vec(), Vec()),
-    OperandEnumerant("SubgroupSize", 36L, Vec(), Vec()),
-    OperandEnumerant("SubgroupMaxSize", 37L, Vec(), Vec()),
-    OperandEnumerant("NumSubgroups", 38L, Vec(), Vec()),
-    OperandEnumerant("NumEnqueuedSubgroups", 39L, Vec(), Vec()),
-    OperandEnumerant("SubgroupId", 40L, Vec(), Vec()),
-    OperandEnumerant("SubgroupLocalInvocationId", 41L, Vec(), Vec()),
-    OperandEnumerant("VertexIndex", 42L, Vec(), Vec()),
-    OperandEnumerant("InstanceIndex", 43L, Vec(), Vec()),
-    OperandEnumerant("CoreIDARM", 4160L, Vec(), Vec()),
-    OperandEnumerant("CoreCountARM", 4161L, Vec(), Vec()),
-    OperandEnumerant("CoreMaxIDARM", 4162L, Vec(), Vec()),
-    OperandEnumerant("WarpIDARM", 4163L, Vec(), Vec()),
-    OperandEnumerant("WarpMaxIDARM", 4164L, Vec(), Vec()),
-    OperandEnumerant("SubgroupEqMask", 4416L, Vec(), Vec("SubgroupEqMaskKHR")),
-    OperandEnumerant("SubgroupGeMask", 4417L, Vec(), Vec("SubgroupGeMaskKHR")),
-    OperandEnumerant("SubgroupGtMask", 4418L, Vec(), Vec("SubgroupGtMaskKHR")),
-    OperandEnumerant("SubgroupLeMask", 4419L, Vec(), Vec("SubgroupLeMaskKHR")),
-    OperandEnumerant("SubgroupLtMask", 4420L, Vec(), Vec("SubgroupLtMaskKHR")),
-    OperandEnumerant("BaseVertex", 4424L, Vec(), Vec()),
-    OperandEnumerant("BaseInstance", 4425L, Vec(), Vec()),
-    OperandEnumerant("DrawIndex", 4426L, Vec(), Vec()),
-    OperandEnumerant("PrimitiveShadingRateKHR", 4432L, Vec(), Vec()),
-    OperandEnumerant("DeviceIndex", 4438L, Vec(), Vec()),
-    OperandEnumerant("ViewIndex", 4440L, Vec(), Vec()),
-    OperandEnumerant("ShadingRateKHR", 4444L, Vec(), Vec()),
-    OperandEnumerant("TileOffsetQCOM", 4492L, Vec(), Vec()),
-    OperandEnumerant("TileDimensionQCOM", 4493L, Vec(), Vec()),
-    OperandEnumerant("TileApronSizeQCOM", 4494L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordNoPerspAMD", 4992L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordNoPerspCentroidAMD", 4993L, Vec(), Vec())
-  )
-
-  private def operandEnumerants6: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("BaryCoordNoPerspSampleAMD", 4994L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordSmoothAMD", 4995L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordSmoothCentroidAMD", 4996L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordSmoothSampleAMD", 4997L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordPullModelAMD", 4998L, Vec(), Vec()),
-    OperandEnumerant("FragStencilRefEXT", 5014L, Vec(), Vec()),
-    OperandEnumerant("RemainingRecursionLevelsAMDX", 5021L, Vec(), Vec()),
-    OperandEnumerant("ShaderIndexAMDX", 5073L, Vec(), Vec()),
-    OperandEnumerant("SamplerHeapEXT", 5122L, Vec(), Vec()),
-    OperandEnumerant("ResourceHeapEXT", 5123L, Vec(), Vec()),
-    OperandEnumerant("ViewportMaskNV", 5253L, Vec(), Vec()),
-    OperandEnumerant("SecondaryPositionNV", 5257L, Vec(), Vec()),
-    OperandEnumerant("SecondaryViewportMaskNV", 5258L, Vec(), Vec()),
-    OperandEnumerant("PositionPerViewNV", 5261L, Vec(), Vec()),
-    OperandEnumerant("ViewportMaskPerViewNV", 5262L, Vec(), Vec()),
-    OperandEnumerant("FullyCoveredEXT", 5264L, Vec(), Vec()),
-    OperandEnumerant("TaskCountNV", 5274L, Vec(), Vec()),
-    OperandEnumerant("PrimitiveCountNV", 5275L, Vec(), Vec()),
-    OperandEnumerant("PrimitiveIndicesNV", 5276L, Vec(), Vec()),
-    OperandEnumerant("ClipDistancePerViewNV", 5277L, Vec(), Vec()),
-    OperandEnumerant("CullDistancePerViewNV", 5278L, Vec(), Vec()),
-    OperandEnumerant("LayerPerViewNV", 5279L, Vec(), Vec()),
-    OperandEnumerant("MeshViewCountNV", 5280L, Vec(), Vec()),
-    OperandEnumerant("MeshViewIndicesNV", 5281L, Vec(), Vec()),
-    OperandEnumerant("BaryCoordKHR", 5286L, Vec(), Vec("BaryCoordNV")),
-    OperandEnumerant("BaryCoordNoPerspKHR", 5287L, Vec(), Vec("BaryCoordNoPerspNV")),
-    OperandEnumerant("FragSizeEXT", 5292L, Vec(), Vec("FragmentSizeNV")),
-    OperandEnumerant("FragInvocationCountEXT", 5293L, Vec(), Vec("InvocationsPerPixelNV")),
-    OperandEnumerant("PrimitivePointIndicesEXT", 5294L, Vec(), Vec()),
-    OperandEnumerant("PrimitiveLineIndicesEXT", 5295L, Vec(), Vec()),
-    OperandEnumerant("PrimitiveTriangleIndicesEXT", 5296L, Vec(), Vec()),
-    OperandEnumerant("CullPrimitiveEXT", 5299L, Vec(), Vec()),
-    OperandEnumerant("LaunchIdKHR", 5319L, Vec(), Vec("LaunchIdNV")),
-    OperandEnumerant("LaunchSizeKHR", 5320L, Vec(), Vec("LaunchSizeNV")),
-    OperandEnumerant("WorldRayOriginKHR", 5321L, Vec(), Vec("WorldRayOriginNV")),
-    OperandEnumerant("WorldRayDirectionKHR", 5322L, Vec(), Vec("WorldRayDirectionNV")),
-    OperandEnumerant("ObjectRayOriginKHR", 5323L, Vec(), Vec("ObjectRayOriginNV")),
-    OperandEnumerant("ObjectRayDirectionKHR", 5324L, Vec(), Vec("ObjectRayDirectionNV")),
-    OperandEnumerant("RayTminKHR", 5325L, Vec(), Vec("RayTminNV")),
-    OperandEnumerant("RayTmaxKHR", 5326L, Vec(), Vec("RayTmaxNV")),
-    OperandEnumerant("InstanceCustomIndexKHR", 5327L, Vec(), Vec("InstanceCustomIndexNV")),
-    OperandEnumerant("ObjectToWorldKHR", 5330L, Vec(), Vec("ObjectToWorldNV")),
-    OperandEnumerant("WorldToObjectKHR", 5331L, Vec(), Vec("WorldToObjectNV")),
-    OperandEnumerant("HitTNV", 5332L, Vec(), Vec()),
-    OperandEnumerant("HitKindKHR", 5333L, Vec(), Vec("HitKindNV")),
-    OperandEnumerant("CurrentRayTimeNV", 5334L, Vec(), Vec()),
-    OperandEnumerant("HitTriangleVertexPositionsKHR", 5335L, Vec(), Vec()),
-    OperandEnumerant("HitMicroTriangleVertexPositionsNV", 5337L, Vec(), Vec()),
-    OperandEnumerant("HitMicroTriangleVertexBarycentricsNV", 5344L, Vec(), Vec()),
-    OperandEnumerant("IncomingRayFlagsKHR", 5351L, Vec(), Vec("IncomingRayFlagsNV")),
-    OperandEnumerant("RayGeometryIndexKHR", 5352L, Vec(), Vec()),
-    OperandEnumerant("HitIsSphereNV", 5359L, Vec(), Vec()),
-    OperandEnumerant("HitIsLSSNV", 5360L, Vec(), Vec()),
-    OperandEnumerant("HitSpherePositionNV", 5361L, Vec(), Vec()),
-    OperandEnumerant("WarpsPerSMNV", 5374L, Vec(), Vec()),
-    OperandEnumerant("SMCountNV", 5375L, Vec(), Vec()),
-    OperandEnumerant("WarpIDNV", 5376L, Vec(), Vec()),
-    OperandEnumerant("SMIDNV", 5377L, Vec(), Vec()),
-    OperandEnumerant("HitLSSPositionsNV", 5396L, Vec(), Vec()),
-    OperandEnumerant("HitKindFrontFacingMicroTriangleNV", 5405L, Vec(), Vec()),
-    OperandEnumerant("HitKindBackFacingMicroTriangleNV", 5406L, Vec(), Vec()),
-    OperandEnumerant("HitSphereRadiusNV", 5420L, Vec(), Vec()),
-    OperandEnumerant("HitLSSRadiiNV", 5421L, Vec(), Vec()),
-    OperandEnumerant("ClusterIDNV", 5436L, Vec(), Vec())
-  )
-
-  private def operandEnumerants7: Vec[OperandEnumerant] = Vec(OperandEnumerant("CullMaskKHR", 6021L, Vec(), Vec()))
-
-  private def operandEnumerants8: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("Matrix", 0L, Vec(), Vec()),
-    OperandEnumerant("Shader", 1L, Vec(), Vec()),
-    OperandEnumerant("Geometry", 2L, Vec(), Vec()),
-    OperandEnumerant("Tessellation", 3L, Vec(), Vec()),
-    OperandEnumerant("Addresses", 4L, Vec(), Vec()),
-    OperandEnumerant("Linkage", 5L, Vec(), Vec()),
-    OperandEnumerant("Kernel", 6L, Vec(), Vec()),
-    OperandEnumerant("Vector16", 7L, Vec(), Vec()),
-    OperandEnumerant("Float16Buffer", 8L, Vec(), Vec()),
-    OperandEnumerant("Float16", 9L, Vec(), Vec()),
-    OperandEnumerant("Float64", 10L, Vec(), Vec()),
-    OperandEnumerant("Int64", 11L, Vec(), Vec()),
-    OperandEnumerant("Int64Atomics", 12L, Vec(), Vec()),
-    OperandEnumerant("ImageBasic", 13L, Vec(), Vec()),
-    OperandEnumerant("ImageReadWrite", 14L, Vec(), Vec()),
-    OperandEnumerant("ImageMipmap", 15L, Vec(), Vec()),
-    OperandEnumerant("Pipes", 17L, Vec(), Vec()),
-    OperandEnumerant("Groups", 18L, Vec(), Vec()),
-    OperandEnumerant("DeviceEnqueue", 19L, Vec(), Vec()),
-    OperandEnumerant("LiteralSampler", 20L, Vec(), Vec()),
-    OperandEnumerant("AtomicStorage", 21L, Vec(), Vec()),
-    OperandEnumerant("Int16", 22L, Vec(), Vec()),
-    OperandEnumerant("TessellationPointSize", 23L, Vec(), Vec()),
-    OperandEnumerant("GeometryPointSize", 24L, Vec(), Vec()),
-    OperandEnumerant("ImageGatherExtended", 25L, Vec(), Vec()),
-    OperandEnumerant("StorageImageMultisample", 27L, Vec(), Vec()),
-    OperandEnumerant("UniformBufferArrayDynamicIndexing", 28L, Vec(), Vec()),
-    OperandEnumerant("SampledImageArrayDynamicIndexing", 29L, Vec(), Vec()),
-    OperandEnumerant("StorageBufferArrayDynamicIndexing", 30L, Vec(), Vec()),
-    OperandEnumerant("StorageImageArrayDynamicIndexing", 31L, Vec(), Vec()),
-    OperandEnumerant("ClipDistance", 32L, Vec(), Vec()),
-    OperandEnumerant("CullDistance", 33L, Vec(), Vec()),
-    OperandEnumerant("ImageCubeArray", 34L, Vec(), Vec()),
-    OperandEnumerant("SampleRateShading", 35L, Vec(), Vec()),
-    OperandEnumerant("ImageRect", 36L, Vec(), Vec()),
-    OperandEnumerant("SampledRect", 37L, Vec(), Vec()),
-    OperandEnumerant("GenericPointer", 38L, Vec(), Vec()),
-    OperandEnumerant("Int8", 39L, Vec(), Vec()),
-    OperandEnumerant("InputAttachment", 40L, Vec(), Vec()),
-    OperandEnumerant("SparseResidency", 41L, Vec(), Vec()),
-    OperandEnumerant("MinLod", 42L, Vec(), Vec()),
-    OperandEnumerant("Sampled1D", 43L, Vec(), Vec()),
-    OperandEnumerant("Image1D", 44L, Vec(), Vec()),
-    OperandEnumerant("SampledCubeArray", 45L, Vec(), Vec()),
-    OperandEnumerant("SampledBuffer", 46L, Vec(), Vec()),
-    OperandEnumerant("ImageBuffer", 47L, Vec(), Vec()),
-    OperandEnumerant("ImageMSArray", 48L, Vec(), Vec()),
-    OperandEnumerant("StorageImageExtendedFormats", 49L, Vec(), Vec()),
-    OperandEnumerant("ImageQuery", 50L, Vec(), Vec()),
-    OperandEnumerant("DerivativeControl", 51L, Vec(), Vec()),
-    OperandEnumerant("InterpolationFunction", 52L, Vec(), Vec()),
-    OperandEnumerant("TransformFeedback", 53L, Vec(), Vec()),
-    OperandEnumerant("GeometryStreams", 54L, Vec(), Vec()),
-    OperandEnumerant("StorageImageReadWithoutFormat", 55L, Vec(), Vec()),
-    OperandEnumerant("StorageImageWriteWithoutFormat", 56L, Vec(), Vec()),
-    OperandEnumerant("MultiViewport", 57L, Vec(), Vec()),
-    OperandEnumerant("SubgroupDispatch", 58L, Vec(), Vec()),
-    OperandEnumerant("NamedBarrier", 59L, Vec(), Vec()),
-    OperandEnumerant("PipeStorage", 60L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniform", 61L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformVote", 62L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformArithmetic", 63L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformBallot", 64L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformShuffle", 65L, Vec(), Vec())
-  )
-
-  private def operandEnumerants9: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("GroupNonUniformShuffleRelative", 66L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformClustered", 67L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformQuad", 68L, Vec(), Vec()),
-    OperandEnumerant("ShaderLayer", 69L, Vec(), Vec()),
-    OperandEnumerant("ShaderViewportIndex", 70L, Vec(), Vec()),
-    OperandEnumerant("UniformDecoration", 71L, Vec(), Vec()),
-    OperandEnumerant("CoreBuiltinsARM", 4165L, Vec(), Vec()),
-    OperandEnumerant("TileImageColorReadAccessEXT", 4166L, Vec(), Vec()),
-    OperandEnumerant("TileImageDepthReadAccessEXT", 4167L, Vec(), Vec()),
-    OperandEnumerant("TileImageStencilReadAccessEXT", 4168L, Vec(), Vec()),
-    OperandEnumerant("TensorsARM", 4174L, Vec(), Vec()),
-    OperandEnumerant("StorageTensorArrayDynamicIndexingARM", 4175L, Vec(), Vec()),
-    OperandEnumerant("StorageTensorArrayNonUniformIndexingARM", 4176L, Vec(), Vec()),
-    OperandEnumerant("GraphARM", 4191L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixLayoutsARM", 4201L, Vec(), Vec()),
-    OperandEnumerant("Float8EXT", 4212L, Vec(), Vec()),
-    OperandEnumerant("Float8CooperativeMatrixEXT", 4213L, Vec(), Vec()),
-    OperandEnumerant("Float6EXT", 4228L, Vec(), Vec()),
-    OperandEnumerant("Float4EXT", 4229L, Vec(), Vec()),
-    OperandEnumerant("Float8UnsignedE8M0EXT", 4230L, Vec(), Vec()),
-    OperandEnumerant("MXInt8EXT", 4231L, Vec(), Vec()),
-    OperandEnumerant("BitcastExtractEXT", 4232L, Vec(), Vec()),
-    OperandEnumerant("FragmentShadingRateKHR", 4422L, Vec(), Vec()),
-    OperandEnumerant("SubgroupBallotKHR", 4423L, Vec(), Vec()),
-    OperandEnumerant("DrawParameters", 4427L, Vec(), Vec()),
-    OperandEnumerant("WorkgroupMemoryExplicitLayoutKHR", 4428L, Vec(), Vec()),
-    OperandEnumerant("WorkgroupMemoryExplicitLayout8BitAccessKHR", 4429L, Vec(), Vec()),
-    OperandEnumerant("WorkgroupMemoryExplicitLayout16BitAccessKHR", 4430L, Vec(), Vec()),
-    OperandEnumerant("SubgroupVoteKHR", 4431L, Vec(), Vec()),
-    OperandEnumerant("StorageBuffer16BitAccess", 4433L, Vec(), Vec("StorageUniformBufferBlock16")),
-    OperandEnumerant("UniformAndStorageBuffer16BitAccess", 4434L, Vec(), Vec("StorageUniform16")),
-    OperandEnumerant("StoragePushConstant16", 4435L, Vec(), Vec()),
-    OperandEnumerant("StorageInputOutput16", 4436L, Vec(), Vec()),
-    OperandEnumerant("DeviceGroup", 4437L, Vec(), Vec()),
-    OperandEnumerant("MultiView", 4439L, Vec(), Vec()),
-    OperandEnumerant("VariablePointersStorageBuffer", 4441L, Vec(), Vec()),
-    OperandEnumerant("VariablePointers", 4442L, Vec(), Vec()),
-    OperandEnumerant("AtomicStorageOps", 4445L, Vec(), Vec()),
-    OperandEnumerant("SampleMaskPostDepthCoverage", 4447L, Vec(), Vec()),
-    OperandEnumerant("StorageBuffer8BitAccess", 4448L, Vec(), Vec()),
-    OperandEnumerant("UniformAndStorageBuffer8BitAccess", 4449L, Vec(), Vec()),
-    OperandEnumerant("StoragePushConstant8", 4450L, Vec(), Vec()),
-    OperandEnumerant("DenormPreserve", 4464L, Vec(), Vec()),
-    OperandEnumerant("DenormFlushToZero", 4465L, Vec(), Vec()),
-    OperandEnumerant("SignedZeroInfNanPreserve", 4466L, Vec(), Vec()),
-    OperandEnumerant("RoundingModeRTE", 4467L, Vec(), Vec()),
-    OperandEnumerant("RoundingModeRTZ", 4468L, Vec(), Vec()),
-    OperandEnumerant("RayQueryProvisionalKHR", 4471L, Vec(), Vec()),
-    OperandEnumerant("RayQueryKHR", 4472L, Vec(), Vec()),
-    OperandEnumerant("UntypedPointersKHR", 4473L, Vec(), Vec()),
-    OperandEnumerant("RayTraversalPrimitiveCullingKHR", 4478L, Vec(), Vec()),
-    OperandEnumerant("RayTracingKHR", 4479L, Vec(), Vec()),
-    OperandEnumerant("TextureSampleWeightedQCOM", 4484L, Vec(), Vec()),
-    OperandEnumerant("TextureBoxFilterQCOM", 4485L, Vec(), Vec()),
-    OperandEnumerant("TextureBlockMatchQCOM", 4486L, Vec(), Vec()),
-    OperandEnumerant("TileShadingQCOM", 4495L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixConversionQCOM", 4496L, Vec(), Vec()),
-    OperandEnumerant("TextureBlockMatch2QCOM", 4498L, Vec(), Vec()),
-    OperandEnumerant("MultipleWaitQueuesQCOM", 4539L, Vec(), Vec()),
-    OperandEnumerant("ImageGatherLinearQCOM", 4543L, Vec(), Vec()),
-    OperandEnumerant("ImageGatherExtendedModesQCOM", 4544L, Vec(), Vec()),
-    OperandEnumerant("Float16ImageAMD", 5008L, Vec(), Vec()),
-    OperandEnumerant("ImageGatherBiasLodAMD", 5009L, Vec(), Vec()),
-    OperandEnumerant("FragmentMaskAMD", 5010L, Vec(), Vec())
-  )
-
-  private def operandEnumerants10: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("StencilExportEXT", 5013L, Vec(), Vec()),
-    OperandEnumerant("ImageReadWriteLodAMD", 5015L, Vec(), Vec()),
-    OperandEnumerant("Int64ImageEXT", 5016L, Vec(), Vec()),
-    OperandEnumerant("ShaderClockKHR", 5055L, Vec(), Vec()),
-    OperandEnumerant("ShaderEnqueueAMDX", 5067L, Vec(), Vec()),
-    OperandEnumerant("QuadControlKHR", 5087L, Vec(), Vec()),
-    OperandEnumerant("Int4TypeINTEL", 5112L, Vec(), Vec()),
-    OperandEnumerant("Int4CooperativeMatrixINTEL", 5114L, Vec(), Vec()),
-    OperandEnumerant("BFloat16TypeKHR", 5116L, Vec(), Vec()),
-    OperandEnumerant("BFloat16DotProductKHR", 5117L, Vec(), Vec()),
-    OperandEnumerant("BFloat16CooperativeMatrixKHR", 5118L, Vec(), Vec()),
-    OperandEnumerant("AbortKHR", 5120L, Vec(), Vec()),
-    OperandEnumerant("DescriptorHeapEXT", 5128L, Vec(), Vec()),
-    OperandEnumerant("ConstantDataKHR", 5146L, Vec(), Vec()),
-    OperandEnumerant("PoisonFreezeKHR", 5156L, Vec(), Vec()),
-    OperandEnumerant("WeakLinkageAMD", 5181L, Vec(), Vec()),
-    OperandEnumerant("SampleMaskOverrideCoverageNV", 5249L, Vec(), Vec()),
-    OperandEnumerant("GeometryShaderPassthroughNV", 5251L, Vec(), Vec()),
-    OperandEnumerant("ShaderViewportIndexLayerEXT", 5254L, Vec(), Vec("ShaderViewportIndexLayerNV")),
-    OperandEnumerant("ShaderViewportMaskNV", 5255L, Vec(), Vec()),
-    OperandEnumerant("ShaderStereoViewNV", 5259L, Vec(), Vec()),
-    OperandEnumerant("PerViewAttributesNV", 5260L, Vec(), Vec()),
-    OperandEnumerant("FragmentFullyCoveredEXT", 5265L, Vec(), Vec()),
-    OperandEnumerant("MeshShadingNV", 5266L, Vec(), Vec()),
-    OperandEnumerant("ImageFootprintNV", 5282L, Vec(), Vec()),
-    OperandEnumerant("MeshShadingEXT", 5283L, Vec(), Vec()),
-    OperandEnumerant("FragmentBarycentricKHR", 5284L, Vec(), Vec("FragmentBarycentricNV")),
-    OperandEnumerant("ComputeDerivativeGroupQuadsKHR", 5288L, Vec(), Vec("ComputeDerivativeGroupQuadsNV")),
-    OperandEnumerant("FragmentDensityEXT", 5291L, Vec(), Vec("ShadingRateNV")),
-    OperandEnumerant("GroupNonUniformPartitionedEXT", 5297L, Vec(), Vec("GroupNonUniformPartitionedNV")),
-    OperandEnumerant("ShaderNonUniform", 5301L, Vec(), Vec("ShaderNonUniformEXT")),
-    OperandEnumerant("RuntimeDescriptorArray", 5302L, Vec(), Vec("RuntimeDescriptorArrayEXT")),
-    OperandEnumerant(
-      "InputAttachmentArrayDynamicIndexing",
-      5303L,
-      Vec(),
-      Vec("InputAttachmentArrayDynamicIndexingEXT")
-    ),
-    OperandEnumerant(
-      "UniformTexelBufferArrayDynamicIndexing",
-      5304L,
-      Vec(),
-      Vec("UniformTexelBufferArrayDynamicIndexingEXT")
-    ),
-    OperandEnumerant(
-      "StorageTexelBufferArrayDynamicIndexing",
-      5305L,
-      Vec(),
-      Vec("StorageTexelBufferArrayDynamicIndexingEXT")
-    ),
-    OperandEnumerant(
-      "UniformBufferArrayNonUniformIndexing",
-      5306L,
-      Vec(),
-      Vec("UniformBufferArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant(
-      "SampledImageArrayNonUniformIndexing",
-      5307L,
-      Vec(),
-      Vec("SampledImageArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant(
-      "StorageBufferArrayNonUniformIndexing",
-      5308L,
-      Vec(),
-      Vec("StorageBufferArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant(
-      "StorageImageArrayNonUniformIndexing",
-      5309L,
-      Vec(),
-      Vec("StorageImageArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant(
-      "InputAttachmentArrayNonUniformIndexing",
-      5310L,
-      Vec(),
-      Vec("InputAttachmentArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant(
-      "UniformTexelBufferArrayNonUniformIndexing",
-      5311L,
-      Vec(),
-      Vec("UniformTexelBufferArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant(
-      "StorageTexelBufferArrayNonUniformIndexing",
-      5312L,
-      Vec(),
-      Vec("StorageTexelBufferArrayNonUniformIndexingEXT")
-    ),
-    OperandEnumerant("RayTracingPositionFetchKHR", 5336L, Vec(), Vec()),
-    OperandEnumerant("RayTracingNV", 5340L, Vec(), Vec()),
-    OperandEnumerant("RayTracingMotionBlurNV", 5341L, Vec(), Vec()),
-    OperandEnumerant("VulkanMemoryModel", 5345L, Vec(), Vec("VulkanMemoryModelKHR")),
-    OperandEnumerant("VulkanMemoryModelDeviceScope", 5346L, Vec(), Vec("VulkanMemoryModelDeviceScopeKHR")),
-    OperandEnumerant("PhysicalStorageBufferAddresses", 5347L, Vec(), Vec("PhysicalStorageBufferAddressesEXT")),
-    OperandEnumerant("ComputeDerivativeGroupLinearKHR", 5350L, Vec(), Vec("ComputeDerivativeGroupLinearNV")),
-    OperandEnumerant("RayTracingProvisionalKHR", 5353L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixNV", 5357L, Vec(), Vec()),
-    OperandEnumerant("FragmentShaderSampleInterlockEXT", 5363L, Vec(), Vec()),
-    OperandEnumerant("FragmentShaderShadingRateInterlockEXT", 5372L, Vec(), Vec()),
-    OperandEnumerant("ShaderSMBuiltinsNV", 5373L, Vec(), Vec()),
-    OperandEnumerant("FragmentShaderPixelInterlockEXT", 5378L, Vec(), Vec()),
-    OperandEnumerant("DemoteToHelperInvocation", 5379L, Vec(), Vec("DemoteToHelperInvocationEXT")),
-    OperandEnumerant("DisplacementMicromapNV", 5380L, Vec(), Vec()),
-    OperandEnumerant("RayTracingOpacityMicromapKHR", 5381L, Vec(), Vec("RayTracingOpacityMicromapEXT")),
-    OperandEnumerant("ShaderInvocationReorderNV", 5383L, Vec(), Vec()),
-    OperandEnumerant("ShaderInvocationReorderEXT", 5388L, Vec(), Vec()),
-    OperandEnumerant("BindlessTextureNV", 5390L, Vec(), Vec()),
-    OperandEnumerant("RayQueryPositionFetchKHR", 5391L, Vec(), Vec()),
-    OperandEnumerant("CooperativeVectorNV", 5394L, Vec(), Vec()),
-    OperandEnumerant("AtomicFloat16VectorNV", 5404L, Vec(), Vec())
-  )
-
-  private def operandEnumerants11: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("RayTracingDisplacementMicromapNV", 5409L, Vec(), Vec()),
-    OperandEnumerant("RawAccessChainsNV", 5414L, Vec(), Vec()),
-    OperandEnumerant("RayTracingSpheresGeometryNV", 5418L, Vec(), Vec()),
-    OperandEnumerant("RayTracingLinearSweptSpheresGeometryNV", 5419L, Vec(), Vec()),
-    OperandEnumerant("PushConstantBanksNV", 5423L, Vec(), Vec()),
-    OperandEnumerant("LongVectorEXT", 5425L, Vec(), Vec()),
-    OperandEnumerant("Shader64BitIndexingEXT", 5426L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixReductionsNV", 5430L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixConversionsNV", 5431L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixPerElementOperationsNV", 5432L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixTensorAddressingNV", 5433L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixBlockLoadsNV", 5434L, Vec(), Vec()),
-    OperandEnumerant("CooperativeVectorTrainingNV", 5435L, Vec(), Vec()),
-    OperandEnumerant("RayTracingClusterAccelerationStructureNV", 5437L, Vec(), Vec()),
-    OperandEnumerant("TensorAddressingNV", 5439L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixDecodeVectorNV", 5447L, Vec(), Vec()),
-    OperandEnumerant("SubgroupShuffleINTEL", 5568L, Vec(), Vec()),
-    OperandEnumerant("SubgroupBufferBlockIOINTEL", 5569L, Vec(), Vec()),
-    OperandEnumerant("SubgroupImageBlockIOINTEL", 5570L, Vec(), Vec()),
-    OperandEnumerant("SubgroupImageMediaBlockIOINTEL", 5579L, Vec(), Vec()),
-    OperandEnumerant("RoundToInfinityINTEL", 5582L, Vec(), Vec()),
-    OperandEnumerant("FloatingPointModeINTEL", 5583L, Vec(), Vec()),
-    OperandEnumerant("IntegerFunctions2INTEL", 5584L, Vec(), Vec()),
-    OperandEnumerant("FunctionPointersINTEL", 5603L, Vec(), Vec()),
-    OperandEnumerant("IndirectReferencesINTEL", 5604L, Vec(), Vec()),
-    OperandEnumerant("AsmINTEL", 5606L, Vec(), Vec()),
-    OperandEnumerant("AtomicFloat32MinMaxEXT", 5612L, Vec(), Vec()),
-    OperandEnumerant("AtomicFloat64MinMaxEXT", 5613L, Vec(), Vec()),
-    OperandEnumerant("AtomicFloat16MinMaxEXT", 5616L, Vec(), Vec()),
-    OperandEnumerant("VectorComputeINTEL", 5617L, Vec(), Vec()),
-    OperandEnumerant("VectorAnyINTEL", 5619L, Vec(), Vec()),
-    OperandEnumerant("ExpectAssumeKHR", 5629L, Vec(), Vec()),
-    OperandEnumerant("SubgroupAvcMotionEstimationINTEL", 5696L, Vec(), Vec()),
-    OperandEnumerant("SubgroupAvcMotionEstimationIntraINTEL", 5697L, Vec(), Vec()),
-    OperandEnumerant("SubgroupAvcMotionEstimationChromaINTEL", 5698L, Vec(), Vec()),
-    OperandEnumerant("VariableLengthArrayINTEL", 5817L, Vec(), Vec()),
-    OperandEnumerant("FunctionFloatControlINTEL", 5821L, Vec(), Vec()),
-    OperandEnumerant("FPGAMemoryAttributesALTERA", 5824L, Vec(), Vec("FPGAMemoryAttributesINTEL")),
-    OperandEnumerant("FPFastMathModeINTEL", 5837L, Vec(), Vec()),
-    OperandEnumerant("ArbitraryPrecisionIntegersALTERA", 5844L, Vec(), Vec("ArbitraryPrecisionIntegersINTEL")),
-    OperandEnumerant(
-      "ArbitraryPrecisionFloatingPointALTERA",
-      5845L,
-      Vec(),
-      Vec("ArbitraryPrecisionFloatingPointINTEL")
-    ),
-    OperandEnumerant("UnstructuredLoopControlsINTEL", 5886L, Vec(), Vec()),
-    OperandEnumerant("FPGALoopControlsALTERA", 5888L, Vec(), Vec("FPGALoopControlsINTEL")),
-    OperandEnumerant("KernelAttributesINTEL", 5892L, Vec(), Vec()),
-    OperandEnumerant("FPGAKernelAttributesINTEL", 5897L, Vec(), Vec()),
-    OperandEnumerant("FPGAMemoryAccessesALTERA", 5898L, Vec(), Vec("FPGAMemoryAccessesINTEL")),
-    OperandEnumerant("FPGAClusterAttributesALTERA", 5904L, Vec(), Vec("FPGAClusterAttributesINTEL")),
-    OperandEnumerant("LoopFuseALTERA", 5906L, Vec(), Vec("LoopFuseINTEL")),
-    OperandEnumerant("FPGADSPControlALTERA", 5908L, Vec(), Vec("FPGADSPControlINTEL")),
-    OperandEnumerant("MemoryAccessAliasingINTEL", 5910L, Vec(), Vec()),
-    OperandEnumerant(
-      "FPGAInvocationPipeliningAttributesALTERA",
-      5916L,
-      Vec(),
-      Vec("FPGAInvocationPipeliningAttributesINTEL")
-    ),
-    OperandEnumerant("FPGABufferLocationALTERA", 5920L, Vec(), Vec("FPGABufferLocationINTEL")),
-    OperandEnumerant("ArbitraryPrecisionFixedPointALTERA", 5922L, Vec(), Vec("ArbitraryPrecisionFixedPointINTEL")),
-    OperandEnumerant("USMStorageClassesALTERA", 5935L, Vec(), Vec("USMStorageClassesINTEL")),
-    OperandEnumerant("RuntimeAlignedAttributeALTERA", 5939L, Vec(), Vec("RuntimeAlignedAttributeINTEL")),
-    OperandEnumerant("IOPipesALTERA", 5943L, Vec(), Vec("IOPipesINTEL")),
-    OperandEnumerant("BlockingPipesALTERA", 5945L, Vec(), Vec("BlockingPipesINTEL")),
-    OperandEnumerant("FPGARegALTERA", 5948L, Vec(), Vec("FPGARegINTEL")),
-    OperandEnumerant("DotProductInputAll", 6016L, Vec(), Vec("DotProductInputAllKHR")),
-    OperandEnumerant("DotProductInput4x8Bit", 6017L, Vec(), Vec("DotProductInput4x8BitKHR")),
-    OperandEnumerant("DotProductInput4x8BitPacked", 6018L, Vec(), Vec("DotProductInput4x8BitPackedKHR")),
-    OperandEnumerant("DotProduct", 6019L, Vec(), Vec("DotProductKHR")),
-    OperandEnumerant("RayCullMaskKHR", 6020L, Vec(), Vec()),
-    OperandEnumerant("CooperativeMatrixKHR", 6022L, Vec(), Vec())
-  )
-
-  private def operandEnumerants12: Vec[OperandEnumerant] = Vec(
-    OperandEnumerant("ReplicatedCompositesEXT", 6024L, Vec(), Vec()),
-    OperandEnumerant("BitInstructions", 6025L, Vec(), Vec()),
-    OperandEnumerant("GroupNonUniformRotateKHR", 6026L, Vec(), Vec()),
-    OperandEnumerant("FloatControls2", 6029L, Vec(), Vec()),
-    OperandEnumerant("FMAKHR", 6030L, Vec(), Vec()),
-    OperandEnumerant("RayTracingOpacityMicromapExecutionModeKHR", 6032L, Vec(), Vec()),
-    OperandEnumerant("AtomicFloat32AddEXT", 6033L, Vec(), Vec()),
-    OperandEnumerant("AtomicFloat64AddEXT", 6034L, Vec(), Vec()),
-    OperandEnumerant("LongCompositesINTEL", 6089L, Vec(), Vec()),
-    OperandEnumerant("OptNoneEXT", 6094L, Vec(), Vec("OptNoneINTEL")),
-    OperandEnumerant("AtomicFloat16AddEXT", 6095L, Vec(), Vec()),
-    OperandEnumerant("DebugInfoModuleINTEL", 6114L, Vec(), Vec()),
-    OperandEnumerant("BFloat16ConversionINTEL", 6115L, Vec(), Vec()),
-    OperandEnumerant("SplitBarrierEXT", 6141L, Vec(), Vec("SplitBarrierINTEL")),
-    OperandEnumerant("ArithmeticFenceEXT", 6144L, Vec(), Vec()),
-    OperandEnumerant("FPGAClusterAttributesV2ALTERA", 6150L, Vec(), Vec("FPGAClusterAttributesV2INTEL")),
-    OperandEnumerant("FPGAKernelAttributesv2INTEL", 6161L, Vec(), Vec()),
-    OperandEnumerant("TaskSequenceALTERA", 6162L, Vec(), Vec("TaskSequenceINTEL")),
-    OperandEnumerant("FPMaxErrorINTEL", 6169L, Vec(), Vec()),
-    OperandEnumerant("FPGALatencyControlALTERA", 6171L, Vec(), Vec("FPGALatencyControlINTEL")),
-    OperandEnumerant("FPGAArgumentInterfacesALTERA", 6174L, Vec(), Vec("FPGAArgumentInterfacesINTEL")),
-    OperandEnumerant("GlobalVariableHostAccessINTEL", 6187L, Vec(), Vec()),
-    OperandEnumerant("GlobalVariableFPGADecorationsALTERA", 6189L, Vec(), Vec("GlobalVariableFPGADecorationsINTEL")),
-    OperandEnumerant("SubgroupBufferPrefetchINTEL", 6220L, Vec(), Vec()),
-    OperandEnumerant("Subgroup2DBlockIOINTEL", 6228L, Vec(), Vec()),
-    OperandEnumerant("Subgroup2DBlockTransformINTEL", 6229L, Vec(), Vec()),
-    OperandEnumerant("Subgroup2DBlockTransposeINTEL", 6230L, Vec(), Vec()),
-    OperandEnumerant("SubgroupMatrixMultiplyAccumulateINTEL", 6236L, Vec(), Vec()),
-    OperandEnumerant("TernaryBitwiseFunctionINTEL", 6241L, Vec(), Vec()),
-    OperandEnumerant("UntypedVariableLengthArrayINTEL", 6243L, Vec(), Vec()),
-    OperandEnumerant("SpecConditionalINTEL", 6245L, Vec(), Vec()),
-    OperandEnumerant("FunctionVariantsINTEL", 6246L, Vec(), Vec()),
-    OperandEnumerant("PredicatedIOINTEL", 6257L, Vec(), Vec()),
-    OperandEnumerant("RoundedDivideSqrtINTEL", 6265L, Vec(), Vec()),
-    OperandEnumerant("GroupUniformArithmeticKHR", 6400L, Vec(), Vec()),
-    OperandEnumerant("TensorFloat32RoundingINTEL", 6425L, Vec(), Vec()),
-    OperandEnumerant("MaskedGatherScatterINTEL", 6427L, Vec(), Vec()),
-    OperandEnumerant("CacheControlsINTEL", 6441L, Vec(), Vec()),
-    OperandEnumerant("RegisterLimitsINTEL", 6460L, Vec(), Vec()),
-    OperandEnumerant("BindlessImagesINTEL", 6528L, Vec(), Vec()),
-    OperandEnumerant("DotProductFloat16AccFloat32VALVE", 6912L, Vec(), Vec()),
-    OperandEnumerant("DotProductFloat16AccFloat16VALVE", 6913L, Vec(), Vec()),
-    OperandEnumerant("DotProductBFloat16AccVALVE", 6914L, Vec(), Vec()),
-    OperandEnumerant("DotProductFloat8AccFloat32VALVE", 6915L, Vec(), Vec()),
-    OperandEnumerant("IntrinsicSAMSUNG", 7041L, Vec(), Vec())
-  )
-
-  private def operandKinds0: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.ImageOperands,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("Bias", 1L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("Lod", 2L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("Grad", 4L, Vec(OperandKind.IdRef, OperandKind.IdRef), Vec()),
-        OperandEnumerant("ConstOffset", 8L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("Offset", 16L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("ConstOffsets", 32L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("Sample", 64L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("MinLod", 128L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("MakeTexelAvailable", 256L, Vec(OperandKind.IdScope), Vec("MakeTexelAvailableKHR")),
-        OperandEnumerant("MakeTexelVisible", 512L, Vec(OperandKind.IdScope), Vec("MakeTexelVisibleKHR")),
-        OperandEnumerant("NonPrivateTexel", 1024L, Vec(), Vec("NonPrivateTexelKHR")),
-        OperandEnumerant("VolatileTexel", 2048L, Vec(), Vec("VolatileTexelKHR")),
-        OperandEnumerant("SignExtend", 4096L, Vec(), Vec()),
-        OperandEnumerant("ZeroExtend", 8192L, Vec(), Vec()),
-        OperandEnumerant("Nontemporal", 16384L, Vec(), Vec()),
-        OperandEnumerant("Offsets", 65536L, Vec(OperandKind.IdRef), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FPFastMathMode,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("NotNaN", 1L, Vec(), Vec()),
-        OperandEnumerant("NotInf", 2L, Vec(), Vec()),
-        OperandEnumerant("NSZ", 4L, Vec(), Vec()),
-        OperandEnumerant("AllowRecip", 8L, Vec(), Vec()),
-        OperandEnumerant("Fast", 16L, Vec(), Vec()),
-        OperandEnumerant("AllowContract", 65536L, Vec(), Vec("AllowContractFastINTEL")),
-        OperandEnumerant("AllowReassoc", 131072L, Vec(), Vec("AllowReassocINTEL")),
-        OperandEnumerant("AllowTransform", 262144L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.SelectionControl,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("Flatten", 1L, Vec(), Vec()),
-        OperandEnumerant("DontFlatten", 2L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.LoopControl,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("Unroll", 1L, Vec(), Vec()),
-        OperandEnumerant("DontUnroll", 2L, Vec(), Vec()),
-        OperandEnumerant("DependencyInfinite", 4L, Vec(), Vec()),
-        OperandEnumerant("DependencyLength", 8L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant("MinIterations", 16L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant("MaxIterations", 32L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant("IterationMultiple", 64L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant("PeelCount", 128L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant("PartialCount", 256L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant(
-          "InitiationIntervalALTERA",
-          65536L,
-          Vec(OperandKind.LiteralInteger),
-          Vec("InitiationIntervalINTEL")
-        ),
-        OperandEnumerant("MaxConcurrencyALTERA", 131072L, Vec(OperandKind.LiteralInteger), Vec("MaxConcurrencyINTEL")),
-        OperandEnumerant(
-          "DependencyArrayALTERA",
-          262144L,
-          Vec(OperandKind.LiteralInteger),
-          Vec("DependencyArrayINTEL")
-        ),
-        OperandEnumerant("PipelineEnableALTERA", 524288L, Vec(OperandKind.LiteralInteger), Vec("PipelineEnableINTEL")),
-        OperandEnumerant("LoopCoalesceALTERA", 1048576L, Vec(OperandKind.LiteralInteger), Vec("LoopCoalesceINTEL")),
-        OperandEnumerant(
-          "MaxInterleavingALTERA",
-          2097152L,
-          Vec(OperandKind.LiteralInteger),
-          Vec("MaxInterleavingINTEL")
-        ),
-        OperandEnumerant(
-          "SpeculatedIterationsALTERA",
-          4194304L,
-          Vec(OperandKind.LiteralInteger),
-          Vec("SpeculatedIterationsINTEL")
-        ),
-        OperandEnumerant("NoFusionALTERA", 8388608L, Vec(), Vec("NoFusionINTEL")),
-        OperandEnumerant("LoopCountALTERA", 16777216L, Vec(OperandKind.LiteralInteger), Vec("LoopCountINTEL")),
-        OperandEnumerant(
-          "MaxReinvocationDelayALTERA",
-          33554432L,
-          Vec(OperandKind.LiteralInteger),
-          Vec("MaxReinvocationDelayINTEL")
-        ),
-        OperandEnumerant("MultipleWaitQueuesQCOM", 268435456L, Vec(OperandKind.LiteralInteger), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FunctionControl,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("Inline", 1L, Vec(), Vec()),
-        OperandEnumerant("DontInline", 2L, Vec(), Vec()),
-        OperandEnumerant("Pure", 4L, Vec(), Vec()),
-        OperandEnumerant("Const", 8L, Vec(), Vec()),
-        OperandEnumerant("OptNoneEXT", 65536L, Vec(), Vec("OptNoneINTEL"))
-      )
-    )
-  )
-
-  private def operandKinds1: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.MemorySemantics,
-      Vec(
-        OperandEnumerant("Relaxed", 0L, Vec(), Vec("None")),
-        OperandEnumerant("Acquire", 2L, Vec(), Vec()),
-        OperandEnumerant("Release", 4L, Vec(), Vec()),
-        OperandEnumerant("AcquireRelease", 8L, Vec(), Vec()),
-        OperandEnumerant("SequentiallyConsistent", 16L, Vec(), Vec()),
-        OperandEnumerant("UniformMemory", 64L, Vec(), Vec()),
-        OperandEnumerant("SubgroupMemory", 128L, Vec(), Vec()),
-        OperandEnumerant("WorkgroupMemory", 256L, Vec(), Vec()),
-        OperandEnumerant("CrossWorkgroupMemory", 512L, Vec(), Vec()),
-        OperandEnumerant("AtomicCounterMemory", 1024L, Vec(), Vec()),
-        OperandEnumerant("ImageMemory", 2048L, Vec(), Vec()),
-        OperandEnumerant("OutputMemory", 4096L, Vec(), Vec("OutputMemoryKHR")),
-        OperandEnumerant("MakeAvailable", 8192L, Vec(), Vec("MakeAvailableKHR")),
-        OperandEnumerant("MakeVisible", 16384L, Vec(), Vec("MakeVisibleKHR")),
-        OperandEnumerant("Volatile", 32768L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.MemoryAccess,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("Volatile", 1L, Vec(), Vec()),
-        OperandEnumerant("Aligned", 2L, Vec(OperandKind.LiteralInteger), Vec()),
-        OperandEnumerant("Nontemporal", 4L, Vec(), Vec()),
-        OperandEnumerant("MakePointerAvailable", 8L, Vec(OperandKind.IdScope), Vec("MakePointerAvailableKHR")),
-        OperandEnumerant("MakePointerVisible", 16L, Vec(OperandKind.IdScope), Vec("MakePointerVisibleKHR")),
-        OperandEnumerant("NonPrivatePointer", 32L, Vec(), Vec("NonPrivatePointerKHR")),
-        OperandEnumerant("AliasScopeINTELMask", 65536L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("NoAliasINTELMask", 131072L, Vec(OperandKind.IdRef), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.KernelProfilingInfo,
-      Vec(OperandEnumerant("None", 0L, Vec(), Vec()), OperandEnumerant("CmdExecTime", 1L, Vec(), Vec()))
-    ),
-    OperandKindInfo(
-      OperandKind.RayFlags,
-      Vec(
-        OperandEnumerant("NoneKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("OpaqueKHR", 1L, Vec(), Vec()),
-        OperandEnumerant("NoOpaqueKHR", 2L, Vec(), Vec()),
-        OperandEnumerant("TerminateOnFirstHitKHR", 4L, Vec(), Vec()),
-        OperandEnumerant("SkipClosestHitShaderKHR", 8L, Vec(), Vec()),
-        OperandEnumerant("CullBackFacingTrianglesKHR", 16L, Vec(), Vec()),
-        OperandEnumerant("CullFrontFacingTrianglesKHR", 32L, Vec(), Vec()),
-        OperandEnumerant("CullOpaqueKHR", 64L, Vec(), Vec()),
-        OperandEnumerant("CullNoOpaqueKHR", 128L, Vec(), Vec()),
-        OperandEnumerant("SkipTrianglesKHR", 256L, Vec(), Vec("SkipBuiltinPrimitivesNV")),
-        OperandEnumerant("SkipAABBsKHR", 512L, Vec(), Vec()),
-        OperandEnumerant("ForceOpacityMicromap2StateKHR", 1024L, Vec(), Vec("ForceOpacityMicromap2StateEXT"))
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FragmentShadingRate,
-      Vec(
-        OperandEnumerant("Vertical2Pixels", 1L, Vec(), Vec()),
-        OperandEnumerant("Vertical4Pixels", 2L, Vec(), Vec()),
-        OperandEnumerant("Horizontal2Pixels", 4L, Vec(), Vec()),
-        OperandEnumerant("Horizontal4Pixels", 8L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.RawAccessChainOperands,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("RobustnessPerComponentNV", 1L, Vec(), Vec()),
-        OperandEnumerant("RobustnessPerElementNV", 2L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.SourceLanguage,
-      Vec(
-        OperandEnumerant("Unknown", 0L, Vec(), Vec()),
-        OperandEnumerant("ESSL", 1L, Vec(), Vec()),
-        OperandEnumerant("GLSL", 2L, Vec(), Vec()),
-        OperandEnumerant("OpenCL_C", 3L, Vec(), Vec()),
-        OperandEnumerant("OpenCL_CPP", 4L, Vec(), Vec()),
-        OperandEnumerant("HLSL", 5L, Vec(), Vec()),
-        OperandEnumerant("CPP_for_OpenCL", 6L, Vec(), Vec()),
-        OperandEnumerant("SYCL", 7L, Vec(), Vec()),
-        OperandEnumerant("HERO_C", 8L, Vec(), Vec()),
-        OperandEnumerant("NZSL", 9L, Vec(), Vec()),
-        OperandEnumerant("WGSL", 10L, Vec(), Vec()),
-        OperandEnumerant("Slang", 11L, Vec(), Vec()),
-        OperandEnumerant("Zig", 12L, Vec(), Vec()),
-        OperandEnumerant("Rust", 13L, Vec(), Vec()),
-        OperandEnumerant("Pred", 14L, Vec(), Vec()),
-        OperandEnumerant("ApilaJai", 15L, Vec(), Vec())
-      )
-    )
-  )
-
-  private def operandKinds2: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.ExecutionModel,
-      Vec(
-        OperandEnumerant("Vertex", 0L, Vec(), Vec()),
-        OperandEnumerant("TessellationControl", 1L, Vec(), Vec()),
-        OperandEnumerant("TessellationEvaluation", 2L, Vec(), Vec()),
-        OperandEnumerant("Geometry", 3L, Vec(), Vec()),
-        OperandEnumerant("Fragment", 4L, Vec(), Vec()),
-        OperandEnumerant("GLCompute", 5L, Vec(), Vec()),
-        OperandEnumerant("Kernel", 6L, Vec(), Vec()),
-        OperandEnumerant("TaskNV", 5267L, Vec(), Vec()),
-        OperandEnumerant("MeshNV", 5268L, Vec(), Vec()),
-        OperandEnumerant("RayGenerationKHR", 5313L, Vec(), Vec("RayGenerationNV")),
-        OperandEnumerant("IntersectionKHR", 5314L, Vec(), Vec("IntersectionNV")),
-        OperandEnumerant("AnyHitKHR", 5315L, Vec(), Vec("AnyHitNV")),
-        OperandEnumerant("ClosestHitKHR", 5316L, Vec(), Vec("ClosestHitNV")),
-        OperandEnumerant("MissKHR", 5317L, Vec(), Vec("MissNV")),
-        OperandEnumerant("CallableKHR", 5318L, Vec(), Vec("CallableNV")),
-        OperandEnumerant("TaskEXT", 5364L, Vec(), Vec()),
-        OperandEnumerant("MeshEXT", 5365L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.AddressingModel,
-      Vec(
-        OperandEnumerant("Logical", 0L, Vec(), Vec()),
-        OperandEnumerant("Physical32", 1L, Vec(), Vec()),
-        OperandEnumerant("Physical64", 2L, Vec(), Vec()),
-        OperandEnumerant("PhysicalStorageBuffer64", 5348L, Vec(), Vec("PhysicalStorageBuffer64EXT"))
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.MemoryModel,
-      Vec(
-        OperandEnumerant("Simple", 0L, Vec(), Vec()),
-        OperandEnumerant("GLSL450", 1L, Vec(), Vec()),
-        OperandEnumerant("OpenCL", 2L, Vec(), Vec()),
-        OperandEnumerant("Vulkan", 3L, Vec(), Vec("VulkanKHR"))
-      )
-    ),
-    OperandKindInfo(OperandKind.ExecutionMode, Vec(operandEnumerants0, operandEnumerants1).flatten),
-    OperandKindInfo(
-      OperandKind.StorageClass,
-      Vec(
-        OperandEnumerant("UniformConstant", 0L, Vec(), Vec()),
-        OperandEnumerant("Input", 1L, Vec(), Vec()),
-        OperandEnumerant("Uniform", 2L, Vec(), Vec()),
-        OperandEnumerant("Output", 3L, Vec(), Vec()),
-        OperandEnumerant("Workgroup", 4L, Vec(), Vec()),
-        OperandEnumerant("CrossWorkgroup", 5L, Vec(), Vec()),
-        OperandEnumerant("Private", 6L, Vec(), Vec()),
-        OperandEnumerant("Function", 7L, Vec(), Vec()),
-        OperandEnumerant("Generic", 8L, Vec(), Vec()),
-        OperandEnumerant("PushConstant", 9L, Vec(), Vec()),
-        OperandEnumerant("AtomicCounter", 10L, Vec(), Vec()),
-        OperandEnumerant("Image", 11L, Vec(), Vec()),
-        OperandEnumerant("StorageBuffer", 12L, Vec(), Vec()),
-        OperandEnumerant("TileImageEXT", 4172L, Vec(), Vec()),
-        OperandEnumerant("TileAttachmentQCOM", 4491L, Vec(), Vec()),
-        OperandEnumerant("NodePayloadAMDX", 5068L, Vec(), Vec()),
-        OperandEnumerant("CallableDataKHR", 5328L, Vec(), Vec("CallableDataNV")),
-        OperandEnumerant("IncomingCallableDataKHR", 5329L, Vec(), Vec("IncomingCallableDataNV")),
-        OperandEnumerant("RayPayloadKHR", 5338L, Vec(), Vec("RayPayloadNV")),
-        OperandEnumerant("HitAttributeKHR", 5339L, Vec(), Vec("HitAttributeNV")),
-        OperandEnumerant("IncomingRayPayloadKHR", 5342L, Vec(), Vec("IncomingRayPayloadNV")),
-        OperandEnumerant("ShaderRecordBufferKHR", 5343L, Vec(), Vec("ShaderRecordBufferNV")),
-        OperandEnumerant("PhysicalStorageBuffer", 5349L, Vec(), Vec("PhysicalStorageBufferEXT")),
-        OperandEnumerant("HitObjectAttributeNV", 5385L, Vec(), Vec()),
-        OperandEnumerant("TaskPayloadWorkgroupEXT", 5402L, Vec(), Vec()),
-        OperandEnumerant("HitObjectAttributeEXT", 5411L, Vec(), Vec()),
-        OperandEnumerant("CodeSectionINTEL", 5605L, Vec(), Vec()),
-        OperandEnumerant("DeviceOnlyALTERA", 5936L, Vec(), Vec("DeviceOnlyINTEL")),
-        OperandEnumerant("HostOnlyALTERA", 5937L, Vec(), Vec("HostOnlyINTEL"))
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.Dim,
-      Vec(
-        OperandEnumerant("1D", 0L, Vec(), Vec()),
-        OperandEnumerant("2D", 1L, Vec(), Vec()),
-        OperandEnumerant("3D", 2L, Vec(), Vec()),
-        OperandEnumerant("Cube", 3L, Vec(), Vec()),
-        OperandEnumerant("Rect", 4L, Vec(), Vec()),
-        OperandEnumerant("Buffer", 5L, Vec(), Vec()),
-        OperandEnumerant("SubpassData", 6L, Vec(), Vec()),
-        OperandEnumerant("TileImageDataEXT", 4173L, Vec(), Vec())
-      )
-    )
-  )
-
-  private def operandKinds3: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.SamplerAddressingMode,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("ClampToEdge", 1L, Vec(), Vec()),
-        OperandEnumerant("Clamp", 2L, Vec(), Vec()),
-        OperandEnumerant("Repeat", 3L, Vec(), Vec()),
-        OperandEnumerant("RepeatMirrored", 4L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.SamplerFilterMode,
-      Vec(OperandEnumerant("Nearest", 0L, Vec(), Vec()), OperandEnumerant("Linear", 1L, Vec(), Vec()))
-    ),
-    OperandKindInfo(
-      OperandKind.ImageFormat,
-      Vec(
-        OperandEnumerant("Unknown", 0L, Vec(), Vec()),
-        OperandEnumerant("Rgba32f", 1L, Vec(), Vec()),
-        OperandEnumerant("Rgba16f", 2L, Vec(), Vec()),
-        OperandEnumerant("R32f", 3L, Vec(), Vec()),
-        OperandEnumerant("Rgba8", 4L, Vec(), Vec()),
-        OperandEnumerant("Rgba8Snorm", 5L, Vec(), Vec()),
-        OperandEnumerant("Rg32f", 6L, Vec(), Vec()),
-        OperandEnumerant("Rg16f", 7L, Vec(), Vec()),
-        OperandEnumerant("R11fG11fB10f", 8L, Vec(), Vec()),
-        OperandEnumerant("R16f", 9L, Vec(), Vec()),
-        OperandEnumerant("Rgba16", 10L, Vec(), Vec()),
-        OperandEnumerant("Rgb10A2", 11L, Vec(), Vec()),
-        OperandEnumerant("Rg16", 12L, Vec(), Vec()),
-        OperandEnumerant("Rg8", 13L, Vec(), Vec()),
-        OperandEnumerant("R16", 14L, Vec(), Vec()),
-        OperandEnumerant("R8", 15L, Vec(), Vec()),
-        OperandEnumerant("Rgba16Snorm", 16L, Vec(), Vec()),
-        OperandEnumerant("Rg16Snorm", 17L, Vec(), Vec()),
-        OperandEnumerant("Rg8Snorm", 18L, Vec(), Vec()),
-        OperandEnumerant("R16Snorm", 19L, Vec(), Vec()),
-        OperandEnumerant("R8Snorm", 20L, Vec(), Vec()),
-        OperandEnumerant("Rgba32i", 21L, Vec(), Vec()),
-        OperandEnumerant("Rgba16i", 22L, Vec(), Vec()),
-        OperandEnumerant("Rgba8i", 23L, Vec(), Vec()),
-        OperandEnumerant("R32i", 24L, Vec(), Vec()),
-        OperandEnumerant("Rg32i", 25L, Vec(), Vec()),
-        OperandEnumerant("Rg16i", 26L, Vec(), Vec()),
-        OperandEnumerant("Rg8i", 27L, Vec(), Vec()),
-        OperandEnumerant("R16i", 28L, Vec(), Vec()),
-        OperandEnumerant("R8i", 29L, Vec(), Vec()),
-        OperandEnumerant("Rgba32ui", 30L, Vec(), Vec()),
-        OperandEnumerant("Rgba16ui", 31L, Vec(), Vec()),
-        OperandEnumerant("Rgba8ui", 32L, Vec(), Vec()),
-        OperandEnumerant("R32ui", 33L, Vec(), Vec()),
-        OperandEnumerant("Rgb10a2ui", 34L, Vec(), Vec()),
-        OperandEnumerant("Rg32ui", 35L, Vec(), Vec()),
-        OperandEnumerant("Rg16ui", 36L, Vec(), Vec()),
-        OperandEnumerant("Rg8ui", 37L, Vec(), Vec()),
-        OperandEnumerant("R16ui", 38L, Vec(), Vec()),
-        OperandEnumerant("R8ui", 39L, Vec(), Vec()),
-        OperandEnumerant("R64ui", 40L, Vec(), Vec()),
-        OperandEnumerant("R64i", 41L, Vec(), Vec())
-      )
-    )
-  )
-
-  private def operandKinds4: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.ImageChannelOrder,
-      Vec(
-        OperandEnumerant("R", 0L, Vec(), Vec()),
-        OperandEnumerant("A", 1L, Vec(), Vec()),
-        OperandEnumerant("RG", 2L, Vec(), Vec()),
-        OperandEnumerant("RA", 3L, Vec(), Vec()),
-        OperandEnumerant("RGB", 4L, Vec(), Vec()),
-        OperandEnumerant("RGBA", 5L, Vec(), Vec()),
-        OperandEnumerant("BGRA", 6L, Vec(), Vec()),
-        OperandEnumerant("ARGB", 7L, Vec(), Vec()),
-        OperandEnumerant("Intensity", 8L, Vec(), Vec()),
-        OperandEnumerant("Luminance", 9L, Vec(), Vec()),
-        OperandEnumerant("Rx", 10L, Vec(), Vec()),
-        OperandEnumerant("RGx", 11L, Vec(), Vec()),
-        OperandEnumerant("RGBx", 12L, Vec(), Vec()),
-        OperandEnumerant("Depth", 13L, Vec(), Vec()),
-        OperandEnumerant("DepthStencil", 14L, Vec(), Vec()),
-        OperandEnumerant("sRGB", 15L, Vec(), Vec()),
-        OperandEnumerant("sRGBx", 16L, Vec(), Vec()),
-        OperandEnumerant("sRGBA", 17L, Vec(), Vec()),
-        OperandEnumerant("sBGRA", 18L, Vec(), Vec()),
-        OperandEnumerant("ABGR", 19L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.ImageChannelDataType,
-      Vec(
-        OperandEnumerant("SnormInt8", 0L, Vec(), Vec()),
-        OperandEnumerant("SnormInt16", 1L, Vec(), Vec()),
-        OperandEnumerant("UnormInt8", 2L, Vec(), Vec()),
-        OperandEnumerant("UnormInt16", 3L, Vec(), Vec()),
-        OperandEnumerant("UnormShort565", 4L, Vec(), Vec()),
-        OperandEnumerant("UnormShort555", 5L, Vec(), Vec()),
-        OperandEnumerant("UnormInt101010", 6L, Vec(), Vec()),
-        OperandEnumerant("SignedInt8", 7L, Vec(), Vec()),
-        OperandEnumerant("SignedInt16", 8L, Vec(), Vec()),
-        OperandEnumerant("SignedInt32", 9L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt8", 10L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt16", 11L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt32", 12L, Vec(), Vec()),
-        OperandEnumerant("HalfFloat", 13L, Vec(), Vec()),
-        OperandEnumerant("Float", 14L, Vec(), Vec()),
-        OperandEnumerant("UnormInt24", 15L, Vec(), Vec()),
-        OperandEnumerant("UnormInt101010_2", 16L, Vec(), Vec()),
-        OperandEnumerant("UnormInt10X6EXT", 17L, Vec(), Vec()),
-        OperandEnumerant("UnsignedIntRaw10EXT", 19L, Vec(), Vec()),
-        OperandEnumerant("UnsignedIntRaw12EXT", 20L, Vec(), Vec()),
-        OperandEnumerant("UnormInt2_101010EXT", 21L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt10X6EXT", 22L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt12X4EXT", 23L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt14X2EXT", 24L, Vec(), Vec()),
-        OperandEnumerant("UnormInt12X4EXT", 25L, Vec(), Vec()),
-        OperandEnumerant("UnormInt14X2EXT", 26L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FPRoundingMode,
-      Vec(
-        OperandEnumerant("RTE", 0L, Vec(), Vec()),
-        OperandEnumerant("RTZ", 1L, Vec(), Vec()),
-        OperandEnumerant("RTP", 2L, Vec(), Vec()),
-        OperandEnumerant("RTN", 3L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FPDenormMode,
-      Vec(OperandEnumerant("Preserve", 0L, Vec(), Vec()), OperandEnumerant("FlushToZero", 1L, Vec(), Vec()))
-    ),
-    OperandKindInfo(
-      OperandKind.QuantizationModes,
-      Vec(
-        OperandEnumerant("TRN", 0L, Vec(), Vec()),
-        OperandEnumerant("TRN_ZERO", 1L, Vec(), Vec()),
-        OperandEnumerant("RND", 2L, Vec(), Vec()),
-        OperandEnumerant("RND_ZERO", 3L, Vec(), Vec()),
-        OperandEnumerant("RND_INF", 4L, Vec(), Vec()),
-        OperandEnumerant("RND_MIN_INF", 5L, Vec(), Vec()),
-        OperandEnumerant("RND_CONV", 6L, Vec(), Vec()),
-        OperandEnumerant("RND_CONV_ODD", 7L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FPOperationMode,
-      Vec(OperandEnumerant("IEEE", 0L, Vec(), Vec()), OperandEnumerant("ALT", 1L, Vec(), Vec()))
-    )
-  )
-
-  private def operandKinds5: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.OverflowModes,
-      Vec(
-        OperandEnumerant("WRAP", 0L, Vec(), Vec()),
-        OperandEnumerant("SAT", 1L, Vec(), Vec()),
-        OperandEnumerant("SAT_ZERO", 2L, Vec(), Vec()),
-        OperandEnumerant("SAT_SYM", 3L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.LinkageType,
-      Vec(
-        OperandEnumerant("Export", 0L, Vec(), Vec()),
-        OperandEnumerant("Import", 1L, Vec(), Vec()),
-        OperandEnumerant("LinkOnceODR", 2L, Vec(), Vec()),
-        OperandEnumerant("WeakAMD", 3L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.AccessQualifier,
-      Vec(
-        OperandEnumerant("ReadOnly", 0L, Vec(), Vec()),
-        OperandEnumerant("WriteOnly", 1L, Vec(), Vec()),
-        OperandEnumerant("ReadWrite", 2L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.HostAccessQualifier,
-      Vec(
-        OperandEnumerant("NoneINTEL", 0L, Vec(), Vec()),
-        OperandEnumerant("ReadINTEL", 1L, Vec(), Vec()),
-        OperandEnumerant("WriteINTEL", 2L, Vec(), Vec()),
-        OperandEnumerant("ReadWriteINTEL", 3L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FunctionParameterAttribute,
-      Vec(
-        OperandEnumerant("Zext", 0L, Vec(), Vec()),
-        OperandEnumerant("Sext", 1L, Vec(), Vec()),
-        OperandEnumerant("ByVal", 2L, Vec(), Vec()),
-        OperandEnumerant("Sret", 3L, Vec(), Vec()),
-        OperandEnumerant("NoAlias", 4L, Vec(), Vec()),
-        OperandEnumerant("NoCapture", 5L, Vec(), Vec()),
-        OperandEnumerant("NoWrite", 6L, Vec(), Vec()),
-        OperandEnumerant("NoReadWrite", 7L, Vec(), Vec()),
-        OperandEnumerant("RuntimeAlignedALTERA", 5940L, Vec(), Vec("RuntimeAlignedINTEL"))
-      )
-    ),
-    OperandKindInfo(OperandKind.Decoration, Vec(operandEnumerants2, operandEnumerants3, operandEnumerants4).flatten),
-    OperandKindInfo(OperandKind.BuiltIn, Vec(operandEnumerants5, operandEnumerants6, operandEnumerants7).flatten),
-    OperandKindInfo(
-      OperandKind.Scope,
-      Vec(
-        OperandEnumerant("CrossDevice", 0L, Vec(), Vec()),
-        OperandEnumerant("Device", 1L, Vec(), Vec()),
-        OperandEnumerant("Workgroup", 2L, Vec(), Vec()),
-        OperandEnumerant("Subgroup", 3L, Vec(), Vec()),
-        OperandEnumerant("Invocation", 4L, Vec(), Vec()),
-        OperandEnumerant("QueueFamily", 5L, Vec(), Vec("QueueFamilyKHR")),
-        OperandEnumerant("ShaderCallKHR", 6L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.GroupOperation,
-      Vec(
-        OperandEnumerant("Reduce", 0L, Vec(), Vec()),
-        OperandEnumerant("InclusiveScan", 1L, Vec(), Vec()),
-        OperandEnumerant("ExclusiveScan", 2L, Vec(), Vec()),
-        OperandEnumerant("ClusteredReduce", 3L, Vec(), Vec()),
-        OperandEnumerant("PartitionedReduceEXT", 6L, Vec(), Vec("PartitionedReduceNV")),
-        OperandEnumerant("PartitionedInclusiveScanEXT", 7L, Vec(), Vec("PartitionedInclusiveScanNV")),
-        OperandEnumerant("PartitionedExclusiveScanEXT", 8L, Vec(), Vec("PartitionedExclusiveScanNV"))
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.KernelEnqueueFlags,
-      Vec(
-        OperandEnumerant("NoWait", 0L, Vec(), Vec()),
-        OperandEnumerant("WaitKernel", 1L, Vec(), Vec()),
-        OperandEnumerant("WaitWorkGroup", 2L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.Capability,
-      Vec(operandEnumerants8, operandEnumerants9, operandEnumerants10, operandEnumerants11, operandEnumerants12).flatten
-    ),
-    OperandKindInfo(
-      OperandKind.RayQueryIntersection,
-      Vec(
-        OperandEnumerant("RayQueryCandidateIntersectionKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("RayQueryCommittedIntersectionKHR", 1L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.RayQueryCommittedIntersectionType,
-      Vec(
-        OperandEnumerant("RayQueryCommittedIntersectionNoneKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("RayQueryCommittedIntersectionTriangleKHR", 1L, Vec(), Vec()),
-        OperandEnumerant("RayQueryCommittedIntersectionGeneratedKHR", 2L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.RayQueryCandidateIntersectionType,
-      Vec(
-        OperandEnumerant("RayQueryCandidateIntersectionTriangleKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("RayQueryCandidateIntersectionAABBKHR", 1L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.PackedVectorFormat,
-      Vec(OperandEnumerant("PackedVectorFormat4x8Bit", 0L, Vec(), Vec("PackedVectorFormat4x8BitKHR")))
-    )
-  )
-
-  private def operandKinds6: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.CooperativeMatrixOperands,
-      Vec(
-        OperandEnumerant("NoneKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("MatrixASignedComponentsKHR", 1L, Vec(), Vec()),
-        OperandEnumerant("MatrixBSignedComponentsKHR", 2L, Vec(), Vec()),
-        OperandEnumerant("MatrixCSignedComponentsKHR", 4L, Vec(), Vec()),
-        OperandEnumerant("MatrixResultSignedComponentsKHR", 8L, Vec(), Vec()),
-        OperandEnumerant("SaturatingAccumulationKHR", 16L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.CooperativeMatrixLayout,
-      Vec(
-        OperandEnumerant("RowMajorKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("ColumnMajorKHR", 1L, Vec(), Vec()),
-        OperandEnumerant("RowBlockedInterleavedARM", 4202L, Vec(), Vec()),
-        OperandEnumerant("ColumnBlockedInterleavedARM", 4203L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.CooperativeMatrixUse,
-      Vec(
-        OperandEnumerant("MatrixAKHR", 0L, Vec(), Vec()),
-        OperandEnumerant("MatrixBKHR", 1L, Vec(), Vec()),
-        OperandEnumerant("MatrixAccumulatorKHR", 2L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.CooperativeMatrixReduce,
-      Vec(
-        OperandEnumerant("Row", 1L, Vec(), Vec()),
-        OperandEnumerant("Column", 2L, Vec(), Vec()),
-        OperandEnumerant("2x2", 4L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.TensorClampMode,
-      Vec(
-        OperandEnumerant("Undefined", 0L, Vec(), Vec()),
-        OperandEnumerant("Constant", 1L, Vec(), Vec()),
-        OperandEnumerant("ClampToEdge", 2L, Vec(), Vec()),
-        OperandEnumerant("Repeat", 3L, Vec(), Vec()),
-        OperandEnumerant("RepeatMirrored", 4L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.TensorAddressingOperands,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("TensorView", 1L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("DecodeFunc", 2L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("DecodeVectorFunc", 4L, Vec(OperandKind.IdRef), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.InitializationModeQualifier,
-      Vec(
-        OperandEnumerant("InitOnDeviceReprogramALTERA", 0L, Vec(), Vec("InitOnDeviceReprogramINTEL")),
-        OperandEnumerant("InitOnDeviceResetALTERA", 1L, Vec(), Vec("InitOnDeviceResetINTEL"))
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.LoadCacheControl,
-      Vec(
-        OperandEnumerant("UncachedINTEL", 0L, Vec(), Vec()),
-        OperandEnumerant("CachedINTEL", 1L, Vec(), Vec()),
-        OperandEnumerant("StreamingINTEL", 2L, Vec(), Vec()),
-        OperandEnumerant("InvalidateAfterReadINTEL", 3L, Vec(), Vec()),
-        OperandEnumerant("ConstCachedINTEL", 4L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.StoreCacheControl,
-      Vec(
-        OperandEnumerant("UncachedINTEL", 0L, Vec(), Vec()),
-        OperandEnumerant("WriteThroughINTEL", 1L, Vec(), Vec()),
-        OperandEnumerant("WriteBackINTEL", 2L, Vec(), Vec()),
-        OperandEnumerant("StreamingINTEL", 3L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(OperandKind.NamedMaximumNumberOfRegisters, Vec(OperandEnumerant("AutoINTEL", 0L, Vec(), Vec()))),
-    OperandKindInfo(
-      OperandKind.MatrixMultiplyAccumulateOperands,
-      Vec(
-        OperandEnumerant("None", 0L, Vec(), Vec()),
-        OperandEnumerant("MatrixASignedComponentsINTEL", 1L, Vec(), Vec()),
-        OperandEnumerant("MatrixBSignedComponentsINTEL", 2L, Vec(), Vec()),
-        OperandEnumerant("MatrixCBFloat16INTEL", 4L, Vec(), Vec()),
-        OperandEnumerant("MatrixResultBFloat16INTEL", 8L, Vec(), Vec()),
-        OperandEnumerant("MatrixAPackedInt8INTEL", 16L, Vec(), Vec()),
-        OperandEnumerant("MatrixBPackedInt8INTEL", 32L, Vec(), Vec()),
-        OperandEnumerant("MatrixAPackedInt4INTEL", 64L, Vec(), Vec()),
-        OperandEnumerant("MatrixBPackedInt4INTEL", 128L, Vec(), Vec()),
-        OperandEnumerant("MatrixATF32INTEL", 256L, Vec(), Vec()),
-        OperandEnumerant("MatrixBTF32INTEL", 512L, Vec(), Vec()),
-        OperandEnumerant("MatrixAPackedFloat16INTEL", 1024L, Vec(), Vec()),
-        OperandEnumerant("MatrixBPackedFloat16INTEL", 2048L, Vec(), Vec()),
-        OperandEnumerant("MatrixAPackedBFloat16INTEL", 4096L, Vec(), Vec()),
-        OperandEnumerant("MatrixBPackedBFloat16INTEL", 8192L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.FPEncoding,
-      Vec(
-        OperandEnumerant("BFloat16KHR", 0L, Vec(), Vec()),
-        OperandEnumerant("Float8E4M3EXT", 4214L, Vec(), Vec()),
-        OperandEnumerant("Float8E5M2EXT", 4215L, Vec(), Vec()),
-        OperandEnumerant("Float6E2M3EXT", 4223L, Vec(), Vec()),
-        OperandEnumerant("Float6E3M2EXT", 4224L, Vec(), Vec()),
-        OperandEnumerant("Float4E2M1EXT", 4225L, Vec(), Vec()),
-        OperandEnumerant("Float8UnsignedE8M0EXT", 4226L, Vec(), Vec()),
-        OperandEnumerant("MXInt8EXT", 4227L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.CooperativeVectorMatrixLayout,
-      Vec(
-        OperandEnumerant("RowMajorNV", 0L, Vec(), Vec()),
-        OperandEnumerant("ColumnMajorNV", 1L, Vec(), Vec()),
-        OperandEnumerant("InferencingOptimalNV", 2L, Vec(), Vec()),
-        OperandEnumerant("TrainingOptimalNV", 3L, Vec(), Vec())
-      )
-    )
-  )
-
-  private def operandKinds7: Vec[OperandKindInfo] = Vec(
-    OperandKindInfo(
-      OperandKind.ComponentType,
-      Vec(
-        OperandEnumerant("Float16NV", 0L, Vec(), Vec()),
-        OperandEnumerant("Float32NV", 1L, Vec(), Vec()),
-        OperandEnumerant("Float64NV", 2L, Vec(), Vec()),
-        OperandEnumerant("SignedInt8NV", 3L, Vec(), Vec()),
-        OperandEnumerant("SignedInt16NV", 4L, Vec(), Vec()),
-        OperandEnumerant("SignedInt32NV", 5L, Vec(), Vec()),
-        OperandEnumerant("SignedInt64NV", 6L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt8NV", 7L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt16NV", 8L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt32NV", 9L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt64NV", 10L, Vec(), Vec()),
-        OperandEnumerant("SignedInt8PackedNV", 1000491000L, Vec(), Vec()),
-        OperandEnumerant("UnsignedInt8PackedNV", 1000491001L, Vec(), Vec()),
-        OperandEnumerant("FloatE4M3NV", 1000491002L, Vec(), Vec()),
-        OperandEnumerant("FloatE5M2NV", 1000491003L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.GatherModes,
-      Vec(
-        OperandEnumerant("Gather4x1QCOM", 0L, Vec(), Vec()),
-        OperandEnumerant("GatherDQCOM", 1L, Vec(), Vec()),
-        OperandEnumerant("GatherH2QCOM", 2L, Vec(), Vec()),
-        OperandEnumerant("GatherV2QCOM", 3L, Vec(), Vec())
-      )
-    ),
-    OperandKindInfo(
-      OperandKind.TensorOperands,
-      Vec(
-        OperandEnumerant("NoneARM", 0L, Vec(), Vec()),
-        OperandEnumerant("NontemporalARM", 1L, Vec(), Vec()),
-        OperandEnumerant("OutOfBoundsValueARM", 2L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("MakeElementAvailableARM", 4L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("MakeElementVisibleARM", 8L, Vec(OperandKind.IdRef), Vec()),
-        OperandEnumerant("NonPrivateElementARM", 16L, Vec(), Vec())
-      )
-    )
-  )
-
   val operandKinds: Map[OperandKind, OperandKindInfo] =
     Vec(
-      operandKinds0,
-      operandKinds1,
-      operandKinds2,
-      operandKinds3,
-      operandKinds4,
-      operandKinds5,
-      operandKinds6,
-      operandKinds7
-    ).flatten.view.map(value => value.kind -> value).toMap
+      "ImageOperands\tNone 0  \tBias 1 IdRef \tLod 2 IdRef \tGrad 4 IdRef,IdRef \tConstOffset 8 IdRef \tOffset 16 IdRef \tConstOffsets 32 IdRef \tSample 64 IdRef \tMinLod 128 IdRef \tMakeTexelAvailable 256 IdScope MakeTexelAvailableKHR\tMakeTexelVisible 512 IdScope MakeTexelVisibleKHR\tNonPrivateTexel 1024  NonPrivateTexelKHR\tVolatileTexel 2048  VolatileTexelKHR\tSignExtend 4096  \tZeroExtend 8192  \tNontemporal 16384  \tOffsets 65536 IdRef \nFPFastMathMode\tNone 0  \tNotNaN 1  \tNotInf 2  \tNSZ 4  \tAllowRecip 8  \tFast 16  \tAllowContract 65536  AllowContractFastINTEL\tAllowReassoc 131072  AllowReassocINTEL\tAllowTransform 262144  \nSelectionControl\tNone 0  \tFlatten 1  \tDontFlatten 2  \nLoopControl\tNone 0  \tUnroll 1  \tDontUnroll 2  \tDependencyInfinite 4  \tDependencyLength 8 LiteralInteger \tMinIterations 16 LiteralInteger \tMaxIterations 32 LiteralInteger \tIterationMultiple 64 LiteralInteger \tPeelCount 128 LiteralInteger \tPartialCount 256 LiteralInteger \tInitiationIntervalALTERA 65536 LiteralInteger InitiationIntervalINTEL\tMaxConcurrencyALTERA 131072 LiteralInteger MaxConcurrencyINTEL\tDependencyArrayALTERA 262144 LiteralInteger DependencyArrayINTEL\tPipelineEnableALTERA 524288 LiteralInteger PipelineEnableINTEL\tLoopCoalesceALTERA 1048576 LiteralInteger LoopCoalesceINTEL\tMaxInterleavingALTERA 2097152 LiteralInteger MaxInterleavingINTEL\tSpeculatedIterationsALTERA 4194304 LiteralInteger SpeculatedIterationsINTEL\tNoFusionALTERA 8388608  NoFusionINTEL\tLoopCountALTERA 16777216 LiteralInteger LoopCountINTEL\tMaxReinvocationDelayALTERA 33554432 LiteralInteger MaxReinvocationDelayINTEL\tMultipleWaitQueuesQCOM 268435456 LiteralInteger \nFunctionControl\tNone 0  \tInline 1  \tDontInline 2  \tPure 4  \tConst 8  \tOptNoneEXT 65536  OptNoneINTEL\nMemorySemantics\tRelaxed 0  None\tAcquire 2  \tRelease 4  \tAcquireRelease 8  \tSequentiallyConsistent 16  \tUniformMemory 64  \tSubgroupMemory 128  \tWorkgroupMemory 256  \tCrossWorkgroupMemory 512  \tAtomicCounterMemory 1024  \tImageMemory 2048  \tOutputMemory 4096  OutputMemoryKHR\tMakeAvailable 8192  MakeAvailableKHR\tMakeVisible 16384  MakeVisibleKHR\tVolatile 32768  \nMemoryAccess\tNone 0  \tVolatile 1  \tAligned 2 LiteralInteger \tNontemporal 4  \tMakePointerAvailable 8 IdScope MakePointerAvailableKHR\tMakePointerVisible 16 IdScope MakePointerVisibleKHR\tNonPrivatePointer 32  NonPrivatePointerKHR\tAliasScopeINTELMask 65536 IdRef \tNoAliasINTELMask 131072 IdRef \nKernelProfilingInfo\tNone 0  \tCmdExecTime 1  \nRayFlags\tNoneKHR 0  \tOpaqueKHR 1  \tNoOpaqueKHR 2  \tTerminateOnFirstHitKHR 4  \tSkipClosestHitShaderKHR 8  \tCullBackFacingTrianglesKHR 16  \tCullFrontFacingTrianglesKHR 32  \tCullOpaqueKHR 64  \tCullNoOpaqueKHR 128  \tSkipTrianglesKHR 256  SkipBuiltinPrimitivesNV\tSkipAABBsKHR 512  \tForceOpacityMicromap2StateKHR 1024  ForceOpacityMicromap2StateEXT\nFragmentShadingRate\tVertical2Pixels 1  \tVertical4Pixels 2  \tHorizontal2Pixels 4  \tHorizontal4Pixels 8  \nRawAccessChainOperands\tNone 0  \tRobustnessPerComponentNV 1  \tRobustnessPerElementNV 2  \nSourceLanguage\tUnknown 0  \tESSL 1  \tGLSL 2  \tOpenCL_C 3  \tOpenCL_CPP 4  \tHLSL 5  \tCPP_for_OpenCL 6  \tSYCL 7  \tHERO_C 8  \tNZSL 9  \tWGSL 10  \tSlang 11  \tZig 12  \tRust 13  \tPred 14  \tApilaJai 15  \nExecutionModel\tVertex 0  \tTessellationControl 1  \tTessellationEvaluation 2  \tGeometry 3  \tFragment 4  \tGLCompute 5  \tKernel 6  \tTaskNV 5267  \tMeshNV 5268  \tRayGenerationKHR 5313  RayGenerationNV\tIntersectionKHR 5314  IntersectionNV\tAnyHitKHR 5315  AnyHitNV\tClosestHitKHR 5316  ClosestHitNV\tMissKHR 5317  MissNV\tCallableKHR 5318  CallableNV\tTaskEXT 5364  \tMeshEXT 5365  \nAddressingModel\tLogical 0  \tPhysical32 1  \tPhysical64 2  \tPhysicalStorageBuffer64 5348  PhysicalStorageBuffer64EXT\nMemoryModel\tSimple 0  \tGLSL450 1  \tOpenCL 2  \tVulkan 3  VulkanKHR\nExecutionMode\tInvocations 0 LiteralInteger \tSpacingEqual 1  \tSpacingFractionalEven 2  \tSpacingFractionalOdd 3  \tVertexOrderCw 4  \tVertexOrderCcw 5  \tPixelCenterInteger 6  \tOriginUpperLeft 7  \tOriginLowerLeft 8  \tEarlyFragmentTests 9  \tPointMode 10  \tXfb 11  \tDepthReplacing 12  \tDepthGreater 14  \tDepthLess 15  \tDepthUnchanged 16  \tLocalSize 17 LiteralInteger,LiteralInteger,LiteralInteger \tLocalSizeHint 18 LiteralInteger,LiteralInteger,LiteralInteger \tInputPoints 19  \tInputLines 20  \tInputLinesAdjacency 21  \tTriangles 22  \tInputTrianglesAdjacency 23  \tQuads 24  \tIsolines 25  \tOutputVertices 26 LiteralInteger \tOutputPoints 27  \tOutputLineStrip 28  \tOutputTriangleStrip 29  \tVecTypeHint 30 LiteralInteger \tContractionOff 31  \tInitializer 33  \tFinalizer 34  \tSubgroupSize 35 LiteralInteger \tSubgroupsPerWorkgroup 36 LiteralInteger \tSubgroupsPerWorkgroupId 37 IdRef \tLocalSizeId 38 IdRef,IdRef,IdRef \tLocalSizeHintId 39 IdRef,IdRef,IdRef \tNonCoherentColorAttachmentReadEXT 4169  \tNonCoherentDepthAttachmentReadEXT 4170  \tNonCoherentStencilAttachmentReadEXT 4171  \tSubgroupUniformControlFlowKHR 4421  \tPostDepthCoverage 4446  \tDenormPreserve 4459 LiteralInteger \tDenormFlushToZero 4460 LiteralInteger \tSignedZeroInfNanPreserve 4461 LiteralInteger \tRoundingModeRTE 4462 LiteralInteger \tRoundingModeRTZ 4463 LiteralInteger \tNonCoherentTileAttachmentReadQCOM 4489  \tTileShadingRateQCOM 4490 LiteralInteger,LiteralInteger,LiteralInteger \tEarlyAndLateFragmentTestsAMD 5017  \tStencilRefReplacingEXT 5027  \tCoalescingAMDX 5069  \tIsApiEntryAMDX 5070 IdRef \tMaxNodeRecursionAMDX 5071 IdRef \tStaticNumWorkgroupsAMDX 5072 IdRef,IdRef,IdRef \tShaderIndexAMDX 5073 IdRef \tMaxNumWorkgroupsAMDX 5077 IdRef,IdRef,IdRef \tStencilRefUnchangedFrontAMD 5079  \tStencilRefGreaterFrontAMD 5080  \tStencilRefLessFrontAMD 5081  \tStencilRefUnchangedBackAMD 5082  \tStencilRefGreaterBackAMD 5083  \tStencilRefLessBackAMD 5084  \tQuadDerivativesKHR 5088  \tRequireFullQuadsKHR 5089  \tSharesInputWithAMDX 5102 IdRef,IdRef \tArithmeticPoisonKHR 5157  \tOutputLinesEXT 5269  OutputLinesNV\tOutputPrimitivesEXT 5270 LiteralInteger OutputPrimitivesNV\tDerivativeGroupQuadsKHR 5289  DerivativeGroupQuadsNV\tDerivativeGroupLinearKHR 5290  DerivativeGroupLinearNV\tOutputTrianglesEXT 5298  OutputTrianglesNV\tPixelInterlockOrderedEXT 5366  \tPixelInterlockUnorderedEXT 5367  \tSampleInterlockOrderedEXT 5368  \tSampleInterlockUnorderedEXT 5369  \tShadingRateInterlockOrderedEXT 5370  \tShadingRateInterlockUnorderedEXT 5371  \tShader64BitIndexingEXT 5427  \tSharedLocalMemorySizeINTEL 5618 LiteralInteger \tRoundingModeRTPINTEL 5620 LiteralInteger \tRoundingModeRTNINTEL 5621 LiteralInteger \tFloatingPointModeALTINTEL 5622 LiteralInteger \tFloatingPointModeIEEEINTEL 5623 LiteralInteger \tMaxWorkgroupSizeINTEL 5893 LiteralInteger,LiteralInteger,LiteralInteger \tMaxWorkDimINTEL 5894 LiteralInteger \tNoGlobalOffsetINTEL 5895  \tNumSIMDWorkitemsINTEL 5896 LiteralInteger \tSchedulerTargetFmaxMhzINTEL 5903 LiteralInteger \tMaximallyReconvergesKHR 6023  \tFPFastMathDefault 6028 IdRef,IdRef \tOpacityMicromapIdKHR 6031 IdRef \tStreamingInterfaceINTEL 6154 LiteralInteger \tRegisterMapInterfaceINTEL 6160 LiteralInteger \tNamedBarrierCountINTEL 6417 LiteralInteger \tMaximumRegistersINTEL 6461 LiteralInteger \tMaximumRegistersIdINTEL 6462 IdRef \tNamedMaximumRegistersINTEL 6463 NamedMaximumNumberOfRegisters \nStorageClass\tUniformConstant 0  \tInput 1  \tUniform 2  \tOutput 3  \tWorkgroup 4  \tCrossWorkgroup 5  \tPrivate 6  \tFunction 7  \tGeneric 8  \tPushConstant 9  \tAtomicCounter 10  \tImage 11  \tStorageBuffer 12  \tTileImageEXT 4172  \tTileAttachmentQCOM 4491  \tNodePayloadAMDX 5068  \tCallableDataKHR 5328  CallableDataNV\tIncomingCallableDataKHR 5329  IncomingCallableDataNV\tRayPayloadKHR 5338  RayPayloadNV\tHitAttributeKHR 5339  HitAttributeNV\tIncomingRayPayloadKHR 5342  IncomingRayPayloadNV\tShaderRecordBufferKHR 5343  ShaderRecordBufferNV\tPhysicalStorageBuffer 5349  PhysicalStorageBufferEXT\tHitObjectAttributeNV 5385  \tTaskPayloadWorkgroupEXT 5402  \tHitObjectAttributeEXT 5411  \tCodeSectionINTEL 5605  \tDeviceOnlyALTERA 5936  DeviceOnlyINTEL\tHostOnlyALTERA 5937  HostOnlyINTEL\nDim\t1D 0  \t2D 1  \t3D 2  \tCube 3  \tRect 4  \tBuffer 5  \tSubpassData 6  \tTileImageDataEXT 4173  \nSamplerAddressingMode\tNone 0  \tClampToEdge 1  \tClamp 2  \tRepeat 3  \tRepeatMirrored 4  \n",
+      "SamplerFilterMode\tNearest 0  \tLinear 1  \nImageFormat\tUnknown 0  \tRgba32f 1  \tRgba16f 2  \tR32f 3  \tRgba8 4  \tRgba8Snorm 5  \tRg32f 6  \tRg16f 7  \tR11fG11fB10f 8  \tR16f 9  \tRgba16 10  \tRgb10A2 11  \tRg16 12  \tRg8 13  \tR16 14  \tR8 15  \tRgba16Snorm 16  \tRg16Snorm 17  \tRg8Snorm 18  \tR16Snorm 19  \tR8Snorm 20  \tRgba32i 21  \tRgba16i 22  \tRgba8i 23  \tR32i 24  \tRg32i 25  \tRg16i 26  \tRg8i 27  \tR16i 28  \tR8i 29  \tRgba32ui 30  \tRgba16ui 31  \tRgba8ui 32  \tR32ui 33  \tRgb10a2ui 34  \tRg32ui 35  \tRg16ui 36  \tRg8ui 37  \tR16ui 38  \tR8ui 39  \tR64ui 40  \tR64i 41  \nImageChannelOrder\tR 0  \tA 1  \tRG 2  \tRA 3  \tRGB 4  \tRGBA 5  \tBGRA 6  \tARGB 7  \tIntensity 8  \tLuminance 9  \tRx 10  \tRGx 11  \tRGBx 12  \tDepth 13  \tDepthStencil 14  \tsRGB 15  \tsRGBx 16  \tsRGBA 17  \tsBGRA 18  \tABGR 19  \nImageChannelDataType\tSnormInt8 0  \tSnormInt16 1  \tUnormInt8 2  \tUnormInt16 3  \tUnormShort565 4  \tUnormShort555 5  \tUnormInt101010 6  \tSignedInt8 7  \tSignedInt16 8  \tSignedInt32 9  \tUnsignedInt8 10  \tUnsignedInt16 11  \tUnsignedInt32 12  \tHalfFloat 13  \tFloat 14  \tUnormInt24 15  \tUnormInt101010_2 16  \tUnormInt10X6EXT 17  \tUnsignedIntRaw10EXT 19  \tUnsignedIntRaw12EXT 20  \tUnormInt2_101010EXT 21  \tUnsignedInt10X6EXT 22  \tUnsignedInt12X4EXT 23  \tUnsignedInt14X2EXT 24  \tUnormInt12X4EXT 25  \tUnormInt14X2EXT 26  \nFPRoundingMode\tRTE 0  \tRTZ 1  \tRTP 2  \tRTN 3  \nFPDenormMode\tPreserve 0  \tFlushToZero 1  \nQuantizationModes\tTRN 0  \tTRN_ZERO 1  \tRND 2  \tRND_ZERO 3  \tRND_INF 4  \tRND_MIN_INF 5  \tRND_CONV 6  \tRND_CONV_ODD 7  \nFPOperationMode\tIEEE 0  \tALT 1  \nOverflowModes\tWRAP 0  \tSAT 1  \tSAT_ZERO 2  \tSAT_SYM 3  \nLinkageType\tExport 0  \tImport 1  \tLinkOnceODR 2  \tWeakAMD 3  \nAccessQualifier\tReadOnly 0  \tWriteOnly 1  \tReadWrite 2  \nHostAccessQualifier\tNoneINTEL 0  \tReadINTEL 1  \tWriteINTEL 2  \tReadWriteINTEL 3  \nFunctionParameterAttribute\tZext 0  \tSext 1  \tByVal 2  \tSret 3  \tNoAlias 4  \tNoCapture 5  \tNoWrite 6  \tNoReadWrite 7  \tRuntimeAlignedALTERA 5940  RuntimeAlignedINTEL\nDecoration\tRelaxedPrecision 0  \tSpecId 1 LiteralInteger \tBlock 2  \tBufferBlock 3  \tRowMajor 4  \tColMajor 5  \tArrayStride 6 LiteralInteger \tMatrixStride 7 LiteralInteger \tGLSLShared 8  \tGLSLPacked 9  \tCPacked 10  \tBuiltIn 11 BuiltIn \tNoPerspective 13  \tFlat 14  \tPatch 15  \tCentroid 16  \tSample 17  \tInvariant 18  \tRestrict 19  \tAliased 20  \tVolatile 21  \tConstant 22  \tCoherent 23  \tNonWritable 24  \tNonReadable 25  \tUniform 26  \tUniformId 27 IdScope \tSaturatedConversion 28  \tStream 29 LiteralInteger \tLocation 30 LiteralInteger \tComponent 31 LiteralInteger \tIndex 32 LiteralInteger \tBinding 33 LiteralInteger \tDescriptorSet 34 LiteralInteger \tOffset 35 LiteralInteger \tXfbBuffer 36 LiteralInteger \tXfbStride 37 LiteralInteger \tFuncParamAttr 38 FunctionParameterAttribute \tFPRoundingMode 39 FPRoundingMode \tFPFastMathMode 40 FPFastMathMode \tLinkageAttributes 41 LiteralString,LinkageType \tNoContraction 42  \tInputAttachmentIndex 43 LiteralInteger \tAlignment 44 LiteralInteger \tMaxByteOffset 45 LiteralInteger \tAlignmentId 46 IdRef \tMaxByteOffsetId 47 IdRef \tSaturatedToLargestFloat8NormalConversionEXT 4216  \tNoSignedWrap 4469  \tNoUnsignedWrap 4470  \tWeightTextureQCOM 4487  \tBlockMatchTextureQCOM 4488  \tBlockMatchSamplerQCOM 4499  \tExplicitInterpAMD 4999  \tNodeSharesPayloadLimitsWithAMDX 5019 IdRef \tNodeMaxPayloadsAMDX 5020 IdRef \tTrackFinishWritingAMDX 5078  \tPayloadNodeNameAMDX 5091 IdRef \tPayloadNodeBaseIndexAMDX 5098 IdRef \tPayloadNodeSparseArrayAMDX 5099  \tPayloadNodeArraySizeAMDX 5100 IdRef \tPayloadDispatchIndirectAMDX 5105  \tArrayStrideIdEXT 5124 IdRef \tOffsetIdEXT 5125 IdRef \tUTFEncodedKHR 5145  \tOverrideCoverageNV 5248  \tPassthroughNV 5250  \tViewportRelativeNV 5252  \tSecondaryViewportRelativeNV 5256 LiteralInteger \tPerPrimitiveEXT 5271  PerPrimitiveNV\tPerViewNV 5272  \tPerTaskNV 5273  \tPerVertexKHR 5285  PerVertexNV\tNonUniform 5300  NonUniformEXT\tRestrictPointer 5355  RestrictPointerEXT\tAliasedPointer 5356  AliasedPointerEXT\tMemberOffsetNV 5358 LiteralInteger \tHitObjectShaderRecordBufferNV 5386  \tHitObjectShaderRecordBufferEXT 5389  \tBankNV 5397 LiteralInteger \tBindlessSamplerNV 5398  \tBindlessImageNV 5399  \tBoundSamplerNV 5400  \tBoundImageNV 5401  \tSIMTCallINTEL 5599 LiteralInteger \tReferencedIndirectlyINTEL 5602  \tClobberINTEL 5607 LiteralString \tSideEffectsINTEL 5608  \tVectorComputeVariableINTEL 5624  \tFuncParamIOKindINTEL 5625 LiteralInteger \tVectorComputeFunctionINTEL 5626  \tStackCallINTEL 5627  \tGlobalVariableOffsetINTEL 5628 LiteralInteger \tCounterBuffer 5634 IdRef HlslCounterBufferGOOGLE\tUserSemantic 5635 LiteralString HlslSemanticGOOGLE\tUserTypeGOOGLE 5636 LiteralString \tFunctionRoundingModeINTEL 5822 LiteralInteger,FPRoundingMode \tFunctionDenormModeINTEL 5823 LiteralInteger,FPDenormMode \tRegisterALTERA 5825  RegisterINTEL\tMemoryALTERA 5826 LiteralString MemoryINTEL\tNumbanksALTERA 5827 LiteralInteger NumbanksINTEL\tBankwidthALTERA 5828 LiteralInteger BankwidthINTEL\tMaxPrivateCopiesALTERA 5829 LiteralInteger MaxPrivateCopiesINTEL\tSinglepumpALTERA 5830  SinglepumpINTEL\tDoublepumpALTERA 5831  DoublepumpINTEL\tMaxReplicatesALTERA 5832 LiteralInteger MaxReplicatesINTEL\tSimpleDualPortALTERA 5833  SimpleDualPortINTEL\tMergeALTERA 5834 LiteralString,LiteralString MergeINTEL\tBankBitsALTERA 5835 LiteralInteger BankBitsINTEL\tForcePow2DepthALTERA 5836 LiteralInteger ForcePow2DepthINTEL\tStridesizeALTERA 5883 LiteralInteger StridesizeINTEL\tWordsizeALTERA 5884 LiteralInteger WordsizeINTEL\tTrueDualPortALTERA 5885  TrueDualPortINTEL\tBurstCoalesceALTERA 5899  BurstCoalesceINTEL\tCacheSizeALTERA 5900 LiteralInteger CacheSizeINTEL\tDontStaticallyCoalesceALTERA 5901  DontStaticallyCoalesceINTEL\tPrefetchALTERA 5902 LiteralInteger PrefetchINTEL\tStallEnableALTERA 5905  StallEnableINTEL\tFuseLoopsInFunctionALTERA 5907  FuseLoopsInFunctionINTEL\tMathOpDSPModeALTERA 5909 LiteralInteger,LiteralInteger MathOpDSPModeINTEL\tAliasScopeINTEL 5914 IdRef \tNoAliasINTEL 5915 IdRef \tInitiationIntervalALTERA 5917 LiteralInteger InitiationIntervalINTEL\tMaxConcurrencyALTERA 5918 LiteralInteger MaxConcurrencyINTEL\tPipelineEnableALTERA 5919 LiteralInteger PipelineEnableINTEL\tBufferLocationALTERA 5921 LiteralInteger BufferLocationINTEL\tIOPipeStorageALTERA 5944 LiteralInteger IOPipeStorageINTEL\tFunctionFloatingPointModeINTEL 6080 LiteralInteger,FPOperationMode \tSingleElementVectorINTEL 6085  \tVectorComputeCallableFunctionINTEL 6087  \tMediaBlockIOINTEL 6140  \tStallFreeALTERA 6151  StallFreeINTEL\tFPMaxErrorDecorationINTEL 6170 LiteralFloat \tLatencyControlLabelALTERA 6172 LiteralInteger LatencyControlLabelINTEL\tLatencyControlConstraintALTERA 6173 LiteralInteger,LiteralInteger,LiteralInteger LatencyControlConstraintINTEL\tConduitKernelArgumentALTERA 6175  ConduitKernelArgumentINTEL\tRegisterMapKernelArgumentALTERA 6176  RegisterMapKernelArgumentINTEL\tMMHostInterfaceAddressWidthALTERA 6177 LiteralInteger MMHostInterfaceAddressWidthINTEL\tMMHostInterfaceDataWidthALTERA 6178 LiteralInteger MMHostInterfaceDataWidthINTEL\tMMHostInterfaceLatencyALTERA 6179 LiteralInteger MMHostInterfaceLatencyINTEL\tMMHostInterfaceReadWriteModeALTERA 6180 AccessQualifier MMHostInterfaceReadWriteModeINTEL\tMMHostInterfaceMaxBurstALTERA 6181 LiteralInteger MMHostInterfaceMaxBurstINTEL\tMMHostInterfaceWaitRequestALTERA 6182 LiteralInteger MMHostInterfaceWaitRequestINTEL\tStableKernelArgumentALTERA 6183  StableKernelArgumentINTEL\tHostAccessINTEL 6188 HostAccessQualifier,LiteralString \tInitModeALTERA 6190 InitializationModeQualifier InitModeINTEL\tImplementInRegisterMapALTERA 6191 LiteralInteger ImplementInRegisterMapINTEL\tConditionalINTEL 6247 IdRef \tCacheControlLoadINTEL 6442 LiteralInteger,LoadCacheControl \tCacheControlStoreINTEL 6443 LiteralInteger,StoreCacheControl \tIntrinsicSAMSUNG 7040 LiteralInteger \n",
+      "BuiltIn\tPosition 0  \tPointSize 1  \tClipDistance 3  \tCullDistance 4  \tVertexId 5  \tInstanceId 6  \tPrimitiveId 7  \tInvocationId 8  \tLayer 9  \tViewportIndex 10  \tTessLevelOuter 11  \tTessLevelInner 12  \tTessCoord 13  \tPatchVertices 14  \tFragCoord 15  \tPointCoord 16  \tFrontFacing 17  \tSampleId 18  \tSamplePosition 19  \tSampleMask 20  \tFragDepth 22  \tHelperInvocation 23  \tNumWorkgroups 24  \tWorkgroupSize 25  \tWorkgroupId 26  \tLocalInvocationId 27  \tGlobalInvocationId 28  \tLocalInvocationIndex 29  \tWorkDim 30  \tGlobalSize 31  \tEnqueuedWorkgroupSize 32  \tGlobalOffset 33  \tGlobalLinearId 34  \tWorkgroupLinearId 35  \tSubgroupSize 36  \tSubgroupMaxSize 37  \tNumSubgroups 38  \tNumEnqueuedSubgroups 39  \tSubgroupId 40  \tSubgroupLocalInvocationId 41  \tVertexIndex 42  \tInstanceIndex 43  \tCoreIDARM 4160  \tCoreCountARM 4161  \tCoreMaxIDARM 4162  \tWarpIDARM 4163  \tWarpMaxIDARM 4164  \tSubgroupEqMask 4416  SubgroupEqMaskKHR\tSubgroupGeMask 4417  SubgroupGeMaskKHR\tSubgroupGtMask 4418  SubgroupGtMaskKHR\tSubgroupLeMask 4419  SubgroupLeMaskKHR\tSubgroupLtMask 4420  SubgroupLtMaskKHR\tBaseVertex 4424  \tBaseInstance 4425  \tDrawIndex 4426  \tPrimitiveShadingRateKHR 4432  \tDeviceIndex 4438  \tViewIndex 4440  \tShadingRateKHR 4444  \tTileOffsetQCOM 4492  \tTileDimensionQCOM 4493  \tTileApronSizeQCOM 4494  \tBaryCoordNoPerspAMD 4992  \tBaryCoordNoPerspCentroidAMD 4993  \tBaryCoordNoPerspSampleAMD 4994  \tBaryCoordSmoothAMD 4995  \tBaryCoordSmoothCentroidAMD 4996  \tBaryCoordSmoothSampleAMD 4997  \tBaryCoordPullModelAMD 4998  \tFragStencilRefEXT 5014  \tRemainingRecursionLevelsAMDX 5021  \tShaderIndexAMDX 5073  \tSamplerHeapEXT 5122  \tResourceHeapEXT 5123  \tViewportMaskNV 5253  \tSecondaryPositionNV 5257  \tSecondaryViewportMaskNV 5258  \tPositionPerViewNV 5261  \tViewportMaskPerViewNV 5262  \tFullyCoveredEXT 5264  \tTaskCountNV 5274  \tPrimitiveCountNV 5275  \tPrimitiveIndicesNV 5276  \tClipDistancePerViewNV 5277  \tCullDistancePerViewNV 5278  \tLayerPerViewNV 5279  \tMeshViewCountNV 5280  \tMeshViewIndicesNV 5281  \tBaryCoordKHR 5286  BaryCoordNV\tBaryCoordNoPerspKHR 5287  BaryCoordNoPerspNV\tFragSizeEXT 5292  FragmentSizeNV\tFragInvocationCountEXT 5293  InvocationsPerPixelNV\tPrimitivePointIndicesEXT 5294  \tPrimitiveLineIndicesEXT 5295  \tPrimitiveTriangleIndicesEXT 5296  \tCullPrimitiveEXT 5299  \tLaunchIdKHR 5319  LaunchIdNV\tLaunchSizeKHR 5320  LaunchSizeNV\tWorldRayOriginKHR 5321  WorldRayOriginNV\tWorldRayDirectionKHR 5322  WorldRayDirectionNV\tObjectRayOriginKHR 5323  ObjectRayOriginNV\tObjectRayDirectionKHR 5324  ObjectRayDirectionNV\tRayTminKHR 5325  RayTminNV\tRayTmaxKHR 5326  RayTmaxNV\tInstanceCustomIndexKHR 5327  InstanceCustomIndexNV\tObjectToWorldKHR 5330  ObjectToWorldNV\tWorldToObjectKHR 5331  WorldToObjectNV\tHitTNV 5332  \tHitKindKHR 5333  HitKindNV\tCurrentRayTimeNV 5334  \tHitTriangleVertexPositionsKHR 5335  \tHitMicroTriangleVertexPositionsNV 5337  \tHitMicroTriangleVertexBarycentricsNV 5344  \tIncomingRayFlagsKHR 5351  IncomingRayFlagsNV\tRayGeometryIndexKHR 5352  \tHitIsSphereNV 5359  \tHitIsLSSNV 5360  \tHitSpherePositionNV 5361  \tWarpsPerSMNV 5374  \tSMCountNV 5375  \tWarpIDNV 5376  \tSMIDNV 5377  \tHitLSSPositionsNV 5396  \tHitKindFrontFacingMicroTriangleNV 5405  \tHitKindBackFacingMicroTriangleNV 5406  \tHitSphereRadiusNV 5420  \tHitLSSRadiiNV 5421  \tClusterIDNV 5436  \tCullMaskKHR 6021  \nScope\tCrossDevice 0  \tDevice 1  \tWorkgroup 2  \tSubgroup 3  \tInvocation 4  \tQueueFamily 5  QueueFamilyKHR\tShaderCallKHR 6  \nGroupOperation\tReduce 0  \tInclusiveScan 1  \tExclusiveScan 2  \tClusteredReduce 3  \tPartitionedReduceEXT 6  PartitionedReduceNV\tPartitionedInclusiveScanEXT 7  PartitionedInclusiveScanNV\tPartitionedExclusiveScanEXT 8  PartitionedExclusiveScanNV\nKernelEnqueueFlags\tNoWait 0  \tWaitKernel 1  \tWaitWorkGroup 2  \n",
+      "Capability\tMatrix 0  \tShader 1  \tGeometry 2  \tTessellation 3  \tAddresses 4  \tLinkage 5  \tKernel 6  \tVector16 7  \tFloat16Buffer 8  \tFloat16 9  \tFloat64 10  \tInt64 11  \tInt64Atomics 12  \tImageBasic 13  \tImageReadWrite 14  \tImageMipmap 15  \tPipes 17  \tGroups 18  \tDeviceEnqueue 19  \tLiteralSampler 20  \tAtomicStorage 21  \tInt16 22  \tTessellationPointSize 23  \tGeometryPointSize 24  \tImageGatherExtended 25  \tStorageImageMultisample 27  \tUniformBufferArrayDynamicIndexing 28  \tSampledImageArrayDynamicIndexing 29  \tStorageBufferArrayDynamicIndexing 30  \tStorageImageArrayDynamicIndexing 31  \tClipDistance 32  \tCullDistance 33  \tImageCubeArray 34  \tSampleRateShading 35  \tImageRect 36  \tSampledRect 37  \tGenericPointer 38  \tInt8 39  \tInputAttachment 40  \tSparseResidency 41  \tMinLod 42  \tSampled1D 43  \tImage1D 44  \tSampledCubeArray 45  \tSampledBuffer 46  \tImageBuffer 47  \tImageMSArray 48  \tStorageImageExtendedFormats 49  \tImageQuery 50  \tDerivativeControl 51  \tInterpolationFunction 52  \tTransformFeedback 53  \tGeometryStreams 54  \tStorageImageReadWithoutFormat 55  \tStorageImageWriteWithoutFormat 56  \tMultiViewport 57  \tSubgroupDispatch 58  \tNamedBarrier 59  \tPipeStorage 60  \tGroupNonUniform 61  \tGroupNonUniformVote 62  \tGroupNonUniformArithmetic 63  \tGroupNonUniformBallot 64  \tGroupNonUniformShuffle 65  \tGroupNonUniformShuffleRelative 66  \tGroupNonUniformClustered 67  \tGroupNonUniformQuad 68  \tShaderLayer 69  \tShaderViewportIndex 70  \tUniformDecoration 71  \tCoreBuiltinsARM 4165  \tTileImageColorReadAccessEXT 4166  \tTileImageDepthReadAccessEXT 4167  \tTileImageStencilReadAccessEXT 4168  \tTensorsARM 4174  \tStorageTensorArrayDynamicIndexingARM 4175  \tStorageTensorArrayNonUniformIndexingARM 4176  \tGraphARM 4191  \tCooperativeMatrixLayoutsARM 4201  \tFloat8EXT 4212  \tFloat8CooperativeMatrixEXT 4213  \tFloat6EXT 4228  \tFloat4EXT 4229  \tFloat8UnsignedE8M0EXT 4230  \tMXInt8EXT 4231  \tBitcastExtractEXT 4232  \tFragmentShadingRateKHR 4422  \tSubgroupBallotKHR 4423  \tDrawParameters 4427  \tWorkgroupMemoryExplicitLayoutKHR 4428  \tWorkgroupMemoryExplicitLayout8BitAccessKHR 4429  \tWorkgroupMemoryExplicitLayout16BitAccessKHR 4430  \tSubgroupVoteKHR 4431  \tStorageBuffer16BitAccess 4433  StorageUniformBufferBlock16\tUniformAndStorageBuffer16BitAccess 4434  StorageUniform16\tStoragePushConstant16 4435  \tStorageInputOutput16 4436  \tDeviceGroup 4437  \tMultiView 4439  \tVariablePointersStorageBuffer 4441  \tVariablePointers 4442  \tAtomicStorageOps 4445  \tSampleMaskPostDepthCoverage 4447  \tStorageBuffer8BitAccess 4448  \tUniformAndStorageBuffer8BitAccess 4449  \tStoragePushConstant8 4450  \tDenormPreserve 4464  \tDenormFlushToZero 4465  \tSignedZeroInfNanPreserve 4466  \tRoundingModeRTE 4467  \tRoundingModeRTZ 4468  \tRayQueryProvisionalKHR 4471  \tRayQueryKHR 4472  \tUntypedPointersKHR 4473  \tRayTraversalPrimitiveCullingKHR 4478  \tRayTracingKHR 4479  \tTextureSampleWeightedQCOM 4484  \tTextureBoxFilterQCOM 4485  \tTextureBlockMatchQCOM 4486  \tTileShadingQCOM 4495  \tCooperativeMatrixConversionQCOM 4496  \tTextureBlockMatch2QCOM 4498  \tMultipleWaitQueuesQCOM 4539  \tImageGatherLinearQCOM 4543  \tImageGatherExtendedModesQCOM 4544  \tFloat16ImageAMD 5008  \tImageGatherBiasLodAMD 5009  \tFragmentMaskAMD 5010  \tStencilExportEXT 5013  \tImageReadWriteLodAMD 5015  \tInt64ImageEXT 5016  \tShaderClockKHR 5055  \tShaderEnqueueAMDX 5067  \tQuadControlKHR 5087  \tInt4TypeINTEL 5112  \tInt4CooperativeMatrixINTEL 5114  \tBFloat16TypeKHR 5116  \tBFloat16DotProductKHR 5117  \tBFloat16CooperativeMatrixKHR 5118  \tAbortKHR 5120  \tDescriptorHeapEXT 5128  \tConstantDataKHR 5146  \tPoisonFreezeKHR 5156  \tWeakLinkageAMD 5181  \tSampleMaskOverrideCoverageNV 5249  \tGeometryShaderPassthroughNV 5251  \tShaderViewportIndexLayerEXT 5254  ShaderViewportIndexLayerNV\tShaderViewportMaskNV 5255  \tShaderStereoViewNV 5259  \tPerViewAttributesNV 5260  \tFragmentFullyCoveredEXT 5265  \tMeshShadingNV 5266  \tImageFootprintNV 5282  \tMeshShadingEXT 5283  \tFragmentBarycentricKHR 5284  FragmentBarycentricNV\tComputeDerivativeGroupQuadsKHR 5288  ComputeDerivativeGroupQuadsNV\tFragmentDensityEXT 5291  ShadingRateNV\tGroupNonUniformPartitionedEXT 5297  GroupNonUniformPartitionedNV\tShaderNonUniform 5301  ShaderNonUniformEXT\tRuntimeDescriptorArray 5302  RuntimeDescriptorArrayEXT\tInputAttachmentArrayDynamicIndexing 5303  InputAttachmentArrayDynamicIndexingEXT\tUniformTexelBufferArrayDynamicIndexing 5304  UniformTexelBufferArrayDynamicIndexingEXT\tStorageTexelBufferArrayDynamicIndexing 5305  StorageTexelBufferArrayDynamicIndexingEXT\tUniformBufferArrayNonUniformIndexing 5306  UniformBufferArrayNonUniformIndexingEXT\tSampledImageArrayNonUniformIndexing 5307  SampledImageArrayNonUniformIndexingEXT\tStorageBufferArrayNonUniformIndexing 5308  StorageBufferArrayNonUniformIndexingEXT\tStorageImageArrayNonUniformIndexing 5309  StorageImageArrayNonUniformIndexingEXT\tInputAttachmentArrayNonUniformIndexing 5310  InputAttachmentArrayNonUniformIndexingEXT\tUniformTexelBufferArrayNonUniformIndexing 5311  UniformTexelBufferArrayNonUniformIndexingEXT\tStorageTexelBufferArrayNonUniformIndexing 5312  StorageTexelBufferArrayNonUniformIndexingEXT\tRayTracingPositionFetchKHR 5336  \tRayTracingNV 5340  \tRayTracingMotionBlurNV 5341  \tVulkanMemoryModel 5345  VulkanMemoryModelKHR\tVulkanMemoryModelDeviceScope 5346  VulkanMemoryModelDeviceScopeKHR\tPhysicalStorageBufferAddresses 5347  PhysicalStorageBufferAddressesEXT\tComputeDerivativeGroupLinearKHR 5350  ComputeDerivativeGroupLinearNV\tRayTracingProvisionalKHR 5353  \tCooperativeMatrixNV 5357  \tFragmentShaderSampleInterlockEXT 5363  \tFragmentShaderShadingRateInterlockEXT 5372  \tShaderSMBuiltinsNV 5373  \tFragmentShaderPixelInterlockEXT 5378  \tDemoteToHelperInvocation 5379  DemoteToHelperInvocationEXT\tDisplacementMicromapNV 5380  \tRayTracingOpacityMicromapKHR 5381  RayTracingOpacityMicromapEXT\tShaderInvocationReorderNV 5383  \tShaderInvocationReorderEXT 5388  \tBindlessTextureNV 5390  \tRayQueryPositionFetchKHR 5391  \tCooperativeVectorNV 5394  \tAtomicFloat16VectorNV 5404  \tRayTracingDisplacementMicromapNV 5409  \tRawAccessChainsNV 5414  \tRayTracingSpheresGeometryNV 5418  \tRayTracingLinearSweptSpheresGeometryNV 5419  \tPushConstantBanksNV 5423  \tLongVectorEXT 5425  \tShader64BitIndexingEXT 5426  \tCooperativeMatrixReductionsNV 5430  \tCooperativeMatrixConversionsNV 5431  \tCooperativeMatrixPerElementOperationsNV 5432  \tCooperativeMatrixTensorAddressingNV 5433  \tCooperativeMatrixBlockLoadsNV 5434  \tCooperativeVectorTrainingNV 5435  \tRayTracingClusterAccelerationStructureNV 5437  \tTensorAddressingNV 5439  \tCooperativeMatrixDecodeVectorNV 5447  \tSubgroupShuffleINTEL 5568  \tSubgroupBufferBlockIOINTEL 5569  \tSubgroupImageBlockIOINTEL 5570  \tSubgroupImageMediaBlockIOINTEL 5579  \tRoundToInfinityINTEL 5582  \tFloatingPointModeINTEL 5583  \tIntegerFunctions2INTEL 5584  \tFunctionPointersINTEL 5603  \tIndirectReferencesINTEL 5604  \tAsmINTEL 5606  \tAtomicFloat32MinMaxEXT 5612  \tAtomicFloat64MinMaxEXT 5613  \tAtomicFloat16MinMaxEXT 5616  \tVectorComputeINTEL 5617  \tVectorAnyINTEL 5619  \tExpectAssumeKHR 5629  \tSubgroupAvcMotionEstimationINTEL 5696  \tSubgroupAvcMotionEstimationIntraINTEL 5697  \tSubgroupAvcMotionEstimationChromaINTEL 5698  \tVariableLengthArrayINTEL 5817  \tFunctionFloatControlINTEL 5821  \tFPGAMemoryAttributesALTERA 5824  FPGAMemoryAttributesINTEL\tFPFastMathModeINTEL 5837  \tArbitraryPrecisionIntegersALTERA 5844  ArbitraryPrecisionIntegersINTEL\tArbitraryPrecisionFloatingPointALTERA 5845  ArbitraryPrecisionFloatingPointINTEL\tUnstructuredLoopControlsINTEL 5886  \tFPGALoopControlsALTERA 5888  FPGALoopControlsINTEL\tKernelAttributesINTEL 5892  \tFPGAKernelAttributesINTEL 5897  \tFPGAMemoryAccessesALTERA 5898  FPGAMemoryAccessesINTEL\tFPGAClusterAttributesALTERA 5904  FPGAClusterAttributesINTEL\tLoopFuseALTERA 5906  LoopFuseINTEL\tFPGADSPControlALTERA 5908  FPGADSPControlINTEL\tMemoryAccessAliasingINTEL 5910  \tFPGAInvocationPipeliningAttributesALTERA 5916  FPGAInvocationPipeliningAttributesINTEL\tFPGABufferLocationALTERA 5920  FPGABufferLocationINTEL\tArbitraryPrecisionFixedPointALTERA 5922  ArbitraryPrecisionFixedPointINTEL\tUSMStorageClassesALTERA 5935  USMStorageClassesINTEL\tRuntimeAlignedAttributeALTERA 5939  RuntimeAlignedAttributeINTEL\tIOPipesALTERA 5943  IOPipesINTEL\tBlockingPipesALTERA 5945  BlockingPipesINTEL\tFPGARegALTERA 5948  FPGARegINTEL\tDotProductInputAll 6016  DotProductInputAllKHR\tDotProductInput4x8Bit 6017  DotProductInput4x8BitKHR\tDotProductInput4x8BitPacked 6018  DotProductInput4x8BitPackedKHR\tDotProduct 6019  DotProductKHR\tRayCullMaskKHR 6020  \tCooperativeMatrixKHR 6022  \tReplicatedCompositesEXT 6024  \tBitInstructions 6025  \tGroupNonUniformRotateKHR 6026  \tFloatControls2 6029  \tFMAKHR 6030  \tRayTracingOpacityMicromapExecutionModeKHR 6032  \tAtomicFloat32AddEXT 6033  \tAtomicFloat64AddEXT 6034  \tLongCompositesINTEL 6089  \tOptNoneEXT 6094  OptNoneINTEL\tAtomicFloat16AddEXT 6095  \tDebugInfoModuleINTEL 6114  \tBFloat16ConversionINTEL 6115  \tSplitBarrierEXT 6141  SplitBarrierINTEL\tArithmeticFenceEXT 6144  \tFPGAClusterAttributesV2ALTERA 6150  FPGAClusterAttributesV2INTEL\tFPGAKernelAttributesv2INTEL 6161  \tTaskSequenceALTERA 6162  TaskSequenceINTEL\tFPMaxErrorINTEL 6169  \tFPGALatencyControlALTERA 6171  FPGALatencyControlINTEL\tFPGAArgumentInterfacesALTERA 6174  FPGAArgumentInterfacesINTEL\tGlobalVariableHostAccessINTEL 6187  \tGlobalVariableFPGADecorationsALTERA 6189  GlobalVariableFPGADecorationsINTEL\tSubgroupBufferPrefetchINTEL 6220  \tSubgroup2DBlockIOINTEL 6228  \tSubgroup2DBlockTransformINTEL 6229  \tSubgroup2DBlockTransposeINTEL 6230  \tSubgroupMatrixMultiplyAccumulateINTEL 6236  \tTernaryBitwiseFunctionINTEL 6241  \tUntypedVariableLengthArrayINTEL 6243  \tSpecConditionalINTEL 6245  \tFunctionVariantsINTEL 6246  \tPredicatedIOINTEL 6257  \tRoundedDivideSqrtINTEL 6265  \tGroupUniformArithmeticKHR 6400  \tTensorFloat32RoundingINTEL 6425  \tMaskedGatherScatterINTEL 6427  \tCacheControlsINTEL 6441  \tRegisterLimitsINTEL 6460  \tBindlessImagesINTEL 6528  \tDotProductFloat16AccFloat32VALVE 6912  \tDotProductFloat16AccFloat16VALVE 6913  \tDotProductBFloat16AccVALVE 6914  \tDotProductFloat8AccFloat32VALVE 6915  \tIntrinsicSAMSUNG 7041  \n",
+      "RayQueryIntersection\tRayQueryCandidateIntersectionKHR 0  \tRayQueryCommittedIntersectionKHR 1  \nRayQueryCommittedIntersectionType\tRayQueryCommittedIntersectionNoneKHR 0  \tRayQueryCommittedIntersectionTriangleKHR 1  \tRayQueryCommittedIntersectionGeneratedKHR 2  \nRayQueryCandidateIntersectionType\tRayQueryCandidateIntersectionTriangleKHR 0  \tRayQueryCandidateIntersectionAABBKHR 1  \nPackedVectorFormat\tPackedVectorFormat4x8Bit 0  PackedVectorFormat4x8BitKHR\nCooperativeMatrixOperands\tNoneKHR 0  \tMatrixASignedComponentsKHR 1  \tMatrixBSignedComponentsKHR 2  \tMatrixCSignedComponentsKHR 4  \tMatrixResultSignedComponentsKHR 8  \tSaturatingAccumulationKHR 16  \nCooperativeMatrixLayout\tRowMajorKHR 0  \tColumnMajorKHR 1  \tRowBlockedInterleavedARM 4202  \tColumnBlockedInterleavedARM 4203  \nCooperativeMatrixUse\tMatrixAKHR 0  \tMatrixBKHR 1  \tMatrixAccumulatorKHR 2  \nCooperativeMatrixReduce\tRow 1  \tColumn 2  \t2x2 4  \nTensorClampMode\tUndefined 0  \tConstant 1  \tClampToEdge 2  \tRepeat 3  \tRepeatMirrored 4  \nTensorAddressingOperands\tNone 0  \tTensorView 1 IdRef \tDecodeFunc 2 IdRef \tDecodeVectorFunc 4 IdRef \nInitializationModeQualifier\tInitOnDeviceReprogramALTERA 0  InitOnDeviceReprogramINTEL\tInitOnDeviceResetALTERA 1  InitOnDeviceResetINTEL\nLoadCacheControl\tUncachedINTEL 0  \tCachedINTEL 1  \tStreamingINTEL 2  \tInvalidateAfterReadINTEL 3  \tConstCachedINTEL 4  \nStoreCacheControl\tUncachedINTEL 0  \tWriteThroughINTEL 1  \tWriteBackINTEL 2  \tStreamingINTEL 3  \nNamedMaximumNumberOfRegisters\tAutoINTEL 0  \nMatrixMultiplyAccumulateOperands\tNone 0  \tMatrixASignedComponentsINTEL 1  \tMatrixBSignedComponentsINTEL 2  \tMatrixCBFloat16INTEL 4  \tMatrixResultBFloat16INTEL 8  \tMatrixAPackedInt8INTEL 16  \tMatrixBPackedInt8INTEL 32  \tMatrixAPackedInt4INTEL 64  \tMatrixBPackedInt4INTEL 128  \tMatrixATF32INTEL 256  \tMatrixBTF32INTEL 512  \tMatrixAPackedFloat16INTEL 1024  \tMatrixBPackedFloat16INTEL 2048  \tMatrixAPackedBFloat16INTEL 4096  \tMatrixBPackedBFloat16INTEL 8192  \nFPEncoding\tBFloat16KHR 0  \tFloat8E4M3EXT 4214  \tFloat8E5M2EXT 4215  \tFloat6E2M3EXT 4223  \tFloat6E3M2EXT 4224  \tFloat4E2M1EXT 4225  \tFloat8UnsignedE8M0EXT 4226  \tMXInt8EXT 4227  \nCooperativeVectorMatrixLayout\tRowMajorNV 0  \tColumnMajorNV 1  \tInferencingOptimalNV 2  \tTrainingOptimalNV 3  \nComponentType\tFloat16NV 0  \tFloat32NV 1  \tFloat64NV 2  \tSignedInt8NV 3  \tSignedInt16NV 4  \tSignedInt32NV 5  \tSignedInt64NV 6  \tUnsignedInt8NV 7  \tUnsignedInt16NV 8  \tUnsignedInt32NV 9  \tUnsignedInt64NV 10  \tSignedInt8PackedNV 1000491000  \tUnsignedInt8PackedNV 1000491001  \tFloatE4M3NV 1000491002  \tFloatE5M2NV 1000491003  \nGatherModes\tGather4x1QCOM 0  \tGatherDQCOM 1  \tGatherH2QCOM 2  \tGatherV2QCOM 3  \nTensorOperands\tNoneARM 0  \tNontemporalARM 1  \tOutOfBoundsValueARM 2 IdRef \tMakeElementAvailableARM 4 IdRef \tMakeElementVisibleARM 8 IdRef \tNonPrivateElementARM 16  \n"
+    ).flatMap(_.split('\n').toVec).view.map(row => OperandKindInfo.parse(row)).map(value => value.kind -> value).toMap
 
   private val aliases: Map[java.lang.String, Definition] = Map(
     "OpSDotKHR" -> Definition.SDot,
@@ -15992,7 +14363,7 @@ object Instruction {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) derives CanEqual {
   case Nop() extends Instruction(Instruction.Definition.Nop)
   case Undef(resultType: Operand, dest: Operand) extends Instruction(Instruction.Definition.Undef, resultType, dest)
   case SourceContinued(continuedSrc: Operand) extends Instruction(Instruction.Definition.SourceContinued, continuedSrc)

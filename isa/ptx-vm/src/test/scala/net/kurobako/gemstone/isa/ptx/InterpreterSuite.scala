@@ -161,7 +161,7 @@ class InterpreterSuite extends munit.FunSuite {
     assertEquals(memory.readInt32(base), Right(200))
   }
 
-  test("lowers shared symbols as addresses") {
+  test("lowers shared symbols as addresses in the CTA's shared window") {
     val source = """
       |.version 8.0
       |.target sm_80
@@ -178,7 +178,8 @@ class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel    = compileKernel(source)
     val addresses = kernel.entry.routine.program.instructions.collect {
-      case PredicatedInstruction(VMIR.Instruction.Move(_, Value.Immediate(address), _), _) => address
+      case PredicatedInstruction(VMIR.Instruction.Move(_, Value.Address(Value.SharedWindow, offset), _), _) =>
+        VMAddressSpace.SharedBase + offset
     }
     assertEquals(addresses.size, 3)
     assert(addresses.sorted.sliding(2).forall(pair => pair(1) - pair(0) >= 4), addresses.toString)

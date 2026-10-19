@@ -21,6 +21,8 @@ import scala.annotation.tailrec
 import scala.util.Using
 
 class SPIRVProgramExecutorSuite extends munit.FunSuite {
+  private val Booleans = Vec(false, true)
+
   private val encoding = ProgramEncoding.SPIRVOpenCLCompute
 
   test("real SPIR-V printf reaches the handler and preserves handler failures") {
@@ -89,7 +91,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     """)
     Using.resource(ExecutionSession(Backends.default().programs)) { service =>
       service.load(encoding, bytes) match {
-        case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains(missing))
+        case Left(ExecutionFailure.InvalidProgram(detail)) => assert(detail.contains(missing))
         case result                                        => fail(s"expected a validation failure, found $result")
       }
     }
@@ -105,12 +107,13 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     """)
     Using.resource(Server.start(Server.Settings(parallelism = 1))) { server =>
       Using.resource(connections.Client(server.endpoint, server.client)) { client =>
+        val replacement = Vec[Byte](99, 0, 0, 0)
         for (id <- Seq(Binary32(0L), Binary32(7L), Binary32(0x80000000L), Binary32(0xffffffffL))) {
           val specId = id.toLong
           val bytes  = specialized(specId, 12)
           assertEquals(client.call(Operation.DescribeSpecialization(bytes)), Right(Vec(SpecializationInfo(id, 4))))
           assertEquals(
-            client.call(Operation.SpecializeImage(bytes, Vec(SpecializationConstant(id, Vec[Byte](99, 0, 0, 0))))),
+            client.call(Operation.SpecializeImage(bytes, Vec(SpecializationConstant(id, replacement)))),
             Right(specialized(specId, 99))
           )
           assert(client.call(Operation.SpecializeImage(bytes, Vec(SpecializationConstant(id, Vec[Byte](1))))).isLeft)
@@ -187,9 +190,11 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
       OpReturn
       OpFunctionEnd
     """)
+    val seeds  = Vec(3L, 7L)
+    val origin = LaunchGeometry.Coordinates(2, 0, 0)
     for {
       groups   <- Vec(1, 2, 3, 5, 9)
-      parallel <- Vec(false, true)
+      parallel <- Booleans
     } {
       val queued = AtomicReference(Option.empty[Runnable])
       Using.resource(PooledWorkgroups()) { pool =>
@@ -204,18 +209,19 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
           val size       = ((groups + 3) * 65536 + 8).refine[Int > 0].value
           val allocation = service.registerAllocation(size).value
           val program    = service.load(encoding, bytes).value
-          val host       = Array.ofDim[Byte](size.raw)
-          for (seed <- Vec(3L, 7L)) {
+          val host       = Array.ofDim[Byte](size)
+          val output     = KernelTask.Argument.Memory(allocation, 4L)
+          for (seed <- seeds) {
             val before = service.read(allocation, 0L, size).value
             val task   = KernelTask.validated(
               "groups",
               Dimensions.One,
               testDimensions(groups.refine[Int > 0].value),
               Vec(
-                KernelTask.Argument.Memory(allocation, 4L),
+                output,
                 KernelTask.Argument.Scalar(LittleEndian.toVec(seed, 4).refine[NonEmpty[Vec[Byte]]].value)
               ),
-              globalOffset = LaunchGeometry.Coordinates(2, 0, 0)
+              globalOffset = origin
             ).value
             val completion = service.launch(program, task).value
             assertEquals(service.completion(completion), Right(CompletionStatus.Pending))
@@ -227,15 +233,15 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
             assertEquals(service.completionDirtyRanges(completion, 0, ExecutionRPC.MaximumElements), Right(ranges))
             ranges.foreach { range =>
               assertEquals(range.allocation, allocation)
-              assert(range.offset.raw >= 0 && range.offset.raw + range.size.raw <= size.raw)
+              assert(range.offset >= 0 && range.offset.raw + range.size <= size)
               service.read(allocation, range.offset, range.size).value
-                .copyToArray(host, range.offset.raw.toInt, range.size.raw)
+                .copyToArray(host, range.offset.toInt, range.size)
             }
-            val expected = Array.ofDim[Byte](size.raw)
+            val expected = Array.ofDim[Byte](size)
             (0 until groups).foreach { group =>
               val address = 4L + (2L + group) * 65536L
               assert(ranges.exists(range =>
-                range.offset.raw <= address && address + 4 <= range.offset.raw + range.size.raw
+                range.offset <= address && address + 4 <= range.offset.raw + range.size
               ))
               LittleEndian.write(seed, expected, address.toInt, 4)
             }

@@ -10,7 +10,7 @@ object ProgramGlobal {
       alias: Option[ProgramGlobalAlias] = None
   ): Either[NonEmpty[String], ProgramGlobal] =
     Either.cond[NonEmpty[String], ProgramGlobal](
-      initial.length.toLong <= size.raw && (alias.isEmpty || initial.isEmpty),
+      initial.length.toLong <= size && (alias.isEmpty || initial.isEmpty),
       ProgramGlobal(size, initial, alias),
       "program-global initial contents exceed its size or alias has independent contents"
     )

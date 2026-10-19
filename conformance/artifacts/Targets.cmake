@@ -28,7 +28,7 @@ foreach(compiler IN LISTS CONFORMANCE_COMPILERS)
 endforeach()
 
 foreach(architecture IN LISTS CUDA_ARCHITECTURES)
-  if(NOT architecture MATCHES "^sm_[0-9]+$")
+  if(NOT architecture MATCHES "^sm_[0-9]+[af]?$")
     message(FATAL_ERROR "Invalid CUDA architecture: ${architecture}")
   endif()
 endforeach()

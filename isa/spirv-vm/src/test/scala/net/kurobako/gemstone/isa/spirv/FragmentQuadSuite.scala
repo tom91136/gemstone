@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv
 import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.bits.*
 
 class FragmentQuadSuite extends munit.FunSuite {
   private def divergentFlow(flow: String): String = flow match {
@@ -143,7 +144,8 @@ class FragmentQuadSuite extends munit.FunSuite {
     "DPdyCoarse"   -> Seq.fill(4)(8f),
     "FwidthCoarse" -> Seq.fill(4)(11f)
   )
-  private val flows = Seq("uniform", "selection", "loop", "break", "continue", "call", "return_value")
+  private val flows          = Seq("uniform", "selection", "loop", "break", "continue", "call", "return_value")
+  private val expectedByName = expectations.toMap
 
   private val cases = expectations.zipWithIndex.map { case ((operation, expected), index) =>
     (operation, expected, false, flows(index % flows.size))
@@ -156,14 +158,14 @@ class FragmentQuadSuite extends munit.FunSuite {
       "DPdyCoarse"   -> "break",
       "FwidthCoarse" -> "continue",
       "DPdxCoarse"   -> "call"
-    ).map((operation, flow) => (operation, expectations.toMap.apply(operation), false, flow))
+    ).map((operation, flow) => (operation, expectedByName(operation), false, flow))
 
   for ((operation, expected, repeated, flow) <- cases) {
     val chain = if (repeated) s"Op$operation then OpDPdyFine" else s"Op$operation"
     test(s"$chain after $flow flow uses nonlinear lane values and suppresses helper side effects") {
       val memory = RegionMemory()
       val region = memory.allocate(96L)
-      writeWords(memory, region, 16, Seq(1f, 2f, 3f, 5f, 2f, 4f, 6f, 10f).map(floatBits)*)
+      writeWords(memory, region, 16, Seq(1f, 2f, 3f, 5f, 2f, 4f, 6f, 10f).map(single)*)
       writeWords(memory, region, 8, 0xfeedL)
       writeWords(memory, region, 88, 0xbeefL)
       assertEquals(memory.write(region, 80L, Vec[Byte](0, 1, 0, 1, 0, 1, 0, 1)), Right(()))
@@ -179,9 +181,9 @@ class FragmentQuadSuite extends munit.FunSuite {
       )
       assertEquals(
         words(memory, region, offset = 48, count = 8),
-        Vec.from((expected ++ expected.map(_ * 4)).map(floatBits))
+        Vec.from((expected ++ expected.map(_ * 4)).map(single))
       )
-      assertEquals(words(memory, region, offset = 0, count = 2), Vec(4L, floatBits(6f)))
+      assertEquals(words(memory, region, offset = 0, count = 2), Vec(4L, single(6f)))
       assertEquals(word(memory, region, 8), 0xfeedL)
       assertEquals(word(memory, region, 88), 0xbeefL)
     }

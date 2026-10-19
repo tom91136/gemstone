@@ -1,40 +1,41 @@
 package net.kurobako.gemstone
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.prelude.*
 import scala.compiletime.testing.typeCheckErrors
 import scala.util.Try
 
 /** Proven implications, carrier widening, exact narrowing and sign-preserving arithmetic. */
 class ConstraintWidenSuite extends munit.FunSuite {
-  test("numeric conversions retain source carrier bounds and predicates") {
+  test("widening a carrier retains its bounds and predicates") {
     val errors = typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       val b: Byte >= 0 = 1
-      b.toShort.widen[Short in 0 ~ 127]
-      b.toInt.widen[Int in 0 ~ 127]
-      b.toLong.widen[Long in 0L ~ 127L]
-      b.toShort.toInt.toLong.widen[Long in 0L ~ 127L]
+      b.widen[Short in 0 ~ 127]
+      b.widen[Int in 0 ~ 127]
+      b.widen[Long in 0L ~ 127L]
       val s: Short >= 0 = 1
-      s.toInt.widen[Int in 0 ~ 32767]
-      s.toLong.widen[Long in 0L ~ 32767L]
+      s.widen[Int in 0 ~ 32767]
+      s.widen[Long in 0L ~ 32767L]
       val n: Int >= 0 = 1
-      n.toLong.widen[Long in 0L ~ 2147483647L]
+      n.widen[Long in 0L ~ 2147483647L]
       val negative: Byte < 0 = -1
-      negative.toInt.widen[Int in -128 ~ -1]
+      negative.widen[Int in -128 ~ -1]
       val aligned: Byte where MultipleOf[8] = 8
-      aligned.toLong.widen[Long where (Between[-128, 127] & MultipleOf[8])]
+      aligned.widen[Long where (Between[-128, 127] & MultipleOf[8])]
     """)
     assertEquals(errors.map(_.message), Nil)
     val largestByte: Byte >= 0   = 127
     val smallestShort: Short < 0 = -32768
     val largestInt: Int >= 0     = Int.MaxValue
-    assertEquals(largestByte.toShort.toInt.toLong.widen[Long in 0L ~ 127L].raw, 127L)
-    assertEquals(smallestShort.toLong.widen[Long in -32768L ~ -1L].raw, -32768L)
-    assertEquals(largestInt.toLong.widen[Long in 0L ~ 2147483647L].raw, 2147483647L)
+    assertEquals(largestByte.widen[Long in 0L ~ 127L].raw, 127L)
+    assertEquals(smallestShort.widen[Long in -32768L ~ -1L].raw, -32768L)
+    assertEquals(largestInt.widen[Long in 0L ~ 2147483647L].raw, 2147483647L)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       val source: Byte >= 0 = 1
-      source.toInt.widen[Int in 0 ~ 126]
+      source.widen[Int in 0 ~ 126]
     """).exists(_.message.contains("Cannot prove")))
   }
 
@@ -153,12 +154,12 @@ class ConstraintWidenSuite extends munit.FunSuite {
     val nonnegative: Int >= 0          = positive
     val negative                       = (-1).unsafe[Int < 0]
     val nonpositive: Int <= 0          = negative
-    def offset(value: Long >= 0): Long = value.raw
+    def offset(value: Long >= 0): Long = value
     assertEquals(offset(positive), 3L)
     assertEquals(nonnegative.raw, 3)
     assertEquals(nonpositive.raw, -1)
     assertEquals(positive.widen[Int >= 0].raw, 3)
-    assertEquals(positive.toLong.raw, 3L)
+    assertEquals(positive.toLong, 3L)
     val bounded                                         = 24.unsafe[Int where (GreaterThan[10] & AtMost[80])]
     val wider: Long where (AtLeast[10] & LessThan[100]) = bounded
     assertEquals(wider.raw, 24L)
@@ -186,11 +187,11 @@ class ConstraintWidenSuite extends munit.FunSuite {
     assertEquals(shortLong.raw, 17L)
     assertEquals(byteCarrierBound.raw, 17)
     assertEquals(shortCarrierBound.raw, 17)
-    assertEquals(byte.toShort.raw, 17.toShort)
-    assertEquals(byte.toInt.raw, 17)
-    assertEquals(byte.toLong.raw, 17L)
-    assertEquals(short.toInt.raw, 17)
-    assertEquals(short.toLong.raw, 17L)
+    assertEquals(byte.toShort, 17.toShort)
+    assertEquals(byte.toInt, 17)
+    assertEquals(byte.toLong, 17L)
+    assertEquals(short.toInt, 17)
+    assertEquals(short.toLong, 17L)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       import net.kurobako.gemstone.constraint.auto.*
@@ -208,7 +209,7 @@ class ConstraintWidenSuite extends munit.FunSuite {
   test("finite choices and divisibility participate in implications") {
     import constraint.auto.*
     val bits                                 = 32.unsafe[Int in (16, 32, 64)]
-    val bytes                                = (bits.raw / 8).unsafe[Int in (2, 4, 8)]
+    val bytes                                = (bits / 8).unsafe[Int in (2, 4, 8)]
     val wide: Long in (2L, 4L, 8L)           = bytes
     val bounded: Int in 1 ~ 8                = bytes
     val choices: Int in (8, 16, 32, 64, 128) = bits
@@ -229,8 +230,8 @@ class ConstraintWidenSuite extends munit.FunSuite {
         value >= -20 && value <= 20 && value % 6 == 0
       )
       assertEquals(
-        Try(value.unsafe[Int where (In[(-3, 2, 4, 8)] & AtLeast[0])]).isSuccess,
-        Set(2, 4, 8).contains(value)
+        Try(value.unsafe[Int where (Membership[(-3, 2, 4, 8)] & AtLeast[0])]).isSuccess,
+        PartialFunction.cond(value) { case 2 | 4 | 8 => true }
       )
       assertEquals(Try(value.unsafe[Int where (MultipleOf[4] & MultipleOf[6])]).isSuccess, value % 12 == 0)
     }
@@ -267,6 +268,14 @@ class ConstraintWidenSuite extends munit.FunSuite {
     assertEquals((longCount / longGroup).raw, 2L)
     assertEquals((longCount % longGroup).raw, 3L)
     assertEquals(longMaximum.ceilDiv(2L).raw, 4611686018427387904L)
+    assertEquals(count.alignUp(group).raw, 12)
+    assertEquals(zero.alignUp(group).raw, 0)
+    assertEquals(longCount.alignUp(longGroup).raw, 12L)
+    assertEquals(17.alignUp(16), 32)
+    assertEquals(32L.alignUp(16L), 32L)
+    val _ = intercept[ArithmeticException](maximum.alignUp(group))
+    val _ = intercept[ArithmeticException](Int.MaxValue.alignUp(16))
+    val _ = intercept[ArithmeticException](Long.MaxValue.alignUp(16L))
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       val count: Int >= 0 = 1
@@ -283,10 +292,12 @@ class ConstraintWidenSuite extends munit.FunSuite {
     assertEquals((y * x).raw, 6)
     assertEquals(x.min(x).raw, 3)
     assertEquals(y.max(x).raw, 3)
-    assertEquals((y - 1.unsafe).raw, 1)
-    assertEquals((x + 1.unsafe).raw, 4)
-    assert(x > y)
-    assert(x >= 0.unsafe[Int >= 0])
+    assertEquals((y - 1).raw, 1)
+    assertEquals((x + 1).raw, 4)
+    val sum: Int > 0         = x + y
+    val difference: Int >= 0 = y - 1
+    assertEquals(sum.raw, 5)
+    assertEquals(difference.raw, 1)
     val _ = intercept[IllegalArgumentException](y - x)
     val _ = intercept[ArithmeticException](Int.MaxValue.unsafe[Int > 0] + x)
     val _ = intercept[ArithmeticException](Int.MaxValue.unsafe[Int >= 0] * y)
@@ -296,7 +307,7 @@ class ConstraintWidenSuite extends munit.FunSuite {
     assertEquals((b * a).raw, 6L)
     assertEquals(b.min(a).raw, 2L)
     assertEquals(a.max(a).raw, 3L)
-    assertEquals((b - 1L.unsafe).raw, 1L)
+    assertEquals((b - 1L).raw, 1L)
     val _ = intercept[IllegalArgumentException](b - a)
     val _ = intercept[ArithmeticException](Long.MaxValue.unsafe[Long >= 0] + b)
     val _ = intercept[ArithmeticException](Long.MaxValue.unsafe[Long > 0] * a)
@@ -309,11 +320,11 @@ class ConstraintWidenSuite extends munit.FunSuite {
     val size: Int >= 0        = 8
     val emptyMaximum: Int > 0 = minimum.max(empty)
     val maximum: Int > 0      = minimum.max(size)
-    val longMaximum: Long > 0 = minimum.toLong.widen[Long > 0].max(size.toLong)
+    val longMaximum: Long > 0 = minimum.widen[Long > 0].max(size)
     assertEquals(emptyMaximum.raw, 1)
     assertEquals(maximum.raw, 8)
     assertEquals(longMaximum.raw, 8L)
-    assertEquals(minimum.toLong.widen[Long > 0].max(empty.toLong).raw, 1L)
+    assertEquals(minimum.widen[Long > 0].max(empty).raw, 1L)
   }
 
   test("checked Long narrowing preserves signs and rejects overflow") {
@@ -336,18 +347,120 @@ class ConstraintWidenSuite extends munit.FunSuite {
     val _ = intercept[ArithmeticException]((-32769: Int < 0).toShortExact)
   }
 
-  test("opaque numeric values cannot silently drop predicates") {
+  test("validating a value its refinement already proves is a compile error naming widen") {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      def unwrap(value: Int > 0): Int = value
+      val lane: Int in 0 ~ 7 = 5
+      lane.unsafe[Int >= 0]
+    """).exists(_.message.contains(".widen[")))
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val lane: Int in 0 ~ 7 = 5
+      lane.refine[Int in 0 ~ 7]
+    """).exists(_.message.contains(".widen[")))
+    val count: Int >= 0 = 9
+    assert(count.refine[Int in 0 ~ 7].isLeft)
+    assertEquals(count.unsafe[Int in 0 ~ 15].raw, 9)
+  }
+
+  test("covariant containers of refined values view their elements as the carrier without copying") {
+    val widths: Vec[Int in 1 ~ 32] = Vec(8, 8, 16)
+    val indices                    = Vec.indices(3)
+    val offset: Option[Int >= 0]   = Some(4)
+    val plain: Vec[Int]            = widths.rawElements
+    val lanes: List[Int]           = List[Int > 0](1, 2).rawElements
+    assert(plain eq widths)
+    assert(indices.rawElements eq indices)
+    assertEquals(widths.rawElements.sum, 32)
+    assertEquals(widths.max.raw, 16)
+    assertEquals(indices.rawElements.sum, 3)
+    assertEquals(offset.rawElements.fold(0)(_ + 1), 5)
+    assertEquals(lanes, List(1, 2))
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val widths: Vec[Int in 1 ~ 32] = Vec(8)
+      widths.sum
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      def primitive(value: Int > 0): Long = value.toLong
+      val widths: Array[Int >= 0] = Array(8)
+      widths.rawElements
     """).nonEmpty)
+  }
+
+  test("refined values convert to their carrier, and only checked count arithmetic keeps a predicate") {
+    val positive: Int > 0          = 3
+    val count: Int >= 0            = 2
+    val lane: Int in 0 ~ 7         = 5
+    val step: Int                  = 4
+    val plain: Int                 = positive
+    val cursor: Int >= 0           = 1
+    def twice(value: Int): Int     = value * 2
+    def widened(value: Long): Long = value
+    val total: Int > 0             = positive + count
+    val sorted                     = List(positive, 1.unsafe[Int > 0]).sorted
+    assertEquals(plain, 3)
+    assertEquals(twice(positive), 6)
+    assertEquals(widened(positive.toLong), 3L)
+    assertEquals(cursor.raw, 1)
+    assertEquals(total.raw, 5)
+    assertEquals(lane + step, 9)
+    assertEquals(lane * 2, 10)
+    assertEquals(count.toLong + 1L, 3L)
+    assertEquals(step - count, 2)
+    assertEquals(positive << 1, 6)
+    assert(positive > count && lane >= positive && lane == 5)
+    assertEquals(sorted.map(_.raw), List(1, 3))
+    val _ = intercept[IllegalArgumentException](cursor - 2)
+    val _ = intercept[ArithmeticException](Int.MaxValue.unsafe[Int >= 0] + count)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       def divide(value: Int > 0): Int > 0 = value / 2
     """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      def strengthen(value: Int): Int > 0 = value
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      def unchecked(count: Int >= 0, step: Int): Int = count + step
+    """).exists(_.message.contains("Runtime inputs require .refine")))
+  }
+
+  test("a refined value keeps its predicate without an expected type and converts only once") {
+    val positive: Int > 0        = 3
+    val inferred                 = positive
+    val kept: Int > 0            = inferred
+    val listed                   = List(positive)
+    val listKept: List[Int > 0]  = listed
+    def carrier(value: Int): Int = value
+    assertEquals(kept.raw, 3)
+    assertEquals(listKept.map(_.raw), List(3))
+    assertEquals(carrier(positive), 3)
+    assertEquals(positive.toLong, 3L)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      def widen(value: Long): Long = value
+      val positive: Int > 0        = 3
+      widen(positive)
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val positive: Int > 0 = 3
+      val carrier: Int      = positive
+      val strengthened: Int > 0 = carrier
+    """).nonEmpty)
+  }
+
+  test("a refined value reaches the extension methods of its carrier") {
+    val address = SInt[17](16).unsafe[SInt[17] in 0 ~ 0xfffc]
+    val offset  = SInt[17](4).unsafe[SInt[17] in 0 ~ 0xfffc]
+    val plain   = SInt[17](2)
+    assertEquals((address + offset).to[UInt[32]], UInt[32](20))
+    assertEquals((address + 4).to[UInt[32]], UInt[32](20))
+    assertEquals((plain + address).to[UInt[32]], UInt[32](18))
+    assertEquals((address - plain).to[UInt[32]], UInt[32](14))
+    assertEquals((address >> 2).to[UInt[32]], UInt[32](4))
+    assert(offset < address && address != offset && address == address)
   }
 }

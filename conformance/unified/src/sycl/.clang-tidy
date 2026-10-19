@@ -1,0 +1,4 @@
+InheritParentConfig: true
+# DPC++ lowers each kernel lambda into implicit declarations at the lambda's location, which internal-linkage
+# then flags and "fixes" by inserting static before the lambda.
+Checks: '-misc-use-internal-linkage'

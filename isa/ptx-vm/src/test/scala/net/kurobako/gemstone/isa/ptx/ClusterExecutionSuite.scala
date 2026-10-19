@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
 
 class ClusterExecutionSuite extends munit.FunSuite {
@@ -136,5 +137,16 @@ class ClusterExecutionSuite extends munit.FunSuite {
       Right(())
     )
     assertEquals(memory.readInt32(memory.start), Right(0))
+  }
+
+  // ptxas 13.3 lowers the multicast form to UGETNEXTWORKID.BROADCAST on sm_100a
+  test("multicast cluster cancellation writes every CTA's response and completes each CTA's mbarrier") {
+    val kernel = compileKernel(AsyncCases.cancelPtx)
+    val memory = DeviceMemory(2 * 32 * 4)
+    assertEquals(
+      execute(kernel, 2, 32, Map(("out": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)), memory),
+      Right(())
+    )
+    for (word <- 0 until 64) assertEquals(memory.readInt32(memory.start.offset(word * 4L)), Right(2), word)
   }
 }

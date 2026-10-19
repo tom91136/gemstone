@@ -4,6 +4,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*
 
+// the error cases are told apart by name, not by payload
+@SuppressWarnings(Array("baumkuchen:duplicate-shape"))
 enum CodecError {
   case UnsupportedInstruction(opcode: NonEmpty[String], target: Target)
   case UnsupportedFormat(opcode: NonEmpty[String], target: Target, formats: Vec[EncodingFormat])

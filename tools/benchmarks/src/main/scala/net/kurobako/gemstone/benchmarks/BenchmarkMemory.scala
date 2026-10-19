@@ -5,7 +5,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
@@ -24,7 +23,9 @@ class BenchmarkMemory(sizes: Int*) extends AddressSpace {
   private val lock        = ReentrantLock()
 
   val ids: Vec[AllocationId] =
-    Vec.indices(allocations.length.unsafe[Int >= 0]).map(index => AllocationId((1L: Long > 0) + index.toLong))
+    Vec.indices(allocations.length.unsafe[Int >= 0]).map(index =>
+      AllocationId((1L: Long > 0) + index.widen[Long >= 0])
+    )
 
   /** Live backing bytes for setup and verification. */
   @SuppressWarnings(Array("scalafix:MutableExposure"))
@@ -45,7 +46,7 @@ class BenchmarkMemory(sizes: Int*) extends AddressSpace {
     )
 
   override def address(id: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
-    range(id, offset.raw, 0).map(_ => base(id).offset(offset.raw))
+    range(id, offset, 0).map(_ => base(id).offset(offset))
 
   override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] = {
     val relative = address.raw - Base
@@ -53,32 +54,32 @@ class BenchmarkMemory(sizes: Int*) extends AddressSpace {
     val offset   = relative - index * Stride
     Either.cond(
       index >= 0 && index < allocations.length &&
-        ByteRange.contains(allocations(index.toInt).length, offset, size.raw.toLong),
+        ByteRange.contains(allocations(index.toInt).length, offset, size.toLong),
       AddressSpace.Location.Within(ids(index.toInt), offset.unsafe[Long >= 0]),
       Fault.Memory(s"address ${address.show} is outside benchmark allocations")
     )
   }
 
   override def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-    range(id, offset.raw, size.raw.toLong).map(bytes =>
-      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset.raw.toInt, offset.raw.toInt + size.raw))
+    range(id, offset, size.toLong).map(bytes =>
+      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size))
     )
 
   override def write(id: AllocationId, offset: Long >= 0, values: Vec[Byte]): Either[Fault, Unit] =
-    range(id, offset.raw, values.size.toLong).map { bytes =>
-      val _ = values.copyToArray(bytes, offset.raw.toInt)
+    range(id, offset, values.size.toLong).map { bytes =>
+      val _ = values.copyToArray(bytes, offset.toInt)
     }
 
   override def readValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
-    range(id, offset.raw, size.raw.toLong).map(LittleEndian.decode(_, offset.raw.toInt, size.widen[Int in 0 ~ 8]))
+    range(id, offset, size.toLong).map(LittleEndian.decode(_, offset.toInt, size.widen[Int in 0 ~ 8]))
 
   override def writeValue(id: AllocationId, offset: Long >= 0, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
-    range(id, offset.raw, size.raw.toLong).map(LittleEndian.write(value, _, offset.raw.toInt, size.widen[Int in 0 ~ 8]))
+    range(id, offset, size.toLong).map(LittleEndian.write(value, _, offset.toInt, size.widen[Int in 0 ~ 8]))
 
   override def atomicModifyValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
       update: Long => Long
   ): Either[Fault, Long] =
-    range(id, offset.raw, size.raw.toLong).map(bytes =>
-      lock.withLock(LittleEndian.atomicModify(bytes, offset.raw.toInt, size.widen[Int in 0 ~ 8])(update))
+    range(id, offset, size.toLong).map(bytes =>
+      lock.withLock(LittleEndian.atomicModify(bytes, offset.toInt, size.widen[Int in 0 ~ 8])(update))
     )
 }

@@ -72,7 +72,9 @@ object ExecutionHandler {
           pointerRelocations,
           discoverArgumentRelocations,
           descriptorBindings,
-          argumentBuffer
+          argumentBuffer,
+          clusterSize,
+          cooperative
         ) =>
       val created = KernelTask.validated(
         kernelName = kernelName,
@@ -86,7 +88,9 @@ object ExecutionHandler {
         workDim = workDim,
         globalOffset = globalOffset,
         discoverArgumentRelocations = discoverArgumentRelocations,
-        argumentBuffer = argumentBuffer
+        argumentBuffer = argumentBuffer,
+        cluster = clusterSize,
+        cooperative = cooperative
       ).left.map(ExecutionFailure.InvalidRequest(_))
       val result = created match {
         case Left(error) => Left(error)

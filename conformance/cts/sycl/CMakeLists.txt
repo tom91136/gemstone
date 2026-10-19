@@ -94,6 +94,12 @@ foreach(operation IN ITEMS permute shift broadcast)
   endforeach()
 endforeach()
 
+# The math builtin generator otherwise prints every expanded signature while generating sources.
+patch_exact("${staging}/tests/math_builtin_api/generate_math_builtin.py"
+  "silent=args.print_output_files" "silent=True")
+patch_exact("${staging}/tests/math_builtin_api/modules/test_generator.py"
+  [[re.search("^sycl::vec<.+,\s*(\d+)>$", at)]] [[re.search(r"^sycl::vec<.+,\s*(\d+)>$", at)]])
+
 # Name and collect upstream executables for artifact registration.
 patch_exact("${staging}/cmake/AdaptDPCPP.cmake"
   [=[add_executable(${exe_name} $<TARGET_OBJECTS:${object_lib_name}>)]=]

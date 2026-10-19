@@ -1,8 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
-import net.kurobako.gemstone.vm.*
-
-private enum AtomicUpdate {
-  case Operation(operation: AtomicOperation, value: Long)
-  case CompareExchange(comparator: Long, value: Long)
+/** The value an atomic stores over the previous one, applied when the write buffer commits. */
+private trait AtomicUpdate {
+  def apply(previous: Long): Long
 }

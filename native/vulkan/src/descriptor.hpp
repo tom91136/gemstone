@@ -41,8 +41,13 @@ private:
   Set::Value *slot(VkDescriptorSet set, uint32_t binding, uint32_t element, uint32_t offset);
 };
 
+inline bool imageDescriptorType(VkDescriptorType type) {
+  return type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT || type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+         || type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || type == VK_DESCRIPTOR_TYPE_SAMPLER;
+}
+
 struct DescriptorSlot {
-  uint32_t set, binding, element;
+  uint32_t set{}, binding{}, element{};
   gx::ShaderResourceKind resourceType = gx::ShaderResourceKind::Buffer;
   auto operator<=>(const DescriptorSlot &) const = default;
 };

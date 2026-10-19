@@ -83,7 +83,9 @@ void execute(bool asynchronousCopy) {
   if (status != HSA_STATUS_SUCCESS) status = hsa_executable_get_symbol_by_name(executable, "vector_copy.kd", &gpu, &symbol);
   check(status, "symbol");
   uint64_t kernelObject = 0;
-  uint32_t argumentSize = 0, groupSize = 0, privateSize = 0;
+  uint32_t argumentSize = 0;
+  uint32_t groupSize = 0;
+  uint32_t privateSize = 0;
   check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernelObject), "kernel object");
   check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &argumentSize), "argument size");
   check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &groupSize), "group size");
@@ -99,16 +101,16 @@ void execute(bool asynchronousCopy) {
     return result;
   };
   auto *arguments = allocate(argumentSize);
-  auto *source = allocate(256);
-  auto *destination = allocate(256);
+  auto *input = allocate(256);
+  auto *output = allocate(256);
   auto *guard = allocate(256);
   const auto expected = unified::test_runtime::input(64);
-  check(hsa_memory_copy(source, expected.data(), 256), "upload");
-  std::memset(destination, 0xa5, 256);
+  check(hsa_memory_copy(input, expected.data(), 256), "upload");
+  std::memset(output, 0xa5, 256);
   std::memset(guard, 0x5a, 256);
   std::memset(arguments, 0, argumentSize);
-  std::memcpy(arguments, &source, 8);
-  std::memcpy(static_cast<char *>(arguments) + 8, &destination, 8);
+  std::memcpy(arguments, &input, 8);
+  std::memcpy(static_cast<char *>(arguments) + 8, &output, 8);
   std::memcpy(static_cast<char *>(arguments) + 16, &guard, 8);
   hsa_signal_t completion{};
   check(hsa_signal_create(1, 0, nullptr, &completion), "completion signal");
@@ -133,7 +135,7 @@ void execute(bool asynchronousCopy) {
                           | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
                           | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
-  hsa_signal_store_screlease(queue->doorbell_signal, index);
+  hsa_signal_store_screlease(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (hsa_signal_load_scacquire(completion) == 1 && std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
@@ -142,12 +144,11 @@ void execute(bool asynchronousCopy) {
     REQUIRE(hsa_signal_load_scacquire(completion) == 0);
   }
   if (asynchronousCopy) {
-    std::memset(source, 0x93, 256); // A no-op copy must not pass using the original upload.
+    std::memset(input, 0x93, 256); // A no-op copy must not pass using the original upload.
     hsa_signal_t copied{};
     check(hsa_signal_create(1, 0, nullptr, &copied), "copy signal");
     cleanup.add([=] { hsa_signal_destroy(copied); });
-    check(hsa_amd_memory_async_copy(source, agents.cpu, destination, agents.cpu, 256, 1, &completion, copied),
-          "dependent asynchronous copy");
+    check(hsa_amd_memory_async_copy(input, agents.cpu, output, agents.cpu, 256, 1, &completion, copied), "dependent asynchronous copy");
     const auto copyDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (hsa_signal_load_scacquire(copied) == 1 && std::chrono::steady_clock::now() < copyDeadline)
       std::this_thread::yield();
@@ -157,7 +158,7 @@ void execute(bool asynchronousCopy) {
     }
   }
   std::vector<int32_t> actual(64);
-  check(hsa_memory_copy(actual.data(), asynchronousCopy ? source : destination, 256), "download");
+  check(hsa_memory_copy(actual.data(), asynchronousCopy ? input : output, 256), "download");
   {
     INFO("HSA dispatch result mismatch");
     REQUIRE(actual == expected);

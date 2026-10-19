@@ -1,12 +1,22 @@
 #include "submission.hpp"
 
-#include <algorithm>
-#include <climits>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <aspartame/vector.hpp>
+
+#include "gemstone_execution_rpc.hpp"
 
 #include "completion.hpp"
 #include "transfer.hpp"
+
+using namespace aspartame;
 
 namespace gemstone::vulkan {
 namespace gx = execution;
@@ -27,7 +37,7 @@ gx::GraphicsRange SubmissionResources::memory(uint8_t *data, size_t size, bool h
     const auto base = reinterpret_cast<uintptr_t>(allocation.data);
     if (allocation.hostBacked == hostBacked && address >= base && address - base <= allocation.size
         && size <= allocation.size - (address - base))
-      return {allocation.id, static_cast<int64_t>(address - base), static_cast<int64_t>(size)};
+      return {.allocation = allocation.id, .offset = {static_cast<int64_t>(address - base)}, .size = {static_cast<int64_t>(size)}};
   }
   // Reserve before acquiring a remote resource so local allocation failure cannot leak it.
   allocations.reserve(allocations.size() + 1);
@@ -36,13 +46,13 @@ gx::GraphicsRange SubmissionResources::memory(uint8_t *data, size_t size, bool h
     fail();
     return {};
   }
-  allocations.push_back({data, size, *allocated, hostBacked});
-  if (!hostBacked) okay = gx::transferAllocation(*client, *allocated, 0, data, size, true, gx::TransferChunk);
-  return {*allocated, 0, static_cast<int64_t>(size)};
+  allocations.push_back({.data = data, .size = size, .id = *allocated, .hostBacked = hostBacked});
+  if (!hostBacked) okay = gx::uploadAllocation(*client, *allocated, 0, data, size, gx::TransferChunk);
+  return {.allocation = *allocated, .offset = {0}, .size = {static_cast<int64_t>(size)}};
 }
 std::optional<gx::ProgramId> SubmissionResources::load(const std::vector<uint8_t> &image) {
   if (!okay || program) return std::nullopt;
-  auto loaded = client->call(gx::LoadProgram{gx::ProgramEncoding::SPIRVVulkanCompute, image});
+  auto loaded = client->call(gx::LoadProgram{.encoding = gx::ProgramEncoding::SPIRVVulkanCompute, .image = image});
   if (!loaded) {
     fail();
     return std::nullopt;
@@ -60,19 +70,18 @@ bool SubmissionResources::complete(gx::CompletionId completion, uint64_t *sample
   }
   if (samples) *samples += statistics.occlusionSamples.value;
   const auto owner = [&](const gx::DirtyRange &range) {
-    return std::find_if(allocations.begin(), allocations.end(),
-                        [&](const auto &allocation) { return allocation.id.value == range.allocation.value; });
+    return allocations ^ find_cref([&](const auto &allocation) { return allocation.id.value == range.allocation.value; });
   };
   std::vector<gx::DirtyRange> copied;
   for (const auto &dirty : result.dirtyRanges) {
     const auto found = owner(dirty);
-    if (found == allocations.end() || static_cast<uint64_t>(dirty.offset.value) > found->size
-        || static_cast<uint64_t>(dirty.size.value) > found->size - dirty.offset.value)
+    if (!found || std::cmp_greater(dirty.offset.value, found->get().size)
+        || static_cast<uint64_t>(dirty.size.value) > found->get().size - dirty.offset.value)
       return false;
-    if (!found->hostBacked) copied.push_back(dirty);
+    if (!found->get().hostBacked) copied.push_back(dirty);
   }
   return gx::readDirtyRanges(*client, copied, [&](const gx::DirtyRange &range, const uint8_t *bytes) {
-    std::memcpy(owner(range)->data + range.offset.value, bytes, range.size.value);
+    std::memcpy(owner(range)->get().data + range.offset.value, bytes, range.size.value);
     return true;
   });
 }

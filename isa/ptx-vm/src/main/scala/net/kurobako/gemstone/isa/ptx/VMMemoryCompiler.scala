@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.*
 
 /** Lowers `ld` and `st` from one reading of their state space, ordering and type qualifiers. */
 private object VMMemoryCompiler {
-  private enum Space {
+  private enum Space derives CanEqual {
     case Parameter, Shared, Local, Global, Generic
   }
 
@@ -23,7 +23,9 @@ private object VMMemoryCompiler {
       else if (has(Modifier.Global) || has(Modifier.Const)) Space.Global
       else Space.Generic
 
-    val signed: Boolean = modifiers.lastOption.exists(Set(Modifier.S8, Modifier.S16, Modifier.S32, Modifier.S64))
+    val signed: Boolean = modifiers.lastOption.exists(PartialFunction.cond(_) {
+      case Modifier.S8 | Modifier.S16 | Modifier.S32 | Modifier.S64 => true
+    })
 
     /** Strong system-scope accesses publish through the host on every access. */
     val access: MemoryAccess = space match {
@@ -36,15 +38,18 @@ private object VMMemoryCompiler {
     // Acquire loads and release stores of global words use the host's sequentially consistent atomics.
     def ordered(order: Modifier): Boolean =
       has(order) && space == Space.Global &&
-        modifiers.lastOption.exists(Set(Modifier.U32, Modifier.B32, Modifier.U64, Modifier.B64))
+        modifiers.lastOption.exists(PartialFunction.cond(_) {
+          case Modifier.U32 | Modifier.B32 | Modifier.U64 | Modifier.B64 => true
+        })
   }
 
-  private def wide(form: Form): Either[Error, MemoryAccess] = form.modifiers match {
-    case Vec(Modifier.Relaxed, Modifier.Cta | Modifier.Gpu, Modifier.B128) => Right(MemoryAccess.Generic(false))
-    case Vec(Modifier.Relaxed, Modifier.Cta | Modifier.Gpu, Modifier.Global, Modifier.B128) =>
-      Right(MemoryAccess.Global(false))
-    case _ => invalid("b128 memory access requires relaxed CTA or GPU scope")
-  }
+  /** A 128-bit access moves two 64-bit words at once; the VM performs a lane's accesses in order, so its ordering
+    * qualifiers need nothing further, but host-published system-scope accesses are word-sized.
+    */
+  private def wide(form: Form): Either[Error, MemoryAccess] =
+    if (form.space == Space.Parameter || form.has(Modifier.Sys))
+      invalid("b128 memory access requires a memory state space below system scope")
+    else Right(form.access)
 
   private def parameterAddress(operand: Operand): Option[(NonEmpty[String], Long)] = operand match {
     case Operand.Address(Vec(Operand.Symbol(name)))                      => Some(name -> 0L)
@@ -57,7 +62,17 @@ private object VMMemoryCompiler {
     if (offset >= 0L && offset <= Int.MaxValue.toLong) Right(offset.toInt.unsafe[Int >= 0])
     else invalid(s"parameter offset is outside Int range: $offset")
 
-  def load(destination: Operand, address: Operand, modifiers: Vec[Modifier], nonCoherent: Boolean)(
+  def load(destination: Operand, address: Operand, modifiers: Vec[Modifier])(
+      using Scope
+  ): Either[Error, VMIR.Instruction] = loaded(destination, address, modifiers, Coherence.Coherent)
+
+  def loadNonCoherent(destination: Operand, address: Operand, modifiers: Vec[Modifier])(
+      using Scope
+  ): Either[Error, VMIR.Instruction] = loaded(destination, address, modifiers, Coherence.NonCoherent)
+
+  private enum Coherence derives CanEqual { case Coherent, NonCoherent }
+
+  private def loaded(destination: Operand, address: Operand, modifiers: Vec[Modifier], coherence: Coherence)(
       using scope: Scope
   ): Either[Error, VMIR.Instruction] = {
     val form                                                                        = Form(modifiers)
@@ -73,7 +88,7 @@ private object VMMemoryCompiler {
         destinations <- scope.registers(destination).flatMap(pair(_, "ld.b128 destination"))
         target       <- scope.address(address)
       } yield VMIR.Instruction.LoadVector(destinations, target, 64, false, access)
-    else if (nonCoherent) scope.address(address).flatMap(plain(_, MemoryAccess.Global(false)))
+    else if (coherence == Coherence.NonCoherent) scope.address(address).flatMap(plain(_, MemoryAccess.Global(false)))
     else form.space match {
       case Space.Parameter =>
         parameterAddress(address) match {

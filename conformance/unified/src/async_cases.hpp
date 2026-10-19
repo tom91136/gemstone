@@ -1,9 +1,10 @@
 #pragma once
-#include <algorithm>
 #include <cstddef>
 #include <numeric>
 #include <vector>
 
+#include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "test_support.hpp"
@@ -13,38 +14,34 @@ namespace unified::async {
 // particular runtime object.  A vendor backend may use a CUDA/HIP stream,
 // SYCL queue/event, or a host future as the implementation vehicle.
 template <class T> std::vector<T> referenceScan(const std::vector<T> &input) {
-  std::vector<T> result(input.size());
-  std::inclusive_scan(input.begin(), input.end(), result.begin(), support::Plus<T>{});
-  return result;
+  using namespace aspartame;
+  return input ^ scan_left(T{}, support::Plus<T>{}) ^ tail();
 }
 
 template <class T> std::vector<T> referenceFutureChain(const std::vector<T> &input) {
-  std::vector<T> result(input.size());
-  std::transform(input.begin(), input.end(), result.begin(), [](T value) { return support::Square<T>{}(support::Affine<T>{}(value)); });
-  return result;
+  using namespace aspartame;
+  return input ^ map([](T value) { return support::Square<T>{}(support::Affine<T>{}(value)); });
 }
 
 template <class T> std::vector<T> referenceEventChain(const std::vector<T> &input) {
-  std::vector<T> result(input.size());
-  std::transform(input.begin(), input.end(), result.begin(),
-                 [](T value) { return support::Combine<T>{}(support::Affine<T>{}(value), support::Square<T>{}(value)); });
-  return result;
+  using namespace aspartame;
+  return input ^ map([](T value) { return support::Combine<T>{}(support::Affine<T>{}(value), support::Square<T>{}(value)); });
 }
 
 template <class T> std::vector<T> referenceInterleaved(const std::vector<T> &input) {
-  std::vector<T> result(input.size());
-  for (size_t index = 0; index < input.size(); ++index)
-    result[index] = index % 2 == 0 ? support::Affine<T>{}(input[index]) : support::Square<T>{}(input[index]);
-  return result;
+  using namespace aspartame;
+  return input ^ zip_with_index()
+         ^ map([](T value, size_t index) { return index % 2 == 0 ? support::Affine<T>{}(value) : support::Square<T>{}(value); });
 }
 
 template <class T> std::vector<T> referenceSort(std::vector<T> input) {
-  std::sort(input.begin(), input.end());
+  input ^= aspartame::sort();
   return input;
 }
 
 template <class T> T referenceReduce(const std::vector<T> &input) {
-  return std::accumulate(input.begin(), input.end(), T{}, support::Plus<T>{});
+  using namespace aspartame;
+  return input ^ fold_left(T{}, support::Plus<T>{});
 }
 
 template <class T, class Backend> void copy(Backend &backend, size_t size) {
@@ -102,10 +99,8 @@ template <class T> struct StatefulOperator {
 };
 
 template <class T> std::vector<T> countingValues(size_t size) {
-  std::vector<T> result(size);
-  for (size_t index = 0; index < size; ++index)
-    result[index] = static_cast<T>(index);
-  return result;
+  using namespace aspartame;
+  return iota(size_t{0}, size) | map([](size_t index) { return static_cast<T>(index); }) | to_vector();
 }
 
 template <class T> std::vector<T> countingReference(size_t size, bool exclusive) {

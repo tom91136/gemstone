@@ -34,7 +34,16 @@ private[isa] object VMKernelLaunch {
         parameter.name -> Argument(bytes)
       }.toMap
       _ <-
-        VMInterpreter.execute(kernel, task.geometry, arguments, addresses, control, workgroups, task.groupSegmentBytes)
+        VMInterpreter.execute(
+          kernel,
+          task.geometry,
+          arguments,
+          addresses,
+          control,
+          workgroups,
+          task.groupSegmentBytes,
+          task.cluster
+        )
     } yield ()
   }
 
@@ -53,7 +62,7 @@ private[isa] object VMKernelLaunch {
       )
     case KernelTask.Argument.Memory(_, _, _) =>
       Either.cond(
-        parameter.widthBytes.raw == 8,
+        parameter.widthBytes == 8,
         (),
         Fault.InvalidRequest(s"memory argument ${parameter.name} requires an eight-byte $isaName parameter")
       )

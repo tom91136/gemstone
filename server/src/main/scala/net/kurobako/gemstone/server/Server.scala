@@ -5,7 +5,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.Transport.*
@@ -35,7 +34,7 @@ object Server {
         instructions <- positive(env.ExecutionMaxInstructions, TaskControl.Limits.Default.maxInstructions)
         parallelism  <- positive(
           name = env.ExecutionParallelism,
-          default = defaultParallelism.toLong,
+          default = defaultParallelism.widen[Long > 0],
           maximum = hostBound,
           expected = s"a positive integer at most the host bound $hostBound"
         )
@@ -46,7 +45,7 @@ object Server {
           expected = "positive seconds fitting an Int millisecond timeout"
         )
         record <- values.get(env.Record)
-          .fold[Either[String, Option[Path]]](Right(None))(configuration.path(env.Record, _).map(Some(_)))
+          .fold[Either[String, Option[Path]]](Right(None))(paths.parse(env.Record, _).map(Some(_)))
       } yield Settings(
         limits = TaskControl.Limits(instructions),
         parallelism = parallelism.toIntExact,
@@ -60,8 +59,8 @@ object Server {
     def replay(values: Map[String, String], profile: Journal.ExecutionProfile): Either[String, Settings] =
       fromEnvironment(
         (values - env.Record)
-          .updated(env.ExecutionMaxInstructions, profile.maxInstructions.raw.toString)
-          .updated(env.ExecutionParallelism, profile.parallelism.raw.toString)
+          .updated(env.ExecutionMaxInstructions, profile.maxInstructions.toString)
+          .updated(env.ExecutionParallelism, profile.parallelism.toString)
       )
   }
 
@@ -168,6 +167,8 @@ class Server private (
       case NonFatal(error) => scribe.error("RPC accept loop terminated unexpectedly", error)
     }
 
+  // joining is the barrier that keeps workers off memory the owner releases next, so a timeout would defeat it
+  @scala.annotation.nowarn("msg=baumkuchen:unbounded-wait")
   override def close(): Unit = if (closed.compareAndSet(false, true)) {
     // Stop accepting first, then snapshot threads before listener closure can remove them.
     def shutdownConnections(): Unit = {

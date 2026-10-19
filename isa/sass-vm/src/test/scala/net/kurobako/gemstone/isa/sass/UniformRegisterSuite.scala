@@ -47,6 +47,59 @@ class UniformRegisterSuite extends munit.FunSuite {
       )
     }
 
+  // measured on sm_89: the elected value goes to the uniform register as for R2UR, and each lane that executes ORs
+  // whether its value differs into the predicate where R2UR assigns it; other lanes keep their predicate
+  private def orProgram(values: String, preset: String, guard: String): String =
+    s"""S2R R0, SR_TID.X
+      |MOV R4, 7
+      |$values
+      |$preset
+      |ISETP.NE.U32.AND P1, PT, R0, 0, PT
+      |${guard}R2UR.OR P0, UR4, R4
+      |MOV R6, UR4
+      |SEL R8, RZ, 0x1, !P0
+      |IADD3 R6, R6, R6, R8
+      |LDC.64 R2, c[0x0][0x160]
+      |IMAD.WIDE.U32 R2, R0, 4, R2
+      |STG.E [R2], R6
+      |EXIT""".stripMargin
+
+  test("R2UR.OR keeps a predicate that is set where the value matches the elected one") {
+    check(
+      89,
+      orProgram(
+        "ISETP.EQ.U32.AND P2, PT, R0, 2, PT\n@P2 MOV R4, 9",
+        "ISETP.GE.U32.AND P0, PT, R0, 3, PT",
+        ""
+      ),
+      Vec(14, 14, 15, 15)
+    )
+  }
+
+  test("R2UR.OR elects the first live lane and sets the predicate of every lane that differs from it") {
+    check(
+      89,
+      orProgram(
+        "ISETP.EQ.U32.AND P2, PT, R0, 0, PT\n@P2 MOV R4, 9",
+        "ISETP.GE.U32.AND P0, PT, R0, 99, PT",
+        ""
+      ),
+      Vec(18, 19, 19, 19)
+    )
+  }
+
+  test("a predicated R2UR.OR leaves the uniform value and predicate of the lanes it skips") {
+    check(
+      89,
+      orProgram(
+        "ISETP.EQ.U32.AND P2, PT, R0, 0, PT\n@P2 MOV R4, 9",
+        "ISETP.EQ.U32.AND P0, PT, R0, 1, PT",
+        "@P1 "
+      ),
+      Vec(14, 15, 14, 14)
+    )
+  }
+
   test("older targets reject a numbered register that aliases their zero encoding") {
     assert(Assembler.assemble("UMOV UR4, UR63;", target(75)).isLeft)
   }

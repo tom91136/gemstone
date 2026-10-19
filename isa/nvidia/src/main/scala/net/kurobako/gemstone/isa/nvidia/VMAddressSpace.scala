@@ -9,10 +9,13 @@ private[isa] object VMAddressSpace {
   inline val SharedLimit    = 0x40000000L
   inline val ParameterBase  = 0x700000000L
 
-  // SASS SR_SWINHI supplies the high word; its low word retains the raw shared offset.
-  // Only rank zero is supported: bits 24..31 of that low word select another cluster CTA.
-  inline val SharedWindowBase = 0x4000000000000000L
-  inline val SharedWindowSize = 0x1000000L
+  // Each cluster CTA's shared memory is a 16 MiB window. PTX shared::cluster addresses select it above
+  // ClusterWindowBase; SASS selects it with bits 24..31 of the low word of an address whose high word is SR_SWINHI.
+  inline val ClusterRankShift  = 24
+  inline val ClusterWindowBase = 0x30000000L
+  inline val SharedWindowBase  = 0x4000000000000000L
+  inline val SharedWindowSize  = 0x100000000L
+  inline val SharedOffsetMask  = 0xffffffL
 
   def isShared(address: Long, size: Int = 1): Boolean =
     size >= 0 &&
@@ -23,8 +26,19 @@ private[isa] object VMAddressSpace {
   def isLocal(address: Long): Boolean =
     java.lang.Long.compareUnsigned(address, LocalLimit) < 0 && !isShared(address)
 
-  def sharedAddress(address: Long): Long =
+  /** The cluster rank whose window holds a shared address, or -1 for the issuing CTA's own shared::cta window. */
+  def clusterRank(address: Long): Int =
     if (address >= SharedWindowBase && address < SharedWindowBase + SharedWindowSize)
-      SharedBase + (address - SharedWindowBase)
-    else address
+      ((address - SharedWindowBase) >>> ClusterRankShift).toInt
+    else if (address >= ClusterWindowBase && address < SharedLimit)
+      ((address - ClusterWindowBase) >>> ClusterRankShift).toInt
+    else -1
+
+  /** The address a shared address names within its CTA's own shared::cta window. */
+  def sharedAddress(address: Long): Long =
+    if (clusterRank(address) < 0) address else SharedBase + (address & SharedOffsetMask)
+
+  /** The PTX shared::cluster address of the shared location `address` within the CTA of rank `rank`. */
+  def clusterAddress(address: Long, rank: Int): Long =
+    ClusterWindowBase + (rank.toLong << ClusterRankShift) + ((sharedAddress(address) - SharedBase) & SharedOffsetMask)
 }

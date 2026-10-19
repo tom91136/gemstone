@@ -8,7 +8,7 @@ import net.kurobako.gemstone.vm.*
 class RecordingWorkgroups extends Workgroups {
   val calls: AtomicInteger = AtomicInteger()
 
-  override def shouldParallel(tasks: Long >= 0, workItems: Long >= 0): Boolean = tasks.raw > 1L
+  override def shouldParallel(tasks: Long >= 0, workItems: Long >= 0): Boolean = tasks > 1L
 
   override def parallelFor(tasks: Long >= 0)(task: Long >= 0 => Either[Fault, Unit]): Either[Fault, Unit] = {
     val _ = calls.incrementAndGet()

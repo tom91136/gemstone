@@ -4,7 +4,6 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
@@ -59,9 +58,9 @@ object AMDGPUDispatchMemoryBenchmark {
       }
       external
     }
-    val measurement = Measurement(measure(iterations.raw))
-    val expected    = iterations.raw / 8L * 6L + math.max(0, iterations.raw % 8 - 2)
+    val measurement = Measurement(measure(iterations))
+    val expected    = iterations / 8L * 6L + math.max(0, iterations % 8 - 2)
     require(measurement.value == expected, s"routing checksum ${measurement.value} != $expected")
-    measurement.sample(iterations.toLong)
+    measurement.sample(iterations.widen[Long > 0])
   }
 }

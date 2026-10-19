@@ -27,7 +27,8 @@ object Printer {
       ).getOrElse("")
     val operands = instruction.operands.filterNot(_.kind == OperandKind.IdResult)
     var rawTail  = false
-    val text     = operands.zipWithIndex.flatMap { case (operand, index) =>
+    val text     = Vec.newBuilder[String]
+    operands.zipWithIndex.foreach { case (operand, index) =>
       // Context-dependent literals use SPIR-V's raw-word syntax to retain every bit, including NaN payloads.
       val rendered =
         if (
@@ -45,10 +46,11 @@ object Printer {
       // A raw word switches the rest of the instruction to untyped token parsing in SPIRV-Tools.
       if (rawTail || rendered.exists(_.startsWith("!"))) {
         rawTail = true
-        operand.words.map(raw(_))
-      } else rendered
+        text ++= operand.words.map(raw(_))
+      } else text ++= rendered
     }
-    result + instruction.definition.opcode + (if (text.isEmpty) "" else " " + text.mkString(" "))
+    val tokens = text.result()
+    result + instruction.definition.opcode + (if (tokens.isEmpty) "" else " " + tokens.mkString(" "))
   }
   private def raw(word: Word): String = f"!0x${word.raw}%08x"
   private def renderOperand(kind: OperandKind, words: Vec[Word], offset: Int): (Vec[String], Int) = {
@@ -69,7 +71,7 @@ object Printer {
       (Vec(name), offset + 1)
     } else Instruction.operandKinds.get(kind) match {
       case Some(info) =>
-        val selected = info.enumerants.filter(enumerant =>
+        val selected = ExtensionEnumerants.of(info).filter(enumerant =>
           if (info.kind.category == OperandKind.Category.ValueEnum || enumerant.value == 0) enumerant.value == value
           else (value & enumerant.value) == enumerant.value
         )
@@ -78,9 +80,15 @@ object Printer {
       case None => (Vec(value.toString), offset + 1)
     }
   }
-  private def renderParameters(kinds: Iterable[OperandKind], words: Vec[Word], offset: Int): (Vec[String], Int) =
-    kinds.foldLeft((Vec.empty[String], offset)) { case ((values, index), kind) =>
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def renderParameters(kinds: Iterable[OperandKind], words: Vec[Word], offset: Int): (Vec[String], Int) = {
+    val values = Vec.newBuilder[String]
+    var index  = offset
+    kinds.foreach { kind =>
       val (next, end) = renderOperand(kind, words, index)
-      (values ++ next, end)
+      values ++= next
+      index = end
     }
+    (values.result(), index)
+  }
 }

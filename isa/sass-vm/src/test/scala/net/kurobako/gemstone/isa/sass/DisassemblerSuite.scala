@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -46,8 +47,8 @@ class DisassemblerSuite extends munit.FunSuite {
     Vec("Ra_URb" -> 6, "Ra_offset" -> 4, "input_reg_sz_64_dist" -> 0, "sz" -> 5, "Pu" -> 0).foreach {
       case (binding, value) =>
         val field = form.fields.find(_.expression match {
-          case NVDisasm.Expression.Reference(name, None, _) => name == binding
-          case _                                            => false
+          case Expression.Reference(name, None, _) => name == binding
+          case _                                   => false
         }).getOrElse(fail(s"missing binary field $binding"))
         val original = BigInt(1, code.slice(0x50, 0x60).reverse)
         val mutated  = field.positions.zipWithIndex.foldLeft(original) { case (word, (physical, logical)) =>
@@ -64,7 +65,7 @@ class DisassemblerSuite extends munit.FunSuite {
 
   test("omitting a default predicate never shifts a later predicate destination") {
     val typed  = InstructionDecoder.decode(0x70, code.slice(0x70, 0x80), target(89)).fold(fail(_), identity)
-    val oracle = listing.find(_.address.raw == 0x70).get
+    val oracle = listing.find(_.address == 0x70).get
     assertEquals(typed.operands, oracle.operands)
     assertEquals(typed.guard, oracle.guard)
     assertEquals(Printer.print(typed.operation), Printer.print(oracle.operation))
@@ -97,8 +98,8 @@ class DisassemblerSuite extends munit.FunSuite {
     def encode(name: String, opcodeName: String, values: Map[String, BigInt]): Array[Byte] = {
       val form = database.forms.find(_.name == name).getOrElse(fail(s"missing $name schema"))
       def field(binding: String): NVDisasm.Assignment = form.fields.find(_.expression match {
-        case NVDisasm.Expression.Reference(reference, None, _) => reference == binding
-        case _                                                 => false
+        case Expression.Reference(reference, None, _) => reference == binding
+        case _                                        => false
       }).getOrElse(fail(s"missing $binding field in $name"))
       def insertField(word: BigInt, assignment: NVDisasm.Assignment, value: BigInt): BigInt =
         assignment.positions.zipWithIndex.foldLeft(word) { case (result, (position, logical)) =>

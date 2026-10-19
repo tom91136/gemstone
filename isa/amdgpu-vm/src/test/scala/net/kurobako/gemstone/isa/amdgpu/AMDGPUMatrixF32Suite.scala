@@ -48,15 +48,22 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
       assertEquals(memory.getInt(allocation, 4), java.lang.Float.floatToRawIntBits(1.0f))
     }
 
+  private val dimensions       = Vec(4, 16, 32)
+  private val bothBanks        = Vec(false, true)
+  private val primaryBlock     = Vec((0, 0))
+  private val primaryAndSecond = Vec((0, 0), (2, 1))
+  private val sweptBroadcasts  = Vec(0, 3, 7)
+
   for {
     architecture              <- Vec("gfx908", "gfx90a", "gfx942", "gfx950")
-    dimension                 <- Vec(4, 16, 32)
-    accumulators              <- if (architecture == "gfx908") Vec(true) else Vec(false, true)
-    inputAccumulators         <- if (dimension == 16 && accumulators) Vec(false, true) else Vec(false)
+    dimension                 <- dimensions
+    accumulators              <- if (architecture == "gfx908") Vec(true) else bothBanks
+    inputAccumulators         <- if (dimension == 16 && accumulators) bothBanks else Vec(false)
     (blockBroadcast, blockId) <-
-      if (architecture == "gfx90a" && dimension == 4 && accumulators) Vec((0, 0), (2, 1)) else Vec((0, 0))
+      if (architecture == "gfx90a" && dimension == 4 && accumulators) primaryAndSecond else primaryBlock
     broadcast <-
-      if (architecture == "gfx942" && dimension == 16 && accumulators && !inputAccumulators) Vec(0, 3, 7) else Vec(0)
+      if (architecture == "gfx942" && dimension == 16 && accumulators && !inputAccumulators) sweptBroadcasts
+      else Vec(0)
   } test(
     s"$architecture ${dimension}x$dimension MFMA accumulator bank=$accumulators inputs=$inputAccumulators broadcast=$broadcast blocks=$blockBroadcast/$blockId"
   ) {

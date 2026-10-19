@@ -8,7 +8,7 @@ class CubinPatchSuite extends munit.FunSuite {
   private val image = fixtures.Fixture.copyAddCubin
 
   private def text(module: Cubin.Module, kernel: String): Vec[Byte] =
-    module.sections(module.kernels.find(_.name == kernel).getOrElse(fail(s"missing $kernel")).section.raw).bytes
+    module.sections(module.kernels.find(_.name == kernel).getOrElse(fail(s"missing $kernel")).section).bytes
 
   test("a kernel's code is replaced in place with code of the same size") {
     val original = text(Cubin.decode(image).value, "copy_add")

@@ -41,7 +41,258 @@ object ControlFlowFixtures {
       |}
       |""".stripMargin
 
+  val clock64Cuda: String =
+    """#include <stdint.h>
+      |extern "C" __global__ void probe(uint32_t *out) {
+      |  long long first = clock64();
+      |  long long second = clock64();
+      |  out[0] = second > first;
+      |  out[1] = static_cast<uint32_t>(clock64() >> 32) >= static_cast<uint32_t>(first >> 32);
+      |}
+      |""".stripMargin
+
+  val virtualIdCuda: String =
+    """#include <stdint.h>
+      |extern "C" __global__ void probe(uint32_t *out) {
+      |  uint32_t smid, nsmid, warpid, nwarpid;
+      |  asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
+      |  asm volatile("mov.u32 %0, %%nsmid;" : "=r"(nsmid));
+      |  asm volatile("mov.u32 %0, %%warpid;" : "=r"(warpid));
+      |  asm volatile("mov.u32 %0, %%nwarpid;" : "=r"(nwarpid));
+      |  uint32_t *o = out + threadIdx.x * 4;
+      |  o[0] = smid;
+      |  o[1] = nsmid;
+      |  o[2] = warpid;
+      |  o[3] = nwarpid;
+      |}
+      |""".stripMargin
+
   val listings: Map[String, String] = Map(
+    "virtualIdSm50" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                           /* 0x001c4400fe0007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;                  /* 0x4c98078000870001 */
+        |        /*0010*/         {         MOV32I R7, 0x40 ;                       /* 0x010000000407f007 */
+        |        /*0018*/                   S2R R2, SR_TID.X         }
+        |                                                                           /* 0xf0c8000002170002 */
+        |                                                                           /* 0x001df400ea200731 */
+        |        /*0028*/                   S2R R0, SR_VIRTID ;                     /* 0xf0c8000000370000 */
+        |        /*0030*/                   S2R R4, SR_VIRTCFG ;                    /* 0xf0c8000000270004 */
+        |        /*0038*/                   S2R R5, SR_VIRTID ;                     /* 0xf0c8000000370005 */
+        |                                                                           /* 0x001f8402fea00ff1 */
+        |        /*0048*/                   SHL R2, R2, 0x2 ;                       /* 0x3848000000270202 */
+        |        /*0050*/                   BFE.U32 R0, R0, 0x914 ;                 /* 0x3800000091470000 */
+        |        /*0058*/                   SHR.U32 R3, R2, 0x1e ;                  /* 0x3828000001e70203 */
+        |                                                                           /* 0x011fd004fe2007f1 */
+        |        /*0068*/                   ISCADD R2.CC, R2, c[0x0][0x140], 0x2 ;  /* 0x4c18810005070202 */
+        |        /*0070*/                   BFE.U32 R4, R4, 0x914 ;                 /* 0x3800000091470404 */
+        |        /*0078*/                   BFE.U32 R5, R5, 0x608 ;                 /* 0x3800000060870505 */
+        |                                                                           /* 0x001fc400fe2007f2 */
+        |        /*0088*/                   IADD.X R3, R3, c[0x0][0x144] ;          /* 0x4c10080005170303 */
+        |        /*0090*/                   STG.E [R2], R0 ;                        /* 0xeedc200000070200 */
+        |        /*0098*/                   STG.E [R2+0x4], R4 ;                    /* 0xeedc200000470204 */
+        |                                                                           /* 0x001fb800fe4007f1 */
+        |        /*00a8*/                   STG.E [R2+0x8], R5 ;                    /* 0xeedc200000870205 */
+        |        /*00b0*/                   STG.E [R2+0xc], R7 ;                    /* 0xeedc200000c70207 */
+        |        /*00b8*/                   NOP ;                                   /* 0x50b0000000070f00 */
+        |                                                                           /* 0x001f8000ffe007ff */
+        |        /*00c8*/                   EXIT ;                                  /* 0xe30000000007000f */
+        |.L_x_1:
+        |""".stripMargin,
+    "virtualIdSm60" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=11"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                           /* 0x001c5800fe0007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;                  /* 0x4c98078000870001 */
+        |        /*0010*/         {         MOV R3, c[0x0][0x108] ;                 /* 0x4c98078004270003 */
+        |        /*0018*/                   S2R R0, SR_VIRTID         }
+        |                                                                           /* 0xf0c8000000370000 */
+        |                                                                           /* 0x001d4400e62007f0 */
+        |        /*0028*/         {         ISETP.EQ.AND P0, PT, R3, RZ, PT ;       /* 0x5b6503800ff70307 */
+        |        /*0030*/                   S2R R2, SR_VIRTID         }
+        |                                                                           /* 0xf0c8000000370002 */
+        |        /*0038*/                   S2R R4, SR_TID.X ;                      /* 0xf0c8000002170004 */
+        |                                                                           /* 0x005fc400f3a00775 */
+        |        /*0048*/                   S2R R7, SR_VIRTID ;                     /* 0xf0c8000000370007 */
+        |        /*0050*/                   S2R R9, SR_VIRTCFG ;                    /* 0xf0c8000000270009 */
+        |        /*0058*/                   BFE.U32 R2, R2, 0x708 ;                 /* 0x3800000070870202 */
+        |                                                                           /* 0x011fc400fe2027e5 */
+        |        /*0068*/                   SHL R4, R4, 0x2 ;                       /* 0x3848000000270404 */
+        |        /*0070*/                   LOP32I.AND R3, R2, 0x2 ;                /* 0x0400000000270203 */
+        |        /*0078*/                   BFE.U32 R7, R7, 0x708 ;                 /* 0x3800000070870707 */
+        |                                                                           /* 0x001f8c40fe200ff1 */
+        |        /*0088*/                   BFE.U32 R0, R0, 0x914 ;                 /* 0x3800000091470000 */
+        |        /*0090*/                   SHR.U32 R10, R4.reuse, 0x1e ;           /* 0x3828000001e7040a */
+        |        /*0098*/                   ISCADD R2.CC, R4, c[0x0][0x140], 0x2 ;  /* 0x4c18810005070402 */
+        |                                                                           /* 0x001fc400fe2207f1 */
+        |        /*00a8*/                   LOP32I.AND R8, R7.reuse, 0x1 ;          /* 0x0400000000170708 */
+        |        /*00b0*/                   SHR.U32 R5, R3, 0x1 ;                   /* 0x3828000000170305 */
+        |        /*00b8*/                   SHR.U32 R6, R7, 0x2 ;                   /* 0x3828000000270706 */
+        |                                                                           /* 0x001f8800fe6087e1 */
+        |        /*00c8*/                   BFE.U32 R4, R9, 0x914 ;                 /* 0x3800000091470904 */
+        |        /*00d0*/                   IADD.X R3, R10, c[0x0][0x144] ;         /* 0x4c10080005170a03 */
+        |        /*00d8*/              @!P0 ISCADD R0, R0, R5, 0x1 ;                /* 0x5c18008000580000 */
+        |                                                                           /* 0x001fc000fe4007f0 */
+        |        /*00e8*/         {         MOV32I R5, 0x40 ;                       /* 0x010000000407f005 */
+        |        /*00f0*/                   STG.E [R2], R0         }
+        |                                                                           /* 0xeedc200000070200 */
+        |        /*00f8*/         {    @!P0 ISCADD R7, R6, R8, 0x1 ;                /* 0x5c18008000880607 */
+        |                                                                           /* 0x001fc800fe0007f2 */
+        |        /*0108*/                   STG.E [R2+0xc], R5         }
+        |                                                                           /* 0xeedc200000c70205 */
+        |        /*0110*/         {    @!P0 SHL R4, R4, 0x1 ;                       /* 0x3848000000180404 */
+        |        /*0118*/                   STG.E [R2+0x8], R7         }
+        |                                                                           /* 0xeedc200000870207 */
+        |                                                                           /* 0x001ffc00ffe007f1 */
+        |        /*0128*/                   STG.E [R2+0x4], R4 ;                    /* 0xeedc200000470204 */
+        |        /*0130*/                   EXIT ;                                  /* 0xe30000000007000f */
+        |.L_x_1:
+        |""".stripMargin,
+    "clock64Sm50" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=6"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_1 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                      /* 0x001fd800fec007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;             /* 0x4c98078000870001 */
+        |        /*0010*/                   CS2R R0, SR_CLOCKHI ;              /* 0x50c8000005170000 */
+        |        /*0018*/                   CS2R R3, SR_CLOCKLO ;              /* 0x50c8000005070003 */
+        |                                                                      /* 0x001fd800fec007ed */
+        |        /*0028*/                   ISETP.LT.AND P0, PT, R3, RZ, PT ;  /* 0x5b6303800ff70307 */
+        |        /*0030*/              @!P0 CS2R R0, SR_CLOCKHI ;              /* 0x50c8000005180000 */
+        |        /*0038*/                   CS2R R2, SR_CLOCKHI ;              /* 0x50c8000005170002 */
+        |                                                                      /* 0x001fd800fda007f6 */
+        |        /*0048*/                   CS2R R4, SR_CLOCKLO ;              /* 0x50c8000005070004 */
+        |        /*0050*/                   ISETP.LT.AND P0, PT, R4, RZ, PT ;  /* 0x5b6303800ff70407 */
+        |        /*0058*/              @!P0 CS2R R2, SR_CLOCKHI ;              /* 0x50c8000005180002 */
+        |                                                                      /* 0x001fc400fea007f1 */
+        |        /*0068*/                   IADD RZ.CC, -R3, R4 ;              /* 0x5c128000004703ff */
+        |        /*0070*/                   MOV R3, c[0x0][0x144] ;            /* 0x4c98078005170003 */
+        |        /*0078*/                   ISET.GT.X.AND R4, R2, R0, PT ;     /* 0x5b590b8000070204 */
+        |                                                                      /* 0x0003d000fe4007f5 */
+        |        /*0088*/                   MOV R2, c[0x0][0x140] ;            /* 0x4c98078005070002 */
+        |        /*0090*/                   LOP32I.AND R4, R4, 0x1 ;           /* 0x0400000000170404 */
+        |        /*0098*/                   STG.E [R2], R4 ;                   /* 0xeedc200000070204 */
+        |                                                                      /* 0x001fb401fec007f6 */
+        |        /*00a8*/                   CS2R R5, SR_CLOCKHI ;              /* 0x50c8000005170005 */
+        |        /*00b0*/                   CS2R R4, SR_CLOCKLO ;              /* 0x50c8000005070004 */
+        |        /*00b8*/                   ISETP.LT.AND P0, PT, R4, RZ, PT ;  /* 0x5b6303800ff70407 */
+        |                                                                      /* 0x001fc800fec007f6 */
+        |        /*00c8*/              @!P0 CS2R R5, SR_CLOCKHI ;              /* 0x50c8000005180005 */
+        |        /*00d0*/                   ISET.GE.U32.AND R0, R5, R0, PT ;   /* 0x5b5c038000070500 */
+        |        /*00d8*/                   LOP32I.AND R0, R0, 0x1 ;           /* 0x0400000000170000 */
+        |                                                                      /* 0x001ffc00ffe007f1 */
+        |        /*00e8*/                   STG.E [R2+0x4], R0 ;               /* 0xeedc200000470200 */
+        |        /*00f0*/                   EXIT ;                             /* 0xe30000000007000f */
+        |.L_x_1:
+        |""".stripMargin,
+    "clock64Sm60" ->
+      """//--------------------- .text.probe               --------------------------
+        |	.section	.text.probe,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	32
+        |        .global         probe
+        |        .type           probe,@function
+        |        .size           probe,(.L_x_7 - probe)
+        |        .other          probe,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |probe:
+        |.text.probe:
+        |                                                                                     /* 0x001fc400fec007f6 */
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;                            /* 0x4c98078000870001 */
+        |        /*0010*/                   MOV R3, RZ ;                                      /* 0x5c9807800ff70003 */
+        |.L_x_1:
+        |        /*0018*/                   CS2R RZ, SR_CLOCKHI ;                             /* 0x50c80000051700ff */
+        |                                                                                     /* 0x001f9800fe2007e6 */
+        |        /*0028*/                   CS2R R0, SR_CLOCKHI ;                             /* 0x50c8000005170000 */
+        |        /*0030*/                   CS2R RZ, SR_CLOCKLO ;                             /* 0x50c80000050700ff */
+        |        /*0038*/                   CS2R R2, SR_CLOCKLO ;                             /* 0x50c8000005070002 */
+        |                                                                                     /* 0x001fb400fcc007f1 */
+        |        /*0048*/                   CS2R RZ, SR_CLOCKHI ;                             /* 0x50c80000051700ff */
+        |        /*0050*/                   CS2R R5, SR_CLOCKHI ;                             /* 0x50c8000005170005 */
+        |        /*0058*/                   ISETP.NE.U32.AND P0, PT, R0, R5, PT ;             /* 0x5b6a038000570007 */
+        |                                                                                     /* 0x001fb400fec007fd */
+        |        /*0068*/              @!P0 BRA `(.L_x_0) ;                                   /* 0xe24000000208000f */
+        |        /*0070*/                   IADD32I R3, R3, 0x1 ;                             /* 0x1c00000000170303 */
+        |        /*0078*/                   ISETP.GE.U32.AND P0, PT, R3, c[0x0][0x10c], PT ;  /* 0x4b6c038004370307 */
+        |                                                                                     /* 0x001fc400fec007fd */
+        |        /*0088*/              @!P0 BRA `(.L_x_1) ;                                   /* 0xe2400ffff888000f */
+        |.L_x_0:
+        |        /*0090*/                   MOV R4, RZ ;                                      /* 0x5c9807800ff70004 */
+        |.L_x_3:
+        |        /*0098*/                   CS2R RZ, SR_CLOCKHI ;                             /* 0x50c80000051700ff */
+        |                                                                                     /* 0x001f9800fe2007e6 */
+        |        /*00a8*/                   CS2R R0, SR_CLOCKHI ;                             /* 0x50c8000005170000 */
+        |        /*00b0*/                   CS2R RZ, SR_CLOCKLO ;                             /* 0x50c80000050700ff */
+        |        /*00b8*/                   CS2R R3, SR_CLOCKLO ;                             /* 0x50c8000005070003 */
+        |                                                                                     /* 0x001fb400fcc007f1 */
+        |        /*00c8*/                   CS2R RZ, SR_CLOCKHI ;                             /* 0x50c80000051700ff */
+        |        /*00d0*/                   CS2R R6, SR_CLOCKHI ;                             /* 0x50c8000005170006 */
+        |        /*00d8*/                   ISETP.NE.U32.AND P0, PT, R0, R6, PT ;             /* 0x5b6a038000670007 */
+        |                                                                                     /* 0x001fb400fec007fd */
+        |        /*00e8*/              @!P0 BRA `(.L_x_2) ;                                   /* 0xe24000000208000f */
+        |        /*00f0*/                   IADD32I R4, R4, 0x1 ;                             /* 0x1c00000000170404 */
+        |        /*00f8*/                   ISETP.GE.U32.AND P0, PT, R4, c[0x0][0x10c], PT ;  /* 0x4b6c038004370407 */
+        |                                                                                     /* 0x001fc400fe2007fd */
+        |        /*0108*/              @!P0 BRA `(.L_x_3) ;                                   /* 0xe2400ffff888000f */
+        |.L_x_2:
+        |        /*0110*/                   IADD RZ.CC, -R2, R3 ;                             /* 0x5c128000003702ff */
+        |        /*0118*/                   MOV R2, c[0x0][0x140] ;                           /* 0x4c98078005070002 */
+        |                                                                                     /* 0x001fd800fe6007f1 */
+        |        /*0128*/                   MOV R3, c[0x0][0x144] ;                           /* 0x4c98078005170003 */
+        |        /*0130*/                   MOV R4, RZ ;                                      /* 0x5c9807800ff70004 */
+        |        /*0138*/                   ISET.GT.X.AND R0, R6, R5, PT ;                    /* 0x5b590b8000570600 */
+        |                                                                                     /* 0x001fc4001e8007e2 */
+        |        /*0148*/                   LOP32I.AND R0, R0, 0x1 ;                          /* 0x0400000000170000 */
+        |        /*0150*/                   STG.E [R2], R0 ;                                  /* 0xeedc200000070200 */
+        |.L_x_5:
+        |        /*0158*/                   CS2R RZ, SR_CLOCKHI ;                             /* 0x50c80000051700ff */
+        |                                                                                     /* 0x001f9800fe200fe6 */
+        |        /*0168*/                   CS2R R0, SR_CLOCKHI ;                             /* 0x50c8000005170000 */
+        |        /*0170*/                   CS2R RZ, SR_CLOCKHI ;                             /* 0x50c80000051700ff */
+        |        /*0178*/                   CS2R R6, SR_CLOCKHI ;                             /* 0x50c8000005170006 */
+        |                                                                                     /* 0x001fd800ffa007ed */
+        |        /*0188*/                   ISETP.NE.U32.AND P0, PT, R0, R6, PT ;             /* 0x5b6a038000670007 */
+        |        /*0190*/              @!P0 BRA `(.L_x_4) ;                                   /* 0xe24000000208000f */
+        |        /*0198*/                   IADD32I R4, R4, 0x1 ;                             /* 0x1c00000000170404 */
+        |                                                                                     /* 0x001f9800ffa007ed */
+        |        /*01a8*/                   ISETP.GE.U32.AND P0, PT, R4, c[0x0][0x10c], PT ;  /* 0x4b6c038004370407 */
+        |        /*01b0*/              @!P0 BRA `(.L_x_5) ;                                   /* 0xe2400ffffa08000f */
+        |.L_x_4:
+        |        /*01b8*/                   ISET.GE.U32.AND R0, R6, R5, PT ;                  /* 0x5b5c038000570600 */
+        |                                                                                     /* 0x001ffc00fe2007e2 */
+        |        /*01c8*/                   LOP32I.AND R0, R0, 0x1 ;                          /* 0x0400000000170000 */
+        |        /*01d0*/                   STG.E [R2+0x4], R0 ;                              /* 0xeedc200000470200 */
+        |        /*01d8*/                   EXIT ;                                            /* 0xe30000000007000f */
+        |.L_x_6:
+        |                                                                                     /* 0x001f8000fc0007ff */
+        |        /*01e8*/                   BRA `(.L_x_6) ;                                   /* 0xe2400fffff07000f */
+        |        /*01f0*/                   NOP;                                              /* 0x50b0000000070f00 */
+        |        /*01f8*/                   NOP;                                              /* 0x50b0000000070f00 */
+        |.L_x_7:
+        |""".stripMargin,
     "bmovClearSm70" ->
       """//--------------------- .text.divergent_loop      --------------------------
         |	.section	.text.divergent_loop,"ax",@progbits

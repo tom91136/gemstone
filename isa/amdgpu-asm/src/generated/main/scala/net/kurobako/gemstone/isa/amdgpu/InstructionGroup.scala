@@ -11,7 +11,7 @@ object InstructionGroup {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum InstructionGroup {
+enum InstructionGroup derives CanEqual {
   case `ATOMIC`
   case `SWMMAC`
   case `WMMA`

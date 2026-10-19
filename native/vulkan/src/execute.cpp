@@ -1,10 +1,25 @@
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <utility>
+#include <variant>
+#include <vector>
 
+#include <aspartame/vector.hpp>
+
+#include "gemstone_execution_rpc.hpp"
 #include "gemstone_image_formats.hpp"
 
 #include "graphics_transfer.hpp"
+
+using namespace aspartame;
 
 namespace gemstone::vulkan {
 namespace {
@@ -26,13 +41,13 @@ Image attachmentLayer(Image image, uint32_t layer) {
 template <typename F> bool forEachView(uint32_t mask, F action) {
   if (!mask) return action(0);
   for (uint32_t view = 0; view < 32; ++view)
-    if ((mask & (1u << view)) && !action(view)) return false;
+    if ((mask & (1U << view)) && !action(view)) return false;
   return true;
 }
 template <typename F> bool forEachDrawView(const Execution &execution, F action) {
-  uint32_t mask;
+  uint32_t mask = 0;
   {
-    std::lock_guard lock(stateMutex);
+    std::scoped_lock const lock(stateMutex);
     mask = currentViewMask(execution);
   }
   // Draws acquire stateMutex themselves and release it before waiting for RPC.
@@ -57,22 +72,32 @@ public:
   void colour(Image &image, const VkRect2D &area, const VkClearColorValue &value) {
     std::vector<int32_t> bits(4);
     std::memcpy(bits.data(), value.uint32, 16);
-    commands.emplace_back(gx::GraphicsCommandClearColour{transfer.image(image), graphicsRect(area), std::move(bits)});
+    commands.emplace_back(
+        gx::GraphicsCommandClearColour{.image = transfer.image(image), .area = graphicsRect(area), .bits = std::move(bits)});
   }
   void depthStencil(Image &image, const VkRect2D &area, VkImageAspectFlags aspects, VkClearDepthStencilValue value) {
-    commands.emplace_back(
-        gx::GraphicsCommandClearDepthStencil{transfer.image(image), graphicsRect(area), value.depth, static_cast<int32_t>(value.stencil),
-                                             bool(aspects & VK_IMAGE_ASPECT_DEPTH_BIT), bool(aspects & VK_IMAGE_ASPECT_STENCIL_BIT)});
+    commands.emplace_back(gx::GraphicsCommandClearDepthStencil{.image = transfer.image(image),
+                                                               .area = graphicsRect(area),
+                                                               .depth = value.depth,
+                                                               .stencil = static_cast<int32_t>(value.stencil),
+                                                               .clearDepth = static_cast<bool>(aspects & VK_IMAGE_ASPECT_DEPTH_BIT),
+                                                               .clearStencil = static_cast<bool>(aspects & VK_IMAGE_ASPECT_STENCIL_BIT)});
   }
   bool submit() { return commands.empty() || transfer.submit(std::move(commands)); }
 };
 bool resolveImageRect(const Image &source, const Image &destination, const VkRect2D &area) {
   GraphicsTransfer transfer;
-  gx::GraphicsLayers layers{0, 0, static_cast<int32_t>(source.layers), true, false, false};
-  gx::GraphicsOffset offset{area.offset.x, area.offset.y, 0};
+  gx::GraphicsLayers const layers{
+      .level = {0}, .baseLayer = {0}, .layers = {static_cast<int32_t>(source.layers)}, .colour = true, .depth = false, .stencil = false};
+  gx::GraphicsOffset const offset{.x = area.offset.x, .y = area.offset.y, .z = 0};
   gx::GraphicsImageCopy copy{
-      layers, offset, layers, offset, {static_cast<int32_t>(area.extent.width), static_cast<int32_t>(area.extent.height), 1}};
-  return transfer.submit(gx::GraphicsCommandResolve{transfer.image(source), transfer.image(destination), {copy}});
+      .source = layers,
+      .sourceOffset = offset,
+      .destination = layers,
+      .destinationOffset = offset,
+      .extent = {.width = {static_cast<int32_t>(area.extent.width)}, .height = {static_cast<int32_t>(area.extent.height)}, .depth = {1}}};
+  return transfer.submit(
+      gx::GraphicsCommandResolve{.source = transfer.image(source), .destination = transfer.image(destination), .regions = {copy}});
 }
 bool drawView(Execution &execution, uint32_t viewIndex, const GraphicsCommandState &state, uint32_t vertexCount, uint32_t instanceCount,
               uint32_t firstVertex, uint32_t firstInstance, bool indexed = false, int32_t vertexOffset = 0,
@@ -104,26 +129,36 @@ bool drawView(Execution &execution, uint32_t viewIndex, const GraphicsCommandSta
   for (const auto &binding : pipeline.bindings) {
     if (binding.binding < state.vertexBuffers.size() && !state.vertexBuffers[binding.binding]) continue;
     if (binding.binding >= state.vertexBuffers.size()) return false;
-    draw.vertexBuffers.push_back({static_cast<int32_t>(binding.binding),
-                                  transfer.buffer(state.vertexBuffers[binding.binding], state.vertexOffsets[binding.binding]),
-                                  static_cast<int32_t>(binding.stride), binding.inputRate == VK_VERTEX_INPUT_RATE_INSTANCE});
+    draw.vertexBuffers.push_back({.binding = {static_cast<int32_t>(binding.binding)},
+                                  .memory = transfer.buffer(state.vertexBuffers[binding.binding], state.vertexOffsets[binding.binding]),
+                                  .stride = {static_cast<int32_t>(binding.stride)},
+                                  .instanceRate = binding.inputRate == VK_VERTEX_INPUT_RATE_INSTANCE});
   }
   draw.attributes = pipeline.attributes;
   if (indexed)
-    draw.index =
-        gx::GraphicsIndexBuffer{transfer.buffer(state.indexBuffer, state.indexOffset), state.indexType == VK_INDEX_TYPE_UINT16 ? 2 : 4};
+    draw.index = gx::GraphicsIndexBuffer{.memory = transfer.buffer(state.indexBuffer, state.indexOffset),
+                                         .width = {state.indexType == VK_INDEX_TYPE_UINT16 ? 2 : 4}};
   if (indirect)
-    draw.indirect = gx::GraphicsIndirect{transfer.buffer(indirect, indirectOffset), static_cast<int32_t>(indirectCount),
-                                         static_cast<int32_t>(indirectStride)};
-  draw.call = {static_cast<int32_t>(vertexCount), static_cast<int32_t>(instanceCount), static_cast<int32_t>(firstVertex),
-               static_cast<int32_t>(firstInstance), vertexOffset};
+    draw.indirect = gx::GraphicsIndirect{.memory = transfer.buffer(indirect, indirectOffset),
+                                         .count = {static_cast<int32_t>(indirectCount)},
+                                         .stride = {static_cast<int32_t>(indirectStride)}};
+  draw.call = {.vertices = {static_cast<int32_t>(vertexCount)},
+               .instances = {static_cast<int32_t>(instanceCount)},
+               .firstVertex = static_cast<int32_t>(firstVertex),
+               .firstInstance = static_cast<int32_t>(firstInstance),
+               .vertexOffset = vertexOffset};
   if (pipeline.dynamicDepthBias) {
     draw.raster.biasConstant = state.depthBias[0];
     draw.raster.biasClamp = state.depthBias[1];
     draw.raster.biasSlope = state.depthBias[2];
   }
   const auto viewport = pipeline.dynamicViewport ? state.viewport : pipeline.viewport;
-  draw.viewport = {viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth};
+  draw.viewport = {.x = viewport.x,
+                   .y = viewport.y,
+                   .width = viewport.width,
+                   .height = viewport.height,
+                   .minDepth = viewport.minDepth,
+                   .maxDepth = viewport.maxDepth};
   draw.scissor = graphicsRect(pipeline.dynamicScissor ? state.scissor : pipeline.scissor);
   draw.renderArea = graphicsRect(execution.renderScope.area);
   draw.width = {static_cast<int32_t>(fb.width)};
@@ -137,8 +172,10 @@ bool drawView(Execution &execution, uint32_t viewIndex, const GraphicsCommandSta
   if (!pipeline.raster.discard && pipeline.depthAttachment != VK_ATTACHMENT_UNUSED)
     draw.depth = transfer.image(attachmentLayer(attachmentImage(execution, pipeline.depthAttachment), viewIndex));
   draw.blends = pipeline.blends;
-  draw.blendConstants = pipeline.dynamicBlendConstants ? gx::GraphicsColour{state.blendConstants[0], state.blendConstants[1],
-                                                                            state.blendConstants[2], state.blendConstants[3]}
+  draw.blendConstants = pipeline.dynamicBlendConstants ? gx::GraphicsColour{.r = state.blendConstants[0],
+                                                                            .g = state.blendConstants[1],
+                                                                            .b = state.blendConstants[2],
+                                                                            .a = state.blendConstants[3]}
                                                        : pipeline.blendConstants;
   const auto stencil = [&](gx::GraphicsStencil &value, size_t face) {
     if (pipeline.dynamicStencilCompareMask) value.compareMask = static_cast<int32_t>(state.stencilCompareMask[face]);
@@ -168,10 +205,10 @@ bool beginSubpass(Execution &execution) {
     const auto aspects = attachmentAspects(ref, image.format);
     const auto &attachment = rp.attachments[index];
     for (unsigned aspect = 0; aspect < 3; ++aspect) {
-      const auto bit = 1u << aspect;
+      const auto bit = 1U << aspect;
       if (!(aspects & bit)) continue;
       auto &loaded = execution.renderScope.loaded.at(index)[aspect];
-      const auto pending = (subpass.viewMask ? subpass.viewMask : 1u) & ~loaded;
+      const auto pending = (subpass.viewMask ? subpass.viewMask : 1U) & ~loaded;
       if (!pending) continue;
       loaded |= pending;
       const auto load = aspect == 2 ? attachment.stencilLoadOp : attachment.loadOp;
@@ -222,8 +259,10 @@ bool finishSubpass(Execution &execution) {
     const auto source = attachmentImage(execution, subpass.depth.attachment);
     const auto destination = attachmentImage(execution, subpass.depthResolve.attachment);
     const auto resolve = [&](uint32_t layer) {
-      auto src = attachmentLayer(source, layer), dst = attachmentLayer(destination, layer);
-      auto *input = imageData(src), *output = imageData(dst);
+      auto src = attachmentLayer(source, layer);
+      auto dst = attachmentLayer(destination, layer);
+      auto *input = imageData(src);
+      auto *output = imageData(dst);
       if (!input || !output || src.samples != 4 || dst.samples != 1 || src.format != dst.format) return false;
       const auto &area = execution.renderScope.area;
       if (area.offset.x < 0 || area.offset.y < 0
@@ -231,22 +270,25 @@ bool finishSubpass(Execution &execution) {
           || static_cast<uint64_t>(area.offset.y) + area.extent.height > std::min(src.extent.height, dst.extent.height))
         return false;
       GraphicsTransfer transfer;
-      return transfer.submit(
-          gx::GraphicsCommandResolveAttachment{transfer.image(src), transfer.image(dst), graphicsRect(area),
-                                               subpass.depthResolveMode ? gx::GraphicsResolve::SampleZero : gx::GraphicsResolve::None,
-                                               subpass.stencilResolveMode ? gx::GraphicsResolve::SampleZero : gx::GraphicsResolve::None});
+      return transfer.submit(gx::GraphicsCommandResolveAttachment{
+          .source = transfer.image(src),
+          .destination = transfer.image(dst),
+          .area = graphicsRect(area),
+          .depth = subpass.depthResolveMode ? gx::GraphicsResolve::SampleZero : gx::GraphicsResolve::None,
+          .stencil = subpass.stencilResolveMode ? gx::GraphicsResolve::SampleZero : gx::GraphicsResolve::None});
     };
     if (subpass.viewMask) {
       if (!forEachView(subpass.viewMask, resolve)) return false;
-    } else
+    } else {
       for (uint32_t layer = 0; layer < fb.layers; ++layer)
         if (!resolve(layer)) return false;
+    }
   }
   return true;
 }
 
 template <typename Clear> bool clearImage(VkImage handle, const std::vector<VkImageSubresourceRange> &regions, Clear clear) {
-  std::lock_guard guard(stateMutex);
+  std::scoped_lock const guard(stateMutex);
   ClearBatch batch;
   const auto &image = images.at(handle);
   for (const auto &range : regions) {
@@ -259,8 +301,11 @@ template <typename Clear> bool clearImage(VkImage handle, const std::vector<VkIm
     if (!layers || layers > image.layers - range.baseArrayLayer) return false;
     for (uint32_t level = 0; level < levels; ++level)
       for (uint32_t layer = 0; layer < layers; ++layer) {
-        auto slice = imageSlice({handle, range.baseArrayLayer + layer, range.baseMipLevel + level});
-        if (!clear(batch, slice, VkRect2D{{0, 0}, {slice.extent.width, slice.extent.height}}, range.aspectMask)) return false;
+        auto slice = imageSlice({.image = handle, .baseLayer = range.baseArrayLayer + layer, .level = range.baseMipLevel + level});
+        if (!clear(batch, slice,
+                   VkRect2D{.offset = {.x = 0, .y = 0}, .extent = {.width = slice.extent.width, .height = slice.extent.height}},
+                   range.aspectMask))
+          return false;
       }
   }
   return batch.submit();
@@ -269,25 +314,20 @@ template <typename Clear> bool clearImage(VkImage handle, const std::vector<VkIm
 
 // Handle resolution happens at execution time; recorded values own their snapshots.
 
-bool execute(Execution &, const recorded::FillBuffer &command) {
-  const auto &[buffer, offset, size, value] = command;
-  std::lock_guard guard(stateMutex);
-  const auto range = bufferRange(buffer, offset, size);
+static bool execute(Execution &, const recorded::FillBuffer &command) {
+  std::scoped_lock const guard(stateMutex);
+  const auto range = bufferRange(command.buffer, command.offset, command.size);
   if (!range) return false;
   for (size_t i = 0; i + 4 <= range->bytes.size(); i += 4)
-    std::memcpy(range->bytes.data() + i, &value, 4);
+    std::memcpy(range->bytes.data() + i, &command.value, 4);
   return true;
 }
-bool execute(Execution &, const recorded::ResetEvent &command) {
-  const auto &[event] = command;
-  return vkResetEvent(VK_NULL_HANDLE, event) == VK_SUCCESS;
-}
-bool execute(Execution &execution, const recorded::DispatchIndirect &command) {
-  const auto &[dispatch, buffer, offset] = command;
-  auto invocation = dispatch;
+static bool execute(Execution &, const recorded::ResetEvent &command) { return vkResetEvent(VK_NULL_HANDLE, command.event) == VK_SUCCESS; }
+static bool execute(Execution &execution, const recorded::DispatchIndirect &command) {
+  auto invocation = command.dispatch;
   {
-    std::lock_guard guard(stateMutex);
-    const auto range = bufferRange(buffer, offset, sizeof(VkDispatchIndirectCommand));
+    std::scoped_lock const guard(stateMutex);
+    const auto range = bufferRange(command.buffer, command.offset, sizeof(VkDispatchIndirectCommand));
     if (!range) return false;
     VkDispatchIndirectCommand dimensions;
     std::memcpy(&dimensions, range->bytes.data(), sizeof(dimensions));
@@ -297,56 +337,53 @@ bool execute(Execution &execution, const recorded::DispatchIndirect &command) {
   }
   return execute(execution, invocation);
 }
-bool execute(Execution &, const recorded::UpdateBuffer &command) {
-  const auto &[buffer, offset, snapshot] = command;
-  std::lock_guard guard(stateMutex);
-  const auto range = bufferRange(buffer, offset, snapshot.size());
+static bool execute(Execution &, const recorded::UpdateBuffer &command) {
+  std::scoped_lock const guard(stateMutex);
+  const auto range = bufferRange(command.buffer, command.offset, command.snapshot.size());
   if (!range) return false;
-  std::ranges::copy(snapshot, range->bytes.begin());
+  std::copy(command.snapshot.begin(), command.snapshot.end(), range->bytes.begin());
   return true;
 }
-bool execute(Execution &execution, const recorded::WaitEvents &command) {
+static bool execute(Execution &execution, const recorded::WaitEvents &command) {
   const auto &[wait] = command;
   std::unique_lock guard(stateMutex);
   const auto failed = [&] { return execution.device && execution.device->failed(); };
   commandQueue().blocking([&] {
     stateChanged.wait(guard, [&] {
-      return failed() || std::ranges::all_of(wait, [](auto event) {
-               const auto found = events.find(event);
-               return found == events.end() || found->second;
-             });
+      return failed() || wait ^ forall([](auto event) {
+                           const auto found = events.find(event);
+                           return found == events.end() || found->second;
+                         });
     });
   });
-  return !failed() && std::ranges::all_of(wait, [](auto event) { return events.contains(event); });
+  return !failed() && wait ^ forall([](auto event) { return events.contains(event); });
 }
-bool execute(Execution &, const recorded::SetEvent &command) {
-  const auto &[event] = command;
-  return vkSetEvent(VK_NULL_HANDLE, event) == VK_SUCCESS;
-}
-bool execute(Execution &, const recorded::Invalid &) { return false; }
-bool execute(Execution &, const recorded::CopyImage &command) {
-  const auto &[source, destination, copies] = command;
-  std::lock_guard guard(stateMutex);
+static bool execute(Execution &, const recorded::SetEvent &command) { return vkSetEvent(VK_NULL_HANDLE, command.event) == VK_SUCCESS; }
+static bool execute(Execution &, const recorded::Invalid &) { return false; }
+static bool execute(Execution &, const recorded::CopyImage &command) {
+  std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
-  return transfer.submit(gx::GraphicsCommandCopyImage{transfer.image(images.at(source)), transfer.image(images.at(destination)), copies});
+  return transfer.submit(gx::GraphicsCommandCopyImage{.source = transfer.image(images.at(command.source)),
+                                                      .destination = transfer.image(images.at(command.destination)),
+                                                      .regions = command.copies});
 }
-bool execute(Execution &, const recorded::ClearDepthStencil &command) {
+static bool execute(Execution &, const recorded::ClearDepthStencil &command) {
   return clearImage(command.handle, command.regions, [&](ClearBatch &batch, Image &image, VkRect2D area, VkImageAspectFlags aspects) {
     if (!depthStencilFormat(image.format)) return false;
     batch.depthStencil(image, area, aspects, command.clear);
     return true;
   });
 }
-bool execute(Execution &, const recorded::ClearColour &command) {
+static bool execute(Execution &, const recorded::ClearColour &command) {
   return clearImage(command.handle, command.regions, [&](ClearBatch &batch, Image &image, VkRect2D area, VkImageAspectFlags aspects) {
     if (aspects != VK_IMAGE_ASPECT_COLOR_BIT) return false;
     batch.colour(image, area, command.value);
     return true;
   });
 }
-bool execute(Execution &execution, const recorded::ClearAttachments &command) {
+static bool execute(Execution &execution, const recorded::ClearAttachments &command) {
   const auto &[clears, rects] = command;
-  std::lock_guard guard(stateMutex);
+  std::scoped_lock const guard(stateMutex);
   ClearBatch batch;
   const auto pass = renderPasses.find(execution.renderScope.pass);
   const auto fb = framebuffers.find(execution.renderScope.framebuffer);
@@ -379,130 +416,137 @@ bool execute(Execution &execution, const recorded::ClearAttachments &command) {
   }
   return batch.submit();
 }
-bool execute(Execution &, const recorded::CopyBufferImage &command) {
-  const auto &[bufferHandle, imageHandle, copies, toImage] = command;
-  std::lock_guard guard(stateMutex);
+static bool execute(Execution &, const recorded::CopyBufferImage &command) {
+  std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
-  return transfer.submit(
-      gx::GraphicsCommandCopyBufferImage{transfer.buffer(bufferHandle), transfer.image(images.at(imageHandle)), copies, toImage});
+  return transfer.submit(gx::GraphicsCommandCopyBufferImage{.buffer = transfer.buffer(command.bufferHandle),
+                                                            .image = transfer.image(images.at(command.imageHandle)),
+                                                            .regions = command.copies,
+                                                            .toImage = command.toImage});
 }
-bool execute(Execution &execution, const recorded::DrawIndirect &command) {
-  const auto &[state, indirect, offset, drawCount, stride, indexed] = command;
-  if (!drawCount) return true;
+static bool execute(Execution &execution, const recorded::DrawIndirect &command) {
+  if (!command.drawCount) return true;
   return forEachDrawView(execution, [&](uint32_t view) {
-    return drawView(execution, view, state, 0, 0, 0, 0, indexed, 0, indirect, offset, drawCount, stride);
+    return drawView(execution, view, command.state, 0, 0, 0, 0, command.indexed, 0, command.indirect, command.offset, command.drawCount,
+                    command.stride);
   });
 }
-bool execute(Execution &execution, const recorded::Draw &command) {
+static bool execute(Execution &execution, const recorded::Draw &command) {
   const auto &[state, vertices, instances, firstVertex, firstInstance, indexed, vertexOffset] = command;
   return forEachDrawView(execution, [&](uint32_t view) {
     return drawView(execution, view, state, vertices, instances, firstVertex, firstInstance, indexed, vertexOffset);
   });
 }
-bool execute(Execution &execution, const recorded::EndRenderPass &) {
-  std::lock_guard guard(stateMutex);
+static bool execute(Execution &execution, const recorded::EndRenderPass &) {
+  std::scoped_lock const guard(stateMutex);
   if (!finishSubpass(execution)) return false;
   execution.renderScope = {};
   return true;
 }
-bool execute(Execution &execution, const recorded::NextSubpass &) {
-  std::lock_guard guard(stateMutex);
+static bool execute(Execution &execution, const recorded::NextSubpass &) {
+  std::scoped_lock const guard(stateMutex);
   if (!finishSubpass(execution)) return false;
   ++execution.renderScope.subpass;
   return beginSubpass(execution);
 }
-bool execute(Execution &execution, const recorded::BeginRenderPass &command) {
-  const auto &[pass, framebuffer, area, clear, attachments] = command;
-  std::lock_guard guard(stateMutex);
-  for (const auto view : attachments)
+static bool execute(Execution &execution, const recorded::BeginRenderPass &command) {
+  std::scoped_lock const guard(stateMutex);
+  for (auto *const view : command.attachments)
     if (!imageViews.contains(view)) return false;
-  execution.renderScope = {
-      pass, framebuffer, area, 0, clear, std::vector<std::array<uint32_t, 3>>(renderPasses.at(pass).attachments.size()), attachments};
+  execution.renderScope = {.pass = command.pass,
+                           .framebuffer = command.framebuffer,
+                           .area = command.area,
+                           .subpass = 0,
+                           .clearValues = command.clear,
+                           .loaded = std::vector<std::array<uint32_t, 3>>(renderPasses.at(command.pass).attachments.size()),
+                           .attachments = command.attachments};
   return beginSubpass(execution);
 }
-bool execute(Execution &, const recorded::CopyQueryResults &command) {
-  const auto &[pool, first, count, destination, offset, stride, flags] = command;
-  if (!count) return true;
+static bool execute(Execution &, const recorded::CopyQueryResults &command) {
+  if (!command.count) return true;
   std::span<uint8_t> bytes;
   {
-    std::lock_guard guard(stateMutex);
-    const auto range = bufferRange(destination, offset, VK_WHOLE_SIZE);
+    std::scoped_lock const guard(stateMutex);
+    const auto range = bufferRange(command.destination, command.offset, VK_WHOLE_SIZE);
     if (!range) return false;
     bytes = range->bytes;
   }
-  const auto status = commandQueue().blocking(
-      [&] { return vkGetQueryPoolResults(VK_NULL_HANDLE, pool, first, count, bytes.size(), bytes.data(), stride, flags); });
+  const auto status = commandQueue().blocking([&] {
+    return vkGetQueryPoolResults(VK_NULL_HANDLE, command.pool, command.first, command.count, bytes.size(), bytes.data(), command.stride,
+                                 command.flags);
+  });
   // Without WAIT, unavailable queries may leave result bytes unchanged; availability is still written.
   return status == VK_SUCCESS || status == VK_NOT_READY;
 }
-bool execute(Execution &execution, const recorded::WriteTimestamp &command) {
-  const auto &[pool, query] = command;
-  std::lock_guard guard(stateMutex);
-  const auto found = queryPools.find(pool);
+static bool execute(Execution &execution, const recorded::WriteTimestamp &command) {
+  std::scoped_lock const guard(stateMutex);
+  const auto found = queryPools.find(command.pool);
   if (found == queryPools.end()) return false;
   const auto &state = found->second;
-  if (state->type != VK_QUERY_TYPE_TIMESTAMP || query >= state->slots.size()) return false;
+  if (state->type != VK_QUERY_TYPE_TIMESTAMP || command.query >= state->slots.size()) return false;
   const auto ticks = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
   const auto count = viewCount(execution);
-  if (count > state->slots.size() - query) return false;
+  if (count > state->slots.size() - command.query) return false;
   for (uint32_t i = 0; i < count; ++i)
-    state->slots[query + i] = {static_cast<uint64_t>(ticks), true};
+    state->slots[command.query + i] = {.value = static_cast<uint64_t>(ticks), .available = true};
   stateChanged.notify_all();
   return true;
 }
-bool execute(Execution &execution, const recorded::EndQuery &command) {
-  const auto &[pool, query] = command;
-  std::lock_guard guard(stateMutex);
-  const auto found = queryPools.find(pool);
+static bool execute(Execution &execution, const recorded::EndQuery &command) {
+  std::scoped_lock const guard(stateMutex);
+  const auto found = queryPools.find(command.pool);
   if (found == queryPools.end()) return false;
   const auto &state = found->second;
-  if (!execution.activeOcclusion || execution.activeOcclusion->pool != state.get() || execution.activeOcclusion->query != query)
+  if (!execution.activeOcclusion || execution.activeOcclusion->pool != state.get() || execution.activeOcclusion->query != command.query)
     return false;
   // The spec permits the combined count in the first slot and zero in the rest.
   for (uint32_t i = 0; i < execution.activeOcclusion->count; ++i)
-    state->slots[query + i] = {i == 0 ? execution.occlusionSamples - execution.activeOcclusion->firstSample : 0, true};
+    state->slots[command.query + i] = {.value = i == 0 ? execution.occlusionSamples - execution.activeOcclusion->firstSample : 0,
+                                       .available = true};
   execution.activeOcclusion.reset();
   stateChanged.notify_all();
   return true;
 }
-bool execute(Execution &execution, const recorded::BeginQuery &command) {
-  const auto &[pool, query] = command;
-  std::lock_guard guard(stateMutex);
-  const auto found = queryPools.find(pool);
+static bool execute(Execution &execution, const recorded::BeginQuery &command) {
+  std::scoped_lock const guard(stateMutex);
+  const auto found = queryPools.find(command.pool);
   if (found == queryPools.end()) return false;
   const auto &state = found->second;
-  if (state->type != VK_QUERY_TYPE_OCCLUSION || query >= state->slots.size() || execution.activeOcclusion) return false;
+  if (state->type != VK_QUERY_TYPE_OCCLUSION || command.query >= state->slots.size() || execution.activeOcclusion) return false;
   const auto count = viewCount(execution);
-  if (count > state->slots.size() - query) return false;
+  if (count > state->slots.size() - command.query) return false;
   for (uint32_t i = 0; i < count; ++i)
-    state->slots[query + i] = {};
-  execution.activeOcclusion = ActiveOcclusion{state.get(), query, count, execution.occlusionSamples};
+    state->slots[command.query + i] = {};
+  execution.activeOcclusion =
+      ActiveOcclusion{.pool = state.get(), .query = command.query, .count = count, .firstSample = execution.occlusionSamples};
   return true;
 }
-bool execute(Execution &, const recorded::ResetQuery &command) { return resetQueryPool(command.pool, command.first, command.count); }
-bool execute(Execution &, const recorded::Blit &command) {
-  const auto &[source, destination, copies, filter] = command;
-  std::lock_guard guard(stateMutex);
+static bool execute(Execution &, const recorded::ResetQuery &command) { return resetQueryPool(command.pool, command.first, command.count); }
+static bool execute(Execution &, const recorded::Blit &command) {
+  std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
-  return transfer.submit(gx::GraphicsCommandBlit{transfer.image(images.at(source)), transfer.image(images.at(destination)), copies,
-                                                 filter == VK_FILTER_LINEAR});
+  return transfer.submit(gx::GraphicsCommandBlit{.source = transfer.image(images.at(command.source)),
+                                                 .destination = transfer.image(images.at(command.destination)),
+                                                 .regions = command.copies,
+                                                 .linear = command.filter == VK_FILTER_LINEAR});
 }
-bool execute(Execution &, const recorded::Resolve &command) {
-  const auto &[source, destination, copies] = command;
-  std::lock_guard guard(stateMutex);
+static bool execute(Execution &, const recorded::Resolve &command) {
+  std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
-  return transfer.submit(gx::GraphicsCommandResolve{transfer.image(images.at(source)), transfer.image(images.at(destination)), copies});
+  return transfer.submit(gx::GraphicsCommandResolve{.source = transfer.image(images.at(command.source)),
+                                                    .destination = transfer.image(images.at(command.destination)),
+                                                    .regions = command.copies});
 }
 
-bool execute(Execution &, const recorded::Copy &command) {
-  std::lock_guard lock(stateMutex);
-  for (const auto &region : command.regions) {
-    const auto source = bufferRange(command.source, region.srcOffset, region.size);
-    const auto destination = bufferRange(command.destination, region.dstOffset, region.size);
-    if (!source || !destination || source->bytes.size() != destination->bytes.size()) return false;
-    std::memmove(destination->bytes.data(), source->bytes.data(), source->bytes.size());
-  }
-  return true;
+static bool execute(Execution &, const recorded::Copy &command) {
+  std::scoped_lock const lock(stateMutex);
+  return command.regions ^ forall([&](const auto &region) {
+           const auto source = bufferRange(command.source, region.srcOffset, region.size);
+           const auto destination = bufferRange(command.destination, region.dstOffset, region.size);
+           if (!source || !destination || source->bytes.size() != destination->bytes.size()) return false;
+           std::memmove(destination->bytes.data(), source->bytes.data(), source->bytes.size());
+           return true;
+         });
 }
 bool execute(Execution &execution, const recorded::Operation &operation) {
   return std::visit([&](const auto &command) { return execute(execution, command); }, operation);

@@ -7,19 +7,23 @@ import net.kurobako.gemstone.isa.spirv.*
 import scala.collection.mutable
 
 private object Rasteriser {
-  def samplePosition(samples: Int, sample: Int): (Double, Double) = {
-    require(samples == 1 || samples == 4, "unsupported sample count")
-    if (samples == 1) (.5, .5) else Vector((.375, .125), (.875, .375), (.125, .625), (.625, .875))(sample)
-  }
+  val PixelCentre: (Double, Double) = (.5, .5)
+
+  private val FourSamples = Vector((.375, .125), (.875, .375), (.125, .625), (.625, .875))
+
+  def samplePosition(samples: Int in (1, 4), sample: Int): (Double, Double) =
+    if (samples == 1) PixelCentre else FourSamples(sample)
 }
 
 /** Homogeneous clipping, primitive coverage and interpolation. All primitive types share quad/sample traversal. */
 private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
+  import VertexStage.*
+
   private val inputs =
     draw.fragment.toVector.flatMap(shader => ShaderRecords.fields(shader, ShaderDirection.Input).map(_._2))
-  private val flat       = inputs.filter(_.qualifiers.flat).flatMap(_.location.map(_.raw)).toSet
-  private val linear     = inputs.filter(_.qualifiers.noPerspective).flatMap(_.location.map(_.raw)).toSet
-  private val centroid   = inputs.filter(_.qualifiers.centroid).flatMap(_.location.map(_.raw)).toSet
+  private val flat       = inputs.filter(_.qualifiers.flat).flatMap(_.location.rawElements).toSet
+  private val linear     = inputs.filter(_.qualifiers.noPerspective).flatMap(_.location.rawElements).toSet
+  private val centroid   = inputs.filter(_.qualifiers.centroid).flatMap(_.location.rawElements).toSet
   val perSample: Boolean = draw.raster.sampleShading ||
     inputs.exists(_.builtin.exists(b => b.raw == BuiltIn.SampleId || b.raw == BuiltIn.SamplePosition))
   private val quads    = draw.fragment.exists(_.fragmentQuads)
@@ -61,14 +65,17 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
         output.result()
       }
   }
-  private def screen(v: RasterVertex, snap: Boolean): Point = {
-    val w                              = 1.0 / v.position(3)
-    def rounded(value: Double): Double =
-      if (!snap) value else math.copySign(math.floor(math.abs(value * 256) + .5), value) / 256
+  private def exact(v: RasterVertex): Point = {
+    val w = 1.0 / v.position(3)
     (
-      rounded(viewport.x + (v.position(0) * w + 1) * viewport.width / 2),
-      rounded(viewport.y + (v.position(1) * w + 1) * viewport.height / 2)
+      viewport.x + (v.position(0) * w + 1) * viewport.width / 2,
+      viewport.y + (v.position(1) * w + 1) * viewport.height / 2
     )
+  }
+  private def screen(v: RasterVertex): Point = {
+    def rounded(value: Double): Double = math.copySign(math.floor(math.abs(value * 256) + .5), value) / 256
+    val point                          = exact(v)
+    (rounded(point._1), rounded(point._2))
   }
   private def polygonCovers(corners: Vector[Point], p: Point): Boolean = corners.indices.forall { i =>
     val a = corners(i); val b = corners((i + 1) % corners.size)
@@ -89,7 +96,7 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
   private def triangle(vertices: Vector[RasterVertex], provoking: RasterVertex): Option[Primitive] =
     if (vertices.exists(_.position(3) == 0)) None
     else {
-      val original   = vertices.map(screen(_, snap = true))
+      val original   = vertices.map(screen(_))
       val signedArea = edge(original(0), original(1), original(2))
       val front      = if (draw.raster.frontCounterClockwise) signedArea < 0 else signedArea > 0
       if (signedArea == 0 || (front && draw.raster.cullFront) || (!front && draw.raster.cullBack)) None
@@ -134,7 +141,7 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
       val vertices = Vector(interpolate(a, b, first), interpolate(a, b, last))
       if (first > last || vertices.exists(_.position(3) <= 0)) None
       else {
-        val start = screen(vertices(0), snap = true); val end = screen(vertices(1), snap = true)
+        val start = screen(vertices(0)); val end = screen(vertices(1))
         if (start == end) None
         else {
           val horizontal                             = math.abs(end._1 - start._1) >= math.abs(end._2 - start._2)
@@ -162,7 +169,7 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
   private def point(v: RasterVertex): Option[Primitive] =
     if (v.position(3) <= 0 || distances(v.position).exists(_ < 0)) None
     else {
-      val centre  = screen(v, snap = false)
+      val centre  = exact(v)
       val corners = Vector((centre._1 - .5, centre._2 - .5), (centre._1 + .5, centre._2 + .5))
       Some(Primitive(
         Vector(v),
@@ -178,15 +185,15 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
     val minX = Vector(0, draw.scissor.x, draw.renderArea.x, math.floor(primitive.corners.map(_._1).min).toInt).max
     val minY = Vector(0, draw.scissor.y, draw.renderArea.y, math.floor(primitive.corners.map(_._2).min).toInt).max
     val maxX = Vector(
-      draw.width.raw.toLong,
-      draw.scissor.x.toLong + draw.scissor.width.raw,
-      draw.renderArea.x.toLong + draw.renderArea.width.raw,
+      draw.width.toLong,
+      draw.scissor.x.toLong + draw.scissor.width,
+      draw.renderArea.x.toLong + draw.renderArea.width,
       math.ceil(primitive.corners.map(_._1).max).toLong
     ).min.toInt
     val maxY = Vector(
-      draw.height.raw.toLong,
-      draw.scissor.y.toLong + draw.scissor.height.raw,
-      draw.renderArea.y.toLong + draw.renderArea.height.raw,
+      draw.height.toLong,
+      draw.scissor.y.toLong + draw.scissor.height,
+      draw.renderArea.y.toLong + draw.renderArea.height,
       math.ceil(primitive.corners.map(_._2).max).toLong
     ).min.toInt
     val invW                                 = primitive.vertices.map(v => 1.0 / v.position(3))
@@ -200,14 +207,15 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
       memory.checkpoint()
       for {
         qx     <- (if (quads) minX & ~1 else minX) until maxX by step
-        sample <- 0 until (if (perSample) draw.raster.samples.raw else 1)
+        sample <- 0 until (if (perSample) draw.raster.samples else 1)
       } {
-        val evaluation = if (perSample) Rasteriser.samplePosition(draw.raster.samples.raw, sample) else (.5, .5)
-        val group      = Vector.newBuilder[Fragment]
+        val evaluation =
+          if (perSample) Rasteriser.samplePosition(draw.raster.samples, sample) else Rasteriser.PixelCentre
+        val group = Vector.newBuilder[Fragment]
         for (lane <- 0 until (if (quads) 4 else 1)) {
           val x        = qx + (lane & 1); val y = qy + (lane >> 1)
-          val coverage = (0 until draw.raster.samples.raw).foldLeft(0) { (mask, s) =>
-            val position = Rasteriser.samplePosition(draw.raster.samples.raw, s)
+          val coverage = (0 until draw.raster.samples).foldLeft(0) { (mask, s) =>
+            val position = Rasteriser.samplePosition(draw.raster.samples, s)
             if (
               (draw.raster.sampleMask & (1 << s)) != 0 &&
               (!perSample || s == sample) && x >= minX && x < maxX && y >= minY && y < maxY &&
@@ -220,7 +228,7 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
             val weights         = primitive.weights(p)
             val rw              = weights.indices.map(i => weights(i) * invW(i)).sum
             val centroidWeights = if (coverage != 0 && !primitive.covers(p)) {
-              val position = Rasteriser.samplePosition(draw.raster.samples.raw, Integer.numberOfTrailingZeros(coverage))
+              val position = Rasteriser.samplePosition(draw.raster.samples, Integer.numberOfTrailingZeros(coverage))
               primitive.weights((x + position._1, y + position._2))
             } else weights
             val varying = primitive.vertices.head.varying.map { (location, values) =>
@@ -239,8 +247,8 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
                    }
                  })
             }
-            val sampleDepths = Array.tabulate(draw.raster.samples.raw) { s =>
-              val position = Rasteriser.samplePosition(draw.raster.samples.raw, s);
+            val sampleDepths = Array.tabulate(draw.raster.samples) { s =>
+              val position = Rasteriser.samplePosition(draw.raster.samples, s);
               depth(primitive.weights((x + position._1, y + position._2)))
             }
             val pointCoord = primitive.pointCentre.fold(IArray(0f, 0f))(centre =>
@@ -271,7 +279,7 @@ private class Rasteriser(draw: GraphicsDraw, memory: GraphicsAccess) {
     if (draw.raster.topology == GraphicsTopology.PointList)
       output.vertices.foreach(v => point(v).foreach(primitives += _))
     else for {
-      instance     <- 0 until draw.call.instances.raw
+      instance     <- 0 until draw.call.instances
       (begin, end) <- output.segments
     } {
       val base     = instance * output.count

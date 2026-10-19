@@ -11,12 +11,15 @@ import net.kurobako.gemstone.memory.*
 
 private object VMCompilationContext {
 
-  /** Forms whose condition-code, carry and generic-address behaviour is verified against CUDA 11.8 sm_50/sm_60 output.
+  /** Forms whose condition-code, carry and generic-address behaviour is verified against CUDA 11.8 sm_50/sm_60 output;
+    * the other Maxwell and Pascal targets share their encodings.
     */
-  def verifiedLegacy(sm: Int): Boolean = Set(50, 60)(sm)
+  def verifiedLegacy(sm: Int): Boolean = Set(50, 52, 53, 60, 61, 62)(sm)
 }
 
 /** Instruction-local lowering facilities shared by the instruction families. Architectural state is explicit VMIR. */
+// the seam that keeps the instruction families independent of VMCompiler
+@SuppressWarnings(Array("baumkuchen:single-implementation"))
 private trait VMCompilationContext {
   def module: Cubin.Module
   def kernel: Cubin.Kernel
@@ -48,7 +51,7 @@ private trait VMCompilationContext {
       global: Boolean,
       sharedUniform: Boolean = false,
       sharedAccess: Boolean = false,
-      allowGlobalU32UniformBase: Boolean = false
+      localAccess: Boolean = false
   ): Value
   def store(destination: Operand, value: Value, bits: ScalarBitWidth = 32): Unit
   def readConditionFlag(flag: VMConditionCodes.Flag): Value.Predicate
@@ -56,13 +59,11 @@ private trait VMCompilationContext {
   def updateIntegerCC(lhs: Value, rhs: Value, result: Value, isSub: Boolean, carry: Option[Value]): Unit
 
   final def operands: Vec[Operand]  = instruction.operands
-  final def sm: Int                 = module.sm.raw
+  final def sm: Int                 = module.sm
   final def generation: Generation  = Generation.of(module.sm)
   final def legacy: Boolean         = generation != Generation.Modern
   final def verifiedLegacy: Boolean = VMCompilationContext.verifiedLegacy(sm)
 
-  /** Conversions, rounding and predicate logic verified against sm_70 to sm_89 compiler output. */
-  final def verifiedModern: Boolean              = Set(70, 75, 80, 86, 89)(sm)
   final def operation: Instruction               = instruction.operation
   final def unsupported(detail: String): Nothing = throw IllegalArgumentException(detail)
 
@@ -90,14 +91,29 @@ private trait VMCompilationContext {
 
   final def literal(value: Operand): Value = Value.Immediate(number(value))
 
+  /** A block barrier's id or thread count: a register, or an immediate. */
+  final def barrierValue(value: Operand): Value =
+    if (OperandQueries.isRegister(value)) source(value) else Value.Immediate(barrierId(value).toLong)
+
   /** A general register operand without selectors. */
-  final def bareRegister(value: Operand, allowZero: Boolean = false): Boolean =
-    OperandQueries.qualifiers(value).isEmpty && OperandQueries.isRegister(value, allowZero = allowZero)
+  final def bareRegister(value: Operand): Boolean =
+    OperandQueries.qualifiers(value).isEmpty && OperandQueries.isRegister(value)
+
+  /** A general register operand or the zero register, without selectors. */
+  final def bareRegisterOrZero(value: Operand): Boolean =
+    OperandQueries.qualifiers(value).isEmpty && OperandQueries.isRegister(value, allowZero = true)
 
   /** The general register underlying `value` once its reuse flag is dropped. */
-  final def registerBase(value: Operand, name: String, allowZero: Boolean = false): Operand.Register =
+  final def registerBase(value: Operand, name: String): Operand.Register =
     OperandQueries.base(OperandQueries.without(value, OperandSelector.`reuse`)) match {
-      case register: Operand.Register if OperandQueries.isRegister(register, allowZero = allowZero) => register
+      case register: Operand.Register if OperandQueries.isRegister(register) => register
+      case _                                                                 => unsupported(s"unsupported $name")
+    }
+
+  /** The general or zero register underlying `value` once its reuse flag is dropped. */
+  final def registerBaseOrZero(value: Operand, name: String): Operand.Register =
+    OperandQueries.base(OperandQueries.without(value, OperandSelector.`reuse`)) match {
+      case register: Operand.Register if OperandQueries.isRegister(register, allowZero = true) => register
       case _ => unsupported(s"unsupported $name")
     }
 
@@ -107,8 +123,8 @@ private trait VMCompilationContext {
   final def destination(value: Operand, add: Int = 0): Value.Register = OperandQueries.base(value) match {
     case Operand.Register(bank @ (RegisterBank.R | RegisterBank.UR), index) =>
       val general = bank == RegisterBank.R
-      val limit   = if (general) registerLayout.generalCount.raw else registerLayout.uniformCount.raw
-      val end     = (index.raw + add).refine[Int in 0 ~ 254].toOption.filter(end => add >= 0 && end.raw < limit)
+      val limit   = if (general) registerLayout.generalCount else registerLayout.uniformCount
+      val end     = (index + add).refine[Int in 0 ~ 254].toOption.filter(end => add >= 0 && end < limit)
         .getOrElse(unsupported(s"register range exceeds $bank bank: $value + $add")).widen[Int in 0 ~ 255]
       Value.Register(if (general) registerLayout.general(end) else registerLayout.uniform(end))
     case _ => unsupported(s"expected writable register, found $value")
@@ -149,6 +165,23 @@ private trait VMCompilationContext {
     val result = temp()
     emit(IntegerBinary(operation, result.slot, left, right, width))
     result
+  }
+
+  /** A 32-bit shared or shared::cluster operand as an address in the SR_SWINHI window. */
+  final def sharedWindow(operand: Operand): Value =
+    binary(
+      IntegerOperation.BitwiseOr,
+      address(operand, global = false, sharedUniform = true),
+      Value.Immediate(VMAddressSpace.SharedWindowBase),
+      64
+    )
+
+  /** Whether `values` is a scoreboard wait mask: a group of scoreboards or a mask of them. */
+  final def scoreboardMask(values: Vec[Operand]): Boolean = values match {
+    case Vec(Operand.Group(entries)) => entries.nonEmpty &&
+      entries.forall(v => OperandQueries.integer(v).exists(n => n >= 0 && n <= 5))
+    case Vec(value) => OperandQueries.integer(value).exists(mask => mask >= 0 && mask <= 63)
+    case _          => false
   }
 
   final def unary(operation: IntegerUnaryOperation, value: Value, width: ScalarBitWidth = 32): Value.Register = {
@@ -197,10 +230,11 @@ private trait VMCompilationContext {
       value: Value,
       from: NumericFormat,
       to: NumericFormat,
-      rounding: Option[ConversionRounding] = None
+      rounding: Option[ConversionRounding] = None,
+      clamp: Option[ConversionClamp] = None
   ): Value.Register = {
     val result = temp()
-    emit(Convert(result.slot, value, from, to, rounding))
+    emit(Convert(result.slot, value, from, to, rounding, clamp))
     result
   }
 

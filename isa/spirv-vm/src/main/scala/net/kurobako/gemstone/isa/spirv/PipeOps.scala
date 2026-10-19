@@ -21,13 +21,13 @@ private object PipeOps {
     case Instruction.WritePipe(t, d, pipe, pointer, _, _) => write(id(t), id(d), id(pipe), id(pointer))
     case Instruction.ReadPipe(t, d, pipe, pointer, _, _)  => read(id(t), id(d), id(pipe), id(pointer))
     case Instruction.ReservedWritePipe(t, d, pipe, reserved, index, pointer, _, _) =>
-      reservedTransfer(id(t), id(d), id(pipe), id(reserved), id(index), id(pointer), writing = true)
+      reservedTransfer(id(t), id(d), id(pipe), id(reserved), id(index), id(pointer), end = PipeEnd.Write)
     case Instruction.ReservedReadPipe(t, d, pipe, reserved, index, pointer, _, _) =>
-      reservedTransfer(id(t), id(d), id(pipe), id(reserved), id(index), id(pointer), writing = false)
+      reservedTransfer(id(t), id(d), id(pipe), id(reserved), id(index), id(pointer), end = PipeEnd.Read)
     case Instruction.ReserveWritePipePackets(t, d, pipe, count, _, _) =>
-      reserve(id(t), id(d), id(pipe), id(count), writing = true)
+      reserve(id(t), id(d), id(pipe), id(count), end = PipeEnd.Write)
     case Instruction.ReserveReadPipePackets(t, d, pipe, count, _, _) =>
-      reserve(id(t), id(d), id(pipe), id(count), writing = false)
+      reserve(id(t), id(d), id(pipe), id(count), end = PipeEnd.Read)
     case _: Instruction.CommitReadPipe | _: Instruction.CommitWritePipe | _: Instruction.GroupCommitReadPipe |
         _: Instruction.GroupCommitWritePipe => Next
     case Instruction.IsValidReserveId(t, d, reserved) =>
@@ -40,6 +40,8 @@ private object PipeOps {
       query(id(t), id(d), id(pipe))((memory, pointer) =>
         indices(memory, pointer).map((read, write) => (write - read) & Index)
       )
+    case Instruction.CreatePipeFromPipeStorage(t, d, storage) =>
+      step((execution, _) => transfer(execution.values, id(storage), id(d), id(t)))
     case Instruction.GetMaxPipePackets(t, d, pipe, _, _) =>
       query(id(t), id(d), id(pipe))((memory, pointer) => header(memory, pointer, PipeLayout.Capacity))
   }
@@ -61,8 +63,9 @@ private object PipeOps {
     at(pipe, PipeLayout.Packets + (index % capacity) * packetBytes)
 
   /** Claims `count` packets at the write or read end and returns the first claimed index, if they fit. */
-  def claim(memory: MemoryState, pipe: Pointer, count: Long, writing: Boolean): Either[Fault, Option[Long]] =
+  def claim(memory: MemoryState, pipe: Pointer, count: Long, end: PipeEnd): Either[Fault, Option[Long]] =
     header(memory, pipe, PipeLayout.Capacity).flatMap { capacity =>
+      val writing                   = end == PipeEnd.Write
       def fits(word: Long): Boolean = {
         val used = ((word >>> 32) - (word & Index)) & Index
         count > 0L && (if (writing) used + count <= capacity else count <= used)
@@ -75,8 +78,8 @@ private object PipeOps {
     }
 
   /** A reservation shared by a group, made once at its rendezvous. */
-  def reserveOnce(memory: MemoryState, pipe: Pointer, count: Long, writing: Boolean): Either[Fault, Long] =
-    claim(memory, pipe, count, writing).map(_.fold(0L)(reservation(_, count)))
+  def reserveOnce(memory: MemoryState, pipe: Pointer, count: Long, end: PipeEnd): Either[Fault, Long] =
+    claim(memory, pipe, count, end).map(_.fold(0L)(reservation(_, count)))
 
   private def readBytes(memory: MemoryState, pointer: Pointer, count: Int): AddressSpace.ReadResult[Array[Byte]] = {
     val bytes                                                   = Array.ofDim[Byte](count)
@@ -121,7 +124,7 @@ private object PipeOps {
         size     <- packetBytes(memory, target)
         capacity <- header(memory, target, PipeLayout.Capacity)
         packet   <- readBytes(memory, source, size)
-        claimed  <- claim(memory, target, 1L, writing = true)
+        claimed  <- claim(memory, target, 1L, PipeEnd.Write)
         _        <- claimed.fold[Either[Fault, Unit]](Right(()))(index =>
           writeBytes(memory, slot(target, capacity, size, index), packet)
         )
@@ -160,7 +163,7 @@ private object PipeOps {
       reserved: Int,
       index: Int,
       pointer: Int,
-      writing: Boolean
+      end: PipeEnd
   ): Op =
     step { (execution, memory) =>
       val values = execution.values
@@ -175,18 +178,18 @@ private object PipeOps {
         target = slot(handle, capacity, size, ((id & Index) + (offset & Index)) & Index)
         _ <-
           if (!valid) Right(())
-          else if (writing) readBytes(memory, packet, size).flatMap(writeBytes(memory, target, _))
+          else if (end == PipeEnd.Write) readBytes(memory, packet, size).flatMap(writeBytes(memory, target, _))
           else readBytes(memory, target, size).flatMap(writeBytes(memory, packet, _))
       } yield values.updateScalar(dest, resultType, if (valid) 0L else Failed)
     }
 
-  private def reserve(resultType: Int, dest: Int, pipe: Int, count: Int, writing: Boolean): Op =
+  private def reserve(resultType: Int, dest: Int, pipe: Int, count: Int, end: PipeEnd): Op =
     step { (execution, memory) =>
       val values = execution.values
       for {
         handle   <- address(values, pipe)
         packets  <- scalar(values, count)
-        reserved <- reserveOnce(memory, handle, packets & Index, writing)
+        reserved <- reserveOnce(memory, handle, packets & Index, end)
       } yield values.updateScalar(dest, resultType, reserved)
     }
 

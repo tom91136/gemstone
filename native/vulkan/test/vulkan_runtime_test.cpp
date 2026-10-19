@@ -1,27 +1,40 @@
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <link.h>
 
+#include <aspartame/array.hpp>
+#include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include "gemstone_execution_rpc.hpp"
 #include "gemstone_image_formats.hpp"
 #include <gemstone/command_queue.hpp>
+#include <gemstone/test_support.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "../src/descriptor.hpp"
 #include "../src/shader.hpp"
 #include <environment_keys.hpp>
 #include <vulkan/vulkan.h>
+
+using namespace aspartame;
 
 using gemstone::vulkan::descriptorAllocationLayout;
 using gemstone::vulkan::DescriptorRange;
@@ -38,7 +51,7 @@ struct TestDevice {
     instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     REQUIRE(vkCreateInstance(&instanceInfo, nullptr, &instance) == VK_SUCCESS);
     uint32_t count = 1;
-    VkPhysicalDevice physical;
+    VkPhysicalDevice physical = nullptr;
     REQUIRE(vkEnumeratePhysicalDevices(instance, &count, &physical) == VK_SUCCESS);
     const float priorities[]{0, 1};
     VkDeviceQueueCreateInfo queueInfo{};
@@ -56,6 +69,8 @@ struct TestDevice {
     REQUIRE(other != VK_NULL_HANDLE);
     REQUIRE(queue != other);
   }
+  TestDevice(const TestDevice &) = delete;
+  TestDevice &operator=(const TestDevice &) = delete;
   ~TestDevice() {
     vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -83,7 +98,7 @@ struct CommandRecording {
   CommandRecording(const CommandRecording &) = delete;
   CommandRecording &operator=(const CommandRecording &) = delete;
   ~CommandRecording() { vkDestroyCommandPool(device, pool, nullptr); }
-  VkCommandBuffer secondary() const {
+  [[nodiscard]] VkCommandBuffer secondary() const {
     VkCommandBufferAllocateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     info.commandPool = pool;
@@ -106,11 +121,39 @@ VkResult submitAndWait(VkQueue queue, VkCommandBuffer command, VkFence fence = V
   REQUIRE(vkQueueSubmit(queue, 1, &submit, fence) == VK_SUCCESS);
   return vkQueueWaitIdle(queue);
 }
+VkDeviceMemory allocateMemory(VkDevice device, VkDeviceSize size) {
+  VkMemoryAllocateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  info.allocationSize = size;
+  VkDeviceMemory memory{};
+  REQUIRE(vkAllocateMemory(device, &info, nullptr, &memory) == VK_SUCCESS);
+  return memory;
+}
+VkBuffer createBuffer(VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage = 0) {
+  VkBufferCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  info.size = size;
+  info.usage = usage;
+  VkBuffer buffer{};
+  REQUIRE(vkCreateBuffer(device, &info, nullptr, &buffer) == VK_SUCCESS);
+  return buffer;
+}
+VkFence createFence(VkDevice device) {
+  VkFenceCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence{};
+  REQUIRE(vkCreateFence(device, &info, nullptr, &fence) == VK_SUCCESS);
+  return fence;
+}
 void allocateDescriptors(DescriptorState &state, VkDescriptorSet set, VkDescriptorType type,
                          std::initializer_list<std::pair<uint32_t, uint32_t>> counts) {
   std::vector<VkDescriptorSetLayoutBinding> bindings;
   for (const auto &[binding, count] : counts)
-    bindings.push_back({binding, type, count, VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+    bindings.push_back({.binding = binding,
+                        .descriptorType = type,
+                        .descriptorCount = count,
+                        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                        .pImmutableSamplers = nullptr});
   state.sets.try_emplace(set, bindings);
 }
 int collectVulkanLibraries(dl_phdr_info *info, size_t, void *data) {
@@ -120,64 +163,65 @@ int collectVulkanLibraries(dl_phdr_info *info, size_t, void *data) {
 }
 } // namespace
 
+namespace {
 struct DiscardPipeline {
-  TestDevice &runtime;
+  VkDevice device{};
   VkShaderModule module{};
   VkRenderPass pass{};
   VkFramebuffer framebuffer{};
   VkPipelineLayout layout{};
   VkPipeline pipeline{};
-  explicit DiscardPipeline(TestDevice &device) : runtime(device) {
+  explicit DiscardPipeline(TestDevice &runtime) : device(runtime.device) {
     // Valid empty vertex entry point; gl_Position is deliberately absent.
     const uint32_t shader[]{0x07230203,
                             0x00010000,
                             0,
                             5,
                             0,
-                            (2u << 16) | 17u,
+                            (2U << 16) | 17U,
                             1,
-                            (3u << 16) | 14u,
+                            (3U << 16) | 14U,
                             0,
                             1,
-                            (5u << 16) | 15u,
+                            (5U << 16) | 15U,
                             0,
                             3,
                             0x6e69616d,
                             0,
-                            (2u << 16) | 19u,
+                            (2U << 16) | 19U,
                             1,
-                            (3u << 16) | 33u,
+                            (3U << 16) | 33U,
                             2,
                             1,
-                            (5u << 16) | 54u,
+                            (5U << 16) | 54U,
                             1,
                             3,
                             0,
                             2,
-                            (2u << 16) | 248u,
+                            (2U << 16) | 248U,
                             4,
-                            (1u << 16) | 253u,
-                            (1u << 16) | 56u};
+                            (1U << 16) | 253U,
+                            (1U << 16) | 56U};
     VkShaderModuleCreateInfo moduleInfo{};
     moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleInfo.codeSize = sizeof(shader);
     moduleInfo.pCode = shader;
-    REQUIRE(vkCreateShaderModule(runtime.device, &moduleInfo, nullptr, &module) == VK_SUCCESS);
+    REQUIRE(vkCreateShaderModule(device, &moduleInfo, nullptr, &module) == VK_SUCCESS);
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     VkRenderPassCreateInfo passInfo{};
     passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     passInfo.subpassCount = 1;
     passInfo.pSubpasses = &subpass;
-    REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
+    REQUIRE(vkCreateRenderPass(device, &passInfo, nullptr, &pass) == VK_SUCCESS);
     VkFramebufferCreateInfo fbInfo{};
     fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fbInfo.renderPass = pass;
     fbInfo.width = fbInfo.height = fbInfo.layers = 1;
-    REQUIRE(vkCreateFramebuffer(runtime.device, &fbInfo, nullptr, &framebuffer) == VK_SUCCESS);
+    REQUIRE(vkCreateFramebuffer(device, &fbInfo, nullptr, &framebuffer) == VK_SUCCESS);
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    REQUIRE(vkCreatePipelineLayout(runtime.device, &layoutInfo, nullptr, &layout) == VK_SUCCESS);
+    REQUIRE(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout) == VK_SUCCESS);
     VkPipelineShaderStageCreateInfo stage{};
     stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -192,8 +236,9 @@ struct DiscardPipeline {
     VkPipelineVertexInputStateCreateInfo input{};
     input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     // Unused bindings require no buffer, even when described in the pipeline.
-    const VkVertexInputBindingDescription unusedBinding{7, 16, VK_VERTEX_INPUT_RATE_VERTEX};
-    const VkVertexInputAttributeDescription unusedAttribute{7, 7, VK_FORMAT_R32G32B32A32_SFLOAT, 0};
+    const VkVertexInputBindingDescription unusedBinding{.binding = 7, .stride = 16, .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
+    const VkVertexInputAttributeDescription unusedAttribute{
+        .location = 7, .binding = 7, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = 0};
     input.vertexBindingDescriptionCount = 1;
     input.pVertexBindingDescriptions = &unusedBinding;
     input.vertexAttributeDescriptionCount = 1;
@@ -214,60 +259,72 @@ struct DiscardPipeline {
     pipelineInfo.layout = layout;
     pipelineInfo.renderPass = pass;
     // Viewport, multisample, depth/stencil, blend and fragment shader state are absent.
-    REQUIRE(vkCreateGraphicsPipelines(runtime.device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) == VK_SUCCESS);
+    REQUIRE(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) == VK_SUCCESS);
   }
   ~DiscardPipeline() {
-    vkDestroyPipeline(runtime.device, pipeline, nullptr);
-    vkDestroyPipelineLayout(runtime.device, layout, nullptr);
-    vkDestroyFramebuffer(runtime.device, framebuffer, nullptr);
-    vkDestroyRenderPass(runtime.device, pass, nullptr);
-    vkDestroyShaderModule(runtime.device, module, nullptr);
+    vkDestroyPipeline(device, pipeline, nullptr);
+    vkDestroyPipelineLayout(device, layout, nullptr);
+    vkDestroyFramebuffer(device, framebuffer, nullptr);
+    vkDestroyRenderPass(device, pass, nullptr);
+    vkDestroyShaderModule(device, module, nullptr);
   }
-  void begin(VkCommandBuffer command, VkSubpassContents contents = VK_SUBPASS_CONTENTS_INLINE) {
+  DiscardPipeline(const DiscardPipeline &) = delete;
+  DiscardPipeline &operator=(const DiscardPipeline &) = delete;
+  void begin(VkCommandBuffer command, VkSubpassContents contents = VK_SUBPASS_CONTENTS_INLINE) const {
     VkRenderPassBeginInfo render{};
     render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     render.renderPass = pass;
     render.framebuffer = framebuffer;
-    render.renderArea.extent = {1, 1};
+    render.renderArea.extent = {.width = 1, .height = 1};
     vkCmdBeginRenderPass(command, &render, contents);
     if (contents == VK_SUBPASS_CONTENTS_INLINE) vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
   }
 };
+} // namespace
 
 TEST_CASE("Vulkan shader bindings preserve image subviews and reject escaping arguments") {
   using namespace gemstone::vulkan;
   using namespace gemstone::execution;
-  std::array<uint8_t, 32> source{}, target{};
+  std::array<uint8_t, 32> source{};
+  std::array<uint8_t, 32> target{};
   StageResources stage;
-  stage.allocations.push_back({source.data(), source.size(), {}});
-  stage.allocations.push_back({target.data(), target.size(), {}});
-  stage.arguments = {StageResources::Argument{0, 4, 12}, StageResources::Argument{0, 8, 8}, StageResources::Argument{1, 0, 32}};
+  stage.allocations.push_back({.data = source.data(), .size = source.size(), .owned = {}});
+  stage.allocations.push_back({.data = target.data(), .size = target.size(), .owned = {}});
+  stage.arguments = {StageResources::Argument{.allocation = 0, .offset = 4, .size = 12},
+                     StageResources::Argument{.allocation = 0, .offset = 8, .size = 8},
+                     StageResources::Argument{.allocation = 1, .offset = 0, .size = 32}};
   DescriptorBinding image{};
   image.argument.value = 1;
   image.descriptor = GraphicsDescriptorImage{};
   stage.descriptorBindings.push_back(image);
   // Registration may return subviews in one shared backing allocation.
   const auto registerMemory = [&](const StageResources::Allocation &allocation) {
-    return GraphicsRange{AllocationId{9}, allocation.data == source.data() ? 64 : 128, static_cast<int64_t>(allocation.size)};
+    return GraphicsRange{.allocation = AllocationId{9},
+                         .offset = {allocation.data == source.data() ? 64 : 128},
+                         .size = {static_cast<int64_t>(allocation.size)}};
   };
   const auto bound = bindStageResources(stage, registerMemory);
-  REQUIRE(bound.has_value());
+  if (!bound) FAIL("stage resources were rejected");
   REQUIRE(bound->arguments.size() == 3);
-  REQUIRE(bound->arguments[0]->allocation.value == bound->arguments[1]->allocation.value);
-  REQUIRE(bound->arguments[0]->offset.value == 68);
-  REQUIRE(bound->arguments[0]->size.value == 12);
-  REQUIRE(bound->arguments[1]->offset.value == 72);
-  REQUIRE(bound->arguments[2]->offset.value == 128);
+  const auto &first = bound->arguments[0];
+  const auto &second = bound->arguments[1];
+  const auto &third = bound->arguments[2];
+  if (!first || !second || !third) FAIL("argument views are missing");
+  REQUIRE(first->allocation.value == second->allocation.value);
+  REQUIRE(first->offset.value == 68);
+  REQUIRE(first->size.value == 12);
+  REQUIRE(second->offset.value == 72);
+  REQUIRE(third->offset.value == 128);
   REQUIRE(bound->descriptorBindings.size() == 1);
   REQUIRE(std::get<GraphicsDescriptorImage>(bound->descriptorBindings[0].descriptor).source.memory.allocation.value == 9);
   REQUIRE(std::get<GraphicsDescriptorImage>(bound->descriptorBindings[0].descriptor).source.memory.offset.value == 72);
   REQUIRE(std::get<GraphicsDescriptorImage>(bound->descriptorBindings[0].descriptor).source.memory.size.value == 8);
-  stage.arguments[0]->size = source.size();
+  stage.arguments[0] = StageResources::Argument{.allocation = 0, .offset = 4, .size = source.size()};
   REQUIRE_FALSE(bindStageResources(stage, registerMemory));
-  stage.arguments[0]->size = 12;
+  stage.arguments[0] = StageResources::Argument{.allocation = 0, .offset = 4, .size = 12};
   stage.descriptorBindings[0].argument.value = -1;
   REQUIRE_FALSE(bindStageResources(stage, registerMemory));
-  stage.descriptorBindings[0].argument.value = stage.arguments.size();
+  stage.descriptorBindings[0].argument.value = static_cast<int32_t>(stage.arguments.size());
   REQUIRE_FALSE(bindStageResources(stage, registerMemory));
 }
 
@@ -278,23 +335,23 @@ TEST_CASE("Vulkan standalone samplers require no native storage registration") {
   stage.arguments.emplace_back(std::nullopt);
   DescriptorBinding sampler{};
   sampler.descriptor = GraphicsDescriptorSampler{};
-  std::get<GraphicsDescriptorSampler>(sampler.descriptor).value.mipLodBias = -0.75f;
+  std::get<GraphicsDescriptorSampler>(sampler.descriptor).value.mipLodBias = -0.75F;
   stage.descriptorBindings.push_back(sampler);
   const auto registerMemory = [](const StageResources::Allocation &) -> GraphicsRange {
     FAIL("sampler preparation must not register native storage");
     return {};
   };
   const auto bound = bindStageResources(stage, registerMemory);
-  REQUIRE(bound.has_value());
+  if (!bound) FAIL("sampler-only stage resources were rejected");
   REQUIRE(bound->arguments.size() == 1);
   REQUIRE_FALSE(bound->arguments.front());
-  REQUIRE(std::get<GraphicsDescriptorSampler>(bound->descriptorBindings.front().descriptor).value.mipLodBias == -0.75f);
+  REQUIRE(std::get<GraphicsDescriptorSampler>(bound->descriptorBindings.front().descriptor).value.mipLodBias == -0.75F);
   stage.descriptorBindings.clear();
   REQUIRE_FALSE(bindStageResources(stage, registerMemory));
 }
 
 TEST_CASE("Vulkan feature queries and device requests agree across a chained payload", "[vulkan][device]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   uint32_t count = 1;
   VkPhysicalDevice physical{};
   REQUIRE(vkEnumeratePhysicalDevices(runtime.instance, &count, &physical) == VK_SUCCESS);
@@ -337,7 +394,7 @@ TEST_CASE("Vulkan feature queries and device requests agree across a chained pay
 }
 
 TEST_CASE("Vulkan narrow storage and 1.2 feature aliases agree at device creation", "[vulkan][device]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   uint32_t count = 1;
   VkPhysicalDevice physical{};
   REQUIRE(vkEnumeratePhysicalDevices(runtime.instance, &count, &physical) == VK_SUCCESS);
@@ -373,7 +430,7 @@ TEST_CASE("Vulkan narrow storage and 1.2 feature aliases agree at device creatio
   std::vector<VkExtensionProperties> extensions(count);
   REQUIRE(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, extensions.data()) == VK_SUCCESS);
   for (const auto *name : {VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME})
-    REQUIRE(std::any_of(extensions.begin(), extensions.end(), [=](const auto &ext) { return std::strcmp(name, ext.extensionName) == 0; }));
+    REQUIRE(extensions ^ exists([=](const auto &ext) { return std::strcmp(name, ext.extensionName) == 0; }));
   const float priority = 1;
   VkDeviceQueueCreateInfo queue{};
   queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -401,7 +458,7 @@ TEST_CASE("Vulkan narrow storage and 1.2 feature aliases agree at device creatio
 }
 
 TEST_CASE("Vulkan procedure lookup respects command scope and enabled extensions", "[vulkan][lookup]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   for (const auto *name : {"vkGetPhysicalDeviceFeatures", "vkCreateDevice", "vkDestroyInstance", "vkEnumerateDeviceExtensionProperties",
                            "vkBindBufferMemory2KHR", "vkResetQueryPoolEXT", "vkGetPhysicalDeviceFeatures2KHR"})
     REQUIRE(vkGetDeviceProcAddr(runtime.device, name) == nullptr);
@@ -443,7 +500,7 @@ TEST_CASE("Vulkan procedure lookup respects command scope and enabled extensions
 }
 
 TEST_CASE("Vulkan host query reset extension is enumerated and scoped to enabled devices", "[vulkan][query][lookup]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   uint32_t count = 1;
   VkPhysicalDevice physical{};
   REQUIRE(vkEnumeratePhysicalDevices(runtime.instance, &count, &physical) == VK_SUCCESS);
@@ -510,7 +567,7 @@ TEST_CASE("Vulkan API facade keeps explicit unsupported and lookup paths") {
 }
 
 TEST_CASE("Vulkan explicit weighted-average sampler reduction needs no optional feature") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkSamplerReductionModeCreateInfo reduction{};
   reduction.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;
   reduction.reductionMode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
@@ -565,19 +622,8 @@ TEST_CASE("Vulkan instance creation is self contained") {
 }
 
 TEST_CASE("Vulkan API target keeps instance and device versions consistent", "[graphics-execution]") {
-  struct RestoreVersion {
-    std::optional<std::string> previous;
-    RestoreVersion() {
-      if (const char *value = std::getenv(gemstone::environment::VulkanApiVersion)) previous = value;
-    }
-    ~RestoreVersion() {
-      if (previous) setenv(gemstone::environment::VulkanApiVersion, previous->c_str(), 1);
-      else unsetenv(gemstone::environment::VulkanApiVersion);
-    }
-  } restore;
   for (const auto *target : {static_cast<const char *>(nullptr), "1.0", "1.2"}) {
-    if (target) REQUIRE(setenv(gemstone::environment::VulkanApiVersion, target, 1) == 0);
-    else REQUIRE(unsetenv(gemstone::environment::VulkanApiVersion) == 0);
+    const gemstone_test::Environment apiVersion(gemstone::environment::VulkanApiVersion, target);
     const uint32_t expected = target && std::strcmp(target, "1.0") == 0 ? VK_API_VERSION_1_0 : VK_API_VERSION_1_2;
     uint32_t version = 0;
     REQUIRE(vkEnumerateInstanceVersion(&version) == VK_SUCCESS);
@@ -585,7 +631,7 @@ TEST_CASE("Vulkan API target keeps instance and device versions consistent", "[g
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &properties);
     REQUIRE(properties.apiVersion == expected);
-    TestDevice runtime;
+    TestDevice const runtime;
     for (const auto *name : {"vkGetDeviceGroupPeerMemoryFeatures", "vkCmdSetDeviceMask", "vkGetDescriptorSetLayoutSupport",
                              "vkCreateSamplerYcbcrConversion", "vkDestroySamplerYcbcrConversion", "vkGetBufferOpaqueCaptureAddress",
                              "vkGetDeviceMemoryOpaqueCaptureAddress", "vkCmdDrawIndirectCount", "vkCmdDrawIndexedIndirectCount"}) {
@@ -597,9 +643,9 @@ TEST_CASE("Vulkan API target keeps instance and device versions consistent", "[g
       REQUIRE(vkGetDeviceProcAddr(runtime.device, name) == nullptr);
       REQUIRE((vkGetInstanceProcAddr(runtime.instance, name) != nullptr) == (expected >= VK_API_VERSION_1_1));
     }
-    for (uint32_t requested : {0u, VK_MAKE_API_VERSION(0, 1, 0, 4095), VK_API_VERSION_1_1, VK_MAKE_API_VERSION(0, 1, 2, 4095),
-                               VK_API_VERSION_1_3, VK_MAKE_API_VERSION(7, 127, 2, 0), VK_MAKE_API_VERSION(0, 127, 2, 0),
-                               VK_MAKE_API_VERSION(0, 1, 1023, 0), VK_MAKE_API_VERSION(1, 1, 0, 0)}) {
+    for (uint32_t const requested : {0U, VK_MAKE_API_VERSION(0, 1, 0, 4095), VK_API_VERSION_1_1, VK_MAKE_API_VERSION(0, 1, 2, 4095),
+                                     VK_API_VERSION_1_3, VK_MAKE_API_VERSION(7, 127, 2, 0), VK_MAKE_API_VERSION(0, 127, 2, 0),
+                                     VK_MAKE_API_VERSION(0, 1, 1023, 0), VK_MAKE_API_VERSION(1, 1, 0, 0)}) {
       VkApplicationInfo application{};
       application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
       application.apiVersion = requested;
@@ -607,13 +653,13 @@ TEST_CASE("Vulkan API target keeps instance and device versions consistent", "[g
       info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
       info.pApplicationInfo = &application;
       VkInstance instance = VK_NULL_HANDLE;
-      const bool supported = expected >= VK_API_VERSION_1_1 || (requested & ~0xfffu) <= expected;
+      const bool supported = expected >= VK_API_VERSION_1_1 || (requested & ~0xfffU) <= expected;
       REQUIRE(vkCreateInstance(&info, nullptr, &instance) == (supported ? VK_SUCCESS : VK_ERROR_INCOMPATIBLE_DRIVER));
       if (supported) vkDestroyInstance(instance, nullptr);
       else REQUIRE(instance == VK_NULL_HANDLE);
     }
   }
-  REQUIRE(setenv(gemstone::environment::VulkanApiVersion, "invalid", 1) == 0);
+  const gemstone_test::Environment apiVersion(gemstone::environment::VulkanApiVersion, "invalid");
   uint32_t version = 0;
   REQUIRE(vkEnumerateInstanceVersion(&version) == VK_ERROR_INITIALIZATION_FAILED);
   VkInstanceCreateInfo info{};
@@ -638,7 +684,7 @@ TEST_CASE("Vulkan core capability queries return initialised unsupported externa
   VkExternalFenceProperties fence{};
   fence.sType = VK_STRUCTURE_TYPE_EXTERNAL_FENCE_PROPERTIES;
   fence.pNext = &tail;
-  fence.exportFromImportedHandleTypes = fence.compatibleHandleTypes = fence.externalFenceFeatures = ~0u;
+  fence.exportFromImportedHandleTypes = fence.compatibleHandleTypes = fence.externalFenceFeatures = ~0U;
   vkGetPhysicalDeviceExternalFenceProperties(VK_NULL_HANDLE, nullptr, &fence);
   REQUIRE(fence.sType == VK_STRUCTURE_TYPE_EXTERNAL_FENCE_PROPERTIES);
   REQUIRE(fence.pNext == &tail);
@@ -649,7 +695,7 @@ TEST_CASE("Vulkan core capability queries return initialised unsupported externa
   VkExternalSemaphoreProperties semaphore{};
   semaphore.sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES;
   semaphore.pNext = &tail;
-  semaphore.exportFromImportedHandleTypes = semaphore.compatibleHandleTypes = semaphore.externalSemaphoreFeatures = ~0u;
+  semaphore.exportFromImportedHandleTypes = semaphore.compatibleHandleTypes = semaphore.externalSemaphoreFeatures = ~0U;
   vkGetPhysicalDeviceExternalSemaphoreProperties(VK_NULL_HANDLE, nullptr, &semaphore);
   REQUIRE(semaphore.sType == VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES);
   REQUIRE(semaphore.pNext == &tail);
@@ -661,8 +707,16 @@ TEST_CASE("Vulkan core capability queries return initialised unsupported externa
 }
 
 TEST_CASE("Vulkan descriptor layout support includes the advertised per-set capacity", "[vulkan][descriptor]") {
-  VkDescriptorSetLayoutBinding bindings[]{{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2048, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-                                          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2048, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}};
+  VkDescriptorSetLayoutBinding bindings[]{{.binding = 0,
+                                           .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                           .descriptorCount = 2048,
+                                           .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                           .pImmutableSamplers = nullptr},
+                                          {.binding = 1,
+                                           .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                           .descriptorCount = 2048,
+                                           .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                           .pImmutableSamplers = nullptr}};
   VkDescriptorSetLayoutCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   info.bindingCount = 2;
@@ -692,18 +746,7 @@ TEST_CASE("Vulkan profiles select the reported device identity", "[vulkan][devic
       {"intel", "Intel Gemstone Vulkan GPU", 0x8086},
       {"llvmpipe", "llvmpipe (Gemstone Vulkan)", 0x10005},
   }));
-  struct RestoreProfile {
-    std::optional<std::string> value;
-    RestoreProfile() {
-      if (const char *current = std::getenv(gemstone::environment::Profile)) value = current;
-    }
-    ~RestoreProfile() {
-      if (value) setenv(gemstone::environment::Profile, value->c_str(), 1);
-      else unsetenv(gemstone::environment::Profile);
-    }
-  } restore;
-  if (profile) REQUIRE(setenv(gemstone::environment::Profile, profile, 1) == 0);
-  else REQUIRE(unsetenv(gemstone::environment::Profile) == 0);
+  const gemstone_test::Environment selected(gemstone::environment::Profile, profile);
   VkPhysicalDeviceProperties properties{};
   vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &properties);
   REQUIRE(properties.deviceName == name);
@@ -711,7 +754,7 @@ TEST_CASE("Vulkan profiles select the reported device identity", "[vulkan][devic
 }
 
 TEST_CASE("Vulkan core device layer enumeration is callable and preserves empty output") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto enumerate =
       reinterpret_cast<PFN_vkEnumerateDeviceLayerProperties>(vkGetInstanceProcAddr(runtime.instance, "vkEnumerateDeviceLayerProperties"));
   REQUIRE(enumerate != nullptr);
@@ -728,13 +771,8 @@ TEST_CASE("Vulkan core device layer enumeration is callable and preserves empty 
 }
 
 TEST_CASE("Vulkan owns buffer memory and executes copies") {
-  TestDevice runtime;
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 32;
-  allocation.memoryTypeIndex = 0;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
-  REQUIRE(vkAllocateMemory(VK_NULL_HANDLE, &allocation, nullptr, &memory) == VK_SUCCESS);
+  TestDevice const runtime;
+  VkDeviceMemory memory = allocateMemory(VK_NULL_HANDLE, 32);
   void *mapped = nullptr;
   REQUIRE(vkMapMemory(VK_NULL_HANDLE, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   std::memcpy(mapped, "gemstone", 9);
@@ -762,15 +800,12 @@ TEST_CASE("Vulkan owns buffer memory and executes copies") {
   REQUIRE(vkBindBufferMemory(VK_NULL_HANDLE, source, memory, 0) == VK_SUCCESS);
   REQUIRE(vkBindBufferMemory(VK_NULL_HANDLE, destination, memory, 16) == VK_SUCCESS);
 
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
-  const VkBufferCopy region{0, 0, 9};
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
+  const VkBufferCopy region{.srcOffset = 0, .dstOffset = 0, .size = 9};
   vkCmdCopyBuffer(command, source, destination, 1, &region);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  VkFence fence = VK_NULL_HANDLE;
-  REQUIRE(vkCreateFence(VK_NULL_HANDLE, &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+  VkFence fence = createFence(VK_NULL_HANDLE);
   REQUIRE(submitAndWait(runtime.queue, command, fence) == VK_SUCCESS);
   REQUIRE(vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) == VK_SUCCESS);
   REQUIRE(std::memcmp(static_cast<char *>(mapped) + 16, "gemstone", 9) == 0);
@@ -782,26 +817,23 @@ TEST_CASE("Vulkan owns buffer memory and executes copies") {
 
 TEST_CASE("Vulkan buffer fills, updates and copies stay within the bound range") {
   const auto operation = GENERATE(0, 1, 2, 3);
-  TestDevice runtime;
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 48;
-  VkDeviceMemory memory{};
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  TestDevice const runtime;
+  VkDeviceMemory memory = allocateMemory(runtime.device, 48);
   uint8_t *bytes = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void **>(&bytes)) == VK_SUCCESS);
   std::memset(bytes, 0xa5, 48);
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = 16;
-  VkBuffer source{}, target{};
+  VkBuffer source{};
+  VkBuffer target{};
   REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &source) == VK_SUCCESS);
   REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &target) == VK_SUCCESS);
   REQUIRE(vkBindBufferMemory(runtime.device, source, memory, 0) == VK_SUCCESS);
   REQUIRE(vkBindBufferMemory(runtime.device, target, memory, 16) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
+  CommandRecording const recording(runtime.device);
   const std::array<uint8_t, 12> payload{};
-  const VkBufferCopy region{0, 8, 16};
+  const VkBufferCopy region{.srcOffset = 0, .dstOffset = 8, .size = 16};
   switch (operation) {
     case 0: vkCmdFillBuffer(recording.command, target, 0, VK_WHOLE_SIZE, 0); break;
     case 1: vkCmdFillBuffer(recording.command, target, 8, 16, 0); break;
@@ -819,11 +851,11 @@ TEST_CASE("Vulkan buffer fills, updates and copies stay within the bound range")
 }
 
 TEST_CASE("Vulkan rejects unknown semaphore handles before enqueueing") {
-  TestDevice runtime;
-  CommandRecording recording(runtime.device);
+  TestDevice const runtime;
+  CommandRecording const recording(runtime.device);
   vkCmdDispatch(recording.command, 1, 1, 1);
   REQUIRE(vkEndCommandBuffer(recording.command) == VK_SUCCESS);
-  const auto semaphore = reinterpret_cast<VkSemaphore>(0x1000);
+  auto *const semaphore = reinterpret_cast<VkSemaphore>(0x1000);
   const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
   auto info = submitInfo(recording.command);
   if (GENERATE(false, true)) {
@@ -842,8 +874,8 @@ TEST_CASE("Vulkan descriptor writes and copies cross binding boundaries", "[vulk
   const auto type = GENERATE(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
   const bool useTemplate = GENERATE(false, true);
   DescriptorState state;
-  const auto source = reinterpret_cast<VkDescriptorSet>(0x1000);
-  const auto destination = reinterpret_cast<VkDescriptorSet>(0x2000);
+  auto *const source = reinterpret_cast<VkDescriptorSet>(0x1000);
+  auto *const destination = reinterpret_cast<VkDescriptorSet>(0x2000);
   // Explicit zero-sized bindings and omitted bindings both consume no descriptors.
   allocateDescriptors(state, source, type, {{5, 2}, {2, 0}, {4, 1}, {1, 2}});
   allocateDescriptors(state, destination, type, {{3, 1}, {4, 4}, {5, 1}});
@@ -851,8 +883,8 @@ TEST_CASE("Vulkan descriptor writes and copies cross binding boundaries", "[vulk
   VkDescriptorImageInfo images[4]{};
   VkBufferView texels[4]{};
   for (size_t i = 0; i < 4; ++i) {
-    buffers[i] = {reinterpret_cast<VkBuffer>(0x3000 + i), i * 16, 16};
-    images[i] = {VK_NULL_HANDLE, reinterpret_cast<VkImageView>(0x4000 + i), VK_IMAGE_LAYOUT_GENERAL};
+    buffers[i] = {.buffer = reinterpret_cast<VkBuffer>(0x3000 + i), .offset = i * 16, .range = 16};
+    images[i] = {.sampler = VK_NULL_HANDLE, .imageView = reinterpret_cast<VkImageView>(0x4000 + i), .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
     texels[i] = reinterpret_cast<VkBufferView>(0x5000 + i);
   }
   VkWriteDescriptorSet write{};
@@ -868,17 +900,25 @@ TEST_CASE("Vulkan descriptor writes and copies cross binding boundaries", "[vulk
   if (useTemplate) {
     const auto apply = [&](const auto &values) {
       // Deliberately unaligned, padded elements exercise both offset and stride.
-      const size_t offset = 1, stride = sizeof(values[0]) + 3;
-      std::vector<uint8_t> bytes(offset + std::size(values) * stride, 0xcd);
+      const size_t offset = 1;
+      const size_t stride = sizeof(values[0]) + 3;
+      std::vector<uint8_t> bytes(offset + (std::size(values) * stride), 0xcd);
       for (size_t i = 0; i < std::size(values); ++i)
-        std::memcpy(bytes.data() + offset + i * stride, &values[i], sizeof(values[i]));
-      const VkDescriptorUpdateTemplateEntry entry{write.dstBinding, write.dstArrayElement, write.descriptorCount, type, offset, stride};
+        std::memcpy(bytes.data() + offset + (i * stride), &values[i], sizeof(values[i]));
+      const VkDescriptorUpdateTemplateEntry entry{.dstBinding = write.dstBinding,
+                                                  .dstArrayElement = write.dstArrayElement,
+                                                  .descriptorCount = write.descriptorCount,
+                                                  .descriptorType = type,
+                                                  .offset = offset,
+                                                  .stride = stride};
       state.updateTemplate(source, {&entry, 1}, bytes.data());
     };
     if (type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) apply(buffers);
     else if (type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) apply(images);
     else apply(texels);
-  } else state.update(1, &write, 0, nullptr);
+  } else {
+    state.update(1, &write, 0, nullptr);
+  }
   const auto check = [&](VkDescriptorSet set, std::pair<uint32_t, uint32_t> slot, size_t i) {
     if (type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
       const auto *value = state.get(set, slot.first, slot.second);
@@ -887,7 +927,9 @@ TEST_CASE("Vulkan descriptor writes and copies cross binding boundaries", "[vulk
       REQUIRE(value->offset == buffers[i].offset);
     } else if (type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
       REQUIRE(state.get<VkDescriptorImageInfo>(set, slot.first, slot.second)->imageView == images[i].imageView);
-    } else REQUIRE(*state.get<VkBufferView>(set, slot.first, slot.second) == texels[i]);
+    } else {
+      REQUIRE(*state.get<VkBufferView>(set, slot.first, slot.second) == texels[i]);
+    }
   };
   REQUIRE(state.get(source, 3, 0) == nullptr);
   check(source, {1, 1}, 0);
@@ -917,13 +959,13 @@ TEST_CASE("Vulkan descriptor views enforce their declared range") {
 }
 
 TEST_CASE("Vulkan descriptor allocation layout preserves overlapping aliases") {
-  const auto first = reinterpret_cast<VkDeviceMemory>(0x1000);
-  const auto second = reinterpret_cast<VkDeviceMemory>(0x2000);
+  auto *const first = reinterpret_cast<VkDeviceMemory>(0x1000);
+  auto *const second = reinterpret_cast<VkDeviceMemory>(0x2000);
   const auto layout = descriptorAllocationLayout({
-      {first, 16, 16},
-      {first, 24, 16},
-      {first, 64, 8},
-      {second, 0, 4},
+      {.memory = first, .offset = 16, .size = 16},
+      {.memory = first, .offset = 24, .size = 16},
+      {.memory = first, .offset = 64, .size = 8},
+      {.memory = second, .offset = 0, .size = 4},
   });
   REQUIRE(layout.allocations.size() == 3);
   REQUIRE(layout.allocations[0].memory == first);
@@ -937,16 +979,16 @@ TEST_CASE("Vulkan descriptor allocation layout preserves overlapping aliases") {
 }
 
 TEST_CASE("Vulkan descriptor allocation layout merges chains independent of input order") {
-  const auto first = reinterpret_cast<VkDeviceMemory>(0x1000);
-  const auto second = reinterpret_cast<VkDeviceMemory>(0x2000);
+  auto *const first = reinterpret_cast<VkDeviceMemory>(0x1000);
+  auto *const second = reinterpret_cast<VkDeviceMemory>(0x2000);
   // The bridge appears last, after nested, disjoint, touching and other-memory views.
-  const std::vector<DescriptorRange> ranges{{first, 32, 16}, {first, 0, 16},  {first, 4, 4}, {first, 64, 8},
-                                            {first, 48, 8},  {second, 0, 16}, {first, 8, 32}};
+  const std::vector<DescriptorRange> ranges{{.memory = first, .offset = 32, .size = 16}, {.memory = first, .offset = 0, .size = 16},
+                                            {.memory = first, .offset = 4, .size = 4},   {.memory = first, .offset = 64, .size = 8},
+                                            {.memory = first, .offset = 48, .size = 8},  {.memory = second, .offset = 0, .size = 16},
+                                            {.memory = first, .offset = 8, .size = 32}};
   auto order = std::vector<size_t>{0, 1, 2, 3, 4, 5, 6};
   do {
-    std::vector<DescriptorRange> shuffled;
-    for (const auto i : order)
-      shuffled.push_back(ranges[i]);
+    const auto shuffled = order ^ map([&](size_t i) { return ranges[i]; });
     const auto layout = descriptorAllocationLayout(shuffled);
     REQUIRE(layout.allocations.size() == 4);
     for (size_t i = 0; i < order.size(); ++i) {
@@ -966,14 +1008,14 @@ TEST_CASE("Vulkan descriptor allocation layout merges chains independent of inpu
 }
 
 TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor aliases") {
-  TestDevice runtime;
+  TestDevice const runtime;
   gemstone_test::RpcFixture fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  fixture.expect({1, 1, 1, 0, 0});
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
   fixture.kernelWorkGroup({1, 1, 1});
-  fixture.shaderDescriptors(
-      {{{0}, {0}, {0}, gemstone::execution::ShaderResourceKind::Buffer}, {{0}, {1}, {0}, gemstone::execution::ShaderResourceKind::Buffer}});
-  fixture.expectAllocationArguments({{0, 0, 16}, {0, 4, 16}});
+  fixture.shaderDescriptors({{.set = {0}, .binding = {0}, .element = {0}, .resource = gemstone::execution::ShaderResourceKind::Buffer},
+                             {.set = {0}, .binding = {1}, .element = {0}, .resource = gemstone::execution::ShaderResourceKind::Buffer}});
+  fixture.expectAllocationArguments({{.alias = 0, .offset = 0, .range = 16}, {.alias = 0, .offset = 4, .range = 16}});
   const uint32_t deviceWrite = 0x12345678;
   std::vector<uint8_t> deviceBytes(sizeof(deviceWrite));
   std::memcpy(deviceBytes.data(), &deviceWrite, sizeof(deviceWrite));
@@ -985,37 +1027,37 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
       0,
       32,
       0,
-      (2u << 16) | 17u,
+      (2U << 16) | 17U,
       1,
-      (3u << 16) | 14u,
+      (3U << 16) | 14U,
       0,
       1,
-      (7u << 16) | 15u,
+      (7U << 16) | 15U,
       5,
       7,
       0x6e69616d,
       0,
       20,
       21,
-      (6u << 16) | 16u,
+      (6U << 16) | 16U,
       7,
       17,
       1,
       1,
       1,
-      (4u << 16) | 71u,
+      (4U << 16) | 71U,
       20,
       33,
       0,
-      (4u << 16) | 71u,
+      (4U << 16) | 71U,
       20,
       34,
       0,
-      (4u << 16) | 71u,
+      (4U << 16) | 71U,
       21,
       33,
       1,
-      (4u << 16) | 71u,
+      (4U << 16) | 71U,
       21,
       34,
       0,
@@ -1032,18 +1074,16 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
   pipelineInfo.stage.module = module;
   pipelineInfo.stage.pName = "main";
-  const VkSpecializationMapEntry specializationEntries[] = {{0, 0, 4}, {1, 4, 4}, {2, 8, 4}};
+  const VkSpecializationMapEntry specializationEntries[] = {
+      {.constantID = 0, .offset = 0, .size = 4}, {.constantID = 1, .offset = 4, .size = 4}, {.constantID = 2, .offset = 8, .size = 4}};
   const uint32_t specializationData[] = {1, 1, 1};
-  const VkSpecializationInfo specializationInfo{3, specializationEntries, sizeof(specializationData), specializationData};
+  const VkSpecializationInfo specializationInfo{
+      .mapEntryCount = 3, .pMapEntries = specializationEntries, .dataSize = sizeof(specializationData), .pData = specializationData};
   pipelineInfo.stage.pSpecializationInfo = &specializationInfo;
   VkPipeline pipeline = VK_NULL_HANDLE;
   REQUIRE(vkCreateComputePipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) == VK_SUCCESS);
 
-  VkMemoryAllocateInfo allocationInfo{};
-  allocationInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocationInfo.allocationSize = 32;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
-  REQUIRE(vkAllocateMemory(VK_NULL_HANDLE, &allocationInfo, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(VK_NULL_HANDLE, 32);
   void *mapped = nullptr;
   REQUIRE(vkMapMemory(VK_NULL_HANDLE, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   std::memset(mapped, 0, 32);
@@ -1058,8 +1098,16 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   REQUIRE(vkBindBufferMemory(VK_NULL_HANDLE, buffers[0], memory, 0) == VK_SUCCESS);
   REQUIRE(vkBindBufferMemory(VK_NULL_HANDLE, buffers[1], memory, 0) == VK_SUCCESS);
   const VkDescriptorSetLayoutBinding bindings[] = {
-      {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-      {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+      {.binding = 0,
+       .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       .descriptorCount = 1,
+       .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+       .pImmutableSamplers = nullptr},
+      {.binding = 1,
+       .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       .descriptorCount = 1,
+       .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+       .pImmutableSamplers = nullptr},
   };
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1067,7 +1115,7 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   layoutInfo.pBindings = bindings;
   VkDescriptorSetLayout layout{};
   REQUIRE(vkCreateDescriptorSetLayout(runtime.device, &layoutInfo, nullptr, &layout) == VK_SUCCESS);
-  const VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2};
+  const VkDescriptorPoolSize poolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   poolInfo.maxSets = 1;
@@ -1082,7 +1130,8 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   setInfo.pSetLayouts = &layout;
   VkDescriptorSet descriptors{};
   REQUIRE(vkAllocateDescriptorSets(runtime.device, &setInfo, &descriptors) == VK_SUCCESS);
-  const VkDescriptorBufferInfo descriptorBuffers[] = {{buffers[0], 0, 16}, {buffers[1], 4, 16}};
+  const VkDescriptorBufferInfo descriptorBuffers[] = {{.buffer = buffers[0], .offset = 0, .range = 16},
+                                                      {.buffer = buffers[1], .offset = 4, .range = 16}};
   VkWriteDescriptorSet writes[2]{};
   for (uint32_t index = 0; index < 2; ++index) {
     writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1094,8 +1143,8 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   }
   vkUpdateDescriptorSets(VK_NULL_HANDLE, 2, writes, 0, nullptr);
 
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, VK_NULL_HANDLE, 0, 1, &descriptors, 0, nullptr);
   VkBuffer indirect = VK_NULL_HANDLE;
@@ -1104,9 +1153,9 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
     bufferInfo.size = 32;
     REQUIRE(vkCreateBuffer(VK_NULL_HANDLE, &bufferInfo, nullptr, &indirect) == VK_SUCCESS);
     REQUIRE(vkBindBufferMemory(VK_NULL_HANDLE, indirect, memory, 0) == VK_SUCCESS);
-    VkDispatchIndirectCommand dimensions{1, 1, 1};
+    VkDispatchIndirectCommand dimensions{.x = 1, .y = 1, .z = 1};
     vkCmdUpdateBuffer(command, indirect, 20, sizeof(dimensions), &dimensions);
-    dimensions = {0, 0, 0}; // UpdateBuffer must own the original host data.
+    dimensions = {.x = 0, .y = 0, .z = 0}; // UpdateBuffer must own the original host data.
     vkCmdDispatchIndirect(command, indirect, 20);
   }
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
@@ -1133,7 +1182,7 @@ TEST_CASE("Vulkan descriptor pool capacity is restored by reset") {
   VkDescriptorPool pool = VK_NULL_HANDLE;
   REQUIRE(vkCreateDescriptorPool(VK_NULL_HANDLE, &poolInfo, nullptr, &pool) == VK_SUCCESS);
 
-  const auto layout = reinterpret_cast<VkDescriptorSetLayout>(0x1000);
+  auto *const layout = reinterpret_cast<VkDescriptorSetLayout>(0x1000);
   VkDescriptorSetAllocateInfo allocation{};
   allocation.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocation.descriptorPool = pool;
@@ -1185,7 +1234,7 @@ TEST_CASE("Vulkan colour images validate memory bounds and unsupported formats")
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R8G8B8A8_UNORM;
-  info.extent = {8, 4, 1};
+  info.extent = {.width = 8, .height = 4, .depth = 1};
   info.mipLevels = info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1208,11 +1257,7 @@ TEST_CASE("Vulkan colour images validate memory bounds and unsupported formats")
   REQUIRE(extended.memoryRequirements.size == requirements.size);
   REQUIRE(dedicated.prefersDedicatedAllocation == VK_FALSE);
   REQUIRE(dedicated.requiresDedicatedAllocation == VK_FALSE);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = requirements.size;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
-  REQUIRE(vkAllocateMemory(VK_NULL_HANDLE, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(VK_NULL_HANDLE, requirements.size);
   REQUIRE(vkBindImageMemory(VK_NULL_HANDLE, image, memory, 64) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
   REQUIRE(vkBindImageMemory(VK_NULL_HANDLE, image, memory, 0) == VK_SUCCESS);
   vkDestroyImage(VK_NULL_HANDLE, image, nullptr);
@@ -1222,9 +1267,9 @@ TEST_CASE("Vulkan colour images validate memory bounds and unsupported formats")
 }
 
 TEST_CASE("Vulkan zero work dispatches perform no RPC or descriptor accesses") {
-  TestDevice runtime;
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  TestDevice const runtime;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   vkCmdDispatch(command, 0, 1, 1);
   vkCmdDispatch(command, 1, 0, 1);
   vkCmdDispatch(command, 1, 1, 0);
@@ -1234,27 +1279,19 @@ TEST_CASE("Vulkan zero work dispatches perform no RPC or descriptor accesses") {
 }
 
 TEST_CASE("Vulkan secondary commands retain payload snapshots and replay in order") {
-  TestDevice runtime;
-  CommandRecording recording(runtime.device);
-  const auto primary = recording.command, secondary = recording.secondary();
+  TestDevice const runtime;
+  CommandRecording const recording(runtime.device);
+  auto *const primary = recording.command;
+  auto *const secondary = recording.secondary();
   VkEventCreateInfo eventInfo{};
   eventInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-  VkEvent event;
+  VkEvent event = nullptr;
   REQUIRE(vkCreateEvent(VK_NULL_HANDLE, &eventInfo, nullptr, &event) == VK_SUCCESS);
   // Guard words surround a two-word update recorded into the secondary buffer.
-  std::array<uint32_t, 4> expected{0xaabbccddu, 17, 29, 0xaabbccddu};
+  std::array<uint32_t, 4> expected{0xaabbccddU, 17, 29, 0xaabbccddU};
   std::array<uint32_t, 2> payload{expected[1], expected[2]};
-  VkMemoryAllocateInfo memoryInfo{};
-  memoryInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  memoryInfo.allocationSize = sizeof(expected);
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &memoryInfo, nullptr, &memory) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = sizeof(expected);
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, sizeof(expected));
+  VkBuffer buffer = createBuffer(runtime.device, sizeof(expected), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
   void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
@@ -1285,15 +1322,12 @@ TEST_CASE("Vulkan secondary commands retain payload snapshots and replay in orde
 }
 
 TEST_CASE("Vulkan binary waits consume one signal and permit cross queue reuse") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkSemaphoreCreateInfo create{};
   create.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  VkSemaphore semaphore;
+  VkSemaphore semaphore = nullptr;
   REQUIRE(vkCreateSemaphore(runtime.device, &create, nullptr, &semaphore) == VK_SUCCESS);
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  VkFence fence;
-  REQUIRE(vkCreateFence(runtime.device, &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+  VkFence fence = createFence(runtime.device);
   const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   VkSubmitInfo signal{};
   signal.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1317,34 +1351,23 @@ TEST_CASE("Vulkan binary waits consume one signal and permit cross queue reuse")
 }
 
 TEST_CASE("Vulkan host event releases asynchronous work before semaphore and fence signalling") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkEventCreateInfo eventInfo{};
   eventInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-  VkEvent event;
+  VkEvent event = nullptr;
   REQUIRE(vkCreateEvent(runtime.device, &eventInfo, nullptr, &event) == VK_SUCCESS);
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  VkFence fence;
-  REQUIRE(vkCreateFence(runtime.device, &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+  VkFence fence = createFence(runtime.device);
   VkSemaphoreCreateInfo semaphoreInfo{};
   semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  VkSemaphore semaphore;
+  VkSemaphore semaphore = nullptr;
   REQUIRE(vkCreateSemaphore(runtime.device, &semaphoreInfo, nullptr, &semaphore) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 4;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 4);
   void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, 4, 0, &mapped) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 4;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, 4);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   vkCmdWaitEvents(command, 1, &event, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, nullptr, 0, nullptr, 0, nullptr);
   vkCmdFillBuffer(command, buffer, 0, 4, 0x12345678);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
@@ -1375,20 +1398,17 @@ TEST_CASE("Vulkan host event releases asynchronous work before semaphore and fen
 }
 
 TEST_CASE("Vulkan asynchronous execution failure wakes fence and idle waits") {
-  TestDevice runtime;
-  VkFenceCreateInfo info{};
-  info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  VkFence fence;
-  REQUIRE(vkCreateFence(runtime.device, &info, nullptr, &fence) == VK_SUCCESS);
-  const auto command = reinterpret_cast<VkCommandBuffer>(0xa200);
+  TestDevice const runtime;
+  VkFence fence = createFence(runtime.device);
+  auto *const command = reinterpret_cast<VkCommandBuffer>(0xa200);
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   REQUIRE(vkBeginCommandBuffer(command, &begin) == VK_SUCCESS);
   VkEventCreateInfo eventInfo{};
   eventInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-  VkEvent event;
+  VkEvent event = nullptr;
   REQUIRE(vkCreateEvent(runtime.device, &eventInfo, nullptr, &event) == VK_SUCCESS);
-  const auto waitingCommand = reinterpret_cast<VkCommandBuffer>(0xa210);
+  auto *const waitingCommand = reinterpret_cast<VkCommandBuffer>(0xa210);
   REQUIRE(vkBeginCommandBuffer(waitingCommand, &begin) == VK_SUCCESS);
   vkCmdWaitEvents(waitingCommand, 1, &event, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, nullptr, 0, nullptr, 0,
                   nullptr);
@@ -1410,7 +1430,7 @@ TEST_CASE("Vulkan asynchronous execution failure wakes fence and idle waits") {
 }
 
 TEST_CASE("Vulkan submissions without waits start no covering workers") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto threads = [] { return std::distance(std::filesystem::directory_iterator("/proc/self/task"), {}); };
   const auto before = threads();
   VkSubmitInfo submit{};
@@ -1423,7 +1443,7 @@ TEST_CASE("Vulkan submissions without waits start no covering workers") {
 }
 
 TEST_CASE("Vulkan timeline waits retain values and resume queued work after a host signal") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkSemaphoreTypeCreateInfo type{};
   type.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
   type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
@@ -1456,7 +1476,8 @@ TEST_CASE("Vulkan timeline waits retain values and resume queued work after a ho
   REQUIRE(vkGetSemaphoreCounterValue(runtime.device, semaphores[0], &value) == VK_SUCCESS);
   REQUIRE(value == 3);
 
-  const uint64_t waitedValue = 5, signalledValue = 7;
+  const uint64_t waitedValue = 5;
+  const uint64_t signalledValue = 7;
   VkTimelineSemaphoreSubmitInfo timeline{};
   timeline.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
   timeline.waitSemaphoreValueCount = timeline.signalSemaphoreValueCount = 1;
@@ -1470,10 +1491,7 @@ TEST_CASE("Vulkan timeline waits retain values and resume queued work after a ho
   submit.pWaitSemaphores = semaphores;
   submit.pSignalSemaphores = semaphores + 1;
   submit.pWaitDstStageMask = &stage;
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  VkFence fence;
-  REQUIRE(vkCreateFence(runtime.device, &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+  VkFence fence = createFence(runtime.device);
   REQUIRE(vkQueueSubmit(runtime.queue, 1, &submit, fence) == VK_SUCCESS);
   REQUIRE(vkWaitForFences(runtime.device, 1, &fence, VK_TRUE, 1000000) == VK_TIMEOUT);
   signal.value = waitedValue;
@@ -1483,7 +1501,7 @@ TEST_CASE("Vulkan timeline waits retain values and resume queued work after a ho
   REQUIRE(value == signalledValue);
   REQUIRE(vkDeviceWaitIdle(runtime.device) == VK_SUCCESS);
   vkDestroyFence(runtime.device, fence, nullptr);
-  for (auto semaphore : semaphores)
+  for (auto *semaphore : semaphores)
     vkDestroySemaphore(runtime.device, semaphore, nullptr);
 }
 
@@ -1529,7 +1547,7 @@ TEST_CASE("Vulkan timeline queries initialise aggregate features and preserve qu
 }
 
 TEST_CASE("Vulkan mapped memory preserves advertised base alignment at arbitrary offsets") {
-  TestDevice runtime;
+  TestDevice const runtime;
   uint32_t count = 1;
   VkPhysicalDevice physical{};
   REQUIRE(vkEnumeratePhysicalDevices(runtime.instance, &count, &physical) == VK_SUCCESS);
@@ -1538,18 +1556,14 @@ TEST_CASE("Vulkan mapped memory preserves advertised base alignment at arbitrary
   const auto alignment = properties.limits.minMemoryMapAlignment;
   REQUIRE(alignment >= 64);
   std::vector<VkDeviceMemory> allocations;
-  for (VkDeviceSize size : {65, 127, 128, 129, 255, 256, 257, 1024, 4096}) {
-    VkMemoryAllocateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    info.allocationSize = size;
-    VkDeviceMemory memory{};
-    REQUIRE(vkAllocateMemory(runtime.device, &info, nullptr, &memory) == VK_SUCCESS);
+  for (VkDeviceSize const size : {65, 127, 128, 129, 255, 256, 257, 1024, 4096}) {
+    VkDeviceMemory memory = allocateMemory(runtime.device, size);
     allocations.push_back(memory);
     void *mapped{};
     REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     std::memset(mapped, 0x5a, size);
     vkUnmapMemory(runtime.device, memory);
-    for (VkDeviceSize offset : {0, 1, 17, 63}) {
+    for (VkDeviceSize const offset : {0, 1, 17, 63}) {
       CAPTURE(size, offset);
       REQUIRE(vkMapMemory(runtime.device, memory, offset, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
       CHECK((reinterpret_cast<uintptr_t>(mapped) - offset) % alignment == 0);
@@ -1558,7 +1572,7 @@ TEST_CASE("Vulkan mapped memory preserves advertised base alignment at arbitrary
       vkUnmapMemory(runtime.device, memory);
     }
   }
-  for (auto memory : allocations)
+  for (auto *memory : allocations)
     vkFreeMemory(runtime.device, memory, nullptr);
 }
 
@@ -1597,14 +1611,14 @@ TEST_CASE("Vulkan driver identity queries agree and overwrite poisoned metadata"
 TEST_CASE("Vulkan overlapping descriptor copies within one binding retain array elements", "[vulkan][descriptor]") {
   const auto type = GENERATE(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
   DescriptorState state;
-  const auto set = reinterpret_cast<VkDescriptorSet>(0x400);
+  auto *const set = reinterpret_cast<VkDescriptorSet>(0x400);
   allocateDescriptors(state, set, type, {{2, 3}});
   VkDescriptorBufferInfo buffers[3]{};
   VkDescriptorImageInfo images[3]{};
   VkBufferView texels[3]{};
   for (uintptr_t i = 0; i < 3; ++i) {
-    buffers[i] = {reinterpret_cast<VkBuffer>(0x100 + i), 0, 16};
-    images[i] = {VK_NULL_HANDLE, reinterpret_cast<VkImageView>(0x100 + i), VK_IMAGE_LAYOUT_GENERAL};
+    buffers[i] = {.buffer = reinterpret_cast<VkBuffer>(0x100 + i), .offset = 0, .range = 16};
+    images[i] = {.sampler = VK_NULL_HANDLE, .imageView = reinterpret_cast<VkImageView>(0x100 + i), .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
     texels[i] = reinterpret_cast<VkBufferView>(0x100 + i);
   }
   VkWriteDescriptorSet write{};
@@ -1636,10 +1650,10 @@ TEST_CASE("Vulkan overlapping descriptor copies within one binding retain array 
 }
 
 TEST_CASE("Vulkan R32_UINT clears and padded rectangular transfers preserve surrounding data", "[graphics-execution]") {
-  TestDevice runtime;
-  const auto layerCount = GENERATE(1u, 3u);
+  TestDevice const runtime;
+  const auto layerCount = GENERATE(1U, 3U);
   const auto baseLayer = layerCount - 1;
-  const auto imageWord = 48 + baseLayer * 12;
+  const auto imageWord = 48 + (baseLayer * 12);
   VkFormatProperties format{};
   vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE, VK_FORMAT_R32_UINT, &format);
   REQUIRE((format.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT) != 0);
@@ -1648,48 +1662,43 @@ TEST_CASE("Vulkan R32_UINT clears and padded rectangular transfers preserve surr
   imageInfo.imageType = VK_IMAGE_TYPE_2D;
   imageInfo.format = VK_FORMAT_R32_UINT;
   imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-  imageInfo.extent = {4, 3, 1};
+  imageInfo.extent = {.width = 4, .height = 3, .depth = 1};
   imageInfo.mipLevels = 1;
   imageInfo.arrayLayers = layerCount;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &imageInfo, nullptr, &image) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocate{};
-  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocate.allocationSize = 384;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocate, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 384);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 192) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 128;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, 128, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 16) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *words = static_cast<uint32_t *>(mapped);
-  std::fill(words, words + 96, 0xdeadbeefu);
+  std::fill(words, words + 96, 0xdeadbeefU);
   words[5] = 11;
   words[6] = 12;
   words[9] = 21;
   words[10] = 22;
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearColorValue clear{};
   clear.uint32[0] = 0x12345678;
-  const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, baseLayer, VK_REMAINING_ARRAY_LAYERS};
+  const VkImageSubresourceRange range{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                      .baseMipLevel = 0,
+                                      .levelCount = 1,
+                                      .baseArrayLayer = baseLayer,
+                                      .layerCount = VK_REMAINING_ARRAY_LAYERS};
   vkCmdClearColorImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
   clear.uint32[0] = 0; // Recording must snapshot the clear value.
   VkBufferImageCopy copy{};
   copy.bufferOffset = 4;
   copy.bufferRowLength = 4;
   copy.bufferImageHeight = 3;
-  copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, baseLayer, 1};
-  copy.imageOffset = {1, 1, 0};
-  copy.imageExtent = {2, 2, 1};
+  copy.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = baseLayer, .layerCount = 1};
+  copy.imageOffset = {.x = 1, .y = 1, .z = 0};
+  copy.imageExtent = {.width = 2, .height = 2, .depth = 1};
   bool invalid = false;
   SECTION("round trip") {}
   SECTION("overflowing buffer offset fails without accessing memory") {
@@ -1724,18 +1733,9 @@ TEST_CASE("Vulkan R32_UINT clears and padded rectangular transfers preserve surr
 }
 
 TEST_CASE("Vulkan timestamp queries preserve unavailable values and respect result stride") {
-  TestDevice runtime;
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 80;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
-  VkMemoryAllocateInfo memoryInfo{};
-  memoryInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  memoryInfo.allocationSize = 96;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &memoryInfo, nullptr, &memory) == VK_SUCCESS);
+  TestDevice const runtime;
+  VkBuffer buffer = createBuffer(runtime.device, 80, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 96);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 16) == VK_SUCCESS);
   void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
@@ -1745,7 +1745,7 @@ TEST_CASE("Vulkan timestamp queries preserve unavailable values and respect resu
   poolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   poolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
   poolInfo.queryCount = 2;
-  VkQueryPool queries;
+  VkQueryPool queries = nullptr;
   REQUIRE(vkCreateQueryPool(runtime.device, &poolInfo, nullptr, &queries) == VK_SUCCESS);
   uint64_t result[6];
   std::fill(std::begin(result), std::end(result), 0xfeed);
@@ -1758,8 +1758,8 @@ TEST_CASE("Vulkan timestamp queries preserve unavailable values and respect resu
   REQUIRE(result[4] == 0);
   REQUIRE(result[5] == 0xfeed);
   REQUIRE(vkGetQueryPoolResults(runtime.device, queries, 0, 2, 15, result, 24, flags) == VK_ERROR_INITIALIZATION_FAILED);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   vkCmdResetQueryPool(command, queries, 0, 2);
   vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queries, 0);
   vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, 1);
@@ -1810,24 +1810,21 @@ TEST_CASE("Vulkan timestamp queries preserve unavailable values and respect resu
 }
 
 TEST_CASE("Vulkan image copies preserve bits, row pitches, and recorded regions", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R8G8B8A8_UNORM;
-  info.extent = {8, 4, 1};
+  info.extent = {.width = 8, .height = 4, .depth = 1};
   info.mipLevels = info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_LINEAR;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  VkImage src, dst;
+  VkImage src = VK_NULL_HANDLE;
+  VkImage dst = VK_NULL_HANDLE;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &src) == VK_SUCCESS);
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &dst) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 384;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 384);
   REQUIRE(vkBindImageMemory(runtime.device, src, memory, 64) == VK_SUCCESS);
   REQUIRE(vkBindImageMemory(runtime.device, dst, memory, 256) == VK_SUCCESS);
   void *mapped = nullptr;
@@ -1836,22 +1833,27 @@ TEST_CASE("Vulkan image copies preserve bits, row pitches, and recorded regions"
   std::fill_n(bytes, 384, 0xa5);
   for (unsigned i = 0; i < 128; ++i)
     bytes[64 + i] = static_cast<uint8_t>(i);
-  VkImageSubresource subresource{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0};
+  VkImageSubresource const subresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .arrayLayer = 0};
   VkSubresourceLayout layout{};
   vkGetImageSubresourceLayout(runtime.device, dst, &subresource, &layout);
   REQUIRE(layout.offset == 0); // Image-relative, independent of the memory binding offset.
   REQUIRE(layout.size == 128);
   REQUIRE(layout.rowPitch == 32);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
-  VkImageCopy region{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {2, 1, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {1, 0, 0}, {3, 2, 1}};
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
+  VkImageCopy region{.srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                     .srcOffset = {.x = 2, .y = 1, .z = 0},
+                     .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                     .dstOffset = {.x = 1, .y = 0, .z = 0},
+                     .extent = {.width = 3, .height = 2, .depth = 1}};
   vkCmdCopyImage(command, src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-  region.extent = {1, 1, 1}; // Host changes after recording must not alter the command.
+  region.extent = {.width = 1, .height = 1, .depth = 1}; // Host changes after recording must not alter the command.
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   for (unsigned i = 0; i < 128; ++i) {
-    const auto y = i / 32, x = i % 32;
-    const auto expected = y < 2 && x >= 4 && x < 16 ? (y + 1) * 32 + x + 4 : 0xa5;
+    const auto y = i / 32;
+    const auto x = i % 32;
+    const auto expected = y < 2 && x >= 4 && x < 16 ? ((y + 1) * 32) + x + 4 : 0xa5;
     REQUIRE(bytes[256 + i] == expected);
   }
   REQUIRE(bytes[255] == 0xa5);
@@ -1862,18 +1864,18 @@ TEST_CASE("Vulkan image copies preserve bits, row pitches, and recorded regions"
 }
 
 TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer clears", "[vulkan][image][graphics-execution]") {
-  const uint32_t mip = GENERATE(0u, 1u);
-  const uint32_t framebufferLayers = GENERATE(1u, 2u);
+  const uint32_t mip = GENERATE(0U, 1U);
+  const uint32_t framebufferLayers = GENERATE(1U, 2U);
   const bool imageless = GENERATE(false, true);
   const bool extendedUsage = GENERATE(false, true);
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.flags = VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
   if (extendedUsage) info.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
   info.imageType = VK_IMAGE_TYPE_3D;
   info.format = extendedUsage ? VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 : VK_FORMAT_R8G8B8A8_UNORM;
-  info.extent = {8, 8, 8};
+  info.extent = {.width = 8, .height = 8, .depth = 8};
   info.mipLevels = 2;
   info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1898,13 +1900,18 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
   viewInfo.image = image;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 1, VK_REMAINING_ARRAY_LAYERS};
+  viewInfo.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                               .baseMipLevel = mip,
+                               .levelCount = 1,
+                               .baseArrayLayer = 1,
+                               .layerCount = VK_REMAINING_ARRAY_LAYERS};
   VkImageView view{};
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
   VkImageView rejected{};
-  viewInfo.subresourceRange.baseArrayLayer = 8u >> mip;
+  viewInfo.subresourceRange.baseArrayLayer = 8U >> mip;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &rejected) == VK_ERROR_FORMAT_NOT_SUPPORTED);
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 2, 0, 1};
+  viewInfo.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 2, .baseArrayLayer = 0, .layerCount = 1};
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &rejected) == VK_ERROR_FORMAT_NOT_SUPPORTED);
   VkAttachmentDescription attachment{};
   attachment.format = viewInfo.format;
@@ -1912,7 +1919,7 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
   attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   attachment.initialLayout = attachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-  const VkAttachmentReference colour{0, VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference colour{.attachment = 0, .layout = VK_IMAGE_LAYOUT_GENERAL};
   VkSubpassDescription subpass{};
   subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
   subpass.colorAttachmentCount = 1;
@@ -1930,7 +1937,7 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
   fb.renderPass = pass;
   fb.attachmentCount = 1;
   fb.pAttachments = &view;
-  fb.width = fb.height = 8u >> mip;
+  fb.width = fb.height = 8U >> mip;
   fb.layers = framebufferLayers;
   VkFramebufferAttachmentImageInfo attachmentInfo{};
   attachmentInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO;
@@ -1938,7 +1945,7 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
   attachmentInfo.usage = info.usage;
   attachmentInfo.width = fb.width;
   attachmentInfo.height = fb.height;
-  attachmentInfo.layerCount = (8u >> mip) - 1;
+  attachmentInfo.layerCount = (8U >> mip) - 1;
   attachmentInfo.viewFormatCount = 1;
   attachmentInfo.pViewFormats = &viewInfo.format;
   VkFramebufferAttachmentsCreateInfo framebufferAttachments{};
@@ -1953,15 +1960,15 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
   }
   VkFramebuffer framebuffer{};
   REQUIRE(vkCreateFramebuffer(runtime.device, &fb, nullptr, &framebuffer) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearValue clear{};
-  std::fill_n(clear.color.float32, 4, 1.0f);
+  std::fill_n(clear.color.float32, 4, 1.0F);
   VkRenderPassBeginInfo render{};
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{0, 0}, {fb.width, fb.height}};
+  render.renderArea = {.offset = {.x = 0, .y = 0}, .extent = {.width = fb.width, .height = fb.height}};
   render.clearValueCount = 1;
   render.pClearValues = &clear;
   VkImageView boundView = view;
@@ -1975,10 +1982,10 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
   vkCmdEndRenderPass(command);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
-  const uint64_t sliceBytes = fb.width * fb.height * 4;
+  const uint64_t sliceBytes = static_cast<uint64_t>(fb.width) * fb.height * 4;
   const uint64_t start = 64 + (mip ? 8 * 8 * 8 * 4 : 0) + sliceBytes;
   for (uint64_t i = 0; i < allocation.allocationSize; ++i)
-    REQUIRE(bytes[i] == (i >= start && i < start + framebufferLayers * sliceBytes ? 0xff : 0xa5));
+    REQUIRE(bytes[i] == (i >= start && i < start + (framebufferLayers * sliceBytes) ? 0xff : 0xa5));
   vkDestroyFramebuffer(runtime.device, framebuffer, nullptr);
   vkDestroyRenderPass(runtime.device, pass, nullptr);
   vkDestroyImageView(runtime.device, view, nullptr);
@@ -1988,25 +1995,22 @@ TEST_CASE("Vulkan 2D array views address volume mip slices and bound framebuffer
 }
 
 TEST_CASE("Vulkan image array slices preserve layer offsets and neighbouring layers", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R8G8B8A8_UNORM;
-  info.extent = {8, 4, 1};
+  info.extent = {.width = 8, .height = 4, .depth = 1};
   info.mipLevels = 1;
   info.arrayLayers = 3;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_LINEAR;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  VkImage src, dst;
+  VkImage src = VK_NULL_HANDLE;
+  VkImage dst = VK_NULL_HANDLE;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &src) == VK_SUCCESS);
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &dst) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 960;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 960);
   REQUIRE(vkBindImageMemory(runtime.device, src, memory, 64) == VK_SUCCESS);
   REQUIRE(vkBindImageMemory(runtime.device, dst, memory, 512) == VK_SUCCESS);
   void *mapped = nullptr;
@@ -2015,7 +2019,7 @@ TEST_CASE("Vulkan image array slices preserve layer offsets and neighbouring lay
   std::fill_n(bytes, 960, 0xa5);
   for (unsigned i = 0; i < 384; ++i)
     bytes[64 + i] = static_cast<uint8_t>(i);
-  VkImageSubresource subresource{VK_IMAGE_ASPECT_COLOR_BIT, 0, 2};
+  VkImageSubresource const subresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .arrayLayer = 2};
   VkSubresourceLayout layout{};
   vkGetImageSubresourceLayout(runtime.device, dst, &subresource, &layout);
   REQUIRE(layout.offset == 256); // Image-relative, independent of the memory binding offset.
@@ -2026,22 +2030,29 @@ TEST_CASE("Vulkan image array slices preserve layer offsets and neighbouring lay
   viewInfo.image = dst;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = info.format;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 2, 1};
-  VkImageView view;
+  viewInfo.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 2, .layerCount = 1};
+  VkImageView view = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
   vkDestroyImageView(runtime.device, view, nullptr);
   viewInfo.subresourceRange.baseArrayLayer = 3;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_ERROR_FORMAT_NOT_SUPPORTED);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
-  VkImageCopy region{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1}, {2, 1, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 2, 1}, {1, 0, 0}, {3, 2, 1}};
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
+  VkImageCopy region{.srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 1, .layerCount = 1},
+                     .srcOffset = {.x = 2, .y = 1, .z = 0},
+                     .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 2, .layerCount = 1},
+                     .dstOffset = {.x = 1, .y = 0, .z = 0},
+                     .extent = {.width = 3, .height = 2, .depth = 1}};
   vkCmdCopyImage(command, src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-  region.extent = {1, 1, 1}; // Host changes after recording must not alter the command.
+  region.extent = {.width = 1, .height = 1, .depth = 1}; // Host changes after recording must not alter the command.
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   for (unsigned i = 0; i < 384; ++i) {
-    const auto layer = i / 128, y = (i % 128) / 32, x = i % 32;
-    const auto expected = layer == 2 && y < 2 && x >= 4 && x < 16 ? 128 + (y + 1) * 32 + x + 4 : 0xa5;
+    const auto layer = i / 128;
+    const auto y = (i % 128) / 32;
+    const auto x = i % 32;
+    const auto expected = layer == 2 && y < 2 && x >= 4 && x < 16 ? 128 + ((y + 1) * 32) + x + 4 : 0xa5;
     REQUIRE(bytes[512 + i] == expected);
   }
   REQUIRE(bytes[511] == 0xa5);
@@ -2052,74 +2063,69 @@ TEST_CASE("Vulkan image array slices preserve layer offsets and neighbouring lay
 }
 
 TEST_CASE("Vulkan depth clears and padded copies preserve layer and texel boundaries", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT);
-  const uint32_t width = format == VK_FORMAT_D16_UNORM ? 2 : 4;
-  const uint32_t imageStride = format == VK_FORMAT_D32_SFLOAT_S8_UINT ? 8 : width;
+  const size_t width = format == VK_FORMAT_D16_UNORM ? 2 : 4;
+  const size_t imageStride = format == VK_FORMAT_D32_SFLOAT_S8_UINT ? 8 : width;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = format;
-  info.extent = {4, 3, 1};
+  info.extent = {.width = 4, .height = 3, .depth = 1};
   info.mipLevels = 1;
   info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_SUCCESS);
   VkMemoryRequirements requirements{};
   vkGetImageMemoryRequirements(runtime.device, image, &requirements);
   REQUIRE(requirements.size == 24 * imageStride);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 320;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 320);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 64) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 64;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, 64, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 320, 0xa5);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
-  VkClearDepthStencilValue clear{0.5f, 0};
-  VkImageSubresourceRange range{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 1, VK_REMAINING_ARRAY_LAYERS};
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
+  VkClearDepthStencilValue clear{.depth = 0.5F, .stencil = 0};
+  VkImageSubresourceRange const range{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                                      .baseMipLevel = 0,
+                                      .levelCount = 1,
+                                      .baseArrayLayer = 1,
+                                      .layerCount = VK_REMAINING_ARRAY_LAYERS};
   vkCmdClearDepthStencilImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
-  clear.depth = 0.0f;
+  clear.depth = 0.0F;
   VkBufferImageCopy copy{};
   copy.bufferOffset = 4;
   copy.bufferRowLength = 4;
   copy.bufferImageHeight = 3;
-  copy.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 1};
-  copy.imageOffset = {1, 1, 0};
-  copy.imageExtent = {2, 2, 1};
+  copy.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .mipLevel = 0, .baseArrayLayer = 1, .layerCount = 1};
+  copy.imageOffset = {.x = 1, .y = 1, .z = 0};
+  copy.imageExtent = {.width = 2, .height = 2, .depth = 1};
   vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_GENERAL, buffer, 1, &copy);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
-  const uint32_t expected = width == 2 ? 32768u : 0x3f000000u;
+  const uint32_t expected = width == 2 ? 32768U : 0x3f000000U;
   for (uint32_t row = 0; row < 2; ++row)
     for (uint32_t col = 0; col < 2; ++col) {
       uint32_t word = 0;
-      std::memcpy(&word, bytes + 4 + (row * 4 + col) * width, width);
+      std::memcpy(&word, bytes + 4 + (((row * 4) + col) * width), width);
       REQUIRE(word == expected);
     }
   REQUIRE(bytes[3] == 0xa5);
-  REQUIRE(bytes[4 + 2 * width] == 0xa5);
+  REQUIRE(bytes[4 + (2 * width)] == 0xa5);
   REQUIRE(bytes[63] == 0xa5);
   REQUIRE(bytes[64] == 0xa5);
-  REQUIRE(bytes[64 + 12 * imageStride - 1] == 0xa5);
-  REQUIRE(bytes[64 + 24 * imageStride] == 0xa5);
+  REQUIRE(bytes[64 + (12 * imageStride) - 1] == 0xa5);
+  REQUIRE(bytes[64 + (24 * imageStride)] == 0xa5);
   if (format == VK_FORMAT_D32_SFLOAT_S8_UINT)
     for (uint32_t pixel = 0; pixel < 24; ++pixel)
       for (uint32_t byte = 4; byte < 8; ++byte)
-        REQUIRE(bytes[64 + pixel * 8 + byte] == 0xa5);
+        REQUIRE(bytes[64 + (pixel * 8) + byte] == 0xa5);
   vkDestroyBuffer(runtime.device, buffer, nullptr);
   vkDestroyImage(runtime.device, image, nullptr);
   vkUnmapMemory(runtime.device, memory);
@@ -2127,24 +2133,29 @@ TEST_CASE("Vulkan depth clears and padded copies preserve layer and texel bounda
 }
 
 TEST_CASE("Vulkan multisample clears and resolves preserve sample and layer boundaries", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UINT, VK_FORMAT_R32_UINT, VK_FORMAT_R32_SFLOAT,
                                VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT);
-  const unsigned components = format == VK_FORMAT_R32_SFLOAT            ? 1
-                              : format == VK_FORMAT_R32G32_SFLOAT       ? 2
-                              : format == VK_FORMAT_R32G32B32A32_SFLOAT ? 4
-                                                                        : 0;
-  const unsigned texelBytes = components ? components * 4 : 4;
+  const unsigned components = [&]() -> unsigned {
+    switch (format) {
+      case VK_FORMAT_R32_SFLOAT: return 1;
+      case VK_FORMAT_R32G32_SFLOAT: return 2;
+      case VK_FORMAT_R32G32B32A32_SFLOAT: return 4;
+      default: return 0;
+    }
+  }();
+  const size_t texelBytes = components ? components * 4 : 4;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = format;
-  info.extent = {2, 1, 1};
+  info.extent = {.width = 2, .height = 1, .depth = 1};
   info.mipLevels = 1;
   info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_4_BIT;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  VkImage src, dst;
+  VkImage src = VK_NULL_HANDLE;
+  VkImage dst = VK_NULL_HANDLE;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &src) == VK_SUCCESS);
   VkMemoryRequirements requirements{};
   vkGetImageMemoryRequirements(runtime.device, src, &requirements);
@@ -2152,14 +2163,10 @@ TEST_CASE("Vulkan multisample clears and resolves preserve sample and layer boun
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.extent.width = 4;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &dst) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 768;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 768);
   REQUIRE(vkBindImageMemory(runtime.device, src, memory, 0) == VK_SUCCESS);
   REQUIRE(vkBindImageMemory(runtime.device, dst, memory, 512) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 768, 0xa5);
@@ -2167,33 +2174,40 @@ TEST_CASE("Vulkan multisample clears and resolves preserve sample and layer boun
   for (unsigned sample = 0; sample < 4; ++sample)
     for (unsigned lane = 0; lane < (components ? components : 4); ++lane) {
       if (components) {
-        const float value = static_cast<float>(sample * 2 + lane) - 4.0f;
-        std::memcpy(bytes + 8 * texelBytes + sample * texelBytes + lane * 4, &value, 4);
-      } else bytes[32 + sample * 4 + lane] = sample * 64 + lane;
+        const float value = static_cast<float>((sample * 2) + lane) - 4.0F;
+        std::memcpy(bytes + (8 * texelBytes) + (sample * texelBytes) + (static_cast<size_t>(lane) * 4), &value, 4);
+      } else {
+        bytes[32 + (sample * 4) + lane] = (sample * 64) + lane;
+      }
     }
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearColorValue clear{};
   if (format == VK_FORMAT_R8G8B8A8_UINT || format == VK_FORMAT_R32_UINT)
-    std::fill_n(clear.uint32, 4, format == VK_FORMAT_R32_UINT ? UINT32_MAX : 255u);
-  else std::fill_n(clear.float32, 4, components ? -2.5f : 1.0f);
-  const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    std::fill_n(clear.uint32, 4, format == VK_FORMAT_R32_UINT ? UINT32_MAX : 255U);
+  else std::fill_n(clear.float32, 4, components ? -2.5F : 1.0F);
+  const VkImageSubresourceRange range{
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1};
   vkCmdClearColorImage(command, src, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
-  VkImageResolve region{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1}, {0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1}, {1, 0, 0}, {1, 1, 1}};
+  VkImageResolve region{.srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 1, .layerCount = 1},
+                        .srcOffset = {.x = 0, .y = 0, .z = 0},
+                        .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 1, .layerCount = 1},
+                        .dstOffset = {.x = 1, .y = 0, .z = 0},
+                        .extent = {.width = 1, .height = 1, .depth = 1}};
   vkCmdResolveImage(command, src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
   region.extent.width = 2;
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   if (components) {
     for (unsigned word = 0; word < 8 * components; ++word) {
-      float value;
-      std::memcpy(&value, bytes + word * 4, 4);
-      REQUIRE(value == -2.5f);
+      float value = NAN;
+      std::memcpy(&value, bytes + (static_cast<size_t>(word) * 4), 4);
+      REQUIRE(value == -2.5F);
     }
-    for (unsigned lane = 0; lane < components; ++lane) {
-      float value;
-      std::memcpy(&value, bytes + 512 + 5 * texelBytes + lane * 4, 4);
-      REQUIRE(value == static_cast<float>(lane) - 1.0f);
+    for (size_t lane = 0; lane < components; ++lane) {
+      float value = NAN;
+      std::memcpy(&value, bytes + 512 + (5 * texelBytes) + (lane * 4), 4);
+      REQUIRE(value == static_cast<float>(lane) - 1.0F);
     }
   } else {
     for (unsigned i = 0; i < 32; ++i)
@@ -2201,8 +2215,8 @@ TEST_CASE("Vulkan multisample clears and resolves preserve sample and layer boun
     for (unsigned lane = 0; lane < 4; ++lane)
       REQUIRE(bytes[532 + lane] == ((format == VK_FORMAT_R8G8B8A8_UINT || format == VK_FORMAT_R32_UINT) ? lane : 96 + lane));
   }
-  REQUIRE(bytes[512 + 5 * texelBytes - 1] == 0xa5);
-  REQUIRE(bytes[512 + 6 * texelBytes] == 0xa5);
+  REQUIRE(bytes[512 + (5 * texelBytes) - 1] == 0xa5);
+  REQUIRE(bytes[512 + (6 * texelBytes)] == 0xa5);
   REQUIRE(bytes[12 * texelBytes] == 0xa5);
   REQUIRE(bytes[16 * texelBytes] == 0xa5);
   vkDestroyImage(runtime.device, src, nullptr);
@@ -2212,29 +2226,29 @@ TEST_CASE("Vulkan multisample clears and resolves preserve sample and layer boun
 }
 
 TEST_CASE("Vulkan mip clears and copies preserve other levels and layers", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_R32_SFLOAT, VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT);
   const bool depth = format != VK_FORMAT_R32_SFLOAT;
-  const uint32_t bytesPerTexel = format == VK_FORMAT_D16_UNORM ? 2 : 4;
+  const size_t bytesPerTexel = format == VK_FORMAT_D16_UNORM ? 2 : 4;
   const auto aspect = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = format;
-  info.extent = {8, 4, 1};
+  info.extent = {.width = 8, .height = 4, .depth = 1};
   info.tiling = VK_IMAGE_TILING_LINEAR;
   info.mipLevels = 5;
   info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_ERROR_FORMAT_NOT_SUPPORTED);
   info.mipLevels = 4;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_SUCCESS);
   VkMemoryRequirements requirements{};
   vkGetImageMemoryRequirements(runtime.device, image, &requirements);
   REQUIRE(requirements.size == 86 * bytesPerTexel);
-  VkImageSubresource subresource{aspect, 2, 1};
+  VkImageSubresource const subresource{.aspectMask = aspect, .mipLevel = 2, .arrayLayer = 1};
   VkSubresourceLayout layout{};
   vkGetImageSubresourceLayout(runtime.device, image, &subresource, &layout);
   REQUIRE(layout.offset == 82 * bytesPerTexel);
@@ -2245,45 +2259,43 @@ TEST_CASE("Vulkan mip clears and copies preserve other levels and layers", "[gra
   viewInfo.image = image;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = format;
-  viewInfo.subresourceRange = {aspect, 2, VK_REMAINING_MIP_LEVELS, 1, 1};
-  VkImageView view;
+  viewInfo.subresourceRange = {
+      .aspectMask = aspect, .baseMipLevel = 2, .levelCount = VK_REMAINING_MIP_LEVELS, .baseArrayLayer = 1, .layerCount = 1};
+  VkImageView view = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 1024;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 1024);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 256) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 128;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, 128, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 1024, 0xa5);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   // The overlapping ranges share storage and must survive one batched submission.
-  VkImageSubresourceRange ranges[]{{aspect, 1, VK_REMAINING_MIP_LEVELS, 1, 1}, {aspect, 2, 1, 1, 1}};
+  VkImageSubresourceRange ranges[]{
+      {.aspectMask = aspect, .baseMipLevel = 1, .levelCount = VK_REMAINING_MIP_LEVELS, .baseArrayLayer = 1, .layerCount = 1},
+      {.aspectMask = aspect, .baseMipLevel = 2, .levelCount = 1, .baseArrayLayer = 1, .layerCount = 1}};
   VkClearColorValue colour{};
   colour.float32[0] = .5f;
-  const VkClearDepthStencilValue clearDepth{.5f, 0};
+  const VkClearDepthStencilValue clearDepth{.depth = .5f, .stencil = 0};
   if (depth) vkCmdClearDepthStencilImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &clearDepth, 2, ranges);
   else vkCmdClearColorImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &colour, 2, ranges);
   ranges[0] = ranges[1] = {}; // Recording owns the caller-provided ranges.
-  VkImageCopy copy{{aspect, 1, 1, 1}, {1, 0, 0}, {aspect, 0, 0, 1}, {1, 1, 0}, {2, 2, 1}};
+  VkImageCopy copy{.srcSubresource = {.aspectMask = aspect, .mipLevel = 1, .baseArrayLayer = 1, .layerCount = 1},
+                   .srcOffset = {.x = 1, .y = 0, .z = 0},
+                   .dstSubresource = {.aspectMask = aspect, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                   .dstOffset = {.x = 1, .y = 1, .z = 0},
+                   .extent = {.width = 2, .height = 2, .depth = 1}};
   vkCmdCopyImage(command, image, VK_IMAGE_LAYOUT_GENERAL, image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
   copy = {}; // Copy regions are also snapshots, not borrowed caller storage.
   VkBufferImageCopy readback{};
   readback.bufferOffset = 8;
   readback.bufferRowLength = 3;
-  readback.imageSubresource = {aspect, 1, 1, 1};
-  readback.imageOffset = {1, 0, 0};
-  readback.imageExtent = {2, 2, 1};
+  readback.imageSubresource = {.aspectMask = aspect, .mipLevel = 1, .baseArrayLayer = 1, .layerCount = 1};
+  readback.imageOffset = {.x = 1, .y = 0, .z = 0};
+  readback.imageExtent = {.width = 2, .height = 2, .depth = 1};
   vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_GENERAL, buffer, 1, &readback);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
@@ -2292,17 +2304,17 @@ TEST_CASE("Vulkan mip clears and copies preserve other levels and layers", "[gra
     const bool changed =
         texel == 9 || texel == 10 || texel == 17 || texel == 18 || (texel >= 72 && texel < 80) || texel == 82 || texel == 83 || texel == 85;
     uint32_t word = 0;
-    std::memcpy(&word, bytes + 256 + texel * bytesPerTexel, bytesPerTexel);
-    REQUIRE(word == (changed ? expected : bytesPerTexel == 2 ? 0xa5a5u : 0xa5a5a5a5u));
+    std::memcpy(&word, bytes + 256 + (texel * bytesPerTexel), bytesPerTexel);
+    REQUIRE(word == (changed ? expected : bytesPerTexel == 2 ? 0xa5a5U : 0xa5a5a5a5U));
   }
   for (unsigned row = 0; row < 2; ++row)
     for (unsigned col = 0; col < 3; ++col) {
       uint32_t word = 0;
-      std::memcpy(&word, bytes + 8 + (row * 3 + col) * bytesPerTexel, bytesPerTexel);
-      REQUIRE(word == (col < 2 ? expected : bytesPerTexel == 2 ? 0xa5a5u : 0xa5a5a5a5u));
+      std::memcpy(&word, bytes + 8 + (((row * 3) + col) * bytesPerTexel), bytesPerTexel);
+      REQUIRE(word == (col < 2 ? expected : bytesPerTexel == 2 ? 0xa5a5U : 0xa5a5a5a5U));
     }
   REQUIRE(bytes[255] == 0xa5);
-  REQUIRE(bytes[256 + 86 * bytesPerTexel] == 0xa5);
+  REQUIRE(bytes[256 + (86 * bytesPerTexel)] == 0xa5);
   vkDestroyImageView(runtime.device, view, nullptr);
   vkDestroyBuffer(runtime.device, buffer, nullptr);
   vkDestroyImage(runtime.device, image, nullptr);
@@ -2311,15 +2323,11 @@ TEST_CASE("Vulkan mip clears and copies preserve other levels and layers", "[gra
 }
 
 TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the render area and other layers", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UINT, VK_FORMAT_R32_UINT, VK_FORMAT_R32_SFLOAT);
   const auto depthFormat = GENERATE(VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT);
-  const uint32_t depthBytes = depthFormat == VK_FORMAT_D16_UNORM ? 2 : 4;
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 4096;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  const size_t depthBytes = depthFormat == VK_FORMAT_D16_UNORM ? 2 : 4;
+  VkDeviceMemory memory = allocateMemory(runtime.device, 4096);
   std::array<VkImage, 3> images{};
   std::array<VkImageView, 3> views{};
   std::array<VkAttachmentDescription, 3> attachments{};
@@ -2329,7 +2337,7 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
     info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     info.imageType = VK_IMAGE_TYPE_2D;
     info.format = i == 2 ? depthFormat : format;
-    info.extent = {8, 4, 1};
+    info.extent = {.width = 8, .height = 4, .depth = 1};
     info.mipLevels = 1;
     info.arrayLayers = 2;
     info.samples = i == 1 ? VK_SAMPLE_COUNT_1_BIT : VK_SAMPLE_COUNT_4_BIT;
@@ -2341,7 +2349,11 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
     view.image = images[i];
     view.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view.format = info.format;
-    view.subresourceRange = {i == 2 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1, 1};
+    view.subresourceRange = {.aspectMask = i == 2 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                             .baseMipLevel = 0,
+                             .levelCount = 1,
+                             .baseArrayLayer = 1,
+                             .layerCount = 1};
     REQUIRE(vkCreateImageView(runtime.device, &view, nullptr, &views[i]) == VK_SUCCESS);
     attachments[i].format = info.format;
     attachments[i].samples = info.samples;
@@ -2349,19 +2361,23 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
     attachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachments[i].initialLayout = attachments[i].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
   }
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 4096, 0xa5);
-  for (unsigned pixel = 0; pixel < 64; ++pixel)
+  for (size_t pixel = 0; pixel < 64; ++pixel)
     for (unsigned sample = 0; sample < 4; ++sample) {
-      auto *at = bytes + 256 + (pixel * 4 + sample) * 4;
+      auto *at = bytes + 256 + (((pixel * 4) + sample) * 4);
       if (format == VK_FORMAT_R32_SFLOAT) {
-        const float value = sample * .25f;
+        const float value = static_cast<float>(sample) * .25f;
         std::memcpy(at, &value, 4);
-      } else std::fill_n(at, 4, (format == VK_FORMAT_R8G8B8A8_UINT || format == VK_FORMAT_R32_UINT) ? 17 + sample * 10 : sample * 64);
+      } else {
+        std::fill_n(at, 4, (format == VK_FORMAT_R8G8B8A8_UINT || format == VK_FORMAT_R32_UINT) ? 17 + (sample * 10) : sample * 64);
+      }
     }
-  const VkAttachmentReference colour{0, VK_IMAGE_LAYOUT_GENERAL}, resolve{1, VK_IMAGE_LAYOUT_GENERAL}, depth{2, VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference colour{.attachment = 0, .layout = VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference resolve{.attachment = 1, .layout = VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference depth{.attachment = 2, .layout = VK_IMAGE_LAYOUT_GENERAL};
   VkSubpassDescription subpass{};
   subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
   subpass.colorAttachmentCount = 1;
@@ -2374,7 +2390,7 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
   passInfo.pAttachments = attachments.data();
   passInfo.subpassCount = 1;
   passInfo.pSubpasses = &subpass;
-  VkRenderPass pass;
+  VkRenderPass pass = nullptr;
   REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
   VkFramebufferCreateInfo framebufferInfo{};
   framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -2384,17 +2400,17 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
   framebufferInfo.width = 8;
   framebufferInfo.height = 4;
   framebufferInfo.layers = 1;
-  VkFramebuffer framebuffer;
+  VkFramebuffer framebuffer = nullptr;
   REQUIRE(vkCreateFramebuffer(runtime.device, &framebufferInfo, nullptr, &framebuffer) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   std::array<VkClearValue, 3> clear{};
   clear[2].depthStencil.depth = .5f;
   VkRenderPassBeginInfo render{};
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{2, 1}, {3, 2}};
+  render.renderArea = {.offset = {.x = 2, .y = 1}, .extent = {.width = 3, .height = 2}};
   render.clearValueCount = 3;
   render.pClearValues = clear.data();
   vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
@@ -2402,19 +2418,25 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
   vkCmdEndRenderPass(command);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
-  for (unsigned pixel = 0; pixel < 64; ++pixel) {
-    const auto x = pixel % 8, y = pixel / 8 % 4;
+  for (size_t pixel = 0; pixel < 64; ++pixel) {
+    const auto x = pixel % 8;
+    const auto y = pixel / 8 % 4;
     const bool changed = pixel >= 32 && x >= 2 && x < 5 && y >= 1 && y < 3;
-    uint32_t actual;
-    std::memcpy(&actual, bytes + 1536 + pixel * 4, 4);
-    const uint32_t expected = format == VK_FORMAT_R32_SFLOAT                                        ? 0x3ec00000
-                              : (format == VK_FORMAT_R8G8B8A8_UINT || format == VK_FORMAT_R32_UINT) ? 0x11111111
-                                                                                                    : 0x60606060;
+    uint32_t actual = 0;
+    std::memcpy(&actual, bytes + 1536 + (pixel * 4), 4);
+    const uint32_t expected = [&]() -> uint32_t {
+      switch (format) {
+        case VK_FORMAT_R32_SFLOAT: return 0x3ec00000;
+        case VK_FORMAT_R8G8B8A8_UINT:
+        case VK_FORMAT_R32_UINT: return 0x11111111;
+        default: return 0x60606060;
+      }
+    }();
     REQUIRE(actual == (changed ? expected : 0xa5a5a5a5));
     for (unsigned sample = 0; sample < 4; ++sample) {
       actual = 0;
-      std::memcpy(&actual, bytes + 2048 + (pixel * 4 + sample) * depthBytes, depthBytes);
-      REQUIRE(actual == (changed ? (depthBytes == 2 ? 0x8000u : 0x3f000000u) : (depthBytes == 2 ? 0xa5a5u : 0xa5a5a5a5u)));
+      std::memcpy(&actual, bytes + 2048 + (((pixel * 4) + sample) * depthBytes), depthBytes);
+      REQUIRE(actual == (changed ? (depthBytes == 2 ? 0x8000U : 0x3f000000U) : (depthBytes == 2 ? 0xa5a5U : 0xa5a5a5a5U)));
     }
   }
   for (const auto guard : {255, 1280, 1535, 1792, 2047, 3072, 4095})
@@ -2438,7 +2460,7 @@ TEST_CASE("Vulkan promoted feature queries initialise poisoned payloads and pres
         void *pNext;
         uint32_t sentinel;
       } unknown{static_cast<VkStructureType>(0x7ffffffe), nullptr, 0x12345678};
-      T payload;
+      T payload{};
       std::memset(&payload, 0xa5, sizeof(payload));
       payload.sType = type;
       payload.pNext = &unknown;
@@ -2501,7 +2523,7 @@ TEST_CASE("Vulkan promoted feature queries initialise poisoned payloads and pres
 }
 
 TEST_CASE("Vulkan sparse capability queries enumerate no records without overwriting caller storage") {
-  TestDevice runtime;
+  TestDevice const runtime;
   for (const char *name : {"vkGetPhysicalDeviceSparseImageFormatProperties", "vkGetPhysicalDeviceSparseImageFormatProperties2",
                            "vkGetImageSparseMemoryRequirements", "vkGetImageSparseMemoryRequirements2"})
     REQUIRE(vkGetInstanceProcAddr(runtime.instance, name) != nullptr);
@@ -2536,18 +2558,20 @@ TEST_CASE("Vulkan sparse capability queries enumerate no records without overwri
     count = 1;
     query(VK_NULL_HANDLE, &info, &count, &properties);
     REQUIRE(count == 0);
-    REQUIRE(std::memcmp(&properties, &expected, sizeof(properties)) == 0);
+    REQUIRE(properties.sType == expected.sType);
+    REQUIRE(properties.pNext == expected.pNext);
+    REQUIRE(std::memcmp(&properties.properties, &expected.properties, sizeof(properties.properties)) == 0);
   }
   VkImageCreateInfo create{};
   create.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   create.imageType = VK_IMAGE_TYPE_2D;
   create.format = VK_FORMAT_R8G8B8A8_UNORM;
-  create.extent = {1, 1, 1};
+  create.extent = {.width = 1, .height = 1, .depth = 1};
   create.mipLevels = create.arrayLayers = 1;
   create.samples = VK_SAMPLE_COUNT_1_BIT;
   create.tiling = VK_IMAGE_TILING_OPTIMAL;
   create.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(VK_NULL_HANDLE, &create, nullptr, &image) == VK_SUCCESS);
   VkSparseImageMemoryRequirements memory;
   std::memset(&memory, 0xa5, sizeof(memory));
@@ -2571,7 +2595,9 @@ TEST_CASE("Vulkan sparse capability queries enumerate no records without overwri
     count = 1;
     query(VK_NULL_HANDLE, &imageInfo, &count, &requirements);
     REQUIRE(count == 0);
-    REQUIRE(std::memcmp(&requirements, &expected, sizeof(requirements)) == 0);
+    REQUIRE(requirements.sType == expected.sType);
+    REQUIRE(requirements.pNext == expected.pNext);
+    REQUIRE(std::memcmp(&requirements.memoryRequirements, &expected.memoryRequirements, sizeof(requirements.memoryRequirements)) == 0);
   }
   vkDestroyImage(VK_NULL_HANDLE, image, nullptr);
 }
@@ -2610,31 +2636,40 @@ TEST_CASE("Vulkan format capabilities preserve storage and blending exclusions",
   constexpr VkFormatFeatureFlags linear = VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
   constexpr VkFormatFeatureFlags blend = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
   constexpr VkFormatFeatureFlags atomic = VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT;
-  std::vector<Case> cases{{VK_FORMAT_R8G8B8A8_UNORM, blend | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, 0},
-                          {VK_FORMAT_R8G8B8A8_SNORM, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, blend},
-                          {VK_FORMAT_R8G8B8A8_SRGB, blend, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
-                          {VK_FORMAT_B8G8R8A8_UNORM, blend, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
-                          {VK_FORMAT_R32_UINT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, blend},
-                          {VK_FORMAT_R16G16_SFLOAT, blend | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, 0},
-                          {VK_FORMAT_E5B9G9R9_UFLOAT_PACK32, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | linear,
-                           VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
-                          {VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,
-                           VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
-                          {VK_FORMAT_D32_SFLOAT, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                           VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT}};
+  std::vector<Case> cases{{.format = VK_FORMAT_R8G8B8A8_UNORM, .required = blend | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, .forbidden = 0},
+                          {.format = VK_FORMAT_R8G8B8A8_SNORM,
+                           .required = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
+                           .forbidden = blend},
+                          {.format = VK_FORMAT_R8G8B8A8_SRGB, .required = blend, .forbidden = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
+                          {.format = VK_FORMAT_B8G8R8A8_UNORM, .required = blend, .forbidden = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
+                          {.format = VK_FORMAT_R32_UINT,
+                           .required = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
+                           .forbidden = blend},
+                          {.format = VK_FORMAT_R16G16_SFLOAT, .required = blend | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, .forbidden = 0},
+                          {.format = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32,
+                           .required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | linear,
+                           .forbidden = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
+                          {.format = VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
+                           .required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,
+                           .forbidden = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
+                          {.format = VK_FORMAT_D32_SFLOAT,
+                           .required = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                           .forbidden = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT}};
   for (const auto format : {VK_FORMAT_R8_UINT, VK_FORMAT_R8_SINT, VK_FORMAT_R8G8_UINT, VK_FORMAT_R8G8_SINT, VK_FORMAT_R8G8B8A8_UINT,
                             VK_FORMAT_R8G8B8A8_SINT, VK_FORMAT_R16_UINT, VK_FORMAT_R16_SINT, VK_FORMAT_R16G16_UINT, VK_FORMAT_R16G16_SINT,
                             VK_FORMAT_R16G16B16A16_UINT, VK_FORMAT_R16G16B16A16_SINT, VK_FORMAT_R32_UINT, VK_FORMAT_R32_SINT,
                             VK_FORMAT_R32G32_UINT, VK_FORMAT_R32G32_SINT, VK_FORMAT_R32G32B32A32_UINT, VK_FORMAT_R32G32B32A32_SINT}) {
     const bool atomics = format == VK_FORMAT_R32_UINT || format == VK_FORMAT_R32_SINT;
-    cases.push_back({format, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | (atomics ? atomic : 0), linear | blend | (atomics ? 0 : atomic)});
+    cases.push_back({.format = format,
+                     .required = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | (atomics ? atomic : 0),
+                     .forbidden = linear | blend | (atomics ? 0 : atomic)});
   }
   for (const auto format :
        {VK_FORMAT_R8_UNORM, VK_FORMAT_R8G8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_B8G8R8A8_UNORM,
         VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_A8B8G8R8_UNORM_PACK32, VK_FORMAT_A8B8G8R8_SRGB_PACK32})
-    cases.push_back({format, linear | blend, 0});
+    cases.push_back({.format = format, .required = linear | blend, .forbidden = 0});
   for (const auto format : {VK_FORMAT_R8_SNORM, VK_FORMAT_R8G8_SNORM, VK_FORMAT_R8G8B8A8_SNORM, VK_FORMAT_A8B8G8R8_SNORM_PACK32})
-    cases.push_back({format, linear, blend});
+    cases.push_back({.format = format, .required = linear, .forbidden = blend});
   for (const auto &value : cases) {
     INFO("format " << value.format);
     VkFormatProperties properties{};
@@ -2706,22 +2741,18 @@ TEST_CASE("Vulkan aggregate property queries agree with individual promoted prop
 }
 
 TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused attachments", "[graphics-execution]") {
-  TestDevice runtime;
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 1024;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  TestDevice const runtime;
+  VkDeviceMemory memory = allocateMemory(runtime.device, 1024);
   std::array<VkImage, 7> images{};
   std::array<VkImageView, 7> views{};
   std::array<VkAttachmentDescription, 7> attachments{};
-  const auto multisampled = [](unsigned i) { return i == 0 || i == 3 || i == 5; };
-  for (unsigned i = 0; i < images.size(); ++i) {
+  const auto multisampled = [](size_t i) { return i == 0 || i == 3 || i == 5; };
+  for (size_t i = 0; i < images.size(); ++i) {
     VkImageCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     info.imageType = VK_IMAGE_TYPE_2D;
     info.format = VK_FORMAT_R32_SFLOAT;
-    info.extent = {2, 2, 1};
+    info.extent = {.width = 2, .height = 2, .depth = 1};
     info.mipLevels = info.arrayLayers = 1;
     info.samples = multisampled(i) ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
     info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -2732,7 +2763,8 @@ TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused
     view.image = images[i];
     view.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view.format = info.format;
-    view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    view.subresourceRange = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1};
     REQUIRE(vkCreateImageView(runtime.device, &view, nullptr, &views[i]) == VK_SUCCESS);
     attachments[i].format = info.format;
     attachments[i].samples = info.samples;
@@ -2740,17 +2772,17 @@ TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused
     attachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachments[i].initialLayout = attachments[i].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
   }
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   std::memset(mapped, 0xa5, 1024);
-  const std::array<VkAttachmentReference, 4> colours{{{3, VK_IMAGE_LAYOUT_GENERAL},
-                                                      {VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED},
-                                                      {0, VK_IMAGE_LAYOUT_GENERAL},
-                                                      {5, VK_IMAGE_LAYOUT_GENERAL}}};
-  const std::array<VkAttachmentReference, 4> resolves{{{6, VK_IMAGE_LAYOUT_GENERAL},
-                                                       {VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED},
-                                                       {1, VK_IMAGE_LAYOUT_GENERAL},
-                                                       {4, VK_IMAGE_LAYOUT_GENERAL}}};
+  const std::array<VkAttachmentReference, 4> colours{{{.attachment = 3, .layout = VK_IMAGE_LAYOUT_GENERAL},
+                                                      {.attachment = VK_ATTACHMENT_UNUSED, .layout = VK_IMAGE_LAYOUT_UNDEFINED},
+                                                      {.attachment = 0, .layout = VK_IMAGE_LAYOUT_GENERAL},
+                                                      {.attachment = 5, .layout = VK_IMAGE_LAYOUT_GENERAL}}};
+  const std::array<VkAttachmentReference, 4> resolves{{{.attachment = 6, .layout = VK_IMAGE_LAYOUT_GENERAL},
+                                                       {.attachment = VK_ATTACHMENT_UNUSED, .layout = VK_IMAGE_LAYOUT_UNDEFINED},
+                                                       {.attachment = 1, .layout = VK_IMAGE_LAYOUT_GENERAL},
+                                                       {.attachment = 4, .layout = VK_IMAGE_LAYOUT_GENERAL}}};
   VkSubpassDescription subpass{};
   subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
   subpass.colorAttachmentCount = colours.size();
@@ -2762,7 +2794,7 @@ TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused
   passInfo.pAttachments = attachments.data();
   passInfo.subpassCount = 1;
   passInfo.pSubpasses = &subpass;
-  VkRenderPass pass;
+  VkRenderPass pass = nullptr;
   REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
   VkFramebufferCreateInfo framebufferInfo{};
   framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -2771,18 +2803,18 @@ TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused
   framebufferInfo.pAttachments = views.data();
   framebufferInfo.width = framebufferInfo.height = 2;
   framebufferInfo.layers = 1;
-  VkFramebuffer framebuffer;
+  VkFramebuffer framebuffer = nullptr;
   REQUIRE(vkCreateFramebuffer(runtime.device, &framebufferInfo, nullptr, &framebuffer) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   std::array<VkClearValue, 7> clear{};
   for (unsigned i = 0; i < clear.size(); ++i)
-    clear[i].color.float32[0] = i + .5f;
+    clear[i].color.float32[0] = static_cast<float>(i) + .5f;
   VkRenderPassBeginInfo render{};
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{1, 0}, {1, 1}};
+  render.renderArea = {.offset = {.x = 1, .y = 0}, .extent = {.width = 1, .height = 1}};
   render.clearValueCount = clear.size();
   render.pClearValues = clear.data();
   vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
@@ -2791,19 +2823,20 @@ TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   const std::array<int, 7> source{{0, 0, -1, 3, 5, 5, 3}};
   const auto *bytes = static_cast<const uint8_t *>(mapped);
-  for (unsigned image = 0; image < images.size(); ++image) {
-    const unsigned samples = multisampled(image) ? 4 : 1;
+  for (size_t image = 0; image < images.size(); ++image) {
+    const size_t samples = multisampled(image) ? 4 : 1;
     for (unsigned pixel = 0; pixel < 4; ++pixel)
       for (unsigned sample = 0; sample < samples; ++sample) {
-        uint32_t actual, expected = 0xa5a5a5a5;
+        uint32_t actual = 0;
+        uint32_t expected = 0xa5a5a5a5;
         if (pixel == 1 && source[image] >= 0) {
-          const float value = source[image] + .5f;
+          const float value = static_cast<float>(source[image]) + .5f;
           std::memcpy(&expected, &value, 4);
         }
-        std::memcpy(&actual, bytes + image * 128 + (pixel * samples + sample) * 4, 4);
+        std::memcpy(&actual, bytes + (image * 128) + (((pixel * samples) + sample) * 4), 4);
         REQUIRE(actual == expected);
       }
-    REQUIRE(bytes[image * 128 + 127] == 0xa5);
+    REQUIRE(bytes[(image * 128) + 127] == 0xa5);
   }
   vkDestroyFramebuffer(runtime.device, framebuffer, nullptr);
   vkDestroyRenderPass(runtime.device, pass, nullptr);
@@ -2816,13 +2849,8 @@ TEST_CASE("Vulkan multiple colour resolves preserve slot permutations and unused
 }
 
 TEST_CASE("Vulkan texel buffer view creation validates ranges and reports executable formats") {
-  TestDevice runtime;
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 67;
-  bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  TestDevice const runtime;
+  VkBuffer buffer = createBuffer(runtime.device, 67, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT);
   for (const auto format : {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UINT, VK_FORMAT_R32_UINT, VK_FORMAT_R32_SFLOAT,
                             VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_B8G8R8A8_UNORM}) {
     VkFormatProperties properties{};
@@ -2836,7 +2864,7 @@ TEST_CASE("Vulkan texel buffer view creation validates ranges and reports execut
     info.format = format;
     info.offset = 1;
     info.range = VK_WHOLE_SIZE;
-    VkBufferView view;
+    VkBufferView view = nullptr;
     REQUIRE(vkCreateBufferView(runtime.device, &info, nullptr, &view) == VK_SUCCESS);
     vkDestroyBufferView(runtime.device, view, nullptr);
     info.range = 64;
@@ -2856,7 +2884,7 @@ TEST_CASE("Vulkan texel buffer view creation validates ranges and reports execut
 }
 
 TEST_CASE("Vulkan 1D images enforce view dimensions and preserve mip and layer boundaries", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageFormatProperties properties{};
   const auto usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   REQUIRE(vkGetPhysicalDeviceImageFormatProperties(VK_NULL_HANDLE, VK_FORMAT_R32_UINT, VK_IMAGE_TYPE_1D, VK_IMAGE_TILING_OPTIMAL, usage, 0,
@@ -2869,25 +2897,21 @@ TEST_CASE("Vulkan 1D images enforce view dimensions and preserve mip and layer b
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_1D;
   info.format = VK_FORMAT_R32_UINT;
-  info.extent = {17, 2, 1};
+  info.extent = {.width = 17, .height = 2, .depth = 1};
   info.mipLevels = 5;
   info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = usage;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_ERROR_FORMAT_NOT_SUPPORTED);
   info.extent.height = 1;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_SUCCESS);
   VkMemoryRequirements requirements{};
   vkGetImageMemoryRequirements(runtime.device, image, &requirements);
   REQUIRE(requirements.size == 256);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 320;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 320);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 0) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 320, 0xa5);
@@ -2896,23 +2920,24 @@ TEST_CASE("Vulkan 1D images enforce view dimensions and preserve mip and layer b
   viewInfo.image = image;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = info.format;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 1, 2, 1, 1};
-  VkImageView view;
+  viewInfo.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 1, .levelCount = 2, .baseArrayLayer = 1, .layerCount = 1};
+  VkImageView view = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_ERROR_FORMAT_NOT_SUPPORTED);
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_1D;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearColorValue clear{};
-  clear.uint32[0] = 0x12345678u;
+  clear.uint32[0] = 0x12345678U;
   vkCmdClearColorImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &viewInfo.subresourceRange);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   for (size_t offset = 0; offset < 320; offset += 4) {
-    uint32_t value;
+    uint32_t value = 0;
     std::memcpy(&value, bytes + offset, 4);
     const bool cleared = (offset >= 168 && offset < 200) || (offset >= 216 && offset < 232);
-    REQUIRE(value == (cleared ? 0x12345678u : 0xa5a5a5a5u));
+    REQUIRE(value == (cleared ? 0x12345678U : 0xa5a5a5a5U));
   }
   vkDestroyImageView(runtime.device, view, nullptr);
   vkDestroyImage(runtime.device, image, nullptr);
@@ -2929,7 +2954,7 @@ TEST_CASE("Vulkan image resource bounds include subresources and differ from all
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R8G8B8A8_UNORM;
-  info.extent = {16384, 16384, 1};
+  info.extent = {.width = 16384, .height = 16384, .depth = 1};
   info.arrayLayers = 2;
   info.mipLevels = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -2950,37 +2975,34 @@ TEST_CASE("Vulkan image resource bounds include subresources and differ from all
 }
 
 TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remapped slots", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const bool clearAgain = GENERATE(false, true);
-  for (auto name : {"vkCmdNextSubpass", "vkCmdNextSubpass2", "vkCreateRenderPass2", "vkCmdBeginRenderPass2", "vkCmdEndRenderPass2"})
+  for (const auto *name : {"vkCmdNextSubpass", "vkCmdNextSubpass2", "vkCreateRenderPass2", "vkCmdBeginRenderPass2", "vkCmdEndRenderPass2"})
     REQUIRE(vkGetDeviceProcAddr(runtime.device, name) != nullptr);
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = VK_IMAGE_TYPE_2D;
   imageInfo.format = VK_FORMAT_R32_UINT;
-  imageInfo.extent = {4, 3, 1};
+  imageInfo.extent = {.width = 4, .height = 3, .depth = 1};
   imageInfo.mipLevels = imageInfo.arrayLayers = 1;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &imageInfo, nullptr, &image) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocate{};
-  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocate.allocationSize = 256;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocate, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 256);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 64) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *words = static_cast<uint32_t *>(mapped);
-  std::fill(words, words + 64, 0xdeadbeefu);
+  std::fill(words, words + 64, 0xdeadbeefU);
   VkImageViewCreateInfo viewInfo{};
   viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   viewInfo.image = image;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = imageInfo.format;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  VkImageView view;
+  viewInfo.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1};
+  VkImageView view = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
   std::array<VkAttachmentDescription, 2> attachments{};
   for (auto &a : attachments) {
@@ -2991,8 +3013,9 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
     a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
   }
-  const VkAttachmentReference first{0, VK_IMAGE_LAYOUT_GENERAL};
-  const VkAttachmentReference second[]{{VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED}, {1, VK_IMAGE_LAYOUT_GENERAL}};
+  const VkAttachmentReference first{.attachment = 0, .layout = VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference second[]{{.attachment = VK_ATTACHMENT_UNUSED, .layout = VK_IMAGE_LAYOUT_UNDEFINED},
+                                       {.attachment = 1, .layout = VK_IMAGE_LAYOUT_GENERAL}};
   VkSubpassDescription subpasses[3]{};
   for (auto &subpass : subpasses)
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -3004,13 +3027,13 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
   }
   VkSubpassDependency dependencies[2]{};
   for (uint32_t i = 0; i < 2; ++i) {
-    dependencies[i] = {i,
-                       i + 1,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                       VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                       0};
+    dependencies[i] = {.srcSubpass = i,
+                       .dstSubpass = i + 1,
+                       .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                       .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                       .dependencyFlags = 0};
   }
   VkRenderPassCreateInfo passInfo{};
   passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -3020,7 +3043,7 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
   passInfo.pSubpasses = subpasses;
   passInfo.dependencyCount = 2;
   passInfo.pDependencies = dependencies;
-  VkRenderPass pass;
+  VkRenderPass pass = nullptr;
   REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
   const VkImageView views[]{view, view};
   VkFramebufferCreateInfo fb{};
@@ -3031,10 +3054,10 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
   fb.width = 4;
   fb.height = 3;
   fb.layers = 1;
-  VkFramebuffer framebuffer;
+  VkFramebuffer framebuffer = nullptr;
   REQUIRE(vkCreateFramebuffer(runtime.device, &fb, nullptr, &framebuffer) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearValue clears[2]{};
   clears[0].color.uint32[0] = 11;
   clears[1].color.uint32[0] = 37;
@@ -3042,14 +3065,14 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{1, 1}, {2, 1}};
+  render.renderArea = {.offset = {.x = 1, .y = 1}, .extent = {.width = 2, .height = 1}};
   render.clearValueCount = 2;
   render.pClearValues = clears;
   vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
   VkClearAttachment clear{};
   clear.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   clear.clearValue.color.uint32[0] = 23;
-  VkClearRect rect{render.renderArea, 0, 1};
+  VkClearRect const rect{.rect = render.renderArea, .baseArrayLayer = 0, .layerCount = 1};
   vkCmdClearAttachments(command, 1, &clear, 1, &rect);
   vkCmdNextSubpass(command, VK_SUBPASS_CONTENTS_INLINE);
   if (clearAgain) {
@@ -3062,7 +3085,7 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   for (size_t i = 0; i < 64; ++i)
-    REQUIRE(words[i] == ((i == 21 || i == 22) ? (clearAgain ? 59u : 37u) : 0xdeadbeefu));
+    REQUIRE(words[i] == ((i == 21 || i == 22) ? (clearAgain ? 59U : 37U) : 0xdeadbeefU));
   vkDestroyFramebuffer(runtime.device, framebuffer, nullptr);
   vkDestroyRenderPass(runtime.device, pass, nullptr);
   vkDestroyImageView(runtime.device, view, nullptr);
@@ -3071,46 +3094,47 @@ TEST_CASE("Vulkan subpass first-use clears preserve aliased contents and remappe
 }
 
 TEST_CASE("Vulkan mutable framebuffer views reinterpret bits at a selected mip and layer", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const bool clearAgain = false;
   const auto viewFormat = GENERATE(VK_FORMAT_R32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UINT, VK_FORMAT_B8G8R8A8_UNORM);
-  uint32_t expected = viewFormat == VK_FORMAT_R32_SFLOAT       ? 0x3fc00000u
-                      : viewFormat == VK_FORMAT_R8G8B8A8_UNORM ? 0xff804020u
-                      : viewFormat == VK_FORMAT_R8G8B8A8_UINT  ? 0x44332211u
-                                                               : 0xff204080u;
-  for (auto name : {"vkCmdNextSubpass", "vkCmdNextSubpass2", "vkCreateRenderPass2", "vkCmdBeginRenderPass2", "vkCmdEndRenderPass2"})
+  uint32_t const expected = [&] {
+    switch (viewFormat) {
+      case VK_FORMAT_R32_SFLOAT: return 0x3fc00000U;
+      case VK_FORMAT_R8G8B8A8_UNORM: return 0xff804020U;
+      case VK_FORMAT_R8G8B8A8_UINT: return 0x44332211U;
+      default: return 0xff204080U;
+    }
+  }();
+  for (const auto *name : {"vkCmdNextSubpass", "vkCmdNextSubpass2", "vkCreateRenderPass2", "vkCmdBeginRenderPass2", "vkCmdEndRenderPass2"})
     REQUIRE(vkGetDeviceProcAddr(runtime.device, name) != nullptr);
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = VK_IMAGE_TYPE_2D;
   imageInfo.format = VK_FORMAT_R32_UINT;
-  imageInfo.extent = {8, 6, 1};
+  imageInfo.extent = {.width = 8, .height = 6, .depth = 1};
   imageInfo.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
   imageInfo.mipLevels = imageInfo.arrayLayers = 2;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &imageInfo, nullptr, &image) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocate{};
-  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocate.allocationSize = 768;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocate, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 768);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 64) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *words = static_cast<uint32_t *>(mapped);
-  std::fill(words, words + 192, 0xdeadbeefu);
+  std::fill(words, words + 192, 0xdeadbeefU);
   VkImageViewCreateInfo viewInfo{};
   viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   viewInfo.image = image;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = imageInfo.format;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 1, 1};
-  VkImageView view;
+  viewInfo.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 1, .levelCount = 1, .baseArrayLayer = 1, .layerCount = 1};
+  VkImageView view = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
   viewInfo.format = viewFormat;
-  VkImageView reinterpreted;
+  VkImageView reinterpreted = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &reinterpreted) == VK_SUCCESS);
   std::array<VkAttachmentDescription, 2> attachments{};
   for (auto &a : attachments) {
@@ -3122,8 +3146,9 @@ TEST_CASE("Vulkan mutable framebuffer views reinterpret bits at a selected mip a
     a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
   }
   attachments[1].format = viewFormat;
-  const VkAttachmentReference first{0, VK_IMAGE_LAYOUT_GENERAL};
-  const VkAttachmentReference second[]{{VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED}, {1, VK_IMAGE_LAYOUT_GENERAL}};
+  const VkAttachmentReference first{.attachment = 0, .layout = VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference second[]{{.attachment = VK_ATTACHMENT_UNUSED, .layout = VK_IMAGE_LAYOUT_UNDEFINED},
+                                       {.attachment = 1, .layout = VK_IMAGE_LAYOUT_GENERAL}};
   VkSubpassDescription subpasses[3]{};
   for (auto &subpass : subpasses)
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -3135,13 +3160,13 @@ TEST_CASE("Vulkan mutable framebuffer views reinterpret bits at a selected mip a
   }
   VkSubpassDependency dependencies[2]{};
   for (uint32_t i = 0; i < 2; ++i) {
-    dependencies[i] = {i,
-                       i + 1,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                       VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                       0};
+    dependencies[i] = {.srcSubpass = i,
+                       .dstSubpass = i + 1,
+                       .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                       .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                       .dependencyFlags = 0};
   }
   VkRenderPassCreateInfo passInfo{};
   passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -3151,7 +3176,7 @@ TEST_CASE("Vulkan mutable framebuffer views reinterpret bits at a selected mip a
   passInfo.pSubpasses = subpasses;
   passInfo.dependencyCount = 2;
   passInfo.pDependencies = dependencies;
-  VkRenderPass pass;
+  VkRenderPass pass = nullptr;
   REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
   const VkImageView views[]{view, reinterpreted};
   VkFramebufferCreateInfo fb{};
@@ -3162,33 +3187,33 @@ TEST_CASE("Vulkan mutable framebuffer views reinterpret bits at a selected mip a
   fb.width = 4;
   fb.height = 3;
   fb.layers = 1;
-  VkFramebuffer framebuffer;
+  VkFramebuffer framebuffer = nullptr;
   REQUIRE(vkCreateFramebuffer(runtime.device, &fb, nullptr, &framebuffer) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearValue clears[2]{};
   clears[0].color.uint32[0] = 11;
   if (viewFormat == VK_FORMAT_R8G8B8A8_UINT) {
     for (unsigned i = 0; i < 4; ++i)
       clears[1].color.uint32[i] = (i + 1) * 17;
   } else {
-    clears[1].color.float32[0] = viewFormat == VK_FORMAT_R32_SFLOAT ? 1.5f : .125f;
+    clears[1].color.float32[0] = viewFormat == VK_FORMAT_R32_SFLOAT ? 1.5F : .125f;
     clears[1].color.float32[1] = .25f;
     clears[1].color.float32[2] = .5f;
-    clears[1].color.float32[3] = 1.f;
+    clears[1].color.float32[3] = 1.F;
   }
   VkRenderPassBeginInfo render{};
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{1, 1}, {2, 1}};
+  render.renderArea = {.offset = {.x = 1, .y = 1}, .extent = {.width = 2, .height = 1}};
   render.clearValueCount = 2;
   render.pClearValues = clears;
   vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
   VkClearAttachment clear{};
   clear.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   clear.clearValue.color.uint32[0] = 23;
-  VkClearRect rect{render.renderArea, 0, 1};
+  VkClearRect const rect{.rect = render.renderArea, .baseArrayLayer = 0, .layerCount = 1};
   vkCmdClearAttachments(command, 1, &clear, 1, &rect);
   vkCmdNextSubpass(command, VK_SUBPASS_CONTENTS_INLINE);
   if (clearAgain) {
@@ -3201,7 +3226,7 @@ TEST_CASE("Vulkan mutable framebuffer views reinterpret bits at a selected mip a
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   for (size_t i = 0; i < 192; ++i)
-    REQUIRE(words[i] == ((i == 129 || i == 130) ? expected : 0xdeadbeefu));
+    REQUIRE(words[i] == ((i == 129 || i == 130) ? expected : 0xdeadbeefU));
   vkDestroyFramebuffer(runtime.device, framebuffer, nullptr);
   vkDestroyRenderPass(runtime.device, pass, nullptr);
   vkDestroyImageView(runtime.device, reinterpreted, nullptr);
@@ -3219,7 +3244,7 @@ TEST_CASE("Vulkan mutable views enforce compatibility and own their format list"
   imageInfo.flags = mutableFormat ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT : 0;
   imageInfo.imageType = VK_IMAGE_TYPE_2D;
   imageInfo.format = imageFormat;
-  imageInfo.extent = {4, 4, 1};
+  imageInfo.extent = {.width = 4, .height = 4, .depth = 1};
   imageInfo.mipLevels = imageInfo.arrayLayers = 1;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -3229,7 +3254,7 @@ TEST_CASE("Vulkan mutable views enforce compatibility and own their format list"
   list.viewFormatCount = 1;
   list.pViewFormats = &permitted;
   imageInfo.pNext = formatList ? &list : nullptr;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(VK_NULL_HANDLE, &imageInfo, nullptr, &image) == VK_SUCCESS);
   permitted = VK_FORMAT_R32_SFLOAT; // The runtime owns the original list.
   for (auto format : {imageFormat, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R8G8B8A8_UINT}) {
@@ -3238,7 +3263,11 @@ TEST_CASE("Vulkan mutable views enforce compatibility and own their format list"
     info.image = image;
     info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     info.format = format;
-    info.subresourceRange = {format == VK_FORMAT_D32_SFLOAT ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    info.subresourceRange = {.aspectMask = format == VK_FORMAT_D32_SFLOAT ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                             .baseMipLevel = 0,
+                             .levelCount = 1,
+                             .baseArrayLayer = 0,
+                             .layerCount = 1};
     VkImageView view = VK_NULL_HANDLE;
     const bool valid =
         format == imageFormat || (mutableFormat && !formatList && imageFormat == VK_FORMAT_R32_UINT && format != VK_FORMAT_R32G32_SFLOAT);
@@ -3276,61 +3305,58 @@ TEST_CASE("Vulkan image queries distinguish cube sample counts and extended view
 }
 
 TEST_CASE("Vulkan depth blits preserve bits across scaled reversed mip and layer regions", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT);
   const size_t stride = format == VK_FORMAT_D16_UNORM ? 2 : 4;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = format;
-  info.extent = {4, 3, 1};
+  info.extent = {.width = 4, .height = 3, .depth = 1};
   info.mipLevels = info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   VkImage images[2]{};
   for (auto &image : images)
     REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocate{};
-  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocate.allocationSize = 384;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocate, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 384);
   REQUIRE(vkBindImageMemory(runtime.device, images[0], memory, 64) == VK_SUCCESS);
   REQUIRE(vkBindImageMemory(runtime.device, images[1], memory, 192) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 384, 0xa5);
-  const uint32_t values[]{format == VK_FORMAT_D16_UNORM ? 0x1234u : 0x3e800000u, format == VK_FORMAT_D16_UNORM ? 0xfedcu : 0x3f400000u};
-  const size_t sourceOffset = 64 + 26 * stride;
+  const uint32_t values[]{format == VK_FORMAT_D16_UNORM ? 0x1234U : 0x3e800000U, format == VK_FORMAT_D16_UNORM ? 0xfedcU : 0x3f400000U};
+  const size_t sourceOffset = 64 + (26 * stride);
   for (size_t x = 0; x < 2; ++x)
-    std::memcpy(bytes + sourceOffset + x * stride, values + x, stride);
+    std::memcpy(bytes + sourceOffset + (x * stride), values + x, stride);
   std::vector<uint8_t> expected(bytes, bytes + 384);
   for (size_t y = 0; y < 3; ++y)
     for (size_t x = 0; x < 4; ++x)
-      std::memcpy(expected.data() + 192 + (12 + y * 4 + x) * stride, values + (x < 2 ? 1 : 0), stride);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+      std::memcpy(expected.data() + 192 + ((12 + (y * 4) + x) * stride), values + (x < 2 ? 1 : 0), stride);
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkImageBlit region{};
-  region.srcSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1, 1};
-  region.srcOffsets[1] = {2, 1, 1};
-  region.dstSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 1};
-  region.dstOffsets[0] = {4, 3, 0};
-  region.dstOffsets[1] = {0, 0, 1};
+  region.srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .mipLevel = 1, .baseArrayLayer = 1, .layerCount = 1};
+  region.srcOffsets[1] = {.x = 2, .y = 1, .z = 1};
+  region.dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .mipLevel = 0, .baseArrayLayer = 1, .layerCount = 1};
+  region.dstOffsets[0] = {.x = 4, .y = 3, .z = 0};
+  region.dstOffsets[1] = {.x = 0, .y = 0, .z = 1};
   vkCmdBlitImage(command, images[0], VK_IMAGE_LAYOUT_GENERAL, images[1], VK_IMAGE_LAYOUT_GENERAL, 1, &region, VK_FILTER_NEAREST);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   REQUIRE(std::equal(expected.begin(), expected.end(), bytes));
-  for (auto image : images)
+  for (auto *image : images)
     vkDestroyImage(runtime.device, image, nullptr);
   vkFreeMemory(runtime.device, memory, nullptr);
 }
 
 TEST_CASE("Vulkan empty pipeline caches serialise a bounded compatible header and merge") {
-  TestDevice device;
+  TestDevice const device;
   VkPipelineCacheCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-  VkPipelineCache cache{}, restored{};
+  VkPipelineCache cache{};
+  VkPipelineCache restored{};
   REQUIRE(vkCreatePipelineCache(device.device, &info, nullptr, &cache) == VK_SUCCESS);
   REQUIRE(vkGetDeviceProcAddr(device.device, "vkMergePipelineCaches") != nullptr);
   size_t size = 0;
@@ -3341,13 +3367,13 @@ TEST_CASE("Vulkan empty pipeline caches serialise a bounded compatible header an
     bytes.fill(0xa5);
     size = capacity;
     REQUIRE(vkGetPipelineCacheData(device.device, cache, &size, bytes.data()) == (capacity < 32 ? VK_INCOMPLETE : VK_SUCCESS));
-    REQUIRE(size == (capacity < 32 ? 0 : 32));
+    REQUIRE(std::cmp_equal(size, (capacity < 32 ? 0 : 32)));
     for (size_t i = size; i < bytes.size(); ++i)
       REQUIRE(bytes[i] == 0xa5);
   }
   const auto word = [&](size_t offset) {
-    return uint32_t(bytes[offset]) | (uint32_t(bytes[offset + 1]) << 8) | (uint32_t(bytes[offset + 2]) << 16)
-           | (uint32_t(bytes[offset + 3]) << 24);
+    return static_cast<uint32_t>(bytes[offset]) | (static_cast<uint32_t>(bytes[offset + 1]) << 8)
+           | (static_cast<uint32_t>(bytes[offset + 2]) << 16) | (static_cast<uint32_t>(bytes[offset + 3]) << 24);
   };
   uint32_t count = 1;
   VkPhysicalDevice physical{};
@@ -3373,10 +3399,11 @@ TEST_CASE("Vulkan empty pipeline caches serialise a bounded compatible header an
 
 TEST_CASE("Vulkan rasteriser discard invokes vertices without Position or ignored fragment state", "[graphics-execution]") {
   TestDevice runtime;
-  DiscardPipeline pipeline(runtime);
+  const DiscardPipeline pipeline(runtime);
   const bool secondary = GENERATE(false, true);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command, child = recording.secondary();
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
+  auto *const child = recording.secondary();
   VkQueryPoolCreateInfo queryInfo{};
   queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   queryInfo.queryType = VK_QUERY_TYPE_OCCLUSION;
@@ -3397,7 +3424,7 @@ TEST_CASE("Vulkan rasteriser discard invokes vertices without Position or ignore
     REQUIRE(vkBeginCommandBuffer(child, &childBegin) == VK_SUCCESS);
     vkCmdBindPipeline(child, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
   }
-  const auto draw = secondary ? child : command;
+  auto *const draw = secondary ? child : command;
   vkCmdBeginQuery(draw, query, 0, 0);
   vkCmdDraw(draw, 6, 2, 0, 0);
   vkCmdEndQuery(draw, query, 0);
@@ -3416,7 +3443,7 @@ TEST_CASE("Vulkan rasteriser discard invokes vertices without Position or ignore
 }
 
 TEST_CASE("Vulkan occlusion query availability and partial results remain independent across queues") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkQueryPoolCreateInfo queryInfo{};
   queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   queryInfo.queryType = VK_QUERY_TYPE_OCCLUSION;
@@ -3427,7 +3454,8 @@ TEST_CASE("Vulkan occlusion query availability and partial results remain indepe
   REQUIRE(vkGetDeviceProcAddr(runtime.device, "vkCmdEndQuery") != nullptr);
   VkEventCreateInfo eventInfo{};
   eventInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-  VkEvent entered{}, release{};
+  VkEvent entered{};
+  VkEvent release{};
   REQUIRE(vkCreateEvent(runtime.device, &eventInfo, nullptr, &entered) == VK_SUCCESS);
   REQUIRE(vkCreateEvent(runtime.device, &eventInfo, nullptr, &release) == VK_SUCCESS);
   const VkCommandBuffer commands[]{reinterpret_cast<VkCommandBuffer>(0x5200), reinterpret_cast<VkCommandBuffer>(0x5201)};
@@ -3491,74 +3519,69 @@ TEST_CASE("Vulkan occlusion query availability and partial results remain indepe
 }
 
 TEST_CASE("Vulkan stencil clears and padded copies preserve depth and neighbouring layers", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT);
-  const uint32_t width = 1;
-  const uint32_t imageStride = format == VK_FORMAT_S8_UINT ? 1 : 8;
+  const size_t width = 1;
+  const size_t imageStride = format == VK_FORMAT_S8_UINT ? 1 : 8;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = format;
-  info.extent = {4, 3, 1};
+  info.extent = {.width = 4, .height = 3, .depth = 1};
   info.mipLevels = 1;
   info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_SUCCESS);
   VkMemoryRequirements requirements{};
   vkGetImageMemoryRequirements(runtime.device, image, &requirements);
   REQUIRE(requirements.size == 24 * imageStride);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 320;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 320);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 64) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 64;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer;
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, 64, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 320, 0xa5);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
-  VkClearDepthStencilValue clear{0.5f, 0x12345678};
-  VkImageSubresourceRange range{VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 1, VK_REMAINING_ARRAY_LAYERS};
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
+  VkClearDepthStencilValue clear{.depth = 0.5F, .stencil = 0x12345678};
+  VkImageSubresourceRange const range{.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
+                                      .baseMipLevel = 0,
+                                      .levelCount = 1,
+                                      .baseArrayLayer = 1,
+                                      .layerCount = VK_REMAINING_ARRAY_LAYERS};
   vkCmdClearDepthStencilImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
   clear.stencil = 0;
   VkBufferImageCopy copy{};
   copy.bufferOffset = 4;
   copy.bufferRowLength = 4;
   copy.bufferImageHeight = 3;
-  copy.imageSubresource = {VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 1};
-  copy.imageOffset = {1, 1, 0};
-  copy.imageExtent = {2, 2, 1};
+  copy.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT, .mipLevel = 0, .baseArrayLayer = 1, .layerCount = 1};
+  copy.imageOffset = {.x = 1, .y = 1, .z = 0};
+  copy.imageExtent = {.width = 2, .height = 2, .depth = 1};
   vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_GENERAL, buffer, 1, &copy);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
-  const uint32_t expected = 0x78u;
+  const uint32_t expected = 0x78U;
   for (uint32_t row = 0; row < 2; ++row)
     for (uint32_t col = 0; col < 2; ++col) {
       uint32_t word = 0;
-      std::memcpy(&word, bytes + 4 + (row * 4 + col) * width, width);
+      std::memcpy(&word, bytes + 4 + (((row * 4) + col) * width), width);
       REQUIRE(word == expected);
     }
   REQUIRE(bytes[3] == 0xa5);
-  REQUIRE(bytes[4 + 2 * width] == 0xa5);
+  REQUIRE(bytes[4 + (2 * width)] == 0xa5);
   REQUIRE(bytes[63] == 0xa5);
   REQUIRE(bytes[64] == 0xa5);
-  REQUIRE(bytes[64 + 12 * imageStride - 1] == 0xa5);
-  REQUIRE(bytes[64 + 24 * imageStride] == 0xa5);
+  REQUIRE(bytes[64 + (12 * imageStride) - 1] == 0xa5);
+  REQUIRE(bytes[64 + (24 * imageStride)] == 0xa5);
   if (format == VK_FORMAT_D32_SFLOAT_S8_UINT)
     for (uint32_t pixel = 0; pixel < 24; ++pixel)
       for (uint32_t byte = 0; byte < 8; ++byte)
-        if (byte != 4) REQUIRE(bytes[64 + pixel * 8 + byte] == 0xa5);
+        if (byte != 4) REQUIRE(bytes[64 + (pixel * 8) + byte] == 0xa5);
   vkDestroyBuffer(runtime.device, buffer, nullptr);
   vkDestroyImage(runtime.device, image, nullptr);
   vkUnmapMemory(runtime.device, memory);
@@ -3570,23 +3593,24 @@ TEST_CASE("Vulkan cube views validate six-face groups and preserve mip and layer
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R8G8B8A8_UNORM;
-  info.extent = {8, 8, 1};
+  info.extent = {.width = 8, .height = 8, .depth = 1};
   info.mipLevels = 4;
   info.arrayLayers = 18;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
   const bool compatible = GENERATE(false, true);
   info.flags = compatible ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(VK_NULL_HANDLE, &info, nullptr, &image) == VK_SUCCESS);
   VkImageViewCreateInfo view{};
   view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   view.image = image;
   view.format = info.format;
-  view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 1, 2, 0, 6};
+  view.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 1, .levelCount = 2, .baseArrayLayer = 0, .layerCount = 6};
   for (const auto type : {VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY})
-    for (uint32_t base : {0u, 1u, 6u, 13u})
-      for (uint32_t count : {1u, 5u, 6u, 7u, 12u, VK_REMAINING_ARRAY_LAYERS}) {
+    for (uint32_t const base : {0U, 1U, 6U, 13U})
+      for (uint32_t const count : {1U, 5U, 6U, 7U, 12U, VK_REMAINING_ARRAY_LAYERS}) {
         view.viewType = type;
         view.subresourceRange.baseArrayLayer = base;
         view.subresourceRange.layerCount = count;
@@ -3601,15 +3625,13 @@ TEST_CASE("Vulkan cube views validate six-face groups and preserve mip and layer
 
 TEST_CASE("Vulkan indirect draws accept the mandatory draw count with padded command strides", "[graphics-execution]") {
   TestDevice runtime;
-  DiscardPipeline pipeline(runtime);
+  const DiscardPipeline pipeline(runtime);
   const bool indexed = GENERATE(false, true);
-  constexpr uint32_t count = 65535, stride = 32;
-  constexpr VkDeviceSize prefix = 16, bytes = prefix + uint64_t{count} * stride;
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = bytes;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  constexpr uint32_t count = 65535;
+  constexpr uint32_t stride = 32;
+  constexpr VkDeviceSize prefix = 16;
+  constexpr VkDeviceSize bytes = prefix + (uint64_t{count} * stride);
+  VkDeviceMemory memory = allocateMemory(runtime.device, bytes);
   void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, bytes, 0, &mapped) == VK_SUCCESS);
   std::memset(mapped, 0, bytes);
@@ -3617,17 +3639,13 @@ TEST_CASE("Vulkan indirect draws accept the mandatory draw count with padded com
   // stride padding must not be interpreted as commands.
   for (uint32_t i = 0; i < count; ++i) {
     const uint32_t one = 1;
-    std::memcpy(static_cast<uint8_t *>(mapped) + prefix + uint64_t{i} * stride + 4, &one, 4);
+    std::memcpy(static_cast<uint8_t *>(mapped) + prefix + (uint64_t{i} * stride) + 4, &one, 4);
   }
-  VkBufferCreateInfo info{};
-  info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  info.size = bytes;
-  info.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-  VkBuffer buffer = VK_NULL_HANDLE;
-  REQUIRE(vkCreateBuffer(runtime.device, &info, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, bytes,
+                                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   pipeline.begin(command);
   if (indexed) vkCmdBindIndexBuffer(command, buffer, 0, VK_INDEX_TYPE_UINT16);
   if (indexed) vkCmdDrawIndexedIndirect(command, buffer, prefix, count, stride);
@@ -3644,12 +3662,12 @@ TEST_CASE("Vulkan indirect draws accept the mandatory draw count with padded com
 
 TEST_CASE("Vulkan volume mip layouts, padded transfers, partial copies and flipped blits preserve neighbouring slices",
           "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_3D;
   info.format = VK_FORMAT_R32_SFLOAT;
-  info.extent = {5, 3, 4};
+  info.extent = {.width = 5, .height = 3, .depth = 4};
   info.mipLevels = 3;
   info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -3671,118 +3689,120 @@ TEST_CASE("Vulkan volume mip layouts, padded transfers, partial copies and flipp
   vkGetImageMemoryRequirements(runtime.device, images[0], &requirements);
   REQUIRE(requirements.size == (60 + 4 + 1) * sizeof(float));
   for (uint32_t mip = 0; mip < 3; ++mip) {
-    VkImageSubresource subresource{VK_IMAGE_ASPECT_COLOR_BIT, mip, 0};
+    VkImageSubresource const subresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = mip, .arrayLayer = 0};
     VkSubresourceLayout layout{};
     vkGetImageSubresourceLayout(runtime.device, images[0], &subresource, &layout);
-    const uint32_t width = std::max(1u, 5u >> mip), height = std::max(1u, 3u >> mip), depth = std::max(1u, 4u >> mip);
+    const VkDeviceSize width = std::max(1U, 5U >> mip);
+    const VkDeviceSize height = std::max(1U, 3U >> mip);
+    const VkDeviceSize depth = std::max(1U, 4U >> mip);
     REQUIRE(layout.rowPitch == width * 4);
     REQUIRE(layout.depthPitch == width * height * 4);
     REQUIRE(layout.size == width * height * depth * 4);
-    REQUIRE(layout.offset == (mip == 0 ? 0 : mip == 1 ? 240 : 256));
+    REQUIRE(std::cmp_equal(layout.offset, (mip == 0 ? 0 : mip == 1 ? 240 : 256)));
   }
   VkImageViewCreateInfo view{};
   view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   view.image = images[0];
   view.format = info.format;
   view.viewType = VK_IMAGE_VIEW_TYPE_3D;
-  view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 1, VK_REMAINING_MIP_LEVELS, 0, 1};
+  view.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                           .baseMipLevel = 1,
+                           .levelCount = VK_REMAINING_MIP_LEVELS,
+                           .baseArrayLayer = 0,
+                           .layerCount = 1};
   VkImageView handle{};
   REQUIRE(vkCreateImageView(runtime.device, &view, nullptr, &handle) == VK_SUCCESS);
   vkDestroyImageView(runtime.device, handle, nullptr);
   view.viewType = VK_IMAGE_VIEW_TYPE_2D;
   REQUIRE(vkCreateImageView(runtime.device, &view, nullptr, &handle) == VK_ERROR_FORMAT_NOT_SUPPORTED);
-  VkMemoryAllocateInfo allocate{};
-  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocate.allocationSize = 4096;
-  VkDeviceMemory memory{};
-  REQUIRE(vkAllocateMemory(runtime.device, &allocate, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 4096);
   REQUIRE(vkBindImageMemory(runtime.device, images[0], memory, 64) == VK_SUCCESS);
   REQUIRE(vkBindImageMemory(runtime.device, images[1], memory, 512) == VK_SUCCESS);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 2048;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer{};
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+  VkBuffer buffer = createBuffer(runtime.device, 2048, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 1024) == VK_SUCCESS);
   void *mapped{};
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 4096, 0xa5);
-  for (uint32_t i = 0; i < 64; ++i) {
+  for (size_t i = 0; i < 64; ++i) {
     const float value = static_cast<float>(i);
-    std::memcpy(bytes + 1024 + i * 4, &value, 4);
+    std::memcpy(bytes + 1024 + (i * 4), &value, 4);
   }
   std::vector<uint8_t> expected(bytes, bytes + 4096);
   const auto set = [&](size_t offset, float value) { std::memcpy(expected.data() + offset, &value, 4); };
-  for (auto offset : {64u, 512u})
+  for (auto offset : {64U, 512U})
     for (uint32_t i = 0; i < 65; ++i)
-      set(offset + i * 4, -1.f);
+      set(offset + (i * 4), -1.F);
   // Two planes of a subvolume, with four-texel rows and three-row planes in the buffer.
   for (uint32_t z = 0; z < 2; ++z)
     for (uint32_t y = 0; y < 2; ++y)
       for (uint32_t x = 0; x < 2; ++x)
-        set(64 + (((z + 1) * 3 + y + 1) * 5 + x + 1) * 4, static_cast<float>(z * 12 + y * 4 + x));
+        set(64 + ((((((z + 1) * 3) + y + 1) * 5) + x + 1) * 4), static_cast<float>((z * 12) + (y * 4) + x));
   // Copy to the other image at a different Z offset.
   for (uint32_t z = 0; z < 2; ++z)
     for (uint32_t y = 0; y < 2; ++y)
       for (uint32_t x = 0; x < 2; ++x)
-        set(512 + ((z * 3 + y) * 5 + x) * 4, static_cast<float>(z * 12 + y * 4 + x));
+        set(512 + (((((z * 3) + y) * 5) + x) * 4), static_cast<float>((z * 12) + (y * 4) + x));
   // Flip Z while reducing XY to the two-texel-wide, two-slice mip.
   for (uint32_t z = 0; z < 2; ++z)
     for (uint32_t x = 0; x < 2; ++x)
-      set(512 + 240 + (z * 2 + x) * 4, static_cast<float>((1 - z) * 12 + 4 + x));
+      set(512 + 240 + (((z * 2) + x) * 4), static_cast<float>(((1 - z) * 12) + 4 + x));
   for (uint32_t z = 0; z < 2; ++z)
     for (uint32_t y = 0; y < 2; ++y)
       for (uint32_t x = 0; x < 2; ++x)
-        set(1024 + 512 + (z * 15 + y * 5 + x) * 4, static_cast<float>(z * 12 + y * 4 + x));
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+        set(1024 + 512 + (((z * 15) + (y * 5) + x) * 4), static_cast<float>((z * 12) + (y * 4) + x));
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkClearColorValue clear{};
-  clear.float32[0] = -1.f;
-  VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1};
-  for (auto image : images)
+  clear.float32[0] = -1.F;
+  VkImageSubresourceRange const range{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                      .baseMipLevel = 0,
+                                      .levelCount = VK_REMAINING_MIP_LEVELS,
+                                      .baseArrayLayer = 0,
+                                      .layerCount = 1};
+  for (auto *image : images)
     vkCmdClearColorImage(command, image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
   VkBufferImageCopy upload{};
   upload.bufferRowLength = 4;
   upload.bufferImageHeight = 3;
-  upload.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  upload.imageOffset = {1, 1, 1};
-  upload.imageExtent = {2, 2, 2};
+  upload.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1};
+  upload.imageOffset = {.x = 1, .y = 1, .z = 1};
+  upload.imageExtent = {.width = 2, .height = 2, .depth = 2};
   vkCmdCopyBufferToImage(command, buffer, images[0], VK_IMAGE_LAYOUT_GENERAL, 1, &upload);
   VkImageCopy copy{};
-  copy.srcSubresource = copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  copy.srcOffset = {1, 1, 1};
-  copy.extent = {2, 2, 2};
+  copy.srcSubresource =
+      copy.dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1};
+  copy.srcOffset = {.x = 1, .y = 1, .z = 1};
+  copy.extent = {.width = 2, .height = 2, .depth = 2};
   vkCmdCopyImage(command, images[0], VK_IMAGE_LAYOUT_GENERAL, images[1], VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
   VkImageBlit blit{};
-  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  blit.srcOffsets[0] = {1, 1, 3};
-  blit.srcOffsets[1] = {3, 3, 1};
-  blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 1, 0, 1};
-  blit.dstOffsets[1] = {2, 1, 2};
+  blit.srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1};
+  blit.srcOffsets[0] = {.x = 1, .y = 1, .z = 3};
+  blit.srcOffsets[1] = {.x = 3, .y = 3, .z = 1};
+  blit.dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 1, .baseArrayLayer = 0, .layerCount = 1};
+  blit.dstOffsets[1] = {.x = 2, .y = 1, .z = 2};
   vkCmdBlitImage(command, images[0], VK_IMAGE_LAYOUT_GENERAL, images[1], VK_IMAGE_LAYOUT_GENERAL, 1, &blit, VK_FILTER_NEAREST);
   VkBufferImageCopy download = upload;
   download.bufferOffset = 512;
   download.bufferRowLength = 5;
-  download.imageOffset = {0, 0, 0};
+  download.imageOffset = {.x = 0, .y = 0, .z = 0};
   vkCmdCopyImageToBuffer(command, images[1], VK_IMAGE_LAYOUT_GENERAL, buffer, 1, &download);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   REQUIRE(std::equal(expected.begin(), expected.end(), bytes));
   vkDestroyBuffer(runtime.device, buffer, nullptr);
-  for (auto image : images)
+  for (auto *image : images)
     vkDestroyImage(runtime.device, image, nullptr);
   vkFreeMemory(runtime.device, memory, nullptr);
 }
 
 TEST_CASE("Vulkan compressed mip storage and padded block transfers preserve edge blocks, arrays and guards", "[graphics-execution]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK;
-  info.extent = {7, 5, 1};
+  info.extent = {.width = 7, .height = 5, .depth = 1};
   info.mipLevels = 3;
   info.arrayLayers = 2;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -3794,7 +3814,7 @@ TEST_CASE("Vulkan compressed mip storage and padded block transfers preserve edg
   VkMemoryRequirements requirement{};
   vkGetImageMemoryRequirements(runtime.device, images[0], &requirement);
   REQUIRE(requirement.size == 96);
-  VkImageSubresource subresource{VK_IMAGE_ASPECT_COLOR_BIT, 1, 1};
+  VkImageSubresource const subresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 1, .arrayLayer = 1};
   VkSubresourceLayout layout{};
   vkGetImageSubresourceLayout(runtime.device, images[0], &subresource, &layout);
   REQUIRE(layout.offset == 72);
@@ -3805,50 +3825,41 @@ TEST_CASE("Vulkan compressed mip storage and padded block transfers preserve edg
     REQUIRE(vkGetPhysicalDeviceImageFormatProperties(VK_NULL_HANDLE, info.format, info.imageType, info.tiling, usage, 0, &properties)
             == VK_ERROR_FORMAT_NOT_SUPPORTED);
   }
-  VkMemoryAllocateInfo allocate{};
-  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocate.allocationSize = 2048;
-  VkDeviceMemory memory{};
-  REQUIRE(vkAllocateMemory(runtime.device, &allocate, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 2048);
   void *mapped{};
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill(bytes, bytes + 2048, 0xa5);
   for (unsigned i = 0; i < 256; ++i)
-    bytes[i] = static_cast<uint8_t>(i * 19 + 7);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 1024;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer buffer{};
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
+    bytes[i] = static_cast<uint8_t>((i * 19) + 7);
+  VkBuffer buffer = createBuffer(runtime.device, 1024, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, buffer, memory, 0) == VK_SUCCESS);
   for (unsigned i = 0; i < 2; ++i)
-    REQUIRE(vkBindImageMemory(runtime.device, images[i], memory, 1024 + i * 128) == VK_SUCCESS);
+    REQUIRE(vkBindImageMemory(runtime.device, images[i], memory, 1024 + (i * 128)) == VK_SUCCESS);
   std::vector<uint8_t> expected(bytes, bytes + 2048);
-  for (unsigned layer = 0; layer < 2; ++layer) {
-    for (unsigned row = 0; row < 2; ++row) {
-      std::memcpy(expected.data() + 1024 + layer * 32 + row * 16, bytes + layer * 48 + row * 24, 16);
-      std::memcpy(expected.data() + 1152 + layer * 32 + row * 16, bytes + layer * 48 + row * 24, 16);
-      std::memcpy(expected.data() + 1152 + layer * 32 + row * 16, bytes + layer * 48 + row * 24 + 8, 8);
-      std::memcpy(expected.data() + 512 + layer * 48 + row * 24, expected.data() + 1152 + layer * 32 + row * 16, 16);
+  for (size_t layer = 0; layer < 2; ++layer) {
+    for (size_t row = 0; row < 2; ++row) {
+      std::memcpy(expected.data() + 1024 + (layer * 32) + (row * 16), bytes + (layer * 48) + (row * 24), 16);
+      std::memcpy(expected.data() + 1152 + (layer * 32) + (row * 16), bytes + (layer * 48) + (row * 24), 16);
+      std::memcpy(expected.data() + 1152 + (layer * 32) + (row * 16), bytes + (layer * 48) + (row * 24) + 8, 8);
+      std::memcpy(expected.data() + 512 + (layer * 48) + (row * 24), expected.data() + 1152 + (layer * 32) + (row * 16), 16);
     }
-    std::memcpy(expected.data() + 1024 + 64 + layer * 8, bytes + 192 + layer * 8, 8);
-    std::memcpy(expected.data() + 1152 + 64 + layer * 8, bytes + 192 + layer * 8, 8);
+    std::memcpy(expected.data() + 1024 + 64 + (layer * 8), bytes + 192 + (layer * 8), 8);
+    std::memcpy(expected.data() + 1152 + 64 + (layer * 8), bytes + 192 + (layer * 8), 8);
   }
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkBufferImageCopy upload{};
   upload.bufferRowLength = 12;
   upload.bufferImageHeight = 8;
-  upload.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
-  upload.imageExtent = {7, 5, 1};
+  upload.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 2};
+  upload.imageExtent = {.width = 7, .height = 5, .depth = 1};
   vkCmdCopyBufferToImage(command, buffer, images[0], VK_IMAGE_LAYOUT_GENERAL, 1, &upload);
   auto mip = upload;
   mip.bufferRowLength = mip.bufferImageHeight = 0;
   mip.bufferOffset = 192;
   mip.imageSubresource.mipLevel = 1;
-  mip.imageExtent = {3, 2, 1};
+  mip.imageExtent = {.width = 3, .height = 2, .depth = 1};
   vkCmdCopyBufferToImage(command, buffer, images[0], VK_IMAGE_LAYOUT_GENERAL, 1, &mip);
   VkImageCopy copies[3]{};
   copies[0].srcSubresource = copies[0].dstSubresource = upload.imageSubresource;
@@ -3865,42 +3876,39 @@ TEST_CASE("Vulkan compressed mip storage and padded block transfers preserve edg
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   REQUIRE(std::equal(expected.begin(), expected.end(), bytes));
   vkDestroyBuffer(runtime.device, buffer, nullptr);
-  for (auto image : images)
+  for (auto *image : images)
     vkDestroyImage(runtime.device, image, nullptr);
   vkFreeMemory(runtime.device, memory, nullptr);
 }
 
 TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers and previous subpass writes", "[graphics-execution]") {
   const bool imageless = GENERATE(false, true);
-  TestDevice runtime;
+  TestDevice const runtime;
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R32_UINT;
-  info.extent = {2, 2, 1};
+  info.extent = {.width = 2, .height = 2, .depth = 1};
   info.mipLevels = 1;
   info.arrayLayers = 6;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-  VkImage image;
+  VkImage image = nullptr;
   REQUIRE(vkCreateImage(runtime.device, &info, nullptr, &image) == VK_SUCCESS);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 256;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
+  VkDeviceMemory memory = allocateMemory(runtime.device, 256);
   REQUIRE(vkBindImageMemory(runtime.device, image, memory, 64) == VK_SUCCESS);
-  void *mapped;
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *words = static_cast<uint32_t *>(mapped);
-  std::fill_n(words, 64, 0xdeadbeefu);
+  std::fill_n(words, 64, 0xdeadbeefU);
   VkImageViewCreateInfo viewInfo{};
   viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   viewInfo.image = image;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   viewInfo.format = info.format;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1, 4};
-  VkImageView view;
+  viewInfo.subresourceRange = {
+      .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 1, .layerCount = 4};
+  VkImageView view = nullptr;
   REQUIRE(vkCreateImageView(runtime.device, &viewInfo, nullptr, &view) == VK_SUCCESS);
   VkAttachmentDescription attachment{};
   attachment.format = info.format;
@@ -3908,7 +3916,7 @@ TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers an
   attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   attachment.initialLayout = attachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-  const VkAttachmentReference reference{0, VK_IMAGE_LAYOUT_GENERAL};
+  const VkAttachmentReference reference{.attachment = 0, .layout = VK_IMAGE_LAYOUT_GENERAL};
   std::array<VkSubpassDescription, 3> subpasses{};
   for (auto &subpass : subpasses) {
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -3927,7 +3935,7 @@ TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers an
   passInfo.pAttachments = &attachment;
   passInfo.subpassCount = 3;
   passInfo.pSubpasses = subpasses.data();
-  VkRenderPass pass;
+  VkRenderPass pass = nullptr;
   REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
   VkFramebufferCreateInfo fb{};
   fb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -3952,16 +3960,16 @@ TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers an
     fb.pNext = &attachmentInfos;
     fb.pAttachments = nullptr;
   }
-  VkFramebuffer framebuffer;
+  VkFramebuffer framebuffer = nullptr;
   REQUIRE(vkCreateFramebuffer(runtime.device, &fb, nullptr, &framebuffer) == VK_SUCCESS);
   VkQueryPoolCreateInfo queryInfo{};
   queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
   queryInfo.queryCount = 4;
-  VkQueryPool query;
+  VkQueryPool query = nullptr;
   REQUIRE(vkCreateQueryPool(runtime.device, &queryInfo, nullptr, &query) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   vkCmdResetQueryPool(command, query, 0, 4);
   VkClearValue clear{};
   clear.color.uint32[0] = 7;
@@ -3969,7 +3977,7 @@ TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers an
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{0, 0}, {2, 2}};
+  render.renderArea = {.offset = {.x = 0, .y = 0}, .extent = {.width = 2, .height = 2}};
   render.clearValueCount = 1;
   render.pClearValues = &clear;
   VkRenderPassAttachmentBeginInfo boundAttachments{};
@@ -3981,7 +3989,7 @@ TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers an
   VkClearAttachment explicitClear{};
   explicitClear.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   explicitClear.clearValue.color.uint32[0] = 19;
-  VkClearRect rect{{{1, 0}, {1, 1}}, 0, 1};
+  VkClearRect const rect{.rect = {.offset = {.x = 1, .y = 0}, .extent = {.width = 1, .height = 1}}, .baseArrayLayer = 0, .layerCount = 1};
   vkCmdClearAttachments(command, 1, &explicitClear, 1, &rect);
   vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query, 1);
   vkCmdNextSubpass(command, VK_SUBPASS_CONTENTS_INLINE);
@@ -3991,11 +3999,13 @@ TEST_CASE("Vulkan multiview load and explicit clears preserve inactive layers an
   REQUIRE(submitAndWait(runtime.queue, command) == VK_SUCCESS);
   for (uint32_t layer = 0; layer < 6; ++layer)
     for (uint32_t pixel = 0; pixel < 4; ++pixel) {
-      const auto expected = layer == 0 || layer == 5 ? 0xdeadbeefu : ((layer == 1 || layer == 3) && pixel == 1 ? 19u : 7u);
-      REQUIRE(words[16 + layer * 4 + pixel] == expected);
+      auto expected = 7U;
+      if (layer == 0 || layer == 5) expected = 0xdeadbeefU;
+      else if ((layer == 1 || layer == 3) && pixel == 1) expected = 19U;
+      REQUIRE(words[16 + (layer * 4) + pixel] == expected);
     }
-  REQUIRE(words[15] == 0xdeadbeefu);
-  REQUIRE(words[40] == 0xdeadbeefu);
+  REQUIRE(words[15] == 0xdeadbeefU);
+  REQUIRE(words[40] == 0xdeadbeefU);
   uint64_t results[4][2]{};
   REQUIRE(vkGetQueryPoolResults(runtime.device, query, 0, 4, sizeof(results), results, sizeof(results[0]),
                                 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)
@@ -4017,11 +4027,18 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   const auto format = GENERATE(VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_S8_UINT);
   const bool depth = format != VK_FORMAT_S8_UINT;
   const bool stencil = format == VK_FORMAT_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
-  const uint32_t stride = format == VK_FORMAT_D16_UNORM ? 2 : format == VK_FORMAT_S8_UINT ? 1 : stencil ? 8 : 4;
+  const size_t stride = [&]() -> size_t {
+    switch (format) {
+      case VK_FORMAT_D16_UNORM: return 2;
+      case VK_FORMAT_S8_UINT: return 1;
+      case VK_FORMAT_D32_SFLOAT_S8_UINT: return 8;
+      default: return 4;
+    }
+  }();
   const uint32_t depthBytes = format == VK_FORMAT_D16_UNORM ? 2 : 4;
   const uint32_t stencilByte = depth ? 4 : 0;
   const VkImageAspectFlags aspects = (depth ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
-  TestDevice runtime;
+  TestDevice const runtime;
   VkPhysicalDeviceDepthStencilResolveProperties resolveProperties{};
   resolveProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES;
   VkPhysicalDeviceVulkan12Properties aggregate{};
@@ -4035,12 +4052,8 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   REQUIRE(resolveProperties.supportedStencilResolveModes == VK_RESOLVE_MODE_SAMPLE_ZERO_BIT);
   REQUIRE(aggregate.supportedDepthResolveModes == resolveProperties.supportedDepthResolveModes);
   REQUIRE(aggregate.supportedStencilResolveModes == resolveProperties.supportedStencilResolveModes);
-  VkMemoryAllocateInfo allocation{};
-  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocation.allocationSize = 1024;
-  VkDeviceMemory memory;
-  REQUIRE(vkAllocateMemory(runtime.device, &allocation, nullptr, &memory) == VK_SUCCESS);
-  void *mapped;
+  VkDeviceMemory memory = allocateMemory(runtime.device, 1024);
+  void *mapped = nullptr;
   REQUIRE(vkMapMemory(runtime.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::memset(bytes, 0xcc, 1024);
@@ -4056,7 +4069,7 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
     image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image.imageType = VK_IMAGE_TYPE_2D;
     image.format = format;
-    image.extent = {2, 2, 1};
+    image.extent = {.width = 2, .height = 2, .depth = 1};
     image.mipLevels = 1;
     image.arrayLayers = 2;
     image.samples = i == 0 ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
@@ -4068,7 +4081,7 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
     view.image = images[i];
     view.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     view.format = format;
-    view.subresourceRange = {aspects, 0, 1, 0, 2};
+    view.subresourceRange = {.aspectMask = aspects, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 2};
     REQUIRE(vkCreateImageView(runtime.device, &view, nullptr, &views[i]) == VK_SUCCESS);
     auto &attachment = attachments[i];
     attachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
@@ -4082,13 +4095,13 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   }
   for (uint32_t pixel = 0; pixel < 8; ++pixel)
     for (uint32_t sample = 0; sample < 4; ++sample) {
-      auto *target = bytes + 64 + (pixel * 4 + sample) * stride;
+      auto *target = bytes + 64 + (((pixel * 4) + sample) * stride);
       if (depth) {
         if (depthBytes == 2) {
-          const uint16_t value = 8000 * (sample + 1) + pixel;
+          const uint16_t value = (8000 * (sample + 1)) + pixel;
           std::memcpy(target, &value, 2);
         } else {
-          const float value = (sample + 1) * .125f + pixel * .01f;
+          const float value = (static_cast<float>(sample + 1) * .125f) + (static_cast<float>(pixel) * .01f);
           std::memcpy(target, &value, 4);
         }
       }
@@ -4097,7 +4110,8 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   VkAttachmentReferenceStencilLayout stencilReference{};
   stencilReference.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT;
   stencilReference.stencilLayout = VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
-  VkAttachmentReference2 source{}, destination{};
+  VkAttachmentReference2 source{};
+  VkAttachmentReference2 destination{};
   source.sType = destination.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
   source.pNext = destination.pNext = depth && stencil ? &stencilReference : nullptr;
   source.attachment = 0;
@@ -4120,7 +4134,7 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   passInfo.pAttachments = attachments.data();
   passInfo.subpassCount = 1;
   passInfo.pSubpasses = &subpass;
-  VkRenderPass pass;
+  VkRenderPass pass = nullptr;
   REQUIRE(vkCreateRenderPass2(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
   VkFramebufferCreateInfo framebufferInfo{};
   framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -4129,15 +4143,15 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   framebufferInfo.pAttachments = views.data();
   framebufferInfo.width = framebufferInfo.height = 2;
   framebufferInfo.layers = 1;
-  VkFramebuffer framebuffer;
+  VkFramebuffer framebuffer = nullptr;
   REQUIRE(vkCreateFramebuffer(runtime.device, &framebufferInfo, nullptr, &framebuffer) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   VkRenderPassBeginInfo render{};
   render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render.renderPass = pass;
   render.framebuffer = framebuffer;
-  render.renderArea = {{0, 0}, {2, 2}};
+  render.renderArea = {.offset = {.x = 0, .y = 0}, .extent = {.width = 2, .height = 2}};
   vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
   vkCmdEndRenderPass(command);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
@@ -4145,10 +4159,10 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   for (uint32_t pixel = 0; pixel < 8; ++pixel)
     for (uint32_t byte = 0; byte < stride; ++byte) {
       const bool copied = (depth && byte < depthBytes) || (stencil && byte == stencilByte);
-      REQUIRE(bytes[512 + pixel * stride + byte] == (copied ? bytes[64 + pixel * 4 * stride + byte] : 0xcc));
+      REQUIRE(bytes[512 + (pixel * stride) + byte] == (copied ? bytes[64 + (pixel * stride * 4) + byte] : 0xcc));
     }
   REQUIRE(bytes[511] == 0xcc);
-  REQUIRE(bytes[512 + 8 * stride] == 0xcc);
+  REQUIRE(bytes[512 + (8 * stride)] == 0xcc);
   vkDestroyFramebuffer(runtime.device, framebuffer, nullptr);
   vkDestroyRenderPass(runtime.device, pass, nullptr);
   for (uint32_t i = 0; i < 2; ++i) {
@@ -4175,7 +4189,7 @@ struct AllocationAudit {
     void *p = nullptr;
     if (posix_memalign(&p, std::max(alignment, sizeof(void *)), size) != 0) return nullptr;
     audit.wrongAlignment |= (reinterpret_cast<uintptr_t>(p) % alignment) != 0;
-    audit.live.emplace(p, Entry{size, scope});
+    audit.live.emplace(p, Entry{.size = size, .scope = scope});
     return p;
   }
   static void VKAPI_CALL free(void *data, void *p) {
@@ -4199,8 +4213,15 @@ struct AllocationAudit {
     }
     return result;
   }
-  VkAllocationCallbacks callbacks() { return {this, allocate, reallocate, free, nullptr, nullptr}; }
-  void requireClean() {
+  VkAllocationCallbacks callbacks() {
+    return {.pUserData = this,
+            .pfnAllocation = allocate,
+            .pfnReallocation = reallocate,
+            .pfnFree = free,
+            .pfnInternalAllocation = nullptr,
+            .pfnInternalFree = nullptr};
+  }
+  void requireClean() const {
     REQUIRE(live.empty());
     REQUIRE_FALSE(wrongThread);
     REQUIRE_FALSE(wrongFree);
@@ -4264,7 +4285,7 @@ TEST_CASE("Vulkan pipeline batches preserve partial success and roll back alloca
     REQUIRE(output[0] != VK_NULL_HANDLE);
     REQUIRE(output[1] == VK_NULL_HANDLE);
     REQUIRE(output[2] != VK_NULL_HANDLE);
-    for (auto pipeline : output)
+    for (auto *pipeline : output)
       vkDestroyPipeline(runtime.device, pipeline, &callbacks);
     audit.requireClean();
   }
@@ -4282,9 +4303,9 @@ TEST_CASE("Vulkan pipeline batches preserve partial success and roll back alloca
         allocationCount = audit.calls;
       } else {
         REQUIRE(result == VK_ERROR_OUT_OF_HOST_MEMORY);
-        REQUIRE(std::ranges::find(output, VK_NULL_HANDLE) != output.end());
+        REQUIRE(output ^ contains(VkPipeline{VK_NULL_HANDLE}));
       }
-      for (auto pipeline : output)
+      for (auto *pipeline : output)
         vkDestroyPipeline(runtime.device, pipeline, &callbacks);
       audit.requireClean();
     };
@@ -4297,7 +4318,7 @@ TEST_CASE("Vulkan pipeline batches preserve partial success and roll back alloca
 }
 
 TEST_CASE("Vulkan host callbacks cover storage and clean every creation failure", "[vulkan][allocation]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   VkBufferCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   info.size = 256;
@@ -4330,7 +4351,7 @@ TEST_CASE("Vulkan host callbacks cover storage and clean every creation failure"
 }
 
 TEST_CASE("Vulkan render pass creation retains callbacks and rolls back every allocation failure", "[vulkan][allocation]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   const auto create = GENERATE(vkCreateRenderPass2, vkCreateRenderPass2KHR);
   VkAttachmentDescription2 attachment{};
   attachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
@@ -4379,18 +4400,26 @@ TEST_CASE("Vulkan render pass creation retains callbacks and rolls back every al
 }
 
 TEST_CASE("Vulkan allocators are copied and inherited independently by each instance", "[vulkan][allocation]") {
-  AllocationAudit first, second, object;
-  auto firstCallbacks = first.callbacks(), secondCallbacks = second.callbacks(), objectCallbacks = object.callbacks();
-  const auto firstInstance = allocatorInstance(&firstCallbacks), secondInstance = allocatorInstance(&secondCallbacks);
-  const auto firstDevice = allocatorDevice(firstInstance, nullptr), secondDevice = allocatorDevice(secondInstance, nullptr);
-  const auto beforeFirst = first.calls, beforeSecond = second.calls;
+  AllocationAudit first;
+  AllocationAudit second;
+  AllocationAudit object;
+  auto firstCallbacks = first.callbacks();
+  auto secondCallbacks = second.callbacks();
+  auto objectCallbacks = object.callbacks();
+  auto *const firstInstance = allocatorInstance(&firstCallbacks);
+  auto *const secondInstance = allocatorInstance(&secondCallbacks);
+  auto *const firstDevice = allocatorDevice(firstInstance, nullptr);
+  auto *const secondDevice = allocatorDevice(secondInstance, nullptr);
+  const auto beforeFirst = first.calls;
+  const auto beforeSecond = second.calls;
   // The runtime must retain the callback contents, not this structure's address.
   firstCallbacks = {};
   VkBufferCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   info.size = 64;
   info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-  VkBuffer inherited{}, explicitBuffer{};
+  VkBuffer inherited{};
+  VkBuffer explicitBuffer{};
   REQUIRE(vkCreateBuffer(firstDevice, &info, nullptr, &inherited) == VK_SUCCESS);
   REQUIRE(first.calls > beforeFirst);
   REQUIRE(second.calls == beforeSecond);
@@ -4411,7 +4440,7 @@ TEST_CASE("Vulkan allocators are copied and inherited independently by each inst
 }
 
 TEST_CASE("Vulkan destroy accepts a compatible allocator with different user data", "[vulkan][allocation]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   AllocationAudit audit;
   auto callbacks = audit.callbacks();
   VkEventCreateInfo info{};
@@ -4419,9 +4448,9 @@ TEST_CASE("Vulkan destroy accepts a compatible allocator with different user dat
   VkEvent event{};
   REQUIRE(vkCreateEvent(runtime.device, &info, &callbacks, &event) == VK_SUCCESS);
   struct Compatible {
-    AllocationAudit *audit;
+    AllocationAudit *audit{};
     size_t calls = 0;
-  } compatible{&audit};
+  } compatible{.audit = &audit};
   callbacks.pUserData = &compatible;
   callbacks.pfnFree = [](void *data, void *p) {
     auto &state = *static_cast<Compatible *>(data);
@@ -4434,7 +4463,7 @@ TEST_CASE("Vulkan destroy accepts a compatible allocator with different user dat
 }
 
 TEST_CASE("Vulkan command pools retain allocator ownership and recover from recording OOM", "[vulkan][allocation]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   AllocationAudit audit;
   auto callbacks = audit.callbacks();
   VkCommandPoolCreateInfo poolInfo{};
@@ -4467,7 +4496,7 @@ TEST_CASE("Vulkan command pools retain allocator ownership and recover from reco
 }
 
 TEST_CASE("Vulkan command buffer batch allocation rolls back partial outputs", "[vulkan][allocation]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   bool passed = false;
   size_t failures = 0;
   for (size_t step = 0; step < 32; ++step) {
@@ -4489,7 +4518,7 @@ TEST_CASE("Vulkan command buffer batch allocation rolls back partial outputs", "
       passed = true;
     } else {
       REQUIRE(result == VK_ERROR_OUT_OF_HOST_MEMORY);
-      for (auto command : commands)
+      for (auto *command : commands)
         REQUIRE(command == VK_NULL_HANDLE);
       ++failures;
     }
@@ -4504,8 +4533,8 @@ TEST_CASE("Vulkan command buffer batch allocation rolls back partial outputs", "
 TEST_CASE("Vulkan queue workers never call application allocators", "[vulkan][allocation]") {
   AllocationAudit audit;
   auto callbacks = audit.callbacks();
-  const auto instance = allocatorInstance(&callbacks);
-  const auto device = allocatorDevice(instance, nullptr);
+  auto *const instance = allocatorInstance(&callbacks);
+  auto *const device = allocatorDevice(instance, nullptr);
   VkQueue queue{};
   vkGetDeviceQueue(device, 0, 0, &queue);
   VkEventCreateInfo eventInfo{};
@@ -4513,7 +4542,7 @@ TEST_CASE("Vulkan queue workers never call application allocators", "[vulkan][al
   VkEvent event{};
   REQUIRE(vkCreateEvent(device, &eventInfo, nullptr, &event) == VK_SUCCESS);
   {
-    CommandRecording recording(device);
+    CommandRecording const recording(device);
     vkCmdSetEvent(recording.command, event, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
     REQUIRE(vkEndCommandBuffer(recording.command) == VK_SUCCESS);
     REQUIRE(submitAndWait(queue, recording.command) == VK_SUCCESS);
@@ -4528,22 +4557,21 @@ TEST_CASE("Vulkan queue workers never call application allocators", "[vulkan][al
 TEST_CASE("Vulkan descriptor updates need no allocation after set allocation", "[vulkan][allocation]") {
   AllocationAudit audit;
   auto callbacks = audit.callbacks();
-  const auto instance = allocatorInstance(&callbacks);
-  const auto device = allocatorDevice(instance, nullptr);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = 64;
-  bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-  VkBuffer buffer{};
-  REQUIRE(vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) == VK_SUCCESS);
-  VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+  auto *const instance = allocatorInstance(&callbacks);
+  auto *const device = allocatorDevice(instance, nullptr);
+  VkBuffer buffer = createBuffer(device, 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  VkDescriptorSetLayoutBinding const binding{.binding = 0,
+                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                             .descriptorCount = 4,
+                                             .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                             .pImmutableSamplers = nullptr};
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   layoutInfo.bindingCount = 1;
   layoutInfo.pBindings = &binding;
   VkDescriptorSetLayout layout{};
   REQUIRE(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout) == VK_SUCCESS);
-  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8};
+  VkDescriptorPoolSize const size{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 8};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   poolInfo.maxSets = 2;
@@ -4559,7 +4587,10 @@ TEST_CASE("Vulkan descriptor updates need no allocation after set allocation", "
   allocate.pSetLayouts = layouts;
   VkDescriptorSet sets[2]{};
   REQUIRE(vkAllocateDescriptorSets(device, &allocate, sets) == VK_SUCCESS);
-  const VkDescriptorBufferInfo buffers[]{{buffer, 0, 16}, {buffer, 16, 16}, {buffer, 32, 16}, {buffer, 48, 16}};
+  const VkDescriptorBufferInfo buffers[]{{.buffer = buffer, .offset = 0, .range = 16},
+                                         {.buffer = buffer, .offset = 16, .range = 16},
+                                         {.buffer = buffer, .offset = 32, .range = 16},
+                                         {.buffer = buffer, .offset = 48, .range = 16}};
   VkWriteDescriptorSet write{};
   write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   write.dstSet = sets[0];
@@ -4571,7 +4602,12 @@ TEST_CASE("Vulkan descriptor updates need no allocation after set allocation", "
   copy.srcSet = sets[0];
   copy.dstSet = sets[1];
   copy.descriptorCount = 4;
-  const VkDescriptorUpdateTemplateEntry entry{0, 0, 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, sizeof(VkDescriptorBufferInfo)};
+  const VkDescriptorUpdateTemplateEntry entry{.dstBinding = 0,
+                                              .dstArrayElement = 0,
+                                              .descriptorCount = 4,
+                                              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                              .offset = 0,
+                                              .stride = sizeof(VkDescriptorBufferInfo)};
   VkDescriptorUpdateTemplateCreateInfo templateInfo{};
   templateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO;
   templateInfo.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET;
@@ -4596,7 +4632,7 @@ TEST_CASE("Vulkan descriptor updates need no allocation after set allocation", "
 }
 
 TEST_CASE("Vulkan recorded queries do not extend the query pool allocator lifetime", "[vulkan][allocation]") {
-  TestDevice runtime;
+  TestDevice const runtime;
   AllocationAudit audit;
   auto callbacks = audit.callbacks();
   VkQueryPoolCreateInfo queryInfo{};
@@ -4605,8 +4641,8 @@ TEST_CASE("Vulkan recorded queries do not extend the query pool allocator lifeti
   queryInfo.queryCount = 1;
   VkQueryPool query{};
   REQUIRE(vkCreateQueryPool(runtime.device, &queryInfo, &callbacks, &query) == VK_SUCCESS);
-  CommandRecording recording(runtime.device);
-  const auto command = recording.command;
+  CommandRecording const recording(runtime.device);
+  auto *const command = recording.command;
   vkCmdResetQueryPool(command, query, 0, 1);
   vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query, 0);
   REQUIRE(vkEndCommandBuffer(command) == VK_SUCCESS);
@@ -4617,7 +4653,7 @@ TEST_CASE("Vulkan recorded queries do not extend the query pool allocator lifeti
 
 TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocation", "[graphics-execution]") {
   TestDevice runtime;
-  DiscardPipeline pipeline(runtime);
+  const DiscardPipeline pipeline(runtime);
   const bool indirect = GENERATE(false, true);
   std::array<VkImage, 2> images{};
   std::array<VkCommandBuffer, 2> commands{reinterpret_cast<VkCommandBuffer>(0x7310), reinterpret_cast<VkCommandBuffer>(0x7320)};
@@ -4625,7 +4661,7 @@ TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocati
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = VK_FORMAT_R32_UINT;
-  info.extent = {8, 8, 1};
+  info.extent = {.width = 8, .height = 8, .depth = 1};
   info.mipLevels = info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -4643,12 +4679,9 @@ TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocati
   void *mapped{};
   REQUIRE(vkMapMemory(runtime.device, memory, 0, stride * 2, 0, &mapped) == VK_SUCCESS);
   std::memset(mapped, 0, stride * 2);
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = stride * 2;
-  bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  VkBuffer indexBuffer{};
-  REQUIRE(vkCreateBuffer(runtime.device, &bufferInfo, nullptr, &indexBuffer) == VK_SUCCESS);
+  VkBuffer indexBuffer =
+      createBuffer(runtime.device, stride * 2,
+                   VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   REQUIRE(vkBindBufferMemory(runtime.device, indexBuffer, memory, 0) == VK_SUCCESS);
 
   for (size_t i = 0; i < images.size(); ++i) {
@@ -4657,18 +4690,20 @@ TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocati
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     REQUIRE(vkBeginCommandBuffer(commands[i], &begin) == VK_SUCCESS);
     // Reused command buffers must restore arguments overwritten by the previous clear.
-    const VkDrawIndexedIndirectCommand arguments{3, 1, 0, 0, 0};
+    const VkDrawIndexedIndirectCommand arguments{
+        .indexCount = 3, .instanceCount = 1, .firstIndex = 0, .vertexOffset = 0, .firstInstance = 0};
     if (indirect) vkCmdUpdateBuffer(commands[i], indexBuffer, stride * i, sizeof(arguments), &arguments);
     // Draw waits release the state mutex; both queues register this same owner.
     pipeline.begin(commands[i]);
-    vkCmdBindIndexBuffer(commands[i], indexBuffer, stride * i + sizeof(arguments), VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(commands[i], indexBuffer, (stride * i) + sizeof(arguments), VK_INDEX_TYPE_UINT32);
     if (indirect) vkCmdDrawIndexedIndirect(commands[i], indexBuffer, stride * i, 1, sizeof(arguments));
     else vkCmdDrawIndexed(commands[i], 3, 1, 0, 0, 0);
     vkCmdEndRenderPass(commands[i]);
 
     VkClearColorValue value{};
-    value.uint32[0] = 0x12340000u + static_cast<uint32_t>(i);
-    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    value.uint32[0] = 0x12340000U + static_cast<uint32_t>(i);
+    VkImageSubresourceRange const range{
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1};
     vkCmdClearColorImage(commands[i], images[i], VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
     REQUIRE(vkEndCommandBuffer(commands[i]) == VK_SUCCESS);
   }
@@ -4676,7 +4711,7 @@ TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocati
   // Keep assertions on the test thread, after joining the creator.
   VkResult creationResult = VK_SUCCESS;
   size_t created = 0;
-  std::jthread creator([&](std::stop_token stop) {
+  std::jthread creator([&](const std::stop_token &stop) {
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     VkRenderPassCreateInfo passInfo{};
@@ -4698,13 +4733,13 @@ TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocati
       const auto submit = submitInfo(commands[i]);
       REQUIRE(vkQueueSubmit(queues[i], 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
     }
-    for (const auto queue : queues)
+    for (auto *const queue : queues)
       REQUIRE(vkQueueWaitIdle(queue) == VK_SUCCESS);
     for (size_t i = 0; i < images.size(); ++i)
       for (size_t pixel = 0; pixel < 64; ++pixel) {
-        uint32_t value;
-        std::memcpy(&value, static_cast<uint8_t *>(mapped) + stride * i + pixel * 4, 4);
-        REQUIRE(value == 0x12340000u + i);
+        uint32_t value = 0;
+        std::memcpy(&value, static_cast<uint8_t *>(mapped) + (stride * i) + (pixel * 4), 4);
+        REQUIRE(value == 0x12340000U + i);
       }
   }
   creator.request_stop();
@@ -4713,7 +4748,7 @@ TEST_CASE("Vulkan concurrent queues publish disjoint image views of one allocati
   REQUIRE(created > 0);
   vkDestroyBuffer(runtime.device, indexBuffer, nullptr);
   vkUnmapMemory(runtime.device, memory);
-  for (const auto image : images)
+  for (auto *const image : images)
     vkDestroyImage(runtime.device, image, nullptr);
   vkFreeMemory(runtime.device, memory, nullptr);
 }

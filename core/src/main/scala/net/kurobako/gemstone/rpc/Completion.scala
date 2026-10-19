@@ -13,7 +13,7 @@ private object Completion {
   type Execute =
     (AddressSpace, TaskControl, Event => Either[Fault, Unit]) => Either[Fault, Option[GraphicsStatistics]]
 
-  private enum HostSyncState {
+  private enum HostSyncState derives CanEqual {
     case AwaitingIssue
     case AwaitingReply
     case Acknowledged(value: Long)
@@ -56,7 +56,7 @@ private object Completion {
   }
 
   private def page[A](values: Vec[A], offset: Int >= 0, limit: Int > 0): Vec[A] =
-    values.slice(offset.raw, offset.raw + math.min(limit.raw, values.length - offset.raw))
+    values.slice(offset, offset.raw + math.min(limit, values.length - offset))
 }
 
 /** One dispatch with its recorded side effects and host exchanges, guarded by the session state lock. */
@@ -101,7 +101,7 @@ private class Completion(
   }
 
   def record(event: Event.Print): Either[ExecutionFailure, Unit] =
-    if (output.size >= maxPrintEvents.raw) Left(ExecutionFailure.Failed("device printf event limit exceeded"))
+    if (output.size >= maxPrintEvents) Left(ExecutionFailure.Failed("device printf event limit exceeded"))
     else { output += event; Right(()) }
 
   val hostMemory: HostMemoryMirror = HostMemoryMirror()
@@ -142,7 +142,7 @@ private class Completion(
       }
     }
     Vec.from(merged.toArray.sortBy(_._1.raw).view.flatMap { (allocationId, written) =>
-      written.chunks(Completion.DirtyChunkBytes).map((offset, size) => DirtyRange(allocationId, offset.toLong, size))
+      written.chunks(Completion.DirtyChunkBytes).map((offset, size) => DirtyRange(allocationId, offset, size))
     })
   }
 

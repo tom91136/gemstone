@@ -1,0 +1,597 @@
+package net.kurobako.gemstone.isa.amdgpu
+
+import VMIR.*
+import laneRuns.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.bits.*
+
+/** VOP3 operations hipcc emits from HIP builtins and saturating arithmetic, each with the LLVM bytes of every target
+  * that encodes it differently; v2, v3 and v4 hold the inputs and v4 the result.
+  */
+class AMDGPUVectorMiscSuite extends munit.FunSuite {
+  private def check(
+      name: String,
+      encodings: Vec[(Target, Vec[Int])],
+      inputs: Vec[Long],
+      expected: Long,
+      mask: Long = 0xffffffffL,
+      result: Int = 4
+  )(using munit.Location): Unit =
+    encodings.foreach { (target, code) =>
+      test(s"$target $name") {
+        assertEquals(
+          laneResult(target, inputs, program(target, octets(code*)), result.unsafe[VectorRegisterIndex]) & mask,
+          expected
+        )
+      }
+    }
+
+  // __builtin_elementwise_add_sat and _sub_sat on int: v_add_i32 v2, v2, v3 clamp under hipcc --offload-arch=gfx906
+  // and v_add_nc_i32 v2, v2, v3 clamp under gfx1030 and gfx1100; encodings from llvm-mc -show-encoding
+  private val addI32 = Vec(
+    Target("gfx906")  -> Vec(0x04, 0x80, 0x9c, 0xd2, 0x02, 0x07, 0x02, 0x00),
+    Target("gfx1030") -> Vec(0x04, 0x80, 0x7f, 0xd7, 0x02, 0x07, 0x02, 0x00),
+    Target("gfx1100") -> Vec(0x04, 0x80, 0x26, 0xd7, 0x02, 0x07, 0x02, 0x00),
+    Target("gfx1201") -> Vec(0x04, 0x80, 0x26, 0xd7, 0x02, 0x07, 0x02, 0x00)
+  )
+  check("v_add_i32 v4, v2, v3 clamp saturates", addI32, Vec(0x7fffffffL, 1L, 0L), 0x7fffffffL)
+  check("v_add_i32 v4, v2, v3 clamp keeps a sum in range", addI32, Vec(0xfffffffeL, 1L, 0L), 0xffffffffL)
+  check(
+    "v_add_i32 v4, v2, v3 wraps",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x9c, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x7f, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x26, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x7fffffffL, 1L, 0L),
+    0x80000000L
+  )
+  check(
+    "v_sub_i32 v4, v2, v3 clamp saturates",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x80, 0x9d, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x80, 0x76, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x80, 0x25, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x80000000L, 1L, 0L),
+    0x80000000L
+  )
+  check(
+    "v_add_i16 v4, v2, v3 clamp saturates",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x80, 0x9e, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x80, 0x0d, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x80, 0x0d, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x7fffL, 1L, 0L),
+    0x7fffL,
+    0xffffL
+  )
+  check(
+    "v_sub_i16 v4, v2, v3 clamp saturates",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x80, 0x9f, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x80, 0x0e, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x80, 0x0e, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x8000L, 1L, 0L),
+    0x8000L,
+    0xffffL
+  )
+
+  // HIP builtins under hipcc -O3 on the documented operations; the media and packing builtins compile to one
+  // instruction each, e.g. __builtin_amdgcn_cubeid to v_cubeid_f32 and __builtin_amdgcn_cvt_pknorm_i16 to
+  // v_cvt_pknorm_i16_f32 (v_cvt_pk_norm_i16_f32 from GFX11); half division emits v_div_fixup_f16
+  check(
+    "v_div_fixup_f16 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x07, 0xd2, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x5f, 0xd7, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x54, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x4100L, 0x4000L, 0x4500L),
+    0x4100L,
+    0xffffL
+  )
+  check(
+    "v_div_fixup_f16 v4, v2, v3, v4 a zero denominator",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x07, 0xd2, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x5f, 0xd7, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x54, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x4100L, 0x8000L, 0x4500L),
+    0xfc00L,
+    0xffffL
+  )
+  check(
+    "v_lerp_u8 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xcd, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x4d, 0xd5, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x15, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x1020304L, 0x3040506L, 0x101L),
+    0x2030405L
+  )
+  check(
+    "v_qsad_pk_u16_u8 v[4:5], v[2:3], v6, v[4:5]",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xe5, 0xd1, 0x02, 0x0d, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x72, 0xd5, 0x02, 0x0d, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x3a, 0xd6, 0x02, 0x0d, 0x12, 0x04)
+    ),
+    Vec(0x4030201L, 0x8070605L, 0x20001L, 0x40003L, 0x1010101L),
+    0xc0007L
+  )
+  check(
+    "v_mqsad_pk_u16_u8 v[4:5], v[2:3], v6, v[4:5]",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xe6, 0xd1, 0x02, 0x0d, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x73, 0xd5, 0x02, 0x0d, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x3b, 0xd6, 0x02, 0x0d, 0x12, 0x04)
+    ),
+    Vec(0x4030201L, 0x8070605L, 0x20001L, 0x40003L, 0x1000100L),
+    0x80005L
+  )
+  check(
+    "v_mqsad_u32_u8 v[10:13], v[2:3], v8, v[4:7]",
+    Vec(
+      Target("gfx906")  -> Vec(0x0a, 0x00, 0xe7, 0xd1, 0x02, 0x11, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x0a, 0x00, 0x75, 0xd5, 0x02, 0x11, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x0a, 0x00, 0x3d, 0xd6, 0x02, 0x11, 0x12, 0x04)
+    ),
+    Vec(0x4030201L, 0x8070605L, 0x64L, 0xc8L, 0x12cL, 0x190L, 0x1000100L),
+    0x68L,
+    result = 10
+  )
+  check(
+    "v_mqsad_u32_u8 v[10:13], v[2:3], v8, v[4:7] into its fourth dword",
+    Vec(
+      Target("gfx906")  -> Vec(0x0a, 0x00, 0xe7, 0xd1, 0x02, 0x11, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x0a, 0x00, 0x75, 0xd5, 0x02, 0x11, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x0a, 0x00, 0x3d, 0xd6, 0x02, 0x11, 0x12, 0x04)
+    ),
+    Vec(0x4030201L, 0x8070605L, 0x64L, 0xc8L, 0x12cL, 0x190L, 0x1000100L),
+    0x19aL,
+    result = 13
+  )
+  check(
+    "v_cubeid_f32 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xc4, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x44, 0xd5, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x0c, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x3f800000L, 0xc0400000L, 0x40000000L),
+    0x40400000L
+  )
+  check(
+    "v_cubesc_f32 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xc5, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x45, 0xd5, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x0d, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x3f800000L, 0xc0400000L, 0x40000000L),
+    0x3f800000L
+  )
+  check(
+    "v_cubetc_f32 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xc6, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x46, 0xd5, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x0e, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x3f800000L, 0xc0400000L, 0x40000000L),
+    0xc0000000L
+  )
+  check(
+    "v_cubema_f32 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xc7, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x47, 0xd5, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x0f, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x3f800000L, 0xc0400000L, 0x40000000L),
+    0xc0c00000L
+  )
+  check(
+    "v_cvt_pk_i16_i32 v4, v2, v3",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x98, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x6b, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x24, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x186a0L, 0xfffffffbL),
+    0xfffb7fffL
+  )
+  check(
+    "v_cvt_pk_u16_u32 v4, v2, v3",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x97, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x6a, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x23, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x11170L, 0x5L),
+    0x5ffffL
+  )
+  check(
+    "v_cvt_pknorm_i16_f32 v4, v2, v3",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x94, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x68, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x21, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x3f000000L, 0xc0000000L),
+    0x80014000L
+  )
+  check(
+    "v_cvt_pknorm_u16_f32 v4, v2, v3",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x95, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x69, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x22, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x3f000000L, 0x40000000L),
+    0xffff8000L
+  )
+  check(
+    "v_cvt_pk_u8_f32 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xdd, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x5e, 0xd5, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x26, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x4348999aL, 0x2L, 0x11223344L),
+    0x11c93344L
+  )
+  check(
+    "v_cvt_off_f32_i4_e32 v4, v2",
+    Vec(
+      Target("gfx906")  -> Vec(0x02, 0x1d, 0x08, 0x7e),
+      Target("gfx1030") -> Vec(0x02, 0x1d, 0x08, 0x7e),
+      Target("gfx1100") -> Vec(0x02, 0x1d, 0x08, 0x7e)
+    ),
+    Vec(0x9L),
+    0xbee00000L
+  )
+  check(
+    "v_cvt_norm_i16_f16_e32 v4, v2",
+    Vec(
+      Target("gfx906")  -> Vec(0x02, 0x9b, 0x08, 0x7e),
+      Target("gfx1030") -> Vec(0x02, 0xc7, 0x08, 0x7e),
+      Target("gfx1100") -> Vec(0x02, 0xc7, 0x08, 0x7e)
+    ),
+    Vec(0xb800L),
+    0xc000L,
+    0xffffL
+  )
+  check(
+    "v_sat_pk_u8_i16_e32 v4, v2",
+    Vec(
+      Target("gfx906")  -> Vec(0x02, 0x9f, 0x08, 0x7e),
+      Target("gfx1030") -> Vec(0x02, 0xc5, 0x08, 0x7e),
+      Target("gfx1100") -> Vec(0x02, 0xc5, 0x08, 0x7e)
+    ),
+    Vec(0xff800123L),
+    0xffL,
+    0xffffL
+  )
+  check(
+    "v_mad_u32_u16 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xf1, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x73, 0xd7, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x59, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0xffffL, 0x10002L, 0x5L),
+    0x20003L
+  )
+  check(
+    "v_mad_u32_u16 v4, v2, v3, v4 op_sel:[1,0,0,0]",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x08, 0xf1, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x08, 0x73, 0xd7, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x08, 0x59, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x30004L, 0x2L, 0x5L),
+    0xbL
+  )
+  check(
+    "v_mad_i32_i16 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0xf2, 0xd1, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x75, 0xd7, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x5a, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0xfffeL, 0x3L, 0xaL),
+    0x4L
+  )
+  check(
+    "v_mad_i16 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x05, 0xd2, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x5e, 0xd7, 0x02, 0x07, 0x12, 0x04),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x53, 0xd6, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0xfffeL, 0x3L, 0xaL),
+    0x4L,
+    0xffffL
+  )
+  check(
+    "v_mac_f16_e32 v4, v2, v3",
+    Vec(
+      Target("gfx906") -> Vec(0x02, 0x07, 0x08, 0x46)
+    ),
+    Vec(0x3e00L, 0x4000L, 0x3800L),
+    0x4300L,
+    0xffffL
+  )
+  check(
+    "v_mad_f16 v4, v2, v3, v4",
+    Vec(
+      Target("gfx906") -> Vec(0x04, 0x00, 0x03, 0xd2, 0x02, 0x07, 0x12, 0x04)
+    ),
+    Vec(0x3e00L, 0x4000L, 0x3800L),
+    0x4300L,
+    0xffffL
+  )
+  check(
+    "v_madak_f16 v4, v2, v3, 0x3800",
+    Vec(
+      Target("gfx906") -> Vec(0x02, 0x07, 0x08, 0x4a, 0x00, 0x38, 0x00, 0x00)
+    ),
+    Vec(0x3e00L, 0x4000L),
+    0x4300L,
+    0xffffL
+  )
+  check(
+    "v_fmamk_f16 v4, v2, 0x4000, v3",
+    Vec(
+      Target("gfx1030") -> Vec(0x02, 0x07, 0x08, 0x6e, 0x00, 0x40, 0x00, 0x00),
+      Target("gfx1100") -> Vec(0x02, 0x07, 0x08, 0x6e, 0x00, 0x40, 0x00, 0x00)
+    ),
+    Vec(0x3e00L, 0x3800L),
+    0x4300L,
+    0xffffL
+  )
+  check(
+    "v_bfm_b32 v4, v2, v3",
+    Vec(
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x93, 0xd2, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1030") -> Vec(0x04, 0x00, 0x63, 0xd7, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x04, 0x00, 0x1d, 0xd7, 0x02, 0x07, 0x02, 0x00)
+    ),
+    Vec(0x4L, 0x8L),
+    0xf00L
+  )
+
+  // __builtin_amdgcn_permlane16 and _permlanex16 (gfx10+) and __builtin_amdgcn_permlane64 (gfx11+); each lane holds
+  // ten times its index in v2 and 0xdead in v4, and s0 and s1 select lanes in reverse order within each row
+  private def permuted(target: Target, code: Vec[Int], exec: Long = -1L, wave32: Boolean = true)(using
+      munit.Location
+  ): Vec[Long] = {
+    import InstructionSource.*
+    val select = Vec(Instruction.SMove(0, Constant(0x89abcdefL)), Instruction.SMove(1, Constant(0x01234567L)))
+    laneResults(
+      target,
+      Vec.tabulate(64)(lane => Vec(lane * 10L, 0L, 0xdeadL)),
+      select ++ program(target, octets(code*)),
+      4,
+      exec,
+      wave32
+    )
+  }
+
+  for (
+    (target, row, crossed) <- Seq(
+      (
+        Target("gfx1030"),
+        Vec(0x04, 0x00, 0x77, 0xd7, 0x02, 0x01, 0x04, 0x00),
+        Vec(0x04, 0x00, 0x78, 0xd7, 0x02, 0x01, 0x04, 0x00)
+      ),
+      (
+        Target("gfx1100"),
+        Vec(0x04, 0x00, 0x5b, 0xd6, 0x02, 0x01, 0x04, 0x00),
+        Vec(0x04, 0x00, 0x5c, 0xd6, 0x02, 0x01, 0x04, 0x00)
+      )
+    )
+  ) {
+    test(s"$target v_permlane16_b32 v4, v2, s0, s1 reads the selected lane of the row") {
+      assertEquals(permuted(target, row).take(32), Vec.tabulate(32)(lane => ((lane & ~15) + 15 - (lane & 15)) * 10L))
+    }
+    test(s"$target v_permlanex16_b32 v4, v2, s0, s1 reads the selected lane of the other row") {
+      assertEquals(
+        permuted(target, crossed).take(32),
+        Vec.tabulate(32)(lane => (((lane & ~15) ^ 16) + 15 - (lane & 15)) * 10L)
+      )
+    }
+    test(s"$target v_permlanex16_b32 keeps, zeroes or fetches what an inactive lane would give") {
+      val kept = permuted(target, crossed, exec = 0xffffL)
+      assertEquals(kept.take(16), Vec.fill(16)(0xdeadL))
+      // op_sel:[0,1] sets bound control and op_sel:[1,0] fetches inactive lanes
+      assertEquals(permuted(target, crossed.updated(1, 0x10), exec = 0xffffL).take(16), Vec.fill(16)(0L))
+      assertEquals(
+        permuted(target, crossed.updated(1, 0x08), exec = 0xffffL).take(16),
+        Vec.tabulate(16)(lane => (31 - lane) * 10L)
+      )
+    }
+  }
+
+  test("gfx1100 v_permlane64_b32 v4, v2 swaps the half-waves of a wave64 and leaves a wave32 alone") {
+    val code = Vec(0x02, 0xcf, 0x08, 0x7e)
+    assertEquals(permuted(Target("gfx1100"), code, wave32 = false), Vec.tabulate(64)(lane => (lane ^ 32) * 10L))
+    assertEquals(permuted(Target("gfx1100"), code).take(32), Vec.fill(32)(0xdeadL))
+  }
+
+  // GFX12 renames the IEEE-mode extrema with _num, which the compiler emits for fmaxf and fminf chains
+  private val gfx1201 = Target("gfx1201")
+  check(
+    "v_max3_num_f32 v4, v2, v3, v4",
+    Vec(gfx1201 -> Vec(0x04, 0x00, 0x2a, 0xd6, 0x02, 0x07, 0x12, 0x04)),
+    Vec(single(1.0f), single(5.0f), single(3.0f)),
+    single(5.0f)
+  )
+  check(
+    "v_min3_num_f16 v4, v2, v3, v4",
+    Vec(gfx1201 -> Vec(0x04, 0x00, 0x2b, 0xd6, 0x02, 0x07, 0x12, 0x04)),
+    Vec(half(1.0f), half(-2.0f), half(3.0f)),
+    half(-2.0f),
+    0xffffL
+  )
+  check(
+    "v_maxmin_num_f32 v4, v2, v3, v4",
+    Vec(gfx1201 -> Vec(0x04, 0x00, 0x69, 0xd6, 0x02, 0x07, 0x12, 0x04)),
+    Vec(single(1.0f), single(5.0f), single(3.0f)),
+    single(3.0f)
+  )
+  check(
+    "v_max_num_f16_e32 v4, v2, v3 returns the number of a NaN pair",
+    Vec(gfx1201 -> Vec(0x02, 0x07, 0x08, 0x62)),
+    Vec(half(1.5f), 0x7e00L),
+    half(1.5f),
+    0xffffL
+  )
+  check(
+    "v_pk_max_num_f16 v4, v2, v3",
+    Vec(gfx1201 -> Vec(0x04, 0x40, 0x1c, 0xcc, 0x02, 0x07, 0x02, 0x18)),
+    Vec(half(1.0f) | (half(4.0f) << 16), half(2.0f) | (half(3.0f) << 16)),
+    half(2.0f) | (half(4.0f) << 16)
+  )
+  check(
+    "v_cvt_i32_i16_e32 v4, v2 sign-extends the low half",
+    Vec(gfx1201 -> Vec(0x02, 0xd5, 0x08, 0x7e)),
+    Vec(0x12348001L),
+    0xffff8001L
+  )
+  check(
+    "v_cvt_u32_u16_e32 v4, v2 zero-extends the low half",
+    Vec(gfx1201 -> Vec(0x02, 0xd7, 0x08, 0x7e), Target("gfx1100") -> Vec(0x02, 0xd7, 0x08, 0x7e)),
+    Vec(0x12348001L),
+    0x8001L
+  )
+
+  test("gfx1201 v_s_exp_f32, v_s_sqrt_f32 and v_s_log_f16 write an SGPR from an SGPR") {
+    def scalar(code: Vec[Int], value: Long): Long =
+      scalarResult(gfx1201, Vec(0L, value), program(gfx1201, octets(code*)))
+    assertEquals(scalar(Vec(0x00, 0x00, 0x80, 0xd6, 0x01, 0x00, 0x00, 0x00), single(3.0f)), single(8.0f))
+    assertEquals(scalar(Vec(0x00, 0x00, 0x88, 0xd6, 0x01, 0x00, 0x00, 0x00), single(16.0f)), single(4.0f))
+    assertEquals(scalar(Vec(0x00, 0x00, 0x83, 0xd6, 0x01, 0x00, 0x00, 0x00), half(8.0f)) & 0xffffL, half(3.0f))
+  }
+
+  // GFX11 true16 VOP3 forms, whose OP_SEL picks each 16-bit operand's half and the destination's
+  private val gfx1100 = Target("gfx1100")
+  check(
+    "v_and_b16 v4.l, v2.l, v3.h op_sel:[0,1,0] keeps the destination's high half",
+    Vec(gfx1100 -> Vec(0x04, 0x10, 0x62, 0xd7, 0x02, 0x07, 0x02, 0x00)),
+    Vec(0x0000f0f0L, 0x0ff00000L, 0xdead0000L),
+    0xdead00f0L
+  )
+  check(
+    "v_or_b16 v4.h, v2.l, v3.l op_sel:[0,0,1] writes the high half",
+    Vec(gfx1100 -> Vec(0x04, 0x40, 0x63, 0xd7, 0x02, 0x07, 0x02, 0x00)),
+    Vec(0x00f0L, 0x0f00L, 0x0000beefL),
+    0x0ff0beefL
+  )
+  check(
+    "v_xor_b16 v4.l, v2.h, v3.h op_sel:[1,1,0]",
+    Vec(gfx1100 -> Vec(0x04, 0x18, 0x64, 0xd7, 0x02, 0x07, 0x02, 0x00)),
+    Vec(0xffff0000L, 0x00ff0000L, 0xdead0000L),
+    0xdeadff00L
+  )
+
+  test("gfx1100 v_cndmask_b16 v4.l, v2.l, v3.h, vcc_lo selects the half VCC picks") {
+    import InstructionSource.*
+    val code           = program(gfx1100, octets(0x04, 0x10, 0x5d, 0xd6, 0x02, 0x07, 0xaa, 0x01))
+    def run(vcc: Long) = laneResult(
+      gfx1100,
+      Vec(0x1111L, 0x22220000L, 0xdead0000L),
+      Instruction.SMove(EncodingConstants.Fixed.VccLo, Constant(vcc)) +: code,
+      4
+    )
+    assertEquals(run(1L), 0xdead2222L)
+    assertEquals(run(0L), 0xdead1111L)
+  }
+
+  // __builtin_amdgcn_fmul_legacy: v_mul_legacy_f32 under gfx906 and v_mul_dx9_zero_f32 from GFX11
+  for (
+    (target, code) <- Seq(
+      Target("gfx906")  -> Vec(0x02, 0x07, 0x08, 0x08),
+      Target("gfx906")  -> Vec(0x04, 0x00, 0x04, 0xd1, 0x02, 0x07, 0x02, 0x00),
+      Target("gfx1100") -> Vec(0x02, 0x07, 0x08, 0x0e)
+    )
+  )
+    test(s"$target legacy multiply gives +0 for a zero operand, infinite or NaN alike (GCN3 ISA V_MUL_LEGACY_F32)") {
+      val run = (a: Long, b: Long) => laneResult(target, Vec(a, b), program(target, octets(code*)), 4)
+      assertEquals(run(single(-0.0f), single(Float.PositiveInfinity)), 0L)
+      assertEquals(run(0x7fc00000L, single(0.0f)), 0L)
+      assertEquals(run(single(2.0f), single(3.0f)), single(6.0f))
+    }
+
+  test("v_movrels_b32_e64 and v_mul_lo_i32 in their VOP3 forms") {
+    // s_mov_b32 m0, 1 names M0 as s124 on GFX10 and as s125 from GFX11
+    val lanes    = Vec(10L, 20L, 30L)
+    val relative = Vec(0x04, 0x00, 0xc3, 0xd5, 0x02, 0x01, 0x00, 0x00)
+    for (
+      (target, m0) <- Seq(Target("gfx1010") -> Vec(0x81, 0x03, 0xfc, 0xbe), gfx1100 -> Vec(0x81, 0x00, 0xfd, 0xbe))
+    ) {
+      val moved = laneResult(
+        target,
+        lanes,
+        program(target, octets((m0 ++ relative)*)),
+        4
+      )
+      assertEquals(moved, 20L, target)
+    }
+    val gfx1010 = Target("gfx1010")
+    assertEquals(
+      laneResult(
+        gfx1010,
+        Vec(3L, 0xfffffffeL),
+        program(gfx1010, octets(0x04, 0x00, 0x6b, 0xd5, 0x02, 0x07, 0x02, 0x00)),
+        4
+      ),
+      0xfffffffaL
+    )
+  }
+
+  // VOP3 DPP from GFX11, quad_perm:[1,0,3,2] or dpp8:[1,0,3,2,5,4,7,6] swapping neighbouring lanes' source 0; each
+  // lane's v2, v3 and v4 and its v4 afterwards
+  private def swapped(target: Target, code: Vec[Int], inputs: Vec[Vec[Long]])(using munit.Location): Vec[Long] =
+    laneResults(target, inputs, program(target, octets(code*)), 4)
+
+  for (target <- Seq(gfx1100, Target("gfx1201")))
+    test(s"$target media and lane-count VOP3 operations route source 0 through DPP") {
+      def lanes(values: Long*): Vec[Vec[Long]] = Vec.from(values.map(Vec(_, 0L, 0L)))
+      assertEquals(
+        swapped(target, Vec(0x04, 0x00, 0x15, 0xd6, 0xfa, 0x06, 0x12, 0x04, 0x02, 0xb1, 0x00, 0xff), lanes(0, 2, 4, 6)),
+        Vec(1L, 0L, 3L, 2L)
+      )
+      assertEquals(
+        swapped(target, Vec(0x04, 0x00, 0x15, 0xd6, 0xe9, 0x06, 0x12, 0x04, 0x02, 0xc1, 0x54, 0xde), lanes(0, 2, 4, 6)),
+        Vec(1L, 0L, 3L, 2L)
+      )
+      assertEquals(
+        swapped(
+          target,
+          Vec(0x04, 0x00, 0x1f, 0xd7, 0xfa, 0x06, 0x02, 0x00, 0x02, 0xb1, 0x00, 0xff),
+          lanes(0, 15, 0, 15)
+        ),
+        Vec(0L, 0L, 2L, 0L)
+      )
+      assertEquals(
+        swapped(target, Vec(0x04, 0x00, 0x1d, 0xd7, 0xfa, 0x06, 0x02, 0x00, 0x02, 0xb1, 0x00, 0xff), lanes(1, 2, 3, 4)),
+        Vec(3L, 1L, 15L, 7L)
+      )
+      assertEquals(
+        swapped(
+          target,
+          Vec(0x04, 0x00, 0x0c, 0xd6, 0xfa, 0x06, 0x12, 0x04, 0x02, 0xb1, 0x00, 0xff),
+          lanes(single(1.0f), single(-1.0f), single(-1.0f), single(1.0f))
+        ),
+        Vec(single(1.0f), single(0.0f), single(0.0f), single(1.0f))
+      )
+    }
+}

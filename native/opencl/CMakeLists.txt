@@ -14,7 +14,7 @@ target_include_directories(gemstone_opencl PRIVATE
 target_compile_definitions(gemstone_opencl PRIVATE CL_TARGET_OPENCL_VERSION=300)
 target_compile_features(gemstone_opencl PRIVATE cxx_std_20)
 target_compile_options(gemstone_opencl PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter -Wno-deprecated-declarations)
-target_link_libraries(gemstone_opencl PRIVATE gemstone_execution_client Aspartame::Aspartame)
+target_link_libraries(gemstone_opencl PRIVATE gemstone_execution_client)
 target_link_options(gemstone_opencl PRIVATE -Wl,-Bsymbolic)
 gemstone_require_abi_implementations(
   TARGET gemstone_opencl

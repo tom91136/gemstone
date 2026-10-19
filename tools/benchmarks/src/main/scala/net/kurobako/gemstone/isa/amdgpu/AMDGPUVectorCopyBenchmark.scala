@@ -42,7 +42,7 @@ object AMDGPUVectorCopyBenchmark {
   )
 
   private def run(iterations: Int > 0, groups: Int > 0, image: Option[Path]): BenchmarkSample = {
-    val elements = Math.multiplyExact(groups.raw, 64)
+    val elements = Math.multiplyExact(groups, 64)
     val prepared =
       VMCompiler().compile(kernel(image)).fold(failure => throw RuntimeException(failure.message), identity)
     val memory = BenchmarkMemory(elements * 4, elements * 4, elements * 4)

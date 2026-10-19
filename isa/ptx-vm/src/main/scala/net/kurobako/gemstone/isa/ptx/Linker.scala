@@ -45,7 +45,7 @@ private object Linker {
           val scoped: NonEmpty[String] = s"$prefix$index$$$name"
           name -> scoped
         }.toMap
-        Renaming(names).statements(statements, local = false)
+        Renaming(names).statements(statements)
       }.map(statements => Program(statements.flatten))
     }
   }
@@ -109,10 +109,12 @@ private object Linker {
       case _                            => Vec.empty
     }
 
-    def statements(values: Vec[Statement], local: Boolean): Either[Fault, Vec[Statement]] = {
-      val locals = if (!local) Set.empty[NonEmpty[String]]
-      else values.flatMap {
-        case Statement.Directive(path, arguments, _, _) if Set("reg", "local", "param").contains(path.raw.head.raw) =>
+    def statements(values: Vec[Statement]): Either[Fault, Vec[Statement]] = values.traverse(statement(_))
+
+    def localStatements(values: Vec[Statement]): Either[Fault, Vec[Statement]] = {
+      val locals = values.flatMap {
+        case Statement.Directive(path, arguments, _, _)
+            if PartialFunction.cond(path.raw.head.raw) { case "reg" | "local" | "param" => true } =>
           arguments.flatMap(argument => declarationOperands(argument.operand))
         case statement => Vec.from(declarationName(statement))
       }.toSet
@@ -125,22 +127,20 @@ private object Linker {
         Right(data.copy(name = rename(data.name), initialiser = data.initialiser.map(operand(_))))
       case value: Statement.Directive         => Right(directive(value))
       case Statement.Instruction(instruction) =>
-        instruction.decoder(
-          instruction.operands.map(operand(_)),
-          instruction.mods,
-          instruction.pred.map(predication(_))
-        )
+        instruction.decoder(instruction.operands.map(operand(_)), instruction.mods)
           .leftMap(error => Fault.InvalidRequest(s"PTX linker could not rewrite ${instruction.opcode}: $error"))
-          .map(Statement.Instruction(_))
+          .map(form =>
+            Statement.Instruction(instruction.copy(form = form, pred = instruction.pred.map(predication(_))))
+          )
       case value: Statement.UnsupportedInstruction => Right(value.copy(
           operands = value.operands.map(operand(_)),
           pred = value.pred.map(predication(_))
         ))
-      case Statement.Block(body)     => statements(body, local = true).map(Statement.Block(_))
+      case Statement.Block(body)     => localStatements(body).map(Statement.Block(_))
       case value: Statement.Function =>
         val parameters = (value.parameters ++ value.returnParameters).map(_.name).toSet
         val scope      = Renaming(names -- parameters)
-        value.body.traverse(scope.statements(_, local = true)).map(body =>
+        value.body.traverse(scope.localStatements(_)).map(body =>
           value.copy(
             name = rename(value.name),
             body = body,
@@ -149,7 +149,7 @@ private object Linker {
         )
       case value: Statement.Entry =>
         val scope = Renaming(names -- value.parameters.map(_.name).toSet)
-        value.body.traverse(scope.statements(_, local = true)).map(body =>
+        value.body.traverse(scope.localStatements(_)).map(body =>
           value.copy(
             name = rename(value.name),
             body = body,

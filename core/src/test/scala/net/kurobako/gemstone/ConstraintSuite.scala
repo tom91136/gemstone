@@ -47,7 +47,7 @@ class ConstraintSuite extends munit.FunSuite {
     assertEquals(BudgetExceeded(limit.unsafe).limit.raw, 12L)
   }
 
-  test("runtime validation requires the exact carrier and a complete target") {
+  test("runtime validation requires the carrier or a refinement of it, and a complete target") {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       1.unsafe[Long > 0]
@@ -92,7 +92,7 @@ class ConstraintSuite extends munit.FunSuite {
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      1.0.unsafe[Double where GreaterThan[0]]
+      'a'.unsafe[Char where GreaterThan[0]]
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
@@ -212,5 +212,43 @@ class ConstraintSuite extends munit.FunSuite {
       object Named extends Newtype[Foreign.Type]
       val primitive: Int = Named(Foreign(7)).raw
     """).nonEmpty)
+  }
+
+  test("refined floating values compare through their carrier under strict equality") {
+    assert(typeCheckErrors("""
+      import scala.language.strictEquality
+      import net.kurobako.gemstone.constraint.*
+      val left: Double >= 0  = 0.0
+      val right: Double >= 0 = 0.0
+      left == right
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import scala.language.strictEquality
+      import net.kurobako.gemstone.constraint.*
+      val left: Float > 0  = 1.0f
+      val right: Float > 0 = 1.0f
+      left != right
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import scala.language.strictEquality
+      import net.kurobako.gemstone.constraint.*
+      val left: Double >= 0 = 0.0
+      val right: Int >= 0   = 0
+      left == right
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import scala.language.strictEquality
+      import net.kurobako.gemstone.constraint.*
+      val left: Double >= 0  = 0.0
+      val right: Double >= 0 = 0.0
+      left.raw == right.raw
+    """).isEmpty)
+    assert(typeCheckErrors("""
+      import scala.language.strictEquality
+      import net.kurobako.gemstone.constraint.*
+      val left: Int >= 0  = 1
+      val right: Long > 0 = 1L
+      left == right
+    """).isEmpty)
   }
 }

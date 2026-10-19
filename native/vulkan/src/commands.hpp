@@ -11,7 +11,7 @@ struct Dispatch {
   uint32_t x = 1, y = 1, z = 1;
   std::array<uint32_t, 3> base{};
   std::array<uint8_t, gx::GraphicsPushConstantBytes> pushConstants{};
-  std::map<DescriptorSlot, uint32_t> dynamicOffsets{};
+  std::map<DescriptorSlot, uint32_t> dynamicOffsets;
 };
 
 struct Copy {
@@ -68,20 +68,20 @@ struct NextSubpass {};
 struct EndRenderPass {};
 struct Draw {
   GraphicsCommandState state;
-  uint32_t vertices;
-  uint32_t instances;
-  uint32_t firstVertex;
-  uint32_t firstInstance;
-  bool indexed;
-  int32_t vertexOffset;
+  uint32_t vertices{};
+  uint32_t instances{};
+  uint32_t firstVertex{};
+  uint32_t firstInstance{};
+  bool indexed{};
+  int32_t vertexOffset{};
 };
 struct DrawIndirect {
   GraphicsCommandState state;
-  VkBuffer indirect;
-  VkDeviceSize offset;
-  uint32_t drawCount;
-  uint32_t stride;
-  bool indexed;
+  VkBuffer indirect{};
+  VkDeviceSize offset{};
+  uint32_t drawCount{};
+  uint32_t stride{};
+  bool indexed{};
 };
 struct CopyBufferImage {
   VkBuffer bufferHandle;
@@ -122,8 +122,8 @@ struct UpdateBuffer {
 };
 struct DispatchIndirect {
   Dispatch dispatch;
-  VkBuffer buffer;
-  VkDeviceSize offset;
+  VkBuffer buffer{};
+  VkDeviceSize offset{};
 };
 struct ResetEvent {
   VkEvent event;

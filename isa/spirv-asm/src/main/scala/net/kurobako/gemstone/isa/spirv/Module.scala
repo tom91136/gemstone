@@ -15,11 +15,11 @@ case class Module(
     endianness: Endianness,
     comments: Vec[Module.Comment] = Vec.empty
 ) {
-  require(comments.forall(_.before.raw <= instructions.size), "comment index exceeds the instruction count")
+  require(comments.forall(_.before <= instructions.size), "comment index exceeds the instruction count")
 
   /** `count` result ids above every id in use, and this module with its bound raised past them. */
   def freshIds(count: Int >= 0): (ids: Vec[Int], module: Module) = {
     val first = header.bound.raw
-    (ids = Vec.tabulate(count.raw)(first + _), module = copy(header = header.copy(bound = Word(first + count.raw))))
+    (ids = Vec.tabulate(count)(first + _), module = copy(header = header.copy(bound = Word(first + count))))
   }
 }

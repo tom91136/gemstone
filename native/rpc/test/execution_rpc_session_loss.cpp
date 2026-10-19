@@ -14,5 +14,5 @@ TEST_CASE("execution RPC reports session loss", "[rpc][integration]") {
   REQUIRE((!client->call(WriteAllocation{allocation.value(), 0, {42}})));
   auto release = client->call(ReleaseAllocation{allocation.value()});
   REQUIRE((!release));
-  REQUIRE((release.error().detail.find("session was lost") != std::string::npos));
+  REQUIRE((release.error().detail.contains("session was lost")));
 }

@@ -32,6 +32,18 @@ class AssemblerSuite extends munit.FunSuite {
     assertEquals(assemble("s_nop 0\n.p2align 3\n.byte 2"), expected)
   }
 
+  test("wave32 SDWA comparisons write a single scalar register") {
+    // LLVM MC gfx1030: v_cmp_eq_u32_sdwa s0, v0, v1 src0_sel:DWORD src1_sel:DWORD, and with vcc_lo.
+    assertEquals(
+      assemble("v_cmp_eq_u32_sdwa s0, v0, v1 src0_sel:DWORD src1_sel:DWORD"),
+      Right(hex("f9 02 84 7d 00 80 06 06"))
+    )
+    assertEquals(
+      assemble("v_cmp_eq_u32_sdwa vcc_lo, v0, v1 src0_sel:DWORD src1_sel:DWORD"),
+      Right(hex("f9 02 84 7d 00 00 06 06"))
+    )
+  }
+
   test("invalid symbols, branch ranges and data widths fail without an output image") {
     Vec(
       "x:\nx:\ns_endpgm",

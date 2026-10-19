@@ -8,7 +8,7 @@ object InvocationView {
 
     /** A scalar, vector or composite value's lanes, each in its type's bit width. */
     case Bits(lanes: Vec[Long])
-    case Address(address: Long)
+    case Address(location: Long)
   }
 }
 

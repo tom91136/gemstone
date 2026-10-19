@@ -81,6 +81,8 @@ struct Backend {
     check(hsa_signal_create(1, 0, nullptr, &done));
     check(hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue));
   }
+  Backend(const Backend &) = delete;
+  Backend &operator=(const Backend &) = delete;
   ~Backend() {
     hsa_queue_destroy(queue);
     hsa_signal_destroy(done);
@@ -91,8 +93,9 @@ struct Backend {
   }
   void *allocate(size_t size) {
     void *p{};
-    if (kind == "pool") check(hsa_amd_memory_pool_allocate(pool, size, 0, &p));
-    else if (kind == "locked") {
+    if (kind == "pool") {
+      check(hsa_amd_memory_pool_allocate(pool, size, 0, &p));
+    } else if (kind == "locked") {
       p = ordinary(size);
       void *alias{};
       check(hsa_amd_memory_lock(p, size, &gpu, 1, &alias));
@@ -101,19 +104,24 @@ struct Backend {
         std::free(p);
         throw Unsupported("locked host pointer graphs require identical host/device addresses");
       }
-    } else check(hsa_memory_allocate(region, size, &p));
+    } else {
+      check(hsa_memory_allocate(region, size, &p));
+    }
     if (kind == "pool") check(hsa_amd_agents_allow_access(1, &gpu, nullptr, p));
     return p;
   }
-  void release(void *p) {
+  void release(void *p) const {
     if (kind == "locked") {
       check(hsa_amd_memory_unlock(p));
       std::free(p);
-    } else if (kind == "pool") check(hsa_amd_memory_pool_free(p));
-    else check(hsa_memory_free(p));
+    } else if (kind == "pool") {
+      check(hsa_amd_memory_pool_free(p));
+    } else {
+      check(hsa_memory_free(p));
+    }
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, void *args, hsa_queue_t *target,
-               hsa_signal_t completion) {
+               hsa_signal_t completion) const {
     std::memset(args, 0, argumentSize);
     std::memcpy(args, &input, 8);
     std::memcpy(static_cast<char *>(args) + 8, &output, 8);
@@ -137,7 +145,7 @@ struct Backend {
                             | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
                             | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     __atomic_store_n(&p->header, header, __ATOMIC_RELEASE);
-    hsa_signal_store_screlease(target->doorbell_signal, index);
+    hsa_signal_store_screlease(target->doorbell_signal, static_cast<hsa_signal_value_t>(index));
   }
   void wait(hsa_signal_t signal) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -145,7 +153,7 @@ struct Backend {
       std::this_thread::yield();
     require(hsa_signal_load_scacquire(signal) == 0, "HSA dispatch failed or timed out");
   }
-  void submit(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
+  void submit(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) const {
     enqueue(input, output, indices, mode, count, arguments, queue, done);
   }
   void finish() { wait(done); }
@@ -155,7 +163,8 @@ struct Backend {
   }
   void ordered(uint32_t *input, uint32_t *middle, uint32_t *output, unsigned count, bool crossQueue) {
     hsa_queue_t *second{};
-    hsa_signal_t produced{}, consumed{};
+    hsa_signal_t produced{};
+    hsa_signal_t consumed{};
     void *secondArgs{};
     check(hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &second));
     check(hsa_signal_create(1, 0, nullptr, &produced));
@@ -171,7 +180,7 @@ struct Backend {
                             | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
                             | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     __atomic_store_n(&barrier->header, header, __ATOMIC_RELEASE);
-    hsa_signal_store_screlease(consumer->doorbell_signal, index);
+    hsa_signal_store_screlease(consumer->doorbell_signal, static_cast<hsa_signal_value_t>(index));
     enqueue(middle, output, input, 0, count, secondArgs, consumer, consumed);
     wait(consumed);
     check(hsa_queue_destroy(second));

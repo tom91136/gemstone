@@ -3121,6 +3121,84 @@
   },
   {
     "isa": "CDNA5",
+    "kind": "DELAY",
+    "fields": [
+      {
+        "field": {
+          "name": "INSTID0",
+          "ranges": [
+            {
+              "offset": 0,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTID1",
+          "ranges": [
+            {
+              "offset": 7,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTSKIP",
+          "ranges": [
+            {
+              "offset": 4,
+              "bits": 3,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTSKIP_SAME": "0",
+          "INSTSKIP_NEXT": "1",
+          "INSTSKIP_SKIP_1": "2",
+          "INSTSKIP_SKIP_2": "3",
+          "INSTSKIP_SKIP_3": "4",
+          "INSTSKIP_SKIP_4": "5"
+        }
+      }
+    ]
+  },
+  {
+    "isa": "CDNA5",
     "kind": "HWREG",
     "fields": [
       {
@@ -5683,6 +5761,84 @@
   },
   {
     "isa": "RDNA3",
+    "kind": "DELAY",
+    "fields": [
+      {
+        "field": {
+          "name": "INSTID0",
+          "ranges": [
+            {
+              "offset": 0,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTID1",
+          "ranges": [
+            {
+              "offset": 7,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTSKIP",
+          "ranges": [
+            {
+              "offset": 4,
+              "bits": 3,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTSKIP_SAME": "0",
+          "INSTSKIP_NEXT": "1",
+          "INSTSKIP_SKIP_1": "2",
+          "INSTSKIP_SKIP_2": "3",
+          "INSTSKIP_SKIP_3": "4",
+          "INSTSKIP_SKIP_4": "5"
+        }
+      }
+    ]
+  },
+  {
+    "isa": "RDNA3",
     "kind": "HWREG",
     "fields": [
       {
@@ -6524,6 +6680,84 @@
           ]
         },
         "names": {}
+      }
+    ]
+  },
+  {
+    "isa": "RDNA3_5",
+    "kind": "DELAY",
+    "fields": [
+      {
+        "field": {
+          "name": "INSTID0",
+          "ranges": [
+            {
+              "offset": 0,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTID1",
+          "ranges": [
+            {
+              "offset": 7,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTSKIP",
+          "ranges": [
+            {
+              "offset": 4,
+              "bits": 3,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTSKIP_SAME": "0",
+          "INSTSKIP_NEXT": "1",
+          "INSTSKIP_SKIP_1": "2",
+          "INSTSKIP_SKIP_2": "3",
+          "INSTSKIP_SKIP_3": "4",
+          "INSTSKIP_SKIP_4": "5"
+        }
       }
     ]
   },
@@ -7420,6 +7654,84 @@
   },
   {
     "isa": "RDNA4",
+    "kind": "DELAY",
+    "fields": [
+      {
+        "field": {
+          "name": "INSTID0",
+          "ranges": [
+            {
+              "offset": 0,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTID1",
+          "ranges": [
+            {
+              "offset": 7,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTSKIP",
+          "ranges": [
+            {
+              "offset": 4,
+              "bits": 3,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTSKIP_SAME": "0",
+          "INSTSKIP_NEXT": "1",
+          "INSTSKIP_SKIP_1": "2",
+          "INSTSKIP_SKIP_2": "3",
+          "INSTSKIP_SKIP_3": "4",
+          "INSTSKIP_SKIP_4": "5"
+        }
+      }
+    ]
+  },
+  {
+    "isa": "RDNA4",
     "kind": "HWREG",
     "fields": [
       {
@@ -8246,6 +8558,84 @@
           ]
         },
         "names": {}
+      }
+    ]
+  },
+  {
+    "isa": "GFX11_7",
+    "kind": "DELAY",
+    "fields": [
+      {
+        "field": {
+          "name": "INSTID0",
+          "ranges": [
+            {
+              "offset": 0,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTID1",
+          "ranges": [
+            {
+              "offset": 7,
+              "bits": 4,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTID_NO_DEP": "0",
+          "INSTID_VALU_DEP_1": "1",
+          "INSTID_VALU_DEP_2": "2",
+          "INSTID_VALU_DEP_3": "3",
+          "INSTID_VALU_DEP_4": "4",
+          "INSTID_TRANS32_DEP_1": "5",
+          "INSTID_TRANS32_DEP_2": "6",
+          "INSTID_TRANS32_DEP_3": "7",
+          "INSTID_FMA_ACCUM_CYCLE_1": "8",
+          "INSTID_SALU_CYCLE_1": "9",
+          "INSTID_SALU_CYCLE_2": "10",
+          "INSTID_SALU_CYCLE_3": "11"
+        }
+      },
+      {
+        "field": {
+          "name": "INSTSKIP",
+          "ranges": [
+            {
+              "offset": 4,
+              "bits": 3,
+              "padding": 0
+            }
+          ]
+        },
+        "names": {
+          "INSTSKIP_SAME": "0",
+          "INSTSKIP_NEXT": "1",
+          "INSTSKIP_SKIP_1": "2",
+          "INSTSKIP_SKIP_2": "3",
+          "INSTSKIP_SKIP_3": "4",
+          "INSTSKIP_SKIP_4": "5"
+        }
       }
     ]
   },

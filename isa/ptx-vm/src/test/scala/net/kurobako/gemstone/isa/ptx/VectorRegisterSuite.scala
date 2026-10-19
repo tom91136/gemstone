@@ -10,10 +10,13 @@ import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.memory.*
 
 class VectorRegisterSuite extends munit.FunSuite {
+  private val widths   = Vec(16, 32, 64)
+  private val prefixes = Vec("", "%")
+
   for {
     count  <- Vec(2, 4)
-    width  <- Vec(16, 32, 64)
-    prefix <- Vec("", "%")
+    width  <- widths
+    prefix <- prefixes
     if count * width <= 128
   } test(s"named v$count u$width vectors ($prefix) move simultaneously and retain component aliases") {
     val parts    = Vec("x", "y", "z", "w").take(count)

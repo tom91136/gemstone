@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv
 
-import VMInvocation.*
 import VMMemory.*
 import VMProgram.*
 import cats.syntax.all.*
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
@@ -14,21 +14,24 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
-import scala.collection.concurrent.TrieMap
+import scala.collection.concurrent
+import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 private object VMProgram {
-  enum RuntimeType {
+  enum RuntimeType derives CanEqual {
     case Void
     case Bool
     case Integer(width: ScalarBitWidth, signed: Boolean)
     case Floating(width: Int in (16, 32, 64))
+    case Float8(format: Minifloat)
     case VectorType(component: Int, count: Int > 0)
     case Array(element: Int, count: Long >= 0)
     case Structure(members: Vec[Int])
     case Pointer(storageClass: Int, pointee: Int)
     case Function(result: Int, parameters: Vec[Int])
     case Event
+    case NamedBarrier
     case Pipe(access: Int)
     case ReserveId
     case DeviceEvent
@@ -50,8 +53,41 @@ private object VMProgram {
     case MultisampledTexture(sampledType: Int, arrayed: Boolean = false)
   }
 
-  case class MatrixLayout(stride: Int > 0, rowMajor: Boolean)
+  trait LeafVisitor { def apply(offset: Long >= 0, component: Int): Unit }
 
+  /** A cooperative matrix type of `rows` by `columns` components of `component`, which every invocation in its scope
+    * holds whole in row-major lanes, so its `use` and `scope` constrain only how it may be combined. The VM types its
+    * values as vectors of `rows * columns` components; `nv` marks SPV_NV_cooperative_matrix's type.
+    */
+  case class CooperativeMatrix(component: Int, scope: Long, rows: Int, columns: Int, use: Long, nv: Boolean)
+
+  object TensorLayout {
+    val BlockSize: Int  = 0
+    val Dimension: Int  = 5
+    val Stride: Int     = 10
+    val Offset: Int     = 15
+    val Span: Int       = 20
+    val ClampValue: Int = 25
+    val Lanes: Int      = 26
+  }
+
+  /** An SPV_NV_tensor_addressing layout of 1 to 5 dimensions, whose values the VM types as vectors of
+    * [[TensorLayout.Lanes]] 32-bit words of state.
+    */
+  case class TensorLayout(dimensions: Int in 1 ~ 5, clampMode: Long)
+
+  object TensorView {
+    val Dimension: Int = 0
+    val Stride: Int    = 5
+    val Clip: Int      = 10
+    val Lanes: Int     = 14
+  }
+
+  /** An SPV_NV_tensor_addressing view, whose values the VM types as vectors of [[TensorView.Lanes]] 32-bit words. */
+  case class TensorView(dimensions: Int in 1 ~ 5, hasDimensions: Boolean, permutation: Vec[Int])
+
+  // the type id is read on every constant of the hot path, and hoisting it turns the patterns into nested ones
+  @SuppressWarnings(Array("baumkuchen:common-factor"))
   enum Constant {
     case Bits(typeId: Int, lanes: Vec[Long])
     case NullPointer(typeId: Int, pointee: Int, storageClass: Int)
@@ -64,6 +100,19 @@ private object VMProgram {
 
     /** An `OpConstantSampler`, as the words of the `ImageDescriptor.SamplerWord` ABI. */
     case Sampler(typeId: Int, words: Vec[Long])
+
+    /** An `OpConstantFunctionPointerINTEL`, whose token takes the program's function pointer namespace. */
+    case FunctionPointer(typeId: Int, function: Int)
+
+    def value: VMValue = this match {
+      case Bits(typeId, lanes)                        => VMValue.Bits(typeId, Vec.toArray(lanes))
+      case NullPointer(typeId, pointee, storageClass) => VMValue.Address(typeId, Pointer(0L, pointee, storageClass))
+      // Global addresses are only known per dispatch, which replaces these placeholders.
+      case GlobalAddress(typeId = typeId)    => VMValue.Address(typeId, Pointer(0L, typeId, 0))
+      case Composite(typeId, lanes, _)       => VMValue.Bits(typeId, Vec.toArray(lanes))
+      case Sampler(typeId, _)                => VMValue.Address(typeId, Pointer(0L, typeId, 0))
+      case FunctionPointer(typeId, function) => VMValue.Bits(typeId, Array(function.toLong))
+    }
   }
 
   /** A pointer word at `offset` in a global's initial image that addresses `target` plus `addend` bytes. */
@@ -72,6 +121,7 @@ private object VMProgram {
   case class GlobalImage(variable: Int, global: Global, bytes: Vec[Byte], fixups: Vec[Fixup])
 
   case class Function(id: Int, parameters: Vec[(Int, Int)], start: Int, end: Int, labels: Map[Int, Int])
+      derives CanEqual
 
   case class Global(pointerType: Int, storageClass: Int, initialiser: Option[Int])
 
@@ -96,6 +146,9 @@ private object VMProgram {
       vulkanEntries: Set[NonEmpty[String]],
       graphicsEntries: Set[NonEmpty[String]],
       subgroupSizes: Map[Int, Int > 0],
+      cooperativeMatrices: Map[Int, CooperativeMatrix],
+      tensorLayouts: Map[Int, TensorLayout],
+      tensorViews: Map[Int, TensorView],
       workGroupSizes: Map[Int, LaunchGeometry.Dimensions],
       builtinWorkGroupSize: Option[LaunchGeometry.Dimensions],
       workGroupSizeHints: Map[Int, LaunchGeometry.Dimensions],
@@ -103,31 +156,9 @@ private object VMProgram {
       names: Map[Int, String],
       collectiveFunctions: Set[Int],
       valueTypes: Map[Int, Int],
+      untypedPointee: Int,
       idBound: Int
   )
-
-  /** The SPIR-V universal limit on the result id bound. */
-  val IdLimit: Int = 4194303
-
-  def load(
-      module: Module,
-      environment: Validation.Environment,
-      workgroups: Workgroups = Workgroups.Sequential
-  ): Either[Fault, VMProgram] =
-    Validation.validate(module, environment) match {
-      case ValidationOutcome.Accepted         => loadUnchecked(module, workgroups)
-      case ValidationOutcome.Rejected(issues) =>
-        Left(Fault.InvalidRequest(s"invalid SPIR-V module: ${issues.map(_.message).mkString("; ")}"))
-      case ValidationOutcome.Incomplete(issues) =>
-        Left(Fault.Unsupported(s"unsupported SPIR-V module: ${issues.map(_.message).mkString("; ")}"))
-    }
-
-  def loadUnchecked(module: Module, workgroups: Workgroups = Workgroups.Sequential): Either[Fault, VMProgram] =
-    try VMLoader.tables(ModuleNormalisation.expandDecorationGroups(module)).map(VMProgram(_, workgroups))
-    catch {
-      case NonFatal(error) =>
-        Left(Fault.InvalidRequest(s"malformed SPIR-V execution state: ${throwables.detail(error)}"))
-    }
 
   def scalarLeafCount(types: scala.collection.Map[Int, RuntimeType], typeId: Int): Either[Fault, Int >= 0] =
     leafCount(types, typeId, Set.empty)
@@ -139,27 +170,29 @@ private object VMProgram {
       def nested(child: Int) = leafCount(types, child, enclosing + typeId)
       types.get(typeId) match {
         case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
-            Some(RuntimeType.Event) | Some(RuntimeType.ReserveId) | Some(RuntimeType.DeviceEvent) |
+            Some(RuntimeType.Float8(_)) |
+            Some(RuntimeType.Event) | Some(RuntimeType.NamedBarrier) | Some(RuntimeType.ReserveId) |
+            Some(RuntimeType.DeviceEvent) |
             Some(RuntimeType.Queue) | Some(RuntimeType.Pointer(_, _)) => Right(1)
         case Some(RuntimeType.VectorType(component, count)) =>
-          nested(component).flatMap(value => leafProduct(typeId, value, count.toLong.widen[Long >= 0]))
+          nested(component).flatMap(value => leafProduct(typeId, value, count.widen[Long >= 0]))
         case Some(RuntimeType.MatrixType(column, count)) =>
-          nested(column).flatMap(value => leafProduct(typeId, value, count.toLong.widen[Long >= 0]))
+          nested(column).flatMap(value => leafProduct(typeId, value, count.widen[Long >= 0]))
         case Some(RuntimeType.Array(element, count)) =>
           nested(element).flatMap(value => leafProduct(typeId, value, count))
         case Some(RuntimeType.Structure(members)) =>
           members.foldLeft[Either[Fault, Int >= 0]](Right(0)) { (total, member) =>
-            total.flatMap(left => nested(member).flatMap(right => leafTotal(typeId, left.raw.toLong + right.raw)))
+            total.flatMap(left => nested(member).flatMap(right => leafTotal(typeId, left.toLong + right)))
           }
         case value => Left(Fault.InvalidRequest(s"SPIR-V type %$typeId has no scalar data leaves: $value"))
       }
     }
 
   private def leafProduct(typeId: Int, leaves: Int >= 0, count: Long >= 0): Either[Fault, Int >= 0] =
-    if (leaves.raw == 0) Right(0)
-    else if (count.raw > Int.MaxValue.toLong / leaves.raw)
-      Left(Fault.InvalidRequest(s"SPIR-V type %$typeId has an invalid scalar leaf count: $leaves * ${count.raw}"))
-    else leafTotal(typeId, leaves.raw.toLong * count.raw)
+    if (leaves == 0) Right(0)
+    else if (count > Int.MaxValue.toLong / leaves)
+      Left(Fault.InvalidRequest(s"SPIR-V type %$typeId has an invalid scalar leaf count: $leaves * $count"))
+    else leafTotal(typeId, leaves.toLong * count)
 
   private def leafTotal(typeId: Int, count: Long): Either[Fault, Int >= 0] =
     count.refine[Long in 0L ~ 2147483647L].bimap(
@@ -181,7 +214,7 @@ private object VMProgram {
       Right(Constant.NullPointer(typeId, typeId, 0))
     case _ =>
       scalarLeafCount(types, typeId) match {
-        case Right(count)                        => Right(Constant.Bits(typeId, Vec.fill(count.raw)(0L)))
+        case Right(count)                        => Right(Constant.Bits(typeId, Vec.fill(count)(0L)))
         case Left(Fault.InvalidRequest(message)) =>
           Left(Fault.InvalidRequest(s"$opcode %$destination has invalid result type: $message"))
         case Left(error) => Left(error)
@@ -189,8 +222,10 @@ private object VMProgram {
   }
 }
 
-/** One loaded module: decoded tables, eager storage layouts, the lowered op table and the backend program surface. */
-private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.Program {
+/** One loaded module: decoded tables, eager storage layouts and globals, which [[LoadedProgram]] lowers and runs. */
+// LoadedProgram sits above the ops and lowering that see this, which keeps them acyclic
+@SuppressWarnings(Array("baumkuchen:single-implementation"))
+private abstract class VMProgram(tables: Tables) extends Backend.Program {
   export tables.*
 
   val vulkan: Boolean = vulkanEntries.nonEmpty
@@ -205,10 +240,15 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
 
   def runtimeType(id: Int): Option[RuntimeType] = if (id >= 0 && id < idBound) typeTable(id) else None
 
+  /** Whether `pointee` is the pointee of SPV_KHR_untyped_pointers' pointer types, the bytes a module's untyped pointers
+    * address; their values may point at any type.
+    */
+  def untyped(pointee: Int): Boolean = untypedPointee >= 0 && pointee == untypedPointee
+
   private val integerShapes: Array[Option[(Int in 1 ~ 64, Int)]] = typeTable.map(_.flatMap {
     case RuntimeType.Integer(width, _)            => Some((width, 1))
     case RuntimeType.VectorType(component, count) => runtimeType(component) match {
-        case Some(RuntimeType.Integer(width, _)) => Some((width, count.raw))
+        case Some(RuntimeType.Integer(width, _)) => Some((width, count))
         case _                                   => None
       }
     case _ => None
@@ -226,8 +266,23 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   def integerShape(typeId: Int): Option[(Int in 1 ~ 64, Int)] =
     if (typeId >= 0 && typeId < idBound) integerShapes(typeId) else None
 
+  def float8Shape(typeId: Int): Option[(Minifloat, Int)] = runtimeType(typeId).flatMap {
+    case RuntimeType.Float8(format)               => Some((format, 1))
+    case RuntimeType.VectorType(component, count) => runtimeType(component).collect {
+        case RuntimeType.Float8(format) => (format, count)
+      }
+    case _ => None
+  }
+
   def floatingShape(typeId: Int): Option[(Int in (16, 32, 64), Int)] =
     if (typeId >= 0 && typeId < idBound) floatingShapes(typeId) else None
+
+  /** Component width, rows and columns of a matrix type. */
+  def matrixShape(typeId: Int): Option[(Int in (16, 32, 64), Int, Int)] = runtimeType(typeId) match {
+    case Some(RuntimeType.MatrixType(column, columns)) =>
+      floatingShape(column).map { case (width, rows) => (width, rows, columns) }
+    case _ => None
+  }
 
   /** Lane width and count of an integer, floating-point or Boolean scalar or vector; Booleans occupy 8-bit lanes. */
   def numericShape(typeId: Int): Option[(Int in 1 ~ 64, Int)] =
@@ -239,7 +294,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   def booleanLanes(typeId: Int): Option[Int] = runtimeType(typeId) match {
     case Some(RuntimeType.Bool)                                                                              => Some(1)
     case Some(RuntimeType.VectorType(component, count)) if runtimeType(component).contains(RuntimeType.Bool) =>
-      Some(count.raw)
+      Some(count)
     case _ => None
   }
 
@@ -284,7 +339,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     if (id >= 0 && id < idBound && sizes(id) >= 0) sizes(id).unsafe[Int >= 0]
     else {
       val size = typeSizeUncached(id)
-      if (id >= 0 && id < idBound) sizes(id) = size.raw
+      if (id >= 0 && id < idBound) sizes(id) = size
       size
     }
 
@@ -292,7 +347,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     if (id >= 0 && id < idBound && alignments(id) > 0) alignments(id).unsafe[Int > 0]
     else {
       val alignment = typeAlignmentUncached(id)
-      if (id >= 0 && id < idBound) alignments(id) = alignment.raw
+      if (id >= 0 && id < idBound) alignments(id) = alignment
       alignment
     }
 
@@ -304,7 +359,9 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       case Some(RuntimeType.Bool)              => 1
       case Some(RuntimeType.Integer(width, _)) => width.toScalarByteWidth.widen[Int >= 0]
       case Some(RuntimeType.Floating(width))   => width.toFloatByteWidth
+      case Some(RuntimeType.Float8(_))         => 1
       case Some(RuntimeType.MultisampledTexture(_, _) | RuntimeType.InputAttachment(_, _) | RuntimeType.Event |
+          RuntimeType.NamedBarrier |
           RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue | RuntimeType.Pipe(_) |
           _: RuntimeType.StorageImage | _: RuntimeType.Texture |
           RuntimeType.CubeTexture(
@@ -312,11 +369,11 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
             _
           ) | RuntimeType.Sampler | RuntimeType.SampledImage(_) | RuntimeType.Pointer(_, _)) => 8
       case Some(RuntimeType.VectorType(component, n)) =>
-        typeSizeOf(component) * (if (n.raw == 3 && !vulkan) 4: Int >= 0 else n)
+        typeSizeOf(component) * (if (n == 3 && !vulkan && !cooperativeMatrices.contains(typeId)) 4: Int >= 0 else n)
       case Some(RuntimeType.MatrixType(column, count)) => typeSizeOf(column) * count
       case Some(RuntimeType.Array(element, n))         =>
         val stride: Int >= 0 = arrayStrides.get(typeId).fold(typeSizeOf(element))(_.widen[Int >= 0])
-        (stride.toLong * n).toIntExact
+        (stride.widen[Long >= 0] * n.widen[Long >= 0]).toIntExact
       case Some(RuntimeType.Structure(members))                      => structSize(typeId, members)
       case Some(RuntimeType.Void) | Some(RuntimeType.Function(_, _)) => 0
       case None => throw IllegalArgumentException(s"SPIR-V type %$typeId is undefined")
@@ -329,8 +386,10 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       case Some(RuntimeType.Structure(members))    => members.map(typeAlignmentOf(_)).maxOption.getOrElse(1: Int > 0)
       case Some(RuntimeType.MatrixType(column, _)) => typeAlignmentOf(column)
       case Some(RuntimeType.Array(element, _))     => typeAlignmentOf(element)
+      case Some(RuntimeType.VectorType(component, _)) if cooperativeMatrices.contains(typeId) =>
+        typeAlignmentOf(component)
       case Some(RuntimeType.VectorType(component, count)) =>
-        typeAlignmentOf(component) * (if (count.raw == 3) 4: Int > 0 else count)
+        typeAlignmentOf(component) * (if (count == 3) 4: Int > 0 else count)
       case Some(RuntimeType.Pointer(_, _)) => 8
       case _                               => (1: Int > 0).max(typeSizeOf(typeId))
     }
@@ -348,7 +407,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       (previous - 1) * value.stride + typeSize(component)
     case (Some(RuntimeType.Array(element, count)), Some(_)) =>
       val stride: Int >= 0 = arrayStrides.get(typeId).fold(storageTypeSize(element, layout))(_.widen[Int >= 0])
-      (stride.toLong * count).toIntExact
+      (stride.widen[Long >= 0] * count.widen[Long >= 0]).toIntExact
     case _ => typeSize(typeId)
   }
 
@@ -363,15 +422,15 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       val member = members(index)
       offset =
         if (packedStructures.contains(structureType)) offset
-        else memberOffsets.getOrElse(structureType -> index, alignUp(offset, typeAlignmentOf(member)))
-      offsets(index) = offset.raw
+        else memberOffsets.getOrElse(structureType -> index, offset.alignUp(typeAlignmentOf(member)))
+      offsets(index) = offset
       offset =
         if (packedStructures.contains(structureType)) offset + typeSizeOf(member)
         else offset + storageTypeSize(member, memberMatrixLayouts.get(structureType -> index))
       extent = extent.max(offset)
       index += 1
     }
-    offsets(members.size) = extent.raw
+    offsets(members.size) = extent
     offsets
   }
 
@@ -391,17 +450,11 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   private def structSize(structureType: Int, members: Vec[Int]): Int >= 0 = {
     val extent = memberOffsetsOf(structureType, members)(members.size).unsafe[Int >= 0]
     if (packedStructures.contains(structureType)) extent
-    else alignUp(extent, typeAlignmentOf(structureType))
+    else extent.alignUp(typeAlignmentOf(structureType))
   }
 
   def structMemberOffset(structureType: Int, members: Vec[Int], selected: Int): Int >= 0 =
     memberOffsetsOf(structureType, members)(selected).unsafe[Int >= 0]
-
-  def alignUp(value: Int >= 0, alignment: Int > 0): Int >= 0 = {
-    val remainder       = value % alignment
-    val extra: Int >= 0 = if (remainder.raw == 0) 0 else 1
-    (value / alignment + extra) * alignment
-  }
 
   private val leafCounts = Array.tabulate[Either[Fault, Int >= 0]](idBound) { id =>
     if (acyclic(id)) VMProgram.scalarLeafCount(types, id)
@@ -415,9 +468,10 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     case Some(RuntimeType.Bool)              => Right(1)
     case Some(RuntimeType.Integer(width, _)) => Right(width.toScalarByteWidth)
     case Some(RuntimeType.Floating(width))   => Right(width.toFloatByteWidth)
+    case Some(RuntimeType.Float8(_))         => Right(1)
     case _                                   =>
       val size = typeSize(typeId)
-      size.raw.refine[Int in 1 ~ 8].leftMap(_ =>
+      size.refine[Int in 1 ~ 8].leftMap(_ =>
         Fault.InvalidRequest(s"SPIR-V scalar type %$typeId has invalid byte width $size")
       )
   }
@@ -426,7 +480,9 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     case Some(RuntimeType.Bool)                     => 8
     case Some(RuntimeType.Integer(width, _))        => width
     case Some(RuntimeType.Floating(width))          => width
+    case Some(RuntimeType.Float8(_))                => 8
     case Some(RuntimeType.Event)                    => 64
+    case Some(RuntimeType.NamedBarrier)             => 64
     case Some(RuntimeType.ReserveId)                => 64
     case Some(RuntimeType.DeviceEvent)              => 64
     case Some(RuntimeType.Queue)                    => 64
@@ -458,13 +514,13 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
 
   // Collection traversal supplies nonnegative indices; retain that proof through offset arithmetic.
   private def scaled(index: Int >= 0, stride: Int >= 0): Long >= 0 =
-    index.toLong.widen[Long >= 0] * stride.toLong.widen[Long >= 0]
+    index.widen[Long >= 0] * stride.widen[Long >= 0]
 
   /** Visit logical scalar lanes in order with their physical byte offsets. Visiting only the leaves preserves padding
     * and supports row-major column views; the default layout is the dense data layout.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def visitLeaves(typeId: Int, layout: Option[MatrixLayout], base: Long >= 0)(visit: (Long >= 0, Int) => Unit): Unit =
+  def visitLeaves(typeId: Int, layout: Option[MatrixLayout], base: Long >= 0)(visit: LeafVisitor): Unit =
     if (recursive(typeId)) throw IllegalArgumentException(s"SPIR-V type %$typeId contains itself")
     else runtimeType(typeId) match {
       case Some(RuntimeType.Structure(members)) =>
@@ -473,15 +529,15 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
           visitLeaves(
             members(index),
             memberMatrixLayouts.get(typeId -> index),
-            base + structMemberOffset(typeId, members, index).toLong.widen[Long >= 0]
+            base + structMemberOffset(typeId, members, index).widen[Long >= 0]
           )(visit)
           index += 1
         }
       case Some(RuntimeType.Array(element, count)) =>
         val stride = arrayStrides.get(typeId).fold(storageTypeSize(element, layout))(_.widen[Int >= 0])
         var index  = 0L
-        while (index < count.raw) {
-          visitLeaves(element, layout, base + index.unsafe[Long >= 0] * stride.toLong.widen[Long >= 0])(visit)
+        while (index < count) {
+          visitLeaves(element, layout, base + index.unsafe[Long >= 0] * stride.widen[Long >= 0])(visit)
           index += 1L
         }
       case Some(RuntimeType.MatrixType(column, columns)) => runtimeType(column) match {
@@ -489,12 +545,13 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
             val scalarBytes = typeSize(component)
             val stride      = layout.fold(typeSize(column))(_.stride.widen[Int >= 0])
             val rowMajor    = layout.exists(_.rowMajor)
-            if (stride.raw <= 0) throw IllegalArgumentException("invalid matrix stride")
+            if (stride <= 0) throw IllegalArgumentException("invalid matrix stride")
             var c = 0
-            while (c < columns.raw) {
+            while (c < columns) {
               var r = 0
-              while (r < rows.raw) {
-                val (major, minor) = if (rowMajor) (r, c) else (c, r)
+              while (r < rows) {
+                val major = if (rowMajor) r else c
+                val minor = if (rowMajor) c else r
                 visit(base + scaled(major.unsafe, stride) + scaled(minor.unsafe, scalarBytes), component)
                 r += 1
               }
@@ -505,12 +562,13 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       case Some(RuntimeType.VectorType(component, count)) =>
         val stride = layout.filter(_.rowMajor).fold(typeSize(component))(_.stride.widen[Int >= 0])
         var index  = 0
-        while (index < count.raw) {
+        while (index < count) {
           visit(base + scaled(index.unsafe, stride), component)
           index += 1
         }
       case Some(RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_) | RuntimeType.Pointer(_, _) |
-          RuntimeType.Event | RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue) =>
+          RuntimeType.Event | RuntimeType.NamedBarrier | RuntimeType.ReserveId | RuntimeType.DeviceEvent |
+          RuntimeType.Queue) =>
         visit(base, typeId)
       case value => throw IllegalArgumentException(s"SPIR-V type %$typeId has no data leaves: $value")
     }
@@ -538,10 +596,10 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
         if (typeId >= 0 && typeId < idBound) pointerLeaves(typeId) = computed
         computed
       }
-    if (baseOffset.raw == 0L) leaves
+    if (baseOffset == 0L) leaves
     else leaves.flatMap(_.traverse { case (offset, pointerType) =>
-      Either.catchOnly[ArithmeticException](Math.addExact(offset.raw, baseOffset.raw)).bimap(
-        _ => Fault.InvalidRequest(s"SPIR-V pointer leaf offsets overflow for type %$typeId at base ${baseOffset.raw}"),
+      Either.catchOnly[ArithmeticException](Math.addExact(offset, baseOffset)).bimap(
+        _ => Fault.InvalidRequest(s"SPIR-V pointer leaf offsets overflow for type %$typeId at base $baseOffset"),
         sum => sum.unsafe[Long >= 0] -> pointerType
       )
     })
@@ -552,26 +610,20 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     else runtimeType(typeId) match {
       case Some(RuntimeType.Pointer(_, _))      => Right(Vec(baseOffset -> typeId))
       case Some(RuntimeType.Structure(members)) =>
-        Vec.indices(members.nonNegativeSize).foldLeft[Either[Fault, Vec[(Long >= 0, Int)]]](Right(Vec.empty)) {
-          (result, index) =>
-            result.flatMap(existing =>
-              pointerLeafOffsetsUnchecked(
-                members(index.raw),
-                baseOffset + structMemberOffset(typeId, members, index.raw).toLong.widen[Long >= 0]
-              ).map(existing ++ _)
-            )
-        }
+        Traversal.traverse(Vec.indices(members.nonNegativeSize))(index =>
+          pointerLeafOffsetsUnchecked(
+            members(index),
+            baseOffset + structMemberOffset(typeId, members, index).widen[Long >= 0]
+          )
+        ).map(_.flatten)
       case Some(RuntimeType.Array(element, count)) =>
-        if (count.raw > Int.MaxValue.toLong)
+        if (count > Int.MaxValue.toLong)
           Left(Fault.InvalidRequest(s"SPIR-V aggregate pointer array type %$typeId has invalid size $count"))
         else {
           val stride = arrayStrides.get(typeId).fold(typeSize(element))(_.widen[Int >= 0])
-          Vec.indices(count.toIntExact).foldLeft[Either[Fault, Vec[(Long >= 0, Int)]]](Right(Vec.empty)) {
-            (result, index) =>
-              result.flatMap(existing =>
-                pointerLeafOffsetsUnchecked(element, baseOffset + scaled(index, stride)).map(existing ++ _)
-              )
-          }
+          Traversal.traverse(Vec.indices(count.toIntExact))(index =>
+            pointerLeafOffsetsUnchecked(element, baseOffset + scaled(index, stride))
+          ).map(_.flatten)
         }
       case Some(_) => Right(Vec.empty)
       case None    => Left(Fault.InvalidRequest(s"SPIR-V aggregate member type %$typeId is undefined"))
@@ -604,25 +656,21 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   /** Whether the value lives unboxed in the scalar register bank. */
   def scalarSlot(id: Int): Boolean = id >= 0 && id < idBound && scalarSlots(id)
 
-  val constants: Map[Int, VMValue] = constantData.view.mapValues(VMValue.fromConstant).toMap
+  val constants: Map[Int, VMValue] = constantData.view.mapValues(_.value).toMap
 
-  /** A register file holding every constant; dispatches copy it and add their globals. */
-  def registers(globals: Map[Int, VMValue]): InvocationValues = {
-    val values = InvocationValues(this, Array.ofDim[Long](idBound), Array.ofDim[VMValue | Null](idBound))
-    constants.foreach { case (id, value) => values.update(id, value) }
-    globals.foreach { case (id, value) => values.update(id, value) }
-    values
-  }
-
-  val ops: Array[Op] = VMLowering.lower(this)
+  lazy val functionPointerConstants: Vector[(Int, Int, Long)] =
+    constantData.collect { case (id, Constant.FunctionPointer(typeId, function)) => (id, typeId, function.toLong) }
+      .toVector
 
   // Zero identifies direct VM execution; published namespaces are bound once.
   private val functionPointerNamespace = java.util.concurrent.atomic.AtomicLong(0L)
 
   def ownsFunctionPointer(token: Long): Boolean = (token >>> 32) == functionPointerNamespace.get()
 
-  private case class Bound(binding: GlobalBinding, memory: AddressSpace)
-  private val boundGlobals: TrieMap[Int, Bound] = TrieMap.empty
+  /** The token of `function` in the program's function pointer namespace. */
+  def functionPointer(function: Long): Long = (functionPointerNamespace.get() << 32) | function
+
+  private val boundGlobals: concurrent.Map[Int, BoundGlobal] = ConcurrentHashMap[Int, BoundGlobal]().asScala
 
   override def global(name: NonEmpty[String]): Either[Fault, ProgramGlobal] =
     globalImage(name).flatMap { image =>
@@ -632,7 +680,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
 
   override def bindGlobal(name: NonEmpty[String], binding: GlobalBinding, memory: AddressSpace): Either[Fault, Unit] =
     globalImage(name).flatMap { image =>
-      val next = Bound(binding, memory)
+      val next = BoundGlobal(binding, memory)
       GlobalBinding.rebind(name, boundGlobals.putIfAbsent(image.variable, next), next).flatMap { first =>
         if (!first) Right(())
         else (for {
@@ -667,11 +715,9 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
 
   override def writeGlobal(name: NonEmpty[String], offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
     globalVariable(name).flatMap { id =>
-      boundGlobals.get(id).toRight(Fault.InvalidRequest(s"SPIR-V global '$name' is not bound")).flatMap { bound =>
-        if (!bound.binding.contains(offset, bytes.nonNegativeSize.toLong))
-          Left(Fault.InvalidRequest(s"SPIR-V global '$name' write exceeds its storage"))
-        else bound.memory.write(bound.binding.region, bound.binding.offset + offset, bytes)
-      }
+      boundGlobals.get(id).toRight(Fault.InvalidRequest(s"SPIR-V global '$name' is not bound")).flatMap(
+        _.write(offset, bytes)(Fault.InvalidRequest(s"SPIR-V global '$name' write exceeds its storage"))
+      )
     }
 
   override def symbols: Either[Fault, ProgramSymbols] =
@@ -688,13 +734,6 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     if (id.raw > 0xffffffffL) Left(Fault.InvalidRequest("function pointer namespace must fit a 32-bit identity"))
     else if (functionPointerNamespace.compareAndSet(0L, id.raw) || functionPointerNamespace.get() == id.raw) Right(())
     else Left(Fault.InvalidRequest("function pointer namespace is already bound"))
-
-  override def execute(
-      task: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, Unit] = VMInterpreter.execute(this, task, memory, control, workgroups, handler)
 
   def kernelNames: Vec[NonEmpty[String]] = Vec.from(entryPoints.keys.toSeq.sorted)
 
@@ -731,64 +770,8 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
       programImages.flatMap(_.find(_.variable == id).toRight(Fault.Memory(s"SPIR-V global '$name' has no storage")))
     )
 
-  override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
-    if (vulkanEntries.contains(name)) VMShaderInterface.metadata(this, name)
-    else
-      entryPoints.get(name)
-        .orElse(names.collectFirst { case (id, candidate) if candidate == name && functions.contains(id) => id })
-        .toRight(Fault.NotFound(s"SPIR-V entry point $name does not exist"))
-        .flatMap { functionId =>
-          functions.get(functionId).toRight(Fault.InvalidRequest(s"SPIR-V entry point $name has no function body"))
-            .flatMap { function =>
-              function.parameters.foldLeft[Either[Fault, (Vec[KernelMetadata.Parameter], Int >= 0)]](
-                Right((Vec.empty[KernelMetadata.Parameter], 0))
-              ) { case (result, (parameterId, parameterType)) =>
-                result.flatMap { case (parameters, currentOffset) =>
-                  parameterMetadata(parameterId, parameterType).map { parameter =>
-                    val offset = alignUp(currentOffset, typeAlignment(parameterType).min(8))
-                    parameters.appended(parameter.copy(offset = offset)) -> (offset + parameter.width)
-                  }
-                }
-              }.flatMap { case (parameters, size) =>
-                for {
-                  entryPointId <-
-                    functionId.refine[Int >= 0].leftMap(_ =>
-                      Fault.InvalidRequest(s"negative SPIR-V function ID $functionId")
-                    )
-                  metadata <- KernelMetadata.validated(
-                    size,
-                    parameters.nonNegativeSize,
-                    parameters,
-                    requiredWorkGroupSize = workGroupSize(functionId),
-                    workGroupSizeHint = workGroupSizeHints.get(functionId),
-                    entryPointId = Some(entryPointId)
-                  ).leftMap(detail => Fault.InvalidRequest(detail))
-                } yield metadata
-              }
-            }
-        }
-
   def workGroupSize(functionId: Int): Option[LaunchGeometry.Dimensions] =
     builtinWorkGroupSize.orElse(workGroupSizes.get(functionId))
-
-  private def parameterMetadata(parameterId: Int, parameterType: Int): Either[Fault, KernelMetadata.Parameter] =
-    runtimeType(parameterType) match {
-      case Some(RuntimeType.Pointer(_, pointee)) if byValueParameters.contains(parameterId) =>
-        scalarParameter(pointee)
-      case Some(RuntimeType.Pointer(StorageClass.Workgroup, _)) =>
-        Right(KernelMetadata.Parameter(8, 0, KernelMetadata.ParameterKind.Local, containsPointers = false))
-      case Some(RuntimeType.Pointer(_, _)) =>
-        Right(KernelMetadata.Parameter(8, 0, KernelMetadata.ParameterKind.Allocation, containsPointers = false))
-      case Some(_) => scalarParameter(parameterType)
-      case None    => Left(Fault.InvalidRequest(s"SPIR-V parameter type %$parameterType is undefined"))
-    }
-
-  private def scalarParameter(valueType: Int): Either[Fault, KernelMetadata.Parameter] =
-    pointerLeafOffsets(valueType, 0L).flatMap { pointers =>
-      val width = typeSize(valueType)
-      width.raw.refine[Int > 0].leftMap(_ => Fault.InvalidRequest(s"SPIR-V parameter width must be positive: $width"))
-        .map(KernelMetadata.Parameter(_, 0, KernelMetadata.ParameterKind.Scalar, pointers.nonEmpty))
-    }
 
   def globalImages(includeStorageClass: Int => Boolean): Either[Fault, Vector[GlobalImage]] =
     globals.toVector.filter { case (variable, global) =>
@@ -851,15 +834,15 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
 
   private def chainOffset(pointerType: Int, element: Option[Long], indexes: Vec[Long]): Either[Fault, Long] = {
     def stride(typeId: Int, member: Int): Long =
-      arrayStrides.get(typeId).fold(storageTypeSize(member, None).raw.toLong)(_.raw.toLong)
+      arrayStrides.get(typeId).fold(storageTypeSize(member, None).toLong)(_.raw.toLong)
     val pointee = pointerPointee(pointerType)
     indexes.foldLeft[Either[Fault, (Long, Int)]](Right(element.fold(0L)(_ * stride(pointerType, pointee)) -> pointee)) {
       case (Right((offset, typeId)), index) => runtimeType(typeId) match {
           case Some(RuntimeType.Structure(members)) if index >= 0 && index < members.size =>
-            Right((offset + structMemberOffset(typeId, members, index.toInt).raw, members(index.toInt)))
+            Right((offset + structMemberOffset(typeId, members, index.toInt), members(index.toInt)))
           case Some(RuntimeType.Array(member, _))         => Right((offset + index * stride(typeId, member), member))
           case Some(RuntimeType.VectorType(component, _)) =>
-            Right((offset + index * typeSize(component).raw, component))
+            Right((offset + index * typeSize(component), component))
           case _ => Left(Fault.InvalidRequest(s"a constant access chain cannot index SPIR-V type %$typeId"))
         }
       case (failure, _) => failure
@@ -869,7 +852,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   private def leafOffsets(typeId: Int): Either[Fault, Vec[Int]] =
     try {
       val offsets = Vec.newBuilder[Int]
-      visitLeaves(typeId, None, 0L)((offset, _) => offsets += offset.toIntExact.raw)
+      visitLeaves(typeId, None, 0L)((offset, _) => offsets += offset.toIntExact)
       Right(offsets.result())
     } catch {
       case error: IllegalArgumentException => Left(Fault.InvalidRequest(throwables.detail(error)))
@@ -911,14 +894,14 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   def decode(typeId: Int, bytes: Array[Byte]): Either[Fault, VMValue] =
     scalarLeafCount(typeId).flatMap { count =>
       try {
-        val lanes = Array.ofDim[Long](count.raw)
+        val lanes = Array.ofDim[Long](count)
         var used  = 0
         visitLeaves(typeId, None, 0L) { (offset, scalar) =>
           if (used >= lanes.length)
             throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too many scalar leaves")
           val width     = leafBytes(scalar)
-          val start     = Math.min(offset.toIntExact.raw, bytes.length)
-          val available = Math.min(width.raw, bytes.length - start).unsafe[Int in 0 ~ 8]
+          val start     = Math.min(offset.toIntExact, bytes.length)
+          val available = Math.min(width, bytes.length - start).unsafe[Int in 0 ~ 8]
           lanes(used) = LittleEndian.decode(bytes, start, available)
           used += 1
         }
@@ -936,7 +919,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
   def encode(value: VMValue): Either[Fault, Array[Byte]] = value match {
     case VMValue.Bits(typeId, lanes) =>
       try {
-        val bytes = Array.ofDim[Byte](typeSize(typeId).raw)
+        val bytes = Array.ofDim[Byte](typeSize(typeId))
         writeLeaves(typeId, lanes, bytes, 0L)
         Right(bytes)
       } catch {
@@ -953,7 +936,7 @@ private class VMProgram(tables: Tables, workgroups: Workgroups) extends Backend.
     visitLeaves(typeId, None, base) { (offset, scalar) =>
       if (used >= lanes.length)
         throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too few scalar leaves")
-      LittleEndian.write(lanes(used), output, offset.toIntExact.raw, leafBytes(scalar))
+      LittleEndian.write(lanes(used), output, offset.toIntExact, leafBytes(scalar))
       used += 1
     }
     if (used != lanes.length)

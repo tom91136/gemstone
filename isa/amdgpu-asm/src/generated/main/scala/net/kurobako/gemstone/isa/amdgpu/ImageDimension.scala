@@ -2,13 +2,18 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum ImageDimension(val encoding: Int, val assemblyName: String, val coordinates: Int, val gradients: Int) {
-  case Image1d extends ImageDimension(0, "SQ_RSRC_IMG_1D", 1, 2)
-  case Image2d extends ImageDimension(1, "SQ_RSRC_IMG_2D", 2, 4)
-  case Image3d extends ImageDimension(2, "SQ_RSRC_IMG_3D", 3, 6)
-  case ImageCube extends ImageDimension(3, "SQ_RSRC_IMG_CUBE", 3, 4)
-  case Image1dArray extends ImageDimension(4, "SQ_RSRC_IMG_1D_ARRAY", 2, 2)
-  case Image2dArray extends ImageDimension(5, "SQ_RSRC_IMG_2D_ARRAY", 3, 4)
-  case Image2dMsaa extends ImageDimension(6, "SQ_RSRC_IMG_2D_MSAA", 3, 4)
-  case Image2dMsaaArray extends ImageDimension(7, "SQ_RSRC_IMG_2D_MSAA_ARRAY", 4, 4)
+enum ImageDimension(val encoding: Int, val assemblyName: String, val coordinates: Int, val gradients: Int)
+    derives CanEqual {
+  case Image1d extends ImageDimension(encoding = 0, assemblyName = "SQ_RSRC_IMG_1D", coordinates = 1, gradients = 2)
+  case Image2d extends ImageDimension(encoding = 1, assemblyName = "SQ_RSRC_IMG_2D", coordinates = 2, gradients = 4)
+  case Image3d extends ImageDimension(encoding = 2, assemblyName = "SQ_RSRC_IMG_3D", coordinates = 3, gradients = 6)
+  case ImageCube extends ImageDimension(encoding = 3, assemblyName = "SQ_RSRC_IMG_CUBE", coordinates = 3, gradients = 4)
+  case Image1dArray
+      extends ImageDimension(encoding = 4, assemblyName = "SQ_RSRC_IMG_1D_ARRAY", coordinates = 2, gradients = 2)
+  case Image2dArray
+      extends ImageDimension(encoding = 5, assemblyName = "SQ_RSRC_IMG_2D_ARRAY", coordinates = 3, gradients = 4)
+  case Image2dMsaa
+      extends ImageDimension(encoding = 6, assemblyName = "SQ_RSRC_IMG_2D_MSAA", coordinates = 3, gradients = 4)
+  case Image2dMsaaArray
+      extends ImageDimension(encoding = 7, assemblyName = "SQ_RSRC_IMG_2D_MSAA_ARRAY", coordinates = 4, gradients = 4)
 }

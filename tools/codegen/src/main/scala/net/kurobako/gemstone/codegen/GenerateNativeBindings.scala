@@ -139,7 +139,7 @@ object GenerateNativeBindings {
       val parameters = function.parameters.zipWithIndex.map { (cType, index) =>
         if (error.isDefined && index == function.parameters.size - 1) s"${cType}error" else cType.raw
       }
-      val assignment = error.map(status => s"if (error) *error = ${status.value}; ").getOrElse("")
+      val assignment = error.fold("")(status => s"if (error) *error = ${status.value}; ")
       val result     = function.returnType.raw match {
         case "void"         => ""
         case "const char *" => "return \"unsupported\"; "

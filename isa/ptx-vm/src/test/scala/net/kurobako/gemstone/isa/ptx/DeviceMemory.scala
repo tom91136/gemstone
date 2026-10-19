@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.*
 
 /** One device allocation at `start`, with the scalar accessors kernels' results are read through. */
 class DeviceMemory(size: Int >= 0, val start: GuestAddress = GuestAddress(RegionMemory.Base)) extends RegionMemory {
-  allocate(AllocationId(1), size.raw, start)
+  allocate(AllocationId(1), size, start)
 
   // Region accesses bypass the address-level hooks fixtures override to observe kernels.
   private def within[A](address: GuestAddress, size: Int >= 0)(access: (AllocationId, Long >= 0) => Either[Fault, A])
@@ -30,4 +30,13 @@ class DeviceMemory(size: Int >= 0, val start: GuestAddress = GuestAddress(Region
     within(address, size)(read(_, _, size))
   def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     within(address, bytes.nonNegativeSize)(write(_, _, bytes))
+
+  /** The 32-bit word at byte `offset` of the allocation, unsigned. */
+  def word(offset: Long): Long = readInt32(start.offset(offset)).toOption.get.toLong & 0xffffffffL
+
+  /** `count` 32-bit words from byte `from` of the allocation on, unsigned. */
+  def words(from: Long, count: Int): Vec[Long] = Vec.tabulate(count)(index => word(from + index * 4L))
+
+  /** `count` 32-bit words from byte `from` of the allocation on, signed. */
+  def ints(from: Long, count: Int): Vec[Int] = Vec.tabulate(count)(index => word(from + index * 4L).toInt)
 }

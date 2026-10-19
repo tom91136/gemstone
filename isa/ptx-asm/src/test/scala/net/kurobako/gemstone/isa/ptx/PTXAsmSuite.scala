@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.string.*
 

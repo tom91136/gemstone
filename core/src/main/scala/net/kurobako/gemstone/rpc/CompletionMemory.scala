@@ -18,6 +18,8 @@ private object CompletionMemory {
   /** Session storage seen by a dispatch. Writes record their dirty ranges against the dispatch. Entry forms take an
     * offset already inside the entry.
     */
+  // the seam that keeps CompletionMemory independent of ExecutionSession
+  @SuppressWarnings(Array("baumkuchen:single-implementation"))
   trait Storage {
     def lock: ReentrantLock
     def index: AllocationAddressIndex
@@ -51,7 +53,7 @@ private object CompletionMemory {
     ): Either[Fault, A] = {
       val entry = index.entry(id)
       if (entry == null) Left(unregistered(id))
-      else if (!ByteRange.contains(entry.size.raw, offset.raw, size.raw.toLong))
+      else if (!ByteRange.contains(entry.size, offset, size.toLong))
         Left(outside(id, offset, size, entry.size))
       else access(entry)
     }
@@ -60,7 +62,7 @@ private object CompletionMemory {
     final def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] = {
       val entry = index.entry(region)
       if (entry == null) Left(Fault.Memory(s"memory region $region is absent"))
-      else Right(entry.base.offset(offset.raw))
+      else Right(entry.base.offset(offset))
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -93,7 +95,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
       inline otherwise: => A
   ): A = {
     val entry = storage.index.entry(region)
-    if (entry != null && !entry.allocation.hostBacked && ByteRange.contains(entry.size.raw, offset.raw, size.toLong))
+    if (entry != null && !entry.allocation.hostBacked && ByteRange.contains(entry.size, offset, size.toLong))
       access(entry)
     else otherwise
   }
@@ -103,10 +105,8 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
       inline device: (Entry, Long >= 0) => Either[E, A]
   )(inline hostOwned: => Either[E, A]): Either[E, A] = {
     val entry = resolve(address, size)
-    if (entry != null) {
-      if (!entry.allocation.hostBacked) device(entry, entry.offsetOf(address))
-      else hostOwned
-    } else if (address.unwrap > 0) hostOwned
+    if (entry != null && !entry.allocation.hostBacked) device(entry, entry.offsetOf(address))
+    else if (entry != null || address.unwrap > 0) hostOwned
     else Left(Fault.Memory(s"address ${address.show} is not bound"))
   }
 
@@ -117,12 +117,16 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
 
   // The synchronisation word can be device-owned while the ordered payload is
   // host-owned. Publication/acquisition must cover both kinds of backing.
-  private inline def deviceAtomic(inline operation: Either[Fault, Long]): Either[Fault, Long] =
-    if (!host.transfers) operation
-    else flushHostWrites().flatMap(_ => operation).map { value =>
-      invalidateHostReads()
-      value
+  private inline def deviceAtomic(inline operation: => Either[Fault, Long]): Either[Fault, Long] = {
+    val transfers = host.transfers
+    (if (transfers) flushHostWrites() else Ready) match {
+      case Left(fault) => Left(fault)
+      case Right(_)    =>
+        val result = operation
+        if (transfers && result.isRight) invalidateHostReads()
+        result
     }
+  }
 
   override def fenceHostMemory(): Either[Fault, Unit] = if (host.transfers) host.fence(record) else Right(())
 
@@ -140,9 +144,9 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
           val (begin, length) = parts(part)
           staged = backed(begin, length)((_, _) => Ready) {
             host.read(record, begin, length) match {
-              case Left(AddressSpace.Pending) => requested = true; Ready
-              case Left(fault: Fault)         => Left(fault)
-              case Right(_)                   => Ready
+              case Left(_: AddressSpace.Pending.type) => requested = true; Ready
+              case Left(fault: Fault)                 => Left(fault)
+              case Right(_)                           => Ready
             }
           }
           part += 1
@@ -176,9 +180,9 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
   // backing allocations. Split only at known boundaries; unknown gaps remain exact.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def segments(address: GuestAddress, size: Int >= 0): Vec[(GuestAddress, Int > 0)] = {
-    val end = address.raw + size.raw.toLong
-    if (address.raw <= 0 || end < address.raw) Vec.from(size.raw.refine[Int > 0].toOption.map(address -> _))
-    else if (size.raw == 0) Vec.empty
+    val end = address.raw + size.toLong
+    if (address.raw <= 0 || end < address.raw) Vec.from(size.refine[Int > 0].toOption.map(address -> _))
+    else if (size == 0) Vec.empty
     else {
       val collected = scala.collection.mutable.ArrayBuilder.ofLong()
       collected += address.raw
@@ -197,20 +201,24 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     }
   }
 
-  private def readSegments(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-    segments(address, size).foldLeft[AddressSpace.ReadResult[Vec[Byte]]](Right(Vec.empty)) {
+  private def readSegments(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] = {
+    val bytes = Vec.newBuilder[Byte]
+    segments(address, size).foldLeft[AddressSpace.ReadResult[Unit]](Right(())) {
       case (result, (begin, length)) =>
-        result.flatMap(bytes =>
-          backed(begin, length)(storage.read(_, _, length))(host.read(record, begin, length)).map(bytes ++ _)
+        result.flatMap(_ =>
+          backed(begin, length)(storage.read(_, _, length))(host.read(record, begin, length)).map { chunk =>
+            val _ = bytes ++= chunk
+          }
         )
-    }
+    }.map(_ => bytes.result())
+  }
 
   private def writeSegments(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     segments(address, bytes.nonNegativeSize).foldLeft[Either[Fault, Unit]](Right(())) {
       case (result, (begin, length)) =>
         result.flatMap { _ =>
           val start = (begin.raw - address.raw).toInt
-          val part  = bytes.slice(start, start + length.raw)
+          val part  = bytes.slice(start, start + length)
           backed(begin, length)(storage.write(_, _, part, record))(host.write(record, begin, part))
         }
     }
@@ -229,22 +237,22 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
 
   private def crossesRegion(region: AllocationId, offset: Long >= 0, size: Int): Boolean = {
     val entry = storage.index.entry(region)
-    entry != null && entry.allocation.aliased && (size > entry.size.raw || offset.raw > entry.size.raw - size)
+    entry != null && entry.allocation.aliased && (size > entry.size || offset > entry.size.raw - size)
   }
 
   private def redirected(region: AllocationId, offset: Long >= 0, size: Int): Boolean =
     hostBacked(region) || crossesRegion(region, offset, size)
 
   override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-    onDevice(region, offset, size.raw)(storage.read(_, offset, size))(awaitRead(readDeferred(region, offset, size)))
+    onDevice(region, offset, size)(storage.read(_, offset, size))(awaitRead(readDeferred(region, offset, size)))
 
   override def readDeferred(
       region: AllocationId,
       offset: Long >= 0,
       size: Int >= 0
   ): AddressSpace.ReadResult[Vec[Byte]] =
-    onDevice(region, offset, size.raw)(storage.read(_, offset, size)) {
-      if (redirected(region, offset, size.raw)) storage.address(region, offset).flatMap(readSegments(_, size))
+    onDevice(region, offset, size)(storage.read(_, offset, size)) {
+      if (redirected(region, offset, size)) storage.address(region, offset).flatMap(readSegments(_, size))
       else storage.read(region, offset, size)
     }
 
@@ -253,7 +261,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
 
   override def readValueInto(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, into: LongRef)
       : Fault | Null =
-    onDevice(region, offset, size.raw)(storage.readValueInto(_, offset, size, into))(
+    onDevice(region, offset, size)(storage.readValueInto(_, offset, size, into))(
       AddressSpace.store(
         into,
         read(region, offset, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
@@ -262,8 +270,8 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
 
   override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
       : AddressSpace.ReadResult[Long] =
-    onDevice(region, offset, size.raw)(entry => AddressSpace.scalar(storage.readValueInto(entry, offset, size, _))) {
-      if (redirected(region, offset, size.raw))
+    onDevice(region, offset, size)(entry => AddressSpace.scalar(storage.readValueInto(entry, offset, size, _))) {
+      if (redirected(region, offset, size))
         readDeferred(region, offset, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
       else storage.readValue(region, offset, size)
     }
@@ -284,8 +292,8 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
 
   override def writeValue(region: AllocationId, offset: Long >= 0, value: Long, size: Int in 1 ~ 8)
       : Either[Fault, Unit] =
-    onDevice(region, offset, size.raw)(storage.writeValue(_, offset, value, size, record)) {
-      if (redirected(region, offset, size.raw))
+    onDevice(region, offset, size)(storage.writeValue(_, offset, value, size, record)) {
+      if (redirected(region, offset, size))
         write(region, offset, LittleEndian.toVec(value, size.widen[Int in 0 ~ 8]))
       else storage.writeValue(region, offset, value, size, record)
     }
@@ -295,8 +303,8 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
 
   override def writeSystemBatch(writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]): Either[Fault, Unit] = {
     val nativeAtomic = writes.flatMap { (address, value, size) =>
-      size.raw.refine[Int in (1, 2, 4, 8)].toOption.filter { width =>
-        host.transfers && systemHostRange(address, width) && address.raw % width.raw == 0
+      size.refine[Int in (1, 2, 4, 8)].toOption.filter { width =>
+        host.transfers && systemHostRange(address, width) && address.raw % width == 0
       }.map(width => HostMemoryAtomic(address, width, 0L, value, HostMemoryAtomicOperation.Store))
     }
     val stored = writes.foldLeft[Either[Fault, Unit]](Right(())) {
@@ -320,11 +328,11 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
   override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
       update: Long => Long
   ): Either[Fault, Long] =
-    onDevice(region, offset, size.raw)(entry =>
+    onDevice(region, offset, size)(entry =>
       deviceAtomic(storage.atomicModifyValue(entry, offset, size, record)(update))
     ) {
       if (hostBacked(region)) storage.address(region, offset).flatMap(host.atomic(record, _, size)(update))
-      else if (crossesRegion(region, offset, size.raw))
+      else if (crossesRegion(region, offset, size))
         storage.address(region, offset).flatMap(atomicAddress(_, size)(update))
       else deviceAtomic(storage.atomicModifyValue(region, offset, size, record)(update))
     }

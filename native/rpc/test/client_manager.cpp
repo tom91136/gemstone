@@ -1,8 +1,13 @@
 #include <cstdlib>
+#include <memory>
+#include <stdexcept>
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+
+#include "gemstone/test_support.hpp"
+#include "gemstone_execution_rpc.hpp"
 
 #include "client.hpp"
 #include "rpc_fixture.hpp"
@@ -22,7 +27,7 @@ TEST_CASE("client manager distinguishes disabled, misconfigured, and ready state
     REQUIRE((partial.client() == nullptr));
   }
 
-  gemstone_test::RpcFixture fixture(GENERATE(false, true));
+  gemstone_test::RpcFixture const fixture(GENERATE(false, true));
   const gemstone_test::RpcEnvironment environment(fixture);
   gemstone::execution::ClientManager ready;
   REQUIRE((ready.mode() == gemstone::execution::ClientMode::Ready));
@@ -32,7 +37,7 @@ TEST_CASE("client manager distinguishes disabled, misconfigured, and ready state
 TEST_CASE("an established client never reconnects after losing its session") {
   std::unique_ptr<gemstone::execution::Client> client;
   {
-    gemstone_test::RpcFixture fixture(GENERATE(false, true));
+    gemstone_test::RpcFixture const fixture(GENERATE(false, true));
     const gemstone_test::RpcEnvironment environment(fixture);
     client = gemstone::execution::Client::fromEnvironment();
     REQUIRE(client);
@@ -41,7 +46,7 @@ TEST_CASE("an established client never reconnects after losing its session") {
   REQUIRE_FALSE(client->call(gemstone::execution::Ping{}));
   const auto lost = client->call(gemstone::execution::Ping{});
   REQUIRE_FALSE(lost);
-  REQUIRE(lost.error().detail.find("session was lost") != std::string::npos);
+  REQUIRE(lost.error().detail.contains("session was lost"));
 }
 
 TEST_CASE("test environment restores absent and empty values after unwinding") {
@@ -50,16 +55,20 @@ TEST_CASE("test environment restores absent and empty values after unwinding") {
   const Environment absent(key, nullptr);
   {
     const Environment empty(key, "");
-    REQUIRE(std::getenv(key));
-    REQUIRE(std::string(std::getenv(key)).empty());
+    const char *value = std::getenv(key);
+    if (!value) FAIL("empty value is unset");
+    REQUIRE(std::string(value).empty());
     CHECK_THROWS_AS(([&] {
                       const Environment configured(key, "tcp://127.0.0.1:1");
-                      REQUIRE(std::string(std::getenv(key)) == "tcp://127.0.0.1:1");
+                      const char *configuredValue = std::getenv(key);
+                      if (!configuredValue) FAIL("configured value is unset");
+                      REQUIRE(std::string(configuredValue) == "tcp://127.0.0.1:1");
                       throw std::runtime_error("test scope unwinding");
                     }()),
                     std::runtime_error);
-    REQUIRE(std::getenv(key));
-    CHECK(std::string(std::getenv(key)).empty());
+    const char *restored = std::getenv(key);
+    if (!restored) FAIL("empty value is not restored");
+    CHECK(std::string(restored).empty());
   }
   CHECK(std::getenv(key) == nullptr);
 }
