@@ -24,8 +24,8 @@ permissions:
 env:
   CONTAINER_EXECUTABLE: docker
   # small is the soraws-uk hardware (CUDA sm_89, gfx1030, OpenCL, SYCL, Level Zero); complete is every CUDA and GFX target
-  CONFORMANCE_TARGET_SET: ${{ inputs.conformance == 'complete' && 'complete' || 'default' }}
-  CONFORMANCE_WORKLOAD: ${{ inputs.conformance == 'complete' && 'full' || 'compact' }}
+  CONFORMANCE_TARGET_SET: ${{ inputs.conformance == 'small' && 'default' || 'complete' }}
+  CONFORMANCE_WORKLOAD: ${{ inputs.conformance == 'small' && 'compact' || 'full' }}
   CONFORMANCE_BACKENDS: cuda hip hsa opencl sycl levelzero
 jobs:
   build:
