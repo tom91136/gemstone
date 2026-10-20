@@ -18,7 +18,7 @@ on:
         description: Conformance scope
         type: choice
         options: [small, complete]
-        default: small
+        default: complete
 permissions:
   contents: read
 env:
