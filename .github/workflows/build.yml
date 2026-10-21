@@ -202,6 +202,10 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [JVM, JS, Native]
     env:
       GEMSTONE_OFFLINE: 1
     steps:
@@ -225,18 +229,47 @@ jobs:
         run: |
           git ls-files -z --cached --others --exclude-standard | xargs -0 touch -c -h -d "@$(git log -1 --format=%ct)"
           for archive in target/ci/*.tar.zst; do zstd -dc "$archive" | tar -xf -; done
-      - name: Test
-        run: sbt --server --batch testFull
-      - name: CTest
-        if: ${{ !cancelled() }}
-        run: |
+      - run: sbt --server --batch 'tests${{ matrix.platform }}/testFull'
+
+  ctest:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GEMSTONE_OFFLINE: 1
+    steps:
+      - *checkout
+      - *java
+      - *tools-cache
+      - *tools
+      - *download-build
+      - *unpack
+      - run: |
           status=0
           ctest --test-dir target/native/build --output-on-failure --parallel "$(nproc)" || status=1
           ctest --test-dir target/conformance/host --output-on-failure --parallel "$(nproc)" || status=1
           exit $status
-      - name: Lint
-        if: ${{ !cancelled() }}
-        run: sbt --server --batch lint
+
+  lint:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GEMSTONE_OFFLINE: 1
+    steps:
+      - *free-disk
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - *references
+      - *dependencies
+      - *download-build
+      - *unpack
+      - run: sbt --server --batch lint
 
   semantics:
     needs: build

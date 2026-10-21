@@ -898,6 +898,47 @@ lazy val conformance = project.in(file("conformance"))
     cleanFiles := Seq(conformanceDirectory.value.toFile)
   )
 
+// CI tests each platform on its own runner; together they cover what the root aggregates
+lazy val platformMatrices =
+  Seq(
+    testSupport,
+    core,
+    server,
+    ptxAsm,
+    ptxVm,
+    sassAsm,
+    sassVm,
+    nvidia,
+    amdgpuAsm,
+    amdgpuVm,
+    spirvAsm,
+    spirvVm,
+    benchmarks,
+    explorer
+  )
+
+def platformTests(id: String, axis: VirtualAxis, others: ProjectReference*): Project =
+  Project(id, file(s"target/platform-tests/$id"))
+    .disablePlugins(Stryker4sPlugin)
+    .aggregate(platformMatrices.flatMap(_.filterProjects(Seq(axis))).map(project => LocalProject(project.id)) ++
+      others *)
+    .settings(publish / skip := true)
+
+lazy val testsJVM =
+  platformTests(
+    "testsJVM",
+    VirtualAxis.jvm,
+    codegenProject,
+    samples,
+    conformanceTool,
+    semanticsCheck,
+    codestyle,
+    native,
+    conformance
+  )
+lazy val testsJS     = platformTests("testsJS", VirtualAxis.js)
+lazy val testsNative = platformTests("testsNative", VirtualAxis.native)
+
 lazy val gemstone = project.in(file("."))
   .disablePlugins(Stryker4sPlugin)
   .aggregate(testSupport.projectRefs *)
