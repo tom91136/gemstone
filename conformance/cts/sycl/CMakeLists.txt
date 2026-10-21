@@ -140,7 +140,10 @@ get_property(sycl_cts_targets GLOBAL PROPERTY CONFORMANCE_SYCL_CTS_TARGETS)
 
 # math_builtin_api and vector_swizzles dominate the compile time; a category belongs to the shard after the first
 # pattern it matches, and shard 0 takes the rest
-set(sycl_cts_shards "^math_builtin_api$" "^(accessor_.*|address_space|atomic.*|vector_swizzles)$")
+set(sycl_cts_shards
+  "^math_builtin_api$"
+  "^vector_swizzles$"
+  "^(accessor_.*|address_space|atomic.*|host_accessor|kernel_bundle|multi_ptr|reduction|spec_constants)$")
 list(LENGTH sycl_cts_shards sycl_cts_shard_count)
 math(EXPR sycl_cts_shard_count "${sycl_cts_shard_count} + 1")
 if(NOT SYCL_CTS_SHARD STREQUAL "")

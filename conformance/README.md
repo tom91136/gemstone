@@ -71,10 +71,15 @@ sh cmake/jobserver.sh -- cmake --build build/artifacts --target artifacts
 The budget defaults to `CMAKE_BUILD_PARALLEL_LEVEL` or the core count; do not add inner `-j` flags.
 `CONFORMANCE_ARTIFACT_PARALLELISM` caps concurrent containers (default: cores / 8, at most 4).
 
-CI builds the SYCL CTS as three shards on separate runners, each with `CONFORMANCE_SYCL_SHARD=<n>` writing
+CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANCE_SYCL_SHARD=<n>` writing
 `artifacts/sycl-shard-<n>`; `cmake -DARTIFACTS=<artifact directory> -P artifacts/Merge.cmake` joins them into
 `artifacts/sycl`. Shard membership is in `cts/sycl/CMakeLists.txt`; shard 0 also builds the unified suite and the
 miniapps.
+
+CI also splits the CUDA and AMD routes by architecture. `sh artifacts/shard.sh <target-set> <index> <count> <backend>...`
+prints the `build` selectors of one shard, dealing the architectures of those backends out round-robin. A shard whose
+architectures need a support closure it does not own rebuilds the route that owns it, so those artifacts repeat across
+shards.
 
 ## Driver
 

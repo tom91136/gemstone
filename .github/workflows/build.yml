@@ -144,12 +144,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {shard: cuda, routes: cuda}
-          - {shard: amd, routes: hip hsa}
+          - {shard: cuda-0, backends: cuda, index: 0, count: 3}
+          - {shard: cuda-1, backends: cuda, index: 1, count: 3}
+          - {shard: cuda-2, backends: cuda, index: 2, count: 3}
+          - {shard: amd-0, backends: hip hsa, index: 0, count: 7}
+          - {shard: amd-1, backends: hip hsa, index: 1, count: 7}
+          - {shard: amd-2, backends: hip hsa, index: 2, count: 7}
+          - {shard: amd-3, backends: hip hsa, index: 3, count: 7}
+          - {shard: amd-4, backends: hip hsa, index: 4, count: 7}
+          - {shard: amd-5, backends: hip hsa, index: 5, count: 7}
+          - {shard: amd-6, backends: hip hsa, index: 6, count: 7}
           - {shard: spirv, routes: opencl levelzero}
           - {shard: sycl-0, routes: sycl, sycl: 0}
           - {shard: sycl-1, routes: sycl, sycl: 1}
           - {shard: sycl-2, routes: sycl, sycl: 2}
+          - {shard: sycl-3, routes: sycl, sycl: 3}
     env:
       CONFORMANCE_SYCL_SHARD: ${{ matrix.sycl }}
     steps:
@@ -168,16 +177,21 @@ jobs:
           restore-keys: |
             conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
             conformance-artifact-dependencies-
+      # shards of a backend deal its architectures out, so a target set with few architectures leaves some empty
       - name: Conformance artifacts
         if: ${{ !cancelled() }}
-        run: sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET ${{ matrix.routes }}"
+        run: |
+          routes='${{ matrix.routes }}'
+          [ -n "$routes" ] || routes=$(sh conformance/artifacts/shard.sh "$CONFORMANCE_TARGET_SET" ${{ matrix.index }} ${{ matrix.count }} ${{ matrix.backends }} | paste -sd ' ')
+          mkdir -p target/conformance/artifacts
+          [ -z "$routes" ] || sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $routes"
       # every job populates the same dependency set, so one of them saves it
       - name: Download cache contents
         id: downloads
-        if: ${{ always() && matrix.shard == 'cuda' }}
+        if: ${{ always() && matrix.shard == 'cuda-0' }}
         run: echo "conformance=$(find .cache/conformance -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Save artifact dependencies
-        if: ${{ always() && matrix.shard == 'cuda' }}
+        if: ${{ always() && matrix.shard == 'cuda-0' }}
         uses: actions/cache/save@v6
         with:
           path: .cache/conformance
@@ -298,9 +312,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {shard: cuda-ptx, routes: cuda-ptx, artifacts: '{build,conformance-cuda}'}
-          - {shard: cuda-sass, routes: cuda-sass, artifacts: '{build,conformance-cuda}'}
-          - {shard: amd, routes: hip hsa, artifacts: '{build,conformance-amd}'}
+          - {shard: cuda-ptx, routes: cuda-ptx, artifacts: '{build,conformance-cuda-*}'}
+          - {shard: cuda-sass, routes: cuda-sass, artifacts: '{build,conformance-cuda-*}'}
+          - {shard: amd, routes: hip hsa, artifacts: '{build,conformance-amd-*}'}
           - {shard: spirv, routes: opencl levelzero sycl, artifacts: '{build,conformance-spirv,conformance-sycl-*}'}
     env:
       GEMSTONE_OFFLINE: 1
