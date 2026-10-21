@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <CL/cl.h>
+#include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "gemstone/test_support.hpp"
@@ -128,7 +129,7 @@ TEST_CASE("OpenCL reports device-side enqueue as unsupported without a SPIR-V tr
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_ALL_VERSIONS, 0, nullptr, &size) == CL_SUCCESS));
   std::vector<cl_name_version> versions(size / sizeof(cl_name_version));
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_ALL_VERSIONS, size, versions.data(), nullptr) == CL_SUCCESS));
-  CHECK(std::ranges::none_of(versions, [](const cl_name_version &entry) { return entry.version == CL_MAKE_VERSION(2, 0, 0); }));
+  CHECK(!(versions ^ aspartame::exists([](const cl_name_version &entry) { return entry.version == CL_MAKE_VERSION(2, 0, 0); })));
   CHECK(session.create({CL_QUEUE_PROPERTIES, DeviceQueue}) == CL_INVALID_QUEUE_PROPERTIES);
 
   cl_int error = CL_SUCCESS;
