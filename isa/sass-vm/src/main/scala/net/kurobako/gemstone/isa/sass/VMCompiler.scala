@@ -457,8 +457,7 @@ private object VMCompiler {
               emit(MoveCombine(result.slot, Vec(register(base), register(base, 1)), 32))
             case Some(base) =>
               emit(Convert(result.slot, register(base), NumericFormat.Unsigned(32), NumericFormat.Unsigned(64), None))
-            case None if !global => emit(Move(result.slot, Value.Immediate(0L), 64))
-            case _               => unsupported("absolute global address is unsupported")
+            case None => emit(Move(result.slot, Value.Immediate(0L), 64))
           }
           if (!Set(1, 4, 8, 16)(operand.scale.raw)) unsupported("unsupported address scale")
           if (operand.scale != 1)
@@ -493,10 +492,13 @@ private object VMCompiler {
             0xea,
             64
           ))
-        // a legacy thread's local window spans 16 MiB, so the 24-bit offsets of cvta.to.local name the same words as
-        // the stack pointer, which grows down from 4 GiB
-        if (localAccess)
-          emit(Logic3(result.slot, result, Value.Immediate(0xffffffL), Value.Immediate(0xff000000L), 0xea, 64))
+        // local offsets name words of the thread's local window, as generic local addresses do; a legacy window wraps
+        // them to its 16 MiB, as cvta.to.local does
+        if (localAccess) {
+          val window = Value.Immediate(VMConstantBank.localWindow(sm))
+          if (legacy) emit(Logic3(result.slot, result, Value.Immediate(0xffffffL), window, 0xea, 64))
+          else add(window)
+        }
         result
       case _ => unsupported(s"unsupported address $raw")
     }
@@ -565,7 +567,14 @@ private object VMCompiler {
       // I2IP spells the fixed shift of its third source for nibbles and crumbs as `.24` and `.28`
       val packed = OperandQueries.is[Form.I2ip](operation) ||
         OperandQueries.is[Form.Ui2ip](operation)
-      if (!packed && operands.exists(OperandQueries.hasUnknownDomain(_)))
+      // the packed video instructions name the elements of a register pair with a vendor selector
+      val elements = VMVideoCompiler.acceptsElementSelectors(instruction)
+      if (
+        !packed && operands.exists(operand =>
+          OperandQueries.hasUnknownDomain(operand) &&
+            !(elements && VMVideoCompiler.isElementSource(operand))
+        )
+      )
         unsupported("unsupported vendor operand domain")
       // nothing defines the handle a cx[URa] bank reads, and no compute toolchain emits one
       if (operands.exists(OperandQueries.indexedBank(_)))

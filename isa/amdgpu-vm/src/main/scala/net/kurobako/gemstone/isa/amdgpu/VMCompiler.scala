@@ -221,6 +221,16 @@ private object VMCompiler {
     case _                     => None
   }
 
+  /** The conversion `opcode` runs on `target`: GFX8 bounds its sine and cosine operands. */
+  private def vectorConvertOperation(opcode: Opcode, target: Target): Option[VectorConvertOperation] =
+    vectorConvertOperation(opcode).map {
+      case VectorConvertOperation.SineF32 if target.isa == ISA.GFX8   => VectorConvertOperation.SineBoundedF32
+      case VectorConvertOperation.CosineF32 if target.isa == ISA.GFX8 => VectorConvertOperation.CosineBoundedF32
+      case VectorConvertOperation.SineF16 if target.isa == ISA.GFX8   => VectorConvertOperation.SineBoundedF16
+      case VectorConvertOperation.CosineF16 if target.isa == ISA.GFX8 => VectorConvertOperation.CosineBoundedF16
+      case other                                                      => other
+    }
+
   private def vectorConvertOperation(opcode: Opcode): Option[VectorConvertOperation] = opcode match {
     case VFrexpExpI32F64                   => Some(VectorConvertOperation.FrexpExponentF64)
     case VFrexpExpI32F32                   => Some(VectorConvertOperation.FrexpExponentF32)
@@ -1513,20 +1523,27 @@ private object VMCompiler {
     case format if format.base == EncodingFormat.VOP3P && machine.definition.mnemonic.raw == "v_mfma_ld_scale_b32" =>
       Left("v_mfma_ld_scale_b32 executes only as the scale prefix of v_mfma_scale_*, as one instruction")
     case format if format.base == EncodingFormat.VOP3P && matrix(machine) => decodeWaveMatrix(machine, target, waveSize)
-    case format if format.base == EncodingFormat.VOP3P                    => decodeVOP3P(machine, target)
-    case format if format.base == EncodingFormat.VOP3                     => decodeVOP3(machine, target)
-    case EncodingFormat.DS | EncodingFormat.VDS => decodeDS(machine).map(zeroingHalves(_, target))
+    case format if format.base == EncodingFormat.VOP3P => decodeVOP3P(machine, target).map(alignedDot(_, target))
+    case format if format.base == EncodingFormat.VOP3  => decodeVOP3(machine, target)
+    case EncodingFormat.DS | EncodingFormat.VDS        => decodeDS(machine, target).map(zeroingHalves(_, target))
     case EncodingFormat.MUBUF | EncodingFormat.MTBUF | EncodingFormat.VBUFFER =>
       decodeBuffer(machine, target).map(zeroingHalves(_, target))
     case format if format.isImage                     => VMResourceDecoder.image(machine, target)
     case format if format.base == EncodingFormat.VOP1 => decodeVOP1(machine, target)
     case format if format.base == EncodingFormat.VOPC => decodeVOPC(machine, target)
-    case format if format.base == EncodingFormat.VOP2 => decodeVOP2(machine, target)
+    case format if format.base == EncodingFormat.VOP2 => decodeVOP2(machine, target).map(alignedDot(_, target))
     case EncodingFormat.FLAT | EncodingFormat.FLAT_GLBL | EncodingFormat.FLAT_GLOBAL | EncodingFormat.VGLOBAL |
         EncodingFormat.VFLAT | EncodingFormat.FLAT_SCRATCH | EncodingFormat.VSCRATCH =>
       decodeGlobalOrFlat(machine, target).map(zeroingHalves(_, target))
     case EncodingFormat.ILLEGAL => Right(Instruction.Halt("v_illegal raises an illegal instruction exception"))
     case format                 => Left(s"$format execution is not implemented")
+  }
+
+  private def alignedDot(instruction: Instruction, target: Target): Instruction = instruction match {
+    case dot @ Instruction.VDot(operation = DotOperation.Halves)
+        if target.isa == ISA.RDNA3 || target.isa == ISA.RDNA3_5 =>
+      dot.copy(operation = DotOperation.AlignedHalves)
+    case other => other
   }
 
   /** ECC, which the CDNA parts enable, makes a 16-bit load write its whole register, zeroing the half it leaves. */
@@ -1592,19 +1609,23 @@ private object VMCompiler {
           case VDualLshlrevB32                              => Right(DualVectorOperation.ShiftLeft32)
           case VDualAndB32                                  => Right(DualVectorOperation.And32)
           case VDualMulDx9ZeroF32                           => Right(DualVectorOperation.MultiplyLegacyF32)
-          case VDualDot2accF32F16                           => Right(DualVectorOperation.DotHalvesF32)
-          case VDualDot2accF32Bf16                          => Right(DualVectorOperation.DotBFloat16F32)
-          case VDualSubNcU32                                => Right(DualVectorOperation.SubtractU32)
-          case VDualMinI32                                  => Right(DualVectorOperation.MinimumI32)
-          case VDualMaxI32                                  => Right(DualVectorOperation.MaximumI32)
-          case VDualLshrrevB32                              => Right(DualVectorOperation.ShiftRight32)
-          case VDualAshrrevI32                              => Right(DualVectorOperation.ShiftRightArithmetic32)
-          case VDualAddF64                                  => Right(DualVectorOperation.AddF64)
-          case VDualMulF64                                  => Right(DualVectorOperation.MultiplyF64)
-          case VDualFmaF64                                  => Right(DualVectorOperation.FmaF64)
-          case VDualMinNumF64                               => Right(DualVectorOperation.MinimumF64)
-          case VDualMaxNumF64                               => Right(DualVectorOperation.MaximumF64)
-          case VDualBitop2B32                               => Right(DualVectorOperation.BitOperation2)
+          case VDualDot2accF32F16                           =>
+            Right(
+              if (target.isa == ISA.RDNA3 || target.isa == ISA.RDNA3_5) DualVectorOperation.DotAlignedHalvesF32
+              else DualVectorOperation.DotHalvesF32
+            )
+          case VDualDot2accF32Bf16 => Right(DualVectorOperation.DotBFloat16F32)
+          case VDualSubNcU32       => Right(DualVectorOperation.SubtractU32)
+          case VDualMinI32         => Right(DualVectorOperation.MinimumI32)
+          case VDualMaxI32         => Right(DualVectorOperation.MaximumI32)
+          case VDualLshrrevB32     => Right(DualVectorOperation.ShiftRight32)
+          case VDualAshrrevI32     => Right(DualVectorOperation.ShiftRightArithmetic32)
+          case VDualAddF64         => Right(DualVectorOperation.AddF64)
+          case VDualMulF64         => Right(DualVectorOperation.MultiplyF64)
+          case VDualFmaF64         => Right(DualVectorOperation.FmaF64)
+          case VDualMinNumF64      => Right(DualVectorOperation.MinimumF64)
+          case VDualMaxNumF64      => Right(DualVectorOperation.MaximumF64)
+          case VDualBitop2B32      => Right(DualVectorOperation.BitOperation2)
           case other => Left[NonEmpty[String], DualVectorOperation](s"dual-issue ${other.mnemonic} is not implemented")
         }
         third <- opcode match {
@@ -1961,6 +1982,13 @@ private object VMCompiler {
     selects(encoded, target, "HW_REG_TRAPSTS", 8L, 1L)
 
   /** The MODE bits a HWREG selector names, clipped to MODE's 32 bits, or None when it names another register. */
+  // NEG_LO and NEG_HI negate binary16 halves; what they do to integer halves is unverified
+  private def floatPacked(opcode: Opcode): Boolean = opcode match {
+    case VPkAddF16 | VPkMulF16 | VPkMaxF16 | VPkMinF16 | VPkMaxNumF16 | VPkMinNumF16 | VPkMinimumF16 | VPkMaximumF16 =>
+      true
+    case _ => false
+  }
+
   private def modeField(encoded: Long, target: Target): Option[(Int in 0 ~ 31, Int in 1 ~ 32)] = for {
     fields <- hardwareRegisterFields(target)
     id     <- fields.get(EncodingField.ID)
@@ -2770,6 +2798,10 @@ private object VMCompiler {
     }
   }
 
+  // GFX8 and GFX9 keep V_EXP_LEGACY_F32 and V_LOG_LEGACY_F32 encodable, but their hardware writes +0 for any source
+  private def legacyExpLogZero(target: Target): Boolean =
+    target.isa.isGFX9OrEarlier && target.isa != ISA.GFX6 && target.isa != ISA.GFX7
+
   private def decodeVOP1(machine: InstructionDecoder.Decoded, target: Target): Either[NonEmpty[String], Instruction] = {
     val opcode  = machine.definition
     val hasDPP  = machine.format.isDpp
@@ -2789,7 +2821,9 @@ private object VMCompiler {
             case InstructionSource.DPP => Right(Instruction.VAccumulatorWrite(destination, src))
             case _ => Left[NonEmpty[String], Instruction](s"$opcode requires an accumulator register")
           }
-        case VMovB32        => Right(Instruction.VMove(destination, src))
+        case VMovB32                                                   => Right(Instruction.VMove(destination, src))
+        case VExpLegacyF32 | VLogLegacyF32 if legacyExpLogZero(target) =>
+          Right(Instruction.VMove(destination, InstructionSource.Constant(0L)))
         case VPermlane64B32 =>
           Right(Instruction.VPermuteLanes(
             destination,
@@ -2836,7 +2870,7 @@ private object VMCompiler {
           vectorBitFindOperation(other)
             .map(operation => Instruction.VBitFind(operation, destination, src))
             .orElse(
-              vectorConvertOperation(other)
+              vectorConvertOperation(other, target)
                 .map(operation => Instruction.VConvert(operation, destination, src))
             )
             .toRight[NonEmpty[String]](s"$other VOP1 execution is not implemented")
@@ -2941,7 +2975,7 @@ private object VMCompiler {
             )
           ).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         def halvedConvert: Either[NonEmpty[String], Instruction] =
-          vectorConvertOperation(opcode).map(operation =>
+          vectorConvertOperation(opcode, target).map(operation =>
             Instruction.VConvert(operation, destination, half(srcA, 0), modifiers, clamp)
           ).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         opcode match {
@@ -3377,8 +3411,10 @@ private object VMCompiler {
               dest,
               srcA
             )
-          case VBfrevB32                                       => Right(Instruction.VBitReverse(destination, srcA))
-          case VMovB32                                         => Right(Instruction.VMove(destination, srcA))
+          case VBfrevB32 => Right(Instruction.VBitReverse(destination, srcA))
+          case VMovB32   => Right(Instruction.VMove(destination, srcA))
+          case VExpLegacyF32 | VLogLegacyF32 if legacyExpLogZero(target) =>
+            Right(Instruction.VMove(destination, InstructionSource.Constant(0L)))
           case VMovB64                                         => Right(Instruction.VMove64(destination, srcA))
           case VScreenPartition4seB32                          => Left(ScreenPartition)
           case VSubF16 | VSubrevF16 | VLdexpF16                => halvedBinary
@@ -3947,7 +3983,7 @@ private object VMCompiler {
           for {
             _ <-
               Either.cond[NonEmpty[String], Unit](
-                negateLow == 0 && negateHigh == 0,
+                (negateLow & 4) == 0 && (negateHigh & 4) == 0 && (floatPacked(packed) || (negateLow | negateHigh) == 0),
                 (),
                 s"$packed packed modifiers are not implemented"
               )
@@ -3962,7 +3998,9 @@ private object VMCompiler {
             srcBHighForHigh = (opSelectionHigh & 2) != 0,
             srcAHighForLow = (opSelection & 1) != 0,
             srcBHighForLow = (opSelection & 2) != 0,
-            clamp = clamp
+            clamp = clamp,
+            negateLow = negateLow,
+            negateHigh = negateHigh
           )
         case other => Left[NonEmpty[String], Nothing](s"$other VOP3P execution is not implemented")
       }
@@ -3974,7 +4012,7 @@ private object VMCompiler {
   /** GWS operations take their data from the ADDR field; GDS forms reach the empty GDS segment of an HSA queue, which
     * reads and returns zero and drops writes.
     */
-  private def decodeDS(machine: InstructionDecoder.Decoded): Either[NonEmpty[String], Instruction] = {
+  private def decodeDS(machine: InstructionDecoder.Decoded, target: Target): Either[NonEmpty[String], Instruction] = {
     val opcode                                   = machine.definition
     def sync(operation: GlobalWaveSyncOperation) = machine.vector(EncodingField.ADDR).map(data =>
       Instruction.GlobalWaveSync(
@@ -3994,8 +4032,8 @@ private object VMCompiler {
       case DsGwsSemaP          => sync(GlobalWaveSyncOperation.SemaphoreP)
       case DsOrderedCount      =>
         machine.vector(EncodingField.VDST).map(Instruction.VMove(_, InstructionSource.Constant(0L)))
-      case _ if machine.isSet(EncodingField.GDS) => decodeLocal(machine).flatMap(globalShare(opcode, _))
-      case _                                     => decodeLocal(machine).flatMap(accumulated(machine, _))
+      case _ if machine.isSet(EncodingField.GDS) => decodeLocal(machine, target).flatMap(globalShare(opcode, _))
+      case _                                     => decodeLocal(machine, target).flatMap(accumulated(machine, _))
     }
   }
 
@@ -4047,7 +4085,11 @@ private object VMCompiler {
     }
   }
 
-  private def decodeLocal(machine: InstructionDecoder.Decoded): Either[NonEmpty[String], Instruction] = {
+  private def decodeLocal(
+      machine: InstructionDecoder.Decoded,
+      target: Target
+  ): Either[NonEmpty[String], Instruction] = {
+    val halves = !target.isa.isGFX9OrEarlier
 
     val opcode   = machine.definition
     val offsetA  = machine(EncodingField.OFFSET0).toInt
@@ -4096,7 +4138,7 @@ private object VMCompiler {
         case DsReadB64TrB8            => Right(Instruction.LoadTranspose(dest, local, TransposeLayout.Rows8))
         case DsReadB64TrB4            => Right(Instruction.LoadTranspose(dest, local, TransposeLayout.Rows4))
         case DsReadB96TrB6            => Right(Instruction.LoadTranspose(dest, local, TransposeLayout.Rows6))
-        case DsPermuteB32             => Right(Instruction.DSPermute(dest, address, dataA, dsOffset))
+        case DsPermuteB32             => Right(Instruction.DSPermute(dest, address, dataA, dsOffset, halves = halves))
         case DsAppend                 => Right(Instruction.LocalCounter(dest, dsOffset, decrement = false))
         case DsConsume                => Right(Instruction.LocalCounter(dest, dsOffset, decrement = true))
         case DsRsubU32 | DsRsubRtnU32 =>
@@ -4129,8 +4171,9 @@ private object VMCompiler {
           Right(exchanges(4, 256)(dest, address, dataA, dataB))
         case DsWrxchg2st64RtnB64 | DsStorexchg2addrStride64RtnB64 =>
           Right(exchanges(8, 512)(dest, address, dataA, dataB))
-        case DsBpermuteB32   => Right(Instruction.DSBPermute(dest, address, dataA, dsOffset))
-        case DsBpermuteFiB32 => Right(Instruction.DSBPermute(dest, address, dataA, dsOffset, fetchInactive = true))
+        case DsBpermuteB32   => Right(Instruction.DSBPermute(dest, address, dataA, dsOffset, halves = halves))
+        case DsBpermuteFiB32 =>
+          Right(Instruction.DSBPermute(dest, address, dataA, dsOffset, fetchInactive = true, halves = halves))
         // DS_SWIZZLE reads its source from the address field.
         case DsSwizzleB32 => Right(Instruction.DSSwizzle(dest, address, dsOffset))
         case atomic @ (

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import EncodingConstants.DPP.*
+import EncodingConstants.Swizzle
 import FloatPrimitives.*
 import VMIR.*
 import net.kurobako.gemstone.binary.*
@@ -466,7 +467,7 @@ private object IntegerSemantics {
           )
         case VectorTernaryOperation.Median3F32 =>
           sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
-            algebra.primitive(a, b, c)(Floats.med3(_: Float32, _: Float32, _: Float32))
+            algebra.primitive(a, b, c, sinks.modeRegister)(Floats.med3(_: Float32, _: Float32, _: Float32, _: UInt[32]))
           )
         case VectorTernaryOperation.Minimum3F16 =>
           sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 16)((a, b, c) =>
@@ -478,7 +479,7 @@ private object IntegerSemantics {
           )
         case VectorTernaryOperation.Median3F16 =>
           sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 16)((a, b, c) =>
-            algebra.primitive(a, b, c)(Floats.med3(_: Float16, _: Float16, _: Float16))
+            algebra.primitive(a, b, c, sinks.modeRegister)(Floats.med3(_: Float16, _: Float16, _: Float16, _: UInt[32]))
           )
         case VectorTernaryOperation.MaximumMinimumF32 =>
           sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
@@ -626,7 +627,7 @@ private object IntegerSemantics {
               )
             case VectorTernaryOperation.FusedMultiplyAddF16 =>
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 16)((a, b, c) =>
-                algebra.fusedMultiplyAdd(a, b, c, 16)
+                algebra.flushedTernary(sinks.modeRegister, 16, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 16))
               )
             case VectorTernaryOperation.MultiplyAddU32U16 =>
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
@@ -654,15 +655,17 @@ private object IntegerSemantics {
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 16)((a, b, c) =>
                 algebra.saturated(
                   clamp,
-                  algebra.halfOperation(clamp = false, algebra.halfOperation(clamp = false, a, b)(Floats.mul), c)(
-                    Floats.add
+                  algebra.flushedTernary(sinks.modeRegister, 16, a, b, c)((x, y, z) =>
+                    algebra.halfOperation(clamp = false, algebra.halfOperation(clamp = false, x, y)(Floats.mul), z)(
+                      Floats.add
+                    )
                   ),
                   16
                 )
               )
             case VectorTernaryOperation.DivisionFixupF16 =>
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 16)((q, d, n) =>
-                algebra.divisionFixup(16, q, d, n)
+                algebra.flushedFixup(sinks.modeRegister, 16, q, d, n)
               )
             case VectorTernaryOperation.PermuteBytes32 =>
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) => algebra.permuteBytes(a, b, c))
@@ -671,7 +674,9 @@ private object IntegerSemantics {
       })
   }
 
-  /** V_PERM_B32: the low four bits of each selector byte pick a byte of `first:second`, and 8-15 produce zero. */
+  /** V_PERM_B32: each selector byte picks a byte of `first:second` (0-7), copies the sign of byte 1 or 3 of `second` or
+    * `first` into every bit (8-11), or gives 0x00 (12) or 0xff (13 and above).
+    */
   extension [V](inline algebra: Algebra[V]) {
     inline def permuteBytes(first: V, second: V, selectors: V): V =
       algebra.let("x", algebra.or(algebra.truncate(second, 32), algebra.shiftLeft(first, algebra.literal(32L))))(
@@ -685,15 +690,28 @@ private object IntegerSemantics {
     inline def selectByte(sources: V, selectors: V, inline index: Int): V =
       algebra.let(
         s"s$index",
-        algebra.and(algebra.shiftRightLogical(selectors, algebra.literal(index * 8L)), algebra.literal(0xfL))
+        algebra.and(algebra.shiftRightLogical(selectors, algebra.literal(index * 8L)), algebra.literal(0xffL))
       )(selector =>
-        algebra.select(
-          algebra.lessThan(selector, algebra.literal(8L), signed = true),
-          algebra.shiftLeft(
+        algebra.shiftLeft(
+          algebra.select(
+            algebra.lessThan(selector, algebra.literal(8L), signed = false),
             algebra.byte(algebra.shiftRightLogical(sources, algebra.shiftLeft(selector, algebra.literal(3L))), 0),
-            algebra.literal(index * 8L)
+            algebra.select(
+              algebra.lessThan(selector, algebra.literal(12L), signed = false),
+              algebra.multiply(
+                algebra.and(
+                  algebra.shiftRightLogical(
+                    sources,
+                    algebra.subtract(algebra.shiftLeft(selector, algebra.literal(4L)), algebra.literal(113L))
+                  ),
+                  algebra.literal(1L)
+                ),
+                algebra.literal(0xffL)
+              ),
+              algebra.select(algebra.equal(selector, algebra.literal(12L)), algebra.literal(0L), algebra.literal(0xffL))
+            )
           ),
-          algebra.literal(0L)
+          algebra.literal(index * 8L)
         )
       )
 
@@ -739,17 +757,17 @@ private object IntegerSemantics {
     case VectorSubDwordOperation.ShiftRight16 =>
       sinks.subDword(instruction)((a, b) => algebra.shiftRightLogical(algebra.truncate(b, 16), algebra.amount(a, 15L)))
     case VectorSubDwordOperation.MaximumI16 =>
-      sinks.subDword(instruction)((a, b) => algebra.truncate(algebra.maximum(a, b, signed = true), 16))
+      sinks.subDword(instruction)((a, b) => algebra.extremum(a, b, 16, signed = true, maximum = true))
     case VectorSubDwordOperation.MinimumI16 =>
-      sinks.subDword(instruction)((a, b) => algebra.truncate(algebra.minimum(a, b, signed = true), 16))
+      sinks.subDword(instruction)((a, b) => algebra.extremum(a, b, 16, signed = true, maximum = false))
     case VectorSubDwordOperation.MinimumU16 =>
       sinks.subDword(instruction)((a, b) => algebra.extremum(a, b, 16, signed = false, maximum = false))
     case VectorSubDwordOperation.MaximumF16 => sinks.subDword(instruction)((a, b) => algebra.maximumNumber(a, b, 16))
     case VectorSubDwordOperation.MinimumF16 => sinks.subDword(instruction)((a, b) => algebra.minimumNumber(a, b, 16))
     case VectorSubDwordOperation.AddF16     =>
-      sinks.subDword(instruction)((a, b) => algebra.halfOperation(clamp = false, a, b)(Floats.add))
+      sinks.subDword(instruction)((a, b) => algebra.flushedHalf(sinks.modeRegister, clamp = false, a, b)(Floats.add))
     case VectorSubDwordOperation.MultiplyF16 =>
-      sinks.subDword(instruction)((a, b) => algebra.halfOperation(clamp = false, a, b)(Floats.mul))
+      sinks.subDword(instruction)((a, b) => algebra.flushedHalf(sinks.modeRegister, clamp = false, a, b)(Floats.mul))
     case _ => otherwise
   }
 
@@ -847,9 +865,9 @@ private object IntegerSemantics {
       case VectorPackedBinaryOperation.MinimumPropagateF16 =>
         sinks.packedBinary(instruction)((a, b) => algebra.saturated(clamp, algebra.minimumPropagate(a, b, 16), 16))
       case VectorPackedBinaryOperation.AddF16 =>
-        sinks.packedBinary(instruction)((a, b) => algebra.halfOperation(clamp, a, b)(Floats.add))
+        sinks.packedBinary(instruction)((a, b) => algebra.flushedHalf(sinks.modeRegister, clamp, a, b)(Floats.add))
       case VectorPackedBinaryOperation.MultiplyF16 =>
-        sinks.packedBinary(instruction)((a, b) => algebra.halfOperation(clamp, a, b)(Floats.mul))
+        sinks.packedBinary(instruction)((a, b) => algebra.flushedHalf(sinks.modeRegister, clamp, a, b)(Floats.mul))
     }
   }
 
@@ -989,11 +1007,17 @@ private object IntegerSemantics {
         algebra.nonZero
       )
     case ScalarBinaryOperation.AddF32 =>
-      sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.singleOperation(clamp = false, a, b)(Floats.add))
+      sinks.scalarDword(dest, srcA, srcB)((a, b, _) =>
+        algebra.flushedSingle(sinks.modeRegister, clamp = false, a, b)(Floats.add)
+      )
     case ScalarBinaryOperation.SubtractF32 =>
-      sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.singleOperation(clamp = false, a, b)(Floats.sub))
+      sinks.scalarDword(dest, srcA, srcB)((a, b, _) =>
+        algebra.flushedSingle(sinks.modeRegister, clamp = false, a, b)(Floats.sub)
+      )
     case ScalarBinaryOperation.MultiplyF32 =>
-      sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.singleOperation(clamp = false, a, b)(Floats.mul))
+      sinks.scalarDword(dest, srcA, srcB)((a, b, _) =>
+        algebra.flushedSingle(sinks.modeRegister, clamp = false, a, b)(Floats.mul)
+      )
   }
 
   /** SOP2 operations on SRC0 and SRC1 register pairs; the logical forms set SCC when the result is non-zero. */
@@ -1797,14 +1821,14 @@ private object IntegerSemantics {
           algebra.select(
             algebra.lessThan(algebra.literal(0L), base, signed = true),
             algebra.subtract(base, algebra.literal(1L)),
-            algebra.literal(-1L)
+            lane
           )
         )
       else if (control == BCAST31)
         algebra.select(
           algebra.lessOrEqual(algebra.literal(32L), lane, signed = true),
           algebra.literal(31L),
-          algebra.literal(-1L)
+          lane
         )
       else algebra.literal(-1L)
     }
@@ -1826,15 +1850,43 @@ private object IntegerSemantics {
         )
       )
 
-    /** DS_SWIZZLE's bit-masked mode: the offset packs AND[4:0], OR[9:5] and XOR[14:10] masks of the lane index. */
-    inline def swizzleSource(control: V, lane: V): V =
-      algebra.xor(
-        algebra.or(algebra.and(lane, algebra.laneMask(control, 0)), algebra.laneMask(control, 5)),
-        algebra.laneMask(control, 10)
+    /** DS_SWIZZLE's source lane: the swizzle pattern in `control` permutes the wave's lanes. A quad permutation picks
+      * the source lane of each of a quad's four lanes; otherwise the pattern's bit masks rewrite the low five bits of
+      * the lane index and the higher bits pass through.
+      */
+    inline def swizzleSource(control: Int, lane: V): V =
+      if ((control & Swizzle.QUAD_PERM_ENC_MASK) == Swizzle.QUAD_PERM_ENC) quadSwizzleSource(control, lane)
+      else bitmaskSwizzleSource(control, lane)
+
+    /** DS_SWIZZLE's quad permutation: the offset's two-bit selectors name the source lane of each of a quad's four
+      * lanes, which the lane's position in its quad selects.
+      */
+    inline def quadSwizzleSource(control: Int, lane: V): V =
+      algebra.or(
+        algebra.and(lane, algebra.literal(~3L)),
+        algebra.and(
+          algebra.shiftRightLogical(
+            algebra.literal(control.toLong),
+            algebra.shiftLeft(algebra.and(lane, algebra.literal(3L)), algebra.literal(1L))
+          ),
+          algebra.literal(3L)
+        )
       )
 
-    inline def laneMask(control: V, inline offset: Int): V =
-      algebra.and(algebra.shiftRightLogical(control, algebra.literal(offset.toLong)), algebra.literal(0x1fL))
+    /** DS_SWIZZLE's bit-masked mode: the offset packs AND[4:0], OR[9:5] and XOR[14:10] masks of the lane index's low
+      * five bits, which the higher bits of the index pass through.
+      */
+    inline def bitmaskSwizzleSource(control: Int, lane: V): V =
+      algebra.or(
+        algebra.and(lane, algebra.literal(~0x1fL)),
+        algebra.xor(
+          algebra.or(
+            algebra.and(lane, algebra.literal((control & 0x1f).toLong)),
+            algebra.literal(((control >> 5) & 0x1f).toLong)
+          ),
+          algebra.literal(((control >> 10) & 0x1f).toLong)
+        )
+      )
 
     /** The lane a DS_PERMUTE or DS_BPERMUTE byte address names, within `lanes` lanes. */
     inline def addressedLane(address: V, offset: V, lanes: V): V =
@@ -1842,6 +1894,17 @@ private object IntegerSemantics {
         algebra.shiftRightLogical(algebra.add(address, offset), algebra.literal(2L)),
         algebra.subtract(lanes, algebra.literal(1L))
       )
+
+    /** The lane a DS_PERMUTE or DS_BPERMUTE byte address names for `lane`, within `lanes` lanes or, with `halves`,
+      * within the 32-lane half `lane` is in.
+      */
+    inline def permutedLane(address: V, offset: V, lane: V, lanes: V, halves: Boolean): V =
+      if (halves)
+        algebra.or(
+          algebra.and(lane, algebra.literal(32L)),
+          algebra.addressedLane(address, offset, algebra.literal(32L))
+        )
+      else algebra.addressedLane(address, offset, lanes)
 
     /** The lane V_READLANE and V_WRITELANE name, within a wave of `lanes` lanes. */
     inline def selectedLane(lane: V, lanes: V): V =

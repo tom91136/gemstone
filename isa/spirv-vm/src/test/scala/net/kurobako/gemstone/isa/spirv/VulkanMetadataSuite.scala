@@ -81,7 +81,7 @@ class VulkanMetadataSuite extends munit.FunSuite {
       axis    <- 0 until 3
     } {
       // Boxing three test dimensions per case is immaterial.
-      @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val dimensions = DefaultSize.updated(axis, invalid)
       val module     = spv"""
         $vulkan

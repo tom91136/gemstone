@@ -464,7 +464,8 @@ private object VMAsyncCompiler {
           barrier,
           source == Modifier.SharedCta,
           mask,
-          (left, right).mapN((left, right) => (left = left, right = right))
+          (left, right).mapN((left, right) => (left = left, right = right)),
+          spaces.headOption.contains(Modifier.SharedCluster)
         )
       case _ => unsupported(instruction, "unsupported bulk copy direction")
     }

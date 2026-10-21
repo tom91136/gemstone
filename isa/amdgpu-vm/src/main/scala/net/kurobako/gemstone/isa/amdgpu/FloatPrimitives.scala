@@ -28,6 +28,71 @@ private object FloatPrimitives {
 
   def bits(width: Int in (16, 32, 64)): Int in 1 ~ 64 = width.widen[Int in 1 ~ 64]
 
+  /** MODE.FP_DENORM: an operation reads and writes `width`-bit denormals as zeros of their sign unless MODE keeps that
+    * width's input or output denormals.
+    */
+  extension [V](inline algebra: Algebra[V]) {
+    inline def denormalInput(mode: V, value: V, width: Int in (16, 32, 64)): V =
+      algebra.denormalFlushed(
+        mode,
+        value,
+        width,
+        if (width == 32) ModeRegister.Denormal32Input else ModeRegister.Denormal16And64Input
+      )
+
+    inline def denormalOutput(mode: V, value: V, width: Int in (16, 32, 64)): V =
+      algebra.denormalFlushed(
+        mode,
+        value,
+        width,
+        if (width == 32) ModeRegister.Denormal32Output else ModeRegister.Denormal16And64Output
+      )
+
+    inline def denormalFlushed(mode: V, value: V, width: Int in (16, 32, 64), keep: Int): V =
+      algebra.let("x", value)(x =>
+        algebra.select(
+          algebra.equal(
+            algebra.or(
+              algebra.and(x, algebra.literal(IEEE754.infinity(width))),
+              algebra.and(mode, algebra.literal(keep.toLong))
+            ),
+            algebra.literal(0L)
+          ),
+          algebra.and(x, algebra.literal(~(IEEE754.signBit(width) - 1L))),
+          x
+        )
+      )
+
+    /** A conversion from `from` bits to `to` bits, its operand's and result's denormals as MODE has them. */
+    inline def converted[A, B](mode: V, from: Int in (16, 32, 64), to: Int in (16, 32, 64), a: V)(
+        inline conversion: A => B
+    ): V = algebra.denormalOutput(mode, algebra.primitive(algebra.denormalInput(mode, a, from))(conversion), to)
+
+    /** `operation` on a `width`-bit operand and result as MODE.FP_DENORM has it read and write them. */
+    inline def flushedUnary(mode: V, width: Int in (16, 32, 64), a: V)(inline operation: V => V): V =
+      algebra.denormalOutput(mode, operation(algebra.denormalInput(mode, a, width)), width)
+
+    inline def flushedBinary(mode: V, width: Int in (16, 32, 64), a: V, b: V)(inline operation: (V, V) => V): V =
+      algebra.denormalOutput(
+        mode,
+        operation(algebra.denormalInput(mode, a, width), algebra.denormalInput(mode, b, width)),
+        width
+      )
+
+    inline def flushedTernary(mode: V, width: Int in (16, 32, 64), a: V, b: V, c: V)(
+        inline operation: (V, V, V) => V
+    ): V =
+      algebra.denormalOutput(
+        mode,
+        operation(
+          algebra.denormalInput(mode, a, width),
+          algebra.denormalInput(mode, b, width),
+          algebra.denormalInput(mode, c, width)
+        ),
+        width
+      )
+  }
+
   /** A binary32 operation, saturated when `clamp`. */
   extension [V](inline algebra: Algebra[V]) {
     inline def singleOperation(clamp: Boolean, left: V, right: V)(
@@ -39,6 +104,16 @@ private object FloatPrimitives {
         inline operation: (Float16, Float16) => Float16
     ): V = algebra.saturated(clamp, algebra.primitive(left, right)(operation), 16)
 
+    /** [[singleOperation]] on operands and result as MODE.FP_DENORM has it read and write them. */
+    inline def flushedSingle(mode: V, clamp: Boolean, left: V, right: V)(
+        inline operation: (Float32, Float32) => Float32
+    ): V = algebra.flushedBinary(mode, 32, left, right)((x, y) => algebra.singleOperation(clamp, x, y)(operation))
+
+    /** [[halfOperation]] on operands and result as MODE.FP_DENORM has it read and write them. */
+    inline def flushedHalf(mode: V, clamp: Boolean, left: V, right: V)(
+        inline operation: (Float16, Float16) => Float16
+    ): V = algebra.flushedBinary(mode, 16, left, right)((x, y) => algebra.halfOperation(clamp, x, y)(operation))
+
     inline def addSingle(left: V, right: V): V =
       algebra.primitive(left, right)(Floats.add(_: Float32, _: Float32))
 
@@ -47,6 +122,12 @@ private object FloatPrimitives {
 
     inline def fusedMultiplyAdd(a: V, b: V, c: V, width: Int in (16, 32, 64)): V =
       algebra.dispatched(width, a, b, c)(Floats.fma, Floats.fma, Floats.fma)
+
+    /** [[divisionFixup]] with the denominator's and numerator's denormals as MODE has them read; the quotient passes as
+      * it is.
+      */
+    inline def flushedFixup(mode: V, width: Int in (16, 32, 64), q: V, d: V, n: V): V =
+      algebra.divisionFixup(width, q, algebra.denormalInput(mode, d, width), algebra.denormalInput(mode, n, width))
 
     /** V_DIV_FIXUP on the quotient, denominator and numerator. */
     inline def divisionFixup(width: Int in (16, 32, 64), q: V, d: V, n: V): V =

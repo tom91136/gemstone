@@ -1161,11 +1161,12 @@ class HardwareGoldenSuite extends munit.FunSuite {
       (89, spacesSm89, spacesSm89Rows, cvtaSm89, cvtaSm89Rows)
     )
   ) {
+    // the probe's module holds one device variable, g_global, of 256 words
     test(s"sm_$sm hardware: isspacep classifies local, global, shared and null generic pointers") {
-      checkGrid(sm, spaces, 2, spacesTable)
+      checkGrid(sm, spaces, 2, spacesTable, Vec(1024))
     }
     test(s"sm_$sm hardware: cvta between local and generic addresses") {
-      checkGrid(sm, cvta, 2, cvtaTable)
+      checkGrid(sm, cvta, 2, cvtaTable, Vec(1024))
     }
   }
 }

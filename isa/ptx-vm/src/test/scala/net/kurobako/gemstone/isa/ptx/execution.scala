@@ -81,7 +81,17 @@ private object execution extends munit.Assertions {
       memory: AddressSpace,
       control: TaskControl = TaskControl(),
       workgroups: Workgroups = Workgroups.Sequential,
-      dynamicSharedBytes: Int >= 0 = 0
+      dynamicSharedBytes: Int >= 0 = 0,
+      cluster: Option[Dimensions] = None
   ): Either[Fault, Unit] =
-    VMInterpreter.execute(kernel, geometry(blocks, threads), arguments, memory, control, workgroups, dynamicSharedBytes)
+    VMInterpreter.execute(
+      kernel,
+      geometry(blocks, threads),
+      arguments,
+      memory,
+      control,
+      workgroups,
+      dynamicSharedBytes,
+      cluster
+    )
 }

@@ -7,6 +7,7 @@ import VMIR.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.semantics.prelude.*
 
 class FloatSemanticsSuite extends munit.FunSuite {
   private val random = scala.util.Random(23)
@@ -147,6 +148,8 @@ class FloatSemanticsSuite extends munit.FunSuite {
     VectorConvertOperation.LogarithmBase2F16,
     VectorConvertOperation.SineF16,
     VectorConvertOperation.CosineF16,
+    VectorConvertOperation.SineBoundedF16,
+    VectorConvertOperation.CosineBoundedF16,
     VectorConvertOperation.FrexpMantissaF16,
     VectorConvertOperation.F16FromI16,
     VectorConvertOperation.F16FromU16
@@ -416,7 +419,7 @@ class FloatSemanticsSuite extends munit.FunSuite {
     } {
       same(
         Execute.divisionFixup(32, a, b, c),
-        IEEE754.floatToBinary32(VMArithmetic.divisionFixupF32(float(a), float(b), float(c))).toLong,
+        VMArithmetic.divisionFixup(a, b, c, 32),
         32,
         s"fixup $a $b $c"
       )
@@ -428,10 +431,12 @@ class FloatSemanticsSuite extends munit.FunSuite {
       same(scaled, IEEE754.floatToBinary32(reference._1).toLong, 32, s"scale $a $b $c")
       assertEquals(flag, reference._2, s"scale flag $a $b $c")
       for (vcc <- Vector(0L, 1L)) {
-        val fused = IEEE754.fma(float(a), float(b), float(c))
+        val fused = IEEE754.floatToBinary32(IEEE754.fma(float(a), float(b), float(c))).toLong
         same(
           Execute.divisionFusedMultiplyAdd(32, a, b, c, vcc),
-          IEEE754.floatToBinary32(if (vcc != 0L) Math.scalb(fused, 32) else fused).toLong,
+          if (vcc != 0L && Vector(a, b, c).forall(x => float(x).isFinite))
+            references.divisionFusedMultiplyAdd(float(a).toDouble, float(b).toDouble, float(c).toDouble, 32)
+          else fused,
           32,
           s"fmas $a $b $c $vcc"
         )
@@ -446,7 +451,7 @@ class FloatSemanticsSuite extends munit.FunSuite {
     } {
       same(
         Execute.divisionFixup(64, a, b, c),
-        IEEE754.doubleToBinary64(references.divisionFixupF64(double(a), double(b), double(c))),
+        references.divisionFixupF64(a, b, c),
         64,
         s"fixup $a $b $c"
       )
@@ -458,10 +463,12 @@ class FloatSemanticsSuite extends munit.FunSuite {
       same(scaled, IEEE754.doubleToBinary64(reference._1), 64, s"scale $a $b $c")
       assertEquals(flag, reference._2, s"scale flag $a $b $c")
       for (vcc <- Vector(0L, 1L)) {
-        val fused = IEEE754.fma(double(a), double(b), double(c))
+        val fused = IEEE754.doubleToBinary64(IEEE754.fma(double(a), double(b), double(c)))
         same(
           Execute.divisionFusedMultiplyAdd(64, a, b, c, vcc),
-          IEEE754.doubleToBinary64(if (vcc != 0L) Math.scalb(fused, 64) else fused),
+          if (vcc != 0L && Vector(a, b, c).forall(x => double(x).isFinite))
+            references.divisionFusedMultiplyAdd(double(a), double(b), double(c), 64)
+          else fused,
           64,
           s"fmas $a $b $c $vcc"
         )
@@ -473,13 +480,12 @@ class FloatSemanticsSuite extends munit.FunSuite {
     def packed: Long = (random.nextLong() & 0xffffL) | ((halves(random.nextInt(halves.size)) & 0xffffL) << 16)
     for (_ <- 0 until 2000) {
       val (a, b, d) = (packed, packed, singles(random.nextInt(singles.size)))
-      for (accumulate <- Vector(false, true))
-        same(
-          Execute.dotHalves(accumulate, a, b, d),
-          references.dot2F32F16(a, b, d, accumulate).toLong,
-          32,
-          s"dot2 $a $b $d $accumulate"
-        )
+      same(
+        toRaw(Dots.halvesToFloat(fromRaw[UInt[32]](a), fromRaw[UInt[32]](b), fromRaw[Float32](d))),
+        references.dot2F32F16(a, b, d).toLong,
+        32,
+        s"dot2 $a $b $d"
+      )
       val (x, y, z) = (random.nextLong(), random.nextLong(), random.nextLong())
       assertEquals(Execute.dotBytes(x, y, z), references.dot4U32U8(x, y, z))
     }
@@ -521,6 +527,7 @@ class FloatSemanticsSuite extends munit.FunSuite {
           (if ((negation & (1 << index)) != 0) 0x8000L else 0L)
       def fma(selection: Int, negation: Int): Long =
         Execute.packedHalfFusedMultiplyAdd(
+          (0xf << ModeRegister.DenormalShift).toLong,
           clamp,
           half(a, selection, negation, 0),
           half(b, selection, negation, 1),
@@ -683,7 +690,7 @@ class FloatSemanticsSuite extends munit.FunSuite {
       a     <- singles
       clamp <- Vector(false, true)
     } {
-      val value = 1.0f / IEEE754.binary32ToFloat(Bits.low32(a))
+      val value = references.reciprocalF32(IEEE754.binary32ToFloat(Bits.low32(a)))
       same(
         Execute.reciprocal(clamp, a),
         IEEE754.floatToBinary32(if (clamp) references.clampF32(value) else value).toLong,

@@ -173,9 +173,11 @@ class InstructionSemanticsSuite extends munit.FunSuite {
           high = true
         )
       ),
-      "def op(v3: UInt[32], v1: UInt[32], v2: UInt[32]): (v3: UInt[32]) =\n" +
-        "  (v3 = (v3.to[UInt[16]].to[UInt[64]] | (Floats.add(v1.to[UInt[16]].asFloat, v2.to[UInt[16]].asFloat).bits" +
-        ".to[UInt[64]] << 16)).to[UInt[32]])"
+      """def op(v3: UInt[32], v1: UInt[32], v2: UInt[32], mode: UInt[32]): (v3: UInt[32]) = {
+        |  val v0 = mode & 64
+        |  val v4 = Floats.add(if (((v1 & 0x7c00) | v0) == UInt[32](0)) (v1 & -0x8000).to[UInt[16]].asFloat else v1.to[UInt[16]].asFloat, if (((v2 & 0x7c00) | v0) == UInt[32](0)) (v2 & -0x8000).to[UInt[16]].asFloat else v2.to[UInt[16]].asFloat).bits
+        |  (v3 = (v3.to[UInt[16]].to[UInt[64]] | ((if (((v4 & 0x7c00).to[UInt[32]] | (mode & 128)) == UInt[32](0)) (v4 & -0x8000).to[UInt[64]] else v4.to[UInt[64]]) << 16)).to[UInt[32]])
+        |}""".stripMargin
     )
     assertEquals(
       defined(

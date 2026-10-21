@@ -100,7 +100,16 @@ private object VMAsync {
 
   def execute(instruction: Instruction, context: VMContext): Either[Fault, Step] = (instruction: @unchecked) match {
     // .ignore_oob leaves the ignored destination bytes indeterminate, so they keep their contents
-    case Instruction.AsyncBulkCopy(destination, source, size, barrier, sharedSource, multicast, ignored) =>
+    case Instruction.AsyncBulkCopy(
+          destination,
+          source,
+          size,
+          barrier,
+          sharedSource,
+          multicast,
+          ignored,
+          clusterDestination
+        ) =>
       forEveryLane(context) { lane =>
         val target = context.read(lane, destination)
         val origin = context.read(lane, source)
@@ -108,6 +117,13 @@ private object VMAsync {
         val left   = ignored.fold(0L)(bounds => context.read(lane, bounds.left))
         val right  = ignored.fold(0L)(bounds => context.read(lane, bounds.right))
         for {
+          _ <- Either.cond(
+            !(clusterDestination && sharedSource) || context.explicitCluster,
+            (),
+            Fault.IllegalInstruction(
+              "a bulk copy of shared::cta into shared::cluster memory needs a launch with a cluster"
+            )
+          )
           _ <- Either.cond(
             bulkAligned(target, origin, bytes) &&
               left >= 0 && left <= 15 && right >= 0 && right <= 15 && left + right <= bytes,
@@ -350,7 +366,10 @@ private object VMAsync {
       val whole  = coordinates(0) % values == 0 && descriptor.dimensions(0) % values == 0 &&
         descriptor.traversal(0) == 1 &&
         (if (descriptor.mode == Mode.Tile) descriptor.box(0) % values == 0 else descriptor.channels % values == 0)
-      if (values == 1) Right(TensorCopy(descriptor, coordinates, offsets, gather))
+      // the inner coordinate of a tile must be a multiple of 16 bytes
+      if (descriptor.mode == Mode.Tile && !gather && (coordinates(0) * descriptor.element.bytes) % 16 != 0)
+        Left(Fault.IllegalInstruction(s"tensor tile coordinate ${coordinates(0)} is not a multiple of 16 bytes"))
+      else if (values == 1) Right(TensorCopy(descriptor, coordinates, offsets, gather))
       else if (!whole)
         Left(Fault.Backend(s"tensor copy of ${descriptor.element} elements does not split into units of $values"))
       else

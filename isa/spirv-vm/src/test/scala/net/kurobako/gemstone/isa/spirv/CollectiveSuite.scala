@@ -204,7 +204,7 @@ class CollectiveSuite extends munit.FunSuite {
         case _     => a ^ b
       }
       // The oracle reduces in the subgroup's order, so it folds over boxed longs.
-      @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val expected = (0 until 80).flatMap { global =>
         val start = global / 40 * 40 + (if (subgroup) global % 40 / 32 * 32 else 0)
         val end   = math.min(global / 40 * 40 + 40, start + (if (subgroup) 32 else 40))

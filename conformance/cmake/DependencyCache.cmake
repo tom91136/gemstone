@@ -1,4 +1,6 @@
 include_guard(GLOBAL)
+# script mode has no cmake_minimum_required, and functions keep the policies of their definition
+cmake_policy(VERSION 3.25)
 include(FetchContent)
 
 # The content hash identifies the pinned source even if its download URL changes.

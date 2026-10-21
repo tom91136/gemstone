@@ -61,10 +61,11 @@ private object VMFloatingCompiler {
     Modifier.COS,
     Modifier.TANH
   )
-  private val mufuModifiers = mufuFunctions ++ Set(Modifier.F16, Modifier.BF16, Modifier.F16x2, Modifier.BF16x2)
-  private val setRelations  = comparisons ++ Set(Modifier.NUM, Modifier.NAN)
-  private val setCombiners  = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
-  private val setModifiers  = setRelations ++ setCombiners ++
+  private val mufuModifiers = mufuFunctions ++
+    Set(Modifier.FTZ, Modifier.F16, Modifier.BF16, Modifier.F16x2, Modifier.BF16x2)
+  private val setRelations = comparisons ++ Set(Modifier.NUM, Modifier.NAN)
+  private val setCombiners = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
+  private val setModifiers = setRelations ++ setCombiners ++
     Set(Modifier.F, Modifier.T, Modifier.BF, Modifier.BM, Modifier.FTZ)
   private val floatFormats        = Set(Modifier.F16, Modifier.BF16, Modifier.E8M7, Modifier.F32, Modifier.F64)
   private val packHalvesModifiers = Set(
@@ -256,15 +257,15 @@ private object VMFloatingCompiler {
   def zeroFlagFset(using context: VMCompilationContext): Boolean = {
     import context.*
     def input(value: Operand): Boolean = value match {
-      case Operand.Unary(inner, false, false, true) => OperandQueries.isRegister(inner)
+      case Operand.Unary(inner, false, false, true) => OperandQueries.isRegister(inner, allowZero = true)
       case Operand.ConstantBank(bank, offset)       => bank == 2 && OperandQueries.integer(offset).exists(_ >= 0)
       case Operand.FloatingBits(_, width, _) if width == 32 => true
-      case other                                            => OperandQueries.isRegister(other)
+      case other                                            => OperandQueries.isRegister(other, allowZero = true)
     }
-    Set(35, 50, 60)(sm) && OperandQueries.is[Form.Fset](operation) &&
+    Set(35, 50, 60, 61)(sm) && OperandQueries.is[Form.Fset](operation) &&
     (modifiers.filterNot(_ == Modifier.FTZ) match {
-      case Vec(Modifier.GTU | Modifier.NEU, Modifier.AND) => true
-      case _                                              => false
+      case Vec(Modifier.GTU | Modifier.NEU | Modifier.EQ, Modifier.AND) => true
+      case _                                                            => false
     }) && operands.size == 4 && operands.head == Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC)) &&
     input(operands(1)) && input(operands(2)) && OperandQueries.isPredicateAllowingNegated(operands(3))
   }
@@ -373,8 +374,9 @@ private object VMFloatingCompiler {
       (!modifiers.contains(Modifier.F32) ||
         modifiers.exists(PartialFunction.cond(_) { case Modifier.F64 | Modifier.U64 | Modifier.S64 => true }))
     ) unsupported("only scalar 32-bit I2FP conversion is implemented")
-    // Narrow float results are verified only with the default rounding.
-    if (modifiers.exists(_.isHalf) && modifiers.exists(roundings))
+    // A half result is verified with the default rounding and with the rounding toward zero; the other roundings and the
+    // bfloat16 results are verified only with the default rounding.
+    if (modifiers.exists(_.isHalf) && modifiers.exists(roundings) && !modifiers.contains(Modifier.RZ))
       unsupported(s"unsupported I2F modifiers ${modifiers.mkString(".")}")
     val rounding = modifiers.find(roundings).getOrElse(Modifier.RN)
     val kind     =
@@ -502,47 +504,67 @@ private object VMFloatingCompiler {
     store(operands.head, flushHigh(high(result)))
   }
 
+  /** The special-function unit's function, whose polynomials differ between the architecture families, and the family's
+    * flavour of them; the hyperbolic tangent has no polynomial of its own in the unit.
+    *
+    * The square root's own polynomial arrived with Pascal, and the trigonometric ones with Volta, which also changed
+    * the argument from radians to cycles.
+    */
+  private def mufuFunction(modifier: Modifier)(using
+      context: VMCompilationContext
+  ): Option[(MufuFunction, Mufu.Flavour)] = {
+    import context.*
+    val flavour = if (legacy) Mufu.Flavour.Legacy else Mufu.Flavour.Modern
+    modifier match {
+      case Modifier.RCP  => Some((MufuFunction.Reciprocal, flavour))
+      case Modifier.RSQ  => Some((MufuFunction.ReciprocalSquareRoot, flavour))
+      case Modifier.LG2  => Some((MufuFunction.Log2, flavour))
+      case Modifier.EX2  => Some((MufuFunction.Exponent2, flavour))
+      case Modifier.SQRT => Some((MufuFunction.SquareRoot, if (sm < 61) Mufu.Flavour.Legacy else Mufu.Flavour.Modern))
+      case Modifier.SIN  => Some((if (legacy) MufuFunction.Sine else MufuFunction.SineCycles, flavour))
+      case Modifier.COS  => Some((if (legacy) MufuFunction.Cosine else MufuFunction.CosineCycles, flavour))
+      case Modifier.TANH => None
+      case _             => unsupported(s"unsupported MUFU function $modifier")
+    }
+  }
+
   private def special()(using context: VMCompilationContext): Unit = {
     import context.*
     requireModifiers(mufuModifiers)
-    val function = modifiers.find(mufuFunctions).getOrElse(unsupported("MUFU requires a function"))
+    val modifier = modifiers.find(mufuFunctions).getOrElse(unsupported("MUFU requires a function"))
     if (operands.size != 2 && (operands.size != 3 || !modifiers.exists(_.isPackedHalf)))
       unsupported("MUFU requires a destination and a source")
-    def evaluate(raw: Value): Value = {
-      val input    = flushFloat(raw)
-      val argument =
-        if (reducedRadians.nonEmpty || !PartialFunction.cond(function) { case Modifier.SIN | Modifier.COS => true })
-          input
-        else {
-          if (legacy) unsupported("legacy MUFU trigonometric range-reduction encoding")
-          // Volta and later MUFU trigonometric inputs are cycles, whereas PTX uses radians. Reduce before scaling so
-          // large exactly integral binary32 inputs remain periodic.
-          val integral = convert(input, NumericFormat.IEEE(32), NumericFormat.IEEE(32), Some(ConversionRounding.RNI))
-          val fraction = temp()
-          val radians  = temp()
-          emit(FloatBinary(FloatOperation.Subtract, fraction.slot, input, integral, 32))
-          emit(FloatBinary(FloatOperation.Multiply, radians.slot, fraction, Value.Immediate(0x40c90fdbL), 32))
-          emit(Select(
-            radians.slot,
-            input,
-            radians,
-            compare(Comparison.Equal, NumericFormat.IEEE(32), input, Value.Immediate(0L)).slot,
-            32
-          ))
-          radians
-        }
-      val result = temp()
-      emit(FloatUnary(function.floatUnaryOperation, result.slot, argument, 32))
-      flushFloat(result)
+    val approximation = mufuFunction(modifier)
+    // The `.ftz` modifier flushes the subnormal operand and the subnormal result of the unit.
+    val control = FloatControl(flushSubnormal = modifiers.contains(Modifier.FTZ))
+    // The legacy trigonometric functions take the angle in radians, which the fused range reduction produces, whereas
+    // the modern ones take it in cycles, which the unit reduces itself.
+    def evaluate(raw: Value): Value = approximation match {
+      case None =>
+        // The unit keeps the subnormal operand and the subnormal result of the hyperbolic tangent.
+        val result = temp()
+        emit(FloatUnary(FloatUnaryOperation.Tanh, result.slot, raw, 32))
+        result
+      case Some((function, flavour)) =>
+        if ((function == MufuFunction.Sine || function == MufuFunction.Cosine) && reducedRadians.isEmpty)
+          unsupported("legacy MUFU trigonometric range-reduction encoding")
+        val result = temp()
+        emit(MufuUnary(result.slot, raw, function, flavour, control))
+        // the unit's fixed-point output cannot be a subnormal value
+        flushFloat(result)
     }
-    // Half forms compute on the binary32 value of each half and round the result back to nearest.
-    def half(value: Value, format: NumericFormat): Value =
+    // The half forms compute on the binary32 value of each half. The exponential's own unit rounds its fixed-point
+    // result toward zero, whereas the other functions round their result to nearest.
+    def half(value: Value, format: NumericFormat): Value = {
+      val rounding =
+        if (approximation.exists(_._1 == MufuFunction.Exponent2)) ConversionRounding.RZ else ConversionRounding.RN
       convert(
-        evaluate(convert(value, format, NumericFormat.IEEE(32))),
+        evaluate(convert(value, format, NumericFormat.IEEE(32), Some(ConversionRounding.RN))),
         NumericFormat.IEEE(32),
         format,
-        Some(ConversionRounding.RN)
+        Some(rounding)
       )
+    }
     val bfloat16 = modifiers.exists(PartialFunction.cond(_) { case Modifier.BF16 | Modifier.BF16x2 => true })
     val format   = if (bfloat16) NumericFormat.BF16 else NumericFormat.IEEE(16)
     store(
@@ -882,10 +904,81 @@ private object VMFloatingCompiler {
       case Modifier.E4M3 => Float8Format.E4M3
       case Modifier.E5M2 => Float8Format.E5M2
     }
-    float8 match {
-      case Some(format)                              => packFloat8(format)
-      case None if modifiers.contains(Modifier.TF32) => packTensorFloat32()
-      case None                                      => packHalves16()
+    val narrow = modifiers.collectFirst {
+      case Modifier.E2M1 => NarrowFormat.E2M1
+      case Modifier.E2M3 => NarrowFormat.E2M3
+      case Modifier.E3M2 => NarrowFormat.E3M2
+      case Modifier.E8   => NarrowFormat.UE8M0
+    }
+    (float8, narrow) match {
+      case (Some(format), _)                                 => packFloat8(format)
+      case (None, Some(format))                              => packNarrow(format)
+      case (None, None) if modifiers.contains(Modifier.TF32) => packTensorFloat32()
+      case (None, None)                                      => packHalves16()
+    }
+  }
+
+  /** The 4- and 6-bit floating conversions and those of the UE8M0 scale (`E8`): two binary32 values or a binary16 pair
+    * into the low half over the upper half of the last source, or a pair widened to binary16 or, from UE8M0, bfloat16.
+    */
+  private def packNarrow(format: NarrowFormat)(using context: VMCompilationContext): Unit = {
+    import context.*
+    val result   = temp()
+    val relu     = modifiers.contains(Modifier.RELU)
+    val saturate = modifiers.contains(Modifier.SATFINITE)
+    val rounding = modifiers.collectFirst {
+      case Modifier.RZ => ConversionRounding.RZ
+      case Modifier.RP => ConversionRounding.RP
+    }
+    val scale  = Value.Immediate(0x7f7fL)
+    val scaled = format == NarrowFormat.UE8M0
+    if ((scaled && relu) || (!scaled && rounding.nonEmpty))
+      unsupported(s"unsupported F2FP modifiers ${modifiers.mkString(".")}")
+    def merged(rest: Operand): Value = binary(
+      IntegerOperation.BitwiseOr,
+      binary(IntegerOperation.BitwiseAnd, source(OperandQueries.base(rest)), Value.Immediate(0xffff0000L)),
+      result
+    )
+    def narrowed(high: Value, low: Value, halves: Boolean) = {
+      if (scaled && rounding.isEmpty) unsupported("F2FP to UE8M0 requires RZ or RP")
+      emit(ConvertNarrow(
+        result.slot,
+        high,
+        low,
+        scale,
+        format,
+        halves,
+        bf16 = false,
+        rounding.getOrElse(ConversionRounding.RN),
+        relu,
+        saturate
+      ))
+    }
+    modifiers.filterNot(PartialFunction.cond(_) {
+      case Modifier.E2M1 | Modifier.E2M3 | Modifier.E3M2 | Modifier.E8 | Modifier.RELU | Modifier.SATFINITE |
+          Modifier.RZ | Modifier.RP => true
+    }) match {
+      case Vec(Modifier.F32, Modifier.PACK_AB_MERGE_C) =>
+        requireOperands(4, "F2FP.PACK_AB_MERGE_C requires destination and three sources")
+        narrowed(source(operands(1)), source(operands(2)), halves = false)
+        store(operands.head, merged(operands(3)))
+      case Vec(Modifier.F16, Modifier.UNPACK_B_MERGE_C) if !scaled =>
+        requireOperands(3, "F2FP.UNPACK_B_MERGE_C requires destination and two sources")
+        narrowed(source(operands(1)), Value.Immediate(0L), halves = true)
+        store(operands.head, merged(operands(2)))
+      case Vec(target @ (Modifier.F16 | Modifier.BF16), Modifier.UNPACK_B)
+          if !relu && !saturate && rounding.isEmpty && (target == Modifier.BF16) == scaled =>
+        requireOperands(2, "F2FP.UNPACK_B requires destination and source")
+        val pair = OperandQueries.qualifiers(operands(1)) match {
+          case Vec()                   => source(operands(1))
+          case Vec(OperandSelector.H1) =>
+            binary(IntegerOperation.ShiftRightLogical, source(OperandQueries.base(operands(1))), Value.Immediate(16L))
+          case Vec(OperandSelector.H0) => source(OperandQueries.base(operands(1)))
+          case _                       => unsupported("unsupported F2FP.UNPACK_B source half")
+        }
+        emit(ConvertWiden(result.slot, pair, scale, format, bf16 = scaled, relu = false, saturate = false))
+        store(operands.head, result)
+      case _ => unsupported(s"unsupported F2FP modifiers ${modifiers.mkString(".")}")
     }
   }
 
@@ -920,11 +1013,12 @@ private object VMFloatingCompiler {
     modifiers.filterNot(PartialFunction.cond(_) { case Modifier.E4M3 | Modifier.E5M2 | Modifier.RELU => true }) match {
       case Vec(Modifier.SATFINITE, Modifier.F32, Modifier.PACK_AB_MERGE_C) =>
         requireOperands(4, "F2FP.PACK_AB_MERGE_C requires destination and three sources")
+        // the merge source names the high half of a register, whose low half the packed bytes replace
         emit(ConvertToFloat8(
           result.slot,
           source(operands(1)),
           source(operands(2)),
-          source(operands(3)),
+          source(OperandQueries.base(operands(3))),
           format,
           halves = false,
           relu

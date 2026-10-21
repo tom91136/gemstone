@@ -141,16 +141,22 @@ private object VMHalfCompiler {
       case _ => unsupported(s"unsupported ${operation.mnemonic.raw} half source")
     }
     val raw      = source(base)
-    val selected = selectors match {
-      case Vec() | Vec(OperandSelector.H1_H0) => raw
-      case Vec(OperandSelector.H0_H0)         => duplicated(raw, 0)
-      case Vec(OperandSelector.H1_H1)         => duplicated(raw, 16)
-      case Vec(OperandSelector.H0_NH1)        =>
-        flipped(halves(lowHalf(raw), highHalf(raw)), 0x8000L)
-      case Vec(OperandSelector.F32) =>
-        val narrowed = convert(raw, NumericFormat.IEEE(32), format(bfloat16), Some(ConversionRounding.RZ))
+    val selected = base match {
+      // a constant bank holds a float32, which the half instructions narrow to a half
+      case Operand.ConstantBank(_, _) =>
+        val narrowed = convert(raw, NumericFormat.IEEE(32), format(bfloat16), Some(ConversionRounding.RN))
         halves(narrowed, narrowed)
-      case _ => unsupported(s"unsupported ${operation.mnemonic.raw} half selector ${selectors.mkString(".")}")
+      case _ => selectors match {
+          case Vec() | Vec(OperandSelector.H1_H0) => raw
+          case Vec(OperandSelector.H0_H0)         => duplicated(raw, 0)
+          case Vec(OperandSelector.H1_H1)         => duplicated(raw, 16)
+          case Vec(OperandSelector.H0_NH1)        =>
+            flipped(halves(lowHalf(raw), highHalf(raw)), 0x8000L)
+          case Vec(OperandSelector.F32) =>
+            val narrowed = convert(raw, NumericFormat.IEEE(32), format(bfloat16), Some(ConversionRounding.RZ))
+            halves(narrowed, narrowed)
+          case _ => unsupported(s"unsupported ${operation.mnemonic.raw} half selector ${selectors.mkString(".")}")
+        }
     }
     flipped(if (absolute) masked(selected, ~signs & 0xffffffffL) else selected, if (negative) signs else 0L)
   }
@@ -246,31 +252,67 @@ private object VMHalfCompiler {
     }
   }
 
-  /** The `.F32` form: the binary32 sum or product of one selected half of each source. */
+  /** The `.F32` form: the operation of one selected half of each source, whose result the destination holds as a
+    * binary32 value. A float32 source is narrowed to a half toward zero.
+    *
+    * The Pascal and Volta units compute the operation in binary16 and widen the rounded result; the Turing and later
+    * units compute it in binary32.
+    */
   private def scalar(kind: FloatOperation, control: FloatControl, bfloat16: Boolean)(using
       context: VMCompilationContext
   ): Unit = {
     import context.*
-    def widened(operand: Operand): Value = {
+    def half(operand: Operand): Value = {
       val Half(base, selectors, negative, absolute) = peel(operand)
-      // a source read whole contributes its low half
-      val shift = selectors match {
-        case Vec() | Vec(OperandSelector.H1_H0) | Vec(OperandSelector.H0_H0) => 0
-        case Vec(OperandSelector.H1_H1)                                      => 16
+      val selected                                  = selectors match {
+        // a source read whole contributes its low half
+        case Vec() | Vec(OperandSelector.H1_H0) | Vec(OperandSelector.H0_H0) =>
+          base match {
+            case Operand.Register(RegisterBank.R | RegisterBank.UR, _) | Operand.ConstantBank(_, _) =>
+              lowHalf(source(base))
+            case _ if immediate(base) => Value.Immediate(halfConstant(base, bfloat16))
+            case _                    => unsupported(s"unsupported ${operation.mnemonic.raw}.F32 source")
+          }
+        case Vec(OperandSelector.H1_H1) =>
+          base match {
+            case Operand.Register(RegisterBank.R | RegisterBank.UR, _) | Operand.ConstantBank(_, _) =>
+              highHalf(source(base))
+            case _ => unsupported(s"unsupported ${operation.mnemonic.raw}.F32 source")
+          }
+        // a float32 source is narrowed to a half toward zero
+        case Vec(OperandSelector.F32) =>
+          convert(floatSource(base), NumericFormat.IEEE(32), format(bfloat16), Some(ConversionRounding.RZ))
         case _ => unsupported(s"${operation.mnemonic.raw}.F32 sources select one half with H0_H0 or H1_H1")
       }
-      val half = base match {
-        case Operand.Register(RegisterBank.R | RegisterBank.UR, _) | Operand.ConstantBank(_, _) =>
-          if (shift == 0) lowHalf(source(base)) else highHalf(source(base))
-        case _ if immediate(base) && selectors.isEmpty => Value.Immediate(halfConstant(base, bfloat16))
-        case _ => unsupported(s"unsupported ${operation.mnemonic.raw}.F32 source")
-      }
-      val value = flipped(if (absolute) masked(half, 0x7fffL) else half, if (negative) 0x8000L else 0L)
-      convert(value, format(bfloat16), NumericFormat.IEEE(32))
+      flipped(if (absolute) masked(selected, 0x7fffL) else selected, if (negative) 0x8000L else 0L)
     }
-    val result = temp()
-    emit(FloatBinary(kind, result.slot, widened(operands(1)), widened(operands(2)), 32, control))
-    store(operands.head, result)
+    val left  = half(operands(1))
+    val right = half(operands(2))
+    if (sm >= 75) {
+      // the binary32 units compute the operation of the widened halves
+      val result = temp()
+      emit(FloatBinary(
+        kind,
+        result.slot,
+        convert(left, format(bfloat16), NumericFormat.IEEE(32)),
+        convert(right, format(bfloat16), NumericFormat.IEEE(32)),
+        32,
+        control
+      ))
+      store(operands.head, result)
+    } else {
+      // the binary16 units compute the operation of the halves and widen the rounded result
+      val result = temp()
+      emit(FloatBinaryPacked(
+        kind,
+        result.slot,
+        halves(left, left),
+        halves(right, right),
+        if (bfloat16) PackedFloatFormat.BF16x2 else PackedFloatFormat.F16x2,
+        control
+      ))
+      store(operands.head, convert(lowHalf(result), format(bfloat16), NumericFormat.IEEE(32)))
+    }
   }
 
   private def fusedMultiplyAdd()(using context: VMCompilationContext): Unit = {

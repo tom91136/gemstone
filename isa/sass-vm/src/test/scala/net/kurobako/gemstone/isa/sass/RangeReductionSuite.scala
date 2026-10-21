@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.nvidia.Mufu
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.testing.either.*
 
@@ -12,11 +13,13 @@ class RangeReductionSuite extends munit.FunSuite {
     input <- Vec(0.0f, -0.0f, 1.0f, -1.0f, Math.PI.toFloat, 1e10f)
   }
     test(s"sm_$sm reduction captures radians before aliases are overwritten: $input") {
+      // the unit's own approximations, which HardwareTableSuite holds to the hardware's results
+      val radians = bits(input.toDouble).toLong & 0xffffffffL
       check(
         sm,
         s"LDC.64 R10, c[0x0][0x160]; MOV R4, 0x${bits(input.toDouble).toHexString}; RRO.SINCOS R4, R4; MUFU.SIN R5, R4; " +
           "MUFU.COS R4, R4; STG.E [R10], R5; STG.E [R10+4], R4; EXIT",
-        Vec(bits(Math.sin(input.toDouble)), bits(Math.cos(input.toDouble)))
+        Vec(Mufu.sine(radians, Mufu.Flavour.Legacy).toInt, Mufu.cosine(radians, Mufu.Flavour.Legacy).toInt)
       )
     }
 

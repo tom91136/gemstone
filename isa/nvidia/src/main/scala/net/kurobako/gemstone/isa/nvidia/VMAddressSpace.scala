@@ -8,6 +8,7 @@ private[isa] object VMAddressSpace {
   inline val SharedBase     = 0x10000000L
   inline val SharedLimit    = 0x40000000L
   inline val ParameterBase  = 0x700000000L
+  inline val ParameterLimit = ParameterBase + 0x100000000L
 
   // Each cluster CTA's shared memory is a 16 MiB window. PTX shared::cluster addresses select it above
   // ClusterWindowBase; SASS selects it with bits 24..31 of the low word of an address whose high word is SR_SWINHI.
@@ -22,9 +23,15 @@ private[isa] object VMAddressSpace {
       ((address >= SharedBase && address <= SharedLimit - size.toLong) ||
         (address >= SharedWindowBase && address <= SharedWindowBase + SharedWindowSize - size.toLong))
 
-  // Thread-local storage occupies the low addresses below 4 GiB outside the shared aperture.
+  // Thread-local storage occupies the addresses below 4 GiB outside the shared aperture; the null address is in the
+  // global window, as the hardware holds it.
   def isLocal(address: Long): Boolean =
-    java.lang.Long.compareUnsigned(address, LocalLimit) < 0 && !isShared(address)
+    address != 0L && java.lang.Long.compareUnsigned(address, LocalLimit) < 0 && !isShared(address)
+
+  /** Whether the address is in the window the kernel's parameters and the device's allocations occupy, which the
+    * hardware holds in the constant window.
+    */
+  def isConstant(address: Long): Boolean = address >= ParameterBase && address < ParameterLimit
 
   /** The cluster rank whose window holds a shared address, or -1 for the issuing CTA's own shared::cta window. */
   def clusterRank(address: Long): Int =

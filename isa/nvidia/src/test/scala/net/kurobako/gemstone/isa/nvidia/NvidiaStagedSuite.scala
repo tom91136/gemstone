@@ -148,13 +148,11 @@ class NvidiaStagedSuite extends munit.FunSuite {
     assertEquals(
       show(Instruction.MultiplyAdd(register, ra, rb, rc, IntegerMultiplyAddOperation.Low(32, 32, true, true))),
       """def op(a: UInt[32], b: UInt[32], c: UInt[32], `CC.CF`: Bool): (d: UInt[32], `CC.CF`: Bool) = {
-        |  val v0 = `CC.CF`.to[UInt[1]].to[UInt[32]]
-        |  val v1 = a.to[UInt[64]] * b.to[UInt[64]]
-        |  val v2 = v1 + c.to[UInt[64]]
-        |  val v3 = v2 + v0.to[UInt[64]]
+        |  val v0 = a * b
+        |  val v1 = `CC.CF`.to[UInt[1]].to[UInt[32]]
         |  (
-        |    d = a * b + c + v0,
-        |    `CC.CF` = multiplyHigh(a.to[UInt[64]], b.to[UInt[64]]) + (v2 < v1 || (`CC.CF` && v3 < v2)).to[UInt[1]].to[UInt[64]] != UInt[64](0) || (v3 >> 32) != UInt[64](0)
+        |    d = v0 + c + v1,
+        |    `CC.CF` = (v0.to[UInt[64]] + c.to[UInt[64]] + v1.to[UInt[64]] >> 32).to[UInt[1]] != UInt[1](0)
         |  )
         |}""".stripMargin
     )

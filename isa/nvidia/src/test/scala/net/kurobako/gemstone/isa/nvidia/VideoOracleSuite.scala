@@ -24,6 +24,7 @@ class VideoOracleSuite extends munit.FunSuite {
       rightSigned: Boolean,
       negateProduct: Boolean,
       negateAddend: Boolean,
+      addendSigned: Boolean,
       plusOne: Boolean,
       shift: Int,
       saturate: Boolean
@@ -31,7 +32,8 @@ class VideoOracleSuite extends munit.FunSuite {
     val signed  = leftSigned || rightSigned || negateProduct || negateAddend
     val product = field(left, leftSelect, leftSigned) * field(right, rightSelect, rightSigned)
     val c       = if (!plusOne && !negateProduct && negateAddend) ~addend & 0xffffffffL else addend
-    val sum = (if (!plusOne && negateProduct) ~product else product) + (if (signed) BigInt(c.toInt) else BigInt(c)) +
+    val sum     = (if (!plusOne && negateProduct) ~product else product) +
+      (if (addendSigned || signed) BigInt(c.toInt) else BigInt(c)) +
       (if (plusOne || negateProduct || negateAddend) 1 else 0)
     val result = (sum >> shift).toLong
     if (!saturate) result
@@ -52,7 +54,7 @@ class VideoOracleSuite extends munit.FunSuite {
       val left, right, addend = word()
       val leftSelect          = selects(random.nextInt(selects.size))
       val rightSelect         = selects(random.nextInt(selects.size))
-      val flags               = random.nextInt(1 << 6)
+      val flags               = random.nextInt(1 << 7)
       val shift               = Shifts(random.nextInt(3))
       val expected            = oracle(
         left,
@@ -65,6 +67,7 @@ class VideoOracleSuite extends munit.FunSuite {
         (flags & 4) != 0,
         (flags & 8) != 0,
         (flags & 16) != 0,
+        (flags & 64) != 0,
         shift,
         (flags & 32) != 0
       )
@@ -79,6 +82,7 @@ class VideoOracleSuite extends munit.FunSuite {
         (flags & 4) != 0,
         (flags & 8) != 0,
         (flags & 16) != 0,
+        (flags & 64) != 0,
         shift,
         (flags & 32) != 0
       )

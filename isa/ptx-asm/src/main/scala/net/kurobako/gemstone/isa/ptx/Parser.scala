@@ -5,7 +5,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.text.*
-import scala.annotation.nowarn
 import scala.collection.mutable
 import scala.util.control.NoStackTrace
 
@@ -46,8 +45,7 @@ object Parser {
     }
 
   // shares the Failure channel Cursor uses, so parse has one handler for both stages
-  @nowarn("msg=baumkuchen:throwing-helper")
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @SuppressWarnings(Array("baumkuchen:throwing-helper", "scalafix:DisableSyntax.var"))
   private def tokenise(source: String): (Array[Token], Array[Token], Token) = {
     val tokens       = mutable.ArrayBuffer.empty[Token]
     val comments     = mutable.ArrayBuffer.empty[Token]

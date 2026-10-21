@@ -109,7 +109,7 @@ class KernelLaunchSuite extends munit.FunSuite {
         override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
           awaitRead(readDeferred(region, offset, size))
         // The fake tracks a few word offsets, so boxing them is immaterial.
-        @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+        @SuppressWarnings(Array("baumkuchen:loop-boxing"))
         override def readDeferred(
             region: AllocationId,
             offset: Long >= 0,

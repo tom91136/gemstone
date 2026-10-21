@@ -110,6 +110,65 @@ private object VMVideoCompiler {
       case found            => context.unsupported(s"unsupported video formats ${found.mkString(".")}")
     }
 
+  /** The elements of the register pair a source's vendor selector names, in the order the selector writes them: `11`
+    * names the 16-bit element 1 twice, `4321` the 8-bit elements 4, 3, 2 and 1.
+    */
+  private def elementSelector(operand: Operand): Option[Vec[Int]] =
+    OperandQueries
+      .selectors(OperandQueries.unaryValue(operand))
+      .collectFirst { case OperandSelector.Unknown(name) => name.raw }
+      .flatMap { spelling =>
+        val digits = spelling.filter(_.isDigit)
+        val count  = digits.length
+        if (count == spelling.length && (count == 2 || count == 4))
+          Some(Vec.from(digits.toVector.map(_.asDigit)))
+        else None
+      }
+
+  /** Whether `operand` is a source whose vendor selector names the elements of a register pair. */
+  def isElementSource(operand: Operand): Boolean = elementSelector(operand).nonEmpty
+
+  /** Whether the instruction reads the elements of a register pair, which its vendor selector names. */
+  def acceptsElementSelectors(instruction: DecodedInstruction): Boolean =
+    (instruction.operation.form: @unchecked) match {
+      case _: Form.Vadd2 | _: Form.Vabsdiff2 | _: Form.Vmnmx2 | _: Form.Vset2 |
+          _: Form.Vadd4 | _: Form.Vabsdiff4 | _: Form.Vmnmx4 | _: Form.Vset4 => true
+      case _ => false
+    }
+
+  /** The source's elements, gathered from the 64-bit register pair its selector names. */
+  private def gathered(operand: Operand, indices: Vec[Int])(using context: VMCompilationContext): Value = {
+    import context.*
+    val (low, high) = registerPair(operand)
+    val bits        = if (indices.size == 2) 16 else 8
+    val mask        = (1L << bits) - 1L
+    val parts       = indices.reverse.zipWithIndex.map { (element, slot) =>
+      val shift = element * bits
+      val word  = if (shift < 32) low else high
+      val moved =
+        if (shift % 32 == 0) word
+        else binary(IntegerOperation.ShiftRightLogical, word, Value.Immediate((shift % 32).toLong))
+      val field = binary(IntegerOperation.BitwiseAnd, moved, Value.Immediate(mask))
+      if (slot * bits == 0) field
+      else binary(IntegerOperation.ShiftLeft, field, Value.Immediate((slot * bits).toLong))
+    }
+    parts.reduceLeft((left, right) => binary(IntegerOperation.BitwiseOr, left, right))
+  }
+
+  /** The aligned register pair a source's selector reads: the even register and the odd one that follows it. */
+  private def registerPair(operand: Operand)(using context: VMCompilationContext): (Value, Value) = {
+    import context.*
+    OperandQueries.base(OperandQueries.without(operand, OperandSelector.`reuse`)) match {
+      case Operand.Register(RegisterBank.R, index) =>
+        val even = (index & ~1).refine[Int in 0 ~ 255].toOption
+          .getOrElse(unsupported(s"video vector source register is out of range: $operand"))
+        val odd = (even + 1).refine[Int in 0 ~ 255].toOption
+          .getOrElse(unsupported(s"video vector source register is out of range: $operand"))
+        (source(Operand.Register(RegisterBank.R, even)), source(Operand.Register(RegisterBank.R, odd)))
+      case other => unsupported(s"unsupported video vector source $other")
+    }
+  }
+
   private def signed(format: Modifier): Boolean =
     PartialFunction.cond(format) { case Modifier.S8 | Modifier.S16 | Modifier.S32 => true }
 
@@ -176,6 +235,7 @@ private object VMVideoCompiler {
       signed(rightFormat),
       left.negated != right.negated,
       negateAddend,
+      false,
       modifiers.contains(Modifier.PO),
       shift,
       modifiers.contains(Modifier.SAT)
@@ -256,7 +316,11 @@ private object VMVideoCompiler {
     }
     def plain(operand: Operand): Value =
       if (OperandQueries.integer(operand).nonEmpty) source(operand)
-      else source(registerBaseOrZero(operand, s"${operation.mnemonic.raw} source"))
+      else
+        elementSelector(operand) match {
+          case Some(indices) => gathered(operand, indices)
+          case None          => source(registerBaseOrZero(operand, s"${operation.mnemonic.raw} source"))
+        }
     // a negated register source subtracts each of its lanes, as __vsub4 lowers on sm_35
     def negated(operand: Operand): (Operand, Boolean) = operand match {
       case Operand.Unary(value, true, false, false) if OperandQueries.integer(operand).isEmpty => (value, true)

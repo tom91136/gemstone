@@ -30,8 +30,8 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
           usesCarry,
           carryOut = true
         )(sinks = probe, destination = register, first = operand, second = operand, third = operand)
-      case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, _) =>
-        IntegerSemantics.multiplyAddHigh(Execute, operandWidth.widen, resultWidth.widen, carryOut = true)(
+      case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, _, signed) =>
+        IntegerSemantics.multiplyAddHigh(Execute, operandWidth.widen, resultWidth.widen, carryOut = true, signed)(
           sinks = probe,
           destination = register,
           first = operand,
@@ -67,18 +67,21 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
       operation: IntegerMultiplyAddOperation,
       carryIn: Boolean
   ): (Long, Boolean) = {
-    val (operandWidth, resultWidth, usesCarry, high) = operation match {
+    val (operandWidth, resultWidth, usesCarry, high, signed) = operation match {
       case IntegerMultiplyAddOperation.Low(operandWidth, resultWidth, usesCarry, _) =>
-        (operandWidth, resultWidth, usesCarry, false)
-      case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, _) =>
-        (operandWidth, resultWidth, true, true)
+        (operandWidth, resultWidth, usesCarry, false, false)
+      case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, _, signed) =>
+        (operandWidth, resultWidth, true, true, signed)
       case other => fail(s"$other has no carry")
     }
-    val product  = unsigned(left, operandWidth) * unsigned(right, operandWidth)
-    val selected = if (high) product >> operandWidth else product
+    val mask    = (BigInt(1) << resultWidth) - 1
+    val product =
+      if (signed) exact(left, operandWidth, signed = true) * exact(right, operandWidth, signed = true)
+      else unsigned(left, operandWidth) * unsigned(right, operandWidth)
+    // the carry is the bit of the sum of the product's half, the addend and the carry in beyond the result's width
+    val selected = if (high) (product >> operandWidth) & mask else product & mask
     val sum      = selected + unsigned(addend, resultWidth) + (if (usesCarry && carryIn) 1 else 0)
-    val mask     = (BigInt(1) << resultWidth) - 1
-    (sum & mask).toLong -> ((sum >> resultWidth) != 0)
+    (sum & mask).toLong -> (((sum >> resultWidth) & 1) != 0)
   }
 
   test("staged multiply-add matches unsigned wide arithmetic") {
@@ -104,12 +107,20 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
       IntegerMultiplyAddOperation.High(
         operandWidth = 32,
         resultWidth = 32,
-        carryOut = true
+        carryOut = true,
+        signed = false
       ),
       IntegerMultiplyAddOperation.High(
         operandWidth = 64,
         resultWidth = 64,
-        carryOut = true
+        carryOut = true,
+        signed = false
+      ),
+      IntegerMultiplyAddOperation.High(
+        operandWidth = 32,
+        resultWidth = 32,
+        carryOut = true,
+        signed = true
       )
     )
     val random = scala.util.Random(0x5eedL)

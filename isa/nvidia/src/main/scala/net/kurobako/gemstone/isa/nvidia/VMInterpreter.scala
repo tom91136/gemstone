@@ -810,7 +810,7 @@ private[isa] object VMInterpreter {
             if (warpArrivals(warp) != null) {
               val key = BarrierKey.Warp(WorkgroupLane.warpBases(warp), cohort.pc, frame)
               // One box per warp arrival, alongside the key allocated for it.
-              warpMembers(key) = warpArrivalMembers(warp): @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+              warpMembers(key) = warpArrivalMembers(warp): @SuppressWarnings(Array("baumkuchen:loop-boxing"))
               val lanes = warpArrivals(warp).nn.result()
               warpArrivals(warp) = null
               arriveWarp(cohort, lanes, key)

@@ -37,7 +37,8 @@ private object LegacyRangeReduction {
   private def scalarDestination(instruction: DecodedInstruction): Option[Operand] = {
     val scalar = instruction.operation.form match {
       case _: Form.Mov | _: Form.Mov32i | _: Form.Rro | _: Form.Mufu |
-          _: Form.Fmul | _: Form.Fadd | _: Form.Ffma | _: Form.Lop |
+          _: Form.Fmul | _: Form.Fmul32i | _: Form.Fadd | _: Form.Fadd32i |
+          _: Form.Ffma | _: Form.Ffma32i | _: Form.Lop |
           _: Form.Lop32i | _: Form.Iadd | _: Form.Iadd32i | _: Form.Imnmx |
           _: Form.Iscadd | _: Form.Shl | _: Form.Shr | _: Form.Sel |
           _: Form.Xmad | _: Form.Imad |

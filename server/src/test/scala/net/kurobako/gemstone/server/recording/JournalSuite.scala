@@ -20,7 +20,7 @@ class JournalSuite extends munit.FunSuite {
         val generic = writer.connection(client)
         for (_ <- 0 until 2) { generic.request(execution()); generic.response(response()) }
         // the writer's own close runs on every path
-        generic.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+        generic.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
         writer.clientClosed(client)
       }
       Using.resource(Journal.open(file)) { reader =>
@@ -56,7 +56,7 @@ class JournalSuite extends munit.FunSuite {
           // the writer's own close runs on every path
           connection.request(execution())
           connection.response(response())
-          connection.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+          connection.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
         }
         writer.clientClosed(client)
         writer.clientClosed(other)
@@ -100,7 +100,7 @@ class JournalSuite extends munit.FunSuite {
         val c = w.connection(client)
         c.request(execution())
         c.response(response())
-        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
       }
       val original = Files.readAllBytes(file)
       Using.resource(RandomAccessFile(file.toFile, "rw"))(_.setLength(original.length - 1L))
@@ -118,7 +118,7 @@ class JournalSuite extends munit.FunSuite {
         // the writer's own close runs on every path
         val c = w.connection(client)
         c.request(execution())
-        c.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
       }
       val summary = Journal.inspect(file)
       assert(!summary.replayable)

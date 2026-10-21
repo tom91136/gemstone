@@ -4,6 +4,7 @@ import FloatPrimitives.*
 import FloatSemantics.*
 import VMIR.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.semantics.prelude.*
 
 /** The staged semantics of vector floating-point and matrix instructions. */
 private object VectorFloatStaged {
@@ -23,7 +24,9 @@ private object VectorFloatStaged {
       sinks.section(multiplyAdd(algebra, operation, clamp)(sinks, dest, srcA, srcB, srcC, modifiers))
     case Instruction.VMadF64(dest, srcA, srcB, srcC, modifiers) =>
       sinks.section(
-        sinks.pairTernary(dest, srcA, srcB, srcC, modifiers)((a, b, c) => algebra.fusedMultiplyAdd(a, b, c, 64))
+        sinks.pairTernary(dest, srcA, srcB, srcC, modifiers)((a, b, c) =>
+          algebra.flushedTernary(sinks.modeRegister, 64, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 64))
+        )
       )
     case Instruction.VTrigPreopF64(dest, src, segment, modifiers) =>
       sinks.section(
@@ -32,39 +35,41 @@ private object VectorFloatStaged {
     case Instruction.VDivScaleF32(dest, conditionDest, srcA, srcB, srcC, modifiers) =>
       sinks.section(
         sinks.scaledFlagged(dest, conditionDest, srcA, srcB, srcC, modifiers)(
-          (a, b, c, _) => algebra.divisionScale(32, a, b, c),
+          (a, b, c, _) => algebra.flushedScale(sinks.modeRegister, 32, a, b, c),
           (_, b, c, _, _) => algebra.divisionScaleFlag(32, b, c)
         )
       )
     case Instruction.VDivScaleF64(dest, conditionDest, srcA, srcB, srcC, modifiers) =>
       sinks.section(
         sinks.pairScaledFlagged(dest, conditionDest, srcA, srcB, srcC, modifiers)(
-          (a, b, c, _) => algebra.divisionScale(64, a, b, c),
+          (a, b, c, _) => algebra.flushedScale(sinks.modeRegister, 64, a, b, c),
           (_, b, c, _, _) => algebra.divisionScaleFlag(64, b, c)
         )
       )
     case Instruction.VDivFmasF64(dest, srcA, srcB, srcC, modifiers) =>
       sinks.section(
         sinks.pairScaled(dest, srcA, srcB, srcC, modifiers)((a, b, c, scaled) =>
-          algebra.divisionFusedMultiplyAdd(64, a, b, c, scaled)
+          algebra.flushedTernary(sinks.modeRegister, 64, a, b, c)(algebra.divisionFusedMultiplyAdd(64, _, _, _, scaled))
         )
       )
     case Instruction.VDivFixupF32(dest, quotient, denominator, numerator, absolute, negate) =>
       sinks.section(
         sinks.vectorTernary(dest, quotient, denominator, numerator, SourceModifiers(absolute, negate), 32)((q, d, n) =>
-          algebra.divisionFixup(32, q, d, n)
+          algebra.flushedFixup(sinks.modeRegister, 32, q, d, n)
         )
       )
     case Instruction.VDivFixupF64(dest, quotient, denominator, numerator, absolute, negate) =>
       sinks.section(
         sinks.pairTernary(dest, quotient, denominator, numerator, SourceModifiers(absolute, negate))((q, d, n) =>
-          algebra.divisionFixup(64, q, d, n)
+          algebra.flushedFixup(sinks.modeRegister, 64, q, d, n)
         )
       )
     case Instruction.VDot2F32F16(dest, srcA, srcB, accumulate) =>
       sinks.section(
         sinks.vectorFloat(dest, srcA, srcB, SourceModifiers.Unmodified, 32)((a, b, d) =>
-          algebra.dotHalves(accumulate, a, b, d)
+          algebra.primitive(a, b, if (accumulate) d else algebra.literal(0L))((x: UInt[32], y: UInt[32], z: Float32) =>
+            Dots.halvesToFloat(x, y, z)
+          )
         )
       )
     case Instruction.VDot(operation, dest, srcA, srcB, srcC, clamp, modifiers) =>

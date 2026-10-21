@@ -504,13 +504,16 @@ object IEEE754 {
     }
   }
 
-  /** Finite `left * right + addend` computed exactly and rounded once into `width`, without a platform fma. */
+  /** Finite `left * right + addend`, times two to the power `power`, computed exactly and rounded once into `width`,
+    * without a platform fma.
+    */
   private[gemstone] def finiteFusedMultiplyAdd(
       left: Double,
       right: Double,
       addend: Double,
       width: Int in (16, 32, 64),
-      rounding: Rounding
+      rounding: Rounding,
+      power: Int = 0
   ): Long = {
     // BigInt rather than BigDecimal: Scala Native's BigDecimal multiply and divide are wrong for some operands
     val (leftSignificand, leftExponent)     = exactParts(left)
@@ -534,7 +537,7 @@ object IEEE754 {
         format(width),
         exact.signum < 0,
         (magnitude >> dropped).toLong | sticky,
-        scale + dropped,
+        scale + dropped + power,
         rounding,
         format(width).fractionBits,
         overflowMode = rounding

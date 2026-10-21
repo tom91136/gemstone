@@ -108,7 +108,7 @@ wmma.store.d.sync.aligned.$cLayout.$shape.global.f32 [%cp],${registers("c", 8)},
       col  <- 0 until n
     } {
       // The oracle accumulates in the hardware's order, so it folds over boxed floats.
-      @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val expected = (0 until 16).foldLeft(c(r, col))((sum, k) => sum + a(r, k, warp) * b(k, col))
       assertEquals(readFloat(memory, warp * 16384 + 8192 + index(r, col, cLayout) * 4), expected)
     }

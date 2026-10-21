@@ -25,8 +25,12 @@ class AMDGPUSharedLiteralSuite extends munit.FunSuite {
     assertEquals(
       defined("s_fmaak_f32 s0, 0x1234, s1, 0x1234"),
       Some(
-        "def s_fmaak_f32(LITERAL: UInt[32], SSRC1: UInt[32]): (SDST: UInt[32]) =\n" +
-          "  (SDST = Floats.fma(LITERAL.asFloat, SSRC1.asFloat, LITERAL.asFloat).bits)"
+        """def s_fmaak_f32(LITERAL: UInt[32], SSRC1: UInt[32], mode: UInt[32]): (SDST: UInt[32]) = {
+          |  val v0 = mode & 16
+          |  val v1 = if (((LITERAL & 0x7f800000) | v0) == UInt[32](0)) (LITERAL & -0x80000000).asFloat else LITERAL.asFloat
+          |  val v2 = Floats.fma(v1, if (((SSRC1 & 0x7f800000) | v0) == UInt[32](0)) (SSRC1 & -0x80000000).asFloat else SSRC1.asFloat, v1).bits
+          |  (SDST = if (((v2 & 0x7f800000) | (mode & 32)) == UInt[32](0)) v2 & -0x80000000 else v2)
+          |}""".stripMargin
       )
     )
     assert(defined("s_fmamk_f32 s0, 0x1234, 0x1234, s1").exists(!_.contains("4660")))

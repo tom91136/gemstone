@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
+import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
@@ -99,12 +100,58 @@ private[isa] object FloatSemantics {
         algebra,
         width,
         algebra.floating(width, input(algebra, width, control, left), input(algebra, width, control, right))(
-          FloatArithmetic.divide(_, _),
-          FloatArithmetic.divide(_, _),
+          divide16(_, _, control.rounding),
+          divide32(_, _, control.rounding, control.approximate, control.full),
+          // the binary64 format rounds its quotient to nearest
           FloatArithmetic.divide(_, _)
         )
       )
     )
+
+  /** The quotient of two binary16 values, rounded as `rounding` asks. */
+  def divide16(left: Float16, right: Float16, rounding: IEEE754.Rounding): Float16 =
+    if (rounding == IEEE754.Rounding.NearestEven) FloatArithmetic.divide(left, right)
+    else
+      fromRaw[Float16](IEEE754.fromDouble(
+        IEEE754.toDouble(toRaw(left), 16) / IEEE754.toDouble(toRaw(right), 16),
+        16,
+        rounding
+      ))
+
+  /** The quotient of two binary32 values: the dividend times the unit's reciprocal of the divisor where the instruction
+    * asks for the approximate quotient, and the exact quotient rounded as `rounding` asks otherwise. The approximate
+    * quotient flushes a subnormal reciprocal; the full-range one first scales both operands by a quarter where the
+    * divisor is above 2^126 and by 2^24 where it is below 2^-126, so that the reciprocal stays normal.
+    */
+  def divide32(
+      left: Float32,
+      right: Float32,
+      rounding: IEEE754.Rounding,
+      approximate: Boolean,
+      full: Boolean
+  ): Float32 =
+    if (approximate || full) approximateQuotient(left, right, full)
+    else if (rounding == IEEE754.Rounding.NearestEven) FloatArithmetic.divide(left, right)
+    else
+      fromRaw[Float32](IEEE754.fromDouble(
+        IEEE754.toDouble(toRaw(left), 32) / IEEE754.toDouble(toRaw(right), 32),
+        32,
+        rounding
+      ))
+
+  private def approximateQuotient(left: Float32, right: Float32, full: Boolean): Float32 = {
+    def multiply(a: Long, b: Long) = IEEE754.multiply(a, b, 32, IEEE754.NaNOperand.Right)
+    val magnitude                  = toRaw(right) & 0x7fffffffL
+    val scale                      =
+      if (!full) None
+      else if (magnitude > 0x7e800000L && magnitude <= 0x7f800000L) Some(0x3e800000L)
+      else if (magnitude < 0x00800000L) Some(0x4b800000L)
+      else None
+    val (dividend, divisor) =
+      scale.fold((toRaw(left), toRaw(right)))(factor => (multiply(toRaw(left), factor), multiply(toRaw(right), factor)))
+    val reciprocal = Mufu.reciprocal(divisor)
+    fromRaw[Float32](multiply(dividend, if (full) reciprocal else VMArithmetic.flushSubnormal(reciprocal, 32)))
+  }
 
   inline def copySign[V](inline algebra: Algebra[V], inline width: Int, control: FloatControl, left: V, right: V): V = {
     val sign = 1L << (width - 1)
@@ -178,6 +225,17 @@ private[isa] object FloatSemantics {
     case _  => unaryAt(algebra, operation, 64, control)(sinks, destination, source)
   }
 
+  /** The special-function unit's approximation of the function, whose result the unit rounds itself. */
+  inline def mufu[V, R](
+      inline algebra: Algebra[V],
+      function: MufuFunction,
+      flavour: Mufu.Flavour,
+      control: FloatControl
+  )(inline sinks: NvidiaSinks[V, R], destination: Register, source: Value): R =
+    sinks.unary(destination, source)(v =>
+      algebra.primitive(v)((x: Float32) => Mufu.approximate(function, flavour, x, control.flushSubnormal))
+    )
+
   inline def unaryAt[V, R](
       inline algebra: Algebra[V],
       operation: FloatUnaryOperation,
@@ -204,15 +262,17 @@ private[isa] object FloatSemantics {
         )
       case FloatUnaryOperation.Reciprocal => sinks.unary(destination, source)(v =>
           approximate(algebra, width, control, v)(
-            FloatArithmetic.reciprocal(_),
-            FloatArithmetic.reciprocal(_),
+            reciprocal16(_, control.rounding),
+            reciprocal32(_, control.rounding),
+            // the binary64 format rounds its reciprocal to nearest
             FloatArithmetic.reciprocal(_)
           )
         )
       case FloatUnaryOperation.SquareRoot => sinks.unary(destination, source)(v =>
           approximate(algebra, width, control, v)(
-            FloatArithmetic.squareRoot(_),
-            FloatArithmetic.squareRoot(_),
+            squareRoot16(_, control.rounding),
+            squareRoot32(_, control.rounding),
+            // the binary64 format rounds its square root to nearest
             FloatArithmetic.squareRoot(_)
           )
         )
@@ -225,7 +285,11 @@ private[isa] object FloatSemantics {
         )
       case FloatUnaryOperation.Exponent2 => sinks.unary(destination, source)(v =>
           approximate(algebra, width, control, v)(
-            FloatArithmetic.exponent2(_),
+            // the half unit's result is its binary32 one rounded toward zero into the half format
+            inline width match {
+              case 16 => FloatArithmetic.exponent2Half(_)
+              case _  => FloatArithmetic.exponent2(_)
+            },
             FloatArithmetic.exponent2(_),
             FloatArithmetic.exponent2(_)
           )
@@ -273,6 +337,30 @@ private[isa] object FloatSemantics {
       algebra.floating(width, input(algebra, width, control, value))(half, single, double)
     )
 
+  /** The reciprocal of a binary16 value, rounded as `rounding` asks. */
+  def reciprocal16(value: Float16, rounding: IEEE754.Rounding): Float16 =
+    FloatArithmetic.canonical(
+      fromRaw[Float16](IEEE754.fromDouble(1.0 / IEEE754.toDouble(toRaw(value), 16), 16, rounding))
+    )
+
+  /** The reciprocal of a binary32 value, rounded as `rounding` asks. */
+  def reciprocal32(value: Float32, rounding: IEEE754.Rounding): Float32 =
+    FloatArithmetic.canonical(
+      fromRaw[Float32](IEEE754.fromDouble(1.0 / IEEE754.toDouble(toRaw(value), 32), 32, rounding))
+    )
+
+  /** The square root of a binary16 value, rounded as `rounding` asks. */
+  def squareRoot16(value: Float16, rounding: IEEE754.Rounding): Float16 =
+    FloatArithmetic.canonical(
+      fromRaw[Float16](IEEE754.fromDouble(Math.sqrt(IEEE754.toDouble(toRaw(value), 16)), 16, rounding))
+    )
+
+  /** The square root of a binary32 value, rounded as `rounding` asks. */
+  def squareRoot32(value: Float32, rounding: IEEE754.Rounding): Float32 =
+    FloatArithmetic.canonical(
+      fromRaw[Float32](IEEE754.fromDouble(Math.sqrt(IEEE754.toDouble(toRaw(value), 32)), 32, rounding))
+    )
+
   inline def fusedMultiplyAdd[V, R](
       inline algebra: Algebra[V],
       width: Int in (16, 32, 64),
@@ -312,6 +400,32 @@ private[isa] object FloatSemantics {
         )
       )
     )
+
+  /** Each element's sign flipped or cleared, with a NaN element canonical. */
+  inline def packedUnary[V, R](inline algebra: Algebra[V], format: PackedFloatFormat, control: FloatControl)(
+      inline sinks: NvidiaSinks[V, R],
+      destination: Register,
+      source: Value,
+      inline operation: FloatUnaryOperation
+  ): R = {
+    val absolute = operation == FloatUnaryOperation.Absolute
+    def element(width: Int in (16, 32), exponentBits: Int in (5, 8)): (V, V) => V = (value, _) =>
+      algebra.primitive(value)((raw: UInt[32]) => FloatArithmetic.signFlipped(raw, width, exponentBits, absolute))
+    // the half unit's result is its binary32 one rounded toward zero into the half format
+    def exponential: (V, V) => V = (value, _) =>
+      algebra.primitive(value)((raw: UInt[32]) => FloatArithmetic.exponent2HalfBits(raw))
+    format match {
+      case PackedFloatFormat.F16x2 | PackedFloatFormat.BF16x2 =>
+        sinks.unary(destination, source)((a: V) =>
+          algebra.perHalf(16, a, a)(
+            if (operation == FloatUnaryOperation.Exponent2) exponential
+            else element(16, if (format == PackedFloatFormat.BF16x2) 8 else 5)
+          )
+        )
+      case PackedFloatFormat.F32x2 =>
+        sinks.unary(destination, source)((a: V) => algebra.perHalf(32, a, a)(element(32, 8)))
+    }
+  }
 
   /** Two elements per register, each under the scalar semantics: binary16 and binary32 elements at their width, and
     * bfloat16 ones as binary32 values rounded back to bfloat16.

@@ -111,21 +111,21 @@ private object MoveStaged {
       sinks.section(
         sinks.writeLane(dest, src, lane)((index, lanes) => algebra.selectedLane(index, lanes))(a => algebra.moved(a))
       )
-    case Instruction.DSPermute(dest, address, src, offset, bank) =>
+    case Instruction.DSPermute(dest, address, src, offset, bank, halves) =>
       sinks.section(
-        sinks.permute(dest, address, src, offset, bank)((at, lanes) =>
-          algebra.addressedLane(at, algebra.literal(offset.toLong), lanes)
+        sinks.permute(dest, address, src, offset, bank)((at, lane, lanes) =>
+          algebra.permutedLane(at, algebra.literal(offset.toLong), lane, lanes, halves)
         )(a => algebra.moved(a))
       )
-    case Instruction.DSBPermute(dest, address, src, offset, bank, fetchInactive) =>
+    case Instruction.DSBPermute(dest, address, src, offset, bank, fetchInactive, halves) =>
       sinks.section(
-        sinks.backwardPermute(dest, address, src, offset, bank, fetchInactive)(at =>
-          algebra.addressedLane(at, algebra.literal(offset.toLong), algebra.literal(64L))
+        sinks.backwardPermute(dest, address, src, offset, bank, fetchInactive)((at, lane) =>
+          algebra.permutedLane(at, algebra.literal(offset.toLong), lane, algebra.literal(64L), halves)
         )(a => algebra.moved(a))
       )
     case Instruction.DSSwizzle(dest, src, control, bank) =>
       sinks.section(
-        sinks.swizzle(dest, src, bank)(lane => algebra.swizzleSource(algebra.literal(control.toLong), lane))(a =>
+        sinks.swizzle(dest, src, bank)(lane => algebra.swizzleSource(control, lane))(a =>
           algebra.moved(a)
         )
       )

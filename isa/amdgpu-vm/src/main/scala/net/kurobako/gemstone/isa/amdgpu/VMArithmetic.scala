@@ -5,8 +5,14 @@ import net.kurobako.gemstone.constraint.*
 
 /** Pure arithmetic and lane-selection semantics shared by instruction execution. */
 private object VMArithmetic {
-  // The instruction's nonnegative left shift is masked to 53 bits, so only this tail of 2/pi contributes.
-  private inline val TrigPreopBits = 0x856033046fc7bL
+  // the leading 1184 fraction bits of 2/pi, which V_TRIG_PREOP_F64 reads as zero beyond
+  private val TwoOverPi = BigInt(
+    "a2f9836e4e441529fc2757d1f534ddc0db6295993c439041fe5163abdebbc561b7246e3a424dd2e006492eea09d1921c" +
+      "fe1deb1cb129a73ee88235f52ebb4484e99c7026b45f7e413991d639835339f49c845f8bbdf9283b1ff897ffde05980f" +
+      "ef2f118b5a0a6d1f6d367ecf27cb09b74f463f669e5fea2d7527bac7ebe5f17b3d0739f78a5292ea6bfb5fb11f8d5d08" +
+      "56033046",
+    16
+  )
 
   /** The low and high 64 bits of `value`, `width` bits wide, placed `at` bits into a 128-bit word. */
   inline def placedLow(value: Long, at: Int): Long = if (at >= 64) 0L else value << at
@@ -17,7 +23,7 @@ private object VMArithmetic {
   def trigPreop(value: Double, segment: Int): Double = {
     val exponent = ((IEEE754.doubleToBinary64(value) >>> 52) & 0x7ffL).toInt
     val shift    = (segment & 0x1f) * 53 + (exponent - 1077).max(0)
-    val chunk    = if (shift >= 53) 0L else (TrigPreopBits << shift) & 0x1fffffffffffffL
+    val chunk    = ((TwoOverPi >> (1184 - 53 - shift)) & 0x1fffffffffffffL).toLong
     val scale    = -53 - shift + (if (exponent >= 1968) 128 else 0)
     Math.scalb(chunk.toDouble, scale)
   }
@@ -48,78 +54,86 @@ private object VMArithmetic {
   private def flushDenormal(value: Double, minimum: Double): Double =
     if (value != 0.0 && math.abs(value) < minimum) math.copySign(0.0, value) else value
 
-  def divisionFixupF32(quotient: Float, denominator: Float, numerator: Float): Float = {
-    val negative =
-      ((java.lang.Float.floatToRawIntBits(numerator) ^
-        java.lang.Float.floatToRawIntBits(denominator)) & 0x80000000) != 0
-    val sign = if (negative) -1.0f else 1.0f
-    if (
-      numerator.isNaN || denominator.isNaN || (numerator.isInfinite && denominator.isInfinite) ||
-      (numerator == 0.0f && denominator == 0.0f)
-    ) Float.NaN
-    else if (denominator == 0.0f || numerator.isInfinite) Math.copySign(Float.PositiveInfinity, sign)
-    else if (denominator.isInfinite || numerator == 0.0f) Math.copySign(0.0f, sign)
-    else if (quotient.isNaN) numerator / denominator
-    else Math.copySign(math.abs(quotient), sign)
-  }
+  private def fractionBits(width: Int in (16, 32, 64)): Int = if (width == 64) 52 else if (width == 32) 23 else 10
 
-  def divisionFixupF64(quotient: Double, denominator: Double, numerator: Double): Double = {
-    val sign = if ((IEEE754.doubleToBinary64(numerator) ^ IEEE754.doubleToBinary64(denominator)) < 0L) -1.0 else 1.0
-    if (
-      numerator.isNaN || denominator.isNaN || (numerator.isInfinite && denominator.isInfinite) ||
-      (numerator == 0.0 && denominator == 0.0)
-    ) Double.NaN
-    else if (denominator == 0.0 || numerator.isInfinite) Math.copySign(Double.PositiveInfinity, sign)
-    else if (denominator.isInfinite || numerator == 0.0) Math.copySign(0.0, sign)
-    else quotient
-  }
+  private def biasedExponent(bits: Long, width: Int in (16, 32, 64)): Int =
+    ((bits & IEEE754.infinity(width)) >>> fractionBits(width)).toInt
 
-  private def denormal(value: Float): Boolean =
-    value != 0.0f && !value.isNaN && !value.isInfinite && math.abs(value) < java.lang.Float.MIN_NORMAL
+  /** The NaN an invalid operation gives: the negative default NaN. */
+  private def defaultNaN(width: Int in (16, 32, 64)): Long =
+    IEEE754.signBit(width) | IEEE754.infinity(width) | IEEE754.quietBit(width)
 
-  private def denormal(value: Double): Boolean =
-    value != 0.0 && !value.isNaN && !value.isInfinite && math.abs(value) < java.lang.Double.MIN_NORMAL
-
-  /** V_DIV_SCALE_F32: `value`, one of the denominator or numerator, scaled by 2^64 or 2^-64 so the quotient's
-    * reciprocal steps stay out of the denormal range.
+  /** V_DIV_FIXUP on `width`-bit floats: a NaN numerator, else a NaN denominator, quieted; the default NaN for 0/0 and
+    * inf/inf; an infinity for x/0, inf/y and a NaN quotient, and a zero for x/inf, 0/y and a quotient whose exponent
+    * falls below every denormal, signed by both operands; otherwise the quotient's magnitude with that sign.
     */
-  def divisionScaleF32(value: Float, denominator: Float, numerator: Float): Float =
-    if (denominator == 0.0f || numerator == 0.0f) Float.NaN
-    else if (Math.getExponent(numerator) - Math.getExponent(denominator) >= 96)
-      if (value == denominator) Math.scalb(value, 64) else value
-    else if (denormal(denominator)) Math.scalb(value, 64)
-    else if (denormal(1.0f / denominator) && denormal(numerator / denominator))
-      if (value == denominator) Math.scalb(value, 64) else value
-    else if (denormal(1.0f / denominator)) Math.scalb(value, -64)
-    else if (denormal(numerator / denominator)) if (value == numerator) Math.scalb(value, 64) else value
-    else if (Math.getExponent(numerator) <= 23 - 127) Math.scalb(value, 64)
-    else value
+  def divisionFixup(quotient: Long, denominator: Long, numerator: Long, width: Int in (16, 32, 64)): Long = {
+    val signBit   = IEEE754.signBit(width)
+    val magnitude = signBit - 1L
+    val infinity  = IEEE754.infinity(width)
+    val sign      = (numerator ^ denominator) & signBit
+    val (d, n)    = (denominator & magnitude, numerator & magnitude)
+    val underflow = fractionBits(width) + (if (width == 64) 1023 else if (width == 32) 127 else 15)
+    if (IEEE754.isNaN(numerator, width)) (numerator & (signBit | magnitude)) | IEEE754.quietBit(width)
+    else if (IEEE754.isNaN(denominator, width)) (denominator & (signBit | magnitude)) | IEEE754.quietBit(width)
+    else if ((d == 0L && n == 0L) || (d == infinity && n == infinity)) defaultNaN(width)
+    else if (d == 0L || n == infinity) sign | infinity
+    else if (d == infinity || n == 0L) sign
+    else if (biasedExponent(numerator, width) - biasedExponent(denominator, width) < -underflow) sign
+    else if (IEEE754.isNaN(quotient, width)) sign | infinity
+    else sign | (quotient & magnitude)
+  }
 
-  /** Whether V_DIV_SCALE_F32 leaves the flag V_DIV_FMAS_F32 rescales its result on. */
-  def divisionScaleConditionF32(denominator: Float, numerator: Float): Boolean =
-    if (denominator == 0.0f || numerator == 0.0f) false
-    else if (Math.getExponent(numerator) - Math.getExponent(denominator) >= 96) true
-    else if (denormal(denominator)) false
-    else denormal(numerator / denominator)
+  /** V_DIV_SCALE on `width`-bit floats: `value`, the denominator or the numerator, scaled by 2^64 or 2^-64, 2^128 or
+    * 2^-128 for binary64, so the quotient's reciprocal steps stay out of the denormal range. A zero operand gives the
+    * default NaN and a NaN `value` passes; otherwise the operands' biased exponents alone decide.
+    */
+  def divisionScale(value: Long, denominator: Long, numerator: Long, wide: Int in (32, 64)): Long = {
+    val width     = wide.widen[Int in (16, 32, 64)]
+    val magnitude = IEEE754.signBit(width) - 1L
+    if ((denominator & magnitude) == 0L || (numerator & magnitude) == 0L) defaultNaN(width)
+    else if (IEEE754.isNaN(value, width)) value
+    else {
+      val (scale, far, top, tiny) = if (width == 64) (128, 768, 2045, 54) else (64, 96, 253, 24)
+      val d                       = biasedExponent(denominator, width)
+      val difference              = biasedExponent(numerator, width) - d
+      val power                   =
+        if (difference >= far) if (value == denominator) scale else 0
+        else if (d == 0) scale
+        else if (d >= top) if (value == denominator || difference > -far) -scale else 0
+        else if (difference <= -far) if (value == numerator) scale else 0
+        else if (biasedExponent(numerator, width) <= tiny) scale
+        else 0
+      if (power == 0) value
+      else if (width == 64) IEEE754.doubleToBinary64(Math.scalb(IEEE754.binary64ToDouble(value), power))
+      else IEEE754.floatToBinary32(Math.scalb(IEEE754.binary32ToFloat(Bits.low32(value)), power)).toLong
+    }
+  }
 
-  /** V_DIV_SCALE_F64, scaling by 2^128 or 2^-128. */
-  def divisionScaleF64(value: Double, denominator: Double, numerator: Double): Double =
-    if (denominator == 0.0 || numerator == 0.0) Double.NaN
-    else if (Math.getExponent(numerator) - Math.getExponent(denominator) >= 768)
-      if (value == denominator) Math.scalb(value, 128) else value
-    else if (denormal(denominator)) Math.scalb(value, 128)
-    else if (denormal(1.0 / denominator) && denormal(numerator / denominator))
-      if (value == denominator) Math.scalb(value, 128) else value
-    else if (denormal(1.0 / denominator)) Math.scalb(value, -128)
-    else if (denormal(numerator / denominator)) if (value == numerator) Math.scalb(value, 128) else value
-    else if (Math.getExponent(numerator) <= 53 - 1023) Math.scalb(value, 128)
-    else value
+  /** The flag V_DIV_SCALE leaves for V_DIV_FMAS: whether the numerator's and denominator's biased exponents differ by
+    * 96, or 768 for binary64, either way, whatever their values.
+    */
+  def divisionScaleCondition(denominator: Long, numerator: Long, wide: Int in (32, 64)): Boolean = {
+    val width = wide.widen[Int in (16, 32, 64)]
+    math.abs(biasedExponent(numerator, width) - biasedExponent(denominator, width)) >= (if (width == 64) 768 else 96)
+  }
 
-  def divisionScaleConditionF64(denominator: Double, numerator: Double): Boolean =
-    if (denominator == 0.0 || numerator == 0.0) false
-    else if (Math.getExponent(numerator) - Math.getExponent(denominator) >= 768) true
-    else if (denormal(denominator)) false
-    else denormal(numerator / denominator)
+  /** V_DIV_FMAS on finite `width`-bit floats where V_DIV_SCALE left its flag: `a * b + c` scaled by 2^64, or 2^128 for
+    * binary64, up when the addend's magnitude is at least one and down otherwise, and rounded once.
+    */
+  def divisionFusedMultiplyAdd(a: Long, b: Long, c: Long, wide: Int in (32, 64)): Long = {
+    val width = wide.widen[Int in (16, 32, 64)]
+    val bias  = if (width == 64) 1023 else 127
+    val scale = if (width == 64) 128 else 64
+    IEEE754.finiteFusedMultiplyAdd(
+      IEEE754.toDouble(a, width),
+      IEEE754.toDouble(b, width),
+      IEEE754.toDouble(c, width),
+      width,
+      IEEE754.Rounding.NearestEven,
+      if (biasedExponent(c, width) >= bias) scale else -scale
+    )
+  }
 
   def floatingLiteralToDouble(raw: Long): Double =
     IEEE754.binary64ToDouble(Bits.join32(0L, Bits.low32(raw).toLong))

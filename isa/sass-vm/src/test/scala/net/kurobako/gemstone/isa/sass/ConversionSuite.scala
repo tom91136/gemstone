@@ -138,11 +138,18 @@ class ConversionSuite extends munit.FunSuite {
   }
 
   test("I2F.F16 lowering rejects unverified rounding modifiers") {
+    // the rounding toward zero is verified by the hardware's own results, the other roundings are not
     rejects(load(80, Fixture.listing("i2fF16Sm80"), "i2f_f16_probe"), 8, 8) {
       case instruction
           if instruction.mnemonic.raw == "I2F" && instruction.modifiers.headOption.exists(_.name == "F16") =>
-        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("RZ"))
+        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("RM"))
     }
+    val kernel = load(80, Fixture.listing("i2fF16Sm80"), "i2f_f16_probe").map { instruction =>
+      if (instruction.mnemonic.raw == "I2F" && instruction.modifiers.headOption.exists(_.name == "F16"))
+        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("RZ"))
+      else instruction
+    }
+    assert(kernel.lower(8, 8).isRight)
   }
 
   test("sm_86 I2FP and I2F preserve signed conversion rounding modes") {

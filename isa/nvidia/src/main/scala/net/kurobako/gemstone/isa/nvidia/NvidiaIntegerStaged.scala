@@ -64,9 +64,9 @@ private[isa] object NvidiaIntegerStaged {
           left,
           right,
           addend,
-          IntegerMultiplyAddOperation.High(operand, result, carryOut)
+          IntegerMultiplyAddOperation.High(operand, result, carryOut, signed)
         ) =>
-      IntegerSemantics.multiplyAddHigh(algebra, bits(operand), bits(result), carryOut)(
+      IntegerSemantics.multiplyAddHigh(algebra, bits(operand), bits(result), carryOut, signed)(
         sinks,
         destination,
         left,
@@ -86,6 +86,20 @@ private[isa] object NvidiaIntegerStaged {
         signed,
         saturate
       )(sinks, destination, left, right, addend)
+    case Instruction.MultiplyAdd(
+          destination,
+          left,
+          right,
+          addend,
+          IntegerMultiplyAddOperation.HighSumCarry(width, signed)
+        ) =>
+      IntegerSemantics.multiplyAddHighSumCarry(algebra, bits(width), signed)(
+        sinks,
+        destination,
+        left,
+        right,
+        addend
+      )
     case Instruction.MultiplyAdd(
           destination,
           left,

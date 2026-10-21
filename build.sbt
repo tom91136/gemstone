@@ -26,10 +26,12 @@ def testSlotSettings(
         link.value
         TestSlots.acquire(thisProject.value.id, slots)
       }.tag(wait)))
-      .value,
-  Test / testResultLogger := {
+      .value
+) ++ Seq(Test / testResultLogger, Test / testFull / testResultLogger).map { logger =>
+  // testFull reports through its own logger rather than delegating to Test / testResultLogger
+  logger := {
     val owner    = thisProject.value.id
-    val delegate = (Test / testResultLogger).value
+    val delegate = logger.value
     new TestResultLogger {
       def run(log: Logger, results: Tests.Output, taskName: String): Unit = {
         delegate.run(log, results, taskName)
@@ -37,7 +39,7 @@ def testSlotSettings(
       }
     }
   }
-)
+}
 
 def nativeTestFrameworks = Def.uncached(Def.task {
   val owner      = thisProject.value.id
@@ -113,6 +115,7 @@ ThisBuild / developers := List(
 ThisBuild / scalaVersion      := scala3Version
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
+ThisBuild / scalafixConfig    := Baumkuchen.scalafixConfig((LocalRootProject / baseDirectory).value.toPath)
 
 lazy val offlineMode             = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
 lazy val conformanceDirectory    = settingKey[Path]("Conformance build, work, artifact, and report root.")

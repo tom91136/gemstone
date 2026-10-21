@@ -51,10 +51,14 @@ private case class CodeObjectKernel(
   }
   val globalMemoryLocks: Array[ReentrantLock] = Array.fill(globalMemory.length)(ReentrantLock())
 
-  /** MODE as a wave starts: FP_DENORM from FLOAT_DENORM_MODE_32 and _16_64, and IEEE where GFX12 has not retired it. */
+  /** MODE as a wave starts: FP_DENORM from FLOAT_DENORM_MODE_32 and _16_64, and DX10_CLAMP and IEEE where GFX12 has not
+    * retired them.
+    */
   val initialMode: Int = {
     val denormals = ((computePgmRsrc1 >>> 16) & 0xf) << ModeRegister.DenormalShift
-    val ieee      = ModeRegister.ieeeSupported(target.isa) && (computePgmRsrc1 & (1 << 23)) != 0
-    denormals | (if (ieee) ModeRegister.IEEE else 0)
+    val legacy    = ModeRegister.ieeeSupported(target.isa)
+    val clamp     = legacy && (computePgmRsrc1 & (1 << 21)) != 0
+    val ieee      = legacy && (computePgmRsrc1 & (1 << 23)) != 0
+    denormals | (if (clamp) ModeRegister.DX10Clamp else 0) | (if (ieee) ModeRegister.IEEE else 0)
   }
 }

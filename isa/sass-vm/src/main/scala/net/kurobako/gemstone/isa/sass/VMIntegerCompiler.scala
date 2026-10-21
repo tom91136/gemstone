@@ -29,11 +29,12 @@ private object VMIntegerCompiler {
     Modifier.U8x4    -> (4, false),
     Modifier.S8x4    -> (4, true)
   )
-  private val viaddModifiers    = viaddFormats.keySet + Modifier.ISAT
-  private val imulWideModifiers = Set(Modifier.WIDE, Modifier.U32, Modifier.S32)
-  private val shiftModifiers    = Set(Modifier.U32, Modifier.S32, Modifier.W, Modifier.C)
-  private val legacySignLogic   = Set(Vec(Modifier.AND), Vec(Modifier.OR), Vec(Modifier.XOR))
-  private val logicModifiers    =
+  private val viaddModifiers       = viaddFormats.keySet + Modifier.ISAT
+  private val imulWideModifiers    = Set(Modifier.WIDE, Modifier.U32, Modifier.S32)
+  private val shiftModifiers       = Set(Modifier.U32, Modifier.S32, Modifier.W, Modifier.C)
+  private val legacySignLogic      = Set(Vec(Modifier.AND), Vec(Modifier.OR), Vec(Modifier.XOR))
+  private val legacySignOperations = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
+  private val logicModifiers       =
     Set(Modifier.AND, Modifier.OR, Modifier.XOR, Modifier.PASS_B, Modifier.PAND, Modifier.POR)
   private val bitfieldExtractModifiers = Set(Modifier.U32, Modifier.S32, Modifier.BREV)
   private val extendedMinMaxModifiers  = Set(Modifier.U32, Modifier.XHI, Modifier.XLO)
@@ -421,26 +422,59 @@ private object VMIntegerCompiler {
         )
         store(values.head, total, 64)
         true
+      // a negated source subtracts, so its carry out is the no-borrow bit
       case _: Form.Iadd if modifiers == Vec(Modifier.`64`) =>
-        requireOperands(3, "IADD.64 requires two sources")
-        store(operands.head, binary(IntegerOperation.Add, source(operands(1), 64), source(operands(2), 64), 64), 64)
+        val (carryOut, values) = operands match {
+          case Vec(destination, carry: Operand.Predicate, a, b) => (Some(carry), Vec(destination, a, b))
+          case Vec(destination, a, b)                           => (None, Vec(destination, a, b))
+          case _                                                => unsupported("IADD.64 requires two sources")
+        }
+        val left = source(values(1), 64)
+        val sum  = binary(IntegerOperation.Add, left, source(values(2), 64), 64)
+        carryOut.foreach { carry =>
+          val negativeLeft  = negatedSource(values(1))
+          val negativeRight = negatedSource(values(2))
+          if (negativeLeft && negativeRight) unsupported("IADD.64 carry with two negated sources")
+          writePredicate(
+            carry,
+            if (negativeLeft || negativeRight) {
+              val (minuend, subtrahend) = if (negativeLeft) (values(2), values(1)) else (values(1), values(2))
+              compare(
+                Comparison.GreaterThanOrEqual,
+                NumericFormat.Unsigned(64),
+                source(minuend, 64),
+                source(OperandQueries.positive(subtrahend), 64)
+              )
+            } else compare(Comparison.LessThan, NumericFormat.Unsigned(64), sum, left)
+          )
+        }
+        store(values.head, sum, 64)
         true
+      // the Blackwell form may also name a carry out ahead of its sources
       case _: Form.Iadd | _: Form.Iadd32i
-          if !legacy && modifiers.contains(Modifier.X) && operands.size == 4 &&
-            OperandQueries.isPredicateAllowingNegated(operands(3)) =>
+          if !legacy && modifiers.contains(Modifier.X) && OperandQueries.isPredicateAllowingNegated(operands.last) &&
+            (operands.size == 4 || operands.size == 5 && OperandQueries.isPredicateAllowingNegated(operands(1))) =>
         requireModifiers(Set(Modifier.X, Modifier.U32))
         def extended(operand: Operand): Value =
           if (negatedSource(operand)) unary(IntegerUnaryOperation.BitwiseNot, source(OperandQueries.positive(operand)))
           else source(operand)
-        val left   = extended(operands(1))
-        val right  = extended(operands(2))
-        val carry  = bit(predicateSource(operands(3)))
-        val result = binary(IntegerOperation.Add, left, right)
-        emit(IntegerBinary(IntegerOperation.Add, result.slot, result, carry, 32))
+        val sources = operands.takeRight(3)
+        val left    = extended(sources(0))
+        val sum     = binary(IntegerOperation.Add, left, extended(sources(1)))
+        val result  = binary(IntegerOperation.Add, sum, bit(predicateSource(sources(2))))
+        if (operands.size == 5)
+          writePredicate(
+            operands(1),
+            combine(
+              PredicateOperation.Or,
+              compare(Comparison.LessThan, NumericFormat.Unsigned(32), sum, left),
+              compare(Comparison.LessThan, NumericFormat.Unsigned(32), result, sum)
+            )
+          )
         store(operands.head, result)
         true
       case _: Form.Iadd if legacy && modifiers == Vec(Modifier.SAT) && operands.size == 3 =>
-        store(operands.head, binary(IntegerOperation.AddSaturated, source(operands(1)), source(operands(2))))
+        packedSaturatingAdd()
         true
       case _: Form.Iadd if operands.size == 4 && OperandQueries.isPredicate(operands(1)) =>
         addCarryOut()
@@ -450,6 +484,31 @@ private object VMIntegerCompiler {
         true
       case _ => lowerLogicAndBits
     }
+  }
+
+  /** The legacy IADD.SAT saturates the sum of its sources. A negated second source makes it the packed saturating add
+    * of the two 16-bit halves ptxas uses for the 16-bit intrinsics: each half is added exactly, so that the negation of
+    * -32768 saturates in the sum where a wrapping negation of the whole register would not, and each half is clamped to
+    * the signed range of a half, with the carry out of the low half's addition added to the high half. Without a
+    * negated source the instruction saturates the 32-bit sum.
+    */
+  private def packedSaturatingAdd()(using context: VMCompilationContext): Unit = {
+    import context.*
+    def negated(operand: Operand): (Operand, Boolean) =
+      OperandQueries.without(operand, OperandSelector.reuse) match {
+        case Operand.Unary(value, true, false, false) if OperandQueries.integer(operand).isEmpty => (value, true)
+        case other                                                                               => (other, false)
+      }
+    val (left, negateLeft)   = negated(operands(1))
+    val (right, negateRight) = negated(operands(2))
+    if (negateLeft) unsupported("IADD.SAT of a negated first source")
+    if (!negateRight) {
+      store(operands.head, binary(IntegerOperation.AddSaturated, source(left), source(right)))
+      return
+    }
+    val result = temp()
+    emit(PackedSaturatingAdd(result.slot, source(left), source(right), 2, negateRight))
+    store(operands.head, result)
   }
 
   private def lowerLogicAndBits(using context: VMCompilationContext): Boolean = {
@@ -491,6 +550,22 @@ private object VMIntegerCompiler {
             operands.head == Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC)) =>
         val value = binary(modifiers.head.integerOperation(), source(operands(1)), source(operands(2)))
         writeSignAndZero(value)
+        true
+      // the `.X` form extends the previous zero flag with the result's own, as the 128-bit compare of ptxas needs
+      case _: Form.Lop
+          if legacy && operands.size == 3 &&
+            operands.head == Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC)) &&
+            modifiers.count(_ == Modifier.X) == 1 &&
+            modifiers.filterNot(_ == Modifier.X).size == 1 &&
+            modifiers.filterNot(_ == Modifier.X).headOption.exists(legacySignOperations.contains) =>
+        val operation = modifiers.filterNot(_ == Modifier.X).head
+        val value     = binary(operation.integerOperation(), source(operands(1)), source(operands(2)))
+        val zero      = compare(Comparison.Equal, NumericFormat.Unsigned(32), value, Value.Immediate(0L))
+        val previous  = predicateTemp()
+        val combined  = predicateTemp()
+        copyPredicate(previous, readConditionFlag(VMConditionCodes.Flag.Zero))
+        emit(PredicateBinary(PredicateOperation.And, combined.slot, zero.slot, previous.slot))
+        emit(WriteConditionFlag(VMConditionCodes.Flag.Zero, combined))
         true
       case _: Form.Lop if verifiedLegacy && modifiers.exists(_.isZeroTest) =>
         legacyLogicalPredicate()
@@ -570,14 +645,22 @@ private object VMIntegerCompiler {
         ))
         true
       case _: Form.Prmt | _: Form.Uprmt =>
-        requireModifiers(Set.empty)
+        val mode = modifiers.collectFirst {
+          case Modifier.F4E  => BytePermuteMode.F4E
+          case Modifier.B4E  => BytePermuteMode.B4E
+          case Modifier.RC8  => BytePermuteMode.RC8
+          case Modifier.ECL  => BytePermuteMode.ECL
+          case Modifier.ECR  => BytePermuteMode.ECR
+          case Modifier.RC16 => BytePermuteMode.RC16
+        }.getOrElse(BytePermuteMode.Default)
+        requireModifiers(Set(Modifier.F4E, Modifier.B4E, Modifier.RC8, Modifier.ECL, Modifier.ECR, Modifier.RC16))
         val result = temp()
         emit(BytePermute(
           result.slot,
           source(operands(1)),
           source(operands(3)),
           source(operands(2)),
-          BytePermuteMode.Default
+          mode
         ))
         store(operands.head, result)
         true
@@ -691,6 +774,8 @@ private object VMIntegerCompiler {
           binary(IntegerOperation.ShiftLeft, Value.MultiprocessorId, Value.Immediate(20L)),
           binary(IntegerOperation.ShiftLeft, Value.WarpId, Value.Immediate(8L))
         )
+      // The downward-growing stack may fill a legacy local window and keeps a modern one above the shared aperture.
+      case SpecialRegister.SR_LMEMHIOFF => Value.Immediate(if (legacy) 0L else VMAddressSpace.SharedLimit)
       case _ => specialRegisters.getOrElse(name, unsupported(s"unsupported special register $name"))
     }
   }
@@ -704,16 +789,14 @@ private object VMIntegerCompiler {
     SpecialRegister.SR_CTAID_Z  -> Value.BlockId(LaunchGeometry.Axis.Z),
     SpecialRegister.SR_LANEID   -> Value.LaneId,
     SpecialRegister.SR_CgaCtaId -> Value.ClusterCtaRank,
-    // The downward-growing local stack cannot enter the shared-memory aperture.
-    SpecialRegister.SR_LMEMHIOFF -> Value.Immediate(VMAddressSpace.SharedLimit),
-    SpecialRegister.SR_SWINHI    -> Value.Immediate(VMAddressSpace.SharedWindowBase >>> 32),
-    SpecialRegister.SR_GEMASK    -> Value.LaneMaskGreaterEqual,
-    SpecialRegister.SR_GTMASK    -> Value.LaneMaskGreater,
-    SpecialRegister.SR_LEMASK    -> Value.LaneMaskLessEqual,
-    SpecialRegister.SR_LTMASK    -> Value.LaneMaskLess,
-    SpecialRegister.SR_EQMASK    -> Value.LaneMaskEqual,
-    SpecialRegister.SR_CLOCKLO   -> Value.Clock(CounterPart.Low),
-    SpecialRegister.SR_CLOCKHI   -> Value.Clock(CounterPart.High),
+    SpecialRegister.SR_SWINHI   -> Value.Immediate(VMAddressSpace.SharedWindowBase >>> 32),
+    SpecialRegister.SR_GEMASK   -> Value.LaneMaskGreaterEqual,
+    SpecialRegister.SR_GTMASK   -> Value.LaneMaskGreater,
+    SpecialRegister.SR_LEMASK   -> Value.LaneMaskLessEqual,
+    SpecialRegister.SR_LTMASK   -> Value.LaneMaskLess,
+    SpecialRegister.SR_EQMASK   -> Value.LaneMaskEqual,
+    SpecialRegister.SR_CLOCKLO  -> Value.Clock(CounterPart.Low),
+    SpecialRegister.SR_CLOCKHI  -> Value.Clock(CounterPart.High),
     // %smid and %warpid as the VM places workgroups and warps, as PTX reads them.
     SpecialRegister.SR_SMID        -> Value.MultiprocessorId,
     SpecialRegister.SR_VIRTUALSMID -> Value.MultiprocessorId,
@@ -1020,12 +1103,20 @@ private object VMIntegerCompiler {
       // From sm_100 the form also names its two discarded carry outputs.
       val inputs =
         if (operands.size == 8 && operands.slice(1, 3).forall(OperandQueries.isAlwaysPredicate)) operands.drop(3)
+        else if (operands.size == 7) operands.drop(2)
         else if (operands.size == 6) operands.drop(1)
         else unsupported("IADD3.X carry outputs")
-      val result = binary(IntegerOperation.Add, source(inputs(0)), source(inputs(1)))
-      Vec(source(inputs(2)), bit(predicateSource(inputs(3))), bit(predicateSource(inputs(4)))).foreach(value =>
-        emit(IntegerBinary(IntegerOperation.Add, result.slot, result, value, 32))
+      // the three sources, the carry the lane adds and the carry it discards
+      val wide = binary(IntegerOperation.Add, widen(source(inputs(0))), widen(source(inputs(1))), 64)
+      emit(IntegerBinary(IntegerOperation.Add, wide.slot, wide, widen(source(inputs(2))), 64))
+      Vec(bit(predicateSource(inputs(3))), bit(predicateSource(inputs(4)))).foreach(value =>
+        emit(IntegerBinary(IntegerOperation.Add, wide.slot, wide, widen(value), 64))
       )
+      val result = temp()
+      emit(IntegerBinary(IntegerOperation.BitwiseAnd, result.slot, wide, Low32, 64))
+      // the form that names the carry it produces at its second operand
+      if (operands.size == 7)
+        writePredicate(operands(1), compare(Comparison.GreaterThan, NumericFormat.Unsigned(64), wide, Low32))
       store(operands.head, result)
     } else {
       val carries = operands.size - 4
@@ -1118,13 +1209,17 @@ private object VMIntegerCompiler {
     store(OperandQueries.without(operands.head, OperandSelector.CC), select(a, b, chooseA))
   }
 
-  /** The destination and inputs of a min/max whose predicate outputs, if any, are all discarded into PT. */
+  /** The destination and inputs of a min/max whose predicate outputs, if any, are all discarded into PT. The outputs
+    * follow the destination, or precede it in the sm_120 64-bit form.
+    */
   private def minMaxData(using context: VMCompilationContext): Vec[Operand] = {
     import context.*
-    val outputs = operands.drop(1).takeWhile { case Operand.Predicate(_, _, _) => true; case _ => false }
+    val predicate: Operand => Boolean = { case Operand.Predicate(_, _, _) => true; case _ => false }
+    val start                         = if (predicate(operands.head)) 0 else 1
+    val outputs                       = operands.drop(start).takeWhile(predicate)
     if (outputs.exists(value => !OperandQueries.isAlwaysPredicate(value)))
       unsupported("integer min/max predicate outputs")
-    operands.take(1) ++ operands.drop(1 + outputs.size)
+    operands.take(start) ++ operands.drop(start + outputs.size)
   }
 
   private def minMax()(using context: VMCompilationContext): Unit = {
@@ -1324,10 +1419,15 @@ private object VMIntegerCompiler {
     val signed                = !modifiers.contains(Modifier.U32)
     val carryOutput           = operands.size >= 5 && OperandQueries.isPredicateAllowingUniform(operands(1))
     val first                 = if (carryOutput) 2 else 1
-    val a                     = source(operands(first))
-    val b                     = source(operands(first + 1))
-    val c                     = source(operands(first + 2), width)
-    val result                = binary(
+    val conditionCode         = OperandQueries.has(operands.head, OperandSelector.CC)
+    // the legacy unit subtracts a negated product from the addend, whose carry is the subtraction's no-borrow
+    val negatedProduct = legacy && !modifiers.contains(Modifier.X) && conditionCode &&
+      OperandQueries.negative(operands(first)) != OperandQueries.negative(operands(first + 1))
+    def factor(operand: Operand) = source(if (negatedProduct) OperandQueries.positive(operand) else operand)
+    val a                        = factor(operands(first))
+    val b                        = factor(operands(first + 1))
+    val c                        = source(operands(first + 2), width)
+    val result                   = binary(
       if (wide) { if (signed) IntegerOperation.MultiplyWideSigned32 else IntegerOperation.MultiplyWideUnsigned32 }
       else if (modifiers.contains(Modifier.HI)) IntegerOperation.MultiplyHigh(signed)
       else IntegerOperation.MultiplyLow,
@@ -1340,8 +1440,13 @@ private object VMIntegerCompiler {
       emit(Move(copy.slot, result, width))
       copy
     } else result
-    val conditionCode = OperandQueries.has(operands.head, OperandSelector.CC)
-    if (legacy && !modifiers.contains(Modifier.X) && conditionCode && OperandQueries.negative(operands(first + 2))) {
+    if (negatedProduct) {
+      if (wide || modifiers.contains(Modifier.HI)) unsupported("negated extended IMAD product")
+      emit(IntegerSubtractWithBorrow(result.slot, c, result, 32, false, true))
+      noBorrowCarry()
+    } else if (
+      legacy && !modifiers.contains(Modifier.X) && conditionCode && OperandQueries.negative(operands(first + 2))
+    ) {
       if (wide || modifiers.contains(Modifier.HI)) unsupported("negated extended IMAD addend")
       emit(IntegerSubtractWithBorrow(
         result.slot,
@@ -1600,7 +1705,13 @@ private object VMIntegerCompiler {
         compare(Comparison.NotEqual, NumericFormat.Unsigned(32), result, Value.Immediate(0L)).slot,
         predicateInput.get.slot
       ))
-    store(body.head, result)
+    // the condition-code destination takes the result's zero flag, which the observed consumer reads
+    if (OperandQueries.has(body.head, OperandSelector.`CC`))
+      emit(WriteConditionFlag(
+        VMConditionCodes.Flag.Zero,
+        compare(Comparison.Equal, NumericFormat.Unsigned(32), result, Value.Immediate(0L))
+      ))
+    else store(body.head, result)
   }
 
   private def funnelShift()(using context: VMCompilationContext): Unit = {

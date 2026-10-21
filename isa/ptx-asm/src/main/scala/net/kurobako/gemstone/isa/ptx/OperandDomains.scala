@@ -1,29 +1,50 @@
 package net.kurobako.gemstone.isa.ptx
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 /** Closed semantic vocabularies for the portions of PTX operands that have known meaning. */
 object OperandDomains {
   object RegisterPart {
     def fromSpelling(value: NonEmpty[String]): RegisterPart = value.raw match {
-      case "lo" => RegisterPart.Lo
-      case "hi" => RegisterPart.Hi
-      case "b0" => RegisterPart.B0
-      case "b1" => RegisterPart.B1
-      case "b2" => RegisterPart.B2
-      case "b3" => RegisterPart.B3
-      case _    => RegisterPart.Unknown(value)
+      case "lo"  => RegisterPart.Lo
+      case "hi"  => RegisterPart.Hi
+      case "b0"  => RegisterPart.B0
+      case "b1"  => RegisterPart.B1
+      case "b2"  => RegisterPart.B2
+      case "b3"  => RegisterPart.B3
+      case other =>
+        elements(other).fold(RegisterPart.Unknown(value))(RegisterPart.Elements(_, _))
     }
+
+    /** The elements of the register pair a packed video source names: `h01` the 16-bit elements 0 and 1, `b3210` the
+      * 8-bit elements 3, 2, 1 and 0. The indices are the ones the selector writes, most significant first.
+      */
+    def elements(value: String): Option[(Vec[Int], Int in (8, 16))] =
+      if (value.length == 3 && value.head == 'h' && value.tail.forall(_.isDigit)) {
+        val indices = value.tail.toVector.map(_.asDigit)
+        if (indices.forall(_ < 4)) Some((Vec.from(indices), 16)) else None
+      } else if (value.length == 5 && value.head == 'b' && value.tail.forall(_.isDigit)) {
+        val indices = value.tail.toVector.map(_.asDigit)
+        if (indices.forall(_ < 8)) Some((Vec.from(indices), 8)) else None
+      } else None
+
+    /** The text an element selector writes. */
+    def spelling(indices: Vec[Int], bits: Int): NonEmpty[String] =
+      ((if (bits == 16) "h" else "b") + indices.map(_.toString).mkString).unsafe[NonEmpty[String]]
   }
 
   enum RegisterPart(val spelling: NonEmpty[String]) {
-    case Lo                               extends RegisterPart("lo")
-    case Hi                               extends RegisterPart("hi")
-    case B0                               extends RegisterPart("b0")
-    case B1                               extends RegisterPart("b1")
-    case B2                               extends RegisterPart("b2")
-    case B3                               extends RegisterPart("b3")
-    case Unknown(value: NonEmpty[String]) extends RegisterPart(value)
+    case Lo extends RegisterPart("lo")
+    case Hi extends RegisterPart("hi")
+    case B0 extends RegisterPart("b0")
+    case B1 extends RegisterPart("b1")
+    case B2 extends RegisterPart("b2")
+    case B3 extends RegisterPart("b3")
+
+    /** The elements of the register pair a packed video source names, in the order the selector writes them. */
+    case Elements(indices: Vec[Int], bits: Int in (8, 16)) extends RegisterPart(RegisterPart.spelling(indices, bits))
+    case Unknown(value: NonEmpty[String])                  extends RegisterPart(value)
   }
 
   object QualifiedOperand {

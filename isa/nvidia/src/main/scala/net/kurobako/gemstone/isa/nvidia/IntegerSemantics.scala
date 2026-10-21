@@ -134,22 +134,23 @@ private[isa] object IntegerSemantics {
       )
 
   /** `madc.hi`: the high product half at `operand` bits plus the addend and the lane's carry, setting it when
-    * `carryOut`.
+    * `carryOut`. The product is signed where `signed`.
     */
   inline def multiplyAddHigh[V, R](
       inline algebra: Algebra[V],
       operand: Int in 1 ~ 64,
       result: Int in 1 ~ 64,
-      carryOut: Boolean
+      carryOut: Boolean,
+      signed: Boolean
   )(inline sinks: NvidiaSinks[V, R], destination: Register, first: Value, second: Value, third: Value): R =
     if (carryOut)
       sinks.carryInOut(destination, first, second, third)(
-        (l, r, a, c) => algebra.carriedSum(algebra.highProduct(l, r, operand), a, c, result),
-        (l, r, a, c, _) => algebra.carryFrom(algebra.highProduct(l, r, operand), a, c, result)
+        (l, r, a, c) => algebra.carriedSum(algebra.highProduct(l, r, operand, signed), a, c, result),
+        (l, r, a, c, _) => algebra.carryFrom(algebra.highProduct(l, r, operand, signed), a, c, result)
       )
     else
       sinks.carryIn(destination, first, second, third)((l, r, a, c) =>
-        algebra.carriedSum(algebra.highProduct(l, r, operand), a, c, result)
+        algebra.carriedSum(algebra.highProduct(l, r, operand, signed), a, c, result)
       )
 
   /** `mad.hi`: the high half of the product plus the addend at `width` bits, clamped to the signed 32-bit range where
@@ -194,7 +195,39 @@ private[isa] object IntegerSemantics {
       )
     )
     else sinks.ternary(destination, first, second, third)((l, r, a) =>
-      algebra.truncate(algebra.add(algebra.highProduct(l, r, width), a), width)
+      algebra.truncate(algebra.add(algebra.highProduct(l, r, width, signed = false), a), width)
+    )
+
+  /** `mad.hi.cc`: the high half of the product plus the addend at `width` bits, which sets the carry flag. The flag
+    * leaves the addition of the addend to the high half, which the lane's own carry does not join.
+    */
+  inline def multiplyAddHighSumCarry[V, R](
+      inline algebra: Algebra[V],
+      width: Int in 1 ~ 64,
+      signed: Boolean
+  )(
+      inline sinks: NvidiaSinks[V, R],
+      destination: Register,
+      first: Value,
+      second: Value,
+      third: Value
+  ): R =
+    sinks.carryInOut(destination, first, second, third)(
+      (l, r, a, _) =>
+        algebra.truncate(
+          algebra.add(
+            algebra.highProduct(l, r, width, signed),
+            a
+          ),
+          width
+        ),
+      (l, r, a, _, _) =>
+        algebra.carryFrom(
+          algebra.highProduct(l, r, width, signed),
+          a,
+          algebra.literal(0L),
+          width
+        )
     )
 
   /** `mad.wide`: the full product of the operands extended from `operand` bits plus the addend. */
@@ -287,8 +320,8 @@ private[isa] object IntegerSemantics {
       carry
     )
 
-    /** The carry out of the low product plus addend and carry: any carry into the 128-bit high half, or any bit of the
-      * 64-bit sum beyond `result` bits.
+    /** The carry out of the low product plus addend and carry: the bit of the sum beyond `result` ones, or, where the
+      * result is as wide as the sum, the bit the sum wraps into.
       */
     inline def lowCarry(
         left: V,
@@ -297,42 +330,35 @@ private[isa] object IntegerSemantics {
         carry: V,
         operand: Int in 1 ~ 64,
         result: Int in 1 ~ 64
-    ): V = algebra.let("p", algebra.multiply(algebra.truncate(left, operand), algebra.truncate(right, operand)))(
-      product =>
-        algebra.let("f", algebra.add(product, algebra.truncate(addend, result)))(first =>
-          algebra.let("s", algebra.add(first, carry))(sum =>
-            algebra.let(
-              "h",
-              algebra.add(
-                algebra.multiplyHigh(
-                  algebra.truncate(left, operand),
-                  algebra.truncate(right, operand),
-                  64,
-                  signed = false
-                ),
-                algebra.or(
-                  algebra.lessThan(first, product, signed = false),
-                  algebra.and(carry, algebra.lessThan(sum, first, signed = false))
-                )
+    ): V = {
+      val product = algebra.multiply(algebra.truncate(left, operand), algebra.truncate(right, operand))
+      if (result == 64)
+        algebra.let("p", product)(product =>
+          algebra.let("f", algebra.add(product, algebra.truncate(addend, result)))(first =>
+            algebra.let("s", algebra.add(first, carry))(sum =>
+              algebra.or(
+                algebra.lessThan(first, product, signed = false),
+                algebra.and(carry, algebra.lessThan(sum, first, signed = false))
               )
-            )(high =>
-              if (result == 64) algebra.notEqual(high, algebra.literal(0L))
-              else
-                algebra.or(
-                  algebra.notEqual(high, algebra.literal(0L)),
-                  algebra.notEqual(
-                    algebra.shiftRightLogical(sum, algebra.literal(result.toLong)),
-                    algebra.literal(0L)
-                  )
-                )
             )
           )
         )
-    )
+      else
+        algebra.let("p", algebra.truncate(product, result))(product =>
+          algebra.let("f", algebra.add(product, algebra.truncate(addend, result)))(first =>
+            algebra.let("s", algebra.add(first, carry))(sum =>
+              algebra.notEqual(
+                algebra.and(algebra.shiftRightLogical(sum, algebra.literal(result.toLong)), algebra.literal(1L)),
+                algebra.literal(0L)
+              )
+            )
+          )
+        )
+    }
 
-    /** The high `operand` bits of the `2 * operand`-bit unsigned product. */
-    inline def highProduct(left: V, right: V, operand: Int in 1 ~ 64): V =
-      algebra.multiplyHigh(algebra.truncate(left, operand), algebra.truncate(right, operand), operand, signed = false)
+    /** The high `operand` bits of the `2 * operand`-bit product, signed where `signed`. */
+    inline def highProduct(left: V, right: V, operand: Int in 1 ~ 64, signed: Boolean): V =
+      algebra.multiplyHigh(algebra.truncate(left, operand), algebra.truncate(right, operand), operand, signed = signed)
 
     inline def carriedSum(left: V, right: V, carry: V, width: Int in 1 ~ 64): V =
       algebra.truncate(
@@ -726,6 +752,7 @@ private[isa] object IntegerSemantics {
       rightSigned: Boolean,
       negateProduct: Boolean,
       negateAddend: Boolean,
+      addendSigned: Boolean,
       plusOne: Boolean,
       shift: Int in (0, 7, 15),
       saturate: Boolean
@@ -742,6 +769,7 @@ private[isa] object IntegerSemantics {
           rightSigned,
           negateProduct,
           negateAddend,
+          addendSigned,
           plusOne,
           shift,
           saturate
@@ -863,11 +891,41 @@ private[isa] object IntegerSemantics {
       rightSigned: Boolean,
       resultSigned: Boolean,
       saturate: Boolean,
-      accumulate: Boolean
+      accumulate: Boolean,
+      leftElements: Option[VideoElements],
+      rightElements: Option[VideoElements]
   )(inline sinks: NvidiaSinks[V, R], destination: Register, first: Value, second: Value, third: Value): R =
     sinks.ternary(destination, first, second, third)((left, right, addend) =>
       algebra.primitive(left, right, addend)((a: prelude.UInt[32], b: prelude.UInt[32], c: prelude.UInt[32]) =>
-        IntegerArithmetic.simd(a, b, c, operation, lanes, leftSigned, rightSigned, resultSigned, saturate, accumulate)
+        IntegerArithmetic.simd(
+          a,
+          b,
+          c,
+          operation,
+          lanes,
+          leftSigned,
+          rightSigned,
+          resultSigned,
+          saturate,
+          accumulate,
+          leftElements,
+          rightElements
+        )
+      )
+    )
+
+  /** The legacy IADD.SAT: `lanes` lanes of `left` and `right` added, each clamped to the signed range of a lane, with
+    * the carry out of the low lane's addition added to the high lane and the lanes of `right` negated exactly where
+    * `negate`.
+    */
+  inline def packedSaturatingAdd[V, R](
+      inline algebra: Algebra[V],
+      lanes: Int in (2, 4),
+      negate: Boolean
+  )(inline sinks: NvidiaSinks[V, R], destination: Register, left: Value, right: Value): R =
+    sinks.binary(destination, left, right)((l, r) =>
+      algebra.primitive(l, r)((a: prelude.UInt[32], b: prelude.UInt[32]) =>
+        IntegerArithmetic.packedSaturatingAdd(a, b, lanes, negate)
       )
     )
 

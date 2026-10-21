@@ -438,7 +438,9 @@ private trait AMDGPUSinks[V, R] {
   /** DPP8: each lane reads the lane `origin` names; the operation runs on them. */
   inline def dpp8(instruction: Instruction.VDPP)(inline origin: V => V)(inline kernel: V => V): R
 
-  /** DS_PERMUTE: each active lane's source to the lane `destination` finds from its address and the wave size. */
+  /** DS_PERMUTE: each active lane's source to the lane `destination` finds from its address, its index and the wave
+    * size.
+    */
   inline def permute(
       dest: VectorRegisterIndex,
       address: VectorRegisterIndex,
@@ -446,11 +448,11 @@ private trait AMDGPUSinks[V, R] {
       offset: Int,
       bank: RegisterBank
   )(
-      inline destination: (V, V) => V
+      inline destination: (V, V, V) => V
   )(inline kernel: V => V): R
 
-  /** DS_BPERMUTE: each active lane reads the source of the lane `origin` finds from its address; an inactive one reads
-    * as zero unless `fetchInactive`, as DS_BPERMUTE_FI_B32 has it.
+  /** DS_BPERMUTE: each active lane reads the source of the lane `origin` finds from its address and index; an inactive
+    * one reads as zero unless `fetchInactive`, as DS_BPERMUTE_FI_B32 has it.
     */
   inline def backwardPermute(
       dest: VectorRegisterIndex,
@@ -459,7 +461,7 @@ private trait AMDGPUSinks[V, R] {
       offset: Int,
       bank: RegisterBank,
       fetchInactive: Boolean
-  )(inline origin: V => V)(inline kernel: V => V): R
+  )(inline origin: (V, V) => V)(inline kernel: V => V): R
 
   /** DS_SWIZZLE: each active lane reads the source of the lane `origin` finds from its index. */
   inline def swizzle(dest: VectorRegisterIndex, src: VectorRegisterIndex, bank: RegisterBank)(

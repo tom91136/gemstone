@@ -7,7 +7,8 @@ import net.kurobako.gemstone.constraint.*
 
 /** Valid PTX that nvcc and clang do not emit for ordinary source but inline assembly and hand-written PTX use, with the
   * results the PTX ISA 13.3 pseudocode gives. Where ptxas lowers an instruction differently from the pseudocode from
-  * sm_70, the inputs keep to where both agree; conformance/unified/src/cuda/video.cu runs the same forms on hardware.
+  * sm_70, the inputs keep to where both agree, or the results are the hardware's where they cannot;
+  * conformance/unified/src/cuda/video.cu runs the same forms on hardware.
   */
 class SpecifiedInstructionSuite extends munit.FunSuite {
   private val Sections = java.util.regex.Pattern.compile("; ")
@@ -167,10 +168,11 @@ class SpecifiedInstructionSuite extends munit.FunSuite {
       negateC: Boolean,
       plusOne: Boolean,
       shift: Int,
-      saturate: Boolean
+      saturate: Boolean,
+      signedAddend: Boolean = false
   ): Long = {
     val addend  = if (negateC) ~c & 0xffffffffL else c
-    val wide    = if (signedFinal) BigInt(addend.toInt) else BigInt(addend)
+    val wide    = if (signedFinal || signedAddend) BigInt(addend.toInt) else BigInt(addend)
     val product = if (negateProduct) -(a * b) - 1 else a * b
     val sum     = product + wide + (if (plusOne || negateProduct || negateC) 1 else 0)
     val result  = ((sum >> shift) & ((BigInt(1) << 64) - 1)).toLong
@@ -209,6 +211,7 @@ class SpecifiedInstructionSuite extends munit.FunSuite {
           saturate = true
         )
       ),
+    // the pseudocode zero-extends an unsigned addend, which the hardware sign-extends from sm_70
     "vmad.u32.u32.u32.shr7 %d, %a.h0, %b.h0, %c;" ->
       ((a, b, c) =>
         videoMad(
@@ -220,7 +223,8 @@ class SpecifiedInstructionSuite extends munit.FunSuite {
           negateC = false,
           plusOne = false,
           shift = 7,
-          saturate = false
+          saturate = false,
+          signedAddend = true
         )
       ),
     "vmad.s32.s32.s32.sat %d, %a, %b, -%c;" ->
@@ -251,6 +255,7 @@ class SpecifiedInstructionSuite extends munit.FunSuite {
           saturate = false
         )
       ),
+    // the pseudocode zero-extends an unsigned addend, which the hardware sign-extends from sm_70
     "vmad.u32.u32.u32.sat %d, %a, %b, %c;" ->
       ((a, b, c) =>
         videoMad(
@@ -262,7 +267,8 @@ class SpecifiedInstructionSuite extends munit.FunSuite {
           negateC = false,
           plusOne = false,
           shift = 0,
-          saturate = true
+          saturate = true,
+          signedAddend = true
         )
       )
   )
@@ -480,6 +486,20 @@ class SpecifiedInstructionSuite extends munit.FunSuite {
       4
     )
     assertEquals(result, Vec(0x3c008001L, 0x3c000001L, 0xbf804000L, 0x3f804000L))
+  }
+
+  // bf16 has binary32's 8-bit exponent: infinities and finite values whose top bits would make a binary16 NaN
+  test("neg and abs of bf16x2 pairs keep infinities and wide-exponent finite values") {
+    val result = run(
+      "",
+      """neg.bf16x2 %d, %a; st.global.u32 [%out], %d;
+        |abs.bf16x2 %d, %a; st.global.u32 [%out+4], %d;
+        |neg.bf16x2 %d, %b; st.global.u32 [%out+8], %d;
+        |abs.bf16x2 %d, %b; st.global.u32 [%out+12], %d;""".stripMargin,
+      Vec(0x7f80ff80L, 0x7c01fc00L, 0L),
+      4
+    )
+    assertEquals(result, Vec(0xff807f80L, 0x7f807f80L, 0xfc017c00L, 0x7c017c00L))
   }
 
   // 6.5.1: a register wider than the destination format holds the result extended by the format's signedness.

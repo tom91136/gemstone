@@ -19,6 +19,11 @@ private object VMCompiler {
   /** The architecture a module without `.target` is lowered for, where an instruction's arithmetic depends on it. */
   private val DefaultArchitecture: Int = 89
 
+  /** The first offset of a frame's local storage, above the null address whose generic pointer the hardware holds in
+    * the global window.
+    */
+  private val LocalFrameBase: Long = 16L
+
   import Lowering.*
 
   enum SourceError derives CanEqual {
@@ -313,7 +318,7 @@ private object VMCompiler {
         case value: Statement.Data if value.addressSpace == DataAddressSpace.Local =>
           (value.name, alignment(value), extentBytes(value))
       }
-      val (offsets, end) = (data ++ spills).foldLeft(Map.empty[NonEmpty[String], Long] -> 0L) {
+      val (offsets, end) = (data ++ spills).foldLeft(Map.empty[NonEmpty[String], Long] -> LocalFrameBase) {
         case ((offsets, next), (name, alignment, size)) =>
           val address = next.alignUp(alignment)
           (offsets.updated(name, address), address + size)

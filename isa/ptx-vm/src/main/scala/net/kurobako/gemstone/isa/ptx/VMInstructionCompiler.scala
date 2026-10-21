@@ -112,6 +112,17 @@ private object VMInstructionCompiler {
     Opcode.Tanh  -> FloatUnaryOperation.Tanh
   )
 
+  /** The special-function unit's function each approximation lowers to. */
+  private val mufuUnary: Map[Opcode, VMIR.MufuFunction] = Map(
+    Opcode.Rcp   -> VMIR.MufuFunction.Reciprocal,
+    Opcode.Rsqrt -> VMIR.MufuFunction.ReciprocalSquareRoot,
+    Opcode.Sqrt  -> VMIR.MufuFunction.SquareRoot,
+    Opcode.Ex2   -> VMIR.MufuFunction.Exponent2,
+    Opcode.Lg2   -> VMIR.MufuFunction.Log2,
+    Opcode.Sin   -> VMIR.MufuFunction.Sine,
+    Opcode.Cos   -> VMIR.MufuFunction.Cosine
+  )
+
   private def unary(destination: Operand, source: Operand)(make: (Register, Value) => VMIR.Instruction)(
       using scope: Scope
   ): Lowered = (scope.register(destination), scope.value(source)).mapN(make)
@@ -210,12 +221,32 @@ private object VMInstructionCompiler {
     case _    => None
   }
 
+  /** The elements of the register pair a packed video source names, in the order its lanes read them. */
+  private def videoElements(operand: Operand): Option[VideoElements] = operand match {
+    case Operand.Register(_, Some(part: OperandDomains.RegisterPart.Elements)) =>
+      Some(VideoElements(part.indices.reverse, part.bits))
+    case _ => None
+  }
+
+  /** The operand without the part that names the elements of a register pair it reads. */
+  private def plain(operand: Operand): Operand = operand match {
+    case Operand.Register(name, Some(_)) => Operand.Register(name, None)
+    case other                           => other
+  }
+
   private def floatControl(modifiers: Vec[Modifier]): FloatControl = FloatControl(
     flushSubnormal = modifiers.contains(Modifier.Ftz),
     saturate = modifiers.contains(Modifier.Sat),
     propagateNaN = modifiers.contains(Modifier.NaN),
     absolute = modifiers.contains(Modifier.Abs),
-    xorSign = modifiers.contains(Modifier.Xorsign)
+    xorSign = modifiers.contains(Modifier.Xorsign),
+    rounding = modifiers
+      .find(DirectedRoundings)
+      .flatMap(rounding(_))
+      .map(VMArithmetic.roundingMode)
+      .getOrElse(IEEE754.Rounding.NearestEven),
+    approximate = modifiers.contains(Modifier.Approx),
+    full = modifiers.contains(Modifier.Full)
   )
 
   private def packedFormat(modifiers: Vec[Modifier]): PackedFloatFormat =
@@ -271,7 +302,9 @@ private object VMInstructionCompiler {
               case Opcode.Min | Opcode.Max => Set(Modifier.NaN)
               case Opcode.Add | Opcode.Sub | Opcode.Mul if modifiers.contains(Modifier.F16x2) =>
                 Set(Modifier.Rn, Modifier.Sat)
-              case _ => Set(Modifier.Rn)
+              // the half unit's exponential is the unit's own approximation
+              case Opcode.Ex2 => Set(Modifier.Rn, Modifier.Approx)
+              case _          => Set(Modifier.Rn)
             })
         else if (bf16 && opcode == Opcode.Fma) Set(Modifier.Bf16, Modifier.Rn, Modifier.Relu)
         else if (bf16) Set(Modifier.Bf16, Modifier.Rn)
@@ -287,8 +320,16 @@ private object VMInstructionCompiler {
             case Opcode.Fma if modifiers.contains(Modifier.F16) =>
               Set(Modifier.Rn, Modifier.Rz, Modifier.Rm, Modifier.Rp, Modifier.Ftz, Modifier.Sat, Modifier.Relu)
             case Opcode.Fma => Set(Modifier.Rn, Modifier.Rz, Modifier.Rm, Modifier.Rp, Modifier.Ftz, Modifier.Sat)
-            case Opcode.Div => Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx, Modifier.Full)
-            case _          => Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx)
+            case Opcode.Rcp | Opcode.Sqrt =>
+              // the directed roundings of the reciprocal and the square root are binary32 forms
+              if (modifiers.contains(Modifier.F32))
+                DirectedRoundings + Modifier.Rn + Modifier.Ftz + Modifier.Approx
+              else Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx)
+            case Opcode.Div =>
+              if (modifiers.contains(Modifier.F32))
+                DirectedRoundings + Modifier.Rn + Modifier.Ftz + Modifier.Approx + Modifier.Full
+              else Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx, Modifier.Full)
+            case _ => Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx)
           })
       val threeInput = instruction.form match {
         case Form.Min(_, _, _, Some(_)) | Form.Max(_, _, _, Some(_)) => true
@@ -332,6 +373,9 @@ private object VMInstructionCompiler {
         val control = floatControl(modifiers)
         modifiers.find(DirectedRoundings).flatMap(rounding(_)) match {
           case None =>
+            binary(destination, left, right)(VMIR.Instruction.FloatBinary(operation, _, _, _, width, control))
+          case Some(_) if operation == FloatOperation.Divide =>
+            // the division rounds its own quotient, which no fused form computes
             binary(destination, left, right)(VMIR.Instruction.FloatBinary(operation, _, _, _, width, control))
           case Some(directed) =>
             // The fused form rounds the exact sum, difference or product once. A zero addend of this sign cannot flip
@@ -383,6 +427,17 @@ private object VMInstructionCompiler {
       width.fold(floatWidth(modifiers))(Right(_)).flatMap(width =>
         unary(destination, source)(VMIR.Instruction.FloatUnary(operation, _, _, width, floatControl(modifiers)))
       )
+
+    /** The unit's approximation of the function, whose polynomials differ between the architectures. */
+    def mufuFloat(function: VMIR.MufuFunction, destination: Operand, source: Operand): Lowered = {
+      val legacy = function match {
+        case VMIR.MufuFunction.SquareRoot                      => scope.architecture < 61
+        case VMIR.MufuFunction.Sine | VMIR.MufuFunction.Cosine => scope.architecture < 70
+        case _                                                 => false
+      }
+      val flavour = if (legacy) Mufu.Flavour.Legacy else Mufu.Flavour.Modern
+      unary(destination, source)(VMIR.Instruction.MufuUnary(_, _, function, flavour, floatControl(modifiers)))
+    }
     def unaryInteger(operation: IntegerUnaryOperation, destination: Operand, source: Operand): Lowered =
       scalarWidth(modifiers).flatMap(width =>
         unary(destination, source)(VMIR.Instruction.IntegerUnary(operation, _, _, width))
@@ -569,6 +624,8 @@ private object VMInstructionCompiler {
             right == Modifier.S32,
             first.negated != second.negated,
             third.negated,
+            // from sm_70 the hardware adds the addend sign-extended
+            scope.architecture >= 70,
             plusOne,
             scale,
             saturate
@@ -702,12 +759,20 @@ private object VMInstructionCompiler {
         narrowMultiply(destination, left, right, Some(addend))
       case Form.Mad(destination, left, right, addend) if has(Modifier.Hi) =>
         (
-          modifiers.filterNot(PartialFunction.cond(_) { case Modifier.Hi | Modifier.Sat => true }),
-          has(Modifier.Sat)
+          modifiers.filterNot(PartialFunction.cond(_) { case Modifier.Hi | Modifier.Sat | Modifier.Cc => true }),
+          has(Modifier.Sat),
+          has(Modifier.Cc)
         ) match {
-          case (Vec(Modifier.S32), true) =>
+          case (Vec(Modifier.S32), true, _) =>
             multiplyAdd(destination, left, right, addend)(IntegerMultiplyAddOperation.HighSum(32, true, true))
-          case (Vec(kind), false)
+          case (Vec(kind), false, true)
+              if (SignedTypes ++ UnsignedTypes)(kind) && kind != Modifier.S8 && kind != Modifier.U8 =>
+            scalarWidth(modifiers).flatMap(width =>
+              multiplyAdd(destination, left, right, addend)(
+                IntegerMultiplyAddOperation.HighSumCarry(width, SignedTypes(kind))
+              )
+            )
+          case (Vec(kind), false, false)
               if (SignedTypes ++ UnsignedTypes)(kind) && kind != Modifier.S8 && kind != Modifier.U8 =>
             scalarWidth(modifiers).flatMap(width =>
               multiplyAdd(destination, left, right, addend)(
@@ -834,11 +899,21 @@ private object VMInstructionCompiler {
       // a half pair's sign bits, which leave NaN payloads as unspecified as the PTX ISA allows
       case Form.Neg(destination, source) if hasAny(Modifier.PackedHalfTypes) && !has(Modifier.Ftz) =>
         unary(destination, source)(
-          VMIR.Instruction.IntegerBinary(IntegerOperation.BitwiseXor, _, _, Value.Immediate(0x80008000L), 32)
+          VMIR.Instruction.FloatUnaryPacked(
+            FloatUnaryOperation.Negate,
+            _,
+            _,
+            packedFormat(modifiers)
+          )
         )
       case Form.Abs(destination, source) if hasAny(Modifier.PackedHalfTypes) && !has(Modifier.Ftz) =>
         unary(destination, source)(
-          VMIR.Instruction.IntegerBinary(IntegerOperation.BitwiseAnd, _, _, Value.Immediate(0x7fff7fffL), 32)
+          VMIR.Instruction.FloatUnaryPacked(
+            FloatUnaryOperation.Absolute,
+            _,
+            _,
+            packedFormat(modifiers)
+          )
         )
       case Form.Neg(destination, source) =>
         if (hasAny(FloatTypes)) unaryFloat(FloatUnaryOperation.Negate, destination, source)
@@ -850,8 +925,26 @@ private object VMInstructionCompiler {
         unaryFloat(FloatUnaryOperation.Reciprocal, destination, source, Some(64))
       case Form.RsqrtApproxFtzF64(destination, source) =>
         unaryFloat(FloatUnaryOperation.ReciprocalSquareRoot, destination, source, Some(64))
+      // The half unit's exponential is less accurate than the binary32 one, which its own path takes.
+      case Form.Ex2(destination, source) if endsWith(Modifier.F16x2) =>
+        unary(destination, source)(
+          VMIR.Instruction.FloatUnaryPacked(
+            FloatUnaryOperation.Exponent2,
+            _,
+            _,
+            packedFormat(modifiers),
+            floatControl(modifiers)
+          )
+        )
+      case Form.Ex2(destination, source) if endsWith(Modifier.Bf16x2) =>
+        Left(Error.Unsupported(instruction.qualifiedOpcode, "the bfloat16 pair exponential is not implemented"))
+      case Form.Ex2(destination, source) if endsWith(Modifier.F16) =>
+        unaryFloat(FloatUnaryOperation.Exponent2, destination, source)
       case _ if floatUnary.contains(instruction.signature.opcode) =>
-        unaryFloat(floatUnary(instruction.signature.opcode), instruction.operands(0), instruction.operands(1))
+        // the unit's approximations are binary32 forms, which the binary64 ones do not use
+        if (has(Modifier.Approx) && mufuUnary.contains(instruction.signature.opcode) && !endsWith(Modifier.F64))
+          mufuFloat(mufuUnary(instruction.signature.opcode), instruction.operands(0), instruction.operands(1))
+        else unaryFloat(floatUnary(instruction.signature.opcode), instruction.operands(0), instruction.operands(1))
       case Form.Not(destination, source) if are(Modifier.Pred) =>
         (scope.predicate(destination), scope.predicate(source)).mapN(VMIR.Instruction.PredicateUnary(_, _))
       case Form.Not(destination, source) =>
@@ -880,19 +973,26 @@ private object VMInstructionCompiler {
       def simd(signs: Vec[Boolean], saturate: Boolean): Lowered = chosen.toRight(
         Error.Unsupported(instruction.qualifiedOpcode, "unsupported SIMD video comparison")
       ).flatMap(found =>
-        ternary(operands(0), operands(1), operands(2), operands(3))(
+        ternary(
+          plain(operands(0)),
+          plain(operands(1)),
+          plain(operands(2)),
+          plain(operands(3))
+        )(
           VMIR.Instruction.VideoSimd(
             _,
             _,
             _,
             _,
-            found,
-            lanes,
-            signs(1),
-            signs(2),
-            signs(0),
-            saturate,
-            has(Modifier.Add)
+            operation = found,
+            lanes = lanes,
+            leftSigned = signs(1),
+            rightSigned = signs(2),
+            resultSigned = signs(0),
+            saturate = saturate,
+            accumulate = has(Modifier.Add),
+            leftElements = videoElements(operands(1)),
+            rightElements = videoElements(operands(2))
           )
         )
       )
@@ -1003,6 +1103,7 @@ private object VMInstructionCompiler {
           case Vec(Modifier.Shared) | Vec(Modifier.SharedCta) => Some(AddressKind.Shared)
           case Vec(Modifier.SharedCluster)                    => Some(AddressKind.Shared)
           case Vec(Modifier.Local)                            => Some(AddressKind.Local)
+          case Vec(Modifier.Const)                            => Some(AddressKind.Constant)
           case _                                              => None
         }.toRight(Error.Unsupported(instruction.qualifiedOpcode, "unsupported isspacep state space")).flatMap(space =>
           (scope.predicate(destination), scope.value(address)).mapN(VMIR.Instruction.SpaceTest(_, _, space))
@@ -1184,9 +1285,10 @@ private object VMInstructionCompiler {
         multiplyAdd(destination, left, right, addend)(IntegerMultiplyAddOperation.Low(32, 64, false, false))
       case Form.Madc(destination, left, right, addend)
           if (has(Modifier.Lo) || has(Modifier.Hi)) && intWords =>
-        val width = wordWidth(modifiers)
+        val width  = wordWidth(modifiers)
+        val signed = modifiers.contains(Modifier.S32)
         multiplyAdd(destination, left, right, addend)(
-          if (has(Modifier.Hi)) IntegerMultiplyAddOperation.High(width, width, has(Modifier.Cc))
+          if (has(Modifier.Hi)) IntegerMultiplyAddOperation.High(width, width, has(Modifier.Cc), signed)
           else IntegerMultiplyAddOperation.Low(width, width, carryIn = true, has(Modifier.Cc))
         )
       case Form.AddCc(destination, left, right) if intWords =>

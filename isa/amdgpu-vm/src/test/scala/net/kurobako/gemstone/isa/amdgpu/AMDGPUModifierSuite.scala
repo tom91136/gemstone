@@ -304,12 +304,6 @@ class AMDGPUModifierSuite extends munit.FunSuite {
         "v_pk_add_u16 packed modifiers are not implemented"
       ),
       (
-        "high-half negation on float packed operations",
-        Target("gfx900"),
-        Vec(0x00, 0x42, 0x8f, 0xd3, 0x01, 0x05, 0x02, 0x18),
-        "v_pk_add_f16 packed modifiers are not implemented"
-      ),
-      (
         "negation on integer dot products",
         Target("gfx906"),
         Vec(0x00, 0x40, 0xa9, 0xd3, 0x01, 0x05, 0x0e, 0x3c),
@@ -362,6 +356,11 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       ),
       ("packed low unsigned multiplication", Target("gfx900"), Vec(0xff, 0x40, 0x81, 0xd3, 0x01, 0x05, 0x02, 0x18)),
       (
+        "high-half negation on float packed operations",
+        Target("gfx900"),
+        Vec(0x00, 0x42, 0x8f, 0xd3, 0x01, 0x05, 0x02, 0x18)
+      ),
+      (
         "scalar unsigned minimum with a literal operand",
         Target("gfx900"),
         Vec(0x02, 0xff, 0x84, 0x83, 0x00, 0x01, 0x00, 0x00)
@@ -401,7 +400,7 @@ class AMDGPUModifierSuite extends munit.FunSuite {
         Option.when(source >= 0L)(source.toInt)
       }
     assertEquals(sources(Vec(0, 4, 15, 16), 0x124), Vec(Some(12), Some(0), Some(11), Some(28)))
-    assertEquals(sources(Vec(0, 16, 32, 48), 0x142), Vec(None, Some(15), Some(31), Some(47)))
-    assertEquals(sources(Vec(0, 16, 32, 48), 0x143), Vec(None, None, Some(31), Some(31)))
+    assertEquals(sources(Vec(0, 16, 32, 48), 0x142), Vec(Some(0), Some(15), Some(31), Some(47)))
+    assertEquals(sources(Vec(0, 16, 32, 48), 0x143), Vec(Some(0), Some(16), Some(31), Some(31)))
   }
 }

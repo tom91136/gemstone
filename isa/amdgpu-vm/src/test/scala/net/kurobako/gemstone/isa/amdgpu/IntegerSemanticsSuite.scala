@@ -179,15 +179,24 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   /** V_MED3 on floats (CDNA3 ISA 12.11): the minimum when any is NaN, otherwise the larger of the two the maximum
     * leaves.
     */
+  // the sinks' MODE keeps denormals, which compare as they are, and the operand picked comes back as it is
   private def floatMedian(a: Long, b: Long, c: Long, width: Int in (16, 32, 64)): Long = {
-    def value(bits: Long): Double = IEEE754.toDouble(bits, width)
+    def value(bits: Long): Double       = IEEE754.toDouble(bits, width)
+    def signalling(bits: Long): Boolean = IEEE754.isNaN(bits, width) && (bits & IEEE754.quietBit(width)) == 0L
+    def pick(x: Long, y: Long, extremum: (Long, Long, Int in (16, 32, 64)) => Long): Long =
+      if (x != y && extremum(x, y, width) == y) y else x
+    def smaller(x: Long, y: Long): Long =
+      if (signalling(x)) x | IEEE754.quietBit(width)
+      else if (signalling(y)) y | IEEE754.quietBit(width)
+      else pick(x, y, IEEE754.minNum)
+    def larger(x: Long, y: Long): Long = pick(x, y, IEEE754.maxNum)
     if (IEEE754.isNaN(a, width) || IEEE754.isNaN(b, width) || IEEE754.isNaN(c, width))
-      IEEE754.minNum(IEEE754.minNum(a, b, width), c, width)
+      smaller(smaller(a, b), c)
     else {
-      val largest = value(IEEE754.maxNum(IEEE754.maxNum(a, b, width), c, width))
-      if (largest == value(a)) IEEE754.maxNum(b, c, width)
-      else if (largest == value(b)) IEEE754.maxNum(a, c, width)
-      else IEEE754.maxNum(a, b, width)
+      val largest = value(larger(larger(a, b), c))
+      if (largest == value(a)) larger(b, c)
+      else if (largest == value(b)) larger(a, c)
+      else larger(a, b)
     }
   }
 
@@ -332,17 +341,22 @@ class IntegerSemanticsSuite extends munit.FunSuite {
     case other => fail(s"$other has no reference")
   }
 
-  /** V_DIV_FIXUP_F16 (RDNA3 ISA 16.10): NaN for a NaN, 0/0 or inf/inf; infinity for a zero denominator or an infinite
-    * numerator and zero for the reverse, signed by both; otherwise the quotient's magnitude with that sign.
+  /** V_DIV_FIXUP_F16: a NaN numerator, else a NaN denominator, quieted; the negative default NaN for 0/0 and inf/inf;
+    * infinity for a zero denominator, an infinite numerator or a NaN quotient, and zero for an infinite denominator, a
+    * zero numerator or exponents 25 apart the denominator's way, signed by both; otherwise the quotient's magnitude
+    * with that sign.
     */
   private def divisionFixupF16(quotient: Long, denominator: Long, numerator: Long): Long = {
     val (q, d, n) =
       (IEEE754.toDouble(quotient, 16), IEEE754.toDouble(denominator, 16), IEEE754.toDouble(numerator, 16))
     val sign = (numerator ^ denominator) & 0x8000L
-    if (n.isNaN || d.isNaN || (n.isInfinite && d.isInfinite) || (n == 0.0 && d == 0.0)) 0x7e00L
+    if (n.isNaN) numerator | 0x200L
+    else if (d.isNaN) denominator | 0x200L
+    else if ((n.isInfinite && d.isInfinite) || (n == 0.0 && d == 0.0)) 0xfe00L
     else if (d == 0.0 || n.isInfinite) sign | 0x7c00L
     else if (d.isInfinite || n == 0.0) sign
-    else if (q.isNaN) IEEE754.fromDouble(n / d, 16)
+    else if (((numerator >>> 10) & 0x1fL) - ((denominator >>> 10) & 0x1fL) < -25) sign
+    else if (q.isNaN) sign | 0x7c00L
     else sign | (quotient & 0x7fffL)
   }
 
@@ -358,9 +372,9 @@ class IntegerSemanticsSuite extends munit.FunSuite {
     case VectorSubDwordOperation.ShiftLeft32  => Bits.low32(right << (left.toInt & 31)).toLong
     case VectorSubDwordOperation.ShiftRight32 => right >>> (left.toInt & 31)
     case VectorSubDwordOperation.ShiftRight16 => Bits.low16(right).toLong >>> (left.toInt & 15)
-    case VectorSubDwordOperation.MaximumI16   => Bits.low16(math.max(left, right)).toLong
+    case VectorSubDwordOperation.MaximumI16   => Bits.low16(math.max(signed16(left), signed16(right))).toLong
     case VectorSubDwordOperation.MaximumF16   => IEEE754.maxNum(left, right, 16)
-    case VectorSubDwordOperation.MinimumI16   => Bits.low16(math.min(left, right)).toLong
+    case VectorSubDwordOperation.MinimumI16   => Bits.low16(math.min(signed16(left), signed16(right))).toLong
     case VectorSubDwordOperation.MinimumF16   => IEEE754.minNum(left, right, 16)
     case VectorSubDwordOperation.MinimumU16   =>
       Bits.low16(math.min(Bits.low16(left).toLong, Bits.low16(right).toLong)).toLong
@@ -949,10 +963,10 @@ class IntegerSemanticsSuite extends munit.FunSuite {
         Execute.dpp8Source(selectors.toLong, lane.toLong),
         dpp8SourceLane(lane, selectors).toLong
       )
-      val swizzle = random.nextInt(1 << 15)
+      val swizzle = random.nextInt(1 << 16)
       assertEquals(
-        Execute.swizzleSource(swizzle.toLong, lane.toLong),
-        (((lane & (swizzle & 0x1f)) | ((swizzle >>> 5) & 0x1f)) ^ ((swizzle >>> 10) & 0x1f)).toLong
+        Execute.swizzleSource(swizzle, lane.toLong),
+        swizzleSourceLane(lane, swizzle).toLong
       )
       val (address, offset) = (random.nextLong() & 0xffffffffL, random.nextInt(1 << 16).toLong)
       assertEquals(

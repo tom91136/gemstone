@@ -617,19 +617,26 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
     ))
   }
 
-  private def half(term: Term, high: Boolean): Term =
-    if (high) Render.shiftRightLogical(term, Literal(16L)) else Render.truncate(term, 16)
-
   inline def packedBinary(instruction: Instruction.VPackedBinary)(inline kernel: (Term, Term) => Term)
       : Option[Term.Steps] = {
-    val (a, b) = (low32(instruction.srcA), low32(instruction.srcB))
+    val (a, b)                                                  = (low32(instruction.srcA), low32(instruction.srcB))
+    def half(value: Term, high: Boolean, negate: Boolean): Term = {
+      val part = if (high) Render.shiftRightLogical(value, Literal(16L)) else Render.truncate(value, 16)
+      if (negate) Render.xor(part, Literal(0x8000L)) else part
+    }
     Some(Term.Steps(
       lane(
         naming.vector(instruction.dest),
         Render.or(
-          kernel(half(a, instruction.srcAHighForLow), half(b, instruction.srcBHighForLow)),
+          kernel(
+            half(a, instruction.srcAHighForLow, (instruction.negateLow & 1) != 0),
+            half(b, instruction.srcBHighForLow, (instruction.negateLow & 2) != 0)
+          ),
           Render.shiftLeft(
-            kernel(half(a, instruction.srcAHighForHigh), half(b, instruction.srcBHighForHigh)),
+            kernel(
+              half(a, instruction.srcAHighForHigh, (instruction.negateHigh & 1) != 0),
+              half(b, instruction.srcBHighForHigh, (instruction.negateHigh & 2) != 0)
+            ),
             Literal(16L)
           )
         )
@@ -1222,7 +1229,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
       offset: Int,
       registers: RegisterBank
   )(
-      inline destination: (Term, Term) => Term
+      inline destination: (Term, Term, Term) => Term
   )(inline kernel: Term => Term): Option[Term.Steps] = {
     val target = bank(registers, dest)
     Some(Term.Steps(
@@ -1234,7 +1241,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
           Vec.empty,
           Vec(
             (kernel(bank(registers, src)), Some(dword)),
-            (destination(naming.vector(address), lanes), Some(dword)),
+            (destination(naming.vector(address), Lane, lanes), Some(dword)),
             (target, Some(dword))
           ),
           Some(dword)
@@ -1250,8 +1257,8 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
       offset: Int,
       registers: RegisterBank,
       fetchInactive: Boolean
-  )(inline origin: Term => Term)(inline kernel: Term => Term): Option[Term.Steps] = Some(Term.Steps(
-    Term.Step("from", origin(naming.vector(address))),
+  )(inline origin: (Term, Term) => Term)(inline kernel: Term => Term): Option[Term.Steps] = Some(Term.Steps(
+    Term.Step("from", origin(naming.vector(address), Lane)),
     lane(
       bank(registers, dest),
       Select(

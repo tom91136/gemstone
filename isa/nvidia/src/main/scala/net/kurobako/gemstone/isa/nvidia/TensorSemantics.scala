@@ -14,7 +14,7 @@ import net.kurobako.gemstone.semantics.prelude.*
 @SuppressWarnings(Array("baumkuchen:megamorphic-call"))
 private[isa] object TensorSemantics {
 
-  /** Slots of [[MatrixOperands.hold]]: a block's products, then their exponents. Blocks hold at most 32 products. */
+  /** Slots of [[MatrixOperands.hold]]: a block's products, then their exponents. Blocks hold at most 64 products. */
   private val Exponents = 64
   val Slots: Int        = 2 * Exponents
 

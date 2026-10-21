@@ -26,6 +26,14 @@ private object VMConstantBank {
   /** The driver's cluster table SR_CgaSize selects; the VM keeps one, at the table's own offsets. */
   val ClusterTable: Long = 0L
 
+  /** The base of a thread's local window, which generic local addresses reach at the local offsets the stack pointer
+    * counts down from the stack origin, so they end at 4 GiB. A legacy window spans the 16 MiB its top byte tags. The
+    * base is non-zero, as the null address is global.
+    */
+  def localWindow(sm: Int): Long = if (sm < 70) 0xff000000L else 0x1000000L
+
+  def stackOrigin(sm: Int): Long = 0x100000000L - localWindow(sm)
+
   /** The cluster launch field of c0 at `offset`: the cluster shape, its float reciprocals for dividing block indices,
     * the grid of clusters and the blocks per cluster, from 0x144 on sm_90 and in the table at 0x2a0 from sm_100.
     */
@@ -147,17 +155,25 @@ private object VMConstantBank {
       emit(MoveCombine(result.slot, Vec(dimension(offset), dimension(offset + 4)), 32))
       result
     }
-    // Legacy cvta.shared.to.generic uses this c0 field as the shared-space tag.
+    // Legacy cvta.shared.to.generic uses this c0 field as the shared-space tag, and cvta.local this one as the local.
     else if (c0 && sm < 50 && bits == 32 && offset == 0x20) constant(VMAddressSpace.SharedBase)
-    // CUDA 11.8 cvta.shared uses c0[0] for the low shared-aperture word.
+    else if (c0 && sm < 50 && bits == 32 && offset == 0x24) constant(localWindow(sm))
+    // CUDA 11.8 cvta.shared uses c0[0] for the low shared-aperture word and cvta.local c0[4] for the local.
     else if (c0 && verified && bits == 32 && offset == 0) constant(VMAddressSpace.SharedBase)
-    // Local addresses occupy the VM's low aperture. Pascal additionally reads the high aperture words for shared and
-    // local cvta.
-    else if (c0 && verified && bits == 32 && (offset == 4 || (sm == 60 && Set(0x100, 0x104)(offset)))) constant(0L)
+    else if (c0 && verified && bits == 32 && offset == 4) constant(localWindow(sm))
+    // Pascal additionally reads the high aperture words for shared and local cvta.
+    else if (c0 && verified && bits == 32 && sm == 60 && Set(0x100, 0x104)(offset)) constant(0L)
     // Modern cvta.shared.to.generic adds the shared aperture base from c0[0x18:0x20].
     else if (c0 && sm >= 70 && sm < 90 && offset == 0x18 && PartialFunction.cond(bits.raw) { case 32 | 64 => true })
       constant(VMAddressSpace.SharedBase, bits)
     else if (c0 && sm >= 70 && sm < 90 && offset == 0x1c && bits == 32) constant(0L)
+    // Modern cvta.local adds the local window base from c0[0x20:0x28], or from c0[0x2f8:0x300] from sm_100.
+    else if (
+      c0 && sm >= 70 && offset == (if (sm >= 100) 0x2f8 else 0x20) &&
+      PartialFunction.cond(bits.raw) { case 32 | 64 => true }
+    )
+      constant(localWindow(sm), bits)
+    else if (c0 && sm >= 70 && offset == (if (sm >= 100) 0x2fc else 0x24) && bits == 32) constant(0L)
     // The generic address of the parameter block, from which ptxas addresses __grid_constant__ tensor maps.
     else if (
       c0 && sm >= 90 && offset == (if (sm >= 100) 0x348 else 0x198) &&
@@ -173,13 +189,12 @@ private object VMConstantBank {
     // ptxas reads %nsmid from this driver field.
     else if (c0 && sm >= 70 && bits == 32 && offset == (if (sm >= 100) 0x2d0 else 0x10c))
       constant(EmulatedDevice.Multiprocessors.toLong)
-    // Stack origin and opaque global-memory descriptor. Global accesses use checked VM addresses.
-    else if (
-      c0 && Set(
-        if (sm < 50) 0x44 else if (sm < 70) 0x20 else if (sm >= 100) 0x37c else 0x28,
-        if (sm >= 100) 0x358 else if (sm >= 90) 0x208 else 0x118
-      )(offset)
-    ) constant(0L, if (bits == 64) 64 else 32)
+    // Stack origin.
+    else if (c0 && offset == (if (sm < 50) 0x44 else if (sm < 70) 0x20 else if (sm >= 100) 0x37c else 0x28))
+      constant(stackOrigin(sm), if (bits == 64) 64 else 32)
+    // Opaque global-memory descriptor. Global accesses use checked VM addresses.
+    else if (c0 && offset == (if (sm >= 100) 0x358 else if (sm >= 90) 0x208 else 0x118))
+      constant(0L, if (bits == 64) 64 else 32)
     else {
       val bankSection = section(bank).getOrElse(unsupported(s"unknown constant bank $bank offset $offset"))
       if (offset + bytes > bankSection.size) unsupported("constant load outside bank")

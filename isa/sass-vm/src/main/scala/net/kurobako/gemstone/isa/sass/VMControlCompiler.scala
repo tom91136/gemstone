@@ -86,7 +86,14 @@ private object VMControlCompiler {
         true
       case _: Form.Break =>
         requireModifiers(Set(Modifier.RELIABLE))
-        emit(Convergence(barrier(operands.head), ConvergenceAction.Break))
+        // the predicated form leaves the convergence barrier only where the predicate holds
+        operands match {
+          case Vec(predicate, register) =>
+            guarded(Convergence(barrier(register), ConvergenceAction.Break), predicateSource(predicate))
+          case Vec(register) =>
+            emit(Convergence(barrier(register), ConvergenceAction.Break))
+          case _ => unsupported("BREAK requires a convergence barrier register")
+        }
         true
       case _: Form.Endcollective =>
         requireModifiers(Set.empty)

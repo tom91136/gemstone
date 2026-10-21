@@ -110,7 +110,7 @@ class NonUniformSuite extends munit.FunSuite {
       check(outputs, width, lanes, branch, 0) { (thread, masked) =>
         val selected = scanned(operation, thread, participants(thread, masked, 0))
         // The oracle reduces in the subgroup's order, so it folds over boxed doubles.
-        @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+        @SuppressWarnings(Array("baumkuchen:loop-boxing"))
         val reduced = Seq.tabulate(lanes)(c =>
           IEEE754.fromDouble(selected.foldLeft(identity)((a, t) => combine(a, input(t, c))), width)
         )

@@ -15,6 +15,10 @@ private[isa] object NvidiaFloatStaged {
       FloatSemantics.binaryPacked(algebra, operation, format, control)(sinks, destination, left, right)
     case Instruction.FloatUnary(operation, destination, source, width, control) =>
       FloatSemantics.unary(algebra, operation, width, control)(sinks, destination, source)
+    case Instruction.MufuUnary(destination, source, function, flavour, control) =>
+      FloatSemantics.mufu(algebra, function, flavour, control)(sinks, destination, source)
+    case Instruction.FloatUnaryPacked(operation, destination, source, format, control) =>
+      FloatSemantics.packedUnary(algebra, format, control)(sinks, destination, source, operation)
     case Instruction.FusedMultiplyAdd(destination, left, right, addend, width, control, rounding) =>
       FloatSemantics.fusedMultiplyAdd(algebra, width, control, rounding)(sinks, destination, left, right, addend)
     case Instruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16, saturate) =>

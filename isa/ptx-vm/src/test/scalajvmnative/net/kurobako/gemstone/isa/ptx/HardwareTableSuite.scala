@@ -6,7 +6,8 @@ import scala.util.Using
 
 /** Every straight-line op_kernel op of the hardware probes, from `hardware/sm_<n>.txt`: the op entry's PTX between its
   * loads and stores, from the PTX embedded in the binaries the hardware ran (`cuobjdump -xptx all`), with the loads and
-  * stores replaced by moves from `%hwi` and to `%hwo`, and sampled `inputs -> outputs` rows.
+  * stores replaced by moves from `%hwi` and to `%hwo`, and sampled `inputs -> outputs` rows, or the first warp's rows
+  * for an op that needs the whole warp.
   */
 class HardwareTableSuite extends munit.FunSuite {
   import hardwareGolden.*
@@ -32,7 +33,7 @@ class HardwareTableSuite extends munit.FunSuite {
   }
 
   for {
-    sm <- Vec(35, 50, 61, 70, 89, 90)
+    sm <- Vec(35, 50, 61, 70, 89, 90, 120)
     op <- ops(sm)
   }
     test(s"sm_$sm hardware: ${op.probe} ${op.name}") {

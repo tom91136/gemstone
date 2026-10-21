@@ -432,9 +432,10 @@ private object VMInterpreter {
     private val active       = LaneBits(lanes, geometry.liveLanes(group, localStart.unsafe[Int >= 0], lanes))
     private var scalarCarry  = false
     private var mode         = kernel.initialMode
-    private val modeWritable = if (ModeRegister.ieeeSupported(program.isa)) -1 else ~ModeRegister.IEEE
-    private val m0           = program.m0
-    private val discarded    = program.discarded
+    private val modeWritable =
+      if (ModeRegister.ieeeSupported(program.isa)) -1 else ~(ModeRegister.DX10Clamp | ModeRegister.IEEE)
+    private val m0        = program.m0
+    private val discarded = program.discarded
     // The 4096-byte floor proves the per-lane allocation is positive.
     private val scratch          = ScratchMemory(lanes, math.max(4096, kernel.privateSegmentSize).unsafe[Int > 0])
     private var conditionMask    = 0L
@@ -2589,21 +2590,27 @@ private object VMInterpreter {
       def lanes(instruction: Instruction.VPackedBinary): Either[Fault, Int] = {
         first.bind(instruction.srcA)
         second.bind(instruction.srcB)
-        val target          = vector(instruction.dest)
-        val srcAHighForHigh = instruction.srcAHighForHigh
-        val srcBHighForHigh = instruction.srcBHighForHigh
-        val srcAHighForLow  = instruction.srcAHighForLow
-        val srcBHighForLow  = instruction.srcBHighForLow
+        val target                                                  = vector(instruction.dest)
+        val srcAHighForHigh                                         = instruction.srcAHighForHigh
+        val srcBHighForHigh                                         = instruction.srcBHighForHigh
+        val srcAHighForLow                                          = instruction.srcAHighForLow
+        val srcBHighForLow                                          = instruction.srcBHighForLow
+        val negateLow                                               = instruction.negateLow
+        val negateHigh                                              = instruction.negateHigh
+        def half(value: Long, high: Boolean, negate: Boolean): Long = {
+          val part = if (high) value >>> 16 else Bits.low16(value).toLong
+          if (negate) part ^ 0x8000L else part
+        }
         foreachActive { lane =>
           val left  = Bits.low32(first(lane)).toLong
           val right = Bits.low32(second(lane)).toLong
           val low   = kernel(
-            if (srcAHighForLow) left >>> 16 else Bits.low16(left).toLong,
-            if (srcBHighForLow) right >>> 16 else Bits.low16(right).toLong
+            half(left, srcAHighForLow, (negateLow & 1) != 0),
+            half(right, srcBHighForLow, (negateLow & 2) != 0)
           )
           val high = kernel(
-            if (srcAHighForHigh) left >>> 16 else Bits.low16(left).toLong,
-            if (srcBHighForHigh) right >>> 16 else Bits.low16(right).toLong
+            half(left, srcAHighForHigh, (negateHigh & 1) != 0),
+            half(right, srcBHighForHigh, (negateHigh & 2) != 0)
           )
           target(lane) = low | (high << 16)
         }
@@ -3482,7 +3489,7 @@ private object VMInterpreter {
         src: VectorRegisterIndex,
         offset: Int,
         bank: RegisterBank
-    )(inline destination: (Long, Long) => Long)(inline kernel: Long => Long): Either[Fault, Int] = {
+    )(inline destination: (Long, Long, Long) => Long)(inline kernel: Long => Long): Either[Fault, Int] = {
       def lanes(
           dest: VectorRegisterIndex,
           address: VectorRegisterIndex,
@@ -3493,7 +3500,7 @@ private object VMInterpreter {
         val sources   = file(src).clone()
         val result    = file(dest).clone()
         foreachActive { lane =>
-          val target = destination(addresses(lane), waveSize.toLong)
+          val target = destination(addresses(lane), lane.toLong, waveSize.toLong)
           if (target < WaveRun.this.lanes.toLong) result(target.toInt) = kernel(sources(lane))
         }
         val registers = file(dest)
@@ -3518,7 +3525,7 @@ private object VMInterpreter {
         offset: Int,
         bank: RegisterBank,
         fetchInactive: Boolean
-    )(inline origin: Long => Long)(inline kernel: Long => Long): Either[Fault, Int] = {
+    )(inline origin: (Long, Long) => Long)(inline kernel: Long => Long): Either[Fault, Int] = {
       def lanes(
           dest: VectorRegisterIndex,
           address: VectorRegisterIndex,
@@ -3531,7 +3538,7 @@ private object VMInterpreter {
         val enabled   = if (fetchInactive) -1L else active.bits
         // a source lane EXEC disables reads as 0
         foreachActive { lane =>
-          val from = origin(addresses(lane))
+          val from = origin(addresses(lane), lane.toLong)
           registers(lane) =
             if (from < WaveRun.this.lanes.toLong && ((enabled >>> from) & 1L) != 0L) kernel(sources(from.toInt))
             else 0L

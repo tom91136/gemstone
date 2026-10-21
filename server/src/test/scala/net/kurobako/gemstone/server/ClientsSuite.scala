@@ -16,7 +16,7 @@ class ClientsSuite extends munit.FunSuite {
       assert(existing.service.isLeft)
       assert(clients.acquire(id, SessionId(process = 2, incarnation = 1)).isLeft)
       // closing the Clients revokes every lease
-      existing.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+      existing.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
     }
   }
 
@@ -27,14 +27,14 @@ class ClientsSuite extends munit.FunSuite {
       val service = first.service.toOption.get
       assert(second.service.toOption.get eq service)
       // closing the Clients revokes every lease
-      first.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+      first.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
       first.close()
       assert(first.service.isLeft)
       assert(second.service.toOption.get eq service)
-      second.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+      second.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
       val next = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
       assert(!(next.service.toOption.get eq service))
-      next.close(): @scala.annotation.nowarn("msg=baumkuchen:unguarded-close")
+      next.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
     }
   }
 

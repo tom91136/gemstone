@@ -74,8 +74,8 @@ private object LegacyAddressRewrite {
   private def isPredicateForm(instruction: DecodedInstruction): Boolean =
     isAuxiliaryHigh(instruction) && instruction.operands.size == 5
   private def isScalarStore(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
-    case _: Form.Sts | _: Form.Stl => true
-    case _                         => false
+    case _: Form.Sts | _: Form.Stl | _: Form.Stg => true
+    case _                                       => false
   }
   private def isReconvergenceSetup(instruction: DecodedInstruction): Boolean =
     LegacyControlFlow.setupKind(instruction).nonEmpty

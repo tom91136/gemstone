@@ -118,7 +118,10 @@ class AMDGPUEncodedFormsSuite extends munit.FunSuite {
     assertEquals(one(gfx1030, Vec(0x05, 0x00, 0x40, 0xd5, 0x02, 0x07, 0x12, 0x04), 0L, infinity, single), single)
     assertEquals(one(gfx1030, Vec(0x02, 0x07, 0x0a, 0x0c), 0L, 0x7fc00000L, 0L, 0x40000000L), 0x40000000L)
     assertEquals(one(gfx906, Vec(0x05, 0x00, 0xc0, 0xd1, 0x02, 0x07, 0x12, 0x04), 0L, infinity, single), single)
-    assertEquals(one(gfx906, Vec(0x02, 0x97, 0x0a, 0x7e), 0x40400000L), 0x41000000L)
+  }
+
+  test("gfx906 v_exp_legacy_f32 writes +0 whatever its source") {
+    assertEquals(one(gfx906, Vec(0x02, 0x97, 0x0a, 0x7e), 0x40400000L), 0L)
   }
 
   test("gfx1030 v_movrelsd_2_b32 and v_swaprel_b32 offset source and destination by M0's two fields") {

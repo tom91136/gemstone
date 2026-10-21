@@ -168,7 +168,7 @@ class Server private (
     }
 
   // joining is the barrier that keeps workers off memory the owner releases next, so a timeout would defeat it
-  @scala.annotation.nowarn("msg=baumkuchen:unbounded-wait")
+  @SuppressWarnings(Array("baumkuchen:unbounded-wait"))
   override def close(): Unit = if (closed.compareAndSet(false, true)) {
     // Stop accepting first, then snapshot threads before listener closure can remove them.
     def shutdownConnections(): Unit = {

@@ -8,6 +8,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.semantics.prelude.*
 
 class AMDGPUArithmeticSuite extends munit.FunSuite {
 
@@ -19,11 +20,11 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     Bits.low16(IEEE754.floatToBinary16(low).toLong).toLong |
       (Bits.low16(IEEE754.floatToBinary16(high).toLong).toLong << 16)
 
-  test("trig preparation retains the 1200-bit reference calculation for every exponent and segment") {
+  test("trig preparation reads 53 bits of 2/pi's leading 1184 for every exponent and segment") {
     val reference = BigInt(
       "a2f9836e4e441529fc2757d1f534ddc0db6295993c439041fe5163abdebbc561b7246e3a424dd2e006492eea09d1921cfe1deb1cb129a73ee88235f52ebb4484e99c7026b45f7e413991d639835339f49c845f8bbdf9283b1ff897ffde05980fef2f118b5a0a6d1f6d367ecf27cb09b74f463f669e5fea2d7527bac7ebe5f17b3d0739f78a5292ea6bfb5fb11f8d5d0856033046fc7b",
       16
-    )
+    ) >> 16
     val mask = (BigInt(1) << 53) - 1
     for {
       exponent <- 0 until 2048
@@ -31,7 +32,7 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     } {
       val shift    = segment * 53 + (exponent - 1077).max(0)
       val expected = Math.scalb(
-        ((reference << shift) & mask).toDouble,
+        ((reference >> (1184 - 53 - shift)) & mask).toDouble,
         -53 - shift + (if (exponent >= 1968) 128 else 0)
       )
       val input = IEEE754.binary64ToDouble(exponent.toLong << 52)
@@ -335,12 +336,13 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     assert(math.abs(trig(VectorConvertOperation.CosineF32, 0.25f)) < 1.0e-6f)
   }
 
-  test("division fixup recovers a finite quotient after pre-scale approximation overflows") {
-    val denominator = -java.lang.Float.MAX_VALUE
-    val result      = VMArithmetic.divisionFixupF32(Float.NaN, denominator, 1.0f)
-    assertEquals(result, 1.0f / denominator)
-    assert(!result.isNaN)
-    assertEquals(VMArithmetic.divisionFixupF32(Float.NaN, denominator = 0.0f, numerator = 1.0f), Float.PositiveInfinity)
+  test("division fixup turns a NaN quotient of finite operands into an infinity of their sign") {
+    val denominator = IEEE754.floatToBinary32(-java.lang.Float.MAX_VALUE).toLong
+    assertEquals(VMArithmetic.divisionFixup(0x7fc00000L, denominator, numerator = 0x3f800000L, 32), 0xff800000L)
+    assertEquals(
+      VMArithmetic.divisionFixup(quotient = 0x7fc00000L, denominator = 0L, numerator = 0x3f800000L, 32),
+      0x7f800000L
+    )
   }
 
   test("gfx1030 VOP3 bitwise operations decode to their VOP2 semantics") {
@@ -386,13 +388,12 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
   }
 
   test("dot2c f32-f16 computes both packed halves before accumulation") {
-    val result = Execute.dotHalves(
-      accumulate = true,
-      packed(low = 1.0f, high = 2.0f),
-      packed(low = 3.0f, high = 4.0f),
-      IEEE754.floatToBinary32(5.0f).toLong
+    val result = Dots.halvesToFloat(
+      fromRaw[UInt[32]](packed(low = 1.0f, high = 2.0f)),
+      fromRaw[UInt[32]](packed(low = 3.0f, high = 4.0f)),
+      Float32(5.0f)
     )
-    assertEquals(IEEE754.binary32ToFloat(Bits.low32(result)), 16.0f)
+    assertEquals(result.toFloat, 16.0f)
   }
 
   test("gfx900 packed-half FMA applies operand selection, negation, and clamp independently") {

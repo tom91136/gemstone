@@ -21,8 +21,8 @@ private object laneRuns extends munit.Assertions {
 
   def octets(values: Int*): Vec[Byte] = Vec.from(values.map(_.toByte))
 
-  /** Each lane's dword in `result` after `operations`, with lane `i` reading `inputs(i)` from v2 onwards, v1 holding
-    * its byte offset and s[6:7] the base of the lanes' memory. EXEC starts as `exec`.
+  /** Each lane's dword in `result` after `operations`, with lane `i` reading `inputs(i)` from `first` onwards, `offset`
+    * holding its byte offset and `base` the base of the lanes' memory. EXEC starts as `exec`.
     */
   def laneResults(
       target: Target,
@@ -31,7 +31,11 @@ private object laneRuns extends munit.Assertions {
       result: VectorRegisterIndex = 2,
       exec: Long = -1L,
       wave32: Boolean = true,
-      groupSegmentSize: Int >= 0 = 0
+      groupSegmentSize: Int >= 0 = 0,
+      computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
+      first: VectorRegisterIndex = 2,
+      offset: VectorRegisterIndex = 1,
+      base: ScalarRegisterIndex = 6
   )(using munit.Location): Vec[Long] = {
     val count      = inputs.size
     val memory     = RegionMemory()
@@ -47,8 +51,8 @@ private object laneRuns extends munit.Assertions {
     val width = inputs.map(_.size).maxOption.getOrElse(0)
     val loads = Vec.tabulate(width)(index =>
       Instruction.Load(
-        (2 + index).unsafe[VectorRegisterIndex],
-        MemoryAddress.Global(1, Some(6), index * 4),
+        (first + index).unsafe[VectorRegisterIndex],
+        MemoryAddress.Global(offset, Some(base), index * 4),
         4,
         false,
         LoadPlacement.Full
@@ -57,17 +61,18 @@ private object laneRuns extends munit.Assertions {
     val waves  = wave32 && (target.isa.isRDNA || target.isa == ISA.CDNA5)
     val all    = if (waves) 0xffffffffL else -1L
     val prefix = Vec(
-      Instruction.SMove64(6, Constant(address)),
-      Instruction.VBinary(VectorBinaryOperation.ShiftLeft32, 1, Constant(6), Register(0), false)
+      Instruction.SMove64(base, Constant(address)),
+      Instruction.VBinary(VectorBinaryOperation.ShiftLeft32, offset, Constant(6), Register(0), false)
     ) ++ loads :+ Instruction.SMove64(Fixed.ExecLo, Constant(exec & all))
     val suffix = Vec(
       Instruction.SMove64(Fixed.ExecLo, Constant(all)),
-      Instruction.Store(result, MemoryAddress.Global(1, Some(6), Stride - 4), 4, false),
+      Instruction.Store(result, MemoryAddress.Global(offset, Some(base), Stride - 4), 4, false),
       Instruction.End
     )
     val source = codeKernel(
       target = target,
       groupSegmentSize = groupSegmentSize,
+      computePgmRsrc1 = computePgmRsrc1,
       kernelCodeProperties = if (waves) KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32 else 0
     )
     val task = KernelTask.validated("kernel", Dimensions(count.unsafe[Int > 0], 1, 1), Dimensions.One, Vec.empty).value

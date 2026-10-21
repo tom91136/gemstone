@@ -8,6 +8,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 // The forms are those nvcc 13.3 emits for cuda::memcpy_async, cuda::ptx and cooperative_groups on sm_90 and that
 // `ptxas -arch=sm_90a` accepts (see the round-4 evidence in the report).
@@ -29,7 +30,11 @@ class BulkTensorSuite extends munit.FunSuite {
       assertEquals(memory.writeInt32(memory.start.offset(index * 4L), value), Right(()))
       assertEquals(memory.writeInt32(memory.start.offset(512 + index * 4L), 1000), Right(()))
     }
-    assertEquals(execute(kernel, 1, 64, Map(argument("data", memory.start.raw)), memory), Right(()))
+    // the kernel's shared::cta to shared::cluster copy needs a launch with a cluster
+    assertEquals(
+      execute(kernel, 1, 64, Map(argument("data", memory.start.raw)), memory, cluster = Some(Dimensions(1, 1, 1))),
+      Right(())
+    )
     val incremented = input.map(_ + 1)
     assertEquals(memory.ints(from = 256, count = 64), incremented)
     assertEquals(memory.ints(from = 512, count = 64), incremented.map(_ + 1000))
@@ -190,6 +195,46 @@ class BulkTensorSuite extends munit.FunSuite {
       case Left(Fault.IllegalInstruction(_)) => ()
       case other                             => fail(s"expected an illegal instruction fault, got $other")
     }
+  }
+
+  test("a global to shared::cluster cp.async.bulk outside a cluster completes") {
+    val kernel = compileKernel(""".version 8.6
+      |.target sm_90
+      |.address_size 64
+      |.visible .entry bulk(.param .u64 data) {
+      | .shared .align 128 .b8 a[256];
+      | .shared .align 8 .b64 bar;
+      | .reg .u64 %data, %dst, %token, %offset;
+      | .reg .u32 %r, %thread, %addr;
+      | .reg .pred %p, %leader;
+      | ld.param.u64 %data, [data];
+      | mov.u32 %thread, %tid.x;
+      | setp.eq.u32 %leader, %thread, 0;
+      | @%leader mbarrier.init.shared::cta.b64 [bar], 1;
+      | fence.mbarrier_init.release.cluster;
+      | bar.sync 0;
+      | @!%leader bra LOADED;
+      | cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes [a], [%data], 256, [bar];
+      | mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 %token, [bar], 256;
+      |LOADED:
+      | mbarrier.try_wait.parity.acquire.cta.shared::cta.b64 %p, [bar], 0, 1000;
+      | @!%p bra LOADED;
+      | mov.u32 %addr, a;
+      | mad.lo.u32 %addr, %thread, 4, %addr;
+      | ld.shared.u32 %r, [%addr];
+      | mul.wide.u32 %offset, %thread, 4;
+      | add.u64 %dst, %data, %offset;
+      | st.global.u32 [%dst+256], %r;
+      | ret;
+      |}
+      |""".stripMargin)
+    val memory = DeviceMemory(512)
+    val input  = Vec.tabulate(64)(index => index * 7 - 9)
+    input.zipWithIndex.foreach((value, index) =>
+      assertEquals(memory.writeInt32(memory.start.offset(index * 4L), value), Right(()))
+    )
+    assertEquals(execute(kernel, 1, 64, Map(argument("data", memory.start.raw)), memory), Right(()))
+    assertEquals(memory.ints(from = 256, count = 64), input)
   }
 
   test("im2col tensor loads walk pixels across the bounding box and into the next image") {

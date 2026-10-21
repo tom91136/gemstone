@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.sass
 
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
@@ -72,12 +73,21 @@ private object hardwareGolden extends munit.Assertions {
     )
   }
 
-  /** A kernel that takes only its output over `blocks` of 64 threads, with rows named by block and thread. */
-  def checkGrid(sm: Int, code: String, blocks: Int, table: Vec[Row])(using munit.Location): Unit = {
-    val threads = 64
-    val count   = table.head.outputs.size
-    val kernel  = fromHex(code, sm, "kernel")
-    kernel.run(threads, blocks)(Arg.zeros(blocks * threads * count * 4)) match {
+  /** A kernel that takes only its output over `blocks` of 64 threads, with rows named by block and thread. `globals`
+    * sizes the module's device variables, whose addresses the driver relocates into bank 4 in order.
+    */
+  def checkGrid(sm: Int, code: String, blocks: Int, table: Vec[Row], globals: Vec[Int] = Vec.empty)(using
+      munit.Location
+  ): Unit = {
+    val threads   = 64
+    val count     = table.head.outputs.size
+    val memory    = Memory()
+    val addresses = globals.flatMap { size =>
+      LittleEndian.toVec(memory.address(memory.allocate(Vec.fill(size)(0.toByte)), 0L).value.raw, 8)
+    }
+    val kernel = fromHex(code, sm, "kernel")
+      .copy(constants = if (addresses.isEmpty) Vec.empty else Vec(".nv.constant4.kernel" -> addresses))
+    kernel.run(threads, blocks, memory)(Arg.zeros(blocks * threads * count * 4)) match {
       case Left(fault)   => fail(s"sm_$sm rejected or faulted on the hardware's instructions: ${fault.message}")
       case Right(result) =>
         val words = result.words(0).grouped(count).toVec

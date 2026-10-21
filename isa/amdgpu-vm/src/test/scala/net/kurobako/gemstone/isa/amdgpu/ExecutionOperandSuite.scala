@@ -1078,21 +1078,21 @@ class ExecutionOperandSuite extends munit.FunSuite {
         Target("gfx900"),
         "v_mov_b32_dpp v3, v2 row_bcast:15 bound_ctrl:1",
         Vec(0xfa, 0x02, 0x06, 0x7e, 0x02, 0x42, 0x09, 0xff),
-        lane => Option.when(lane >= 16)((lane & ~15) - 1),
+        lane => Option.when(lane >= 16)((lane & ~15) - 1).orElse(Some(lane)),
         move
       ),
       (
         Target("gfx900"),
         "v_mov_b32_dpp v3, v2 row_bcast:15",
         Vec(0xfa, 0x02, 0x06, 0x7e, 0x02, 0x42, 0x01, 0xff),
-        lane => Option.when(lane >= 16)((lane & ~15) - 1),
+        lane => Option.when(lane >= 16)((lane & ~15) - 1).orElse(Some(lane)),
         move
       ),
       (
         Target("gfx900"),
         "v_mov_b32_dpp v3, v2 row_bcast:31 bound_ctrl:1",
         Vec(0xfa, 0x02, 0x06, 0x7e, 0x02, 0x43, 0x09, 0xff),
-        lane => Option.when(lane >= 32)(31),
+        lane => Option.when(lane >= 32)(31).orElse(Some(lane)),
         move
       ),
       (

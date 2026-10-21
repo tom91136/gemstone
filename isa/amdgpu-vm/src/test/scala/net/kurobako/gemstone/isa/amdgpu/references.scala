@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import VMIR.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.prelude.*
 
 /** The interpreter's hand-written formulas before staging, kept as the references the staged semantics must match. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -101,8 +102,13 @@ private object references {
   }
 
   def trigF32(operation: VectorConvertOperation, value: Float): Float = operation match {
-    case VectorConvertOperation.SineF32   => math.sin(2.0 * math.Pi * value.toDouble).toFloat
-    case VectorConvertOperation.CosineF32 => math.cos(2.0 * math.Pi * value.toDouble).toFloat
+    case VectorConvertOperation.SineF32   => unit32(TranscendentalUnit.sine32, value)
+    case VectorConvertOperation.CosineF32 => unit32(TranscendentalUnit.cosine32, value)
+    // GFX8 gives sin(0) and cos(0) for finite operands beyond 256 turns
+    case VectorConvertOperation.SineBoundedF32 =>
+      if (math.abs(value) > 256.0f && !value.isInfinite) 0.0f else trigF32(VectorConvertOperation.SineF32, value)
+    case VectorConvertOperation.CosineBoundedF32 =>
+      if (math.abs(value) > 256.0f && !value.isInfinite) 1.0f else trigF32(VectorConvertOperation.CosineF32, value)
     case _ => throw IllegalArgumentException(s"$operation is not a trigonometric operation")
   }
 
@@ -143,6 +149,24 @@ private object references {
     if ((negate & (1 << index)) != 0) -magnitude else magnitude
   }
 
+  /** The FMA's NaN result: a NaN operand propagates quieted, and an invalid product gives the default NaN. */
+  private def fmaNaN(left: Float, right: Float, addend: Float): Option[Long] = {
+    def nan(value: Float): Boolean = value.isNaN
+    def invalid: Boolean           =
+      (left == 0.0f && right.isInfinite) || (right == 0.0f && left.isInfinite)
+    if (nan(left)) Some(IEEE754.floatToBinary32(left).toLong)
+    else if (nan(right)) Some(IEEE754.floatToBinary32(right).toLong)
+    else if (invalid) Some(IEEE754.signBit(32) | IEEE754.infinity(32) | IEEE754.quietBit(32))
+    else if (nan(addend)) Some(IEEE754.floatToBinary32(addend).toLong)
+    else None
+  }
+
+  /** The NaN a product and an addend give: the product's NaN, else the addend's, both quieted. */
+  private def madNaN(product: Float, addend: Float): Option[Long] =
+    if (product.isNaN) Some(IEEE754.floatToBinary32(product).toLong)
+    else if (addend.isNaN) Some(IEEE754.floatToBinary32(addend).toLong)
+    else None
+
   def fmaMixF16(
       existing: Long,
       srcA: Long,
@@ -158,10 +182,28 @@ private object references {
   ): Long = {
     val left    = mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute)
     val right   = mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute)
-    val addend  = mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute).toDouble
+    val addend  = mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
     val rounded =
-      if (fused) IEEE754.fusedMultiplyAddExact(left.toDouble, right.toDouble, addend, 16, IEEE754.Rounding.NearestEven)
-      else IEEE754.fusedMultiplyAddExact((left * right).toDouble, 1.0, addend, 16, IEEE754.Rounding.NearestEven)
+      if (fused)
+        fmaNaN(left, right, addend) match {
+          case Some(nan) => IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Bits.low32(nan))).toLong
+          case None      =>
+            IEEE754.fusedMultiplyAddExact(
+              left.toDouble,
+              right.toDouble,
+              addend.toDouble,
+              16,
+              IEEE754.Rounding.NearestEven
+            )
+        }
+      else {
+        val product = left * right
+        madNaN(product, addend) match {
+          case Some(nan) => IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Bits.low32(nan))).toLong
+          case None      =>
+            IEEE754.fusedMultiplyAddExact(product.toDouble, 1.0, addend.toDouble, 16, IEEE754.Rounding.NearestEven)
+        }
+      }
     mergeD16(existing, clampF16(rounded, clamp), high)
   }
 
@@ -179,19 +221,70 @@ private object references {
     val left   = mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute)
     val right  = mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute)
     val addend = mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
-    val result = if (fused) IEEE754.fma(left, right, addend) else left * right + addend
+    val result =
+      if (fused)
+        fmaNaN(left, right, addend) match {
+          case Some(nan) => IEEE754.binary32ToFloat(Bits.low32(nan))
+          case None      => IEEE754.fma(left, right, addend)
+        }
+      else {
+        val product = left * right
+        madNaN(product, addend) match {
+          case Some(nan) => IEEE754.binary32ToFloat(Bits.low32(nan))
+          case None      => product + addend
+        }
+      }
     IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).toLong
   }
 
-  def dot2F32F16(left: Long, right: Long, accumulator: Long, accumulate: Boolean): Binary32 = {
-    val leftLow   = IEEE754.binary16ToFloat(Bits.low16(left))
-    val leftHigh  = IEEE754.binary16ToFloat(Bits.low16(left >>> 16))
-    val rightLow  = IEEE754.binary16ToFloat(Bits.low16(right))
-    val rightHigh = IEEE754.binary16ToFloat(Bits.low16(right >>> 16))
-    val products  = IEEE754.fma(leftLow, rightLow, leftHigh * rightHigh)
-    val result    =
-      if (accumulate) products + IEEE754.binary32ToFloat(Bits.low32(accumulator)) else products
-    IEEE754.floatToBinary32(result)
+  /** V_DOT2_F32_F16: the first NaN operand quieted, an invalid sum the negative default NaN, and otherwise the exact
+    * products summed exactly with the accumulator and rounded once to binary32.
+    */
+  def dot2F32F16(left: Long, right: Long, accumulator: Long): Binary32 = {
+    val halves = Vector(left & 0xffffL, right & 0xffffL, (left >>> 16) & 0xffffL, (right >>> 16) & 0xffffL)
+    def widened(half: Long): Long = ((half & 0x8000L) << 16) | 0x7fc00000L | ((half & 0x3ffL) << 13)
+    def value(half: Long): Double = IEEE754.binary16ToFloat(Bits.low16(half)).toDouble
+    val nan                       = halves.find(IEEE754.isNaN(_, 16)).map(widened).orElse(
+      Option.when(IEEE754.isNaN(accumulator & 0xffffffffL, 32))((accumulator & 0xffffffffL) | 0x00400000L)
+    )
+    nan.fold {
+      val terms = Vector(
+        value(halves(0)) * value(halves(1)),
+        value(halves(2)) * value(halves(3)),
+        IEEE754.binary32ToFloat(Bits.low32(accumulator)).toDouble
+      )
+      val sum = terms.sum
+      if (sum.isNaN) Bits.low32(0xffc00000L)
+      else if (sum.isInfinite) IEEE754.floatToBinary32(sum.toFloat)
+      else Bits.low32(exactlyRounded(terms))
+    }(bits => Bits.low32(bits))
+  }
+
+  /** Finite binary64 `terms` summed exactly, as multiples of 2^-1074, and rounded once to binary32. */
+  private def exactlyRounded(terms: Vector[Double]): Long = {
+    def scaled(value: Double): BigInt = {
+      val bits     = IEEE754.doubleToBinary64(value)
+      val exponent = ((bits >>> 52) & 0x7ffL).toInt
+      val fraction = bits & 0xfffffffffffffL
+      val integer  = BigInt(if (exponent == 0) fraction else fraction | (1L << 52)) << math.max(exponent - 1, 0)
+      if (bits < 0L) -integer else integer
+    }
+    val exact = terms.map(scaled).sum
+    // an exact zero is -0 only when every term is
+    if (exact.signum == 0) if (terms.forall(IEEE754.doubleToBinary64(_) < 0L)) 0x80000000L else 0L
+    else {
+      val dropped = math.max(exact.bitLength - 62, 0)
+      val sticky  = if (dropped > 0 && exact.abs.lowestSetBit < dropped) 1L else 0L
+      val sum     = (exact.abs >> dropped).toLong | sticky
+      IEEE754.encodeSum(
+        if (exact.signum < 0) -sum else sum,
+        dropped - 1074,
+        exponentBits = 8,
+        fieldBits = 23,
+        kept = 23,
+        IEEE754.Rounding.NearestEven
+      )
+    }
   }
 
   def dot4U32U8(left: Long, right: Long, accumulator: Long): Long = {
@@ -209,10 +302,13 @@ private object references {
   def permuteBytes(srcA: Long, srcB: Long, selectors: Long): Long = {
     val sources = Bits.join32(srcB, srcA)
     (0 until 4).foldLeft(0L) { (result, byte) =>
-      val selector = ((selectors >>> (byte * 8)) & 0xfL).toInt
-      if (selector < 8)
-        result | (((sources >>> (selector * 8)) & 0xffL) << (byte * 8))
-      else result
+      val selector = ((selectors >>> (byte * 8)) & 0xffL).toInt
+      val picked   =
+        if (selector < 8) (sources >>> (selector * 8)) & 0xffL
+        else if (selector < 12) if (((sources >>> ((selector - 8) * 16 + 15)) & 1L) != 0L) 0xffL else 0L
+        else if (selector == 12) 0L
+        else 0xffL
+      result | (picked << (byte * 8))
     }
   }
 
@@ -321,119 +417,147 @@ private object references {
       case WAVE_ROR1       => (lane - 1) & 63
       case ROW_MIRROR      => rowBase | (15 - rowLane)
       case ROW_HALF_MIRROR => (lane & ~7) | (7 - (lane & 7))
-      case BCAST15         => if (rowBase > 0) rowBase - 1 else -1
-      case BCAST31         => if (lane >= 32) 31 else -1
+      case BCAST15         => if (rowBase > 0) rowBase - 1 else lane
+      case BCAST31         => if (lane >= 32) 31 else lane
       case _               => -1
     }
   }
 
   def dpp8SourceLane(lane: Int, selectors: Int): Int = (lane & ~7) | ((selectors >>> ((lane & 7) * 3)) & 7)
 
+  /** DS_SWIZZLE's source lane: a quad permutation names the source lane of each of a quad's four lanes; otherwise the
+    * pattern's AND, OR and XOR masks rewrite the low five bits of the lane index and the higher bits pass through.
+    */
+  def swizzleSourceLane(lane: Int, control: Int): Int = {
+    import EncodingConstants.Swizzle
+    if ((control & Swizzle.QUAD_PERM_ENC_MASK) == Swizzle.QUAD_PERM_ENC)
+      (lane & ~3) | ((control >>> ((lane & 3) * 2)) & 3)
+    else {
+      val and = control & 0x1f
+      val or  = (control >>> 5) & 0x1f
+      val xor = (control >>> 10) & 0x1f
+      (lane & ~0x1f) | ((((lane & 0x1f) & and) | or) ^ xor)
+    }
+  }
+
   def bpermuteSourceLane(address: Long, offset: Long): Int                    = (((address + offset) >>> 2) & 63L).toInt
   def permuteDestinationLane(address: Long, offset: Long, waveSize: Int): Int =
     (((address + offset) >>> 2) & (waveSize - 1L)).toInt
 
-  def divisionFixupF64(q: Double, d: Double, n: Double): Double = {
-    val sign =
-      if ((IEEE754.doubleToBinary64(n) ^ IEEE754.doubleToBinary64(d)) < 0L)
-        -1.0
-      else 1.0
-    if (n.isNaN || d.isNaN || (n.isInfinite && d.isInfinite) || (n == 0.0 && d == 0.0)) Double.NaN
-    else if (d == 0.0 || n.isInfinite) Math.copySign(Double.PositiveInfinity, sign)
-    else if (d.isInfinite || n == 0.0) Math.copySign(0.0, sign)
-    else q
+  /** V_DIV_FIXUP_F64 on raw pairs, as [[divisionScaleF64]] decides on biased exponents. */
+  def divisionFixupF64(q: Long, d: Long, n: Long): Long = {
+    val (quotient, denominator, numerator) =
+      (IEEE754.binary64ToDouble(q), IEEE754.binary64ToDouble(d), IEEE754.binary64ToDouble(n))
+    val sign = (n ^ d) & Long.MinValue
+    if (numerator.isNaN) n | 0x0008000000000000L
+    else if (denominator.isNaN) d | 0x0008000000000000L
+    else if ((numerator.isInfinite && denominator.isInfinite) || (numerator == 0.0 && denominator == 0.0))
+      0xfff8000000000000L
+    else if (denominator == 0.0 || numerator.isInfinite) sign | 0x7ff0000000000000L
+    else if (denominator.isInfinite || numerator == 0.0) sign
+    else if (Math.getExponent(numerator) - Math.getExponent(denominator) < -1075) sign
+    else if (quotient.isNaN) sign | 0x7ff0000000000000L
+    else sign | (q & Long.MaxValue)
   }
 
-  /** V_DIV_SCALE_F32's result and VCC bit. */
+  /** V_DIV_SCALE_F32's result and VCC bit, which the hardware decides on the operands' biased exponents alone: VCC when
+    * they differ by 96 either way.
+    */
   def divisionScaleF32(s0: Float, s1: Float, s2: Float): (Float, Boolean) = {
-    def denormal(value: Float): Boolean =
-      value != 0.0f && !value.isNaN && !value.isInfinite && math.abs(value) < java.lang.Float.MIN_NORMAL
-    var result = s0
-    var flag   = false
-    if (s1 == 0.0f || s2 == 0.0f) {
-      result = Float.NaN
-    } else if (Math.getExponent(s2) - Math.getExponent(s1) >= 96) {
-      flag = true
-      if (s0 == s1) result = Math.scalb(s0, 64)
-    } else if (denormal(s1)) {
-      result = Math.scalb(s0, 64)
-    } else if (denormal(1.0f / s1) && denormal(s2 / s1)) {
-      flag = true
-      if (s0 == s1) result = Math.scalb(s0, 64)
-    } else if (denormal(1.0f / s1)) {
-      result = Math.scalb(s0, -64)
-    } else if (denormal(s2 / s1)) {
-      flag = true
-      if (s0 == s2) result = Math.scalb(s0, 64)
-    } else if (Math.getExponent(s2) <= 23 - 127) {
-      result = Math.scalb(s0, 64)
-    }
-    (result, flag)
+    val (d, n) = (Math.getExponent(s1) + 127, Math.getExponent(s2) + 127)
+    val result =
+      if (s1 == 0.0f || s2 == 0.0f) Float.NaN
+      else if (s0.isNaN) s0
+      else if (n - d >= 96) if (s0 == s1) Math.scalb(s0, 64) else s0
+      else if (d == 0) Math.scalb(s0, 64)
+      else if (d >= 253) if (s0 == s1 || n - d > -96) Math.scalb(s0, -64) else s0
+      else if (n - d <= -96) if (s0 == s2) Math.scalb(s0, 64) else s0
+      else if (n <= 24) Math.scalb(s0, 64)
+      else s0
+    (result, math.abs(n - d) >= 96)
   }
 
   def divisionScaleF64(s0: Double, s1: Double, s2: Double): (Double, Boolean) = {
-    def denormal(value: Double): Boolean =
-      value != 0.0 && !value.isNaN && !value.isInfinite && math.abs(value) < java.lang.Double.MIN_NORMAL
-    var result = s0
-    var flag   = false
-    if (s1 == 0.0 || s2 == 0.0) {
-      result = Double.NaN
-    } else if (Math.getExponent(s2) - Math.getExponent(s1) >= 768) {
-      flag = true
-      if (s0 == s1) result = Math.scalb(s0, 128)
-    } else if (denormal(s1)) {
-      result = Math.scalb(s0, 128)
-    } else if (denormal(1.0 / s1) && denormal(s2 / s1)) {
-      flag = true
-      if (s0 == s1) result = Math.scalb(s0, 128)
-    } else if (denormal(1.0 / s1)) {
-      result = Math.scalb(s0, -128)
-    } else if (denormal(s2 / s1)) {
-      flag = true
-      if (s0 == s2) result = Math.scalb(s0, 128)
-    } else if (Math.getExponent(s2) <= 53 - 1023) {
-      result = Math.scalb(s0, 128)
-    }
-    (result, flag)
+    val (d, n) = (Math.getExponent(s1) + 1023, Math.getExponent(s2) + 1023)
+    val result =
+      if (s1 == 0.0 || s2 == 0.0) Double.NaN
+      else if (s0.isNaN) s0
+      else if (n - d >= 768) if (s0 == s1) Math.scalb(s0, 128) else s0
+      else if (d == 0) Math.scalb(s0, 128)
+      else if (d >= 2045) if (s0 == s1 || n - d > -768) Math.scalb(s0, -128) else s0
+      else if (n - d <= -768) if (s0 == s2) Math.scalb(s0, 128) else s0
+      else if (n <= 54) Math.scalb(s0, 128)
+      else s0
+    (result, math.abs(n - d) >= 768)
   }
+
+  /** V_DIV_FMAS with its flag set, on finite operands: `a * b + c` exactly, scaled by 2^64, or 2^128 for binary64, up
+    * when `c`'s magnitude is at least one and down otherwise, then rounded once.
+    */
+  def divisionFusedMultiplyAdd(a: Double, b: Double, c: Double, width: Int): Long = {
+    val power = (if (math.abs(c) >= 1.0) 1 else -1) * (if (width == 64) 128 else 64)
+    val exact = java.math.BigDecimal(a).multiply(java.math.BigDecimal(b)).add(java.math.BigDecimal(c))
+    val value = if (power > 0) exact.multiply(java.math.BigDecimal(2).pow(power))
+    else exact.divide(java.math.BigDecimal(2).pow(-power))
+    if (exact.signum == 0) IEEE754.fromDouble(IEEE754.fma(a, b, c), if (width == 64) 64 else 32)
+    else if (width == 64) IEEE754.doubleToBinary64(value.doubleValue)
+    else IEEE754.floatToBinary32(value.floatValue).toLong
+  }
+
+  def flushedF32(value: Float): Float =
+    if (math.abs(value) < java.lang.Float.MIN_NORMAL) Math.copySign(0.0f, value) else value
+
+  /** The transcendental unit's binary32 `function` of a value. */
+  private def unit32(function: Long => Long, value: Float): Float =
+    IEEE754.binary32ToFloat(Bits.low32(function(IEEE754.floatToBinary32(value).toLong)))
+
+  /** V_RCP_F32, which reads and writes denormals as zeros of their sign whatever MODE says. */
+  def reciprocalF32(value: Float): Float           = unit32(TranscendentalUnit.reciprocal32, value)
+  def reciprocalSquareRootF32(value: Float): Float = unit32(TranscendentalUnit.reciprocalSquareRoot32, value)
 
   /** The VConvert lane formula: the stored dword, or register pair for the binary64 results, from the source's raw
     * bits; f64 sources arrive as a pair.
     */
   def convert(operation: VectorConvertOperation, source: Long, clamp: Boolean): Long = {
-    val raw                              = Bits.signed32(source)
-    val float32                          = IEEE754.binary32ToFloat(Bits.low32(source))
-    def float64: Double                  = IEEE754.binary64ToDouble(source)
-    def half: Float                      = IEEE754.binary16ToFloat(Bits.low16(source))
-    def writeFloat16(value: Float): Long = clampF16(IEEE754.floatToBinary16(value).toLong, clamp)
-    def writeFloat32(value: Float): Long =
+    val raw                                    = Bits.signed32(source)
+    val float32                                = IEEE754.binary32ToFloat(Bits.low32(source))
+    def float64: Double                        = IEEE754.binary64ToDouble(source)
+    def unit64(function: Long => Long): Double = IEEE754.binary64ToDouble(function(source))
+    def half: Float                            = IEEE754.binary16ToFloat(Bits.low16(source))
+    def writeFloat16(value: Float): Long       = clampF16(IEEE754.floatToBinary16(value).toLong, clamp)
+    def writeFloat32(value: Float): Long       =
       IEEE754.floatToBinary32(if (clamp) clampF32(value) else value).toLong
     def writeFloat64(value: Double): Long =
       IEEE754.doubleToBinary64(if (clamp) math.max(0.0, math.min(1.0, value)) else value)
     def toInteger(value: Double, width: Int in 1 ~ 64, signed: Boolean): Long =
       IEEE754.toIntegerSaturated(value, width, signed, IEEE754.Rounding.TowardZero)
+    // the binary32 transcendental unit reads denormals as zeros whatever MODE says
+    def transcendental: Float = flushedF32(float32)
+    // Math.getExponent gives every denormal the same exponent
+    def exponent(value: Double): Int =
+      if (value != 0.0 && math.abs(value) < java.lang.Double.MIN_NORMAL) Math.getExponent(Math.scalb(value, 64)) - 64
+      else Math.getExponent(value)
     operation match {
       case VectorConvertOperation.FrexpExponentF64 =>
         val value = float64
-        Bits.unsigned32(if (value == 0.0 || value.isNaN || value.isInfinite) 0 else Math.getExponent(value) + 1)
-          .toLong
+        Bits.unsigned32(if (value == 0.0 || value.isNaN || value.isInfinite) 0 else exponent(value) + 1).toLong
       case VectorConvertOperation.FrexpExponentF32 =>
         Bits.unsigned32(
-          if (float32 == 0.0f || float32.isNaN || float32.isInfinite) 0 else Math.getExponent(float32) + 1
+          if (float32 == 0.0f || float32.isNaN || float32.isInfinite) 0 else exponent(float32.toDouble) + 1
         ).toLong
       case VectorConvertOperation.FrexpMantissaF32 =>
         writeFloat32(
           if (float32 == 0.0f || float32.isNaN || float32.isInfinite) float32
-          else Math.scalb(float32, -Math.getExponent(float32) - 1)
+          else Math.scalb(float32.toDouble, -exponent(float32.toDouble) - 1).toFloat
         )
       case VectorConvertOperation.FrexpMantissaF64 =>
         val value = float64
         writeFloat64(
           if (value == 0.0 || value.isNaN || value.isInfinite) value
-          else Math.scalb(value, -Math.getExponent(value) - 1)
+          else Math.scalb(value, -exponent(value) - 1)
         )
-      case VectorConvertOperation.ReciprocalF32 => writeFloat32(1.0f / float32)
-      case VectorConvertOperation.ReciprocalF64 => writeFloat64(1.0 / float64)
+      case VectorConvertOperation.ReciprocalF32 => writeFloat32(reciprocalF32(float32))
+      case VectorConvertOperation.ReciprocalF64 => writeFloat64(unit64(TranscendentalUnit.reciprocal64))
       case VectorConvertOperation.TruncateF32   =>
         writeFloat32((if (float32 >= 0.0f) math.floor(float32.toDouble) else math.ceil(float32.toDouble)).toFloat)
       case VectorConvertOperation.FractionF32 =>
@@ -448,32 +572,37 @@ private object references {
         val value = float64
         writeFloat64(math.min(value - math.floor(value), Math.nextDown(1.0)))
       case VectorConvertOperation.RoundNearestEvenF64     => writeFloat64(Math.rint(float64))
-      case VectorConvertOperation.ReciprocalSquareRootF32 =>
-        writeFloat32((1.0 / math.sqrt(float32.toDouble)).toFloat)
-      case VectorConvertOperation.ReciprocalSquareRootF64 => writeFloat64(1.0 / math.sqrt(float64))
-      case VectorConvertOperation.SquareRootF32           => writeFloat32(math.sqrt(float32.toDouble).toFloat)
-      case VectorConvertOperation.ExponentBase2F32        => writeFloat32(math.pow(2.0, float32.toDouble).toFloat)
-      case trig @ (VectorConvertOperation.SineF32 | VectorConvertOperation.CosineF32) =>
+      case VectorConvertOperation.ReciprocalSquareRootF32 => writeFloat32(reciprocalSquareRootF32(float32))
+      case VectorConvertOperation.ReciprocalSquareRootF64 =>
+        writeFloat64(unit64(TranscendentalUnit.reciprocalSquareRoot64))
+      case VectorConvertOperation.SquareRootF32    => writeFloat32(unit32(TranscendentalUnit.squareRoot32, float32))
+      case VectorConvertOperation.ExponentBase2F32 => writeFloat32(unit32(TranscendentalUnit.powerOfTwo32, float32))
+      case trig @ (VectorConvertOperation.SineF32 | VectorConvertOperation.CosineF32 |
+          VectorConvertOperation.SineBoundedF32 | VectorConvertOperation.CosineBoundedF32) =>
         writeFloat32(trigF32(trig, float32))
       case VectorConvertOperation.LogarithmBase2F32 =>
-        writeFloat32((math.log(float32.toDouble) / math.log(2.0)).toFloat)
+        writeFloat32(unit32(TranscendentalUnit.logarithm32, float32))
       // Sea Islands ISA: clamped forms bound infinities to max_float, legacy ones give +0 for a zero and flush
       // infinities to zero
       case VectorConvertOperation.ReciprocalClampF32 =>
-        writeFloat32(math.max(-Float.MaxValue, math.min(Float.MaxValue, 1.0f / float32)))
+        writeFloat32(math.max(-Float.MaxValue, math.min(Float.MaxValue, reciprocalF32(float32))))
       case VectorConvertOperation.ReciprocalClampF64 =>
-        writeFloat64(math.max(-Double.MaxValue, math.min(Double.MaxValue, 1.0 / float64)))
+        writeFloat64(
+          math.max(-Double.MaxValue, math.min(Double.MaxValue, unit64(TranscendentalUnit.reciprocal64)))
+        )
       case VectorConvertOperation.ReciprocalSquareRootClampF32 =>
-        writeFloat32(math.max(-Float.MaxValue, math.min(Float.MaxValue, (1.0 / math.sqrt(float32.toDouble)).toFloat)))
+        writeFloat32(math.max(-Float.MaxValue, math.min(Float.MaxValue, reciprocalSquareRootF32(float32))))
       case VectorConvertOperation.ReciprocalSquareRootClampF64 =>
-        writeFloat64(math.max(-Double.MaxValue, math.min(Double.MaxValue, 1.0 / math.sqrt(float64))))
+        writeFloat64(
+          math.max(-Double.MaxValue, math.min(Double.MaxValue, unit64(TranscendentalUnit.reciprocalSquareRoot64)))
+        )
       case VectorConvertOperation.LogarithmClampF32 =>
-        writeFloat32(math.max(-Float.MaxValue, (math.log(float32.toDouble) / math.log(2.0)).toFloat))
+        writeFloat32(math.max(-Float.MaxValue, unit32(TranscendentalUnit.logarithm32, float32)))
       case VectorConvertOperation.ReciprocalLegacyF32 =>
-        val result = 1.0f / float32
-        writeFloat32(if (float32 == 0.0f) 0.0f else if (result.isInfinite) 0.0f * result.sign else result)
+        val result = reciprocalF32(float32)
+        writeFloat32(if (transcendental == 0.0f) 0.0f else if (result.isInfinite) 0.0f * result.sign else result)
       case VectorConvertOperation.ReciprocalSquareRootLegacyF32 =>
-        writeFloat32(if (float32 == 0.0f) 0.0f else (1.0 / math.sqrt(float32.toDouble)).toFloat)
+        writeFloat32(if (transcendental == 0.0f) 0.0f else reciprocalSquareRootF32(float32))
       case VectorConvertOperation.I32FromF32 => toInteger(float32.toDouble, 32, true)
       case VectorConvertOperation.U32FromF32 => toInteger(float32.toDouble, 32, false)
       case VectorConvertOperation.I32FromF64 => toInteger(float64, 32, true)
@@ -496,7 +625,7 @@ private object references {
       case VectorConvertOperation.F32FromU32        => writeFloat32(Integer.toUnsignedLong(raw).toFloat)
       case VectorConvertOperation.CeilF32           => writeFloat32(math.ceil(float32.toDouble).toFloat)
       case VectorConvertOperation.CeilF64           => writeFloat64(math.ceil(float64))
-      case VectorConvertOperation.SquareRootF64     => writeFloat64(math.sqrt(float64))
+      case VectorConvertOperation.SquareRootF64     => writeFloat64(unit64(TranscendentalUnit.squareRoot64))
       case VectorConvertOperation.FloorI32FromF32   => toInteger(math.floor(float32.toDouble), 32, true)
       case VectorConvertOperation.NearestI32FromF32 => toInteger(math.floor(float32.toDouble + 0.5), 32, true)
       case VectorConvertOperation.FrexpExponentF16  =>
@@ -537,7 +666,7 @@ private object references {
       case VectorConvertOperation.PairF32FromE5M2Fnuz =>
         eightBit(source, Minifloat.E5M2FNUZ) |
           (eightBit(source >>> 8, Minifloat.E5M2FNUZ) << 32)
-      case operation => writeFloat16(halfOperation(operation, half.toDouble).toFloat)
+      case operation => clampF16(IEEE754.doubleToBinary16(halfOperation(operation, half.toDouble)).toLong, clamp)
     }
   }
 
@@ -556,10 +685,14 @@ private object references {
     case VectorConvertOperation.ReciprocalF16           => 1.0 / x
     case VectorConvertOperation.ReciprocalSquareRootF16 => 1.0 / math.sqrt(x)
     case VectorConvertOperation.ExponentBase2F16        => math.pow(2.0, x)
-    case VectorConvertOperation.LogarithmBase2F16       => math.log(x) / math.log(2.0)
-    case VectorConvertOperation.SineF16                 => math.sin(2.0 * math.Pi * x)
-    case VectorConvertOperation.CosineF16               => math.cos(2.0 * math.Pi * x)
-    case VectorConvertOperation.FrexpMantissaF16        =>
+    case VectorConvertOperation.LogarithmBase2F16       => unit32(TranscendentalUnit.logarithm32, x.toFloat).toDouble
+    case VectorConvertOperation.SineF16                 => trigF32(VectorConvertOperation.SineF32, x.toFloat).toDouble
+    case VectorConvertOperation.CosineF16               => trigF32(VectorConvertOperation.CosineF32, x.toFloat).toDouble
+    case VectorConvertOperation.SineBoundedF16          =>
+      trigF32(VectorConvertOperation.SineBoundedF32, x.toFloat).toDouble
+    case VectorConvertOperation.CosineBoundedF16 =>
+      trigF32(VectorConvertOperation.CosineBoundedF32, x.toFloat).toDouble
+    case VectorConvertOperation.FrexpMantissaF16 =>
       if (x == 0.0 || x.isNaN || x.isInfinite) x else Math.scalb(x, -Math.getExponent(x) - 1)
     case other => throw IllegalArgumentException(s"$other is no binary16 operation")
   }
@@ -683,7 +816,9 @@ private object references {
       case DualVectorOperation.And32              => a & b
       case DualVectorOperation.MultiplyLegacyF32  =>
         if ((a & 0x7fffffffL) == 0L || (b & 0x7fffffffL) == 0L) 0L else bits(float(a) * float(b))
-      case DualVectorOperation.DotHalvesF32   => dot2F32F16(a, b, addend, accumulate = true).toLong
+      case DualVectorOperation.DotHalvesF32        => dot2F32F16(a, b, addend).toLong
+      case DualVectorOperation.DotAlignedHalvesF32 =>
+        toRaw(Dots.halvesToFloatAligned(fromRaw[UInt[32]](a), fromRaw[UInt[32]](b), fromRaw[Float32](addend)))
       case DualVectorOperation.DotBFloat16F32 =>
         def bfloat(value: Long): Float = float((value & 0xffffL) << 16)
         bits(IEEE754.fma(bfloat(a), bfloat(b), bfloat(a >>> 16) * bfloat(b >>> 16)) + float(addend))

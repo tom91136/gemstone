@@ -20,6 +20,9 @@ class LegacyVideoSuite extends munit.FunSuite {
   private val Sms    = Vec(50, 60)
   private val Spaces = Vec("shared", "global")
 
+  // ptxas's cvta.shared takes the high word of a generic shared address from c0[0x100] on Pascal and zero on Maxwell
+  private def sharedHigh(sm: Int): String = if (sm < 60) "RZ" else "c[0x0][0x100]"
+
   private def run(sm: Int, body: String, expected: Long)(using munit.Location): Unit =
     check(
       sm,
@@ -75,7 +78,7 @@ class LegacyVideoSuite extends munit.FunSuite {
   for (target <- Spaces)
     test(s"sm_50 generic RED and ATOMS paths behind the shared window test reach a $target counter") {
       val low  = if (target == "shared") "c[0x0][0x0]" else "c[0x0][0x160]"
-      val high = if (target == "shared") "c[0x0][0x4]" else "c[0x0][0x164]"
+      val high = if (target == "shared") sharedHigh(50) else "c[0x0][0x164]"
       check(
         50,
         "S2R R0, SR_TID.X; ISETP.NE.AND P1, PT, R0, RZ, PT; @!P1 STS [RZ], RZ; MOV32I R6, 0x7; @!P1 MOV R9, RZ; " +
@@ -151,7 +154,7 @@ class LegacyVideoSuite extends munit.FunSuite {
   }
     test(s"sm_$sm the shared window test reads its high word from an unpaired register for a $target counter") {
       val low  = if (target == "shared") "c[0x0][0x0]" else "c[0x0][0x160]"
-      val high = if (target == "shared") "c[0x0][0x4]" else "c[0x0][0x164]"
+      val high = if (target == "shared") sharedHigh(sm) else "c[0x0][0x164]"
       check(
         sm,
         "S2R R0, SR_TID.X; ISETP.NE.AND P1, PT, R0, RZ, PT; @!P1 STS [RZ], RZ; MOV32I R6, 0x7; @!P1 MOV R9, RZ; " +

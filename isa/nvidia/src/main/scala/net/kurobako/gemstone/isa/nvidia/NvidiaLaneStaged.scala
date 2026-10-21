@@ -58,6 +58,7 @@ private[isa] object NvidiaLaneStaged {
           rightSigned,
           negateProduct,
           negateAddend,
+          addendSigned,
           plusOne,
           shift,
           saturate
@@ -70,6 +71,7 @@ private[isa] object NvidiaLaneStaged {
         rightSigned,
         negateProduct,
         negateAddend,
+        addendSigned,
         plusOne,
         shift,
         saturate
@@ -158,6 +160,8 @@ private[isa] object NvidiaLaneStaged {
       IntegerSemantics.convertFromFloat8(algebra, format)(sinks, destination, source)
     case Instruction.SpaceTest(destination, address, space) =>
       IntegerSemantics.spaceTest(algebra, space)(sinks, destination, address)
+    case Instruction.PackedSaturatingAdd(destination, left, right, lanes, negate) =>
+      IntegerSemantics.packedSaturatingAdd(algebra, lanes, negate)(sinks, destination, left, right)
     case Instruction.FindNthSet(destination, mask, base, offset) =>
       IntegerSemantics.findNthSet(algebra)(sinks, destination, mask, base, offset)
     case Instruction.VideoSimd(
@@ -171,7 +175,9 @@ private[isa] object NvidiaLaneStaged {
           rightSigned,
           resultSigned,
           saturate,
-          accumulate
+          accumulate,
+          leftElements,
+          rightElements
         ) =>
       IntegerSemantics.simd(
         algebra,
@@ -181,7 +187,9 @@ private[isa] object NvidiaLaneStaged {
         rightSigned,
         resultSigned,
         saturate,
-        accumulate
+        accumulate,
+        leftElements,
+        rightElements
       )(
         sinks,
         destination,

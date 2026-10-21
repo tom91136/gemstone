@@ -7,8 +7,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 
-/** Hardware probe results replayed through the instructions the hardware ran, with each lane's registers from v2 on set
-  * as the probe's loads set them.
+/** Hardware probe results replayed through the instructions the hardware ran, with each lane's registers set as the
+  * probe's loads set them. The lanes' addressing lives in v255 and s[100:101], which no probe op touches.
   */
 private object hardwareGolden extends munit.Assertions {
 
@@ -28,7 +28,7 @@ private object hardwareGolden extends munit.Assertions {
   // `2=0>16&ffffs`: v2 holds word 0 shifted right by 16, masked to 0xffff and sign-extended
   private val LoadSpec = raw"(\d+)=(\d+)(?:>(\d+))?(?:&([0-9a-f]+))?(s?)".r
 
-  private def loads(spec: String): Vec[Load] = Vec.from(spec.split(' ').map {
+  private def loads(spec: String): Vec[Load] = Vec.from(spec.split(' ').filter(_.nonEmpty).map {
     case LoadSpec(register, word, shift, mask, signed) =>
       Load(
         register.toInt,
@@ -40,10 +40,13 @@ private object hardwareGolden extends munit.Assertions {
     case other => fail(s"bad load $other")
   })
 
+  private def first(spec: Vec[Load]): Int = spec.map(_.register).minOption.getOrElse(2)
+
   private def registers(spec: Vec[Load], inputs: Vec[Long]): Vec[Long] = {
-    val top = spec.map(_.register).max
-    Vec.tabulate(top - 1) { index =>
-      spec.find(_.register == index + 2).fold(0L) { load =>
+    val low = first(spec)
+    val top = spec.map(_.register).maxOption.getOrElse(low - 1)
+    Vec.tabulate(top - low + 1) { index =>
+      spec.find(_.register == index + low).fold(0L) { load =>
         val value = (inputs(load.word) >>> load.shift) & load.mask
         val width = java.lang.Long.bitCount(load.mask).unsafe[Int in 1 ~ 64]
         if (load.signed) Bits.signExtend(value, width) & 0xffffffffL else value
@@ -59,14 +62,32 @@ private object hardwareGolden extends munit.Assertions {
       spec: String,
       outputs: String,
       expected: Vec[Vec[Long]],
-      texts: Vec[String]
+      texts: Vec[String],
+      computePgmRsrc1: Int
   )(using munit.Location): Unit = {
     val load    = loads(spec)
-    val program = laneRuns.program(target, octets(code))
     val lanes   = inputs.map(registers(load, _))
+    val prefix  = 3 + lanes.map(_.size).maxOption.getOrElse(0)
+    val program = VMCompiler
+      .decodeProgram(octets(code), target, (if (wave32) 32 else 64).unsafe[Int in (32, 64)])
+      .fold(error => fail(error.raw), _.operations)
+      .map {
+        case Instruction.Branch(condition, at) => Instruction.Branch(condition, at + prefix)
+        case other                             => other
+      }
     val stored  = Vec.from(outputs.split(' ').map(_.toInt))
     val results = stored.map(register =>
-      laneResults(target, lanes, program, register.unsafe[VectorRegisterIndex], wave32 = wave32)
+      laneResults(
+        target,
+        lanes,
+        program,
+        register.unsafe[VectorRegisterIndex],
+        wave32 = wave32,
+        computePgmRsrc1 = computePgmRsrc1,
+        first = first(load).unsafe[VectorRegisterIndex],
+        offset = 255,
+        base = 100
+      )
     )
     val produced = Vec.tabulate(inputs.size)(lane => results.map(_(lane)))
     val wrong    = inputs.indices.filter(lane => produced(lane) != expected(lane))
@@ -78,22 +99,27 @@ private object hardwareGolden extends munit.Assertions {
       )
   }
 
-  def check(target: Target, wave32: Boolean, golden: Golden)(using munit.Location): Unit = {
+  /** The probe kit's kernels as the compiler described them: IEEE mode, DX10 clamping, and FLOAT_DENORM_MODE_32 and
+    * _16_64 from `denormals`.
+    */
+  def descriptor(denormals: Int): Int = (1 << 23) | (1 << 21) | (denormals << 16)
+
+  def check(target: Target, wave32: Boolean, golden: Golden, computePgmRsrc1: Int)(using munit.Location): Unit = {
     val rows              = Vec.from(golden.rows.stripMargin.linesIterator.map(_.trim).filter(_.nonEmpty))
     val (inputs, outputs) = rows.map { row =>
       val arrow = row.indexOf("->")
       words(row.take(arrow)) -> words(row.drop(arrow + 2))
     }.unzip
-    run(target, wave32, inputs, golden.code, golden.loads, golden.outputs, outputs, rows)
+    run(target, wave32, inputs, golden.code, golden.loads, golden.outputs, outputs, rows, computePgmRsrc1)
   }
 
-  def check(target: Target, lanes: String, op: WaveOp)(using munit.Location): Unit = {
+  def check(target: Target, lanes: String, op: WaveOp, computePgmRsrc1: Int)(using munit.Location): Unit = {
     val inputs   = Vec.from(lanes.stripMargin.linesIterator.map(_.trim).filter(_.nonEmpty)).map(words(_))
     val count    = op.outputs.split(' ').length
     val expected = words(op.results).grouped(count).toVec
     val texts    = inputs.zip(expected).map((in, out) =>
       s"${in.map(word => f"$word%08x").mkString(" ")} -> ${out.map(word => f"$word%08x").mkString(" ")}"
     )
-    run(target, wave32 = false, inputs, op.code, op.loads, op.outputs, expected, texts)
+    run(target, wave32 = false, inputs, op.code, op.loads, op.outputs, expected, texts, computePgmRsrc1)
   }
 }

@@ -77,9 +77,9 @@ class MatrixSuite extends munit.FunSuite {
           Scenario(column, row, "%matrix", flatten(x.map(p => y.map(p * _))), binary("OpOuterProduct", "%matrix"))
         case "indexed" =>
           // Matrices are vectors of boxed doubles, so updating a cell boxes it.
-          @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+          @SuppressWarnings(Array("baumkuchen:loop-boxing"))
           val changed = a.updated(rows - 1, a.last.updated(columns - 1, x.last))
-          @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+          @SuppressWarnings(Array("baumkuchen:loop-boxing"))
           val stored = changed.zip(x).map(_.updated(0, _))
           Scenario(
             matrix,
@@ -124,7 +124,7 @@ class MatrixSuite extends munit.FunSuite {
       val inverse =
         Vector.tabulate(size, size)((r, c) => if (r == c) 0.5 else if (r < c) -Math.pow(0.5, c - r + 1) else 0.0)
       // Matrices are vectors of boxed doubles, so swapping columns boxes the cells.
-      @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
+      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val expected = flatten(if (swapped) inverse.map(row => row.updated(0, row(1)).updated(1, row(0))) else inverse)
       val actual   = shader(
         width,

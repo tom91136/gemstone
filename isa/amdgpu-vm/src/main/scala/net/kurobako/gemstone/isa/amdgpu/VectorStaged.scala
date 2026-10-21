@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import FloatPrimitives.*
 import FloatSemantics.*
 import IntegerSemantics.*
 import VMIR.*
@@ -24,7 +25,13 @@ private object VectorStaged {
       sinks.section(
         vectorTernary(algebra, operation, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(
           sinks.scaled(dest, srcA, srcB, srcC, modifiers)((a, b, c, scaled) =>
-            algebra.divisionFusedMultiplyAdd(32, a, b, c, scaled)
+            algebra.flushedTernary(
+              sinks.modeRegister,
+              32,
+              a,
+              b,
+              c
+            )(algebra.divisionFusedMultiplyAdd(32, _, _, _, scaled))
           )
         )
       )

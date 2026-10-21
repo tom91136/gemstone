@@ -219,13 +219,18 @@ private object VMTensorCompiler {
     if (instruction.guard.nonEmpty) unsupported("predicated HMMA.884 is not implemented")
     if (sm != 70 && sm != 75) unsupported(s"HMMA.884 requires sm_70 or sm_75, found sm_$sm")
     requireOperands(4, "HMMA.884 requires destination, A fragment, B fragment and accumulator")
-    val (slots, accumulator, step) = (modifiers match {
+    // the D and C types; each step writes a pair of D registers and reads the pair of C registers it names, which the
+    // f16 C of an f32 D shares between two steps
+    val (slots, accumulator, addendSlots, addendElement, step) = (modifiers match {
       case Vec(Modifier.`884`, Modifier.F32, Modifier.F32, value) =>
-        stepNumber(value).filter(_ <= 3).map((8, Element.F32, _))
+        stepNumber(value).filter(_ <= 3).map((8, Element.F32, 8, Element.F32, _))
+      case Vec(Modifier.`884`, Modifier.F32, Modifier.F16, value) =>
+        stepNumber(value).filter(_ <= 3).map((8, Element.F32, 4, Element.F16, _))
       case Vec(Modifier.`884`, Modifier.F16, Modifier.F16, value) =>
-        stepNumber(value).filter(_ <= 1).map((4, Element.F16, _))
+        stepNumber(value).filter(_ <= 1).map((4, Element.F16, 4, Element.F16, _))
       case _ => None
     }).getOrElse(unsupported(s"unsupported HMMA.884 modifiers ${modifiers.mkString(".")}"))
+    val addendPair = if (addendSlots < slots) step / 2 * 2 else step * 2
     if (!bareRegister(operands.head)) unsupported("unsupported HMMA.884 destination")
     val destination = registerBase(operands.head, "HMMA.884 destination")
     if (destination.index > 253)
@@ -235,26 +240,25 @@ private object VMTensorCompiler {
     if (!bareRegisterOrZero(operands(3))) unsupported("unsupported HMMA.884 accumulator")
     val zero = temp()
     emit(Move(zero.slot, Value.Immediate(0L), 32))
-    val addend = Vec.tabulate(slots) { index =>
-      if (index >= step * 2 && index < step * 2 + 2 && !OperandQueries.isZero(operands(3)))
-        source(offsetRegister(operands(3), index - step * 2))
+    val addend = Vec.tabulate(addendSlots) { index =>
+      if (index >= addendPair && index < addendPair + 2 && !OperandQueries.isZero(operands(3)))
+        source(offsetRegister(operands(3), index - addendPair))
       else zero
     }
     def pair(base: Operand.Register) = Vec(source(base), source(offsetRegister(base, 1)))
     val shape                        = Shape(8, 8, 4)
-    val c                            = Fragment(shape, Role.C, accumulator, wmma = false)
     emit(Tensor(Operation.Multiply(
       Fragment(shape, Role.A, Element.F16, wmma = false, leftColumnMajor),
       Fragment(shape, Role.B, Element.F16, wmma = false, rightColumnMajor),
-      c,
-      c,
+      Fragment(shape, Role.C, addendElement, wmma = false),
+      Fragment(shape, Role.C, accumulator, wmma = false),
       Vec.tabulate(slots)(index =>
         if (index / 2 == step) context.destination(destination, index % 2).slot else temp().slot
       ),
       pair(leftBase),
       pair(rightBase),
       addend,
-      Matrix.accumulation(sm, shape, Element.F16, accumulator, ConversionRounding.RN)
+      Matrix.accumulation(sm, shape, Element.F16, Matrix.accumulator(addendElement, accumulator), ConversionRounding.RN)
     )))
   }
 

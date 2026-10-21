@@ -115,7 +115,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         "DS permute",
         Target("gfx1036"),
         Vec(0x00, 0x00, 0xc8, 0xda, 0x01, 0x02, 0x00, 0x05),
-        Instruction.DSPermute(5, 1, 2, 0)
+        Instruction.DSPermute(5, 1, 2, 0, halves = true)
       )
     )
   ) test(s"$target decodes $name") {

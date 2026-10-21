@@ -343,7 +343,16 @@ object OperandParser {
     private def absolute(): Operand = {
       val value = operand()
       expect('|')
-      Operand.Unary(value, negative = false, not = false, absolute = true)
+      // `|R2|.H0_H0`, as cuobjdump prints it, is the operand `|R2.H0_H0|`
+      val selectors = dottedSuffixes()
+      val inner     =
+        if (selectors.isEmpty) value
+        else
+          value match {
+            case Operand.Qualified(_, _) => fail("selectors inside or after an absolute value, not both")
+            case _                       => Operand.Qualified(value, OperandSelector.fromSpellings(selectors))
+          }
+      Operand.Unary(inner, negative = false, not = false, absolute = true)
     }
 
     private def address(): Operand = {

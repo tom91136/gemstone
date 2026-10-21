@@ -328,6 +328,9 @@ private object VMIR {
     case ReciprocalClampF32, ReciprocalClampF64, ReciprocalSquareRootClampF32, ReciprocalSquareRootClampF64
     case LogarithmClampF32, ReciprocalLegacyF32, ReciprocalSquareRootLegacyF32
 
+    /** GFX8's sine and cosine, which give +0 and 1 for finite operands beyond 256 turns. */
+    case SineBoundedF32, CosineBoundedF32, SineBoundedF16, CosineBoundedF16
+
     /** One 8-bit float, or two from the low word as a binary32 pair, in CDNA3's FNUZ or the OCP formats. */
     case F32FromE4M3, F32FromE5M2, F32FromE4M3Fnuz, F32FromE5M2Fnuz
     case PairF32FromE4M3, PairF32FromE5M2, PairF32FromE4M3Fnuz, PairF32FromE5M2Fnuz
@@ -348,7 +351,7 @@ private object VMIR {
   enum DualVectorOperation derives CanEqual {
     case Move, AddF32, SubtractF32, ReverseSubtractF32, MultiplyF32, FmaF32, MinimumF32, MaximumF32
     case ConditionalMask, AddU32, ShiftLeft32, And32
-    case MultiplyLegacyF32, DotHalvesF32, DotBFloat16F32
+    case MultiplyLegacyF32, DotHalvesF32, DotAlignedHalvesF32, DotBFloat16F32
     case SubtractU32, MinimumI32, MaximumI32, ShiftRight32, ShiftRightArithmetic32
     case AddF64, MultiplyF64, FmaF64, MinimumF64, MaximumF64, BitOperation2
 
@@ -484,7 +487,10 @@ private object VMIR {
     case SignedNibbles   extends DotOperation(4, signed = true)
     case UnsignedNibbles extends DotOperation(4, signed = false)
     case Halves          extends DotOperation(16, signed = false)
-    case BFloat16Halves  extends DotOperation(16, signed = false)
+
+    /** V_DOT2_F32_F16 on RDNA3 and RDNA3.5, which sums through a fixed-point accumulator as [[Dots]] describes. */
+    case AlignedHalves  extends DotOperation(16, signed = false)
+    case BFloat16Halves extends DotOperation(16, signed = false)
 
     case MixedBytes(signedA: Boolean, signedB: Boolean)         extends DotOperation(8, signed = true)
     case MixedNibbles(signedA: Boolean, signedB: Boolean)       extends DotOperation(4, signed = true)
@@ -1067,7 +1073,8 @@ private object VMIR {
     )
 
     /** Packed 16-bit halves, each source's half for each result half picked by OP_SEL and OP_SEL_HI; `clamp` saturates
-      * integer results and clamps float results to [0, 1].
+      * integer results and clamps float results to [0, 1]. `negateLow` and `negateHigh` negate the halves of the
+      * sources their bits name.
       */
     case VPackedBinary(
         operation: VectorPackedBinaryOperation,
@@ -1078,7 +1085,9 @@ private object VMIR {
         srcBHighForHigh: Boolean,
         srcAHighForLow: Boolean = false,
         srcBHighForLow: Boolean = false,
-        clamp: Boolean = false
+        clamp: Boolean = false,
+        negateLow: Int = 0,
+        negateHigh: Int = 0
     )
 
     /** Packs the binary16 halves `opSelection` picks (bit `i` takes source `i`'s high half). */
@@ -1411,12 +1420,17 @@ private object VMIR {
 
     /** `access`, then the TFE status dword, zero as no access faults, in `status`. */
     case WithStatus(access: Instruction, status: VectorRegisterIndex)
+
+    /** DS_PERMUTE and DS_BPERMUTE; with `halves`, as GFX10 onwards has them, an address names a lane of the 32-lane
+      * half its lane is in.
+      */
     case DSPermute(
         dest: VectorRegisterIndex,
         address: VectorRegisterIndex,
         src: VectorRegisterIndex,
         offset: Int,
-        bank: RegisterBank = RegisterBank.Vector
+        bank: RegisterBank = RegisterBank.Vector,
+        halves: Boolean = false
     )
     case DSBPermute(
         dest: VectorRegisterIndex,
@@ -1424,7 +1438,8 @@ private object VMIR {
         src: VectorRegisterIndex,
         offset: Int,
         bank: RegisterBank = RegisterBank.Vector,
-        fetchInactive: Boolean = false
+        fetchInactive: Boolean = false,
+        halves: Boolean = false
     )
     case DSSwizzle(
         dest: VectorRegisterIndex,

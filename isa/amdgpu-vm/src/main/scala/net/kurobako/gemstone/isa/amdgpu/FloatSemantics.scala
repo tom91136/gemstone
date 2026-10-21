@@ -25,21 +25,21 @@ private object FloatSemantics {
       modifiers: SourceModifiers
   )(otherwise: => R): R = operation match {
     case VectorBinaryOperation.AddF32 => sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))(
-        (a, b, _) => algebra.singleOperation(clamp, a, b)(Floats.add)
+        (a, b, _) => algebra.flushedSingle(sinks.modeRegister, clamp, a, b)(Floats.add)
       )
     case VectorBinaryOperation.SubtractF32 => sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))(
-        (a, b, _) => algebra.singleOperation(clamp, a, b)(Floats.sub)
+        (a, b, _) => algebra.flushedSingle(sinks.modeRegister, clamp, a, b)(Floats.sub)
       )
     case VectorBinaryOperation.SubtractReverseF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.singleOperation(clamp, b, a)(Floats.sub)
+        algebra.flushedSingle(sinks.modeRegister, clamp, b, a)(Floats.sub)
       )
     case VectorBinaryOperation.MultiplyF32 => sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))(
-        (a, b, _) => algebra.singleOperation(clamp, a, b)(Floats.mul)
+        (a, b, _) => algebra.flushedSingle(sinks.modeRegister, clamp, a, b)(Floats.mul)
       )
     case VectorBinaryOperation.MultiplyLegacyF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.singleOperation(clamp, a, b)(Floats.mulLegacyF32)
+        algebra.flushedSingle(sinks.modeRegister, clamp, a, b)(Floats.mulLegacyF32)
       )
     case VectorBinaryOperation.MinimumF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
@@ -59,11 +59,17 @@ private object FloatSemantics {
       )
     case VectorBinaryOperation.MultiplyAccumulateF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, d) =>
-        algebra.addSingle(algebra.multiplySingle(a, b), d)
+        algebra.flushedTernary(sinks.modeRegister, 32, a, b, d)((x, y, z) =>
+          algebra.addSingle(algebra.multiplySingle(x, y), z)
+        )
       )
     case VectorBinaryOperation.LoadExponentF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.saturated(clamp, algebra.loadExponent(a, b, 32), 32)
+        algebra.saturated(
+          clamp,
+          algebra.flushedUnary(sinks.modeRegister, 32, a)(x => algebra.loadExponent(x, b, 32)),
+          32
+        )
       )
     case VectorBinaryOperation.MinimumF16 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
@@ -90,21 +96,25 @@ private object FloatSemantics {
         algebra.saturated(clamp, algebra.maximumPropagate(a, b, 16), 16)
       )
     case VectorBinaryOperation.AddF16 => sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))(
-        (a, b, _) => algebra.halfOperation(clamp, a, b)(Floats.add)
+        (a, b, _) => algebra.flushedHalf(sinks.modeRegister, clamp, a, b)(Floats.add)
       )
     case VectorBinaryOperation.MultiplyF16 => sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))(
-        (a, b, _) => algebra.halfOperation(clamp, a, b)(Floats.mul)
+        (a, b, _) => algebra.flushedHalf(sinks.modeRegister, clamp, a, b)(Floats.mul)
       )
     case VectorBinaryOperation.FusedMultiplyAccumulateF16 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, d) =>
-        algebra.saturated(clamp, algebra.fusedMultiplyAdd(a, b, d, 16), 16)
+        algebra.saturated(
+          clamp,
+          algebra.flushedTernary(sinks.modeRegister, 16, a, b, d)(algebra.fusedMultiplyAdd(_, _, _, 16)),
+          16
+        )
       )
     case VectorBinaryOperation.SubtractF16 => sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))(
-        (a, b, _) => algebra.halfOperation(clamp, a, b)(Floats.sub)
+        (a, b, _) => algebra.flushedHalf(sinks.modeRegister, clamp, a, b)(Floats.sub)
       )
     case VectorBinaryOperation.SubtractReverseF16 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.halfOperation(clamp, b, a)(Floats.sub)
+        algebra.flushedHalf(sinks.modeRegister, clamp, b, a)(Floats.sub)
       )
     case VectorBinaryOperation.PackRoundTowardZeroF16 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
@@ -113,7 +123,13 @@ private object FloatSemantics {
     // the exponent is a signed 16-bit integer
     case VectorBinaryOperation.LoadExponentF16 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.saturated(clamp, algebra.primitive(a, b)(Floats.ldexp(_: Float16, _: SInt[16])), 16)
+        algebra.saturated(
+          clamp,
+          algebra.flushedUnary(sinks.modeRegister, 16, a)(x =>
+            algebra.primitive(x, b)(Floats.ldexp(_: Float16, _: SInt[16]))
+          ),
+          16
+        )
       )
     case _ => otherwise
   }
@@ -126,11 +142,17 @@ private object FloatSemantics {
       srcB: InstructionSource
   ): R = operation match {
     case ScalarFloatOperation.AddF16 =>
-      sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.halfOperation(clamp = false, a, b)(Floats.add))
+      sinks.scalarDword(dest, srcA, srcB)((a, b, _) =>
+        algebra.flushedHalf(sinks.modeRegister, clamp = false, a, b)(Floats.add)
+      )
     case ScalarFloatOperation.SubtractF16 =>
-      sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.halfOperation(clamp = false, a, b)(Floats.sub))
+      sinks.scalarDword(dest, srcA, srcB)((a, b, _) =>
+        algebra.flushedHalf(sinks.modeRegister, clamp = false, a, b)(Floats.sub)
+      )
     case ScalarFloatOperation.MultiplyF16 =>
-      sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.halfOperation(clamp = false, a, b)(Floats.mul))
+      sinks.scalarDword(dest, srcA, srcB)((a, b, _) =>
+        algebra.flushedHalf(sinks.modeRegister, clamp = false, a, b)(Floats.mul)
+      )
     case ScalarFloatOperation.MinimumF16 =>
       sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.minimumNumber(a, b, 16))
     case ScalarFloatOperation.MaximumF16 =>
@@ -258,73 +280,37 @@ private object FloatSemantics {
       modifiers: SourceModifiers
   ): R = operation match {
     case VectorConvertOperation.FrexpExponentF64 =>
-      sinks.narrowingUnary(dest, src, modifiers)(a => algebra.frexpExponent(a, 64))
+      sinks.narrowingUnary(dest, src, modifiers)(a =>
+        algebra.frexpExponent(algebra.denormalInput(sinks.modeRegister, a, 64), 64)
+      )
     case VectorConvertOperation.FrexpExponentF32 =>
-      sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.frexpExponent(a, 32))
-    case VectorConvertOperation.FrexpMantissaF32 =>
       sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-        algebra.saturated(
-          clamp,
-          algebra.primitive(a)(Floats.frexpMant(_: Float32)),
-          32
-        )
+        algebra.frexpExponent(algebra.denormalInput(sinks.modeRegister, a, 32), 32)
       )
+    case VectorConvertOperation.FrexpMantissaF32 =>
+      single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.frexpMant(_: Float32))
     case VectorConvertOperation.FrexpMantissaF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(
-          clamp,
-          algebra.primitive(a)(Floats.frexpMant(_: Float64)),
-          64
-        )
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.frexpMant(_: Float64))
     case VectorConvertOperation.ReciprocalF32 =>
       sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.reciprocal(clamp, a))
     case VectorConvertOperation.ReciprocalF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(clamp, algebra.primitive(a)(Floats.rcp(_: Float64)), 64)
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.rcp(_: Float64))
     case VectorConvertOperation.TruncateF32 =>
-      sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.saturated(clamp, algebra.truncateSingle(a), 32))
+      single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.trunc(_: Float32))
     case VectorConvertOperation.FractionF32 =>
-      sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-        algebra.saturated(
-          clamp,
-          algebra.primitive(a)(Floats.fract(_: Float32)),
-          32
-        )
-      )
+      single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.fract(_: Float32))
     case VectorConvertOperation.FloorF32 =>
-      sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-        algebra.saturated(clamp, algebra.primitive(a)(Floats.floor(_: Float32)), 32)
-      )
+      single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.floor(_: Float32))
     case VectorConvertOperation.RoundNearestEvenF32 =>
-      sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-        algebra.saturated(clamp, algebra.primitive(a)(Floats.rndne(_: Float32)), 32)
-      )
+      single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.rndne(_: Float32))
     case VectorConvertOperation.TruncateF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(
-          clamp,
-          algebra.primitive(a)(Floats.trunc(_: Float64)),
-          64
-        )
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.trunc(_: Float64))
     case VectorConvertOperation.FloorF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(clamp, algebra.primitive(a)(Floats.floor(_: Float64)), 64)
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.floor(_: Float64))
     case VectorConvertOperation.FractionF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(
-          clamp,
-          algebra.primitive(a)(Floats.fract(_: Float64)),
-          64
-        )
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.fract(_: Float64))
     case VectorConvertOperation.RoundNearestEvenF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(clamp, algebra.primitive(a)(Floats.rndne(_: Float64)), 64)
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.rndne(_: Float64))
     case VectorConvertOperation.ReciprocalSquareRootF32 =>
       sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
         algebra.saturated(
@@ -334,9 +320,7 @@ private object FloatSemantics {
         )
       )
     case VectorConvertOperation.ReciprocalSquareRootF64 =>
-      sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-        algebra.saturated(clamp, algebra.primitive(a)(Floats.rsq(_: Float64)), 64)
-      )
+      double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.rsq(_: Float64))
     case VectorConvertOperation.SquareRootF32 =>
       sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
         algebra.saturated(clamp, algebra.primitive(a)(Floats.sqrt(_: Float32)), 32)
@@ -348,37 +332,25 @@ private object FloatSemantics {
     case _ =>
       sinks.section(operation match {
         case VectorConvertOperation.SineF32 =>
-          sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-            algebra.saturated(
-              clamp,
-              algebra.primitive(a)(Floats.sin(_: Float32)),
-              32
-            )
-          )
+          single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.sin(_: Float32))
         case VectorConvertOperation.CosineF32 =>
-          sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-            algebra.saturated(
-              clamp,
-              algebra.primitive(a)(Floats.cos(_: Float32)),
-              32
-            )
-          )
+          single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.cos(_: Float32))
+        case VectorConvertOperation.SineBoundedF32 =>
+          single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.sinBounded(_: Float32))
+        case VectorConvertOperation.CosineBoundedF32 =>
+          single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.cosBounded(_: Float32))
         case VectorConvertOperation.ReciprocalClampF32 =>
           sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
             algebra.saturated(clamp, algebra.primitive(a)(Floats.rcpClamp(_: Float32)), 32)
           )
         case VectorConvertOperation.ReciprocalClampF64 =>
-          sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-            algebra.saturated(clamp, algebra.primitive(a)(Floats.rcpClamp(_: Float64)), 64)
-          )
+          double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.rcpClamp(_: Float64))
         case VectorConvertOperation.ReciprocalSquareRootClampF32 =>
           sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
             algebra.saturated(clamp, algebra.primitive(a)(Floats.rsqClamp(_: Float32)), 32)
           )
         case VectorConvertOperation.ReciprocalSquareRootClampF64 =>
-          sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-            algebra.saturated(clamp, algebra.primitive(a)(Floats.rsqClamp(_: Float64)), 64)
-          )
+          double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.rsqClamp(_: Float64))
         case VectorConvertOperation.LogarithmClampF32 =>
           sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
             algebra.saturated(clamp, algebra.primitive(a)(Floats.logClampF32), 32)
@@ -429,15 +401,17 @@ private object FloatSemantics {
           )
         case VectorConvertOperation.F32FromF64 =>
           sinks.narrowingUnary(dest, src, modifiers)(a =>
-            algebra.saturated(clamp, algebra.primitive(a)(Floats.cvtF32F64), 32)
+            algebra.saturated(clamp, algebra.converted(sinks.modeRegister, 64, 32, a)(Floats.cvtF32F64), 32)
           )
         case VectorConvertOperation.F32FromF16 =>
-          sinks.modifiedUnary(dest, src, modifiers, 16)(a => algebra.saturated(clamp, algebra.halfToSingle(a), 32))
+          sinks.modifiedUnary(dest, src, modifiers, 16)(a =>
+            algebra.saturated(clamp, algebra.converted(sinks.modeRegister, 16, 32, a)(Floats.cvtF32F16), 32)
+          )
         case _ =>
           sinks.section(operation match {
             case VectorConvertOperation.F16FromF32 =>
               sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-                algebra.saturated(clamp, algebra.singleToHalf(a), 16)
+                algebra.saturated(clamp, algebra.converted(sinks.modeRegister, 32, 16, a)(Floats.cvtF16F32), 16)
               )
             case VectorConvertOperation.I16FromF16 =>
               sinks.modifiedUnary(dest, src, modifiers, 16)(a =>
@@ -453,7 +427,7 @@ private object FloatSemantics {
               )
             case VectorConvertOperation.F64FromF32 =>
               sinks.wideningUnary(dest, src, modifiers)(a =>
-                algebra.saturated(clamp, algebra.primitive(a)(Floats.cvtF64F32), 64)
+                algebra.saturated(clamp, algebra.converted(sinks.modeRegister, 32, 64, a)(Floats.cvtF64F32), 64)
               )
             case VectorConvertOperation.F32FromI32 =>
               sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
@@ -464,19 +438,15 @@ private object FloatSemantics {
                 algebra.saturated(clamp, algebra.unsignedToSingle(a), 32)
               )
             case VectorConvertOperation.CeilF32 =>
-              sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
-                algebra.saturated(clamp, algebra.primitive(a)(Floats.ceil(_: Float32)), 32)
-              )
+              single(algebra, clamp)(sinks, dest, src, modifiers)(Floats.ceil(_: Float32))
             case VectorConvertOperation.CeilF64 =>
-              sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-                algebra.saturated(clamp, algebra.primitive(a)(Floats.ceil(_: Float64)), 64)
-              )
+              double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.ceil(_: Float64))
             case VectorConvertOperation.SquareRootF64 =>
-              sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
-                algebra.saturated(clamp, algebra.primitive(a)(Floats.sqrt(_: Float64)), 64)
-              )
+              double(algebra, clamp)(sinks, dest, src, modifiers)(Floats.sqrt(_: Float64))
             case VectorConvertOperation.FloorI32FromF32 =>
-              sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.primitive(a)(Floats.cvtFloorI32F32))
+              sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
+                algebra.primitive(algebra.denormalInput(sinks.modeRegister, a, 32))(Floats.cvtFloorI32F32)
+              )
             case VectorConvertOperation.NearestI32FromF32 =>
               sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.primitive(a)(Floats.cvtNearestI32F32))
             case VectorConvertOperation.CeilF16 =>
@@ -505,10 +475,16 @@ private object FloatSemantics {
                   half(algebra, clamp)(sinks, dest, src, modifiers)(Floats.sin(_: Float16))
                 case VectorConvertOperation.CosineF16 =>
                   half(algebra, clamp)(sinks, dest, src, modifiers)(Floats.cos(_: Float16))
+                case VectorConvertOperation.SineBoundedF16 =>
+                  half(algebra, clamp)(sinks, dest, src, modifiers)(Floats.sinBounded(_: Float16))
+                case VectorConvertOperation.CosineBoundedF16 =>
+                  half(algebra, clamp)(sinks, dest, src, modifiers)(Floats.cosBounded(_: Float16))
                 case VectorConvertOperation.FrexpMantissaF16 =>
                   half(algebra, clamp)(sinks, dest, src, modifiers)(Floats.frexpMant(_: Float16))
                 case VectorConvertOperation.FrexpExponentF16 =>
-                  sinks.modifiedUnary(dest, src, modifiers, 16)(a => algebra.primitive(a)(Floats.frexpExpF16))
+                  sinks.modifiedUnary(dest, src, modifiers, 16)(a =>
+                    algebra.primitive(algebra.denormalInput(sinks.modeRegister, a, 16))(Floats.frexpExpF16)
+                  )
                 case VectorConvertOperation.I32FromI16 =>
                   sinks.modifiedUnary(dest, src, modifiers, 16)(a => algebra.truncate(algebra.signExtend(a, 16), 32))
                 case VectorConvertOperation.U32FromU16 =>
@@ -588,14 +564,39 @@ private object FloatSemantics {
       )
   }
 
-  /** A binary16 unary operation on a modified binary16 source, saturated when `clamp`. */
+  /** A binary16 unary operation on a modified binary16 source, its denormals as MODE has them, saturated when `clamp`.
+    */
   inline def half[V, R](inline algebra: Algebra[V], clamp: Boolean)(
       inline sinks: AMDGPUSinks[V, R],
       dest: VectorRegisterIndex,
       src: InstructionSource,
       modifiers: SourceModifiers
   )(inline operation: Float16 => Float16): R =
-    sinks.modifiedUnary(dest, src, modifiers, 16)(a => algebra.saturated(clamp, algebra.primitive(a)(operation), 16))
+    sinks.modifiedUnary(dest, src, modifiers, 16)(a =>
+      algebra.saturated(clamp, algebra.flushedUnary(sinks.modeRegister, 16, a)(algebra.primitive(_)(operation)), 16)
+    )
+
+  /** [[half]] on binary32. */
+  inline def single[V, R](inline algebra: Algebra[V], clamp: Boolean)(
+      inline sinks: AMDGPUSinks[V, R],
+      dest: VectorRegisterIndex,
+      src: InstructionSource,
+      modifiers: SourceModifiers
+  )(inline operation: Float32 => Float32): R =
+    sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
+      algebra.saturated(clamp, algebra.flushedUnary(sinks.modeRegister, 32, a)(algebra.primitive(_)(operation)), 32)
+    )
+
+  /** [[half]] on a binary64 register pair. */
+  inline def double[V, R](inline algebra: Algebra[V], clamp: Boolean)(
+      inline sinks: AMDGPUSinks[V, R],
+      dest: VectorRegisterIndex,
+      src: InstructionSource,
+      modifiers: SourceModifiers
+  )(inline operation: Float64 => Float64): R =
+    sinks.pairUnary(dest, src, PairRead.Floating, modifiers)(a =>
+      algebra.saturated(clamp, algebra.flushedUnary(sinks.modeRegister, 64, a)(algebra.primitive(_)(operation)), 64)
+    )
 
   /** V_RCP_F32 and S_RCP_F32. */
   extension [V](inline algebra: Algebra[V]) {
@@ -666,56 +667,57 @@ private object FloatSemantics {
       updateExec: Boolean
   ): R = test match {
     case FloatTest.Less =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         if (swap) algebra.less(b, a, width) else algebra.less(a, b, width)
       )
     case FloatTest.LessOrEqual =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         if (swap) algebra.lessOrEqual(b, a, width) else algebra.lessOrEqual(a, b, width)
       )
     case FloatTest.Equal =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.equal(a, b, width)
       )
     case FloatTest.NotEqual =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.negation(algebra.equal(a, b, width))
       )
     case FloatTest.OrderedNotEqual =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.or(algebra.less(a, b, width), algebra.less(b, a, width))
       )
     case FloatTest.NotLess =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.negation(if (swap) algebra.less(b, a, width) else algebra.less(a, b, width))
       )
     case FloatTest.NotLessOrEqual =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.negation(if (swap) algebra.lessOrEqual(b, a, width) else algebra.lessOrEqual(a, b, width))
       )
     case FloatTest.NotLessOrGreater =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.negation(algebra.or(algebra.less(a, b, width), algebra.less(b, a, width)))
       )
     case FloatTest.Ordered =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.negation(algebra.unordered(a, b, width))
       )
     case FloatTest.Unordered =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
         algebra.unordered(a, b, width)
       )
     case FloatTest.Never =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((_, _) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((_, _) =>
         algebra.literal(0L)
       )
     case FloatTest.Always =>
-      floatShape(sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((_, _) =>
+      floatShape(algebra, sinks, scalar, pair, dest, srcA, srcB, modifiers, selection, updateExec, width)((_, _) =>
         algebra.literal(1L)
       )
   }
 
   inline def floatShape[V, R](
+      inline algebra: Algebra[V],
       inline sinks: AMDGPUSinks[V, R],
       inline scalar: Boolean,
       inline pair: Boolean,
@@ -727,11 +729,25 @@ private object FloatSemantics {
       updateExec: Boolean,
       width: Int in (16, 32, 64)
   )(inline kernel: (V, V) => V): R =
-    inline if (scalar) sinks.scalarCompare(srcA, srcB, pair = false)(kernel)
-    else inline if (pair) sinks.comparePair(dest, srcA, srcB, PairRead.Floating, modifiers, updateExec)(kernel)
-    else sinks.compareModified(dest, srcA, srcB, modifiers, selection, updateExec, width)(kernel)
+    inline if (scalar)
+      sinks.scalarCompare(srcA, srcB, pair = false)((a, b) =>
+        algebra.compared(sinks.modeRegister, width, a, b)(kernel)
+      )
+    else inline if (pair)
+      sinks.comparePair(dest, srcA, srcB, PairRead.Floating, modifiers, updateExec)((a, b) =>
+        algebra.compared(sinks.modeRegister, width, a, b)(kernel)
+      )
+    else
+      sinks.compareModified(dest, srcA, srcB, modifiers, selection, updateExec, width)((a, b) =>
+        algebra.compared(sinks.modeRegister, width, a, b)(kernel)
+      )
 
   extension [V](inline algebra: Algebra[V]) {
+
+    /** `test` on binary32 operands as MODE.FP_DENORM has them read; other widths compare as they are. */
+    inline def compared(mode: V, width: Int in (16, 32, 64), a: V, b: V)(inline test: (V, V) => V): V =
+      if (width == 32) test(algebra.denormalInput(mode, a, 32), algebra.denormalInput(mode, b, 32)) else test(a, b)
+
     inline def negation(condition: V): V = algebra.xor(condition, algebra.literal(1L))
 
     inline def less(a: V, b: V, width: Int in (16, 32, 64)): V = width.raw match {
@@ -802,21 +818,29 @@ private object FloatSemantics {
       )
     }
 
-    /** V_FREXP_EXP: the exponent of a finite non-zero value as a fraction in [0.5, 1), otherwise zero. */
+    /** V_FREXP_EXP: the exponent of a finite non-zero value as a fraction in [0.5, 1), otherwise zero. A denormal's
+      * exponent counts its fraction's leading zeros.
+      */
     inline def frexpExponent(value: V, width: Int in (32, 64)): V = {
       val fraction = if (width == 64) 52L else 23L
       val exponent = if (width == 64) 0x7ffL else 0xffL
-      algebra.let(
-        "e",
-        algebra.and(algebra.shiftRightLogical(value, algebra.literal(fraction)), algebra.literal(exponent))
-      )(e =>
-        algebra.select(
-          algebra.or(
-            algebra.equal(algebra.and(value, algebra.literal((1L << (width - 1)) - 1L)), algebra.literal(0L)),
-            algebra.equal(e, algebra.literal(exponent))
-          ),
-          algebra.literal(0L),
-          algebra.truncate(algebra.subtract(e, algebra.literal(exponent / 2 - 1)), 32)
+      algebra.let("m", algebra.and(value, algebra.literal((1L << (width - 1)) - 1L)))(magnitude =>
+        algebra.let("e", algebra.shiftRightLogical(magnitude, algebra.literal(fraction)))(e =>
+          algebra.select(
+            algebra.or(algebra.equal(magnitude, algebra.literal(0L)), algebra.equal(e, algebra.literal(exponent))),
+            algebra.literal(0L),
+            algebra.truncate(
+              algebra.select(
+                algebra.equal(e, algebra.literal(0L)),
+                algebra.subtract(
+                  algebra.literal(width - (exponent / 2 - 1) - fraction),
+                  algebra.leadingZeros(magnitude, width.widen[Int in 1 ~ 64])
+                ),
+                algebra.subtract(e, algebra.literal(exponent / 2 - 1))
+              ),
+              32
+            )
+          )
         )
       )
     }
@@ -860,26 +884,33 @@ private object FloatSemantics {
       modifiers: SourceModifiers
   ): R = operation match {
     case VectorMadF32Operation.FusedMultiplyAdd =>
-      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
-        algebra.saturated(clamp, algebra.fusedMultiplyAdd(a, b, c, 32), 32)
-      )
+      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(algebra.fusedMultiplyAdd(_, _, _, 32))
     case VectorMadF32Operation.MultiplyAdd =>
-      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
-        algebra.saturated(clamp, algebra.addSingle(algebra.multiplySingle(a, b), c), 32)
+      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)((a, b, c) =>
+        algebra.addSingle(algebra.multiplySingle(a, b), c)
       )
     case VectorMadF32Operation.MultiplyAddLegacy =>
-      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
-        algebra.saturated(clamp, algebra.addSingle(algebra.primitive(a, b)(Floats.mulLegacyF32), c), 32)
+      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)((a, b, c) =>
+        algebra.addSingle(algebra.primitive(a, b)(Floats.mulLegacyF32), c)
       )
     case VectorMadF32Operation.FusedMultiplyAddLegacy =>
-      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
-        algebra.saturated(clamp, algebra.primitive(a, b, c)(Floats.fmaLegacyF32), 32)
-      )
+      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(algebra.primitive(_, _, _)(Floats.fmaLegacyF32))
     case VectorMadF32Operation.MultiplyLighting =>
-      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
-        algebra.saturated(clamp, algebra.primitive(a, b, c)(Floats.mullitF32), 32)
-      )
+      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(algebra.primitive(_, _, _)(Floats.mullitF32))
   }
+
+  /** A binary32 VOP3 operation on three modified sources, its denormals as MODE has them, saturated when `clamp`. */
+  inline def single[V, R](inline algebra: Algebra[V], clamp: Boolean)(
+      inline sinks: AMDGPUSinks[V, R],
+      dest: VectorRegisterIndex,
+      srcA: InstructionSource,
+      srcB: InstructionSource,
+      srcC: InstructionSource,
+      modifiers: SourceModifiers
+  )(inline operation: (V, V, V) => V): R =
+    sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
+      algebra.saturated(clamp, algebra.flushedTernary(sinks.modeRegister, 32, a, b, c)(operation), 32)
+    )
 
   /** V_DIV_SCALE: the operand pre-scaled away from the denormal range. */
   extension [V](inline algebra: Algebra[V]) {
@@ -887,48 +918,33 @@ private object FloatSemantics {
       if (width == 64) algebra.primitive(a, b, c)(Floats.divScale(_: Float64, _: Float64, _: Float64))
       else algebra.primitive(a, b, c)(Floats.divScale(_: Float32, _: Float32, _: Float32))
 
+    /** [[divisionScale]] on operands as MODE has their denormals read. */
+    inline def flushedScale(mode: V, width: Int in (32, 64), a: V, b: V, c: V): V = {
+      val wide = width.widen[Int in (16, 32, 64)]
+      algebra.divisionScale(
+        width,
+        algebra.denormalInput(mode, a, wide),
+        algebra.denormalInput(mode, b, wide),
+        algebra.denormalInput(mode, c, wide)
+      )
+    }
+
     /** The flag V_DIV_SCALE leaves for V_DIV_FMAS, from the denominator and numerator. */
     inline def divisionScaleFlag(width: Int in (32, 64), b: V, c: V): V =
       if (width == 64) algebra.primitive(b, c)(Floats.divScaleFlag(_: Float64, _: Float64))
       else algebra.primitive(b, c)(Floats.divScaleFlag(_: Float32, _: Float32))
 
-    /** V_DIV_FMAS: a fused multiply-add scaled by 2^32, or 2^64 for binary64, when the flag is set. */
-    inline def divisionFusedMultiplyAdd(
-        width: Int in (32, 64),
-        a: V,
-        b: V,
-        c: V,
-        scaled: V
-    )
-        : V =
+    /** V_DIV_FMAS: a fused multiply-add, rescaled when the flag is set. */
+    inline def divisionFusedMultiplyAdd(width: Int in (32, 64), a: V, b: V, c: V, scaled: V): V =
       if (width == 64)
-        algebra.let("r", algebra.fusedMultiplyAdd(a, b, c, 64))(result =>
-          algebra.select(scaled, algebra.loadExponent(result, algebra.literal(64L), 64), result)
-        )
-      else
-        algebra.let("r", algebra.fusedMultiplyAdd(a, b, c, 32))(result =>
-          algebra.select(scaled, algebra.loadExponent(result, algebra.literal(32L), 32), result)
-        )
+        algebra.primitive(a, b, c, scaled)(Floats.divFmas(_: Float64, _: Float64, _: Float64, _: Bool))
+      else algebra.primitive(a, b, c, scaled)(Floats.divFmas(_: Float32, _: Float32, _: Float32, _: Bool))
 
     /** V_TRIG_PREOP_F64: the segment of 2/pi the dword selects, scaled for the operand's exponent. */
     inline def trigPreop(value: V, segment: V): V =
       algebra.primitive(value, segment)(Floats.trigPreopF64)
 
-    /** V_DOT2_F32_F16: the packed halves' products summed with one rounding of the low product, then added to the
-      * destination when `accumulate`.
-      */
-    inline def dotHalves(accumulate: Boolean, a: V, b: V, d: V): V =
-      algebra.let(
-        "p",
-        algebra.fusedMultiplyAdd(
-          algebra.halfToSingle(a),
-          algebra.halfToSingle(b),
-          algebra.multiplySingle(algebra.halfToSingle(algebra.high16(a)), algebra.halfToSingle(algebra.high16(b))),
-          32
-        )
-      )(products => if (accumulate) algebra.addSingle(products, d) else products)
-
-    /** The bfloat16 halves of `a` and `b` widened exactly, multiplied and summed as [[dotHalves]] sums them, plus `d`.
+    /** The bfloat16 halves of `a` and `b` widened exactly, the low product fused with the rounded high one, plus `d`.
       */
     inline def dotBFloat16(a: V, b: V, d: V): V =
       algebra.let(
@@ -950,10 +966,18 @@ private object FloatSemantics {
   inline def packedSingle[V, R](inline algebra: Algebra[V], instruction: Instruction.VPackedF32)(
       inline sinks: AMDGPUSinks[V, R]
   ): R = instruction.operation match {
-    case PackedF32Operation.Add      => sinks.packedSingle(instruction)((a, b, _) => algebra.addSingle(a, b))
-    case PackedF32Operation.Multiply => sinks.packedSingle(instruction)((a, b, _) => algebra.multiplySingle(a, b))
-    case PackedF32Operation.Fma      =>
-      sinks.packedSingle(instruction)((a, b, c) => algebra.fusedMultiplyAdd(a, b, c, 32))
+    case PackedF32Operation.Add =>
+      sinks.packedSingle(instruction)((a, b, _) =>
+        algebra.flushedBinary(sinks.modeRegister, 32, a, b)(algebra.addSingle)
+      )
+    case PackedF32Operation.Multiply =>
+      sinks.packedSingle(instruction)((a, b, _) =>
+        algebra.flushedBinary(sinks.modeRegister, 32, a, b)(algebra.multiplySingle)
+      )
+    case PackedF32Operation.Fma =>
+      sinks.packedSingle(instruction)((a, b, c) =>
+        algebra.flushedTernary(sinks.modeRegister, 32, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 32))
+      )
   }
 
   /** V_PACK_B32_F16: two binary16 values, saturated when `clamp`, as the low and high halves. */
@@ -975,12 +999,13 @@ private object FloatSemantics {
       modifiers: SourceModifiers
   ): R = operation match {
     case DotOperation.Halves =>
+      // the hardware rounds the whole dot product once and does not clamp it
       sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
-        algebra.saturated(
-          clamp,
-          algebra.dotHalves(accumulate = true, a, b, c),
-          32
-        )
+        algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloat(x, y, z))
+      )
+    case DotOperation.AlignedHalves =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
+        algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloatAligned(x, y, z))
       )
     case DotOperation.BFloat16Halves =>
       sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
@@ -1033,7 +1058,7 @@ private object FloatSemantics {
     instruction.operation match {
       case PackedTernaryOperation.FusedMultiplyAddF16 =>
         sinks.packedHalf(instruction)((a, b, c) =>
-          algebra.packedHalfFusedMultiplyAdd(clamp, a, b, c)
+          algebra.packedHalfFusedMultiplyAdd(sinks.modeRegister, clamp, a, b, c)
         )
       case PackedTernaryOperation.MultiplyAddU16 =>
         sinks.packedHalf(instruction)((a, b, c) =>
@@ -1054,10 +1079,10 @@ private object FloatSemantics {
     }
   }
 
-  /** V_PK_FMA_F16 on one half of each source. */
+  /** V_PK_FMA_F16 on one half of each source, its denormals as MODE has them. */
   extension [V](inline algebra: Algebra[V]) {
-    inline def packedHalfFusedMultiplyAdd(clamp: Boolean, a: V, b: V, c: V): V =
-      algebra.saturated(clamp, algebra.fusedMultiplyAdd(a, b, c, 16), 16)
+    inline def packedHalfFusedMultiplyAdd(mode: V, clamp: Boolean, a: V, b: V, c: V): V =
+      algebra.saturated(clamp, algebra.flushedTernary(mode, 16, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 16)), 16)
 
     /** V_FMA_MIX and V_MAD_MIX into a binary16 half of the destination's previous dword. Bit `i` of `selectionHigh`
       * converts source `i` from the binary16 half bit `i` of `selection` names; `absolute` and `negate` then apply. The
@@ -1190,7 +1215,13 @@ private object FloatSemantics {
     case DualVectorOperation.MultiplyLegacyF32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.primitive(a, b)(Floats.mulLegacyF32))
     case DualVectorOperation.DotHalvesF32 =>
-      dualShape(algebra, sinks, second, half, other)((a, b, c, _) => algebra.dotHalves(accumulate = true, a, b, c))
+      dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
+        algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloat(x, y, z))
+      )
+    case DualVectorOperation.DotAlignedHalvesF32 =>
+      dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
+        algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloatAligned(x, y, z))
+      )
     case DualVectorOperation.DotBFloat16F32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, c, _) => algebra.dotBFloat16(a, b, c))
     case DualVectorOperation.SubtractU32 =>

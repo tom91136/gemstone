@@ -376,7 +376,7 @@ private object VMMemoryCompiler {
       global || generic,
       sharedUniform = shared,
       sharedAccess = shared,
-      localAccess = legacy && !(shared || global || generic)
+      localAccess = !(shared || global || generic)
     )
     val data    = operands(if (loading) 0 else 1)
     val words   = math.max(1, bits / 32)
@@ -427,7 +427,23 @@ private object VMMemoryCompiler {
     val (low, high) = if (loading) (operands(1), operands.head) else (operands(1), operands(2))
     def word(index: Int): (Operand, Int) = if (index < 4) (low, index) else (high, index - 4)
     val selected                         = (0 until 8).filter(index => (mask & (1L << index)) != 0)
-    if (loading) {
+    if (mask == 0xffL) {
+      // the whole 256-bit group is one access, which the hardware aligns to 32 bytes
+      if (loading) {
+        val loaded = Vec.fill(8)(temp())
+        emit(LoadVector(loaded.map(_.slot), pointer, 32, false, access))
+        selected.foreach { index =>
+          val (group, offset) = word(index)
+          if (!OperandQueries.isZero(group)) emit(Move(destination(group, offset).slot, loaded(index), 32))
+        }
+      } else
+        emit(StoreVector(
+          pointer,
+          Vec.from(selected.map(index => register(word(index)._1, word(index)._2))),
+          32,
+          access
+        ))
+    } else if (loading) {
       val loaded = selected.map { index =>
         val value = temp()
         emit(Load(value.slot, Value.Address(pointer, index * 4L), 32, false, access))

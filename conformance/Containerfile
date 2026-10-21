@@ -1,8 +1,10 @@
-# Values the CMake driver always supplies (CUDA_IMAGE, CUDA_PACKAGE_VERSION,
-# ROCM_VERSION) carry no default here; their authority is Toolchains.cmake or
-# build.sbt, and a fallback would only let the two drift apart.
+# Values the CMake driver supplies (CUDA_IMAGE, CUDA_PACKAGE_VERSION,
+# ROCM_VERSION) carry no usable default here; their authority is
+# Toolchains.cmake or build.sbt, and a fallback would only let the two drift
+# apart. CUDA_IMAGE names no image so BuildKit, which rejects a blank FROM in
+# any stage, still builds the routes that leave it unset.
 ARG UBUNTU_IMAGE=docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
-ARG CUDA_IMAGE
+ARG CUDA_IMAGE=cuda-image-not-supplied
 ARG SYCL_IMAGE=docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c
 ARG NVHPC_IMAGE=nvcr.io/nvidia/nvhpc@sha256:25621a24ed39fe0dce3e9458e56e3f11194c122ac0206a44532246a58972a854
 

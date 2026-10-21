@@ -174,6 +174,11 @@ private[isa] object VMIR {
     case Plain, Add, Minimum, Maximum
   }
 
+  /** The elements of the 64-bit value a packed video source reads: the 16-bit or 8-bit elements of a register pair, in
+    * the order the source's selector names them, the least significant lane first.
+    */
+  case class VideoElements(indices: Vec[Int], bits: Int in (8, 16)) derives CanEqual
+
   /** The 8-bit floating-point formats: four exponent and three mantissa bits without infinities, or five and two. */
   enum Float8Format derives CanEqual {
     case E4M3, E5M2
@@ -198,7 +203,7 @@ private[isa] object VMIR {
 
   /** The state space whose window a generic address may fall in. */
   enum AddressKind derives CanEqual {
-    case Global, Shared, Local
+    case Global, Shared, Local, Constant
   }
 
   enum VoteOperation derives CanEqual {
@@ -255,12 +260,18 @@ private[isa] object VMIR {
     case GreaterThanOrEqualUnordered
   }
 
+  /** The modifiers of a floating-point operation: the subnormal flush, the saturation, the NaN propagation, the
+    * absolute value and the sign xor, the rounding the result takes, and the approximate quotient of a division.
+    */
   case class FloatControl(
       flushSubnormal: Boolean = false,
       saturate: Boolean = false,
       propagateNaN: Boolean = false,
       absolute: Boolean = false,
-      xorSign: Boolean = false
+      xorSign: Boolean = false,
+      rounding: IEEE754.Rounding = IEEE754.Rounding.NearestEven,
+      approximate: Boolean = false,
+      full: Boolean = false
   )
 
   enum PackedFloatFormat derives CanEqual {
@@ -292,6 +303,27 @@ private[isa] object VMIR {
     case Tanh
   }
 
+  /** The special-function unit's approximations, whose results differ from the correctly rounded ones. */
+  enum MufuFunction derives CanEqual {
+    case Exponent2
+    case Log2
+    case Reciprocal
+    case ReciprocalSquareRoot
+    case SquareRoot
+
+    /** The sine of an angle in radians. */
+    case Sine
+
+    /** The cosine of an angle in radians. */
+    case Cosine
+
+    /** The sine of an angle in cycles, which the unit reduces itself. */
+    case SineCycles
+
+    /** The cosine of an angle in cycles, which the unit reduces itself. */
+    case CosineCycles
+  }
+
   enum IntegerMultiplyAddOperation {
     case Low(
         operandWidth: ScalarBitWidth,
@@ -300,13 +332,18 @@ private[isa] object VMIR {
         carryOut: Boolean
     )
 
-    /** The high product half plus the addend and the carry flag, as `madc.hi` computes. */
-    case High(operandWidth: ScalarBitWidth, resultWidth: ScalarBitWidth, carryOut: Boolean)
+    /** The high product half plus the addend and the carry flag, as `madc.hi` computes. The product is signed where
+      * `signed`.
+      */
+    case High(operandWidth: ScalarBitWidth, resultWidth: ScalarBitWidth, carryOut: Boolean, signed: Boolean)
 
     /** `mad.hi`: the high half of the signed or unsigned product plus the addend, clamped to the signed range where
       * `saturate`.
       */
     case HighSum(width: ScalarBitWidth, signed: Boolean, saturate: Boolean)
+
+    /** `mad.hi.cc`: the high half of the signed or unsigned product plus the addend, which sets the carry flag. */
+    case HighSumCarry(width: ScalarBitWidth, signed: Boolean)
 
     /** `mad.wide`: the full product of the extended operands plus the addend of twice their width. */
     case Wide(operandWidth: Int in (16, 32), signed: Boolean)
@@ -457,7 +494,8 @@ private[isa] object VMIR {
       * (arXiv:2512.07004, and an RTX 4060 Ti for Ada) and the code ptxas emits: Volta and Turing fuse 4 half-precision
       * products, Ampere and Ada 8 with one extra alignment bit (4 for TF32), Hopper and Blackwell 16 with two (8 for
       * TF32). Ada fuses 16 FP8 products with 13 fraction bits; Hopper and the Blackwell data-centre parts convert FP8
-      * to half precision for two half-precision blocks from zero and add C after; consumer Blackwell fuses 32.
+      * to half precision for two half-precision blocks from zero and add C after; consumer Blackwell fuses 32, and all
+      * 64 of packed E2M1 with 12 extra bits, the fewest that every measured sum agrees with.
       */
     def accumulation(
         architecture: Int,
@@ -475,6 +513,7 @@ private[isa] object VMIR {
         val (size, extra) =
           if (input == Element.TF32) (Tf32Sizes(generation), guard)
           else if (input.narrow && generation == 1) (16, -10)
+          else if (input == Element.E2M1 && architecture >= 120) (64, 12)
           else if (input.narrow && architecture >= 120) (32, guard)
           else (DefaultSizes(generation), guard)
         val half              = result == Element.F16
@@ -1052,8 +1091,21 @@ private[isa] object VMIR {
     /** Whether the generic address `address` falls in the window of `space`. */
     case SpaceTest(destination: Predicate, address: Value, space: AddressKind)
 
+    /** The legacy IADD.SAT: `lanes` lanes of `left` and `right` added, each clamped to the signed range of a lane, with
+      * the carry out of the low lane's addition added to the high lane and the lanes of `right` negated exactly where
+      * `negate`.
+      */
+    case PackedSaturatingAdd(
+        destination: Register,
+        left: Value,
+        right: Value,
+        lanes: Int in (2, 4),
+        negate: Boolean
+    )
+
     /** `lanes` lanes of `left` and `right` combined by `operation`, packed or, where `accumulate`, summed onto
-      * `addend`.
+      * `addend`. A source whose `elements` name the elements of the pair `left` and `right` reads them instead of the
+      * lanes of its own word.
       */
     case VideoSimd(
         destination: Register,
@@ -1066,7 +1118,9 @@ private[isa] object VMIR {
         rightSigned: Boolean,
         resultSigned: Boolean,
         saturate: Boolean,
-        accumulate: Boolean
+        accumulate: Boolean,
+        leftElements: Option[VideoElements] = None,
+        rightElements: Option[VideoElements] = None
     )
 
     /** A scalar video operation on the selected parts of `left` and `right`, extended as their signedness says, clamped
@@ -1092,7 +1146,7 @@ private[isa] object VMIR {
 
     /** `vmad`: the product of the selected parts of `left` and `right`, negated where `negateProduct`, plus `addend`,
       * negated where `negateAddend`, plus one where `plusOne`, shifted right by `shift` and clamped to 32 bits where
-      * `saturate`.
+      * `saturate`. The addend is sign-extended where `addendSigned`.
       */
     case VideoMultiplyAdd(
         destination: Register,
@@ -1105,6 +1159,7 @@ private[isa] object VMIR {
         rightSigned: Boolean,
         negateProduct: Boolean,
         negateAddend: Boolean,
+        addendSigned: Boolean,
         plusOne: Boolean,
         shift: Int in (0, 7, 15),
         saturate: Boolean
@@ -1259,6 +1314,20 @@ private[isa] object VMIR {
         width: Int in (16, 32, 64),
         control: FloatControl = FloatControl()
     )
+    case MufuUnary(
+        destination: Register,
+        source: Value,
+        function: MufuFunction,
+        flavour: Mufu.Flavour,
+        control: FloatControl = FloatControl()
+    )
+    case FloatUnaryPacked(
+        operation: FloatUnaryOperation,
+        destination: Register,
+        source: Value,
+        format: PackedFloatFormat,
+        control: FloatControl = FloatControl()
+    )
     case FusedMultiplyAdd(
         destination: Register,
         left: Value,
@@ -1389,7 +1458,8 @@ private[isa] object VMIR {
     case AsyncBulkStore(destination: Value, source: Value, size: Value, byteMask: Value)
 
     /** A bulk copy into shared::cluster memory from global or, where `sharedSource`, shared::cta memory, completing its
-      * bytes on `barrier`; with `multicast`, into the same offsets of every cluster CTA its 16-bit mask names.
+      * bytes on `barrier`; with `multicast`, into the same offsets of every cluster CTA its 16-bit mask names. The copy
+      * into shared::cluster memory of shared::cta memory needs a launch with a cluster.
       */
     case AsyncBulkCopy(
         destination: Value,
@@ -1398,7 +1468,8 @@ private[isa] object VMIR {
         barrier: Value,
         sharedSource: Boolean = false,
         multicast: Option[Value] = None,
-        ignored: Option[(left: Value, right: Value)] = None
+        ignored: Option[(left: Value, right: Value)] = None,
+        clusterDestination: Boolean = false
     )
 
     /** A bulk reduction of shared::cta elements into global memory or, with `barrier`, shared::cluster memory. */

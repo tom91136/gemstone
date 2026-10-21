@@ -72,7 +72,8 @@ private class Values(a: Long, b: Long = 0L, c: Long = 0L, d: Long = 0L) extends 
 
   inline def section(inline body: Out): Out = body
 
-  inline def modeRegister: Long = 0L
+  // FP_DENORM keeping every width's denormals, as the default kernel descriptor has it
+  inline def modeRegister: Long = 0xf0L
 
   inline def sequence(inline before: Out, inline after: Out): Out = {
     val _ = before
@@ -479,8 +480,8 @@ private class Values(a: Long, b: Long = 0L, c: Long = 0L, d: Long = 0L) extends 
       offset: Int,
       bank: RegisterBank
   )(
-      inline destination: (Long, Long) => Long
-  )(inline kernel: Long => Long): Out = (kernel(a), destination(b, c))
+      inline destination: (Long, Long, Long) => Long
+  )(inline kernel: Long => Long): Out = (kernel(a), destination(b, d, c))
 
   inline def backwardPermute(
       dest: VectorRegisterIndex,
@@ -489,7 +490,7 @@ private class Values(a: Long, b: Long = 0L, c: Long = 0L, d: Long = 0L) extends 
       offset: Int,
       bank: RegisterBank,
       fetchInactive: Boolean
-  )(inline origin: Long => Long)(inline kernel: Long => Long): Out = (kernel(a), origin(b))
+  )(inline origin: (Long, Long) => Long)(inline kernel: Long => Long): Out = (kernel(a), origin(b, d))
 
   inline def swizzle(dest: VectorRegisterIndex, src: VectorRegisterIndex, bank: RegisterBank)(
       inline origin: Long => Long

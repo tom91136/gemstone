@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
 import scala.annotation.targetName
@@ -124,8 +125,67 @@ private[isa] object FloatArithmetic {
   def reciprocalSquareRoot(value: Float32): Float32 =
     unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.ReciprocalSquareRoot, _, 32))
   @targetName("reciprocalSquareRoot64")
-  def reciprocalSquareRoot(value: Float64): Float64 =
-    unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.ReciprocalSquareRoot, _, 64))
+  def reciprocalSquareRoot(value: Float64): Float64 = fromRaw[Float64](reciprocalSquareRootBits(toRaw(value)))
+
+  /** The reciprocal square root of a binary64 value's bits, which the unit rounds to nearest even. The square root of
+    * the significand is taken at more than binary64's precision, so that the result is the correctly rounded one.
+    */
+  private def reciprocalSquareRootBits(bits: Long): Long = {
+    val sign     = bits & 0x8000000000000000L
+    val exponent = ((bits >>> 52) & 0x7ffL).toInt
+    val fraction = bits & 0xfffffffffffffL
+    if (exponent == 0x7ff) {
+      // an infinity's reciprocal square root is zero, and a NaN has none
+      if (fraction != 0 || sign != 0) VMArithmetic.DefaultNaN64 else 0L
+    } else if (exponent == 0 && fraction == 0) {
+      if (sign != 0) 0xfff0000000000000L else 0x7ff0000000000000L
+    } else if (sign != 0) {
+      VMArithmetic.DefaultNaN64
+    } else {
+      // the value is m * 2^e, whose reciprocal square root is 2^-j over the square root of an even-scaled m
+      val m: BigInt = if (exponent == 0) BigInt(fraction) else BigInt(fraction | (1L << 52))
+      val e: Int    = if (exponent == 0) -1074 else exponent - 1075
+      val odd       = (e & 1) != 0
+      val scaled    = if (odd) m * 2 else m
+      val j         = (e - (if (odd) 1 else 0)) / 2
+      // the square root of the scaled significand, which bounds the result from both sides
+      var scale       = 64 + scaled.bitLength
+      var root        = integerSquareRoot(scaled << (2 * scale))
+      var power       = root.bitLength - 1
+      var significand = roundedQuotient(BigInt(1) << (52 + power + 1), root)
+      while (significand != roundedQuotient(BigInt(1) << (52 + power + 1), root + 1)) {
+        scale += 16
+        root = integerSquareRoot(scaled << (2 * scale))
+        power = root.bitLength - 1
+        significand = roundedQuotient(BigInt(1) << (52 + power + 1), root)
+      }
+      val carried  = significand >= (BigInt(1) << 53)
+      val mantissa = (if (carried) significand >> 1 else significand) - (BigInt(1) << 52)
+      val biased   = (scale - power - 1 - j) + 1023 + (if (carried) 1 else 0)
+      (biased.toLong << 52) | mantissa.toLong
+    }
+  }
+
+  /** The quotient of `numerator` by `denominator`, rounded to nearest even. */
+  private def roundedQuotient(numerator: BigInt, denominator: BigInt): BigInt = {
+    val quotient  = numerator / denominator
+    val remainder = numerator % denominator
+    val twice     = remainder * 2
+    if (twice > denominator || (twice == denominator && quotient.testBit(0))) quotient + 1 else quotient
+  }
+
+  /** The integer square root of a nonnegative integer. */
+  private def integerSquareRoot(value: BigInt): BigInt =
+    if (value < 2) value
+    else {
+      var guess = BigInt(1) << ((value.bitLength + 1) / 2)
+      var next  = (guess + value / guess) / 2
+      while (next < guess) {
+        guess = next
+        next = (guess + value / guess) / 2
+      }
+      guess
+    }
 
   @targetName("exponent216")
   def exponent2(value: Float16): Float16 =
@@ -136,6 +196,28 @@ private[isa] object FloatArithmetic {
   @targetName("exponent264")
   def exponent2(value: Float64): Float64 =
     unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Exponent2, _, 64))
+
+  /** The base-2 exponential of a binary16 value, as the half unit approximates it: the unit's binary32 result rounded
+    * toward zero into the half format, which is less accurate than the binary32 unit's own.
+    */
+  @targetName("exponent2Half")
+  def exponent2Half(value: Float16): Float16 = {
+    val widened = IEEE754.fromDouble(IEEE754.toDouble(toRaw(value), 16), 32)
+    val result  = Mufu.exponent2(widened)
+    fromRaw[Float16](halfTruncated(IEEE754.toDouble(result, 32)))
+  }
+
+  /** A binary64 value rounded toward zero into the half format, whose overflow the unit turns into an infinity where
+    * the IEEE's directed rounding would keep the largest finite value.
+    */
+  private def halfTruncated(value: Double): Long =
+    if (value >= 65536.0) 0x7c00L
+    else if (value <= -65536.0) 0xfc00L
+    else IEEE754.fromDouble(value, 16, IEEE754.Rounding.TowardZero)
+
+  /** The base-2 exponential of a binary16 value's bits, as the half unit approximates it. */
+  def exponent2HalfBits(bits: UInt[32]): UInt[32] =
+    fromRaw[UInt[32]](toRaw(exponent2Half(fromRaw[Float16](toRaw(bits)))))
 
   @targetName("log216")
   def log2(value: Float16): Float16 = unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Log2, _, 16))
@@ -161,7 +243,7 @@ private[isa] object FloatArithmetic {
   @targetName("tanh16")
   def tanh(value: Float16): Float16 = unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Tanh, _, 16))
   @targetName("tanh32")
-  def tanh(value: Float32): Float32 = unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Tanh, _, 32))
+  def tanh(value: Float32): Float32 = fromRaw[Float32](Mufu.tanh(toRaw(value)))
   @targetName("tanh64")
   def tanh(value: Float64): Float64 = unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Tanh, _, 64))
 
@@ -250,6 +332,19 @@ private[isa] object FloatArithmetic {
   def canonical(value: Float16): Float16 = unary(value)(VMArithmetic.canonical(_, 16))
   @targetName("canonical32")
   def canonical(value: Float32): Float32 = unary(value)(VMArithmetic.canonical(_, 32))
+
+  /** The sign of a binary16, bfloat16 or binary32 element flipped or cleared, with a NaN element canonical. */
+  def signFlipped(value: UInt[32], width: Int in (16, 32), exponentBits: Int in (5, 8), absolute: Boolean): UInt[32] = {
+    val bits         = toRaw(value)
+    val mantissaBits = width - 1 - exponentBits
+    val exponentMask = (1L << exponentBits) - 1L
+    val mantissaMask = (1L << mantissaBits) - 1L
+    val canonicalNaN = (1L << (width - 1)) - 1L
+    val isNaN        = ((bits >>> mantissaBits) & exponentMask) == exponentMask && (bits & mantissaMask) != 0L
+    if (isNaN) UInt[32](canonicalNaN)
+    else if (absolute) UInt[32](bits & canonicalNaN)
+    else UInt[32](bits ^ (1L << (width - 1)))
+  }
 
   @targetName("compare16")
   def compare(left: Float16, right: Float16, comparison: Comparison): Bool =

@@ -9,9 +9,42 @@ import scala.annotation.targetName
 /** NVIDIA integer operations that combine many fields of their operands, as functions of the operands' bits. */
 private[isa] object IntegerArithmetic {
 
+  /** The legacy IADD.SAT: each of `lanes` 16-bit lanes of `left` and `right`, extended as signed values, added and
+    * clamped to the signed range of a lane, with the carry out of the low lane's addition added to the high lane. The
+    * lanes of `right` are negated exactly where `negate`, so that the negation of -32768 saturates in the sum rather
+    * than wrapping to -32768.
+    */
+  def packedSaturatingAdd(left: UInt[32], right: UInt[32], lanes: Int in (2, 4), negate: Boolean): UInt[32] = {
+    val bits                             = 32 / lanes
+    val mask                             = (1L << bits) - 1L
+    val low                              = -(1L << (bits - 1))
+    val high                             = (1L << (bits - 1)) - 1L
+    def lane(word: UInt[32], index: Int) = {
+      val field = (word.raw >>> (index * bits)) & mask
+      if ((field >>> (bits - 1)) != 0L) field - (1L << bits) else field
+    }
+    var result = 0L
+    var carry  = 0L
+    var index  = 0
+    while (index < lanes) {
+      val a   = lane(left, index)
+      val b   = lane(right, index)
+      val sum = a + (if (negate) -b else b) + carry
+      result |= (math.min(math.max(sum, low), high) & mask) << (index * bits)
+      if (index == 0) {
+        // the carry out of the low lane's addition, as the sixteen-bit adder that produces the sum reports it
+        val effective = (if (negate) -b else b) & mask
+        carry = if ((a & mask) + effective > mask) 1L else 0L
+      }
+      index += 1
+    }
+    UInt[32](result)
+  }
+
   /** The SIMD video operations: each of `lanes` 16-bit or 8-bit lanes of `left` and `right`, extended as their
     * signedness says, combined by `operation` and clamped to the result's lane range where `saturate`. The lanes are
-    * packed into the result or, where `accumulate`, summed onto `addend`.
+    * packed into the result or, where `accumulate`, summed onto `addend`. A source whose `elements` name elements of
+    * the register pair reads them instead of the lanes of its own word.
     */
   // call sites name these arguments, which the argument checks enforce
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:PublicSignatures.primitive-run"))
@@ -25,7 +58,9 @@ private[isa] object IntegerArithmetic {
       rightSigned: Boolean,
       resultSigned: Boolean,
       saturate: Boolean,
-      accumulate: Boolean
+      accumulate: Boolean,
+      leftElements: Option[VideoElements],
+      rightElements: Option[VideoElements]
   ): UInt[32] = {
     val bits                                              = 32 / lanes
     val mask                                              = (1L << bits) - 1L
@@ -33,12 +68,19 @@ private[isa] object IntegerArithmetic {
       val field = (word.raw >>> (index * bits)) & mask
       if (signed && (field >>> (bits - 1)) != 0L) field - (1L << bits) else field
     }
+    // the element of the register pair a source's selector names, extended as its signedness says
+    def element(elements: VideoElements, index: Int, signed: Boolean) = {
+      val shift = elements.indices(index) * elements.bits
+      val word  = if (shift < 32) left else right
+      val field = (word.raw >>> (shift % 32)) & ((1L << elements.bits) - 1L)
+      if (signed && (field >>> (elements.bits - 1)) != 0L) field - (1L << elements.bits) else field
+    }
     val (low, high) = if (resultSigned) (-(1L << (bits - 1)), (1L << (bits - 1)) - 1L) else (0L, mask)
     var result      = if (accumulate) addend.raw else 0L
     var index       = 0
     while (index < lanes) {
-      val a     = lane(left, index, leftSigned)
-      val b     = lane(right, index, rightSigned)
+      val a     = leftElements.fold(lane(left, index, leftSigned))(found => element(found, index, leftSigned))
+      val b     = rightElements.fold(lane(right, index, rightSigned))(found => element(found, index, rightSigned))
       val value = operation match {
         case VideoOperation.Add                => a + b
         case VideoOperation.Subtract           => a - b
@@ -301,6 +343,7 @@ private[isa] object IntegerArithmetic {
       rightSigned: Boolean,
       negateProduct: Boolean,
       negateAddend: Boolean,
+      addendSigned: Boolean,
       plusOne: Boolean,
       shift: Int in (0, 7, 15),
       saturate: Boolean
@@ -312,10 +355,11 @@ private[isa] object IntegerArithmetic {
     val productLow  = if (negated) ~(a * b) else a * b
     val productHigh = if (negated) ~Math.multiplyHigh(a, b) else Math.multiplyHigh(a, b)
     val c           = if (!plusOne && !negateProduct && negateAddend) ~addend.raw & 0xffffffffL else addend.raw
-    val extended    = if (signed) c.toInt.toLong else c
-    val carryIn     = if (plusOne || negateProduct || negateAddend) 1L else 0L
-    val addedLow    = productLow + extended
-    val addedHigh   = productHigh + (extended >> 63) +
+    // the hardware adds the addend sign-extended where it says so
+    val extended  = if (addendSigned || signed) c.toInt.toLong else c
+    val carryIn   = if (plusOne || negateProduct || negateAddend) 1L else 0L
+    val addedLow  = productLow + extended
+    val addedHigh = productHigh + (extended >> 63) +
       (if (java.lang.Long.compareUnsigned(addedLow, productLow) < 0) 1L else 0L)
     val sumLow  = addedLow + carryIn
     val sumHigh = addedHigh + (if (carryIn == 1L && sumLow == 0L) 1L else 0L)
@@ -374,11 +418,12 @@ private[isa] object IntegerArithmetic {
 
   /** Whether the generic `address` falls in the window of `space`; global memory is every other address. */
   def within(address: UInt[64], space: AddressKind): Bool = space match {
-    case AddressKind.Shared => VMAddressSpace.isShared(address.raw)
-    case AddressKind.Local  => VMAddressSpace.isLocal(address.raw)
-    case AddressKind.Global =>
+    case AddressKind.Shared   => VMAddressSpace.isShared(address.raw)
+    case AddressKind.Local    => VMAddressSpace.isLocal(address.raw)
+    case AddressKind.Constant => VMAddressSpace.isConstant(address.raw)
+    case AddressKind.Global   =>
       !VMAddressSpace.isShared(address.raw) && !VMAddressSpace.isLocal(address.raw) &&
-      (address.raw < VMAddressSpace.ParameterBase || address.raw >= VMAddressSpace.ParameterBase + 0x100000000L)
+      !VMAddressSpace.isConstant(address.raw)
   }
 
   /** The low 64 bits of the carry-less product of `left` and `right`, as `clmad.lo` takes it. */
@@ -418,7 +463,8 @@ private[isa] object IntegerArithmetic {
   private def scaleOf(byte: Long): Double = Minifloat.E8M0.toDouble(byte & 0xffL)
 
   /** `value` in `format`: NaN is the format's NaN or, for formats without one, its largest positive value; a negative
-    * value is zero where `relu`; beyond the largest finite magnitude it saturates where `saturate`.
+    * value is zero where `relu`, except in the unsigned UE8M0, which encodes the rounded magnitude; beyond the largest
+    * finite magnitude it saturates where `saturate`.
     */
   private def narrowed(
       value: Double,
@@ -432,7 +478,8 @@ private[isa] object IntegerArithmetic {
     minifloat(format) match {
       case Some(target) =>
         if (value.isNaN) target.nan
-        else if (relu && negative && format != NarrowFormat.UE8M0) 0L
+        else if (format == NarrowFormat.UE8M0) target.fromDouble(Math.abs(value), rounding, saturate)
+        else if (relu && negative) 0L
         else target.fromDouble(value, rounding, saturate)
       case None =>
         if (value.isNaN) 0x7fL
