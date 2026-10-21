@@ -196,7 +196,8 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
       (name, instance),
       for {
         program <- asm.Parser.parse(instance).left.map(_.diagnostic.raw)
-        code    <- asm.Assembler.encode(program, selected, TargetDefaults.waveSize(selected)).left.map(_.toString)
+        code    <-
+          asm.Assembler.encode(program, TargetMode(selected, TargetDefaults.waveSize(selected))).left.map(_.toString)
       } yield code
     )
     literal = parameters.zip(inputs).collectFirst {
@@ -403,12 +404,12 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
       dispatch <- task.left.map(_.raw)
       _        <- VMInterpreter.execute(
         irKernel(operations, source),
-        dispatch,
-        AMDGPUGlobalSpace(harness.globalBytes),
-        TaskControl(observer = Some(ended)),
-        Workgroups.Sequential,
-        Vec.empty,
-        _ => Right(())
+        KernelLaunch(
+          dispatch,
+          TaskContext(AMDGPUGlobalSpace(harness.globalBytes), TaskControl(observer = Some(ended)), _ => Right(())),
+          Workgroups.Sequential
+        ),
+        Vec.empty
       ).left.map(_.toString)
     } yield {
       if (fields.nonEmpty)

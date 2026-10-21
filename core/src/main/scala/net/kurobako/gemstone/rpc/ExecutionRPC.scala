@@ -231,6 +231,9 @@ object ExecutionRPC {
     ) extends Operation[Unit]
     case WriteProgramGlobal(program: ProgramId, name: NonEmpty[String], offset: Long >= 0, bytes: Vec[Byte])
         extends Operation[Unit]
+    // Compiles the kernel ahead of its launches, so a program that cannot be built fails here rather than in a completion.
+    case BuildKernel(program: ProgramId, kernelName: NonEmpty[String])
+        extends Operation[Unit]
     case Launch(
         program: ProgramId,
         kernelName: NonEmpty[String],

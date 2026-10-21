@@ -175,7 +175,7 @@ object AMDGPUSample {
   )
 
   private def run(program: asm.Program): Either[String, Vec[Long]] = for {
-    code     <- asm.Assembler.encode(program, target, waveSize = 64).left.map(_.toString)
+    code     <- asm.Assembler.encode(program, TargetMode(target, waveSize = 64)).left.map(_.toString)
     original <- CodeObject.decode(template).left.map(_.message.raw)
     replaced <- original.replaceKernel("vector_copy", code).left.map(_.message.raw)
     out      <- Kernel.run(
@@ -223,9 +223,9 @@ object AMDGPUSample {
 
   def run(): Either[String, Outcome] = for {
     program  <- asm.Parser.parse(source).left.map(_.message.raw)
-    code     <- asm.Assembler.encode(program, target, waveSize = 64).left.map(_.toString)
+    code     <- asm.Assembler.encode(program, TargetMode(target, waveSize = 64)).left.map(_.toString)
     original <- run(program)
-    decoded  <- asm.Disassembler(target, 64).decode(code).left.map(_.toString)
+    decoded  <- asm.Disassembler(TargetMode(target, 64)).decode(code).left.map(_.toString)
     changed  <- replaceConstant(decoded, 3, 5)
     edited   <- run(changed)
     extra    <- asm.Parser.parse("v_add_u32 v2, 1, v2").left.map(_.message.raw)

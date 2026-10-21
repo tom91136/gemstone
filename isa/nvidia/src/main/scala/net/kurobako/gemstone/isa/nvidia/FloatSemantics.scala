@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
-import net.kurobako.gemstone.binary.IEEE754
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
@@ -229,7 +229,7 @@ private[isa] object FloatSemantics {
   inline def mufu[V, R](
       inline algebra: Algebra[V],
       function: MufuFunction,
-      flavour: Mufu.Flavour,
+      flavour: MufuFlavour,
       control: FloatControl
   )(inline sinks: NvidiaSinks[V, R], destination: Register, source: Value): R =
     sinks.unary(destination, source)(v =>
@@ -286,10 +286,7 @@ private[isa] object FloatSemantics {
       case FloatUnaryOperation.Exponent2 => sinks.unary(destination, source)(v =>
           approximate(algebra, width, control, v)(
             // the half unit's result is its binary32 one rounded toward zero into the half format
-            inline width match {
-              case 16 => FloatArithmetic.exponent2Half(_)
-              case _  => FloatArithmetic.exponent2(_)
-            },
+            FloatArithmetic.exponent2Half(_),
             FloatArithmetic.exponent2(_),
             FloatArithmetic.exponent2(_)
           )
@@ -402,7 +399,7 @@ private[isa] object FloatSemantics {
     )
 
   /** Each element's sign flipped or cleared, with a NaN element canonical. */
-  inline def packedUnary[V, R](inline algebra: Algebra[V], format: PackedFloatFormat, control: FloatControl)(
+  inline def packedUnary[V, R](inline algebra: Algebra[V], format: PackedFloatFormat)(
       inline sinks: NvidiaSinks[V, R],
       destination: Register,
       source: Value,
@@ -416,14 +413,13 @@ private[isa] object FloatSemantics {
       algebra.primitive(value)((raw: UInt[32]) => FloatArithmetic.exponent2HalfBits(raw))
     format match {
       case PackedFloatFormat.F16x2 | PackedFloatFormat.BF16x2 =>
-        sinks.unary(destination, source)((a: V) =>
-          algebra.perHalf(16, a, a)(
-            if (operation == FloatUnaryOperation.Exponent2) exponential
-            else element(16, if (format == PackedFloatFormat.BF16x2) 8 else 5)
-          )
-        )
+        val halves =
+          if (operation == FloatUnaryOperation.Exponent2) exponential
+          else element(16, if (format == PackedFloatFormat.BF16x2) 8 else 5)
+        sinks.unary(destination, source)((a: V) => algebra.perHalf(16, a, a)(halves))
       case PackedFloatFormat.F32x2 =>
-        sinks.unary(destination, source)((a: V) => algebra.perHalf(32, a, a)(element(32, 8)))
+        val halves = element(32, 8)
+        sinks.unary(destination, source)((a: V) => algebra.perHalf(32, a, a)(halves))
     }
   }
 

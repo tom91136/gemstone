@@ -119,8 +119,8 @@ cvt.u32.u32 %r0, %r0;
       )
     }
     assert(compileInstructions("setp.eq.pred %p0, %p0, %p1;").toOption.get.exists {
-      case _: VMI.PredicateCompare => true
-      case _                       => false
+      case VMI.PredicateCompare(_, _, _, _) => true
+      case _                                => false
     })
   }
 

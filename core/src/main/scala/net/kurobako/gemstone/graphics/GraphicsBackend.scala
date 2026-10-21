@@ -4,18 +4,12 @@ import GraphicsProtocol.*
 import ShaderMetadata.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 /** Shader preparation and rendering supplied by the application to an execution session. */
 trait GraphicsBackend {
-  def prepare(
-      image: Vec[Byte],
-      entry: NonEmpty[String],
-      stage: ShaderStageKind,
-      constants: Vec[SpecializationConstant]
-  ): Either[Fault, PreparedShader]
+  def prepare(shader: ShaderStage): Either[Fault, PreparedShader]
   def validate(submission: GraphicsSubmission, size: AllocationId => Option[Int > 0]): Either[String, Set[AllocationId]]
   def validateDescriptorBindings(
       bindings: Vec[DescriptorBinding],
@@ -28,10 +22,5 @@ trait GraphicsBackend {
       control: TaskControl
   )(execute: (AddressSpace, Vec[GraphicsRange], Vec[KernelTask.PointerRelocation]) => Either[Fault, A])
       : Either[Fault, A]
-  def execute(
-      submission: GraphicsSubmission,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, GraphicsStatistics]
+  def execute(submission: GraphicsSubmission, context: TaskContext): Either[Fault, GraphicsStatistics]
 }

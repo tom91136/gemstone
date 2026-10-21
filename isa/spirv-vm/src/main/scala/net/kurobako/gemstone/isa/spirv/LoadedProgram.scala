@@ -39,12 +39,8 @@ private object LoadedProgram {
 private class LoadedProgram(tables: Tables, workgroups: Workgroups) extends VMProgram(tables) {
   val ops: Array[Op] = VMLowering.lower(this)
 
-  override def execute(
-      task: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, Unit] = VMInterpreter.execute(this, ops, task, memory, control, workgroups, handler)
+  override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+    VMInterpreter.execute(this, ops, KernelLaunch(task, context, workgroups))
 
   override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
     if (vulkanEntries.contains(name)) VMShaderInterface.metadata(this, name)

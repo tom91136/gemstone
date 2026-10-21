@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,5 +21,9 @@ struct ExecutableKernelMetadata {
 // Bridge for facades embedded with the HSA provider; copies the server-owned layout under the executable lock.
 bool copyExecutableKernelMetadata(hsa_executable_t executable, std::string_view name, ExecutableKernelMetadata &metadata);
 bool copyExecutableKernelMetadata(hsa_executable_t executable, std::vector<ExecutableKernelMetadata> &metadata);
+
+// Bridge for facades embedded with the HSA provider; compiles a loaded kernel so a build failure is reported to the caller
+// and not by a later dispatch.
+std::optional<execution::Error> buildExecutableKernel(uint64_t kernelObject);
 
 } // namespace gemstone::hsa

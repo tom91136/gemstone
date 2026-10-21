@@ -92,6 +92,8 @@ public:
   bool removeKernel(uint64_t kernelObject);
   /** Binds a named global of the program owning `kernelObject`. */
   bool bindGlobal(uint64_t kernelObject, const std::string &name, uint64_t allocation, uint64_t offset);
+  /** Compiles the kernel behind `kernelObject` ahead of its dispatches; what the service reported when it could not. */
+  std::optional<execution::Error> build(uint64_t kernelObject);
 
   bool registerAllocation(uint64_t base, uint64_t size, uint64_t allocation);
   bool unregisterAllocation(uint64_t base);

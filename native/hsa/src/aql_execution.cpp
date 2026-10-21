@@ -230,6 +230,17 @@ bool AqlRuntime::bindGlobal(uint64_t kernelObject, const std::string &name, uint
   return static_cast<bool>(bound);
 }
 
+std::optional<Error> AqlRuntime::build(uint64_t kernelObject) {
+  const auto found = kernel(kernelObject);
+  if (!found) return Error{.detail = "kernel object is not installed", .kind = FailureKind::NotFound};
+  auto *connection = client();
+  if (!connection) return Error{.detail = "Gemstone execution RPC client is not configured"};
+  const auto built = connection->call(BuildKernel{.program = found->program, .kernelName = {found->name}});
+  if (built) return std::nullopt;
+  fail(built.error().detail);
+  return built.error();
+}
+
 bool AqlRuntime::registerAllocation(uint64_t base, uint64_t size, uint64_t allocation) {
   if (base == 0 || size == 0 || allocation == 0 || base > UINT64_MAX - size) return false;
   std::scoped_lock const guard(lock);

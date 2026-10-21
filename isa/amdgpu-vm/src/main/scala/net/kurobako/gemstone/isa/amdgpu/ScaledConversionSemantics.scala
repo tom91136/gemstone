@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import IntegerSemantics.*
 import VMIR.*
+import VMIR.ScaledConversion.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -23,7 +24,7 @@ private object ScaledConversionSemantics {
     val sources   = Vec((instruction.srcA, dwords.a), (instruction.srcB, dwords.b), (instruction.srcC, dwords.c))
       .filter((_, count) => count > 0)
     instruction.conversion match {
-      case ScaledConversion.Widen(format, side) =>
+      case ScaledConversion(side, Layout.Widen(format)) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, old) =>
           val element = widened(
             algebra,
@@ -37,7 +38,7 @@ private object ScaledConversionSemantics {
             else placed(algebra, old(0), element, if ((selection & 8) != 0) 16 else 0, 16)
           )
         }
-      case ScaledConversion.WidenPair(format, side) =>
+      case ScaledConversion(side, Layout.WidenPair(format)) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, _) =>
           val packed =
             if (format.width == 8) field(algebra, inputs(0), offset = 16 * (selection & 1), width = 16)
@@ -53,7 +54,7 @@ private object ScaledConversionSemantics {
           if (side == Minifloats.Wide.Single) IndexedSeq(low, high)
           else IndexedSeq(algebra.pack(low, high))
         }
-      case ScaledConversion.NarrowPair(side, format) =>
+      case ScaledConversion(side, Layout.NarrowPair(format)) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, old) =>
           def narrowedPair(first: V, second: V, scale: V): IndexedSeq[V] = {
             val mode = if (format.width == 8) sinks.modeRegister else algebra.literal(0L)
@@ -84,7 +85,7 @@ private object ScaledConversionSemantics {
             )
           }
         }
-      case ScaledConversion.NarrowStochastic(side, format) =>
+      case ScaledConversion(side, Layout.NarrowStochastic(format)) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, old) =>
           val value =
             if (side == Minifloats.Wide.Single) modified(algebra, inputs(0), modifiers, index = 0, width = 32)
@@ -101,7 +102,7 @@ private object ScaledConversionSemantics {
           )
           IndexedSeq(placed(algebra, old(0), code, 8 * ((selection >> 2) & 3), 8))
         }
-      case ScaledConversion.NarrowStochasticPair(side) =>
+      case ScaledConversion(side, Layout.NarrowStochasticPair) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, old) =>
           def stochasticPair(first: V, second: V, seed: V, scale: V): IndexedSeq[V] = {
             val pair = algebra.or(
@@ -124,7 +125,7 @@ private object ScaledConversionSemantics {
             )
           }
         }
-      case ScaledConversion.WidenBlock(format, side) =>
+      case ScaledConversion(side, Layout.WidenBlock(format)) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, _) =>
           def element(index: Int): V =
             widened(algebra, sixBitField(algebra, inputs, 6 * index), inputs(6), format, side)
@@ -140,7 +141,7 @@ private object ScaledConversionSemantics {
             }
           results.result()
         }
-      case ScaledConversion.NarrowBlock(side, format, interleaved, stochastic) =>
+      case ScaledConversion(side, Layout.NarrowBlock(format, interleaved, stochastic)) =>
         sinks.block(dest, dwords.dest, sources) { (inputs, _) =>
           val scale = inputs.last
           val codes = IndexedSeq.newBuilder[V]

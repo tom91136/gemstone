@@ -2,17 +2,15 @@ package net.kurobako.gemstone.codegen
 
 class SASSInstructionModelSuite extends munit.FunSuite {
   private def form(name: String, format: String, opcode: String): SASSDescription.InstructionClass = {
-    val formatSection = SASSDescription.Section("FORMAT", format, format, Vector.empty)
+    val formatSection = SASSDescription.Section("FORMAT", format, Vector.empty)
     val opcodeSection = SASSDescription.Section(
       "OPCODES",
       opcode,
-      opcode,
-      Vector(SASSDescription.Entry(opcode, "", opcode, 0, opcode.length))
+      Vector(SASSDescription.Entry(opcode, ""))
     )
     SASSDescription.InstructionClass(
       name,
       alternate = false,
-      conditional = false,
       raw = "",
       sections = Vector(formatSection, opcodeSection)
     )

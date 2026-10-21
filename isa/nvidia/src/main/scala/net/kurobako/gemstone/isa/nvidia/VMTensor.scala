@@ -40,7 +40,7 @@ private object VMTensor {
       bits: Int in (8, 16, 32, 64)
   ): Either[Fault, Long] =
     if (shared(space, address)) Right(context.workgroup.readShared(address, bits))
-    else context.memory.readValue(GuestAddress(address), bits.toScalarByteWidth)
+    else context.device.memory.readValue(GuestAddress(address), bits.toScalarByteWidth)
 
   /** Element `offset` of a matrix at `pointer` whose elements are `bits` wide, packed low first within bytes. */
   private def readElement(
@@ -58,15 +58,15 @@ private object VMTensor {
   }
 
   private def writeMemory(
-      effects: VMWriteBuffer,
+      context: VMContext,
       lane: WorkgroupLane,
       space: MemorySpace,
       address: Long,
       bits: Int in (8, 16, 32, 64),
       value: Long
   ): Unit =
-    if (shared(space, address)) effects.stageShared(address, bits, value)
-    else effects.stage(VMWrite.Memory(lane, GuestAddress(address), bits, value, false))
+    if (shared(space, address)) context.effects.stageShared(address, bits, value)
+    else context.effects.stage(VMWrite.Memory(lane, GuestAddress(address), bits, value, false))
 
   private def uniform(
       context: VMContext,
@@ -104,12 +104,8 @@ private object VMTensor {
       )
     } yield (pointer, leading)
 
-  def execute(
-      operation: Operation,
-      context: VMContext,
-      effects: VMWriteBuffer
-  ): Either[Fault, Step] =
-    participating(context).flatMap(_.traverse_(base => executeWarp(operation, base, context, effects)))
+  def execute(operation: Operation, context: VMContext): Either[Fault, Step] =
+    participating(context).flatMap(_.traverse_(base => executeWarp(operation, base, context)))
       .map(_ => Step.Advance)
 
   /** The warps with an active lane, each of which must have all 32 lanes active. */
@@ -263,8 +259,7 @@ private object VMTensor {
   private def executeWarp(
       operation: Operation,
       base: WorkgroupLane.WarpBase,
-      context: VMContext,
-      effects: VMWriteBuffer
+      context: VMContext
   ): Either[Fault, Unit] = operation match {
     case Operation.Load(fragment, destinations, address, stride, column, space) =>
       parameters(context, base, address, stride, fragment, column).flatMap { (pointer, leading) =>
@@ -278,7 +273,7 @@ private object VMTensor {
               readElement(context, space, pointer, offset, fragment.element.bits)
                 .map(_ << (part.raw * fragment.element.bits))
             }.map(parts =>
-              effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, orAll(parts))
+              context.effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, orAll(parts))
             )
           }
         }
@@ -296,7 +291,7 @@ private object VMTensor {
                   val offset =
                     memoryIndex(fragment, lane, register * fragment.element.packed + part, leading, column)
                   writeMemory(
-                    effects,
+                    context,
                     WorkgroupLane.inWarp(base, lane),
                     space,
                     pointer + offset * (bits.raw / 8),
@@ -330,7 +325,7 @@ private object VMTensor {
                 else memory(offset) & 0xffL
               bits |= element << (part * 8 * tile.shape.bytes)
             }
-            effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, bits)
+            context.effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, bits)
           }
         }
       }
@@ -344,7 +339,7 @@ private object VMTensor {
             (0 until parts).foreach { part =>
               val (matrix, row, column) = tile.coordinate(lane, register, part)
               val (stored, offset)      = tile.stored(row, column)
-              effects.stageShared(
+              context.effects.stageShared(
                 addresses(matrix * tile.addresses + stored) + offset * tile.shape.bytes,
                 if (width == 16) 16 else 8,
                 bits >>> (part * width)
@@ -353,7 +348,7 @@ private object VMTensor {
           }
         }
       }
-    case widened: Operation.Widen                       => Right(widen(widened, base, context, effects))
+    case widened: Operation.Widen                       => Right(widen(widened, base, context))
     case Operation.WarpgroupMultiply(product = product) =>
       Left(invalid(s"wgmma into ${product.d.element} from ${product.a.element} is not supported"))
     case Operation.Transpose(destination, source) =>
@@ -361,7 +356,7 @@ private object VMTensor {
       def element(row: Int, column: Int): Long = (values(4 * row + column / 2) >>> (16 * (column % 2))) & 0xffffL
       Right(WarpLane.values.foreach { lane =>
         val row = 2 * (lane.raw % 4)
-        effects.stageRegister(
+        context.effects.stageRegister(
           WorkgroupLane.inWarp(base, lane),
           destination,
           element(row, lane.raw / 4) | (element(row + 1, lane.raw / 4) << 16)
@@ -372,17 +367,15 @@ private object VMTensor {
   private def widen(
       operation: Operation.Widen,
       base: WorkgroupLane.WarpBase,
-      context: VMContext,
-      effects: VMWriteBuffer
-  )
-      : Unit = {
+      context: VMContext
+  ): Unit = {
     val values = Vec.tabulate(32)(lane => context.read(WorkgroupLane.fromIndex(base + lane), operation.source))
     def element(row: Int, column: Int): Long = (values(4 * row + column / 8) >>> (4 * (column % 8))) & 0xfL
     WarpLane.values.foreach { lane =>
       def bytes(first: Int): Long = LittleEndian.decode(4)(part => element(lane.raw / 4, first + part).toByte)
       val target                  = WorkgroupLane.inWarp(base, lane)
-      effects.stageRegister(target, operation.low, bytes(lane.raw % 4 * 4))
-      effects.stageRegister(target, operation.high, bytes(16 + lane.raw % 4 * 4))
+      context.effects.stageRegister(target, operation.low, bytes(lane.raw % 4 * 4))
+      context.effects.stageRegister(target, operation.high, bytes(16 + lane.raw % 4 * 4))
     }
   }
 

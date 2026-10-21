@@ -119,8 +119,8 @@ private object OperandQueries {
     case _                                => false
   }
   def isPredicateAllowingBoth(value: Operand): Boolean = value match {
-    case _: Operand.Predicate => true
-    case _                    => false
+    case Operand.Predicate(_, _, _) => true
+    case _                          => false
   }
   def isAlwaysPredicate(value: Operand): Boolean = value match {
     case Operand.Predicate(None, _, false) => true
@@ -140,10 +140,10 @@ private object OperandQueries {
   }
   @annotation.tailrec
   def numericFloating(value: Operand): Boolean = value match {
-    case Operand.Integer(_) | _: Operand.Floating | Operand.FloatingSymbol(_) => true
-    case Operand.FloatingBits(_, width, _) if width == 64                     => true
-    case Operand.Unary(value = inner)                                         => numericFloating(inner)
-    case _                                                                    => false
+    case Operand.Integer(_) | Operand.Floating(_, _, _) | Operand.FloatingSymbol(_) => true
+    case Operand.FloatingBits(_, width, _) if width == 64                           => true
+    case Operand.Unary(value = inner)                                               => numericFloating(inner)
+    case _                                                                          => false
   }
 
 }

@@ -512,15 +512,15 @@ private object VMFloatingCompiler {
     */
   private def mufuFunction(modifier: Modifier)(using
       context: VMCompilationContext
-  ): Option[(MufuFunction, Mufu.Flavour)] = {
+  ): Option[(MufuFunction, MufuFlavour)] = {
     import context.*
-    val flavour = if (legacy) Mufu.Flavour.Legacy else Mufu.Flavour.Modern
+    val flavour = if (legacy) MufuFlavour.Legacy else MufuFlavour.Modern
     modifier match {
       case Modifier.RCP  => Some((MufuFunction.Reciprocal, flavour))
       case Modifier.RSQ  => Some((MufuFunction.ReciprocalSquareRoot, flavour))
       case Modifier.LG2  => Some((MufuFunction.Log2, flavour))
       case Modifier.EX2  => Some((MufuFunction.Exponent2, flavour))
-      case Modifier.SQRT => Some((MufuFunction.SquareRoot, if (sm < 61) Mufu.Flavour.Legacy else Mufu.Flavour.Modern))
+      case Modifier.SQRT => Some((MufuFunction.SquareRoot, if (sm < 61) MufuFlavour.Legacy else MufuFlavour.Modern))
       case Modifier.SIN  => Some((if (legacy) MufuFunction.Sine else MufuFunction.SineCycles, flavour))
       case Modifier.COS  => Some((if (legacy) MufuFunction.Cosine else MufuFunction.CosineCycles, flavour))
       case Modifier.TANH => None
@@ -746,8 +746,8 @@ private object VMFloatingCompiler {
         val result = binary(IntegerOperation.BitwiseAnd, floatPairOperand(inner), mask, 64)
         if (negative) emit(IntegerBinary(IntegerOperation.BitwiseXor, result.slot, result, Value.Immediate(signs), 64))
         result
-      case _: Operand.Unary => unsupported("packed float32 does not support bitwise source inversion")
-      case _                =>
+      case Operand.Unary(_, _, _, _) => unsupported("packed float32 does not support bitwise source inversion")
+      case _                         =>
         val selected = OperandQueries.qualifiers(operand)
         val base     = OperandQueries.base(OperandQueries.without(operand, OperandSelector.reuse))
         val scalar   = selected == Vec(OperandSelector.F32)
@@ -969,16 +969,22 @@ private object VMFloatingCompiler {
       case Vec(target @ (Modifier.F16 | Modifier.BF16), Modifier.UNPACK_B)
           if !relu && !saturate && rounding.isEmpty && (target == Modifier.BF16) == scaled =>
         requireOperands(2, "F2FP.UNPACK_B requires destination and source")
-        val pair = OperandQueries.qualifiers(operands(1)) match {
-          case Vec()                   => source(operands(1))
-          case Vec(OperandSelector.H1) =>
-            binary(IntegerOperation.ShiftRightLogical, source(OperandQueries.base(operands(1))), Value.Immediate(16L))
-          case Vec(OperandSelector.H0) => source(OperandQueries.base(operands(1)))
-          case _                       => unsupported("unsupported F2FP.UNPACK_B source half")
-        }
+        val pair = unpackHalf(operands(1))
         emit(ConvertWiden(result.slot, pair, scale, format, bf16 = scaled, relu = false, saturate = false))
         store(operands.head, result)
       case _ => unsupported(s"unsupported F2FP modifiers ${modifiers.mkString(".")}")
+    }
+  }
+
+  /** The half of the source the selector names, or the whole source when it names none. */
+  private def unpackHalf(operand: Operand)(using context: VMCompilationContext): Value = {
+    import context.*
+    OperandQueries.qualifiers(operand) match {
+      case Vec()                   => source(operand)
+      case Vec(OperandSelector.H1) =>
+        binary(IntegerOperation.ShiftRightLogical, source(OperandQueries.base(operand)), Value.Immediate(16L))
+      case Vec(OperandSelector.H0) => source(OperandQueries.base(operand))
+      case _                       => unsupported("unsupported F2FP.UNPACK_B source half")
     }
   }
 
@@ -1029,13 +1035,7 @@ private object VMFloatingCompiler {
         emit(ConvertToFloat8(result.slot, pair, pair, source(operands(2)), format, halves = true, relu))
       case Vec(Modifier.F16, Modifier.UNPACK_B) if !relu =>
         requireOperands(2, "F2FP.UNPACK_B requires destination and source")
-        val pair = OperandQueries.qualifiers(operands(1)) match {
-          case Vec()                   => source(operands(1))
-          case Vec(OperandSelector.H1) =>
-            binary(IntegerOperation.ShiftRightLogical, source(OperandQueries.base(operands(1))), Value.Immediate(16L))
-          case Vec(OperandSelector.H0) => source(OperandQueries.base(operands(1)))
-          case _                       => unsupported("unsupported F2FP.UNPACK_B source half")
-        }
+        val pair = unpackHalf(operands(1))
         emit(ConvertFromFloat8(result.slot, pair, format))
       case _ => unsupported(s"unsupported F2FP modifiers ${modifiers.mkString(".")}")
     }

@@ -213,13 +213,12 @@ private object VMIR {
 
   /** The texel coordinates of an image access: the address words, consecutive or as the instruction lists them, two
     * 16-bit coordinates to a word under `a16`. The coordinates the dimension takes come first, then the mip level. GFX8
-    * and GFX9 name no dimension, so the descriptor's type does, with `array` for DA.
+    * and GFX9 name no dimension, so the descriptor's type does.
     */
   case class ImageAddress(
       words: Vec[VectorRegisterIndex],
       resource: ScalarRegisterIndex,
       dimension: Option[ImageDimension],
-      array: Boolean,
       mip: Boolean,
       a16: Boolean
   )
@@ -596,37 +595,44 @@ private object VMIR {
       ((lane & ~groupMask) + offset(element) + ((lane >> laneShift) & laneMask) * laneScale, lane & elementMask)
   }
 
-  /** The element layouts of gfx950's scaled conversions between `side` floats and `format` floats: one element of the
-    * byte OP_SEL[1:0] names into a binary32 dword or the half OP_SEL[3] names; two from the word OP_SEL[0] names, or
-    * the byte OP_SEL[1:0] names for FP4, into a register pair of binary32 or a dword of halves; two, SRC0 and SRC1 or
-    * SRC0's halves, into the word OP_SEL[3] or the FP4 byte OP_SEL[3:2] names; one, SRC0's or its half OP_SEL[0] names,
-    * rounded by SRC1's seed into the byte OP_SEL[3:2] names; two FP4 elements so rounded, the second by the seed
-    * V_PRNG_B32 advances; and 32 6-bit elements, six dwords, from or into 32 wide elements, SRC0's or, when
-    * `interleaved`, SRC0's and SRC1's in turn, rounded by SRC1's advancing seed when `stochastic`.
-    */
-  enum ScaledConversion {
-    case Widen(format: Minifloat, side: Minifloats.Wide)
-    case WidenPair(format: Minifloat, side: Minifloats.Wide)
-    case NarrowPair(side: Minifloats.Wide, format: Minifloat)
-    case NarrowStochastic(side: Minifloats.Wide, format: Minifloat)
-    case NarrowStochasticPair(side: Minifloats.Wide)
-    case WidenBlock(format: Minifloat, side: Minifloats.Wide)
-    case NarrowBlock(side: Minifloats.Wide, format: Minifloat, interleaved: Boolean, stochastic: Boolean)
+  object ScaledConversion {
+
+    /** The element layouts of a scaled conversion between wide floats and `format` floats: one element of the byte
+      * OP_SEL[1:0] names into a binary32 dword or the half OP_SEL[3] names; two from the word OP_SEL[0] names, or the
+      * byte OP_SEL[1:0] names for FP4, into a register pair of binary32 or a dword of halves; two, SRC0 and SRC1 or
+      * SRC0's halves, into the word OP_SEL[3] or the FP4 byte OP_SEL[3:2] names; one, SRC0's or its half OP_SEL[0]
+      * names, rounded by SRC1's seed into the byte OP_SEL[3:2] names; two FP4 elements so rounded, the second by the
+      * seed V_PRNG_B32 advances; and 32 6-bit elements, six dwords, from or into 32 wide elements, SRC0's or, when
+      * `interleaved`, SRC0's and SRC1's in turn, rounded by SRC1's advancing seed when `stochastic`.
+      */
+    enum Layout derives CanEqual {
+      case Widen(format: Minifloat)
+      case WidenPair(format: Minifloat)
+      case NarrowPair(format: Minifloat)
+      case NarrowStochastic(format: Minifloat)
+      case NarrowStochasticPair
+      case WidenBlock(format: Minifloat)
+      case NarrowBlock(format: Minifloat, interleaved: Boolean, stochastic: Boolean)
+    }
+  }
+
+  /** gfx950's scaled conversions between `side` floats and the narrow floats of `layout`. */
+  case class ScaledConversion(side: Minifloats.Wide, layout: ScaledConversion.Layout) {
 
     /** The dwords the destination takes and SRC0, SRC1 and SRC2 give, none for a source the conversion leaves. */
     def dwords: (dest: Int, a: Int, b: Int, c: Int) = {
-      def single(side: Minifloats.Wide): Boolean = side == Minifloats.Wide.Single
-      this match {
-        case Widen(format = _)                 => (1, 1, 1, 0)
-        case WidenPair(side = side)            => (if (single(side)) 2 else 1, 1, 1, 0)
-        case NarrowPair(side = side)           => (1, 1, 1, if (single(side)) 1 else 0)
-        case NarrowStochastic(side = _)        => (1, 1, 1, 1)
-        case NarrowStochasticPair(side = side) => (1, if (single(side)) 2 else 1, 1, 1)
-        case WidenBlock(side = side)           => (if (single(side)) 32 else 16, 6, 1, 0)
-        case NarrowBlock(side = side, interleaved = interleaved, stochastic = stochastic) =>
+      val single = side == Minifloats.Wide.Single
+      layout match {
+        case ScaledConversion.Layout.Widen(_)                                => (1, 1, 1, 0)
+        case ScaledConversion.Layout.WidenPair(_)                            => (if (single) 2 else 1, 1, 1, 0)
+        case ScaledConversion.Layout.NarrowPair(_)                           => (1, 1, 1, if (single) 1 else 0)
+        case ScaledConversion.Layout.NarrowStochastic(_)                     => (1, 1, 1, 1)
+        case ScaledConversion.Layout.NarrowStochasticPair                    => (1, if (single) 2 else 1, 1, 1)
+        case ScaledConversion.Layout.WidenBlock(_)                           => (if (single) 32 else 16, 6, 1, 0)
+        case ScaledConversion.Layout.NarrowBlock(_, interleaved, stochastic) =>
           (
             6,
-            if (single(side) && !interleaved) 32 else 16,
+            if (single && !interleaved) 32 else 16,
             if (interleaved) 16 else 1,
             if (interleaved || stochastic) 1 else 0
           )
@@ -735,8 +741,8 @@ private object VMIR {
     case SMultiplyImmediate(dest: ScalarRegisterIndex, value: Int)
     case SMove64(dest: ScalarRegisterIndex, src: InstructionSource)
 
-    /** Set a hardware register (for example the flat-scratch base). */
-    case SSetReg(hwreg: Int, src: ScalarRegisterIndex)
+    /** A write to a hardware register other than MODE, none of which a lane observes. */
+    case SSetReg
 
     /** Write the low `size` bits of `src` into MODE from bit `offset`. */
     case SSetMode(offset: Int in 0 ~ 31, size: Int in 1 ~ 32, src: InstructionSource)

@@ -10,18 +10,13 @@ import cats.parse.Parser0
   */
 object SASSDescription {
 
-  case class Description(
-      architecture: Option[String],
-      preamble: String,
-      globals: Vector[Section],
-      classes: Vector[InstructionClass],
-      trailing: String
-  )
+  case class Description(preamble: String, classes: Vector[InstructionClass])
 
+  // raw is the reader's round trip, which its tests check, and what keeps it lossless
+  @SuppressWarnings(Array("baumkuchen:test-only-member"))
   case class InstructionClass(
       name: String,
       alternate: Boolean,
-      conditional: Boolean,
       raw: String,
       sections: Vector[Section]
   ) {
@@ -33,9 +28,9 @@ object SASSDescription {
     def opcodes: Vector[String] = opcodeEntries.map(_.name)
   }
 
-  case class Section(name: String, body: String, raw: String, entries: Vector[Entry])
+  case class Section(name: String, body: String, entries: Vector[Entry])
 
-  case class Entry(name: String, value: String, raw: String, start: Int, end: Int)
+  case class Entry(name: String, value: String)
 
   private enum LexemeKind derives CanEqual { case Word, Quoted, Comment, Group, Space, Symbol }
   private case class Lexeme(
@@ -45,7 +40,7 @@ object SASSDescription {
       end: Int = 0,
       children: Vector[Lexeme] = Vector.empty
   )
-  private case class Line(start: Int, end: Int, contentEnd: Int, text: String)
+  private case class Line(start: Int, contentEnd: Int, text: String)
   private case class Header(start: Int, end: Int, name: String, alternate: Boolean)
 
   // cats-parse handles the nested token grammar; exact token slices are retained.
@@ -91,39 +86,25 @@ object SASSDescription {
 
   def parse(source: String): Either[ParseError, Description] =
     lex(source).flatMap { tokens =>
-      val topLevel     = tokens.view.filter(t => t.children.isEmpty).map(t => t.start -> t).toMap
-      val lines        = splitLines(source)
-      val headers      = lines.flatMap(classHeader(_, topLevel))
-      val headerStarts = headers.map(_.start).toSet
-      val (depth, conditional, directiveError) =
-        lines.foldLeft((0, Map.empty[Int, Boolean], Option.empty[ParseError])) {
-          case ((depth, active, error), line) =>
-            val marked  = if (headerStarts(line.start)) active.updated(line.start, depth > 0) else active
+      val topLevel                = tokens.view.filter(t => t.children.isEmpty).map(t => t.start -> t).toMap
+      val lines                   = splitLines(source)
+      val headers                 = lines.flatMap(classHeader(_, topLevel))
+      val (depth, directiveError) =
+        lines.foldLeft((0, Option.empty[ParseError])) {
+          case ((depth, error), line) =>
             val trimmed = line.text.trim
             val offset  = line.start + line.text.indexOf(trimmed)
-            if (!topLevel.get(offset).exists(_.raw == "#")) (depth, marked, error)
+            if (!topLevel.get(offset).exists(_.raw == "#")) (depth, error)
             else trimmed match {
-              case s"##IF $guard" if guard.nonEmpty => (depth + 1, marked, error)
-              case "##IF"                  => (depth, marked, Some(ParseError("missing ##IF condition", offset)))
-              case "##ENDIF" if depth == 0 => (depth, marked, Some(ParseError("unmatched ##ENDIF", offset)))
-              case "##ENDIF"               => (depth - 1, marked, error)
-              case "##ELSE" if depth == 0  => (depth, marked, Some(ParseError("unmatched ##ELSE", offset)))
-              case _                       => (depth, marked, error)
+              case s"##IF $guard" if guard.nonEmpty => (depth + 1, error)
+              case "##IF"                           => (depth, Some(ParseError("missing ##IF condition", offset)))
+              case "##ENDIF" if depth == 0          => (depth, Some(ParseError("unmatched ##ENDIF", offset)))
+              case "##ENDIF"                        => (depth - 1, error)
+              case "##ELSE" if depth == 0           => (depth, Some(ParseError("unmatched ##ELSE", offset)))
+              case _                                => (depth, error)
             }
         }
-      val error    = if (depth != 0) Some(ParseError("unterminated ##IF", source.length)) else directiveError
-      val archLine = lines.collectFirst {
-        case line if line.text.trim.startsWith("ARCHITECTURE ") => line
-      }
-      val arch = archLine.flatMap { line =>
-        val keyword = line.start + line.text.indexOf(line.text.trim)
-        Option.when(topLevel.get(keyword).exists(_.raw == "ARCHITECTURE")) {
-          line.text.trim match {
-            case s"ARCHITECTURE \"$name\"" => name
-            case _                         => ""
-          }
-        }
-      }.filter(_.nonEmpty)
+      val error      = if (depth != 0) Some(ParseError("unterminated ##IF", source.length)) else directiveError
       val firstClass = headers.headOption.map(_.start).getOrElse(source.length)
       val preamble   = source.substring(0, firstClass)
       val classes    = headers.zipWithIndex.map { case (header, i) =>
@@ -132,13 +113,11 @@ object SASSDescription {
         InstructionClass(
           header.name,
           header.alternate,
-          conditional(header.start),
           raw,
           parseSections(raw, header.end - header.start, classSectionNames)
         )
       }
-      val globals = parseSections(preamble, 0, globalSectionNames)
-      error.toLeft(Description(arch, preamble, globals, classes, ""))
+      error.toLeft(Description(preamble, classes))
     }
 
   private def lex(source: String): Either[ParseError, Vector[Lexeme]] = {
@@ -155,7 +134,7 @@ object SASSDescription {
     val lines = source.split("\n", -1).toVector
     lines.scanLeft(0)((offset, line) => offset + line.length + 1).zip(lines).map { case (start, line) =>
       val text = line.stripSuffix("\r")
-      Line(start, (start + line.length + 1).min(source.length), start + text.length, text)
+      Line(start, start + text.length, text)
     }
   }
 
@@ -185,15 +164,6 @@ object SASSDescription {
     "CONDITION",
     "PROPERTIES"
   )
-  private val globalSectionNames = Set(
-    "RELOCATORS",
-    "OPTIONS",
-    "PARAMETERS",
-    "CONSTANTS",
-    "REGISTERS",
-    "INSTRUCTIONS",
-    "SUBCLASSES"
-  )
 
   private def parseSections(raw: String, headerEnd: Int, names: Set[String]): Vector[Section] = {
     val tokens      = lex(raw).fold(error => throw IllegalArgumentException(error.toString), identity)
@@ -210,10 +180,10 @@ object SASSDescription {
   }
 
   private def buildSections(raw: String, starts: Vector[(Int, Int, String)]): Vector[Section] =
-    starts.zipWithIndex.map { case ((start, bodyStart, name), i) =>
+    starts.zipWithIndex.map { case ((_, bodyStart, name), i) =>
       val end  = starts.lift(i + 1).map(_._1).getOrElse(raw.length)
       val body = raw.substring(bodyStart, end)
-      Section(name, body, raw.substring(start, end), parseEntries(body))
+      Section(name, body, parseEntries(body))
     }
 
   private def parseEntries(body: String): Vector[Entry] = {
@@ -232,7 +202,7 @@ object SASSDescription {
       val nameTokens = significant.take(index)
       val name       = if (nameTokens.size == 1) parseName(nameTokens.head)
       else bindingName.parseAll(raw.substring(nameTokens.head.start, nameTokens.last.end)).toOption
-      name.map(value => Entry(value, raw.substring(significant(index).end).trim.stripSuffix(";"), raw, from, until))
+      name.map(value => Entry(value, raw.substring(significant(index).end).trim.stripSuffix(";")))
     }
   }
 

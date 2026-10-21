@@ -39,7 +39,7 @@ class AMDGPUScalarStoreSuite extends munit.FunSuite {
   }
 
   private def assemble(target: Target, text: String)(using munit.Location): Vec[Byte] =
-    asm.Assembler.encode(asm.Parser.parse(text).value, target, 64).value
+    asm.Assembler.encode(asm.Parser.parse(text).value, TargetMode(target, 64)).value
 
   private def address(allocation: Long): Long = RegionMemory.Base + (allocation - 1L) * RegionMemory.Stride
 

@@ -88,16 +88,5 @@ private object ModifierLowering {
       case Modifier.`RP` => ConversionRounding.RP
       case _             => unsupported(s"unsupported SASS rounding mode $raw")
     }
-    def floatUnaryOperation: FloatUnaryOperation = raw match {
-      case Modifier.`RCP`  => FloatUnaryOperation.Reciprocal
-      case Modifier.`RSQ`  => FloatUnaryOperation.ReciprocalSquareRoot
-      case Modifier.`SQRT` => FloatUnaryOperation.SquareRoot
-      case Modifier.`EX2`  => FloatUnaryOperation.Exponent2
-      case Modifier.`LG2`  => FloatUnaryOperation.Log2
-      case Modifier.`SIN`  => FloatUnaryOperation.Sine
-      case Modifier.`COS`  => FloatUnaryOperation.Cosine
-      case Modifier.`TANH` => FloatUnaryOperation.Tanh
-      case _               => unsupported(s"unsupported SASS floating operation $raw")
-    }
   }
 }

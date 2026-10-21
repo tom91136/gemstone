@@ -2216,7 +2216,7 @@ ze_result_t ZE_APICALL kernelCreate(ze_module_handle_t moduleHandle, const ze_ke
   if (!described) {
     recordRemoteError(remote.error());
     delete kernel;
-    return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    return described.error().kind == FailureKind::NotFound ? ZE_RESULT_ERROR_INVALID_KERNEL_NAME : ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
   }
   const auto &metadata = described.value();
   kernel->parameters =

@@ -162,6 +162,58 @@ class BulkTensorSuite extends munit.FunSuite {
       }
     }
 
+  // the interleaved layouts rearrange global and shared memory in ways the plain-layout copy does not model
+  test("tensor copies through an interleaved tensor map fault rather than copy in the plain layout") {
+    val kernel               = compileKernel(AsyncCases.tilePtx)
+    val (w, h)               = (40, 20)
+    val tensor               = w * h * 4
+    val memory               = DeviceMemory((3 * tensor + 1024).unsafe[Int >= 0])
+    val source               = memory.start.raw
+    def describe(base: Long) = {
+      val bytes = TensorMaps.tiled(base, TensorMap.Element.F32, Vec(w.toLong, h.toLong), Vec(w * 4L), Vec(32, 8))
+      assert(TensorMap.replace(bytes, TensorMap.Field.Interleave, 0, 1L).isRight)
+      bytes
+    }
+    val result = execute(
+      kernel,
+      1,
+      256,
+      Map(
+        map("load", describe(source)),
+        map("store", describe(source + tensor)),
+        map("reduce", describe(source + 2 * tensor)),
+        argument("out", source + 3 * tensor),
+        (("x": NonEmpty[String]), Argument.fromLong(0L)),
+        (("y": NonEmpty[String]), Argument.fromLong(0L))
+      ),
+      memory
+    )
+    result match {
+      case Left(Fault.Backend(message)) => assert(message.contains("interleave"), message)
+      case other                        => fail(s"expected a backend fault, got $other")
+    }
+  }
+
+  test("tensor prefetches through an interleaved tensor map move no data and complete") {
+    val kernel = compileKernel(""".version 8.6
+      |.target sm_90
+      |.address_size 64
+      |.visible .entry prefetch(
+      | .param .align 64 .b8 load[128]
+      |) {
+      | .reg .u64 %map;
+      | mov.b64 %map, load;
+      | cvta.param.u64 %map, %map;
+      | cp.async.bulk.prefetch.tensor.2d.L2.global.tile [%map, {0, 0}];
+      | ret;
+      |}
+      |""".stripMargin)
+    val memory = DeviceMemory(4096)
+    val bytes  = TensorMaps.tiled(memory.start.raw, TensorMap.Element.F32, Vec(40L, 20L), Vec(160L), Vec(32, 8))
+    assert(TensorMap.replace(bytes, TensorMap.Field.Interleave, 0, 1L).isRight)
+    assertEquals(execute(kernel, 1, 32, Map(map("load", bytes)), memory), Right(()))
+  }
+
   // GH200 k_bulk_smem: the shared-to-shared bulk copy of a launch without a cluster ends in cudaErrorIllegalInstruction.
   test("sm_90 hardware: shared-to-shared cp.async.bulk outside a cluster raises an illegal instruction") {
     val kernel = compileKernel(""".version 8.6

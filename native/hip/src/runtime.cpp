@@ -42,6 +42,7 @@
 #include "gemstone/hsa/images.hpp"
 #include "gemstone/hsa/memory_copy.hpp"
 #include "gemstone/hsa/target.hpp"
+#include "gemstone_execution_rpc.hpp"
 #include "gemstone_hip_api.h"
 #include <gemstone/bytes.hpp>
 #include <gemstone/command_queue.hpp>
@@ -165,6 +166,7 @@ constexpr uint64_t MaximumBundleCount = 64;
 struct Kernel {
   uint64_t object = 0;
   gemstone::hsa::KernelLayout layout;
+  std::atomic<bool> built{false};
 };
 
 struct Module;
@@ -287,6 +289,20 @@ hipError_t mapQueueError(hsa_status_t status) {
     case HSA_STATUS_ERROR_INVALID_CODE_OBJECT: return hipErrorInvalidImage;
     case HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS:
     case HSA_STATUS_ERROR_INVALID_ARGUMENT: return hipErrorInvalidConfiguration;
+    default: return hipErrorLaunchFailure;
+  }
+}
+
+// The error a launch reports when the service cannot build its kernel.
+hipError_t buildError(gemstone::execution::FailureKind kind) {
+  using gemstone::execution::FailureKind;
+  switch (kind) {
+    case FailureKind::InvalidProgram: return hipErrorInvalidImage;
+    case FailureKind::Unsupported: return hipErrorNotSupported;
+    case FailureKind::InvalidRequest: return hipErrorInvalidValue;
+    case FailureKind::NotFound: return hipErrorNotFound;
+    case FailureKind::InvalidConfiguration: return hipErrorInvalidConfiguration;
+    case FailureKind::OutOfResources: return hipErrorLaunchOutOfResources;
     default: return hipErrorLaunchFailure;
   }
 }
@@ -550,7 +566,9 @@ std::shared_ptr<Kernel> resolveModuleKernel(Module &module, const std::string &n
   if (hsa_executable_get_symbol_by_name(module.executable, name.c_str(), &state().gpu, &symbol) != HSA_STATUS_SUCCESS) return {};
   uint64_t object = 0;
   if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) != HSA_STATUS_SUCCESS) return {};
-  auto kernel = std::make_shared<Kernel>(Kernel{.object = object, .layout = metadata.layout});
+  auto kernel = std::make_shared<Kernel>();
+  kernel->object = object;
+  kernel->layout = metadata.layout;
   module.kernels.emplace(metadata.name, kernel);
   module.kernels.emplace(metadata.symbol, kernel);
   if (metadata.symbol.size() > 3 && (metadata.symbol ^ ends_with(".kd")))
@@ -631,6 +649,14 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
     return remember(hipErrorInvalidConfiguration);
   const dim3 global = !globalWorkItems ? dim3(grid.x * block.x, grid.y * block.y, grid.z * block.z) : *globalWorkItems;
   if (global.x < block.x || global.y < block.y || global.z < block.z) return remember(hipErrorInvalidConfiguration);
+  // A kernel is built on its first launch, which reports a build failure the way a lazily loaded module does.
+  if (!kernel->built.load()) {
+    if (const auto failure = gemstone::hsa::buildExecutableKernel(kernel->object)) {
+      if (traceModules()) std::fprintf(stderr, "Gemstone HIP kernel build failed: %s\n", failure->detail.c_str());
+      return remember(buildError(failure->kind));
+    }
+    kernel->built.store(true);
+  }
   void *kernarg = nullptr;
   hsa_status_t status = kernel->layout.kernargSize == 0 ? HSA_STATUS_SUCCESS
                                                         : hsa_memory_allocate(state().kernargRegion, kernel->layout.kernargSize, &kernarg);
@@ -1637,7 +1663,7 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
     selected->metadata | filter([&](const auto &candidate) { return candidate.name ^ starts_with(prefix); }) | take(8)
         | for_each([](const auto &candidate) { std::fprintf(stderr, "Gemstone HIP nearby module function=%s\n", candidate.name.c_str()); });
   }
-  if (!kernel) return remember(hipErrorInvalidDeviceFunction);
+  if (!kernel) return remember(hipErrorNotFound);
   auto *result = new (std::nothrow) FunctionHandle{.module = std::move(selected), .kernel = std::move(kernel)};
   if (!result) return remember(hipErrorOutOfMemory);
   *function = reinterpret_cast<hipFunction_t>(result);

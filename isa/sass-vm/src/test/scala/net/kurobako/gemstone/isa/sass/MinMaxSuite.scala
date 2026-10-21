@@ -10,11 +10,12 @@ import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
 class MinMaxSuite extends munit.FunSuite {
-  private trait Reduction {
-    def apply(a: Int, b: Int, c: Int): Int
-  }
-
-  private case class NestedKernel(function: String, listing: String, modifiers: Vec[String], expected: Reduction)
+  private class NestedKernel(
+      val function: String,
+      val listing: String,
+      val modifiers: Vec[String],
+      val expected: (Int, Int, Int) => Int
+  )
 
   private val Flags = Vec(false, true)
 
@@ -157,14 +158,15 @@ class MinMaxSuite extends munit.FunSuite {
       Arg.zeros(nestedCases.size * 4)
     )
     for (sm <- Vec(50, 60))
-      NestedKernels.foreach { case NestedKernel(function, listing, modifiers, expected) =>
-        val kernel = load(sm, Fixture.listing(listing), function)
-        val vmnmx  = kernel.function.instructions.filter(_.mnemonic.raw == "VMNMX")
-        assertEquals(vmnmx.map(_.modifiers.map(_.name)), Vec(modifiers), s"sm_$sm $function")
+      NestedKernels.foreach { nestedKernel =>
+        val function = nestedKernel.function
+        val kernel   = load(sm, Fixture.listing(nestedKernel.listing), function)
+        val vmnmx    = kernel.function.instructions.filter(_.mnemonic.raw == "VMNMX")
+        assertEquals(vmnmx.map(_.modifiers.map(_.name)), Vec(nestedKernel.modifiers), s"sm_$sm $function")
         assertEquals(vmnmx.head.operands.size, 4, s"sm_$sm $function")
         assertEquals(
           nested(kernel).words(3).map(_.toInt),
-          nestedCases.map((a, b, c) => expected(a, b, c)),
+          nestedCases.map((a, b, c) => nestedKernel.expected(a, b, c)),
           s"sm_$sm $function"
         )
         if (function == "nested_min") {

@@ -64,6 +64,8 @@ private object VMIntegerCompiler {
     Modifier.W
   )
   private val loadEffectiveAddressModifiers = Set(Modifier.HI, Modifier.X, Modifier.SX32)
+  private val bytePermuteModifiers          =
+    Set(Modifier.F4E, Modifier.B4E, Modifier.RC8, Modifier.ECL, Modifier.ECR, Modifier.RC16)
 
   def lower(using VMCompilationContext): Boolean = lowerConversionsAndAdditions
 
@@ -140,8 +142,8 @@ private object VMIntegerCompiler {
         )
           unsupported("I2I.U32.U32 destination must be a general register")
         operands(1) match {
-          case _: Operand.Unary => unsupported("I2I.U32.U32 source modifiers")
-          case operand          => store(operands.head, source(operand))
+          case Operand.Unary(_, _, _, _) => unsupported("I2I.U32.U32 source modifiers")
+          case operand                   => store(operands.head, source(operand))
         }
         true
       case _: Form.I2i | _: Form.Ui2i =>
@@ -354,6 +356,17 @@ private object VMIntegerCompiler {
 
   private def lowerMultiplyAndAdd(using context: VMCompilationContext): Boolean = {
     import context.*
+
+    /** The carry-out predicate of an addition: the sum is below the left source, or the total is below the sum. */
+    def writeCarryOut(target: Operand, left: Value, sum: Value, total: Value, width: Int in (8, 16, 32, 64)): Unit =
+      writePredicate(
+        target,
+        combine(
+          PredicateOperation.Or,
+          compare(Comparison.LessThan, NumericFormat.Unsigned(width), sum, left),
+          compare(Comparison.LessThan, NumericFormat.Unsigned(width), total, sum)
+        )
+      )
     (operation.form: @unchecked) match {
       case _: Form.Sgxt | _: Form.Usgxt =>
         signExtendField()
@@ -410,16 +423,7 @@ private object VMIntegerCompiler {
         val left  = source(values(1), 64)
         val sum   = binary(IntegerOperation.Add, left, source(values(2), 64), 64)
         val total = binary(IntegerOperation.Add, sum, bit(predicateSource(values(3)), 64), 64)
-        carryOut.foreach(carry =>
-          writePredicate(
-            carry,
-            combine(
-              PredicateOperation.Or,
-              compare(Comparison.LessThan, NumericFormat.Unsigned(64), sum, left),
-              compare(Comparison.LessThan, NumericFormat.Unsigned(64), total, sum)
-            )
-          )
-        )
+        carryOut.foreach(carry => writeCarryOut(carry, left, sum, total, 64))
         store(values.head, total, 64)
         true
       // a negated source subtracts, so its carry out is the no-borrow bit
@@ -462,15 +466,7 @@ private object VMIntegerCompiler {
         val left    = extended(sources(0))
         val sum     = binary(IntegerOperation.Add, left, extended(sources(1)))
         val result  = binary(IntegerOperation.Add, sum, bit(predicateSource(sources(2))))
-        if (operands.size == 5)
-          writePredicate(
-            operands(1),
-            combine(
-              PredicateOperation.Or,
-              compare(Comparison.LessThan, NumericFormat.Unsigned(32), sum, left),
-              compare(Comparison.LessThan, NumericFormat.Unsigned(32), result, sum)
-            )
-          )
+        if (operands.size == 5) writeCarryOut(operands(1), left, sum, result, 32)
         store(operands.head, result)
         true
       case _: Form.Iadd if legacy && modifiers == Vec(Modifier.SAT) && operands.size == 3 =>
@@ -502,13 +498,12 @@ private object VMIntegerCompiler {
     val (left, negateLeft)   = negated(operands(1))
     val (right, negateRight) = negated(operands(2))
     if (negateLeft) unsupported("IADD.SAT of a negated first source")
-    if (!negateRight) {
-      store(operands.head, binary(IntegerOperation.AddSaturated, source(left), source(right)))
-      return
+    if (!negateRight) store(operands.head, binary(IntegerOperation.AddSaturated, source(left), source(right)))
+    else {
+      val result = temp()
+      emit(PackedSaturatingAdd(result.slot, source(left), source(right), 2, negateRight))
+      store(operands.head, result)
     }
-    val result = temp()
-    emit(PackedSaturatingAdd(result.slot, source(left), source(right), 2, negateRight))
-    store(operands.head, result)
   }
 
   private def lowerLogicAndBits(using context: VMCompilationContext): Boolean = {
@@ -653,7 +648,7 @@ private object VMIntegerCompiler {
           case Modifier.ECR  => BytePermuteMode.ECR
           case Modifier.RC16 => BytePermuteMode.RC16
         }.getOrElse(BytePermuteMode.Default)
-        requireModifiers(Set(Modifier.F4E, Modifier.B4E, Modifier.RC8, Modifier.ECL, Modifier.ECR, Modifier.RC16))
+        requireModifiers(bytePermuteModifiers)
         val result = temp()
         emit(BytePermute(
           result.slot,

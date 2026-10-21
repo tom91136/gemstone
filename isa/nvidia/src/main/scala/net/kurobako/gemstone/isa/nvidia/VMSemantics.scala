@@ -15,7 +15,7 @@ private object VMSemantics {
 
   def execute(instruction: Instruction, sinks: LaneLoop): Either[Fault, Step] = {
     val staged = NvidiaStaged.execute(instruction, sinks)
-    if (staged eq NvidiaStaged.Unstaged) executeStaged(instruction, sinks.context, sinks.effects)
+    if (staged eq NvidiaStaged.Unstaged) executeStaged(instruction, sinks.context)
     else advance(staged)
   }
 
@@ -45,7 +45,7 @@ private object VMSemantics {
       : Either[Fault, Vec[Byte]] =
     if (size == 0L) Right(Vec.empty)
     else size.toInt.refine[Int >= 0].leftMap(Fault.Backend(_)).flatMap(count =>
-      context.memory.read(GuestAddress(address), count).leftMap(VMWriteBuffer.located(_, context.pc, lane))
+      context.device.memory.read(GuestAddress(address), count).leftMap(VMWriteBuffer.located(_, context.pc, lane))
     )
 
   private enum BarrierMode(val blocking: Boolean) {
@@ -130,51 +130,49 @@ private object VMSemantics {
     )
   }
 
-  private def executeStaged(instruction: Instruction, context: VMContext, effects: VMWriteBuffer)
-      : Either[Fault, Step] = instruction match {
+  private def executeStaged(instruction: Instruction, context: VMContext): Either[Fault, Step] = instruction match {
     case _: (Instruction.Branch | Instruction.BranchTable | Instruction.BarrierSync | Instruction.BarrierArrive |
           Instruction.BarrierReduce |
           Instruction.ReturnStackPush | Instruction.ReturnStackPop | Instruction.ReturnStackSave |
           Instruction.Convergence | Instruction.WarpBarrier |
           Instruction.Call | Instruction.CallBuiltin) =>
-      executeControl(instruction, context, effects)
+      executeControl(instruction, context)
     case Instruction.Fence | Instruction.NoOp | Instruction.Trap | Instruction.Return | Instruction.Exit =>
-      executeControl(instruction, context, effects)
+      executeControl(instruction, context)
     case Instruction.WarpReduce(operation = operation) =>
       Left(Fault.Backend(s"unsupported warp reduction operation: $operation"))
     case Instruction.InvalidateConditionFlag(flag) =>
-      context.active.foreachLane(lane => effects.stage(VMWrite.ConditionFlag(lane, flag, None)))
+      context.active.foreachLane(lane => context.effects.stage(VMWrite.ConditionFlag(lane, flag, None)))
       Advanced
     case Instruction.InvalidateAddThreeCarry =>
-      context.active.foreachLane(lane => effects.stage(VMWrite.AddThreeCarry(lane, None)))
+      context.active.foreachLane(lane => context.effects.stage(VMWrite.AddThreeCarry(lane, None)))
       Advanced
-    case Instruction.Tensor(operation) => VMTensor.execute(operation, context, effects)
+    case Instruction.Tensor(operation) => VMTensor.execute(operation, context)
     case _: (Instruction.MBarrierLoad | Instruction.MBarrierInit | Instruction.MBarrierInvalidate |
           Instruction.MBarrierArrive | Instruction.MBarrierTest) =>
-      executeMBarrier(instruction, context, effects)
-    case _: (Instruction.SharedLockLoad | Instruction.SharedStoreUnlock) => executeLock(instruction, context, effects)
-    case _: (Instruction.ClusterBarrier | Instruction.ClusterTryCancel) => executeCluster(instruction, context, effects)
-    case _: (Instruction.AsyncBulkStore | Instruction.AsyncCopy) => executeAsyncCopy(instruction, context, effects)
+      executeMBarrier(instruction, context)
+    case _: (Instruction.SharedLockLoad | Instruction.SharedStoreUnlock) => executeLock(instruction, context)
+    case _: (Instruction.ClusterBarrier | Instruction.ClusterTryCancel)  => executeCluster(instruction, context)
+    case _: (Instruction.AsyncBulkStore | Instruction.AsyncCopy)         => executeAsyncCopy(instruction, context)
     case _: (Instruction.AsyncBulkCopy | Instruction.AsyncBulkReduce | Instruction.AsyncBulkFill |
           Instruction.AsyncTensor | Instruction.TensorMapReplace | Instruction.TensorMapCopy |
           Instruction.AsyncSharedStore | Instruction.AsyncSharedReduce | Instruction.MBarrierTransaction |
           Instruction.ClusterMap | Instruction.ClusterRankOf) =>
       VMAsync.execute(instruction, context)
     case _: (Instruction.StackAllocate | Instruction.StackSave | Instruction.StackRestore) =>
-      executeStack(instruction, context, effects)
+      executeStack(instruction, context)
     case _: (Instruction.TensorMemoryAllocate | Instruction.TensorMemoryDeallocate | Instruction.TensorMemoryClaim |
           Instruction.TensorMemoryRelease | Instruction.TensorMemoryLoad | Instruction.TensorMemoryStore |
           Instruction.TensorMemoryCopy | Instruction.TensorMemoryShift | Instruction.TensorMemoryCommit) |
         Instruction.TensorMemoryRelinquish =>
-      VMTensorMemory.execute(instruction, context, effects)
+      VMTensorMemory.execute(instruction, context)
     case other => Left(Fault.IllegalInstruction(s"unhandled ${context.kernel.isaName} instruction $other"))
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
   private def executeControl(
       instruction: Instruction,
-      context: VMContext,
-      effects: VMWriteBuffer
+      context: VMContext
   ): Either[Fault, Step] =
     (instruction: @unchecked) match {
       case Instruction.Branch(target)              => Right(Step.Jump(target))
@@ -215,7 +213,7 @@ private object VMSemantics {
           val stack = context.lane(lane).returnStack
           Either.cond(
             stack.nonEmpty,
-            effects.stageRegister(lane, destination, stack.pop()),
+            context.effects.stageRegister(lane, destination, stack.pop()),
             Fault.Backend("return stack is empty")
           )
         })
@@ -261,7 +259,7 @@ private object VMSemantics {
         if (seen == 0L) Left(Fault.Backend("bar.warp.sync has no active lanes"))
         else if (differs) Left(Fault.Backend("bar.warp.sync member mask differs across active lanes"))
         else Right(Step.WarpSync(memberMask))
-      case Instruction.Fence => context.memory.fenceHostMemory().map(_ => Step.Advance)
+      case Instruction.Fence => context.device.memory.fenceHostMemory().map(_ => Step.Advance)
       case Instruction.NoOp  => Advanced
       case Instruction.Call(Value.Immediate(address), returnParameters, parameters) =>
         deviceCall(context, address, context.active).map(call => Step.Call(Vec(call), parameters, returnParameters))
@@ -294,8 +292,7 @@ private object VMSemantics {
 
   private def executeMBarrier(
       instruction: Instruction,
-      context: VMContext,
-      effects: VMWriteBuffer
+      context: VMContext
   ): Either[Fault, Step] =
     (instruction: @unchecked) match {
       case Instruction.MBarrierLoad(address) =>
@@ -334,7 +331,7 @@ private object VMSemantics {
         advance(LaneFaults.everyLane(context)(lane =>
           mbarrier(context, context.read(lane, address))
             .flatMap(_.arrive(context.read(lane, count), context.read(lane, expectedBytes), drop, complete))
-            .map(token => destination.foreach(effects.stageRegister(lane, _, token)))
+            .map(token => destination.foreach(context.effects.stageRegister(lane, _, token)))
         ))
       case Instruction.MBarrierTest(destination, address, phase, parity) =>
         advance(LaneFaults.everyLane(context) { lane =>
@@ -346,14 +343,14 @@ private object VMSemantics {
               (),
               Fault.Backend(s"invalid mbarrier phase parity: $token")
             )
-          } yield effects.stage(
+          } yield context.effects.stage(
             VMWrite.Predicate(lane, destination, barrier.complete(if (parity) token else MBarrier.tokenParity(token)))
           )
         })
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def executeLock(instruction: Instruction, context: VMContext, effects: VMWriteBuffer): Either[Fault, Step] = {
+  private def executeLock(instruction: Instruction, context: VMContext): Either[Fault, Step] = {
     def owned(lane: WorkgroupLane, address: Value, width: ScalarBitWidth): Either[Fault, (VMWorkgroup, Long, Long)] = {
       val raw = context.read(lane, address)
       if (!VMAddressSpace.isShared(raw, width.toScalarByteWidth) || (raw & (width.toScalarByteWidth - 1L)) != 0)
@@ -370,9 +367,9 @@ private object VMSemantics {
             val free = owner.sharedLocks.get(canonical).forall(_ == lane.toInt)
             if (free) {
               owner.sharedLocks(canonical) = lane.toInt
-              effects.stageRegister(lane, result, context.workgroup.readShared(raw, width))
+              context.effects.stageRegister(lane, result, context.workgroup.readShared(raw, width))
             }
-            effects.stage(VMWrite.Predicate(lane, destination, free))
+            context.effects.stage(VMWrite.Predicate(lane, destination, free))
           }
         ))
       case Instruction.SharedStoreUnlock(destination, address, source, width) =>
@@ -381,9 +378,9 @@ private object VMSemantics {
             val held = owner.sharedLocks.get(canonical).contains(lane.toInt)
             if (held) {
               val _ = owner.sharedLocks.subtractOne(canonical)
-              effects.stageShared(raw, width, context.read(lane, source))
+              context.effects.stageShared(raw, width, context.read(lane, source))
             }
-            effects.stage(VMWrite.Predicate(lane, destination, held))
+            context.effects.stage(VMWrite.Predicate(lane, destination, held))
           }
         ))
     }
@@ -391,8 +388,7 @@ private object VMSemantics {
 
   private def executeCluster(
       instruction: Instruction,
-      context: VMContext,
-      effects: VMWriteBuffer
+      context: VMContext
   ): Either[Fault, Step] =
     (instruction: @unchecked) match {
       case Instruction.ClusterBarrier(arrive)                         => Right(Step.ClusterBarrier(arrive))
@@ -412,8 +408,8 @@ private object VMSemantics {
               val to        = if (multicast) VMAddressSpace.clusterAddress(responseAddress, rank) else responseAddress
               val signalled = if (multicast) VMAddressSpace.clusterAddress(barrierAddress, rank) else barrierAddress
               mbarrier(context, signalled).flatMap(_.completeBytes(16)).map { _ =>
-                effects.stageShared(to, 64, 0L)
-                effects.stageShared(to + 8L, 64, 0L)
+                context.effects.stageShared(to, 64, 0L)
+                context.effects.stageShared(to + 8L, 64, 0L)
               }
             }
           } yield ()
@@ -422,8 +418,7 @@ private object VMSemantics {
 
   private def executeAsyncCopy(
       instruction: Instruction,
-      context: VMContext,
-      effects: VMWriteBuffer
+      context: VMContext
   ): Either[Fault, Step] =
     (instruction: @unchecked) match {
       case Instruction.AsyncBulkStore(destination, source, size, byteMask) =>
@@ -434,7 +429,7 @@ private object VMSemantics {
           bulkTransfer("bulk store", target, origin, context.read(lane, size)).map { bytes =>
             (0L until bytes).foreach { offset =>
               if ((mask & (1L << (offset.toInt & 15))) != 0L)
-                effects.stageMemory(
+                context.effects.stageMemory(
                   lane,
                   GuestAddress(target + offset),
                   8,
@@ -456,7 +451,7 @@ private object VMSemantics {
             )
             copied <- readDeviceBytes(context, lane, origin, count)
           } yield (0 until size).foreach(offset =>
-            effects.stageShared(target + offset.toLong, 8, copied.lift(offset).getOrElse(0.toByte).toLong)
+            context.effects.stageShared(target + offset.toLong, 8, copied.lift(offset).getOrElse(0.toByte).toLong)
           )
         })
     }
@@ -466,8 +461,7 @@ private object VMSemantics {
     */
   private def executeStack(
       instruction: Instruction,
-      context: VMContext,
-      effects: VMWriteBuffer
+      context: VMContext
   ): Either[Fault, Step] = {
     val bottom                                       = (context.frame.routine.localBytes.toLong + 15L) & -16L
     val top                                          = bottom + VMAddressSpace.LocalFrameSize
@@ -486,11 +480,13 @@ private object VMSemantics {
             Left(overflow(lane, pointer))
           else {
             storage.stack = top - pointer
-            Right(effects.stageRegister(lane, destination, pointer))
+            Right(context.effects.stageRegister(lane, destination, pointer))
           }
         })
       case Instruction.StackSave(destination) =>
-        context.active.foreachLane(lane => effects.stageRegister(lane, destination, top - context.lane(lane).stack))
+        context.active.foreachLane(lane =>
+          context.effects.stageRegister(lane, destination, top - context.lane(lane).stack)
+        )
         Advanced
       case Instruction.StackRestore(source) =>
         advance(LaneFaults.everyLane(context) { lane =>

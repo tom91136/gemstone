@@ -1,9 +1,12 @@
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <optional>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -426,7 +429,6 @@ TEST_CASE("CUDA dispatch failures that leave the context usable are reported onc
   } cases[]{
       {.kind = FailureKind::OutOfResources, .cubinModule = false, .expected = CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES},
       {.kind = FailureKind::InvalidProgram, .cubinModule = false, .expected = CUDA_ERROR_INVALID_PTX},
-      {.kind = FailureKind::InvalidProgram, .cubinModule = true, .expected = CUDA_ERROR_INVALID_IMAGE},
       {.kind = FailureKind::Unsupported, .cubinModule = false, .expected = CUDA_ERROR_NOT_SUPPORTED},
       {.kind = FailureKind::InvalidRequest, .cubinModule = false, .expected = CUDA_ERROR_INVALID_VALUE},
       {.kind = FailureKind::NotFound, .cubinModule = false, .expected = CUDA_ERROR_NOT_FOUND},
@@ -462,19 +464,97 @@ TEST_CASE("CUDA kernels that fail to load fail their launch, leaving the followi
   for (const auto &[cubinModule, driver, runtime] : cases) {
     CAPTURE(cubinModule);
     session.loadKernel(cubinModule ? static_cast<const void *>(cubin.data()) : ptx.c_str());
-    session.fixture.failNextCompletion(FailureKind::InvalidProgram);
-    session.fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+    session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, FailureKind::InvalidProgram);
     void *arguments[]{&session.allocation};
     CHECK(__cudaLaunchKernel(reinterpret_cast<cudaKernel_t>(session.function), dim3(1), dim3(1), arguments, 0, nullptr) == runtime);
     CHECK(cudaGetLastError() == runtime);
     CHECK(cudaDeviceSynchronize() == cudaSuccess);
     CHECK(cudaGetLastError() == cudaSuccess);
 
-    session.fixture.failNextCompletion(FailureKind::InvalidProgram);
+    session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, FailureKind::InvalidProgram);
     CHECK(session.launch() == driver);
     CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    CHECK(session.fixture.kernelBuilds == 0);
     REQUIRE(cuModuleUnload(session.module) == CUDA_SUCCESS);
   }
+}
+
+TEST_CASE("CUDA kernels build on their first successful launch only", "[cuda][code-mode]") {
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  CHECK(session.fixture.kernelBuilds == 0);
+  for (int launch = 0; launch < 3; ++launch) {
+    REQUIRE(session.launch() == CUDA_SUCCESS);
+    CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    CHECK(session.fixture.kernelBuilds == 1);
+  }
+}
+
+TEST_CASE("CUDA kernels build again after a rejected build, then stop", "[cuda][code-mode]") {
+  using gemstone::execution::FailureKind;
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, FailureKind::InvalidProgram);
+  CHECK(session.launch() == CUDA_ERROR_INVALID_PTX);
+  CHECK(session.fixture.kernelBuilds == 0);
+  for (int launch = 0; launch < 3; ++launch) {
+    REQUIRE(session.launch() == CUDA_SUCCESS);
+    CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+    CHECK(session.fixture.kernelBuilds == 1);
+  }
+}
+
+TEST_CASE("CUDA kernels build again after a global is bound", "[cuda][code-mode]") {
+  using gemstone::execution::FailureKind;
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  REQUIRE(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(session.fixture.kernelBuilds == 1);
+
+  session.fixture.describeGlobal("counter", 8);
+  session.fixture.expectGlobalBinding("counter", 0, {});
+  CUdeviceptr address = 0;
+  size_t bytes = 0;
+  REQUIRE(cuModuleGetGlobal_v2(&address, &bytes, session.module, "counter") == CUDA_SUCCESS);
+
+  session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, FailureKind::InvalidProgram);
+  CHECK(session.launch() == CUDA_ERROR_INVALID_PTX);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  REQUIRE(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(session.fixture.kernelBuilds == 2);
+  REQUIRE(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(session.fixture.kernelBuilds == 2);
+}
+
+TEST_CASE("CUDA racing first launches of one kernel leave it built", "[cuda][code-mode]") {
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  session.fixture.opaqueLaunches();
+  std::atomic<unsigned> succeeded{0};
+  const auto first = [&] {
+    if (cuCtxSetCurrent(session.context) != CUDA_SUCCESS) return;
+    void *arguments[]{&session.allocation};
+    if (cuLaunchKernel(session.function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == CUDA_SUCCESS) ++succeeded;
+  };
+  std::thread left(first);
+  std::thread right(first);
+  left.join();
+  right.join();
+  CHECK(succeeded == 2);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  const auto builds = session.fixture.kernelBuilds.load();
+  CHECK((builds == 1 || builds == 2));
+  void *arguments[]{&session.allocation};
+  REQUIRE(cuLaunchKernel(session.function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(session.fixture.kernelBuilds == builds);
 }
 
 namespace {
@@ -496,6 +576,18 @@ void checkStickyFailure(gemstone::execution::FailureKind kind, CUresult expected
   CHECK(cudaGetLastError() == static_cast<cudaError_t>(expected));
   CHECK(cuDevicePrimaryCtxReset(0) == CUDA_SUCCESS);
   CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+}
+
+// A build the service could not answer or classify fails like a dispatch that did, so the context stays failed
+void checkStickyBuildFailure(const std::function<void(FailureSession &)> &arm) {
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  arm(session);
+  CHECK(session.launch() == CUDA_ERROR_LAUNCH_FAILED);
+  CHECK(cuCtxSynchronize() == CUDA_ERROR_LAUNCH_FAILED);
+  CHECK(cuStreamQuery(nullptr) == CUDA_ERROR_LAUNCH_FAILED);
+  CHECK(session.launch() == CUDA_ERROR_LAUNCH_FAILED);
 }
 
 } // namespace
@@ -526,6 +618,16 @@ TEST_CASE("CUDA launch timeouts persist", "[cuda][code-mode]") {
 
 TEST_CASE("CUDA unclassified dispatch failures persist as launch failures", "[cuda][code-mode]") {
   checkStickyFailure(gemstone::execution::FailureKind::Failed, CUDA_ERROR_LAUNCH_FAILED);
+}
+
+TEST_CASE("CUDA unclassified build failures persist as launch failures", "[cuda][code-mode]") {
+  checkStickyBuildFailure([](FailureSession &session) {
+    session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, gemstone::execution::FailureKind::Failed);
+  });
+}
+
+TEST_CASE("CUDA build transport failures persist as launch failures", "[cuda][code-mode]") {
+  checkStickyBuildFailure([](FailureSession &session) { session.fixture.dropNext(gemstone::execution::operation::BuildKernel); });
 }
 
 TEST_CASE("CUDA launch configurations outside the device limits are invalid configurations", "[cuda][code-mode]") {

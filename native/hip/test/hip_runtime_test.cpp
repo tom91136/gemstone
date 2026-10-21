@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -80,6 +81,22 @@ TEST_CASE("HIP wave size follows the selected processor", "[hip]") {
     REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
     CHECK((properties.warpSize == expected));
   }
+}
+
+TEST_CASE("HIP module function lookups of a missing symbol report it not found", "[hip]") {
+  // gfx1036 (ROCm 7.1.1): hipModuleGetFunction of a name the loaded code object lacks returns hipErrorNotFound, which
+  // hipGetLastError then reports too.
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  hipFunction_t function = nullptr;
+  CHECK((hipModuleGetFunction(&function, module, "absent") == hipErrorNotFound));
+  CHECK((function == nullptr));
+  CHECK((hipGetLastError() == hipErrorNotFound));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
 }
 
 TEST_CASE("HIP primary context can be pushed", "[hip]") {
@@ -668,6 +685,92 @@ TEST_CASE("HIP queued failures report the error the failure kind names", "[hip]"
   }
   REQUIRE((hipFree(output) == hipSuccess));
   REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+namespace {
+
+struct BuildSession {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment{fixture};
+  hipModule_t module{};
+  hipFunction_t function{};
+  void *output = nullptr;
+  uint32_t seed = 1;
+
+  BuildSession() {
+    const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+    REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+    REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+    REQUIRE((hipMalloc(&output, sizeof(uint32_t)) == hipSuccess));
+  }
+  ~BuildSession() {
+    (void)hipFree(output);
+    (void)hipModuleUnload(module);
+  }
+  hipError_t launch() {
+    fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = seed});
+    void *arguments[] = {&output, &seed};
+    return hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr);
+  }
+};
+
+} // namespace
+
+TEST_CASE("HIP kernels that fail to build fail their launch, leaving the following synchronisation clean", "[hip]") {
+  using gemstone::execution::FailureKind;
+  const struct {
+    FailureKind kind;
+    hipError_t expected;
+  } cases[]{
+      {.kind = FailureKind::InvalidProgram, .expected = hipErrorInvalidImage},
+      {.kind = FailureKind::Unsupported, .expected = hipErrorNotSupported},
+      {.kind = FailureKind::InvalidRequest, .expected = hipErrorInvalidValue},
+      {.kind = FailureKind::NotFound, .expected = hipErrorNotFound},
+      {.kind = FailureKind::OutOfResources, .expected = hipErrorLaunchOutOfResources},
+      {.kind = FailureKind::Failed, .expected = hipErrorLaunchFailure},
+  };
+  BuildSession session;
+  for (const auto &[kind, expected] : cases) {
+    CAPTURE(static_cast<int>(kind));
+    session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, kind);
+    CHECK((session.launch() == expected));
+    CHECK((hipGetLastError() == expected));
+    CHECK((hipDeviceSynchronize() == hipSuccess));
+    CHECK((hipGetLastError() == hipSuccess));
+    CHECK((session.fixture.kernelBuilds == 0));
+  }
+}
+
+TEST_CASE("HIP kernels build again after a rejected build, then stop", "[hip]") {
+  BuildSession session;
+  CHECK((session.fixture.kernelBuilds == 0));
+  session.fixture.rejectNext(gemstone::execution::operation::BuildKernel, gemstone::execution::FailureKind::InvalidProgram);
+  CHECK((session.launch() == hipErrorInvalidImage));
+  CHECK((session.fixture.kernelBuilds == 0));
+  for (uint32_t launch = 0; launch < 3; ++launch) {
+    REQUIRE((session.launch() == hipSuccess));
+    CHECK((hipDeviceSynchronize() == hipSuccess));
+    CHECK((session.fixture.kernelBuilds == 1));
+    ++session.seed;
+  }
+}
+
+TEST_CASE("HIP module loads report a rejected code object synchronously", "[hip]") {
+  using gemstone::execution::FailureKind;
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  for (const auto operation : {gemstone::execution::operation::LoadProgram, gemstone::execution::operation::DescribeProgram,
+                               gemstone::execution::operation::DescribeKernel}) {
+    CAPTURE(std::string(operation));
+    hipModule_t module{};
+    fixture.rejectNext(operation, FailureKind::InvalidProgram);
+    CHECK((hipModuleLoadData(&module, image.data()) == hipErrorInvalidImage));
+    CHECK((module == nullptr));
+    CHECK((hipGetLastError() == hipErrorInvalidImage));
+    CHECK((hipDeviceSynchronize() == hipSuccess));
+    CHECK((hipGetLastError() == hipSuccess));
+  }
 }
 
 TEST_CASE("HIP pointer attributes", "[hip]") { pointerAttributes(); }

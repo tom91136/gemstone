@@ -98,22 +98,10 @@ private[isa] object FloatArithmetic {
   def maximumNumber(left: Float64, right: Float64, absolute: Boolean, xorSign: Boolean): Float64 =
     binary(left, right)(VMArithmetic.extremum(_, _, 64, maximum = true, propagate = false, absolute, xorSign))
 
-  @targetName("reciprocal16")
-  def reciprocal(value: Float16): Float16 =
-    unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Reciprocal, _, 16))
-  @targetName("reciprocal32")
-  def reciprocal(value: Float32): Float32 =
-    unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Reciprocal, _, 32))
   @targetName("reciprocal64")
   def reciprocal(value: Float64): Float64 =
     unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Reciprocal, _, 64))
 
-  @targetName("squareRoot16")
-  def squareRoot(value: Float16): Float16 =
-    unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.SquareRoot, _, 16))
-  @targetName("squareRoot32")
-  def squareRoot(value: Float32): Float32 =
-    unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.SquareRoot, _, 32))
   @targetName("squareRoot64")
   def squareRoot(value: Float64): Float64 =
     unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.SquareRoot, _, 64))
@@ -130,6 +118,7 @@ private[isa] object FloatArithmetic {
   /** The reciprocal square root of a binary64 value's bits, which the unit rounds to nearest even. The square root of
     * the significand is taken at more than binary64's precision, so that the result is the correctly rounded one.
     */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def reciprocalSquareRootBits(bits: Long): Long = {
     val sign     = bits & 0x8000000000000000L
     val exponent = ((bits >>> 52) & 0x7ffL).toInt
@@ -175,6 +164,7 @@ private[isa] object FloatArithmetic {
   }
 
   /** The integer square root of a nonnegative integer. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def integerSquareRoot(value: BigInt): BigInt =
     if (value < 2) value
     else {
@@ -187,9 +177,6 @@ private[isa] object FloatArithmetic {
       guess
     }
 
-  @targetName("exponent216")
-  def exponent2(value: Float16): Float16 =
-    unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Exponent2, _, 16))
   @targetName("exponent232")
   def exponent2(value: Float32): Float32 =
     unary(value)(VMArithmetic.floatUnaryBits(FloatUnaryOperation.Exponent2, _, 32))

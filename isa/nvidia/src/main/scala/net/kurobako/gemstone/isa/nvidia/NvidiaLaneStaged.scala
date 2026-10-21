@@ -197,7 +197,7 @@ private[isa] object NvidiaLaneStaged {
         right,
         addend
       )
-    case Instruction.ConvertPacked(destination, high, low, _, destinationFormat, rounding, clamp) =>
+    case Instruction.ConvertPacked(destination, high, low, destinationFormat, rounding, clamp) =>
       IntegerSemantics.convertPacked(
         algebra,
         destinationFormat == NumericFormat.BF16,

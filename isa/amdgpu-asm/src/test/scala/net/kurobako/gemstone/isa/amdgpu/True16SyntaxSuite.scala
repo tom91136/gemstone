@@ -24,16 +24,17 @@ class True16SyntaxSuite extends munit.FunSuite {
   )
     test(s"$source assembles and round-trips") {
       val expected = hex(bytes)
-      assertEquals(Binary.encodeStatement(parseStatement(source), target, 32), Right(expected))
-      val decoded = Binary.decodeStatementAt(expected, 0, target, 32).fold(error => fail(error.toString), identity)
+      assertEquals(Binary.encodeStatement(parseStatement(source), TargetMode(target, 32)), Right(expected))
+      val decoded =
+        Binary.decodeStatementAt(expected, 0, TargetMode(target, 32)).fold(error => fail(error.toString), identity)
       val printed = Printer.render(Program(Vec(decoded.statement)))
-      assertEquals(Binary.encodeStatement(parseStatement(printed), target, 32), Right(expected), printed)
+      assertEquals(Binary.encodeStatement(parseStatement(printed), TargetMode(target, 32)), Right(expected), printed)
     }
 
   test("true16 halves reach only the first 128 VGPRs in 32-bit encodings, so others take VOP3") {
-    assert(Binary.encodeStatement(parseStatement("v_add_f16_e32 v0.h, v128.l, v2.h"), target, 32).isLeft)
+    assert(Binary.encodeStatement(parseStatement("v_add_f16_e32 v0.h, v128.l, v2.h"), TargetMode(target, 32)).isLeft)
     assertEquals(
-      Binary.encodeStatement(parseStatement("v_add_f16 v0.h, v128.l, v2.h"), target, 32),
+      Binary.encodeStatement(parseStatement("v_add_f16 v0.h, v128.l, v2.h"), TargetMode(target, 32)),
       Right(hex("00 50 32 d5 80 05 02 02"))
     )
   }

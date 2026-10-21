@@ -100,7 +100,7 @@ private object VMHalfCompiler {
 
   private def immediate(operand: Operand): Boolean = peel(operand).base match {
     case Operand.Integer(_) | Operand.Bits(_, _) | Operand.FloatingSymbol(_) => true
-    case _: Operand.Floating | _: Operand.FloatingBits                       => true
+    case Operand.Floating(_, _, _) | Operand.FloatingBits(_, _, _)           => true
     case _                                                                   => false
   }
 

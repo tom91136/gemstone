@@ -111,7 +111,7 @@ class GenerateSASSISASuite extends munit.FunSuite {
     references.tables.foreach { table =>
       assert(table.description.preamble.startsWith("ARCHITECTURE "), table.digest)
       table.description.classes.foreach { form =>
-        assert(!form.conditional && !form.raw.linesIterator.exists(_.trim.startsWith("##")), form.name)
+        assert(!form.raw.linesIterator.exists(_.trim.startsWith("##")), form.name)
         assert(form.opcodes.nonEmpty && Vector("ENCODING", "REMAP").exists(form.section(_).nonEmpty), form.name)
       }
     }

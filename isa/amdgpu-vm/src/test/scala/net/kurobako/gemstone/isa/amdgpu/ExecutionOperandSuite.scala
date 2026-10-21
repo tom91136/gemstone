@@ -2320,7 +2320,7 @@ class ExecutionOperandSuite extends munit.FunSuite {
   test("wave32 mask writes decode and execute at the last scalar slot") {
     val target = Target("gfx1030")
     for (text <- Seq("v_add_co_u32 v2, exec_hi, v3, v4", "v_cmp_eq_u32 exec_hi, v3, v4")) {
-      val bytes = asm.Assembler.encode(asm.Parser.parse(text).value, target).value
+      val bytes = asm.Assembler.encode(asm.Parser.parse(text).value, TargetMode(target)).value
       assert(VMCompiler.decodeInstruction(bytes, target).isRight, text)
     }
     val operation = Instruction.VAddCarry(2, 127, InstructionSource.Constant(1), InstructionSource.Constant(1), None)

@@ -66,7 +66,6 @@ class SASSPreprocessorSuite extends munit.FunSuite {
       val active = SASSPreprocessor.preprocess(raw).fold(e => fail(s"$digest: ${e.message} at ${e.offset}"), identity)
       assert(!active.linesIterator.exists(_.trim.startsWith("##")), digest)
       val description = references.tables.find(_.digest == digest).getOrElse(fail(s"missing $digest")).description
-      assert(!description.classes.exists(_.conditional), digest)
       val definitions = SASSConditions.definitions(description.preamble).fold(e => fail(s"$digest: $e"), identity)
       assert(definitions.parameters.contains("MAX_REG_COUNT"), digest)
       assertEquals(SASSEncoding.compile(description).forms.size, description.classes.size, digest)

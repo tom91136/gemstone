@@ -183,13 +183,12 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   private def floatMedian(a: Long, b: Long, c: Long, width: Int in (16, 32, 64)): Long = {
     def value(bits: Long): Double       = IEEE754.toDouble(bits, width)
     def signalling(bits: Long): Boolean = IEEE754.isNaN(bits, width) && (bits & IEEE754.quietBit(width)) == 0L
-    def pick(x: Long, y: Long, extremum: (Long, Long, Int in (16, 32, 64)) => Long): Long =
-      if (x != y && extremum(x, y, width) == y) y else x
-    def smaller(x: Long, y: Long): Long =
+    def pick(x: Long, y: Long, extremum: Long): Long = if (x != y && extremum == y) y else x
+    def smaller(x: Long, y: Long): Long              =
       if (signalling(x)) x | IEEE754.quietBit(width)
       else if (signalling(y)) y | IEEE754.quietBit(width)
-      else pick(x, y, IEEE754.minNum)
-    def larger(x: Long, y: Long): Long = pick(x, y, IEEE754.maxNum)
+      else pick(x, y, IEEE754.minNum(x, y, width))
+    def larger(x: Long, y: Long): Long = pick(x, y, IEEE754.maxNum(x, y, width))
     if (IEEE754.isNaN(a, width) || IEEE754.isNaN(b, width) || IEEE754.isNaN(c, width))
       smaller(smaller(a, b), c)
     else {

@@ -25,8 +25,8 @@ class ProgramTraversalSuite extends munit.FunSuite {
   private def adds(program: Program): Vec[String] = {
     val found = Vec.newBuilder[String]
     val _     = program.mapInstructions {
-      case add @ Instruction(_: Form.Add, _, _) => found += asm.Printer.render(add).raw; add
-      case other                                => other
+      case add @ Instruction(Form.Add(_, _, _), _, _) => found += asm.Printer.render(add).raw; add
+      case other                                      => other
     }
     found.result()
   }

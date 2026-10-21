@@ -30,7 +30,7 @@ class CodeObjectPatchSuite extends munit.FunSuite {
 
   test("a patched code object loads and runs the new code") {
     def run(codeObject: CodeObject) = AMDGPUBackend().load(codeObject.image).flatMap { program =>
-      try program.execute(fixtures.singleTask(), RegionMemory(), vm.TaskControl(), _ => Right(()))
+      try program.execute(fixtures.singleTask(), vm.TaskContext(RegionMemory(), vm.TaskControl(), _ => Right(())))
       finally program.close()
     }
     assertEquals(run(image), Right(()))

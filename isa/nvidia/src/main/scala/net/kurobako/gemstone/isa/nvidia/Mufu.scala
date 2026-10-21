@@ -1,6 +1,25 @@
+/* The polynomials, coefficient tables and radian range reduction are ported from ptx-math
+ * (https://github.com/bcarlet/ptx-math), under the MIT License:
+ *
+ * Copyright (c) 2020 Benjamin Carleton
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+ * documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+ * WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+ * OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
 package net.kurobako.gemstone.isa.nvidia
 
-import net.kurobako.gemstone.binary.IEEE754
+import VMIR.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.semantics.prelude.*
 
 /** NVIDIA's special-function unit: the approximations of the reciprocal, the reciprocal square root, the square root,
@@ -9,37 +28,15 @@ import net.kurobako.gemstone.semantics.prelude.*
   *
   * The polynomials, their coefficient tables and the radian range reduction are ported from the `src/ptxm` sources of
   * [[https://github.com/bcarlet/ptx-math ptx-math]] (`ex2.c`, `lg2.c`, `rcp.c`, `rsqrt.c`, `sqrt.c`, `sincos.c`, the
-  * `tables` directory and `reduction/rro_sincos.c`), under the MIT License:
-  *
-  * Copyright (c) 2020 Benjamin Carleton
-  *
-  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-  * documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
-  * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-  * permit persons to whom the Software is furnished to do so, subject to the following conditions:
-  *
-  * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
-  * Software.
-  *
-  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-  * WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-  * OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  * `tables` directory and `reduction/rro_sincos.c`), under the MIT License at the top of this file.
   */
 private[isa] object Mufu {
-
-  /** The unit of an architecture, where the legacy polynomials differ from the later ones in the last bits. */
-  enum Flavour derives CanEqual {
-    case Legacy
-    case Modern
-  }
 
   private val CanonicalNaN = 0x7fffffffL
   private val Infinity     = 0x7f800000L
   private val One          = 0x3f800000L
   private val TwoTo24      = 0x4b800000L
   private val Half         = 0x3f000000L
-  private val Quarter      = 0x3e800000L
 
   private val Ex2Bias   = 0x6fc4000000000000L
   private val Lg2Bias   = 0x868b000000000000L
@@ -99,10 +96,11 @@ private[isa] object Mufu {
   private def scale(bits: Long, n: Int): Long = {
     val doubled = IEEE754.toDouble(bits, 32) * math.pow(2.0, n.toDouble)
     if (doubled.isNaN || doubled.isInfinite) (if (doubled < 0) 0x80000000L else 0L) | Infinity
-    else IEEE754.fromDouble(doubled, 32, IEEE754.Rounding.NearestEven)
+    else IEEE754.fromDouble(doubled, 32)
   }
 
   /** The `x` bits deposited into the positions the mask selects. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def pdep(source: Long, mask: Long): Long = {
     var result  = 0L
     var value   = source
@@ -128,6 +126,7 @@ private[isa] object Mufu {
     }
 
   /** The square of `x` less the error the plus-plus-minus squaring leaves, which the polynomials use in place of it. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def squareApprox(x: Long): Long = {
     var error = pdep(x, 0x55555555L) & 0x7ffffL
     var index = 0
@@ -144,6 +143,7 @@ private[isa] object Mufu {
     ((sign & 1L) << 31) | ((exponent & 0xffL) << 23) | (fraction & 0x7fffffL)
 
   /** The base-2 exponential of a value, as the unit approximates it. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def exponent2(bits: Long): Long =
     if (isNaN(bits)) CanonicalNaN
     else if (isInfinite(bits)) if (isNegative(bits)) 0L else Infinity
@@ -153,7 +153,6 @@ private[isa] object Mufu {
       val halved               = if (square) multiply(bits, Half) else bits
       val (integral, fraction) = split(halved)
       var whole                = integral
-      var reduced              = fraction
       var significand          = fraction
       if (fraction != 0L) {
         significand = (significand | 0x800000L) & 0xffffffL
@@ -169,12 +168,13 @@ private[isa] object Mufu {
       val c2Term       = c2.toLong * squareApprox(lowerSignificand(significand, Ex2M))
       var sum          = c0Term + c1Term + c2Term
       sum = sum + (Ex2Bias >>> ((64 - 57) + 23))
-      val result = format(0L, 127L, (sum >>> (57 - 23)) & 0x7fffffL)
+      val result = format(sign = 0L, exponent = 127L, fraction = (sum >>> (57 - 23)) & 0x7fffffL)
       val scaled = multiply(exp2i(whole), result)
       if (square) multiply(scaled, scaled) else scaled
     }
 
   /** The base-2 logarithm of a value, as the unit approximates it. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def logarithm2(bits: Long): Long =
     if (isNaN(bits)) CanonicalNaN
     else if (isInfinite(bits)) if (isNegative(bits)) CanonicalNaN else Infinity
@@ -206,12 +206,17 @@ private[isa] object Mufu {
             magnitude = magnitude >>> 1
           }
         }
-        val result = format(if (value(scaled) < 1.0f) 1L else 0L, resultExponent, (magnitude >>> (56 - 23)) & 0x7fffffL)
+        val result = format(
+          sign = if (value(scaled) < 1.0f) 1L else 0L,
+          exponent = resultExponent,
+          fraction = (magnitude >>> (56 - 23)) & 0x7fffffL
+        )
         if (subnormal) subtract(result, encode(24.0f)) else result
       }
     }
 
   /** The reciprocal of a value, as the unit approximates it. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def reciprocal(bits: Long): Long =
     if (isNaN(bits)) CanonicalNaN
     else if (isInfinite(bits)) if (isNegative(bits)) 0x80000000L else 0L
@@ -232,11 +237,16 @@ private[isa] object Mufu {
         resultExponent -= 1
         sum = sum << 1
       }
-      val result = format(if (isNegative(scaled)) 1L else 0L, resultExponent, (sum >>> (56 - 23)) & 0x7fffffL)
-      scale(result, -logarithm.toInt)
+      val result = format(
+        sign = if (isNegative(scaled)) 1L else 0L,
+        exponent = resultExponent,
+        fraction = (sum >>> (56 - 23)) & 0x7fffffL
+      )
+      scale(result, -logarithm)
     }
 
   /** The reciprocal square root of a value, as the unit approximates it. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def reciprocalSquareRoot(bits: Long): Long =
     if (isNaN(bits)) CanonicalNaN
     else if (isInfinite(bits)) if (isNegative(bits)) CanonicalNaN else 0L
@@ -263,17 +273,18 @@ private[isa] object Mufu {
           var sum          = c0Term - c1Term + c2Term
           sum = sum + (RsqrtBias >>> ((64 - 57) + 23))
           sum = sum << 1
-          val result = format(0L, 126L, (sum >>> (57 - 23)) & 0x7fffffL)
+          val result = format(sign = 0L, exponent = 126L, fraction = (sum >>> (57 - 23)) & 0x7fffffL)
           scale(result, -logarithm / 2)
         }
       }
     }
 
   /** The square root of a value, as the unit approximates it. */
-  def squareRoot(bits: Long, flavour: Flavour): Long =
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def squareRoot(bits: Long, flavour: MufuFlavour): Long =
     flavour match {
-      case Flavour.Legacy => reciprocal(reciprocalSquareRoot(bits))
-      case Flavour.Modern =>
+      case MufuFlavour.Legacy => reciprocal(reciprocalSquareRoot(bits))
+      case MufuFlavour.Modern =>
         if (isNaN(bits)) CanonicalNaN
         else if (isInfinite(bits)) if (isNegative(bits)) CanonicalNaN else Infinity
         else if (isZero(bits)) if (isNegative(bits)) 0x80000000L else 0L
@@ -295,18 +306,18 @@ private[isa] object Mufu {
             val c2Term       = c2.toLong * squareApprox(lower)
             var sum          = c0Term + c1Term - c2Term
             sum = sum + (SqrtBias >>> ((64 - 58) + 23))
-            val result = format(0L, 127L, (sum >>> (58 - 23)) & 0x7fffffL)
+            val result = format(sign = 0L, exponent = 127L, fraction = (sum >>> (58 - 23)) & 0x7fffffL)
             scale(result, logarithm / 2)
           }
         }
     }
 
   /** The reduced angle of a value in radians, which the unit's trigonometric polynomials take. */
-  def reduceRadians(bits: Long, flavour: Flavour): Long = {
+  def reduceRadians(bits: Long, flavour: MufuFlavour): Long = {
     val reduced = reduce(bits)
     flavour match {
-      case Flavour.Legacy => reduced
-      case Flavour.Modern =>
+      case MufuFlavour.Legacy => reduced
+      case MufuFlavour.Modern =>
         if (isNormal(bits)) {
           val count = math.min(math.max(exponentOf(value(bits).toDouble * SincosPi2Reciprocal), 0), 25)
           reduced & ~((1L << count) - 1L) & 0xffffffffL
@@ -317,23 +328,24 @@ private[isa] object Mufu {
   /** The reduction of a value in radians to a quarter period, with its sign and quadrant. */
   private def reduce(bits: Long): Long = {
     val sign = if (isNegative(bits)) 1L else 0L
-    if (isNaN(bits)) format(sign, 0x80L, 0L)
-    else if (isInfinite(bits)) format(sign, 0x81L, 0L)
-    else if (isZero(bits) || isSubnormal(bits)) format(sign, 0L, 0L)
+    if (isNaN(bits)) format(sign = sign, exponent = 0x80L, fraction = 0L)
+    else if (isInfinite(bits)) format(sign = sign, exponent = 0x81L, fraction = 0L)
+    else if (isZero(bits) || isSubnormal(bits)) format(sign = sign, exponent = 0L, fraction = 0L)
     else {
       val magnitude = math.abs(value(bits).toDouble)
-      if (magnitude >= 8589934592.0) format(sign, 0L, 0L)
+      if (magnitude >= 8589934592.0) format(sign = sign, exponent = 0L, fraction = 0L)
       else {
         val count   = (magnitude * SincosPi2Reciprocal).toLong
         val reduced = magnitude - count * SincosPi2
         val clamped = math.min(math.max(reduced, 0.0), SincosQuarterMax)
-        val packed  = format(sign, count & 3L, lerp(clamped))
+        val packed  = format(sign = sign, exponent = count & 3L, fraction = lerp(clamped))
         packed & ~((1L << math.max(ilogb(bits) - 8, 0)) - 1L) & 0xffffffffL
       }
     }
   }
 
   /** The fixed-point quarter period of an angle, which the unit's polynomials index. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def lerp(angle: Double): Long = {
     val scaled = angle * SincosPi2Reciprocal
     if (scaled == 0.0) 0L
@@ -352,10 +364,10 @@ private[isa] object Mufu {
   }
 
   /** The sine of a value in radians, as the unit approximates it. */
-  def sine(bits: Long, flavour: Flavour): Long = polynomialSine(reduceRadians(bits, flavour))
+  def sine(bits: Long, flavour: MufuFlavour): Long = polynomialSine(reduceRadians(bits, flavour))
 
   /** The cosine of a value in radians, as the unit approximates it. */
-  def cosine(bits: Long, flavour: Flavour): Long = polynomialCosine(reduceRadians(bits, flavour))
+  def cosine(bits: Long, flavour: MufuFlavour): Long = polynomialCosine(reduceRadians(bits, flavour))
 
   /** The hyperbolic tangent of a value, as the unit approximates it: the value itself below 2^-8 and one from 8; in
     * between, the quadratic of the segment of its binade that the top fraction bits select, evaluated on the next 17
@@ -379,12 +391,6 @@ private[isa] object Mufu {
     }
   }
 
-  /** The sine of a reduced angle, which the unit's own reduction produces. */
-  def sineReduced(reduced: Long): Long = polynomialSine(reduced)
-
-  /** The cosine of a reduced angle, which the unit's own reduction produces. */
-  def cosineReduced(reduced: Long): Long = polynomialCosine(reduced)
-
   /** The sine of an angle in cycles, which the unit reduces from the cycles themselves. */
   def sineCycles(bits: Long): Long = polynomialSine(reduceCycles(bits))
 
@@ -394,9 +400,9 @@ private[isa] object Mufu {
   /** The quarter period of an angle in cycles, with its sign and quadrant. */
   private def reduceCycles(bits: Long): Long = {
     val sign = if (isNegative(bits)) 1L else 0L
-    if (isNaN(bits)) format(sign, 0x80L, 0L)
-    else if (isInfinite(bits)) format(sign, 0x81L, 0L)
-    else if (isZero(bits)) format(sign, 0L, 0L)
+    if (isNaN(bits)) format(sign = sign, exponent = 0x80L, fraction = 0L)
+    else if (isInfinite(bits)) format(sign = sign, exponent = 0x81L, fraction = 0L)
+    else if (isZero(bits)) format(sign = sign, exponent = 0L, fraction = 0L)
     else {
       val magnitude = math.abs(value(bits).toDouble)
       val quarters  = magnitude * 4.0
@@ -404,7 +410,11 @@ private[isa] object Mufu {
       val fraction  = quarters - quadrant
       // The whole turns of the argument do not reach the unit, whose quadrant is the remainder of the quarter periods
       // the argument holds; a whole number of quarters has none.
-      format(sign, (quadrant % 4.0).toLong, (fraction * (1L << 23)).toLong & 0x7fffffL)
+      format(
+        sign = sign,
+        exponent = (quadrant % 4.0).toLong,
+        fraction = (fraction * (1L << 23)).toLong & 0x7fffffL
+      )
     }
   }
 
@@ -413,11 +423,11 @@ private[isa] object Mufu {
     * The `flush` argument is the `.ftz` modifier, which flushes the subnormal operand and the subnormal result to a
     * sign-preserving zero.
     */
-  def approximate(function: VMIR.MufuFunction, flavour: Flavour, value: Float32, flush: Boolean): Float32 =
+  def approximate(function: VMIR.MufuFunction, flavour: MufuFlavour, value: Float32, flush: Boolean): Float32 =
     fromRaw[Float32](apply(function, flavour, toRaw(value), flush))
 
   /** The unit's approximation of the function, on the binary32 bits of the operand. */
-  def apply(function: VMIR.MufuFunction, flavour: Flavour, bits: Long, flush: Boolean): Long = {
+  def apply(function: VMIR.MufuFunction, flavour: MufuFlavour, bits: Long, flush: Boolean): Long = {
     val operand = if (flush && isSubnormal(bits)) bits & 0x80000000L else bits
     val result  = function match {
       case VMIR.MufuFunction.Exponent2            => exponent2(operand)
@@ -433,6 +443,7 @@ private[isa] object Mufu {
     if (flush && isSubnormal(result)) result & 0x80000000L else result
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def polynomialSine(reduced: Long): Long = {
     var sign     = (reduced >>> 31) & 1L
     val quadrant = (reduced >>> 23) & 0xffL
@@ -445,6 +456,7 @@ private[isa] object Mufu {
     }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def polynomialCosine(reduced: Long): Long = {
     val quadrant = (reduced >>> 23) & 0xffL
     if ((quadrant & 0x80L) != 0L) CanonicalNaN
@@ -456,6 +468,7 @@ private[isa] object Mufu {
     }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def polynomial(reduced: Long, sign: Long): Long = {
     val (c0, c1, c2)   = sinTable(upperSignificand(reduced, SinM).toInt)
     val c0Term         = c0.toLong << 31
@@ -470,7 +483,7 @@ private[isa] object Mufu {
         sum = sum << 1
       }
     }
-    format(sign, resultExponent, (sum >>> (56 - 23)) & 0x7fffffL)
+    format(sign = sign, exponent = resultExponent, fraction = (sum >>> (56 - 23)) & 0x7fffffL)
   }
 
   // the fraction bits that select a tanh segment in each binade from 2^-8 to 2^2, and the binade's first segment

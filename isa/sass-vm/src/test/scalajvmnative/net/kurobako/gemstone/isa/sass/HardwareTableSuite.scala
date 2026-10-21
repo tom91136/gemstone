@@ -48,10 +48,10 @@ class HardwareTableSuite extends munit.FunSuite {
     val Array(_, probe, name) = lines(0).split(' '): @unchecked
     val (banks, table)        = lines.drop(2).span(_.startsWith("bank "))
     def bank(line: String)    = line.split(' ') match {
-      case Array(_, name, hex) => name -> hex
-      case _                   => fail(s"bad bank $line")
+      case Array(_, label, hex) => label -> hex
+      case _                    => fail(s"bad bank $line")
     }
-    WarpKernel(probe, name, lines(1).stripPrefix("code "), Vec.from(banks.map(bank)), rows(table.mkString("\n")))
+    WarpKernel(probe, name, lines(1).stripPrefix("code "), Vec.from(banks.map(bank(_))), rows(table.mkString("\n")))
   }
 
   private def ops(sm: Int): Vec[Op] =

@@ -147,13 +147,15 @@ jobs:
           - {shard: cuda-0, backends: cuda, index: 0, count: 3}
           - {shard: cuda-1, backends: cuda, index: 1, count: 3}
           - {shard: cuda-2, backends: cuda, index: 2, count: 3}
-          - {shard: amd-0, backends: hip hsa, index: 0, count: 7}
-          - {shard: amd-1, backends: hip hsa, index: 1, count: 7}
-          - {shard: amd-2, backends: hip hsa, index: 2, count: 7}
-          - {shard: amd-3, backends: hip hsa, index: 3, count: 7}
-          - {shard: amd-4, backends: hip hsa, index: 4, count: 7}
-          - {shard: amd-5, backends: hip hsa, index: 5, count: 7}
-          - {shard: amd-6, backends: hip hsa, index: 6, count: 7}
+          - {shard: amd-0, backends: hip hsa, index: 0, count: 9}
+          - {shard: amd-1, backends: hip hsa, index: 1, count: 9}
+          - {shard: amd-2, backends: hip hsa, index: 2, count: 9}
+          - {shard: amd-3, backends: hip hsa, index: 3, count: 9}
+          - {shard: amd-4, backends: hip hsa, index: 4, count: 9}
+          - {shard: amd-5, backends: hip hsa, index: 5, count: 9}
+          - {shard: amd-6, backends: hip hsa, index: 6, count: 9}
+          - {shard: amd-7, backends: hip hsa, index: 7, count: 9}
+          - {shard: amd-8, backends: hip hsa, index: 8, count: 9}
           - {shard: spirv, routes: opencl levelzero}
           - {shard: sycl-0, routes: sycl, sycl: 0}
           - {shard: sycl-1, routes: sycl, sycl: 1}
@@ -184,7 +186,7 @@ jobs:
           routes='${{ matrix.routes }}'
           [ -n "$routes" ] || routes=$(sh conformance/artifacts/shard.sh "$CONFORMANCE_TARGET_SET" ${{ matrix.index }} ${{ matrix.count }} ${{ matrix.backends }} | paste -sd ' ')
           mkdir -p target/conformance/artifacts
-          [ -z "$routes" ] || sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $routes"
+          [ -z "$routes" ] || CONFORMANCE_SHARD_ROUTES="$routes" sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $routes"
       # every job populates the same dependency set, so one of them saves it
       - name: Download cache contents
         id: downloads
@@ -265,13 +267,11 @@ jobs:
           ctest --test-dir target/conformance/host --output-on-failure --parallel "$(nproc)" || status=1
           exit $status
 
+  # independent of every other job: it builds the compile databases clang-tidy reads itself, and the lint alias picks up
+  # baumkuchen whenever the build resolves it
   lint:
-    needs: build
-    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    env:
-      GEMSTONE_OFFLINE: 1
     steps:
       - *free-disk
       - *checkout
@@ -281,8 +281,6 @@ jobs:
       - *tools
       - *references
       - *dependencies
-      - *download-build
-      - *unpack
       - run: sbt --server --batch lint
 
   semantics:

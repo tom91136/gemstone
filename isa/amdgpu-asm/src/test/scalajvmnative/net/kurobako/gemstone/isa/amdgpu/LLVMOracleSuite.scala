@@ -26,13 +26,17 @@ class LLVMOracleSuite extends munit.FunSuite {
             case Vec(value) => value
             case other      => fail(s"$clue: expected one instruction or pair, found $other")
           }
-          val actual = Binary.encodeStatement(statement, golden.target, golden.waveSize)
+          val actual = Binary.encodeStatement(statement, TargetMode(golden.target, golden.waveSize))
             .fold(error => fail(s"$clue: $error"), identity)
           assertEquals(actual, golden.bytes, clue)
-          val decoded = Binary.decodeStatementAt(actual, 0, golden.target, golden.waveSize)
+          val decoded = Binary.decodeStatementAt(actual, 0, TargetMode(golden.target, golden.waveSize))
             .fold(error => fail(s"$clue: $error"), identity)
           assertEquals(decoded.size.raw, actual.size, clue)
-          assertEquals(Binary.encodeStatement(decoded.statement, golden.target, golden.waveSize), Right(actual), clue)
+          assertEquals(
+            Binary.encodeStatement(decoded.statement, TargetMode(golden.target, golden.waveSize)),
+            Right(actual),
+            clue
+          )
           (statement, decoded.statement) match {
             case (Statement.Instruction(expected), Statement.Instruction(found)) =>
               // Legacy names may share an opcode; the decoded instruction must retain the encoding identity.
@@ -52,7 +56,7 @@ class LLVMOracleSuite extends munit.FunSuite {
           val rendered = Printer.render(Program(Vec(decoded.statement)))
           val reparsed = Parser.parse(rendered).fold(error => fail(s"$clue: $rendered: $error"), identity)
           assertEquals(
-            Binary.encodeStatement(reparsed.statements.head, golden.target, golden.waveSize),
+            Binary.encodeStatement(reparsed.statements.head, TargetMode(golden.target, golden.waveSize)),
             Right(actual),
             clue
           )

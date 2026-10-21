@@ -122,7 +122,7 @@ private[isa] object VMInterpreter {
       cluster: Option[Dimensions] = None
   ): Either[Fault, Unit] =
     parameterBlock(kernel.entry, arguments).flatMap(block =>
-      launch(kernel, geometry, block, DeviceHeap(memory), control, workgroups, dynamicSharedBytes, cluster)
+      launch(kernel, geometry, block, VMDevice(DeviceHeap(memory), control, workgroups), dynamicSharedBytes, cluster)
     )
 
   /** The cluster shape a launch runs with: the launch's own, which must agree with any the kernel requires. */
@@ -144,16 +144,14 @@ private[isa] object VMInterpreter {
   /** The most workgroups a cluster may hold, as the non-portable cluster size limit allows. */
   val ClusterLimit: Int = 16
 
-  private val launchGrid: VMContext.Launch = launch(_, _, _, _, _, _, _)
+  private val launchGrid: VMContext.Launch = launch(_, _, _, _, _)
 
   /** Runs every workgroup of one launch, including device-side launches sharing the parent's heap. */
   def launch(
       kernel: Kernel,
       geometry: LaunchGeometry,
       parameterBlock: Array[Byte],
-      memory: DeviceHeap,
-      control: TaskControl,
-      workgroups: Workgroups,
+      device: VMDevice,
       dynamicSharedBytes: Int >= 0,
       cluster: Option[Dimensions] = None
   ): Either[Fault, Unit] =
@@ -166,9 +164,9 @@ private[isa] object VMInterpreter {
       allLanes = VMLaneMask.all(laneCount)
       _ <- shape match {
         case Some(dimensions) if dimensions != Dimensions.One =>
-          clusters(kernel, geometry, dimensions, parameterBlock, memory, control, workgroups, dynamicSharedBytes)
+          clusters(kernel, geometry, dimensions, parameterBlock, device, dynamicSharedBytes)
         case _ =>
-          Dispatch.forEachGroup(geometry, workgroups) { (_, group) =>
+          Dispatch.forEachGroup(geometry, device.workgroups) { (_, group) =>
             val block = borrow(laneCount)
             try
               Execution(
@@ -177,9 +175,7 @@ private[isa] object VMInterpreter {
                 group,
                 liveLanes(geometry, group, allLanes),
                 parameterBlock,
-                memory,
-                control,
-                workgroups,
+                device,
                 dynamicSharedBytes,
                 block,
                 shape
@@ -199,9 +195,7 @@ private[isa] object VMInterpreter {
       geometry: LaunchGeometry,
       shape: Dimensions,
       parameterBlock: Array[Byte],
-      memory: DeviceHeap,
-      control: TaskControl,
-      workgroups: Workgroups,
+      device: VMDevice,
       dynamicSharedBytes: Int >= 0
   ): Either[Fault, Unit] = {
     val laneCount = geometry.groupVolume.unsafe[Int in 1 ~ 1024]
@@ -213,7 +207,7 @@ private[isa] object VMInterpreter {
     )
     val size = shape.x.raw * shape.y.raw * shape.z.raw
     LaunchGeometry.forLaunch(geometry.groupSize, count).left.map(Fault.InvalidRequest(_)).flatMap { grid =>
-      Dispatch.forEachGroup(grid, workgroups) { (_, origin) =>
+      Dispatch.forEachGroup(grid, device.workgroups) { (_, origin) =>
         val blocks = borrow(laneCount, size)
         try {
           val sync   = ClusterSync()
@@ -244,9 +238,7 @@ private[isa] object VMInterpreter {
               group,
               liveLanes(geometry, group, allLanes),
               parameterBlock,
-              memory,
-              control,
-              workgroups,
+              device,
               dynamicSharedBytes,
               block,
               Some(shape),
@@ -313,8 +305,8 @@ private[isa] object VMInterpreter {
   }
 
   private def warpgroupWide(instruction: Instruction): Boolean = instruction match {
-    case Instruction.Tensor(_: Matrix.Operation.WarpgroupMultiply) => true
-    case _                                                         => false
+    case Instruction.Tensor(Matrix.Operation.WarpgroupMultiply(_, _, _, _, _, _, _, _)) => true
+    case _                                                                              => false
   }
 
   private def inFunction(fault: Fault, name: NonEmpty[String]): Fault = fault match {
@@ -335,9 +327,7 @@ private[isa] object VMInterpreter {
       group: Coordinates,
       initialLive: VMLaneMask,
       parameterBlock: Array[Byte],
-      memory: DeviceHeap,
-      control: TaskControl,
-      workgroups: Workgroups,
+      device: VMDevice,
       dynamicSharedBytes: Int >= 0,
       block: Block,
       cluster: Option[Dimensions] = None,
@@ -351,9 +341,7 @@ private[isa] object VMInterpreter {
       geometry,
       group,
       workgroup,
-      memory,
-      control,
-      workgroups,
+      device,
       dynamicSharedBytes,
       effects,
       root,
@@ -385,9 +373,9 @@ private[isa] object VMInterpreter {
 
     private def fail(fault: Fault)(using Run): Nothing = break(Left(fault))
 
-    private val observing = control.observer.isDefined
+    private val observing = device.control.observer.isDefined
 
-    private def observe(frame: VMFrame, pc: Pc, active: VMLaneMask)(using Run): Unit = control.observer.foreach {
+    private def observe(frame: VMFrame, pc: Pc, active: VMLaneMask)(using Run): Unit = device.control.observer.foreach {
       observer =>
         val at = location(frame, pc, active)
         observer.instruction(at, View(frame, active)) match {
@@ -738,7 +726,7 @@ private[isa] object VMInterpreter {
     private def step(cohort: Cohort, instruction: PredicatedInstruction)(using Run): Unit = {
       val frame = cohort.frame
       cohort.lanes.positiveSize match {
-        case Some(size) => check(control.checkpoint(size.widen[Int > 0]))
+        case Some(size) => check(device.control.checkpoint(size.widen[Int > 0]))
         case None       => ()
       }
       val active = instruction.predication match {
@@ -764,7 +752,7 @@ private[isa] object VMInterpreter {
       val outcome = if (active.isEmpty) Advanced else VMSemantics.execute(instruction.instruction, LaneLoop(context))
       val result  = outcome match {
         case Right(_) =>
-          effects.commit(frame.lanes, workgroup, memory, cohort.pc) match {
+          effects.commit(frame.lanes, workgroup, device.memory, cohort.pc) match {
             case Left(fault) => Left(fault)
             case _           => outcome
           }

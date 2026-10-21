@@ -121,20 +121,15 @@ private object checkpoints {
         program.bindGlobal(name, binding, memory)
       override def writeGlobal(name: NonEmpty[String], offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
         program.writeGlobal(name, offset, bytes)
-      override def close(): Unit = program.close()
-      override def execute(
-          task: KernelTask,
-          memory: AddressSpace,
-          control: TaskControl,
-          handler: Event => Either[Fault, Unit]
-      ): Either[Fault, Unit] = {
+      override def close(): Unit                                                        = program.close()
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
         val launch = launches.getAndIncrement()
         checkpoint(launch, "before")
         val checked =
           if (forceContention)
-            ContendedMemory(memory, launch, Files.readString(directory.resolve(s"counter-$launch")).trim.toLong)
-          else memory
-        val result = program.execute(task, checked, control, handler).flatMap { result =>
+            ContendedMemory(context.memory, launch, Files.readString(directory.resolve(s"counter-$launch")).trim.toLong)
+          else context.memory
+        val result = program.execute(task, context.withMemory(checked)).flatMap { result =>
           if (forceContention && contendedOperations.get() != expectedOperations)
             Left(Fault.InvalidRequest(
               s"expected $expectedOperations atomic operations, saw ${contendedOperations.get()}"

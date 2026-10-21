@@ -29,10 +29,10 @@ private object VMProgram {
     case Array(element: Int, count: Long >= 0)
     case Structure(members: Vec[Int])
     case Pointer(storageClass: Int, pointee: Int)
-    case Function(result: Int, parameters: Vec[Int])
+    case Function
     case Event
     case NamedBarrier
-    case Pipe(access: Int)
+    case Pipe
     case ReserveId
     case DeviceEvent
     case Queue
@@ -44,22 +44,22 @@ private object VMProgram {
         arrayed: Boolean = false,
         cube: Boolean = false
     )
-    case Texture(sampledType: Int, dimensions: Int = 2, texelBuffer: Boolean = false, arrayed: Boolean = false)
+    case Texture(dimensions: Int = 2, texelBuffer: Boolean = false, arrayed: Boolean = false)
     case Sampler
-    case CubeTexture(sampledType: Int, arrayed: Boolean)
+    case CubeTexture(arrayed: Boolean)
     case SampledImage(imageType: Int)
     case MatrixType(column: Int, count: Int in 2 ~ 4)
     case InputAttachment(sampledType: Int, multisampled: Boolean)
-    case MultisampledTexture(sampledType: Int, arrayed: Boolean = false)
+    case MultisampledTexture(arrayed: Boolean = false)
   }
 
   trait LeafVisitor { def apply(offset: Long >= 0, component: Int): Unit }
 
   /** A cooperative matrix type of `rows` by `columns` components of `component`, which every invocation in its scope
-    * holds whole in row-major lanes, so its `use` and `scope` constrain only how it may be combined. The VM types its
-    * values as vectors of `rows * columns` components; `nv` marks SPV_NV_cooperative_matrix's type.
+    * holds whole in row-major lanes, so its `use` constrains only how it may be combined. The VM types its values as
+    * vectors of `rows * columns` components; `nv` marks SPV_NV_cooperative_matrix's type.
     */
-  case class CooperativeMatrix(component: Int, scope: Long, rows: Int, columns: Int, use: Long, nv: Boolean)
+  case class CooperativeMatrix(component: Int, rows: Int, columns: Int, use: Long, nv: Boolean)
 
   object TensorLayout {
     val BlockSize: Int  = 0
@@ -208,9 +208,9 @@ private object VMProgram {
       opcode: String
   ): Either[Fault, Constant] = types.get(typeId) match {
     case Some(RuntimeType.Pointer(storageClass, pointee)) => Right(Constant.NullPointer(typeId, pointee, storageClass))
-    case Some(_: RuntimeType.Texture | _: RuntimeType.StorageImage | RuntimeType.CubeTexture(_, _) |
-        RuntimeType.MultisampledTexture(_, _) | RuntimeType.InputAttachment(_, _) | RuntimeType.SampledImage(_) |
-        RuntimeType.Pipe(_) | RuntimeType.Sampler) if opcode == "OpUndef" =>
+    case Some(RuntimeType.Texture(_, _, _) | RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.CubeTexture(_) |
+        RuntimeType.MultisampledTexture(_) | RuntimeType.InputAttachment(_, _) | RuntimeType.SampledImage(_) |
+        RuntimeType.Pipe | RuntimeType.Sampler) if opcode == "OpUndef" =>
       Right(Constant.NullPointer(typeId, typeId, 0))
     case _ =>
       scalarLeafCount(types, typeId) match {
@@ -360,22 +360,20 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
       case Some(RuntimeType.Integer(width, _)) => width.toScalarByteWidth.widen[Int >= 0]
       case Some(RuntimeType.Floating(width))   => width.toFloatByteWidth
       case Some(RuntimeType.Float8(_))         => 1
-      case Some(RuntimeType.MultisampledTexture(_, _) | RuntimeType.InputAttachment(_, _) | RuntimeType.Event |
+      case Some(RuntimeType.MultisampledTexture(_) | RuntimeType.InputAttachment(_, _) | RuntimeType.Event |
           RuntimeType.NamedBarrier |
-          RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue | RuntimeType.Pipe(_) |
-          _: RuntimeType.StorageImage | _: RuntimeType.Texture |
-          RuntimeType.CubeTexture(
-            _,
-            _
-          ) | RuntimeType.Sampler | RuntimeType.SampledImage(_) | RuntimeType.Pointer(_, _)) => 8
+          RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue | RuntimeType.Pipe |
+          RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.Texture(_, _, _) |
+          RuntimeType.CubeTexture(_) | RuntimeType.Sampler | RuntimeType.SampledImage(_) |
+          RuntimeType.Pointer(_, _)) => 8
       case Some(RuntimeType.VectorType(component, n)) =>
         typeSizeOf(component) * (if (n == 3 && !vulkan && !cooperativeMatrices.contains(typeId)) 4: Int >= 0 else n)
       case Some(RuntimeType.MatrixType(column, count)) => typeSizeOf(column) * count
       case Some(RuntimeType.Array(element, n))         =>
         val stride: Int >= 0 = arrayStrides.get(typeId).fold(typeSizeOf(element))(_.widen[Int >= 0])
         (stride.widen[Long >= 0] * n.widen[Long >= 0]).toIntExact
-      case Some(RuntimeType.Structure(members))                      => structSize(typeId, members)
-      case Some(RuntimeType.Void) | Some(RuntimeType.Function(_, _)) => 0
+      case Some(RuntimeType.Structure(members))                => structSize(typeId, members)
+      case Some(RuntimeType.Void) | Some(RuntimeType.Function) => 0
       case None => throw IllegalArgumentException(s"SPIR-V type %$typeId is undefined")
     }
 

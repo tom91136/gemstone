@@ -49,7 +49,7 @@ private object VMLowering {
     "extended instructions"                                 -> ExtendedOps.lower(site),
     "image access and sampling"                             -> ImageOps.lower(site),
     "OpenCL pipes"                                          -> PipeOps.lower,
-    "device-side enqueue"                                   -> DeviceEnqueueOps.lower(site),
+    "device-side enqueue"                                   -> DeviceEnqueueOps.lower,
     "integer dot products"                                  -> IntegerDotOps.lower(site),
     "Intel and VALVE vendor arithmetic"                     -> IntelArithmeticOps.lower(site),
     "cooperative matrix loads, stores and products"         -> CooperativeMatrixOps.lower(site),

@@ -126,8 +126,7 @@ private object VMLoader {
         case Instruction.TypeStruct(dest, members) => types.update(id(dest), RuntimeType.Structure(members.map(id(_))))
         case Instruction.TypePointer(dest, storageClass, dataType) =>
           types.update(id(dest), RuntimeType.Pointer(id(storageClass), id(dataType)))
-        case Instruction.TypeFunction(dest, result, parameters) =>
-          types.update(id(dest), RuntimeType.Function(id(result), parameters.map(id(_))))
+        case Instruction.TypeFunction(dest, _, _)          => types.update(id(dest), RuntimeType.Function)
         case Instruction.TypeSampler(dest)                 => types.update(id(dest), RuntimeType.Sampler)
         case Instruction.TypeSampledImage(dest, imageType) =>
           // SPIR-V 1.6 forbids sampled buffer images; older GLSL toolchains still emit them for samplerBuffer
@@ -143,8 +142,8 @@ private object VMLoader {
             case Left(error)  => return Left(error)
             case Right(value) => types.update(id(instruction.dest), value)
           }
-        case Instruction.TypeEvent(dest)        => types.update(id(dest), RuntimeType.Event)
-        case Instruction.TypePipe(dest, access) => types.update(id(dest), RuntimeType.Pipe(unsigned(access).toInt))
+        case Instruction.TypeEvent(dest)                => types.update(id(dest), RuntimeType.Event)
+        case Instruction.TypePipe(dest, _)              => types.update(id(dest), RuntimeType.Pipe)
         case Instruction.ConstantTrue(resultType, dest) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(1L)))
         case Instruction.SpecConstantTrue(resultType, dest) =>
@@ -221,23 +220,22 @@ private object VMLoader {
           val supported = required.forall(capability => SupportedCapabilities(unsigned(capability).toInt))
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(if (supported) 1L else 0L)))
         // a pipe storage reads and writes, as a ReadWrite (2) pipe does
-        case Instruction.TypePipeStorage(dest)                     => types.update(id(dest), RuntimeType.Pipe(2))
+        case Instruction.TypePipeStorage(dest)                     => types.update(id(dest), RuntimeType.Pipe)
         case Instruction.TypeUntypedPointerKHR(dest, storageClass) =>
           types.update(id(dest), RuntimeType.Pointer(id(storageClass), -1))
         // a structure whose members a kernel never declares; pointers to it carry addresses only
         case Instruction.TypeOpaque(dest, _) => types.update(id(dest), RuntimeType.Structure(Vec.empty))
-        case CooperativeMatrixType(dest, component, scope, rows, columns, use, nv) =>
-          val dimensions = Vec(scope, rows, columns).map(operand => constants.get(id(operand)).flatMap(scalarBits(_)))
+        case CooperativeMatrixType(dest, component, rows, columns, use, nv) =>
+          val dimensions = Vec(rows, columns).map(operand => constants.get(id(operand)).flatMap(scalarBits(_)))
           val usage      = use.fold(Option(2L))(operand => constants.get(id(operand)).flatMap(scalarBits(_)))
           (dimensions, usage) match {
-            case (Vec(Some(within), Some(height), Some(width)), Some(kind))
+            case (Vec(Some(height), Some(width)), Some(kind))
                 if height > 0 && width > 0 && height * width <= 65536 =>
               types.update(id(dest), RuntimeType.VectorType(id(component), (height * width).toInt.unsafe[Int > 0]))
               cooperativeMatrices.update(
                 id(dest),
                 CooperativeMatrix(
                   component = id(component),
-                  scope = within,
                   rows = height.toInt,
                   columns = width.toInt,
                   use = kind,
@@ -245,7 +243,7 @@ private object VMLoader {
                 )
               )
             case _ => return Left(Fault.Unsupported(
-                s"SPIR-V cooperative matrix %${id(dest)} needs constant scope, rows, columns and use of at most 65536 components"
+                s"SPIR-V cooperative matrix %${id(dest)} needs constant rows, columns and use of at most 65536 components"
               ))
           }
         case Instruction.TypeVectorIdEXT(dest, component, count) =>
@@ -698,7 +696,7 @@ private object VMLoader {
     if (sampled == 1L && multisampled == 1L)
       Either.cond(
         dim == Dim.Value2D && arrayed <= 1L,
-        RuntimeType.MultisampledTexture(sampledType, arrayed == 1L),
+        RuntimeType.MultisampledTexture(arrayed == 1L),
         Fault.Unsupported("multisampled textures require 2D views")
       )
     else if (dim == Dim.SubpassData)
@@ -710,7 +708,7 @@ private object VMLoader {
     else if (sampled == 1L && dim == Dim.Cube)
       Either.cond(
         arrayed <= 1L && multisampled == 0L,
-        RuntimeType.CubeTexture(sampledType, arrayed == 1L),
+        RuntimeType.CubeTexture(arrayed == 1L),
         Fault.Unsupported("cube textures require single-sample views")
       )
     else if (sampled == 1L)
@@ -718,7 +716,6 @@ private object VMLoader {
         Set[Long](Dim.Value1D, Dim.Value2D, Dim.Value3D, Dim.Buffer).contains(dim) && arrayed <= 1L &&
           !((dim == Dim.Buffer || dim == Dim.Value3D) && arrayed != 0L) && multisampled == 0L,
         RuntimeType.Texture(
-          sampledType,
           if (dim == Dim.Value3D) 3 else if (dim == Dim.Value2D) 2 else 1,
           dim == Dim.Buffer,
           arrayed == 1L
@@ -795,22 +792,79 @@ private object VMLoader {
 
   private def collective(instruction: Instruction, names: Map[Int, String]): Boolean = instruction match {
     case value if VMCollectives.isNonUniform(value) => true
-    case _: Instruction.DPdx | _: Instruction.DPdy | _: Instruction.Fwidth | _: Instruction.DPdxFine |
-        _: Instruction.DPdyFine | _: Instruction.FwidthFine | _: Instruction.DPdxCoarse | _: Instruction.DPdyCoarse |
-        _: Instruction.FwidthCoarse | _: Instruction.ImageSampleImplicitLod | _: Instruction.ImageSampleDrefImplicitLod |
-        _: Instruction.ImageSampleProjImplicitLod | _: Instruction.ImageSampleProjDrefImplicitLod |
-        _: Instruction.ImageQueryLod => true
-    case _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax |
-        _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR |
-        _: Instruction.GroupBitwiseAndKHR | _: Instruction.GroupBitwiseOrKHR | _: Instruction.GroupBitwiseXorKHR |
-        _: Instruction.GroupLogicalAndKHR | _: Instruction.GroupLogicalOrKHR | _: Instruction.GroupLogicalXorKHR |
-        _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR |
-        _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL |
-        _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL |
-        _: Instruction.GroupBroadcast | _: Instruction.ControlBarrier | _: Instruction.ControlBarrierWaitEXT |
-        _: Instruction.MemoryNamedBarrier | _: Instruction.SubgroupMatrixMultiplyAccumulateINTEL |
-        _: Instruction.GroupReserveReadPipePackets |
-        _: Instruction.GroupReserveWritePipePackets => true
+    case Instruction.DPdx(
+          _,
+          _,
+          _
+        ) | Instruction.DPdy(_, _, _) | Instruction.Fwidth(_, _, _) | Instruction.DPdxFine(_, _, _) |
+        Instruction.DPdyFine(
+          _,
+          _,
+          _
+        ) | Instruction.FwidthFine(_, _, _) | Instruction.DPdxCoarse(_, _, _) | Instruction.DPdyCoarse(_, _, _) |
+        Instruction.FwidthCoarse(_, _, _) | Instruction.ImageSampleImplicitLod(
+          _,
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.ImageSampleDrefImplicitLod(_, _, _, _, _, _) |
+        Instruction.ImageSampleProjImplicitLod(
+          _,
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.ImageSampleProjDrefImplicitLod(_, _, _, _, _, _) |
+        Instruction.ImageQueryLod(_, _, _, _) => true
+    case Instruction.GroupAny(_, _, _, _) | Instruction.GroupAll(
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.GroupUMin(_, _, _, _, _) | Instruction.GroupUMax(_, _, _, _, _) |
+        Instruction.GroupSMin(_, _, _, _, _) | Instruction.GroupSMax(
+          _,
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.GroupIAdd(_, _, _, _, _) | Instruction.GroupIMulKHR(_, _, _, _, _) |
+        Instruction.GroupBitwiseAndKHR(
+          _,
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.GroupBitwiseOrKHR(_, _, _, _, _) | Instruction.GroupBitwiseXorKHR(_, _, _, _, _) |
+        Instruction.GroupLogicalAndKHR(
+          _,
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.GroupLogicalOrKHR(_, _, _, _, _) | Instruction.GroupLogicalXorKHR(_, _, _, _, _) |
+        Instruction.GroupFAdd(_, _, _, _, _) | Instruction.GroupFMin(
+          _,
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.GroupFMax(_, _, _, _, _) | Instruction.GroupFMulKHR(_, _, _, _, _) |
+        Instruction.SubgroupShuffleINTEL(_, _, _, _) | Instruction.SubgroupShuffleXorINTEL(_, _, _, _) |
+        Instruction.SubgroupShuffleUpINTEL(_, _, _, _, _) | Instruction.SubgroupShuffleDownINTEL(_, _, _, _, _) |
+        Instruction.GroupBroadcast(_, _, _, _, _) | Instruction.ControlBarrier(
+          _,
+          _,
+          _
+        ) | Instruction.ControlBarrierWaitEXT(_, _, _) |
+        Instruction.MemoryNamedBarrier(
+          _,
+          _,
+          _
+        ) | Instruction.SubgroupMatrixMultiplyAccumulateINTEL(_, _, _, _, _, _, _) |
+        Instruction.GroupReserveReadPipePackets(_, _, _, _, _, _, _) |
+        Instruction.GroupReserveWritePipePackets(_, _, _, _, _, _, _) => true
     case Instruction.FunctionCall(function = called) => names.get(id(called)).exists(OpenCLBuiltins.collective)
     case _                                           => false
   }
@@ -1015,13 +1069,12 @@ private object VMLoader {
     * accumulators unless a use says otherwise.
     */
   private object CooperativeMatrixType {
-    def unapply(instruction: Instruction)
-        : Option[(Operand, Operand, Operand, Operand, Operand, Option[Operand], Boolean)] =
+    def unapply(instruction: Instruction): Option[(Operand, Operand, Operand, Operand, Option[Operand], Boolean)] =
       instruction match {
-        case Instruction.TypeCooperativeMatrixKHR(dest, component, scope, rows, columns, use) =>
-          Some((dest, component, scope, rows, columns, Some(use), false))
-        case Instruction.TypeCooperativeMatrixNV(dest, component, scope, rows, columns) =>
-          Some((dest, component, scope, rows, columns, None, true))
+        case Instruction.TypeCooperativeMatrixKHR(dest, component, _, rows, columns, use) =>
+          Some((dest, component, rows, columns, Some(use), false))
+        case Instruction.TypeCooperativeMatrixNV(dest, component, _, rows, columns) =>
+          Some((dest, component, rows, columns, None, true))
         case _ => None
       }
   }

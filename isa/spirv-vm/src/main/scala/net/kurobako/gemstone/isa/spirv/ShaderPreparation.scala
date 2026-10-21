@@ -14,12 +14,8 @@ import scala.util.control.NonFatal
   * reflection use the same compiler as execution.
   */
 object ShaderPreparation {
-  def prepare(
-      image: Vec[Byte],
-      entry: NonEmpty[String],
-      stage: ShaderStageKind,
-      constants: Vec[SpecializationConstant]
-  ): Either[Fault, PreparedShader] =
+  def prepare(shader: ShaderStage): Either[Fault, PreparedShader] = {
+    val ShaderStage(image, entry, stage, constants) = shader
     try
       for {
         decoded  <- ISA.decode(image).left.map(error => Fault.InvalidRequest(error.message))
@@ -60,6 +56,7 @@ object ShaderPreparation {
           )
         )
     }
+  }
 
   private def descriptorsOf(program: VMProgram, arguments: Vec[Int]): Either[Fault, Vec[ShaderDescriptor]] = {
     val counts = scala.collection.mutable.Map.empty[Int, Int >= 0]
@@ -84,8 +81,8 @@ object ShaderPreparation {
       case Some(RuntimeType.Sampler)         => ShaderResourceKind.Sampler
       case Some(RuntimeType.SampledImage(_)) => ShaderResourceKind.SampledImage
       case Some(
-            _: RuntimeType.StorageImage | _: RuntimeType.Texture | RuntimeType.CubeTexture(_, _) |
-            RuntimeType.InputAttachment(_, _) | RuntimeType.MultisampledTexture(_, _)
+            RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.Texture(_, _, _) | RuntimeType.CubeTexture(_) |
+            RuntimeType.InputAttachment(_, _) | RuntimeType.MultisampledTexture(_)
           ) => ShaderResourceKind.Image
       case _ => ShaderResourceKind.Buffer
     }

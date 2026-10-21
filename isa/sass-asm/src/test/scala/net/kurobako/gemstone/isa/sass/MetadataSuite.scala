@@ -91,7 +91,7 @@ class MetadataSuite extends munit.FunSuite {
           else Vec.from(s"(${kinds.keys.mkString("|")})".r.findAllIn(suffix)).map(kinds)
         case _ => fail(s"$name does not name its operand shape")
       }
-      val instruction = decoder.decode(Vec.empty, operands, None).getOrElse(fail(definition.name.raw))
+      val instruction = Instruction(decoder.decode(operands).getOrElse(fail(definition.name.raw)))
       assert(instruction.definition eq definition, definition)
       assertEquals(instruction.operands, operands, definition)
       assertEquals(

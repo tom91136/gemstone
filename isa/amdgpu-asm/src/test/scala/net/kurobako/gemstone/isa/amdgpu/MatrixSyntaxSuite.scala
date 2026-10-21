@@ -16,11 +16,18 @@ class MatrixSyntaxSuite extends munit.FunSuite {
       munit.Location
   ): Unit = {
     val expected = hex(bytes)
-    assertEquals(Binary.encodeStatement(parseStatement(source), target, waveSize), Right(expected), source)
+    assertEquals(Binary.encodeStatement(parseStatement(source), TargetMode(target, waveSize)), Right(expected), source)
     val decoded =
-      Binary.decodeStatementAt(expected, 0, target, waveSize).fold(error => fail(s"$source: $error"), identity)
+      Binary.decodeStatementAt(expected, 0, TargetMode(target, waveSize)).fold(
+        error => fail(s"$source: $error"),
+        identity
+      )
     val printed = Printer.render(Program(Vec(decoded.statement)))
-    assertEquals(Binary.encodeStatement(parseStatement(printed), target, waveSize), Right(expected), printed)
+    assertEquals(
+      Binary.encodeStatement(parseStatement(printed), TargetMode(target, waveSize)),
+      Right(expected),
+      printed
+    )
   }
 
   test("gfx942 SMFMAC writes accumulation registers") {
@@ -89,8 +96,7 @@ class MatrixSyntaxSuite extends munit.FunSuite {
     )
     assert(Binary.encodeStatement(
       parseStatement("v_mfma_f32_16x16x128_f8f6f4 v[0:3], v[4:11], v[12:19], v[0:3] cbsz:4 blgp:4"),
-      target,
-      64
+      TargetMode(target, 64)
     ).isLeft)
   }
 

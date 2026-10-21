@@ -362,4 +362,65 @@ class TranscendentalUnitSuite extends munit.FunSuite {
       16
     )(TranscendentalUnit.squareRoot64)
   }
+
+  // gfx803, gfx906, gfx1036 and gfx1150 agree on the infinity rows
+  test("FRACT of an infinity gives the negative default NaN at every width") {
+    check(
+      """
+        |7c00 -> fe00
+        |fc00 -> fe00
+        |""",
+      4
+    )(half(Floats.fract(_: Float16)))
+    check(
+      """
+        |7f800000 -> ffc00000
+        |ff800000 -> ffc00000
+        |""",
+      8
+    )(value => Floats.fract(fromRaw[Float32](value)).bits.raw)
+    check(
+      """
+        |7ff0000000000000 -> fff8000000000000
+        |fff0000000000000 -> fff8000000000000
+        |""",
+      16
+    )(value => Floats.fract(fromRaw[Float64](value)).bits.raw)
+  }
+
+  test("LDEXP returns a NaN quieted with its sign and payload, and a quiet NaN unchanged, at every width") {
+    for (exponent <- Seq(0, 5, -5))
+      check(
+        """
+          |7c01 -> 7e01
+          |fc01 -> fe01
+          |7dff -> 7fff
+          |7e01 -> 7e01
+          |fe55 -> fe55
+          |""",
+        4
+      )(value => Floats.ldexp(fromRaw[Float16](value), fromRaw[SInt[16]](exponent.toLong)).bits.raw)
+    for (exponent <- Seq(0, 5, -5, Int.MaxValue, Int.MinValue)) {
+      check(
+        """
+          |7f800001 -> 7fc00001
+          |ff800001 -> ffc00001
+          |7fa12345 -> 7fe12345
+          |7fc00001 -> 7fc00001
+          |ffc12345 -> ffc12345
+          |""",
+        8
+      )(value => Floats.ldexp(fromRaw[Float32](value), fromRaw[SInt[32]](exponent.toLong)).bits.raw)
+      check(
+        """
+          |7ff0000000000001 -> 7ff8000000000001
+          |fff0000000000001 -> fff8000000000001
+          |7ff4000000000000 -> 7ffc000000000000
+          |7ff8000000000001 -> 7ff8000000000001
+          |fff8000000000123 -> fff8000000000123
+          |""",
+        16
+      )(value => Floats.ldexp(fromRaw[Float64](value), fromRaw[SInt[32]](exponent.toLong)).bits.raw)
+    }
+  }
 }

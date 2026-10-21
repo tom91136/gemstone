@@ -371,12 +371,14 @@ private object VMInstructionCompiler {
     def float(operation: FloatOperation, destination: Operand, left: Operand, right: Operand): Lowered =
       floatWidth(modifiers).flatMap { width =>
         val control = floatControl(modifiers)
+        def unfused =
+          binary(destination, left, right)(VMIR.Instruction.FloatBinary(operation, _, _, _, width, control))
         modifiers.find(DirectedRoundings).flatMap(rounding(_)) match {
           case None =>
-            binary(destination, left, right)(VMIR.Instruction.FloatBinary(operation, _, _, _, width, control))
+            unfused
           case Some(_) if operation == FloatOperation.Divide =>
             // the division rounds its own quotient, which no fused form computes
-            binary(destination, left, right)(VMIR.Instruction.FloatBinary(operation, _, _, _, width, control))
+            unfused
           case Some(directed) =>
             // The fused form rounds the exact sum, difference or product once. A zero addend of this sign cannot flip
             // the sign of an exact zero product under the rounding.
@@ -435,7 +437,7 @@ private object VMInstructionCompiler {
         case VMIR.MufuFunction.Sine | VMIR.MufuFunction.Cosine => scope.architecture < 70
         case _                                                 => false
       }
-      val flavour = if (legacy) Mufu.Flavour.Legacy else Mufu.Flavour.Modern
+      val flavour = if (legacy) MufuFlavour.Legacy else MufuFlavour.Modern
       unary(destination, source)(VMIR.Instruction.MufuUnary(_, _, function, flavour, floatControl(modifiers)))
     }
     def unaryInteger(operation: IntegerUnaryOperation, destination: Operand, source: Operand): Lowered =
@@ -873,11 +875,27 @@ private object VMInstructionCompiler {
     // the VM keeps no caches, so a cache policy only has to be a value
     def cachePolicy(policy: Option[Operand]): Either[Error, Unit] = policy.traverse(scope.value(_)).map(_ => ())
     def memoryAndMoves(): Lowered                                 = instruction.form match {
-      case _: Form.WmmaLoad | _: Form.WmmaStore | _: Form.WmmaMma | _: Form.Mma |
-          _: Form.MmaSp | _: Form.MmaSpOrderedMetadata | Form.Ldmatrix(_, _) | Form.Stmatrix(_, _) |
+      case Form.WmmaLoad(
+            _,
+            _,
+            _
+          ) | Form.WmmaStore(_, _, _) | Form.WmmaMma(_, _, _, _) | Form.Mma(_, _, _, _, _, _, _, _) |
+          Form.MmaSp(_, _, _, _, _, _) | Form.MmaSpOrderedMetadata(_, _, _, _, _, _, _, _, _, _) | Form.Ldmatrix(
+            _,
+            _
+          ) | Form.Stmatrix(_, _) |
           Form.Movmatrix(_, _) =>
         VMTensorCompiler.lower(instruction)
-      case _: Form.WgmmaMmaAsync | _: Form.WgmmaMmaAsyncSp | Form.WgmmaFence() |
+      case Form.WgmmaMmaAsync(
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _
+          ) | Form.WgmmaMmaAsyncSp(_, _, _, _, _, _, _, _, _, _) | Form.WgmmaFence() |
           Form.WgmmaCommitGroup() | Form.WgmmaWaitGroup(_) =>
         VMWarpgroupCompiler.lower(instruction)
       case Form.Ld(destination, address, policy) if policy.isEmpty == !has(Modifier.L2CacheHint) =>
@@ -932,11 +950,10 @@ private object VMInstructionCompiler {
             FloatUnaryOperation.Exponent2,
             _,
             _,
-            packedFormat(modifiers),
-            floatControl(modifiers)
+            packedFormat(modifiers)
           )
         )
-      case Form.Ex2(destination, source) if endsWith(Modifier.Bf16x2) =>
+      case Form.Ex2(_, _) if endsWith(Modifier.Bf16x2) =>
         Left(Error.Unsupported(instruction.qualifiedOpcode, "the bfloat16 pair exponential is not implemented"))
       case Form.Ex2(destination, source) if endsWith(Modifier.F16) =>
         unaryFloat(FloatUnaryOperation.Exponent2, destination, source)
@@ -1377,7 +1394,6 @@ private object VMInstructionCompiler {
                 _,
                 _,
                 _,
-                NumericFormat.IEEE(32),
                 if (target == Modifier.F16x2) NumericFormat.IEEE(16) else NumericFormat.BF16,
                 mode,
                 Option.when(has(Modifier.Relu))(ConversionClamp.Relu)

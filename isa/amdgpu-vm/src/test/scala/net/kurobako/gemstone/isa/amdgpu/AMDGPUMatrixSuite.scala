@@ -215,9 +215,10 @@ class AMDGPUMatrixSuite extends munit.FunSuite {
     val selected = target.unsafe[Target]
     val code     = (for {
       program <- asm.Parser.parse(text).left.map(_.diagnostic.raw)
-      bytes   <- asm.Assembler.encode(program, selected, waveSize.unsafe[Int in (32, 64)]).left.map(_.toString)
+      bytes   <-
+        asm.Assembler.encode(program, TargetMode(selected, waveSize.unsafe[Int in (32, 64)])).left.map(_.toString)
     } yield bytes).fold(fail(_), identity)
-    val instruction = VMCompiler.decodeProgram(code, selected, waveSize.unsafe[Int in (32, 64)])
+    val instruction = VMCompiler.decodeProgram(code, TargetMode(selected, waveSize.unsafe[Int in (32, 64)]))
       .fold(error => fail(error.raw), _.operations.head)
     val seeds = registers.toVec.flatMap { case ((file, index), values) =>
       val target = if (file == 'a') 255 else index
@@ -580,7 +581,7 @@ class AMDGPUMatrixSuite extends munit.FunSuite {
         exactly(math.scalb(left.toDouble, scaleA - 127)).multiply(exactly(math.scalb(right.toDouble, scaleB - 127)))
       )
       // the nearest binary32, ties to even, by exact comparison
-      val guess   = BigDecimal(exact).toDouble.toFloat
+      val guess   = exact.doubleValue.toFloat
       val rounded = Vec(Math.nextDown(guess), guess, Math.nextUp(guess)).minBy(candidate =>
         (BigDecimal(exact.subtract(exactly(candidate.toDouble)).abs), java.lang.Float.floatToRawIntBits(candidate) & 1)
       )

@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
-import net.kurobako.gemstone.isa.nvidia.Mufu.Flavour.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.MufuFlavour.*
 
 /** The special-function unit's approximations, against the hardware's own results.
   *
@@ -17,7 +17,7 @@ class MufuSuite extends munit.FunSuite {
       val produced = function(input)
       Option.when(produced != expected)(s"  $line\n  gemstone ${f"$produced%08x"}")
     }.toList
-    if (wrong.nonEmpty) fail(s"${wrong.size} rows differ:\n" + wrong.take(8).mkString("\n"))
+    if (wrong.nonEmpty) fail(s"${wrong.size} $name rows differ:\n" + wrong.take(8).mkString("\n"))
   }
 
   // Quadro K620 sm_50, driver 580, CUDA 12.8

@@ -199,8 +199,8 @@ private object VMTensorMemoryCompiler {
     if (guard != 6) unsupported("UTC*MMA operands")
     val extra  = operands(5)
     val scaled = extra match {
-      case _: Operand.Address => true
-      case _                  => false
+      case Operand.Address(_, _, _, _, _, _) => true
+      case _                                 => false
     }
     val pair       = named("2CTA")
     val ws         = named("WS")

@@ -54,7 +54,7 @@ private object fixtures extends munit.Assertions {
   def words(values: Int*): Vec[Byte] = Vec.unsafeWrapArray(bytes.words(values*))
 
   def validate(code: Vec[Byte], target: Target): Either[NonEmpty[String], Unit] =
-    VMCompiler.decodeProgram(code, target, TargetDefaults.waveSize(target)).map(_ => ())
+    VMCompiler.decodeProgram(code, TargetMode(target, TargetDefaults.waveSize(target))).map(_ => ())
 
   def decoded(target: Target, code: Vec[Byte])(using munit.Location): VMIR.Instruction =
     VMCompiler.decodeInstruction(code, target).fold(error => fail(error.raw), identity)
@@ -88,7 +88,11 @@ private object fixtures extends munit.Assertions {
       control: TaskControl = TaskControl(),
       workgroups: Workgroups = Workgroups.Sequential
   ): Either[Fault, Unit] =
-    VMInterpreter.execute(kernel, task, memory, control, workgroups, Vec.empty, _ => Right(()))
+    VMInterpreter.execute(
+      kernel,
+      KernelLaunch(task, TaskContext(memory, control, _ => Right(())), workgroups),
+      Vec.empty
+    )
 
   def minimalCodeObject(globalPointer: Boolean = false): Array[Byte] =
     elfImage.amdgpu(bytes.words(0xbf810000), kernargSize = 24, kernelCodeProperties = 0x0a, globalPointer)

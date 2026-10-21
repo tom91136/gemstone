@@ -14,40 +14,48 @@ object SPIRVExecutionBenchmark {
     case Arithmetic, Calls
   }
 
+  private case class Options(
+      mode: Mode,
+      iterations: Int > 0,
+      groups: Int > 0,
+      instructions: Int > 0,
+      workers: Int > 0
+  )
+
   val benchmark: Case = (
     choice("mode", "arithmetic" -> Mode.Arithmetic, "calls" -> Mode.Calls),
     iterations(20),
     positive("groups", "Workgroups per dispatch", 256),
     positive("instructions", "Integer additions or function calls per invocation", 64),
     workers
-  ).mapN((mode, iterations, groups, instructions, workers) =>
-    () => run(mode, iterations, groups, instructions, workers)
-  )
+  ).mapN(Options(_, _, _, _, _)).map(options => () => run(options))
 
-  private def run(mode: Mode, iterations: Int > 0, groups: Int > 0, instructions: Int > 0, workers: Int > 0)
-      : BenchmarkSample = {
-    val memory = BenchmarkMemory(Math.multiplyExact(Math.multiplyExact(iterations, groups), 4))
+  private def run(options: Options): BenchmarkSample = {
+    val memory = BenchmarkMemory(Math.multiplyExact(Math.multiplyExact(options.iterations, options.groups), 4))
     val output = memory.ids(0)
-    val tasks  = Vec.tabulate(iterations) { iteration =>
+    val tasks  = Vec.tabulate(options.iterations) { iteration =>
       KernelTask.validated(
         kernelName = "arithmetic",
         groupSize = LaunchGeometry.Dimensions.One,
-        groupCount = LaunchGeometry.Dimensions(groups, 1, 1),
-        arguments = Vec(KernelTask.Argument.Memory(output, (iteration.toLong * groups * 4L).unsafe[Long >= 0]))
+        groupCount = LaunchGeometry.Dimensions(options.groups, 1, 1),
+        arguments = Vec(KernelTask.Argument.Memory(output, (iteration.toLong * options.groups * 4L).unsafe[Long >= 0]))
       ).fold(error => throw IllegalArgumentException(error), identity)
     }
-    val sample = Using.resource(WorkerPool(workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
-      val program = ISA.encode(module(instructions, mode)).left.map(error => Fault.InvalidRequest(error.message))
-        .flatMap(SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(_))
-        .fold(error => throw IllegalArgumentException(error.message), identity)
+    val sample = Using.resource(WorkerPool(options.workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
+      val program =
+        ISA.encode(module(options.instructions, options.mode)).left.map(error => Fault.InvalidRequest(error.message))
+          .flatMap(SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(_))
+          .fold(error => throw IllegalArgumentException(error.message), identity)
       val measurement = Measurement {
-        tasks.foreach(task => Measurement.succeeded(program.execute(task, memory, TaskControl(), _ => Right(()))))
+        tasks.foreach(task =>
+          Measurement.succeeded(program.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))))
+        )
       }
-      measurement.sample(iterations.widen[Long > 0])
+      measurement.sample(options.iterations.widen[Long > 0])
     }
-    (0 until iterations.raw * groups).foreach { invocation =>
+    (0 until options.iterations.raw * options.groups).foreach { invocation =>
       val actual   = memory.getInt(output, invocation * 4)
-      val expected = invocation % groups + instructions
+      val expected = invocation % options.groups + options.instructions
       if (actual != expected)
         throw IllegalStateException(s"SPIR-V result mismatch at invocation $invocation: $actual != $expected")
     }

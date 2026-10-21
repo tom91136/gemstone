@@ -52,7 +52,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
       val task   = KernelTask.validated("print_value", Dimensions.One, Dimensions.One, Vec.empty).value
       val events = scala.collection.mutable.ArrayBuffer.empty[Event]
       assertEquals(
-        program.execute(task, RejectingMemory(), TaskControl(), event => { events += event; Right(()) }),
+        program.execute(task, TaskContext(RejectingMemory(), TaskControl(), event => { events += event; Right(()) })),
         Right(())
       )
       assertEquals(events.toVector, Vector(Event.Print("%u", Vec(Event.PrintArgument.Integer(Vec(7L), 32)))))
@@ -60,12 +60,14 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
       assertEquals(
         program.execute(
           task,
-          RejectingMemory(),
-          TaskControl(),
-          _ => {
-            val _ = rejected.incrementAndGet()
-            Left(Fault.EventHandling("sink closed"))
-          }
+          TaskContext(
+            RejectingMemory(),
+            TaskControl(),
+            _ => {
+              val _ = rejected.incrementAndGet()
+              Left(Fault.EventHandling("sink closed"))
+            }
+          )
         ),
         Left(Fault.EventHandling("sink closed"))
       )

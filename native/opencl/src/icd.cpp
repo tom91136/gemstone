@@ -1283,7 +1283,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DRIVER_VERSION: return outputString(size, output, written, "26.22.38646.6");
     case CL_DEVICE_PROFILE: return outputString(size, output, written, "FULL_PROFILE");
     case CL_DEVICE_VERSION: return outputString(size, output, written, "OpenCL 3.0 Gemstone");
-    case CL_DEVICE_OPENCL_C_VERSION: return outputString(size, output, written, "OpenCL C 2.0 Gemstone");
+    case CL_DEVICE_OPENCL_C_VERSION:
+      return outputString(size, output, written, deviceEnqueueSupported() ? "OpenCL C 2.0 Gemstone" : "OpenCL C 1.2 Gemstone");
     case CL_DEVICE_EXTENSIONS: return outputString(size, output, written, DeviceExtensionString);
     case CL_DEVICE_NUMERIC_VERSION: return outputScalar(size, output, written, cl_version{CL_MAKE_VERSION(3, 0, 0)});
     case CL_DEVICE_EXTENSIONS_WITH_VERSION:
@@ -1304,7 +1305,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
                                                  {.version = CL_MAKE_VERSION(1, 2, 0), .name = "OpenCL C"},
                                                  {.version = CL_MAKE_VERSION(2, 0, 0), .name = "OpenCL C"},
                                                  {.version = CL_MAKE_VERSION(3, 0, 0), .name = "OpenCL C"}};
-      return outputBytes(size, output, written, versions, sizeof(versions));
+      std::vector<cl_name_version> supported;
+      for (const auto &version : versions)
+        if (deviceEnqueueSupported() || version.version != CL_MAKE_VERSION(2, 0, 0)) supported.push_back(version);
+      return outputBytes(size, output, written, supported.data(), supported.size() * sizeof(cl_name_version));
     }
     case CL_DEVICE_OPENCL_C_FEATURES: {
       static const cl_name_version features[] = {
@@ -1328,7 +1332,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
           {.version = CL_MAKE_VERSION(1, 0, 0), .name = "__opencl_c_kernel_clock_scope_device"},
           {.version = CL_MAKE_VERSION(1, 0, 0), .name = "__opencl_c_kernel_clock_scope_work_group"},
           {.version = CL_MAKE_VERSION(1, 0, 0), .name = "__opencl_c_kernel_clock_scope_sub_group"}};
-      return outputBytes(size, output, written, features, sizeof(features));
+      std::vector<cl_name_version> supported;
+      for (const auto &feature : features)
+        if (deviceEnqueueSupported() || std::string_view(feature.name) != "__opencl_c_device_enqueue") supported.push_back(feature);
+      return outputBytes(size, output, written, supported.data(), supported.size() * sizeof(cl_name_version));
     }
     case CL_DEVICE_KERNEL_CLOCK_CAPABILITIES_KHR: {
       cl_device_kernel_clock_capabilities_khr const v = CL_DEVICE_KERNEL_CLOCK_SCOPE_DEVICE_KHR
@@ -1366,14 +1373,21 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputBytes(size, output, written, sizes, sizeof(sizes));
     }
     case CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: return outputScalar(size, output, written, size_t{32});
-    case CL_DEVICE_QUEUE_ON_DEVICE_PROPERTIES: return outputScalar(size, output, written, queueProperties);
-    case CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE: return outputScalar(size, output, written, DeviceQueuePreferredSize);
-    case CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE: return outputScalar(size, output, written, DeviceQueueMaxSize);
-    case CL_DEVICE_MAX_ON_DEVICE_QUEUES: return outputScalar(size, output, written, MaxDeviceQueues);
-    case CL_DEVICE_MAX_ON_DEVICE_EVENTS: return outputScalar(size, output, written, MaxDeviceEvents);
+    case CL_DEVICE_QUEUE_ON_DEVICE_PROPERTIES:
+      return outputScalar(size, output, written, deviceEnqueueSupported() ? queueProperties : cl_command_queue_properties{0});
+    case CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE:
+      return outputScalar(size, output, written, deviceEnqueueSupported() ? DeviceQueuePreferredSize : cl_uint{0});
+    case CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE:
+      return outputScalar(size, output, written, deviceEnqueueSupported() ? DeviceQueueMaxSize : cl_uint{0});
+    case CL_DEVICE_MAX_ON_DEVICE_QUEUES:
+      return outputScalar(size, output, written, deviceEnqueueSupported() ? MaxDeviceQueues : cl_uint{0});
+    case CL_DEVICE_MAX_ON_DEVICE_EVENTS:
+      return outputScalar(size, output, written, deviceEnqueueSupported() ? MaxDeviceEvents : cl_uint{0});
     case CL_DEVICE_DEVICE_ENQUEUE_CAPABILITIES:
       return outputScalar(size, output, written,
-                          cl_device_device_enqueue_capabilities{CL_DEVICE_QUEUE_SUPPORTED | CL_DEVICE_QUEUE_REPLACEABLE_DEFAULT});
+                          deviceEnqueueSupported()
+                              ? cl_device_device_enqueue_capabilities{CL_DEVICE_QUEUE_SUPPORTED | CL_DEVICE_QUEUE_REPLACEABLE_DEFAULT}
+                              : cl_device_device_enqueue_capabilities{0});
     case CL_DEVICE_INTEGER_DOT_PRODUCT_CAPABILITIES_KHR: {
       cl_device_integer_dot_product_capabilities_khr const v =
           CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR | CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_KHR;
@@ -1589,6 +1603,7 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
       }
     }
   const bool onDevice = queueProperties & CL_QUEUE_ON_DEVICE;
+  if (onDevice && !deviceEnqueueSupported()) return fail(error, CL_INVALID_QUEUE_PROPERTIES);
   if ((!onDevice && (size || (queueProperties & CL_QUEUE_ON_DEVICE_DEFAULT)))
       || (onDevice && !(queueProperties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) || (size && *size > DeviceQueueMaxSize))
     return fail(error, CL_INVALID_VALUE);

@@ -69,7 +69,7 @@ private object hardwareGolden extends munit.Assertions {
     val lanes   = inputs.map(registers(load, _))
     val prefix  = 3 + lanes.map(_.size).maxOption.getOrElse(0)
     val program = VMCompiler
-      .decodeProgram(octets(code), target, (if (wave32) 32 else 64).unsafe[Int in (32, 64)])
+      .decodeProgram(octets(code), TargetMode(target, (if (wave32) 32 else 64).unsafe[Int in (32, 64)]))
       .fold(error => fail(error.raw), _.operations)
       .map {
         case Instruction.Branch(condition, at) => Instruction.Branch(condition, at + prefix)

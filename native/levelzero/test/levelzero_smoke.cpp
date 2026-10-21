@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ze_api.h>
 
+#include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 
 using namespace aspartame;
@@ -77,6 +78,66 @@ TEST_CASE("Level Zero regular sampler kernels require implemented image support"
 
 TEST_CASE("Level Zero immediate sampler kernels require implemented image support", "[level-zero][sampler]") {
   checkSamplerCapability(true);
+}
+
+TEST_CASE("Level Zero rejected modules fail their creation with a build log", "[level-zero]") {
+  using gemstone::execution::FailureKind;
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  for (const auto kind : {FailureKind::InvalidProgram, FailureKind::InvalidRequest, FailureKind::Unsupported}) {
+    CAPTURE(static_cast<int>(kind));
+    server.rejectNext(gemstone::execution::operation::LoadProgram, kind);
+    ze_module_handle_t module = nullptr;
+    ze_module_build_log_handle_t log = nullptr;
+    CHECK(zeModuleCreate(context, device, &moduleDesc, &module, &log) == ZE_RESULT_ERROR_MODULE_BUILD_FAILURE);
+    CHECK(module == nullptr);
+    REQUIRE(log != nullptr);
+    size_t size = 0;
+    CHECK(zeModuleBuildLogGetString(log, &size, nullptr) == ZE_RESULT_SUCCESS);
+    CHECK(size > 1);
+    CHECK(zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS);
+  }
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero kernel creation names the failure the service reported", "[level-zero]") {
+  using gemstone::execution::FailureKind;
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  server.kernelMetadata(0, 0, {});
+  auto [driver, device, context] = createContext();
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  ze_module_handle_t module = nullptr;
+  REQUIRE(zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  ze_kernel_desc_t kernelDesc{};
+  kernelDesc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+  kernelDesc.pKernelName = "absent";
+  const struct {
+    FailureKind kind;
+    ze_result_t expected;
+  } cases[]{
+      {.kind = FailureKind::NotFound, .expected = ZE_RESULT_ERROR_INVALID_KERNEL_NAME},
+      {.kind = FailureKind::InvalidProgram, .expected = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE},
+  };
+  for (const auto &[kind, expected] : cases) {
+    CAPTURE(static_cast<int>(kind));
+    server.rejectNext(gemstone::execution::operation::DescribeKernel, kind);
+    ze_kernel_handle_t kernel = nullptr;
+    CHECK(zeKernelCreate(module, &kernelDesc, &kernel) == expected);
+    CHECK(kernel == nullptr);
+  }
+  REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
 TEST_CASE("Level Zero kernel group sizes honour device limits and required dimensions", "[level-zero]") {

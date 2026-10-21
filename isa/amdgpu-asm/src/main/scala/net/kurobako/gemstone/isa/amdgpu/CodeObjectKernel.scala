@@ -45,6 +45,8 @@ private case class CodeObjectKernel(
     ) 32
     else 64
 
+  val mode: TargetMode = TargetMode(target, waveSize)
+
   // Most kernels never execute a device call.
   lazy val emulatedCalls: Map[Long, EmulatedCall] = functionTargets.flatMap { case (address, function) =>
     EmulatedCall.matching(function).headOption.map(address -> _)

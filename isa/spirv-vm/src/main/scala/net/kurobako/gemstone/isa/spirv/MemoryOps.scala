@@ -287,11 +287,11 @@ private object MemoryOps {
   private def load(site: Site, instruction: Instruction, resultType: Int, dest: Int, pointer: Int): Op = {
     val program = site.program
     program.runtimeType(resultType) match {
-      case Some(RuntimeType.MultisampledTexture(
+      case Some(RuntimeType.MultisampledTexture(_) | RuntimeType.InputAttachment(
             _,
             _
-          ) | RuntimeType.InputAttachment(_, _) | _: RuntimeType.StorageImage |
-          _: RuntimeType.Texture | RuntimeType.CubeTexture(_, _) | RuntimeType.Sampler) =>
+          ) | RuntimeType.StorageImage(_, _, _, _, _, _) |
+          RuntimeType.Texture(_, _, _) | RuntimeType.CubeTexture(_) | RuntimeType.Sampler) =>
         step((execution, _) =>
           address(execution.values, pointer).map(source =>
             execution.values.update(dest, VMValue.Address(resultType, source))
@@ -683,8 +683,8 @@ private object MemoryOps {
     program.runtimeType(resultType) match {
       case Some(RuntimeType.Pointer(storageClass, pointee)) =>
         val function = program.runtimeType(pointee).exists {
-          case RuntimeType.Function(_, _) => true
-          case _                          => false
+          case RuntimeType.Function => true
+          case _                    => false
         }
         step { (execution, _) =>
           execution.values.get(source) match {
@@ -949,8 +949,8 @@ private object MemoryOps {
           Left(Fault.InvalidRequest("SPIR-V parameter has an unresolved descriptor"))
       }
     case Some(
-          RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.Texture(_, _, _, _) | RuntimeType.Sampler |
-          RuntimeType.SampledImage(_) | RuntimeType.Pipe(_)
+          RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.Texture(_, _, _) | RuntimeType.Sampler |
+          RuntimeType.SampledImage(_) | RuntimeType.Pipe
         ) =>
       argument match {
         case KernelTask.Argument.Memory(_, _, range) =>

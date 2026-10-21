@@ -19,6 +19,15 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 object NVIDIAControlFlowBenchmark {
   private enum ISA derives CanEqual { case PTX, SASS }
 
+  private case class Options(
+      isa: ISA,
+      iterations: Int > 0,
+      rounds: Int > 0,
+      lanes: Int in 1 ~ 1024,
+      groups: Int > 0,
+      workers: Int > 0
+  )
+
   val benchmark: Case = (
     choice("isa", "ptx" -> ISA.PTX, "sass" -> ISA.SASS),
     iterations(5),
@@ -28,9 +37,7 @@ object NVIDIAControlFlowBenchmark {
     ),
     positive("groups", "Workgroups per dispatch", 16),
     workers
-  ).mapN((isa, iterations, rounds, lanes, groups, workers) =>
-    () => run(isa, iterations, rounds, lanes, groups, workers)
-  )
+  ).mapN(Options(_, _, _, _, _, _)).map(options => () => run(options))
 
   // The SM80 launch parameter bank starts at 0x160: pointer, rounds, then lane count.
   private val parameterBase: Int >= 0 = 0x160
@@ -107,39 +114,31 @@ object NVIDIAControlFlowBenchmark {
       .fold(error => throw IllegalArgumentException(error), identity)
   }
 
-  private def run(
-      isa: ISA,
-      iterations: Int > 0,
-      rounds: Int > 0,
-      lanes: Int in 1 ~ 1024,
-      groups: Int > 0,
-      workers: Int > 0
-  )
-      : BenchmarkSample = {
-    val kernel = isa match {
+  private def run(options: Options): BenchmarkSample = {
+    val kernel = options.isa match {
       case ISA.PTX  => PTX.PTXControlFlowFixture.compile()
       case ISA.SASS => sassKernel()
     }
-    val geometry = LaunchGeometry.forLaunch(Dimensions(lanes, 1, 1), Dimensions(groups, 1, 1))
+    val geometry = LaunchGeometry.forLaunch(Dimensions(options.lanes, 1, 1), Dimensions(options.groups, 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
-    val count      = Math.multiplyExact(lanes, groups)
+    val count      = Math.multiplyExact(options.lanes, options.groups)
     val memory     = BenchmarkMemory((count + 1) * 4)
     val output     = memory.ids(0)
-    val parameters = isa match {
-      case ISA.PTX  => PTX.PTXParameters.output(memory, output, "rounds": NonEmpty[String], rounds.toLong)
+    val parameters = options.isa match {
+      case ISA.PTX  => PTX.PTXParameters.output(memory, output, "rounds": NonEmpty[String], options.rounds.toLong)
       case ISA.SASS => Map(
           ("param0": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
-          ("param1": NonEmpty[String]) -> Argument(LittleEndian.toVec(rounds.toLong, 4).unsafe),
-          ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(lanes.toLong, 4).unsafe)
+          ("param1": NonEmpty[String]) -> Argument(LittleEndian.toVec(options.rounds.toLong, 4).unsafe),
+          ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(options.lanes.toLong, 4).unsafe)
         )
     }
-    val sample = Measurement.repeatPooled(iterations, workers)(pool =>
+    val sample = Measurement.repeatPooled(options.iterations, options.workers)(pool =>
       VMInterpreter.execute(kernel, geometry, parameters, memory, workgroups = pool)
     )
     (0 until count).foreach { lane =>
       val actual    = memory.getInt(output, (lane + 1) * 4)
-      val increment = if ((lane % lanes & 1) == 0) 1 else 2
-      val expected  = lane + rounds.raw * (increment + 1) - 1
+      val increment = if ((lane % options.lanes & 1) == 0) 1 else 2
+      val expected  = lane + options.rounds.raw * (increment + 1) - 1
       require(actual == expected, s"lane $lane: expected $expected, got $actual")
     }
     require(memory.getInt(output, 0) == 0, "leading guard word was overwritten")

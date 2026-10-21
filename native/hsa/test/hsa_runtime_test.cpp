@@ -906,6 +906,28 @@ TEST_CASE("HSA rejected launch reports an exception and leaves the completion si
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
 }
 
+TEST_CASE("HSA executable loading reports a rejected code object synchronously", "[hsa]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
+  const auto gpu = gpuAgent();
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true);
+  hsa_code_object_reader_t reader{};
+  REQUIRE((hsa_code_object_reader_create_from_memory(image.data(), image.size(), &reader) == HSA_STATUS_SUCCESS));
+  for (const auto operation : {gemstone::execution::operation::LoadProgram, gemstone::execution::operation::DescribeProgram,
+                               gemstone::execution::operation::DescribeKernel}) {
+    CAPTURE(std::string(operation));
+    hsa_executable_t executable{};
+    REQUIRE(
+        (hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
+    fixture.rejectNext(operation, gemstone::execution::FailureKind::InvalidProgram);
+    CHECK((hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr) == HSA_STATUS_ERROR_INVALID_CODE_OBJECT));
+    REQUIRE((hsa_executable_destroy(executable) == HSA_STATUS_SUCCESS));
+  }
+  REQUIRE((hsa_code_object_reader_destroy(reader) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
+}
+
 TEST_CASE("HSA queue without an error callback stops quietly when queue fault messages are disabled", "[hsa][queue-error]") {
   MemoryLockSession const session;
   const gemstone_test::Environment quiet("HSA_ENABLE_QUEUE_FAULT_MESSAGE", "0");

@@ -50,7 +50,7 @@ private object fixtures extends munit.Assertions {
       memory: AddressSpace,
       control: TaskControl = TaskControl(),
       handler: Event => Either[Fault, Unit] = _ => Right(())
-  ): Either[Fault, Unit] = program.execute(task, memory, control, handler)
+  ): Either[Fault, Unit] = program.execute(task, TaskContext(memory, control, handler))
 
   def run(
       module: Module,

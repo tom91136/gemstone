@@ -226,6 +226,46 @@ class CooperativeMatrixSuite extends munit.FunSuite {
     assertEquals(words(memory, length, offset = 0, count = 1), Vec(4L))
   }
 
+  private def pitched(strideLoad: String, strideStore: String) = spv"""
+    OpCapability CooperativeMatrixKHR
+    OpCapability Int64
+    OpExtension "SPV_KHR_cooperative_matrix"
+    $openCL
+    OpEntryPoint Kernel %main "main"
+    %void = OpTypeVoid
+    %uint = OpTypeInt 32 0
+    %ulong = OpTypeInt 64 0
+    %scope = OpConstant %uint 3
+    %two = OpConstant %uint 2
+    %use_c = OpConstant %uint 2
+    %row_major = OpConstant %uint 0
+    %huge_load = OpConstant %ulong $strideLoad
+    %huge_store = OpConstant %ulong $strideStore
+    %c_type = OpTypeCooperativeMatrixKHR %uint %scope %two %two %use_c
+    %uint_ptr = OpTypePointer CrossWorkgroup %uint
+    %fn = OpTypeFunction %void %uint_ptr %uint_ptr
+    %main = OpFunction %void None %fn
+    %in = OpFunctionParameter %uint_ptr
+    %out = OpFunctionParameter %uint_ptr
+    %entry = OpLabel
+    %loaded = OpCooperativeMatrixLoadKHR %c_type %in %row_major %huge_load
+    OpCooperativeMatrixStoreKHR %out %loaded %row_major %huge_store
+    OpReturn
+    OpFunctionEnd
+  """
+
+  for {
+    (name, stride) <-
+      Vec("an overflowing product" -> "2305843009213693952", "a stride with the top bit set" -> "18446744073709551615")
+    (access, load, store) <- Vec(("load", stride, "2"), ("store", "2", stride))
+  } test(s"a cooperative matrix $access through $name faults rather than skipping components") {
+    val memory = RegionMemory()
+    val input  = memory.allocate(16L)
+    val output = memory.allocate(16L)
+    writeWords(memory, input, 0, 1L, 2L, 3L, 4L)
+    assert(run(pitched(load, store), "main", memory, Vec(buffer(input), buffer(output))).isLeft)
+  }
+
   // glslangValidator -V --target-env vulkan1.1 of a GL_NV_cooperative_matrix shader: half 16x16 A loaded row-major and
   // B column-major with stride 16, a float accumulator of 0.5, coopMatMulAddNV, every element tripled through
   // length() and indexing, and a row-major store

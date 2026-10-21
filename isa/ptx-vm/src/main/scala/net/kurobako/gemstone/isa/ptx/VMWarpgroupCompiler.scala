@@ -47,8 +47,8 @@ private object VMWarpgroupCompiler {
   }
 
   private def sparse(instruction: Instruction): Boolean = instruction.form match {
-    case _: Form.WgmmaMmaAsyncSp => true
-    case _                       => false
+    case Form.WgmmaMmaAsyncSp(_, _, _, _, _, _, _, _, _, _) => true
+    case _                                                  => false
   }
 
   /** The product `instruction`'s qualifiers name: `.sync.aligned` in either order, one shape, D, A and B in that order,
@@ -94,7 +94,7 @@ private object VMWarpgroupCompiler {
     * instruction that is not a supported product.
     */
   def fragments(instruction: Instruction): Option[Vec[Option[Int]]] = instruction.form match {
-    case _: Form.WgmmaMmaAsync | _: Form.WgmmaMmaAsyncSp =>
+    case Form.WgmmaMmaAsync(_, _, _, _, _, _, _, _) | Form.WgmmaMmaAsyncSp(_, _, _, _, _, _, _, _, _, _) =>
       product(instruction).map { form =>
         val a =
           instruction.operands.lift(1).filter(Operand.isVectorLiteral(_)).map(_ => Warpgroup.MultiplicandRegisters)

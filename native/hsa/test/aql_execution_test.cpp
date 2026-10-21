@@ -329,6 +329,19 @@ TEST_CASE("AQL dispatch failures publish the code for the failure kind", "[hsa][
   }
 }
 
+TEST_CASE("AQL kernels build ahead of dispatch and report what the service rejected", "[hsa][aql]") {
+  Harness harness;
+  harness.fixture.kernelMetadata(8, 0, {});
+  harness.install(77, "add_one");
+  CHECK(!harness.runtime->build(77));
+  CHECK(harness.fixture.kernelBuilds.load() == 1);
+
+  harness.fixture.rejectNext(gemstone::execution::operation::BuildKernel, FailureKind::InvalidProgram);
+  CHECK(harness.runtime->build(77).value_or(gemstone::execution::Error{}).kind == FailureKind::InvalidProgram);
+  CHECK(harness.fixture.kernelBuilds.load() == 1);
+  CHECK(harness.runtime->build(999).value_or(gemstone::execution::Error{}).kind == FailureKind::NotFound);
+}
+
 TEST_CASE("AQL code objects bind multiple kernel objects", "[hsa][aql]") {
   Harness harness;
   const std::array<KernelSymbol, 2> symbols{{{.object = 41, .name = "first"}, {.object = 42, .name = "second"}}};

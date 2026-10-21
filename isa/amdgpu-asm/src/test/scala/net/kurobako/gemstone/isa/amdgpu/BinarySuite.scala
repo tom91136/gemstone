@@ -40,13 +40,13 @@ class BinarySuite extends munit.FunSuite {
     val expected    = hex("16 07 b4 f1 20 40 21 03 10 00 02 01 04 05 06 07 08 09 00 00")
     val target      = Target("gfx1030")
     val instruction = parse(source)
-    assertEquals(Binary.encode(instruction, target), Right(expected))
+    assertEquals(Binary.encode(instruction, TargetMode(target)), Right(expected))
     val decoded = disassembled(expected, target)
     assertEquals(decoded.operands, instruction.operands)
-    assertEquals(Binary.encode(decoded, target), Right(expected))
+    assertEquals(Binary.encode(decoded, TargetMode(target)), Right(expected))
     val tooMany =
       parse(source.replace("v8, v9]", "v8, v9, v10]"))
-    assert(Binary.encode(tooMany, target).isLeft)
+    assert(Binary.encode(tooMany, TargetMode(target)).isLeft)
   }
 
   test("wave size controls matrix register tuples without changing their encoding") {
@@ -60,11 +60,11 @@ class BinarySuite extends munit.FunSuite {
       val instruction = parse(source)
       val target      = Target("gfx1200")
       val waveSize    = wave.unsafe[Int in (32, 64)]
-      assertEquals(Binary.encode(instruction, target, waveSize), Right(bytes))
+      assertEquals(Binary.encode(instruction, TargetMode(target, waveSize)), Right(bytes))
       val decoded = disassembled(bytes, target, waveSize)
       assertEquals(decoded.operands, instruction.operands)
-      assertEquals(Binary.encode(decoded, target, waveSize), Right(bytes))
-      assert(Binary.encode(instruction, target, (96 - wave).unsafe[Int in (32, 64)]).isLeft)
+      assertEquals(Binary.encode(decoded, TargetMode(target, waveSize)), Right(bytes))
+      assert(Binary.encode(instruction, TargetMode(target, (96 - wave).unsafe[Int in (32, 64)])).isLeft)
     }
   }
 
@@ -80,13 +80,13 @@ class BinarySuite extends munit.FunSuite {
     cases.foreach { case (control, prefix) =>
       val instruction = parse(s"ds_swizzle_b32 v8, v2 offset:swizzle(${control.trim})")
       val bytes       = hex(s"$prefix d4 d8 02 00 00 08")
-      assertEquals(Binary.encode(instruction, target), Right(bytes))
+      assertEquals(Binary.encode(instruction, TargetMode(target)), Right(bytes))
       val decoded = disassembled(bytes, target)
-      assertEquals(Binary.encode(decoded, target), Right(bytes))
+      assertEquals(Binary.encode(decoded, TargetMode(target)), Right(bytes))
     }
     Vec("SWAP,0", "SWAP,3", "REVERSE,64", "BROADCAST,8,8", """BITMASK_PERM,"zzzzz" """).foreach { control =>
       val instruction = parse(s"ds_swizzle_b32 v8, v2 offset:swizzle(${control.trim})")
-      assert(Binary.encode(instruction, target).isLeft)
+      assert(Binary.encode(instruction, TargetMode(target)).isLeft)
     }
   }
 
@@ -118,11 +118,11 @@ class BinarySuite extends munit.FunSuite {
     cases.foreach { case (source, expected) =>
       val instruction = parse(source)
       val target      = Target("gfx1030")
-      assertEquals(Binary.encode(instruction, target), Right(expected), source)
+      assertEquals(Binary.encode(instruction, TargetMode(target)), Right(expected), source)
       val decoded = disassembled(expected, target)
       assertEquals(decoded.definition, instruction.definition, source)
       val reparsed = parse(Printer.render(decoded))
-      assertEquals(Binary.encode(reparsed, target), Right(expected), source)
+      assertEquals(Binary.encode(reparsed, TargetMode(target)), Right(expected), source)
     }
   }
 
@@ -142,17 +142,17 @@ class BinarySuite extends munit.FunSuite {
     )
     invalid.foreach { source =>
       val instruction = parse(source)
-      assert(Binary.encode(instruction, target).isLeft, source)
+      assert(Binary.encode(instruction, TargetMode(target)).isLeft, source)
     }
     val source  = parse("v_add_f32_e32 v0, lit(1), v2")
     val literal = encoded(source, target)
-    assert(Binary.decode(literal.take(4), target).isLeft)
+    assert(Binary.decode(literal.take(4), TargetMode(target)).isLeft)
     val memory = parse("ds_read_b32 v0, v1")
     val bytes  = encoded(memory, target)
-    assert(Binary.decode(bytes.take(4), target).isLeft)
+    assert(Binary.decode(bytes.take(4), TargetMode(target)).isLeft)
     // DATA0 is reserved for DS_READ; accepting it would silently lose bits when printed.
-    assert(Binary.decode(bytes.updated(5, 1.toByte), target).isLeft)
-    assert(Binary.decode(bytes :+ 0.toByte, target).isLeft)
+    assert(Binary.decode(bytes.updated(5, 1.toByte), TargetMode(target)).isLeft)
+    assert(Binary.decode(bytes :+ 0.toByte, TargetMode(target)).isLeft)
   }
 
   test("scalar codecs preserve asymmetric widths and shared literal words across ISAs") {
@@ -172,7 +172,7 @@ class BinarySuite extends munit.FunSuite {
         assertEquals(decoded.definition, instruction.definition)
         if (!source.contains("lit(")) assertEquals(decoded.operands, instruction.operands)
         val reparsed = parse(Printer.render(decoded))
-        assertEquals(Binary.encode(reparsed, target), Right(bytes))
+        assertEquals(Binary.encode(reparsed, TargetMode(target)), Right(bytes))
       }
     }
   }
@@ -184,22 +184,22 @@ class BinarySuite extends munit.FunSuite {
       "s_add_u32 s2, s0, s1" -> "00 01 02 80",
       "s_cmp_eq_u32 s0, s1"  -> "00 01 06 bf"
     ).foreach { case (source, expected) =>
-      assertEquals(Binary.encode(parse(source), Target("gfx900")), Right(hex(expected)))
+      assertEquals(Binary.encode(parse(source), TargetMode(Target("gfx900"))), Right(hex(expected)))
     }
   }
 
   test("literal truncation, mismatched widths, reserved bits, and trailing bytes are rejected") {
     val target                 = Target("gfx1030")
-    def encode(source: String) = Binary.encode(parse(source), target)
+    def encode(source: String) = Binary.encode(parse(source), TargetMode(target))
     val literal                = encoded(parse("s_mov_b32 s0, lit(1)"), target)
     assertEquals(literal.size, 8)
-    assert(Binary.decode(literal.take(4), target).isLeft)
-    assert(Binary.decode(literal :+ 0.toByte, target).isLeft)
+    assert(Binary.decode(literal.take(4), TargetMode(target)).isLeft)
+    assert(Binary.decode(literal :+ 0.toByte, TargetMode(target)).isLeft)
     assert(encode("s_mov_b64 s0, s1").isLeft)
     assert(encode("s_add_u32 s0, lit(1), lit(2)").isLeft)
     val getpc = encoded(parse("s_getpc_b64 s[0:1]"), target)
-    assert(Binary.decode(getpc.updated(0, 1.toByte), target).isLeft)
-    assert(Binary.decodeStatementAt(literal, 100, target).isLeft)
+    assert(Binary.decode(getpc.updated(0, 1.toByte), TargetMode(target)).isLeft)
+    assert(Binary.decodeStatementAt(literal, 100, TargetMode(target)).isLeft)
   }
 
   test("SOPP disassembly retains distinct opcodes and operands before execution lowering") {
@@ -214,7 +214,7 @@ class BinarySuite extends munit.FunSuite {
         val text = Printer.render(decoded)
         assertEquals(
           parseInstruction(text).flatMap(value =>
-            Binary.encode(value, target).left.map(error => s"encoding failed: $error")
+            Binary.encode(value, TargetMode(target)).left.map(error => s"encoding failed: $error")
           ),
           Right(bytes)
         )
@@ -229,8 +229,8 @@ class BinarySuite extends munit.FunSuite {
     ).foreach { case (source, target, expected, text) =>
       val instruction = parse(source)
       val bytes       = hex(expected)
-      assertEquals(Binary.encode(instruction, target), Right(bytes))
-      assertEquals(Binary.decode(bytes, target).map(Printer.render), Right(text))
+      assertEquals(Binary.encode(instruction, TargetMode(target)), Right(bytes))
+      assertEquals(Binary.decode(bytes, TargetMode(target)).map(Printer.render), Right(text))
     }
   }
 
@@ -245,11 +245,14 @@ class BinarySuite extends munit.FunSuite {
       ("s_delay_alu 0", "00 00 87 bf")
     ).foreach { (source, expected) =>
       Vec(Target("gfx1100"), Target("gfx1151"), Target("gfx1201")).foreach { target =>
-        assertEquals(Binary.encode(parse(source), target), Right(hex(expected)), s"$source on $target")
+        assertEquals(Binary.encode(parse(source), TargetMode(target)), Right(hex(expected)), s"$source on $target")
       }
     }
-    assert(Binary.encode(parse("s_delay_alu instid0(VALU_DEP_9)"), Target("gfx1100")).isLeft)
-    assert(Binary.encode(parse("s_delay_alu instid0(VALU_DEP_1) | instid0(VALU_DEP_2)"), Target("gfx1100")).isLeft)
+    assert(Binary.encode(parse("s_delay_alu instid0(VALU_DEP_9)"), TargetMode(Target("gfx1100"))).isLeft)
+    assert(Binary.encode(
+      parse("s_delay_alu instid0(VALU_DEP_1) | instid0(VALU_DEP_2)"),
+      TargetMode(Target("gfx1100"))
+    ).isLeft)
   }
 
   test("lane, image, export, interpolation, literal, matrix and dual encodings match LLVM bytes") {
@@ -314,13 +317,13 @@ class BinarySuite extends munit.FunSuite {
     )
     cases.foreach { case (target, source, expected) =>
       val statement = parseStatement(source)
-      assertEquals(Binary.encodeStatement(statement, target), Right(expected), source)
-      val decoded = Binary.decodeStatementAt(expected, 0, target).value
+      assertEquals(Binary.encodeStatement(statement, TargetMode(target)), Right(expected), source)
+      val decoded = Binary.decodeStatementAt(expected, 0, TargetMode(target)).value
       assertEquals(decoded.size.raw, expected.size)
       val printed  = Printer.render(Program(Vec(decoded.statement)))
       val reparsed = parseStatement(printed)
-      assertEquals(Binary.encodeStatement(reparsed, target), Right(expected), printed)
-      assert(Binary.decodeStatementAt(expected.dropRight(1), 0, target).isLeft, source)
+      assertEquals(Binary.encodeStatement(reparsed, TargetMode(target)), Right(expected), printed)
+      assert(Binary.decodeStatementAt(expected.dropRight(1), 0, TargetMode(target)).isLeft, source)
     }
   }
 
@@ -340,8 +343,8 @@ class BinarySuite extends munit.FunSuite {
         "01 00 43 d0 00 00 10 00 04 05 00 00"
     ).foreach { (source, bytes) =>
       val expected = hex(bytes)
-      assertEquals(Binary.encodeStatement(parseStatement(source), target), Right(expected), source)
-      assert(Binary.decodeStatementAt(expected, 0, target).isRight, source)
+      assertEquals(Binary.encodeStatement(parseStatement(source), TargetMode(target)), Right(expected), source)
+      assert(Binary.decodeStatementAt(expected, 0, TargetMode(target)).isRight, source)
     }
   }
 
@@ -351,15 +354,19 @@ class BinarySuite extends munit.FunSuite {
     // LLVM MC gfx1250_asm_vopd3.s.
     val bytes  = hex("f0 40 84 cf f0 00 08 00 fe 02 00 07")
     val parsed = parseStatement(source)
-    assertEquals(Binary.encodeStatement(parsed, target), Right(bytes))
-    val decoded = Binary.decodeStatementAt(bytes, 0, target).value
-    assertEquals(Binary.encodeStatement(decoded.statement, target), Right(bytes))
+    assertEquals(Binary.encodeStatement(parsed, TargetMode(target)), Right(bytes))
+    val decoded = Binary.decodeStatementAt(bytes, 0, TargetMode(target)).value
+    assertEquals(Binary.encodeStatement(decoded.statement, TargetMode(target)), Right(bytes))
     Vec("lit(1)", "lit64(0x123456789abcdef0)", "0x12345678").foreach { literal =>
       val invalid =
         parseStatement(HalfLiteral.replaceFirstIn(source, literal))
-      assert(Binary.encodeStatement(invalid, target).isLeft, literal)
+      assert(Binary.encodeStatement(invalid, TargetMode(target)).isLeft, literal)
     }
-    assert(Binary.decodeStatementAt(bytes.updated(0, 0xff.toByte) ++ Vec.fill(4)(0.toByte), 0, target).isLeft)
+    assert(Binary.decodeStatementAt(
+      bytes.updated(0, 0xff.toByte) ++ Vec.fill(4)(0.toByte),
+      0,
+      TargetMode(target)
+    ).isLeft)
   }
 
   test("VOPD3 selects take their lane mask from an explicit SGPR") {
@@ -374,9 +381,9 @@ class BinarySuite extends munit.FunSuite {
         "0e 91 4c cf 01 01 0f 10 07 02 01 00"
     ).foreach { (source, bytes) =>
       val expected = hex(bytes)
-      assertEquals(Binary.encodeStatement(parseStatement(source), target), Right(expected), source)
-      val decoded = Binary.decodeStatementAt(expected, 0, target).value
-      assertEquals(Binary.encodeStatement(decoded.statement, target), Right(expected), source)
+      assertEquals(Binary.encodeStatement(parseStatement(source), TargetMode(target)), Right(expected), source)
+      val decoded = Binary.decodeStatementAt(expected, 0, TargetMode(target)).value
+      assertEquals(Binary.encodeStatement(decoded.statement, TargetMode(target)), Right(expected), source)
     }
   }
 
@@ -393,8 +400,8 @@ class BinarySuite extends munit.FunSuite {
         "0e 21 4d cf 01 01 0f 10 07 02 3c 00"
     ).foreach { (source, bytes) =>
       val expected = hex(bytes)
-      assertEquals(Binary.encodeStatement(parseStatement(source), target), Right(expected), source)
-      val decoded = Binary.decodeStatementAt(expected, 0, target).value
+      assertEquals(Binary.encodeStatement(parseStatement(source), TargetMode(target)), Right(expected), source)
+      val decoded = Binary.decodeStatementAt(expected, 0, TargetMode(target)).value
       assertEquals(Printer.render(Program(Vec(decoded.statement))).replace(" e96", ""), source, source)
     }
   }
@@ -410,7 +417,7 @@ class BinarySuite extends munit.FunSuite {
       "v_dual_add_f32 v0, lit(123), v4 :: v_dual_mul_f32 v1, lit(456), v5"
     ).foreach { source =>
       val parsed = parseStatement(source)
-      assert(Binary.encodeStatement(parsed, target).isLeft, source)
+      assert(Binary.encodeStatement(parsed, TargetMode(target)).isLeft, source)
     }
   }
 
@@ -426,7 +433,7 @@ class BinarySuite extends munit.FunSuite {
     )
     accepted.foreach { case (target, control, bytes) =>
       val instruction = parse(s"v_mov_b32_dpp v0, v1 $control row_mask:0xf bank_mask:0xf")
-      assertEquals(Binary.encode(instruction, target), Right(bytes), s"$target $control")
+      assertEquals(Binary.encode(instruction, TargetMode(target)), Right(bytes), s"$target $control")
       val printed = Printer.render(disassembled(bytes, target))
       assert(printed.contains(control), s"$target: $printed")
     }
@@ -441,8 +448,8 @@ class BinarySuite extends munit.FunSuite {
       control            <- controls
     } {
       val instruction = parse(s"v_mov_b32_dpp v0, v1 $control row_mask:0xf bank_mask:0xf")
-      assert(Binary.encode(instruction, target).isLeft, s"$target $control")
+      assert(Binary.encode(instruction, TargetMode(target)).isLeft, s"$target $control")
     }
-    assert(Binary.decode(hex("fa 02 00 7e 01 61 01 ff"), Target("gfx90a")).isLeft)
+    assert(Binary.decode(hex("fa 02 00 7e 01 61 01 ff"), TargetMode(Target("gfx90a"))).isLeft)
   }
 }

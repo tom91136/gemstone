@@ -148,8 +148,8 @@ private object ImageOps {
             coords     <- bits(values, id(c))
             image      <- address(values, id(i))
             dimensions <- program.runtimeType(image.pointee) match {
-              case Some(RuntimeType.Texture(_, n, false, _)) => Right((n, false))
-              case Some(RuntimeType.CubeTexture(_, _))       => Right((3, true))
+              case Some(RuntimeType.Texture(n, false, _)) => Right((n, false))
+              case Some(RuntimeType.CubeTexture(_))       => Right((3, true))
               case _ => Left(Fault.InvalidRequest("LOD query requires a sampled 1D, 2D, 3D or cube image"))
             }
             _ <- Either.cond(
@@ -234,9 +234,9 @@ private object ImageOps {
           for {
             image     <- address(values, id(i))
             imageType <- program.runtimeType(image.pointee) match {
-              case Some(RuntimeType.Texture(_, dimensions, buffer, arrayed)) =>
+              case Some(RuntimeType.Texture(dimensions, buffer, arrayed)) =>
                 Right((dimensions, buffer, false, arrayed))
-              case Some(RuntimeType.MultisampledTexture(_, arrayed)) => Right((2, false, true, arrayed))
+              case Some(RuntimeType.MultisampledTexture(arrayed)) => Right((2, false, true, arrayed))
               case _ => Left(Fault.InvalidRequest("texel fetch requires a sampled image"))
             }
             operands      = mods.fold(Array(0))(_.words.toVector.map(_.raw).toArray)
@@ -319,12 +319,12 @@ private object ImageOps {
               }
             )
           )
-            readInputAttachment(program, memory, values, image, coordinate, mods)
+            readInputAttachment(memory, values, image, coordinate, mods)
               .map(lanes => values.update(id(dest), VMValue.Bits(id(resultType), lanes)))
           else
             for {
               _     <- hinted(mods, "unsupported storage image read operands")
-              texel <- imageTexel(program, memory, values, image, coordinate)
+              texel <- imageTexel(memory, values, image, coordinate)
               lanes <- {
                 val (pointer, format) = texel
                 val valid             = pointer.bounds.exists { case (_, end) => pointer.address < end }
@@ -365,7 +365,7 @@ private object ImageOps {
         imaging { (_, memory, values) =>
           for {
             _       <- hinted(mods, "unsupported storage image write operands")
-            target  <- imageTexel(program, memory, values, image, coordinate)
+            target  <- imageTexel(memory, values, image, coordinate)
             written <- bits(values, id(texel))
             lanes = if (written.length == 1) Array(written(0), 0L, 0L, 0x3f800000L) else written
             _ <- Either.cond(lanes.length == 4, (), Fault.InvalidRequest("image texel requires four components"))
@@ -429,7 +429,7 @@ private object ImageOps {
           for {
             sampleIndex <- scalar(values, id(sample))
             _           <- Either.cond(sampleIndex == 0, (), Fault.InvalidRequest("storage image has only sample zero"))
-            target      <- imageTexel(program, memory, values, image, coordinate)
+            target      <- imageTexel(memory, values, image, coordinate)
             _           <- Either.cond(
               target._2 == 33 || target._2 == 24,
               (),
@@ -444,8 +444,8 @@ private object ImageOps {
             imageType <- program.runtimeType(pointer.pointee) match {
               case Some(RuntimeType.StorageImage(_, format, dimensions, buffer, arrayed, cube)) =>
                 Right((format, dimensions, buffer, arrayed, cube))
-              case Some(RuntimeType.Texture(_, 1, true, false))      => Right((-1, 1, true, false, false))
-              case Some(RuntimeType.MultisampledTexture(_, arrayed)) => Right((-1, 2, false, arrayed, false))
+              case Some(RuntimeType.Texture(1, true, false))      => Right((-1, 1, true, false, false))
+              case Some(RuntimeType.MultisampledTexture(arrayed)) => Right((-1, 2, false, arrayed, false))
               case _ => Left(Fault.InvalidRequest("image size query requires a storage image or texel buffer"))
             }
             shape <-
@@ -472,8 +472,8 @@ private object ImageOps {
       cubeDimensions: Int,
       failure: NonEmpty[String]
   ): Either[Fault, (Int, Boolean, Boolean)] = program.runtimeType(image.pointee) match {
-    case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
-    case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((cubeDimensions, arrayed, true))
+    case Some(RuntimeType.Texture(dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
+    case Some(RuntimeType.CubeTexture(arrayed))                => Right((cubeDimensions, arrayed, true))
     case Some(RuntimeType.StorageImage(_, ImageFormat.Unknown, dimensions, false, arrayed, false)) =>
       Right((dimensions, arrayed, false))
     case _ => Left(Fault.InvalidRequest(failure))
@@ -872,7 +872,6 @@ private object ImageOps {
       stride
     )
   private def imageTexel(
-      program: VMProgram,
       memory: MemoryState,
       values: InvocationValues,
       image: Operand,
@@ -880,17 +879,17 @@ private object ImageOps {
   ): AddressSpace.ReadResult[(Pointer, Int)] =
     for {
       source    <- address(values, id(image))
-      imageType <- program.runtimeType(source.pointee) match {
+      imageType <- values.program.runtimeType(source.pointee) match {
         case Some(RuntimeType.StorageImage(sampledType, format, dimensions, texelBuffer, arrayed, cube)) =>
           Right((sampledType, format, dimensions, texelBuffer, arrayed || cube))
         case _ => Left(Fault.InvalidRequest("image operand does not identify a storage image"))
       }
-      data   <- imageLevel(memory, source, 0, expectedFormat(program, imageType._2), imageType._4)
+      data   <- imageLevel(memory, source, 0, expectedFormat(values.program, imageType._2), imageType._4)
       coords <- bits(values, id(coordinate))
       required = imageType._3 + (if (imageType._5) 1 else 0)
       // OpenCL passes four-component coordinates to 3D and 2D array images.
       _ <- Either.cond(
-        coords.length == required || (!program.vulkan && coords.length == 4 && required >= 3),
+        coords.length == required || (!values.program.vulkan && coords.length == 4 && required >= 3),
         (),
         Fault.InvalidRequest("image coordinate component count does not match dimensionality")
       )
@@ -917,7 +916,7 @@ private object ImageOps {
           bounds = Some(begin -> end)
         ),
         // OpenCL depth images store UNORM_INT16 depths as R16 texels
-        if (!program.vulkan && data.format == ImageDescriptor.Format.D16Unorm) ImageFormat.R16 else data.format
+        if (!values.program.vulkan && data.format == ImageDescriptor.Format.D16Unorm) ImageFormat.R16 else data.format
       )
     }
 
@@ -1345,7 +1344,6 @@ private object ImageOps {
     )
   }
   private def readInputAttachment(
-      program: VMProgram,
       memory: MemoryState,
       values: InvocationValues,
       image: Operand,
@@ -1353,7 +1351,7 @@ private object ImageOps {
       mods: Option[Operand]
   ): AddressSpace.ReadResult[Array[Long]] = for {
     source    <- address(values, id(image))
-    imageType <- program.runtimeType(source.pointee) match {
+    imageType <- values.program.runtimeType(source.pointee) match {
       case Some(RuntimeType.InputAttachment(component, multisampled)) => Right(component -> multisampled)
       case _ => Left(Fault.InvalidRequest("subpass read requires an input attachment"))
     }
@@ -1366,7 +1364,7 @@ private object ImageOps {
       )
     coord <- bits(values, id(coordinate))
     _ <- Either.cond(coord.length == 2, (), Fault.InvalidRequest("input attachment coordinates require two components"))
-    position <- program.builtins.view.collectFirst {
+    position <- values.program.builtins.view.collectFirst {
       case (variable, 15) if values.get(variable).exists { case VMValue.Address(_, _) => true; case _ => false } =>
         variable
     }.flatMap(v => values.get(v)) match {

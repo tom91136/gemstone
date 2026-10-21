@@ -5,57 +5,57 @@ import net.kurobako.gemstone.isa.*
 
 private object VMCollectives {
   def isNonUniform(instruction: Instruction): Boolean = instruction match {
-    case _: Instruction.GroupNonUniformElect |
-        _: Instruction.GroupNonUniformAll |
-        _: Instruction.GroupNonUniformAny |
-        _: Instruction.GroupNonUniformAllEqual |
-        _: Instruction.GroupNonUniformBroadcast |
-        _: Instruction.GroupNonUniformBroadcastFirst |
-        _: Instruction.GroupNonUniformBallot |
-        _: Instruction.GroupNonUniformInverseBallot |
-        _: Instruction.GroupNonUniformBallotBitExtract |
-        _: Instruction.GroupNonUniformBallotBitCount |
-        _: Instruction.GroupNonUniformBallotFindLSB |
-        _: Instruction.GroupNonUniformBallotFindMSB |
-        _: Instruction.GroupNonUniformShuffle |
-        _: Instruction.GroupNonUniformShuffleXor |
-        _: Instruction.GroupNonUniformShuffleUp |
-        _: Instruction.GroupNonUniformShuffleDown |
-        _: Instruction.GroupNonUniformRotateKHR |
-        _: Instruction.GroupNonUniformIAdd |
-        _: Instruction.GroupNonUniformIMul |
-        _: Instruction.GroupNonUniformSMin |
-        _: Instruction.GroupNonUniformUMin |
-        _: Instruction.GroupNonUniformSMax |
-        _: Instruction.GroupNonUniformUMax |
-        _: Instruction.GroupNonUniformFAdd |
-        _: Instruction.GroupNonUniformFMul |
-        _: Instruction.GroupNonUniformFMin |
-        _: Instruction.GroupNonUniformFMax |
-        _: Instruction.GroupNonUniformBitwiseAnd |
-        _: Instruction.GroupNonUniformBitwiseOr |
-        _: Instruction.GroupNonUniformBitwiseXor |
-        _: Instruction.GroupNonUniformLogicalAnd |
-        _: Instruction.GroupNonUniformLogicalOr |
-        _: Instruction.GroupNonUniformLogicalXor |
-        _: Instruction.GroupNonUniformQuadBroadcast |
-        _: Instruction.GroupNonUniformQuadSwap |
-        _: Instruction.SubgroupBallotKHR |
-        _: Instruction.SubgroupFirstInvocationKHR |
-        _: Instruction.SubgroupAllKHR |
-        _: Instruction.SubgroupAnyKHR |
-        _: Instruction.SubgroupAllEqualKHR |
-        _: Instruction.SubgroupReadInvocationKHR |
-        _: Instruction.GroupNonUniformPartitionEXT |
-        _: Instruction.GroupIAddNonUniformAMD |
-        _: Instruction.GroupFAddNonUniformAMD |
-        _: Instruction.GroupFMinNonUniformAMD |
-        _: Instruction.GroupUMinNonUniformAMD |
-        _: Instruction.GroupSMinNonUniformAMD |
-        _: Instruction.GroupFMaxNonUniformAMD |
-        _: Instruction.GroupUMaxNonUniformAMD |
-        _: Instruction.GroupSMaxNonUniformAMD |
-        _: Instruction.CompositeConstructCoopMatQCOM => true
+    case Instruction.GroupNonUniformElect(_, _, _) |
+        Instruction.GroupNonUniformAll(_, _, _, _) |
+        Instruction.GroupNonUniformAny(_, _, _, _) |
+        Instruction.GroupNonUniformAllEqual(_, _, _, _) |
+        Instruction.GroupNonUniformBroadcast(_, _, _, _, _) |
+        Instruction.GroupNonUniformBroadcastFirst(_, _, _, _) |
+        Instruction.GroupNonUniformBallot(_, _, _, _) |
+        Instruction.GroupNonUniformInverseBallot(_, _, _, _) |
+        Instruction.GroupNonUniformBallotBitExtract(_, _, _, _, _) |
+        Instruction.GroupNonUniformBallotBitCount(_, _, _, _, _) |
+        Instruction.GroupNonUniformBallotFindLSB(_, _, _, _) |
+        Instruction.GroupNonUniformBallotFindMSB(_, _, _, _) |
+        Instruction.GroupNonUniformShuffle(_, _, _, _, _) |
+        Instruction.GroupNonUniformShuffleXor(_, _, _, _, _) |
+        Instruction.GroupNonUniformShuffleUp(_, _, _, _, _) |
+        Instruction.GroupNonUniformShuffleDown(_, _, _, _, _) |
+        Instruction.GroupNonUniformRotateKHR(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformIAdd(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformIMul(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformSMin(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformUMin(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformSMax(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformUMax(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformFAdd(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformFMul(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformFMin(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformFMax(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformBitwiseAnd(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformBitwiseOr(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformBitwiseXor(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformLogicalAnd(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformLogicalOr(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformLogicalXor(_, _, _, _, _, _) |
+        Instruction.GroupNonUniformQuadBroadcast(_, _, _, _, _) |
+        Instruction.GroupNonUniformQuadSwap(_, _, _, _, _) |
+        Instruction.SubgroupBallotKHR(_, _, _) |
+        Instruction.SubgroupFirstInvocationKHR(_, _, _) |
+        Instruction.SubgroupAllKHR(_, _, _) |
+        Instruction.SubgroupAnyKHR(_, _, _) |
+        Instruction.SubgroupAllEqualKHR(_, _, _) |
+        Instruction.SubgroupReadInvocationKHR(_, _, _, _) |
+        Instruction.GroupNonUniformPartitionEXT(_, _, _) |
+        Instruction.GroupIAddNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupFAddNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupFMinNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupUMinNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupSMinNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupFMaxNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupUMaxNonUniformAMD(_, _, _, _, _) |
+        Instruction.GroupSMaxNonUniformAMD(_, _, _, _, _) |
+        Instruction.CompositeConstructCoopMatQCOM(_, _, _) => true
     case _ => false
   }
 

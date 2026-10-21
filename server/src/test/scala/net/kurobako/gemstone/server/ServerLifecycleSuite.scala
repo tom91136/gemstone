@@ -36,18 +36,13 @@ class ServerLifecycleSuite extends munit.FunSuite {
       override def symbols: Either[Fault, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
       override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
         KernelMetadata.validated(0, 1, Vec.empty).left.map(Fault.InvalidRequest(_))
-      override def execute(
-          task: KernelTask,
-          memory: AddressSpace,
-          control: TaskControl,
-          handler: Event => Either[Fault, Unit]
-      ): Either[Fault, Unit] = {
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
         started.countDown()
         val deadline = platform.monotonicNanos + TimeUnit.SECONDS.toNanos(5)
         try {
-          while (!control.isCancelled && platform.monotonicNanos < deadline) Thread.sleep(1)
+          while (!context.control.isCancelled && platform.monotonicNanos < deadline) Thread.sleep(1)
           Left(Fault.Backend("stopped"))
-        } finally if (control.isCancelled) cancelled.countDown()
+        } finally if (context.control.isCancelled) cancelled.countDown()
       }
     }
     class WaitingBackend extends Backend {

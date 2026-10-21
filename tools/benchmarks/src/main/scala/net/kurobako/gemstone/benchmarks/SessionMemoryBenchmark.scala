@@ -104,13 +104,8 @@ object SessionMemoryBenchmark {
         KernelMetadata.validated(0, 0, Vec.empty).left.map(Fault.InvalidRequest(_))
 
       @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
-      override def execute(
-          task: KernelTask,
-          memory: AddressSpace,
-          control: TaskControl,
-          handler: Event => Either[Fault, Unit]
-      ): Either[Fault, Unit] = {
-        val heap = DeviceHeap(memory)
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
+        val heap = DeviceHeap(context.memory)
         workers.parallelFor(options.workers.widen[Long >= 0]) { worker =>
           val offset = if (options.shared) 0L else worker.raw * 64L
           val ranges = addresses.map { address =>

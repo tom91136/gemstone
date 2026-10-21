@@ -235,13 +235,10 @@ class LoadedProgram private (
       } yield ()
     }
 
-  override def execute(
-      task: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, Unit] =
-    compiled(task.kernelName).flatMap(VMKernelLaunch.execute(_, task, memory, control, workgroups))
+  override def build(name: NonEmpty[String]): Either[Fault, Unit] = compiled(name).map(_ => ())
+
+  override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+    compiled(task.kernelName).flatMap(VMKernelLaunch.execute(_, KernelLaunch(task, context, workgroups)))
 
   override def close(): Unit = release()
 

@@ -23,7 +23,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
       LaunchGeometry.Dimensions.One,
       Vec.empty
     ).value
-    first.execute(task, RejectingMemory(), TaskControl(), _ => Right(()))
+    first.execute(task, TaskContext(RejectingMemory(), TaskControl(), _ => Right(())))
       .fold(error => fail(error.message), value => value)
   }
   test("cancellation during a backing read stays cancellation through PTX memory conversion") {
@@ -51,7 +51,10 @@ class ProgramExecutionSuite extends munit.FunSuite {
       LaunchGeometry.Dimensions.One,
       Vec.empty
     ).value
-    assertEquals(loaded.execute(task, CancelledMemory(), TaskControl(), _ => Right(())), Left(Fault.Cancelled))
+    assertEquals(
+      loaded.execute(task, TaskContext(CancelledMemory(), TaskControl(), _ => Right(()))),
+      Left(Fault.Cancelled)
+    )
   }
   test("module shared symbols and dynamic aliases retain generic and explicit access") {
     val source = """.version 8.0
@@ -106,7 +109,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
       arguments = Vec.empty,
       groupSegmentBytes = 64
     ).value
-    assertEquals(loaded.execute(task, RejectingMemory(), TaskControl(), _ => Right(())), Right(()))
+    assertEquals(loaded.execute(task, TaskContext(RejectingMemory(), TaskControl(), _ => Right(()))), Right(()))
   }
 
   test("module shared allocations cannot escape the shared aperture") {
@@ -139,9 +142,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
     ).value
     assert(loaded.execute(
       task,
-      RejectingMemory(),
-      TaskControl(),
-      _ => Right(())
+      TaskContext(RejectingMemory(), TaskControl(), _ => Right(()))
     ).left.exists(_.message.contains("broken: pc")))
   }
 
@@ -164,7 +165,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
       ).value
       val task =
         KernelTask.validated("probe", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty).value
-      loaded.execute(task, RejectingMemory(), TaskControl(), _ => Right(()))
+      loaded.execute(task, TaskContext(RejectingMemory(), TaskControl(), _ => Right(())))
     }
     assert(run("trap;").left.exists { case Fault.Trap(_) => true; case _ => false })
     assert(run("st.param.b64 [message], 0; call __assertfail, (message);").left.exists {
@@ -221,7 +222,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
         arguments = Vec.empty,
         groupSegmentBytes = requested
       ).value
-      assertEquals(loaded.execute(task, RejectingMemory(), TaskControl(), _ => Right(())), Right(()))
+      assertEquals(loaded.execute(task, TaskContext(RejectingMemory(), TaskControl(), _ => Right(()))), Right(()))
     }
 
 }

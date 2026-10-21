@@ -303,6 +303,12 @@ private[isa] object VMIR {
     case Tanh
   }
 
+  /** The unit of an architecture, where the legacy polynomials differ from the later ones in the last bits. */
+  enum MufuFlavour derives CanEqual {
+    case Legacy
+    case Modern
+  }
+
   /** The special-function unit's approximations, whose results differ from the correctly rounded ones. */
   enum MufuFunction derives CanEqual {
     case Exponent2
@@ -1318,15 +1324,14 @@ private[isa] object VMIR {
         destination: Register,
         source: Value,
         function: MufuFunction,
-        flavour: Mufu.Flavour,
+        flavour: MufuFlavour,
         control: FloatControl = FloatControl()
     )
     case FloatUnaryPacked(
         operation: FloatUnaryOperation,
         destination: Register,
         source: Value,
-        format: PackedFloatFormat,
-        control: FloatControl = FloatControl()
+        format: PackedFloatFormat
     )
     case FusedMultiplyAdd(
         destination: Register,
@@ -1422,7 +1427,6 @@ private[isa] object VMIR {
         destination: Register,
         high: Value,
         low: Value,
-        sourceFormat: NumericFormat,
         destinationFormat: NumericFormat,
         rounding: ConversionRounding,
         clamp: Option[ConversionClamp]

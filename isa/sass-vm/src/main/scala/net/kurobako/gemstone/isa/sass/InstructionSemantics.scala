@@ -30,6 +30,8 @@ object InstructionSemantics {
     * stands for: one slot, or the low then the high register of a pair. `rendered` is the steps with each such pair
     * joined into one value, and `naming` names and types what they use.
     */
+  // the semantics-check reference runs the lowering the rendered semantics describe
+  @SuppressWarnings(Array("baumkuchen:test-only-member"))
   private[isa] case class SASSLowering(
       prologue: Vec[VMIR.Instruction],
       steps: Vec[VMIR.Instruction],

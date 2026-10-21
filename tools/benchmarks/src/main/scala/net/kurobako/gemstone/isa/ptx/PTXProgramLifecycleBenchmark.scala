@@ -72,7 +72,7 @@ object PTXProgramLifecycleBenchmark {
         ).fold(error => throw IllegalArgumentException(error), identity)
         val memory = BenchmarkMemory()
         Measurement.repeat(options.iterations) {
-          program.execute(task, memory, TaskControl(), _ => Right(()))
+          program.execute(task, TaskContext(memory, TaskControl(), _ => Right(())))
             .fold(error => throw IllegalStateException(error.message), _ => ())
         }
     }

@@ -87,12 +87,12 @@ class GraphicsMemorySuite extends munit.FunSuite {
     val cancelled = TaskControl()
     cancelled.cancel()
     assertEquals(
-      GraphicsRuntime().execute(submission, Backing(), cancelled, _ => Right(())),
+      GraphicsRuntime().execute(submission, TaskContext(Backing(), cancelled, _ => Right(()))),
       Left(Fault.Cancelled)
     )
     val limited = TaskControl(TaskControl.Limits(1L))
     assertEquals(
-      GraphicsRuntime().execute(submission, Backing(), limited, _ => Right(())),
+      GraphicsRuntime().execute(submission, TaskContext(Backing(), limited, _ => Right(()))),
       Left(Fault.BudgetExceeded(1L))
     )
   }
@@ -376,7 +376,7 @@ class GraphicsMemorySuite extends munit.FunSuite {
       )
     ))
     assertEquals(GraphicsRuntime().validate(clear, _ => Some(16)), Right(Set(allocation)))
-    assert(GraphicsRuntime().execute(clear, backing, TaskControl(), _ => Right(())).isRight)
+    assert(GraphicsRuntime().execute(clear, TaskContext(backing, TaskControl(), _ => Right(()))).isRight)
     val expected = Array.fill[Byte](16)(0x55.toByte)
     LittleEndian.write(java.lang.Float.floatToRawIntBits(0.25f).toLong, expected, 0, 4)
     // Combined D32/S8 pixels have an eight-byte stride and stencil in byte four.

@@ -42,7 +42,7 @@ object Assembly {
         .flatMap(sass.asm.Assembler(target).encode(_).leftMap(Error.SASS(_)))
     case Format.AMDGPU(target, waveSize) => amdgpu.asm.Parser.parse(source).leftMap(Error.Syntax(_)).flatMap {
         program =>
-          amdgpu.asm.Assembler.encode(program, target, waveSize).leftMap(Error.AMDGPUEncoding(_))
+          amdgpu.asm.Assembler.encode(program, amdgpu.TargetMode(target, waveSize)).leftMap(Error.AMDGPUEncoding(_))
       }
   }
 
@@ -59,7 +59,7 @@ object Assembly {
       case Format.AMDGPU(target, waveSize) =>
         (if (section.isDefined || elf.hasMagic(bytes)) codeObjectSection(bytes, section) else Right(bytes))
           .flatMap(code =>
-            amdgpu.asm.Disassembler(target, waveSize).decode(code).leftMap(Error.AMDGPUDecoding(_))
+            amdgpu.asm.Disassembler(amdgpu.TargetMode(target, waveSize)).decode(code).leftMap(Error.AMDGPUDecoding(_))
               .map(amdgpu.asm.Printer.render(_))
           )
     }

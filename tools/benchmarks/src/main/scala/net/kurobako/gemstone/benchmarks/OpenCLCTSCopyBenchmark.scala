@@ -64,7 +64,10 @@ object OpenCLCTSCopyBenchmark {
     val sample = Using.resource(WorkerPool(options.workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
       val program = SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(image)
         .fold(error => throw IllegalArgumentException(error.message), identity)
-      Measurement.repeatSucceeding(options.iterations)(program.execute(task, memory, TaskControl(), _ => Right(())))
+      Measurement.repeatSucceeding(options.iterations)(program.execute(
+        task,
+        TaskContext(memory, TaskControl(), _ => Right(()))
+      ))
     }
     val source      = memory.array(input)
     val destination = memory.array(output)

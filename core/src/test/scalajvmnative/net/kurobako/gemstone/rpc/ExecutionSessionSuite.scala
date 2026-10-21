@@ -46,12 +46,8 @@ class ExecutionSessionSuite extends munit.FunSuite {
         Vec(KernelMetadata.Parameter(8, 0, KernelMetadata.ParameterKind.Allocation, false))
       )
         .left.map(Fault.InvalidRequest(_))
-    override def execute(
-        task: KernelTask,
-        memory: AddressSpace,
-        control: TaskControl,
-        handler: Event => Either[Fault, Unit]
-    ): Either[Fault, Unit]     = run(task, memory, handler)
+    override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+      run(task, context.memory, context.handler)
     override def close(): Unit = closed.set(true)
   }
 
@@ -145,6 +141,30 @@ class ExecutionSessionSuite extends munit.FunSuite {
           service.describeImage(encoding, Vec[Byte](1), "probe"),
           Left(ExecutionFailure.InvalidProgram(fault.message))
         )
+      }
+    }
+  }
+
+  private class BuildingProgram(built: AtomicReference[Vec[String]]) extends Program(AtomicBoolean()) {
+    override def build(name: NonEmpty[String]): Either[Fault, Unit] = {
+      built.updateAndGet(_ :+ (name: String))
+      if (name == "broken") Left(Fault.InvalidProgram("cannot compile")) else Right(())
+    }
+    override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+      Left(Fault.Backend("build must not dispatch"))
+  }
+
+  test("building a kernel reports the program's compile fault without dispatching") {
+    val built   = AtomicReference(Vec.empty[String])
+    val backend = ProgramBackend(BuildingProgram(built))
+    Using.resource(ExecutionSession(List(backend))) { service =>
+      val program = service.load(encoding, Vec[Byte](1)).toOption.get
+      assertEquals(service.build(program, "fine"), Right(()))
+      assertEquals(service.build(program, "broken"), Left(ExecutionFailure.InvalidProgram("cannot compile")))
+      assertEquals(built.get(), Vec("fine", "broken"))
+      service.build(ProgramId(99L), "fine") match {
+        case Left(ExecutionFailure.NotFound(_)) => ()
+        case other                              => fail(s"unexpected $other")
       }
     }
   }
@@ -524,17 +544,12 @@ class ExecutionSessionSuite extends munit.FunSuite {
     val finished = CountDownLatch(1)
     val disposed = CountDownLatch(1)
     class WaitingProgram extends Program(AtomicBoolean()) {
-      override def execute(
-          task: KernelTask,
-          memory: AddressSpace,
-          control: TaskControl,
-          handler: Event => Either[Fault, Unit]
-      ): Either[Fault, Unit] =
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
         try
-          if (sync) memory.fenceHostMemory()
+          if (sync) context.memory.fenceHostMemory()
           else {
-            assertEquals(memory.readDeferred(GuestAddress(0x1000L), 4), Left(AddressSpace.Pending))
-            memory.flushHostReads()
+            assertEquals(context.memory.readDeferred(GuestAddress(0x1000L), 4), Left(AddressSpace.Pending))
+            context.memory.flushHostReads()
           }
         finally finished.countDown()
       override def close(): Unit = disposed.countDown()

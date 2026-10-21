@@ -431,7 +431,7 @@ class InstructionSemanticsSuite extends munit.FunSuite {
   test("a block of results reads its sources before it writes any, as execution does") {
     def defined(dest: VectorRegisterIndex): Map[String, Term] = {
       val conversion = Instruction.VScaledConvert(
-        ScaledConversion.WidenPair(Minifloat.E4M3, Minifloats.Wide.Single),
+        ScaledConversion(Minifloats.Wide.Single, ScaledConversion.Layout.WidenPair(Minifloat.E4M3)),
         dest,
         vector(0),
         vector(2),

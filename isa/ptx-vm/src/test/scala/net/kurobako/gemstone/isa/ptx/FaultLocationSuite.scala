@@ -32,7 +32,7 @@ class FaultLocationSuite extends munit.FunSuite {
           Vec(KernelTask.Argument.Memory(output, 0L))
         ).value
       assertEquals(
-        program.execute(task, memory, TaskControl(), _ => Right(())).left.map(_.location),
+        program.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))).left.map(_.location),
         Left(Some(Fault.Location("overrun", Some("overrun"), Some(2L), Some(Coordinates.origin), Some(0))))
       )
     }

@@ -158,6 +158,10 @@ Result<Unit> Client::call(const WriteProgramGlobal &request) {
   return implementation->call<Unit>(operation::WriteProgramGlobal, request);
 }
 
+Result<Unit> Client::call(const BuildKernel &request) {
+  return implementation->call<Unit>(operation::BuildKernel, request);
+}
+
 Result<CompletionId> Client::call(const Launch &request) {
   return implementation->call<CompletionId>(operation::Launch, request);
 }

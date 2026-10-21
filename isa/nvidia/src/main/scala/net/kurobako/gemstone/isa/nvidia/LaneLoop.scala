@@ -642,7 +642,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
           }
           result
         } else if (totalBytes <= 8)
-          context.memory.readValueInto(
+          context.device.memory.readValueInto(
             GuestAddress(start),
             totalBytes.unsafe[Int in 1 ~ 8],
             context.scalar
@@ -657,7 +657,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
             case fault: Fault => Left(VMWriteBuffer.located(fault, context.pc, lane))
           }
         else
-          context.memory.read(GuestAddress(start), totalBytes) match {
+          context.device.memory.read(GuestAddress(start), totalBytes) match {
             case Left(fault)  => Left(VMWriteBuffer.located(fault, context.pc, lane))
             case Right(bytes) =>
               var index = 0

@@ -20,7 +20,7 @@ private object DeviceEnqueueOps {
   private val SubgroupSize             = 32L
   private val ProfilingCommandExecTime = 1L
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
+  def lower: PartialFunction[Instruction, Op] = {
     case Instruction.GetDefaultQueue(t, d) =>
       step((execution, _) => Right(execution.values.updateScalar(id(d), id(t), DefaultQueue)))
     case Instruction.BuildNDRange(t, d, global, local, offset) =>
@@ -36,7 +36,7 @@ private object DeviceEnqueueOps {
           values.update(id(d), VMValue.Bits(id(t), lanes))
         }
       }
-    case instruction: Instruction.EnqueueKernel                    => enqueueKernel(site.program, instruction)
+    case instruction: Instruction.EnqueueKernel                    => enqueueKernel(instruction)
     case Instruction.EnqueueMarker(t, d, queue, count, waits, ret) =>
       step { (execution, memory) =>
         val values = execution.values
@@ -107,14 +107,14 @@ private object DeviceEnqueueOps {
       )
     case Instruction.GetKernelNDrangeSubGroupCount(resultType = t, dest = d, nDRange = range) =>
       step((execution, memory) =>
-        ndRange(site.program, execution.values, memory, id(range)).map { ndrange =>
+        ndRange(execution.values, memory, id(range)).map { ndrange =>
           val volume = groupShape(ndrange).product
           execution.values.updateScalar(id(d), id(t), (volume + SubgroupSize - 1L) / SubgroupSize)
         }
       )
     case Instruction.GetKernelNDrangeMaxSubGroupSize(resultType = t, dest = d, nDRange = range) =>
       step((execution, memory) =>
-        ndRange(site.program, execution.values, memory, id(range)).map(ndrange =>
+        ndRange(execution.values, memory, id(range)).map(ndrange =>
           execution.values.updateScalar(id(d), id(t), math.min(SubgroupSize, groupShape(ndrange).product))
         )
       )
@@ -125,8 +125,9 @@ private object DeviceEnqueueOps {
     if (range.local.take(range.dimensions).exists(_ != 0L)) range.local.take(range.dimensions).map(math.max(1L, _))
     else math.min(range.global.head, MaxWorkGroupSize) +: Vector.fill(range.dimensions - 1)(1L)
 
-  private def ndRange(program: VMProgram, values: InvocationValues, memory: MemoryState, operand: Int)
+  private def ndRange(values: InvocationValues, memory: MemoryState, operand: Int)
       : AddressSpace.ReadResult[NDRange] = {
+    val program                                       = values.program
     val decoded: AddressSpace.ReadResult[Array[Long]] = values.get(operand) match {
       case Some(VMValue.Address(_, pointer)) =>
         val pointee = program.pointerPointee(program.valueType(operand))
@@ -164,9 +165,10 @@ private object DeviceEnqueueOps {
       case Right(_)                               => Right(Success)
     }
 
-  private def localSize(program: VMProgram, values: InvocationValues, memory: MemoryState, operand: Int)
+  private def localSize(values: InvocationValues, memory: MemoryState, operand: Int)
       : AddressSpace.ReadResult[Long] = values.get(operand) match {
     case Some(VMValue.Address(_, pointer)) =>
+      val program = values.program
       program.scalarMemoryWidth(program.pointerPointee(program.valueType(operand))).flatMap(memory.readScalar(
         pointer,
         _
@@ -178,14 +180,14 @@ private object DeviceEnqueueOps {
   private def validRange(range: NDRange): Boolean =
     range.dimensions >= 1 && range.dimensions <= 3 && range.global.take(range.dimensions).forall(_ > 0L)
 
-  private def enqueueKernel(program: VMProgram, instruction: Instruction.EnqueueKernel): Op = {
+  private def enqueueKernel(instruction: Instruction.EnqueueKernel): Op = {
     val Instruction.EnqueueKernel(t, d, queue, _, range, count, waits, ret, invoke, param, size, alignment, locals) =
       instruction
     step { (execution, memory) =>
       val values = execution.values
       for {
         target   <- scalar(values, id(queue))
-        ndrange  <- ndRange(program, values, memory, id(range))
+        ndrange  <- ndRange(values, memory, id(range))
         number   <- scalar(values, id(count))
         list     <- address(values, id(waits))
         returned <- address(values, id(ret))
@@ -193,7 +195,7 @@ private object DeviceEnqueueOps {
         bytes    <- scalar(values, id(size))
         align    <- scalar(values, id(alignment))
         handles  <- waitList(memory, number, list)
-        sizes    <- locals.toVector.traverse(operand => localSize(program, values, memory, id(operand)))
+        sizes    <- locals.toVector.traverse(operand => localSize(values, memory, id(operand)))
         captured <- memory.read(literal, bytes.toInt.unsafe[Int >= 0])
         status   <-
           if (target == 0L) Right(InvalidQueue)

@@ -136,6 +136,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.DescribeGlobal(program, "global"),
     Operation.BindProgramGlobal(program, "global", allocation, 8L),
     Operation.WriteProgramGlobal(program, "global", 8L, Vec[Byte](4, 5)),
+    Operation.BuildKernel(program, "kernel"),
     Operation.Launch(
       program = program,
       kernelName = "kernel",

@@ -75,7 +75,7 @@ class ParserSuite extends munit.FunSuite {
       ".loc 1 42 7\nmov.u32 %r0, 1;\n.loc 1 43 0\nret;\n}"
     val program = roundTrip(source)
     program.statements match {
-      case Vec(_: Statement.Directive, Statement.Entry(_, _, _, Some(body), _)) =>
+      case Vec(Statement.Directive(_, _, _, _), Statement.Entry(_, _, _, Some(body), _)) =>
         assertEquals(body.map(_.productPrefix), Vec("Directive", "Instruction", "Directive", "Instruction"))
         assertEquals(body.collect { case Statement.Instruction(value) => value }.size, 2)
       case other => fail(s"lost debug directives or instructions: $other")

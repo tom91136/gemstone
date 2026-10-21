@@ -148,11 +148,8 @@ class LoadedProgram(
       }.map(kernel => Option(compiled.putIfAbsent(name, kernel)).getOrElse(kernel))
     }(Right(_))
 
-  override def execute(
-      task: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, Unit] =
-    compile(task.kernelName).flatMap(VMKernelLaunch.execute(_, task, memory, control, workgroups))
+  override def build(name: NonEmpty[String]): Either[Fault, Unit] = compile(name).map(_ => ())
+
+  override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+    compile(task.kernelName).flatMap(VMKernelLaunch.execute(_, KernelLaunch(task, context, workgroups)))
 }

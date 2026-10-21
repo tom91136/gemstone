@@ -25,6 +25,7 @@ private class ShaderExecutor(
     Vec(KernelTask.Argument.Memory(region, 0L, Some(size)))
   }
   private val relocations = shader.relocations
+  private val context     = TaskContext(memory, memory.control, handler)
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def execute(count: Int >= 0, records: Array[Array[Byte]]): Unit = {
     require(!shader.fragmentQuads || count.raw % 4 == 0, "invalid shader invocation count")
@@ -58,7 +59,7 @@ private class ShaderExecutor(
           workDim = 1
         )
           .fold(error => throw GraphicsAccess.Failure(Fault.InvalidRequest(error)), identity)
-        program.execute(task, memory, memory.control, handler)
+        program.execute(task, context)
           .fold(fault => throw GraphicsAccess.Failure(fault), _ => ())
         start += batch
       }

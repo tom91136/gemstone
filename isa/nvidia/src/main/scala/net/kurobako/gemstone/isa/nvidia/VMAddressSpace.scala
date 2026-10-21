@@ -8,6 +8,8 @@ private[isa] object VMAddressSpace {
   inline val SharedBase     = 0x10000000L
   inline val SharedLimit    = 0x40000000L
   inline val ParameterBase  = 0x700000000L
+  // an inline val's type is its constant, which a written type would only repeat
+  @SuppressWarnings(Array("scalafix:ExplicitResultTypes"))
   inline val ParameterLimit = ParameterBase + 0x100000000L
 
   // Each cluster CTA's shared memory is a 16 MiB window. PTX shared::cluster addresses select it above

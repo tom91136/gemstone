@@ -40,10 +40,10 @@ class ShaderPreparationSuite extends munit.FunSuite {
       source: String,
       stage: ShaderStageKind,
       constants: Vec[SpecializationConstant] = Vec.empty
-  ): PreparedShader = ShaderPreparation.prepare(image(source), "main", stage, constants).value
+  ): PreparedShader = ShaderPreparation.prepare(ShaderStage(image(source), "main", stage, constants)).value
 
   private def rejected(source: String, stage: ShaderStageKind, entry: NonEmpty[String] = "main"): Boolean =
-    ShaderPreparation.prepare(image(source), entry, stage, Vec.empty).isLeft
+    ShaderPreparation.prepare(ShaderStage(image(source), entry, stage, Vec.empty)).isLeft
 
   private def assertWire(prepared: PreparedShader): Unit = assertEquals(
     Wire.Codec[PreparedShader].encode(prepared, ExecutionRPC.Limits)
@@ -251,7 +251,7 @@ class ShaderPreparationSuite extends munit.FunSuite {
       interfaces = "%out"
     )
     assertEquals(
-      ShaderPreparation.prepare(image(module), "main", ShaderStageKind.Vertex, Vec.empty).leftValue,
+      ShaderPreparation.prepare(ShaderStage(image(module), "main", ShaderStageKind.Vertex, Vec.empty)).leftValue,
       Fault.InvalidRequest("shader preparation: interface component 4 is out of range")
     )
   }

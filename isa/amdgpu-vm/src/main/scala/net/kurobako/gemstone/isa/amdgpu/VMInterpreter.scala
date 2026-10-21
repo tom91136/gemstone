@@ -58,22 +58,19 @@ private object VMInterpreter {
 
   def execute(
       prepared: Kernel,
-      dispatch: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups,
+      launch: KernelLaunch,
       globalBindings: Vec[GlobalMapping],
-      @scala.annotation.unused handler: Event => Either[Fault, Unit],
       layout: Option[KernargLayout] = None
-  ): Either[Fault, Unit] =
+  ): Either[Fault, Unit] = {
+    val KernelLaunch(dispatch, context, _) = launch
     for {
       kernarg <- dispatch.argumentBuffer match {
-        case Some(buffer) => memory.address(buffer.region, buffer.offset).flatMap { address =>
-            memory.locate(address, prepared.source.kernargSize.raw.max(1).unsafe[Int >= 0])
+        case Some(buffer) => context.memory.address(buffer.region, buffer.offset).flatMap { address =>
+            context.memory.locate(address, prepared.source.kernargSize.raw.max(1).unsafe[Int >= 0])
               .map(_ => (Array.emptyByteArray, address.raw))
           }
         case None if layout.exists(_.parameters.size == dispatch.arguments.size) && dispatch.arguments.nonEmpty =>
-          KernelArguments.resolve(dispatch, argumentAddress(_, _, memory, globalBindings)).flatMap(arguments =>
+          KernelArguments.resolve(dispatch, argumentAddress(_, _, context.memory, globalBindings)).flatMap(arguments =>
             arguments.traverse[[A] =>> Either[Fault, A], Vec[Byte]] {
               case KernelArguments.Resolved.Bytes(bytes) => Right(bytes.raw)
               case KernelArguments.Resolved.Local(_)     =>
@@ -84,7 +81,7 @@ private object VMInterpreter {
         case None =>
           effectiveKernargSize(prepared.source, dispatch.arguments)
             .leftMap(detail => Fault.InvalidRequest(detail))
-            .flatMap(size => packArguments(dispatch, size, memory, globalBindings))
+            .flatMap(size => packArguments(dispatch, size, context.memory, globalBindings))
             .map(bytes => (bytes, KernargAddress))
       }
       _ <- runDispatch(
@@ -92,12 +89,10 @@ private object VMInterpreter {
         kernarg._1,
         kernarg._2,
         Vec.toArray(globalBindings),
-        dispatch,
-        memory,
-        control,
-        workgroups
+        launch
       )
     } yield ()
+  }
 
   /** A descriptor without a kernarg size takes the packed size of the typed arguments. */
   def effectiveKernargSize(
@@ -171,12 +166,12 @@ private object VMInterpreter {
       kernarg: Array[Byte],
       kernargAddress: Long,
       allocations: Array[GlobalMapping],
-      dispatch: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups
+      launch: KernelLaunch
   ): Either[Fault, Unit] = {
-    val kernel = program.source
+    val KernelLaunch(dispatch, context, workgroups) = launch
+    val memory                                      = context.memory
+    val control                                     = context.control
+    val kernel                                      = program.source
     // Kernels using enable_sgpr_dispatch_ptr read the HSA packet directly;
     // OpenMP derives its grid-stride loop increment from grid_size_x.
     val packet = Array.ofDim[Byte](64)
@@ -1609,7 +1604,7 @@ private object VMInterpreter {
             }
             NextStep
         }
-      case Instruction.SSetReg(_, _) =>
+      case Instruction.SSetReg =>
         NextStep
       case Instruction.SSetMode(offset, size, src) =>
         val mask = (Bits.mask(size) << offset).toInt & modeWritable

@@ -50,7 +50,8 @@ object Assembler {
 
   private val SymbolName = "[A-Za-z_.$][A-Za-z0-9_.$]*".r
 
-  def encode(program: Program, target: Target, waveSize: Int in (32, 64) = 32): Either[CodecError, Vec[Byte]] = {
+  def encode(program: Program, mode: TargetMode): Either[CodecError, Vec[Byte]] = {
+    val target  = mode.target
     val planned = program.statements.foldLeft[Either[CodecError, State]](Right(State(0, Map.empty, Vec.empty))) {
       (state, statement) =>
         state.flatMap { state =>
@@ -71,10 +72,10 @@ object Assembler {
               )
             case Statement.Instruction(instruction) => branch(instruction, target) match {
                 case Some(expression) => append(Part.Branch(state.offset, instruction, expression), 4)
-                case None             => Binary.encode(instruction, target, waveSize).flatMap(bytes(_))
+                case None             => Binary.encode(instruction, mode).flatMap(bytes(_))
               }
             case pair @ Statement.InstructionPair(_, _) =>
-              Binary.encodeStatement(pair, target, waveSize).flatMap(bytes(_))
+              Binary.encodeStatement(pair, mode).flatMap(bytes(_))
             case Statement.Directive(".text", "") => Right(state)
             case Statement.Directive(".section", args) if args.split(',').headOption.exists(_.trim == ".text") =>
               Right(state)
@@ -97,8 +98,8 @@ object Assembler {
             case Statement.Directive(name @ (".p2align" | ".align" | ".balign" | ".zero" | ".space"), args) =>
               val values = args.split(",", -1).toVec.map(_.trim)
               values.traverse(evaluate(_, state.labels, state.offset)).flatMap {
-                case Vec(amount)       => padding(state.offset, name, amount, None, target).flatMap(bytes(_))
-                case Vec(amount, fill) => padding(state.offset, name, amount, Some(fill), target).flatMap(bytes(_))
+                case Vec(amount)       => padding(state.offset, name, amount, None, mode).flatMap(bytes(_))
+                case Vec(amount, fill) => padding(state.offset, name, amount, Some(fill), mode).flatMap(bytes(_))
                 case _                 => Left(CodecError.InvalidOperand(s"invalid $name directive"))
               }
             case Statement.Directive(name, _) =>
@@ -114,7 +115,7 @@ object Assembler {
             val delta = address - offset - 4
             if (delta % 4 != 0 || delta / 4 < Short.MinValue || delta / 4 > Short.MaxValue)
               Left(CodecError.InvalidOperand(s"branch target '$expression' is unaligned or out of range"))
-            else withOffset(instruction, delta / 4).flatMap(Binary.encode(_, target, waveSize))
+            else withOffset(instruction, delta / 4).flatMap(Binary.encode(_, mode))
           }
         case Part.Data(offset, width, expressions) => expressions.zipWithIndex.traverse { case (expression, index) =>
             evaluate(expression, state.labels, offset + index * width).flatMap { value =>
@@ -132,7 +133,7 @@ object Assembler {
       name: String,
       amount: BigInt,
       fill: Option[BigInt],
-      target: Target
+      mode: TargetMode
   ): Either[CodecError, Vec[Byte]] = {
     val power = name == ".p2align"
     if (amount < 0 || !amount.isValidInt || (power && amount > 30) || fill.exists(value => value < 0 || value > 255))
@@ -151,7 +152,7 @@ object Assembler {
         case None                                        =>
           Instruction.decode(SOPPInstructionDefs.SNop, Vec(Operand.IntegerLiteral(BigInt(0), 10)), Vec.empty[Modifier])
             .left.map(error => CodecError.InvalidOperand(s"invalid padding instruction: $error"))
-            .flatMap(Binary.encode(_, target))
+            .flatMap(Binary.encode(_, mode))
             .map(nop => Vec.fill(count / 4)(nop).flatten ++ Vec.fill(count % 4)(0.toByte))
       }
     }

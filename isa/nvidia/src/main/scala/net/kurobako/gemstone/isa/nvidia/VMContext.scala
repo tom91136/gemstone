@@ -12,11 +12,10 @@ private object VMContext {
 
   def globalTimer: Long = timerOrigin + platform.monotonicNanos
 
-  /** Runs a grid device code launches: its kernel, geometry and parameter block, in the launching grid's memory,
-    * control and workgroups, with its dynamic shared bytes.
+  /** Runs a grid device code launches: its kernel, geometry and parameter block, on the launching grid's device, with
+    * its dynamic shared bytes.
     */
-  type Launch =
-    (Kernel, LaunchGeometry, Array[Byte], DeviceHeap, TaskControl, Workgroups, Int >= 0) => Either[Fault, Unit]
+  type Launch = (Kernel, LaunchGeometry, Array[Byte], VMDevice, Int >= 0) => Either[Fault, Unit]
 }
 
 /** The machine state visible to one instruction issue: the dispatch, the workgroup, the issuing frame and lanes, and
@@ -28,9 +27,7 @@ private class VMContext(
     val geometry: LaunchGeometry,
     val group: Coordinates,
     val workgroup: VMWorkgroup,
-    val memory: DeviceHeap,
-    val control: TaskControl,
-    val workgroups: Workgroups,
+    val device: VMDevice,
     val dynamicSharedBytes: Int >= 0,
     val effects: VMWriteBuffer,
     var frame: VMFrame,

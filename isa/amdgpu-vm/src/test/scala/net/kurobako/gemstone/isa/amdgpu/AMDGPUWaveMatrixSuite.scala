@@ -145,8 +145,7 @@ class AMDGPUWaveMatrixSuite extends munit.FunSuite {
     // v_wmma_f32_16x16x16_f16 v[16:19], v[0:n], v[8:m], v[16:19]
     val matrix = VMCompiler.decodeProgram(
       Vec(0x10, 0x40, 0x40, 0xcc, 0x00, 0x11, 0x42, 0x1c).map(_.toByte),
-      target,
-      64
+      TargetMode(target, 64)
     ).fold(error => fail(error.raw), _.operations)
     def load(dest: Int, at: Int) =
       Instruction.Load(

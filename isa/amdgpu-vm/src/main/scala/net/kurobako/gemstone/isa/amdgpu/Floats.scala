@@ -19,6 +19,9 @@ private[isa] object Floats {
   private inline def quieted(bits: Long, width: Int in (16, 32, 64)): Long =
     (bits & ((IEEE754.signBit(width) << 1) - 1L)) | IEEE754.quietBit(width)
 
+  private inline def infinite(bits: Long, width: Int in (16, 32, 64)): Boolean =
+    (bits & (IEEE754.signBit(width) - 1L)) == IEEE754.infinity(width)
+
   /** The NaN an invalid operation gives: the negative default NaN. */
   private inline def defaultNaN(width: Int in (16, 32, 64)): Long =
     IEEE754.signBit(width) | IEEE754.infinity(width) | IEEE754.quietBit(width)
@@ -27,10 +30,8 @@ private[isa] object Floats {
     * NaN does not replace.
     */
   private def invalidProduct(a: Long, b: Long, width: Int in (16, 32, 64)): Boolean = {
-    val magnitude                  = IEEE754.signBit(width) - 1L
-    def zero(x: Long): Boolean     = (x & magnitude) == 0L
-    def infinite(x: Long): Boolean = (x & magnitude) == IEEE754.infinity(width)
-    (zero(a) && infinite(b)) || (infinite(a) && zero(b))
+    def zero(x: Long): Boolean = (x & (IEEE754.signBit(width) - 1L)) == 0L
+    (zero(a) && infinite(b, width)) || (infinite(a, width) && zero(b))
   }
 
   // compiled code may order a commutative operation's operands either way, so which of two NaN operands the JVM
@@ -149,14 +150,21 @@ private[isa] object Floats {
       (IEEE754.fromDouble(high.toDouble, 16, IEEE754.Rounding.TowardZero) << 16)
   )
 
-  /** LDEXP: the value scaled by two to the power of the exponent. */
+  /** LDEXP: the value scaled by two to the power of the exponent; a NaN quieted, with its sign and payload, which the
+    * host's scaling need not keep.
+    */
   @targetName("ldexpF32")
-  def ldexp(value: Float32, exponent: SInt[32]): Float32 = Float32(Math.scalb(value.toFloat, exponent.raw.toInt))
+  def ldexp(value: Float32, exponent: SInt[32]): Float32 =
+    if (IEEE754.isNaN(bits(value), 32)) fromRaw[Float32](quieted(bits(value), 32))
+    else Float32(Math.scalb(value.toFloat, exponent.raw.toInt))
   @targetName("ldexpF64")
-  def ldexp(value: Float64, exponent: SInt[32]): Float64 = Float64(Math.scalb(value.toDouble, exponent.raw.toInt))
+  def ldexp(value: Float64, exponent: SInt[32]): Float64 =
+    if (IEEE754.isNaN(bits(value), 64)) fromRaw[Float64](quieted(bits(value), 64))
+    else Float64(Math.scalb(value.toDouble, exponent.raw.toInt))
   @targetName("ldexpF16")
   def ldexp(value: Float16, exponent: SInt[16]): Float16 =
-    Float16(Math.scalb(value.toDouble, exponent.raw.toShort.toInt).toFloat)
+    if (IEEE754.isNaN(bits(value), 16)) fromRaw[Float16](quieted(bits(value), 16))
+    else Float16(Math.scalb(value.toDouble, exponent.raw.toShort.toInt).toFloat)
 
   /** The binary32 transcendental unit reads denormals as zeros whatever MODE says. */
   private inline def flushed32(value: Float32): Float =
@@ -281,9 +289,11 @@ private[isa] object Floats {
   @targetName("rndneF16")
   def rndne(value: Float16): Float16 = halved(value)(Math.rint(_))
 
-  /** The fractional part, below the largest binary16 under one. */
+  /** The fractional part, below the largest binary16 under one; an infinity gives the default NaN. */
   @targetName("fractF16")
-  def fract(value: Float16): Float16 = halved(value)(x => math.min(x - math.floor(x), 0.99951171875))
+  def fract(value: Float16): Float16 =
+    if (infinite(bits(value), 16)) fromRaw[Float16](defaultNaN(16))
+    else halved(value)(x => math.min(x - math.floor(x), 0.99951171875))
   @targetName("sqrtF16")
   def sqrt(value: Float16): Float16 = halved(value)(math.sqrt)
   @targetName("rcpF16")
@@ -333,14 +343,21 @@ private[isa] object Floats {
   @targetName("floorF64")
   def floor(value: Float64): Float64 = integral64(value)(math.floor)
   @targetName("rndneF32")
-  def rndne(value: Float32): Float32 = integral32(value)(Math.rint)
+  def rndne(value: Float32): Float32 = integral32(value)(Math.rint(_))
   @targetName("rndneF64")
-  def rndne(value: Float64): Float64 = integral64(value)(Math.rint)
+  def rndne(value: Float64): Float64 = integral64(value)(Math.rint(_))
+
+  /** The fractional part, below the largest value under one; an infinity gives the default NaN, which the host's
+    * subtraction need not.
+    */
   @targetName("fractF32")
   def fract(value: Float32): Float32 =
-    integral32(value)(x => math.min(x - math.floor(x), Math.nextDown(1.0f).toDouble))
+    if (infinite(bits(value), 32)) fromRaw[Float32](defaultNaN(32))
+    else integral32(value)(x => math.min(x - math.floor(x), Math.nextDown(1.0f).toDouble))
   @targetName("fractF64")
-  def fract(value: Float64): Float64 = integral64(value)(x => math.min(x - math.floor(x), Math.nextDown(1.0)))
+  def fract(value: Float64): Float64 =
+    if (infinite(bits(value), 64)) fromRaw[Float64](defaultNaN(64))
+    else integral64(value)(x => math.min(x - math.floor(x), Math.nextDown(1.0)))
 
   /** FREXP_MANT: the significand of a finite non-zero value, denormals included, as a fraction in [0.5, 1); a NaN
     * returns quieted and other values pass.

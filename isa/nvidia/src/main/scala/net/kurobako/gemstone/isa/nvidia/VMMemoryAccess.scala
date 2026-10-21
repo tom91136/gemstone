@@ -57,8 +57,8 @@ private object VMMemoryAccess {
         context.scalar.elem = context.workgroup.readLocal(lane, local, width)
         Completed
       },
-      (if (access.systemScoped) context.memory.readSystemValueInto(GuestAddress(address), size, context.scalar)
-       else context.memory.readValueInto(GuestAddress(address), size, context.scalar)) match {
+      (if (access.systemScoped) context.device.memory.readSystemValueInto(GuestAddress(address), size, context.scalar)
+       else context.device.memory.readValueInto(GuestAddress(address), size, context.scalar)) match {
         case null         => Completed
         case fault: Fault => Left(VMWriteBuffer.located(fault, context.pc, lane))
       }
@@ -88,7 +88,7 @@ private object VMMemoryAccess {
       (bytes, offset) => Right(LittleEndian.write(value, bytes, offset, width.toScalarByteWidth)),
       Right(context.workgroup.writeShared(address, width, value)),
       local => Right(context.workgroup.writeLocal(lane, local, width, value)),
-      context.memory.writeValue(GuestAddress(address), value, width.toScalarByteWidth)
+      context.device.memory.writeValue(GuestAddress(address), value, width.toScalarByteWidth)
     )
 
   /** Faults the first active lane whose access of `size` bytes is [[misaligned]], then publishes the device ranges the
@@ -124,8 +124,8 @@ private object VMMemoryAccess {
         fault match {
           case found: Fault => Left(found)
           case null         =>
-            (if (access.systemScoped) context.memory.prepareSystemReads(ranges)
-             else context.memory.prepareReads(ranges)) match {
+            (if (access.systemScoped) context.device.memory.prepareSystemReads(ranges)
+             else context.device.memory.prepareReads(ranges)) match {
               case Left(unmapped) =>
                 // A batch fault names no lane, so attribute it to the first lane whose device range is unmapped.
                 val faulting = context.active.filterLanes { lane =>
@@ -134,7 +134,7 @@ private object VMMemoryAccess {
                     (_, _) => false,
                     false,
                     _ => false,
-                    context.memory.locate(GuestAddress(raw), size).isLeft
+                    context.device.memory.locate(GuestAddress(raw), size).isLeft
                   )
                 }.headOption
                 Left(VMWriteBuffer.located(

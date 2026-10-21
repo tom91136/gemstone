@@ -11,6 +11,7 @@
 #include <future>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <CL/cl.h>
@@ -19,6 +20,7 @@
 
 #include "gemstone/test_support.hpp"
 
+#include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "session.hpp"
 #include <environment_keys.hpp>
@@ -33,6 +35,32 @@ void *allocateUnified(cl_context context, cl_device_id device, cl_unified_shared
   return clSharedMemAllocINTEL(context, device, nullptr, size, 0, error);
 }
 
+void convertGeneratedSource() {
+  gemstone_test::RpcFixture const server;
+  const gemstone_test::RpcEnvironment environment(server);
+  cl_device_id device = gpu();
+  cl_int error = CL_SUCCESS;
+  cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  for (const char *fixture : {"subgroup_bool_compare.cl", "control_break_in_cond.cl"}) {
+    const auto sourcePath = std::filesystem::path(GEMSTONE_OPENCL_TEST_SOURCE_DIR) / fixture;
+    std::ifstream sourceFile(sourcePath);
+    REQUIRE(sourceFile.good());
+    const std::string source(std::istreambuf_iterator<char>{sourceFile}, {});
+    const char *sourceText = source.c_str();
+    cl_program program = clCreateProgramWithSource(context, 1, &sourceText, nullptr, &error);
+    REQUIRE((program && error == CL_SUCCESS));
+    const cl_int build = clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr);
+    size_t logSize = 0;
+    REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize) == CL_SUCCESS));
+    std::string log(logSize, '\0');
+    REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log.size(), log.data(), nullptr) == CL_SUCCESS));
+    INFO(fixture << ": " << log);
+    REQUIRE((build == CL_SUCCESS));
+    REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
+  }
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
 } // namespace
 
 TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
@@ -83,31 +111,11 @@ TEST_CASE("OpenCL IL queries expose every supported SPIR-V revision consistently
   }
 }
 
-TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
-  gemstone_test::RpcFixture const server;
-  const gemstone_test::RpcEnvironment environment(server);
-  cl_device_id device = gpu();
-  cl_int error = CL_SUCCESS;
-  cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
-  REQUIRE((context && error == CL_SUCCESS));
-  for (const char *fixture : {"subgroup_bool_compare.cl", "control_break_in_cond.cl"}) {
-    const auto sourcePath = std::filesystem::path(GEMSTONE_OPENCL_TEST_SOURCE_DIR) / fixture;
-    std::ifstream sourceFile(sourcePath);
-    REQUIRE(sourceFile.good());
-    const std::string source(std::istreambuf_iterator<char>{sourceFile}, {});
-    const char *sourceText = source.c_str();
-    cl_program program = clCreateProgramWithSource(context, 1, &sourceText, nullptr, &error);
-    REQUIRE((program && error == CL_SUCCESS));
-    const cl_int build = clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr);
-    size_t logSize = 0;
-    REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize) == CL_SUCCESS));
-    std::string log(logSize, '\0');
-    REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log.size(), log.data(), nullptr) == CL_SUCCESS));
-    INFO(fixture << ": " << log);
-    REQUIRE((build == CL_SUCCESS));
-    REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
-  }
-  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") { convertGeneratedSource(); }
+
+TEST_CASE("OpenCL generated source converts to SPIR-V through the compiler backend", "[opencl]") {
+  const gemstone_test::Environment translator(gemstone::environment::OpenclLlvmSpirv, "none");
+  convertGeneratedSource();
 }
 
 TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact", "[opencl]") {
@@ -453,6 +461,39 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((clReleaseContext(context) == CL_SUCCESS));
   REQUIRE((server.launches.load() == 40));
   server.check();
+}
+
+TEST_CASE("OpenCL rejected programs fail their build with a log, never a later enqueue", "[opencl]") {
+  using gemstone::execution::FailureKind;
+  gemstone_opencl_test::Session session;
+  session.server.programCatalogue({{.name = "groups", .linkageName = "groups"}}, {});
+  const struct {
+    std::string_view operation;
+    FailureKind kind;
+  } cases[]{
+      {.operation = gemstone::execution::operation::LoadProgram, .kind = FailureKind::InvalidProgram},
+      {.operation = gemstone::execution::operation::LoadProgram, .kind = FailureKind::InvalidRequest},
+      {.operation = gemstone::execution::operation::DescribeProgram, .kind = FailureKind::InvalidProgram},
+  };
+  for (const auto &[operation, kind] : cases) {
+    CAPTURE(std::string(operation), static_cast<int>(kind));
+    cl_int error = CL_SUCCESS;
+    auto *program =
+        clCreateProgramWithIL(session.context, gemstone_test::RpcFixture::Spirv, sizeof(gemstone_test::RpcFixture::Spirv), &error);
+    REQUIRE((program && error == CL_SUCCESS));
+    session.server.rejectNext(operation, kind);
+    CHECK((clBuildProgram(program, 1, &session.device, nullptr, nullptr, nullptr) == CL_BUILD_PROGRAM_FAILURE));
+    cl_build_status status = CL_BUILD_NONE;
+    REQUIRE((clGetProgramBuildInfo(program, session.device, CL_PROGRAM_BUILD_STATUS, sizeof(status), &status, nullptr) == CL_SUCCESS));
+    CHECK((status == CL_BUILD_ERROR));
+    size_t logSize = 0;
+    REQUIRE((clGetProgramBuildInfo(program, session.device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize) == CL_SUCCESS));
+    CHECK((logSize > 1));
+    clCreateKernel(program, "groups", &error);
+    CHECK((error == CL_INVALID_PROGRAM_EXECUTABLE));
+    CHECK((clFinish(session.queue) == CL_SUCCESS));
+    clReleaseProgram(program);
+  }
 }
 
 TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "[opencl][unified-memory]") {

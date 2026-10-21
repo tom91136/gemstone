@@ -23,8 +23,8 @@ class CodeSectionSuite extends munit.FunSuite {
       val code    = Fixture.saxpy(sm)
       val program = Disassembler(target(sm)).decode(code).fold(error => fail(error.message), identity(_))
       val first   = program.statements.indexWhere {
-        case _: Program.Statement.Operation => true
-        case _                              => false
+        case Program.Statement.Operation(_, _, _) => true
+        case _                                    => false
       }
       val changed = program.copy(statements = program.statements.take(first) ++ program.statements.drop(first + 1))
       assert(Assembler(target(sm)).encode(changed).isLeft)
@@ -39,7 +39,7 @@ class CodeSectionSuite extends munit.FunSuite {
         .fold(error => fail(error.message), identity(_))
       val index          = section.layout.bundles.head.words.size
       val statementIndex = program.statements.zipWithIndex.collect {
-        case (_: Program.Statement.Operation, offset) => offset
+        case (Program.Statement.Operation(_, _, _), offset) => offset
       }(index)
       val replacement = Parser.parse("MOV R3, R7;").fold(fail(_), identity(_))
       val replaced    = program.statements.updated(statementIndex, Program.Statement.Operation(replacement))

@@ -22,11 +22,11 @@ private object assembly extends munit.Assertions {
     Parser.parse(source).fold(error => fail(s"$source: $error"), _.statements.head)
 
   def encoded(instruction: Instruction, target: Target, waveSize: Int in (32, 64) = 32)(using Location): Vec[Byte] =
-    Binary.encode(instruction, target, waveSize).fold(
+    Binary.encode(instruction, TargetMode(target, waveSize)).fold(
       error => fail(s"${Printer.render(instruction)}: $error"),
       identity
     )
 
   def disassembled(code: Vec[Byte], target: Target, waveSize: Int in (32, 64) = 32)(using Location): Instruction =
-    Binary.decode(code, target, waveSize).fold(error => fail(s"$target: $error"), identity)
+    Binary.decode(code, TargetMode(target, waveSize)).fold(error => fail(s"$target: $error"), identity)
 }

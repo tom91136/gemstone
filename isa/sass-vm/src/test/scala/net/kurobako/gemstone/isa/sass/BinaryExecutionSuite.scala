@@ -61,4 +61,22 @@ class BinaryExecutionSuite extends munit.FunSuite {
     }
   }
 
+  test("building a binary kernel reports the unsupported instruction before any launch") {
+    val image   = Fixture.copyAddCubin.toArray
+    val module  = Cubin.decode(Vec.unsafeWrapArray(image)).value
+    val kernel  = module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add"))
+    val section = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections(kernel.section)
+    Using.resource(ExecutionSession(List(CubinBackend()))) { service =>
+      val valid = service.load(ProgramEncoding.CUDACubin, Vec.from(Fixture.copyAddCubin)).value
+      assertEquals(service.build(valid, "copy_add"), Right(()))
+
+      java.util.Arrays.fill(image, section.offset, section.offset + 16, 0.toByte)
+      val broken = service.load(ProgramEncoding.CUDACubin, Vec.from(image)).value
+      service.build(broken, "copy_add") match {
+        case Left(ExecutionFailure.InvalidProgram(detail)) =>
+          assert(detail.startsWith("copy_add sm_89 at 0x0:"), detail)
+        case other => fail(s"expected invalid program failure, got $other")
+      }
+    }
+  }
 }

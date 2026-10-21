@@ -17,7 +17,8 @@ object Validation {
   def validate(program: Program, target: Target): ValidationOutcome[Issue] = {
     val results = program.statements.collect {
       case Statement.Instruction(instruction)        => validate(instruction, target)
-      case pair @ Statement.InstructionPair(left, _) => result(left, target, Binary.encodeStatement(pair, target))
+      case pair @ Statement.InstructionPair(left, _) =>
+        result(left, target, Binary.encodeStatement(pair, TargetMode(target)))
     }
     if (program.statements.nonEmpty && results.isEmpty)
       incomplete("directive and label validation is not implemented")
@@ -32,7 +33,7 @@ object Validation {
       case other                                                   => other
     }
     Instruction.decode(instruction.definition, operands, instruction.mods) match {
-      case Right(value) => result(instruction, target, Binary.encode(value, target))
+      case Right(value) => result(instruction, target, Binary.encode(value, TargetMode(target)))
       case Left(_)      => incomplete(s"invalid operand form for ${instruction.opcode}")
     }
   }

@@ -13,14 +13,14 @@ object Disassembler {
 }
 
 /** Decodes an AMDGPU instruction stream, retaining the byte offset of a failed instruction. */
-class Disassembler(target: Target, waveSize: Int in (32, 64) = 32) {
+class Disassembler(mode: TargetMode) {
   def decode(bytes: Vec[Byte]): Either[Disassembler.Error, Program] = {
     val statements = Vec.newBuilder[Program.Statement]
     val array      = Vec.toArray(bytes)
     @tailrec
     def loop(offset: Int >= 0): Either[Disassembler.Error, Program] =
       if (offset.raw == bytes.size) Right(Program(statements.result()))
-      else Binary.decodeStatementAt(array, offset, target, waveSize) match {
+      else Binary.decodeStatementAt(array, offset, mode) match {
         case Left(error)    => Left(Disassembler.Error.Instruction(offset, error))
         case Right(decoded) =>
           statements += decoded.statement

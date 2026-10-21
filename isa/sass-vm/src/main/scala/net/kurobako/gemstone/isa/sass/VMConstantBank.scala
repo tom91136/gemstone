@@ -129,6 +129,13 @@ private object VMConstantBank {
       emit(Move(result.slot, Value.Immediate(value), width))
       result
     }
+
+    /** Whether the offset is the field the aperture's base is read from: the architectures from `from` read it at
+      * `newer` from sm_100, and at `older` before.
+      */
+    def apertureBase(from: Int, older: Int, newer: Int, offset: Int): Boolean =
+      c0 && sm >= from && offset == (if (sm >= 100) newer else older) &&
+        PartialFunction.cond(bits.raw) { case 32 | 64 => true }
     def isDimension(at: Int): Boolean =
       c0 &&
         (at - launch) % 4 == 0 &&
@@ -168,17 +175,11 @@ private object VMConstantBank {
       constant(VMAddressSpace.SharedBase, bits)
     else if (c0 && sm >= 70 && sm < 90 && offset == 0x1c && bits == 32) constant(0L)
     // Modern cvta.local adds the local window base from c0[0x20:0x28], or from c0[0x2f8:0x300] from sm_100.
-    else if (
-      c0 && sm >= 70 && offset == (if (sm >= 100) 0x2f8 else 0x20) &&
-      PartialFunction.cond(bits.raw) { case 32 | 64 => true }
-    )
+    else if (apertureBase(from = 70, older = 0x20, newer = 0x2f8, offset))
       constant(localWindow(sm), bits)
     else if (c0 && sm >= 70 && offset == (if (sm >= 100) 0x2fc else 0x24) && bits == 32) constant(0L)
     // The generic address of the parameter block, from which ptxas addresses __grid_constant__ tensor maps.
-    else if (
-      c0 && sm >= 90 && offset == (if (sm >= 100) 0x348 else 0x198) &&
-      PartialFunction.cond(bits.raw) { case 32 | 64 => true }
-    )
+    else if (apertureBase(from = 90, older = 0x198, newer = 0x348, offset))
       constant(VMAddressSpace.ParameterBase, bits)
     else if (c0 && sm >= 90 && offset == (if (sm >= 100) 0x34c else 0x19c) && bits == 32)
       constant(VMAddressSpace.ParameterBase >>> 32)

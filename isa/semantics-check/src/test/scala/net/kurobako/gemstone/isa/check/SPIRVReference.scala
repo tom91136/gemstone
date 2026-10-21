@@ -44,7 +44,7 @@ object SPIRVReference extends Reference[SPIRVHarness, Lookup.Mnemonic] {
     values = parameters.map(_._1).zip(inputs).toMap
     slots  = program.parameters.collect { case Parameter.Slot(name) => values.getOrElse(name, 0L) }
     task <- task(program, values, slots, harness)
-    _    <- program.loaded.execute(task, harness, TaskControl(), _ => Right(())).left.map(_.description.raw)
+    _ <- program.loaded.execute(task, TaskContext(harness, TaskControl(), _ => Right(()))).left.map(_.description.raw)
   } yield {
     val base = if (program.shader) slots.size else 0
     results.map { (name, tpe) =>

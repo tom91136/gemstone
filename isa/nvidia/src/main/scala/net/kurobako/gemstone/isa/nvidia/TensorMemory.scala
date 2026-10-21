@@ -178,7 +178,6 @@ private[isa] object TensorMemory {
     * the shape, element types, accumulation, sparsity and scaling.
     */
   case class Product(
-      kind: Kind,
       multiply: Operation.Multiply,
       negateA: Boolean,
       negateB: Boolean,
@@ -287,7 +286,6 @@ private[isa] object TensorMemory {
         )
         val zero = Value.Immediate(0L)
         Right(Product(
-          kind,
           Operation.Multiply(
             a = Fragment(shape, Role.A, left, wmma = false),
             b = Fragment(shape, Role.B, right, wmma = false),

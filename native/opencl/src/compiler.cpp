@@ -124,6 +124,9 @@ std::string discoverExecutable(const std::vector<std::string> &names, const std:
   return findFirstGlob(patterns);
 }
 
+// Selects the compiler's own SPIR-V backend even when a translator is installed.
+constexpr std::string_view NoTranslator = "none";
+
 const std::string &compilerPath() {
   static const std::string path = [] {
     if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclCompiler); configured && configured[0] != '\0')
@@ -136,7 +139,7 @@ const std::string &compilerPath() {
 const std::string &spirvConverterPath() {
   static const std::string path = [] {
     if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmSpirv); configured && configured[0] != '\0')
-      return std::string(configured);
+      return std::string_view(configured) == NoTranslator ? std::string() : std::string(configured);
     return discoverExecutable({"llvm-spirv"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
                                "/usr/lib/llvm-*/bin/llvm-spirv", "/usr/lib64/llvm*/bin/llvm-spirv", "/usr/local/bin/llvm-spirv"});
@@ -155,12 +158,16 @@ const std::string &bitcodeLinkerPath() {
   return path;
 }
 
-// Only the SPIR-V extensions the interpreter executes.
-constexpr const char *SpirvExtensions =
-    "--spirv-ext=+SPV_KHR_subgroup_rotate,+SPV_KHR_bit_instructions,+SPV_INTEL_subgroups,+SPV_KHR_linkonce_odr,+SPV_KHR_shader_clock,"
-    "+SPV_INTEL_bfloat16_conversion,+SPV_INTEL_split_barrier,+SPV_INTEL_media_block_io,"
-    "+SPV_INTEL_subgroup_matrix_multiply_accumulate,+SPV_INTEL_2d_block_io,+SPV_INTEL_tensor_float32_conversion,"
-    "+SPV_INTEL_ternary_bitwise_function,+SPV_INTEL_masked_gather_scatter,+SPV_INTEL_variable_length_array";
+// Only the SPIR-V extensions the interpreter executes. LLVM's own backend (clang 21 and newer, earlier ones run llvm-spirv)
+// rejects an extension it does not know, so it gets only the ones every release implements.
+#define GEMSTONE_SPIRV_EXTENSIONS                                                                                                          \
+  "--spirv-ext=+SPV_KHR_subgroup_rotate,+SPV_KHR_bit_instructions,+SPV_INTEL_subgroups,+SPV_KHR_linkonce_odr,"                             \
+  "+SPV_KHR_shader_clock,+SPV_INTEL_bfloat16_conversion,+SPV_INTEL_split_barrier,+SPV_INTEL_media_block_io,"                               \
+  "+SPV_INTEL_subgroup_matrix_multiply_accumulate,+SPV_INTEL_2d_block_io,+SPV_INTEL_ternary_bitwise_function,"                             \
+  "+SPV_INTEL_variable_length_array"
+constexpr const char *SpirvBackendExtensions = GEMSTONE_SPIRV_EXTENSIONS;
+constexpr const char *SpirvExtensions = GEMSTONE_SPIRV_EXTENSIONS ",+SPV_INTEL_tensor_float32_conversion,+SPV_INTEL_masked_gather_scatter";
+#undef GEMSTONE_SPIRV_EXTENSIONS
 
 // Declarations of the Intel builtins the driver provides beyond clang's headers, which llvm-spirv translates by name
 // or through the __spirv_ functions they call.
@@ -224,7 +231,8 @@ bool bitcodeToSpirv(const std::string &input, const std::string &output, std::st
     diagnostic += "no OpenCL compiler or llvm-spirv available for SPIR-V generation";
     return false;
   }
-  const ProcessResult conversion = runProcess({compilerPath(), "-target", "spirv64", "-c", input, "-o", output});
+  const ProcessResult conversion =
+      runProcess({compilerPath(), "-target", "spirv64", "-mllvm", SpirvBackendExtensions, "-c", input, "-o", output});
   diagnostic += conversion.output;
   return conversion.status == 0;
 }
@@ -383,6 +391,9 @@ bool readBytes(const std::string &path, std::vector<uint8_t> *bytes) {
 
 } // namespace
 
+// LLVM's SPIR-V backend cannot lower the device-side enqueue types, so only llvm-spirv can build such kernels.
+bool deviceEnqueueSupported() { return !spirvConverterPath().empty(); }
+
 bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log) {
   if (compilerPath().empty()) {
     log = std::string("no OpenCL compiler found (set ") + gemstone::environment::OpenclCompiler + " or install clang)";
@@ -443,9 +454,11 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
       command.emplace_back("-U");
       command.emplace_back(feature);
     }
-    command.insert(command.end(), {"-Xclang", "-cl-ext=+cl_intel_subgroups,+cl_khr_kernel_clock,+__opencl_c_kernel_clock_scope_device,"
-                                              "+__opencl_c_kernel_clock_scope_work_group,+__opencl_c_kernel_clock_scope_sub_group,"
-                                              "+cl_intel_bfloat16_conversions"});
+    std::string extensions =
+        "-cl-ext=+cl_intel_subgroups,+cl_khr_kernel_clock,+__opencl_c_kernel_clock_scope_device,"
+        "+__opencl_c_kernel_clock_scope_work_group,+__opencl_c_kernel_clock_scope_sub_group,+cl_intel_bfloat16_conversions";
+    if (!deviceEnqueueSupported()) extensions += ",-__opencl_c_device_enqueue";
+    command.insert(command.end(), {"-Xclang", extensions});
     if (usesIntelBuiltins) command.insert(command.end(), {"-include", prelude});
     // The driver's built-in declaration tables omit the Intel subgroup functions; only the full header declares them, at
     // several times the compile cost.

@@ -964,6 +964,7 @@ struct Function {
   Module *module{};
   std::string name;
   std::vector<Parameter> parameters;
+  std::atomic<bool> built{false};
 };
 
 std::vector<std::unique_ptr<Module>> modules;
@@ -990,6 +991,26 @@ std::pair<Function *, std::array<int, 3>> findLaunchFunction(const void *handle)
   const std::scoped_lock lock(stateMutex);
   auto *entry = registeredFunction(handle);
   return {entry, entry ? entry->clusterDimensions : std::array<int, 3>{}};
+}
+
+// A kernel is built on its first launch, which reports a build failure the way a lazily loaded module does.
+CUresult buildFunction(Function &function) {
+  if (function.built.load()) return CUDA_SUCCESS;
+  const auto built =
+      client->call(BuildKernel{.program = ProgramId{static_cast<int64_t>(function.module->program)}, .kernelName = {function.name}});
+  if (!built) {
+    if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA kernel build failed: %s\n", built.error().detail.c_str());
+    return latchStatus(failureStatus(built.error().kind, function.module->encoding, CUDA_ERROR_LAUNCH_FAILED));
+  }
+  function.built.store(true);
+  return CUDA_SUCCESS;
+}
+
+// Binding a global discards the kernels the service compiled for the module, so each builds again on its next launch.
+void invalidateBuilds(const Module &module) {
+  const std::scoped_lock lock(stateMutex);
+  for (const auto &function : functions)
+    if (function->module == &module) function->built.store(false);
 }
 
 size_t clusterAxis(CUfunction_attribute attribute) {
@@ -1873,7 +1894,7 @@ CUresult encodeCommon(CUtensorMap *map, const Common &common, uint32_t minimumRa
   const uint64_t alignment = common.interleave == CU_TENSOR_MAP_INTERLEAVE_32B || type->padded() ? 32 : 16;
   const auto address = reinterpret_cast<uint64_t>(common.address);
   if (address % alignment != 0) return CUDA_ERROR_INVALID_VALUE;
-  if (common.rank > 1 && !common.strides) return CUDA_ERROR_INVALID_VALUE;
+  if (!common.strides) return CUDA_ERROR_INVALID_VALUE;
   if (common.dimensions[0] % (type->padded() ? 128 : type->values) != 0) return CUDA_ERROR_INVALID_VALUE;
   for (uint32_t index = 0; index < common.rank; ++index) {
     if (common.dimensions[index] == 0 || common.dimensions[index] > (uint64_t{1} << 32)) return CUDA_ERROR_INVALID_VALUE;
@@ -2600,11 +2621,13 @@ CUresult cuModuleGetGlobal_v2(CUdeviceptr *pointer, size_t *bytes, CUmodule modu
     if (status == CUDA_SUCCESS && !initial.empty()) status = cuMemcpyHtoD_v2(address, initial.data(), initial.size());
 
     const auto binding = status == CUDA_SUCCESS ? pointerBinding(address) : std::nullopt;
-    if (!binding
-        || !client->call(BindProgramGlobal{.program = ProgramId{static_cast<int64_t>(owner->program)},
-                                           .name = {name},
-                                           .allocation = AllocationId{static_cast<int64_t>(binding->allocation)},
-                                           .offset = {0}})) {
+    const bool bound = binding
+                       && client->call(BindProgramGlobal{.program = ProgramId{static_cast<int64_t>(owner->program)},
+                                                         .name = {name},
+                                                         .allocation = AllocationId{static_cast<int64_t>(binding->allocation)},
+                                                         .offset = {0}});
+    if (binding) invalidateBuilds(*owner);
+    if (!bound) {
       if (address != 0) (void)cuMemFree_v2(address);
       return status == CUDA_SUCCESS ? CUDA_ERROR_UNKNOWN : status;
     }
@@ -2990,6 +3013,7 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
       if (gridX % x != 0 || gridY % y != 0 || gridZ % z != 0) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
       launch.clusterSize = Dimensions{.x = {static_cast<int32_t>(x)}, .y = {static_cast<int32_t>(y)}, .z = {static_cast<int32_t>(z)}};
     }
+    if (const auto status = buildFunction(*entry); status != CUDA_SUCCESS) return status;
     return enqueueCommand(stream, [launch = std::move(launch), encoding = entry->module->encoding]() -> int32_t {
       std::string error;
       CompletionResult result;

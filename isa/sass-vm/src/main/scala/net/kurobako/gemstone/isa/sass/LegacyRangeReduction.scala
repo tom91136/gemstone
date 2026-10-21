@@ -122,8 +122,8 @@ private object LegacyRangeReduction {
                   })
               // an address names its whole register pair, so only data operands widen
               def aliases(operand: Operand): Boolean = operand match {
-                case _: Operand.Address => false
-                case _                  => registers(operand).exists(r => r <= register && register < r + 4)
+                case Operand.Address(_, _, _, _, _, _) => false
+                case _ => registers(operand).exists(r => r <= register && register < r + 4)
               }
               if (wide && reads.exists(aliases(_)))
                 reject(s"with wide alias at 0x${next.address.raw.toHexString}")

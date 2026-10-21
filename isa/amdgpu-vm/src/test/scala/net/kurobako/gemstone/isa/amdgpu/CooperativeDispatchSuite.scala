@@ -227,7 +227,7 @@ class CooperativeDispatchSuite extends munit.FunSuite {
                       |s_mov_b32 s3, 0x${base >>> 32}%x
                       |v_mov_b32 v0, 0
                       |$text""".stripMargin
-    val code   = asm.Assembler.encode(asm.Parser.parse(assembly).value, gfx906, 64).value
+    val code   = asm.Assembler.encode(asm.Parser.parse(assembly).value, TargetMode(gfx906, 64)).value
     val source = codeKernel(target = gfx906, computePgmRsrc2 = 0x80, code = code)
     val task   = KernelTask.validated(
       "kernel",

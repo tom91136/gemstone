@@ -718,7 +718,8 @@ def conformanceArtifacts(
     s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}",
     s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${if (syclCtsFull) "ON"
       else sys.env.getOrElse("SYCL_CTS_ENABLE_FULL_CONFORMANCE", "OFF")}",
-    s"-DCONFORMANCE_SYCL_SHARD=${sys.env.getOrElse("CONFORMANCE_SYCL_SHARD", "")}"
+    s"-DCONFORMANCE_SYCL_SHARD=${sys.env.getOrElse("CONFORMANCE_SYCL_SHARD", "")}",
+    s"-DCONFORMANCE_SHARD_ROUTES=${sys.env.getOrElse("CONFORMANCE_SHARD_ROUTES", "")}"
   ) ++ sys.env.get("CONFORMANCE_ARTIFACT_PARALLELISM").map(value => s"-DCONFORMANCE_ARTIFACT_PARALLELISM=$value"),
   log = log,
   buildTargets = targets,

@@ -112,7 +112,7 @@ class LoadedProgramSuite extends munit.FunSuite {
         groupCount = LaunchGeometry.Dimensions.One,
         arguments = Vec.empty
       ).value
-      assertEquals(loaded.execute(task, memory, TaskControl(), _ => Right(())), Right(()))
+      assertEquals(loaded.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))), Right(()))
     }
     assertEquals(memory.readValue(region, 32L, 4), Right(42L))
     assertEquals(memory.readValue(region, 36L, 4), Right(84L))
@@ -131,6 +131,44 @@ class LoadedProgramSuite extends munit.FunSuite {
       val program = Parser.parse(source).value
       assert(LoadedProgram.load(program).isLeft)
     }
+  }
+
+  test("building a kernel reports a compile failure only for the kernel that cannot compile") {
+    val source =
+      ".version 8.0\n.target sm_80\n.address_size 64\n" +
+        ".visible .entry fine() { ret; }\n" +
+        ".visible .entry broken() { .reg .u32 %r<2>; not_an_instruction.u32 %r0; ret; }\n"
+    val program = Parser.parse(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+
+    assertEquals(loaded.build("fine"), Right(()))
+    assertEquals(loaded.build("fine"), Right(()))
+    loaded.build("broken") match {
+      case Left(Fault.InvalidProgram(detail)) => assert(detail.contains("not_an_instruction"), detail)
+      case other                              => fail(s"expected invalid program failure, got $other")
+    }
+    loaded.build("absent") match {
+      case Left(Fault.NotFound(_)) => ()
+      case other                   => fail(s"expected missing kernel failure, got $other")
+    }
+  }
+
+  test("launching a kernel after building it reuses the compiled result") {
+    val source =
+      ".version 8.0\n.target sm_80\n.address_size 64\n" +
+        ".visible .entry broken() { .reg .u32 %r<2>; not_an_instruction.u32 %r0; ret; }\n"
+    val program = Parser.parse(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val task    = KernelTask.validated(
+      kernelName = "broken",
+      groupSize = LaunchGeometry.Dimensions.One,
+      groupCount = LaunchGeometry.Dimensions.One,
+      arguments = Vec.empty
+    ).value
+    val built    = loaded.build("broken")
+    val launched = loaded.execute(task, TaskContext(DeviceMemory(16), TaskControl(), _ => Right(())))
+    assert(built.isLeft)
+    assert(built eq launched, s"$built was recompiled as $launched")
   }
 
   test("exposes aligned PTX kernel parameter offsets") {

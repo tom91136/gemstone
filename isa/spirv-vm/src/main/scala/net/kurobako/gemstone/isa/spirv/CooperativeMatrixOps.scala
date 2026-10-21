@@ -3,7 +3,6 @@ package net.kurobako.gemstone.isa.spirv
 import Op.*
 import OpBuilder.*
 import VMInvocation.*
-import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -251,26 +250,10 @@ private object CooperativeMatrixOps {
       for {
         base   <- address(values, pointer)
         places <- place(values)
-        lanes  <- read(memory, base, places, width)
+        lanes  <- MatrixAccess(base, places, width, sparse = false).read(memory, Array.ofDim[Long](places.length))
       } yield values.update(dest, VMValue.Bits(resultType, lanes))
     }
   })
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-  private def read(memory: MemoryState, base: Pointer, places: Array[Long], width: Int in 1 ~ 8)
-      : AddressSpace.ReadResult[Array[Long]] = {
-    val lanes                                             = Array.ofDim[Long](places.length)
-    var failure: Fault | AddressSpace.Pending.type | Null = null
-    var lane                                              = 0
-    while (lane < lanes.length && (failure eq null)) {
-      memory.readScalar(base.copy(address = base.address + places(lane)), width) match {
-        case Left(error)  => failure = error
-        case Right(value) => lanes(lane) = value
-      }
-      lane += 1
-    }
-    if (failure ne null) Left(failure) else Right(lanes)
-  }
 
   private def store(
       site: Site,
@@ -287,25 +270,10 @@ private object CooperativeMatrixOps {
         base   <- address(values, pointer)
         lanes  <- bits(values, source)
         places <- place(values)
-        _      <- write(memory, base, places, lanes, width)
+        _      <- MatrixAccess(base, places, width, sparse = false).write(memory, lanes)
       } yield ()
     }
   })
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-  private def write(memory: MemoryState, base: Pointer, places: Array[Long], lanes: Array[Long], width: Int in 1 ~ 8)
-      : Either[Fault, Unit] = {
-    var failure: Fault | Null = null
-    var lane                  = 0
-    while (lane < places.length && failure == null) {
-      memory.writeScalar(base.copy(address = base.address + places(lane)), lanes(lane), width) match {
-        case Left(error) => failure = error
-        case Right(())   => ()
-      }
-      lane += 1
-    }
-    if (failure != null) Left(failure) else Right(())
-  }
 
   private def mulAdd(site: Site, instruction: Instruction, resultType: Operand, a: Operand, b: Operand, c: Operand)
       : Op = {

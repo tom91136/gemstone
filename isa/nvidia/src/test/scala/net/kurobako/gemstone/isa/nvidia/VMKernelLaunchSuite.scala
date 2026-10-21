@@ -53,10 +53,11 @@ class VMKernelLaunchSuite extends munit.FunSuite {
   ): Either[Fault, Unit] =
     VMKernelLaunch.execute(
       executable,
-      task(arguments, relocations),
-      memory,
-      TaskControl(),
-      Workgroups.Sequential
+      KernelLaunch(
+        task(arguments, relocations),
+        TaskContext(memory, TaskControl(), _ => Right(())),
+        Workgroups.Sequential
+      )
     )
 
   test("shared launch binds scalar and memory arguments for interpreter parameter loads") {

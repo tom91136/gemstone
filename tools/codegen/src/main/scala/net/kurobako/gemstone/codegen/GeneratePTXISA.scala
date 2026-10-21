@@ -47,7 +47,6 @@ object GeneratePTXISA {
   private case class InstructionField(name: String, optional: Boolean)
   private case class InstructionShape(
       opcode: String,
-      mnemonic: String,
       operationModifiers: Vector[String],
       caseName: String,
       fields: Vector[InstructionField],
@@ -948,7 +947,6 @@ object GeneratePTXISA {
       .groupMap(_._1)(_._2)
     formsByOpcode.toVector.sortBy(_._1).map { case (opcode, forms) =>
       val parts          = opcode.split('.').toVector
-      val mnemonic       = parts.head
       val maxArity       = forms.map(_.operands.size).maxOption.getOrElse(0)
       val inferredFields = Vector.tabulate(maxArity) { position =>
         val present = forms.flatMap(_.operands.lift(position))
@@ -967,7 +965,7 @@ object GeneratePTXISA {
             fields :+ field.copy(name = if (count == 1) field.name else s"${field.name}$count")
           )
       }._2
-      InstructionShape(opcode, mnemonic, parts.tail, scalaCaseName(opcode), fields, forms)
+      InstructionShape(opcode, parts.tail, scalaCaseName(opcode), fields, forms)
     }
   }
 

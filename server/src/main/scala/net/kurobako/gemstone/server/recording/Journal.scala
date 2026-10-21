@@ -550,8 +550,8 @@ object Journal {
             replayable,
             failure
           ))
-        case Some((_, _: HeaderRecord)) => invalid("duplicate archive header")
-        case None                       => invalid("incomplete archive/footer")
+        case Some((_, HeaderRecord(_, _, _, _, _, _, _))) => invalid("duplicate archive header")
+        case None                                         => invalid("incomplete archive/footer")
       }
     (events.result(), locations.toMap, summary.getOrElse(invalid("archive footer is absent")))
   }

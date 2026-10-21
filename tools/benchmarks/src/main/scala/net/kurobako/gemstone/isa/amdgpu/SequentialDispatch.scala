@@ -25,8 +25,8 @@ object SequentialDispatch {
     )).fold(error => throw IllegalStateException(error.message), identity)
 
   /** Measure `iterations` single-threaded dispatches of `kernel`, each of which must succeed. */
-  def repeat(iterations: Int > 0, kernel: VMIR.Kernel, task: KernelTask, memory: AddressSpace): BenchmarkSample =
-    Measurement.repeatSucceeding(iterations)(
-      VMInterpreter.execute(kernel, task, memory, TaskControl(), Workgroups.Sequential, Vec.empty, _ => Right(()))
-    )
+  def repeat(iterations: Int > 0, kernel: VMIR.Kernel, task: KernelTask, memory: AddressSpace): BenchmarkSample = {
+    val launch = KernelLaunch(task, TaskContext(memory, TaskControl(), _ => Right(())), Workgroups.Sequential)
+    Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, launch, Vec.empty))
+  }
 }

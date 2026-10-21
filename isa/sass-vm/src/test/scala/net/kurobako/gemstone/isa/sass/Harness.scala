@@ -315,6 +315,9 @@ object Harness extends munit.Assertions {
       )
 
     def run(program: VMIR.Kernel, task: KernelTask): Either[Fault, Unit] =
-      VMKernelLaunch.execute(program, task, this, TaskControl(), Workgroups.Sequential)
+      VMKernelLaunch.execute(
+        program,
+        KernelLaunch(task, TaskContext(this, TaskControl(), _ => Right(())), Workgroups.Sequential)
+      )
   }
 }

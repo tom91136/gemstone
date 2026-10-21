@@ -49,7 +49,7 @@ class AMDGPUResourceSuite extends munit.FunSuite {
 
   private def assemble(target: Target, text: String)(using munit.Location): Vec[Byte] = {
     val waveSize = if (target.isa.isRDNA) 32 else 64
-    asm.Assembler.encode(asm.Parser.parse(text).value, target, waveSize.unsafe[Int in (32, 64)]).value
+    asm.Assembler.encode(asm.Parser.parse(text).value, TargetMode(target, waveSize.unsafe[Int in (32, 64)])).value
   }
 
   private def address(allocation: Long): Long = RegionMemory.Base + (allocation - 1L) * RegionMemory.Stride

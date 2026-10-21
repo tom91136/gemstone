@@ -77,9 +77,9 @@ CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANC
 miniapps.
 
 CI also splits the CUDA and AMD routes by architecture. `sh artifacts/shard.sh <target-set> <index> <count> <backend>...`
-prints the `build` selectors of one shard, dealing the architectures of those backends out round-robin. A shard whose
-architectures need a support closure it does not own rebuilds the route that owns it, so those artifacts repeat across
-shards.
+prints the `build` selectors of one shard, cutting the architectures of those backends, in route order, into equal
+consecutive slices. A shard names its routes in `CONFORMANCE_SHARD_ROUTES`, so its own first route of each support
+closure builds that closure; the closures are identical, so the shards' artifacts unpack over each other.
 
 ## Driver
 

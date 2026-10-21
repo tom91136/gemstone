@@ -25,7 +25,7 @@ class MatrixSuite extends munit.FunSuite {
       LaunchGeometry.Dimensions.One,
       Vec(KernelTask.Argument.Memory(out, 0L), KernelTask.Argument.Memory(in, 0L))
     ).value
-    program.execute(task, memory, TaskControl(), _ => Right(())).value
+    program.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))).value
     memory.readWords(out, (32 * probe.d).unsafe[Int >= 0])
   }
 

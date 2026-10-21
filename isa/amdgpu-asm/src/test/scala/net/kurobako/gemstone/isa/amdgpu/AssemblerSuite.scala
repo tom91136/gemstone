@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.amdgpu.asm.*
 class AssemblerSuite extends munit.FunSuite {
   private val target                   = Target("gfx1030")
   private def assemble(source: String) = Parser.parse(source).left.map(_.toString)
-    .flatMap(Assembler.encode(_, target).left.map(_.toString))
+    .flatMap(Assembler.encode(_, TargetMode(target)).left.map(_.toString))
 
   test("forward and backward branches account for literal words and instruction alignment") {
     val source =

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import fixtures.*
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
@@ -30,8 +31,29 @@ class ProgramExecutionSuite extends munit.FunSuite {
 
     val loaded = LoadedProgram.load(program)
     assertEquals(
-      loaded.execute(singleTask(), RejectingMemory(), TaskControl(), _ => Right(())),
+      loaded.execute(singleTask(), TaskContext(RejectingMemory(), TaskControl(), _ => Right(()))),
       Left(Fault.InvalidRequest("invalid ELF section table"))
     )
+  }
+
+  private def loaded(code: Array[Byte]): LoadedProgram =
+    LoadedProgram.load(CodeObject.decode(Vec.unsafeWrapArray(
+      elfImage.amdgpu(code, kernargSize = 0, kernelCodeProperties = 0x0a)
+    )).value)
+
+  test("building a kernel reports a compile failure and an absent kernel, and a built kernel launches") {
+    val context = TaskContext(RegionMemory(), TaskControl(), _ => Right(()))
+    val fine    = loaded(bytes.words(0xbf810000))
+    assertEquals(fine.build("kernel"), Right(()))
+    assertEquals(fine.execute(singleTask(), context), Right(()))
+    fine.build("absent") match {
+      case Left(Fault.NotFound(_)) => ()
+      case other                   => fail(s"expected a missing kernel, got $other")
+    }
+    val broken = loaded(Array.fill(4)(0xff.toByte))
+    broken.build("kernel") match {
+      case Left(Fault.InvalidProgram(_)) => ()
+      case other                         => fail(s"expected an invalid program, got $other")
+    }
   }
 }

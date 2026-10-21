@@ -22,7 +22,7 @@ object InstructionDefinitions {
       guard: Option[Guard]
   ): Either[String, Instruction] = {
     val decoders = byMnemonic.getOrElse(mnemonic, Vec.empty[FormDecoder])
-    decoders.view.flatMap(_.decode(modifiers, operands, guard)).headOption
+    decoders.view.flatMap(_.decode(operands)).headOption.map(Instruction(_, modifiers, guard))
       .toRight(if (decoders.isEmpty) s"unknown SASS mnemonic $mnemonic"
       else s"invalid operands for $mnemonic: $operands")
   }

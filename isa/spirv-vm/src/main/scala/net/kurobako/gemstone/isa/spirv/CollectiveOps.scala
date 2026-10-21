@@ -1437,7 +1437,7 @@ private object CollectiveOps {
             }
           case CollectiveKind.MatrixRows =>
             val Vec(rows, columns, use, componentBits, elementBits) = expected.selector.map(_.toInt): @unchecked
-            val shape = VMProgram.CooperativeMatrix(0, Scope.Subgroup, rows, columns, use.toLong, nv = false)
+            val shape = VMProgram.CooperativeMatrix(0, rows, columns, use.toLong, nv = false)
             lanesOf("OpCompositeConstructCoopMatQCOM").map { inputs =>
               val matrix = Array.ofDim[Long](rows * columns)
               participants.zip(inputs).foreach { (execution, elements) =>

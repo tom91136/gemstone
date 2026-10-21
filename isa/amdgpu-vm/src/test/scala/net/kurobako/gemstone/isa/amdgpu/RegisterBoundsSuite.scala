@@ -12,7 +12,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
   test("decoder rejects scalar pairs that cross the 128-slot bank") {
     val target   = Target("gfx900")
     val parsed   = asm.Parser.parse("s_mov_b64 s[0:1], 0").value
-    val bytes    = asm.Assembler.encode(parsed, target).value
+    val bytes    = asm.Assembler.encode(parsed, TargetMode(target)).value
     val lastPair = bytes.updated(2, ((bytes(2) & 0x80) | 126).toByte)
     val crossing = bytes.updated(2, (bytes(2) | 127).toByte)
     assert(VMCompiler.decodeInstruction(lastPair, target).isRight)
@@ -23,7 +23,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
   test("decoder rejects scalar loads crossing the bank boundary") {
     val target = Target("gfx900")
     val parsed = asm.Parser.parse("s_load_dwordx4 s[124:127], s[0:1], 0").value
-    val bytes  = asm.Assembler.encode(parsed, target).value
+    val bytes  = asm.Assembler.encode(parsed, TargetMode(target)).value
     assert(VMCompiler.decodeInstruction(bytes, target).isRight)
     val field = InstructionLayout.Catalogue.forFormat(target, EncodingFormat.SMEM).get.byName(EncodingField.SDATA)
     val word  = bytes.zipWithIndex.foldLeft(0L) { case (word, (byte, index)) =>
@@ -38,7 +38,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
   test("ldexp decodes a scalar exponent in the final vector register") {
     val target = Target("gfx900")
     val parsed = asm.Parser.parse("v_ldexp_f64 v[0:1], v[2:3], v255").value
-    assert(VMCompiler.decodeInstruction(asm.Assembler.encode(parsed, target).value, target).isRight)
+    assert(VMCompiler.decodeInstruction(asm.Assembler.encode(parsed, TargetMode(target)).value, target).isRight)
   }
 
   test("register spans fit their banks before execution") {
@@ -145,7 +145,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
   test("decoding rejects a register pair that crosses the bank boundary") {
     val target = Target("gfx900")
     val parsed = asm.Parser.parse("v_add_f64 v[254:255], v[0:1], v[2:3]").value
-    val bytes  = asm.Assembler.encode(parsed, target).value
+    val bytes  = asm.Assembler.encode(parsed, TargetMode(target)).value
     assert(VMCompiler.decodeInstruction(bytes, target).isRight)
     // VOP3 VDST is the low byte; v255 is encodable but cannot start a register pair.
     val invalid = bytes.updated(0, 255.toByte)

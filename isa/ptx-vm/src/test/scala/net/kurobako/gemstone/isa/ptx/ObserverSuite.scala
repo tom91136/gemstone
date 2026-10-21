@@ -43,7 +43,10 @@ class ObserverSuite extends munit.FunSuite {
             Right(())
           case other => Left(Fault.InvalidRequest(s"unexpected state $other"))
         }
-      assertEquals(program.execute(task, memory, TaskControl(observer = Some(observer)), _ => Right(())), Right(()))
+      assertEquals(
+        program.execute(task, TaskContext(memory, TaskControl(observer = Some(observer)), _ => Right(()))),
+        Right(())
+      )
       assertEquals(seen.map(_._1).distinct.toVector, Vector(0L, 1L, 2L, 3L))
       val lanes = Vec(0, 1)
       assert(seen.forall(_._2 == lanes), seen)

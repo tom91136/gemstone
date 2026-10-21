@@ -31,12 +31,15 @@ class PTXBackendSuite extends munit.FunSuite {
         LaunchGeometry.Dimensions.One,
         Vec.empty
       ).value
-      program.execute(task, RejectingMemory(), TaskControl(), _ => Right(()))
+      program.execute(task, TaskContext(RejectingMemory(), TaskControl(), _ => Right(())))
         .fold(error => fail(error.message), value => value)
 
       val cancelled = TaskControl()
       cancelled.cancel()
-      assertEquals(program.execute(task, RejectingMemory(), cancelled, _ => Right(())), Left(Fault.Cancelled))
+      assertEquals(
+        program.execute(task, TaskContext(RejectingMemory(), cancelled, _ => Right(()))),
+        Left(Fault.Cancelled)
+      )
       assertEquals(program.global("unused").left.map(_.message: String), Left("PTX global 'unused' is not present"))
     }
   }

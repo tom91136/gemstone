@@ -2,6 +2,7 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.util.control.NonFatal
@@ -40,7 +41,7 @@ object ExecutionHandler {
     case request @ Operation.SpecializeImage(image, constants) =>
       encode(request, session.specializeImage(image, constants))
     case request @ Operation.PrepareShader(image, entry, stage, constants) =>
-      encode(request, session.prepareShader(image, entry, stage, constants))
+      encode(request, session.prepareShader(ShaderStage(image, entry, stage, constants)))
     case request @ Operation.SubmitGraphics(submission)         => encode(request, session.submitGraphics(submission))
     case request @ Operation.ReadGraphicsStatistics(completion) =>
       encode(request, session.readGraphicsStatistics(completion))
@@ -58,6 +59,8 @@ object ExecutionHandler {
       encode(request, session.bindGlobal(program, name, allocation, offset))
     case request @ Operation.WriteProgramGlobal(program, name, offset, bytes) =>
       encode(request, session.writeGlobal(program, name, offset, bytes))
+    case request @ Operation.BuildKernel(program, kernelName) =>
+      encode(request, session.build(program, kernelName))
     case request @ Operation.Launch(
           program,
           kernelName,

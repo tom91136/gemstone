@@ -21,13 +21,17 @@ object OperandDomains {
       * 8-bit elements 3, 2, 1 and 0. The indices are the ones the selector writes, most significant first.
       */
     def elements(value: String): Option[(Vec[Int], Int in (8, 16))] =
-      if (value.length == 3 && value.head == 'h' && value.tail.forall(_.isDigit)) {
-        val indices = value.tail.toVector.map(_.asDigit)
-        if (indices.forall(_ < 4)) Some((Vec.from(indices), 16)) else None
-      } else if (value.length == 5 && value.head == 'b' && value.tail.forall(_.isDigit)) {
-        val indices = value.tail.toVector.map(_.asDigit)
-        if (indices.forall(_ < 8)) Some((Vec.from(indices), 8)) else None
-      } else None
+      if (value.length == 3 && value.head == 'h' && value.tail.forall(_.isDigit))
+        elementsOf(value, count = 4, bits = 16)
+      else if (value.length == 5 && value.head == 'b' && value.tail.forall(_.isDigit))
+        elementsOf(value, count = 8, bits = 8)
+      else None
+
+    /** The elements the selector names, when each of them is below `count` and the pair holds them in `bits` bits. */
+    private def elementsOf(value: String, count: Int, bits: Int in (8, 16)): Option[(Vec[Int], Int in (8, 16))] = {
+      val indices = value.tail.toVector.map(_.asDigit)
+      if (indices.forall(_ < count)) Some((Vec.from(indices), bits)) else None
+    }
 
     /** The text an element selector writes. */
     def spelling(indices: Vec[Int], bits: Int): NonEmpty[String] =

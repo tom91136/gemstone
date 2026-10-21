@@ -110,7 +110,7 @@ public:
     uint64_t offset;
     std::optional<uint64_t> range = std::nullopt;
   };
-  std::atomic<unsigned> launches{0}, reads{0}, programLoads{0}, programUnloads{0};
+  std::atomic<unsigned> launches{0}, reads{0}, programLoads{0}, programUnloads{0}, kernelBuilds{0};
   std::atomic_bool completionEntered{false};
 
   explicit RpcFixture(bool unixSocket = false) {
@@ -246,6 +246,10 @@ public:
     std::scoped_lock const lock(stateMutex);
     expectedGlobals.emplace(std::move(name), std::make_pair(offset, std::move(initial)));
   }
+  void describeGlobal(std::string name, uint64_t size) {
+    std::scoped_lock const lock(stateMutex);
+    describedGlobals.emplace(std::move(name), size);
+  }
   size_t allocationCount() {
     std::scoped_lock const lock(stateMutex);
     return allocations.size();
@@ -314,6 +318,11 @@ public:
     std::scoped_lock const lock(stateMutex);
     rejectedOperation = operation;
     rejectedKind = kind;
+  }
+  // The next request with this operation tag closes its connection without a response.
+  void dropNext(std::string_view operation) {
+    std::scoped_lock const lock(stateMutex);
+    droppedOperation = operation;
   }
   void failNextCompletion(FailureKind kind = FailureKind::Failed) {
     completionKind = kind;
@@ -472,6 +481,10 @@ private:
       bool failed = false;
       std::string failure = "completion failed";
       auto failureKind = completionKind;
+      if (operationTag == droppedOperation) {
+        droppedOperation.clear();
+        return;
+      }
       if (operationTag == rejectedOperation) {
         rejectedOperation.clear();
         failed = true;
@@ -590,6 +603,13 @@ private:
         }
         programGlobals.clear();
         encodePayload(result, catalogue);
+      } else if (operationTag == operation::DescribeGlobal) {
+        const auto request = decodePayload<DescribeGlobal>(payload);
+        const auto described = describedGlobals.find(request.name.value);
+        GEMSTONE_RPC_REQUIRE(livePrograms.contains(request.program.value) && described != describedGlobals.end());
+        gemstone::execution::ProgramGlobal global{};
+        global.size = {static_cast<int64_t>(described->second)};
+        encodePayload(result, global);
       } else if (operationTag == operation::BindProgramGlobal) {
         const auto request = decodePayload<BindProgramGlobal>(payload);
         const auto name = request.name.value;
@@ -602,6 +622,11 @@ private:
         GEMSTONE_RPC_REQUIRE(offset <= memory.size() && initial.size() <= memory.size() - offset);
         std::copy(initial.begin(), initial.end(), memory.data() + offset);
         expectedGlobals.erase(expected);
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::BuildKernel) {
+        const auto request = decodePayload<BuildKernel>(payload);
+        GEMSTONE_RPC_REQUIRE(livePrograms.contains(request.program.value) && !request.kernelName.value.empty());
+        ++kernelBuilds;
         encodePayload(result, Unit{});
       } else if (operationTag == operation::Launch) {
         launch(payload);
@@ -922,7 +947,8 @@ private:
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals;
   std::vector<std::pair<uint64_t, uint32_t>> ranges;
   std::atomic_bool failGraphicsStatistics{false};
-  std::string rejectedOperation;
+  std::string rejectedOperation, droppedOperation;
+  std::map<std::string, uint64_t> describedGlobals;
   FailureKind rejectedKind = FailureKind::Failed;
   FailureKind completionKind = FailureKind::Failed;
   std::atomic_bool failCompletion{false};

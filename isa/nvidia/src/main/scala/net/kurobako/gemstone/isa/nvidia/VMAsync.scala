@@ -57,7 +57,7 @@ private object VMAsync {
       case None if VMAddressSpace.isShared(address, size) =>
         sharedTarget(context, address, size.raw, "tensor map").map((owner, start) => readShared(owner, start, size))
       case None =>
-        context.memory.read(GuestAddress(address), size).map(Vec.toArray(_)).leftMap(located(context, lane))
+        context.device.memory.read(GuestAddress(address), size).map(Vec.toArray(_)).leftMap(located(context, lane))
     }
 
   private def writeGeneric(context: VMContext, lane: WorkgroupLane, address: Long, bytes: Array[Byte])
@@ -66,7 +66,7 @@ private object VMAsync {
       sharedTarget(context, address, bytes.length, "tensor map").map((owner, start) =>
         owner.writeSharedBytes(start, bytes, 0, bytes.length)
       )
-    else context.memory.write(GuestAddress(address), Vec.unsafeWrapArray(bytes)).leftMap(located(context, lane))
+    else context.device.memory.write(GuestAddress(address), Vec.unsafeWrapArray(bytes)).leftMap(located(context, lane))
 
   /** The cluster ranks a multicast mask names, or this CTA's alone. */
   private def destinations(context: VMContext, mask: Option[Long]): Either[Fault, Vec[VMWorkgroup]] = mask match {
@@ -183,8 +183,9 @@ private object VMAsync {
               Vec.from(0 until bytes.toInt by width).traverse_ { offset =>
                 val operand = LittleEndian.decode(data, offset, element.size)
                 combine(0L, operand).flatMap(_ =>
-                  context.memory.atomicModifyValue(GuestAddress(target + offset), width.unsafe[Int in 1 ~ 8])(old =>
-                    operator(element, old, operand).getOrElse(old)
+                  context.device.memory.atomicModifyValue(GuestAddress(target + offset), width.unsafe[Int in 1 ~ 8])(
+                    old =>
+                      operator(element, old, operand).getOrElse(old)
                   ).map(_ => ()).leftMap(located(context, lane))
                 )
               }
@@ -224,6 +225,12 @@ private object VMAsync {
             (),
             Fault.Backend(s"tensor copy does not match its ${descriptor.rank}D ${descriptor.mode} tensor map")
           )
+          // the interleaved layouts are not verified on hardware, so a copy in the plain layout would be silently wrong
+          _ <- Either.cond(
+            operation == TensorMap.Operation.Prefetch || descriptor.interleave == 0,
+            (),
+            Fault.Backend(s"tensor maps with interleave ${descriptor.interleave} are not modelled")
+          )
           _ <- operation match {
             case TensorMap.Operation.Reduce(_) if descriptor.element.packed =>
               Left(Fault.Backend(s"tensor reductions have no ${descriptor.element} form"))
@@ -245,7 +252,7 @@ private object VMAsync {
                   sharedTarget(context, context.read(lane, shared), copy.bytes, "tensor copy destination")
                 (signalled, barrierWord) <- barrier.toRight(Fault.Backend("tensor load without an mbarrier"))
                   .flatMap(word => sharedTarget(context, context.read(lane, word), 8, "tensor copy mbarrier"))
-                data    <- copy.load(context.memory).leftMap(located(context, lane))
+                data    <- copy.load(context.device.memory).leftMap(located(context, lane))
                 targets <-
                   if (multicast.isEmpty) Right(Vec(owner))
                   else destinations(context, multicast.map(context.read(lane, _)))
@@ -260,7 +267,7 @@ private object VMAsync {
                 (owner, start) =>
                   val data = Array.ofDim[Byte](copy.bytes.toInt)
                   copy.place(data, start)((offset, from, count) => owner.readSharedBytes(offset, data, from, count))
-                  copy.store(context.memory, data, operation).leftMap(located(context, lane))
+                  copy.store(context.device.memory, data, operation).leftMap(located(context, lane))
               }
           }
         } yield ()

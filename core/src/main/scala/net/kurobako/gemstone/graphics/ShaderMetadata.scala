@@ -2,6 +2,7 @@ package net.kurobako.gemstone.graphics
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
@@ -43,6 +44,14 @@ object ShaderMetadata {
       qualifiers: ShaderQualifiers,
       fields: Vec[ShaderField]
   ) derives Codec
+
+  /** A shader entry point of an image, with the specialization constants applied before it is prepared. */
+  case class ShaderStage(
+      image: Vec[Byte],
+      entry: NonEmpty[String],
+      kind: ShaderStageKind,
+      constants: Vec[SpecializationConstant]
+  )
 
   case class PreparedShader(
       image: Vec[Byte],

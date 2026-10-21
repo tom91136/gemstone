@@ -243,7 +243,7 @@ private object ConversionOps {
                 case Some(RuntimeType.Pointer(storageClass, pointee)) if program.integerShape(sourceType).nonEmpty =>
                   repack(program, sourceType, resultType, lanes).flatMap { bits =>
                     program.runtimeType(pointee) match {
-                      case Some(RuntimeType.Function(_, _)) => Right(VMValue.Bits(resultType, bits))
+                      case Some(RuntimeType.Function) => Right(VMValue.Bits(resultType, bits))
                       case _ => Right(VMValue.Address(resultType, Pointer(bits(0), pointee, storageClass)))
                     }
                   }

@@ -41,7 +41,8 @@ private object VMTensorMemory {
   private def chunk(owner: VMWorkgroup, offset: Long): Array[Byte] =
     Array.tabulate(16)(index => byte(owner, offset + index).toByte)
 
-  def execute(instruction: Instruction, context: VMContext, effects: VMWriteBuffer): Either[Fault, Step] =
+  def execute(instruction: Instruction, context: VMContext): Either[Fault, Step] = {
+    val effects = context.effects
     (instruction: @unchecked) match {
       case Instruction.TensorMemoryAllocate(destination, columns) =>
         warps(context) { (lane, _) =>
@@ -113,6 +114,7 @@ private object VMTensorMemory {
         )
           .map(_ => Step.Advance)
     }
+  }
 
   /** The active lanes of each warp with any, for operations a warp issues once on its uniform datapath. */
   private def issuers(context: VMContext): Vec[Vec[WorkgroupLane]] =

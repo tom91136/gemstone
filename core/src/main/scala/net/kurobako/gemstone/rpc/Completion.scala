@@ -10,8 +10,7 @@ import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
 private object Completion {
-  type Execute =
-    (AddressSpace, TaskControl, Event => Either[Fault, Unit]) => Either[Fault, Option[GraphicsStatistics]]
+  type Execute = TaskContext => Either[Fault, Option[GraphicsStatistics]]
 
   private enum HostSyncState derives CanEqual {
     case AwaitingIssue

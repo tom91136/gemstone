@@ -214,7 +214,7 @@ object SASSInstructionRenderer {
        |  private lazy val byMnemonic: Map[String, Vec[FormDecoder]] = decoders.groupBy(_.definition.mnemonic.raw)
        |  def decode(mnemonic: String, modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Either[String, Instruction] = {
        |    val decoders = byMnemonic.getOrElse(mnemonic, Vec.empty[FormDecoder])
-       |    decoders.view.flatMap(_.decode(modifiers, operands, guard)).headOption
+       |    decoders.view.flatMap(_.decode(operands)).headOption.map(Instruction(_, modifiers, guard))
        |      .toRight(if (decoders.isEmpty) s"unknown SASS mnemonic $$mnemonic"
        |               else s"invalid operands for $$mnemonic: $$operands")
        |  }

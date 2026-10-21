@@ -38,11 +38,8 @@ class SASSSymbolsSuite extends munit.FunSuite {
 
     def compile(secondDefault: Int): Vector[SASSSymbols.Vocabulary] = {
       val description = SASSDescription.Description(
-        None,
         s"REGISTERS\n A FIRST *=0; B SECOND *=$secondDefault; C = A + B;\nTABLES",
-        Vector.empty,
-        Vector.empty,
-        ""
+        Vector.empty
       )
       SASSSymbols.compile(description)
     }

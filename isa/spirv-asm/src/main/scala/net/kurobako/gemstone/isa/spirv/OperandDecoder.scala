@@ -18,7 +18,7 @@ private object OperandDecoder {
       shapes: Vec[OperandShape],
       kinds: Map[OperandKind, OperandKindInfo]
   ): Either[InstructionDecodeError, DecodedOperands] =
-    decodeShapes(opcode, words, shapes, kinds, index = 0, offset = 0, Chain.empty)
+    Reader(opcode, words, kinds).decodeShapes(shapes, index = 0, offset = 0, Chain.empty)
       .map(fields => DecodedOperands(Vec.from(fields.toVector.view)))
   def decodeSwitch64(
       opcode: NonEmpty[String],
@@ -41,146 +41,106 @@ private object OperandDecoder {
       Right(DecodedOperands(Vec(Vec(selector), Vec(default), Vec.from(targets))))
     }
 
-  private def decodeShapes(
-      opcode: NonEmpty[String],
-      words: Vec[Word],
-      shapes: Vec[OperandShape],
-      kinds: Map[OperandKind, OperandKindInfo],
-      index: Int,
-      offset: Int,
-      fields: Chain[Vec[Operand]]
-  ): Either[InstructionDecodeError, Chain[Vec[Operand]]] =
-    if (index >= shapes.size) {
-      if (offset == words.size) Right(fields)
-      else Left(InstructionDecodeError.InvalidOperandCount(
-        opcode,
-        s"${words.size - offset} trailing words"
-      ))
-    } else {
-      val shape  = shapes(index)
-      def single = decodeOne(opcode, shape.kind, words, offset, kinds).flatMap { case (operand, next) =>
-        decodeShapes(opcode, words, shapes, kinds, index + 1, next, fields.append(Vec(operand)))
-      }
-      shape.quantifier match {
-        case OperandQuantifier.One      => single
-        case OperandQuantifier.Optional =>
-          if (offset == words.size)
-            decodeShapes(opcode, words, shapes, kinds, index + 1, offset, fields.append(Vec.empty))
-          else single
-        case OperandQuantifier.Repeated =>
-          decodeRepeated(opcode, shape.kind, words, offset, kinds, Chain.empty).flatMap { case (operands, next) =>
-            decodeShapes(
-              opcode,
-              words,
-              shapes,
-              kinds,
-              index + 1,
-              next,
-              fields.append(Vec.from(operands.toVector.view))
-            )
-          }
-      }
-    }
-
-  private def decodeRepeated(
-      opcode: NonEmpty[String],
-      kind: OperandKind,
-      words: Vec[Word],
-      offset: Int,
-      kinds: Map[OperandKind, OperandKindInfo],
-      operands: Chain[Operand]
-  ): Either[InstructionDecodeError, (Chain[Operand], Int)] =
-    if (offset >= words.size) Right(operands -> offset)
-    else
-      decodeOne(opcode, kind, words, offset, kinds).flatMap { case (operand, next) =>
-        decodeRepeated(opcode, kind, words, next, kinds, operands.append(operand))
+  /** Decodes the operands of one instruction from its `words`. */
+  private class Reader(opcode: NonEmpty[String], words: Vec[Word], kinds: Map[OperandKind, OperandKindInfo]) {
+    def decodeShapes(
+        shapes: Vec[OperandShape],
+        index: Int,
+        offset: Int,
+        fields: Chain[Vec[Operand]]
+    ): Either[InstructionDecodeError, Chain[Vec[Operand]]] =
+      if (index >= shapes.size) {
+        if (offset == words.size) Right(fields)
+        else Left(InstructionDecodeError.InvalidOperandCount(
+          opcode,
+          s"${words.size - offset} trailing words"
+        ))
+      } else {
+        val shape  = shapes(index)
+        def single = decodeOne(shape.kind, offset).flatMap { case (operand, next) =>
+          decodeShapes(shapes, index + 1, next, fields.append(Vec(operand)))
+        }
+        shape.quantifier match {
+          case OperandQuantifier.One      => single
+          case OperandQuantifier.Optional =>
+            if (offset == words.size) decodeShapes(shapes, index + 1, offset, fields.append(Vec.empty))
+            else single
+          case OperandQuantifier.Repeated =>
+            decodeRepeated(shape.kind, offset, Chain.empty).flatMap { case (operands, next) =>
+              decodeShapes(shapes, index + 1, next, fields.append(Vec.from(operands.toVector.view)))
+            }
+        }
       }
 
-  private def decodeOne(
-      opcode: NonEmpty[String],
-      kind: OperandKind,
-      words: Vec[Word],
-      offset: Int,
-      kinds: Map[OperandKind, OperandKindInfo]
-  ): Either[InstructionDecodeError, (Operand, Int)] =
-    if (offset >= words.size)
-      Left(InstructionDecodeError.InvalidOperandCount(opcode, s"missing $kind at word $offset"))
-    else if (kind == OperandKind.LiteralString) decodeString(opcode, kind, words, offset)
-    else if (kind == OperandKind.LiteralContextDependentNumber)
-      Right(Operand(kind, words.drop(offset).unsafe) -> words.size)
-    else if (kind.category == OperandKind.Category.Composite)
-      decodeSpan(opcode, kind, words, offset, offset, kind.components, kinds)
-    else kinds.get(kind) match {
-      case Some(info) if info.kind.category == OperandKind.Category.ValueEnum =>
-        decodeValueEnum(opcode, info, words, offset, kinds)
-      case Some(info) if info.kind.category == OperandKind.Category.BitEnum =>
-        decodeBitEnum(opcode, info, words, offset, kinds)
-      case _ => Right(Operand(kind, Vec.nonEmpty(words(offset))) -> (offset + 1))
+    private def decodeRepeated(
+        kind: OperandKind,
+        offset: Int,
+        operands: Chain[Operand]
+    ): Either[InstructionDecodeError, (Chain[Operand], Int)] =
+      if (offset >= words.size) Right(operands -> offset)
+      else
+        decodeOne(kind, offset).flatMap { case (operand, next) =>
+          decodeRepeated(kind, next, operands.append(operand))
+        }
+
+    private def decodeOne(kind: OperandKind, offset: Int): Either[InstructionDecodeError, (Operand, Int)] =
+      if (offset >= words.size)
+        Left(InstructionDecodeError.InvalidOperandCount(opcode, s"missing $kind at word $offset"))
+      else if (kind == OperandKind.LiteralString) decodeString(kind, offset)
+      else if (kind == OperandKind.LiteralContextDependentNumber)
+        Right(Operand(kind, words.drop(offset).unsafe) -> words.size)
+      else if (kind.category == OperandKind.Category.Composite)
+        decodeSpan(kind, offset, offset, kind.components)
+      else kinds.get(kind) match {
+        case Some(info) if info.kind.category == OperandKind.Category.ValueEnum => decodeValueEnum(info, offset)
+        case Some(info) if info.kind.category == OperandKind.Category.BitEnum   => decodeBitEnum(info, offset)
+        case _ => Right(Operand(kind, Vec.nonEmpty(words(offset))) -> (offset + 1))
+      }
+
+    private def decodeString(kind: OperandKind, offset: Int): Either[InstructionDecodeError, (Operand, Int)] =
+      words.indexWhere(
+        word =>
+          (0 until 4).exists(byte =>
+            Bits.unsignedField(word.toUnsigned.toLong, byte * 8, 8) == 0L
+          ),
+        offset
+      ) match {
+        case -1  => Left(InstructionDecodeError.UnterminatedString(opcode))
+        case end => Right(Operand(kind, words.slice(offset, end + 1).unsafe) -> (end + 1))
+      }
+
+    private def decodeValueEnum(info: OperandKindInfo, offset: Int): Either[InstructionDecodeError, (Operand, Int)] = {
+      val value = words(offset).toUnsigned.toLong
+      info.enumerants.find(_.value == value) match {
+        case None            => Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
+        case Some(enumerant) => decodeSpan(info.kind, offset, offset + 1, enumerant.parameterKinds)
+      }
     }
 
-  private def decodeString(
-      opcode: NonEmpty[String],
-      kind: OperandKind,
-      words: Vec[Word],
-      offset: Int
-  ): Either[InstructionDecodeError, (Operand, Int)] =
-    words.indexWhere(
-      word =>
-        (0 until 4).exists(byte =>
-          Bits.unsignedField(word.toUnsigned.toLong, byte * 8, 8) == 0L
-        ),
-      offset
-    ) match {
-      case -1  => Left(InstructionDecodeError.UnterminatedString(opcode))
-      case end => Right(Operand(kind, words.slice(offset, end + 1).unsafe) -> (end + 1))
+    private def decodeBitEnum(info: OperandKindInfo, offset: Int): Either[InstructionDecodeError, (Operand, Int)] = {
+      val value       = words(offset).toUnsigned.toLong
+      val enumerants  = ExtensionEnumerants.of(info)
+      val allowedMask = enumerants.foldLeft(0L)(_ | _.value)
+      if ((value & ~allowedMask) != 0L) Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
+      else {
+        val parameterKinds = enumerants.filter { enumerant =>
+          if (enumerant.value == 0L) value == 0L else (value & enumerant.value) == enumerant.value
+        }.flatMap(_.parameterKinds)
+        decodeSpan(info.kind, offset, offset + 1, parameterKinds)
+      }
     }
 
-  private def decodeValueEnum(
-      opcode: NonEmpty[String],
-      info: OperandKindInfo,
-      words: Vec[Word],
-      offset: Int,
-      kinds: Map[OperandKind, OperandKindInfo]
-  ): Either[InstructionDecodeError, (Operand, Int)] = {
-    val value = words(offset).toUnsigned.toLong
-    info.enumerants.find(_.value == value) match {
-      case None            => Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
-      case Some(enumerant) => decodeSpan(opcode, info.kind, words, offset, offset + 1, enumerant.parameterKinds, kinds)
-    }
+    /** One operand of `outerKind` from `offset`, whose nested operands of `parts` start at `first`. */
+    private def decodeSpan(
+        outerKind: OperandKind,
+        offset: Int,
+        first: Int,
+        parts: Seq[OperandKind]
+    ): Either[InstructionDecodeError, (Operand, Int)] =
+      parts
+        .foldLeft[Either[InstructionDecodeError, Int]](Right(first)) { (next, part) =>
+          next.flatMap(current => decodeOne(part, current).map(_._2))
+        }
+        .map(next => Operand(outerKind, words.slice(offset, next).unsafe) -> next)
   }
-
-  private def decodeBitEnum(
-      opcode: NonEmpty[String],
-      info: OperandKindInfo,
-      words: Vec[Word],
-      offset: Int,
-      kinds: Map[OperandKind, OperandKindInfo]
-  ): Either[InstructionDecodeError, (Operand, Int)] = {
-    val value       = words(offset).toUnsigned.toLong
-    val enumerants  = ExtensionEnumerants.of(info)
-    val allowedMask = enumerants.foldLeft(0L)(_ | _.value)
-    if ((value & ~allowedMask) != 0L) Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
-    else {
-      val parameterKinds = enumerants.filter { enumerant =>
-        if (enumerant.value == 0L) value == 0L else (value & enumerant.value) == enumerant.value
-      }.flatMap(_.parameterKinds)
-      decodeSpan(opcode, info.kind, words, offset, offset + 1, parameterKinds, kinds)
-    }
-  }
-
-  /** One operand of `outerKind` from `offset`, whose nested operands of `parts` start at `first`. */
-  private def decodeSpan(
-      opcode: NonEmpty[String],
-      outerKind: OperandKind,
-      words: Vec[Word],
-      offset: Int,
-      first: Int,
-      parts: Seq[OperandKind],
-      kinds: Map[OperandKind, OperandKindInfo]
-  ): Either[InstructionDecodeError, (Operand, Int)] =
-    parts
-      .foldLeft[Either[InstructionDecodeError, Int]](Right(first)) { (next, part) =>
-        next.flatMap(current => decodeOne(opcode, part, words, current, kinds).map(_._2))
-      }
-      .map(next => Operand(outerKind, words.slice(offset, next).unsafe) -> next)
 }

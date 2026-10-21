@@ -176,27 +176,23 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         Vec(KernelMetadata.Parameter(8, 0, KernelMetadata.ParameterKind.Allocation, false))
       )
         .left.map(Fault.InvalidRequest(_))
-      override def execute(
-          task: KernelTask,
-          memory: AddressSpace,
-          control: TaskControl,
-          handler: Event => Either[Fault, Unit]
-      ): Either[Fault, Unit] = {
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
         val region = task.arguments.head match {
           case KernelTask.Argument.Memory(region, _, _) => region
           case _                                        => fail("prepared argument is not memory")
         }
-        captured += memory -> region
+        captured += context.memory -> region
         if (standalone) {
           assert(task.pointerRelocations.isEmpty)
-          val bias = memory.readValue(region, (ImageDescriptor.SamplerWord.MipLodBias * 4L).unsafe, 4).toOption.get
+          val bias =
+            context.memory.readValue(region, (ImageDescriptor.SamplerWord.MipLodBias * 4L).unsafe, 4).toOption.get
           assertEquals(java.lang.Float.intBitsToFloat(bias.toInt), -0.75f)
         } else {
           val texels = task.pointerRelocations.find(r =>
             r.source == KernelTask.RelocationSource.Memory(region) &&
               r.sourceOffset.raw == ImageDescriptor.Layout.Texels
           ).get
-          val red = memory.readValue(texels.target, 0L, 4).toOption.get.toInt
+          val red = context.memory.readValue(texels.target, 0L, 4).toOption.get.toInt
           assertEqualsFloat(java.lang.Float.intBitsToFloat(red), 2f / 255f, 0.000001f)
         }
         if (reject) Left(Fault.Backend("consumer rejected execution")) else Right(())

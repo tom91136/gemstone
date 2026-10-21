@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import EncodingConstants.*
 import VMIR.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
@@ -101,6 +102,7 @@ private object references {
     }
   }
 
+  @annotation.tailrec
   def trigF32(operation: VectorConvertOperation, value: Float): Float = operation match {
     case VectorConvertOperation.SineF32   => unit32(TranscendentalUnit.sine32, value)
     case VectorConvertOperation.CosineF32 => unit32(TranscendentalUnit.cosine32, value)
@@ -244,7 +246,7 @@ private object references {
     val halves = Vector(left & 0xffffL, right & 0xffffL, (left >>> 16) & 0xffffL, (right >>> 16) & 0xffffL)
     def widened(half: Long): Long = ((half & 0x8000L) << 16) | 0x7fc00000L | ((half & 0x3ffL) << 13)
     def value(half: Long): Double = IEEE754.binary16ToFloat(Bits.low16(half)).toDouble
-    val nan                       = halves.find(IEEE754.isNaN(_, 16)).map(widened).orElse(
+    val nan                       = halves.find(IEEE754.isNaN(_, 16)).map(widened(_)).orElse(
       Option.when(IEEE754.isNaN(accumulator & 0xffffffffL, 32))((accumulator & 0xffffffffL) | 0x00400000L)
     )
     nan.fold {
@@ -269,7 +271,7 @@ private object references {
       val integer  = BigInt(if (exponent == 0) fraction else fraction | (1L << 52)) << math.max(exponent - 1, 0)
       if (bits < 0L) -integer else integer
     }
-    val exact = terms.map(scaled).sum
+    val exact = terms.map(scaled(_)).sum
     // an exact zero is -0 only when every term is
     if (exact.signum == 0) if (terms.forall(IEEE754.doubleToBinary64(_) < 0L)) 0x80000000L else 0L
     else {
@@ -428,8 +430,7 @@ private object references {
   /** DS_SWIZZLE's source lane: a quad permutation names the source lane of each of a quad's four lanes; otherwise the
     * pattern's AND, OR and XOR masks rewrite the low five bits of the lane index and the higher bits pass through.
     */
-  def swizzleSourceLane(lane: Int, control: Int): Int = {
-    import EncodingConstants.Swizzle
+  def swizzleSourceLane(lane: Int, control: Int): Int =
     if ((control & Swizzle.QUAD_PERM_ENC_MASK) == Swizzle.QUAD_PERM_ENC)
       (lane & ~3) | ((control >>> ((lane & 3) * 2)) & 3)
     else {
@@ -438,7 +439,6 @@ private object references {
       val xor = (control >>> 10) & 0x1f
       (lane & ~0x1f) | ((((lane & 0x1f) & and) | or) ^ xor)
     }
-  }
 
   def bpermuteSourceLane(address: Long, offset: Long): Int                    = (((address + offset) >>> 2) & 63L).toInt
   def permuteDestinationLane(address: Long, offset: Long, waveSize: Int): Int =

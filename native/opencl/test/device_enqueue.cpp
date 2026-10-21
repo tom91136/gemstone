@@ -8,13 +8,17 @@
 #include <CL/cl.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include "gemstone/test_support.hpp"
+
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "rpc/gemstone_execution_rpc.hpp"
 #include "session.hpp"
+#include <environment_keys.hpp>
 
 using gemstone_opencl_test::gpu;
 using gemstone_opencl_test::hasFeature;
 using gemstone_opencl_test::info;
+using gemstone_opencl_test::requireDeviceEnqueue;
 
 namespace {
 template <class T> T queueInfo(cl_command_queue queue, cl_command_queue_info name) {
@@ -90,6 +94,7 @@ constexpr const char *SpawnSource = R"CLC(
 
 TEST_CASE("OpenCL advertises device-side enqueue with the required limits", "[opencl][device-enqueue]") {
   auto *const device = gpu();
+  requireDeviceEnqueue(device);
   const auto capabilities = info<cl_device_device_enqueue_capabilities>(device, CL_DEVICE_DEVICE_ENQUEUE_CAPABILITIES);
   CHECK((capabilities & CL_DEVICE_QUEUE_SUPPORTED) != 0);
   CHECK((capabilities & CL_DEVICE_QUEUE_REPLACEABLE_DEFAULT) != 0);
@@ -104,8 +109,43 @@ TEST_CASE("OpenCL advertises device-side enqueue with the required limits", "[op
   CHECK(hasFeature(device, "__opencl_c_device_enqueue"));
 }
 
+TEST_CASE("OpenCL reports device-side enqueue as unsupported without a SPIR-V translator", "[opencl][device-enqueue]") {
+  const gemstone_test::Environment translator(gemstone::environment::OpenclLlvmSpirv, "none");
+  Session session;
+  auto *const device = session.device;
+  CHECK(info<cl_device_device_enqueue_capabilities>(device, CL_DEVICE_DEVICE_ENQUEUE_CAPABILITIES) == 0);
+  CHECK(info<cl_command_queue_properties>(device, CL_DEVICE_QUEUE_ON_DEVICE_PROPERTIES) == 0);
+  CHECK(info<cl_uint>(device, CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE) == 0);
+  CHECK(info<cl_uint>(device, CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE) == 0);
+  CHECK(info<cl_uint>(device, CL_DEVICE_MAX_ON_DEVICE_QUEUES) == 0);
+  CHECK(info<cl_uint>(device, CL_DEVICE_MAX_ON_DEVICE_EVENTS) == 0);
+  CHECK(!hasFeature(device, "__opencl_c_device_enqueue"));
+  size_t size = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, 0, nullptr, &size) == CL_SUCCESS));
+  std::string version(size, '\0');
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, size, version.data(), nullptr) == CL_SUCCESS));
+  CHECK(version.rfind("OpenCL C 1.2 ", 0) == 0);
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_ALL_VERSIONS, 0, nullptr, &size) == CL_SUCCESS));
+  std::vector<cl_name_version> versions(size / sizeof(cl_name_version));
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_ALL_VERSIONS, size, versions.data(), nullptr) == CL_SUCCESS));
+  CHECK(std::ranges::none_of(versions, [](const cl_name_version &entry) { return entry.version == CL_MAKE_VERSION(2, 0, 0); }));
+  CHECK(session.create({CL_QUEUE_PROPERTIES, DeviceQueue}) == CL_INVALID_QUEUE_PROPERTIES);
+
+  cl_int error = CL_SUCCESS;
+  const char *text = SpawnSource;
+  auto *program = clCreateProgramWithSource(session.context, 1, &text, nullptr, &error);
+  REQUIRE((program && error == CL_SUCCESS));
+  CHECK(clBuildProgram(program, 1, &device, "-cl-std=CL3.0", nullptr, nullptr) == CL_BUILD_PROGRAM_FAILURE);
+  REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &size) == CL_SUCCESS));
+  std::string log(size, '\0');
+  REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, size, log.data(), nullptr) == CL_SUCCESS));
+  CHECK(log.contains("device-side enqueue is not enabled"));
+  clReleaseProgram(program);
+}
+
 TEST_CASE("OpenCL on-device queues report their size and track the default queue", "[opencl][device-enqueue]") {
   Session session;
+  requireDeviceEnqueue(session.device);
   const auto preferred = info<cl_uint>(session.device, CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE);
   auto *fallback = session.deviceQueue(CL_QUEUE_ON_DEVICE_DEFAULT);
   CHECK(queueInfo<cl_uint>(fallback, CL_QUEUE_SIZE) == preferred);
@@ -129,6 +169,7 @@ TEST_CASE("OpenCL on-device queues report their size and track the default queue
 
 TEST_CASE("OpenCL rejects invalid on-device queue properties", "[opencl][device-enqueue]") {
   Session session;
+  requireDeviceEnqueue(session.device);
   const auto maximum = info<cl_uint>(session.device, CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE);
   CHECK(session.create({CL_QUEUE_PROPERTIES, CL_QUEUE_ON_DEVICE}) == CL_INVALID_VALUE);
   CHECK(session.create({CL_QUEUE_PROPERTIES, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE_DEFAULT}) == CL_INVALID_VALUE);
@@ -138,6 +179,7 @@ TEST_CASE("OpenCL rejects invalid on-device queue properties", "[opencl][device-
 
 TEST_CASE("OpenCL queue_t kernel arguments take device queues", "[opencl][device-enqueue]") {
   Session session;
+  requireDeviceEnqueue(session.device);
   session.server.opaqueLaunches();
   session.server.programCatalogue({{.name = "spawn", .linkageName = "spawn"}}, {});
   session.server.kernelMetadata(
@@ -169,6 +211,7 @@ TEST_CASE("OpenCL queue_t kernel arguments take device queues", "[opencl][device
 
 TEST_CASE("OpenCL creates the reported number of device queues alongside the default queue", "[opencl][device-enqueue]") {
   Session session;
+  requireDeviceEnqueue(session.device);
   session.deviceQueue(CL_QUEUE_ON_DEVICE_DEFAULT);
   for (cl_uint index = 0; index < info<cl_uint>(session.device, CL_DEVICE_MAX_ON_DEVICE_QUEUES); ++index)
     session.deviceQueue();

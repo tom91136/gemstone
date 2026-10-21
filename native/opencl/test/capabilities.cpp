@@ -371,8 +371,44 @@ TEST_CASE("OpenCL libraries stay unloaded until linked into an executable", "[op
   clReleaseProgram(library);
 }
 
+TEST_CASE("OpenCL links programs created from compiled binaries", "[opencl][capability]") {
+  Session session;
+  gemstone_opencl_test::requireSpirvTranslator(session.device);
+  session.server.programCatalogue({{.name = "step", .linkageName = "step"}}, {});
+  const auto compiledBinary = [&](const char *source) {
+    cl_int error = CL_SUCCESS;
+    auto *program = clCreateProgramWithSource(session.context, 1, &source, nullptr, &error);
+    REQUIRE((program && error == CL_SUCCESS));
+    REQUIRE((clCompileProgram(program, 1, &session.device, "-cl-std=CL3.0", 0, nullptr, nullptr, nullptr, nullptr) == CL_SUCCESS));
+    size_t size = 0;
+    REQUIRE((clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(size), &size, nullptr) == CL_SUCCESS));
+    std::vector<unsigned char> binary(size);
+    unsigned char *destination = binary.data();
+    REQUIRE((clGetProgramInfo(program, CL_PROGRAM_BINARIES, sizeof(destination), &destination, nullptr) == CL_SUCCESS));
+    clReleaseProgram(program);
+    const unsigned char *data = binary.data();
+    cl_int status = CL_SUCCESS;
+    auto *loaded = clCreateProgramWithBinary(session.context, 1, &session.device, &size, &data, &status, &error);
+    REQUIRE((loaded && error == CL_SUCCESS && status == CL_SUCCESS));
+    return loaded;
+  };
+  const cl_program inputs[] = {compiledBinary("extern int helper(int *value);\n"
+                                              "kernel void step(global int *out, uint seed) { out[0] = helper(out) + (int)seed; }"),
+                               compiledBinary("int helper(int *value) { return *value + 1; }")};
+  cl_int error = CL_SUCCESS;
+  auto *executable = clLinkProgram(session.context, 1, &session.device, "", 2, inputs, nullptr, nullptr, &error);
+  REQUIRE((executable && error == CL_SUCCESS));
+  auto *kernel = clCreateKernel(executable, "step", &error);
+  CHECK((kernel && error == CL_SUCCESS));
+  clReleaseKernel(kernel);
+  clReleaseProgram(executable);
+  for (auto *input : inputs)
+    clReleaseProgram(input);
+}
+
 TEST_CASE("OpenCL reports OpenCL C 2.0 together with every OpenCL C 2.0 feature", "[opencl][capability]") {
   auto *const device = gpu();
+  gemstone_opencl_test::requireDeviceEnqueue(device);
   size_t size = 0;
   REQUIRE((clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, 0, nullptr, &size) == CL_SUCCESS));
   std::string version(size, '\0');

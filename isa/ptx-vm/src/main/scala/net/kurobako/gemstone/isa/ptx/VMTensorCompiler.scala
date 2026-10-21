@@ -117,8 +117,8 @@ private object VMTensorCompiler {
   }
 
   private def tensorModifiers(instruction: Instruction): Vec[Modifier] = instruction.form match {
-    case _: Form.WmmaMma | _: Form.WmmaLoad | _: Form.WmmaStore | _: Form.MmaSp |
-        _: Form.MmaSpOrderedMetadata =>
+    case Form.WmmaMma(_, _, _, _) | Form.WmmaLoad(_, _, _) | Form.WmmaStore(_, _, _) | Form.MmaSp(_, _, _, _, _, _) |
+        Form.MmaSpOrderedMetadata(_, _, _, _, _, _, _, _, _, _) =>
       instruction.fixedModifiers.drop(1) ++ instruction.mods
     case _ => instruction.fixedModifiers ++ instruction.mods
   }
@@ -223,9 +223,9 @@ private object VMTensorCompiler {
 
   private def wmmaMemoryForm(operation: Instruction, modifiers: Vec[Modifier]): Option[WmmaMemoryForm] = {
     val memoryOperation = operation.form match {
-      case _: Form.WmmaLoad  => Some(MemoryOperation.Load)
-      case _: Form.WmmaStore => Some(MemoryOperation.Store)
-      case _                 => None
+      case Form.WmmaLoad(_, _, _)  => Some(MemoryOperation.Load)
+      case Form.WmmaStore(_, _, _) => Some(MemoryOperation.Store)
+      case _                       => None
     }
     memoryOperation.flatMap { access =>
       val parsed = modifiers match {
@@ -454,14 +454,19 @@ private object VMTensorCompiler {
   def fragments(instruction: Instruction): Option[Vec[Option[Int]]] = {
     val modifiers = tensorModifiers(instruction)
     instruction.form match {
-      case _: Form.WmmaLoad | _: Form.WmmaStore =>
+      case Form.WmmaLoad(_, _, _) | Form.WmmaStore(_, _, _) =>
         wmmaMemoryForm(instruction, modifiers).flatMap(form =>
           memoryFragment(form.shape, form.role, form.element).toOption.map { fragment =>
             val held = Some(fragment.registers.raw)
             if (form.operation == MemoryOperation.Load) Vec(held, None, None) else Vec(None, held, None)
           }
         )
-      case _: Form.Mma | _: Form.WmmaMma | _: Form.MmaSp | _: Form.MmaSpOrderedMetadata =>
+      case Form.Mma(_, _, _, _, _, _, _, _) | Form.WmmaMma(
+            _,
+            _,
+            _,
+            _
+          ) | Form.MmaSp(_, _, _, _, _, _) | Form.MmaSpOrderedMetadata(_, _, _, _, _, _, _, _, _, _) =>
         product(instruction, modifiers).map { form =>
           val held     = form.fragments.map(fragment => Some(fragment.registers.raw))
           val sparsity = if (form.sparse) Vec(None, None) else Vec.empty[Option[Int]]
@@ -501,11 +506,16 @@ private object VMTensorCompiler {
     val operands                         = instruction.operands
     val qualifiedOpcode                  = instruction.qualifiedOpcode
     val result: Either[Error, Operation] = instruction.form match {
-      case _: Form.WmmaLoad | _: Form.WmmaStore =>
+      case Form.WmmaLoad(_, _, _) | Form.WmmaStore(_, _, _) =>
         wmmaMemoryForm(instruction, tensorModifiers(instruction))
           .toRight(Error.Unsupported(qualifiedOpcode, "unsupported WMMA memory qualifiers"))
           .flatMap(form => lowerWmmaMemory(form, operands))
-      case _: Form.Mma | _: Form.WmmaMma | _: Form.MmaSp | _: Form.MmaSpOrderedMetadata =>
+      case Form.Mma(_, _, _, _, _, _, _, _) | Form.WmmaMma(
+            _,
+            _,
+            _,
+            _
+          ) | Form.MmaSp(_, _, _, _, _, _) | Form.MmaSpOrderedMetadata(_, _, _, _, _, _, _, _, _, _) =>
         product(instruction, tensorModifiers(instruction))
           .toRight(Error.Unsupported(qualifiedOpcode, "unsupported tensor instruction qualifiers"))
           .flatMap(form => lowerMultiply(form, operands, qualifiedOpcode))

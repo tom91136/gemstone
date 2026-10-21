@@ -57,12 +57,8 @@ class GlobalBindingSuite extends munit.FunSuite {
       assertEquals(
         VMInterpreter.execute(
           prepared,
-          dispatch,
-          memory,
-          TaskControl(),
-          Workgroups.Sequential,
-          Vec(mapping(global)),
-          _ => Right(())
+          KernelLaunch(dispatch, TaskContext(memory, TaskControl(), _ => Right(())), Workgroups.Sequential),
+          Vec(mapping(global))
         ),
         Right(())
       )
@@ -100,12 +96,8 @@ class GlobalBindingSuite extends munit.FunSuite {
       assertEquals(
         VMInterpreter.execute(
           prepared,
-          dispatch,
-          memory,
-          TaskControl(),
-          Workgroups.Sequential,
-          bindings,
-          _ => Right(())
+          KernelLaunch(dispatch, TaskContext(memory, TaskControl(), _ => Right(())), Workgroups.Sequential),
+          bindings
         ),
         Right(())
       )

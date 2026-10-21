@@ -22,12 +22,7 @@ class CompletionMemorySuite extends munit.FunSuite {
     override def symbols: Either[Fault, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
     override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
       KernelMetadata.validated(0, 0, Vec.empty).left.map(Fault.InvalidRequest(_))
-    override def execute(
-        task: KernelTask,
-        memory: AddressSpace,
-        control: TaskControl,
-        handler: Event => Either[Fault, Unit]
-    ): Either[Fault, Unit] = body(memory)
+    override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = body(context.memory)
   }
 
   /** Loads the kernel body set for the next dispatch. */

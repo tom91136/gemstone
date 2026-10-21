@@ -142,10 +142,10 @@ private object InstructionCodec {
       value: Metadata.Encoding,
       opcode: String,
       fields: Map[EncodingField, BigInt],
-      target: Target,
-      waveSize: Int in (32, 64),
+      mode: TargetMode,
       count: Option[Int] = None
   ): Vec[OperandInfo] = {
+    val TargetMode(target, waveSize) = mode
     val original = value.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC).map { info =>
       val matrix = value.groups.exists(group => group == InstructionGroup.WMMA || group == InstructionGroup.SWMMAC)
       val halve  = waveSize == 64 && matrix && (target.isa match {
@@ -197,6 +197,10 @@ private object InstructionCodec {
       data.filterNot(_.field.contains(EncodingField.SADDR))
     else data
   }
+
+  /** A catalogue encoding with the layout its instruction would be written in. */
+  private case class Candidate(encoding: Metadata.Encoding, layout: InstructionLayout)
+
   private def layout(value: Metadata.Encoding): Option[InstructionLayout] =
     if (value.format == EncodingFormat.VOPDXY || value.format == EncodingFormat.VOPD3XY) None
     else if (
@@ -208,11 +212,12 @@ private object InstructionCodec {
 
   def supports(value: Metadata.Encoding): Boolean = layout(value).nonEmpty
 
-  def encode(instruction: Instruction, target: Target, waveSize: Int in (32, 64)): Either[CodecError, Vec[Byte]] = {
+  def encode(instruction: Instruction, mode: TargetMode): Either[CodecError, Vec[Byte]] = {
+    val target     = mode.target
     val candidates =
       instruction.definition.encodings(target).flatMap(value => layout(value).map(value -> _))
         .sortBy(_._2.bits)
-    candidates.view.flatMap { case (value, layout) => encode(instruction, target, value, layout, waveSize) }.headOption
+    candidates.view.flatMap { case (value, layout) => encode(instruction, mode, Candidate(value, layout)) }.headOption
       .toRight(
         if (
           candidates.nonEmpty && candidates.forall(_._2.format == EncodingFormat.SOPP) && instruction.mods.isEmpty &&
@@ -317,31 +322,20 @@ private object InstructionCodec {
       BigInt
     ])(_ ++ _))
 
-  private def encode(
-      instruction: Instruction,
-      target: Target,
-      value: Metadata.Encoding,
-      layout: InstructionLayout,
-      waveSize: Int in (32, 64)
-  ): Option[Vec[Byte]] =
-    if (layout.format == EncodingFormat.SOPP) ProgramOperands.encode(instruction, target, value, layout)
-    else encodeFields(instruction, target, value, layout, waveSize)
+  private def encode(instruction: Instruction, mode: TargetMode, candidate: Candidate): Option[Vec[Byte]] =
+    if (candidate.layout.format == EncodingFormat.SOPP) ProgramOperands.encode(instruction, mode.target, candidate)
+    else encodeFields(instruction, mode, candidate)
 
-  private def encodeFields(
-      instruction: Instruction,
-      target: Target,
-      value: Metadata.Encoding,
-      layout: InstructionLayout,
-      waveSize: Int in (32, 64)
-  ): Option[Vec[Byte]] = {
-    val allOperands = value.operands.filterNot(_.implicitOperand)
-    val parsedMods  = modifiers(instruction, layout, allOperands)
-    val operands    = schema(
+  private def encodeFields(instruction: Instruction, mode: TargetMode, candidate: Candidate): Option[Vec[Byte]] = {
+    val TargetMode(target, waveSize) = mode
+    val Candidate(value, layout)     = candidate
+    val allOperands                  = value.operands.filterNot(_.implicitOperand)
+    val parsedMods                   = modifiers(instruction, layout, allOperands)
+    val operands                     = schema(
       value,
       instruction.opcode.raw,
       parsedMods.getOrElse(Map.empty),
-      target,
-      waveSize,
+      mode,
       Some(instruction.operands.size)
     )
     if (
@@ -863,15 +857,15 @@ private object InstructionCodec {
     }
   }
 
-  def decode(
-      bytes: Array[Byte],
-      offset: Int,
-      target: Target,
-      waveSize: Int in (32, 64)
-  ): Either[CodecError, DecodedInstruction] = {
+  def decode(bytes: Array[Byte], offset: Int, mode: TargetMode): Either[CodecError, DecodedInstruction] = {
+    val target     = mode.target
     val candidates = InstructionDecoder.candidates(bytes, offset, target)
       .filter(candidate => supportsLayout(candidate.layout))
-      .flatMap(decodeOperands(bytes, offset, target, _, waveSize).toVec).distinct
+      .flatMap { candidate =>
+        decodeOperands(candidate, mode)
+          .filter(_.encoded == Vec.unsafeWrapArray(bytes.slice(offset, offset + candidate.size)))
+          .map(decoded => DecodedInstruction(decoded.instruction, candidate.size)).toVec
+      }.distinct
     val canonical = OpcodeIndex.canonical(candidates, target)(_.instruction.definition).filterNot(value =>
       value.instruction.opcode.raw.startsWith("v_wmma_ld_scale") && candidates.exists(_.size == 16)
     )
@@ -886,19 +880,15 @@ private object InstructionCodec {
     }
   }
 
-  private def decodeOperands(
-      bytes: Array[Byte],
-      offset: Int,
-      target: Target,
-      decoded: InstructionDecoder.Decoded,
-      waveSize: Int in (32, 64)
-  ): Option[DecodedInstruction] = {
+  private def decodeOperands(decoded: InstructionDecoder.Decoded, mode: TargetMode)
+      : Option[(instruction: Instruction, encoded: Vec[Byte])] = {
+    val target     = mode.target
     val layout     = decoded.layout
     val word       = decoded.word
     val definition = decoded.definition
     val value      = decoded.encoding
     val fields     = layout.fields.map(field => field.name -> BigInt(field.get(word))).toMap
-    val operands   = schema(value, definition.mnemonic.raw, fields, target, waveSize)
+    val operands   = schema(value, definition.mnemonic.raw, fields, mode)
     val literal    = decoded.literal.flatMap(bits =>
       decoded.literalBytes.refine[Int in (4, 8)].toOption.map(OperandCodec.Literal(bits, _))
     )
@@ -1120,25 +1110,21 @@ private object InstructionCodec {
         ) mods.filterNot(_.name == "offset")
         else mods
       Instruction.decode(definition, args, filtered).toOption.flatMap { instruction =>
-        encode(instruction, target, value, layout, waveSize)
-          .filter(_ == Vec.unsafeWrapArray(bytes.slice(offset, offset + decoded.size)))
-          .map(_ => DecodedInstruction(instruction, decoded.size))
+        encode(instruction, mode, Candidate(value, layout)).map(encoded => (instruction, encoded))
       }
     }
   }
 
   /** SOPP carries one 16-bit operand, which may be a symbolic counter, message or relative branch. */
   private object ProgramOperands {
-    def encode(
-        instruction: Instruction,
-        target: Target,
-        value: Metadata.Encoding,
-        layout: InstructionLayout
-    ): Option[Vec[Byte]] = for {
-      immediate <- immediate(instruction, target, value, layout)
-      opcode    <- layout.byName.get(EncodingField.OP).flatMap(_.put(BigInt(value.opcode)))
-      field     <- layout.byName.get(EncodingField.SIMM16).flatMap(_.put(BigInt(immediate)))
-    } yield LittleEndian.toVec((layout.fixedPrefix | opcode | field).toLong, 4)
+    def encode(instruction: Instruction, target: Target, candidate: Candidate): Option[Vec[Byte]] = {
+      val Candidate(value, layout) = candidate
+      for {
+        immediate <- immediate(instruction, target, candidate)
+        opcode    <- layout.byName.get(EncodingField.OP).flatMap(_.put(BigInt(value.opcode)))
+        field     <- layout.byName.get(EncodingField.SIMM16).flatMap(_.put(BigInt(immediate)))
+      } yield LittleEndian.toVec((layout.fixedPrefix | opcode | field).toLong, 4)
+    }
 
     def decode(
         definition: Opcode,
@@ -1157,33 +1143,31 @@ private object InstructionCodec {
         else Vec.empty[Operand]
       }
 
-    private def immediate(
-        instruction: Instruction,
-        target: Target,
-        definition: Metadata.Encoding,
-        layout: InstructionLayout
-    ): Option[Long] = layout.byName.get(EncodingField.SIMM16).flatMap { field =>
-      val maximum = (BigInt(1) << field.width) - 1
-      val minimum = -(BigInt(1) << (field.width - 1))
-      val named   = definition.operands.find(!_.implicitOperand).flatMap { info =>
-        if (
-          PartialFunction.cond(info.kind) {
-            case OperandKind.WAITCNT | OperandKind.WAITCNT_DEPCTR | OperandKind.WAIT_ALU => true
+    private def immediate(instruction: Instruction, target: Target, candidate: Candidate): Option[Long] = {
+      val Candidate(definition, layout) = candidate
+      layout.byName.get(EncodingField.SIMM16).flatMap { field =>
+        val maximum = (BigInt(1) << field.width) - 1
+        val minimum = -(BigInt(1) << (field.width - 1))
+        val named   = definition.operands.find(!_.implicitOperand).flatMap { info =>
+          if (
+            PartialFunction.cond(info.kind) {
+              case OperandKind.WAITCNT | OperandKind.WAITCNT_DEPCTR | OperandKind.WAIT_ALU => true
+            }
+          )
+            SymbolicOperandEncoder.counters(instruction, info.kind, target)
+          else if (info.kind == OperandKind.DELAY) SymbolicOperandEncoder.delay(instruction, target)
+          else if (instruction.mods.isEmpty && instruction.operands.size == 1)
+            SymbolicOperandEncoder.encode(instruction.operands.head, info.kind, target)
+          else None
+        }
+        named.filter(value => value >= 0 && value <= maximum).map(_.toLong).orElse {
+          instruction.operands match {
+            case _ if instruction.mods.nonEmpty                                                => None
+            case Vec()                                                                         => Some(0L)
+            case Vec(Operand.IntegerLiteral(value, _)) if value >= minimum && value <= maximum =>
+              Some((value & maximum).toLong)
+            case _ => None
           }
-        )
-          SymbolicOperandEncoder.counters(instruction, info.kind, target)
-        else if (info.kind == OperandKind.DELAY) SymbolicOperandEncoder.delay(instruction, target)
-        else if (instruction.mods.isEmpty && instruction.operands.size == 1)
-          SymbolicOperandEncoder.encode(instruction.operands.head, info.kind, target)
-        else None
-      }
-      named.filter(value => value >= 0 && value <= maximum).map(_.toLong).orElse {
-        instruction.operands match {
-          case _ if instruction.mods.nonEmpty                                                => None
-          case Vec()                                                                         => Some(0L)
-          case Vec(Operand.IntegerLiteral(value, _)) if value >= minimum && value <= maximum =>
-            Some((value & maximum).toLong)
-          case _ => None
         }
       }
     }

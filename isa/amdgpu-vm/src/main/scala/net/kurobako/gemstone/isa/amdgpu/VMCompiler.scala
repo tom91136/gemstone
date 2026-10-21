@@ -767,12 +767,17 @@ private object VMCompiler {
     case VCvtSrF16F32 | VCvtSrBf16F32              => 1
     case other if scaledConversion(other).nonEmpty =>
       scaledConversion(other).fold(0) {
-        case ScaledConversion.NarrowPair(side, _) => if (side == Minifloats.Wide.Single) 7 else 3
-        case ScaledConversion.NarrowStochastic(side = _) | ScaledConversion.NarrowStochasticPair(Minifloats.Wide.Half) |
-            ScaledConversion.NarrowStochasticPair(Minifloats.Wide.BFloat) => 5
-        case ScaledConversion.NarrowStochasticPair(side = _)                             => 4
-        case ScaledConversion.Widen(format = _) | ScaledConversion.WidenPair(format = _) => 3
-        case _                                                                           => 0
+        case ScaledConversion(side, ScaledConversion.Layout.NarrowPair(_)) =>
+          if (side == Minifloats.Wide.Single) 7 else 3
+        case ScaledConversion(_, ScaledConversion.Layout.NarrowStochastic(_)) |
+            ScaledConversion(
+              Minifloats.Wide.Half | Minifloats.Wide.BFloat,
+              ScaledConversion.Layout.NarrowStochasticPair
+            ) =>
+          5
+        case ScaledConversion(_, ScaledConversion.Layout.NarrowStochasticPair)                            => 4
+        case ScaledConversion(_, ScaledConversion.Layout.Widen(_) | ScaledConversion.Layout.WidenPair(_)) => 3
+        case _                                                                                            => 0
       }
     case other =>
       vectorComparison(other).fold(convertForm(other).fold(0)(_.modifiers))(comparisonModifierMask(_))
@@ -797,22 +802,25 @@ private object VMCompiler {
       case "bf16" => Some(Minifloats.Wide.BFloat)
       case _      => None
     }
-    val mnemonic                                                                  = opcode.mnemonic.raw
-    def widening(from: String, to: String): Option[(Minifloat, Minifloats.Wide)]  = narrow(from).zip(wide(to))
-    def narrowing(from: String, to: String): Option[(Minifloats.Wide, Minifloat)] = wide(from).zip(narrow(to))
+    val mnemonic                                                                                  = opcode.mnemonic.raw
+    def widening(from: String, to: String)(layout: Minifloat => Layout): Option[ScaledConversion] =
+      narrow(from).zip(wide(to)).map((format, side) => ScaledConversion(side, layout(format)))
+    def narrowing(from: String, to: String)(layout: Minifloat => Layout): Option[ScaledConversion] =
+      wide(from).zip(narrow(to)).map((side, format) => ScaledConversion(side, layout(format)))
     if (!mnemonic.startsWith("v_cvt_scalef32_")) None
     else mnemonic.stripPrefix("v_cvt_scalef32_").split('_').toVec match {
-      case Vec(to, from)       => widening(from, to).map(Widen(_, _))
+      case Vec(to, from)       => widening(from, to)(Layout.Widen(_))
       case Vec("pk", to, from) =>
-        widening(from, to).map(WidenPair(_, _)).orElse(narrowing(from, to).map(NarrowPair(_, _)))
-      case Vec("sr", to, from)          => narrowing(from, to).map(NarrowStochastic(_, _))
-      case Vec("sr", "pk", "fp4", from) => wide(from).map(NarrowStochasticPair(_))
+        widening(from, to)(Layout.WidenPair(_)).orElse(narrowing(from, to)(Layout.NarrowPair(_)))
+      case Vec("sr", to, from)          => narrowing(from, to)(Layout.NarrowStochastic(_))
+      case Vec("sr", "pk", "fp4", from) => wide(from).map(ScaledConversion(_, Layout.NarrowStochasticPair))
       case Vec("pk32", to, from)        =>
-        widening(from, to).map(WidenBlock(_, _))
-          .orElse(narrowing(from, to).map(NarrowBlock(_, _, interleaved = false, stochastic = false)))
-      case Vec("2xpk16", to, from) => narrowing(from, to).map(NarrowBlock(_, _, interleaved = true, stochastic = false))
+        widening(from, to)(Layout.WidenBlock(_))
+          .orElse(narrowing(from, to)(Layout.NarrowBlock(_, interleaved = false, stochastic = false)))
+      case Vec("2xpk16", to, from) =>
+        narrowing(from, to)(Layout.NarrowBlock(_, interleaved = true, stochastic = false))
       case Vec("sr", "pk32", to, from) =>
-        narrowing(from, to).map(NarrowBlock(_, _, interleaved = false, stochastic = true))
+        narrowing(from, to)(Layout.NarrowBlock(_, interleaved = false, stochastic = true))
       case _ => None
     }
   }
@@ -1220,7 +1228,7 @@ private object VMCompiler {
       target: Target
   ): Either[NonEmpty[String], Instruction] =
     Either.cond[NonEmpty[String], Unit](code.size >= 4, (), "truncated instruction at byte 0")
-      .flatMap(_ => decode(Vec.toArray(code), 0, target, TargetDefaults.waveSize(target)).map(_.operation))
+      .flatMap(_ => decode(Vec.toArray(code), 0, TargetMode(target)).map(_.operation))
 
   private def selfContained(program: DecodedProgram): Boolean = {
     def constant(source: InstructionSource): Option[Long] = source match {
@@ -1312,8 +1320,7 @@ private object VMCompiler {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def decodeResolving(
       code: Vec[Byte],
-      target: Target,
-      waveSize: Int in (32, 64),
+      mode: TargetMode,
       functionRanges: Vec[(Int, Int)]
   )(external: (Instruction, NonEmpty[String]) => Either[NonEmpty[String], Instruction])
       : Either[NonEmpty[String], DecodedProgram] = {
@@ -1333,7 +1340,7 @@ private object VMCompiler {
           if (padding) offset = rangeEnd
           else failure = Some(s"truncated instruction at byte $offset")
         } else
-          decode(bytes, offset, target, waveSize) match {
+          decode(bytes, offset, mode) match {
             case Right(decoded) if offset + decoded.size <= rangeEnd =>
               result += offset -> decoded.operation
               offset += decoded.size
@@ -1378,19 +1385,17 @@ private object VMCompiler {
 
   def decodeProgram(
       code: Vec[Byte],
-      target: Target,
-      waveSize: Int in (32, 64),
+      mode: TargetMode,
       functionRanges: Vec[(Int, Int)] = Vec.empty
   ): Either[NonEmpty[String], DecodedProgram] =
-    decodeResolving(code, target, waveSize, functionRanges)((_, error) => Left(error))
+    decodeResolving(code, mode, functionRanges)((_, error) => Left(error))
 
   private def decodeDeferringExternalBranches(
       code: Vec[Byte],
-      target: Target,
-      waveSize: Int in (32, 64),
+      mode: TargetMode,
       functionRanges: Vec[(Int, Int)]
   ): Either[NonEmpty[String], DecodedProgram] =
-    decodeResolving(code, target, waveSize, functionRanges)((operation, _) => Right(operation))
+    decodeResolving(code, mode, functionRanges)((operation, _) => Right(operation))
 
   private val ScreenPartition: NonEmpty[String] =
     "v_screen_partition_4se_b32 reads the rasteriser's table of shader-engine masks, which is not modelled"
@@ -1410,7 +1415,7 @@ private object VMCompiler {
   /** Whether the scalar unit or the sequencer runs an instruction, which VSKIP does not skip. */
   private def scalarIssued(operation: Instruction): Boolean = operation match {
     case _: (Instruction.SLoad | Instruction.SMove | Instruction.SWriteExec | Instruction.SMoveRelative |
-          Instruction.SMultiplyImmediate | Instruction.SMove64 | Instruction.SSetReg | Instruction.SSetMode |
+          Instruction.SMultiplyImmediate | Instruction.SMove64 | Instruction.SSetMode |
           Instruction.SGetMode | Instruction.SGetPc | Instruction.SReadClock | Instruction.SReadWaveId |
           Instruction.SubvectorLoopRelative | Instruction.SubvectorLoop | Instruction.SSetPc |
           Instruction.SSwapPc |
@@ -1423,8 +1428,8 @@ private object VMCompiler {
           Instruction.BarrierJoin | Instruction.Trap |
           Instruction.SStore | Instruction.SAtomic | Instruction.SCompareSwap | Instruction.ForkIndirect |
           Instruction.ForkRelative | Instruction.Fork | Instruction.Join | Instruction.SetVectorSkip) => true
-    case Instruction.SGprIndexOff | Instruction.Barrier | Instruction.BarrierLeave | Instruction.Wait |
-        Instruction.Sleep | Instruction.End |
+    case Instruction.SSetReg | Instruction.SGprIndexOff | Instruction.Barrier | Instruction.BarrierLeave |
+        Instruction.Wait | Instruction.Sleep | Instruction.End |
         Instruction.CacheInvalidate | Instruction.CacheWritebackInvalidate => true
     case _ => false
   }
@@ -1463,18 +1468,15 @@ private object VMCompiler {
     private def isSet(field: EncodingField): Boolean = machine(field) != 0
   }
 
-  private def decode(
-      bytes: Array[Byte],
-      offset: Int,
-      target: Target,
-      waveSize: Int in (32, 64)
-  ): Either[NonEmpty[String], Decoded] =
+  private def decode(bytes: Array[Byte], offset: Int, mode: TargetMode): Either[NonEmpty[String], Decoded] = {
+    val target = mode.target
     InstructionDecoder.dual(bytes, offset, target)
       .map(_.flatMap(dual => decodeVOPD(dual, target).map(Decoded(_, dual.size))))
       .getOrElse(InstructionDecoder.decode(bytes, offset, target).flatMap(machine =>
-        decodeMachine(machine, offset, target, waveSize).map(Decoded(_, machine.size))
+        decodeMachine(machine, offset, mode).map(Decoded(_, machine.size))
       ))
-      .flatMap(decoded => VMRegisterBounds.validate(decoded.operation, waveSize).map(_ => decoded))
+      .flatMap(decoded => VMRegisterBounds.validate(decoded.operation, mode.waveSize).map(_ => decoded))
+  }
 
   /** Instructions with no effect execution observes: trace and performance markers, sleeps and wake-ups for sleeps that
     * do not block, branches only a debugger's flags take, clearing a HALT or KILL bit that is never set, prefetches,
@@ -1495,48 +1497,44 @@ private object VMCompiler {
     case _                                    => None
   }
 
-  private def decodeMachine(
-      machine: InstructionDecoder.Decoded,
-      offset: Int,
-      target: Target,
-      waveSize: Int in (32, 64)
-  ): Either[NonEmpty[String], Instruction] =
-    hint(machine).fold(decodeFormat(machine, offset, target, waveSize))(Right(_))
+  private def decodeMachine(machine: InstructionDecoder.Decoded, offset: Int, mode: TargetMode)
+      : Either[NonEmpty[String], Instruction] =
+    hint(machine).fold(decodeFormat(machine, offset, mode))(Right(_))
 
-  private def decodeFormat(
-      machine: InstructionDecoder.Decoded,
-      offset: Int,
-      target: Target,
-      waveSize: Int in (32, 64)
-  ): Either[NonEmpty[String], Instruction] = machine.format match {
-    case EncodingFormat.SMEM => decodeSMEM(machine, target)
-    case EncodingFormat.SOP1 | EncodingFormat.SOP1_INST_LITERAL | EncodingFormat.SOP1_INST_LITERAL64 =>
-      decodeSOP1(machine, offset, target)
-    case EncodingFormat.SOPC | EncodingFormat.SOPC_INST_LITERAL | EncodingFormat.SOPC_INST_LITERAL64 =>
-      decodeSOPC(machine, target)
-    case EncodingFormat.SOPP                                    => decodeSOPP(machine, target)
-    case EncodingFormat.SOPK | EncodingFormat.SOPK_INST_LITERAL => decodeSOPK(machine, target)
-    case EncodingFormat.SOP2 | EncodingFormat.SOP2_INST_LITERAL | EncodingFormat.SOP2_INST_LITERAL64 =>
-      decodeSOP2(machine, target)
-    case EncodingFormat.VOP3P_MFMA                         => decodeMFMA(machine, target)
-    case EncodingFormat.VOP3PX2 if target.isa == ISA.CDNA4 => decodeMFMA(machine, target)
-    case format if format.base == EncodingFormat.VOP3P && machine.definition.mnemonic.raw == "v_mfma_ld_scale_b32" =>
-      Left("v_mfma_ld_scale_b32 executes only as the scale prefix of v_mfma_scale_*, as one instruction")
-    case format if format.base == EncodingFormat.VOP3P && matrix(machine) => decodeWaveMatrix(machine, target, waveSize)
-    case format if format.base == EncodingFormat.VOP3P => decodeVOP3P(machine, target).map(alignedDot(_, target))
-    case format if format.base == EncodingFormat.VOP3  => decodeVOP3(machine, target)
-    case EncodingFormat.DS | EncodingFormat.VDS        => decodeDS(machine, target).map(zeroingHalves(_, target))
-    case EncodingFormat.MUBUF | EncodingFormat.MTBUF | EncodingFormat.VBUFFER =>
-      decodeBuffer(machine, target).map(zeroingHalves(_, target))
-    case format if format.isImage                     => VMResourceDecoder.image(machine, target)
-    case format if format.base == EncodingFormat.VOP1 => decodeVOP1(machine, target)
-    case format if format.base == EncodingFormat.VOPC => decodeVOPC(machine, target)
-    case format if format.base == EncodingFormat.VOP2 => decodeVOP2(machine, target).map(alignedDot(_, target))
-    case EncodingFormat.FLAT | EncodingFormat.FLAT_GLBL | EncodingFormat.FLAT_GLOBAL | EncodingFormat.VGLOBAL |
-        EncodingFormat.VFLAT | EncodingFormat.FLAT_SCRATCH | EncodingFormat.VSCRATCH =>
-      decodeGlobalOrFlat(machine, target).map(zeroingHalves(_, target))
-    case EncodingFormat.ILLEGAL => Right(Instruction.Halt("v_illegal raises an illegal instruction exception"))
-    case format                 => Left(s"$format execution is not implemented")
+  private def decodeFormat(machine: InstructionDecoder.Decoded, offset: Int, mode: TargetMode)
+      : Either[NonEmpty[String], Instruction] = {
+    val TargetMode(target, waveSize) = mode
+    machine.format match {
+      case EncodingFormat.SMEM => decodeSMEM(machine, target)
+      case EncodingFormat.SOP1 | EncodingFormat.SOP1_INST_LITERAL | EncodingFormat.SOP1_INST_LITERAL64 =>
+        decodeSOP1(machine, offset, target)
+      case EncodingFormat.SOPC | EncodingFormat.SOPC_INST_LITERAL | EncodingFormat.SOPC_INST_LITERAL64 =>
+        decodeSOPC(machine, target)
+      case EncodingFormat.SOPP                                    => decodeSOPP(machine, target)
+      case EncodingFormat.SOPK | EncodingFormat.SOPK_INST_LITERAL => decodeSOPK(machine, target)
+      case EncodingFormat.SOP2 | EncodingFormat.SOP2_INST_LITERAL | EncodingFormat.SOP2_INST_LITERAL64 =>
+        decodeSOP2(machine, target)
+      case EncodingFormat.VOP3P_MFMA                         => decodeMFMA(machine, target)
+      case EncodingFormat.VOP3PX2 if target.isa == ISA.CDNA4 => decodeMFMA(machine, target)
+      case format if format.base == EncodingFormat.VOP3P && machine.definition.mnemonic.raw == "v_mfma_ld_scale_b32" =>
+        Left("v_mfma_ld_scale_b32 executes only as the scale prefix of v_mfma_scale_*, as one instruction")
+      case format if format.base == EncodingFormat.VOP3P && matrix(machine) =>
+        decodeWaveMatrix(machine, target, waveSize)
+      case format if format.base == EncodingFormat.VOP3P => decodeVOP3P(machine, target).map(alignedDot(_, target))
+      case format if format.base == EncodingFormat.VOP3  => decodeVOP3(machine, target)
+      case EncodingFormat.DS | EncodingFormat.VDS        => decodeDS(machine, target).map(zeroingHalves(_, target))
+      case EncodingFormat.MUBUF | EncodingFormat.MTBUF | EncodingFormat.VBUFFER =>
+        decodeBuffer(machine, target).map(zeroingHalves(_, target))
+      case format if format.isImage                     => VMResourceDecoder.image(machine, target)
+      case format if format.base == EncodingFormat.VOP1 => decodeVOP1(machine, target)
+      case format if format.base == EncodingFormat.VOPC => decodeVOPC(machine, target)
+      case format if format.base == EncodingFormat.VOP2 => decodeVOP2(machine, target).map(alignedDot(_, target))
+      case EncodingFormat.FLAT | EncodingFormat.FLAT_GLBL | EncodingFormat.FLAT_GLOBAL | EncodingFormat.VGLOBAL |
+          EncodingFormat.VFLAT | EncodingFormat.FLAT_SCRATCH | EncodingFormat.VSCRATCH =>
+        decodeGlobalOrFlat(machine, target).map(zeroingHalves(_, target))
+      case EncodingFormat.ILLEGAL => Right(Instruction.Halt("v_illegal raises an illegal instruction exception"))
+      case format                 => Left(s"$format execution is not implemented")
+    }
   }
 
   private def alignedDot(instruction: Instruction, target: Target): Instruction = instruction match {
@@ -2054,7 +2052,7 @@ private object VMCompiler {
                 machine.literal.map(InstructionSource.Constant(_)).toRight[NonEmpty[String]](s"$setreg has no literal")
               else machine.scalar(EncodingField.SDST).map(InstructionSource.Scalar(_))
             source.map(Instruction.SSetMode(offset, size, _))
-          case None => machine.scalar(EncodingField.SDST).map(Instruction.SSetReg(encoded.toInt, _))
+          case None => machine.scalar(EncodingField.SDST).map(_ => Instruction.SSetReg)
         }
       case compare @ (SCmpkEqI32 | SCmpkLgI32 | SCmpkGtI32 | SCmpkGeI32 | SCmpkLtI32 | SCmpkLeI32 | SCmpkEqU32 |
           SCmpkLgU32 | SCmpkGtU32 | SCmpkGeU32 | SCmpkLtU32 | SCmpkLeU32) =>
@@ -4499,7 +4497,7 @@ private class VMCompiler {
 
   def compile(kernel: CodeObjectKernel): Either[Fault, Kernel] = {
     val entryRange = linkedTextRanges(kernel.textAddress, kernel.text, Map(kernel.entry -> kernel.entrySize))
-    decodeDeferringExternalBranches(kernel.text, kernel.target, kernel.waveSize, entryRange)
+    decodeDeferringExternalBranches(kernel.text, kernel.mode, entryRange)
       .flatMap { program =>
         // Decode unrelated functions only when the entry can transfer outside its own range.
         if (selfContained(program)) Right(program)
@@ -4508,8 +4506,7 @@ private class VMCompiler {
           _ =>
             decodeProgram(
               kernel.text,
-              kernel.target,
-              kernel.waveSize,
+              kernel.mode,
               linkedTextRanges(kernel.textAddress, kernel.text, kernel.functionSizes)
             )
         )

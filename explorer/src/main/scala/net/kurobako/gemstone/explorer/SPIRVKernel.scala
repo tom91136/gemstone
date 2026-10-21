@@ -74,6 +74,8 @@ object SPIRVKernel {
   }
 
   /** An operand's kernel parameter: the components of a value as 64-bit slots, or a pointer into memory. */
+  // the semantics-check reference binds its inputs to the parameters by name
+  @SuppressWarnings(Array("baumkuchen:test-only-member"))
   enum Parameter {
     case Slot(name: String)
     case Pointer(name: String)

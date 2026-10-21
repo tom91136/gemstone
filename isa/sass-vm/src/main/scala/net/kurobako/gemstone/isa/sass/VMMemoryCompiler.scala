@@ -468,6 +468,12 @@ private object VMMemoryCompiler {
     * arrives once for each lane on an sm_80 to sm_89 mbarrier, whose arrivals and phase live in its high word; both
     * return the old value. Lanes arrive one after another, so each sees the arrivals of the lanes before it.
     */
+  /** Whether the first operand is a predicate destination. */
+  private def predicateFirst(operands: Vec[Operand]): Boolean = operands.headOption.exists {
+    case Operand.Predicate(_, _, _) => true
+    case _                          => false
+  }
+
   private def counted()(using context: VMCompilationContext): Unit = {
     import context.*
     val counting: (AtomicOperation, ScalarBitWidth) =
@@ -480,10 +486,7 @@ private object VMMemoryCompiler {
       }
     val (arithmetic, bits) = counting
     val shared             = OperandQueries.is[Form.Atoms](operation)
-    val predicated         = operands.headOption.exists {
-      case _: Operand.Predicate => true
-      case _                    => false
-    }
+    val predicated         = predicateFirst(operands)
     if (predicated) writePredicate(operands.head, Value.Predicate(VMRegisters.Predicate.True.slot))
     val values = if (predicated) operands.tail else operands
     if (values.size != 2) unsupported("counted atomic requires a destination and an address")
@@ -518,11 +521,8 @@ private object VMMemoryCompiler {
       else 32
     // ptxas spells signed minima and maxima .S32 and .S64 and leaves unsigned ones untyped or .64
     val signed     = modifiers.exists(_.isSigned32Or64)
-    val predicated = operands.headOption.exists {
-      case _: Operand.Predicate => true
-      case _                    => false
-    }
-    val reduction = operation.form match {
+    val predicated = predicateFirst(operands)
+    val reduction  = operation.form match {
       case _: Form.Red | _: Form.Redg | _: Form.Reds => true
       case _                                         => false
     }

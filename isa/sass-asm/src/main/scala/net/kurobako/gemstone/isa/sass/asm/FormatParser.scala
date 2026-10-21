@@ -336,6 +336,56 @@ object FormatParser {
     loop(statement, 0, None)
   }
 
+  /** Reads the fields of `form`, written at `address`, against the vocabulary of `database`. */
+  private class FieldReader(database: NVDisasm.Database, form: NVDisasm.Form, address: Int) {
+    def decodeField(field: NVDisasm.Syntax.Field, spelling: String, depth: Int, qualifier: Boolean)
+        : Option[Vec[(String, BigInt)]] = {
+      val raw = spelling.trim
+      if (raw.isEmpty && (depth == 0 || qualifier || field.default.nonEmpty) && !field.category.isRegister)
+        defaultValue(database, field).map(value => Vec("" -> value))
+      else if (raw.isEmpty) None
+      else {
+        val (token, attributes) = field.category match {
+          case NVDisasm.FieldKind.SignedImmediate | NVDisasm.FieldKind.RelativeImmediate |
+              NVDisasm.FieldKind.FloatingImmediate(_) => raw -> Vec.empty[(String, Int)]
+          case _ => decorations(raw)
+        }
+        database.vocabulary(field).find(_.name == token).map(_.value)
+          .orElse(Option.when(field.binding == "Opcode")(form.opcodes.find(_.name == token).map(_.value)).flatten)
+          .orElse(parseRegister(field.category, token))
+          .orElse(parseImmediate(field, token, NVDisasm.number(token)))
+          .map(number => Vec("" -> number) ++ attributes.map { case (name, bit) => name -> BigInt(bit) })
+      }
+    }
+
+    private def parseImmediate(field: NVDisasm.Syntax.Field, token: String, numeric: Option[BigInt]): Option[BigInt] = {
+      val width = field.arguments.flatMap(_.takeWhile(_ != '/').toIntOption)
+      field.category match {
+        case NVDisasm.FieldKind.Immediate       => numeric.filter(_ >= 0)
+        case NVDisasm.FieldKind.SignedImmediate =>
+          val parsed                    = OperandParser.parse(token).toOption
+          def complement(value: BigInt) = width.filter(_ > 0).map(bits => (BigInt(1) << bits) - value)
+          parsed.flatMap {
+            case Operand.Integer(value) if value >= 0              => Some(value)
+            case Operand.Bits(value, _)                            => Some(value)
+            case Operand.Unary(Operand.Integer(value), true, _, _) => complement(value)
+            case Operand.Unary(Operand.Bits(value, _), true, _, _) => complement(value)
+            case _                                                 => None
+          }
+        case NVDisasm.FieldKind.RelativeImmediate => numeric.flatMap { target =>
+            val bits  = width.getOrElse(0)
+            val delta = target - (BigInt(address) + (if (database.width == 128) 16 else 8))
+            if (bits > 0 && delta >= -(BigInt(1) << (bits - 1)) && delta < (BigInt(1) << (bits - 1)))
+              Some(if (delta < 0) (BigInt(1) << bits) + delta else delta)
+            else None
+          }
+        case NVDisasm.FieldKind.FloatingImmediate(format) =>
+          floatingBits(format, token, FormatBindings.floatingShift(database, form, field, format))
+        case _ => None
+      }
+    }
+  }
+
   private def consume(
       database: NVDisasm.Database,
       form: NVDisasm.Form,
@@ -344,6 +394,7 @@ object FormatParser {
       address: Int,
       encodedNames: Map[(String, String), String]
   ): Either[String, Vec[State]] = {
+    val reader                                    = FieldReader(database, form, address)
     val maximumWork                               = 100000
     val visited                                   = mutable.HashSet.empty[(Int, State)]
     def run(index: Int, state: State): Vec[State] =
@@ -364,7 +415,7 @@ object FormatParser {
             if (visited.size > maximumWork) Vec.empty[State]
             else {
               val spelling = source.substring(state.offset, end)
-              decodeField(database, field, spelling, address, form, depth, qualifier).toVec.flatMap { parsed =>
+              reader.decodeField(field, spelling, depth, qualifier).toVec.flatMap { parsed =>
                 val updates = parsed.map { case (suffix, value) =>
                   (if (suffix.isEmpty) encoded else s"$encoded@$suffix") -> value
                 }.toMap
@@ -384,33 +435,6 @@ object FormatParser {
     Either.cond(visited.size <= maximumWork, result, s"${form.name}: FORMAT parse exceeded $maximumWork search states")
   }
 
-  private def decodeField(
-      database: NVDisasm.Database,
-      field: NVDisasm.Syntax.Field,
-      spelling: String,
-      address: Int,
-      form: NVDisasm.Form,
-      depth: Int,
-      qualifier: Boolean
-  ): Option[Vec[(String, BigInt)]] = {
-    val raw = spelling.trim
-    if (raw.isEmpty && (depth == 0 || qualifier || field.default.nonEmpty) && !field.category.isRegister)
-      defaultValue(database, field).map(value => Vec("" -> value))
-    else if (raw.isEmpty) None
-    else {
-      val (token, attributes) = field.category match {
-        case NVDisasm.FieldKind.SignedImmediate | NVDisasm.FieldKind.RelativeImmediate |
-            NVDisasm.FieldKind.FloatingImmediate(_) => raw -> Vec.empty[(String, Int)]
-        case _ => decorations(raw)
-      }
-      database.vocabulary(field).find(_.name == token).map(_.value)
-        .orElse(Option.when(field.binding == "Opcode")(form.opcodes.find(_.name == token).map(_.value)).flatten)
-        .orElse(parseRegister(field.category, token))
-        .orElse(parseImmediate(database, form, field, token, address, NVDisasm.number(token)))
-        .map(number => Vec("" -> number) ++ attributes.map { case (name, bit) => name -> BigInt(bit) })
-    }
-  }
-
   private def parseRegister(category: NVDisasm.FieldKind, token: String): Option[BigInt] = {
     import NVDisasm.FieldKind.*
     val bank = category match {
@@ -425,40 +449,6 @@ object FormatParser {
     else bank.flatMap(expected =>
       OperandParser.parse(token).toOption.collect { case Operand.Register(`expected`, index) => BigInt(index) }
     )
-  }
-
-  private def parseImmediate(
-      database: NVDisasm.Database,
-      form: NVDisasm.Form,
-      field: NVDisasm.Syntax.Field,
-      token: String,
-      address: Int,
-      numeric: Option[BigInt]
-  ): Option[BigInt] = {
-    val width = field.arguments.flatMap(_.takeWhile(_ != '/').toIntOption)
-    field.category match {
-      case NVDisasm.FieldKind.Immediate       => numeric.filter(_ >= 0)
-      case NVDisasm.FieldKind.SignedImmediate =>
-        val parsed                    = OperandParser.parse(token).toOption
-        def complement(value: BigInt) = width.filter(_ > 0).map(bits => (BigInt(1) << bits) - value)
-        parsed.flatMap {
-          case Operand.Integer(value) if value >= 0              => Some(value)
-          case Operand.Bits(value, _)                            => Some(value)
-          case Operand.Unary(Operand.Integer(value), true, _, _) => complement(value)
-          case Operand.Unary(Operand.Bits(value, _), true, _, _) => complement(value)
-          case _                                                 => None
-        }
-      case NVDisasm.FieldKind.RelativeImmediate => numeric.flatMap { target =>
-          val bits  = width.getOrElse(0)
-          val delta = target - (BigInt(address) + (if (database.width == 128) 16 else 8))
-          if (bits > 0 && delta >= -(BigInt(1) << (bits - 1)) && delta < (BigInt(1) << (bits - 1)))
-            Some(if (delta < 0) (BigInt(1) << bits) + delta else delta)
-          else None
-        }
-      case NVDisasm.FieldKind.FloatingImmediate(format) =>
-        floatingBits(format, token, FormatBindings.floatingShift(database, form, field, format))
-      case _ => None
-    }
   }
 
   /** The display default, falling back to the vocabulary's starred default value. */

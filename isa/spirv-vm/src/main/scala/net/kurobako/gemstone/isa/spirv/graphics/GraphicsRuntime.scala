@@ -12,12 +12,7 @@ import net.kurobako.gemstone.vm.*
 
 /** A graphics submission is one ordered, cancellable completion, including all of its shader work. */
 class GraphicsRuntime(workgroups: Workgroups = Workgroups.Sequential) extends GraphicsBackend {
-  override def prepare(
-      image: Vec[Byte],
-      entry: NonEmpty[String],
-      stage: ShaderStageKind,
-      constants: Vec[SpecializationConstant]
-  ): Either[Fault, PreparedShader] = ShaderPreparation.prepare(image, entry, stage, constants)
+  override def prepare(shader: ShaderStage): Either[Fault, PreparedShader] = ShaderPreparation.prepare(shader)
   override def validate(
       submission: GraphicsSubmission,
       size: AllocationId => Option[Int > 0]
@@ -44,15 +39,10 @@ class GraphicsRuntime(workgroups: Workgroups = Workgroups.Sequential) extends Gr
       val descriptors = bindings.map(images.prepare(_))
       execute(access, descriptors, images.relocations)
     }
-  override def execute(
-      submission: GraphicsSubmission,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, GraphicsStatistics] =
-    GraphicsAccess.scoped(memory, control) { access =>
+  override def execute(submission: GraphicsSubmission, context: TaskContext): Either[Fault, GraphicsStatistics] =
+    GraphicsAccess.scoped(context.memory, context.control) { access =>
       val images = ImageOperations(access)
-      val draws  = DrawExecution(access, workgroups, handler)
+      val draws  = DrawExecution(access, workgroups, context.handler)
       val ranges = Vector.newBuilder[GraphicsRange]
       submission.commands.foreach(command =>
         GraphicsResources.foreach(command)(

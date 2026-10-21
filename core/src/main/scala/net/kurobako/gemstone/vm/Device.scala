@@ -22,9 +22,11 @@ class Device(backends: BackendRegistry, memory: AddressSpace, limits: TaskContro
     val events = ConcurrentLinkedQueue[Event]()
     program.execute(
       task,
-      observer.fold(memory)(ObservedAddressSpace(memory, _)),
-      TaskControl(limits, observer),
-      event => Right(events.add(event)).map(_ => ())
+      TaskContext(
+        observer.fold(memory)(ObservedAddressSpace(memory, _)),
+        TaskControl(limits, observer),
+        event => Right(events.add(event)).map(_ => ())
+      )
     ).map(_ => Vec.from(events.asScala))
   }
 }

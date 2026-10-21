@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.isa.nvidia.Mufu
+import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.testing.either.*
 
@@ -19,7 +19,7 @@ class RangeReductionSuite extends munit.FunSuite {
         sm,
         s"LDC.64 R10, c[0x0][0x160]; MOV R4, 0x${bits(input.toDouble).toHexString}; RRO.SINCOS R4, R4; MUFU.SIN R5, R4; " +
           "MUFU.COS R4, R4; STG.E [R10], R5; STG.E [R10+4], R4; EXIT",
-        Vec(Mufu.sine(radians, Mufu.Flavour.Legacy).toInt, Mufu.cosine(radians, Mufu.Flavour.Legacy).toInt)
+        Vec(Mufu.sine(radians, VMIR.MufuFlavour.Legacy).toInt, Mufu.cosine(radians, VMIR.MufuFlavour.Legacy).toInt)
       )
     }
 

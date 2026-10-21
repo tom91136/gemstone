@@ -17,7 +17,10 @@ private object laneRuns extends munit.Assertions {
 
   /** LLVM machine code, decoded as a program so that sequences lower together. */
   def program(target: Target, code: Vec[Byte])(using munit.Location): Vec[Instruction] =
-    VMCompiler.decodeProgram(code, target, TargetDefaults.waveSize(target)).fold(error => fail(error.raw), _.operations)
+    VMCompiler.decodeProgram(
+      code,
+      TargetMode(target, TargetDefaults.waveSize(target))
+    ).fold(error => fail(error.raw), _.operations)
 
   def octets(values: Int*): Vec[Byte] = Vec.from(values.map(_.toByte))
 

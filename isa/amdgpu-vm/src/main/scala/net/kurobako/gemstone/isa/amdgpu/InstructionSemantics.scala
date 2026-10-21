@@ -61,7 +61,7 @@ object InstructionSemantics {
   ): Either[Unrendered, Definition] = for {
     program <-
       asm.Parser.parse(text).left.map(error => Unrendered.Malformed(s"$text does not parse: ${error.diagnostic.raw}"))
-    code <- asm.Assembler.encode(program, target, TargetDefaults.waveSize(target)).left.map(error =>
+    code <- asm.Assembler.encode(program, TargetMode(target)).left.map(error =>
       Unrendered.Malformed(s"$text does not assemble: $error")
     )
     found = encoded(code, target)
@@ -126,7 +126,7 @@ object InstructionSemantics {
     case Instruction.Wait => "nothing a lane observes: a wait, hint or synchronous cache operation"
     case Instruction.CacheInvalidate | Instruction.CacheWritebackInvalidate =>
       "cache maintenance, after which loads read memory again"
-    case _: (Instruction.SSetReg | Instruction.SSetMode | Instruction.SGetMode) => "a hardware register access"
+    case Instruction.SSetReg | _: (Instruction.SSetMode | Instruction.SGetMode) => "a hardware register access"
     case Instruction.SGprIndexOff                                               => "a VGPR indexing mode switch"
     case Instruction.SMoveRelative(dest = _)         => "a move between SGPRs that M0 offsets"
     case Instruction.LocalCounter(decrement = false) => "an LDS append counter, which the wave updates once"
@@ -154,13 +154,13 @@ object InstructionSemantics {
       "an image atomic on the texel a resource descriptor addresses"
     case Instruction.CompareSwap(address = MemoryAddress.Texel(_)) =>
       "an image atomic on the texel a resource descriptor addresses"
-    case _: Instruction.FormatLoad         => "a typed buffer load converting texels from their data format"
-    case _: Instruction.FormatStore        => "a typed buffer store converting texels to their data format"
-    case _: Instruction.LoadLocal          => "a buffer load into LDS"
-    case Instruction.StoreLocal(_, _)      => "a buffer store from LDS"
-    case _: Instruction.SBufferLoad        => "a scalar load through a buffer resource descriptor"
-    case _: Instruction.Image              => "an image access converting texels through a resource descriptor"
-    case Instruction.WithStatus(access, _) => s"${mechanics(access)}, then a zero TFE status"
-    case other                             => s"${other.productPrefix} execution"
+    case Instruction.FormatLoad(_, _, _, _, _, _)     => "a typed buffer load converting texels from their data format"
+    case Instruction.FormatStore(_, _, _, _, _, _)    => "a typed buffer store converting texels to their data format"
+    case Instruction.LoadLocal(_, _, _, _)            => "a buffer load into LDS"
+    case Instruction.StoreLocal(_, _)                 => "a buffer store from LDS"
+    case Instruction.SBufferLoad(_, _, _, _, _, _, _) => "a scalar load through a buffer resource descriptor"
+    case Instruction.Image(_, _, _, _, _, _) => "an image access converting texels through a resource descriptor"
+    case Instruction.WithStatus(access, _)   => s"${mechanics(access)}, then a zero TFE status"
+    case other                               => s"${other.productPrefix} execution"
   }
 }

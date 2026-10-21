@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import EncodingConstants.*
 import EncodingConstants.DPP.*
-import EncodingConstants.Swizzle
 import FloatPrimitives.*
 import VMIR.*
 import net.kurobako.gemstone.binary.*
@@ -1759,22 +1759,29 @@ private object IntegerSemantics {
     case _ => false
   }
 
-  /** The lane a DPP16 control reads for `lane`, or -1 past its row or the wave; the decoder admits only valid controls.
-    */
   extension [V](inline algebra: Algebra[V]) {
+
+    /** The lane a quad permutation names: the control's two-bit selector picks the source lane of each of a quad's four
+      * lanes.
+      */
+    inline def quadPermutation(control: Int, lane: V): V =
+      algebra.or(
+        algebra.and(lane, algebra.literal(~3L)),
+        algebra.and(
+          algebra.shiftRightLogical(
+            algebra.literal(control.toLong),
+            algebra.shiftLeft(algebra.and(lane, algebra.literal(3L)), algebra.literal(1L))
+          ),
+          algebra.literal(3L)
+        )
+      )
+
+    /** The lane a DPP16 control reads for `lane`, or -1 past its row or the wave; the decoder admits only valid
+      * controls.
+      */
     inline def dppSource(control: Int, lane: V): V = {
       val distance = algebra.literal((control & 15).toLong)
-      if (DppControl.within(control, QUAD_PERM_FIRST, QUAD_PERM_LAST))
-        algebra.or(
-          algebra.and(lane, algebra.literal(~3L)),
-          algebra.and(
-            algebra.shiftRightLogical(
-              algebra.literal(control.toLong),
-              algebra.shiftLeft(algebra.and(lane, algebra.literal(3L)), algebra.literal(1L))
-            ),
-            algebra.literal(3L)
-          )
-        )
+      if (DppControl.within(control, QUAD_PERM_FIRST, QUAD_PERM_LAST)) quadPermutation(control, lane)
       else if (DppControl.within(control, ROW_SHL_FIRST, ROW_SHL_LAST))
         algebra.select(
           algebra.lessThan(algebra.add(algebra.rowLane(lane), distance), algebra.literal(16L), signed = true),
@@ -1855,23 +1862,8 @@ private object IntegerSemantics {
       * the lane index and the higher bits pass through.
       */
     inline def swizzleSource(control: Int, lane: V): V =
-      if ((control & Swizzle.QUAD_PERM_ENC_MASK) == Swizzle.QUAD_PERM_ENC) quadSwizzleSource(control, lane)
+      if ((control & Swizzle.QUAD_PERM_ENC_MASK) == Swizzle.QUAD_PERM_ENC) quadPermutation(control, lane)
       else bitmaskSwizzleSource(control, lane)
-
-    /** DS_SWIZZLE's quad permutation: the offset's two-bit selectors name the source lane of each of a quad's four
-      * lanes, which the lane's position in its quad selects.
-      */
-    inline def quadSwizzleSource(control: Int, lane: V): V =
-      algebra.or(
-        algebra.and(lane, algebra.literal(~3L)),
-        algebra.and(
-          algebra.shiftRightLogical(
-            algebra.literal(control.toLong),
-            algebra.shiftLeft(algebra.and(lane, algebra.literal(3L)), algebra.literal(1L))
-          ),
-          algebra.literal(3L)
-        )
-      )
 
     /** DS_SWIZZLE's bit-masked mode: the offset packs AND[4:0], OR[9:5] and XOR[14:10] masks of the lane index's low
       * five bits, which the higher bits of the index pass through.

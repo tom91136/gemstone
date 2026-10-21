@@ -14,6 +14,7 @@ private[isa] object IntegerArithmetic {
     * lanes of `right` are negated exactly where `negate`, so that the negation of -32768 saturates in the sum rather
     * than wrapping to -32768.
     */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def packedSaturatingAdd(left: UInt[32], right: UInt[32], lanes: Int in (2, 4), negate: Boolean): UInt[32] = {
     val bits                             = 32 / lanes
     val mask                             = (1L << bits) - 1L

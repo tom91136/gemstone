@@ -53,11 +53,11 @@ private object VMBuiltins {
         parameter(0).refine[Long in 1L ~ 2147483647L].left.map(_ =>
           Fault.Backend(s"invalid malloc size: ${parameter(0)}")
         )
-          .flatMap(size => context.memory.allocate(size.toInt.unsafe[Int > 0]))
+          .flatMap(size => context.device.memory.allocate(size.toInt.unsafe[Int > 0]))
           .map(address => returnValue(address.raw))
       case Builtin.AssertFail => Left(Fault.Assertion("device-side assertion failed"))
       case Builtin.Free       =>
-        val _ = context.memory.free(GuestAddress(parameter(0)))
+        val _ = context.device.memory.free(GuestAddress(parameter(0)))
         Right(())
       case Builtin.LaunchDevice => launch(context, lane, parameters, parameter(_, _)).map(_ => returnValue(0L))
     }
@@ -104,9 +104,7 @@ private object VMBuiltins {
           context.kernel.copy(entry = child),
           geometry,
           block,
-          context.memory,
-          context.control,
-          context.workgroups,
+          context.device,
           shared
         )
       } yield ()

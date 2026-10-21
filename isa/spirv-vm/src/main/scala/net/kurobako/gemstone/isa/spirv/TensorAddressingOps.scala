@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import Op.*
 import VMInvocation.*
-import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -192,11 +191,13 @@ private object TensorAddressingOps {
                 Addressing(state, layoutShape, viewed, shape.columns, dest.isEmpty).indices(shape.rows * shape.columns),
                 Fault.InvalidRequest("a tensor layout or view addresses through a zero span or dimension")
               )
-              result <- dest.fold[AddressSpace.ReadResult[Unit]](store(memory, base, places, lanes, width)) { target =>
+              access = MatrixAccess(base, places, width, sparse = true)
+              result <- dest.fold[AddressSpace.ReadResult[Unit]](access.write(memory, lanes)) { target =>
                 val clamp = state(TensorLayout.ClampValue) &
                   (if (width >= 4) Word else (1L << (width * 8)) - 1L)
-                load(memory, base, places, lanes.clone(), clamp, width)
-                  .map(loaded => values.update(target, VMValue.Bits(matrixType, loaded)))
+                val loaded = lanes.clone()
+                places.indices.foreach(at => if (places(at) == Clamped) loaded(at) = clamp)
+                access.read(memory, loaded).map(read => values.update(target, VMValue.Bits(matrixType, read)))
               }
             } yield result
           }
@@ -210,45 +211,6 @@ private object TensorAddressingOps {
 
   /** A matrix element outside a load's tensor under constant clamping, which reads the clamp value. */
   private val Clamped = -2L
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-  private def store(memory: MemoryState, base: Pointer, places: Array[Long], lanes: Array[Long], width: Int in 1 ~ 8)
-      : Either[Fault, Unit] = {
-    var failure: Fault | Null = null
-    var at                    = 0
-    while (at < places.length && failure == null) {
-      if (places(at) >= 0L)
-        memory.writeScalar(base.copy(address = base.address + places(at) * width), lanes(at), width) match {
-          case Left(error) => failure = error
-          case Right(())   => ()
-        }
-      at += 1
-    }
-    if (failure != null) Left(failure) else Right(())
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-  private def load(
-      memory: MemoryState,
-      base: Pointer,
-      places: Array[Long],
-      loaded: Array[Long],
-      clamp: Long,
-      width: Int in 1 ~ 8
-  ): AddressSpace.ReadResult[Array[Long]] = {
-    var failure: Fault | AddressSpace.Pending.type | Null = null
-    var at                                                = 0
-    while (at < places.length && (failure eq null)) {
-      if (places(at) == Clamped) loaded(at) = clamp
-      else if (places(at) >= 0L)
-        memory.readScalar(base.copy(address = base.address + places(at) * width), width) match {
-          case Left(error)  => failure = error
-          case Right(value) => loaded(at) = value
-        }
-      at += 1
-    }
-    if (failure ne null) Left(failure) else Right(loaded)
-  }
 
   private object Addressing {
     @SuppressWarnings(Array("baumkuchen:unused-member"))

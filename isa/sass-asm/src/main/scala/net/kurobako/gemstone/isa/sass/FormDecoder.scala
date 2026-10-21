@@ -458,11 +458,11 @@ class FormDecoder private (
     build: Vec[Operand] => Form
 ) {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+  def decode(operands: Vec[Operand]): Option[Form] =
     if (operands.size != kinds.size) None
     else {
       var index = 0
       while (index < kinds.size && kinds(index).admits(operands(index))) index += 1
-      if (index == kinds.size) Some(Instruction(build(operands), modifiers, guard)) else None
+      if (index == kinds.size) Some(build(operands)) else None
     }
 }

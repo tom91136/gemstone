@@ -25,12 +25,10 @@ object Backend {
         @scala.annotation.unused offset: Long >= 0,
         @scala.annotation.unused bytes: Vec[Byte]
     ): Either[Fault, Unit] = Left(Fault.Unsupported("program globals are not writable"))
-    def execute(
-        task: KernelTask,
-        memory: AddressSpace,
-        control: TaskControl,
-        handler: Event => Either[Fault, Unit]
-    ): Either[Fault, Unit]
+
+    /** Compiles a kernel ahead of its launches, so that an invalid program is reported here and not by `execute`. */
+    def build(@scala.annotation.unused name: NonEmpty[String]): Either[Fault, Unit] = Right(())
+    def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit]
     override def close(): Unit = ()
   }
 

@@ -206,12 +206,12 @@ object AMDGPUModel extends Model {
   def assemble(source: String, name: Option[String]): Either[String, String] = for {
     target  <- selected(name)
     program <- asm.Parser.parse(source).left.map(_.diagnostic.raw)
-    bytes   <- asm.Assembler.encode(program, target, TargetDefaults.waveSize(target)).left.map(_.toString)
+    bytes   <- asm.Assembler.encode(program, TargetMode(target, TargetDefaults.waveSize(target))).left.map(_.toString)
   } yield Hex.render(bytes)
 
   def disassemble(bytes: Vec[Byte], name: Option[String]): Either[String, String] = for {
     target  <- selected(name)
-    program <- asm.Disassembler(target, TargetDefaults.waveSize(target)).decode(bytes).left.map(_.toString)
+    program <- asm.Disassembler(TargetMode(target, TargetDefaults.waveSize(target))).decode(bytes).left.map(_.toString)
   } yield asm.Printer.render(program)
 
   val assemblyExample: String = "v_add_f32 v0, v1, v2\ns_movk_i32 s5, 0xfffe\n"

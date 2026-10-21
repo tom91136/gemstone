@@ -9,12 +9,10 @@ import net.kurobako.gemstone.vm.*
 private[isa] object VMKernelLaunch {
   def execute(
       kernel: Kernel,
-      task: KernelTask,
-      addresses: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups
+      launch: KernelLaunch
   ): Either[Fault, Unit] = {
-    val parameters = kernel.entry.parameters
+    val KernelLaunch(task, context, workgroups) = launch
+    val parameters                              = kernel.entry.parameters
     for {
       _ <- Either.cond(
         task.argumentBuffer.isEmpty,
@@ -29,7 +27,7 @@ private[isa] object VMKernelLaunch {
         )
       )
       _        <- parameters.zip(task.arguments).traverse_(validateArgument(kernel.isaName, _, _))
-      resolved <- KernelArguments.resolve(task, addresses)
+      resolved <- KernelArguments.resolve(task, context.memory)
       arguments = parameters.zip(resolved).collect { case (parameter, KernelArguments.Resolved.Bytes(bytes)) =>
         parameter.name -> Argument(bytes)
       }.toMap
@@ -38,8 +36,8 @@ private[isa] object VMKernelLaunch {
           kernel,
           task.geometry,
           arguments,
-          addresses,
-          control,
+          context.memory,
+          context.control,
           workgroups,
           task.groupSegmentBytes,
           task.cluster

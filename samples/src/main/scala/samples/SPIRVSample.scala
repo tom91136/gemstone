@@ -75,8 +75,8 @@ object SPIRVSample {
         Operand(sum.srcA.kind, sum.dest.words),
         Operand(sum.srcA.kind, words(constant))
       )
-      val constants    = module.instructions.lastIndexWhere { case _: Instruction.Constant => true; case _ => false }
-      val summed       = Vec(sum, increment)
+      val constants = module.instructions.lastIndexWhere { case Instruction.Constant(_, _, _) => true; case _ => false }
+      val summed    = Vec(sum, increment)
       val instructions = module.instructions.flatMap {
         case `sum`                                                                     => summed
         case store @ Instruction.Store(_, stored, _) if stored.words == sum.dest.words =>

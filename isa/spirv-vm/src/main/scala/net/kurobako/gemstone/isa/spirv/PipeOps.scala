@@ -28,8 +28,13 @@ private object PipeOps {
       reserve(id(t), id(d), id(pipe), id(count), end = PipeEnd.Write)
     case Instruction.ReserveReadPipePackets(t, d, pipe, count, _, _) =>
       reserve(id(t), id(d), id(pipe), id(count), end = PipeEnd.Read)
-    case _: Instruction.CommitReadPipe | _: Instruction.CommitWritePipe | _: Instruction.GroupCommitReadPipe |
-        _: Instruction.GroupCommitWritePipe => Next
+    case Instruction.CommitReadPipe(_, _, _, _) | Instruction.CommitWritePipe(
+          _,
+          _,
+          _,
+          _
+        ) | Instruction.GroupCommitReadPipe(_, _, _, _, _) |
+        Instruction.GroupCommitWritePipe(_, _, _, _, _) => Next
     case Instruction.IsValidReserveId(t, d, reserved) =>
       step((execution, _) =>
         scalar(execution.values, id(reserved)).map(value =>

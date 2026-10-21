@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 class SASSDescriptionSuite extends munit.FunSuite {
-  test("conditional scope survives class boundaries and duplicate names") {
+  test("classes with duplicate names inside an ##IF block parse, and an unterminated ##IF is rejected") {
     val source = """##IF DEFINED(ARCH_SEMANTICS)
                    |CLASS "LDG"
                    |FORMAT Register:Rd;
@@ -12,7 +12,7 @@ class SASSDescriptionSuite extends munit.FunSuite {
                    |FORMAT Opcode;
                    |""".stripMargin
     val parsed = SASSDescription.parse(source).fold(e => fail(e.message), identity)
-    assertEquals(parsed.classes.map(_.conditional), Vector(true, true, false))
+    assertEquals(parsed.classes.map(_.name), Vector("LDG", "LDG", "NOP"))
     assert(SASSDescription.parse(source.replace("##ENDIF", "")).isLeft)
   }
 
@@ -111,8 +111,6 @@ class SASSDescriptionSuite extends munit.FunSuite {
         |""".stripMargin
 
     val parsed = SASSDescription.parse(source).toOption.get
-    assertEquals(parsed.architecture, Some("Test"))
-    assert(parsed.globals.exists(_.name == "CONSTANTS"))
     assertEquals(parsed.classes.map(_.name), Vector("IADD3", "IADD3 immediate"))
     assertEquals(parsed.classes.map(_.alternate), Vector(false, true))
     val cls = parsed.classes.head

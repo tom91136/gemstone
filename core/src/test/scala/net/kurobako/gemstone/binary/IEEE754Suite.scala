@@ -11,7 +11,7 @@ class IEEE754Suite extends munit.FunSuite {
 
   private def exactRound(value: java.math.BigDecimal, width: Int in (16, 32, 64), rounding: IEEE754.Rounding): Long = {
     // reference: walk the finite encodings around the binary64 nearest value
-    val nearest                                   = IEEE754.fromDouble(BigDecimal(value).toDouble, width)
+    val nearest                                   = IEEE754.fromDouble(value.doubleValue, width)
     val sign                                      = 1L << (width - 1)
     def decoded(bits: Long): java.math.BigDecimal = java.math.BigDecimal(IEEE754.toDouble(bits, width))
     def next(bits: Long, up: Boolean): Long       =
@@ -183,7 +183,7 @@ class IEEE754Suite extends munit.FunSuite {
       )
       val (a, b, c) = (value(), value(), value() * Math.pow(2.0, -random.nextInt(scale)))
       val exact     = java.math.BigDecimal(a).multiply(java.math.BigDecimal(b)).add(java.math.BigDecimal(c))
-      if (exact.signum() != 0 && Math.abs(BigDecimal(exact).toDouble) < (if (width == 16) 65504.0 else 1.0e30))
+      if (exact.signum() != 0 && Math.abs(exact.doubleValue) < (if (width == 16) 65504.0 else 1.0e30))
         assertEquals(
           IEEE754.fusedMultiplyAdd(
             IEEE754.fromDouble(a, width),

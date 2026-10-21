@@ -250,13 +250,8 @@ class ExecutionSession(
   def describeSpecialization(image: Vec[Byte]): Either[ExecutionFailure, Vec[SpecializationInfo]] =
     specializer.flatMap(_.describe(image).left.map(failure(_)))
 
-  def prepareShader(
-      image: Vec[Byte],
-      entry: NonEmpty[String],
-      stage: ShaderStageKind,
-      constants: Vec[SpecializationConstant]
-  ): Either[ExecutionFailure, PreparedShader] =
-    graphicsBackend.flatMap(_.prepare(image, entry, stage, constants).left.map(failure(_)))
+  def prepareShader(shader: ShaderStage): Either[ExecutionFailure, PreparedShader] =
+    graphicsBackend.flatMap(_.prepare(shader).left.map(failure(_)))
 
   def specializeImage(image: Vec[Byte], constants: Vec[SpecializationConstant]): Either[ExecutionFailure, Vec[Byte]] =
     specializer.flatMap(_.specialize(image, constants).left.map(failure(_)))
@@ -290,6 +285,8 @@ class ExecutionSession(
 
   def kernel(id: ProgramId, name: NonEmpty[String]): Either[ExecutionFailure, KernelMetadata] =
     describe(id)(_.kernel(name))
+
+  def build(id: ProgramId, name: NonEmpty[String]): Either[ExecutionFailure, Unit] = describe(id)(_.build(name))
 
   def symbols(id: ProgramId): Either[ExecutionFailure, ProgramSymbols] = describe(id)(_.symbols)
 
@@ -523,10 +520,10 @@ class ExecutionSession(
             ).left.map(message => ExecutionFailure.InvalidRequest(s"invalid descriptor bindings: $message"))
           )
       } yield enqueue(current, Some(program), TaskValidation.referenced(effective) ++ entry.allocations ++ images) {
-        (memory, control, handler) =>
-          if (descriptorBindings.isEmpty) loaded.execute(effective, memory, control, handler).map(_ => None)
+        context =>
+          if (descriptorBindings.isEmpty) loaded.execute(effective, context).map(_ => None)
           else graphics.toRight(Fault.Unsupported("graphics backend is unavailable")).flatMap(
-            _.withDescriptorBindings(descriptorBindings, memory, control) {
+            _.withDescriptorBindings(descriptorBindings, context.memory, context.control) {
               (preparedMemory, descriptors, relocations) =>
                 val replacements = descriptorBindings.zip(descriptors).map { (binding, range) =>
                   binding.argument.raw -> KernelTask.Argument.Memory(range.allocation, range.offset, Some(range.size))
@@ -534,7 +531,7 @@ class ExecutionSession(
                 effective.withArguments(Vec.from(effective.arguments.zipWithIndex.map { (argument, index) =>
                   replacements.getOrElse(index, argument)
                 })).flatMap(_.withPointerRelocations(relocations)).left.map(Fault.InvalidRequest(_)).flatMap(prepared =>
-                  loaded.execute(prepared, preparedMemory, control, handler).map(_ => None)
+                  loaded.execute(prepared, context.withMemory(preparedMemory)).map(_ => None)
                 )
             }
           )
@@ -551,9 +548,7 @@ class ExecutionSession(
         backend    <- graphicsBackend
         references <- backend.validate(submission, id => current.allocation(id).map(_.size))
           .left.map(message => ExecutionFailure.InvalidRequest(s"invalid graphics submission: $message"))
-      } yield enqueue(current, None, references) { (memory, control, handler) =>
-        backend.execute(submission, memory, control, handler).map(Some(_))
-      }
+      } yield enqueue(current, None, references)(backend.execute(submission, _).map(Some(_)))
     }
     accepted.foreach(_ => startExecutionWorker())
     accepted
@@ -605,9 +600,7 @@ class ExecutionSession(
             try
               programLifecycleLock.readLock().withLock {
                 completion.execute(
-                  CompletionMemory(Storage, host, completion),
-                  completion.control,
-                  handleEvent(id, _)
+                  TaskContext(CompletionMemory(Storage, host, completion), completion.control, handleEvent(id, _))
                 )
                   .left.map(failure(_))
               }

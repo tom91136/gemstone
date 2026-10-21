@@ -34,6 +34,15 @@ inline bool hasFeature(cl_device_id device, std::string_view feature) {
   return features ^ exists([&](const cl_name_version &entry) { return entry.name == feature; });
 }
 
+inline void requireDeviceEnqueue(cl_device_id device) {
+  if (!hasFeature(device, "__opencl_c_device_enqueue")) SKIP("device-side enqueue needs a SPIR-V translator");
+}
+
+// The driver offers device-side enqueue exactly when it has a SPIR-V translator, which reverse translation also needs.
+inline void requireSpirvTranslator(cl_device_id device) {
+  if (!hasFeature(device, "__opencl_c_device_enqueue")) SKIP("linking SPIR-V binaries needs a SPIR-V translator");
+}
+
 struct Session {
   gemstone_test::RpcFixture server;
   gemstone_test::RpcEnvironment environment{server};

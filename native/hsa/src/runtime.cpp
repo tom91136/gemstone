@@ -2035,7 +2035,7 @@ hsa_status_t loadCodeObject(hsa_executable_t executableHandle, hsa_agent_t agent
   programGuard.program = 0;
   if (!runtime.aql->installLoadedProgram(loadedProgram.value(), symbols)) {
     std::fprintf(stderr, "hsa install failed: %s\n", runtime.aql->lastError().c_str());
-    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
   const auto removeKernels = [&]() {
     for (const auto &kernel : kernels)
@@ -2045,7 +2045,7 @@ hsa_status_t loadCodeObject(hsa_executable_t executableHandle, hsa_agent_t agent
     auto layout = runtime.aql->layout(kernel->object);
     if (!layout) {
       removeKernels();
-      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
     kernel->metadata.layout = std::move(*layout);
   }
@@ -2359,6 +2359,12 @@ bool gemstone::hsa::copyExecutableKernelMetadata(hsa_executable_t executableHand
   if (!executableValue) return false;
   metadata = executableValue->kernels ^ map([](const KernelRef &kernel) { return kernel->metadata; });
   return true;
+}
+
+std::optional<gemstone::execution::Error> gemstone::hsa::buildExecutableKernel(uint64_t kernelObject) {
+  auto &runtime = state();
+  if (requireInitialised(runtime) != HSA_STATUS_SUCCESS) return gemstone::execution::Error{.detail = "HSA is not initialised"};
+  return runtime.aql->build(kernelObject);
 }
 
 extern "C" hsa_status_t hsa_amd_agent_iterate_memory_pools(hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *),

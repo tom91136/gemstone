@@ -15,7 +15,7 @@ private object ControlOps {
   import Operand.*
 
   def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.Nop() | _: Instruction.Line | Instruction.NoLine() | Instruction.FunctionParameter(_, _) |
+    case Instruction.Nop() | Instruction.Line(_, _, _) | Instruction.NoLine() | Instruction.FunctionParameter(_, _) |
         Instruction.AssumeTrueKHR(_) | Instruction.LoopControlINTEL(_) => Next
     case Instruction.Label(label)                                         => Label(id(label))
     case Instruction.Phi(_, _, _)                                         => phi(site)

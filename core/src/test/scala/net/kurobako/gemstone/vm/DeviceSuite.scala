@@ -16,17 +16,12 @@ class DeviceSuite extends munit.FunSuite {
   private open class EchoProgram(image: Vec[Byte]) extends Backend.Program {
     override def symbols: Either[Fault, ProgramSymbols]                        = Left(Fault.Unsupported("no symbols"))
     override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] = Left(Fault.Unsupported("no kernels"))
-    override def execute(
-        task: KernelTask,
-        memory: AddressSpace,
-        control: TaskControl,
-        handler: Event => Either[Fault, Unit]
-    ): Either[Fault, Unit] = task.arguments.head match {
+    override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = task.arguments.head match {
       case KernelTask.Argument.Memory(region, offset, _) =>
         for {
-          _ <- control.checkpoint(image.size.toLong.refine[Long > 0].value)
-          _ <- memory.write(region, offset, image.take(1))
-          _ <- handler(Event.Print("%d", Vec(Event.PrintArgument.Integer(Vec(image.head.toLong), 8))))
+          _ <- context.control.checkpoint(image.size.toLong.refine[Long > 0].value)
+          _ <- context.memory.write(region, offset, image.take(1))
+          _ <- context.handler(Event.Print("%d", Vec(Event.PrintArgument.Integer(Vec(image.head.toLong), 8))))
         } yield ()
       case other => Left(Fault.InvalidRequest(s"unexpected argument $other"))
     }
@@ -97,21 +92,17 @@ class DeviceSuite extends munit.FunSuite {
 
   /** Reports one instruction per image byte to an attached observer before echoing. */
   private class ObservedEcho(image: Vec[Byte]) extends EchoProgram(image) {
-    override def execute(
-        task: KernelTask,
-        memory: AddressSpace,
-        control: TaskControl,
-        handler: Event => Either[Fault, Unit]
-    ): Either[Fault, Unit] = control.observer.fold[Either[Fault, Unit]](Right(()))(observer =>
-      image.indices.foldLeft[Either[Fault, Unit]](Right(()))((result, index) =>
-        result.flatMap(_ =>
-          observer.instruction(
-            Fault.Location("echo", None, Some(index.toLong.unsafe), None, None),
-            NoState
+    override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+      context.control.observer.fold[Either[Fault, Unit]](Right(()))(observer =>
+        image.indices.foldLeft[Either[Fault, Unit]](Right(()))((result, index) =>
+          result.flatMap(_ =>
+            observer.instruction(
+              Fault.Location("echo", None, Some(index.toLong.unsafe), None, None),
+              NoState
+            )
           )
         )
-      )
-    ).flatMap(_ => super.execute(task, memory, control, handler))
+      ).flatMap(_ => super.execute(task, context))
   }
 
   private class ObservedBackend extends Backend {

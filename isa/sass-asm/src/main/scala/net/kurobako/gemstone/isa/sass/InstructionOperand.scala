@@ -35,17 +35,19 @@ object InstructionOperand {
   }
 
   val Register: Kind[Register]   = Kind("register", { case Operand.Register(_, _) => true; case _ => false }, identity)
-  val Predicate: Kind[Predicate] = Kind("predicate", { case _: Operand.Predicate => true; case _ => false }, identity)
+  val Predicate: Kind[Predicate] =
+    Kind("predicate", { case Operand.Predicate(_, _, _) => true; case _ => false }, identity)
   val Immediate: Kind[Immediate] = Kind(
     "immediate",
     {
-      case Operand.Integer(_) | Operand.Bits(_, _) | _: Operand.FloatingBits | _: Operand.Floating |
+      case Operand.Integer(_) | Operand.Bits(_, _) | Operand.FloatingBits(_, _, _) | Operand.Floating(_, _, _) |
           Operand.FloatingSymbol(_) => true
       case _ => false
     },
     identity
   )
-  val Address: Kind[Address]           = Kind("address", { case _: Operand.Address => true; case _ => false }, identity)
+  val Address: Kind[Address] =
+    Kind("address", { case Operand.Address(_, _, _, _, _, _) => true; case _ => false }, identity)
   val ConstantBank: Kind[ConstantBank] =
     Kind("constant-bank", { case Operand.ConstantBank(_, _) => true; case _ => false }, identity)
   val SpecialRegister: Kind[SpecialRegister] =

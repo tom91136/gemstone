@@ -282,7 +282,7 @@ private object VMResourceDecoder {
       packing =
         if (!machine.isSet(EncodingField.D16)) Packing.Dword
         else halves(target, high = false)
-      address = ImageAddress(words, resource, dimension, machine.isSet(EncodingField.DA), metadata.lodOrClampOrMip, a16)
+      address = ImageAddress(words, resource, dimension, metadata.lodOrClampOrMip, a16)
       bank    = if (machine.isSet(EncodingField.ACC)) RegisterBank.Accumulator else RegisterBank.Vector
       access <-
         if (name.startsWith("atomic_"))

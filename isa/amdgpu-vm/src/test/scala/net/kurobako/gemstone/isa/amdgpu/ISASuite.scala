@@ -48,7 +48,7 @@ class ISASuite extends munit.FunSuite {
       assertEquals(target.raw.refine[Target], Right(target))
       val instruction = parse("s_nop 0")
       val nop         = encoded(instruction, target)
-      assertEquals(Binary.decode(nop, target), Right(instruction))
+      assertEquals(Binary.decode(nop, TargetMode(target)), Right(instruction))
       assertEquals(fixtures.validate(nop ++ encoded(parse("s_endpgm"), target), target), Right(()))
     }
   }
@@ -58,7 +58,7 @@ class ISASuite extends munit.FunSuite {
     assert(instruction.definition.encodings(Target("gfx1010")).isEmpty)
     val code = encoded(instruction, Target("gfx1030"))
     assertEquals(disassembled(code, Target("gfx1030")).definition, instruction.definition)
-    assert(!Binary.decode(code, Target("gfx1010")).exists(_.definition == instruction.definition))
+    assert(!Binary.decode(code, TargetMode(Target("gfx1010"))).exists(_.definition == instruction.definition))
   }
 
   test("SOPK literal instructions decode through their literal layout") {
@@ -76,10 +76,10 @@ class ISASuite extends munit.FunSuite {
     for (suffix <- Vector("e32", "e64")) {
       val instruction = parse(s"v_fmac_f32_$suffix v2, v3, v4")
       val code        = encoded(instruction, target)
-      assertEquals(Binary.encode(disassembled(code, target), target), Right(code))
+      assertEquals(Binary.encode(disassembled(code, target), TargetMode(target)), Right(code))
       for (unsupported <- Vector(Target("gfx9"), Target("gfx900"), Target("gfx904"), Target("gfx90c"))) {
-        assert(Binary.encode(instruction, unsupported).isLeft, unsupported.name)
-        assert(Binary.decode(code, unsupported).isLeft, unsupported.name)
+        assert(Binary.encode(instruction, TargetMode(unsupported)).isLeft, unsupported.name)
+        assert(Binary.decode(code, TargetMode(unsupported)).isLeft, unsupported.name)
       }
     }
   }

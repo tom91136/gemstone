@@ -196,20 +196,20 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
       } yield ()
     }
 
-  override def execute(
-      task: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, Unit] =
+  private def compile(name: NonEmpty[String]): Either[Fault, (LoadedProgram.Indexed, String, VMIR.Kernel)] =
     for {
-      program <- initialised
-      alias   <- program.aliases.get(
-        task.kernelName
-      ).toRight(Fault.NotFound(s"AMDGPU kernel '${task.kernelName}' is not present"))
+      program  <- initialised
+      alias    <- program.aliases.get(name).toRight(Fault.NotFound(s"AMDGPU kernel '$name' is not present"))
       kernel   <- program.index.kernel(alias).leftMap(error => Fault.InvalidRequest(error.message))
       prepared <- compiled.computeIfAbsent(kernel.name, _ => compiler.compile(kernel))
+    } yield (program, alias, prepared)
+
+  override def build(name: NonEmpty[String]): Either[Fault, Unit] = compile(name).map(_ => ())
+
+  override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+    for {
+      (program, alias, prepared) <- compile(task.kernelName)
       layout = program.layouts.get(alias).orElse(program.layouts.get(task.kernelName))
-      _ <- VMInterpreter.execute(prepared, task, memory, control, workgroups, bindings, handler, layout)
+      _ <- VMInterpreter.execute(prepared, KernelLaunch(task, context, workgroups), bindings, layout)
     } yield ()
 }

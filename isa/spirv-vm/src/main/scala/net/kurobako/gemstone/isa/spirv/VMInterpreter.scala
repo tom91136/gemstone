@@ -32,12 +32,9 @@ private object VMInterpreter {
   def execute(
       program: VMProgram,
       ops: Array[Op],
-      dispatch: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups,
-      handler: Event => Either[Fault, Unit]
-  ): Either[Fault, Unit] =
+      launch: KernelLaunch
+  ): Either[Fault, Unit] = {
+    val dispatch = launch.task
     try
       if (dispatch.argumentBuffer.nonEmpty)
         Left(Fault.Unsupported("SPIR-V does not support allocation-backed argument buffers"))
@@ -48,11 +45,12 @@ private object VMInterpreter {
             program.functions.get(functionId)
               .toRight(Fault.InvalidRequest(s"SPIR-V entry point ${dispatch.kernelName} has no function body"))
           )
-          .flatMap(executeDispatch(program, ops, _, dispatch, memory, control, workgroups, handler))
+          .flatMap(executeDispatch(program, ops, _, launch))
     catch {
       case NonFatal(error) =>
         Left(Fault.InvalidRequest(s"malformed SPIR-V execution state: ${throwables.detail(error)}"))
     }
+  }
 
   /** Per-dispatch reuse of invocation machines: one for independent lanes, one per lane for collective groups. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
@@ -123,13 +121,11 @@ private object VMInterpreter {
       program: VMProgram,
       ops: Array[Op],
       function: Function,
-      dispatch: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups,
-      handler: Event => Either[Fault, Unit]
+      launch: KernelLaunch
   ): Either[Fault, Unit] = {
-    val shader       = program.vulkanEntries.contains(dispatch.kernelName)
+    val KernelLaunch(dispatch, context, _) = launch
+    val memory                             = context.memory
+    val shader                             = program.vulkanEntries.contains(dispatch.kernelName)
     val arguments    = if (shader) argumentVariables(program, dispatch.kernelName) else Vec.empty[Int]
     val expected     = if (shader) arguments.size else function.parameters.size
     val globalLayout = Layout(GlobalAperture)
@@ -153,8 +149,8 @@ private object VMInterpreter {
       globalValues <-
         if (!shader) Right(initialGlobals)
         else descriptorValues(program, memory, arguments.zip(dispatch.arguments), initialGlobals)
-      storage  = Storage(memory, dispatch.pointerRelocations, globalLayout.result(), handler)
-      launcher = Launcher(program, ops, memory, control, workgroups, globalValues, storage)
+      storage  = Storage(memory, dispatch.pointerRelocations, globalLayout.result(), context.handler)
+      launcher = Launcher(program, ops, launch, globalValues, storage)
       _ <- launcher.launch(function, dispatch, shader) { (workgroupLayout, privateLayout) =>
         if (shader) Right(Map.empty[Int, VMValue])
         else bindParameters(program, function, dispatch, memory, workgroupLayout, privateLayout)
@@ -169,12 +165,11 @@ private object VMInterpreter {
   private class Launcher(
       program: VMProgram,
       ops: Array[Op],
-      memory: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups,
+      root: KernelLaunch,
       globalValues: Map[Int, VMValue],
       storage: Storage
   ) {
+    private val memory       = root.context.memory
     private lazy val entries = program.entryPoints.map(_.swap)
 
     def launch(function: Function, dispatch: KernelTask, shader: Boolean)(
@@ -195,10 +190,7 @@ private object VMInterpreter {
           program,
           ops,
           function,
-          dispatch,
-          memory,
-          control,
-          workgroups,
+          root.copy(task = dispatch),
           globalValues,
           template,
           privateBuiltins.map(_._2),
@@ -390,10 +382,7 @@ private object VMInterpreter {
       program: VMProgram,
       programOps: Array[Op],
       function: Function,
-      dispatch: KernelTask,
-      memory: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups,
+      launch: KernelLaunch,
       globalValues: Map[Int, VMValue],
       template: InvocationValues,
       builtins: Vector[PrivateBuiltin],
@@ -401,9 +390,12 @@ private object VMInterpreter {
       workgroupImage: Array[Byte],
       storage: Storage
   ): Either[Fault, Unit] = {
-    val geometry          = dispatch.geometry
-    val stageInterfaces   = stageInterfaceVariables(program, dispatch.kernelName).toSet
-    val stageInitialisers = stageInterfaces.toVector.flatMap { variable =>
+    val KernelLaunch(dispatch, context, workgroups) = launch
+    val memory                                      = context.memory
+    val control                                     = context.control
+    val geometry                                    = dispatch.geometry
+    val stageInterfaces                             = stageInterfaceVariables(program, dispatch.kernelName).toSet
+    val stageInitialisers                           = stageInterfaces.toVector.flatMap { variable =>
       program.globals.get(variable).filter(_.storageClass == StorageClass.Output).flatMap(_.initialiser).map {
         initialiser => variable -> program.encode(program.constants(initialiser))
       }

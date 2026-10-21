@@ -132,7 +132,8 @@ private object ShaderLowering {
     }
     if (added.isEmpty) Result(module, early, quads)
     else {
-      val (prefix, functions) = module.instructions.span { case _: Instruction.Function => false; case _ => true }
+      val (prefix, functions) =
+        module.instructions.span { case Instruction.Function(_, _, _, _) => false; case _ => true }
       require(functions.nonEmpty, "shader has no function")
       val (preamble, data) = prefix.span(instruction => instruction.definition.opcodeNumber.raw < SPIRV.Opcode.TypeVoid)
       val instructions     = (preamble ++ Vec.from(decorations) ++ data ++ Vec.from(declarations) ++ functions).map {
