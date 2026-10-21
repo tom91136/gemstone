@@ -178,14 +178,15 @@ matches an instruction once and hands its kernel to a family of sinks:
 ```console
 sbt 'conformance/build [--target-set <set>] [--sycl-cts-full] [<backend>[/<arch>[/clang|gcc]] ...]'
 sbt 'conformance/run [--machine <profile>] [--workload <workload>] [<backend>[/<arch>[/clang|gcc]] ...]'
-sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [all|<backend>|<backend>/<arch>|cuda-ptx|cuda-sass[/<arch>] ...]'
+sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [--prebuilt] [all|<backend>|<backend>/<arch>|cuda-ptx|cuda-sass[/<arch>] ...]'
 ```
 
 - In the sbt shell, `Tab` completes target sets, workloads, profiles and routes, and an unknown name is rejected
   before anything builds. `build` with routes builds just those artifacts; `cuda/sm_89` covers both of its compilers.
 - Workloads (default `compact`), suites and artifacts are described in [the conformance README](conformance/README.md).
 - Profiles are `conformance/profiles/<profile>.toml`; `--machine` defaults to the local short hostname.
-- `build` and `emulate` default to `conformanceTargetSet` (`default`); `emulate` builds its target set first.
+- `build` and `emulate` default to `conformanceTargetSet` (`default`); `emulate` builds its target set first, unless
+  given `--prebuilt`, which reads `target/conformance/artifacts` as it is and fails if a backend is missing.
   `complete` adds every CUDA and GFX architecture. `cuda` and `cuda/sm_89` select both code variants; `cuda-ptx` and
   `cuda-sass` select one.
 - Artifacts go to `target/conformance/artifacts`; reports to `target/conformance/{direct,emulated}`.
@@ -198,6 +199,7 @@ sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [all|<back
 | `CONFORMANCE_JOBS` | Concurrent emulated tests (default: half the cores, at most 16) |
 | `CMAKE_BUILD_PARALLEL_LEVEL` | Job budget shared across artifact containers |
 | `CONFORMANCE_ARTIFACT_PARALLELISM` | Concurrent artifact containers (default: cores / 8, at most 4) |
+| `CONFORMANCE_SYCL_SHARD` | Build only this zero-based shard of the SYCL CTS, as `artifacts/sycl-shard-<n>` (CI only) |
 | `SYCL_CTS_ENABLE_FULL_CONFORMANCE=ON` | Full SYCL CTS type matrices; the default for `build --sycl-cts-full` |
 
 ## Benchmarks

@@ -2,9 +2,10 @@
 # a="-P ubuntu-24.04=catthehacker/ubuntu:act-24.04 --pull=false --rm", v="--security-opt label=disable -v $PWD/target/ci:$PWD/target/ci".
 # Podman rejects act's copies through the image's absolute /var/run symlink; there, use an image built with
 # `printf 'FROM catthehacker/ubuntu:act-24.04\nRUN rm /var/run && ln -s ../run /var/run\n' | podman build -t act-24.04-podman -`.
-# build's sibling containers bind by host path, so move the host's target/native and target/conformance aside first; other
-# jobs run without `needs`, which act would otherwise follow back to build:
+# build's and conformance-build's sibling containers bind by host path, so move the host's target/native and
+# target/conformance aside first; other jobs run without `needs`, which act would otherwise follow back to build:
 #   act -j build $a --container-options "$v -v $PWD/.cache:$PWD/.cache -v $PWD/target/native:$PWD/target/native -v $PWD/target/conformance:$PWD/target/conformance"
+#   act -j conformance-build --matrix shard:sycl-0 $a --container-options "$v -v $PWD/.cache:$PWD/.cache -v $PWD/target/conformance:$PWD/target/conformance"
 #   sed '/^    needs:/d' .github/workflows/build.yml > /tmp/ci.yml && act -W /tmp/ci.yml -j <job> $a --container-options "$v:ro -v $PWD/target/conformance:$PWD/target/conformance"
 name: Build
 on:
@@ -26,7 +27,6 @@ env:
   # small is the soraws-uk hardware (CUDA sm_89, gfx1030, OpenCL, SYCL, Level Zero); complete is every CUDA and GFX target
   CONFORMANCE_TARGET_SET: ${{ inputs.conformance == 'small' && 'default' || 'complete' }}
   CONFORMANCE_WORKLOAD: ${{ inputs.conformance == 'small' && 'compact' || 'full' }}
-  CONFORMANCE_BACKENDS: cuda hip hsa opencl sycl levelzero
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -100,9 +100,6 @@ jobs:
       - name: Compile
         if: ${{ !cancelled() }}
         run: sbt --server --batch Test/compile explorerJS/fullLinkJS native/build conformance/conformanceHost
-      - name: Conformance artifacts
-        if: ${{ !cancelled() }}
-        run: sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_BACKENDS"
       - name: Download cache contents
         id: downloads
         if: always()
@@ -129,10 +126,7 @@ jobs:
           pack() { tar -cf - "${@:2}" | zstd -T0 -q -f -o "target/ci/$1.tar.zst"; }
           mkdir -p target/ci
           pack build target/native/build target/references/api-native target/references/level-zero \
-            target/conformance/host "target/conformance/build/$CONFORMANCE_TARGET_SET"
-          for backend in $CONFORMANCE_BACKENDS; do
-            pack "conformance-$backend" "target/conformance/artifacts/$backend"
-          done
+            target/conformance/host
           ls -l target/ci
       - name: Upload
         if: ${{ !cancelled() && !env.ACT }}
@@ -141,12 +135,67 @@ jobs:
           name: build
           path: target/ci/build.tar.zst
           compression-level: 0
-      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-cuda, path: target/ci/conformance-cuda.tar.zst, compression-level: 0}}
-      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-hip, path: target/ci/conformance-hip.tar.zst, compression-level: 0}}
-      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-hsa, path: target/ci/conformance-hsa.tar.zst, compression-level: 0}}
-      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-opencl, path: target/ci/conformance-opencl.tar.zst, compression-level: 0}}
-      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-sycl, path: target/ci/conformance-sycl.tar.zst, compression-level: 0}}
-      - {if: '${{ !cancelled() && !env.ACT }}', uses: actions/upload-artifact@v7, with: {name: conformance-levelzero, path: target/ci/conformance-levelzero.tar.zst, compression-level: 0}}
+
+  # the artifact builds do not depend on the rest of build, so they run beside it
+  conformance-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {shard: cuda, routes: cuda}
+          - {shard: amd, routes: hip hsa}
+          - {shard: spirv, routes: opencl levelzero}
+          - {shard: sycl-0, routes: sycl, sycl: 0}
+          - {shard: sycl-1, routes: sycl, sycl: 1}
+          - {shard: sycl-2, routes: sycl, sycl: 2}
+    env:
+      CONFORMANCE_SYCL_SHARD: ${{ matrix.sycl }}
+    steps:
+      - *free-disk
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - name: Restore artifact dependencies
+        id: dependencies
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/conformance
+          key: conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}
+          restore-keys: |
+            conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
+            conformance-artifact-dependencies-
+      - name: Conformance artifacts
+        if: ${{ !cancelled() }}
+        run: sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET ${{ matrix.routes }}"
+      # every job populates the same dependency set, so one of them saves it
+      - name: Download cache contents
+        id: downloads
+        if: ${{ always() && matrix.shard == 'cuda' }}
+        run: echo "conformance=$(find .cache/conformance -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - name: Save artifact dependencies
+        if: ${{ always() && matrix.shard == 'cuda' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/conformance
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}-${{ steps.downloads.outputs.conformance }}
+      - name: Pack
+        if: ${{ !cancelled() }}
+        run: |
+          pack() { tar -cf - "${@:2}" | zstd -T0 -q -f -o "target/ci/$1.tar.zst"; }
+          mkdir -p target/ci
+          pack "conformance-${{ matrix.shard }}" target/conformance/artifacts
+          ls -l target/ci
+      - name: Upload
+        if: ${{ !cancelled() && !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: conformance-${{ matrix.shard }}
+          path: target/ci/conformance-${{ matrix.shard }}.tar.zst
+          compression-level: 0
 
   test:
     needs: build
@@ -208,19 +257,18 @@ jobs:
       - run: sbt --server --batch 'semanticsCheck${{ matrix.isa }}/testOnly *'
 
   conformance:
-    needs: build
+    needs: [build, conformance-build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
       fail-fast: false
-      # shards select backends, so each covers every architecture of the chosen target set
       matrix:
         include:
-          - {shard: cuda-ptx, routes: cuda-ptx, backends: cuda}
-          - {shard: cuda-sass, routes: cuda-sass, backends: cuda}
-          - {shard: amd, routes: hip hsa, backends: '{hip,hsa}'}
-          - {shard: spirv, routes: opencl levelzero sycl, backends: '{opencl,levelzero,sycl}'}
+          - {shard: cuda-ptx, routes: cuda-ptx, artifacts: '{build,conformance-cuda}'}
+          - {shard: cuda-sass, routes: cuda-sass, artifacts: '{build,conformance-cuda}'}
+          - {shard: amd, routes: hip hsa, artifacts: '{build,conformance-amd}'}
+          - {shard: spirv, routes: opencl levelzero sycl, artifacts: '{build,conformance-spirv,conformance-sycl-*}'}
     env:
       GEMSTONE_OFFLINE: 1
     steps:
@@ -234,14 +282,17 @@ jobs:
       - if: ${{ !env.ACT }}
         uses: actions/download-artifact@v8
         with:
-          pattern: '{build,conformance-${{ matrix.backends }}}'
+          pattern: ${{ matrix.artifacts }}
           path: target/ci
           merge-multiple: true
       - *unpack
+      - name: Merge SYCL shards
+        if: ${{ contains(matrix.routes, 'sycl') }}
+        run: cmake -DARTIFACTS=target/conformance/artifacts -P conformance/artifacts/Merge.cmake
       - name: Emulate
         run: |
           sbt --server --batch 'set conformance / conformanceJfr := false' \
-            "conformance/emulate --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
+            "conformance/emulate --prebuilt --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
       - if: ${{ !cancelled() && !env.ACT }}
         uses: actions/upload-artifact@v7
         with:

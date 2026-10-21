@@ -717,7 +717,8 @@ def conformanceArtifacts(
     s"-DCONFORMANCE_CCACHE_DIRECTORY=${root / ".cache/ccache"}",
     s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}",
     s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${if (syclCtsFull) "ON"
-      else sys.env.getOrElse("SYCL_CTS_ENABLE_FULL_CONFORMANCE", "OFF")}"
+      else sys.env.getOrElse("SYCL_CTS_ENABLE_FULL_CONFORMANCE", "OFF")}",
+    s"-DCONFORMANCE_SYCL_SHARD=${sys.env.getOrElse("CONFORMANCE_SYCL_SHARD", "")}"
   ) ++ sys.env.get("CONFORMANCE_ARTIFACT_PARALLELISM").map(value => s"-DCONFORMANCE_ARTIFACT_PARALLELISM=$value"),
   log = log,
   buildTargets = targets,
@@ -836,15 +837,28 @@ lazy val conformance = project.in(file("conformance"))
         val conformance = baseDirectory.value.toPath
         ArgumentParsers.arguments(
           conformanceOptions(conformance, "--target-set", "--workload"),
-          Seq.empty,
+          Seq("--prebuilt"),
           "all" +: ArgumentParsers.prefixes(conformanceExecutionRoutes(conformance, conformanceTargetSet.value))
         )
       }.parsed
       val targetSet = arguments.option("--target-set").getOrElse(conformanceTargetSet.value)
-      val remaining = arguments.tokens(Set("--target-set"))
+      val remaining = arguments.tokens(Set("--target-set", "--prebuilt"))
       val artifacts =
         if (arguments.free.isEmpty || arguments.free.contains("all")) Seq.empty
         else arguments.free.map(_.replaceFirst("^cuda-(ptx|sass)(?=/|$)", "cuda")).distinct
+      // chosen outside the task, which would otherwise run build regardless of the branch taken
+      val resolved =
+        if (arguments.flag("--prebuilt")) Def.task {
+          val directory = conformanceDirectory.value / "artifacts"
+          val backends  =
+            (if (artifacts.isEmpty) conformanceArtifactRoutes(baseDirectory.value.toPath, targetSet) else artifacts)
+              .map(_.takeWhile(_ != '/')).distinct
+          val missing = backends.filterNot(directory.resolve(_).toFile.isDirectory)
+          if (missing.nonEmpty)
+            throw sbt.internal.util.MessageOnlyException(s"Missing prebuilt artifacts: ${missing.mkString(", ")}")
+          directory
+        }
+        else build.toTask((s" --target-set $targetSet" +: artifacts).mkString(" "))
       RunMain.main(
         conformanceTool,
         s"$rootPackage.tools.conformance.CLI",
@@ -857,7 +871,7 @@ lazy val conformance = project.in(file("conformance"))
             "--executable",
             s"${conformanceHost.value / "bin/conformance"}",
             "--artifacts",
-            s"${build.toTask((s" --target-set $targetSet" +: artifacts).mkString(" ")).value}",
+            s"${resolved.value}",
             "--output",
             s"${conformanceDirectory.value / "emulated"}",
             "--root",
