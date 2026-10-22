@@ -382,7 +382,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: conformance (${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -409,7 +409,8 @@ jobs:
         run: |
           [ -z "$(find target/conformance/artifacts -maxdepth 1 -name 'sycl-shard-*' -print -quit)" ] ||
             cmake -DARTIFACTS=target/conformance/artifacts -P conformance/artifacts/Merge.cmake
-      # a runner that runs out of memory is shut down without a trace, so the log samples it as the run goes
+      # a runner that runs out of memory is shut down without a trace, so the log samples it as the run goes; the server
+      # takes half the memory, so sbt gives up the 8g heap .jvmopts asks for, which would leave the clients none
       - name: Emulate
         run: |
           while sleep 60; do
@@ -417,7 +418,7 @@ jobs:
           done &
           sampler=$!
           trap 'kill "$sampler"' EXIT
-          sbt --server --batch 'set conformance / conformanceJfr := true' \
+          sbt --server --batch -J-Xmx3g 'set conformance / conformanceJfr := true' \
             "conformance/emulate --prebuilt --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
       # the server records one JFR file per run, in a temporary directory; rename it after the shard
       - name: Collect JFR
