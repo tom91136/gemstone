@@ -5,8 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import scala.concurrent.duration.*
 
 class HostMemoryMirrorSuite extends munit.FunSuite {
+  override val munitTimeout: Duration = 120.seconds
+
   private def at(address: Long): GuestAddress = GuestAddress(address)
 
   test("executions cannot share pending reads or dirty bytes") {

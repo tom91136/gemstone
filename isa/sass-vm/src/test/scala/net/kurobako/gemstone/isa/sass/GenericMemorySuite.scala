@@ -845,9 +845,7 @@ class GenericMemorySuite extends munit.FunSuite {
   }
 
   /** Instructions following the global load's memory consumer, 8 bytes apart, plus the printed auxiliary predicate. */
-  private trait TailBuilder {
-    def apply(start: Int, aux: String): Vec[DecodedInstruction]
-  }
+  private type TailBuilder = (Int, String) => Vec[DecodedInstruction]
 
   private def tail(sm: Int)(build: TailBuilder): DecodedFunction = {
     val function    = generic("AddressGlobalLoad", sm, "global_load").function

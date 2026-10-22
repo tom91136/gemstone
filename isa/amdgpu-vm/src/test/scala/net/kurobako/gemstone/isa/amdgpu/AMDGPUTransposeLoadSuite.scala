@@ -30,7 +30,7 @@ class AMDGPUTransposeLoadSuite extends munit.FunSuite {
   }
 
   @FunctionalInterface
-  private trait Origin { def apply(lane: Int, element: Int): (Int, Int) }
+  private type Origin = (Int, Int) => (Int, Int)
 
   /** Each lane's dwords of `elements` elements of `bits`, element `e` from where `origin(lane, e)` says. */
   private def expected(lanes: Int, bits: Int, elements: Int)(origin: Origin): Vec[Vec[Long]] =

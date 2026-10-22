@@ -33,10 +33,10 @@ def testSlotSettings(
     val owner    = thisProject.value.id
     val delegate = logger.value
     new TestResultLogger {
-      def run(log: Logger, results: Tests.Output, taskName: String): Unit = {
-        delegate.run(log, results, taskName)
-        TestSlots.release(owner)
-      }
+      // a failing suite makes the delegate throw, and the slot must go back all the same
+      def run(log: Logger, results: Tests.Output, taskName: String): Unit =
+        try delegate.run(log, results, taskName)
+        finally TestSlots.release(owner)
     }
   }
 }

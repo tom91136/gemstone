@@ -317,6 +317,7 @@ jobs:
     env:
       GEMSTONE_OFFLINE: 1
     steps:
+      - *free-disk
       - *checkout
       - *java
       - *sbt

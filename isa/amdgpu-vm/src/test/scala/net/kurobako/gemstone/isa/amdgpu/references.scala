@@ -463,8 +463,12 @@ private object references {
   /** V_DIV_SCALE_F32's result and VCC bit, which the hardware decides on the operands' biased exponents alone: VCC when
     * they differ by 96 either way.
     */
+  private def biased32(value: Float): Int  = (java.lang.Float.floatToRawIntBits(value) >>> 23) & 0xff
+  private def biased64(value: Double): Int = ((java.lang.Double.doubleToRawLongBits(value) >>> 52) & 0x7ffL).toInt
+
   def divisionScaleF32(s0: Float, s1: Float, s2: Float): (Float, Boolean) = {
-    val (d, n) = (Math.getExponent(s1) + 127, Math.getExponent(s2) + 127)
+    // the biased exponent fields, read from the bits since Math.getExponent of zero differs between platforms
+    val (d, n) = (biased32(s1), biased32(s2))
     val result =
       if (s1 == 0.0f || s2 == 0.0f) Float.NaN
       else if (s0.isNaN) s0
@@ -478,7 +482,7 @@ private object references {
   }
 
   def divisionScaleF64(s0: Double, s1: Double, s2: Double): (Double, Boolean) = {
-    val (d, n) = (Math.getExponent(s1) + 1023, Math.getExponent(s2) + 1023)
+    val (d, n) = (biased64(s1), biased64(s2))
     val result =
       if (s1 == 0.0 || s2 == 0.0) Double.NaN
       else if (s0.isNaN) s0

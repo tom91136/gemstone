@@ -186,7 +186,7 @@ object GenerateSPIRVISA {
           enumerants =
             (optionalObjectArray(obj, "enumerants").map { enumerant =>
               Enumerant(
-                parseUnsigned(valueField(enumerant, "value")),
+                parseUnsigned(field(enumerant, "value")),
                 stringField(enumerant, "enumerant"),
                 optionalObjectArray(enumerant, "parameters").map(parameter => stringField(parameter, "kind")),
                 optionalStringArray(enumerant, "aliases")
@@ -201,7 +201,7 @@ object GenerateSPIRVISA {
       case _ => throw IllegalArgumentException("operand kind is not an object")
     }
     Grammar(
-      magic = parseUnsigned(valueField(root, "magic_number")),
+      magic = parseUnsigned(field(root, "magic_number")),
       major = versionField(root, "major_version"),
       minor = versionField(root, "minor_version"),
       entries = wrappedEntries,
@@ -486,7 +486,6 @@ object GenerateSPIRVISA {
 
   private def field(obj: ujson.Obj, name: String): Value =
     obj.value.getOrElse(name, throw IllegalArgumentException(s"missing JSON field $name"))
-  private def valueField(obj: ujson.Obj, name: String): Value         = field(obj, name)
   private def arrayField(obj: ujson.Obj, name: String): Vector[Value] = field(obj, name) match {
     case ujson.Arr(values) => values.toVector
     case _                 => throw IllegalArgumentException(s"JSON field $name is not an array")

@@ -13,9 +13,7 @@ import net.kurobako.gemstone.constraint.*
 class SpecifiedInstructionSuite extends munit.FunSuite {
   private val Sections = java.util.regex.Pattern.compile("; ")
 
-  private trait Expected {
-    def apply(a: Long, b: Long, c: Long): Long
-  }
+  private type Expected = (Long, Long, Long) => Long
 
   /** The 32-bit words `body` stores from `%out`, after running on one thread with `%in` addressing `inputs`. */
   private def run(registers: String, body: String, inputs: Vec[Long], outputs: Int, target: String = "sm_90")(using

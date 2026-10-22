@@ -21,7 +21,7 @@ class AMDGPUMatrixSuite extends munit.FunSuite {
   // instruction of each layout family: (lane, item) to (block, row or column, k) of A or B, and to (block, row, column)
   // of D.
   @FunctionalInterface
-  private trait Layout { def apply(lane: Int, item: Int): (Int, Int, Int) }
+  private type Layout = (Int, Int) => (Int, Int, Int)
 
   private class Formula(
       val target: String,

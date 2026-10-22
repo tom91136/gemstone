@@ -29,7 +29,7 @@ class AMDGPUDualIssueSuite extends munit.FunSuite {
   }
 
   @FunctionalInterface
-  private trait Reference { def apply(lane: Vec[Long]): Long }
+  private type Reference = Vec[Long] => Long
 
   /** Each lane's `register` after `code` on `inputs`. */
   private def run(inputs: Vec[Vec[Long]], code: Vec[Int], register: Int)(using munit.Location): Vec[Long] =
