@@ -3,10 +3,11 @@
 # Podman rejects act's copies through the image's absolute /var/run symlink; there, use an image built with
 # `printf 'FROM catthehacker/ubuntu:act-24.04\nRUN rm /var/run && ln -s ../run /var/run\n' | podman build -t act-24.04-podman -`.
 # build's and conformance-build's sibling containers bind by host path, so move the host's target/native and
-# target/conformance aside first; other jobs run without `needs`, which act would otherwise follow back to build:
+# target/conformance aside first; other jobs need only shards, which their matrices come from, as act would otherwise
+# follow `needs` back to build:
 #   act -j build $a --container-options "$v -v $PWD/.cache:$PWD/.cache -v $PWD/target/native:$PWD/target/native -v $PWD/target/conformance:$PWD/target/conformance"
 #   act -j conformance-build --matrix shard:sycl-0 $a --container-options "$v -v $PWD/.cache:$PWD/.cache -v $PWD/target/conformance:$PWD/target/conformance"
-#   sed '/^    needs:/d' .github/workflows/build.yml > /tmp/ci.yml && act -W /tmp/ci.yml -j <job> $a --container-options "$v:ro -v $PWD/target/conformance:$PWD/target/conformance"
+#   sed 's/^    needs:.*/    needs: shards/' .github/workflows/build.yml > /tmp/ci.yml && act -W /tmp/ci.yml -j <job> $a --container-options "$v:ro -v $PWD/target/conformance:$PWD/target/conformance"
 name: Build
 on:
   push:
@@ -52,17 +53,15 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.local/tools
-          key: tools-make-4.4.1-ninja-1.13.2
+          key: tools-make-4.4.1-ninja-1.13.2-${{ hashFiles('conformance/artifacts/Toolchains.cmake') }}
       - &tools
         name: Native tools
-        # the conformance jobserver needs make >= 4.4 and ninja >= 1.13; LLVM 22 matches the repository's formatting
+        # the conformance jobserver needs make >= 4.4 and ninja >= 1.13; LLVM is the release the conformance images pin,
+        # which matches the repository's formatting, rather than apt.llvm.org, which drops out often enough to fail runs
         run: |
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list >/dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential clang-22 clang-format-22 clang-tidy-22 llvm-22 \
-            cmake liblz4-dev libzstd-dev zlib1g-dev python3 spirv-tools unzip zstd
-          for tool in clang clang++ clang-format clang-tidy; do sudo ln -sf "/usr/bin/$tool-22" "/usr/local/bin/$tool"; done
+          sudo apt-get install -y -qq --no-install-recommends build-essential \
+            cmake liblz4-dev libzstd-dev zlib1g-dev python3 spirv-tools unzip xz-utils zstd
           tools=~/.local/tools
           if [ ! -x "$tools/bin/make" ] || [ ! -x "$tools/bin/ninja" ]; then
             curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz | tar -xz -C "$RUNNER_TEMP"
@@ -70,6 +69,26 @@ jobs:
             curl -fsSL -o "$RUNNER_TEMP/ninja.zip" https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip
             unzip -q -o "$RUNNER_TEMP/ninja.zip" -d "$tools/bin"
           fi
+          release=$(sed -n 's/^set(conformance_clang_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          sha256=$(sed -n 's/^set(conformance_clang_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          llvm="$tools/llvm-$release"
+          if [ ! -x "$llvm/bin/clang-tidy" ]; then
+            archive="LLVM-$release-Linux-X64"
+            curl -fsSL --retry 5 -o "$RUNNER_TEMP/llvm.tar.xz" \
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$release/$archive.tar.xz"
+            echo "$sha256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check --strict
+            mkdir -p "$llvm"
+            set -- "$archive/lib/clang/${release%%.*}/include"
+            for tool in clang clang++ "clang-${release%%.*}" clang-format clang-tidy run-clang-tidy clang-apply-replacements llvm-link; do
+              set -- "$@" "$archive/bin/$tool"
+            done
+            tar -xJf "$RUNNER_TEMP/llvm.tar.xz" --strip-components=1 -C "$llvm" "$@"
+            rm "$RUNNER_TEMP/llvm.tar.xz"
+          fi
+          mkdir -p "$tools/bin"
+          for tool in clang clang++ clang-format clang-tidy run-clang-tidy llvm-link; do
+            ln -sf "$llvm/bin/$tool" "$tools/bin/$tool"
+          done
           echo "$tools/bin" >> "$GITHUB_PATH"
       - &references
         name: Restore references
@@ -136,33 +155,36 @@ jobs:
           path: target/ci/build.tar.zst
           compression-level: 0
 
+  # the build and run shards come from one policy in Shards.cmake, so a run shard finds the artifacts its build shard made
+  shards:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.shards.outputs.build }}
+      run: ${{ steps.shards.outputs.run }}
+      lint: ${{ steps.shards.outputs.lint }}
+    steps:
+      - *checkout
+      - id: shards
+        run: |
+          for mode in build run; do
+            matrix=$(cmake "-DCONFORMANCE_TARGET_SET=$CONFORMANCE_TARGET_SET" "-DMODE=$mode" -P conformance/artifacts/Shards.cmake \
+              2>"$RUNNER_TEMP/warnings")
+            sed 's/^warning: /::warning::/' "$RUNNER_TEMP/warnings"
+            echo "$mode=$matrix" | tee -a "$GITHUB_OUTPUT"
+          done
+          backends=$(sed -n 's/^add_lint(\([a-z]*\) .*/"\1"/p' conformance/artifacts/CMakeLists.txt | paste -sd ,)
+          echo "lint=[$backends]" | tee -a "$GITHUB_OUTPUT"
+
   # the artifact builds do not depend on the rest of build, so they run beside it
   conformance-build:
+    needs: shards
+    name: conformance-build (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {shard: cuda-0, backends: cuda, index: 0, count: 3}
-          - {shard: cuda-1, backends: cuda, index: 1, count: 3}
-          - {shard: cuda-2, backends: cuda, index: 2, count: 3}
-          - {shard: amd-0, backends: hip hsa, index: 0, count: 9}
-          - {shard: amd-1, backends: hip hsa, index: 1, count: 9}
-          - {shard: amd-2, backends: hip hsa, index: 2, count: 9}
-          - {shard: amd-3, backends: hip hsa, index: 3, count: 9}
-          - {shard: amd-4, backends: hip hsa, index: 4, count: 9}
-          - {shard: amd-5, backends: hip hsa, index: 5, count: 9}
-          - {shard: amd-6, backends: hip hsa, index: 6, count: 9}
-          - {shard: amd-7, backends: hip hsa, index: 7, count: 9}
-          - {shard: amd-8, backends: hip hsa, index: 8, count: 9}
-          - {shard: spirv, routes: opencl levelzero}
-          - {shard: sycl-0, routes: sycl, sycl: 0}
-          - {shard: sycl-1, routes: sycl, sycl: 1}
-          - {shard: sycl-2, routes: sycl, sycl: 2}
-          - {shard: sycl-3, routes: sycl, sycl: 3}
-    env:
-      CONFORMANCE_SYCL_SHARD: ${{ matrix.sycl }}
+        include: ${{ fromJSON(needs.shards.outputs.build) }}
     steps:
       - *free-disk
       - *checkout
@@ -179,21 +201,22 @@ jobs:
           restore-keys: |
             conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
             conformance-artifact-dependencies-
-      # shards of a backend deal its architectures out, so a target set with few architectures leaves some empty
       - name: Conformance artifacts
         if: ${{ !cancelled() }}
+        env:
+          CONFORMANCE_SHARD_ROUTES: ${{ matrix.routes }}
+          SPLIT: ${{ matrix.split }}
         run: |
-          routes='${{ matrix.routes }}'
-          [ -n "$routes" ] || routes=$(sh conformance/artifacts/shard.sh "$CONFORMANCE_TARGET_SET" ${{ matrix.index }} ${{ matrix.count }} ${{ matrix.backends }} | paste -sd ' ')
+          [ -z "$SPLIT" ] || export "${SPLIT?}"
           mkdir -p target/conformance/artifacts
-          [ -z "$routes" ] || CONFORMANCE_SHARD_ROUTES="$routes" sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $routes"
+          sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_SHARD_ROUTES"
       # every job populates the same dependency set, so one of them saves it
       - name: Download cache contents
         id: downloads
-        if: ${{ always() && matrix.shard == 'cuda-0' }}
+        if: ${{ always() && strategy.job-index == 0 }}
         run: echo "conformance=$(find .cache/conformance -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Save artifact dependencies
-        if: ${{ always() && matrix.shard == 'cuda-0' }}
+        if: ${{ always() && strategy.job-index == 0 }}
         uses: actions/cache/save@v6
         with:
           path: .cache/conformance
@@ -281,7 +304,29 @@ jobs:
       - *tools
       - *references
       - *dependencies
-      - run: sbt --server --batch lint
+      - run: sbt --server --batch lintSources
+
+  # one backend per runner: each route builds the single toolchain image it needs and lints alone, so the images stay
+  # small and the routes do not compete for the memory clang-tidy needs
+  conformance-lint:
+    needs: shards
+    name: conformance-lint (${{ matrix.backend }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.shards.outputs.lint) }}
+    steps:
+      - *free-disk
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - *references
+      - *dependencies
+      - run: sbt --server --batch 'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lint
 
   semantics:
     needs: build
@@ -302,18 +347,15 @@ jobs:
       - run: sbt --server --batch 'semanticsCheck${{ matrix.isa }}/testOnly *'
 
   conformance:
-    needs: [build, conformance-build]
+    needs: [shards, build, conformance-build]
     if: ${{ !cancelled() }}
+    name: conformance (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {shard: cuda-ptx, routes: cuda-ptx, artifacts: '{build,conformance-cuda-*}'}
-          - {shard: cuda-sass, routes: cuda-sass, artifacts: '{build,conformance-cuda-*}'}
-          - {shard: amd, routes: hip hsa, artifacts: '{build,conformance-amd-*}'}
-          - {shard: spirv, routes: opencl levelzero sycl, artifacts: '{build,conformance-spirv,conformance-sycl-*}'}
+        include: ${{ fromJSON(needs.shards.outputs.run) }}
     env:
       GEMSTONE_OFFLINE: 1
     steps:
@@ -333,17 +375,41 @@ jobs:
           merge-multiple: true
       - *unpack
       - name: Merge SYCL shards
-        if: ${{ contains(matrix.routes, 'sycl') }}
-        run: cmake -DARTIFACTS=target/conformance/artifacts -P conformance/artifacts/Merge.cmake
+        run: |
+          [ -z "$(find target/conformance/artifacts -maxdepth 1 -name 'sycl-shard-*' -print -quit)" ] ||
+            cmake -DARTIFACTS=target/conformance/artifacts -P conformance/artifacts/Merge.cmake
+      # a runner that runs out of memory is shut down without a trace, so the log samples it as the run goes
       - name: Emulate
         run: |
-          sbt --server --batch 'set conformance / conformanceJfr := false' \
+          while sleep 60; do
+            echo "::group::memory $(date -u +%T)"; free -m; ps -eo rss=,args= --sort=-rss | head -5 | cut -c1-200; echo "::endgroup::"
+          done &
+          sampler=$!
+          trap 'kill "$sampler"' EXIT
+          sbt --server --batch 'set conformance / conformanceJfr := true' \
             "conformance/emulate --prebuilt --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
+      # the server records one JFR file per run, in a temporary directory; rename it after the shard
+      - name: Collect JFR
+        if: ${{ !cancelled() && !env.ACT }}
+        run: |
+          mkdir -p target/conformance/jfr-report
+          for recording in target/conformance/jfr/emulate-*/server.jfr; do
+            [ -f "$recording" ] || continue
+            mv "$recording" "target/conformance/jfr-report/${{ matrix.shard }}-server.jfr"
+          done
+          ls -l target/conformance/jfr-report
       - if: ${{ !cancelled() && !env.ACT }}
         uses: actions/upload-artifact@v7
         with:
           name: report-${{ matrix.shard }}
           path: target/conformance/emulated
+      - if: ${{ !cancelled() && !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: jfr-${{ matrix.shard }}
+          path: target/conformance/jfr-report
+          if-no-files-found: ignore
+          compression-level: 0
 
   conformance-summary:
     needs: conformance

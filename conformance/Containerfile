@@ -6,6 +6,10 @@
 ARG UBUNTU_IMAGE=docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
 ARG CUDA_IMAGE=cuda-image-not-supplied
 ARG SYCL_IMAGE=docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c
+# The package versions SYCL_IMAGE carries; lint-sycl installs the same ones without the rest of the toolkit.
+ARG ONEAPI_VERSION=2026.1
+ARG ONEAPI_DPCPP_PACKAGE=2026.1.0-235
+ARG ONEAPI_MKL_PACKAGE=2026.1.0-236
 ARG NVHPC_IMAGE=nvcr.io/nvidia/nvhpc@sha256:25621a24ed39fe0dce3e9458e56e3f11194c122ac0206a44532246a58972a854
 
 ARG CUDA_PACKAGE_VERSION
@@ -40,7 +44,7 @@ USER root
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache cmake ninja-build patchelf python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # One static Ninja works across the different toolchain base distributions.
@@ -54,6 +58,56 @@ RUN curl -fsSL https://codeload.github.com/ninja-build/ninja/tar.gz/refs/tags/v1
     && cmake -S /tmp/ninja-src -B /tmp/ninja-build -G Ninja -DBUILD_TESTING=OFF \
        -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
     && cmake --build /tmp/ninja-build --parallel 2
+
+FROM jobserver-ninja AS cmake-release
+ARG CMAKE_VERSION
+ARG CMAKE_LINUX_X86_64_SHA256
+RUN archive="cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+    && curl -fsSLO "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${archive}" \
+    && echo "${CMAKE_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict \
+    && mkdir -p /opt/cmake \
+    && tar -xzf "${archive}" --strip-components=1 -C /opt/cmake \
+    && rm "${archive}"
+
+# The release archive is the pinned upstream build and runs on every base distribution here, where apt.llvm.org
+# drops out often enough to fail whole runs. Its tools land where the distribution packages would put them.
+FROM jobserver-ninja AS llvm-tidy
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+ARG LLVM_RELEASE
+ARG LLVM_RELEASE_SHA256
+RUN apt-get update && apt-get install --no-install-recommends --yes xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+RUN test "${LLVM_RELEASE%%.*}" = "${LLVM_VERSION}" \
+    && curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE}/LLVM-${LLVM_RELEASE}-Linux-X64.tar.xz" \
+       -o /tmp/llvm.tar.xz \
+    && echo "${LLVM_RELEASE_SHA256}  /tmp/llvm.tar.xz" | sha256sum --check --strict \
+    && mkdir -p /llvm/usr/bin "/llvm/usr/lib/llvm-${LLVM_VERSION}" \
+    && tar -xJf /tmp/llvm.tar.xz --strip-components=1 -C "/llvm/usr/lib/llvm-${LLVM_VERSION}" \
+       "LLVM-${LLVM_RELEASE}-Linux-X64/bin/clang-tidy" "LLVM-${LLVM_RELEASE}-Linux-X64/bin/run-clang-tidy" \
+       "LLVM-${LLVM_RELEASE}-Linux-X64/bin/clang-apply-replacements" "LLVM-${LLVM_RELEASE}-Linux-X64/lib/clang" \
+    && for tool in clang-tidy run-clang-tidy clang-apply-replacements; do \
+         ln -s "../lib/llvm-${LLVM_VERSION}/bin/${tool}" "/llvm/usr/bin/${tool}-${LLVM_VERSION}"; \
+       done
+
+FROM llvm-tidy AS llvm
+ARG LLVM_VERSION
+ARG LLVM_RELEASE
+RUN tar -xJf /tmp/llvm.tar.xz --strip-components=1 -C "/llvm/usr/lib/llvm-${LLVM_VERSION}" \
+       $(for tool in clang clang++ "clang-${LLVM_VERSION}" clang-scan-deps clang-offload-bundler clang-offload-packager \
+           clang-linker-wrapper clang-nvlink-wrapper; do echo "LLVM-${LLVM_RELEASE}-Linux-X64/bin/${tool}"; done) \
+    && for tool in clang clang++; do \
+         ln -s "../lib/llvm-${LLVM_VERSION}/bin/${tool}" "/llvm/usr/bin/${tool}-${LLVM_VERSION}"; \
+       done
+
+FROM jobserver-ninja AS cccl
+ARG CCCL_VERSION
+ARG CCCL_SHA256
+RUN curl -fsSL "https://codeload.github.com/NVIDIA/cccl/tar.gz/refs/tags/v${CCCL_VERSION}" -o /tmp/cccl.tar.gz \
+    && echo "${CCCL_SHA256}  /tmp/cccl.tar.gz" | sha256sum --check --strict \
+    && mkdir /opt/cccl \
+    && tar -xzf /tmp/cccl.tar.gz --strip-components=1 -C /opt/cccl \
+    && rm /tmp/cccl.tar.gz
 
 # Source for the relocatable OpenCL compiler subset. The runtime needs an
 # OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
@@ -70,12 +124,14 @@ RUN apt-get update \
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM ubuntu-build-base AS toolchain-opencl
+FROM ubuntu-build-base AS opencl-base
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       ocl-icd-opencl-dev opencl-headers python3 spirv-tools \
+       ocl-icd-opencl-dev opencl-headers spirv-tools \
     && rm -rf /var/lib/apt/lists/*
+
+FROM opencl-base AS toolchain-opencl
 COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/icpx /opt/intel/oneapi/compiler/latest/bin/icpx
 COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/icpx.cfg /opt/intel/oneapi/compiler/latest/bin/icpx.cfg
 COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/clang /opt/intel/oneapi/compiler/latest/bin/compiler/clang
@@ -86,19 +142,14 @@ COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/lib/clang /
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM toolchain-opencl AS lint-opencl
-ARG DEBIAN_FRONTEND=noninteractive
-ARG LLVM_VERSION
-RUN apt-get update && apt-get install --no-install-recommends --yes ca-certificates curl gpg \
-    && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
-       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
-       > /etc/apt/sources.list.d/llvm.list \
-    && apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
-    && rm -rf /var/lib/apt/lists/*
+# The lint stages share their toolchain's base, so they parse against the same headers, but leave out the vendor
+# compilers, whose images are several gigabytes each; the kernels are not part of the lint.
+FROM opencl-base AS lint-opencl
+COPY --from=llvm-tidy /llvm/ /
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28ec222ea13f2aed2110b8a6 AS toolchain-levelzero
+FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28ec222ea13f2aed2110b8a6 AS levelzero-base
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
 COPY --from=network-config /etc/apt/apt.conf.d/80-retries /etc/apt/apt.conf.d/80-retries
@@ -106,22 +157,25 @@ COPY --from=network-config /root/.curlrc /root/.curlrc
 ENV CURL_HOME=/root
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache cmake ninja-build patchelf python3 \
        libboost-all-dev libpng-dev libva-dev libze-dev \
     && rm -rf /var/lib/apt/lists/*
 
+FROM levelzero-base AS toolchain-levelzero
 # Compile project-owned Level Zero kernels from source in the artifact build.
 COPY --from=toolchain-opencl /opt/intel/oneapi/compiler /opt/intel/oneapi/compiler
 
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM toolchain-levelzero AS lint-levelzero
+FROM levelzero-base AS lint-levelzero
 ARG DEBIAN_FRONTEND=noninteractive
-ARG LLVM_VERSION
-# clang-tidy selects the newest GCC installation its own dependencies bring in, so that one needs its C++ headers.
-RUN apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} libstdc++-16-dev \
+# clang-tidy selects the newest GCC installation, and the base carries GCC 16's runtime without its C++ headers.
+RUN apt-get update && apt-get install --no-install-recommends --yes libstdc++-16-dev \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=llvm-tidy /llvm/ /
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 FROM ubuntu-build-base AS rocm-repository
 ARG DEBIAN_FRONTEND=noninteractive
@@ -138,7 +192,7 @@ RUN apt-get update \
        > /etc/apt/preferences.d/rocm-pin-600 \
     && rm -rf /var/lib/apt/lists/*
 
-FROM rocm-repository AS toolchain-hip
+FROM rocm-repository AS hip-base
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes hip-dev rocblas-dev rocprim-dev rocthrust-dev \
@@ -160,21 +214,17 @@ ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
 RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
     > /etc/ld.so.conf.d/conformance.conf && ldconfig
 
+FROM hip-base AS toolchain-hip
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 # ROCm's LLVM ships no clang-tidy; upstream parses HIP against the same ROCm tree.
-FROM toolchain-hip AS lint-hip
-ARG DEBIAN_FRONTEND=noninteractive
-ARG LLVM_VERSION
-RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
-       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
-       > /etc/apt/sources.list.d/llvm.list \
-    && apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
-    && rm -rf /var/lib/apt/lists/*
+FROM hip-base AS lint-hip
+COPY --from=llvm-tidy /llvm/ /
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM rocm-repository AS toolchain-hsa
+FROM rocm-repository AS hsa-base
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes hsa-rocr-dev hip-dev rocm-device-libs rocm-llvm \
@@ -189,18 +239,14 @@ ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
 RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
     > /etc/ld.so.conf.d/conformance.conf && ldconfig
 
+FROM hsa-base AS toolchain-hsa
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM toolchain-hsa AS lint-hsa
-ARG DEBIAN_FRONTEND=noninteractive
-ARG LLVM_VERSION
-RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
-       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
-       > /etc/apt/sources.list.d/llvm.list \
-    && apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
-    && rm -rf /var/lib/apt/lists/*
+FROM hsa-base AS lint-hsa
+COPY --from=llvm-tidy /llvm/ /
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 FROM ${CUDA_IMAGE} AS cuda-sdk
 USER root
@@ -223,8 +269,6 @@ RUN apt-get update \
 FROM ubuntu-build-base AS toolchain-cuda
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_PACKAGE_VERSION
-ARG CMAKE_VERSION
-ARG CMAKE_LINUX_X86_64_SHA256
 COPY --from=cuda-sdk /usr/local/ /usr/local/
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes curl xz-utils g++-11 \
@@ -232,12 +276,7 @@ RUN apt-get update \
     && rm -f /usr/local/cuda \
     && ln -s "cuda-$(echo "${CUDA_PACKAGE_VERSION}" | tr - .)" /usr/local/cuda
 ENV CUDAHOSTCXX=/usr/bin/g++-11
-RUN archive="cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
-    && curl -fsSLO "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${archive}" \
-    && echo "${CMAKE_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict \
-    && mkdir -p /opt/cmake \
-    && tar -xzf "${archive}" --strip-components=1 -C /opt/cmake \
-    && rm "${archive}"
+COPY --from=cmake-release /opt/cmake /opt/cmake
 ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:${PATH}" \
     CXX=/usr/bin/g++ \
     CUDAToolkit_ROOT=/usr/local/cuda \
@@ -265,33 +304,54 @@ RUN apt-get update \
 
 FROM toolchain-cuda AS toolchain-clang-cuda
 COPY --from=clang-cuda-headers /clang-cuda-headers/ /opt/cuda-clang-headers/
-ARG DEBIAN_FRONTEND=noninteractive
 ARG LLVM_VERSION
-ARG CCCL_VERSION
-ARG CCCL_SHA256
-RUN apt-get update && apt-get install --no-install-recommends --yes gpg \
-    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
-       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
-       > /etc/apt/sources.list.d/llvm.list \
-    && apt-get update && apt-get install --no-install-recommends --yes clang-${LLVM_VERSION} clang-tools-${LLVM_VERSION} \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
+COPY --from=llvm /llvm/ /
+COPY --from=cccl /opt/cccl /opt/cccl
+RUN ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
     && ln -s /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++
-RUN curl -fsSL "https://codeload.github.com/NVIDIA/cccl/tar.gz/refs/tags/v${CCCL_VERSION}" -o /tmp/cccl.tar.gz \
-    && echo "${CCCL_SHA256}  /tmp/cccl.tar.gz" | sha256sum --check --strict \
-    && mkdir /opt/cccl \
-    && tar -xzf /tmp/cccl.tar.gz --strip-components=1 -C /opt/cccl \
-    && rm /tmp/cccl.tar.gz
 ENV PATH=/usr/lib/llvm-${LLVM_VERSION}/bin:${PATH} \
     CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ CUDACXX=/usr/local/bin/clang++ \
     CPATH=/opt/cuda-clang-headers:/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include
 
-FROM toolchain-clang-cuda AS lint-clang-cuda
+# The toolkit packages come from NVIDIA's repository, so the lint does not pull the SDK image, which carries the
+# whole toolkit; the rest mirrors toolchain-cuda and toolchain-clang-cuda.
+FROM ubuntu-build-base AS lint-clang-cuda
 ARG DEBIAN_FRONTEND=noninteractive
+ARG CUDA_PACKAGE_VERSION
 ARG LLVM_VERSION
-RUN apt-get update && apt-get install --no-install-recommends --yes clang-tidy-${LLVM_VERSION} \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes curl gpg g++-11 \
+    && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/3bf863cc.pub \
+       | gpg --dearmor -o /usr/share/keyrings/cuda.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cuda.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
+       > /etc/apt/sources.list.d/cuda.list \
+    && apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
+       cuda-nvdisasm-${CUDA_PACKAGE_VERSION} libcublas-dev-${CUDA_PACKAGE_VERSION} \
+       libcurand-dev-${CUDA_PACKAGE_VERSION} \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /usr/local/cuda \
+    && ln -s "cuda-$(echo "${CUDA_PACKAGE_VERSION}" | tr - .)" /usr/local/cuda
+COPY --from=cmake-release /opt/cmake /opt/cmake
+COPY --from=llvm /llvm/ /
+COPY --from=cccl /opt/cccl /opt/cccl
+RUN ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
+    && ln -s /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++
+ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:/usr/lib/llvm-${LLVM_VERSION}/bin:${PATH}" \
+    CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ CUDACXX=/usr/local/bin/clang++ \
+    CUDAHOSTCXX=/usr/bin/g++-11 \
+    CUDAToolkit_ROOT=/usr/local/cuda \
+    CPATH=/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include \
+    LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib \
+    LD_LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib:/usr/local/cuda/compat
+
+# Make toolkit runtimes discoverable by both the loader and CMake dependency scanning.
+RUN printf '%s\n' /usr/local/cuda/targets/x86_64-linux/lib \
+    > /etc/ld.so.conf.d/conformance.conf && ldconfig
+
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 # GCC 14 looks up launch ICVs using the unresolved default-device sentinel.
 # Rebuild only the host runtime; retain distribution offload plugins/device libraries.
@@ -380,8 +440,44 @@ RUN printf '%s\n' /opt/intel/oneapi/compiler/latest/lib /opt/intel/oneapi/mkl/la
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
+# The lint installs the compiler and oneMKL that SYCL_IMAGE carries, at the same versions, without the rest of the
+# toolkit; the environment mirrors toolchain-sycl.
+FROM ubuntu-build-base AS lint-sycl
+ARG DEBIAN_FRONTEND=noninteractive
+ARG ONEAPI_VERSION
+ARG ONEAPI_DPCPP_PACKAGE
+ARG ONEAPI_MKL_PACKAGE
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes curl gpg \
+    && curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+       | gpg --dearmor -o /usr/share/keyrings/intel.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/intel.gpg] https://apt.repos.intel.com/oneapi all main" \
+       > /etc/apt/sources.list.d/intel.list \
+    && apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       intel-oneapi-dpcpp-cpp-${ONEAPI_VERSION}=${ONEAPI_DPCPP_PACKAGE} \
+       intel-oneapi-mkl-devel-${ONEAPI_VERSION}=${ONEAPI_MKL_PACKAGE} \
+       libdrm2 libhwloc15 libnuma1 libze1 \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}" \
+    CC=icx \
+    CXX=icpx \
+    ONEAPI_ROOT=/opt/intel/oneapi \
+    MKLROOT=/opt/intel/oneapi/mkl/latest \
+    TBBROOT=/opt/intel/oneapi/tbb/latest \
+    CPATH=/opt/intel/oneapi/dpl/latest/include:/opt/intel/oneapi/mkl/latest/include \
+    LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
+    LD_LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
+    CMAKE_PREFIX_PATH=/opt/intel/oneapi/compiler/latest:/opt/intel/oneapi/dpl/latest:/opt/intel/oneapi/mkl/latest:/opt/intel/oneapi/tbb/latest:/opt/intel/oneapi/umf/latest
+
+# Make vendor runtimes discoverable by both the loader and CMake dependency scanning.
+RUN printf '%s\n' /opt/intel/oneapi/compiler/latest/lib /opt/intel/oneapi/mkl/latest/lib /opt/intel/oneapi/tbb/latest/lib /opt/intel/oneapi/umf/latest/lib \
+    > /etc/ld.so.conf.d/conformance.conf && ldconfig
+
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 # oneAPI's own clang-tidy understands the DPC++ frontend that upstream clang-tidy cannot parse.
-FROM toolchain-sycl AS lint-sycl
 RUN ln -s /opt/intel/oneapi/compiler/latest/bin/compiler/clang-tidy /usr/local/bin/clang-tidy
 
 FROM ${NVHPC_IMAGE} AS toolchain-openacc

@@ -27,7 +27,13 @@ function(conformance_cuda_toolchain architecture image_output package_output sup
 endfunction()
 
 # Compiler variants retain the runtime API backend and have independent artifacts.
-set(conformance_clang_version 22)
+set(conformance_clang_release 22.1.8)
+set(conformance_clang_release_sha256 df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384)
+string(REGEX MATCH "^[0-9]+" conformance_clang_version "${conformance_clang_release}")
+set(conformance_clang_build_arguments
+  --build-arg "LLVM_VERSION=${conformance_clang_version}"
+  --build-arg "LLVM_RELEASE=${conformance_clang_release}"
+  --build-arg "LLVM_RELEASE_SHA256=${conformance_clang_release_sha256}")
 set(conformance_gcc_version 14)
 set(conformance_gcc_runtime_version 14.2.0)
 set(conformance_gcc_runtime_sha256 a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9)
@@ -68,7 +74,7 @@ function(conformance_toolchain backend architecture image_output dependency_outp
   if(lint)
     string(REGEX REPLACE "^toolchain-" "lint-" stage "${stage}")
     if(NOT compiler STREQUAL "clang")
-      list(APPEND build_arguments --build-arg "LLVM_VERSION=${conformance_clang_version}")
+      list(APPEND build_arguments ${conformance_clang_build_arguments})
     endif()
   endif()
   set(support "support")
@@ -99,7 +105,7 @@ function(conformance_toolchain backend architecture image_output dependency_outp
       set(cccl_version 3.4.3)
       set(cccl_sha256 2b3eee7b044f528408b45ab85535ce6c7430b063d5bc939599a4e038da7cf6fb)
     endif()
-    list(APPEND build_arguments --build-arg "LLVM_VERSION=${conformance_clang_version}"
+    list(APPEND build_arguments ${conformance_clang_build_arguments}
       --build-arg "CCCL_VERSION=${cccl_version}" --build-arg "CCCL_SHA256=${cccl_sha256}")
   elseif(compiler STREQUAL "gcc")
     set(support "support-gcc")

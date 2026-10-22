@@ -121,6 +121,7 @@ lazy val offlineMode             = settingKey[Boolean]("Require cached dependenc
 lazy val conformanceDirectory    = settingKey[Path]("Conformance build, work, artifact, and report root.")
 lazy val conformanceTargetSet    = settingKey[String]("Conformance artifact matrix used by builds and emulation.")
 lazy val conformanceJfr          = settingKey[Boolean]("Record the conformance emulation server with JFR.")
+lazy val conformanceLintTargets  = settingKey[Seq[String]]("Conformance lint targets; lint is all of them.")
 lazy val conformanceHost         = taskKey[Path]("Built host conformance driver and its tests.")
 lazy val emulate                 = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val nativeArtifact          = taskKey[Path]("Built native runtime directory.")
@@ -733,11 +734,12 @@ lazy val conformance = project.in(file("conformance"))
   .enablePlugins(ExternalProjectPlugin)
   .settings(
     externalCodestyleSettings,
-    name                  := "gemstone-conformance",
-    conformanceTargetSet  := "default",
-    nativeCompileDatabase := Def.uncached(conformanceHost.value),
-    conformanceJfr        := true,
-    build                 := {
+    name                   := "gemstone-conformance",
+    conformanceTargetSet   := "default",
+    nativeCompileDatabase  := Def.uncached(conformanceHost.value),
+    conformanceJfr         := true,
+    conformanceLintTargets := Seq("lint"),
+    build                  := {
       val arguments = Def.setting {
         val conformance = baseDirectory.value.toPath
         val default     = conformanceTargetSet.value
@@ -779,7 +781,7 @@ lazy val conformance = project.in(file("conformance"))
         (LocalRootProject / baseDirectory).value.toPath,
         offlineMode.value,
         conformanceTargetSet.value,
-        Seq("lint"),
+        conformanceLintTargets.value,
         false,
         streams.value.log.info
       )
@@ -1020,7 +1022,17 @@ lazy val gemstone = project.in(file("."))
 
 addCommandAlias("gemstoneRun", "server/run run")
 
-addCommandAlias(
-  "lint",
-  s"${if (Baumkuchen.enabled) ";baumkuchenAnalyse" else ""};codegen/checkEnvironment;scalafmtCheckAll;scalafmtSbtCheck;scalafixAll --check;mimaReportBinaryIssues;native/lint;conformance/lint"
-)
+// the conformance lint runs in containers, so it is separate from the checks that only need the checkout
+lazy val lintSourceTasks = Seq(
+  Option.when(Baumkuchen.enabled)("baumkuchenAnalyse"),
+  Some("codegen/checkEnvironment"),
+  Some("scalafmtCheckAll"),
+  Some("scalafmtSbtCheck"),
+  Some("scalafixAll --check"),
+  Some("mimaReportBinaryIssues"),
+  Some("native/lint")
+).flatten.mkString(";")
+
+addCommandAlias("lintSources", lintSourceTasks)
+
+addCommandAlias("lint", s"$lintSourceTasks;conformance/lint")

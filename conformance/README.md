@@ -76,10 +76,16 @@ CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANC
 `artifacts/sycl`. Shard membership is in `cts/sycl/CMakeLists.txt`; shard 0 also builds the unified suite and the
 miniapps.
 
-CI also splits the CUDA and AMD routes by architecture. `sh artifacts/shard.sh <target-set> <index> <count> <backend>...`
-prints the `build` selectors of one shard, cutting the architectures of those backends, in route order, into equal
-consecutive slices. A shard names its routes in `CONFORMANCE_SHARD_ROUTES`, so its own first route of each support
-closure builds that closure; the closures are identical, so the shards' artifacts unpack over each other.
+`cmake -DCONFORMANCE_TARGET_SET=<target set> -DMODE=build|run -P artifacts/Shards.cmake` prints the CI build or
+emulation shards as a GitHub Actions matrix.
+Its policy groups routes by the first pattern they match, and a route that matches none goes to the first group's
+shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. With equal
+build and run counts, run shard `n` emulates exactly what build shard `n` built. A shard names its routes in
+`CONFORMANCE_SHARD_ROUTES`, so its own first route of each support closure builds that closure; the closures are
+identical, so the shards' artifacts unpack over each other.
+
+CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
+beside the `report-<shard>` reports.
 
 ## Driver
 

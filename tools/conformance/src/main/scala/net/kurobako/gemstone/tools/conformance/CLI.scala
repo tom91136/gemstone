@@ -3,6 +3,8 @@ package net.kurobako.gemstone.tools.conformance
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
+import com.sun.management.OperatingSystemMXBean
+import java.lang.management.ManagementFactory
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -202,7 +204,9 @@ object CLI {
       environment.ExecutionParallelism -> s"$workers",
       environment.NativeDirectory      -> s"${emulation.server.native.toAbsolutePath}"
     )
-    val heap      = s"-Xmx${math.max(8L, math.min(28L, 2L + jobs.toLong * 6L))}g"
+    // the JVM reports the container's limit; the build JVM and the clients need the other half
+    val memory    = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[OperatingSystemMXBean].getTotalMemorySize
+    val heap      = s"-Xmx${math.min(math.max(8L, math.min(28L, 2L + jobs.toLong * 6L)) << 10, memory / 2 >> 20)}m"
     val directory = Files.createDirectories(root.resolve("target/conformance"))
     val session   = Files.createTempDirectory(directory, "server-")
     val recording = emulation.server.jfr.map { jfr =>
@@ -232,6 +236,7 @@ object CLI {
     val listen       =
       emulation.server.listen.getOrElse(s"unix://${session.resolve("rpc.sock").toUri.getRawPath}")
     val script = session.resolve("launcher.sh")
+    Console.println(s"Conformance server: $jobs concurrent case(s), $heap")
     recording.foreach(file => Console.println(s"Conformance JFR recording: $file"))
     val process = Process(
       gemstone(serverJvm, "serve", "--listen", listen, "--endpoint-file", s"$endpointFile"),
