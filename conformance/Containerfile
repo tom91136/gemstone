@@ -10,6 +10,8 @@ ARG SYCL_IMAGE=docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a
 ARG ONEAPI_VERSION=2026.1
 ARG ONEAPI_DPCPP_PACKAGE=2026.1.0-235
 ARG ONEAPI_MKL_PACKAGE=2026.1.0-236
+ARG ONEDPL_VERSION=2022.13
+ARG ONEDPL_PACKAGE=2022.13.0-107
 ARG NVHPC_IMAGE=nvcr.io/nvidia/nvhpc@sha256:25621a24ed39fe0dce3e9458e56e3f11194c122ac0206a44532246a58972a854
 
 ARG CUDA_PACKAGE_VERSION
@@ -114,6 +116,13 @@ RUN curl -fsSL "https://codeload.github.com/NVIDIA/cccl/tar.gz/refs/tags/v${CCCL
 # SYCL toolchain uses keeps OpenCL artifacts self-contained.
 FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
 
+FROM ubuntu-build-base AS lint-kernel-stubs
+RUN d=/opt/intel/oneapi/compiler/latest/bin/compiler \
+    && mkdir -p "$d" \
+    && printf '%s\n' '#!/bin/sh' 'while [ $# -gt 0 ]; do [ "$1" = -o ] && echo placeholder > "$2"; shift; done' > "$d/clang" \
+    && chmod +x "$d/clang" \
+    && ln -s clang "$d/llvm-spirv"
+
 FROM ubuntu-build-base AS toolchain-vulkan
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -143,9 +152,11 @@ COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 # The lint stages share their toolchain's base, so they parse against the same headers, but leave out the vendor
-# compilers, whose images are several gigabytes each; the kernels are not part of the lint.
+# compilers, whose images are several gigabytes each. The kernels are not part of the lint, so the compiler paths
+# the generated headers depend on are stubs that write a placeholder image.
 FROM opencl-base AS lint-opencl
 COPY --from=llvm-tidy /llvm/ /
+COPY --from=lint-kernel-stubs /opt/intel/oneapi/compiler /opt/intel/oneapi/compiler
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
@@ -170,6 +181,7 @@ COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/nin
 
 FROM levelzero-base AS lint-levelzero
 ARG DEBIAN_FRONTEND=noninteractive
+COPY --from=lint-kernel-stubs /opt/intel/oneapi/compiler /opt/intel/oneapi/compiler
 # clang-tidy selects the newest GCC installation, and the base carries GCC 16's runtime without its C++ headers.
 RUN apt-get update && apt-get install --no-install-recommends --yes libstdc++-16-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -440,13 +452,15 @@ RUN printf '%s\n' /opt/intel/oneapi/compiler/latest/lib /opt/intel/oneapi/mkl/la
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-# The lint installs the compiler and oneMKL that SYCL_IMAGE carries, at the same versions, without the rest of the
+# The lint installs the compiler, oneMKL, and oneDPL that SYCL_IMAGE carries, at the same versions, without the rest of the
 # toolkit; the environment mirrors toolchain-sycl.
 FROM ubuntu-build-base AS lint-sycl
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ONEAPI_VERSION
 ARG ONEAPI_DPCPP_PACKAGE
 ARG ONEAPI_MKL_PACKAGE
+ARG ONEDPL_VERSION
+ARG ONEDPL_PACKAGE
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes curl gpg \
     && curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
@@ -457,6 +471,7 @@ RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
        intel-oneapi-dpcpp-cpp-${ONEAPI_VERSION}=${ONEAPI_DPCPP_PACKAGE} \
        intel-oneapi-mkl-devel-${ONEAPI_VERSION}=${ONEAPI_MKL_PACKAGE} \
+       intel-oneapi-libdpstd-devel-${ONEDPL_VERSION}=${ONEDPL_PACKAGE} \
        libdrm2 libhwloc15 libnuma1 libze1 \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}" \

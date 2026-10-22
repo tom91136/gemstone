@@ -41,21 +41,27 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # conformance-build skips its setup when its package restores; elsewhere there is no such step and the condition holds
       - &java
+        if: ${{ steps.package.outputs.cache-hit != 'true' }}
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
           cache: sbt
       - &sbt
+        if: ${{ steps.package.outputs.cache-hit != 'true' }}
         uses: sbt/setup-sbt@v1
       - &tools-cache
+        if: ${{ steps.package.outputs.cache-hit != 'true' }}
         uses: actions/cache@v6
         with:
           path: ~/.local/tools
           key: tools-make-4.4.1-ninja-1.13.2-${{ hashFiles('conformance/artifacts/Toolchains.cmake') }}
       - &tools
         name: Native tools
+        if: ${{ steps.package.outputs.cache-hit != 'true' }}
+        timeout-minutes: 20
         # the conformance jobserver needs make >= 4.4 and ninja >= 1.13; LLVM is the release the conformance images pin,
         # which matches the repository's formatting, rather than apt.llvm.org, which drops out often enough to fail runs
         run: |
@@ -74,7 +80,7 @@ jobs:
           llvm="$tools/llvm-$release"
           if [ ! -x "$llvm/bin/clang-tidy" ]; then
             archive="LLVM-$release-Linux-X64"
-            curl -fsSL --retry 5 -o "$RUNNER_TEMP/llvm.tar.xz" \
+            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm.tar.xz" \
               "https://github.com/llvm/llvm-project/releases/download/llvmorg-$release/$archive.tar.xz"
             echo "$sha256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check --strict
             mkdir -p "$llvm"
@@ -142,7 +148,7 @@ jobs:
       - name: Pack
         if: ${{ !cancelled() }}
         run: |
-          pack() { tar -cf - "${@:2}" | zstd -T0 -q -f -o "target/ci/$1.tar.zst"; }
+          pack() { tar -cf - "${@:2}" | zstd -T0 -q -12 --long=30 -f -o "target/ci/$1.tar.zst"; }
           mkdir -p target/ci
           pack build target/native/build target/references/api-native target/references/level-zero \
             target/conformance/host
@@ -188,12 +194,22 @@ jobs:
     steps:
       - *free-disk
       - *checkout
+      # a package is valid for the sources that build it, so a run that changes nothing under them reuses the last one
+      - name: Restore package
+        id: package
+        uses: actions/cache@v6
+        with:
+          path: |
+            target/ci/conformance-${{ matrix.shard }}.tar.zst
+            target/ci/conformance-${{ matrix.shard }}-support.tar.zst
+          key: conformance-package-${{ matrix.shard }}-${{ env.CONFORMANCE_TARGET_SET }}-${{ hashFiles('conformance/**', 'tools/conformance/**', 'build.sbt') }}
       - *java
       - *sbt
       - *tools-cache
       - *tools
       - name: Restore artifact dependencies
         id: dependencies
+        if: ${{ steps.package.outputs.cache-hit != 'true' }}
         uses: actions/cache/restore@v6
         with:
           path: .cache/conformance
@@ -202,7 +218,7 @@ jobs:
             conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
             conformance-artifact-dependencies-
       - name: Conformance artifacts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.package.outputs.cache-hit != 'true' }}
         env:
           CONFORMANCE_SHARD_ROUTES: ${{ matrix.routes }}
           SPLIT: ${{ matrix.split }}
@@ -213,20 +229,28 @@ jobs:
       # every job populates the same dependency set, so one of them saves it
       - name: Download cache contents
         id: downloads
-        if: ${{ always() && strategy.job-index == 0 }}
+        if: ${{ always() && strategy.job-index == 0 && steps.package.outputs.cache-hit != 'true' }}
         run: echo "conformance=$(find .cache/conformance -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Save artifact dependencies
-        if: ${{ always() && strategy.job-index == 0 }}
+        if: ${{ always() && strategy.job-index == 0 && steps.package.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .cache/conformance
           key: ${{ steps.dependencies.outputs.cache-primary-key }}-${{ steps.downloads.outputs.conformance }}
+      # shards share their support closures, so Shards.cmake has one shard pack each
       - name: Pack
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.package.outputs.cache-hit != 'true' }}
+        env:
+          EXCLUDED: ${{ matrix.excluded }}
+          OWNED: ${{ matrix.owned }}
         run: |
-          pack() { tar -cf - "${@:2}" | zstd -T0 -q -f -o "target/ci/$1.tar.zst"; }
+          pack() { tar -cf - "${@:2}" | zstd -T0 -q -12 --long=30 -f -o "target/ci/$1.tar.zst"; }
           mkdir -p target/ci
-          pack "conformance-${{ matrix.shard }}" target/conformance/artifacts
+          excludes=() owned=()
+          for path in $EXCLUDED; do excludes+=("--exclude=target/conformance/artifacts/$path"); done
+          for support in $OWNED; do owned+=("target/conformance/artifacts/$support"); done
+          pack "conformance-${{ matrix.shard }}" "${excludes[@]}" target/conformance/artifacts
+          [ ${#owned[@]} -eq 0 ] || pack "conformance-${{ matrix.shard }}-support" "${owned[@]}"
           ls -l target/ci
       - name: Upload
         if: ${{ !cancelled() && !env.ACT }}
@@ -234,6 +258,13 @@ jobs:
         with:
           name: conformance-${{ matrix.shard }}
           path: target/ci/conformance-${{ matrix.shard }}.tar.zst
+          compression-level: 0
+      - name: Upload support
+        if: ${{ !cancelled() && !env.ACT && matrix.owned != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: conformance-${{ matrix.shard }}-support
+          path: target/ci/conformance-${{ matrix.shard }}-support.tar.zst
           compression-level: 0
 
   test:
@@ -267,7 +298,7 @@ jobs:
         # sources older than the unpacked outputs keep CMake and Ninja from rebuilding them
         run: |
           git ls-files -z --cached --others --exclude-standard | xargs -0 touch -c -h -d "@$(git log -1 --format=%ct)"
-          for archive in target/ci/*.tar.zst; do zstd -dc "$archive" | tar -xf -; done
+          for archive in target/ci/*.tar.zst; do zstd -dc --long=30 "$archive" | tar -xf -; done
       - run: sbt --server --batch 'tests${{ matrix.platform }}/testFull'
 
   ctest:

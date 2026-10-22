@@ -205,7 +205,10 @@ object CLI {
       environment.NativeDirectory      -> s"${emulation.server.native.toAbsolutePath}"
     )
     // the JVM reports the container's limit; the build JVM and the clients need the other half
-    val memory    = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[OperatingSystemMXBean].getTotalMemorySize
+    val memory = ManagementFactory.getOperatingSystemMXBean match {
+      case system: OperatingSystemMXBean => system.getTotalMemorySize
+      case _                             => Long.MaxValue
+    }
     val heap      = s"-Xmx${math.min(math.max(8L, math.min(28L, 2L + jobs.toLong * 6L)) << 10, memory / 2 >> 20)}m"
     val directory = Files.createDirectories(root.resolve("target/conformance"))
     val session   = Files.createTempDirectory(directory, "server-")

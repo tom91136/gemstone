@@ -82,7 +82,9 @@ Its policy groups routes by the first pattern they match, and a route that match
 shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. With equal
 build and run counts, run shard `n` emulates exactly what build shard `n` built. A shard names its routes in
 `CONFORMANCE_SHARD_ROUTES`, so its own first route of each support closure builds that closure; the closures are
-identical, so the shards' artifacts unpack over each other.
+identical, so the shards' artifacts unpack over each other. CI packs each closure once: the lowest build shard holding
+it uploads it as `conformance-<shard>-support`, which every run shard of the group takes, and SYCL shards past 0
+leave out `lib`.
 
 CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
 beside the `report-<shard>` reports.

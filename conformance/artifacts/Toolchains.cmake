@@ -53,6 +53,17 @@ function(conformance_compiler_supported backend architecture compiler output)
   set(${output} "${supported}" PARENT_SCOPE)
 endfunction()
 
+# Routes of one key share the runtime closure under <backend>/<key> of the artifact tree.
+function(conformance_support_key backend architecture compiler output)
+  set(support "support")
+  if(compiler STREQUAL "gcc")
+    set(support "support-gcc")
+  elseif(backend STREQUAL "cuda")
+    conformance_cuda_toolchain("${architecture}" unused_image unused_package support)
+  endif()
+  set(${output} "${support}" PARENT_SCOPE)
+endfunction()
+
 function(conformance_toolchain backend architecture image_output dependency_output support_output)
   set(compiler vendor)
   if(ARGC GREATER 5)
@@ -77,13 +88,13 @@ function(conformance_toolchain backend architecture image_output dependency_outp
       list(APPEND build_arguments ${conformance_clang_build_arguments})
     endif()
   endif()
-  set(support "support")
+  conformance_support_key("${backend}" "${architecture}" "${compiler}" support)
   if(backend STREQUAL "cuda")
     if(compiler STREQUAL "gcc")
       # GNU generates PTX itself; this SDK supplies only the driver headers/probe.
-      conformance_cuda_toolchain(sm_70 cuda_image cuda_package support)
+      conformance_cuda_toolchain(sm_70 cuda_image cuda_package unused_support)
     else()
-      conformance_cuda_toolchain("${architecture}" cuda_image cuda_package support)
+      conformance_cuda_toolchain("${architecture}" cuda_image cuda_package unused_support)
     endif()
     set(key "cuda-${cuda_package}")
     list(APPEND build_arguments
@@ -108,7 +119,6 @@ function(conformance_toolchain backend architecture image_output dependency_outp
     list(APPEND build_arguments ${conformance_clang_build_arguments}
       --build-arg "CCCL_VERSION=${cccl_version}" --build-arg "CCCL_SHA256=${cccl_sha256}")
   elseif(compiler STREQUAL "gcc")
-    set(support "support-gcc")
     list(APPEND build_arguments --build-arg "GCC_VERSION=${conformance_gcc_version}"
       --build-arg "GCC_RUNTIME_VERSION=${conformance_gcc_runtime_version}"
       --build-arg "GCC_RUNTIME_SHA256=${conformance_gcc_runtime_sha256}")

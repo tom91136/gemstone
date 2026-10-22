@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
 # Joins the sycl-shard-<n> artifacts into the sycl artifact. Every shard holds a
-# disjoint part of the suites and its own runtime closure, so the result is the
-# union of their files and test program manifests.
+# disjoint part of the suites and the shared runtime closure, which CI packs from
+# shard 0 alone, so the result is the union of their files and test program
+# manifests.
 #
 #   cmake -DARTIFACTS=<artifact directory> -P Merge.cmake
 
