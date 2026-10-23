@@ -17,7 +17,8 @@ object PTXBackend {
 
 class PTXBackend(
     workgroups: Workgroups = Workgroups.Sequential,
-    decode: Vec[Byte] => Either[ISA.DecodeError, Program] = ISA.decode(_)
+    decode: Vec[Byte] => Either[ISA.DecodeError, Program] = ISA.decode(_),
+    retainReleased: Boolean = true
 ) extends Backend {
   override val format: ProgramFormat = PTXBackend.format
 
@@ -50,21 +51,26 @@ class PTXBackend(
     var references: Int >= 0 = 0
   }
 
-  // Share immutable parsed syntax only while loaded programs reference it; runtime state remains per load.
+  // Share immutable parsed syntax between loads; runtime state remains per load. Each case of a conformance run loads
+  // its module afresh, and parsing dominates the load, so released syntax stays retained while memory allows.
   private val cacheLock = ReentrantLock()
   private val decoded   = mutable.HashMap.empty[Image, Cached]
+  private val retained  = Retained[Cached]()
 
-  private def release(cached: Cached): Unit = cacheLock.withLock {
+  // Only a program that loaded is retained, so a failed decode is retried.
+  private def release(cached: Cached, loaded: Boolean): Unit = cacheLock.withLock {
     cached.references -= 1
     if (cached.references == 0) {
       val _ = decoded.remove(cached.image)
+      if (loaded && retainReleased) retained.put(cached.image.hashCode, cached)
     }
   }
 
   override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = {
     val key    = Image(image)
     val cached = cacheLock.withLock {
-      val entry = decoded.getOrElseUpdate(key, Cached(key))
+      val entry =
+        decoded.getOrElseUpdate(key, retained.take(key.hashCode)(_.image.bytes == image).getOrElse(Cached(key)))
       entry.references += 1
       entry
     }
@@ -75,14 +81,14 @@ class PTXBackend(
       cached.program.run()
       val parsed = try cached.program.get()
       catch { case error: ExecutionException => throw error.getCause }
-      parsed.flatMap(LoadedProgram.load(_, workgroups, () => release(cached)))
+      parsed.flatMap(LoadedProgram.load(_, workgroups, () => release(cached, loaded = true)))
     } catch {
       case error: Throwable =>
-        release(cached)
+        release(cached, loaded = false)
         throw error
     }
     loaded.left.map { error =>
-      release(cached)
+      release(cached, loaded = false)
       error
     }
   }

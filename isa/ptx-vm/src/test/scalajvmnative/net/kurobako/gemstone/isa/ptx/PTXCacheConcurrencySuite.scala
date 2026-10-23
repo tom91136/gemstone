@@ -52,12 +52,15 @@ class PTXCacheConcurrencySuite extends munit.FunSuite {
     val calls   = AtomicInteger()
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
-    val backend = PTXBackend(decode = { bytes =>
-      val _ = calls.incrementAndGet()
-      entered.countDown()
-      if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("parse was not released")
-      ISA.decode(bytes)
-    })
+    val backend = PTXBackend(
+      decode = { bytes =>
+        val _ = calls.incrementAndGet()
+        entered.countDown()
+        if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("parse was not released")
+        ISA.decode(bytes)
+      },
+      retainReleased = false
+    )
     Using.resource(threads.Pool(8)) { pool =>
       val loads = Vector.fill(8)(pool.executor.submit(() =>
         backend.load(Vec.from(source.getBytes(StandardCharsets.UTF_8)))
@@ -81,12 +84,15 @@ class PTXCacheConcurrencySuite extends munit.FunSuite {
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
     val calls   = AtomicInteger()
-    val backend = PTXBackend(decode = { bytes =>
-      val _ = calls.incrementAndGet()
-      entered.countDown()
-      if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("parse was not released")
-      ISA.decode(bytes)
-    })
+    val backend = PTXBackend(
+      decode = { bytes =>
+        val _ = calls.incrementAndGet()
+        entered.countDown()
+        if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("parse was not released")
+        ISA.decode(bytes)
+      },
+      retainReleased = false
+    )
     Using.resource(threads.Pool(1)) { pool =>
       val owner  = pool.executor.submit(() => backend.load(image))
       val waiter = FutureTask(() => backend.load(image))

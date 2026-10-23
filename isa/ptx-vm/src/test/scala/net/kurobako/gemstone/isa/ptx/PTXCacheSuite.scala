@@ -33,12 +33,15 @@ class PTXCacheSuite extends munit.FunSuite {
     val firstImage  = Vec.from(bytes.hex("58fbb7a9b2680392"))
     val secondImage = Vec.from(bytes.hex("69176c4aa471a321"))
     val calls       = AtomicInteger()
-    val backend     = PTXBackend(decode = { bytes =>
-      val _      = calls.incrementAndGet()
-      val kernel = if (bytes == firstImage) "first" else "second"
-      ISA.decode(Vec.from(s".version 8.0\n.target sm_80\n.address_size 64\n.entry $kernel() { ret; }"
-        .getBytes(StandardCharsets.UTF_8)))
-    })
+    val backend     = PTXBackend(
+      decode = { bytes =>
+        val _      = calls.incrementAndGet()
+        val kernel = if (bytes == firstImage) "first" else "second"
+        ISA.decode(Vec.from(s".version 8.0\n.target sm_80\n.address_size 64\n.entry $kernel() { ret; }"
+          .getBytes(StandardCharsets.UTF_8)))
+      },
+      retainReleased = false
+    )
     Using.Manager { use =>
       val first  = backend.load(firstImage).value
       val second = use(backend.load(secondImage).value)
@@ -57,13 +60,16 @@ class PTXCacheSuite extends munit.FunSuite {
   test("decode errors and thrown failures release the cache reservation and allow retry") {
     val calls       = AtomicInteger()
     val interrupted = InterruptedException("decode interrupted")
-    val backend     = PTXBackend(decode = { bytes =>
-      calls.incrementAndGet() match {
-        case 1 => Left(ISA.DecodeError.InvalidUTF8(0))
-        case 2 => throw interrupted
-        case _ => ISA.decode(bytes)
-      }
-    })
+    val backend     = PTXBackend(
+      decode = { bytes =>
+        calls.incrementAndGet() match {
+          case 1 => Left(ISA.DecodeError.InvalidUTF8(0))
+          case 2 => throw interrupted
+          case _ => ISA.decode(bytes)
+        }
+      },
+      retainReleased = false
+    )
     assert(backend.load(image).isLeft)
     val observed = try { val _ = backend.load(image); None }
     catch { case error: InterruptedException => Some(error) }
