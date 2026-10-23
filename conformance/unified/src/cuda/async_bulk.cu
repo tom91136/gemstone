@@ -86,7 +86,8 @@ TEST_CASE("runtime/cuda/async/memcpy-async-barrier", "[unified][runtime][async][
 
 namespace {
 // Bulk copies in, stores, reductions and a shared-to-shared copy, each completing through an mbarrier transaction
-// or a bulk group.
+// or a bulk group. The shared-to-shared copy needs a launch with a cluster; without one, sm_90 hardware ends the launch
+// with an illegal instruction.
 __global__ void bulkCopies(const int *input, int *output) {
 #if __CUDA_ARCH__ >= 900
   __shared__ alignas(128) int loaded[256];
@@ -139,8 +140,17 @@ TEST_CASE("runtime/cuda/async/bulk-copy-store-reduce", "[unified][runtime][async
     }
   Buffer<int> source(input);
   Buffer<int> target(initial);
-  bulkCopies<<<blocks, 256>>>(source.device, target.device);
-  check(cudaGetLastError(), "bulkCopies launch");
+  cudaLaunchConfig_t config{};
+  config.gridDim = dim3(blocks);
+  config.blockDim = dim3(256);
+  cudaLaunchAttribute attribute{};
+  attribute.id = cudaLaunchAttributeClusterDimension;
+  attribute.val.clusterDim.x = 1;
+  attribute.val.clusterDim.y = 1;
+  attribute.val.clusterDim.z = 1;
+  config.attrs = &attribute;
+  config.numAttrs = 1;
+  check(cudaLaunchKernelEx(&config, bulkCopies, source.device, target.device), "bulkCopies launch");
   check(cudaDeviceSynchronize(), "bulkCopies");
   const auto actual = target.download(initial.size());
   for (int block = 0; block < blocks; ++block)
