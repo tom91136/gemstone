@@ -1415,14 +1415,16 @@ private object VMIntegerCompiler {
     val carryOutput           = operands.size >= 5 && OperandQueries.isPredicateAllowingUniform(operands(1))
     val first                 = if (carryOutput) 2 else 1
     val conditionCode         = OperandQueries.has(operands.head, OperandSelector.CC)
-    // the legacy unit subtracts a negated product from the addend, whose carry is the subtraction's no-borrow
+    // the legacy unit subtracts a negated product from the addend, whose carry is the subtraction's no-borrow; a negative
+    // immediate is a sign-extended value rather than a negation, so its product is added like any other
     val negatedProduct = legacy && !modifiers.contains(Modifier.X) && conditionCode &&
-      OperandQueries.negative(operands(first)) != OperandQueries.negative(operands(first + 1))
-    def factor(operand: Operand) = source(if (negatedProduct) OperandQueries.positive(operand) else operand)
-    val a                        = factor(operands(first))
-    val b                        = factor(operands(first + 1))
-    val c                        = source(operands(first + 2), width)
-    val result                   = binary(
+      negatedSource(operands(first)) != negatedSource(operands(first + 1))
+    def factor(operand: Operand) =
+      source(if (negatedProduct && negatedSource(operand)) OperandQueries.positive(operand) else operand)
+    val a      = factor(operands(first))
+    val b      = factor(operands(first + 1))
+    val c      = source(operands(first + 2), width)
+    val result = binary(
       if (wide) { if (signed) IntegerOperation.MultiplyWideSigned32 else IntegerOperation.MultiplyWideUnsigned32 }
       else if (modifiers.contains(Modifier.HI)) IntegerOperation.MultiplyHigh(signed)
       else IntegerOperation.MultiplyLow,
@@ -1439,9 +1441,7 @@ private object VMIntegerCompiler {
       if (wide || modifiers.contains(Modifier.HI)) unsupported("negated extended IMAD product")
       emit(IntegerSubtractWithBorrow(result.slot, c, result, 32, false, true))
       noBorrowCarry()
-    } else if (
-      legacy && !modifiers.contains(Modifier.X) && conditionCode && OperandQueries.negative(operands(first + 2))
-    ) {
+    } else if (legacy && !modifiers.contains(Modifier.X) && conditionCode && negatedSource(operands(first + 2))) {
       if (wide || modifiers.contains(Modifier.HI)) unsupported("negated extended IMAD addend")
       emit(IntegerSubtractWithBorrow(
         result.slot,

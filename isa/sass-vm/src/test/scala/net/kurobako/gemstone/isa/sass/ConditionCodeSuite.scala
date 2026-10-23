@@ -96,6 +96,19 @@ class ConditionCodeSuite extends munit.FunSuite {
     }
   }
 
+  // ptxas forms x - 17 * q as x + q * -0x11, so a zero product must not report the no-borrow of a subtraction
+  test("sm_35 IMAD.U32.U32.CC adds the product of a negative immediate as its sign-extended value") {
+    val kernel = probe("IMAD.U32.U32 R0.CC, R0, -0x11, R1; IADD.X R7, RZ, RZ; ST.E [R4], R0; ST.E [R4+0x4], R7; EXIT")
+    Vec(0L -> 5L, 1L -> 0x10L, 1L -> 0x11L, 2L -> 0L, 0xffffffffL -> 0xffffffffL).foreach { (a, b) =>
+      val sum = ((a * 0xffffffefL) & 0xffffffffL) + b
+      assertEquals(
+        flags(kernel, a, b),
+        Vec(sum & 0xffffffffL, sum >>> 32),
+        s"a=0x${a.toHexString} b=0x${b.toHexString}"
+      )
+    }
+  }
+
   private def decoded(raw: Long, control: Long, address: Int, sm: Int): DecodedInstruction =
     InstructionDecoder.decode(
       address.unsafe[Int >= 0],
