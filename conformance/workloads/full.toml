@@ -3,7 +3,7 @@
 # The two CUDA index regressions traverse billions of elements.
 extends = "cts-bounded"
 include_programs = []
-specs = ['~"cts/opencl/basic/imagedim_*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"range_api"~[full-matrix]~"regressions/cuda-thrust/for-each-with-big-indexes"~"regressions/cuda-thrust/adjacent-difference-with-big-indexes"']
+specs = ['~"cts/opencl/basic/imagedim_*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"range_api"~"cts/opencl/image_streams/2Darray"~"cts/opencl/image_streams/3D"~[full-matrix]~"regressions/cuda-thrust/for-each-with-big-indexes"~"regressions/cuda-thrust/adjacent-difference-with-big-indexes"']
 levelzero_cases = [
   # Shared/system memory transfers across page boundaries (bounded kernel sizes).
   "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_usm_non_atomic_regular_4KB",

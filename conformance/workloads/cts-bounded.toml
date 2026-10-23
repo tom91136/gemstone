@@ -1,11 +1,12 @@
 # Bounded CTS regression set, shared by full and the standalone CTS workloads.
-# OpenCL omits exhaustive integer, half-store, image-size and thread-dimension sweeps.
+# OpenCL omits exhaustive integer, half-store, image-size and thread-dimension sweeps, and the 2D-array and 3D
+# image streams, which run for about an hour each under emulation.
 # SYCL omits range_api (trillions of work-items); all other compiled CTS cases remain.
 # Vulkan pins representative API, compute, graphics, format and shader variants;
 # it is not the official mustpass list. No wildcard expansion changes its size.
 include_programs = ['opencl_cts_*', 'sycl_cts_*', 'vulkan_cts']
 exclude_programs = ['opencl_cts_thread_dimensions']
-specs = ['~"cts/opencl/basic/imagedim_*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"range_api"']
+specs = ['~"cts/opencl/basic/imagedim_*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"range_api"~"cts/opencl/image_streams/2Darray"~"cts/opencl/image_streams/3D"']
 vulkan_cases = [
   # api.buffer_view
   "dEQP-VK.api.buffer_view.access.dedicated_alloc.buffer_view_memory_test_complete_with_buffer_dedicated_alloc_image_dedicated_alloc_compute",
