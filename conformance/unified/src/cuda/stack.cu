@@ -101,7 +101,12 @@ namespace {
 // Inlined into the loop, each round's allocation is released with stackrestore before the next.
 __device__ __forceinline__ uint32_t scratch(const uint32_t *in, uint32_t count, uint32_t salt) {
 #if defined(CUDA_STACK_ALLOCA) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 520
+  #if defined(__clang__)
+  // ptxas merges clang's 8-byte local stores into 16-byte ones, which fault on hardware below 16-byte alignment.
+  auto *values = static_cast<uint32_t *>(__builtin_alloca_with_align(count * sizeof(uint32_t), 128));
+  #else
   auto *values = static_cast<uint32_t *>(__builtin_alloca(count * sizeof(uint32_t)));
+  #endif
   for (uint32_t index = 0; index < count; ++index)
     values[index] = in[index] ^ salt;
   uint32_t sum = 0;
