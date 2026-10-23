@@ -84,7 +84,8 @@ build and run counts, run shard `n` emulates exactly what build shard `n` built.
 `CONFORMANCE_SHARD_ROUTES`, so its own first route of each support closure builds that closure; the closures are
 identical, so the shards' artifacts unpack over each other. CI packs each closure once: the lowest build shard holding
 it uploads it as `conformance-<shard>-support`, which every run shard of the group takes, and SYCL shards past 0
-leave out `lib`.
+leave out `lib`. A group with `CASES <n>` runs each of its run shards as n shards; the driver keeps every n-th case of
+the routes through `CONFORMANCE_CASE_SHARD=<index>/<count>`. OpenCL runs this way, as one route too long for a runner.
 
 CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
 beside the `report-<shard>` reports.

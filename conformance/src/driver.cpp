@@ -95,6 +95,28 @@ int32_t configuredJobs(std::string_view configured, uint32_t hardwareConcurrency
     throw std::invalid_argument("CONFORMANCE_JOBS must be a positive 32-bit integer");
   return static_cast<int32_t>(result);
 }
+void selectCaseShard(std::vector<TargetExecution> &targets, std::string_view shard) {
+  const auto field = [&](std::string_view value) {
+    uint32_t result = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+    if (value.empty() || error != std::errc{} || end != value.data() + value.size())
+      throw std::invalid_argument("CONFORMANCE_CASE_SHARD must be <index>/<count>");
+    return result;
+  };
+  const auto separator = shard.find('/');
+  if (separator == std::string_view::npos) throw std::invalid_argument("CONFORMANCE_CASE_SHARD must be <index>/<count>");
+  const auto index = field(shard.substr(0, separator));
+  const auto count = field(shard.substr(separator + 1));
+  if (index >= count) throw std::invalid_argument("CONFORMANCE_CASE_SHARD index must be below its count");
+  size_t ordinal = 0;
+  for (auto &target : targets) {
+    std::vector<ScheduledCase> selected;
+    for (auto &test : target.tests)
+      if (ordinal++ % count == index) selected.push_back(std::move(test));
+    target.tests = std::move(selected);
+  }
+  std::erase_if(targets, [](const TargetExecution &target) { return target.tests.empty(); });
+}
 std::vector<std::string> catchCaseNames(std::string_view json, std::string_view program) {
   CatchReport inventory;
   constexpr auto options = [] {
@@ -775,6 +797,11 @@ int32_t run(RunOptions configuration) {
   std::vector<TargetExecution> prepared;
   for (auto &value : discovered)
     if (value) prepared.push_back(std::move(*value));
+  // Neighbouring cases of a suite often share a cost, so interleaving spreads them across the shards of a route.
+  if (const auto *shard = std::getenv("CONFORMANCE_CASE_SHARD"); shard && *shard) {
+    selectCaseShard(prepared, shard);
+    std::cout << "conformance case shard: " << shard << '\n';
+  }
   std::cout << "conformance discovery completed in " << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
             << "s\n"
             << std::flush;

@@ -389,6 +389,7 @@ jobs:
         include: ${{ fromJSON(needs.shards.outputs.run) }}
     env:
       GEMSTONE_OFFLINE: 1
+      CONFORMANCE_CASE_SHARD: ${{ matrix.cases }}
     steps:
       - *free-disk
       - *checkout

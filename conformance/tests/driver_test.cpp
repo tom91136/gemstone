@@ -439,6 +439,40 @@ TEST_CASE("native shards select exact names including Catch metacharacters", "[d
   CHECK_THROWS(catchShardArguments({}, 0, 0));
 }
 
+TEST_CASE("case shards interleave the cases of every target and keep their Catch shards", "[driver]") {
+  const auto targets = [] {
+    std::vector<TargetExecution> result;
+    for (const auto &[id, cases] : std::vector<std::pair<std::string, uint32_t>>{{"first", 5}, {"second", 1}, {"third", 2}}) {
+      TargetExecution target{.id = id, .config = {}, .tests = {}};
+      for (uint32_t index = 0; index < cases; ++index)
+        target.tests.push_back(
+            {.identity = fmt::format("{}{}", id, index), .program = "p", .timeoutSeconds = 1, .index = index, .count = cases});
+      result.push_back(std::move(target));
+    }
+    return result;
+  };
+  std::vector<std::string> selected;
+  for (const auto *shard : {"0/3", "1/3", "2/3"}) {
+    auto sharded = targets();
+    selectCaseShard(sharded, shard);
+    for (const auto &target : sharded) {
+      CHECK_FALSE(target.tests.empty());
+      for (const auto &test : target.tests)
+        selected.push_back(test.identity);
+    }
+  }
+  CHECK(selected == std::vector<std::string>{"first0", "first3", "third0", "first1", "first4", "third1", "first2", "second0"});
+  auto last = targets();
+  selectCaseShard(last, "2/3");
+  REQUIRE(last.size() == 2);
+  CHECK(last[0].tests[0].index == 2);
+  CHECK(last[0].tests[0].count == 5);
+  for (const auto *invalid : {"", "1", "3/3", "0/0", "a/2", "1/2/3", "-1/2"}) {
+    auto rejected = targets();
+    CHECK_THROWS(selectCaseShard(rejected, invalid));
+  }
+}
+
 TEST_CASE("cases on one physical device run one at a time while other devices run concurrently", "[driver]") {
   const auto target = [](std::string id, std::string device, bool lock) {
     TargetExecution result{.id = std::move(id), .config = {}, .tests = {}};

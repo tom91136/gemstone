@@ -115,6 +115,8 @@ public:
 };
 
 int32_t configuredJobs(std::string_view configured, uint32_t hardwareConcurrency);
+// Keeps every count-th case, from the index-th, of the cases of all targets in order, and drops targets left without cases.
+void selectCaseShard(std::vector<TargetExecution> &targets, std::string_view shard);
 uint32_t scaledTimeout(uint32_t seconds, uint32_t hardwareConcurrency);
 std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const Workload &workload, const std::filesystem::path &artifact,
                                          const std::map<std::string, std::string> &environment, const std::string &id,
