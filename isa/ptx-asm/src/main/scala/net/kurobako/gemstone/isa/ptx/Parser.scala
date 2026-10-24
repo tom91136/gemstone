@@ -139,6 +139,10 @@ object Parser {
   private class Cursor(source: String, tokens: Array[Token], comments: Array[Token], end: Token) {
     private var index        = 0
     private var commentIndex = 0
+    // a module names a few thousand registers, constants and modifier lists millions of times, so they share one
+    // instance each
+    private val atoms     = mutable.HashMap.empty[String, Operand]
+    private val modifiers = mutable.HashMap.empty[Vec[Modifier], Vec[Modifier]]
 
     private def eof: Boolean = index >= tokens.length
 
@@ -480,19 +484,21 @@ object Parser {
           Some(Predication(negated, operandAtom()))
         } else None
       val operation = segment()
-      val modifiers = mutable.ArrayBuilder.make[Modifier]
-      modifiers.sizeHint(2)
+      val suffixes  = mutable.ArrayBuilder.make[Modifier]
+      suffixes.sizeHint(2)
       while (at(".") && adjacent) {
         expect(".")
-        modifiers += Modifier(name(modifierSegment()))
+        suffixes += Modifier(name(modifierSegment()))
       }
       val operands   = operandsUntil(";")
       val _          = accept(";")
       val normalised = {
-        val values = Vec.unsafeWrapArray(modifiers.result())
-        if (operation == "vote" && values.contains(Modifier.Sync) && values.contains(Modifier.Ballot))
-          Vec(Modifier.Sync) ++ values.filterNot(_ == Modifier.Sync)
-        else values
+        val values = Vec.unsafeWrapArray(suffixes.result())
+        val order  =
+          if (operation == "vote" && values.contains(Modifier.Sync) && values.contains(Modifier.Ballot))
+            Vec(Modifier.Sync) ++ values.filterNot(_ == Modifier.Sync)
+          else values
+        modifiers.getOrElseUpdate(order, order)
       }
       Instruction.decodeParsed(name(operation), operands, normalised, predicate) match {
         case Right(value)                                      => Statement.Instruction(value)
@@ -588,7 +594,7 @@ object Parser {
       } else {
         val value = word()
         if (value.startsWith("%")) {
-          if (!at(".") || !adjacent) Operand.Register(name(value), None)
+          if (!at(".") || !adjacent) atoms.getOrElseUpdate(value, Operand.Register(name(value), None))
           else {
             val segments = mutable.ArrayBuffer(value)
             while (at(".") && adjacent) {
@@ -607,8 +613,8 @@ object Parser {
           val symbol = operand()
           expect(")")
           Operand.GenericAddress(symbol)
-        } else if (number(value)) Operand.Immediate(name(value))
-        else Operand.Symbol(name(value))
+        } else if (number(value)) atoms.getOrElseUpdate(value, Operand.Immediate(name(value)))
+        else atoms.getOrElseUpdate(value, Operand.Symbol(name(value)))
       }
 
     private def segment(): String = joined(at("::"))
