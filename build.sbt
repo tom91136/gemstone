@@ -170,9 +170,13 @@ lazy val forkedTestSettings = Seq(
   Test / javaOptions ++= Seq("-Xmx4g", "-Xss6m")
 )
 
+// Scala Native's default Immix collector intermittently hands back corrupt references in the multithreaded binaries
+// here, where Commix runs them cleanly.
+lazy val nativeGC = scala.scalanative.build.GC.commix
+
 // Scala Native has no class path: a binary embeds the resources its modules read at runtime.
 lazy val nativeTestSettings = Seq(
-  Test / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.debug).withEmbedResources(true)),
+  Test / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.debug).withEmbedResources(true).withGC(nativeGC)),
   Test / nativeLink / logLevel           := Level.Warn,
   Test / loadedTestFrameworks / logLevel := Level.Warn,
   Test / parallelExecution               := false
@@ -563,7 +567,9 @@ lazy val server = module(projectMatrix.in(file("server")))
     scalaVersions = Seq(scala3Version),
     settings = nativeTestSettings ++ Seq(
       Compile / exportJars := true,
-      Compile / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.releaseFast).withEmbedResources(true))
+      Compile / nativeConfig ~=
+        (_.withMode(scala.scalanative.build.Mode.releaseFast).withEmbedResources(true)
+          .withGC(nativeGC))
     )
   )
 
@@ -605,7 +611,7 @@ lazy val benchmarks = module(projectMatrix.in(file("tools/benchmarks")))
   )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = nativeTestSettings ++ Seq(Compile / nativeConfig ~= (_.withEmbedResources(true)))
+    settings = nativeTestSettings ++ Seq(Compile / nativeConfig ~= (_.withEmbedResources(true).withGC(nativeGC)))
   )
 
 lazy val conformanceTool = module(project.in(file("tools/conformance")))
