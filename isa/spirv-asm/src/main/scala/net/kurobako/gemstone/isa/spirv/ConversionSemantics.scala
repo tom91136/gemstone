@@ -9,8 +9,6 @@ import net.kurobako.gemstone.semantics.prelude.*
 /** SPIR-V conversions by opcode, from a `width`-bit operand to a `resultWidth`-bit result. Conversions that round do so
   * once, in the decorated rounding `mode`; float-to-integer conversions first round to an integral value in that mode.
   */
-// the per-width conversions have distinct result types
-@SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
 object ConversionSemantics {
 
   /** Integer width conversions, and same-width bit casts. */

@@ -56,8 +56,8 @@ class BinaryExecutionSuite extends munit.FunSuite {
       ).value
       val completion = service.launch(program, task).value
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(output, 0L, 128), Right(integers(values.map(_ + 1))))
-      assertEquals(service.read(input, 0L, 128), Right(integers(values)))
+      assertEquals(service.read(AllocationRange(output, 0L, 128)), Right(integers(values.map(_ + 1))))
+      assertEquals(service.read(AllocationRange(input, 0L, 128)), Right(integers(values)))
     }
   }
 

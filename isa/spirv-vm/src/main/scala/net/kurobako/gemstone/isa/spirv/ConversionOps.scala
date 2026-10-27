@@ -3,10 +3,10 @@ package net.kurobako.gemstone.isa.spirv
 import LaneOps.*
 import Op.*
 import OpBuilder.*
+import VMInvocation.*
 import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.binary.Bits.*
-import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 
@@ -14,7 +14,7 @@ import net.kurobako.gemstone.vm.*
 private object ConversionOps {
   import Operand.*
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
+  def lower(using site: Site): PartialFunction[Instruction, Op] = {
     case instruction @ Instruction.UConvert(_, _, a) =>
       typed(site, a) match {
         case Typed.Undefined(value) => Fail(undefined(value))
@@ -22,29 +22,29 @@ private object ConversionOps {
         case Typed.Data(_, _)       => staged(site, instruction, CoreFamily.Conversion)
       }
     case instruction @ Instruction.SConvert(t, _, a) =>
-      lowered(integerToInteger(site, "OpSConvert", t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
+      lowered(integerToInteger("OpSConvert", t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
     case instruction @ Instruction.SatConvertSToU(t, _, a) =>
-      lowered(integerToInteger(site, "OpSatConvertSToU", t, a).map(_ =>
+      lowered(integerToInteger("OpSatConvertSToU", t, a).map(_ =>
         staged(site, instruction, CoreFamily.Conversion)
       ))
     case instruction @ Instruction.SatConvertUToS(t, _, a) =>
-      lowered(integerToInteger(site, "OpSatConvertUToS", t, a).map(_ =>
+      lowered(integerToInteger("OpSatConvertUToS", t, a).map(_ =>
         staged(site, instruction, CoreFamily.Conversion)
       ))
     case instruction @ Instruction.ConvertSToF(t, _, a) =>
-      lowered(integerToFloating(site, "OpConvertSToF", t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
+      lowered(integerToFloating("OpConvertSToF", t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
     case instruction @ Instruction.ConvertUToF(t, _, a) =>
-      lowered(integerToFloating(site, "OpConvertUToF", t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
+      lowered(integerToFloating("OpConvertUToF", t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
     case instruction @ Instruction.ConvertFToS(t, _, a) =>
-      lowered(floatingToIntegerShapes(site, "OpConvertFToS", t, a).map(_ =>
+      lowered(floatingToIntegerShapes("OpConvertFToS", t, a).map(_ =>
         staged(site, instruction, CoreFamily.Conversion)
       ))
     case instruction @ Instruction.ConvertFToU(t, _, a) =>
-      lowered(floatingToIntegerShapes(site, "OpConvertFToU", t, a).map(_ =>
+      lowered(floatingToIntegerShapes("OpConvertFToU", t, a).map(_ =>
         staged(site, instruction, CoreFamily.Conversion)
       ))
     case instruction @ Instruction.FConvert(t, _, a) =>
-      lowered(floatingToFloating(site, t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
+      lowered(floatingToFloating(t, a).map(_ => staged(site, instruction, CoreFamily.Conversion)))
     case instruction @ Instruction.QuantizeToF16(t, _, a) =>
       typed(site, a) match {
         case Typed.Undefined(value) => Fail(undefined(value))
@@ -55,7 +55,7 @@ private object ConversionOps {
       }
     case instruction @ Instruction.ArithmeticFenceEXT(t, _, a) =>
       typed(site, a) match {
-        case Typed.Data(_, sourceType) if sameShape(site, sourceType, id(t)) =>
+        case Typed.Data(_, sourceType) if sameShape(sourceType, id(t)) =>
           staged(site, instruction, CoreFamily.Fence)
         case Typed.Undefined(value) => Fail(undefined(value))
         case _ => Fail(Fault.InvalidRequest("OpArithmeticFenceEXT requires an operand of its result type"))
@@ -80,40 +80,46 @@ private object ConversionOps {
             "OpBitcastExtractEXT requires a narrower numeric result of the base's lanes and a scalar integer offset"
           ))
       }
-    // the operand whose specialised condition holds, which the module's constants already decide
-    case Instruction.ConditionalCopyObjectINTEL(t, d, pairs) =>
-      pairs.grouped(2).collectFirst {
-        case Vec(condition, operand)
-            if site.program.constants.get(id(condition)).exists(VMValue.isTrue) =>
-          copy(id(t), id(d), id(operand))
-      }.getOrElse(Fail(Fault.InvalidRequest("OpConditionalCopyObjectINTEL has no operand whose condition holds")))
-    case Instruction.CopyObject(t, d, a)            => copy(id(t), id(d), id(a))
-    case Instruction.ExpectKHR(t, d, a, _)          => copy(id(t), id(d), id(a))
-    case Instruction.CopyLogical(t, d, a)           => copy(id(t), id(d), id(a))
-    case instruction @ Instruction.Bitcast(t, d, a) => bitcast(site, instruction, id(t), id(d), id(a))
+    case Instruction.ConditionalCopyObjectINTEL(t, d, pairs) => ConditionalCopy(pairs.map(id(_)).toArray, id(d), id(t))
+    case Instruction.CopyObject(t, d, a)                     => copy(ResultIds(t, d), id(a))
+    case Instruction.ExpectKHR(t, d, a, _)                   => copy(ResultIds(t, d), id(a))
+    case Instruction.CopyLogical(t, d, a)                    => copy(ResultIds(t, d), id(a))
+    case instruction @ Instruction.Bitcast(t, d, a)          => bitcast(instruction, ResultIds(t, d), id(a))
   }
 
-  private def sameShape(site: Site, left: Int, right: Int): Boolean = {
+  private def sameShape(left: Int, right: Int)(using site: Site): Boolean = {
     val program = site.program
     program.floatingShape(left).exists(program.floatingShape(right).contains) ||
     program.integerShape(left).exists(program.integerShape(right).contains)
   }
 
-  private def copy(resultType: Int, dest: Int, source: Int): Op =
-    step((execution, _) => transfer(execution.values, source, dest, resultType))
+  private def copy(ids: ResultIds, source: Int): Op = CopyValue(source, ids.dest, ids.resultType)
 
-  private def source(site: Site, opcode: String, operand: Operand): Either[Fault, Int] = typed(site, operand) match {
-    case Typed.Undefined(value) => Left(undefined(value))
-    case Typed.Opaque(_, _)     => Left(Fault.InvalidRequest(s"$opcode source %${id(operand)} is a pointer"))
-    case Typed.Data(_, typeId)  => Right(typeId)
+  private class CopyValue(source: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.copy(InvocationMachine(execution))(source, dest, resultType)
   }
+
+  private class ConditionalCopy(pairs: Array[Int], dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.conditionalCopy(InvocationMachine(execution))(pairs, dest, resultType)
+  }
+
+  private def source(opcode: String, operand: Operand)(using site: Site): Either[Fault, Int] =
+    typed(site, operand) match {
+      case Typed.Undefined(value) => Left(undefined(value))
+      case Typed.Opaque(_, _)     => Left(Fault.InvalidRequest(s"$opcode source %${id(operand)} is a pointer"))
+      case Typed.Data(_, typeId)  => Right(typeId)
+    }
 
   private def lanes(opcode: String, sourceLanes: Int, resultLanes: Int): Fault =
     Fault.InvalidRequest(s"$opcode cannot convert $sourceLanes source lanes to $resultLanes result lanes")
 
-  private def integerToInteger(site: Site, opcode: String, resultType: Operand, operand: Operand)
+  private def integerToInteger(opcode: String, resultType: Operand, operand: Operand)(using
+      site: Site
+  )
       : Either[Fault, (Int in 1 ~ 64, Int in 1 ~ 64)] =
-    source(site, opcode, operand).flatMap(sourceType =>
+    source(opcode, operand).flatMap(sourceType =>
       (site.program.integerShape(sourceType), site.program.integerShape(id(resultType))) match {
         case (Some((width, count)), Some((resultWidth, resultCount))) if count == resultCount =>
           Right((width, resultWidth))
@@ -127,12 +133,11 @@ private object ConversionOps {
 
   // Integers convert in one rounding, so 64-bit sources beyond binary64 precision do not round twice.
   private def integerToFloating(
-      site: Site,
       opcode: String,
       resultType: Operand,
       operand: Operand
-  ): Either[Fault, Unit] =
-    source(site, opcode, operand).flatMap(sourceType =>
+  )(using site: Site): Either[Fault, Unit] =
+    source(opcode, operand).flatMap(sourceType =>
       (site.program.integerShape(sourceType), site.program.floatingShape(id(resultType))) match {
         case (Some((_, count)), Some((_, resultCount))) if count == resultCount => Right(())
         case (None, _)                                                          =>
@@ -143,9 +148,11 @@ private object ConversionOps {
       }
     )
 
-  private def floatingToIntegerShapes(site: Site, opcode: String, resultType: Operand, operand: Operand)
+  private def floatingToIntegerShapes(opcode: String, resultType: Operand, operand: Operand)(using
+      site: Site
+  )
       : Either[Fault, (Int in (16, 32, 64), Int in 1 ~ 64)] =
-    source(site, opcode, operand).flatMap(sourceType =>
+    source(opcode, operand).flatMap(sourceType =>
       (site.program.floatingShape(sourceType), site.program.integerShape(id(resultType))) match {
         case (Some((width, count)), Some((resultWidth, resultCount))) if count == resultCount =>
           Right((width, resultWidth))
@@ -157,8 +164,8 @@ private object ConversionOps {
       }
     )
 
-  private def floatingToFloating(site: Site, resultType: Operand, operand: Operand): Either[Fault, Unit] =
-    source(site, "OpFConvert", operand).flatMap(sourceType =>
+  private def floatingToFloating(resultType: Operand, operand: Operand)(using site: Site): Either[Fault, Unit] =
+    source("OpFConvert", operand).flatMap(sourceType =>
       (site.program.floatingShape(sourceType), site.program.floatingShape(id(resultType))) match {
         case (Some((_, count)), Some((_, resultCount))) if count == resultCount => Right(())
         case (None, _)                                                          =>
@@ -213,9 +220,11 @@ private object ConversionOps {
         Left(Fault.InvalidRequest(s"OpBitcast result type %$resultType is not scalar/vector numeric data"))
     }
 
-  private def bitcast(site: Site, instruction: Instruction, resultType: Int, dest: Int, source: Int): Op = {
-    val program = site.program
-    val numeric =
+  private def bitcast(instruction: Instruction, ids: ResultIds, source: Int)(using site: Site): Op = {
+    val program    = site.program
+    val resultType = ids.resultType
+    val dest       = ids.dest
+    val numeric    =
       (bitShape(program, program.valueType(source)), program.runtimeType(resultType), program.numericShape(resultType))
     numeric match {
       // Same-width scalar reinterpretation only retypes the register.

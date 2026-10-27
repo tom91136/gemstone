@@ -10,8 +10,6 @@ import net.kurobako.gemstone.semantics.prelude.*
   * accumulate in blocks as [[Accumulation.Blocked]] describes, with any NaN or infinity among the products and C
   * deciding the result as IEEE addition of them would.
   */
-// inline bodies: each expansion sees one receiver class
-@SuppressWarnings(Array("baumkuchen:megamorphic-call"))
 private[isa] object TensorSemantics {
 
   /** Slots of [[MatrixOperands.hold]]: a block's products, then their exponents. Blocks hold at most 64 products. */

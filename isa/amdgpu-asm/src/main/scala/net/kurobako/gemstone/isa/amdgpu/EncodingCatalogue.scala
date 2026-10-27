@@ -54,5 +54,5 @@ object EncodingCatalogue {
 
   /** Source operand spellings, such as `s0`, `vcc_lo` or `src_scc`, by their encoded selector value. */
   def sourceSelectors(isa: ISA): Map[String, Int] =
-    OperandEncoding.Catalogue.forKind(isa, OperandKind.SRC).fold(Map.empty[String, Int])(_.selectors)
+    domain.DomainCatalogue.table(isa, "src").fold(Map.empty[String, Int])(_.selectors)
 }

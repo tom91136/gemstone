@@ -9,32 +9,29 @@ import scala.util.Using
 class ClientsSuite extends munit.FunSuite {
   test("released clients revoke existing leases and reject delayed acquisition") {
     Using.resource(Clients(() => ExecutionSession(Nil))) { clients =>
-      val id       = clients.register()
-      val existing = clients.acquire(id, SessionId(process = 1, incarnation = 1)).toOption.get
-      assert(existing.service.isRight)
-      clients.release(id)
-      assert(existing.service.isLeft)
-      assert(clients.acquire(id, SessionId(process = 2, incarnation = 1)).isLeft)
-      // closing the Clients revokes every lease
-      existing.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+      val id = clients.register()
+      Using.resource(clients.acquire(id, SessionId(process = 1, incarnation = 1)).toOption.get) { existing =>
+        assert(existing.service.isRight)
+        clients.release(id)
+        assert(existing.service.isLeft)
+        assert(clients.acquire(id, SessionId(process = 2, incarnation = 1)).isLeft)
+      }
     }
   }
 
   test("connections share a process session until its last lease closes") {
     Using.resource(Clients(() => ExecutionSession(Nil))) { clients =>
       val first   = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
-      val second  = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
       val service = first.service.toOption.get
-      assert(second.service.toOption.get eq service)
-      // closing the Clients revokes every lease
-      first.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
-      first.close()
-      assert(first.service.isLeft)
-      assert(second.service.toOption.get eq service)
-      second.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
-      val next = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
-      assert(!(next.service.toOption.get eq service))
-      next.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+      Using.resource(clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get) { second =>
+        assert(second.service.toOption.get eq service)
+        Using.resource(first)(_.close())
+        assert(first.service.isLeft)
+        assert(second.service.toOption.get eq service)
+      }
+      Using.resource(clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get) { next =>
+        assert(!(next.service.toOption.get eq service))
+      }
     }
   }
 

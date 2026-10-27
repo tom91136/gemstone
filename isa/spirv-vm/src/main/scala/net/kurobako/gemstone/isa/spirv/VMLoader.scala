@@ -112,6 +112,13 @@ private object VMLoader {
             case Right(columns) if validColumn => types.update(id(dest), RuntimeType.MatrixType(id(column), columns))
             case _ => return Left(Fault.InvalidRequest("SPIR-V matrix requires two to four floating columns and rows"))
           }
+        case Instruction.TypeTensorARM(dest, element, Some(rank), _) =>
+          constants.get(id(rank)).flatMap(scalarBits(_)) match {
+            case Some(dimensions) if dimensions >= 1L && dimensions <= Int.MaxValue =>
+              types.update(id(dest), RuntimeType.Tensor(dimensions.toInt, id(element)))
+            case _ =>
+              return Left(Fault.InvalidRequest(s"SPIR-V tensor rank %${id(rank)} is not a positive scalar constant"))
+          }
         case Instruction.TypeArray(dest, element, length) =>
           constants.get(id(length)).flatMap(scalarBits(_)) match {
             case None =>
@@ -174,7 +181,7 @@ private object VMLoader {
                 case Some(Constant.NullPointer(_, _, _)) => true
                 case _                                   => false
               }) =>
-          zeroFailure = zero(resultType, dest, "OpSpecConstantOp")
+          zeroFailure = zero(ResultIds(resultType, dest), "OpSpecConstantOp")
         case Instruction.SpecConstantOp(resultType, dest, opcode, operands) =>
           SpecializationOperation.evaluate(
             types,
@@ -196,9 +203,9 @@ private object VMLoader {
         case Instruction.ConstantFunctionPointerINTEL(resultType, dest, function) =>
           constants.update(id(dest), Constant.FunctionPointer(id(resultType), id(function)))
         case Instruction.ConstantNull(resultType, dest) =>
-          zeroFailure = zero(resultType, dest, "OpConstantNull")
+          zeroFailure = zero(ResultIds(resultType, dest), "OpConstantNull")
         case Instruction.Undef(resultType, dest) =>
-          zeroFailure = zero(resultType, dest, "OpUndef")
+          zeroFailure = zero(ResultIds(resultType, dest), "OpUndef")
         case Instruction.Variable(resultType, dest, storageClass, initialiser) =>
           global(resultType, dest, storageClass, initialiser)
         case _ => ()
@@ -294,7 +301,7 @@ private object VMLoader {
           }
         // the VM gives poison, as it gives undefined values, the zero of their type
         case Instruction.PoisonKHR(resultType, dest) =>
-          zeroFailure = zero(resultType, dest, "OpPoisonKHR")
+          zeroFailure = zero(ResultIds(resultType, dest), "OpPoisonKHR")
         case Instruction.UntypedVariableKHR(resultType, dest, storageClass, _, initialiser) =>
           global(resultType, dest, storageClass, initialiser)
         case _ => return Right(false)
@@ -337,11 +344,11 @@ private object VMLoader {
     def global(resultType: Operand, dest: Operand, storageClass: Operand, initialiser: Option[Operand]): Unit =
       globals.update(id(dest), Global(id(resultType), id(storageClass), initialiser.map(id(_))))
 
-    def zero(resultType: Operand, dest: Operand, opcode: String): Option[Fault] =
-      zeroValue(types, id(resultType), id(dest), opcode) match {
+    def zero(ids: ResultIds, opcode: String): Option[Fault] =
+      zeroValue(types, ids.resultType, ids.dest, opcode) match {
         case Left(error)  => Some(error)
         case Right(value) =>
-          constants.update(id(dest), value)
+          constants.update(ids.dest, value)
           None
       }
 

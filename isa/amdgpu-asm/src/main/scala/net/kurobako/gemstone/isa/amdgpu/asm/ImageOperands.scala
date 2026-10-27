@@ -6,6 +6,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
+import net.kurobako.gemstone.isa.amdgpu.domain.*
 
 private object ImageOperands {
   def supports(layout: InstructionLayout): Boolean       = layout.format.isImage
@@ -99,13 +100,11 @@ private object ImageOperands {
     case Operand.Register(RegisterFile.Scalar, first, last)
         if first >= 0 && last < 128 && first % 4 == 0 && last - first + 1 == count => Some(first)
     case Operand.Register(RegisterFile.TrapTemporary, first, last) =>
-      OperandEncoding.Catalogue.forKind(layout.isa, OperandKind.SRC).flatMap { encoding =>
-        for {
-          start <- encoding.selectors.get(s"ttmp$first")
-          end   <- encoding.selectors.get(s"ttmp$last")
-          value <- scalar(Operand.Register(RegisterFile.Scalar, start, end), count, layout)
-        } yield value
-      }
+      DomainCatalogue.table(
+        layout.isa,
+        "src"
+      ).flatMap(_.registers(RegisterFile.TrapTemporary, first, 128))
+        .filter(_ => last - first + 1 == count && first % 4 == 0)
     case _ => None
   }
   private def addresses(layout: InstructionLayout): Vector[EncodingField] =

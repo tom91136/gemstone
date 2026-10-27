@@ -147,6 +147,27 @@ class AMDGPUScalarStoreSuite extends munit.FunSuite {
     assertEquals(output.take(7), Vec(1, 7, 1, 0, 1, 7, 1))
   }
 
+  test("s_setvskip sets VSKIP from the bit its operand names, and a clear lets vector instructions run") {
+    val code = assemble(
+      gfx906,
+      """v_mov_b32 v2, 1
+        |s_mov_b32 s41, 0x20
+        |s_setvskip s41, 5
+        |v_mov_b32 v2, 2
+        |s_getreg_b32 s21, hwreg(HW_REG_MODE, 28, 1)
+        |s_setvskip s41, 4
+        |s_getreg_b32 s22, hwreg(HW_REG_MODE, 28, 1)
+        |v_mov_b32 v3, 3
+        |v_mov_b32 v4, s21
+        |v_mov_b32 v5, s22
+        |v_lshlrev_b32 v6, 4, v0
+        |global_store_dwordx4 v6, v[2:5], s[14:15]
+        |s_endpgm""".stripMargin
+    )
+    val (_, output) = run(gfx906, 2, prologue(gfx906) ++ code)
+    assertEquals(output.take(8), Vec(1, 3, 1, 0, 1, 3, 1, 0))
+  }
+
   test("ds_write_addtid_b32 and ds_read_addtid_b32 address M0[15:0] plus the offset plus four bytes a lane") {
     // s_mov_b32 m0, 0x10; v_add_u32 v1, 100, v0; ds_write_addtid_b32 v1 offset:4
     // v6 = v0 * 4 + 20; ds_read_b32 v2, v6; ds_read_addtid_b32 v3 offset:8; v[2:3] to the output by lane

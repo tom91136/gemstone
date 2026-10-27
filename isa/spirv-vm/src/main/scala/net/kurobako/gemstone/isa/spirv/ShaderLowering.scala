@@ -48,7 +48,7 @@ private object ShaderLowering {
     val variables = module.instructions.collect { case Instruction.Variable(_, dest, storage, _) =>
       id(dest) -> unsigned(storage)
     }.toMap
-    def hasBuiltin(builtin: Long, storage: Long): Boolean = builtins.exists { case (variable, value) =>
+    def missingBuiltin(builtin: Long, storage: Long): Boolean = !builtins.exists { case (variable, value) =>
       value.toLong == builtin && variables.get(variable).contains(storage)
     }
     val inputAttachments = fragment && module.instructions.exists {
@@ -98,7 +98,7 @@ private object ShaderLowering {
       )
       added += ref(value)
     }
-    if (inputAttachments && !hasBuiltin(BuiltIn.FragCoord, StorageClass.Input)) {
+    if (inputAttachments && missingBuiltin(BuiltIn.FragCoord, StorageClass.Input)) {
       val float = declaration(
         { case Instruction.TypeFloat(dest, width, None) if id(width) == 32 => id(dest) },
         value => Instruction.TypeFloat(result(value), literal(32), None)
@@ -109,7 +109,7 @@ private object ShaderLowering {
       )
       variable(vector, StorageClass.Input, BuiltIn.FragCoord)
     }
-    if (kill && !hasBuiltin(BuiltIn.SampleMask, StorageClass.Output)) {
+    if (kill && missingBuiltin(BuiltIn.SampleMask, StorageClass.Output)) {
       val uint = declaration(
         { case Instruction.TypeInt(dest, width, signed) if id(width) == 32 && id(signed) == 0 => id(dest) },
         value => Instruction.TypeInt(result(value), literal(32), literal(0))
@@ -125,7 +125,7 @@ private object ShaderLowering {
     }
     // Early depth/stencil rejection must suppress shader side effects even when
     // the shader does not need derivative quads.
-    if ((quads || early) && !hasBuiltin(BuiltIn.HelperInvocation, StorageClass.Input)) {
+    if ((quads || early) && missingBuiltin(BuiltIn.HelperInvocation, StorageClass.Input)) {
       val boolean =
         declaration({ case Instruction.TypeBool(dest) => id(dest) }, value => Instruction.TypeBool(result(value)))
       variable(boolean, StorageClass.Input, BuiltIn.HelperInvocation)

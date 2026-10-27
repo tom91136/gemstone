@@ -66,8 +66,8 @@ object GenerateOfficialAPIManifest {
 
   private val command = Command("GenerateOfficialAPIManifest", "Generate the official API manifest")((
     Opts.option[String]("clang", help = "Clang executable"),
-    Opts.argument[String]("references").map(Path.of(_)),
-    Opts.argument[String]("manifest").map(Path.of(_))
+    CodegenCommand.path("references"),
+    CodegenCommand.path("manifest")
   ).mapN(Request(_, _, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>

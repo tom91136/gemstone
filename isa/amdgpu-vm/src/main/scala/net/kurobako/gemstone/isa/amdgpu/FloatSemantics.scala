@@ -10,8 +10,6 @@ import net.kurobako.gemstone.semantics.prelude.*
 /** AMDGPU floating-point semantics on register bits. IEEE arithmetic, rounding and conversions are named primitives;
   * saturation, sign manipulation, classification and exponent extraction decompose into the algebra.
   */
-// enum-dispatch arms must stay lexical to inline into staged kernels
-@SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
 private object FloatSemantics {
 
   /** Floating-point VOP2 operations on modified SRC0 and SRC1 and the destination's previous dword, which the
@@ -510,6 +508,10 @@ private object FloatSemantics {
                       algebra.shiftLeft(algebra.saturatedByte(algebra.high16(a)), algebra.literal(8L))
                     )
                   )
+                case VectorConvertOperation.SaturatePackI4FromI8 =>
+                  sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.saturatedNibbles(a, signed = true))
+                case VectorConvertOperation.SaturatePackU4FromU8 =>
+                  sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.saturatedNibbles(a, signed = false))
                 case VectorConvertOperation.F16FromI16 =>
                   sinks.modifiedUnary(dest, src, modifiers, 16)(a =>
                     algebra.saturated(clamp, algebra.primitive(a)(Floats.cvtF16I16), 16)
@@ -536,6 +538,18 @@ private object FloatSemantics {
                   sinks.wideningUnary(dest, src, modifiers)(a => algebra.primitive(a)(Minifloats.pairFromE4M3Fnuz))
                 case VectorConvertOperation.PairF32FromE5M2Fnuz =>
                   sinks.wideningUnary(dest, src, modifiers)(a => algebra.primitive(a)(Minifloats.pairFromE5M2Fnuz))
+                case VectorConvertOperation.F16FromE4M3 =>
+                  sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.primitive(a)(Minifloats.halfFromE4M3))
+                case VectorConvertOperation.F16FromE5M2 =>
+                  sinks.modifiedUnary(dest, src, modifiers, 32)(a => algebra.primitive(a)(Minifloats.halfFromE5M2))
+                case VectorConvertOperation.PackedF16FromE4M3 =>
+                  sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
+                    algebra.primitive(a)(Minifloats.packedHalvesFromE4M3)
+                  )
+                case VectorConvertOperation.PackedF16FromE5M2 =>
+                  sinks.modifiedUnary(dest, src, modifiers, 32)(a =>
+                    algebra.primitive(a)(Minifloats.packedHalvesFromE5M2)
+                  )
                 case other => throw IllegalStateException(s"$other has no staged conversion")
               })
           })
@@ -563,6 +577,15 @@ private object FloatSemantics {
         )
       )
   }
+
+  inline def packedHalf[V, R](inline algebra: Algebra[V], instruction: Instruction.VConvertPackedHalf)(
+      inline sinks: AMDGPUSinks[V, R]
+  ): R =
+    sinks.modifiedUnary(instruction.dest, instruction.src, SourceModifiers.Unmodified, 32)(a =>
+      algebra.primitive(a, sinks.modeRegister)((value: UInt[32], mode: UInt[32]) =>
+        Minifloats.packHalves(value, mode, instruction.format)
+      )
+    )
 
   /** A binary16 unary operation on a modified binary16 source, its denormals as MODE has them, saturated when `clamp`.
     */
@@ -872,6 +895,32 @@ private object FloatSemantics {
       sinks.pairBinary(dest, srcA, srcB, PairRead.Floating, modifiers)((a, b) => algebra.maximumPropagate(a, b, 64))
     case VectorBinary64Operation.MinimumPropagate =>
       sinks.pairBinary(dest, srcA, srcB, PairRead.Floating, modifiers)((a, b) => algebra.minimumPropagate(a, b, 64))
+    case VectorBinary64Operation.AddU64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) => algebra.add(a, b))
+    case VectorBinary64Operation.SubtractU64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) =>
+        algebra.subtract(a, b)
+      )
+    case VectorBinary64Operation.MultiplyLowU64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) =>
+        algebra.multiply(a, b)
+      )
+    case VectorBinary64Operation.MaximumI64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) =>
+        algebra.maximum(a, b, signed = true)
+      )
+    case VectorBinary64Operation.MaximumU64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) =>
+        algebra.maximum(a, b, signed = false)
+      )
+    case VectorBinary64Operation.MinimumI64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) =>
+        algebra.minimum(a, b, signed = true)
+      )
+    case VectorBinary64Operation.MinimumU64 =>
+      sinks.pairBinary(dest, srcA, srcB, PairRead.Integer, SourceModifiers.Unmodified)((a, b) =>
+        algebra.minimum(a, b, signed = false)
+      )
   }
 
   /** V_MAD_F32 rounds the product before the sum; V_FMA_F32 rounds once. */
@@ -1050,7 +1099,9 @@ private object FloatSemantics {
       })
   }
 
-  /** V_PK_FMA_F16, V_PK_MAD_U16/I16 and V_PK_MINIMUM3/MAXIMUM3_F16 on each triple of halves. */
+  /** V_PK_FMA_F16, V_PK_MAD_U16/I16, V_PK_MINIMUM3/MAXIMUM3_F16 and the GFX12.5 packed minimum, maximum and add-minimum
+    * or add-maximum operations on each triple of halves.
+    */
   inline def packedTernary[V, R](inline algebra: Algebra[V], instruction: Instruction.VPackedTernary)(
       inline sinks: AMDGPUSinks[V, R]
   ): R = {
@@ -1075,6 +1126,38 @@ private object FloatSemantics {
       case PackedTernaryOperation.Maximum3PropagateF16 =>
         sinks.packedHalf(instruction)((a, b, c) =>
           algebra.saturated(clamp, algebra.maximumPropagate(algebra.maximumPropagate(a, b, 16), c, 16), 16)
+        )
+      case PackedTernaryOperation.Minimum3F16 =>
+        sinks.packedHalf(instruction)((a, b, c) =>
+          algebra.saturated(clamp, algebra.minimumNumber(algebra.minimumNumber(a, b, 16), c, 16), 16)
+        )
+      case PackedTernaryOperation.Maximum3F16 =>
+        sinks.packedHalf(instruction)((a, b, c) =>
+          algebra.saturated(clamp, algebra.maximumNumber(algebra.maximumNumber(a, b, 16), c, 16), 16)
+        )
+      case PackedTernaryOperation.Minimum3I16 =>
+        sinks.packedHalf(instruction)((a, b, c) => algebra.three(a, b, c, 16, maximum = false, signed = true))
+      case PackedTernaryOperation.Minimum3U16 =>
+        sinks.packedHalf(instruction)((a, b, c) => algebra.three(a, b, c, 16, maximum = false, signed = false))
+      case PackedTernaryOperation.Maximum3I16 =>
+        sinks.packedHalf(instruction)((a, b, c) => algebra.three(a, b, c, 16, maximum = true, signed = true))
+      case PackedTernaryOperation.Maximum3U16 =>
+        sinks.packedHalf(instruction)((a, b, c) => algebra.three(a, b, c, 16, maximum = true, signed = false))
+      case PackedTernaryOperation.AddMinimumI16 =>
+        sinks.packedHalf(instruction)((a, b, c) =>
+          algebra.addSaturatedPicked(a, b, c, 16, maximum = false, signed = true)
+        )
+      case PackedTernaryOperation.AddMinimumU16 =>
+        sinks.packedHalf(instruction)((a, b, c) =>
+          algebra.addSaturatedPicked(a, b, c, 16, maximum = false, signed = false)
+        )
+      case PackedTernaryOperation.AddMaximumI16 =>
+        sinks.packedHalf(instruction)((a, b, c) =>
+          algebra.addSaturatedPicked(a, b, c, 16, maximum = true, signed = true)
+        )
+      case PackedTernaryOperation.AddMaximumU16 =>
+        sinks.packedHalf(instruction)((a, b, c) =>
+          algebra.addSaturatedPicked(a, b, c, 16, maximum = true, signed = false)
         )
     }
   }

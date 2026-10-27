@@ -22,7 +22,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
 
   test("decoder rejects scalar loads crossing the bank boundary") {
     val target = Target("gfx900")
-    val parsed = asm.Parser.parse("s_load_dwordx4 s[124:127], s[0:1], 0").value
+    val parsed = asm.Parser.parse("s_load_dwordx4 s[4:7], s[0:1], 0").value
     val bytes  = asm.Assembler.encode(parsed, TargetMode(target)).value
     assert(VMCompiler.decodeInstruction(bytes, target).isRight)
     val field = InstructionLayout.Catalogue.forFormat(target, EncodingFormat.SMEM).get.byName(EncodingField.SDATA)

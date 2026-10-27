@@ -90,8 +90,6 @@ object Launch {
     val client: ClientId        = Control.register(endpoint)
     private val released        = AtomicBoolean(false)
     private val releaseFinished = CountDownLatch(1)
-    // a second caller waits on the first, whose release is bounded by the control connection's timeouts
-    @SuppressWarnings(Array("baumkuchen:unbounded-wait"))
     private def release(): Unit =
       if (released.compareAndSet(false, true)) {
         try Control.release(endpoint, client)

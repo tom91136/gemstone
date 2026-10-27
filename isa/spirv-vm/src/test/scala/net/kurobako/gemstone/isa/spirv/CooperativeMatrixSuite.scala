@@ -7,6 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
+import net.kurobako.gemstone.vm.*
 
 class CooperativeMatrixSuite extends munit.FunSuite {
 
@@ -689,6 +690,37 @@ class CooperativeMatrixSuite extends munit.FunSuite {
     OpReturn
     OpFunctionEnd
   """
+
+  test("a cooperative matrix load of a type that is not a matrix fails when the module loads") {
+    val module = spv"""
+      OpCapability Shader
+      OpCapability VulkanMemoryModel
+      OpCapability CooperativeMatrixKHR
+      OpExtension "SPV_KHR_cooperative_matrix"
+      OpMemoryModel Logical Vulkan
+      OpEntryPoint GLCompute %main "main"
+      OpExecutionMode %main LocalSize 32 1 1
+      %void = OpTypeVoid
+      %fn = OpTypeFunction %void
+      %float = OpTypeFloat 32
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %uint_0 = OpConstant %uint 0
+      %ulong_16 = OpConstant %ulong 16
+      %ptr = OpTypePointer Function %float
+      %pointer = OpUndef %ptr
+      %main = OpFunction %void None %fn
+      %entry = OpLabel
+      %load = OpCooperativeMatrixLoadKHR %float %pointer %uint_0 %ulong_16 None
+      OpReturn
+      OpFunctionEnd
+    """
+    val at = module.instructions.indexWhere(_.opcode.raw == "OpCooperativeMatrixLoadKHR")
+    assertEquals(
+      SPIRVLowering.failures(module, environment(module)).map(_(at)),
+      Right(Some(Fault.InvalidRequest("OpCooperativeMatrixLoadKHR type %4 is not a cooperative matrix")))
+    )
+  }
 
   test("SPV_NV_cooperative_matrix2 transposes accumulators into B matrices and converts their use in place") {
     val memory = RegionMemory()

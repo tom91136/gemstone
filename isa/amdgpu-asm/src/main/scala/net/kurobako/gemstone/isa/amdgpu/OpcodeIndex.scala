@@ -58,10 +58,8 @@ private object OpcodeIndex {
   def encodings(isa: ISA, format: EncodingFormat): IntMap[Vec[(Opcode, Metadata.Encoding)]] =
     entries.getOrElse((isa, format), IntMap.empty)
 
-  def canonical[A](values: Vec[A], target: Target)(definition: A => Opcode): Vec[A] =
-    values.filterNot(value =>
-      preferredName(definition(value).mnemonic, target).exists(name =>
-        values.exists(value => definition(value).mnemonic == name)
-      )
-    )
+  def canonical[A](values: Vec[A], target: Target)(definition: A => Opcode): Vec[A] = {
+    val mnemonics = values.map(value => definition(value).mnemonic.raw).toSet
+    values.filterNot(value => preferredName(definition(value).mnemonic, target).exists(mnemonics))
+  }
 }

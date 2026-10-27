@@ -109,12 +109,12 @@ class ReplaySuite extends munit.FunSuite {
   test("replay preserves multiple live connections, surrogate clients and response order") {
     temporary { file =>
       capture(file) { w =>
-        val a = w.connection(ClientId(1L)); val b = w.connection(ClientId(2L))
-        a.request(execution(session = 77)); b.request(execution(session = 77))
-        b.response(response()); a.response(response())
-        // the writer's own close runs on every path
-        a.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
-        b.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(ClientId(1L))) { a =>
+          Using.resource(w.connection(ClientId(2L))) { b =>
+            a.request(execution(session = 77)); b.request(execution(session = 77))
+            b.response(response()); a.response(response())
+          }
+        }
       }
       val arrivals = CountDownLatch(2)
       val peer     = Peer { (request, _, out) =>
@@ -140,10 +140,10 @@ class ReplaySuite extends munit.FunSuite {
   test("completion timing permits earlier success and waits for recorded terminal results") {
     for (early <- Seq(false, true)) temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(query); c.response(completion(1)); c.request(query);
-        c.response(completion(2))
-        // the writer's own close runs on every path
-        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(client)) { c =>
+          c.request(query); c.response(completion(1)); c.request(query);
+          c.response(completion(2))
+        }
       }
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(completion(if (early || calls.incrementAndGet() >= 4) 2 else 1)))
@@ -158,11 +158,10 @@ class ReplaySuite extends munit.FunSuite {
   test("pending timing does not hide failures and terminal waits are bounded") {
     for (failed <- Seq(false, true)) temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client)
-        c.request(query); c.response(completion(1))
-        c.request(query); c.response(completion(2))
-        // the writer's own close runs on every path
-        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(client)) { c =>
+          c.request(query); c.response(completion(1))
+          c.request(query); c.response(completion(2))
+        }
       }
       val peer = Peer((_, _, out) => out.write(if (failed) completion(0) else completion(1)))
       Using.resource(peer) { peer =>
@@ -182,9 +181,9 @@ class ReplaySuite extends munit.FunSuite {
   test("recorded terminal failures wait through pending replies and compare the actual status") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(query); c.response(completion(0))
-        // the writer's own close runs on every path
-        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(client)) { c =>
+          c.request(query); c.response(completion(0))
+        }
       }
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(if (calls.incrementAndGet() < 3) completion(1) else completion(0)))
@@ -199,9 +198,9 @@ class ReplaySuite extends munit.FunSuite {
   test("response mismatches close the endpoint and preserve cleanup failures as suppressed") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(client); c.request(execution()); c.response(response())
-        // the writer's own close runs on every path
-        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(client)) { c =>
+          c.request(execution()); c.response(response())
+        }
       }
       val closed = AtomicBoolean(false)
       val peer   = Peer((_, _, out) => out.write(response(1)))

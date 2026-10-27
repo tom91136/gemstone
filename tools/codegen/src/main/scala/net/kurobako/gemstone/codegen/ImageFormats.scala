@@ -6,8 +6,6 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 
 /** Shared texel layout facts. Algorithms remain in the VM; frozen test references stay independent. */
-// the layout string names generated image format layouts, which are not types of the build
-@SuppressWarnings(Array("baumkuchen:stale-name-string"))
 object ImageFormats {
   private enum Encoding derives CanEqual { case Unorm, Half, Ufloat, SharedExponent }
   private enum Layout derives CanEqual   {
@@ -583,8 +581,6 @@ ${GeneratedHeader.annotation()}object GraphicsFormats {
   enum GraphicsShaderFormat derives CanEqual { case ${shaders.map(shaderName(_)).mkString(", ")} }
 
   /** Supported storage/view layouts. Metadata cannot be supplied independently of the format. */
-  // the cases are rows of one table, each a distinct value
-  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   enum GraphicsFormat(
       val shaderFormat: GraphicsShaderFormat,
       val texelBytes: Int > 0,
@@ -604,7 +600,7 @@ $decoded
   }
   def main(arguments: Array[String]): Unit = CodegenCommand.run(
     Command("ImageFormats", "Generate shared graphics format domains")(
-      Opts.argument[String]("core-source-root").map(Path.of(_))
+      CodegenCommand.path("core-source-root")
     ),
     arguments
   ) { root =>

@@ -136,7 +136,7 @@ class PTXBackendSuite extends munit.FunSuite {
       val completion = service.launch(program, task).value
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
       assertEquals(
-        service.read(output, 0L, 4).map(bytes =>
+        service.read(AllocationRange(output, 0L, 4)).map(bytes =>
           LittleEndian.decode(bytes, 0, 4)
         ),
         Right(1L)

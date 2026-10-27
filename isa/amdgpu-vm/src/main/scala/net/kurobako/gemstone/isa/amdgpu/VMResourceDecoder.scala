@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.domain.*
 import net.kurobako.gemstone.vm.*
 
 /** Lowers the buffer (MUBUF, MTBUF, VBUFFER), image (MIMG, VIMAGE) and scalar buffer encodings. */
@@ -34,21 +35,20 @@ private object VMResourceDecoder {
     s"v${index + by} exceeds the vector register bank"
   )
 
-  /** The scalar offset an SOFFSET encodes: an SGPR, M0, the null register or an inline integer. */
+  private def sourceSlot(machine: InstructionDecoder.Decoded, target: Target): Option[Slot] =
+    Src.decode(target.isa, machine(EncodingField.SOFFSET)).map(_.slot)
+
+  /** The scalar offset an SOFFSET encodes: an SGPR, M0, the null register or an inline integer. VBUFFER's SOFFSET
+    * domain lists no inline integers but the VM takes them as the source domain does.
+    */
   private def scalarOffset(machine: InstructionDecoder.Decoded, target: Target)
-      : Result[(Option[ScalarRegisterIndex], Int)] = {
-    val value  = machine(EncodingField.SOFFSET).toInt
-    val modern = target.isa match {
-      case ISA.RDNA3 | ISA.RDNA3_5 | ISA.GFX11_7 | ISA.RDNA4 | ISA.CDNA5 => true
-      case _                                                             => false
+      : Result[(Option[ScalarRegisterIndex], Int)] =
+    machine.slot(EncodingField.SOFFSET).orElse(sourceSlot(machine, target)) match {
+      case Some(Slot.Named("null"))  => Right((None, 0))
+      case Some(Slot.Named("m0"))    => Right((Some(m0Register(target.isa)), 0))
+      case Some(Slot.Integer(value)) => Right((None, value))
+      case _ => machine.scalarOperand(EncodingField.SOFFSET).map(register => (Some(register), 0))
     }
-    val (nullRegister, m0) = if (modern) (124, 125) else (125, 124)
-    if (value == nullRegister) Right((None, 0))
-    else if (value == m0) Right((Some(m0Register(target.isa)), 0))
-    else if (value >= 128 && value <= 192) Right((None, value - 128))
-    else if (value >= 193 && value <= 208) Right((None, 192 - value))
-    else machine.scalar(EncodingField.SOFFSET).map(register => (Some(register), 0))
-  }
 
   private val FormatName = "t?buffer_(load|store)_[a-z0-9_]*?(x|xy|xyz|xyzw)".r
 

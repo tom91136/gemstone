@@ -251,4 +251,25 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
     assert(VMCompiler().compile(wave32).isRight)
     assert(VMCompiler().compile(wave32.copy(kernelCodeProperties = 0)).isLeft)
   }
+
+  test("codes outside an operand domain are decode errors, not SGPR reads") {
+    // buffer_load_dword v1, v2, s[4:7], s125 offen: GFX9 and CDNA2 have no null register to read here
+    val bufferLoad = octets(0x00, 0x10, 0x00, 0xe0, 0x02, 0x01, 0x01, 0x7d)
+    Vec(Target("gfx900") -> "gfx9", Target("gfx90a") -> "cdna2").foreach { case (target, family) =>
+      assert(
+        VMCompiler.decodeInstruction(bufferLoad, target).left.exists(
+          _.contains(s"SOFFSET code 125 is outside the ssrc_nolit domain on $family")
+        ),
+        target.name
+      )
+      assert(
+        VMCompiler.decodeInstruction(octets(0x00, 0x10, 0x00, 0xe0, 0x02, 0x01, 0x01, 0x80), target).isRight,
+        target.name
+      )
+    }
+    // s_mov_b32 s2, reserved source code 209 on RDNA3
+    assert(VMCompiler.decodeInstruction(octets(0xd1, 0x00, 0x82, 0xbe), Target("gfx1100")).left.exists(
+      _.contains("SSRC0 code 209 is outside the src domain on rdna3")
+    ))
+  }
 }

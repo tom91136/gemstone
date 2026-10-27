@@ -330,6 +330,71 @@ class ExtensionDeclarationSuite extends munit.FunSuite {
     assertEquals(words(memory, out, offset = 0, count = 1), Vec(2L))
   }
 
+  test("a conditional copy selects the operand of the first condition that holds at run time") {
+    val module = spv"""
+      OpCapability SpecConditionalINTEL
+      OpCapability FunctionVariantsINTEL
+      OpExtension "SPV_INTEL_function_variants"
+      $openCL
+      OpEntryPoint Kernel %kernel "main"
+      %void = OpTypeVoid
+      %bool = OpTypeBool
+      %uint = OpTypeInt 32 0
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %uint_ptr
+      %zero = OpConstant %uint 0
+      %one = OpConstant %uint 1
+      %two = OpConstant %uint 2
+      %kernel = OpFunction %void None %fn
+      %out = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      OpStore %out %one
+      %value = OpLoad %uint %out
+      %is_zero = OpIEqual %bool %value %zero
+      %is_one = OpIEqual %bool %value %one
+      %chosen = OpConditionalCopyObjectINTEL %uint %is_zero %zero %is_one %two
+      OpStore %out %chosen
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(4L)
+    assertEquals(run(module, "main", memory, Vec(buffer(out))), Right(()))
+    assertEquals(words(memory, out, offset = 0, count = 1), Vec(2L))
+  }
+
+  test("a conditional copy faults when no condition holds at run time") {
+    val module = spv"""
+      OpCapability SpecConditionalINTEL
+      OpCapability FunctionVariantsINTEL
+      OpExtension "SPV_INTEL_function_variants"
+      $openCL
+      OpEntryPoint Kernel %kernel "main"
+      %void = OpTypeVoid
+      %bool = OpTypeBool
+      %uint = OpTypeInt 32 0
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %uint_ptr
+      %zero = OpConstant %uint 0
+      %one = OpConstant %uint 1
+      %two = OpConstant %uint 2
+      %kernel = OpFunction %void None %fn
+      %out = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      OpStore %out %one
+      %value = OpLoad %uint %out
+      %is_zero = OpIEqual %bool %value %zero
+      %is_two = OpIEqual %bool %value %two
+      %chosen = OpConditionalCopyObjectINTEL %uint %is_zero %zero %is_two %two
+      OpStore %out %chosen
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(4L)
+    assert(run(module, "main", memory, Vec(buffer(out))).isLeft)
+  }
+
   test("pipe storage holds a program-scope pipe that persists across the launches of its program") {
     val module = spv"""
       OpCapability Pipes

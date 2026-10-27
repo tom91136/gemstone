@@ -19,8 +19,7 @@ object TensorMaps {
       nanFill: Boolean = false
   ): Array[Byte] = {
     val bytes                                                        = Array.ofDim[Byte](TensorMap.Bytes)
-    def set(field: TensorMap.Field, ordinal: Int, value: Long): Unit =
-      assert(TensorMap.replace(bytes, field, ordinal, value).isRight, s"$field $value")
+    def set(field: TensorMap.Field, ordinal: Int, value: Long): Unit = replace(bytes, field, ordinal, value)
     set(TensorMap.Field.GlobalAddress, 0, address)
     set(TensorMap.Field.Rank, 0, dimensions.size - 1L)
     set(TensorMap.Field.ElementType, 0, element.instruction.toLong)
@@ -33,6 +32,11 @@ object TensorMaps {
       set(TensorMap.Field.ElementStride, index, traversal.lift(index).getOrElse(1).toLong)
     )
     bytes
+  }
+
+  def replace(bytes: Array[Byte], field: TensorMap.Field, ordinal: Int, value: Long): Unit = {
+    assert(TensorMap.accepts(field, value), s"$field $value")
+    TensorMap.update(bytes, field, ordinal, value)
   }
 
   /** An im2col map: corners are given for W, then H, then D, W alone for the wide modes. */

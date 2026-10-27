@@ -2344,6 +2344,516 @@ a2d9c27d 9eac9c99 d17d2f0b -> d0ff06f5
 67a18bb5 3cc5d095 849bcee2 -> 8493e5e7
 7ad90000 00004229 0000e31f -> 0000e31f
 
+op minmax_pred VibMaxS16 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<11>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; mov.b32 %r10, %hwi1; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; max.s16x2 %r6, %r9, %r10; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+00057fff 7fff0005 -> 7fff7fff 00000000 00000001
+007f8001 007f8001 -> 007f8001 00000001 00000001
+7ffefffe fffe7ffe -> 7ffe7ffe 00000001 00000000
+c000007f c0000080 -> c0000080 00000001 00000000
+00000000 ffffffff -> 00000000 00000001 00000001
+ed74502f 852783fc -> ed74502f 00000001 00000001
+
+op minmax_pred VibMinS16 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<11>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; mov.b32 %r10, %hwi1; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; min.s16x2 %r6, %r9, %r10; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+00057fff 7fff0005 -> 00050005 00000001 00000000
+007f8001 007f8001 -> 007f8001 00000001 00000001
+7ffefffe fffe7ffe -> fffefffe 00000000 00000001
+c000007f c0000080 -> c000007f 00000001 00000001
+00000000 ffffffff -> ffffffff 00000000 00000000
+ed74502f 852783fc -> 852783fc 00000000 00000000
+
+op minmax_pred VibMaxU16 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<11>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; mov.b32 %r10, %hwi1; { .reg .pred pu, pv; .reg .u16 rs0, rs1, rs2, rs3; max.u16x2 %r6, %r9, %r10; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.u16 pv, rs0, rs2; setp.eq.u16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+00057fff 7fff0005 -> 7fff7fff 00000000 00000001
+007f8001 007f8001 -> 007f8001 00000001 00000001
+7ffefffe fffe7ffe -> fffefffe 00000000 00000001
+c000007f c0000080 -> c0000080 00000001 00000000
+00000000 ffffffff -> ffffffff 00000000 00000000
+ed74502f 852783fc -> ed7483fc 00000001 00000000
+
+op minmax_pred VibMinU16 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<11>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; mov.b32 %r10, %hwi1; { .reg .pred pu, pv; .reg .u16 rs0, rs1, rs2, rs3; min.u16x2 %r6, %r9, %r10; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.u16 pv, rs0, rs2; setp.eq.u16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+00057fff 7fff0005 -> 00050005 00000001 00000000
+007f8001 007f8001 -> 007f8001 00000001 00000001
+7ffefffe fffe7ffe -> 7ffe7ffe 00000001 00000000
+c000007f c0000080 -> c000007f 00000001 00000001
+00000000 ffffffff -> 00000000 00000001 00000001
+ed74502f 852783fc -> 8527502f 00000000 00000001
+
+op minmax_pred VibMaxS16Relu sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<11>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; mov.b32 %r10, %hwi1; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; max.relu.s16x2 %r6, %r9, %r10; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+00057fff 7fff0005 -> 7fff7fff 00000000 00000001
+007f8001 007f8001 -> 007f0000 00000001 00000000
+7ffefffe fffe7ffe -> 7ffe7ffe 00000001 00000000
+c000007f c0000080 -> 00000080 00000000 00000000
+00000000 ffffffff -> 00000000 00000001 00000001
+ed74502f 852783fc -> 0000502f 00000000 00000001
+
+op minmax_pred VibMinS16Relu sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<11>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; mov.b32 %r10, %hwi1; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; min.relu.s16x2 %r6, %r9, %r10; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+00057fff 7fff0005 -> 00050005 00000001 00000000
+007f8001 007f8001 -> 007f0000 00000001 00000000
+7ffefffe fffe7ffe -> 00000000 00000000 00000000
+c000007f c0000080 -> 0000007f 00000000 00000001
+00000000 ffffffff -> 00000000 00000001 00000001
+ed74502f 852783fc -> 00000000 00000000 00000000
+
+op minmax_pred VibMaxS16ImmA sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0xfffe0005; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; max.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 007f0080 00000001 00000001
+007f4000 -> 007f4000 00000001 00000001
+80010000 -> fffe0005 00000000 00000000
+80014000 -> fffe4000 00000000 00000001
+86970116 -> fffe0116 00000000 00000001
+7ac810cc -> 7ac810cc 00000001 00000001
+
+op minmax_pred VibMinS16ImmA sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0xfffe0005; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; min.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> fffe0005 00000000 00000000
+007f4000 -> fffe0005 00000000 00000000
+80010000 -> 80010000 00000001 00000001
+80014000 -> 80010005 00000001 00000000
+86970116 -> 86970005 00000001 00000000
+7ac810cc -> fffe0005 00000000 00000000
+
+op minmax_pred VibMaxU16ImmA sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0xfffe0005; { .reg .pred pu, pv; .reg .u16 rs0, rs1, rs2, rs3; max.u16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.u16 pv, rs0, rs2; setp.eq.u16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> fffe0080 00000000 00000001
+007f4000 -> fffe4000 00000000 00000001
+80010000 -> fffe0005 00000000 00000000
+80014000 -> fffe4000 00000000 00000001
+86970116 -> fffe0116 00000000 00000001
+7ac810cc -> fffe10cc 00000000 00000001
+
+op minmax_pred VibMinU16ImmA sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0xfffe0005; { .reg .pred pu, pv; .reg .u16 rs0, rs1, rs2, rs3; min.u16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.u16 pv, rs0, rs2; setp.eq.u16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 007f0005 00000001 00000000
+007f4000 -> 007f0005 00000001 00000000
+80010000 -> 80010000 00000001 00000001
+80014000 -> 80010005 00000001 00000000
+86970116 -> 86970005 00000001 00000000
+7ac810cc -> 7ac80005 00000001 00000000
+
+op minmax_pred VibMaxS16ReluImmA sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0xfffe0005; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; max.relu.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 007f0080 00000001 00000001
+007f4000 -> 007f4000 00000001 00000001
+80010000 -> 00000005 00000000 00000000
+80014000 -> 00004000 00000000 00000001
+86970116 -> 00000116 00000000 00000001
+7ac810cc -> 7ac810cc 00000001 00000001
+
+op minmax_pred VibMinS16ReluImmA sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0xfffe0005; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; min.relu.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 00000005 00000000 00000000
+007f4000 -> 00000005 00000000 00000000
+80010000 -> 00000000 00000000 00000001
+80014000 -> 00000005 00000000 00000000
+86970116 -> 00000005 00000000 00000000
+7ac810cc -> 00000005 00000000 00000000
+
+op minmax_pred VibMaxS16ImmB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0x80007fff; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; max.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 007f7fff 00000001 00000000
+007f4000 -> 007f7fff 00000001 00000000
+80010000 -> 80017fff 00000001 00000000
+80014000 -> 80017fff 00000001 00000000
+86970116 -> 86977fff 00000001 00000000
+7ac810cc -> 7ac87fff 00000001 00000000
+
+op minmax_pred VibMinS16ImmB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0x80007fff; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; min.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 80000080 00000000 00000001
+007f4000 -> 80004000 00000000 00000001
+80010000 -> 80000000 00000000 00000001
+80014000 -> 80004000 00000000 00000001
+86970116 -> 80000116 00000000 00000001
+7ac810cc -> 800010cc 00000000 00000001
+
+op minmax_pred VibMaxU16ImmB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0x80007fff; { .reg .pred pu, pv; .reg .u16 rs0, rs1, rs2, rs3; max.u16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.u16 pv, rs0, rs2; setp.eq.u16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 80007fff 00000000 00000000
+007f4000 -> 80007fff 00000000 00000000
+80010000 -> 80017fff 00000001 00000000
+80014000 -> 80017fff 00000001 00000000
+86970116 -> 86977fff 00000001 00000000
+7ac810cc -> 80007fff 00000000 00000000
+
+op minmax_pred VibMinU16ImmB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0x80007fff; { .reg .pred pu, pv; .reg .u16 rs0, rs1, rs2, rs3; min.u16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.u16 pv, rs0, rs2; setp.eq.u16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 007f0080 00000001 00000001
+007f4000 -> 007f4000 00000001 00000001
+80010000 -> 80000000 00000000 00000001
+80014000 -> 80004000 00000000 00000001
+86970116 -> 80000116 00000000 00000001
+7ac810cc -> 7ac810cc 00000001 00000001
+
+op minmax_pred VibMaxS16ReluImmB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0x80007fff; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; max.relu.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 007f7fff 00000001 00000000
+007f4000 -> 007f7fff 00000001 00000000
+80010000 -> 00007fff 00000000 00000000
+80014000 -> 00007fff 00000000 00000000
+86970116 -> 00007fff 00000000 00000000
+7ac810cc -> 7ac87fff 00000001 00000000
+
+op minmax_pred VibMinS16ReluImmB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r9, %hwi0; { .reg .b32 k; mov.b32 k, 0x80007fff; { .reg .pred pu, pv; .reg .s16 rs0, rs1, rs2, rs3; min.relu.s16x2 %r6, %r9, k; mov.b32 {rs0, rs1}, %r6; mov.b32 {rs2, rs3}, %r9; setp.eq.s16 pv, rs0, rs2; setp.eq.s16 pu, rs1, rs3; selp.b32 %r7, 1, 0, pu; selp.b32 %r8, 1, 0, pv; } } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8;
+007f0080 -> 00000080 00000000 00000001
+007f4000 -> 00004000 00000000 00000001
+80010000 -> 00000000 00000000 00000001
+80014000 -> 00004000 00000000 00000001
+86970116 -> 00000116 00000000 00000001
+7ac810cc -> 000010cc 00000000 00000001
+
+op minmax_pred VibMaxRelu32 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<8>;
+body mov.b32 %r8, %hwi0; mov.b32 %r9, %hwi1; { .reg .pred p; .reg .s32 m; max.relu.s32 m, %r8, %r9; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00000100 00010000 -> 00010000 00000000
+00008000 00ff00ff -> 00ff00ff 00000000
+55555555 fefefefe -> 55555555 00000001
+9abcdef0 ffff0000 -> 00000000 00000000
+fefefefe aaaaaaaa -> 00000000 00000000
+cc121946 87453342 -> 00000000 00000000
+
+op minmax_pred VibMinRelu32 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<8>;
+body mov.b32 %r8, %hwi0; mov.b32 %r9, %hwi1; { .reg .pred p; .reg .s32 m; min.relu.s32 m, %r8, %r9; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00000100 00010000 -> 00000100 00000001
+00008000 00ff00ff -> 00008000 00000001
+55555555 fefefefe -> 00000000 00000000
+9abcdef0 ffff0000 -> 00000000 00000000
+fefefefe aaaaaaaa -> 00000000 00000000
+cc121946 87453342 -> 00000000 00000000
+
+op minmax_pred VibMaxRelu32EqB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<8>;
+body mov.b32 %r8, %hwi0; mov.b32 %r9, %hwi1; { .reg .pred p; .reg .s32 m; max.relu.s32 m, %r8, %r9; setp.eq.s32 p, m, %r9; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00000100 00010000 -> 00010000 00000001
+00008000 00ff00ff -> 00ff00ff 00000001
+55555555 fefefefe -> 55555555 00000000
+9abcdef0 ffff0000 -> 00000000 00000000
+fefefefe aaaaaaaa -> 00000000 00000000
+cc121946 87453342 -> 00000000 00000000
+
+op minmax_pred VibMinRelu32EqB sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<8>;
+body mov.b32 %r8, %hwi0; mov.b32 %r9, %hwi1; { .reg .pred p; .reg .s32 m; min.relu.s32 m, %r8, %r9; setp.eq.s32 p, m, %r9; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00000100 00010000 -> 00000100 00000000
+00008000 00ff00ff -> 00008000 00000000
+55555555 fefefefe -> 00000000 00000000
+9abcdef0 ffff0000 -> 00000000 00000000
+fefefefe aaaaaaaa -> 00000000 00000000
+cc121946 87453342 -> 00000000 00000000
+
+op minmax_pred VibMaxRelu32Imm7 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r8, %hwi0; { .reg .pred p; .reg .s32 m; max.relu.s32 m, %r8, 7; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00008000 -> 00008000 00000001
+deadbeef -> 00000007 00000000
+00000006 -> 00000007 00000000
+85f9c2b1 -> 00000007 00000000
+bb8bbd73 -> 00000007 00000000
+c2a37e09 -> 00000007 00000000
+
+op minmax_pred VibMinRelu32Imm7 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r8, %hwi0; { .reg .pred p; .reg .s32 m; min.relu.s32 m, %r8, 7; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00008000 -> 00000007 00000000
+deadbeef -> 00000000 00000000
+00000006 -> 00000006 00000001
+85f9c2b1 -> 00000000 00000000
+bb8bbd73 -> 00000000 00000000
+c2a37e09 -> 00000000 00000000
+
+op minmax_pred VibMaxRelu32ImmM7 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r8, %hwi0; { .reg .pred p; .reg .s32 m; max.relu.s32 m, %r8, -7; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00008000 -> 00008000 00000001
+deadbeef -> 00000000 00000000
+00000006 -> 00000006 00000001
+85f9c2b1 -> 00000000 00000000
+bb8bbd73 -> 00000000 00000000
+c2a37e09 -> 00000000 00000000
+
+op minmax_pred VibMinRelu32ImmM7 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r8, %hwi0; { .reg .pred p; .reg .s32 m; min.relu.s32 m, %r8, -7; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00008000 -> 00000000 00000000
+deadbeef -> 00000000 00000000
+00000006 -> 00000000 00000000
+85f9c2b1 -> 00000000 00000000
+bb8bbd73 -> 00000000 00000000
+c2a37e09 -> 00000000 00000000
+
+op minmax_pred VibMaxRelu32Imm0 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r8, %hwi0; { .reg .pred p; .reg .s32 m; max.relu.s32 m, %r8, 0; setp.eq.s32 p, m, %r8; selp.u32 %r7, 1, 0, p; mov.s32 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+00008000 -> 00008000 00000001
+deadbeef -> 00000000 00000000
+00000006 -> 00000006 00000001
+85f9c2b1 -> 00000000 00000000
+bb8bbd73 -> 00000000 00000000
+c2a37e09 -> 00000000 00000000
+
+op minmax_pred VibMaxS16Scalar sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<3>; .reg .b32 %r<8>; .reg .b64 %rd<8>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs1, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs2, t; } { .reg .pred p; .reg .s16 m; max.s16 m, %rs1, %rs2; setp.eq.s16 p, m, %rs1; selp.u32 %r7, 1, 0, p; cvt.u32.s16 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+0000007f 00000080 -> 00000080 00000000
+0000007f 00004000 -> 00004000 00000000
+00008001 00000000 -> 00000000 00000000
+00008001 00004000 -> 00004000 00000000
+00008b23 00001824 -> 00001824 00000000
+0000416d 0000ea5a -> 0000416d 00000001
+
+op minmax_pred VibMinS16Scalar sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<3>; .reg .b32 %r<8>; .reg .b64 %rd<8>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs1, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs2, t; } { .reg .pred p; .reg .s16 m; min.s16 m, %rs1, %rs2; setp.eq.s16 p, m, %rs1; selp.u32 %r7, 1, 0, p; cvt.u32.s16 %r6, m; } mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7;
+0000007f 00000080 -> 0000007f 00000001
+0000007f 00004000 -> 0000007f 00000001
+00008001 00000000 -> ffff8001 00000001
+00008001 00004000 -> ffff8001 00000001
+00008b23 00001824 -> ffff8b23 00000001
+0000416d 0000ea5a -> ffffea5a 00000000
+
+op minmax_pred VhMaxF16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; max.f16x2 t, %r7, %r8; max.f16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+83ff8400 840083ff 38004000 -> 38004000
+bc003c01 3c01bc00 03fffc00 -> 3c013c01
+fbfffe00 fe00fbff bc008000 -> bc008000
+42480200 02004248 3c017e00 -> 42484248
+3e007a00 7a003e00 80004900 -> 7a007a00
+0604c540 b13d5c5c 4d3da9f2 -> 4d3d5c5c
+
+op minmax_pred VhMinF16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; min.f16x2 t, %r7, %r8; min.f16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+83ff8400 840083ff 38004000 -> 84008400
+bc003c01 3c01bc00 03fffc00 -> bc00fc00
+fbfffe00 fe00fbff bc008000 -> fbfffbff
+42480200 02004248 3c017e00 -> 02000200
+3e007a00 7a003e00 80004900 -> 80003e00
+0604c540 b13d5c5c 4d3da9f2 -> b13dc540
+
+op minmax_pred VhMaxNanF16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; max.NaN.f16x2 t, %r7, %r8; max.NaN.f16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+83ff8400 840083ff 38004000 -> 38004000
+bc003c01 3c01bc00 03fffc00 -> 3c013c01
+fbfffe00 fe00fbff bc008000 -> 7fff7fff
+42480200 02004248 3c017e00 -> 42487fff
+3e007a00 7a003e00 80004900 -> 7a007a00
+0604c540 b13d5c5c 4d3da9f2 -> 4d3d5c5c
+
+op minmax_pred VhMinNanF16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; min.NaN.f16x2 t, %r7, %r8; min.NaN.f16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+83ff8400 840083ff 38004000 -> 84008400
+bc003c01 3c01bc00 03fffc00 -> bc00fc00
+fbfffe00 fe00fbff bc008000 -> 7fff7fff
+42480200 02004248 3c017e00 -> 02007fff
+3e007a00 7a003e00 80004900 -> 80003e00
+0604c540 b13d5c5c 4d3da9f2 -> b13dc540
+
+op minmax_pred VhMaxBf16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; max.bf16x2 t, %r7, %r8; max.bf16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+00008080 80800000 80008080 -> 00000000
+4f00bf80 bf804f00 ff800000 -> 4f004f00
+0001ffc0 ffc00001 80807f81 -> 00010001
+3f804120 41203f80 42c80001 -> 42c84120
+80000000 80000000 80000000 -> 80000000
+748b6a69 125321a9 0be63d88 -> 748b6a69
+
+op minmax_pred VhMinBf16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; min.bf16x2 t, %r7, %r8; min.bf16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+00008080 80800000 80008080 -> 80808080
+4f00bf80 bf804f00 ff800000 -> ff80bf80
+0001ffc0 ffc00001 80807f81 -> 80800001
+3f804120 41203f80 42c80001 -> 3f800001
+80000000 80000000 80000000 -> 80000000
+748b6a69 125321a9 0be63d88 -> 0be621a9
+
+op minmax_pred VhMaxNanBf16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; max.NaN.bf16x2 t, %r7, %r8; max.NaN.bf16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+00008080 80800000 80008080 -> 00000000
+4f00bf80 bf804f00 ff800000 -> 4f004f00
+0001ffc0 ffc00001 80807f81 -> 7fff7fff
+3f804120 41203f80 42c80001 -> 42c84120
+80000000 80000000 80000000 -> 80000000
+748b6a69 125321a9 0be63d88 -> 748b6a69
+
+op minmax_pred VhMinNanBf16x2 sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; min.NaN.bf16x2 t, %r7, %r8; min.NaN.bf16x2 %r6, t, %r9; } mov.b32 %hwo0, %r6;
+00008080 80800000 80008080 -> 80808080
+4f00bf80 bf804f00 ff800000 -> ff80bf80
+0001ffc0 ffc00001 80807f81 -> 7fff7fff
+3f804120 41203f80 42c80001 -> 3f800001
+80000000 80000000 80000000 -> 80000000
+748b6a69 125321a9 0be63d88 -> 0be621a9
+
+op minmax_pred VhMaxF16x2Assoc sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; max.f16x2 t, %r8, %r9; max.f16x2 %r6, %r7, t; } mov.b32 %hwo0, %r6;
+83ff8400 840083ff 38004000 -> 38004000
+bc003c01 3c01bc00 03fffc00 -> 3c013c01
+fbfffe00 fe00fbff bc008000 -> bc008000
+42480200 02004248 3c017e00 -> 42484248
+3e007a00 7a003e00 80004900 -> 7a007a00
+0604c540 b13d5c5c 4d3da9f2 -> 4d3d5c5c
+
+op minmax_pred VhMinNanBf16x2Assoc sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<10>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; mov.b32 %r9, %hwi2; { .reg .b32 t; min.NaN.bf16x2 t, %r8, %r9; min.NaN.bf16x2 %r6, %r7, t; } mov.b32 %hwo0, %r6;
+00008080 80800000 80008080 -> 80808080
+4f00bf80 bf804f00 ff800000 -> ff80bf80
+0001ffc0 ffc00001 80807f81 -> 7fff7fff
+3f804120 41203f80 42c80001 -> 3f800001
+80000000 80000000 80000000 -> 80000000
+748b6a69 125321a9 0be63d88 -> 0be621a9
+
+op minmax_pred VhMaxF16 sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<5>; .reg .b32 %r<7>; .reg .b64 %rd<9>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs2, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs3, t; } { .reg .b32 t; shr.b32 t, %hwi2, 0; cvt.u16.u32 %rs4, t; } { .reg .b16 t; max.f16 t, %rs2, %rs3; max.f16 %rs1, t, %rs4; } cvt.u32.u16 	%r6, %rs1; mov.b32 %hwo0, %r6;
+000083ff 00007b00 000003ff -> 00007b00
+0000bc00 00007b00 00003c00 -> 00007b00
+00007c00 00000000 00007c00 -> 00007c00
+00004200 00007800 00004900 -> 00007800
+00000200 00008000 00000100 -> 00000200
+000059f3 0000a2e5 000015ec -> 000059f3
+
+op minmax_pred VhMinF16 sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<5>; .reg .b32 %r<7>; .reg .b64 %rd<9>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs2, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs3, t; } { .reg .b32 t; shr.b32 t, %hwi2, 0; cvt.u16.u32 %rs4, t; } { .reg .b16 t; min.f16 t, %rs2, %rs3; min.f16 %rs1, t, %rs4; } cvt.u32.u16 	%r6, %rs1; mov.b32 %hwo0, %r6;
+000083ff 00007b00 000003ff -> 000083ff
+0000bc00 00007b00 00003c00 -> 0000bc00
+00007c00 00000000 00007c00 -> 00000000
+00004200 00007800 00004900 -> 00004200
+00000200 00008000 00000100 -> 00008000
+000059f3 0000a2e5 000015ec -> 0000a2e5
+
+op minmax_pred VhMaxBf16 sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<5>; .reg .b32 %r<7>; .reg .b64 %rd<9>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs2, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs3, t; } { .reg .b32 t; shr.b32 t, %hwi2, 0; cvt.u16.u32 %rs4, t; } { .reg .b16 t; max.bf16 t, %rs2, %rs3; max.bf16 %rs1, t, %rs4; } cvt.u32.u16 	%r6, %rs1; mov.b32 %hwo0, %r6;
+0000807f 00005f00 00007f00 -> 00007f00
+0000bf80 00007f7f 00007fff -> 00007f7f
+0000ff7f 00004049 00003fc0 -> 00004049
+00005f00 00004049 00003f80 -> 00005f00
+00004120 00000001 00003e80 -> 00004120
+00004ac4 00006346 0000e754 -> 00006346
+
+op minmax_pred VhMinBf16 sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<5>; .reg .b32 %r<7>; .reg .b64 %rd<9>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs2, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs3, t; } { .reg .b32 t; shr.b32 t, %hwi2, 0; cvt.u16.u32 %rs4, t; } { .reg .b16 t; min.bf16 t, %rs2, %rs3; min.bf16 %rs1, t, %rs4; } cvt.u32.u16 	%r6, %rs1; mov.b32 %hwo0, %r6;
+0000807f 00005f00 00007f00 -> 0000807f
+0000bf80 00007f7f 00007fff -> 0000bf80
+0000ff7f 00004049 00003fc0 -> 0000ff7f
+00005f00 00004049 00003f80 -> 00003f80
+00004120 00000001 00003e80 -> 00000001
+00004ac4 00006346 0000e754 -> 0000e754
+
+op minmax_pred VhMaxNanF16 sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<5>; .reg .b32 %r<7>; .reg .b64 %rd<9>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs2, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs3, t; } { .reg .b32 t; shr.b32 t, %hwi2, 0; cvt.u16.u32 %rs4, t; } { .reg .b16 t; max.NaN.f16 t, %rs2, %rs3; max.NaN.f16 %rs1, t, %rs4; } cvt.u32.u16 	%r6, %rs1; mov.b32 %hwo0, %r6;
+000083ff 00007b00 000003ff -> 00007b00
+0000bc00 00007b00 00003c00 -> 00007b00
+00007c00 00000000 00007c00 -> 00007c00
+00004200 00007800 00004900 -> 00007800
+00000200 00008000 00000100 -> 00000200
+000059f3 0000a2e5 000015ec -> 000059f3
+
+op minmax_pred VhMinNanBf16 sm_120
+registers .reg .pred %p<2>; .reg .b16 %rs<5>; .reg .b32 %r<7>; .reg .b64 %rd<9>;
+body { .reg .b32 t; shr.b32 t, %hwi0, 0; cvt.u16.u32 %rs2, t; } { .reg .b32 t; shr.b32 t, %hwi1, 0; cvt.u16.u32 %rs3, t; } { .reg .b32 t; shr.b32 t, %hwi2, 0; cvt.u16.u32 %rs4, t; } { .reg .b16 t; min.NaN.bf16 t, %rs2, %rs3; min.NaN.bf16 %rs1, t, %rs4; } cvt.u32.u16 	%r6, %rs1; mov.b32 %hwo0, %r6;
+0000807f 00005f00 00007f00 -> 0000807f
+0000bf80 00007f7f 00007fff -> 00007fff
+0000ff7f 00004049 00003fc0 -> 0000ff7f
+00005f00 00004049 00003f80 -> 00003f80
+00004120 00000001 00003e80 -> 00000001
+00004ac4 00006346 0000e754 -> 0000e754
+
+op minmax_pred VhMaxF16x2ImmMid sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; { .reg .b32 t, k; mov.b32 k, 0x3c00bc00; max.f16x2 t, %r7, k; max.f16x2 %r6, t, %r8; } mov.b32 %hwo0, %r6;
+68000400 fc000001 -> 68000400
+4248bc00 7bff7b00 -> 7bff7b00
+49007e00 0100bc00 -> 4900bc00
+bc004200 56408000 -> 56404200
+fc007800 04007bff -> 3c007bff
+93323d14 baba6269 -> 3c006269
+
+op minmax_pred VhMaxF16x2ImmLast sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; { .reg .b32 t, k; mov.b32 k, 0x3c00bc00; max.f16x2 t, %r7, %r8; max.f16x2 %r6, t, k; } mov.b32 %hwo0, %r6;
+68000400 fc000001 -> 68000400
+4248bc00 7bff7b00 -> 7bff7b00
+49007e00 0100bc00 -> 4900bc00
+bc004200 56408000 -> 56404200
+fc007800 04007bff -> 3c007bff
+93323d14 baba6269 -> 3c006269
+
+op minmax_pred VhMinF16x2ImmMid sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; { .reg .b32 t, k; mov.b32 k, 0x3c00bc00; min.f16x2 t, %r7, k; min.f16x2 %r6, t, %r8; } mov.b32 %hwo0, %r6;
+68000400 fc000001 -> fc00bc00
+4248bc00 7bff7b00 -> 3c00bc00
+49007e00 0100bc00 -> 0100bc00
+bc004200 56408000 -> bc00bc00
+fc007800 04007bff -> fc00bc00
+93323d14 baba6269 -> bababc00
+
+op minmax_pred VhMaxNanF16x2ImmMid sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; { .reg .b32 t, k; mov.b32 k, 0x7e000000; max.NaN.f16x2 t, %r7, k; max.NaN.f16x2 %r6, t, %r8; } mov.b32 %hwo0, %r6;
+68000400 fc000001 -> 7fff0400
+4248bc00 7bff7b00 -> 7fff7b00
+49007e00 0100bc00 -> 7fff7fff
+bc004200 56408000 -> 7fff4200
+fc007800 04007bff -> 7fff7bff
+93323d14 baba6269 -> 7fff6269
+
+op minmax_pred VhMinBf16x2ImmMid sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; { .reg .b32 t, k; mov.b32 k, 0x3f80bf80; min.bf16x2 t, %r7, k; min.bf16x2 %r6, t, %r8; } mov.b32 %hwo0, %r6;
+4f000080 007f3fc0 -> 007fbf80
+3f80bf80 0000ff7f -> 0000ff7f
+3f817fc0 4f0042c8 -> 3f80bf80
+4f002f80 007f7f80 -> 007fbf80
+42c87f00 3f7f5f00 -> 3f7fbf80
+8d96d41c 1867d8f6 -> 8d96d8f6
+
+op minmax_pred VhMaxNanBf16x2ImmLast sm_120
+registers .reg .pred %p<2>; .reg .b32 %r<9>; .reg .b64 %rd<9>;
+body mov.b32 %r7, %hwi0; mov.b32 %r8, %hwi1; { .reg .b32 t, k; mov.b32 k, 0x7fc00000; max.NaN.bf16x2 t, %r7, %r8; max.NaN.bf16x2 %r6, t, k; } mov.b32 %hwo0, %r6;
+4f000080 007f3fc0 -> 7fff3fc0
+3f80bf80 0000ff7f -> 7fff0000
+3f817fc0 4f0042c8 -> 7fff7fff
+4f002f80 007f7f80 -> 7fff7f80
+42c87f00 3f7f5f00 -> 7fff7f00
+8d96d41c 1867d8f6 -> 7fff0000
+
 op mma_blackwell F8E4M3E4M3 sm_120a
 registers .reg .pred %p<2>; .reg .b32 %r<20>; .reg .b64 %rd<9>;
 body mov.b32 %r10, %hwi1; mov.b32 %r11, %hwi2; mov.b32 %r12, %hwi3; mov.b32 %r13, %hwi4; mov.b32 %r14, %hwi5; mov.b32 %r15, %hwi6; mov.b32 %r16, %hwi7; mov.b32 %r17, %hwi8; mov.b32 %r18, %hwi9; mov.b32 %r19, %hwi10; mma.sync.aligned.m16n8k32.row.col.kind::f8f6f4.f32.e4m3.e4m3.f32 {%r6, %r7, %r8, %r9}, {%r10, %r11, %r12, %r13}, {%r14, %r15}, {%r16, %r17, %r18, %r19}; mov.b32 %hwo0, %r6; mov.b32 %hwo1, %r7; mov.b32 %hwo2, %r8; mov.b32 %hwo3, %r9;

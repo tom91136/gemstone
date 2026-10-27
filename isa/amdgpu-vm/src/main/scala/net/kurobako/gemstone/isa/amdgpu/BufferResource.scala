@@ -22,6 +22,7 @@ import net.kurobako.gemstone.semantics.prelude.*
   *
   * The functions over prelude types are what definitions call and execution runs.
   */
+// the renderer binds one dword at a time, so the descriptor words stay primitive
 private[isa] object BufferResource {
   import ResourceGeneration.*
 

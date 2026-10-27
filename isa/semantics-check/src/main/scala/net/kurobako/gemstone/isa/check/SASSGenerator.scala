@@ -20,7 +20,7 @@ object SASSGenerator {
         SASSModel.instances(Some(target), entry.mnemonic, form.name).toOption.toVec.flatten.flatMap(found =>
           // counters are never staged into a checked definition
           SASSModel.definition(found, entry.mnemonic, form.name).toOption.filter(described =>
-            !NvidiaCases.excluded(described) && !counters.exists(found.text.contains)
+            NvidiaCases.included(described) && !counters.exists(found.text.contains)
           )
             .map(described =>
               Case(found.text, Some(target), described, Lookup.Sass(found.operands, found.constants, found.written))

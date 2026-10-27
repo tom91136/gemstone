@@ -17,24 +17,24 @@ private object IntelArithmeticOps {
     case Integer, Floating
   }
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case instruction @ Instruction.UCountLeadingZerosINTEL(t, _, a)  => integer(site, instruction, t, Vec(a))
-    case instruction @ Instruction.UCountTrailingZerosINTEL(t, _, a) => integer(site, instruction, t, Vec(a))
-    case instruction @ Instruction.AbsISubINTEL(t, _, a, b)          => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.AbsUSubINTEL(t, _, a, b)          => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.IAddSatINTEL(t, _, a, b)          => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.UAddSatINTEL(t, _, a, b)          => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.ISubSatINTEL(t, _, a, b)          => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.USubSatINTEL(t, _, a, b)          => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.IAverageINTEL(t, _, a, b)         => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.UAverageINTEL(t, _, a, b)         => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.IAverageRoundedINTEL(t, _, a, b)  => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.UAverageRoundedINTEL(t, _, a, b)  => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.IMul32x16INTEL(t, _, a, b)        => integer(site, instruction, t, Vec(a, b))
-    case instruction @ Instruction.UMul32x16INTEL(t, _, a, b)        => integer(site, instruction, t, Vec(a, b))
+  def lower(using site: Site): PartialFunction[Instruction, Op] = {
+    case instruction @ Instruction.UCountLeadingZerosINTEL(t, _, a)           => integer(instruction, t, Vec(a))
+    case instruction @ Instruction.UCountTrailingZerosINTEL(t, _, a)          => integer(instruction, t, Vec(a))
+    case instruction @ Instruction.AbsISubINTEL(t, _, a, b)                   => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.AbsUSubINTEL(t, _, a, b)                   => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.IAddSatINTEL(t, _, a, b)                   => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.UAddSatINTEL(t, _, a, b)                   => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.ISubSatINTEL(t, _, a, b)                   => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.USubSatINTEL(t, _, a, b)                   => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.IAverageINTEL(t, _, a, b)                  => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.UAverageINTEL(t, _, a, b)                  => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.IAverageRoundedINTEL(t, _, a, b)           => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.UAverageRoundedINTEL(t, _, a, b)           => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.IMul32x16INTEL(t, _, a, b)                 => integer(instruction, t, Vec(a, b))
+    case instruction @ Instruction.UMul32x16INTEL(t, _, a, b)                 => integer(instruction, t, Vec(a, b))
     case instruction @ Instruction.BitwiseFunctionINTEL(t, _, a, b, c, table) =>
       lowered(
-        shapes(site, instruction.opcode.raw, t, Vec(a, b, c))(site.program.integerShape).flatMap(_ =>
+        shapes(instruction.opcode.raw, t, Vec(a, b, c))(site.program.integerShape).flatMap(_ =>
           Either.cond(
             site.program.integerShape(site.program.valueType(id(table))).exists(_._2 == 1),
             staged(site, instruction, CoreFamily.IntelInteger),
@@ -43,9 +43,8 @@ private object IntelArithmeticOps {
         )
       )
     case instruction @ Instruction.ConvertFToBF16INTEL(t, _, a) =>
-      conversion(site, instruction, a, source => site.program.floatingShape(source).map(_._2), 16, Format.Integer, t)
+      conversion(instruction, a, source => site.program.floatingShape(source).map(_._2), 16, Format.Integer, t)
     case instruction @ Instruction.ConvertBF16ToFINTEL(t, _, a) => conversion(
-        site,
         instruction,
         a,
         source => site.program.integerShape(source).collect { case (width, lanes) if width == 16 => lanes },
@@ -54,7 +53,6 @@ private object IntelArithmeticOps {
         t
       )
     case instruction @ Instruction.RoundFToTF32INTEL(t, _, a) => conversion(
-        site,
         instruction,
         a,
         source => site.program.floatingShape(source).collect { case (width, lanes) if width == 32 => lanes },
@@ -63,9 +61,9 @@ private object IntelArithmeticOps {
         t
       )
     case instruction @ Instruction.FDot2MixAcc32VALVE(t, _, a, b, accumulator) =>
-      mixed(site, instruction, t, a, b, accumulator, 32)
+      mixed(instruction, t, a, b, accumulator, 32)
     case instruction @ Instruction.FDot2MixAcc16VALVE(t, _, a, b, accumulator) =>
-      mixed(site, instruction, t, a, b, accumulator, 16)
+      mixed(instruction, t, a, b, accumulator, 16)
     case instruction @ Instruction.FDot4MixAcc32VALVE(t, _, a, b, accumulator) =>
       val program = site.program
       val vectors = Vec(a, b).forall(operand =>
@@ -81,7 +79,9 @@ private object IntelArithmeticOps {
   }
 
   /** The operands' data types, which must all have the result type's shape. */
-  private inline def shapes(site: Site, opcode: String, resultType: Operand, operands: Vec[Operand])(
+  private inline def shapes(opcode: String, resultType: Operand, operands: Vec[Operand])(using
+      site: Site
+  )(
       inline shape: Int => Option[(Int in 1 ~ 64, Int)]
   ): Either[Fault, (Int in 1 ~ 64, Int)] = {
     val expected = shape(id(resultType))
@@ -97,23 +97,22 @@ private object IntelArithmeticOps {
     }
   }
 
-  private def integer(site: Site, instruction: Instruction, resultType: Operand, operands: Vec[Operand]): Op =
+  private def integer(instruction: Instruction, resultType: Operand, operands: Vec[Operand])(using site: Site): Op =
     lowered(
-      shapes(site, instruction.opcode.raw, resultType, operands)(site.program.integerShape).map(_ =>
+      shapes(instruction.opcode.raw, resultType, operands)(site.program.integerShape).map(_ =>
         staged(site, instruction, CoreFamily.IntelInteger)
       )
     )
 
   /** A lane-wise conversion from a source of `lanes` lanes into `width`-bit integer or floating-point lanes. */
   private inline def conversion(
-      site: Site,
       instruction: Instruction,
       operand: Operand,
       inline lanes: Int => Option[Int],
       width: Int,
       format: Format,
       resultType: Operand
-  ): Op = {
+  )(using site: Site): Op = {
     val result = format match {
       case Format.Integer =>
         site.program.integerShape(id(resultType)).collect { case (bits, count) if bits.raw == width => count }
@@ -131,14 +130,13 @@ private object IntelArithmeticOps {
 
   /** A dot product of two-lane binary16 vectors accumulated at the result's `width`. */
   private def mixed(
-      site: Site,
       instruction: Instruction,
       resultType: Operand,
       a: Operand,
       b: Operand,
       accumulator: Operand,
       width: Int
-  ): Op = {
+  )(using site: Site): Op = {
     val program = site.program
     val vectors = Vec(a, b).forall(operand =>
       program.floatingShape(program.valueType(id(operand))).exists(shape =>

@@ -98,6 +98,9 @@ private object Lowering {
 
   private val predefinedConstants: Map[String, Value] = Map("WARP_SZ" -> Value.Immediate(32))
 
+  case class Access(address: Operand, value: Operand, modifiers: Vec[Modifier])
+  case class Transfer(destination: Operand, source: Operand, modifiers: Vec[Modifier])
+
   /** Operand resolution and dense storage slots of one routine. Symbols resolve to addresses when lowered, so the
     * interpreter never looks a name up.
     */

@@ -162,7 +162,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
       ).value
       val completion = service.launch(program, task).value
       assertEquals(awaitCompletion(service, completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(allocation, 0L, 4), Right(Vec[Byte](0x78, 0x56, 0x34, 0x12)))
+      assertEquals(service.read(AllocationRange(allocation, 0L, 4)), Right(Vec[Byte](0x78, 0x56, 0x34, 0x12)))
     }
   }
 
@@ -213,8 +213,9 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
           val program    = service.load(encoding, bytes).value
           val host       = Array.ofDim[Byte](size)
           val output     = KernelTask.Argument.Memory(allocation, 4L)
+          val whole      = AllocationRange(allocation, 0L, size)
           for (seed <- seeds) {
-            val before = service.read(allocation, 0L, size).value
+            val before = service.read(whole).value
             val task   = KernelTask.validated(
               "groups",
               Dimensions.One,
@@ -228,7 +229,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
             val completion = service.launch(program, task).value
             assertEquals(service.completion(completion), Right(CompletionStatus.Pending))
             assert(service.completionDirtyRanges(completion, 0, ExecutionRPC.MaximumElements).isLeft)
-            assertEquals(service.read(allocation, 0L, size), Right(before))
+            assertEquals(service.read(whole), Right(before))
             queued.getAndSet(None).get.run()
             assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
             val ranges = service.completionDirtyRanges(completion, 0, ExecutionRPC.MaximumElements).value
@@ -236,7 +237,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
             ranges.foreach { range =>
               assertEquals(range.allocation, allocation)
               assert(range.offset >= 0 && range.offset.raw + range.size <= size)
-              service.read(allocation, range.offset, range.size).value
+              service.read(AllocationRange(allocation, range.offset, range.size)).value
                 .copyToArray(host, range.offset.toInt, range.size)
             }
             val expected = Array.ofDim[Byte](size)

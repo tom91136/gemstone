@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 import net.kurobako.gemstone.isa.amdgpu.PackedVectorInstructionDefs.*
+import net.kurobako.gemstone.isa.amdgpu.domain.*
 import net.kurobako.gemstone.string.*
 
 /** Maps instruction operands and modifiers to the generated machine layouts. */
@@ -146,9 +147,9 @@ private object InstructionCodec {
       count: Option[Int] = None
   ): Vec[OperandInfo] = {
     val TargetMode(target, waveSize) = mode
+    val matrix   = value.groups.exists(group => group == InstructionGroup.WMMA || group == InstructionGroup.SWMMAC)
     val original = value.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC).map { info =>
-      val matrix = value.groups.exists(group => group == InstructionGroup.WMMA || group == InstructionGroup.SWMMAC)
-      val halve  = waveSize == 64 && matrix && (target.isa match {
+      val halve = waveSize == 64 && matrix && (target.isa match {
         case ISA.GFX11_7 | ISA.RDNA4 => true
         case ISA.RDNA3 | ISA.RDNA3_5 =>
           info.field.exists(field => field == EncodingField.VDST || field == EncodingField.SRC2)
@@ -562,6 +563,12 @@ private object InstructionCodec {
     if (layout.isa.isGFX9OrEarlier) 127
     else if (layout.isa.isGFX11OrLater) Fixed.M0 else Fixed.NullSgpr
 
+  private def smemOffset(target: Target, value: BigInt): Option[BigInt] =
+    DomainCatalogue.table(target.isa, "smem_offset").flatMap(_.encode(Slot.Immediate(value)))
+
+  private def smemImmediate(target: Target, code: Long): BigInt =
+    DomainCatalogue.table(target.isa, "smem_offset").flatMap(_.decodeImmediate(code)).getOrElse(BigInt(code))
+
   private def scalarRegister(kind: OperandKind): Boolean =
     kind.isScalarRegister || kind.isScalarSource || kind.isScalarDestination ||
       PartialFunction.cond(kind) {
@@ -625,7 +632,7 @@ private object InstructionCodec {
                 info,
                 layout,
                 mods
-              ) + 31) / 32 =>
+              ) + 31) / 32 && OperandCodec.aligned(target, file, first, registerWidth(info, layout, mods)) =>
             val accumulator = file == RegisterFile.Accumulator
             val cd          = matrixResult(field, info)
             if ((accumulator && !info.kind.acceptsAccumulator) || (!accumulator && info.kind.isBareAccumulator)) None
@@ -719,11 +726,12 @@ private object InstructionCodec {
           case Operand.IntegerLiteral(value, _)
               if value >= 256 && layout.bits == 32 && layout.isa == ISA.GFX7 && value <= BigInt("ffffffff", 16) =>
             Some((Map(EncodingField.OFFSET -> BigInt(Source.LITERAL_CONST)), Some(OperandCodec.Literal(value.toLong))))
-          case Operand.IntegerLiteral(value, _) if value >= 0 =>
+          case Operand.IntegerLiteral(value, _) if smemOffset(target, value).nonEmpty =>
+            val offset = smemOffset(target, value).getOrElse(value)
             Some((
               if (layout.byName.contains(EncodingField.IMM))
-                Map(EncodingField.IMM        -> BigInt(1), EncodingField.OFFSET                    -> value)
-              else Map(EncodingField.SOFFSET -> BigInt(nullRegister(layout)), EncodingField.OFFSET -> value),
+                Map(EncodingField.IMM        -> BigInt(1), EncodingField.OFFSET                    -> offset)
+              else Map(EncodingField.SOFFSET -> BigInt(nullRegister(layout)), EncodingField.OFFSET -> offset),
               None
             ))
           case _ => OperandCodec.encode(operand, info.copy(field = Some(EncodingField.SDST)), target).map {
@@ -816,13 +824,12 @@ private object InstructionCodec {
           case Operand.Register(RegisterFile.VectorRegister, first, last)
               if vectorRegister(info.kind) && first >= 0 && first < 256 &&
                 last - first + 1 ==
-                (registerWidth(info, layout, mods) + 31) / 32 =>
+                (registerWidth(info, layout, mods) + 31) / 32 &&
+                OperandCodec.aligned(target, RegisterFile.VectorRegister, first, registerWidth(info, layout, mods)) =>
             result(first + (if (SourceFields(field)) 256 else 0))
           case Operand.Register(RegisterFile.Scalar, first, last)
-              if scalarRegister(info.kind) && first >= 0 && last < 128 &&
-                last - first + 1 ==
-                (info.bits.raw + 31) / 32 &&
-                (info.bits <= 32 || first % 2 == 0) =>
+              if scalarRegister(info.kind) && last - first + 1 == (info.bits.raw + 31) / 32 &&
+                OperandCodec.encode(operand, info, target).exists(_._1 == first) =>
             if (LaneModifiers.sdwa(layout) && field.isVectorSource)
               Some((Map(field -> BigInt(first), EncodingField.ScalarSelectors(field.index) -> BigInt(1)), None))
             else result(first)
@@ -857,13 +864,14 @@ private object InstructionCodec {
     }
   }
 
-  def decode(bytes: Array[Byte], offset: Int, mode: TargetMode): Either[CodecError, DecodedInstruction] = {
+  def decode(code: CodeStream, offset: Int): Either[CodecError, DecodedInstruction] = {
+    val mode       = code.mode
     val target     = mode.target
-    val candidates = InstructionDecoder.candidates(bytes, offset, target)
+    val candidates = InstructionDecoder.candidates(code, offset)
       .filter(candidate => supportsLayout(candidate.layout))
       .flatMap { candidate =>
         decodeOperands(candidate, mode)
-          .filter(_.encoded == Vec.unsafeWrapArray(bytes.slice(offset, offset + candidate.size)))
+          .filter(_.encoded == Vec.unsafeWrapArray(code.bytes.slice(offset, offset + candidate.size)))
           .map(decoded => DecodedInstruction(decoded.instruction, candidate.size)).toVec
       }.distinct
     val canonical = OpcodeIndex.canonical(candidates, target)(_.instruction.definition).filterNot(value =>
@@ -872,12 +880,47 @@ private object InstructionCodec {
     canonical match {
       case Vec(value) => Right(value)
       case Vec()      =>
-        Left(CodecError.InvalidEncoding(s"unknown or unsupported instruction at byte $offset for ${target.name}"))
+        Left(CodecError.InvalidEncoding(undefinedOperand(code, offset).getOrElse(
+          s"unknown or unsupported instruction at byte $offset for ${target.name}"
+        )))
       case _ =>
         Left(CodecError.InvalidEncoding(s"ambiguous instruction at byte $offset for ${target.name}: ${canonical.map(
             value => s"${value.instruction.opcode} ${value.instruction.operands}"
           ).mkString("; ")}"))
     }
+  }
+
+  private val SourceDomainFields = Vec(
+    EncodingField.SSRC0,
+    EncodingField.SSRC1,
+    EncodingField.SRC0,
+    EncodingField.SRC1,
+    EncodingField.SRC2,
+    EncodingField.SOFFSET
+  )
+
+  /** The first scalar source code a candidate names outside the source domain, which explains a failed decode. */
+  private def undefinedOperand(code: CodeStream, offset: Int): Option[NonEmpty[String]] = {
+    val target = code.target
+    InstructionDecoder.candidates(code, offset).view.flatMap(candidate =>
+      Option.when(supportsLayout(candidate.layout))(candidate).flatMap(undefinedSource(_, target))
+    ).headOption
+  }
+
+  private def undefinedSource(candidate: InstructionDecoder.Decoded, target: Target): Option[NonEmpty[String]] = {
+    val layout    = candidate.layout
+    val encoding  = candidate.encoding
+    val immediate = layout.byName.contains(EncodingField.IMM) && layout.get(candidate.word, EncodingField.IMM) == 1
+    SourceDomainFields
+      .flatMap(field =>
+        Option.when(layout.byName.contains(field) && (field != EncodingField.SOFFSET || !immediate))(field)
+          .flatMap { name =>
+            val code = layout.get(candidate.word, name)
+            if (name == EncodingField.SOFFSET) DomainCatalogue.field(target.isa, encoding.format, encoding.opcode, name)
+              .flatMap(_.undefined(target.isa, name, code)).map(_.unsafe[NonEmpty[String]])
+            else OperandCodec.undefined(name, code, target)
+          }
+      ).headOption
   }
 
   private def decodeOperands(decoded: InstructionDecoder.Decoded, mode: TargetMode)
@@ -1010,7 +1053,7 @@ private object InstructionCodec {
           )
             if (memoryLiteral) literal.map(value => Operand.IntegerLiteral(BigInt(value.value), 16))
             else if (layout.get(word, EncodingField.IMM) == 1)
-              Some(Operand.IntegerLiteral(BigInt(layout.get(word, EncodingField.OFFSET)), 10))
+              Some(Operand.IntegerLiteral(smemImmediate(target, layout.get(word, EncodingField.OFFSET)), 10))
             else OperandCodec.decode(
               layout.get(word, EncodingField.OFFSET).toInt,
               info.copy(field = Some(EncodingField.SDST)),
@@ -1020,7 +1063,7 @@ private object InstructionCodec {
           else if (
             field == EncodingField.SOFFSET && info.kind == OperandKind.SMEM_OFFSET && number == nullRegister(layout)
           )
-            Some(Operand.IntegerLiteral(BigInt(layout.get(word, EncodingField.OFFSET)), 10))
+            Some(Operand.IntegerLiteral(smemImmediate(target, layout.get(word, EncodingField.OFFSET)), 10))
           else if (
             (field == EncodingField.ADDR || field == EncodingField.VADDR) &&
             layout.format.isScratch &&
@@ -1054,7 +1097,7 @@ private object InstructionCodec {
             Some(Operand.SpecialRegister("src_lds_direct"))
           else if (info.kind.isVector) None
           else if (bits > 64 && number < 128)
-            Some(Operand.Register(RegisterFile.Scalar, number, number + (bits + 31) / 32 - 1))
+            OperandCodec.decode(number, info.copy(bits = bits.unsafe[Int >= 0]), None, target)
           else OperandCodec.decode(
             number,
             info.copy(

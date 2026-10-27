@@ -18,13 +18,11 @@ private object CompletionMemory {
   /** Session storage seen by a dispatch. Writes record their dirty ranges against the dispatch. Entry forms take an
     * offset already inside the entry.
     */
-  // the seam that keeps CompletionMemory independent of ExecutionSession
-  @SuppressWarnings(Array("baumkuchen:single-implementation"))
   trait Storage {
     def lock: ReentrantLock
     def index: AllocationAddressIndex
     protected def unregistered(id: AllocationId): Fault
-    protected def outside(id: AllocationId, offset: Long >= 0, size: Int >= 0, limit: Int > 0): Fault
+    protected def outside(range: AllocationRange, limit: Int > 0): Fault
 
     def read(entry: Entry, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]]
     def readValueInto(entry: Entry, offset: Long >= 0, size: Int in 1 ~ 8, into: LongRef): Fault | Null
@@ -35,17 +33,23 @@ private object CompletionMemory {
         update: Long => Long
     ): Either[Fault, Long]
 
-    final def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-      located(id, offset, size)(read(_, offset, size))
-    final def readValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
-      located(id, offset, size)(entry => AddressSpace.scalar(readValueInto(entry, offset, size, _)))
+    final def read(range: AllocationRange): Either[Fault, Vec[Byte]] =
+      located(range.allocation, range.offset, range.size)(read(_, range.offset, range.size))
+    final def readValue(scalar: AllocationScalar): Either[Fault, Long] =
+      located(scalar.allocation, scalar.offset, scalar.size)(entry =>
+        AddressSpace.scalar(readValueInto(entry, scalar.offset, scalar.size, _))
+      )
     final def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte], completion: Completion)
         : Either[Fault, Unit] = located(id, offset, bytes.nonNegativeSize)(write(_, offset, bytes, completion))
-    final def writeValue(id: AllocationId, offset: Long >= 0, value: Long, size: Int in 1 ~ 8, completion: Completion)
-        : Either[Fault, Unit] = located(id, offset, size)(writeValue(_, offset, value, size, completion))
-    final def atomicModifyValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, completion: Completion)(
-        update: Long => Long
-    ): Either[Fault, Long] = located(id, offset, size)(atomicModifyValue(_, offset, size, completion)(update))
+    final def writeValue(scalar: AllocationScalar, value: Long, completion: Completion): Either[Fault, Unit] =
+      located(scalar.allocation, scalar.offset, scalar.size)(
+        writeValue(_, scalar.offset, value, scalar.size, completion)
+      )
+    final def atomicModifyValue(scalar: AllocationScalar, completion: Completion)(update: Long => Long)
+        : Either[Fault, Long] =
+      located(scalar.allocation, scalar.offset, scalar.size)(
+        atomicModifyValue(_, scalar.offset, scalar.size, completion)(update)
+      )
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
     private inline def located[A](id: AllocationId, offset: Long >= 0, size: Int >= 0)(
@@ -54,7 +58,7 @@ private object CompletionMemory {
       val entry = index.entry(id)
       if (entry == null) Left(unregistered(id))
       else if (!ByteRange.contains(entry.size, offset, size.toLong))
-        Left(outside(id, offset, size, entry.size))
+        Left(outside(AllocationRange(id, offset, size), entry.size))
       else access(entry)
     }
 
@@ -253,7 +257,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
   ): AddressSpace.ReadResult[Vec[Byte]] =
     onDevice(region, offset, size)(storage.read(_, offset, size)) {
       if (redirected(region, offset, size)) storage.address(region, offset).flatMap(readSegments(_, size))
-      else storage.read(region, offset, size)
+      else storage.read(AllocationRange(region, offset, size))
     }
 
   override def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
@@ -273,7 +277,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     onDevice(region, offset, size)(entry => AddressSpace.scalar(storage.readValueInto(entry, offset, size, _))) {
       if (redirected(region, offset, size))
         readDeferred(region, offset, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
-      else storage.readValue(region, offset, size)
+      else storage.readValue(AllocationScalar(region, offset, size))
     }
 
   override def readSystemValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
@@ -295,7 +299,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     onDevice(region, offset, size)(storage.writeValue(_, offset, value, size, record)) {
       if (redirected(region, offset, size))
         write(region, offset, LittleEndian.toVec(value, size.widen[Int in 0 ~ 8]))
-      else storage.writeValue(region, offset, value, size, record)
+      else storage.writeValue(AllocationScalar(region, offset, size), value, record)
     }
 
   override def writeSystemValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
@@ -334,7 +338,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
       if (hostBacked(region)) storage.address(region, offset).flatMap(host.atomic(record, _, size)(update))
       else if (crossesRegion(region, offset, size))
         storage.address(region, offset).flatMap(atomicAddress(_, size)(update))
-      else deviceAtomic(storage.atomicModifyValue(region, offset, size, record)(update))
+      else deviceAtomic(storage.atomicModifyValue(AllocationScalar(region, offset, size), record)(update))
     }
 
   override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =

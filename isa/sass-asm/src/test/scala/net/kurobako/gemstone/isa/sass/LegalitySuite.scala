@@ -65,7 +65,7 @@ class LegalitySuite extends munit.FunSuite {
             message
           ))
       )
-      Legality.check(database, form, Map.empty).left.toOption.get
+      Legality.check(NVDisasm.Encoding(database, form), Map.empty).left.toOption.get
     }
     assertEquals(invalid("first wording").category, NVDisasm.FailureCategory.IllegalCandidate)
     assertEquals(invalid("changed wording").category, NVDisasm.FailureCategory.IllegalCandidate)
@@ -100,17 +100,16 @@ class LegalitySuite extends munit.FunSuite {
       Vec.empty,
       conditions = Vec.nonEmpty(condition)
     )
-    assertEquals(Legality.check(database, form, Map("Ra" -> BigInt(12))), Right(()))
+    assertEquals(Legality.check(NVDisasm.Encoding(database, form), Map("Ra" -> BigInt(12))), Right(()))
     assertEquals(
-      Legality.check(database, form, Map("Ra" -> BigInt(13))),
+      Legality.check(NVDisasm.Encoding(database, form), Map("Ra" -> BigInt(13))),
       Left(NVDisasm.CandidateFailure(
         NVDisasm.FailureCategory.IllegalCandidate,
         "illegal matrix: unaligned register group"
       ))
     )
     assert(Legality.check(
-      database,
-      form,
+      NVDisasm.Encoding(database, form),
       Map.empty
     ).left.toOption.exists(_.message.startsWith("unsupported condition")))
   }
@@ -130,8 +129,11 @@ class LegalitySuite extends munit.FunSuite {
     )
     val bindings = Legality.completeBindings(form, Map("SyncMode" -> BigInt(1)))
     assertEquals(bindings.get("sync"), Some(BigInt(1)))
-    assertEquals(Legality.check(database, form, bindings), Right(()))
-    assert(Legality.check(database, form, Legality.completeBindings(form, Map("SyncMode" -> BigInt(0)))).isLeft)
+    assertEquals(Legality.check(NVDisasm.Encoding(database, form), bindings), Right(()))
+    assert(Legality.check(
+      NVDisasm.Encoding(database, form),
+      Legality.completeBindings(form, Map("SyncMode" -> BigInt(0)))
+    ).isLeft)
     val repeatedKind = form.copy(
       syntax = Vec.nonEmpty(
         NVDisasm.Syntax.field("register", "Ra", None, None),
@@ -188,9 +190,9 @@ class LegalitySuite extends munit.FunSuite {
       conditions = Vec.nonEmpty(condition)
     )
 
-    assertEquals(Legality.check(database, form, Map.empty), Right(()))
-    assertEquals(Legality.check(database, form, Map("dst_wr_sb" -> BigInt(7))), Right(()))
-    assert(Legality.check(database, form, Map("dst_wr_sb" -> BigInt(6))).isLeft)
+    assertEquals(Legality.check(NVDisasm.Encoding(database, form), Map.empty), Right(()))
+    assertEquals(Legality.check(NVDisasm.Encoding(database, form), Map("dst_wr_sb" -> BigInt(7))), Right(()))
+    assert(Legality.check(NVDisasm.Encoding(database, form), Map("dst_wr_sb" -> BigInt(6))).isLeft)
 
     val unrelated =
       form.copy(conditions =
@@ -199,6 +201,6 @@ class LegalitySuite extends munit.FunSuite {
           requires = None
         ))
       )
-    assert(Legality.check(database, unrelated, Map.empty).isLeft)
+    assert(Legality.check(NVDisasm.Encoding(database, unrelated), Map.empty).isLeft)
   }
 }

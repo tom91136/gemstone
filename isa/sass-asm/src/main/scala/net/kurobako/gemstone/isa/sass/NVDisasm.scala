@@ -233,6 +233,8 @@ object NVDisasm {
     )
   }
 
+  case class Encoding(database: Database, form: Form)
+
   private case class AssignmentRow(name: Int, positions: Vec[Int], expression: Int) derives ReadWriter
   private case class FormRow(
       name: Int,

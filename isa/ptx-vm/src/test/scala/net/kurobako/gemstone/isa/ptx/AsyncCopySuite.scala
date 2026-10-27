@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class AsyncCopySuite extends munit.FunSuite {
@@ -62,6 +63,28 @@ ret;
         Right(bytes.slice(16, 16 + sourceSize) ++ Vec.fill(16 - sourceSize)(0.toByte))
       )
     }
+
+  test("async copy from a shared window address faults") {
+    val kernel = compileKernel(""".version 8.0
+.target sm_80
+.address_size 64
+.visible .entry copy(.param .u64 data) {
+.shared .align 16 .b8 buffer[16];
+.reg .u64 %source;
+mov.u64 %source,buffer;
+cvta.shared.u64 %source,%source;
+cp.async.ca.shared.global [buffer],[%source],16;
+cp.async.commit_group;
+cp.async.wait_all;
+ret;
+}""")
+    val memory    = DeviceMemory(32)
+    val arguments = Map(("data": NonEmpty[String]) -> Argument.fromLong(memory.start.raw))
+    execute(kernel, 1, 1, arguments, memory) match {
+      case Left(Fault.Memory(_)) => ()
+      case other                 => fail(s"expected a memory fault, found $other")
+    }
+  }
 
   for (copyFirst <- Vec(false, true))
     test(s"bulk copy completion and arrivals jointly release two barrier phases: copy first=$copyFirst") {

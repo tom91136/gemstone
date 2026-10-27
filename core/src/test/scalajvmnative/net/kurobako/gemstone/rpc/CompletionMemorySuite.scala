@@ -7,6 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
@@ -51,7 +52,7 @@ class CompletionMemorySuite extends munit.FunSuite {
   private def aliased(session: ExecutionSession, address: Long, value: Long): AllocationId = {
     val id = checked(session.registerAllocation(64))
     checked(session.registerAllocationAddress(id, GuestAddress(address)))
-    checked(session.writeValue(id, 0L, value, 8))
+    checked(session.writeValue(AllocationScalar(id, 0L, 8), value))
     id
   }
 
@@ -68,7 +69,7 @@ class CompletionMemorySuite extends munit.FunSuite {
         val second = aliased(session, Address.raw, 2L)
         assertEquals(memory.readValue(Address, 8), Right(2L))
         assertEquals(memory.writeValue(Address.offset(8), 4L, 8), Right(()))
-        assertEquals(session.readValue(second, 8L, 8), Right(4L))
+        assertEquals(session.readValue(AllocationScalar(second, 8L, 8)), Right(4L))
         Right(())
       }
     }
@@ -77,7 +78,7 @@ class CompletionMemorySuite extends munit.FunSuite {
   test("an alias registered over a synthetic range takes precedence within a running dispatch") {
     withSession { (session, backend) =>
       val synthetic = checked(session.registerAllocation(64))
-      checked(session.writeValue(synthetic, 0L, 5L, 8))
+      checked(session.writeValue(AllocationScalar(synthetic, 0L, 8), 5L))
       dispatch(session, backend) { memory =>
         val base = checked(memory.address(synthetic, 0L))
         assertEquals(memory.readValue(base, 8), Right(5L))
@@ -172,7 +173,7 @@ class CompletionMemorySuite extends munit.FunSuite {
           }
         }
         val increments = workers / 2 * iterations
-        assertEquals(session.readValue(id, 40L, 8), Right(increments.toLong))
+        assertEquals(session.readValue(AllocationScalar(id, 40L, 8)), Right(increments.toLong))
         assertEquals(observed.asScala.toVector.sorted, Vector.range(0L, increments.toLong))
       }
     }

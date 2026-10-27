@@ -31,17 +31,34 @@ private[isa] object Minifloats {
   def pairFromE4M3Fnuz(value: UInt[16]): UInt[64] = pair(Minifloat.E4M3FNUZ, bits(value) & 0xffffL)
   def pairFromE5M2Fnuz(value: UInt[16]): UInt[64] = pair(Minifloat.E5M2FNUZ, bits(value) & 0xffffL)
 
+  private def packedHalves(format: Minifloat, value: Long): UInt[32] = fromRaw[UInt[32]](
+    bits(Float16(format.toDouble(value & 0xffL))) | (bits(Float16(format.toDouble((value >>> 8) & 0xffL))) << 16)
+  )
+
+  def halfFromE4M3(value: Float8E4M3): Float16 = Float16(value.toDouble)
+  def halfFromE5M2(value: Float8E5M2): Float16 = Float16(value.toDouble)
+
+  /** Two elements, the low byte's in the low half. */
+  def packedHalvesFromE4M3(value: UInt[16]): UInt[32] = packedHalves(Minifloat.E4M3, bits(value) & 0xffffL)
+  def packedHalvesFromE5M2(value: UInt[16]): UInt[32] = packedHalves(Minifloat.E5M2, bits(value) & 0xffffL)
+
   /** `value` rounded as `rounding` says to `format`'s code; NaN keeps its sign in the OCP formats, as ROCm's emulation
     * of the conversions does.
     */
   private def narrowed(value: Long, format: Minifloat, rounding: IEEE754.Rounding, mode: UInt[32]): Long = {
     val real = java.lang.Float.intBitsToFloat(value.toInt).toDouble
-    if (real.isNaN) narrowedNaN(value, format) else rounded(real, format, rounding, mode)
+    if (real.isNaN) narrowedNaN((value >>> 24) & 0x80L, format) else rounded(real, format, rounding, mode)
   }
 
-  private def narrowedNaN(value: Long, format: Minifloat): Long = format match {
+  private def narrowedNaN(sign: Long, format: Minifloat): Long = format match {
     case Minifloat.E4M3FNUZ | Minifloat.E5M2FNUZ => 0x80L
-    case _                                       => ((value >>> 24) & 0x80L) | 0x7fL
+    case _                                       => sign | 0x7fL
+  }
+
+  private def narrowedHalf(value: Long, format: Minifloat, mode: UInt[32]): Long = {
+    val real = IEEE754.toDouble(value, 16)
+    if (real.isNaN) narrowedNaN((value >>> 8) & 0x80L, format)
+    else rounded(real, format, IEEE754.Rounding.NearestEven, mode)
   }
 
   private def rounded(real: Double, format: Minifloat, rounding: IEEE754.Rounding, mode: UInt[32]): Long = {
@@ -57,6 +74,14 @@ private[isa] object Minifloats {
       (narrowed(bits(b), format, IEEE754.Rounding.NearestEven, mode) << 8)
     fromRaw[UInt[32]](
       if (high) (bits(old) & 0xffffL) | (word << 16) else (bits(old) & 0xffff0000L) | word
+    )
+  }
+
+  /** V_CVT_PK_*8_F16: the binary16 halves of `source` rounded to nearest even into the low and high bytes. */
+  def packHalves(source: UInt[32], mode: UInt[32], format: Minifloat): UInt[32] = {
+    val value = bits(source)
+    fromRaw[UInt[32]](
+      narrowedHalf(value & 0xffffL, format, mode) | (narrowedHalf((value >>> 16) & 0xffffL, format, mode) << 8)
     )
   }
 

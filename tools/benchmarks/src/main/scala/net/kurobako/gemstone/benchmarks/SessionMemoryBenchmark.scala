@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
 import scala.runtime.LongRef
@@ -69,7 +70,9 @@ object SessionMemoryBenchmark {
         }
         allocations.zipWithIndex.foreach { (allocation, index) =>
           expected(index).zipWithIndex.foreach { (wanted, slot) =>
-            val actual = checked(session.readValue(allocation, (slot.toLong * 64L).unsafe[Long >= 0], 8))
+            val actual = checked(
+              session.readValue(AllocationScalar(allocation, (slot.toLong * 64L).unsafe[Long >= 0], 8))
+            )
             require(actual == wanted, s"allocation $index slot $slot: $actual != $wanted")
           }
         }

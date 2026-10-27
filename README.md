@@ -9,17 +9,17 @@ checks every instruction's availability against the module's `.version` and `.ta
 
 | Path | Contents |
 | --- | --- |
-| `core` | Refinement types, numerics, ELF and source text scanning, execution RPC and session, backend interface, VM scheduling |
+| `core` | Refinement types, numerics, ELF and source text scanning, execution RPC and session, backend interface, the machine algebra that machine semantics are written in, VM scheduling |
 | `isa/{ptx,sass,amdgpu,spirv}-asm` | Instruction model, decoding, encoding, assembly text, containers, and validation |
-| `isa/{ptx,sass,amdgpu,spirv}-vm` | Semantic compilation, execution, and each ISA's backend |
-| `isa/nvidia` | Shared NVIDIA execution IR for PTX and SASS |
+| `isa/{ptx,sass,amdgpu,spirv}-vm` | Semantic compilation, machine semantics, execution, and each ISA's backend |
+| `isa/nvidia` | Shared NVIDIA execution IR and machine operations for PTX and SASS |
 | `server` | Backend registry, client lifecycle, transport, recording and replay, launching |
 | `native` | CMake-built API facades and RPC client |
 | `tools/codegen` | Generators for checked-in sources under `src/generated` and `native/generated` |
 | `tools/conformance` | Conformance run and emulation orchestration |
 | `tools/benchmarks` | Benchmarks |
 | `test-support` | Shared test utilities |
-| `explorer` | Instruction explorer: search, encodings, register files, assembly, and each form's semantics as an executable definition; models build for the JVM and Scala.js (`sbt explorerJS/explorerSite` writes `target/explorer/`) |
+| `explorer` | Instruction explorer: search, encodings, register files, assembly, lane and machine semantics, and an instruction sandbox; loads a compiled program, runs it on the VM, and steps through its issue timeline and register pressure. Models build for the JVM and Scala.js (`sbt explorerJS/explorerSite` writes `target/explorer/`, `sbt explorerJS/explorerServe` serves it on port 8080) |
 | `isa/semantics-check` | Every definition the explorer shows, generated, compiled, and checked against the VM on random operands |
 | `samples` | Library API samples: assemble, run, disassemble and edit a kernel for each ISA (`sbt samples/run`) |
 | `codestyle/publicapi` | Compiler plugin that limits the server to the public API of core and the ISAs; sbt-baumkuchen provides the Scalafix rules and cycle checks |
@@ -117,7 +117,8 @@ for {
 ```
 
 - `Device.launch` takes an optional `LaunchObserver`, which sees every instruction with the ISA's view of its state
-  (`InvocationView`, `CohortView`, `WaveView`) and every device memory access; blocking it single-steps the launch.
+  (`InvocationView`, `CohortView`, `WaveView`), the registers it read and wrote (NVIDIA reports them per issue), and
+  every device memory access; blocking it single-steps the launch.
 - Faults carry a `Fault.Location`: kernel, function, instruction address, workgroup and lane.
 - `ReplayDevice` resumes a launch from any observed instruction by deterministic replay.
 - `Cubin.patchKernel`/`replaceKernel` and `CodeObject.patchKernel`/`replaceKernel` write edited kernels back into
@@ -153,8 +154,8 @@ shared shape, and splits into an `asm` and a `vm` module, no finer. `NoPackagePr
   in most signatures. Refined values convert implicitly to their carrier; only constructing one validates. They suit
   Scala 3 callers and exclude Java, Kotlin and C.
 - Lowering, interpreters and register files are private in every ISA, and no ISA exposes serialisable execution state.
-  NVIDIA state views use lowered register slots, not PTX or SASS register names, and the observer reports no barrier
-  events yet.
+  NVIDIA state views name the lowered register slots after the PTX registers they came from, and SASS views name the
+  general and uniform banks the kernel spells.
 
 ### Semantics
 

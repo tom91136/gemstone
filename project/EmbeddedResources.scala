@@ -21,15 +21,14 @@ object EmbeddedResources {
   }
 
   private def module(packageName: String, name: String, text: String): String = {
-    val chunks = text.grouped(ChunkCharacters).map(chunk => s"    \"${literal(chunk)}\"").mkString(",\n")
+    val appends = text.grouped(ChunkCharacters).map(chunk => s"    .append(\"${literal(chunk)}\")").mkString("\n")
     s"""package $packageName
        |
        |private object $name extends net.kurobako.gemstone.EmbeddedResource {
        |  // Read once by reflection and parsed by the owner; a val would pin the joined text for the module's lifetime.
-       |  @SuppressWarnings(Array("baumkuchen:literal-table-in-def"))
-       |  def text: String = Array[String](
-       |$chunks
-       |  ).mkString
+       |  def text: String = new java.lang.StringBuilder(${text.length})
+       |$appends
+       |    .toString
        |}
        |""".stripMargin
   }

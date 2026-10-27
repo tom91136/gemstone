@@ -41,6 +41,21 @@ class AMDGPUNullRegisterSuite extends munit.FunSuite {
       assertEquals(result(5), 0L)
     }
 
+  for (target <- Seq(Target("gfx1030"), Target("gfx1100"), Target("gfx1201")))
+    test(s"$target a MODE read into the null register is dropped and the register reads zero") {
+      val register = VMIR.nullRegister(target.isa).getOrElse(fail("no null register"))
+      val result   = scalarResult(
+        target,
+        Vec.empty,
+        Vec(
+          VMIR.Instruction.SSetMode(0, 4, VMIR.InstructionSource.Constant(0xfL)),
+          VMIR.Instruction.SGetMode(register, 0, 4)
+        ),
+        register
+      )
+      assertEquals(result, 0L)
+    }
+
   for ((target, m0, absent) <- Seq((Target("gfx1030"), "s124", "s125"), (Target("gfx1100"), "s125", "s124")))
     test(s"$target definitions name M0 and read the null register as zero") {
       val defined =

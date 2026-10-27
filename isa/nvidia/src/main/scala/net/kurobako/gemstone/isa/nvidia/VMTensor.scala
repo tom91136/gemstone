@@ -5,12 +5,11 @@ import VMIR.*
 import VMIR.Matrix.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 /** Warp-level tensor operations. Sources are read before any staged writes commit. WMMA has an intentionally
@@ -20,93 +19,26 @@ import net.kurobako.gemstone.vm.*
   */
 private object VMTensor {
   private def invalid(detail: NonEmpty[String]): Fault = Fault.Backend(detail)
-  private def memoryIndex(
-      fragment: Fragment,
-      lane: WarpLane,
-      index: Int >= 0,
-      stride: Long,
-      column: Boolean
-  ): Long = {
-    val (row, col) = fragment.coordinate(lane, index)
-    if (column) col.toLong * stride + row else row.toLong * stride + col
-  }
-  private def shared(space: MemorySpace, address: Long): Boolean =
-    space == MemorySpace.Shared || (space == MemorySpace.Generic && VMAddressSpace.isShared(address))
+  private type Warped = Operation.Multiply | Operation.Widen | Operation.WarpgroupMultiply
 
-  private def readMemory(
-      context: VMContext,
-      space: MemorySpace,
-      address: Long,
-      bits: Int in (8, 16, 32, 64)
-  ): Either[Fault, Long] =
-    if (shared(space, address)) Right(context.workgroup.readShared(address, bits))
-    else context.device.memory.readValue(GuestAddress(address), bits.toScalarByteWidth)
-
-  /** Element `offset` of a matrix at `pointer` whose elements are `bits` wide, packed low first within bytes. */
-  private def readElement(
-      context: VMContext,
-      space: MemorySpace,
-      pointer: Long,
-      offset: Long,
-      bits: Int in (1, 4, 8, 16, 32, 64)
-  ): Either[Fault, Long] = bits match {
-    case wide: (Int in (8, 16, 32, 64)) @unchecked if bits >= 8 =>
-      readMemory(context, space, pointer + offset * (bits.raw / 8), wide)
-    case _ =>
-      val bit = offset * bits
-      readMemory(context, space, pointer + bit / 8, 8).map(byte => (byte >>> (bit % 8)) & ((1L << bits) - 1L))
+  def execute(
+      operation: Operation.LoadMatrix | Operation.Transpose | Operation.Multiply | Operation.Widen |
+        Operation.WarpgroupMultiply,
+      context: VMContext
+  ): Either[Fault, Step] = operation match {
+    case Operation.LoadMatrix(tile, destinations, address, _) =>
+      loadMatrix(tile, destinations, address, context)
+    case Operation.Transpose(destination, source) => moveMatrix(destination, source, context)
+    case warped: Warped                           =>
+      participating(context).flatMap(_.traverse_(base => executeWarp(warped, base, context)))
+        .map(_ => Step.Advance)
   }
 
-  private def writeMemory(
-      context: VMContext,
-      lane: WorkgroupLane,
-      space: MemorySpace,
-      address: Long,
-      bits: Int in (8, 16, 32, 64),
-      value: Long
-  ): Unit =
-    if (shared(space, address)) context.effects.stageShared(address, bits, value)
-    else context.effects.stage(VMWrite.Memory(lane, GuestAddress(address), bits, value, false))
+  private def moveMatrix(destination: Register, source: Value, context: VMContext): Either[Fault, Step] =
+    MachineSemantics.moveMatrix(Execute, VMMachineOps(context))(destination, source)
 
-  private def uniform(
-      context: VMContext,
-      base: WorkgroupLane.WarpBase,
-      value: Value
-  ): Either[Fault, Long] = {
-    val values = WarpLane.values.map(lane => context.read(WorkgroupLane.inWarp(base, lane), value))
-    Either.cond(
-      values.distinct.size == 1,
-      values.head,
-      invalid("WMMA address and stride must be uniform within each warp")
-    )
-  }
-
-  private def parameters(
-      context: VMContext,
-      base: WorkgroupLane.WarpBase,
-      address: Value,
-      stride: Value,
-      fragment: Fragment,
-      column: Boolean
-  ): Either[Fault, (Long, Long)] =
-    for {
-      pointer <- uniform(context, base, address)
-      leading <- uniform(context, base, stride)
-      _       <- Either.cond(
-        pointer % 32 == 0 && (leading * fragment.element.bits / 8) % 16 == 0,
-        (),
-        Fault.Misaligned("WMMA addresses must be aligned to 32 bytes and strides to 16")
-      )
-      _ <- Either.cond(
-        leading >= (if (column) fragment.rows else fragment.columns),
-        (),
-        invalid("WMMA stride is smaller than the matrix leading dimension")
-      )
-    } yield (pointer, leading)
-
-  def execute(operation: Operation, context: VMContext): Either[Fault, Step] =
-    participating(context).flatMap(_.traverse_(base => executeWarp(operation, base, context)))
-      .map(_ => Step.Advance)
+  private def loadMatrix(tile: Tile, destinations: Vec[Register], address: Value, context: VMContext)
+      : Either[Fault, Step] = MachineSemantics.loadMatrix(Execute, VMMachineOps(context))(tile, destinations, address)
 
   /** The warps with an active lane, each of which must have all 32 lanes active. */
   def participating(context: VMContext): Either[Fault, Vec[WorkgroupLane.WarpBase]] = {
@@ -244,124 +176,15 @@ private object VMTensor {
     }
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def orAll(values: Vec[Long]): Long = {
-    var result = 0L
-    var index  = 0
-    while (index < values.length) {
-      result |= values(index)
-      index += 1
-    }
-    result
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executeWarp(
-      operation: Operation,
+      operation: Warped,
       base: WorkgroupLane.WarpBase,
       context: VMContext
   ): Either[Fault, Unit] = operation match {
-    case Operation.Load(fragment, destinations, address, stride, column, space) =>
-      parameters(context, base, address, stride, fragment, column).flatMap { (pointer, leading) =>
-        val registerDestinations = destinations.zip(Vec.indices(destinations.nonNegativeSize))
-        val parts                = Vec.indices(fragment.element.packed)
-        WarpLane.values.traverse_ { lane =>
-          registerDestinations.traverse_ { (destination, register) =>
-            parts.traverse { part =>
-              val offset =
-                memoryIndex(fragment, lane, register * fragment.element.packed + part, leading, column)
-              readElement(context, space, pointer, offset, fragment.element.bits)
-                .map(_ << (part.raw * fragment.element.bits))
-            }.map(parts =>
-              context.effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, orAll(parts))
-            )
-          }
-        }
-      }
-    case Operation.Store(fragment, sources, address, stride, column, space) =>
-      parameters(context, base, address, stride, fragment, column).flatMap { (pointer, leading) =>
-        fragment.element.bits match {
-          case bits: (Int in (8, 16, 32, 64)) @unchecked if fragment.element.bits >= 8 =>
-            val sourceRegisters = sources.zip(Vec.indices(sources.nonNegativeSize))
-            val parts           = Vec.indices(fragment.element.packed)
-            Right(WarpLane.values.foreach { lane =>
-              sourceRegisters.foreach { (source, register) =>
-                val value = context.read(WorkgroupLane.inWarp(base, lane), source)
-                parts.foreach { part =>
-                  val offset =
-                    memoryIndex(fragment, lane, register * fragment.element.packed + part, leading, column)
-                  writeMemory(
-                    context,
-                    WorkgroupLane.inWarp(base, lane),
-                    space,
-                    pointer + offset * (bits.raw / 8),
-                    bits,
-                    value >>> (part.raw * bits)
-                  )
-                }
-              }
-            })
-          case _ => Left(invalid("WMMA stores whole bytes"))
-        }
-      }
-    case Operation.Multiply(d = d) => Left(invalid(s"mma into ${d.element} is not supported"))
-    case Operation.LoadMatrix(tile, destinations, address, space) =>
-      rowAddresses(context, base, address, tile.count.raw * tile.addresses, space).map { addresses =>
-        val rows = Array.tabulate(addresses.size)(index =>
-          tile.packing.unpack(
-            Array.tabulate(16)(byte => context.workgroup.readShared(addresses(index) + byte, 8).toByte)
-          )
-        )
-        val parts = 4 / tile.shape.bytes
-        WarpLane.values.foreach { lane =>
-          destinations.zipWithIndex.foreach { (destination, register) =>
-            var bits = 0L
-            (0 until parts).foreach { part =>
-              val (matrix, row, column) = tile.coordinate(lane, register, part)
-              val (stored, offset)      = tile.stored(row, column)
-              val memory                = rows(matrix * tile.addresses + stored)
-              val element               =
-                if (tile.shape.bytes == 2) (memory(offset * 2) & 0xffL) | ((memory(offset * 2 + 1) & 0xffL) << 8)
-                else memory(offset) & 0xffL
-              bits |= element << (part * 8 * tile.shape.bytes)
-            }
-            context.effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, bits)
-          }
-        }
-      }
-    case Operation.StoreMatrix(tile, sources, address, space) =>
-      rowAddresses(context, base, address, tile.count.raw * tile.addresses, space).map { addresses =>
-        val parts = 4 / tile.shape.bytes
-        val width = 8 * tile.shape.bytes
-        WarpLane.values.foreach { lane =>
-          sources.zipWithIndex.foreach { (source, register) =>
-            val bits = context.read(WorkgroupLane.inWarp(base, lane), source)
-            (0 until parts).foreach { part =>
-              val (matrix, row, column) = tile.coordinate(lane, register, part)
-              val (stored, offset)      = tile.stored(row, column)
-              context.effects.stageShared(
-                addresses(matrix * tile.addresses + stored) + offset * tile.shape.bytes,
-                if (width == 16) 16 else 8,
-                bits >>> (part * width)
-              )
-            }
-          }
-        }
-      }
+    case Operation.Multiply(d = d)                      => Left(invalid(s"mma into ${d.element} is not supported"))
     case widened: Operation.Widen                       => Right(widen(widened, base, context))
     case Operation.WarpgroupMultiply(product = product) =>
       Left(invalid(s"wgmma into ${product.d.element} from ${product.a.element} is not supported"))
-    case Operation.Transpose(destination, source) =>
-      val values = Vec.tabulate(32)(lane => context.read(WorkgroupLane.fromIndex(base + lane), source))
-      def element(row: Int, column: Int): Long = (values(4 * row + column / 2) >>> (16 * (column % 2))) & 0xffffL
-      Right(WarpLane.values.foreach { lane =>
-        val row = 2 * (lane.raw % 4)
-        context.effects.stageRegister(
-          WorkgroupLane.inWarp(base, lane),
-          destination,
-          element(row, lane.raw / 4) | (element(row + 1, lane.raw / 4) << 16)
-        )
-      })
   }
 
   private def widen(
@@ -377,21 +200,6 @@ private object VMTensor {
       context.effects.stageRegister(target, operation.low, bytes(lane.raw % 4 * 4))
       context.effects.stageRegister(target, operation.high, bytes(16 + lane.raw % 4 * 4))
     }
-  }
-
-  private def rowAddresses(
-      context: VMContext,
-      base: WorkgroupLane.WarpBase,
-      address: Value,
-      count: Int,
-      space: MemorySpace
-  ): Either[Fault, Vec[Long]] = Vec.tabulate(count)(identity).traverse { lane =>
-    val pointer = context.read(WorkgroupLane.fromIndex(base + lane), address)
-    Either.cond(
-      pointer % 16 == 0 && shared(space, pointer),
-      pointer,
-      Fault.Misaligned("matrix row addresses must be 16-byte aligned shared addresses")
-    )
   }
 
   /** A fragment's elements as their encodings, signed ones sign-extended, in row-major order within each partition. */

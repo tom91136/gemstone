@@ -67,7 +67,7 @@ private object VMHalfCompiler {
       case _: Form.Hsetp2 =>
         setPredicates()
         true
-      case _: Form.Hmnmx2 =>
+      case _: Form.Hmnmx2 | _: Form.Vhmnmx =>
         extremum()
         true
       case _: Form.Fhadd | _: Form.Ufhadd =>
@@ -503,20 +503,22 @@ private object VMHalfCompiler {
     import context.*
     requireModifiers(extremumModifiers)
     val narrow         = bfloat16
-    val (values, next) = sources(1, 2, narrow, operands)
-    if (next != operands.size - 1) unsupported("HMNMX2 requires destination, two sources, and a predicate")
-    val nan                                        = modifiers.contains(Modifier.NAN)
-    val format                                     = if (narrow) PackedFloatFormat.BF16x2 else PackedFloatFormat.F16x2
-    val flush                                      = FloatControl(flushSubnormal = modifiers.contains(Modifier.FTZ))
-    def extremum(minimum: Boolean): Value.Register = {
+    val count          = if (OperandQueries.is[Form.Vhmnmx](operation)) 3 else 2
+    val (values, next) = sources(1, count, narrow, operands)
+    if (next != operands.size - 1)
+      unsupported(s"${operation.mnemonic.raw} requires destination, $count sources, and a predicate")
+    val nan                               = modifiers.contains(Modifier.NAN)
+    val format                            = if (narrow) PackedFloatFormat.BF16x2 else PackedFloatFormat.F16x2
+    val flush                             = FloatControl(flushSubnormal = modifiers.contains(Modifier.FTZ))
+    def extremum(minimum: Boolean): Value = values.tail.foldLeft(values.head) { (left, right) =>
       val result = temp()
       emit(FloatBinaryPacked(
         if (minimum) { if (nan) FloatOperation.Minimum else FloatOperation.MinimumNumber }
         else if (nan) FloatOperation.Maximum
         else FloatOperation.MaximumNumber,
         result.slot,
-        values(0),
-        values(1),
+        left,
+        right,
         format,
         flush
       ))

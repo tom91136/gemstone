@@ -32,8 +32,8 @@ private object RenderContext {
   private val Dword = Type.unsigned(32)
   private val Pair  = Type.unsigned(64)
 
-  val Lane: Term     = Term.context(Wave, "lane", Vec.empty, Vec.empty, Some(Dword))
-  val ExecMask: Term = Term.context(Wave, "exec", Vec.empty, Vec.empty, Some(Pair))
+  val Lane: Term     = Term.context(Wave, MachineCall("lane", Vec.empty, Vec.empty), Some(Dword))
+  val ExecMask: Term = Term.context(Wave, MachineCall("exec", Vec.empty, Vec.empty), Some(Pair))
 
   private def width(bytes: Int): Type = Type.unsigned((bytes * 8).unsafe[Int in 1 ~ 64])
 
@@ -41,19 +41,23 @@ private object RenderContext {
   def load(space: Space, at: Term, bytes: Int): Term =
     Term.context(
       (space.context, space.name),
-      s"load${bytes * 8}",
-      Vec.empty,
-      Vec((at, Some(space.address))),
+      MachineCall(s"load${bytes * 8}", Vec.empty, Vec((at, Some(space.address)))),
       Some(width(bytes))
     )
 
   def store(space: Space, at: Term, value: Term, bytes: Int): Term = Term.context(
     (space.context, space.name),
-    s"store${bytes * 8}",
-    Vec.empty,
-    Vec((at, Some(space.address)), (value, Some(width(bytes)))),
+    MachineCall(s"store${bytes * 8}", Vec.empty, Vec((at, Some(space.address)), (value, Some(width(bytes))))),
     None,
     effect = true
+  )
+
+  case class Exchange(
+      address: MemoryAddress,
+      dest: VectorRegisterIndex,
+      bytes: Int in (4, 8),
+      returnValue: Boolean,
+      bank: RegisterBank
   )
 
   /** An assembly spelling, such as `s1`, `v[2:3]`, `0x1234` or `scc`, and the type its operand is read at. */
@@ -135,6 +139,12 @@ private object RenderContext {
       case _                                 =>
         val target = name(scalar(index))
         value => Term.Step(target, value)
+    }
+
+    /** A write of a dword to the SGPR `index` that never reaches the lane masks VCC and EXEC. */
+    def slotWrite(index: ScalarRegisterIndex): Term => Term.Step = index.raw match {
+      case Fixed.VccLo | Fixed.VccHi | Fixed.ExecLo | Fixed.ExecHi => value => Term.Step("_", value)
+      case _                                                       => scalarWrite(index)
     }
 
     def scalarPair(index: ScalarRegisterIndex): Term = index.raw match {

@@ -26,7 +26,8 @@ object FormatParser {
       names: Map[(String, String), String],
       defaults: Map[String, BigInt],
       descriptorField: Option[String],
-      explicitDescriptor: Option[(String, BigInt)]
+      explicitDescriptor: Option[(String, BigInt)],
+      typed: Vec[(String, NVDisasm.Syntax.Field, FieldDomain)]
   )
 
   // forms and databases are large and never copied, so the caches compare them by identity
@@ -78,7 +79,27 @@ object FormatParser {
       database.vocabulary(field).find(entry => !defaultValue(database, field).contains(entry.value))
         .map(encodedBinding(field) -> _.value)
     ).orElse(Option.when(required("e_desc"))("e_desc" -> BigInt(1)))
-    Prepared(layout(form), required, names, defaults, descriptorField, explicitDescriptor)
+    val typed = declared.flatMap { field =>
+      SassDomains.field(database, form, field.binding).filter(domain =>
+        domain.label == field.kind && domain.immediate.isEmpty
+      ).map((encodedBinding(field), field, _))
+    }
+    Prepared(layout(form), required, names, defaults, descriptorField, explicitDescriptor, typed)
+  }
+
+  /** The first bound value no domain of the form holds; a field's own default is always written. */
+  private def outsideDomain(
+      encoding: NVDisasm.Encoding,
+      prepared: Prepared,
+      bindings: Map[String, BigInt]
+  ): Option[String] = {
+    val NVDisasm.Encoding(database, form) = encoding
+    prepared.typed.collectFirst(Function.unlift { (name, field, domain) =>
+      bindings.get(name).filterNot(value => domain.contains(value) || database.defaultValues(field).contains(value))
+        .map(value =>
+          s"${field.binding}=$value is outside the ${field.kind} domain of ${form.name}: ${domain.describe}"
+        )
+    })
   }
 
   def parse(
@@ -87,43 +108,48 @@ object FormatParser {
       address: Int,
       text: String
   ): Either[String, Map[String, BigInt]] = {
-    val source = normalise(text.stripSuffix(";"))
-    val Prepared(pieces, required, names, defaults, descriptorField, explicitDescriptor) = prepare(database, form)
-    def described(bindings: Map[String, BigInt]): Map[String, BigInt]                    =
+    val source      = normalise(text.stripSuffix(";"))
+    val preparation = prepare(database, form)
+    val encoding    = NVDisasm.Encoding(database, form)
+    val Prepared(pieces, required, names, defaults, descriptorField, explicitDescriptor, _) = preparation
+    def described(bindings: Map[String, BigInt]): Map[String, BigInt]                       =
       (descriptorField, explicitDescriptor) match {
         case (Some(descriptor), Some((name, value))) if bindings.contains(descriptor) =>
           bindings.updated(name, value)
         case _ => bindings
       }
     def legality(bindings: Map[String, BigInt]) =
-      Legality.check(database, form, Legality.completeBindings(form, bindings))
+      Legality.check(encoding, Legality.completeBindings(form, bindings))
     pieces.flatMap(consume(database, form, _, source, address, names)).flatMap { parsed =>
       val complete =
         parsed.filter(_.offset == source.length).map(state => defaults ++ described(state.bindings)).distinct
       val bound = complete.filter(bindings => required.subsetOf(bindings.keySet))
       val legal = bound.filter(legality(_).isRight)
+      val typed = legal.filter(outsideDomain(encoding, preparation, _).isEmpty)
       if (parsed.isEmpty) Left(s"text does not match ${form.name} FORMAT: $text")
       else if (complete.isEmpty) Left(s"trailing or incomplete text for ${form.name} FORMAT: $text")
       else if (bound.isEmpty) {
         val missing = required -- complete.flatMap(_.keySet).toSet
         Left(s"${form.name} FORMAT is missing required bindings: ${missing.toVec.sorted.mkString(", ")}")
       } else
-        legal match {
-          case Vec(bindings) => Right(bindings)
-          case Vec()         => Left(bound.flatMap(legality(_).left.toOption).head.message)
-          case _             =>
-            // fields whose values print the same text read as their default
-            legal.filter(bindings =>
-              legal.forall(other =>
-                other.keySet.forall(key =>
-                  other.get(key) == bindings.get(key) || bindings.get(key).exists(defaults.get(key).contains)
+        if (legal.isEmpty) Left(bound.flatMap(legality(_).left.toOption).head.message)
+        else
+          typed match {
+            case Vec(bindings) => Right(bindings)
+            case Vec()         => Left(legal.flatMap(outsideDomain(encoding, preparation, _)).head)
+            case _             =>
+              // fields whose values print the same text read as their default
+              typed.filter(bindings =>
+                typed.forall(other =>
+                  other.keySet.forall(key =>
+                    other.get(key) == bindings.get(key) || bindings.get(key).exists(defaults.get(key).contains)
+                  )
                 )
-              )
-            ) match {
-              case Vec(bindings) => Right(bindings)
-              case _             => Left(s"ambiguous ${form.name} FORMAT: ${legal.size} binding sets")
-            }
-        }
+              ) match {
+                case Vec(bindings) => Right(bindings)
+                case _             => Left(s"ambiguous ${form.name} FORMAT: ${typed.size} binding sets")
+              }
+          }
     }
   }
 
@@ -352,7 +378,7 @@ object FormatParser {
         }
         database.vocabulary(field).find(_.name == token).map(_.value)
           .orElse(Option.when(field.binding == "Opcode")(form.opcodes.find(_.name == token).map(_.value)).flatten)
-          .orElse(parseRegister(field.category, token))
+          .orElse(parseRegister(SassDomains.field(database, form, field.binding), token))
           .orElse(parseImmediate(field, token, NVDisasm.number(token)))
           .map(number => Vec("" -> number) ++ attributes.map { case (name, bit) => name -> BigInt(bit) })
       }
@@ -435,21 +461,14 @@ object FormatParser {
     Either.cond(visited.size <= maximumWork, result, s"${form.name}: FORMAT parse exceeded $maximumWork search states")
   }
 
-  private def parseRegister(category: NVDisasm.FieldKind, token: String): Option[BigInt] = {
-    import NVDisasm.FieldKind.*
-    val bank = category match {
-      case Register | ZeroRegister | NonZeroRegister                      => Some(RegisterBank.R)
-      case UniformRegister | ZeroUniformRegister | NonZeroUniformRegister => Some(RegisterBank.UR)
-      case BarrierRegister | CbuState                                     => Some(RegisterBank.B)
-      case Scoreboard                                                     => Some(RegisterBank.SB)
-      case _                                                              => None
-    }
+  private def parseRegister(domain: Option[FieldDomain], token: String): Option[BigInt] =
     // Zero-register encodings come from the architecture vocabulary.
     if (token.endsWith("Z")) None
-    else bank.flatMap(expected =>
-      OperandParser.parse(token).toOption.collect { case Operand.Register(`expected`, index) => BigInt(index) }
+    else domain.flatMap(_.bank).flatMap(expected =>
+      OperandParser.parse(token).toOption.collect {
+        case Operand.Register(bank, index) if bank == RegisterBank.fromSpelling(expected) => BigInt(index)
+      }
     )
-  }
 
   /** The display default, falling back to the vocabulary's starred default value. */
   private def defaultValue(database: NVDisasm.Database, field: NVDisasm.Syntax.Field): Option[BigInt] =

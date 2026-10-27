@@ -10,6 +10,7 @@ object Validation {
 
   enum Issue derives CanEqual {
     case InvalidHeader(detail: NonEmpty[String])
+    case InvalidOperand(violation: OperandViolation)
     case MissingKernelCapability
     case MissingKernelEntryPoint
     case MissingOpenCLMemoryModel
@@ -21,6 +22,7 @@ object Validation {
 
     def message: NonEmpty[String] = this match {
       case InvalidHeader(detail)       => detail
+      case InvalidOperand(violation)   => violation.message
       case MissingKernelCapability     => "OpCapability Kernel is required"
       case MissingKernelEntryPoint     => "an OpEntryPoint Kernel is required"
       case MissingOpenCLMemoryModel    => "an OpenCL physical-addressing OpMemoryModel is required"
@@ -128,7 +130,8 @@ object Validation {
       (headerIssues ++
         issueWhen(!hasCapability)(requirements.missingCapability) ++
         issueWhen(requirements.requireEntryPoint && !hasEntryPoint)(requirements.missingEntryPoint) ++
-        issueWhen(!hasMemoryModel)(requirements.missingMemoryModel)).toVector.view
+        issueWhen(!hasMemoryModel)(requirements.missingMemoryModel)).toVector.view ++
+        OperandConstraintCheck.violations(module).view.map(Issue.InvalidOperand(_))
     )
     val unsupportedIssues = Vec.from(unsupported.toVector.view)
     if (invalidIssues.nonEmpty) ValidationOutcome.Rejected(invalidIssues.unsafe)

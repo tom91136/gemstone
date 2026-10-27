@@ -109,9 +109,7 @@ class NonUniformSuite extends munit.FunSuite {
         dispatch(module, width, lanes, (thread, component) => IEEE754.fromDouble(input(thread, component), width))
       check(outputs, width, lanes, branch, 0) { (thread, masked) =>
         val selected = scanned(operation, thread, participants(thread, masked, 0))
-        // The oracle reduces in the subgroup's order, so it folds over boxed doubles.
-        @SuppressWarnings(Array("baumkuchen:loop-boxing"))
-        val reduced = Seq.tabulate(lanes)(c =>
+        val reduced  = Seq.tabulate(lanes)(c =>
           IEEE754.fromDouble(selected.foldLeft(identity)((a, t) => combine(a, input(t, c))), width)
         )
         Some(reduced)

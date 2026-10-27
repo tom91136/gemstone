@@ -207,18 +207,29 @@ class IntegerSemanticsSuite extends munit.FunSuite {
     }.sum
   }
 
+  private def saturatedSum(left: Long, right: Long, signed: Boolean): Long =
+    if (signed) (left.toInt.toLong + right.toInt).max(Int.MinValue.toLong).min(Int.MaxValue.toLong)
+    else ((left & Bits.Mask32) + (right & Bits.Mask32)).min(Bits.Mask32)
+
   // The interpreter's lane formulas before staging, before the store's low dword.
   private def ternaryReference(operation: VectorTernaryOperation, clamp: Boolean, left: Long, right: Long, addend: Long)
       : Long = operation match {
-    case VectorTernaryOperation.Add3U32     => left + right + addend
-    case VectorTernaryOperation.Or3B32      => left | right | addend
-    case VectorTernaryOperation.Xor3B32     => left ^ right ^ addend
-    case VectorTernaryOperation.Maximum3I32 => math.max(math.max(left.toInt, right.toInt), addend.toInt).toLong
-    case VectorTernaryOperation.Maximum3U32 => math.max(math.max(left, right), addend)
-    case VectorTernaryOperation.Minimum3I32 => math.min(math.min(left.toInt, right.toInt), addend.toInt).toLong
-    case VectorTernaryOperation.Minimum3F32 => IEEE754.minNum(IEEE754.minNum(left, right, 32), addend, 32)
-    case VectorTernaryOperation.Maximum3F32 => IEEE754.maxNum(IEEE754.maxNum(left, right, 32), addend, 32)
-    case VectorTernaryOperation.Minimum3F16 =>
+    case VectorTernaryOperation.Add3U32       => left + right + addend
+    case VectorTernaryOperation.AddMaximumI32 => math.max(saturatedSum(left, right, signed = true), addend.toInt.toLong)
+    case VectorTernaryOperation.AddMinimumI32 => math.min(saturatedSum(left, right, signed = true), addend.toInt.toLong)
+    case VectorTernaryOperation.AddMaximumU32 =>
+      math.max(saturatedSum(left, right, signed = false), addend & Bits.Mask32)
+    case VectorTernaryOperation.AddMinimumU32 =>
+      math.min(saturatedSum(left, right, signed = false), addend & Bits.Mask32)
+    case VectorTernaryOperation.MultiplyAddU32 => (left & Bits.Mask32) * (right & Bits.Mask32) + addend
+    case VectorTernaryOperation.Or3B32         => left | right | addend
+    case VectorTernaryOperation.Xor3B32        => left ^ right ^ addend
+    case VectorTernaryOperation.Maximum3I32    => math.max(math.max(left.toInt, right.toInt), addend.toInt).toLong
+    case VectorTernaryOperation.Maximum3U32    => math.max(math.max(left, right), addend)
+    case VectorTernaryOperation.Minimum3I32    => math.min(math.min(left.toInt, right.toInt), addend.toInt).toLong
+    case VectorTernaryOperation.Minimum3F32    => IEEE754.minNum(IEEE754.minNum(left, right, 32), addend, 32)
+    case VectorTernaryOperation.Maximum3F32    => IEEE754.maxNum(IEEE754.maxNum(left, right, 32), addend, 32)
+    case VectorTernaryOperation.Minimum3F16    =>
       IEEE754.minNum(IEEE754.minNum(left & 0xffffL, right & 0xffffL, 16), addend & 0xffffL, 16)
     case VectorTernaryOperation.Maximum3F16 =>
       IEEE754.maxNum(IEEE754.maxNum(left & 0xffffL, right & 0xffffL, 16), addend & 0xffffL, 16)

@@ -17079,6 +17079,16 @@
         ]
       },
       {
+        "name": "OP_SEL",
+        "ranges": [
+          {
+            "offset": 14,
+            "bits": 1,
+            "padding": 3
+          }
+        ]
+      },
+      {
         "name": "SRC0",
         "ranges": [
           {
@@ -20463,6 +20473,16 @@
         ]
       },
       {
+        "name": "OP_SEL",
+        "ranges": [
+          {
+            "offset": 14,
+            "bits": 1,
+            "padding": 3
+          }
+        ]
+      },
+      {
         "name": "SRC0",
         "ranges": [
           {
@@ -21299,6 +21319,16 @@
         ]
       },
       {
+        "name": "OP_SEL",
+        "ranges": [
+          {
+            "offset": 14,
+            "bits": 1,
+            "padding": 3
+          }
+        ]
+      },
+      {
         "name": "SRC0",
         "ranges": [
           {
@@ -21973,6 +22003,16 @@
             "offset": 11,
             "bits": 1,
             "padding": 0
+          }
+        ]
+      },
+      {
+        "name": "OP_SEL",
+        "ranges": [
+          {
+            "offset": 14,
+            "bits": 1,
+            "padding": 3
           }
         ]
       },

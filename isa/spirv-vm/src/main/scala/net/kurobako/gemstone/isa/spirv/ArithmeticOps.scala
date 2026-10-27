@@ -3,6 +3,8 @@ package net.kurobako.gemstone.isa.spirv
 import LaneOps.*
 import Op.*
 import OpBuilder.*
+import VMInvocation.*
+import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -12,96 +14,97 @@ import net.kurobako.gemstone.vm.*
 /** Integer and floating-point arithmetic, bitwise operations, shifts, bit fields and the linear algebra opcodes. Each
   * family pairs a shape rule, checked once at load, with a lane kernel.
   */
-// result type, site and operand ids are the raw operands of each opcode; a holder would allocate per instruction
-@SuppressWarnings(Array("baumkuchen:data-clump"))
 private object ArithmeticOps {
   import Operand.*
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
+  def lower(using site: Site): PartialFunction[Instruction, Op] = {
     case instruction @ Instruction.IAdd(_, _, a, b) =>
-      wrapping(site, a, b)(staged(site, instruction, CoreFamily.Integer))
+      wrapping(a, b)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.ISub(_, _, a, b) =>
-      wrapping(site, a, b)(staged(site, instruction, CoreFamily.Integer))
+      wrapping(a, b)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.IMul(_, _, a, b) =>
-      wrapping(site, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.UDiv(t, _, a, b) =>
-      division(site, "OpUDiv", t, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.UMod(t, _, a, b) =>
-      division(site, "OpUMod", t, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.SDiv(t, _, a, b) =>
-      division(site, "OpSDiv", t, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.SRem(t, _, a, b) =>
-      division(site, "OpSRem", t, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.SMod(t, _, a, b) =>
-      division(site, "OpSMod", t, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.SNegate(t, _, a) => negate(site, t, a)(staged(site, instruction, CoreFamily.Integer))
+      wrapping(a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.UDiv(t, d, a, b) =>
+      division("OpUDiv", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.UMod(t, d, a, b) =>
+      division("OpUMod", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SDiv(t, d, a, b) =>
+      division("OpSDiv", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SRem(t, d, a, b) =>
+      division("OpSRem", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SMod(t, d, a, b) =>
+      division("OpSMod", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.SNegate(t, _, a) => negate(t, a)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.ShiftLeftLogical(t, _, a, b) =>
-      shift(site, "OpShiftLeftLogical", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+      shift("OpShiftLeftLogical", t, a, b)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.ShiftRightLogical(t, _, a, b) =>
-      shift(site, "OpShiftRightLogical", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+      shift("OpShiftRightLogical", t, a, b)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.ShiftRightArithmetic(t, _, a, b) =>
-      shift(site, "OpShiftRightArithmetic", t, a, b)(staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.BitwiseOr(t, _, a, b) =>
-      bitwiseOperands(site, "OpBitwiseOr", t, a, b)(_ => staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.BitwiseXor(t, _, a, b) =>
-      bitwiseOperands(site, "OpBitwiseXor", t, a, b)(_ => staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.BitwiseAnd(t, _, a, b) =>
-      bitwiseOperands(site, "OpBitwiseAnd", t, a, b)(_ => staged(site, instruction, CoreFamily.Integer))
-    case instruction @ Instruction.Not(t, _, a)      => not(site, t, a)(staged(site, instruction, CoreFamily.Integer))
+      shift("OpShiftRightArithmetic", t, a, b)(staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitwiseOr(t, d, a, b) =>
+      bitwiseOperands("OpBitwiseOr", BinaryOperands(t, d, a, b))(_ => staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitwiseXor(t, d, a, b) =>
+      bitwiseOperands("OpBitwiseXor", BinaryOperands(t, d, a, b))(_ => staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.BitwiseAnd(t, d, a, b) =>
+      bitwiseOperands("OpBitwiseAnd", BinaryOperands(t, d, a, b))(_ => staged(site, instruction, CoreFamily.Integer))
+    case instruction @ Instruction.Not(t, _, a)      => not(t, a)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.BitCount(t, _, a) =>
-      bitCount(site, t, a)(staged(site, instruction, CoreFamily.Integer))
+      bitCount(t, a)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.BitReverse(t, _, a) =>
-      bitField(site, t, a, None)(staged(site, instruction, CoreFamily.Integer))
+      bitField(t, a, None)(staged(site, instruction, CoreFamily.Integer))
     case instruction @ Instruction.BitFieldUExtract(resultType = t, base = base) =>
-      bitField(site, t, base, None)(staged(site, instruction, CoreFamily.BitField))
+      bitField(t, base, None)(staged(site, instruction, CoreFamily.BitField))
     case instruction @ Instruction.BitFieldSExtract(resultType = t, base = base) =>
-      bitField(site, t, base, None)(staged(site, instruction, CoreFamily.BitField))
+      bitField(t, base, None)(staged(site, instruction, CoreFamily.BitField))
     case instruction @ Instruction.BitFieldInsert(resultType = t, base = base, insert = insert) =>
-      bitField(site, t, base, Some(insert))(staged(site, instruction, CoreFamily.BitField))
-    case instruction @ Instruction.IAddCarry(t, _, a, b)    => extended(site, instruction, t, a, b)
-    case instruction @ Instruction.ISubBorrow(t, _, a, b)   => extended(site, instruction, t, a, b)
-    case instruction @ Instruction.UMulExtended(t, _, a, b) => extended(site, instruction, t, a, b)
-    case instruction @ Instruction.SMulExtended(t, _, a, b) => extended(site, instruction, t, a, b)
+      bitField(t, base, Some(insert))(staged(site, instruction, CoreFamily.BitField))
+    case instruction @ Instruction.IAddCarry(t, d, a, b)    => extended(instruction, BinaryOperands(t, d, a, b))
+    case instruction @ Instruction.ISubBorrow(t, d, a, b)   => extended(instruction, BinaryOperands(t, d, a, b))
+    case instruction @ Instruction.UMulExtended(t, d, a, b) => extended(instruction, BinaryOperands(t, d, a, b))
+    case instruction @ Instruction.SMulExtended(t, d, a, b) => extended(instruction, BinaryOperands(t, d, a, b))
     // binary16 operands are exact in binary32, and binary32 holds 2p + 2 bits of a binary16 result, so the basic
     // operations round once into binary16; remainders are exact.
-    case instruction @ Instruction.FAdd(t, _, a, b) =>
-      floating(site, "OpFAdd", t, a, b)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.FSub(t, _, a, b) =>
-      floating(site, "OpFSub", t, a, b)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.FMul(t, _, a, b) =>
-      floating(site, "OpFMul", t, a, b)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.FDiv(t, _, a, b) =>
-      floating(site, "OpFDiv", t, a, b)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.FRem(t, _, a, b) =>
-      floating(site, "OpFRem", t, a, b)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.FMod(t, _, a, b) =>
-      floating(site, "OpFMod", t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FAdd(t, d, a, b) =>
+      floating("OpFAdd", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FSub(t, d, a, b) =>
+      floating("OpFSub", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FMul(t, d, a, b) =>
+      floating("OpFMul", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FDiv(t, d, a, b) =>
+      floating("OpFDiv", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FRem(t, d, a, b) =>
+      floating("OpFRem", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FMod(t, d, a, b) =>
+      floating("OpFMod", BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.FNegate(t, _, a) =>
-      floatingNegate(site, t, a)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.FmaKHR(t, _, a, b, c) =>
+      floatingNegate(t, a)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.FmaKHR(t, d, a, b, c) =>
       def fused = staged(site, instruction, CoreFamily.FusedMultiplyAdd)
-      floating(site, "OpFmaKHR", t, a, b)(floating(site, "OpFmaKHR", t, b, c)(fused))
+      floating("OpFmaKHR", BinaryOperands(t, d, a, b))(floating("OpFmaKHR", BinaryOperands(t, d, b, c))(fused))
     case instruction @ Instruction.VectorTimesScalar(t, _, a, b) =>
-      vectorTimesScalar(site, t, a, b)(staged(site, instruction, CoreFamily.Floating))
-    case instruction @ Instruction.Dot(t, _, a, b) => dot(site, t, a, b)(staged(site, instruction, CoreFamily.Floating))
+      vectorTimesScalar(t, a, b)(staged(site, instruction, CoreFamily.Floating))
+    case instruction @ Instruction.Dot(t, d, a, b) =>
+      dot(BinaryOperands(t, d, a, b))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.Transpose(t, d, a) =>
-      matrix(site, t, d, MatrixOperation.Transpose, Vec(a))(staged(site, instruction, CoreFamily.Floating))
+      matrix(ResultIds(t, d), MatrixOperation.Transpose, Vec(a))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.MatrixTimesScalar(t, _, a, b) if site.program.cooperativeMatrices.contains(id(t)) =>
-      vectorTimesScalar(site, t, a, b)(staged(site, instruction, CoreFamily.Floating))
+      vectorTimesScalar(t, a, b)(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.MatrixTimesScalar(t, d, a, b) =>
-      matrix(site, t, d, MatrixOperation.Scale, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+      matrix(ResultIds(t, d), MatrixOperation.Scale, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.VectorTimesMatrix(t, d, a, b) =>
-      matrix(site, t, d, MatrixOperation.VectorMatrix, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+      matrix(ResultIds(t, d), MatrixOperation.VectorMatrix, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.MatrixTimesVector(t, d, a, b) =>
-      matrix(site, t, d, MatrixOperation.MatrixVector, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+      matrix(ResultIds(t, d), MatrixOperation.MatrixVector, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.MatrixTimesMatrix(t, d, a, b) =>
-      matrix(site, t, d, MatrixOperation.Multiply, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+      matrix(ResultIds(t, d), MatrixOperation.Multiply, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
     case instruction @ Instruction.OuterProduct(t, d, a, b) =>
-      matrix(site, t, d, MatrixOperation.OuterProduct, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
+      matrix(ResultIds(t, d), MatrixOperation.OuterProduct, Vec(a, b))(staged(site, instruction, CoreFamily.Floating))
   }
 
   /** Data operands, or the fault the first absent or opaque one raises. */
-  private def data(site: Site, operands: Vec[Operand], opaque: Typed.Opaque => Fault): Either[Fault, Vec[Typed.Data]] =
+  private def data(operands: Vec[Operand], opaque: Typed.Opaque => Fault)(using
+      site: Site
+  ): Either[Fault, Vec[Typed.Data]] =
     Traversal.traverse(operands)(operand =>
       typed(site, operand) match {
         case value: Typed.Data      => Right(value)
@@ -120,38 +123,34 @@ private object ArithmeticOps {
   )
 
   // Wrapping addition, subtraction and multiplication take their width from the result and broadcast operands.
-  private def wrapping(site: Site, left: Operand, right: Operand)(staged: => Op): Op =
+  private def wrapping(left: Operand, right: Operand)(using site: Site)(staged: => Op): Op =
     lowered(
-      data(site, Vec(left, right), value => Fault.InvalidRequest(s"SPIR-V value %${value.id} is not numeric")).map(_ =>
+      data(Vec(left, right), value => Fault.InvalidRequest(s"SPIR-V value %${value.id} is not numeric")).map(_ =>
         staged
       )
     )
 
   private inline def sameShapes[S](
-      site: Site,
       opcode: String,
-      resultType: Operand,
-      left: Operand,
-      right: Operand,
+      operands: BinaryOperands,
       inline shape: Int => Option[S],
       resultKind: String,
       operandKind: String
-  )(using CanEqual[S, S]): Either[Fault, S] =
+  )(using site: Site, canEqual: CanEqual[S, S]): Either[Fault, S] =
     data(
-      site,
-      Vec(left, right),
-      value => Fault.InvalidRequest(s"$opcode ${side(value.id, left)} operand %${value.id} is a pointer")
+      Vec(operands.left, operands.right),
+      value => Fault.InvalidRequest(s"$opcode ${side(value.id, operands.left)} operand %${value.id} is a pointer")
     )
-      .flatMap { operands =>
-        (shape(id(resultType)), shape(operands(0).typeId), shape(operands(1).typeId)) match {
+      .flatMap { found =>
+        (shape(operands.ids.resultType), shape(found(0).typeId), shape(found(1).typeId)) match {
           case (Some(result), Some(leftShape), Some(rightShape)) if result == leftShape && result == rightShape =>
             Right(result)
           case (None, _, _) =>
-            Left(Fault.InvalidRequest(s"$opcode result type %${id(resultType)} is not $resultKind"))
+            Left(Fault.InvalidRequest(s"$opcode result type %${operands.ids.resultType} is not $resultKind"))
           case (_, None, _) =>
-            Left(Fault.InvalidRequest(s"$opcode left operand %${id(left)} is not $operandKind"))
+            Left(Fault.InvalidRequest(s"$opcode left operand %${id(operands.left)} is not $operandKind"))
           case (_, _, None) =>
-            Left(Fault.InvalidRequest(s"$opcode right operand %${id(right)} is not $operandKind"))
+            Left(Fault.InvalidRequest(s"$opcode right operand %${id(operands.right)} is not $operandKind"))
           case (Some(result), Some(leftShape), Some(rightShape)) =>
             Left(
               Fault.InvalidRequest(
@@ -161,13 +160,12 @@ private object ArithmeticOps {
         }
       }
 
-  private def sameIntegerShapes(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)
+  private def sameIntegerShapes(opcode: String, operands: BinaryOperands)(using
+      site: Site
+  )
       : Either[Fault, (Int in 1 ~ 64, Int)] = sameShapes(
-    site,
     opcode,
-    resultType,
-    left,
-    right,
+    operands,
     site.program.integerShape,
     resultKind = "an integer scalar or vector",
     operandKind = "an integer scalar or vector"
@@ -175,11 +173,11 @@ private object ArithmeticOps {
 
   private def side(value: Int, left: Operand): String = if (value == id(left)) "left" else "right"
 
-  private def division(site: Site, name: String, resultType: Operand, left: Operand, right: Operand)(staged: => Op)
-      : Op = lowered(sameIntegerShapes(site, name, resultType, left, right).map(_ => staged))
+  private def division(name: String, operands: BinaryOperands)(using site: Site)(staged: => Op): Op =
+    lowered(sameIntegerShapes(name, operands).map(_ => staged))
 
-  private def negate(site: Site, resultType: Operand, source: Operand)(staged: => Op): Op = lowered(
-    data(site, Vec(source), _ => Fault.InvalidRequest("OpSNegate source is a pointer")).flatMap { operands =>
+  private def negate(resultType: Operand, source: Operand)(using site: Site)(staged: => Op): Op = lowered(
+    data(Vec(source), _ => Fault.InvalidRequest("OpSNegate source is a pointer")).flatMap { operands =>
       (site.program.integerShape(operands(0).typeId), site.program.integerShape(id(resultType))) match {
         case (Some(shape), Some(result)) if shape == result => Right(staged)
         case _                                              =>
@@ -188,10 +186,11 @@ private object ArithmeticOps {
     }
   )
 
-  private def shift(site: Site, name: String, resultType: Operand, base: Operand, shift: Operand)(staged: => Op)
+  private def shift(name: String, resultType: Operand, base: Operand, shift: Operand)(using
+      site: Site
+  )(staged: => Op)
       : Op = lowered(
     data(
-      site,
       Vec(base, shift),
       _ => Fault.InvalidRequest(s"$name requires integer scalar or vector operands")
     ).flatMap {
@@ -214,14 +213,17 @@ private object ArithmeticOps {
   )
 
   /** Integer operands whose type is the result type or has its integer shape. */
-  def bitwiseOperands(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)(
+  def bitwiseOperands(opcode: String, operands: BinaryOperands)(using
+      site: Site
+  )(
       op: (Int in 1 ~ 64) => Op
-  ): Op = site.program.integerShape(id(resultType)) match {
+  ): Op = site.program.integerShape(operands.ids.resultType) match {
     case None =>
-      Fail(Fault.InvalidRequest(s"$opcode result type %${id(resultType)} is not an integer scalar or vector"))
+      Fail(Fault.InvalidRequest(s"$opcode result type %${operands.ids.resultType} is not an integer scalar or vector"))
     case Some(shape @ (width, _)) =>
-      def matches(typeId: Int): Boolean = typeId == id(resultType) || site.program.integerShape(typeId).contains(shape)
-      (typed(site, left), typed(site, right)) match {
+      def matches(typeId: Int): Boolean =
+        typeId == operands.ids.resultType || site.program.integerShape(typeId).contains(shape)
+      (typed(site, operands.left), typed(site, operands.right)) match {
         case (Typed.Undefined(value), _) => Fail(undefined(value))
         case (_, Typed.Undefined(value)) => Fail(undefined(value))
         case (Typed.Data(_, leftType), Typed.Data(_, rightType)) if matches(leftType) && matches(rightType) => op(width)
@@ -230,7 +232,7 @@ private object ArithmeticOps {
       }
   }
 
-  private def not(site: Site, resultType: Operand, source: Operand)(staged: => Op): Op =
+  private def not(resultType: Operand, source: Operand)(using site: Site)(staged: => Op): Op =
     site.program.integerShape(id(resultType)) match {
       case None =>
         Fail(Fault.InvalidRequest(s"OpNot result type %${id(resultType)} is not an integer scalar or vector"))
@@ -245,8 +247,8 @@ private object ArithmeticOps {
         }
     }
 
-  private def bitCount(site: Site, resultType: Operand, base: Operand)(staged: => Op): Op = lowered(
-    data(site, Vec(base), _ => Fault.InvalidRequest("OpBitCount base is not an integer value")).flatMap { operands =>
+  private def bitCount(resultType: Operand, base: Operand)(using site: Site)(staged: => Op): Op = lowered(
+    data(Vec(base), _ => Fault.InvalidRequest("OpBitCount base is not an integer value")).flatMap { operands =>
       (site.program.integerShape(id(resultType)), site.program.integerShape(operands(0).typeId)) match {
         case (Some((_, count)), Some((_, baseCount))) if count == baseCount => Right(staged)
         case _                                                              =>
@@ -256,7 +258,9 @@ private object ArithmeticOps {
   )
 
   /** Bit reversal and bit-field instructions, whose base and inserted value have the result's integer shape. */
-  private def bitField(site: Site, resultType: Operand, base: Operand, insert: Option[Operand])(staged: => Op): Op =
+  private def bitField(resultType: Operand, base: Operand, insert: Option[Operand])(using
+      site: Site
+  )(staged: => Op): Op =
     site.program.integerShape(id(resultType)) match {
       case None        => Fail(Fault.InvalidRequest("bit-field result requires integer components"))
       case Some(shape) =>
@@ -273,10 +277,9 @@ private object ArithmeticOps {
         } yield staged)
     }
 
-  private def extended(site: Site, instruction: Instruction, resultType: Operand, left: Operand, right: Operand)
-      : Op = {
+  private def extended(instruction: Instruction, operands: BinaryOperands)(using site: Site): Op = {
     val opcode = instruction.opcodeNumber.toInt
-    val member = site.program.runtimeType(id(resultType)) match {
+    val member = site.program.runtimeType(operands.ids.resultType) match {
       case Some(RuntimeType.Structure(members)) if members.size == 2 && members(0) == members(1) => Some(members(0))
       case _                                                                                     => None
     }
@@ -291,7 +294,7 @@ private object ArithmeticOps {
     )
     val mismatch =
       Fault.InvalidRequest("extended integer arithmetic requires a two-member integer structure and matching operands")
-    (typed(site, left), typed(site, right), shape) match {
+    (typed(site, operands.left), typed(site, operands.right), shape) match {
       case (Typed.Undefined(value), _, _) => Fail(undefined(value))
       case (_, Typed.Undefined(value), _) => Fail(undefined(value))
       case (Typed.Data(_, leftType), Typed.Data(_, rightType), Some((_, _, signed)))
@@ -302,22 +305,19 @@ private object ArithmeticOps {
   }
 
   /** Floating-point operands and result of one shape, named `opcode` in faults. */
-  def floating(site: Site, opcode: String, resultType: Operand, left: Operand, right: Operand)(staged: => Op): Op =
+  def floating(opcode: String, operands: BinaryOperands)(using site: Site)(staged: => Op): Op =
     lowered(
       sameShapes(
-        site,
         opcode,
-        resultType,
-        left,
-        right,
+        operands,
         site.program.floatingShape,
         resultKind = "a floating-point scalar or vector",
         operandKind = "floating-point"
       ).map(_ => staged)
     )
 
-  private def floatingNegate(site: Site, resultType: Operand, source: Operand)(staged: => Op): Op = lowered(
-    data(site, Vec(source), _ => Fault.InvalidRequest("OpFNegate source is a pointer")).flatMap { operands =>
+  private def floatingNegate(resultType: Operand, source: Operand)(using site: Site)(staged: => Op): Op = lowered(
+    data(Vec(source), _ => Fault.InvalidRequest("OpFNegate source is a pointer")).flatMap { operands =>
       (site.program.floatingShape(operands(0).typeId), site.program.floatingShape(id(resultType))) match {
         case (Some(shape), Some(result)) if shape == result => Right(staged)
         case _                                              =>
@@ -328,7 +328,9 @@ private object ArithmeticOps {
     }
   )
 
-  private def vectorTimesScalar(site: Site, resultType: Operand, vector: Operand, scalar: Operand)(staged: => Op): Op =
+  private def vectorTimesScalar(resultType: Operand, vector: Operand, scalar: Operand)(using
+      site: Site
+  )(staged: => Op): Op =
     (typed(site, vector), typed(site, scalar)) match {
       case (Typed.Undefined(value), _)                            => Fail(undefined(value))
       case (_, Typed.Undefined(value))                            => Fail(undefined(value))
@@ -346,15 +348,15 @@ private object ArithmeticOps {
       case _ => Fail(Fault.InvalidRequest("OpVectorTimesScalar requires a floating vector and scalar"))
     }
 
-  private def dot(site: Site, resultType: Operand, left: Operand, right: Operand)(staged: => Op): Op =
-    (typed(site, left), typed(site, right)) match {
+  private def dot(operands: BinaryOperands)(using site: Site)(staged: => Op): Op =
+    (typed(site, operands.left), typed(site, operands.right)) match {
       case (Typed.Undefined(value), _)                         => Fail(undefined(value))
       case (_, Typed.Undefined(value))                         => Fail(undefined(value))
       case (Typed.Data(_, leftType), Typed.Data(_, rightType)) =>
         (
           site.program.floatingShape(leftType),
           site.program.floatingShape(rightType),
-          site.program.floatingShape(id(resultType))
+          site.program.floatingShape(operands.ids.resultType)
         ) match {
           case (Some((width, count)), Some((rightWidth, rightCount)), Some((resultWidth, 1)))
               if width == rightWidth && width == resultWidth && count == rightCount =>
@@ -369,17 +371,13 @@ private object ArithmeticOps {
   }
 
   // Every matrix is a sequence of columns; storage padding is not part of a value's lanes.
-  private def matrix(
-      site: Site,
-      resultType: Operand,
-      dest: Operand,
-      operation: MatrixOperation,
-      sources: Vec[Operand]
+  private def matrix(ids: ResultIds, operation: MatrixOperation, sources: Vec[Operand])(using
+      site: Site
   )(staged: => Op): Op =
-    lowered(data(site, sources, _ => Fault.InvalidRequest(s"matrix $operation requires data operands")).flatMap {
+    lowered(data(sources, _ => Fault.InvalidRequest(s"matrix $operation requires data operands")).flatMap {
       operands =>
         val program      = site.program
-        val resultId     = id(resultType)
+        val resultId     = ids.resultType
         val leftType     = operands(0).typeId
         val rightType    = if (operands.size == 2) operands(1).typeId else leftType
         val resultMatrix = program.matrixShape(resultId)
@@ -429,26 +427,13 @@ private object ArithmeticOps {
         (operation, leftMatrix) match {
           case (_, _) if !valid                                      => Left(mismatch)
           case (MatrixOperation.Transpose, Some((_, rows, columns))) =>
-            Right(transpose(resultId, id(dest), operands(0).id, rows, columns, mismatch))
+            Right(Transposed(operands(0).id, rows, columns, ids.dest, resultId))
           case _ => Right(staged)
         }
     })
 
-  /** Transposition only moves lanes: result lane `row + columns * column` is source lane `column + rows * row`. */
-  private def transpose(resultType: Int, dest: Int, source: Int, rows: Int, columns: Int, mismatch: Fault): Op =
-    step { (execution, _) =>
-      val values = execution.values
-      Option(values.lanes(source)) match {
-        case Some(lanes) if lanes.length == rows * columns =>
-          Right(values.update(
-            dest,
-            VMValue.Bits(
-              resultType,
-              Array.tabulate(lanes.length)(lane => lanes((lane % columns) * rows + lane / columns))
-            )
-          ))
-        case None => Left(undefined(source))
-        case _    => Left(mismatch)
-      }
-    }
+  private class Transposed(source: Int, rows: Int, columns: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      MatrixSemantics.transpose(InvocationMachine(execution))(source, rows, columns, dest, resultType)
+  }
 }

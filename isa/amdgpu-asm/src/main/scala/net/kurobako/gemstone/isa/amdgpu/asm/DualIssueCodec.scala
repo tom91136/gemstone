@@ -161,8 +161,8 @@ private object DualIssueCodec {
       }
     }.headOption
 
-  def decode(bytes: Array[Byte], offset: Int, target: Target): Option[Either[CodecError, DecodedStatement]] =
-    InstructionDecoder.dual(bytes, offset, target).map(_.left.map(CodecError.InvalidEncoding(_)).flatMap { dual =>
+  def decode(code: CodeStream, offset: Int): Option[Either[CodecError, DecodedStatement]] =
+    InstructionDecoder.dual(code, offset).map(_.left.map(CodecError.InvalidEncoding(_)).flatMap { dual =>
       val format  = dual.layout.format
       val literal = dual.literal.map(OperandCodec.Literal(_))
       def half(side: Side, candidates: Vec[(Opcode, Metadata.Encoding)]): Option[Instruction] =
@@ -176,7 +176,7 @@ private object DualIssueCodec {
                   raw,
                   info.copy(field = Some(EncodingField.SSRC0), bits = 32.unsafe[Int >= 0]),
                   None,
-                  target
+                  code.target
                 )
               else if (field.isVectorDestination || field.isVectorSource) {
                 val value = if (field == EncodingField.VDSTY) dual.destinationY.toInt else raw
@@ -187,7 +187,7 @@ private object DualIssueCodec {
                   raw - 256,
                   raw - 256 + (info.bits.raw + 31) / 32 - 1
                 ))
-              else OperandCodec.decode(raw, info.copy(field = Some(EncodingField.SSRC0)), literal, target)
+              else OperandCodec.decode(raw, info.copy(field = Some(EncodingField.SSRC0)), literal, code.target)
             }
           }.flatMap { args =>
             val schema = operands(encoding, side).operands.filterNot(_.implicitOperand)
@@ -208,8 +208,8 @@ private object DualIssueCodec {
       (for {
         x       <- half(Side.X, dual.x)
         y       <- half(Side.Y, dual.y)
-        encoded <- encode(x, y, target).toOption
-        if encoded == Vec.unsafeWrapArray(bytes.slice(offset, offset + dual.size))
+        encoded <- encode(x, y, code.target).toOption
+        if encoded == Vec.unsafeWrapArray(code.bytes.slice(offset, offset + dual.size))
       } yield DecodedStatement(Statement.InstructionPair(x, y), dual.size))
         .toRight(CodecError.InvalidEncoding(s"invalid dual-issue instruction at byte $offset"))
     })

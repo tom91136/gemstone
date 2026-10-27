@@ -9,8 +9,6 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 /** NVIDIA integer semantics, written once against an [[Algebra]]: executed lane by lane and rendered for description.
   * The operation is matched once per instruction, and each case expands into its own kernel.
   */
-// enum-dispatch arms must stay lexical to inline into staged kernels
-@SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
 private[isa] object IntegerSemantics {
 
   inline def move[V, R](
@@ -1530,19 +1528,6 @@ private[isa] object IntegerSemantics {
   ): R =
     sinks.test(destination, source)(response =>
       algebra.notEqual(algebra.and(response, algebra.literal(1L)), algebra.literal(0L))
-    )
-
-  /** The arrivals an mbarrier token's phase still awaited: 2^20 less the count held from bit 43. */
-  inline def pendingArrivals[V, R](inline algebra: Algebra[V])(
-      inline sinks: NvidiaSinks[V, R],
-      destination: Register,
-      token: Value
-  ): R =
-    sinks.unary(destination, token)(state =>
-      algebra.subtract(
-        algebra.literal(1L << 20),
-        algebra.and(algebra.shiftRightLogical(state, algebra.literal(43L)), algebra.literal(0xfffffL))
-      )
     )
 
   /** A cluster cancellation response's CTA coordinate on `axis`, from its low and high words. */

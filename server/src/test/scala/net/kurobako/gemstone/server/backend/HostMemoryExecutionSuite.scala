@@ -237,7 +237,10 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       List(0x1000L -> encoded(73, 4), 0x2000L -> encoded(0, 4)),
       beforeSync = (sync, _) => { syncs += sync; Map.empty },
       afterExecution = (service, allocations) =>
-        assertEquals(service.read(allocations(0x2000L), 0L, 4).map(_.toList), Right(encoded(73, 4).toList))
+        assertEquals(
+          service.read(AllocationRange(allocations(0x2000L), 0L, 4)).map(_.toList),
+          Right(encoded(73, 4).toList)
+        )
     )
     assertEquals(reads, Vector.empty)
     assertEquals(writes, Map.empty)

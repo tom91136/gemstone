@@ -3,9 +3,11 @@ package net.kurobako.gemstone.isa.spirv
 import Op.*
 import OpBuilder.*
 import VMInvocation.*
+import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 /** SPV_KHR_cooperative_matrix and SPV_NV_cooperative_matrix. Every invocation of a matrix's scope holds the whole
@@ -16,104 +18,105 @@ import net.kurobako.gemstone.vm.*
 private object CooperativeMatrixOps {
   import Operand.*
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.CooperativeMatrixLengthKHR(t, d, typeOrValue) => length(site, id(t), id(d), id(typeOrValue))
-    case Instruction.CooperativeMatrixLengthNV(t, d, typeOrValue)  => length(site, id(t), id(d), id(typeOrValue))
-    case Instruction.CooperativeMatrixLoadKHR(t, d, pointer, layout, stride, _) =>
-      matrix(site, id(t), "OpCooperativeMatrixLoadKHR")(shape =>
-        load(site, id(t), id(d), shape, id(pointer), Left(id(layout)), stride.map(id(_)))
-      )
-    case Instruction.CooperativeMatrixLoadNV(t, d, pointer, stride, columnMajor, _) =>
-      matrix(site, id(t), "OpCooperativeMatrixLoadNV")(shape =>
-        load(site, id(t), id(d), shape, id(pointer), Right(id(columnMajor)), Some(id(stride)))
-      )
-    case Instruction.CooperativeMatrixStoreKHR(pointer, source, layout, stride, _) =>
-      matrix(site, site.program.valueType(id(source)), "OpCooperativeMatrixStoreKHR")(shape =>
-        store(site, shape, id(pointer), id(source), Left(id(layout)), stride.map(id(_)))
-      )
-    case Instruction.CooperativeMatrixStoreNV(pointer, source, stride, columnMajor, _) =>
-      matrix(site, site.program.valueType(id(source)), "OpCooperativeMatrixStoreNV")(shape =>
-        store(site, shape, id(pointer), id(source), Right(id(columnMajor)), Some(id(stride)))
-      )
-    // SPV_NV_cooperative_matrix2's use conversion keeps every component in place; its transposition swaps rows and
-    // columns
+  def lower(using site: Site): PartialFunction[Instruction, Op] = {
+    case Instruction.CooperativeMatrixLengthKHR(t, d, typeOrValue)          => length(ResultIds(t, d), id(typeOrValue))
+    case Instruction.CooperativeMatrixLengthNV(t, d, typeOrValue)           => length(ResultIds(t, d), id(typeOrValue))
+    case instruction @ Instruction.CooperativeMatrixLoadKHR(resultType = t) =>
+      access(instruction, id(t))
+    case instruction @ Instruction.CooperativeMatrixLoadNV(resultType = t) =>
+      access(instruction, id(t))
+    case instruction @ Instruction.CooperativeMatrixStoreKHR(src = source) =>
+      access(instruction, site.program.valueType(id(source)))
+    case instruction @ Instruction.CooperativeMatrixStoreNV(src = source) =>
+      access(instruction, site.program.valueType(id(source)))
     case Instruction.CooperativeMatrixConvertNV(t, d, source) =>
-      matrix(site, id(t), "OpCooperativeMatrixConvertNV")(_ =>
-        step((execution, _) => transfer(execution.values, id(source), id(d), id(t)))
-      )
+      matrix(id(t), "OpCooperativeMatrixConvertNV")(_ => CopyOp(id(source), id(d), id(t)))
     case Instruction.CooperativeMatrixTransposeNV(t, d, source) =>
-      matrix(site, site.program.valueType(id(source)), "OpCooperativeMatrixTransposeNV")(shape =>
-        step((execution, _) =>
-          bits(execution.values, id(source)).map(lanes =>
-            execution.values.update(
-              id(d),
-              VMValue.Bits(
-                id(t),
-                Array.tabulate(lanes.length)(lane => lanes((lane % shape.rows) * shape.columns + lane / shape.rows))
-              )
-            )
-          )
-        )
+      matrix(site.program.valueType(id(source)), "OpCooperativeMatrixTransposeNV")(shape =>
+        TransposeOp(id(source), rows = shape.columns, columns = shape.rows, id(d), id(t))
       )
     case Instruction.BitCastArrayQCOM(t, d, source) =>
-      val program = site.program
-      step((execution, _) =>
-        execution.values.get(id(source)).toRight(undefined(id(source))).flatMap(program.encode(_))
-          .flatMap(program.decode(id(t), _)).map(execution.values.update(id(d), _))
-      )
+      lowered(for {
+        origin <- scalarArray(site.program, site.program.valueType(id(source)))
+        result <- scalarArray(site.program, id(t))
+      } yield BitCastArray(id(source), origin._1, origin._2, id(d), result._1, result._2, id(t)))
     case Instruction.ExtractSubArrayQCOM(t, d, source, index) =>
-      lowered(site.program.scalarLeafCount(id(t)).map { count =>
-        step { (execution, _) =>
-          val values = execution.values
-          for {
-            lanes <- bits(values, id(source))
-            start <- scalar(values, id(index)).map(_.toInt)
-            _     <- Either.cond(
-              start >= 0 && start + count <= lanes.length,
-              (),
-              Fault.InvalidRequest(s"OpExtractSubArrayQCOM range $start + $count exceeds ${lanes.length} elements")
-            )
-          } yield values.update(id(d), VMValue.Bits(id(t), lanes.slice(start, start + count)))
-        }
-      })
+      lowered(site.program.scalarLeafCount(id(t)).map(_ => SubArrayExtract(id(source), id(index), id(d), id(t))))
     case Instruction.CompositeExtractCoopMatQCOM(t, d, source) =>
-      matrix(site, site.program.valueType(id(source)), "OpCompositeExtractCoopMatQCOM")(shape =>
-        lowered(lines(site, shape, id(t)).map { (count, componentBits, elementBits) =>
-          step { (execution, _) =>
-            bits(execution.values, id(source)).map { lanes =>
-              val lane = execution.invocation.subgroupLocal
-              val line = Array.tabulate(lineLength(shape))(at =>
-                if (lane >= lineCount(shape)) 0L
-                else lanes(if (shape.use == 1L) at * shape.columns + lane else lane * shape.columns + at)
-              )
-              execution.values.update(id(d), VMValue.Bits(id(t), packLine(line, count, componentBits, elementBits)))
-            }
-          }
+      matrix(site.program.valueType(id(source)), "OpCompositeExtractCoopMatQCOM")(shape =>
+        lowered(lines(shape, id(t)).map { (count, componentBits, elementBits) =>
+          LineExtract(id(source), shape, count, componentBits, elementBits, id(d), id(t))
         })
       )
     case Instruction.CompositeConstructCoopMatQCOM(t, d, source) =>
-      matrix(site, id(t), "OpCompositeConstructCoopMatQCOM")(shape =>
-        lowered(lines(site, shape, site.program.valueType(id(source))).map { (_, componentBits, elementBits) =>
-          Dynamic { (execution, _) =>
-            bits(execution.values, id(source)).flatMap(lanes =>
-              suspend(
-                execution,
-                VMCollectives.Request(
-                  VMCollectives.Kind.MatrixRows,
-                  _,
-                  _,
-                  Scope.Subgroup,
-                  VMCollectives.Payload.Value(id(t), id(d), VMValue.Bits(id(t), lanes)),
-                  selector =
-                    Vec(shape.rows.toLong, shape.columns.toLong, shape.use, componentBits.toLong, elementBits.toLong)
-                )
-              )
-            )
-          }
+      matrix(id(t), "OpCompositeConstructCoopMatQCOM")(shape =>
+        lowered(lines(shape, site.program.valueType(id(source))).map { (_, componentBits, elementBits) =>
+          LineConstruct(
+            id(source),
+            id(d),
+            id(t),
+            Vec(shape.rows.toLong, shape.columns.toLong, shape.use, componentBits.toLong, elementBits.toLong)
+          )
         })
       )
-    case instruction @ Instruction.CooperativeMatrixMulAddKHR(t, _, a, b, c, _) => mulAdd(site, instruction, t, a, b, c)
-    case instruction @ Instruction.CooperativeMatrixMulAddNV(t, _, a, b, c)     => mulAdd(site, instruction, t, a, b, c)
+    case Instruction.CooperativeMatrixPerElementOpNV(t, d, source, function, operands) =>
+      perElement(ResultIds(t, d), id(source), id(function), operands.map(id(_)))
+    case Instruction.CooperativeMatrixReduceNV(t, d, source, reduce, combine) =>
+      reduction(ResultIds(t, d), id(source), unsigned(reduce), id(combine))
+    case instruction @ Instruction.CooperativeMatrixMulAddKHR(t, _, a, b, c, _) => mulAdd(instruction, t, a, b, c)
+    case instruction @ Instruction.CooperativeMatrixMulAddNV(t, _, a, b, c)     => mulAdd(instruction, t, a, b, c)
+  }
+
+  private def scalarArray(program: VMProgram, array: Int): Either[Fault, (Int, Int in 1 ~ 8)] =
+    program.runtimeType(array) match {
+      case Some(RuntimeType.Array(element, count)) => program.scalarMemoryWidth(element).map((count.toInt, _))
+      case _                                       => Left(Fault.InvalidRequest(s"%$array is not an array of scalars"))
+    }
+
+  private class BitCastArray(
+      source: Int,
+      have: Int,
+      from: Int in 1 ~ 8,
+      target: Int,
+      count: Int,
+      to: Int in 1 ~ 8,
+      typeId: Int
+  ) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.bitCast(Execute, InvocationMachine(execution))(source, have, from, target, count, to, typeId)
+  }
+
+  private class SubArrayExtract(source: Int, index: Int, target: Int, typeId: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.subArray(InvocationMachine(execution))(source, index, target, typeId)
+  }
+
+  private class LineExtract(
+      source: Int,
+      shape: CooperativeMatrix,
+      count: Int,
+      componentBits: Int,
+      elementBits: Int,
+      target: Int,
+      typeId: Int
+  ) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CooperativeSemantics.ownLine(Execute, InvocationMachine(execution))(
+        source,
+        shape.rows,
+        shape.columns,
+        shape.use.toInt,
+        componentBits,
+        elementBits,
+        count,
+        target,
+        typeId
+      )
+  }
+
+  private class LineConstruct(source: Int, dest: Int, resultType: Int, selector: Vec[Long]) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CooperativeSemantics.construct(InvocationMachine(execution))(source, dest, resultType, selector)
   }
 
   /** The rows of an A or accumulator matrix, or columns of a B matrix, that SPV_QCOM_cooperative_matrix_conversion
@@ -124,7 +127,7 @@ private object CooperativeMatrixOps {
   def lineLength(shape: CooperativeMatrix): Int = if (shape.use == 1L) shape.rows else shape.columns
 
   /** The array's length and the bits of a matrix component and of an array element, which packs whole components. */
-  private def lines(site: Site, shape: CooperativeMatrix, array: Int): Either[Fault, (Int, Int, Int)] = {
+  private def lines(shape: CooperativeMatrix, array: Int)(using site: Site): Either[Fault, (Int, Int, Int)] = {
     val program = site.program
     (program.runtimeType(array), program.scalarMemoryWidth(shape.component)) match {
       case (Some(RuntimeType.Array(element, count)), Right(component)) =>
@@ -140,142 +143,146 @@ private object CooperativeMatrixOps {
     }
   }
 
-  /** A line's components packed, lowest first, into `count` array elements. */
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def packLine(line: Array[Long], count: Int, componentBits: Int, elementBits: Int): Array[Long] = {
-    val each = elementBits / componentBits
-    val mask = if (componentBits == 64) -1L else (1L << componentBits) - 1L
-    Array.tabulate(count) { element =>
-      var word = 0L
-      var part = 0
-      while (part < each) {
-        word |= (line(element * each + part) & mask) << (part * componentBits)
-        part += 1
-      }
-      word
-    }
-  }
-
   def unpackLine(elements: Array[Long], length: Int, componentBits: Int, elementBits: Int): Array[Long] = {
     val each = elementBits / componentBits
     val mask = if (componentBits == 64) -1L else (1L << componentBits) - 1L
     Array.tabulate(length)(at => (elements(at / each) >>> ((at % each) * componentBits)) & mask)
   }
 
-  private def matrix(site: Site, typeId: Int, opcode: String)(op: CooperativeMatrix => Op): Op =
+  private def matrix(typeId: Int, opcode: String)(using site: Site)(op: CooperativeMatrix => Op): Op =
     site.program.cooperativeMatrices.get(typeId)
       .fold(Fail(Fault.InvalidRequest(s"$opcode type %$typeId is not a cooperative matrix")))(op)
 
+  private def access(instruction: Instruction, typeId: Int)(using site: Site): Op =
+    matrix(typeId, instruction.opcode.raw)(shape =>
+      lowered(site.program.scalarMemoryWidth(shape.component).map(MatrixOp(instruction, shape.rows, shape.columns, _)))
+    )
+
   // OpCooperativeMatrixLengthKHR names a type; Intel's compilers also pass a matrix value
-  private def length(site: Site, resultType: Int, dest: Int, operand: Int): Op = {
+  private def length(ids: ResultIds, operand: Int)(using site: Site): Op = {
     val program = site.program
     program.cooperativeMatrices.get(operand).orElse(program.cooperativeMatrices.get(program.valueType(operand))).fold(
       Fail(Fault.InvalidRequest(s"cooperative matrix length operand %$operand is not a cooperative matrix"))
-    ) { shape =>
-      val count = (shape.rows * shape.columns).toLong
-      step((execution, _) => Right(execution.values.updateScalar(dest, resultType, count)))
+    )(shape => LengthOp((shape.rows * shape.columns).toLong, ids.dest, ids.resultType))
+  }
+
+  private class LengthOp(count: Long, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CooperativeSemantics.length(InvocationMachine(execution))(count, dest, resultType)
+  }
+
+  private class CopyOp(source: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.copy(InvocationMachine(execution))(source, dest, resultType)
+  }
+
+  private class TransposeOp(source: Int, rows: Int, columns: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      MatrixSemantics.transpose(InvocationMachine(execution))(source, rows, columns, dest, resultType)
+  }
+
+  private class MatrixOp(instruction: Instruction, rows: Int, columns: Int, width: Int in 1 ~ 8) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CooperativeSemantics.matrix(Execute, InvocationMachine(execution))(instruction, rows, columns, width)
+  }
+
+  private def returns(function: Function, component: Int)(using site: Site): Boolean =
+    site.program.module.instructions(function.start) match {
+      case Instruction.Function(resultType = resultType) => id(resultType) == component
+      case _                                             => false
     }
-  }
 
-  /** The component width in bytes, and the bytes a stride counts. */
-  private def units(site: Site, shape: CooperativeMatrix, pointer: Int): Either[Fault, (Int in 1 ~ 8, Long)] = {
-    val program = site.program
-    program.scalarMemoryWidth(shape.component).map { width =>
-      val pointee = program.runtimeType(program.valueType(pointer)) match {
-        case Some(RuntimeType.Pointer(_, element)) if program.vulkan => program.typeSize(element).toLong
-        case _                                                       => width.toLong
-      }
-      (width, if (pointee > 0L) pointee else width.toLong)
-    }
-  }
-
-  /** The byte offset of each component, row-major, from the layout and stride ids, each read by `read`. */
-  private inline def offsets(
-      shape: CooperativeMatrix,
-      layout: Either[Int, Int],
-      stride: Option[Int],
-      width: Int,
-      unit: Long
-  )(inline read: Int => Either[Fault, Long]): Either[Fault, Array[Long]] = for {
-    columnMajor <- layout.fold(
-      id =>
-        read(id).flatMap(value =>
-          Either.cond(
-            value == 0L || value == 1L,
-            value == 1L,
-            Fault.Unsupported(s"cooperative matrix layout $value is not RowMajorKHR or ColumnMajorKHR")
-          )
-        ),
-      id => read(id).map(_ != 0L)
-    )
-    spacing <- stride.fold[Either[Fault, Long]](Right((if (columnMajor) shape.rows else shape.columns).toLong))(read)
-  } yield Array.tabulate(shape.rows * shape.columns) { lane =>
-    val (row, column)  = (lane / shape.columns, lane % shape.columns)
-    val (major, minor) = if (columnMajor) (column, row) else (row, column)
-    major * spacing * unit + minor.toLong * width
-  }
-
-  /** The component offsets, fixed as the site lowers where its layout and stride are constants, else read as the
-    * instruction runs.
-    */
-  private def placement(
-      site: Site,
-      shape: CooperativeMatrix,
-      layout: Either[Int, Int],
-      stride: Option[Int],
-      width: Int,
-      unit: Long
-  ): InvocationValues => Either[Fault, Array[Long]] = {
-    val constants = site.program.constants
-    offsets(shape, layout, stride, width, unit)(id =>
-      constants.get(id).collect { case VMValue.Bits(_, Array(value)) => value }.toRight(undefined(id))
-    ).fold(
-      _ => values => offsets(shape, layout, stride, width, unit)(scalar(values, _)),
-      places => _ => Right(places)
-    )
-  }
-
-  private def load(
-      site: Site,
-      resultType: Int,
-      dest: Int,
-      shape: CooperativeMatrix,
-      pointer: Int,
-      layout: Either[Int, Int],
-      stride: Option[Int]
-  ): Op = lowered(units(site, shape, pointer).map { (width, unit) =>
-    val place = placement(site, shape, layout, stride, width, unit)
-    step { (execution, memory) =>
-      val values = execution.values
-      for {
-        base   <- address(values, pointer)
-        places <- place(values)
-        lanes  <- MatrixAccess(base, places, width, sparse = false).read(memory, Array.ofDim[Long](places.length))
-      } yield values.update(dest, VMValue.Bits(resultType, lanes))
-    }
-  })
-
-  private def store(
-      site: Site,
-      shape: CooperativeMatrix,
-      pointer: Int,
+  private def perElement(
+      ids: ResultIds,
       source: Int,
-      layout: Either[Int, Int],
-      stride: Option[Int]
-  ): Op = lowered(units(site, shape, pointer).map { (width, unit) =>
-    val place = placement(site, shape, layout, stride, width, unit)
-    step { (execution, memory) =>
-      val values = execution.values
-      for {
-        base   <- address(values, pointer)
-        lanes  <- bits(values, source)
-        places <- place(values)
-        _      <- MatrixAccess(base, places, width, sparse = false).write(memory, lanes)
-      } yield ()
+      function: Int,
+      operands: Vec[Int]
+  )(using site: Site): Op = {
+    val program  = site.program
+    val matrices = program.cooperativeMatrices
+    (matrices.get(program.valueType(source)), matrices.get(ids.resultType), program.functions.get(function)) match {
+      case (Some(shape), Some(result), Some(callee))
+          if shape == result && callee.parameters.size == 3 + operands.size && returns(callee, shape.component) =>
+        val same    = Vec.tabulate(operands.size)(at => matrices.get(program.valueType(operands(at))).contains(shape))
+        val fixed   = Array.tabulate(3 + operands.size)(at => if (at < 3 || same(at - 3)) -1 else operands(at - 3))
+        val sources = source +: operands.indices.filter(same(_)).map(operands(_))
+        PerElementOp(
+          Sweep(callee, shape.component, fixed, shape.rows * shape.columns),
+          shape,
+          source,
+          operands.toArray,
+          sources.toArray,
+          ids.dest,
+          ids.resultType
+        )
+      case _ => Fail(Fault.InvalidRequest(
+          s"OpCooperativeMatrixPerElementOpNV needs a matrix of its result type and a function of %$function " +
+            "returning its component that takes its row, column and component, then the operands"
+        ))
     }
-  })
+  }
 
-  private def mulAdd(site: Site, instruction: Instruction, resultType: Operand, a: Operand, b: Operand, c: Operand)
+  private class PerElementOp(
+      sweep: Sweep,
+      shape: CooperativeMatrix,
+      source: Int,
+      operands: Array[Int],
+      sources: Array[Int],
+      dest: Int,
+      resultType: Int
+  ) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CooperativeSemantics.perElement(Execute, InvocationMachine(execution))(
+        sweep,
+        shape.rows,
+        shape.columns,
+        source,
+        operands,
+        sources,
+        dest,
+        resultType
+      )
+  }
+
+  private def reduction(ids: ResultIds, source: Int, mask: Long, combine: Int)(using site: Site): Op = {
+    val program  = site.program
+    val matrices = program.cooperativeMatrices
+    (matrices.get(program.valueType(source)), matrices.get(ids.resultType), program.functions.get(combine)) match {
+      case (Some(shape), Some(result), Some(callee))
+          if result.component == shape.component && result.use == shape.use && callee.parameters.size == 2 &&
+            returns(callee, shape.component) && aligned(shape, result, mask) =>
+        Reduction.of(shape.rows, shape.columns, mask, result.rows * result.columns) match {
+          case Left(message)    => Fail(Fault.InvalidRequest(s"OpCooperativeMatrixReduceNV $message"))
+          case Right(reduction) =>
+            ReduceOp(
+              Sweep(callee, shape.component, Array(-1, -1), reduction.calls),
+              reduction,
+              source,
+              ids.dest,
+              ids.resultType
+            )
+        }
+      case _ => Fail(Fault.InvalidRequest(
+          s"OpCooperativeMatrixReduceNV needs matrices of one component and a function of %$combine " +
+            "combining two of them"
+        ))
+    }
+  }
+
+  private def aligned(shape: CooperativeMatrix, result: CooperativeMatrix, mask: Long): Boolean = mask match {
+    case Reduction.Row    => result.rows == shape.rows
+    case Reduction.Column => result.columns == shape.columns
+    case _                => true
+  }
+
+  private class ReduceOp(sweep: Sweep, reduction: Reduction, source: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CooperativeSemantics.reduce(InvocationMachine(execution))(sweep, reduction, source, dest, resultType)
+  }
+
+  private def mulAdd(instruction: Instruction, resultType: Operand, a: Operand, b: Operand, c: Operand)(using
+      site: Site
+  )
       : Op = {
     val matrices = site.program.cooperativeMatrices
     val shapes   = Vec(a, b, c).map(operand => matrices.get(site.program.valueType(id(operand))))

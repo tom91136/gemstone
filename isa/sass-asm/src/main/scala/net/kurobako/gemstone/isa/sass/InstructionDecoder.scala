@@ -11,7 +11,7 @@ import scala.collection.mutable
 
 /** Decodes instruction words through their recovered FORMAT trees directly to structural operands. */
 object InstructionDecoder {
-  private val RegisterBanks      = Vec("UR", "SB", "R", "B")
+  private lazy val RegisterBanks = SassDomains.banks
   private val ModifierSeparators = Array(';', ',', '*', '.', '/', ' ', '\t', '\r', '\n', '\f', '\u000b')
 
   private enum FormatPiece {
@@ -98,6 +98,7 @@ object InstructionDecoder {
     import NVDisasm.Syntax.*
     private val form      = original.form
     private val candidate = FieldDecoder.refine(database, original)
+    private val encoding  = NVDisasm.Encoding(database, form)
 
     private def attribute(field: Field, name: String): BigInt = candidate.bindings.get(s"${field.binding}@$name")
       .orElse(candidate.bindings.get(s"${form.encodedBinding(field)}@$name")).getOrElse(BigInt(0))
@@ -126,9 +127,10 @@ object InstructionDecoder {
     private def symbol(field: Field, value: BigInt): Option[String] = {
       val valid     = database.vocabulary(field).filter(_.value == value).map(_.name).filterNot(_.startsWith("INVALID"))
       val preferred = field.category match {
-        case NVDisasm.FieldKind.SpecialRegister => valid.find(_.startsWith("SR_")).orElse(valid.lastOption)
-        case category if category.isPredicate   => valid.find(_.endsWith("T")).orElse(valid.headOption)
-        case category if category.isRegister    => valid.minByOption(_.length)
+        case NVDisasm.FieldKind.SpecialRegister =>
+          valid.find(_.startsWith("SR_")).orElse(valid.find(_.startsWith("SR"))).orElse(valid.lastOption)
+        case category if category.isPredicate => valid.find(_.endsWith("T")).orElse(valid.headOption)
+        case category if category.isRegister  => valid.minByOption(_.length)
         // legacy condition tests list flag aliases (ZFT, LEG, U) before the comparison names nvdisasm prints
         case NVDisasm.FieldKind.Vocabulary("Test") => valid.lastOption
         case _                                     =>
@@ -173,7 +175,9 @@ object InstructionDecoder {
           symbol(field, value).map(Operand.Symbol.apply)
             .toRight(illegal(s"illegal condition selector $value (${field.binding})"))
         case NVDisasm.FieldKind.BarrierRegister | NVDisasm.FieldKind.Scoreboard =>
-          symbol(field, value).flatMap(register(_)).toRight(unsupported(s"unknown register $value (${field.binding})"))
+          SassDomains.field(database, form, field.binding).flatMap(_.register(value)).flatMap((bank, index) =>
+            index.refine[Int in 0 ~ 255].toOption.map(Operand.Register(RegisterBank.fromSpelling(bank), _))
+          ).toRight(unsupported(s"unknown register $value (${field.binding})"))
         case NVDisasm.FieldKind.CbuState =>
           val name = symbol(field, value).getOrElse(value.toString)
           Right(register(name).getOrElse(Operand.Symbol(name)))
@@ -289,11 +293,13 @@ object InstructionDecoder {
 
     /** A selector field after `/` qualifies the preceding operand once an operand has been produced. */
     private def slashSelector(pieces: Vec[FormatPiece], index: Int, allowCC: Boolean): Boolean =
-      afterSlash(pieces, index) && pieces.take(index).exists {
-        case FormatPiece.Field(previous, Some(_)) => isOperandValue(previous, allowCC)
-        case group: FormatPiece.Group             => operandValue(group).nonEmpty
-        case _                                    => false
-      }
+      afterSlash(pieces, index) && pieces.take(index).exists(qualifiesSelector(_, allowCC))
+
+    private def qualifiesSelector(piece: FormatPiece, allowCC: Boolean): Boolean = piece match {
+      case FormatPiece.Field(previous, Some(_)) => isOperandValue(previous, allowCC)
+      case group: FormatPiece.Group             => operandValue(group).nonEmpty
+      case _                                    => false
+    }
 
     private def operandValue(piece: FormatPiece): Vec[Operand] = piece match {
       case FormatPiece.Field(_, value)           => value.toVec
@@ -391,11 +397,12 @@ object InstructionDecoder {
           else Vec(address)
         case _ => values.filterNot(_ == Operand.SpecialRegister(SpecialRegister.desc))
       }
+      val precededBySelector = chunk.scanLeft(false)((seen, piece) => seen || qualifiesSelector(piece, allowCC))
       // nvdisasm conveys exp_desc through the printed `desc[URx]` rather than a selector.
       val selectors = chunk.zipWithIndex.collect {
         case (FormatPiece.Field(field, _), index) if field.kind != "EXP_DESC" =>
           raw(field).flatMap(symbol(field, _)).filter(value =>
-            slashSelector(chunk, index, allowCC) ||
+            (afterSlash(chunk, index) && precededBySelector(index)) ||
               (field.category == NVDisasm.FieldKind.OptionalConditionCode && value == "CC") ||
               field.category == NVDisasm.FieldKind.PartitionSelector ||
               field.category == NVDisasm.FieldKind.InstructionSelector
@@ -438,7 +445,7 @@ object InstructionDecoder {
       rawBindings = form.declared.foldLeft(candidate.bindings) { (bindings, field) =>
         raw(field).fold(bindings)(value => bindings.updated(field.binding, value))
       }
-      _ <- Legality.check(database, form, Legality.completeBindings(form, rawBindings))
+      _ <- Legality.check(encoding, Legality.completeBindings(form, rawBindings))
       _ <- Either.cond(
         candidate.issues.forall(_.structural),
         (),

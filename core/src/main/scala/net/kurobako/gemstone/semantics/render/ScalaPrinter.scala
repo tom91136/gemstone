@@ -89,6 +89,15 @@ private[gemstone] object ScalaPrinter {
     case _                    => false
   }
 
+  /** `body` as the statements of a braced block, one a line, indented. */
+  private def block(body: Vec[Term.Step]): String = {
+    val lines = body.map { step =>
+      val statement = show(step.value).replace("\n", "\n  ")
+      if (step.name.isEmpty) statement else s"val ${identifier(step.name)} = $statement"
+    }
+    lines.mkString("{\n  ", "\n  ", "\n}")
+  }
+
   def show(term: Term): String = {
     def atom(term: Term): String = term match {
       case _ if selection(term) => s"(${show(term)})"
@@ -130,7 +139,9 @@ private[gemstone] object ScalaPrinter {
         s"${operand(operator, left, Side.Left)} $operator ${operand(operator, right, Side.Right)}"
       case Term.Select(condition, whenTrue, whenFalse) =>
         s"if (${show(condition)}) ${show(whenTrue)} else ${show(whenFalse)}"
-      case Term.Let(_, _, _) => show(term.expand)
+      case Term.Let(_, _, _)                 => show(term.expand)
+      case Term.Each(variable, source, body) => s"for (${identifier(variable)} <- ${show(source)}) ${block(body)}"
+      case Term.When(condition, body)        => s"if (${show(condition)}) ${block(body)}"
     }
   }
 }

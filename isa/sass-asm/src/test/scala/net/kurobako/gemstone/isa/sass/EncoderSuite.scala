@@ -35,7 +35,11 @@ class EncoderSuite extends munit.FunSuite {
         )
       )
     )
-    val bytes = Encoder.encode(database(form), form, "TEST", Map("A" -> BigInt(5), "B" -> BigInt(6))).toOption.get
+    val bytes = Encoder.encode(
+      NVDisasm.Encoding(database(form), form),
+      "TEST",
+      Map("A" -> BigInt(5), "B" -> BigInt(6))
+    ).toOption.get
     assertEquals(word(bytes), BigInt(0x035a))
     val candidate = FieldDecoder.candidates(database(form), word(bytes)).toOption.get.head
     assertEquals(candidate.bindings("A"), BigInt(5))
@@ -61,8 +65,7 @@ class EncoderSuite extends munit.FunSuite {
       )
     )
     val encoded = Encoder.encode(
-      database(form),
-      form,
+      NVDisasm.Encoding(database(form), form),
       "TEST",
       Map("A" -> BigInt(2), "B" -> BigInt(4)),
       preserved = Some(BigInt("ffff", 16))
@@ -114,8 +117,7 @@ class EncoderSuite extends munit.FunSuite {
       )
     )
     val encoded = Encoder.encode(
-      database(form),
-      form,
+      NVDisasm.Encoding(database(form), form),
       "TEST",
       Map(
         "twice"     -> BigInt(3),
@@ -147,9 +149,21 @@ class EncoderSuite extends munit.FunSuite {
         )
       )
     )
-    assert(Encoder.encode(database(form), form, "TEST", Map("A" -> BigInt(16), "B" -> BigInt(4))).isLeft)
-    assert(Encoder.encode(database(form), form, "TEST", Map("A" -> BigInt(1), "B" -> BigInt(3))).isLeft)
-    assert(Encoder.encode(database(form), form, "OTHER", Map("A" -> BigInt(1), "B" -> BigInt(4))).isLeft)
+    assert(Encoder.encode(
+      NVDisasm.Encoding(database(form), form),
+      "TEST",
+      Map("A" -> BigInt(16), "B" -> BigInt(4))
+    ).isLeft)
+    assert(Encoder.encode(
+      NVDisasm.Encoding(database(form), form),
+      "TEST",
+      Map("A" -> BigInt(1), "B" -> BigInt(3))
+    ).isLeft)
+    assert(Encoder.encode(
+      NVDisasm.Encoding(database(form), form),
+      "OTHER",
+      Map("A" -> BigInt(1), "B" -> BigInt(4))
+    ).isLeft)
   }
 
   test("preserved lookup bits are accepted only when current inputs select that output") {
@@ -177,15 +191,23 @@ class EncoderSuite extends munit.FunSuite {
       )
     )
     val db = database(lookupForm, Vec(table))
-    assert(Encoder.encode(db, lookupForm, "TEST", Map("input" -> BigInt(3))).isLeft)
+    assert(Encoder.encode(NVDisasm.Encoding(db, lookupForm), "TEST", Map("input" -> BigInt(3))).isLeft)
     val preserved = BigInt("802a", 16)
     assertEquals(
-      Encoder.encode(db, lookupForm, "TEST", Map("input" -> BigInt(3)), Some(preserved)).map(word(_)),
+      Encoder.encode(
+        NVDisasm.Encoding(db, lookupForm),
+        "TEST",
+        Map("input" -> BigInt(3)),
+        Some(preserved)
+      ).map(word(_)),
       Right(preserved)
     )
-    assertEquals(Encoder.encode(db, lookupForm, "TEST", Map.empty, Some(preserved)).map(word(_)), Right(preserved))
-    assert(Encoder.encode(db, lookupForm, "TEST", Map("input" -> BigInt(4)), Some(preserved)).isLeft)
-    assert(Encoder.encode(db, lookupForm, "TEST", Map.empty, Some(BigInt("803a", 16))).isLeft)
+    assertEquals(
+      Encoder.encode(NVDisasm.Encoding(db, lookupForm), "TEST", Map.empty, Some(preserved)).map(word(_)),
+      Right(preserved)
+    )
+    assert(Encoder.encode(NVDisasm.Encoding(db, lookupForm), "TEST", Map("input" -> BigInt(4)), Some(preserved)).isLeft)
+    assert(Encoder.encode(NVDisasm.Encoding(db, lookupForm), "TEST", Map.empty, Some(BigInt("803a", 16))).isLeft)
   }
 
   test("relaxed constant fields preserve their original encoding") {
@@ -198,7 +220,12 @@ class EncoderSuite extends munit.FunSuite {
         NVDisasm.Assignment("reserved", Vec(4, 5, 6, 7), Expression.Constant(BigInt(1), relaxed = true))
       )
     )
-    val encoded = Encoder.encode(database(relaxed), relaxed, "TEST", Map.empty, Some(BigInt("7a", 16))).toOption.get
+    val encoded = Encoder.encode(
+      NVDisasm.Encoding(database(relaxed), relaxed),
+      "TEST",
+      Map.empty,
+      Some(BigInt("7a", 16))
+    ).toOption.get
     assertEquals(word(encoded), BigInt("7a", 16))
   }
 
@@ -212,7 +239,7 @@ class EncoderSuite extends munit.FunSuite {
         NVDisasm.Assignment("A", Vec(3, 4, 5, 6), Expression.Reference("A", None, relaxed = false))
       )
     )
-    assert(Encoder.encode(database(overlapping), overlapping, "TEST", Map("A" -> BigInt(0))).isLeft)
+    assert(Encoder.encode(NVDisasm.Encoding(database(overlapping), overlapping), "TEST", Map("A" -> BigInt(0))).isLeft)
   }
 
   test("invalid field positions are rejected before computing the assigned mask") {
@@ -223,7 +250,7 @@ class EncoderSuite extends munit.FunSuite {
         Vec(opcodeValue),
         Vec(opcodeField, NVDisasm.Assignment("A", positions, Expression.Constant(BigInt(0), relaxed = false)))
       )
-      assert(Encoder.encode(database(form), form, "TEST", Map.empty).isLeft)
+      assert(Encoder.encode(NVDisasm.Encoding(database(form), form), "TEST", Map.empty).isLeft)
     }
   }
 }

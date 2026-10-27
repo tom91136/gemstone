@@ -17,10 +17,9 @@ class JournalSuite extends munit.FunSuite {
   test("archive preserves sequenced frames and normalises client identities") {
     temporary { file =>
       capture(file) { writer =>
-        val generic = writer.connection(client)
-        for (_ <- 0 until 2) { generic.request(execution()); generic.response(response()) }
-        // the writer's own close runs on every path
-        generic.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(writer.connection(client)) { generic =>
+          for (_ <- 0 until 2) { generic.request(execution()); generic.response(response()) }
+        }
         writer.clientClosed(client)
       }
       Using.resource(Journal.open(file)) { reader =>
@@ -51,13 +50,11 @@ class JournalSuite extends munit.FunSuite {
       val other = ClientId(9L)
       capture(file) { writer =>
         writer.clientClosed(ClientId(7L))
-        for (owner <- List(client, client, other)) {
-          val connection = writer.connection(owner)
-          // the writer's own close runs on every path
-          connection.request(execution())
-          connection.response(response())
-          connection.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
-        }
+        for (owner <- List(client, client, other))
+          Using.resource(writer.connection(owner)) { connection =>
+            connection.request(execution())
+            connection.response(response())
+          }
         writer.clientClosed(client)
         writer.clientClosed(other)
       }
@@ -96,11 +93,10 @@ class JournalSuite extends munit.FunSuite {
   test("truncated and corrupt archives fail instead of replaying a prefix") {
     temporary { file =>
       capture(file) { w =>
-        // the writer's own close runs on every path
-        val c = w.connection(client)
-        c.request(execution())
-        c.response(response())
-        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(client)) { c =>
+          c.request(execution())
+          c.response(response())
+        }
       }
       val original = Files.readAllBytes(file)
       Using.resource(RandomAccessFile(file.toFile, "rw"))(_.setLength(original.length - 1L))
@@ -115,10 +111,9 @@ class JournalSuite extends munit.FunSuite {
   test("unfinished exchanges and capture limits are explicitly unreplayable") {
     temporary { file =>
       capture(file) { w =>
-        // the writer's own close runs on every path
-        val c = w.connection(client)
-        c.request(execution())
-        c.close(): @SuppressWarnings(Array("baumkuchen:unguarded-close"))
+        Using.resource(w.connection(client)) { c =>
+          c.request(execution())
+        }
       }
       val summary = Journal.inspect(file)
       assert(!summary.replayable)

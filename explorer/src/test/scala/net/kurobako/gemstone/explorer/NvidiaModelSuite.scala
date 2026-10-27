@@ -189,6 +189,34 @@ class NvidiaModelSuite extends munit.FunSuite {
     )
   }
 
+  test("SASS operand slots and encoded fields show the domain of the form") {
+    val (_, bsync) = form(SASSModel, Some("sm_90"), "BSYNC", "bsync_")
+    assertEquals(bsync.operands.find(_.name == "barReg").map(_.detail), Some("B0..B15"))
+    val encoded = bsync.encoding.getOrElse(fail("no encoding")).fields.find(_.name == "barReg").map(_.detail)
+    assertEquals(encoded, Some("BITS_4_19_16_barReg = barReg; B0..B15"))
+    val (_, s2r) = form(SASSModel, Some("sm_90"), "S2R", "s2r_")
+    assertEquals(
+      s2r.operands.find(_.name == "Rd").map(_.detail),
+      Some("R0..R253, RZ")
+    )
+  }
+
+  test("PTX operand slots show the register class by type and the immediates the document limits") {
+    val bfe = entry(PTXModel, None, "bfe").forms.head
+    assertEquals(bfe.syntax.collect { case View.Token.Slot(_, detail) => detail }.head, "modifier .type")
+    assertEquals(bfe.choices.headOption.map(_.name), Some(".type"))
+    val destination = bfe.operands.head.domain.getOrElse(fail("no domain for the destination"))
+    assert(destination.values.exists((name, detail) => name == ".u32" && detail == "32-bit unsigned integer register"))
+    val length = bfe.operands(3).domain.getOrElse(fail("no domain for the length"))
+    assertEquals(length.summary, ".u32 register, immediate 0..255 (integer-arithmetic-instructions-bfe)")
+    val shift = entry(PTXModel, None, "shl").forms.head.operands(2).domain.getOrElse(fail("no domain for the amount"))
+    assert(shift.summary.startsWith(".u32 register"), shift.summary)
+    val load = entry(PTXModel, None, "ld").forms.head.operands.find(_.kind == "address").flatMap(_.domain)
+    assertEquals(load.map(_.summary), Some("address: [reg], [reg+imm], [imm]"))
+    val barrier = entry(PTXModel, None, "bar").forms.flatMap(_.operands).flatMap(_.domain)
+    assert(barrier.exists(_.values.exists((kind, limit) => kind.startsWith("immediate") && limit.startsWith("0..15"))))
+  }
+
   test("SASS forms without a definition say why, from how the VM treats their instances") {
     val (bar, sync) = form(SASSModel, Some("sm_90"), "BAR", "bar__SYNC_II_optionalCount_II")
     assertEquals(SASSModel.unavailable(bar, sync), Unavailable.Mechanics("Lowers to BarrierSync."))
@@ -244,6 +272,35 @@ class NvidiaModelSuite extends munit.FunSuite {
       SASSModel.instances(half.target, half.mnemonic, pair.name).exists(_.forall(_.text.contains(", UR24, "))),
       pair.name
     )
+  }
+
+  test("tcgen05 products, tensor memory claims, release stores and shared locks have machine semantics") {
+    val mnemonics = Set("UTCHMMA", "UTCIMMA", "UTCQMMA", "UTCOMMA", "UTCATOMSWS", "USTGR", "UREDGR", "LDSLK", "STSCUL")
+    val checked   = Vec("sm_35", "sm_37", "sm_100", "sm_101", "sm_103", "sm_110").flatMap { target =>
+      SASSModel.entries(Some(target)).flatMap { entry =>
+        def machine(form: View.Form): Vec[Int] = SASSModel.semanticsOf(entry, form) match {
+          case Semantics.Machine(_) | Semantics.Both(_, _) => Vec(1)
+          case other                                       => fail(s"$target ${entry.mnemonic} ${form.name}: $other")
+        }
+        if (mnemonics(entry.mnemonic)) entry.forms.flatMap(form =>
+          if (form.name.startsWith("utcatomsws_cas_")) Vec.empty[Int] else machine(form)
+        )
+        else Vec.empty[Int]
+      }
+    }
+    assert(checked.size >= 100, checked.size)
+  }
+
+  test("PTX tcgen05.mma products have machine semantics") {
+    Vec("tcgen05.mma", "tcgen05.mma.sp", "tcgen05.mma.ws", "tcgen05.mma.ws.sp").foreach { mnemonic =>
+      val product = entry(PTXModel, None, mnemonic)
+      product.forms.foreach(form =>
+        PTXModel.semanticsOf(product, form) match {
+          case Semantics.Machine(_) | Semantics.Both(_, _) => ()
+          case other                                       => fail(s"$mnemonic ${form.name}: $other")
+        }
+      )
+    }
   }
 
   test("SASS forms whose every instance the encoding tables reject are not modelled") {

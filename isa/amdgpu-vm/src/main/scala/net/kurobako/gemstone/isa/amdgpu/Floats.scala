@@ -11,8 +11,6 @@ import scala.annotation.targetName
   * arithmetic rounds as the JVM does, and binary16 arithmetic rounds its binary32 result. Arithmetic on a NaN returns
   * the first NaN operand quieted.
   */
-// conversions differing only in the destination, mirroring the V_CVT_* mnemonics
-@SuppressWarnings(Array("baumkuchen:numbered-family", "baumkuchen:near-duplicate-code"))
 private[isa] object Floats {
   private inline def bits[T](value: T): Long = toRaw[T](value)
 

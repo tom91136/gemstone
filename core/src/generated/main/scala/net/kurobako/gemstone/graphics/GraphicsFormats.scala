@@ -21,8 +21,6 @@ object GraphicsFormats {
   }
 
   /** Supported storage/view layouts. Metadata cannot be supplied independently of the format. */
-  // the cases are rows of one table, each a distinct value
-  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   enum GraphicsFormat(
       val shaderFormat: GraphicsShaderFormat,
       val texelBytes: Int > 0,

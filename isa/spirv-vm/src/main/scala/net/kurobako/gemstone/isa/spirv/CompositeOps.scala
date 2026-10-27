@@ -2,6 +2,8 @@ package net.kurobako.gemstone.isa.spirv
 
 import LaneOps.*
 import Op.*
+import VMInvocation.*
+import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -11,24 +13,24 @@ import net.kurobako.gemstone.vm.*
 private object CompositeOps {
   import Operand.*
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.CompositeExtract(t, d, composite, indexes) => extract(site, id(t), id(d), id(composite), indexes)
+  def lower(using site: Site): PartialFunction[Instruction, Op] = {
+    case Instruction.CompositeExtract(t, d, composite, indexes) => extract(ResultIds(t, d), id(composite), indexes)
     // a cooperative matrix is constructed from one scalar that fills it
     case Instruction.CompositeConstruct(t, d, Vec(constituent)) if site.program.cooperativeMatrices.contains(id(t)) =>
       val matrix = site.program.cooperativeMatrices(id(t))
-      construct(site, id(t), id(d), Vec.fill(matrix.rows * matrix.columns)(id(constituent)))
-    case Instruction.CompositeConstruct(t, d, constituents) => construct(site, id(t), id(d), constituents.map(id(_)))
+      construct(ResultIds(t, d), Vec.fill(matrix.rows * matrix.columns)(id(constituent)))
+    case Instruction.CompositeConstruct(t, d, constituents)      => construct(ResultIds(t, d), constituents.map(id(_)))
     case Instruction.CompositeConstructReplicateEXT(t, d, value) =>
       VMLoader.constituentCount(site.program.types, id(t)).fold(
         Fail(Fault.InvalidRequest(s"OpCompositeConstructReplicateEXT result type %${id(t)} is not a composite"))
-      )(count => construct(site, id(t), id(d), Vec.fill(count)(id(value))))
+      )(count => construct(ResultIds(t, d), Vec.fill(count)(id(value))))
     case Instruction.CompositeInsert(t, d, source, composite, indexes) =>
-      insert(site, id(t), id(d), id(source), id(composite), indexes)
-    case Instruction.VectorExtractDynamic(t, d, vector, index) => extractDynamic(id(t), id(d), id(vector), id(index))
+      insert(ResultIds(t, d), id(source), id(composite), indexes)
+    case Instruction.VectorExtractDynamic(t, d, vector, index) => extractDynamic(ResultIds(t, d), id(vector), id(index))
     case Instruction.VectorInsertDynamic(t, d, vector, component, index) =>
-      insertDynamic(resultType = id(t), dest = id(d), vector = id(vector), component = id(component), index = id(index))
+      insertDynamic(ResultIds(t, d), vector = id(vector), component = id(component), index = id(index))
     case Instruction.VectorShuffle(t, d, left, right, components) =>
-      shuffle(site, id(t), id(d), id(left), id(right), components)
+      shuffle(ResultIds(t, d), id(left), id(right), components)
   }
 
   /** The first scalar lane and lane count that literal `indexes` select within `typeId`. */
@@ -69,7 +71,7 @@ private object CompositeOps {
     program.scalarLeafCount(current).map(offset -> _)
   }
 
-  private def extract(site: Site, resultType: Int, dest: Int, composite: Int, indexes: Vec[Operand]): Op = {
+  private def extract(ids: ResultIds, composite: Int, indexes: Vec[Operand])(using site: Site): Op = {
     val program = site.program
     val typeId  = program.valueType(composite)
     if (typeId < 0) Fail(undefined(composite))
@@ -78,27 +80,16 @@ private object CompositeOps {
     else
       leafRange(program, typeId, indexes) match {
         case Left(error)            => Fail(error)
-        case Right((offset, count)) =>
-          step { (execution, _) =>
-            val values = execution.values
-            Option(values.lanes(composite)) match {
-              case None                                                         => Left(undefined(composite))
-              case Some(lanes) if offset >= 0 && offset + count <= lanes.length =>
-                Right(
-                  if (count == 1) values.updateScalar(dest, resultType, lanes(offset))
-                  else values.update(dest, VMValue.Bits(resultType, lanes.slice(offset, offset + count)))
-                )
-              case Some(lanes) =>
-                Left(
-                  Fault.InvalidRequest(s"OpCompositeExtract range $offset+$count exceeds ${lanes.length} scalar leaves")
-                )
-            }
-          }
+        case Right((offset, count)) => Extract(composite, offset, count, ids.dest, ids.resultType)
       }
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-  private def construct(site: Site, resultType: Int, dest: Int, constituents: Vec[Int]): Op = {
+  private class Extract(composite: Int, offset: Int, count: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.extract(InvocationMachine(execution))(composite, offset, count, dest, resultType)
+  }
+
+  private def construct(ids: ResultIds, constituents: Vec[Int])(using site: Site): Op = {
     val program = site.program
     val kinds   = constituents.map(typed(site, _))
     kinds.collectFirst {
@@ -108,38 +99,25 @@ private object CompositeOps {
     }.getOrElse {
       val counts =
         constituents.map(constituent => program.scalarLeafCount(program.valueType(constituent)).fold(_ => -1, _.raw))
-      program.scalarLeafCount(resultType) match {
+      program.scalarLeafCount(ids.resultType) match {
         case Left(error)                                                          => Fail(error)
         case Right(expected) if counts.sum != expected.raw || counts.contains(-1) =>
-          Fail(Fault.InvalidRequest(s"OpCompositeConstruct %$dest has ${counts.sum} scalar leaves, expected $expected"))
-        case Right(expected) =>
-          val parts = constituents.toArray
-          step { (execution, _) =>
-            val values = execution.values
-            val result = Array.ofDim[Long](expected)
-            var cursor = 0
-            var index  = 0
-            var absent = -1
-            while (index < parts.length && absent < 0) {
-              val part = parts(index)
-              if (program.scalarSlot(part)) {
-                result(cursor) = values.scalars(part)
-                cursor += 1
-              } else values.lanes(part) match {
-                case null  => absent = part
-                case lanes =>
-                  Array.copy(lanes, 0, result, cursor, lanes.length)
-                  cursor += lanes.length
-              }
-              index += 1
-            }
-            if (absent >= 0) Left(undefined(absent)) else Right(values.update(dest, VMValue.Bits(resultType, result)))
-          }
+          Fail(Fault.InvalidRequest(
+            s"OpCompositeConstruct %${ids.dest} has ${counts.sum} scalar leaves, expected $expected"
+          ))
+        case Right(expected) => Construct(constituents.toArray, expected, ids.dest, ids.resultType)
       }
     }
   }
 
-  private def insert(site: Site, resultType: Int, dest: Int, source: Int, composite: Int, indexes: Vec[Operand]): Op = {
+  private class Construct(parts: Array[Int], leaves: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.construct(InvocationMachine(execution))(parts, leaves, dest, resultType)
+  }
+
+  private def insert(ids: ResultIds, source: Int, composite: Int, indexes: Vec[Operand])(using
+      site: Site
+  ): Op = {
     val program = site.program
     val typeId  = program.valueType(composite)
     if (program.valueType(source) < 0) Fail(undefined(source))
@@ -147,64 +125,37 @@ private object CompositeOps {
     else
       leafRange(program, typeId, indexes) match {
         case Left(error)            => Fail(error)
-        case Right((offset, count)) =>
-          step { (execution, _) =>
-            val values = execution.values
-            (Option(values.lanes(source)), Option(values.lanes(composite))) match {
-              case (Some(inserted), Some(lanes))
-                  if inserted.length == count.raw && offset + count.raw <= lanes.length =>
-                val result = lanes.clone()
-                Array.copy(inserted, 0, result, offset, count)
-                Right(values.update(dest, VMValue.Bits(resultType, result)))
-              case (Some(inserted), Some(_)) =>
-                Left(Fault.InvalidRequest(
-                  s"OpCompositeInsert source has ${inserted.length} leaves, expected $count at offset $offset"
-                ))
-              case _ => Left(Fault.Unsupported("composite insertion requires scalar data"))
-            }
-          }
+        case Right((offset, count)) => Insert(source, composite, offset, count, ids.dest, ids.resultType)
       }
   }
 
-  private def extractDynamic(resultType: Int, dest: Int, vector: Int, index: Int): Op = step { (execution, _) =>
-    val values = execution.values
-    (values.get(vector), values.get(index)) match {
-      case (Some(VMValue.Bits(_, lanes)), Some(VMValue.Bits(_, Array(component)))) =>
-        val selected = component.toInt
-        if (selected < 0 || selected >= lanes.length)
-          Left(Fault.InvalidRequest(s"OpVectorExtractDynamic index $selected is out of range"))
-        else Right(values.updateScalar(dest, resultType, lanes(selected)))
-      case (None, _) => Left(undefined(vector))
-      case (_, None) => Left(undefined(index))
-      case _         => Left(Fault.Unsupported("OpVectorExtractDynamic requires a scalar index"))
-    }
+  private class Insert(source: Int, composite: Int, offset: Int, count: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.insert(InvocationMachine(execution))(source, composite, offset, count, dest, resultType)
   }
 
-  private def insertDynamic(resultType: Int, dest: Int, vector: Int, component: Int, index: Int): Op =
-    step { (execution, _) =>
-      val values = execution.values
-      (values.get(vector), values.get(component), scalar(values, index)) match {
-        case (Some(VMValue.Bits(_, lanes)), Some(VMValue.Bits(_, Array(value))), Right(selected)) =>
-          val position = selected.toInt
-          if (position < 0 || position >= lanes.length)
-            Left(Fault.InvalidRequest(s"OpVectorInsertDynamic index $position is out of range"))
-          else {
-            val result = lanes.clone()
-            result(position) = value
-            Right(values.update(dest, VMValue.Bits(resultType, result)))
-          }
-        case (None, _, _)        => Left(undefined(vector))
-        case (_, None, _)        => Left(undefined(component))
-        case (_, _, Left(error)) => Left(error)
-        case _                   => Left(Fault.InvalidRequest("OpVectorInsertDynamic requires scalar component"))
-      }
-    }
+  private def extractDynamic(ids: ResultIds, vector: Int, index: Int): Op =
+    ExtractDynamic(vector, index, ids.dest, ids.resultType)
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def shuffle(site: Site, resultType: Int, dest: Int, left: Int, right: Int, components: Vec[Operand]): Op = {
+  private class ExtractDynamic(vector: Int, index: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.extractDynamic(InvocationMachine(execution))(vector, index, dest, resultType)
+  }
+
+  private def insertDynamic(ids: ResultIds, vector: Int, component: Int, index: Int): Op =
+    InsertDynamic(vector, component, index, ids.dest, ids.resultType)
+
+  private class InsertDynamic(vector: Int, component: Int, index: Int, dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.insertDynamic(InvocationMachine(execution))(vector, component, index, dest, resultType)
+  }
+
+  private def shuffle(ids: ResultIds, left: Int, right: Int, components: Vec[Operand])(using
+      site: Site
+  ): Op = {
     val program                        = site.program
     def lanes(value: Int): Option[Int] = program.scalarLeafCount(program.valueType(value)).toOption.rawElements
-    (program.valueType(left), program.valueType(right), program.scalarLeafCount(resultType)) match {
+    (program.valueType(left), program.valueType(right), program.scalarLeafCount(ids.resultType)) match {
       case (-1, _, _)                                                 => Fail(undefined(left))
       case (_, -1, _)                                                 => Fail(undefined(right))
       case (_, _, Left(error))                                        => Fail(error)
@@ -218,26 +169,13 @@ private object CompositeOps {
         selection.find(selected => selected != 0xffffffffL && selected >= combined.toLong) match {
           case Some(selected) =>
             Fail(Fault.InvalidRequest(s"OpVectorShuffle component $selected is outside $combined lanes"))
-          case None =>
-            step { (execution, _) =>
-              val values = execution.values
-              (Option(values.lanes(left)), Option(values.lanes(right))) match {
-                case (Some(first), Some(second)) =>
-                  val result = Array.ofDim[Long](selection.length)
-                  var index  = 0
-                  while (index < selection.length) {
-                    val selected = selection(index)
-                    result(index) =
-                      if (selected == 0xffffffffL) 0L
-                      else if (selected < first.length) first(selected.toInt)
-                      else second(selected.toInt - first.length)
-                    index += 1
-                  }
-                  Right(values.update(dest, VMValue.Bits(resultType, result)))
-                case _ => Left(Fault.InvalidRequest("OpVectorShuffle operands must be numeric vectors"))
-              }
-            }
+          case None => Shuffle(left, right, selection, ids.dest, ids.resultType)
         }
     }
+  }
+
+  private class Shuffle(left: Int, right: Int, selection: Array[Long], dest: Int, resultType: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.shuffle(InvocationMachine(execution))(left, right, selection, dest, resultType)
   }
 }

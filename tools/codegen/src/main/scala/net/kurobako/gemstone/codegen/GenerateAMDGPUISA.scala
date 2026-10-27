@@ -253,10 +253,12 @@ for name in sorted(module.instructions):
     ("SCALE", "MatrixScale", "MATRIX_SCALE_", 1),
     ("SCALE_FMT", "MatrixScaleFmt", "MATRIX_SCALE_FMT_", 2)
   )
-  private val ModernSourceIsas      = Set("RDNA4", "CDNA5", "GFX11_7")
-  private val ImplicitSources       = Vector("SRC_VCCZ", "SRC_EXECZ", "SRC_SCC", "SRC_POPS_EXITING_WAVE_ID")
+  private val ModernSourceIsas = Set("RDNA4", "CDNA5", "GFX11_7")
+  private val ImplicitSources  = Vector("SRC_SCC")
+  // gfx1170 has no XML table; llvm accepts vccz and execz there, but not pops
+  private val Gfx117Sources         = Vector("SRC_VCCZ", "SRC_EXECZ")
   private val TrapSources           = Vector("TBA_LO", "TBA_HI", "TMA_LO", "TMA_HI")
-  private val ByteSelectConversions = Set("v_cvt_f32_bf8", "v_cvt_f32_fp8")
+  private val ByteSelectConversions = Set("v_cvt_f16_bf8", "v_cvt_f16_fp8", "v_cvt_f32_bf8", "v_cvt_f32_fp8")
   private val ScalarFormats         = Set("SOP1", "SOP2", "SOPC")
   private val LiteralSuffixes       = Vector(4 -> "_INST_LITERAL", 8 -> "_INST_LITERAL64")
   private val ModernImageFormats    = Set("VIMAGE", "VSAMPLE")
@@ -285,13 +287,17 @@ for name in sorted(module.instructions):
   private val command = Command("GenerateAMDGPUISA", "Generate AMDGPU ISA sources")((
     Opts.option[String]("python", help = "Python executable for the pinned ACO model").withDefault("python3"),
     Opts.option[String]("tablegen", help = "Pinned LLVM TableGen executable").map(Path.of(_)),
-    Opts.argument[String]("prepared-references").map(Path.of(_)),
-    Opts.argument[String]("generated-source-root").map(Path.of(_)),
-    Opts.argument[String]("generated-resource-root").map(Path.of(_)),
-    Opts.argument[String]("generated-native-root").map(Path.of(_))
+    CodegenCommand.path("prepared-references"),
+    CodegenCommand.path("generated-source-root"),
+    CodegenCommand.path("generated-resource-root"),
+    CodegenCommand.path("generated-native-root")
   ).mapN(Request(_, _, _, _, _, _)))
 
   private val Gfx9Version = "FeatureISAVersion9_0_[0-9A-F]".r
+
+  // written by GenerateAMDGPUDomains
+  private def isGeneratedDomain(path: Path): Boolean =
+    path.getFileName.toString == "domains-report.md" || path.getFileName.toString.matches("domains-[a-z0-9_]+\\.json")
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
     val result = extract(request.references, request.python)
@@ -360,12 +366,13 @@ for name in sorted(module.instructions):
     val _        = GeneratedFiles.write(imagesResource, ujson.write(images, indent = 2) + "\n")
     val expected = definitions.map(_._1).toSet ++ Set(constants, defaults, instructionRoot.resolve("Opcode.scala")) ++
       domains.map(value => instructionRoot.resolve(s"${value._1}.scala"))
-    val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
+    val include = (path: Path) =>
+      path.getFileName.toString.endsWith(".scala") && !path.toString.contains(s"/$PackageRoot/domain/")
     GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
     GeneratedFiles.removeUnexpected(
       request.resourceRoot,
       Set(metadataResource, layoutsResource, operandsResource, imagesResource),
-      _ => true
+      path => !isGeneratedDomain(path)
     )
   }
 
@@ -418,10 +425,9 @@ for name in sorted(module.instructions):
   }
 
   private def layoutMetadata(value: ujson.Value): Option[ujson.Value] = {
-    val opcodes = value("fields").arr.filter(field => OpcodeFields(field("name").str))
-      .flatMap(_("ranges").arr).foldLeft(BigInt(0)) { (bits, range) =>
-        bits | (((BigInt(1) << range("bits").num.toInt) - 1) << range("offset").num.toInt)
-      }
+    val opcodes = AMDGPUOperandFields.bitMask(
+      value("fields").arr.filter(field => OpcodeFields(field("name").str)).flatMap(_("ranges").arr)
+    )
     val mask     = BigInt(value("mask").str, 16) & ~opcodes
     val prefixes = value("identifiers").arr.map(identifier => BigInt(identifier.str, 16) & mask).distinct
     // Layouts whose identifiers disagree outside the opcode fields have no single fixed prefix.
@@ -432,32 +438,10 @@ for name in sorted(module.instructions):
     }))
   }
 
-  private def operandMetadata(value: ujson.Value): Option[ujson.Value] = {
-    val selectors = value.obj.get("values").toVector.flatMap(_.obj.toVector).flatMap { case (name, code) =>
-      code.str.toIntOption.map(name -> _)
-    }
-    val integers = selectors.flatMap { case (name, code) =>
-      name.toLongOption.map(number => code.toString -> ujson.Str(number.toString))
-    }
-    val floating = selectors.filter(_._1.contains('.')).flatMap { case (name, code) =>
-      name.toDoubleOption.map(number => code.toString -> ujson.Num(number))
-    }
-    val special = selectors.filter { case (name, _) => name.startsWith("src_") && !name.startsWith("src_literal") }
-      .sortBy(_._1).reverse.map { case (name, code) => code.toString -> ujson.Str(name) }
-    val literals = selectors.collect {
-      case ("src_literal", code)   => code.toString -> ujson.Num(4)
-      case ("src_literal64", code) => code.toString -> ujson.Num(8)
-    }
-    val header = Vector("isa" -> value("isa"), "kind" -> value("kind"))
-    if (value("kind").str == "SRC") Some(ujson.Obj.from(header ++ Vector(
-      "selectors" -> ujson.Obj.from(selectors.map { case (name, code) => name -> ujson.Num(code) }),
-      "integers"  -> ujson.Obj.from(integers),
-      "floating"  -> ujson.Obj.from(floating),
-      "special"   -> ujson.Obj.from(special),
-      "literals"  -> ujson.Obj.from(literals)
-    )))
-    else Option.when(SymbolicOperandKinds(value("kind").str))(ujson.Obj.from(header :+ ("fields" -> value("fields"))))
-  }
+  private def operandMetadata(value: ujson.Value): Option[ujson.Value] =
+    Option.when(SymbolicOperandKinds(value("kind").str))(
+      ujson.Obj("isa" -> value("isa"), "kind" -> value("kind"), "fields" -> value("fields"))
+    )
 
   private def imageMetadata(tables: ujson.Value): ujson.Value = {
     def number(value: ujson.Value): Int = value match {
@@ -729,16 +713,24 @@ for name in sorted(module.instructions):
             ))
         val byteSelect = ujson.read(ujson.write(layout))
         byteSelect("format") = format.replace("VOP3", "VOP3_BYTESEL")
-        byteSelect("fields") = ujson.Arr.from(byteSelect("fields").arr.map { field =>
-          if (OpSelFields(field("name").str)) ujson.Obj(
-            "name" -> "BYTE_SEL",
-            // LLVM VOP3 source byte selection reverses these two bits.
-            "ranges" -> ujson.Arr(
-              ujson.Obj("offset" -> 12, "bits" -> 1, "padding" -> 0),
-              ujson.Obj("offset" -> 11, "bits" -> 1, "padding" -> 0)
+        byteSelect("fields") = ujson.Arr.from(byteSelect("fields").arr.flatMap { field =>
+          if (OpSelFields(field("name").str)) Vector(
+            ujson.Obj(
+              "name" -> "BYTE_SEL",
+              // LLVM VOP3 source byte selection reverses these two bits.
+              "ranges" -> ujson.Arr(
+                ujson.Obj("offset" -> 12, "bits" -> 1, "padding" -> 0),
+                ujson.Obj("offset" -> 11, "bits" -> 1, "padding" -> 0)
+              )
+            )
+          ) ++ Option.when(layout("isa").str == "CDNA5")(
+            ujson.Obj(
+              "name" -> "OP_SEL",
+              // source op_sel bits are BYTE_SEL here, so the padding keeps them clear
+              "ranges" -> ujson.Arr(ujson.Obj("offset" -> 14, "bits" -> 1, "padding" -> 3))
             )
           )
-          else field
+          else Vector(field)
         })
         Vector(layout, copy, byteSelect)
       } else Vector(layout)
@@ -773,7 +765,9 @@ for name in sorted(module.instructions):
     }
     def extendLayouts(values: Vector[ujson.Value]): Vector[ujson.Value] = values ++
       values.filter(_("isa").str == "RDNA3_5").map { value =>
-        ujson.Obj.from(value.obj.toVector.filterNot(_._1 == "isa") :+ ("isa" -> ujson.Str("GFX11_7")))
+        val copy = ujson.read(ujson.write(value))
+        copy("isa") = "GFX11_7"
+        copy
       }
     val illegalSource =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIInstructions.td"), StandardCharsets.UTF_8)
@@ -978,7 +972,9 @@ for name in sorted(module.instructions):
     )
   }
 
-  private def xmlDocument(input: Path): org.w3c.dom.Document = {
+  def xmlDocument(input: Path): org.w3c.dom.Document = documentBuilder().parse(input.toFile)
+
+  private def documentBuilder(): javax.xml.parsers.DocumentBuilder = {
     val factory = DocumentBuilderFactory.newInstance()
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
     factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
@@ -989,7 +985,7 @@ for name in sorted(module.instructions):
     factory.setXIncludeAware(false)
     factory.setExpandEntityReferences(false)
     factory.setNamespaceAware(false)
-    factory.newDocumentBuilder().parse(input.toFile)
+    factory.newDocumentBuilder()
   }
 
   private object Layout {
@@ -1371,7 +1367,12 @@ for name in sorted(module.instructions):
         ImplicitSources.foreach { name =>
           names(name.toLowerCaseRoot) = codes(name)
         }
+        if (isa == "GFX11_7") Gfx117Sources.foreach { name =>
+          names(name.toLowerCaseRoot) = codes(name)
+        }
         if (old) {
+          // llvm rejects pops before gfx9
+          val _ = names.obj.remove("src_pops_exiting_wave_id")
           names.obj.keys.filter(_.startsWith("ttmp")).toVector.foreach(names.obj.remove(_))
           (constants("TTMP_VI_MIN") to constants("TTMP_VI_MAX")).zipWithIndex.foreach { case (code, index) =>
             names(s"ttmp$index") = code.toString
@@ -1395,7 +1396,7 @@ for name in sorted(module.instructions):
   private def lowBitsField(name: String, bits: Int): ujson.Obj =
     ujson.Obj("name" -> name, "ranges" -> ujson.Arr(ujson.Obj("offset" -> 0, "bits" -> bits, "padding" -> 0)))
 
-  private def bitRanges(field: Element): Vector[ujson.Obj] =
+  def bitRanges(field: Element): Vector[ujson.Obj] =
     directChildren(requiredDirect(field, "BitLayout"), "Range").sortBy(_.getAttribute("Order").toInt).map { range =>
       ujson.Obj(
         "offset"  -> requiredText(range, "BitOffset").toInt,
@@ -1404,31 +1405,34 @@ for name in sorted(module.instructions):
       )
     }
 
+  def microcodeFields(element: Element): Vector[Element] =
+    optionalDirect(element, "MicrocodeFormat").flatMap(optionalDirect(_, "BitMap"))
+      .fold(Vector.empty[Element])(directChildren(_, "Field"))
+
   private def parseOperandLayouts(input: Path): Vector[ujson.Value] = {
     val document = xmlDocument(input)
     val isa      = input.getFileName.toString.stripPrefix("amdgpu_isa_").stripSuffix(".xml").toUpperCaseRoot
     val nodes    = document.getElementsByTagName("OperandType")
     Vector.tabulate(nodes.getLength)(nodes.item(_)).collect { case element: Element => element }.flatMap { operand =>
       optionalDirect(operand, "OperandTypeName").map { name =>
-        val fields = optionalDirect(operand, "MicrocodeFormat").flatMap(optionalDirect(_, "BitMap"))
-          .fold(Vector.empty[Element])(directChildren(_, "Field")).map { field =>
-            val names =
-              optionalDirect(field, "FieldPredefinedValues").fold(Vector.empty[Element])(
-                directChildren(_, "PredefinedValue")
-              )
-                .flatMap(value =>
-                  scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
-                    requiredText(value, "Name") -> ujson.Str(number.toString)
-                  )
-                )
-            ujson.Obj(
-              "field" -> ujson.Obj(
-                "name"   -> requiredText(field, "FieldName"),
-                "ranges" -> ujson.Arr.from(bitRanges(field))
-              ),
-              "names" -> ujson.Obj.from(names)
+        val fields = microcodeFields(operand).map { field =>
+          val names =
+            optionalDirect(field, "FieldPredefinedValues").fold(Vector.empty[Element])(
+              directChildren(_, "PredefinedValue")
             )
-          }
+              .flatMap(value =>
+                scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
+                  requiredText(value, "Name") -> ujson.Str(number.toString)
+                )
+              )
+          ujson.Obj(
+            "field" -> ujson.Obj(
+              "name"   -> requiredText(field, "FieldName"),
+              "ranges" -> ujson.Arr.from(bitRanges(field))
+            ),
+            "names" -> ujson.Obj.from(names)
+          )
+        }
         val values = optionalDirect(operand, "OperandPredefinedValues")
           .fold(Vector.empty[Element])(directChildren(_, "PredefinedValue")).flatMap { value =>
             scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
@@ -1548,7 +1552,7 @@ for name in sorted(module.instructions):
     val header =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIDefines.h"), StandardCharsets.UTF_8)
     GeneratedHeader.scala("encoding constants from pinned AMD and LLVM inputs") +
-      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}@SuppressWarnings(Array(\"baumkuchen:unused-member\"))\nprivate object EncodingConstants {\n" +
+      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}// mirrors LLVM's full tables so the copy stays easy to resync\n@SuppressWarnings(Array(\"baumkuchen:unused-member\"))\nprivate object EncodingConstants {\n" +
       renderOperandConstants(header) + renderSharedConstants(result, references) + relocations + "\n" +
       renderELFMachines(Files.readString(
         references.resolve("llvm/llvm/include/llvm/BinaryFormat/ELF.h"),
@@ -2033,25 +2037,26 @@ for name in sorted(module.instructions):
       case other   => throw IllegalArgumentException(s"invalid $name '$other'")
     }
 
-  private def requiredText(element: Element, name: String): String =
+  def requiredText(element: Element, name: String): String =
     optionalText(element, name).getOrElse(throw IllegalArgumentException(s"missing <$name>"))
 
-  private def optionalText(element: Element, name: String): Option[String] = {
+  def optionalText(element: Element, name: String): Option[String] = {
     val nodes = element.getElementsByTagName(name)
     if (nodes.getLength == 0) None else Some(nodes.item(0).getTextContent.trim)
   }
 
-  private def requiredDirect(element: Element, name: String): Element =
+  def requiredDirect(element: Element, name: String): Element =
     optionalDirect(element, name).getOrElse(throw IllegalArgumentException(s"missing direct <$name>"))
 
-  private def optionalDirect(element: Element, name: String): Option[Element] = directChildren(element, name).headOption
+  def optionalDirect(element: Element, name: String): Option[Element] =
+    directChildren(element, name).headOption
 
   private def element(node: Node, tag: String): Element = node match {
     case found: Element => found
     case _              => throw IllegalArgumentException(s"$tag node is not an XML element: $node")
   }
 
-  private def directChildren(element: Element, name: String): Vector[Element] = {
+  def directChildren(element: Element, name: String): Vector[Element] = {
     val children = element.getChildNodes
     Vector.tabulate(children.getLength)(children.item(_)).collect {
       case child: Element if child.getTagName == name => child

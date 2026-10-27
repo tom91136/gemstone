@@ -9,8 +9,6 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 
-// Vec is ArraySeq by design, so every ArraySeq operation applies and nothing is wrapped
-@SuppressWarnings(Array("baumkuchen:alias-with-operations"))
 object collection {
 
   object Vec {
@@ -86,6 +84,13 @@ object collection {
     def unapplySeq[A](values: Vec[A]): Some[Seq[A]] = Some(values)
 
     def sameElements[A](left: Vec[A], right: Vec[A]): Boolean = left.sameElements(right)
+
+    /** The maximal runs of consecutive integers in `values`, each as its first and last value, in ascending order. */
+    def runs(values: IterableOnce[Int]): Vec[(Int, Int)] =
+      from(values.iterator.toVector.sorted.distinct.foldLeft(Vector.empty[(Int, Int)]) {
+        case (done :+ ((first, last)), value) if value == last + 1 => done :+ ((first, value))
+        case (done, value)                                         => done :+ ((value, value))
+      })
   }
 
   extension [A](values: Vec[A]) {

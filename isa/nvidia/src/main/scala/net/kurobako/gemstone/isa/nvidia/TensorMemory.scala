@@ -71,6 +71,16 @@ private[isa] object TensorMemory {
     }
   }
 
+  /** Moves the first `rows - 1` of `rows` rows of `columns` columns down by one row, as tcgen05.shift and `.ashift` do.
+    */
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
+  def shiftRows(state: State, firstLane: Int, firstColumn: Int, rows: Int, columns: Int): Unit =
+    (rows - 2 to 0 by -1).foreach { row =>
+      (0 until columns).foreach(offset =>
+        state.write(firstLane + row + 1, firstColumn + offset, state.read(firstLane + row, firstColumn + offset))
+      )
+    }
+
   /** The granules `columns` columns from `column` on cover, when they are whole granules. */
   def granules(column: Int, columns: Long): Option[Long] =
     Option.when(
@@ -199,6 +209,51 @@ private[isa] object TensorMemory {
     }
   }
 
+  /** A bit field of an instruction descriptor. */
+  case class Field(offset: Int, width: Int) {
+    def of(bits: Long): Long = (bits >>> offset) & ((1L << width) - 1L)
+    def codes: Int           = 1 << width
+  }
+
+  /** The fields of an instruction descriptor that pick the element formats, scaling and sparsity of a product. */
+  object Fields {
+    val Sparse: Field      = Field(offset = 2, width = 1)
+    val Saturate: Field    = Field(offset = 3, width = 1)
+    val Accumulator: Field = Field(offset = 4, width = 2)
+    val A: Field           = Field(offset = 7, width = 3)
+    val NegateA: Field     = Field(offset = 13, width = 1)
+    val NegateB: Field     = Field(offset = 14, width = 1)
+
+    def b(kind: Kind): Field     = Field(offset = 10, width = if (kind == Kind.MXF4 || kind == Kind.MXF4NVF4) 2 else 3)
+    def scale(kind: Kind): Field = Field(offset = 23, width = if (kind == Kind.MXF4NVF4) 2 else 1)
+
+    /** The fields `kind` takes that change the product's element math, apart from negation. */
+    def formats(multiply: Multiply): Vec[Field] =
+      Vec(A, b(multiply.kind)) ++
+        (if (multiply.kind.scaled) Vec(scale(multiply.kind)) else Vec(Accumulator)) ++
+        (if (multiply.kind == Kind.I8) Vec(Saturate) else Vec.empty[Field]) ++
+        (if (multiply.sparseByDescriptor) Vec(Sparse) else Vec.empty[Field])
+  }
+
+  /** A product a descriptor can describe for a form, with the codes of [[Fields.formats]] that give it. */
+  case class Variant(product: Product, codes: Vec[Long])
+
+  /** Every product the descriptors of `multiply`'s kind can describe apart from their shape and negation, which the
+    * element math does not read, each with the format codes that select it.
+    */
+  def variants(multiply: Multiply): Vec[Variant] = {
+    val fields = Fields.formats(multiply)
+    val shape  = if (multiply.kind.scaled) 1L << 27 else 8L << 24
+    val base   = shape | (8L << 17) | (if (!multiply.sparseByDescriptor && multiply.metadata.nonEmpty) 4L else 0L)
+    Vec.from(0 until fields.map(_.codes).product).flatMap { combination =>
+      val codes = fields.scanLeft(combination)((rest, field) => rest / field.codes).zip(fields).map((rest, field) =>
+        (rest % field.codes).toLong
+      )
+      val bits = base + codes.zip(fields).map((code, field) => code << field.offset).sum
+      Vec.from(product(multiply, bits).toOption.map(Variant(_, codes)))
+    }
+  }
+
   /** The accumulator element a descriptor's D type names, if the kind takes it. */
   private def accumulator(kind: Kind, code: Long): Option[Element] = (kind, code) match {
     case (Kind.F16 | Kind.F8F6F4, 0L) => Some(Element.F16)
@@ -238,10 +293,10 @@ private[isa] object TensorMemory {
     val scaled                                                   = kind.scaled
     val m      = if (scaled) field(offset = 27, width = 2).toInt << 7 else field(offset = 24, width = 5).toInt << 4
     val n      = field(offset = 17, width = 6).toInt << 3
-    val a      = input(kind, field(offset = 7, width = 3))
+    val a      = input(kind, Fields.A.of(descriptor))
     val k      = (if (a.contains(Element.TF32)) 8 else kind.depth) * (if (sparse) 2 else 1)
-    val b      = input(kind, field(offset = 10, width = if (kind == Kind.MXF4 || kind == Kind.MXF4NVF4) 2 else 3))
-    val d      = if (scaled) Some(Element.F32) else accumulator(kind, field(offset = 4, width = 2))
+    val b      = input(kind, Fields.b(kind).of(descriptor))
+    val d      = if (scaled) Some(Element.F32) else accumulator(kind, Fields.Accumulator.of(descriptor))
     val validM =
       if (pair) Set(128, 256)(m) && !ws
       else if (ws) Set(32, 64, 128)(m)
@@ -255,15 +310,15 @@ private[isa] object TensorMemory {
         (if (pair) 16 else 8) == 0 &&
         (kind != Kind.I8 || n <= 32 || n % 16 == 0) &&
         (kind != Kind.I8 || !pair || n   % 32 == 0)
+    val scaleCode   = Fields.scale(kind).of(descriptor)
     val scaleFormat =
       if (!scaled) None
-      else if (kind == Kind.MXF4NVF4 && field(offset = 23, width = 2) == 0L) Some(ScaleFormat.UE4M3)
-      else if ((kind == Kind.MXF4NVF4 && field(offset = 23, width = 2) == 1L) || field(offset = 23, width = 1) == 1L)
-        Some(ScaleFormat.UE8M0)
+      else if (kind == Kind.MXF4NVF4 && scaleCode == 0L) Some(ScaleFormat.UE4M3)
+      else if ((scaleCode & 1L) == 1L) Some(ScaleFormat.UE8M0)
       else None
     val vectorSize = if (vector != 0) vector else if (kind == Kind.MXF8F6F4) 1 else 2
     (a, b, d) match {
-      case _ if Bits.isSet(descriptor, 2) != sparse =>
+      case _ if (Fields.Sparse.of(descriptor) == 1L) != sparse =>
         Left("the instruction descriptor's sparsity does not match the instruction")
       case _ if !validM || !validN            => Left(s"invalid tcgen05.mma shape ${m}x${n}x$k")
       case _ if scaled && scaleFormat.isEmpty => Left("invalid block scale factor type")
@@ -296,14 +351,14 @@ private[isa] object TensorMemory {
             right = Vec.empty,
             addend = Vec.empty,
             accumulation = accumulation,
-            saturate = kind == Kind.I8 && Bits.isSet(descriptor, 3),
+            saturate = kind == Kind.I8 && Fields.Saturate.of(descriptor) == 1L,
             sparsity = Option.when(sparse)(Sparsity(zero, zero)),
             scaling = scaleFormat.map(format =>
               Scaling(format, vectorSize.unsafe[Int in (1, 2, 4)], zero, zero, zero, zero, zero, zero)
             )
           ),
-          negateA = Bits.isSet(descriptor, 13),
-          negateB = Bits.isSet(descriptor, 14),
+          negateA = Fields.NegateA.of(descriptor) == 1L,
+          negateB = Fields.NegateB.of(descriptor) == 1L,
           transposeA = Bits.isSet(descriptor, 15),
           transposeB = Bits.isSet(descriptor, 16),
           selector = field(0, 2).toInt,

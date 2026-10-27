@@ -59,6 +59,53 @@ object InstructionSemantics {
       name: Option[String] = None,
       encoding: Option[Metadata.Encoding] = None
   ): Either[Unrendered, Definition] = for {
+    instruction <- decoded(target, text, encoding)
+    naming = RenderContext.Names(operands.get, TargetDefaults.waveSize(target), Some(target.isa))
+    rendered   <- LaneRenderer.describe(instruction, naming).toRight(Unrendered.Unstaged(Vec(mechanics(instruction))))
+    definition <- definitionOf(rendered, text, naming, order, name, "definition")
+  } yield definition
+
+  /** The definition, like [[describe]]'s, of the machine operations the assembly `text` of one instruction requests on
+    * `target`, or none if the instruction requests none or does not decode. Its immediate operand is named as the
+    * operand table names it.
+    */
+  def machine(
+      target: Target,
+      text: String,
+      operands: Map[String, String],
+      order: Vec[String] = Vec.empty,
+      name: Option[String] = None,
+      encoding: Option[Metadata.Encoding] = None
+  ): Option[Either[Unrendered, Definition]] = decoded(target, text, encoding).toOption.flatMap { instruction =>
+    val naming    = RenderContext.Names(operands.get, TargetDefaults.waveSize(target), Some(target.isa))
+    def immediate = naming.named(
+      EncodingField.SIMM16.toString,
+      instruction match {
+        case Instruction.Trap(_) => AmdGpuMachineRender.TrapCode
+        case _                   => AmdGpuMachineRender.Displacement
+      }
+    )
+    ScalarControl.render(
+      instruction,
+      AmdGpuMachineRender(naming, immediate),
+      ModeRegister.writable(target.isa),
+      TargetDefaults.waveSize(target) == 64
+    ).map(definitionOf(_, text, naming, order, name, "machine definition"))
+  }
+
+  private def definitionOf(
+      steps: Term.Steps,
+      text: String,
+      naming: RenderContext.Names,
+      order: Vec[String],
+      name: Option[String],
+      kind: String
+  ): Either[Unrendered, Definition] =
+    Definition.from(steps, name.getOrElse(text.takeWhile(!_.isWhitespace)), naming, order, settle = true).left
+      .map(why => Unrendered.Undefined(s"$text has no $kind: $why"))
+
+  private def decoded(target: Target, text: String, encoding: Option[Metadata.Encoding])
+      : Either[Unrendered, Instruction] = for {
     program <-
       asm.Parser.parse(text).left.map(error => Unrendered.Malformed(s"$text does not parse: ${error.diagnostic.raw}"))
     code <- asm.Assembler.encode(program, TargetMode(target)).left.map(error =>
@@ -72,16 +119,7 @@ object InstructionSemantics {
     )
     instruction <-
       VMCompiler.decodeInstruction(code, target).left.map(error => Unrendered.Rejected(s"$text: ${error.raw}"))
-    naming = RenderContext.Names(operands.get, TargetDefaults.waveSize(target), Some(target.isa))
-    rendered   <- LaneRenderer.describe(instruction, naming).toRight(Unrendered.Unstaged(Vec(mechanics(instruction))))
-    definition <- Definition.from(
-      rendered,
-      name.getOrElse(text.takeWhile(!_.isWhitespace)),
-      naming,
-      order,
-      settle = true
-    ).left.map(why => Unrendered.Undefined(s"$text has no definition: $why"))
-  } yield definition
+  } yield instruction
 
   /** Whether a decoded encoding is the expected one; the decoder reports an instruction with a literal under the format
     * without it.
@@ -95,15 +133,15 @@ object InstructionSemantics {
     * operand where the pair carries a literal, or the encoding.
     */
   private def encoded(code: Vec[Byte], target: Target): Vec[Metadata.Encoding] = {
-    val bytes = Vec.toArray(code)
-    InstructionDecoder.dual(bytes, 0, target).flatMap(_.toOption)
+    val stream = CodeStream(Vec.toArray(code), TargetMode(target))
+    InstructionDecoder.dual(stream, 0).flatMap(_.toOption)
       .map(dual =>
         Vec(dual.x, dual.y).flatMap(half =>
           half.map(_._2).find(_.operands.exists(_.field.contains(EncodingField.LITERAL)) == dual.literal.nonEmpty)
             .orElse(half.headOption.map(_._2))
         )
       )
-      .getOrElse(InstructionDecoder.decode(bytes, 0, target).toOption.map(_.encoding).toVec)
+      .getOrElse(InstructionDecoder.decode(stream, 0).toOption.map(_.encoding).toVec)
   }
 
   /** What execution does with an instruction that has no per-lane definition. */

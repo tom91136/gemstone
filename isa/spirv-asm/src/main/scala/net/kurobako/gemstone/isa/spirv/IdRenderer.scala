@@ -45,6 +45,8 @@ object IdRenderer {
   /** The context machine operations render against. */
   val Memory: String = "memory"
 
+  case class ContextCall(method: String, arguments: Vec[Term], result: Option[Type])
+
   private val Accumulator = "acc"
   private val Scale       = "scale"
   private val Norm        = "norm"
@@ -130,19 +132,21 @@ class IdRenderer(instance: IdRenderer.Instance, declarations: Scope[Int])
   private def lanewise(ids: OperandIds, operands: Int*)(kernel: LaneTerm): Option[Term.Steps] =
     rendered(ids, operands.map(ids(_)), Seq.tabulate(lanesOf(ids.result))(index => result(ids, index) -> kernel(index)))
 
-  private def access(method: String, tpe: Type, arguments: Vec[Term], result: Option[Type]): Term = Term.context(
-    (MemoryType, Memory),
-    method,
-    Vec(tpe),
-    arguments.zip(Some(Shape.Address) +: Vec.fill(arguments.size - 1)(Some(tpe))),
-    result,
-    result.isEmpty
-  )
+  private def access(tpe: Type, call: ContextCall): Term = {
+    val ContextCall(method, arguments, result) = call
+    Term.context(
+      (MemoryType, Memory),
+      MachineCall(method, Vec(tpe), arguments.zip(Some(Shape.Address) +: Vec.fill(arguments.size - 1)(Some(tpe)))),
+      result,
+      result.isEmpty
+    )
+  }
 
   private def readMemory(method: String, tpe: Type, arguments: Vec[Term]): Term =
-    access(method, tpe, arguments, Some(tpe))
+    access(tpe, ContextCall(method, arguments, Some(tpe)))
 
-  private def writeMemory(method: String, tpe: Type, arguments: Vec[Term]): Term = access(method, tpe, arguments, None)
+  private def writeMemory(method: String, tpe: Type, arguments: Vec[Term]): Term =
+    access(tpe, ContextCall(method, arguments, None))
 
   private def offset(address: Term, bytes: Long): Term =
     if (bytes == 0L) address else Binary("+", address, Literal(bytes))

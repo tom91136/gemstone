@@ -80,8 +80,6 @@ class VulkanMetadataSuite extends munit.FunSuite {
       invalid <- Seq(0L, 0x80000000L, 0x100000001L)
       axis    <- 0 until 3
     } {
-      // Boxing three test dimensions per case is immaterial.
-      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val dimensions = DefaultSize.updated(axis, invalid)
       val module     = spv"""
         $vulkan

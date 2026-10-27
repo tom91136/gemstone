@@ -23,14 +23,17 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.domain.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.IntMap
 
-// the digit in decodeVOP1/2/3 names an encoding format, not a width
-@SuppressWarnings(Array("baumkuchen:numbered-family"))
 private object VMCompiler {
   private def isAbsentScalarOffset(value: Long): Boolean =
     value == Fixed.NullSgpr || value == Fixed.ExecLo || value == Fixed.ExecHi
+
+  /** The scalar address codes that mean no scalar base: RDNA3 onwards also encodes the null register as s124. */
+  private def absentScalarOffset(target: Target)(value: Long): Boolean =
+    isAbsentScalarOffset(value) || (target.isa.isGFX11OrLater && value == 124L)
 
   /** GCN V_CMPX writes its mask to both EXEC and the VOPC destination; GFX10 onwards writes only EXEC. */
   private def comparisonDestination(
@@ -306,6 +309,8 @@ private object VMCompiler {
     case VCvtNormI16F16                    => Some(VectorConvertOperation.SignedNormFromF16)
     case VCvtNormU16F16                    => Some(VectorConvertOperation.UnsignedNormFromF16)
     case VSatPkU8I16                       => Some(VectorConvertOperation.SaturatePackU8FromI16)
+    case VSatPk4I4I8                       => Some(VectorConvertOperation.SaturatePackI4FromI8)
+    case VSatPk4U4U8                       => Some(VectorConvertOperation.SaturatePackU4FromU8)
     case VPrngB32                          => Some(VectorConvertOperation.PseudoRandom)
     case _                                 => None
   }
@@ -356,9 +361,10 @@ private object VMCompiler {
     case VectorConvertOperation.OffsetF32FromI4                                => Some(ConvertForm(0, Some(32), 0))
     case VectorConvertOperation.I32FromI16 | VectorConvertOperation.U32FromU16 => Some(ConvertForm(0, None, 1))
     case VectorConvertOperation.F32FromBF16                                    => Some(ConvertForm(1, Some(32), 1))
-    case VectorConvertOperation.SaturatePackU8FromI16                          => Some(ConvertForm(0, None, 8))
-    case VectorConvertOperation.PseudoRandom                                   => Some(ConvertForm(0, None, 0))
-    case _                                                                     => None
+    case VectorConvertOperation.SaturatePackU8FromI16 | VectorConvertOperation.SaturatePackI4FromI8 |
+        VectorConvertOperation.SaturatePackU4FromU8 => Some(ConvertForm(0, None, 8))
+    case VectorConvertOperation.PseudoRandom => Some(ConvertForm(0, None, 0))
+    case _                                   => None
   }
 
   def vectorBinaryOperation(opcode: Opcode): Option[VectorBinaryOperation] = opcode match {
@@ -485,6 +491,13 @@ private object VMCompiler {
     case VMinF64 | VMinNumF64 => Some(VectorBinary64Operation.Minimum)
     case VMaximumF64          => Some(VectorBinary64Operation.MaximumPropagate)
     case VMinimumF64          => Some(VectorBinary64Operation.MinimumPropagate)
+    case VAddNcU64            => Some(VectorBinary64Operation.AddU64)
+    case VSubNcU64            => Some(VectorBinary64Operation.SubtractU64)
+    case VMulU64              => Some(VectorBinary64Operation.MultiplyLowU64)
+    case VMaxI64              => Some(VectorBinary64Operation.MaximumI64)
+    case VMaxU64              => Some(VectorBinary64Operation.MaximumU64)
+    case VMinI64              => Some(VectorBinary64Operation.MinimumI64)
+    case VMinU64              => Some(VectorBinary64Operation.MinimumU64)
     case _                    => None
   }
 
@@ -577,6 +590,11 @@ private object VMCompiler {
     case VMadI16 | VMadLegacyI16           => Some(VectorTernaryOperation.MultiplyAddI16)
     case VMadF16 | VMadLegacyF16 | VMacF16 => Some(VectorTernaryOperation.MultiplyAddF16)
     case VDivFixupF16 | VDivFixupLegacyF16 => Some(VectorTernaryOperation.DivisionFixupF16)
+    case VAddMaxI32                        => Some(VectorTernaryOperation.AddMaximumI32)
+    case VAddMaxU32                        => Some(VectorTernaryOperation.AddMaximumU32)
+    case VAddMinI32                        => Some(VectorTernaryOperation.AddMinimumI32)
+    case VAddMinU32                        => Some(VectorTernaryOperation.AddMinimumU32)
+    case VMadU32                           => Some(VectorTernaryOperation.MultiplyAddU32)
     case VAshrPkI8I32                      => Some(VectorTernaryOperation.ShiftRightPackI8)
     case VAshrPkU8I32                      => Some(VectorTernaryOperation.ShiftRightPackU8)
     case _                                 => None
@@ -875,6 +893,7 @@ private object VMCompiler {
     case VAddF16 | VMulF16 | VMinF16 | VMaxF16 | VFmacF16 | VSubF16 | VSubrevF16 | VLdexpF16 => Some(0xb)
     case VCvtF32F16                                                                          => Some(0x1)
     case VCvtF16F32                                                                          => Some(0x8)
+    case VCvtF16Fp8 | VCvtF16Bf8                                                             => Some(0x8)
     case VCvtI16F16                                                                          => Some(0x9)
     case VDot2F16F16 | VDot2Bf16Bf16                                                         => Some(0xc)
     case VAshrPkI8I32 | VAshrPkU8I32                                                         => Some(0x8)
@@ -919,6 +938,10 @@ private object VMCompiler {
   private lazy val HalfResultOpcodes: Set[Opcode] = Set(
     VDot2F16F16,
     VDot2Bf16Bf16,
+    VCvtPkFp8F16,
+    VCvtPkBf8F16,
+    VCvtF16Fp8,
+    VCvtF16Bf8,
     VAshrPkI8I32,
     VAshrPkU8I32,
     VAddF16,
@@ -988,7 +1011,7 @@ private object VMCompiler {
     case (false, true)  => Minifloat.E5M2
   }
 
-  /** The widening of V_CVT_F32_FP8, V_CVT_F32_BF8 and their packed forms in the target's format. */
+  /** The widening of V_CVT_F32_FP8, V_CVT_F32_BF8, V_CVT_F16_FP8, V_CVT_F16_BF8 and their packed forms. */
   private def eightBitConversion(opcode: Opcode, target: Target): Option[VectorConvertOperation] =
     (opcode, eightBit(opcode == VCvtF32Bf8 || opcode == VCvtPkF32Bf8, target)) match {
       case (VCvtF32Fp8 | VCvtF32Bf8, Minifloat.E4M3)         => Some(VectorConvertOperation.F32FromE4M3)
@@ -999,6 +1022,10 @@ private object VMCompiler {
       case (VCvtPkF32Fp8 | VCvtPkF32Bf8, Minifloat.E5M2)     => Some(VectorConvertOperation.PairF32FromE5M2)
       case (VCvtPkF32Fp8 | VCvtPkF32Bf8, Minifloat.E4M3FNUZ) => Some(VectorConvertOperation.PairF32FromE4M3Fnuz)
       case (VCvtPkF32Fp8 | VCvtPkF32Bf8, _)                  => Some(VectorConvertOperation.PairF32FromE5M2Fnuz)
+      case (VCvtF16Fp8, _)                                   => Some(VectorConvertOperation.F16FromE4M3)
+      case (VCvtF16Bf8, _)                                   => Some(VectorConvertOperation.F16FromE5M2)
+      case (VCvtPkF16Fp8, _)                                 => Some(VectorConvertOperation.PackedF16FromE4M3)
+      case (VCvtPkF16Bf8, _)                                 => Some(VectorConvertOperation.PackedF16FromE5M2)
       case _                                                 => None
     }
 
@@ -1029,7 +1056,7 @@ private object VMCompiler {
       machine: InstructionDecoder.Decoded,
       target: Target
   ): Either[NonEmpty[String], InstructionSource] =
-    operandSource(machine, machine(EncodingField.SRC0).toInt, machine.literal, target)
+    operandSource(machine, EncodingField.SRC0, machine.literal, target)
       .map(trueHalf(_, trueHalves(machine, target), 0))
 
   /** A 32-bit encoding's destination VGPR and whether a 16-bit result goes to its high half. */
@@ -1163,7 +1190,11 @@ private object VMCompiler {
     VMax3U16,
     VMed3I16,
     VMed3U16,
-    VAlignbitB32
+    VAlignbitB32,
+    VAddMaxI32,
+    VAddMaxU32,
+    VAddMinI32,
+    VAddMinU32
   )
 
   /** The floating-point result width of VOP3 opcodes whose IR leaves the clamp to [[Instruction.VClampResult]]. */
@@ -1177,6 +1208,14 @@ private object VMCompiler {
   private lazy val UnmodifiedVOP3POpcodes: Set[Opcode] = Set(
     VPkMadU16,
     VPkMadI16,
+    VPkAddMaxI16,
+    VPkAddMaxU16,
+    VPkAddMinI16,
+    VPkAddMinU16,
+    VPkMax3I16,
+    VPkMax3U16,
+    VPkMin3I16,
+    VPkMin3U16,
     VAccvgprReadB32,
     VAccvgprRead,
     VAccvgprWriteB32,
@@ -1228,7 +1267,7 @@ private object VMCompiler {
       target: Target
   ): Either[NonEmpty[String], Instruction] =
     Either.cond[NonEmpty[String], Unit](code.size >= 4, (), "truncated instruction at byte 0")
-      .flatMap(_ => decode(Vec.toArray(code), 0, TargetMode(target)).map(_.operation))
+      .flatMap(_ => decode(CodeStream(Vec.toArray(code), TargetMode(target)), 0).map(_.operation))
 
   private def selfContained(program: DecodedProgram): Boolean = {
     def constant(source: InstructionSource): Option[Long] = source match {
@@ -1325,6 +1364,7 @@ private object VMCompiler {
   )(external: (Instruction, NonEmpty[String]) => Either[NonEmpty[String], Instruction])
       : Either[NonEmpty[String], DecodedProgram] = {
     val bytes      = Vec.toArray(code)
+    val stream     = CodeStream(bytes, mode)
     val ranges     = if (functionRanges.nonEmpty) functionRanges else Vec(0 -> bytes.length)
     val result     = Vec.newBuilder[(Int, Instruction)]
     var rangeIndex = 0
@@ -1340,7 +1380,7 @@ private object VMCompiler {
           if (padding) offset = rangeEnd
           else failure = Some(s"truncated instruction at byte $offset")
         } else
-          decode(bytes, offset, mode) match {
+          decode(stream, offset) match {
             case Right(decoded) if offset + decoded.size <= rangeEnd =>
               result += offset -> decoded.operation
               offset += decoded.size
@@ -1468,11 +1508,12 @@ private object VMCompiler {
     private def isSet(field: EncodingField): Boolean = machine(field) != 0
   }
 
-  private def decode(bytes: Array[Byte], offset: Int, mode: TargetMode): Either[NonEmpty[String], Decoded] = {
+  private def decode(code: CodeStream, offset: Int): Either[NonEmpty[String], Decoded] = {
+    val mode   = code.mode
     val target = mode.target
-    InstructionDecoder.dual(bytes, offset, target)
+    InstructionDecoder.dual(code, offset)
       .map(_.flatMap(dual => decodeVOPD(dual, target).map(Decoded(_, dual.size))))
-      .getOrElse(InstructionDecoder.decode(bytes, offset, target).flatMap(machine =>
+      .getOrElse(InstructionDecoder.decode(code, offset).flatMap(machine =>
         decodeMachine(machine, offset, mode).map(Decoded(_, machine.size))
       ))
       .flatMap(decoded => VMRegisterBounds.validate(decoded.operation, mode.waveSize).map(_ => decoded))
@@ -1591,7 +1632,7 @@ private object VMCompiler {
         opcode    <- candidates.headOption.map(_._1).toRight[NonEmpty[String]]("missing dual-issue opcode")
         dest      <- register("destination", destination)
         second    <- register(source1.toString, dual(source1))
-        left      <- vectorSource(dual(source0).toInt, dual.literal, target)
+        left      <- vectorSource(source0, dual(source0).toInt, dual.literal, target)
         operation <- opcode match {
           case VDualMovB32                                  => Right(DualVectorOperation.Move)
           case VDualAddF32                                  => Right(DualVectorOperation.AddF32)
@@ -1673,10 +1714,7 @@ private object VMCompiler {
   }
 
   private def decodeSMEM(machine: InstructionDecoder.Decoded, target: Target): Either[NonEmpty[String], Instruction] = {
-    val opcode = machine.definition
-    // RDNA3+ uses s124 as the null offset register; older RDNA uses s125.
-    val nullOffset = if (target.isa.isGFX11OrLater) Fixed.M0
-    else Fixed.NullSgpr
+    val opcode    = machine.definition
     val immediate = !machine.contains(EncodingField.IMM) || machine.isSet(EncodingField.IMM)
     // GFX6/GFX7 SMRD immediates and GFX7 trailing literals count dwords; an SGPR offset counts bytes. GFX8 byte
     // offsets are unsigned 20-bit; GFX9 onwards sign-extends the whole field.
@@ -1696,9 +1734,10 @@ private object VMCompiler {
     else {
       val scalarOffset =
         if (!machine.contains(EncodingField.IMM))
-          if (machine(EncodingField.SOFFSET) != nullOffset.toLong) machine.scalar(EncodingField.SOFFSET).map(Some(_))
+          if (!machine.slot(EncodingField.SOFFSET).contains(Slot.Named("null")))
+            machine.scalarOperand(EncodingField.SOFFSET).map(Some(_))
           else Right(None)
-        else if (machine.isSet(EncodingField.SOFFSET_EN)) machine.scalar(EncodingField.SOFFSET).map(Some(_))
+        else if (machine.isSet(EncodingField.SOFFSET_EN)) machine.scalarOperand(EncodingField.SOFFSET).map(Some(_))
         else if (!immediate && machine.literal.isEmpty) machine.scalar(EncodingField.OFFSET).map(Some(_))
         else Right(None)
       if (opcode.mnemonic.raw.startsWith("s_buffer_load"))
@@ -1800,11 +1839,8 @@ private object VMCompiler {
   /** Named barrier objects, which LLVM's execution synchronization model gives GFX12.5 and not RDNA4. */
   private def namedBarriers(target: Target): Boolean = target.isa == ISA.CDNA5
 
-  // GFX12 encodes M0 as scalar 125
-  private val NamedBarrierM0: ScalarRegisterIndex = 125
-
   private def fromM0(machine: InstructionDecoder.Decoded): Boolean =
-    machine(EncodingField.SSRC0).toInt == NamedBarrierM0.raw
+    machine.slot(EncodingField.SSRC0).contains(Slot.Named("m0"))
 
   private def decodeSOP1(
       machine: InstructionDecoder.Decoded,
@@ -1812,13 +1848,13 @@ private object VMCompiler {
       target: Target
   ): Either[NonEmpty[String], Instruction] =
     for {
-      src         <- scalarSource(machine(EncodingField.SSRC0).toInt, machine.literal, target)
-      destination <- machine.scalar(EncodingField.SDST)
+      src         <- scalarSource(machine, EncodingField.SSRC0, machine.literal, target)
+      destination <- machine.scalarOperand(EncodingField.SDST)
       operation   <- machine.definition match {
         case SBarrierSignal        => Right(Instruction.BarrierSignal(src, isFirst = false, fromM0(machine)))
         case SBarrierSignalIsfirst => Right(Instruction.BarrierSignal(src, isFirst = true, fromM0(machine)))
         case SBarrierInit if namedBarriers(target) =>
-          Right(Instruction.BarrierInit(src, fromM0(machine), InstructionSource.Scalar(NamedBarrierM0)))
+          Right(Instruction.BarrierInit(src, fromM0(machine), InstructionSource.Scalar(m0Register(target.isa))))
         case SBarrierJoin if namedBarriers(target)     => Right(Instruction.BarrierJoin(src, fromM0(machine)))
         case SGetBarrierState if namedBarriers(target) =>
           Left[NonEmpty[String], Instruction](
@@ -1834,7 +1870,7 @@ private object VMCompiler {
           Right(Instruction.SCSelect(destination, src, InstructionSource.Scalar(destination), 32))
         case SCmovB64 =>
           Right(Instruction.SCSelect(destination, src, InstructionSource.Scalar(destination), 64))
-        case SGetpcB64                           => Right(Instruction.SGetPc(destination, offset))
+        case SGetpcB64 | SGetPcI64               => Right(Instruction.SGetPc(destination, offset))
         case SSetGprIdxIdx                       => Right(Instruction.SGprIndex(Some(src), None, enable = false))
         case SAndn2WrexecB32 | SAndNot1WrexecB32 => Right(Instruction.SWriteExec(notExec = true, destination, src, 32))
         case SAndn2WrexecB64 | SAndNot1WrexecB64 => Right(Instruction.SWriteExec(notExec = true, destination, src, 64))
@@ -1861,9 +1897,9 @@ private object VMCompiler {
           ))
         case SSendmsgRtnB64 if realTime(machine(EncodingField.SSRC0)) =>
           Right(Instruction.SReadClock(destination, Clock.RealTime))
-        case SSetpcB64       => Right(Instruction.SSetPc(src))
-        case SSwappcB64      => Right(Instruction.SSwapPc(destination, src))
-        case SAndSaveexecB32 =>
+        case SSetpcB64 | SSetPcI64   => Right(Instruction.SSetPc(src))
+        case SSwappcB64 | SSwapPcI64 => Right(Instruction.SSwapPc(destination, src))
+        case SAndSaveexecB32         =>
           Right(Instruction.SSaveExec(SaveExecOperation.And, destination, src, 32))
         case SAndSaveexecB64 =>
           Right(Instruction.SSaveExec(SaveExecOperation.And, destination, src, 64))
@@ -1911,9 +1947,9 @@ private object VMCompiler {
     def constant = machine.literal.map(InstructionSource.Literal(_))
       .toRight[NonEmpty[String]](s"$opcode is missing its literal operand")
     for {
-      srcA        <- scalarSource(machine(EncodingField.SSRC0).toInt, machine.literal, target)
-      srcB        <- scalarSource(machine(EncodingField.SSRC1).toInt, machine.literal, target)
-      destination <- machine.scalar(EncodingField.SDST)
+      srcA        <- scalarSource(machine, EncodingField.SSRC0, machine.literal, target)
+      srcB        <- scalarSource(machine, EncodingField.SSRC1, machine.literal, target)
+      destination <- machine.scalarOperand(EncodingField.SDST)
       operation   <- opcode match {
         case SFmacF32 => Right(Instruction.SFmaF32(destination, srcA, srcB, InstructionSource.Scalar(destination)))
         case SFmacF16 => Right(Instruction.SFmaF16(
@@ -2005,9 +2041,9 @@ private object VMCompiler {
       // Memory and LDS operations finish synchronously before the next instruction.
       case SWaitcntVscnt | SWaitcntLgkmcnt => Right(Instruction.Wait)
       case SMovkI32                        =>
-        machine.scalar(EncodingField.SDST).map(Instruction.SMove(_, InstructionSource.Constant(immediate)))
+        machine.scalarOperand(EncodingField.SDST).map(Instruction.SMove(_, InstructionSource.Constant(immediate)))
       case SCmovkI32 =>
-        machine.scalar(EncodingField.SDST).map(destination =>
+        machine.scalarOperand(EncodingField.SDST).map(destination =>
           Instruction.SCSelect(
             destination,
             InstructionSource.Constant(immediate),
@@ -2016,9 +2052,9 @@ private object VMCompiler {
           )
         )
       case SMulkI32 =>
-        machine.scalar(EncodingField.SDST).map(Instruction.SMultiplyImmediate(_, immediate.toInt))
+        machine.scalarOperand(EncodingField.SDST).map(Instruction.SMultiplyImmediate(_, immediate.toInt))
       case SAddkI32 | SAddkCoI32 =>
-        machine.scalar(EncodingField.SDST).map(Instruction.SAddImmediate(_, immediate.toInt))
+        machine.scalarOperand(EncodingField.SDST).map(Instruction.SAddImmediate(_, immediate.toInt))
       case SGetregB32 =>
         val encoded = machine(EncodingField.SIMM16)
         val value   = for {
@@ -2031,16 +2067,17 @@ private object VMCompiler {
         } yield (VMAddressSpace.HardwareBases >>> offset.field.get(encoded).toInt) &
           (-1L >>> (64 - size.field.get(encoded).toInt - 1))
         modeField(encoded, target) match {
-          case Some((offset, size)) => machine.scalar(EncodingField.SDST).map(Instruction.SGetMode(_, offset, size))
+          case Some((offset, size)) =>
+            machine.scalarOperand(EncodingField.SDST).map(Instruction.SGetMode(_, offset, size))
           case None if shaderCycles(encoded, target) =>
-            machine.scalar(EncodingField.SDST).map(Instruction.SReadClock(_, Clock.ShaderCycles))
+            machine.scalarOperand(EncodingField.SDST).map(Instruction.SReadClock(_, Clock.ShaderCycles))
           // a memory violation faults the launch and GWS operations always complete, so the flag stays clear
           case None if memoryViolation(encoded, target) =>
-            machine.scalar(EncodingField.SDST).map(Instruction.SMove(_, InstructionSource.Constant(0)))
+            machine.scalarOperand(EncodingField.SDST).map(Instruction.SMove(_, InstructionSource.Constant(0)))
           case None =>
             for {
               value       <- value.toRight[NonEmpty[String]](s"unsupported hardware register selector $encoded")
-              destination <- machine.scalar(EncodingField.SDST)
+              destination <- machine.scalarOperand(EncodingField.SDST)
             } yield Instruction.SMove(destination, InstructionSource.Constant(value.toInt))
         }
       case setreg @ (SSetregB32 | SSetregImm32B32) =>
@@ -2050,28 +2087,29 @@ private object VMCompiler {
             val source =
               if (setreg == SSetregImm32B32)
                 machine.literal.map(InstructionSource.Constant(_)).toRight[NonEmpty[String]](s"$setreg has no literal")
-              else machine.scalar(EncodingField.SDST).map(InstructionSource.Scalar(_))
+              else machine.scalarOperand(EncodingField.SDST).map(InstructionSource.Scalar(_))
             source.map(Instruction.SSetMode(offset, size, _))
-          case None => machine.scalar(EncodingField.SDST).map(_ => Instruction.SSetReg)
+          case None => machine.scalarOperand(EncodingField.SDST).map(_ => Instruction.SSetReg)
         }
       case compare @ (SCmpkEqI32 | SCmpkLgI32 | SCmpkGtI32 | SCmpkGeI32 | SCmpkLtI32 | SCmpkLeI32 | SCmpkEqU32 |
           SCmpkLgU32 | SCmpkGtU32 | SCmpkGeU32 | SCmpkLtU32 | SCmpkLeU32) =>
         for {
           (operation, signed) <- scalarImmediateCompareOperation(compare)
             .toRight[NonEmpty[String]](s"$compare SOPK execution is not implemented")
-          register <- machine.scalar(EncodingField.SDST)
+          register <- machine.scalarOperand(EncodingField.SDST)
         } yield Instruction.SCmp(
           operation,
           InstructionSource.Scalar(register),
           InstructionSource.Constant(if (signed) immediate else machine(EncodingField.SIMM16))
         )
-      case SCallB64 => machine.scalar(EncodingField.SDST).map(Instruction.CallRelative(_, immediate.toInt))
+      case SCallB64 | SCallI64 =>
+        machine.scalarOperand(EncodingField.SDST).map(Instruction.CallRelative(_, immediate.toInt))
       case begin @ (SSubvectorLoopBegin | SSubvectorLoopEnd) =>
-        machine.scalar(EncodingField.SDST).map(
+        machine.scalarOperand(EncodingField.SDST).map(
           Instruction.SubvectorLoopRelative(begin == SSubvectorLoopBegin, _, immediate.toInt)
         )
       case SCbranchIFork =>
-        machine.scalar(EncodingField.SDST).map(mask =>
+        machine.scalarOperand(EncodingField.SDST).map(mask =>
           Instruction.ForkRelative(InstructionSource.Scalar(mask), machine.signed(EncodingField.SIMM16).toInt)
         )
       case other => Left[NonEmpty[String], Nothing](s"$other SOPK execution is not implemented")
@@ -2080,8 +2118,8 @@ private object VMCompiler {
 
   private def decodeSOPC(machine: InstructionDecoder.Decoded, target: Target): Either[NonEmpty[String], Instruction] =
     for {
-      srcA      <- scalarSource(machine(EncodingField.SSRC0).toInt, machine.literal, target)
-      srcB      <- scalarSource(machine(EncodingField.SSRC1).toInt, machine.literal, target)
+      srcA      <- scalarSource(machine, EncodingField.SSRC0, machine.literal, target)
+      srcB      <- scalarSource(machine, EncodingField.SSRC1, machine.literal, target)
       operation <- machine.definition match {
         case SSetGprIdxOn =>
           Right(Instruction.SGprIndex(Some(srcA), Some(machine(EncodingField.SSRC1).toInt & 0xf), enable = true))
@@ -2147,7 +2185,7 @@ private object VMCompiler {
       // Operations complete synchronously; waits only flush staged host writes.
       case SWaitcnt | SWaitcntVscnt | SWaitcntDepctr | SDelayAlu | SWaitKmcnt | SWaitAlu |
           SWaitLoadcnt | SWaitStorecnt | SWaitDscnt | SWaitLoadcntDscnt | SWaitStorecntDscnt |
-          SWaitSamplecnt | SWaitBvhcnt | SWaitExpcnt =>
+          SWaitSamplecnt | SWaitBvhcnt | SWaitExpcnt | SWaitXcnt | SWaitAsynccnt =>
         Right(Instruction.Wait)
       case SDenormMode =>
         Right(Instruction.SSetMode(ModeRegister.DenormalShift, 4, InstructionSource.Constant(immediate & 0xf)))
@@ -2163,8 +2201,8 @@ private object VMCompiler {
       // Clause grouping has no observable effect.
       case SClause => Right(Instruction.Wait)
       // Wave priority only affects physical scheduling.
-      case SSetprio     => Right(Instruction.Wait)
-      case SBarrierWait => Right(Instruction.BarrierWait(machine.signed(EncodingField.SIMM16).toInt))
+      case SSetprio | SSetprioIncWg => Right(Instruction.Wait)
+      case SBarrierWait             => Right(Instruction.BarrierWait(machine.signed(EncodingField.SIMM16).toInt))
       case SBarrierLeave if namedBarriers(target) => Right(Instruction.BarrierLeave)
       case SBarrier                               => Right(Instruction.Barrier)
       case SEndpgm                                => Right(Instruction.End)
@@ -2257,7 +2295,9 @@ private object VMCompiler {
           Instruction.VMadF32 | Instruction.VCndMask | Instruction.VTernary | Instruction.VBitCount |
           Instruction.VDot | Instruction.VMedia | Instruction.VMaskBitCount | Instruction.VConvertNarrow |
           Instruction.VDot2F32F16 | Instruction.VPackedTernary | Instruction.VFmaMixF32 |
-          Instruction.VFmaMixF16 | Instruction.VAccumulatorWrite | Instruction.VPackB32F16) => true
+          Instruction.VFmaMixF16 | Instruction.VAccumulatorWrite | Instruction.VPackB32F16 | Instruction.VMadU64U32 |
+          Instruction.VMadI64I32 | Instruction.VBitOp3 | Instruction.VConvertPackedHalf | Instruction.VShiftLeft64 |
+          Instruction.VShiftRight64 | Instruction.VShiftRightArithmetic64) => true
     case _ => false
   }
 
@@ -2274,8 +2314,9 @@ private object VMCompiler {
       PairConversions(conversion) && !WideningConversions(conversion)
     case Instruction.VClampResult(operation = inner)  => pairRouted(inner)
     case Instruction.VOutputModified(ignored = inner) => pairRouted(inner)
-    case Instruction.VMove64(dest = _) | Instruction.VBinary64(dest = _) | Instruction.VMadF64(dest = _) => true
-    case _                                                                                               => false
+    case Instruction.VMove64(dest = _) | Instruction.VBinary64(dest = _) | Instruction.VMadF64(dest = _) |
+        Instruction.VShiftLeftAdd64(dest = _) => true
+    case _ => false
   }
 
   private val PairConversions: Set[VectorConvertOperation] = Set(
@@ -2364,7 +2405,7 @@ private object VMCompiler {
       scalarSelect: EncodingField,
       target: Target
   ): Either[NonEmpty[String], InstructionSource] =
-    if (machine.isSet(scalarSelect)) operandSource(machine, machine(field).toInt, None, target)
+    if (machine.isSet(scalarSelect)) operandSource(machine, field, None, target)
     else machine.vector(field).map(InstructionSource.VectorRegister(_))
 
   /** VSRC1 names an SGPR only when SDWA selects scalar source mode. */
@@ -2581,11 +2622,11 @@ private object VMCompiler {
         // GFX6 and GFX7 encode the lane moves in VOP2, VSRC1 naming the lane select as a source operand does
         case VReadlaneB32 =>
           for {
-            lane        <- scalarSource(machine(EncodingField.VSRC1).toInt, None, target)
+            lane        <- scalarSource(machine, EncodingField.VSRC1, None, target)
             destination <- machine.scalar(EncodingField.VDST)
           } yield Instruction.VReadLane(destination, srcA, lane)
         case VWritelaneB32 =>
-          scalarSource(machine(EncodingField.VSRC1).toInt, None, target).map(Instruction.VWriteLane(dest, srcA, _))
+          scalarSource(machine, EncodingField.VSRC1, None, target).map(Instruction.VWriteLane(dest, srcA, _))
         // each half accumulates into the same half of the destination
         case VPkFmacF16 =>
           Right(Instruction.VPackedTernary(
@@ -2607,7 +2648,7 @@ private object VMCompiler {
             InstructionSource.VectorRegister(dest),
             SourceModifiers.Unmodified
           ))
-        case VAddF64 | VMulF64 | VMaxF64 | VMaxNumF64 | VMinF64 | VMinNumF64 =>
+        case VAddF64 | VMulF64 | VMaxF64 | VMaxNumF64 | VMinF64 | VMinNumF64 | VAddNcU64 | VSubNcU64 | VMulU64 =>
           vectorBinary64Operation(opcode).map(operation =>
             Instruction.VBinary64(operation, dest, srcA, srcB, SourceModifiers.Unmodified)
           ).toRight[NonEmpty[String]](s"$opcode VOP2 execution is not implemented")
@@ -2835,7 +2876,8 @@ private object VMCompiler {
         case VMovB64 if !hasSDWA => Right(Instruction.VMove64(destination, src))
         case VMovB64             =>
           Left[NonEmpty[String], Instruction](s"$opcode has no SDWA form: SDWA selects within a dword")
-        case VCvtF32Fp8 | VCvtF32Bf8 | VCvtPkF32Fp8 | VCvtPkF32Bf8 =>
+        case VCvtF32Fp8 | VCvtF32Bf8 | VCvtPkF32Fp8 | VCvtPkF32Bf8 | VCvtF16Fp8 | VCvtF16Bf8 | VCvtPkF16Fp8 |
+            VCvtPkF16Bf8 =>
           eightBitConversion(opcode, target).map(Instruction.VConvert(_, destination, src))
             .toRight[NonEmpty[String]](s"$opcode VOP1 execution is not implemented")
         case VSwaprelB32 => src match {
@@ -2890,7 +2932,7 @@ private object VMCompiler {
         if (hasSDWA) for {
           _           <- sdwaListed(machine)
           destination <-
-            if (machine.isSet(EncodingField.SD)) machine.scalar(EncodingField.SDST)
+            if (machine.isSet(EncodingField.SD)) machine.scalarOperand(EncodingField.SDST)
             else Right(Fixed.VccLo: ScalarRegisterIndex)
           srcASelection <- subDwordSelection(machine(EncodingField.SRC0_SEL).toInt)
           srcBSelection <- subDwordSelection(machine(EncodingField.SRC1_SEL).toInt)
@@ -2926,7 +2968,7 @@ private object VMCompiler {
     // MAC reads its addend from the destination, which takes no modifiers.
     val sourceModifiersAB             = SourceModifiers(modifiers.absolute & 3, modifiers.negate & 3)
     def operand(field: EncodingField) =
-      operandSource(machine, machine(field).toInt, literal, target).leftMap[NonEmpty[String]](error =>
+      operandSource(machine, field, literal, target).leftMap[NonEmpty[String]](error =>
         s"$error in $opcode"
       )
     val opSelection                                                  = machine(EncodingField.OP_SEL).toInt
@@ -2951,7 +2993,7 @@ private object VMCompiler {
         s"$opcode op_sel is not implemented"
       )
       destination      <- machine.vector(EncodingField.VDST)
-      carryDestination <- machine.scalar(EncodingField.SDST)
+      carryDestination <- machine.scalarOperand(EncodingField.SDST)
       lower = (clamp: Boolean) => {
         def scalarDestination: Either[NonEmpty[String], ScalarRegisterIndex] =
           destination.refine[ScalarRegisterIndex]
@@ -3147,7 +3189,8 @@ private object VMCompiler {
               srcC = srcC,
               modifiers = modifiers
             ))
-          case VAddF64 | VLdexpF64 | VMulF64 | VMaxF64 | VMaxNumF64 | VMinF64 | VMinNumF64 | VMinimumF64 | VMaximumF64 =>
+          case VAddF64 | VLdexpF64 | VMulF64 | VMaxF64 | VMaxNumF64 | VMinF64 | VMinNumF64 | VMinimumF64 | VMaximumF64 |
+              VAddNcU64 | VSubNcU64 | VMulU64 | VMaxI64 | VMaxU64 | VMinI64 | VMinU64 =>
             vectorBinary64Operation(opcode)
               .map(operation =>
                 Instruction.VBinary64(operation, destination, srcA, srcB, modifiers)
@@ -3289,7 +3332,8 @@ private object VMCompiler {
               VMax3F32 | VMed3F32 | VMaxminF32 | VMinmaxF32 | VMaxminI32 | VMinmaxI32 | VMaxminU32 | VMinmaxU32 |
               VMax3NumF32 | VMin3NumF32 | VMed3NumF32 | VMaxminNumF32 | VMinmaxNumF32 | VMinimum3F32 | VMaximum3F32 |
               VMaximumminimumF32 | VMinimummaximumF32 |
-              VAlignbyteB32 | VSadU8 | VSadHiU8 | VSadU16 | VSadU32 | VMsadU8 | VAshrPkI8I32 | VAshrPkU8I32 =>
+              VAlignbyteB32 | VSadU8 | VSadHiU8 | VSadU16 | VSadU32 | VMsadU8 | VAshrPkI8I32 | VAshrPkU8I32 |
+              VAddMaxI32 | VAddMaxU32 | VAddMinI32 | VAddMinU32 | VMadU32 =>
             vectorTernaryOperation(opcode)
               .map(operation => Instruction.VTernary(operation, destination, srcA, srcB, srcC, modifiers, clamp))
               .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
@@ -3297,7 +3341,7 @@ private object VMCompiler {
               VMaxminNumF16 | VMinmaxNumF16 | VMinimum3F16 | VMaximum3F16 | VMaximumminimumF16 | VMinimummaximumF16 =>
             halvedTernary
           case other if ExtendedVOP3Opcodes(other) || scaledConversion(other).nonEmpty =>
-            extendedVOP3(machine, target, destination, srcA, srcB, srcC, modifiers, opSelection, clamp)
+            extendedVOP3(machine, target, destination, (srcA, srcB, srcC), modifiers, opSelection, clamp)
           case VCvtPkRtzF16F32_1 | VCvtPkrtzF16F32_2 =>
             Right(Instruction.VBinary(
               VectorBinaryOperation.PackRoundTowardZeroF16,
@@ -3336,6 +3380,12 @@ private object VMCompiler {
             Right(Instruction.VMadU64U32(destination, carryDestination, srcA, srcB, srcC, clamp))
           case VMadI64I32 | VMadCoI64I32 =>
             Right(Instruction.VMadI64I32(destination, carryDestination, srcA, srcB, srcC, clamp))
+          case VMadNcU64U32 | VMadNcI64I32 =>
+            nullRegister(target.isa).toRight[NonEmpty[String]](s"$opcode has no null register to take the carry").map(
+              discarded =>
+                if (opcode == VMadNcU64U32) Instruction.VMadU64U32(destination, discarded, srcA, srcB, srcC, clamp)
+                else Instruction.VMadI64I32(destination, discarded, srcA, srcB, srcC, clamp)
+            )
           case VDivScaleF32 =>
             Right(Instruction.VDivScaleF32(
               dest = destination,
@@ -3496,6 +3546,12 @@ private object VMCompiler {
     VCvtPkF32Bf8,
     VCvtPkFp8F32,
     VCvtPkBf8F32,
+    VCvtPkFp8F16,
+    VCvtPkBf8F16,
+    VCvtF16Fp8,
+    VCvtF16Bf8,
+    VCvtPkF16Fp8,
+    VCvtPkF16Bf8,
     VCvtSrFp8F32,
     VCvtSrBf8F32,
     VMadLegacyF32,
@@ -3516,14 +3572,13 @@ private object VMCompiler {
       machine: InstructionDecoder.Decoded,
       target: Target,
       destination: VectorRegisterIndex,
-      srcA: InstructionSource,
-      srcB: InstructionSource,
-      srcC: InstructionSource,
+      sources: (InstructionSource, InstructionSource, InstructionSource),
       modifiers: SourceModifiers,
       opSelection: Int,
       clamp: Boolean
   ): Either[NonEmpty[String], Instruction] = {
-    val opcode = machine.definition
+    val (srcA, srcB, srcC) = sources
+    val opcode             = machine.definition
     opcode match {
       // the VOP3 forms of the VOP2 dot products accumulate into the destination
       case VDot2cF32F16 if !clamp => Right(Instruction.VDot2F32F16(destination, srcA, srcB, accumulate = true))
@@ -3558,7 +3613,7 @@ private object VMCompiler {
           case _ => Left[NonEmpty[String], Instruction](s"$opcode requires an accumulator register")
         }
       // the byte or word an 8-bit float conversion reads, which BYTE_SEL or OP_SEL names
-      case VCvtF32Fp8 | VCvtF32Bf8 =>
+      case VCvtF32Fp8 | VCvtF32Bf8 | VCvtF16Fp8 | VCvtF16Bf8 =>
         val byte = if (machine.contains(EncodingField.BYTE_SEL)) machine(EncodingField.BYTE_SEL).toInt else 0
         eightBitConversion(opcode, target).map(operation =>
           Instruction.VConvert(
@@ -3572,7 +3627,7 @@ private object VMCompiler {
             )
           )
         ).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
-      case VCvtPkF32Fp8 | VCvtPkF32Bf8 =>
+      case VCvtPkF32Fp8 | VCvtPkF32Bf8 | VCvtPkF16Fp8 | VCvtPkF16Bf8 =>
         eightBitConversion(opcode, target).map(operation =>
           Instruction.VConvert(
             operation,
@@ -3581,6 +3636,8 @@ private object VMCompiler {
             else InstructionSource.Selected(srcA, SubDwordSelection.Word1, signExtend = false)
           )
         ).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
+      case VCvtPkFp8F16 | VCvtPkBf8F16 =>
+        Right(Instruction.VConvertPackedHalf(destination, srcA, eightBit(opcode == VCvtPkBf8F16, target)))
       case VCvtPkFp8F32 | VCvtPkBf8F32 =>
         Right(Instruction.VConvertNarrow(
           destination,
@@ -3697,7 +3754,7 @@ private object VMCompiler {
     val clamp          = machine.contains(EncodingField.CLAMP) && machine.isSet(EncodingField.CLAMP)
     def fail(message: String): Either[NonEmpty[String], Unit]                    = Left(s"$opcode $message")
     def scale(field: EncodingField): Either[NonEmpty[String], InstructionSource] =
-      vectorSource(machine(field).toInt, machine.literal, target)
+      vectorSource(field, machine(field).toInt, machine.literal, target)
     for {
       shape <- MatrixShape.of(mnemonic, target.isa, 64, blockBroadcast, laneGroups)
         .leftMap[NonEmpty[String]](message => s"$message: execution is not implemented")
@@ -3710,9 +3767,9 @@ private object VMCompiler {
       _ <- if (double && laneGroups != 0 && target.isa == ISA.CDNA2) fail("negation is not defined on gfx90a")
       else Right(())
       _ <- if (clamp && !shape.c.integer) fail("clamp, which follows MODE.FP16_OVFL, is not implemented") else Right(())
-      a <- vectorSource(machine(EncodingField.SRC0).toInt, None, target)
-      b <- vectorSource(machine(EncodingField.SRC1).toInt, None, target)
-      addend      <- vectorSource(machine(EncodingField.SRC2).toInt, None, target)
+      a <- vectorSource(EncodingField.SRC0, machine(EncodingField.SRC0).toInt, None, target)
+      b <- vectorSource(EncodingField.SRC1, machine(EncodingField.SRC1).toInt, None, target)
+      addend      <- vectorSource(EncodingField.SRC2, machine(EncodingField.SRC2).toInt, None, target)
       c           <- if (shape.sparse) Right(addend) else matrixElements(addend, shape.c)
       destination <- machine.vector(EncodingField.VDST)
       scales      <-
@@ -3780,9 +3837,19 @@ private object VMCompiler {
         (),
         s"$opcode clamp on floating-point results is not implemented"
       )
-      a      <- vectorSource(machine(EncodingField.SRC0).toInt, None, target).flatMap(matrixElements(_, shape.a))
-      b      <- vectorSource(machine(EncodingField.SRC1).toInt, None, target).flatMap(matrixElements(_, shape.b))
-      addend <- operandSource(machine, machine(EncodingField.SRC2).toInt, machine.literal, target)
+      a <- vectorSource(
+        EncodingField.SRC0,
+        machine(EncodingField.SRC0).toInt,
+        None,
+        target
+      ).flatMap(matrixElements(_, shape.a))
+      b <- vectorSource(
+        EncodingField.SRC1,
+        machine(EncodingField.SRC1).toInt,
+        None,
+        target
+      ).flatMap(matrixElements(_, shape.b))
+      addend <- operandSource(machine, EncodingField.SRC2, machine.literal, target)
         .leftMap[NonEmpty[String]](error => s"$error in $opcode")
       c           <- if (shape.sparse) Right(addend) else matrixElements(addend, shape.c)
       destination <- machine.vector(EncodingField.VDST)
@@ -3813,7 +3880,7 @@ private object VMCompiler {
     val negateLow       = machine(EncodingField.NEG).toInt
     val negateHigh      = machine(EncodingField.NEG_HI).toInt
     val clamp           = machine.isSet(EncodingField.CLAMP)
-    def operand(field: EncodingField) = operandSource(machine, machine(field).toInt, machine.literal, target)
+    def operand(field: EncodingField) = operandSource(machine, field, machine.literal, target)
       .leftMap[NonEmpty[String]](error => s"$error in $opcode")
     // A mixed-precision source that OP_SEL_HI converts from f16 reads an inline float constant as binary16.
     def mixSource(source: InstructionSource, index: Int): InstructionSource = source match {
@@ -3870,7 +3937,9 @@ private object VMCompiler {
             Instruction.VPackedMove32(destination, srcA, srcB, (opSelection & 1) != 0, (opSelection & 2) != 0),
             s"$opcode packed modifiers are not implemented"
           )
-        case VPkFmaF16 | VPkMadU16 | VPkMadI16 | VPkMinimum3F16 | VPkMaximum3F16 =>
+        case VPkFmaF16 | VPkMadU16 | VPkMadI16 | VPkMinimum3F16 | VPkMaximum3F16 | VPkMin3NumF16 | VPkMax3NumF16 |
+            VPkMin3I16 | VPkMin3U16 | VPkMax3I16 | VPkMax3U16 | VPkAddMinI16 | VPkAddMinU16 | VPkAddMaxI16 |
+            VPkAddMaxU16 =>
           Right(Instruction.VPackedTernary(
             dest = destination,
             srcA = srcA,
@@ -3886,6 +3955,16 @@ private object VMCompiler {
               case VPkMadI16      => PackedTernaryOperation.MultiplyAddI16
               case VPkMinimum3F16 => PackedTernaryOperation.Minimum3PropagateF16
               case VPkMaximum3F16 => PackedTernaryOperation.Maximum3PropagateF16
+              case VPkMin3NumF16  => PackedTernaryOperation.Minimum3F16
+              case VPkMax3NumF16  => PackedTernaryOperation.Maximum3F16
+              case VPkMin3I16     => PackedTernaryOperation.Minimum3I16
+              case VPkMin3U16     => PackedTernaryOperation.Minimum3U16
+              case VPkMax3I16     => PackedTernaryOperation.Maximum3I16
+              case VPkMax3U16     => PackedTernaryOperation.Maximum3U16
+              case VPkAddMinI16   => PackedTernaryOperation.AddMinimumI16
+              case VPkAddMinU16   => PackedTernaryOperation.AddMinimumU16
+              case VPkAddMaxI16   => PackedTernaryOperation.AddMaximumI16
+              case VPkAddMaxU16   => PackedTernaryOperation.AddMaximumU16
               case _              => PackedTernaryOperation.FusedMultiplyAddF16
             }
           ))
@@ -4304,12 +4383,11 @@ private object VMCompiler {
     for {
       vectorAddress <- machine.vector(if (wide) EncodingField.VADDR else EncodingField.ADDR)
       dataRegister  <- machine.vector(if (wide) EncodingField.VSRC else EncodingField.DATA)
-      scalarAddress <- machine.scalar(EncodingField.SADDR)
+      scalarAddress <- machine.scalarOperand(EncodingField.SADDR, absentScalarOffset(target))
       destination   <- machine.vector(EncodingField.VDST)
       // RDNA3 and later encode the null scalar address as 124.
-      absentScalar = isAbsentScalarOffset(scalarAddress.toLong) ||
-        (target.isa.isGFX11OrLater && scalarAddress == 124)
-      scalar = Option.when(!absentScalar)(scalarAddress)
+      absentScalar = absentScalarOffset(target)(scalarAddress.toLong)
+      scalar       = Option.when(!absentScalar)(scalarAddress)
       address <-
         if (segment == 1) {
           // without SVE, a scalar address replaces the vector one
@@ -4413,12 +4491,12 @@ private object VMCompiler {
     */
   private def operandSource(
       machine: InstructionDecoder.Decoded,
-      encoding: Int,
+      field: EncodingField,
       literal: Option[Long],
       target: Target
   ): Either[NonEmpty[String], InstructionSource] = {
     val name = machine.definition.mnemonic.raw
-    vectorSource(encoding, literal, target).map {
+    vectorSource(field, machine(field).toInt, literal, target).map {
       case InstructionSource.Floating(value) if name.endsWith("_f16") && !name.contains("_mix") =>
         InstructionSource.Constant(Bits.low16(IEEE754.floatToBinary16(value.toFloat).toLong).toLong)
       case other => other
@@ -4433,52 +4511,60 @@ private object VMCompiler {
   }
 
   private def scalarSource(
-      encoding: Int,
+      machine: InstructionDecoder.Decoded,
+      field: EncodingField,
       literal: Option[Long],
       target: Target
   ): Either[NonEmpty[String], InstructionSource] =
-    vectorSource(encoding, literal, target).filterOrElse(
+    vectorSource(field, machine(field).toInt, literal, target).filterOrElse(
       {
         case InstructionSource.VectorRegister(_) => false
         case _                                   => true
       },
-      unsupportedSource(encoding)
+      unsupportedSource(machine(field).toInt)
     )
 
   private def unsupportedSource(encoding: Int): NonEmpty[String] =
     s"source encoding $encoding is not implemented or its literal is missing"
 
   private def vectorSource(
+      field: EncodingField,
       encoding: Int,
       literal: Option[Long],
       target: Target
   ): Either[NonEmpty[String], InstructionSource] =
-    SourceOperand.decode(encoding, target.isa).flatMap {
-      case SourceOperand.Scalar(index) if nullRegister(target.isa).contains(index) =>
-        Some(InstructionSource.Constant(0L))
-      case SourceOperand.Scalar(index)                  => Some(InstructionSource.Scalar(index))
-      case SourceOperand.VectorRegister(index)          => Some(InstructionSource.VectorRegister(index))
-      case SourceOperand.Integer(value)                 => Some(InstructionSource.Constant(value))
-      case SourceOperand.Floating(value)                => Some(InstructionSource.Floating(value))
-      case SourceOperand.Special(SpecialSource.src_scc) =>
-        Some(InstructionSource.Condition(ScalarBranchCondition.SccNonZero))
-      case SourceOperand.Special(SpecialSource.src_vccz) =>
-        Some(InstructionSource.Condition(ScalarBranchCondition.VccZero))
-      case SourceOperand.Special(SpecialSource.src_execz) =>
-        Some(InstructionSource.Condition(ScalarBranchCondition.ExecZero))
-      case SourceOperand.Special(SpecialSource.src_shared_base) =>
-        Some(InstructionSource.Constant(VMAddressSpace.LocalBase))
-      case SourceOperand.Special(SpecialSource.src_shared_limit) =>
-        Some(InstructionSource.Constant(VMAddressSpace.LocalLimit))
-      case SourceOperand.Special(SpecialSource.src_private_base) =>
-        Some(InstructionSource.Constant(VMAddressSpace.PrivateBase))
-      case SourceOperand.Special(SpecialSource.src_private_limit) =>
-        Some(InstructionSource.Constant(VMAddressSpace.PrivateLimit))
-      case SourceOperand.Special(SpecialSource.src_pops_exiting_wave_id) =>
-        Some(InstructionSource.Constant(0L))
-      case SourceOperand.Literal(bytes) if bytes == 4 => literal.map(InstructionSource.Literal(_))
-      case _                                          => None
-    }.toRight(unsupportedSource(encoding))
+    Src.decode(target.isa, encoding).toRight(sourceOutsideDomain(field, encoding, target)).flatMap(source =>
+      (source match {
+        case Src.Null                 => Some(InstructionSource.Constant(0L))
+        case Src.Vgpr(index)          => Some(InstructionSource.VectorRegister(index))
+        case Src.Integer(value)       => Some(InstructionSource.Constant(value.raw.toLong))
+        case Src.Floating(value)      => Some(InstructionSource.Floating(inlineFloat(encoding, value)))
+        case Src.SrcScc               => Some(InstructionSource.Condition(ScalarBranchCondition.SccNonZero))
+        case Src.SrcVccz              => Some(InstructionSource.Condition(ScalarBranchCondition.VccZero))
+        case Src.SrcExecz             => Some(InstructionSource.Condition(ScalarBranchCondition.ExecZero))
+        case Src.SrcSharedBase        => Some(InstructionSource.Constant(VMAddressSpace.LocalBase))
+        case Src.SrcSharedLimit       => Some(InstructionSource.Constant(VMAddressSpace.LocalLimit))
+        case Src.SrcPrivateBase       => Some(InstructionSource.Constant(VMAddressSpace.PrivateBase))
+        case Src.SrcPrivateLimit      => Some(InstructionSource.Constant(VMAddressSpace.PrivateLimit))
+        case Src.SrcPopsExitingWaveId => Some(InstructionSource.Constant(0L))
+        case Src.Literal              => literal.map(InstructionSource.Literal(_))
+        case Src.Literal64 | Src.SrcLdsDirect | Src.SrcFlatScratchBaseLo | Src.SrcFlatScratchBaseHi => None
+        case _ => scalarRegister(encoding)
+      }).toRight(unsupportedSource(encoding))
+    )
+
+  private def sourceOutsideDomain(field: EncodingField, encoding: Int, target: Target): NonEmpty[String] =
+    Src.table(target.isa).undefined(
+      target.isa,
+      field,
+      encoding
+    ).fold(unsupportedSource(encoding))(_.unsafe[NonEmpty[String]])
+
+  private def inlineFloat(encoding: Int, value: Double): Double =
+    if (encoding == Source.INLINE_FLOATING_C_MAX) SourceOperand.InverseTwoPi else value
+
+  private def scalarRegister(encoding: Int): Option[InstructionSource] =
+    encoding.refine[ScalarRegisterIndex].toOption.map(InstructionSource.Scalar(_))
 
   private def subDwordSelection(encoding: Int): Either[NonEmpty[String], SubDwordSelection] =
     SubDwordSelection.fromEncoding(encoding).toRight[NonEmpty[String]](s"unknown SDWA selection $encoding")

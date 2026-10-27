@@ -247,14 +247,14 @@ class ExecutionSessionSuite extends munit.FunSuite {
         val release = CountDownLatch(1)
         val written = CountDownLatch(1)
         val atomic  = FutureTask[Either[ExecutionFailure, Long]](() =>
-          service.atomicModifyValue(first, 0L, 8) { previous =>
+          service.atomicModifyValue(AllocationScalar(first, 0L, 8)) { previous =>
             entered.countDown()
             if (!release.await(5L, TimeUnit.SECONDS)) throw IllegalStateException("atomic update was not released")
             previous + 1L
           }
         )
         val writer = FutureTask[Either[ExecutionFailure, Unit]] { () =>
-          val result = service.writeValue(second, offset, 42L, 8)
+          val result = service.writeValue(AllocationScalar(second, offset, 8), 42L)
           written.countDown()
           result
         }
@@ -270,7 +270,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
         assertEquals(writer.get(5L, TimeUnit.SECONDS), Right(()))
         atomicThread.join()
         writeThread.join()
-        assertEquals(service.readValue(second, offset, 8), Right(42L))
+        assertEquals(service.readValue(AllocationScalar(second, offset, 8)), Right(42L))
         assert(independent, "one allocation's atomic update held the session lock across an unrelated write")
       }
     }
@@ -282,7 +282,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       val program    = service.load(encoding, Vec[Byte](1)).toOption.get
       val completion = service.launch(program, task("write", KernelTask.Argument.Memory(allocation, 2L))).toOption.get
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(allocation, 2L, 1), Right(Vec[Byte](42)))
+      assertEquals(service.read(AllocationRange(allocation, 2L, 1)), Right(Vec[Byte](42)))
       assertEquals(service.completionPrints(completion), Right("done 42"))
       assertEquals(
         service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
@@ -348,7 +348,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       val operation = ExecutionRPC.Operation.CompletionDirtyRanges(completion, 0)
       for (page <- Vec(first, second))
         assert(operation.replyCodec.encode(page, ExecutionRPC.Limits).isRight)
-      val bytes = service.read(allocation, 0L, (count * 2).unsafe[Int >= 0]).toOption.get
+      val bytes = service.read(AllocationRange(allocation, 0L, (count * 2).unsafe[Int >= 0])).toOption.get
       assertEquals(bytes, Vec.from(0 until count * 2).map(index => if (index % 2 == 0) 42.toByte else 0.toByte))
       assertEquals(service.releaseCompletion(completion), Right(()))
       assert(service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements).isLeft)
@@ -373,7 +373,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
         val completion =
           service.launch(program, task("parallel", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
         assertEquals(service.awaitCompletion(completion), Right(()))
-        assertEquals(service.readValue(allocation, 4095L, 8), Right(128L))
+        assertEquals(service.readValue(AllocationScalar(allocation, 4095L, 8)), Right(128L))
         val expected =
           Vec.from(0 until 128).map(index => DirtyRange(allocation, (index.toLong * 16L).unsafe[Long >= 0], 8))
             .appended(DirtyRange(allocation, 4095L, 8))
@@ -383,8 +383,11 @@ class ExecutionSessionSuite extends munit.FunSuite {
         )
         (0 until 128).foreach { index =>
           val offset = ((index.toLong * 31L % 128L) * 16L).unsafe[Long >= 0]
-          assertEquals(service.readValue(allocation, offset, 8), Right(index.toLong + 1L))
-          assertEquals(service.readValue(allocation, (offset.raw + 8L).unsafe[Long >= 0], 8), Right(0L))
+          assertEquals(service.readValue(AllocationScalar(allocation, offset, 8)), Right(index.toLong + 1L))
+          assertEquals(
+            service.readValue(AllocationScalar(allocation, (offset.raw + 8L).unsafe[Long >= 0], 8)),
+            Right(0L)
+          )
         }
       }
     }
@@ -654,7 +657,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
             assertEquals(service.registerAllocationAddress(replacement, address), Right(()))
           } finally release.countDown()
           assertEquals(service.awaitCompletion(completion), Right(()))
-          assertEquals(service.read(used, 8L, 1), Right(Vec[Byte](42)))
+          assertEquals(service.read(AllocationRange(used, 8L, 1)), Right(Vec[Byte](42)))
           assertEquals(service.releaseCompletion(completion), Right(()))
           assertEquals(service.releaseAllocation(used), Right(()))
         }
@@ -854,7 +857,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
           case other                                  => fail(s"expected failed execution, got $other")
         }
         assertEquals(session.awaitCompletion(queued), Right(()))
-        assertEquals(session.read(allocation, 0L, 1), Right(Vec[Byte](42)))
+        assertEquals(session.read(AllocationRange(allocation, 0L, 1)), Right(Vec[Byte](42)))
         assertEquals(session.releaseCompletion(failed), Right(()))
         assertEquals(session.releaseCompletion(queued), Right(()))
         assertEquals(session.unload(program), Right(()))

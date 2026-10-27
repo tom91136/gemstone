@@ -57,14 +57,20 @@ class PTXBackend(
   private val decoded   = mutable.HashMap.empty[Image, Cached]
   private val retained  = Retained[Cached]()
 
-  // Only a program that loaded is retained, so a failed decode is retried.
-  private def release(cached: Cached, loaded: Boolean): Unit = cacheLock.withLock {
+  private def unreference(cached: Cached)(onLast: => Unit): Unit = cacheLock.withLock {
     cached.references -= 1
     if (cached.references == 0) {
       val _ = decoded.remove(cached.image)
-      if (loaded && retainReleased) retained.put(cached.image.hashCode, cached)
+      onLast
     }
   }
+
+  // Only a program that loaded is retained, so a failed decode is retried.
+  private def releaseLoaded(cached: Cached): Unit = unreference(cached) {
+    if (retainReleased) retained.put(cached.image.hashCode, cached)
+  }
+
+  private def releaseFailed(cached: Cached): Unit = unreference(cached)(())
 
   override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = {
     val key    = Image(image)
@@ -81,14 +87,14 @@ class PTXBackend(
       cached.program.run()
       val parsed = try cached.program.get()
       catch { case error: ExecutionException => throw error.getCause }
-      parsed.flatMap(LoadedProgram.load(_, workgroups, () => release(cached, loaded = true)))
+      parsed.flatMap(LoadedProgram.load(_, workgroups, () => releaseLoaded(cached)))
     } catch {
       case error: Throwable =>
-        release(cached, loaded = false)
+        releaseFailed(cached)
         throw error
     }
     loaded.left.map { error =>
-      release(cached, loaded = false)
+      releaseFailed(cached)
       error
     }
   }

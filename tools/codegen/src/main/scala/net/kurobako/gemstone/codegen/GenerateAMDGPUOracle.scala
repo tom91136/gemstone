@@ -62,10 +62,11 @@ object GenerateAMDGPUOracle {
   private val GPUName: Regex         = raw"(?i)\bgfx[0-9a-z]+\b".r
   private val OraclePath             = "net/kurobako/gemstone/isa/amdgpu/llvm-oracle"
   private val OperandFree            = Set("v_nop", "v_clrexcp")
+  private val TopSgprs               = Set("s102", "s103")
 
   private val command = Command("GenerateAMDGPUOracle", "Generate the bounded AMDGPU oracle")((
-    Opts.argument[String]("prepared-references").map(Path.of(_)),
-    Opts.argument[String]("generated-resource-root").map(Path.of(_))
+    CodegenCommand.path("prepared-references"),
+    CodegenCommand.path("generated-resource-root")
   ).mapN(Request(_, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(request =>
@@ -126,7 +127,7 @@ object GenerateAMDGPUOracle {
                  else input.trim)
                   .refine[NonEmpty[String]].toOption.fold(current) { canonical =>
                     val key = (target, canonical, bytes, waveSize)
-                    if (!containsFileCheckExpression(canonical) && !current.positiveSeen(key))
+                    if (isPlainText(canonical) && !current.positiveSeen(key))
                       current.copy(
                         positiveSeen = current.positiveSeen + key,
                         positives =
@@ -150,7 +151,7 @@ object GenerateAMDGPUOracle {
                 val (target, _) = context
                 message.refine[NonEmpty[String]].toOption.fold(current) { diagnostic =>
                   val key = (target, assembly, diagnostic)
-                  if (!containsFileCheckExpression(assembly) && !current.diagnosticSeen(key))
+                  if (isPlainText(assembly) && !current.diagnosticSeen(key))
                     current.copy(
                       diagnosticSeen = current.diagnosticSeen + key,
                       diagnostics = current.diagnostics.append(
@@ -236,6 +237,10 @@ object GenerateAMDGPUOracle {
       Option.when(identifiers.exists(Text.registerToken(_, 'v')))("vgpr"),
       Option.when(identifiers.exists(Text.registerToken(_, 's')))("sgpr"),
       Option.when(assembly.contains("ttmp"))("temporary-register"),
+      // the operand domain merge takes the top scalar registers of GFX6 from the oracle
+      Option.when(familyForTargetOption(value.target).contains("gfx6") && identifiers.exists(TopSgprs))(
+        "top-scalar-register"
+      ),
       Option.when(assembly.contains("vcc"))("vcc"),
       Option.when(assembly.contains("exec"))("exec"),
       Option.when(assembly.contains("src_"))("pseudo-source"),
@@ -387,7 +392,7 @@ object GenerateAMDGPUOracle {
   private def validDiagnosticSource(value: String): Boolean =
     value.nonEmpty && !value.startsWith("//") && !value.startsWith("#")
 
-  private def containsFileCheckExpression(value: String): Boolean = value.contains("{{") || value.contains("[[")
+  private def isPlainText(value: String): Boolean = !value.contains("{{") && !value.contains("[[")
 
   private def parseBytes(value: String): Option[Vector[Int in 0 ~ 255]] = {
     val fields = value.split(',').view.map(_.trim).filter(_.nonEmpty).toVector

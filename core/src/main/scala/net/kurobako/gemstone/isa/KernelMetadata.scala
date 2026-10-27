@@ -6,7 +6,7 @@ import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
 object KernelMetadata {
-  enum ParameterKind derives Codec {
+  enum ParameterKind derives Codec, CanEqual {
     case Scalar
     case Allocation
     case Local

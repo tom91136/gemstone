@@ -16,8 +16,8 @@ object GenerateNativeBindings {
 
   private val command =
     Command("GenerateNativeBindings", "Generate native ABI declarations and implementation checks")((
-      Opts.argument[String]("output-directory").map(Path.of(_)),
-      Opts.argument[String]("official-header-manifest").map(Path.of(_))
+      CodegenCommand.path("output-directory"),
+      CodegenCommand.path("official-header-manifest")
     ).tupled)
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { (output, manifest) =>
@@ -34,9 +34,12 @@ object GenerateNativeBindings {
   }
 
   private def platformFiles(output: Path, manifest: Manifest, platform: Platform): Vector[GeneratedFile] = {
+    val byName   = manifest.surfaces.map(surface => surface.name.raw -> surface).toMap
     val surfaces = platform.surfaces.map { surface =>
-      val found = manifest.surfaces.find(_.name.raw == surface.name)
-        .getOrElse(throw IllegalArgumentException(s"official API manifest is missing ${surface.name}"))
+      val found = byName.getOrElse(
+        surface.name,
+        throw IllegalArgumentException(s"official API manifest is missing ${surface.name}")
+      )
       surface.dispatchTable.foreach(table =>
         if (!found.dispatchTable.exists(_.name.raw == table))
           throw IllegalArgumentException(s"official API manifest ${surface.name} is missing dispatch table $table")

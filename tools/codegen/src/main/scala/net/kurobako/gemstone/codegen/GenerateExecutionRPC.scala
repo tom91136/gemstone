@@ -15,7 +15,7 @@ object GenerateExecutionRPC {
   private val Namespace = "gemstone::execution"
 
   private val command = Command("GenerateExecutionRPC", "Generate the native typed execution RPC client")(
-    Opts.argument[String]("output-directory").map(Path.of(_)).map(Request(_))
+    CodegenCommand.path("output-directory").map(Request(_))
   )
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>

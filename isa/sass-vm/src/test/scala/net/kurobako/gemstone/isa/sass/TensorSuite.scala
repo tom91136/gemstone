@@ -341,11 +341,9 @@ class TensorSuite extends munit.FunSuite {
     def b(row: Int, col: Int): Float            = ((2 * row + col)        % 5 - 2).toFloat
     def floats(values: Vec[Float]): Vec[Long]   =
       values.map(v => java.lang.Float.floatToRawIntBits(v).toLong & 0xffffffffL)
-    val av = Vec.tabulate(2048)(i => if (i % 32 < 16) a(i / 512, i % 512 / 32, i % 32) else 0f)
-    val bv = Vec.tabulate(2048)(i => if (i % 32 < 16) b(i % 32, i % 512 / 32) else 0f)
-    val cv = Vec.tabulate(2048)(i => if (i % 32 < 16) (i % 512 / 32 - i % 32).toFloat else -1234f)
-    // The oracle accumulates in the hardware's order, so it folds over boxed floats.
-    @SuppressWarnings(Array("baumkuchen:loop-boxing"))
+    val av       = Vec.tabulate(2048)(i => if (i % 32 < 16) a(i / 512, i % 512 / 32, i % 32) else 0f)
+    val bv       = Vec.tabulate(2048)(i => if (i % 32 < 16) b(i % 32, i % 512 / 32) else 0f)
+    val cv       = Vec.tabulate(2048)(i => if (i % 32 < 16) (i % 512 / 32 - i % 32).toFloat else -1234f)
     val expected = cv.zipWithIndex.map { (initial, i) =>
       val (row, col) = (i % 512 / 32, i % 32)
       if (col >= 16) initial else 2f * (0 until 16).foldLeft(initial)((sum, n) => sum + a(i / 512, row, n) * b(n, col))

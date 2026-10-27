@@ -13,6 +13,12 @@ trait CohortView extends ArchitecturalState {
   /** The active lanes, by index within the workgroup. */
   def lanes: Vec[Int >= 0]
 
+  /** The source name of each register slot the executing routine declared, in slot order. */
+  def registerNames: Vec[NonEmpty[String]]
+
+  /** The source name of each predicate slot the executing routine declared, in slot order. */
+  def predicateNames: Vec[NonEmpty[String]]
+
   def register(lane: Int >= 0, slot: Int >= 0): Long
 
   /** A predicate slot's value, unless the lane has not defined it. */

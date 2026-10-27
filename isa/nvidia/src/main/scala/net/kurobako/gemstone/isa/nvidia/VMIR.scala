@@ -137,8 +137,6 @@ private[isa] object VMIR {
   /** Where a barrier's reduction of its participants' predicates lands: one predicate combined by `operation`, or the
     * number of true predicates.
     */
-  // the destinations are distinct opaque types, a predicate and a register
-  @SuppressWarnings(Array("baumkuchen:common-factor"))
   enum BarrierResult {
     case Combined(destination: Predicate, operation: PredicateOperation)
     case Count(destination: Register)
@@ -972,9 +970,8 @@ private[isa] object VMIR {
     }
   }
 
-  // predicate move, uniform move and transpose are distinct instructions with the same operands; saturating
   // conversions pass a rounding mode and a clamp together
-  @SuppressWarnings(Array("baumkuchen:duplicate-shape", "baumkuchen:exclusive-options"))
+  @SuppressWarnings(Array("baumkuchen:exclusive-options"))
   enum Instruction derives CanEqual {
     case Tensor(operation: Matrix.Operation)
 

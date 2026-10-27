@@ -5,6 +5,8 @@ import VMMemory.*
 import net.kurobako.gemstone.vm.*
 
 private object Op {
+  type Flow[A] = AddressSpace.ReadResult[A]
+
   val Done: AddressSpace.ReadResult[Unit] = Right(())
 
   /** An instruction whose operands failed load-time checks faults only when it executes. */
@@ -31,7 +33,12 @@ private object Op {
     }
 
   /** A hint that reads nothing: it faults only when its pointer operand is not an address. */
-  def prefetch(pointer: Int): Op = step((execution, _) => address(execution.values, pointer).map(_ => ()))
+  def prefetch(pointer: Int): Op = Prefetch(pointer)
+
+  private class Prefetch(pointer: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      MemoryAccessSemantics.prefetch(InvocationMachine(execution))(pointer)
+  }
 
   /** Suspends the invocation at a collective rendezvous built from its current position. */
   inline def suspend(
@@ -74,24 +81,32 @@ private object Op {
   /** The op a lowering produced, or one that faults with its load-time failure. */
   def lowered(op: Either[Fault, Op]): Op = op.fold(Fail(_), identity)
 
+  private val Checked: Either[Fault, Unit] = Right(())
+
   /** Checks the memory scope and semantics operands of an atomic or barrier. */
   def memoryControls(values: InvocationValues, scope: Int, semantics: Int, opcode: String): Either[Fault, Unit] =
-    for {
-      memoryScope <- scalar(values, scope)
-      _           <- Either.cond(
-        memoryScope >= 0L && memoryScope <= 6L,
-        (),
-        Fault.InvalidRequest(s"$opcode has invalid memory scope $memoryScope")
-      )
-      memorySemantics <- scalar(values, semantics)
-      _               <- Either.cond(
-        (memorySemantics & ~0xffdeL) == 0L,
-        (),
-        Fault.InvalidRequest(
-          s"$opcode has unknown memory-semantics bits 0x${java.lang.Long.toHexString(memorySemantics)}"
-        )
-      )
-    } yield ()
+    scalar(values, scope) match {
+      case Left(error)        => Left(error)
+      case Right(memoryScope) =>
+        if (memoryScope < 0L || memoryScope > 6L)
+          Left(Fault.InvalidRequest(s"$opcode has invalid memory scope $memoryScope"))
+        else scalar(values, semantics) match {
+          case Left(error)            => Left(error)
+          case Right(memorySemantics) =>
+            if ((memorySemantics & ~0xffdeL) == 0L) Checked
+            else
+              Left(
+                Fault.InvalidRequest(
+                  s"$opcode has unknown memory-semantics bits 0x${java.lang.Long.toHexString(memorySemantics)}"
+                )
+              )
+        }
+    }
+
+  def isWorkgroupOrSubgroup(scope: Long): Boolean = scope == Scope.Workgroup || scope == Scope.Subgroup
+
+  def scopeFault(opcode: String, scope: Long): Fault =
+    Fault.Unsupported(s"$opcode execution scope $scope is not Subgroup or Workgroup")
 
   def scalar(values: InvocationValues, id: Int): Either[Fault, Long] =
     if (values.program.scalarSlot(id)) Right(values.scalars(id))
@@ -101,6 +116,15 @@ private object Op {
       case Some(_)                      => Left(Fault.InvalidRequest(s"SPIR-V value %$id is not numeric"))
       case None                         => Left(undefined(id))
     }
+
+  def conditionalOperand(values: InvocationValues, pairs: Array[Int]): Either[Fault, Int] =
+    (0 until pairs.length by 2).view
+      .map(index => scalar(values, pairs(index)).map(value => (value != 0L, pairs(index + 1))))
+      .collectFirst[Either[Fault, Int]] {
+        case Left(error)            => Left(error)
+        case Right((true, operand)) => Right(operand)
+      }
+      .getOrElse(Left(Fault.InvalidRequest("OpConditionalCopyObjectINTEL has no operand whose condition holds")))
 
   def bits(values: InvocationValues, id: Int): Either[Fault, Array[Long]] = values.get(id) match {
     case Some(VMValue.Bits(_, lanes)) => Right(lanes)

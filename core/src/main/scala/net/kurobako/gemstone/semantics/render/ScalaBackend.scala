@@ -48,9 +48,15 @@ object ScalaBackend extends Backend {
         if (!owner.startsWith(Prelude)) found += owner
         arguments.foreach(visit(_))
       case Term.Context(arguments = arguments) => arguments.foreach(visit(_))
-      case Term.Constant(code)                 => found ++= ScalaPrinter.owners(code)
-      case Term.Unary(_, value)                => visit(value)
-      case Term.Binary(_, left, right)         =>
+      case Term.Each(_, source, body)          =>
+        visit(source)
+        body.foreach(step => visit(step.value))
+      case Term.When(condition, body) =>
+        visit(condition)
+        body.foreach(step => visit(step.value))
+      case Term.Constant(code)         => found ++= ScalaPrinter.owners(code)
+      case Term.Unary(_, value)        => visit(value)
+      case Term.Binary(_, left, right) =>
         visit(left)
         visit(right)
       case Term.Call(_, arguments)                     => arguments.foreach(visit(_))
@@ -129,7 +135,7 @@ object ScalaBackend extends Backend {
         case Statement(Target.Method(binding), value) =>
           val method = s"${ScalaPrinter.identifier(binding)}Of"
           Vec(s"def $method = ${ScalaPrinter.show(value)}", s"val ${named(binding)} = $method")
-        case Statement(Target.Effect, value) => Vec(ScalaPrinter.show(value))
+        case Statement(Target.Effect, value) => Vec(ScalaPrinter.show(value).replace("\n", "\n  "))
       }
     if (lines.isEmpty) s"$header =\n  $tuple" else (lines :+ tuple).mkString(s"$header = {\n  ", "\n  ", "\n}")
   }

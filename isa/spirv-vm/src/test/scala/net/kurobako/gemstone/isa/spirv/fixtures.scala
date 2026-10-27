@@ -211,6 +211,29 @@ private object fixtures extends munit.Assertions {
     )
   }
 
+  /** Writes the descriptor of a tensor with `shape` and byte `strides`, and returns the relocation of its base address.
+    */
+  def writeTensor(
+      memory: RegionMemory,
+      region: AllocationId,
+      offset: Int,
+      shape: Seq[Long],
+      strides: Seq[Long],
+      data: AllocationId,
+      dataOffset: Long >= 0 = 0L
+  ): KernelTask.PointerRelocation = {
+    val bytes = memory.array(region)
+    (shape ++ strides).zipWithIndex.foreach((value, index) =>
+      LittleEndian.write(value, bytes, offset + 8 + index * 8, 8)
+    )
+    KernelTask.PointerRelocation(
+      KernelTask.RelocationSource.Memory(region),
+      offset.toLong.refine[Long >= 0].value,
+      data,
+      dataOffset
+    )
+  }
+
   /** Sampler packet in the `ImageDescriptor.SamplerWord` ABI. */
   case class Sampler(
       minFilter: Int = ImageDescriptor.Filter.Nearest,

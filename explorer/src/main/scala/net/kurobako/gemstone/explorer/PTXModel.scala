@@ -1,15 +1,37 @@
 package net.kurobako.gemstone.explorer
 
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import net.kurobako.gemstone.semantics.render.*
 import scala.collection.mutable
 
 /** PTX instruction definitions and the specification metadata of each; PTX is a text ISA without an encoding. */
 object PTXModel extends Model {
+
+  /** The ordering instructions the VM runs with no effect, and why, keyed by the mnemonics they match. */
+  private val orderingOnly: OrderingOnly = OrderingOnly(
+    (
+      "cp\\.async(\\.bulk)?\\.(commit_group|wait_group)|cp\\.async\\.wait_all",
+      ".*",
+      "asynchronous copies complete when issued, so no group is pending."
+    ),
+    ("setmaxnreg", ".*", "the VM does not limit the registers of a thread."),
+    (
+      "tcgen05\\.wait::(ld|st)",
+      ".*",
+      "tensor memory moves complete when issued, so there is nothing to wait for."
+    ),
+    (
+      "wgmma\\.(fence|commit_group|wait_group)",
+      ".*",
+      "warpgroup matrix products complete when issued, so no group is pending."
+    )
+  )
   private def minimumTargets(definition: Instruction.Definition): Vec[Target] =
     definition.meta.entries.raw.map(_.minimumTarget)
 
@@ -46,12 +68,19 @@ object PTXModel extends Model {
 
   private def forms(definition: Instruction.Definition): Vec[View.Form] = definition.meta.entries.raw.flatMap { entry =>
     entry.forms.zipWithIndex.map { (form, index) =>
-      val names    = operandNames(definition, form.operands.size)
-      val opcode   = spelling(definition).mkString(".")
-      val required = form.requiredModifierGroups.map(group => group.raw.map(_.name.raw).toVec.sorted)
-      val optional = form.optionalModifiers.map(_.name.raw).toVec.sorted
-      val syntax   = Vec[View.Token](View.Token.Text(opcode)) ++
-        required.map(values => View.Token.Slot(values.mkString(".{", "|", "}"), "required modifier")) ++
+      val names       = operandNames(definition, form.operands.size)
+      val opcode      = spelling(definition).mkString(".")
+      val required    = form.requiredModifierGroups.map(group => group.raw.map(_.name.raw).toVec.sorted)
+      val optional    = form.optionalModifiers.map(_.name.raw).toVec.sorted
+      val typed       = PTXDomains.alternative(definition, form.requiredModifierGroups.map(_.raw))
+      val syntaxNames = typed.fold(Vec.empty[Option[String]])(_.names(form.operands.size))
+      val slots       = form.requiredModifierGroups.map(group =>
+        typed.flatMap(_.required.find(_.values == group.raw)).map(PTXDomains.name(_))
+      )
+      val syntax = Vec[View.Token](View.Token.Text(opcode)) ++
+        required.zip(slots).map((values, slot) =>
+          View.Token.Slot(values.mkString(".{", "|", "}"), slot.fold("required modifier")(name => s"modifier $name"))
+        ) ++
         Option.when(optional.nonEmpty)(View.Token.Slot(
           optional.mkString("[.", "|.", "]"),
           "optional modifiers"
@@ -62,8 +91,16 @@ object PTXModel extends Model {
       View.Form(
         s"$definition ${index + 1}",
         syntax,
-        names.zip(form.operands).map((name, constraint) => View.OperandSlot(name, kind(constraint))),
-        required.zipWithIndex.map((values, group) => View.Choice(s"required group ${group + 1}", values)) ++
+        names.zip(form.operands).zipWithIndex.map { case ((name, constraint), position) =>
+          View.OperandSlot(
+            name,
+            kind(constraint),
+            domain = PTXDomains.operand(definition, typed, position, constraint, syntaxNames.lift(position).flatten)
+          )
+        },
+        required.zip(slots).zipWithIndex.map { case ((values, slot), group) =>
+          View.Choice(slot.getOrElse(s"required group ${group + 1}"), values)
+        } ++
           Option.when(optional.nonEmpty)(View.Choice("optional", optional)).toVec,
         Vec(
           "Introduced"     -> s"PTX ISA ${entry.introduced}",
@@ -565,6 +602,25 @@ object PTXModel extends Model {
       |}
       |""".stripMargin
   val binaryExample: String = ""
+
+  private val machined =
+    ConcurrentHashMap[(View.Entry, View.Form), Vec[(instance: String, outcome: Either[Unrendered, Definition])]]()
+
+  override protected def clearOutcomes(): Unit = machined.clear()
+
+  override def semanticsOf(entry: View.Entry, form: View.Form): Semantics =
+    orderingOnly.semantics(entry.mnemonic, form.name).getOrElse(machineSemantics(entry, form))
+
+  private def machineSemantics(entry: View.Entry, form: View.Form): Semantics = {
+    val outcomes = machined.computeIfAbsent(
+      (entry, form),
+      _ =>
+        instances(entry.mnemonic, form.name).flatMap((instance, registers) =>
+          InstructionSemantics.machine(entry.mnemonic, instance, registers).map((instance, _))
+        )
+    )
+    withMachineOutcomes(entry, form, outcomes)
+  }
 
   protected def render(entry: View.Entry, form: View.Form): Either[Unavailable, Vec[Described]] = {
     val results = instances(entry.mnemonic, form.name).map((instance, registers) =>

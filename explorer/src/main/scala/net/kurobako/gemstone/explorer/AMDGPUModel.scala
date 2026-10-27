@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.explorer
 
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
@@ -18,7 +19,21 @@ object AMDGPUModel extends Model {
     case None        => Right(None)
   }
 
-  private def encoding(layout: EncodingCatalogue.Layout, opcode: Int): View.Encoding = {
+  private lazy val operandSlots: Map[(ISA, EncodingFormat), Set[EncodingField]] =
+    InstructionDefs.definitions.flatMap(_.meta.encodings).groupBy(value => (value.isa, value.format)).map {
+      case (key, values) => key -> values.flatMap(_.operands.flatMap(_.field)).toSet
+    }
+
+  private def ignoredFields(value: Metadata.Encoding): Set[EncodingField] = {
+    val read = value.operands.flatMap(_.field).toSet
+    // a literal is selected by a source field that no operand names
+    if (read.contains(EncodingField.LITERAL) || read.contains(EncodingField.LITERAL64)) Set.empty
+    else operandSlots.getOrElse((value.isa, value.format), Set.empty[EncodingField]).filterNot(read)
+  }
+
+  private def encoding(layout: EncodingCatalogue.Layout, value: Metadata.Encoding): View.Encoding = {
+    val ignored                                             = ignoredFields(value)
+    val opcode                                              = value.opcode
     def positions(field: EncodingCatalogue.Field): Vec[Int] =
       field.ranges.flatMap(range => Vec.tabulate(range.bits)(range.offset.raw + _))
     val fixed = Vec.tabulate(layout.bits)(identity).collect {
@@ -33,16 +48,19 @@ object AMDGPUModel extends Model {
     }
     View.Encoding(
       layout.bits,
-      layout.fields.map(field =>
+      layout.fields.map { field =>
+        val positioned = positions(field)
         View.Field(
           field.name.toString,
-          positions(field),
+          positioned,
           field.ranges.map(range =>
             s"[${range.offset.raw + range.bits - 1}:${range.offset}]" +
               (if (range.padding > 0) s" << ${range.padding}" else "")
-          ).mkString(field.name.toString + " ", ", ", "")
+          ).mkString(field.name.toString + " ", ", ", ""),
+          ignored = ignored(field.name),
+          domain = Option.unless(ignored(field.name))(AMDGPUDomains.of(value, field.name, positioned.size)).flatten
         )
-      ),
+      },
       fixed ++ operation
     )
   }
@@ -56,6 +74,8 @@ object AMDGPUModel extends Model {
     built.computeIfAbsent(value, _ => build(opcode, value))
 
   private def build(opcode: Opcode, value: Metadata.Encoding): View.Form = {
+    val layout   = EncodingCatalogue.layout(value.isa, value.format)
+    val widths   = layout.toVec.flatMap(_.fields).map(field => field.name -> field.ranges.foldLeft(0)(_ + _.bits)).toMap
     val explicit = value.operands.filterNot(_.implicitOperand)
     val names    = explicit.map(operandName(_))
     View.Form(
@@ -72,7 +92,8 @@ object AMDGPUModel extends Model {
             Option.when(info.output)("output"),
             Option.when(info.implicitOperand)("implicit"),
             Option.when(info.bits > 0)(s"${info.bits} bits")
-          ).flatten.mkString(", ")
+          ).flatten.mkString(", "),
+          info.field.flatMap(field => AMDGPUDomains.of(value, field, widths.getOrElse(field, 0)))
         )
       ),
       properties = Vec(
@@ -81,7 +102,7 @@ object AMDGPUModel extends Model {
         "Opcode" -> s"${value.opcode} (0x${value.opcode.toHexString})"
       ) ++ Option.when(value.groups.nonEmpty)("Groups" -> value.groups.mkString(", ")).toVec ++
         Option.when(value.processors.nonEmpty)("Processors" -> value.processors.mkString(", ")).toVec,
-      encoding = EncodingCatalogue.layout(value.isa, value.format).map(encoding(_, value.opcode))
+      encoding = layout.map(encoding(_, value))
     )
   }
 
@@ -223,6 +244,44 @@ object AMDGPUModel extends Model {
 
   private def described(found: Outcomes): Vec[(described: Described, operands: Map[String, String])] =
     found.collect { case (text, operands, Right(definition)) => (Described(text, definition), operands) }
+
+  private val machined =
+    ConcurrentHashMap[(View.Entry, View.Form), Vec[(instance: String, outcome: Either[Unrendered, Definition])]]()
+
+  override protected def clearOutcomes(): Unit = machined.clear()
+
+  private val orderingOnly: OrderingOnly = OrderingOnly(
+    (
+      "s_set_gpr_idx_off",
+      ".*",
+      "the VM resolves the VGPR indexing mode when the program loads, so the instruction has no effect at run time."
+    )
+  )
+
+  /** The lane definitions of a form, or its machine definitions where the lane has none because the VM runs it as
+    * mechanics.
+    */
+  override def semanticsOf(entry: View.Entry, form: View.Form): Semantics =
+    semantics(entry, form) match {
+      case Left(Unavailable.Mechanics(_)) =>
+        orderingOnly.semantics(entry.mnemonic, form.name).getOrElse(machineSemantics(entry, form))
+      case lane => Semantics.of(lane, Vec.empty)
+    }
+
+  private def machineSemantics(entry: View.Entry, form: View.Form): Semantics = {
+    val formOperands = form.operands.map(_.name)
+    val outcomes     = machined.computeIfAbsent(
+      (entry, form),
+      _ =>
+        encoding(entry.target, entry.mnemonic, form).toVec.flatMap((_, value) =>
+          instances(entry.target, entry.mnemonic, form).flatMap((target, text, operands) =>
+            InstructionSemantics.machine(target, text, operands, formOperands, Some(entry.mnemonic), Some(value))
+              .map((text, _))
+          )
+        )
+    )
+    withMachineOutcomes(entry, form, outcomes)
+  }
 
   protected def render(entry: View.Entry, form: View.Form): Either[Unavailable, Vec[Described]] = {
     val found   = outcomes(entry, form)

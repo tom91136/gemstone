@@ -134,7 +134,7 @@ private object VMAsyncCompiler {
         )
       case copy: Form.CpAsyncBulkMBarrier => Some(bulkCopy(instruction, copy, modifiers))
       case Form.CpAsyncBulkGroup(destAddr = destination, srcAddr = source, size = size, byteMask = byteMask) =>
-        Some(bulkStore(destination, source, size, byteMask, modifiers))
+        Some(bulkStore(Transfer(destination, source, modifiers), size, byteMask))
       case Form.CpReduceAsyncBulk(destination, source, size, barrierOrPolicy) =>
         Some(reduction(modifiers).fold(unsupported(instruction, "unsupported bulk reduction operation or type")) {
           (operator, element) =>
@@ -250,14 +250,14 @@ private object VMAsyncCompiler {
         } yield VMIR.Instruction.AsyncSharedStore(target, stored._2, stored._1, word))
       // A release store or reduction completes as it issues, which orders it before every later operation.
       case Form.StAsync(address, value, None) if has(Modifier.Release) =>
-        Some(releaseStore(address, value, modifiers))
-      case Form.MultimemStAsync(address, value)                         => Some(releaseStore(address, value, modifiers))
+        Some(releaseStore(Access(address, value, modifiers)))
+      case Form.MultimemStAsync(address, value) => Some(releaseStore(Access(address, value, modifiers)))
       case Form.RedAsync(address, value, None) if has(Modifier.Release) =>
-        Some(releaseReduction(instruction, address, value, modifiers))
+        Some(releaseReduction(instruction, Access(address, value, modifiers)))
       case Form.MultimemRedAsync(address, value) =>
-        Some(releaseReduction(instruction, address, value, modifiers))
+        Some(releaseReduction(instruction, Access(address, value, modifiers)))
       case Form.MultimemCpAsyncBulk(destination, source, size, byteMask) =>
-        Some(bulkStore(destination, source, size, byteMask, modifiers))
+        Some(bulkStore(Transfer(destination, source, modifiers), size, byteMask))
       case Form.MultimemCpReduceAsyncBulk(destination, source, size) =>
         Some(reduction(modifiers).fold(unsupported(instruction, "unsupported bulk reduction operation or type")) {
           (operator, element) =>
@@ -325,15 +325,16 @@ private object VMAsyncCompiler {
   }
 
   /** `st.async.release` and `multimem.st.async`: a store to global memory, on one device to its own memory. */
-  private def releaseStore(address: Operand, value: Operand, modifiers: Vec[Modifier])(using scope: Scope): Lowered =
+  private def releaseStore(access: Access)(using scope: Scope): Lowered = {
+    val Access(address, value, modifiers) = access
     (scalarWidth(modifiers), scope.address(address), scope.value(value)).mapN((width, target, source) =>
       VMIR.Instruction.Store(target, source, width, modifiers.access)
     )
+  }
 
   /** `red.async.release` and `multimem.red.async`: an atomic reduction in global memory. */
-  private def releaseReduction(instruction: Instruction, address: Operand, value: Operand, modifiers: Vec[Modifier])(
-      using scope: Scope
-  ): Lowered =
+  private def releaseReduction(instruction: Instruction, access: Access)(using scope: Scope): Lowered = {
+    val Access(address, value, modifiers) = access
     atomicReduction(instruction, modifiers) { (operation, width) =>
       (scope.address(address), scope.value(value)).mapN((target, source) =>
         VMIR.Instruction.Atomic(
@@ -346,6 +347,7 @@ private object VMAsyncCompiler {
         )
       )
     }
+  }
 
   private def reduction(modifiers: Vec[Modifier]): Option[(TensorMap.Reduction, TensorMap.Element)] =
     (
@@ -353,18 +355,14 @@ private object VMAsyncCompiler {
       modifiers.reverse.collectFirst(Function.unlift(elements.get))
     ).tupled
 
-  private def bulkStore(
-      destination: Operand,
-      source: Operand,
-      size: Operand,
-      byteMask: Option[Operand],
-      modifiers: Vec[Modifier]
-  )(using scope: Scope): Lowered = for {
+  private def bulkStore(transfer: Transfer, size: Operand, byteMask: Option[Operand])(
+      using scope: Scope
+  ): Lowered = for {
     mask <-
-      if (modifiers.contains(Modifier.CpMask))
+      if (transfer.modifiers.contains(Modifier.CpMask))
         byteMask.toRight(Error.Invalid("masked bulk copy requires a byte mask")).flatMap(scope.value(_))
       else Right(Value.Immediate(0xffffL))
-    lowered <- (scope.address(destination), scope.address(source), scope.value(size))
+    lowered <- (scope.address(transfer.destination), scope.address(transfer.source), scope.value(size))
       .mapN(VMIR.Instruction.AsyncBulkStore(_, _, _, mask))
   } yield lowered
 

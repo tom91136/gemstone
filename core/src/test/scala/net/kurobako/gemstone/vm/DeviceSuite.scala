@@ -88,7 +88,10 @@ class DeviceSuite extends munit.FunSuite {
     override def memory(access: LaunchObserver.Access): Unit = { val _ = accesses.add(access) }
   }
 
-  private object NoState extends ArchitecturalState
+  private object NoState extends ArchitecturalState {
+    def unit: MachineUnit = MachineUnit(LaunchGeometry.Coordinates.origin, 0, 0, MachineUnit.State.Running)
+    def issued: Long      = 0L
+  }
 
   /** Reports one instruction per image byte to an attached observer before echoing. */
   private class ObservedEcho(image: Vec[Byte]) extends EchoProgram(image) {

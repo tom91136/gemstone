@@ -339,6 +339,9 @@ s_absdiff_i32 s2, s4, s6
 s_add_u32 s1, s2, s3
 // ENCODING: [0x02, 0x03, 0x01, 0x80] WAVE_SIZE: 64
 
+s_add_u32 s101, s102, s103
+// ENCODING: [0x66, 0x67, 0x65, 0x80] WAVE_SIZE: 64
+
 s_addc_u32 s1, s2, s3
 // ENCODING: [0x02, 0x03, 0x01, 0x82] WAVE_SIZE: 64
 

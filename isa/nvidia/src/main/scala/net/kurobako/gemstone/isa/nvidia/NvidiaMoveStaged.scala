@@ -24,8 +24,6 @@ private[isa] object NvidiaMoveStaged {
     case Instruction.ReadConditionFlag(destination, flag) => PredicateSemantics.readFlag(sinks, destination, flag)
     case Instruction.ReadConditionPredicate(destination, flag) =>
       PredicateSemantics.testFlag(sinks, destination, flag)
-    case Instruction.MBarrierPending(destination, token) =>
-      IntegerSemantics.pendingArrivals(algebra)(sinks, destination, token)
     case Instruction.ClusterCancelStatus(destination, response) =>
       IntegerSemantics.cancelled(algebra)(sinks, destination, response)
     case Instruction.ClusterCancelCta(destination, low, high, axis) =>

@@ -1,6 +1,10 @@
 package net.kurobako.gemstone.isa.spirv
 
 import Op.*
+import VMCollectives.Kind as CollectiveKind
+import VMCollectives.Payload as CollectivePayload
+import VMCollectives.Request as CollectiveRequest
+import VMInvocation.*
 import VMMemory.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
@@ -17,39 +21,41 @@ private object PipeOps {
 
   private val Index = 0xffffffffL
 
-  def lower: PartialFunction[Instruction, Op] = {
-    case Instruction.WritePipe(t, d, pipe, pointer, _, _) => write(id(t), id(d), id(pipe), id(pointer))
-    case Instruction.ReadPipe(t, d, pipe, pointer, _, _)  => read(id(t), id(d), id(pipe), id(pointer))
+  /** Runs the pipe operation `instruction` names. */
+  def execute(execution: InvocationState, instruction: Instruction): Flow[Unit] = instruction match {
+    case Instruction.WritePipe(t, d, pipe, pointer, _, _) => write(execution, ResultIds(t, d), id(pipe), id(pointer))
+    case Instruction.ReadPipe(t, d, pipe, pointer, _, _)  => read(execution, ResultIds(t, d), id(pipe), id(pointer))
     case Instruction.ReservedWritePipe(t, d, pipe, reserved, index, pointer, _, _) =>
-      reservedTransfer(id(t), id(d), id(pipe), id(reserved), id(index), id(pointer), end = PipeEnd.Write)
+      reservedTransfer(execution, ResultIds(t, d), id(pipe), id(reserved), id(index), id(pointer), end = PipeEnd.Write)
     case Instruction.ReservedReadPipe(t, d, pipe, reserved, index, pointer, _, _) =>
-      reservedTransfer(id(t), id(d), id(pipe), id(reserved), id(index), id(pointer), end = PipeEnd.Read)
+      reservedTransfer(execution, ResultIds(t, d), id(pipe), id(reserved), id(index), id(pointer), end = PipeEnd.Read)
     case Instruction.ReserveWritePipePackets(t, d, pipe, count, _, _) =>
-      reserve(id(t), id(d), id(pipe), id(count), end = PipeEnd.Write)
+      reserve(execution, ResultIds(t, d), id(pipe), id(count), end = PipeEnd.Write)
     case Instruction.ReserveReadPipePackets(t, d, pipe, count, _, _) =>
-      reserve(id(t), id(d), id(pipe), id(count), end = PipeEnd.Read)
-    case Instruction.CommitReadPipe(_, _, _, _) | Instruction.CommitWritePipe(
-          _,
-          _,
-          _,
-          _
-        ) | Instruction.GroupCommitReadPipe(_, _, _, _, _) |
-        Instruction.GroupCommitWritePipe(_, _, _, _, _) => Next
+      reserve(execution, ResultIds(t, d), id(pipe), id(count), end = PipeEnd.Read)
+    case Instruction.GroupReserveWritePipePackets(t, d, scope, pipe, count, _, _) =>
+      groupReserve(execution, ResultIds(t, d), id(scope), id(pipe), id(count), end = PipeEnd.Write)
+    case Instruction.GroupReserveReadPipePackets(t, d, scope, pipe, count, _, _) =>
+      groupReserve(execution, ResultIds(t, d), id(scope), id(pipe), id(count), end = PipeEnd.Read)
     case Instruction.IsValidReserveId(t, d, reserved) =>
-      step((execution, _) =>
+      advancing(execution)(
         scalar(execution.values, id(reserved)).map(value =>
           execution.values.updateScalar(id(d), id(t), if (value < 0L) 1L else 0L)
         )
       )
     case Instruction.GetNumPipePackets(t, d, pipe, _, _) =>
-      query(id(t), id(d), id(pipe))((memory, pointer) =>
+      query(execution, ResultIds(t, d), id(pipe))((memory, pointer) =>
         indices(memory, pointer).map((read, write) => (write - read) & Index)
       )
     case Instruction.CreatePipeFromPipeStorage(t, d, storage) =>
-      step((execution, _) => transfer(execution.values, id(storage), id(d), id(t)))
+      advancing(execution)(transfer(execution.values, id(storage), id(d), id(t)))
     case Instruction.GetMaxPipePackets(t, d, pipe, _, _) =>
-      query(id(t), id(d), id(pipe))((memory, pointer) => header(memory, pointer, PipeLayout.Capacity))
+      query(execution, ResultIds(t, d), id(pipe))((memory, pointer) => header(memory, pointer, PipeLayout.Capacity))
+    case _ => Left(Fault.Unsupported(s"${instruction.opcode} is not a pipe operation"))
   }
+
+  private def advancing(execution: InvocationState)(outcome: => Flow[Unit]): Flow[Unit] =
+    outcome.map(_ => execution.pc += 1)
 
   /** A reservation of `count` packets from `start`, with the sign bit marking it valid. */
   private def reservation(start: Long, count: Long): Long = Long.MinValue | ((count & 0x7fffffffL) << 32) |
@@ -120,8 +126,9 @@ private object PipeOps {
       Either.cond(bytes > 0L && bytes <= Int.MaxValue, bytes.toInt, Fault.InvalidRequest("pipe packet size is invalid"))
     )
 
-  private def write(resultType: Int, dest: Int, pipe: Int, pointer: Int): Op =
-    step { (execution, memory) =>
+  private def write(execution: InvocationState, ids: ResultIds, pipe: Int, pointer: Int): Flow[Unit] =
+    advancing(execution) {
+      val memory = execution.memory
       val values = execution.values
       for {
         target   <- address(values, pipe)
@@ -133,12 +140,13 @@ private object PipeOps {
         _        <- claimed.fold[Either[Fault, Unit]](Right(()))(index =>
           writeBytes(memory, slot(target, capacity, size, index), packet)
         )
-      } yield values.updateScalar(dest, resultType, if (claimed.isDefined) 0L else Failed)
+      } yield values.updateScalar(ids.dest, ids.resultType, if (claimed.isDefined) 0L else Failed)
     }
 
   // Reads the oldest packet, then claims exactly that index; a lost race reads the next one.
-  private def read(resultType: Int, dest: Int, pipe: Int, pointer: Int): Op =
-    step { (execution, memory) =>
+  private def read(execution: InvocationState, ids: ResultIds, pipe: Int, pointer: Int): Flow[Unit] =
+    advancing(execution) {
+      val memory = execution.memory
       val values = execution.values
       def attempt(source: Pointer, target: Pointer, size: Int, capacity: Long): AddressSpace.ReadResult[Boolean] =
         indices(memory, source).flatMap { (oldest, newest) =>
@@ -158,19 +166,20 @@ private object PipeOps {
         size     <- packetBytes(memory, source)
         capacity <- header(memory, source, PipeLayout.Capacity)
         read     <- attempt(source, target, size, capacity)
-      } yield values.updateScalar(dest, resultType, if (read) 0L else Failed)
+      } yield values.updateScalar(ids.dest, ids.resultType, if (read) 0L else Failed)
     }
 
   private def reservedTransfer(
-      resultType: Int,
-      dest: Int,
+      execution: InvocationState,
+      ids: ResultIds,
       pipe: Int,
       reserved: Int,
       index: Int,
       pointer: Int,
       end: PipeEnd
-  ): Op =
-    step { (execution, memory) =>
+  ): Flow[Unit] =
+    advancing(execution) {
+      val memory = execution.memory
       val values = execution.values
       for {
         handle   <- address(values, pipe)
@@ -185,21 +194,52 @@ private object PipeOps {
           if (!valid) Right(())
           else if (end == PipeEnd.Write) readBytes(memory, packet, size).flatMap(writeBytes(memory, target, _))
           else readBytes(memory, target, size).flatMap(writeBytes(memory, packet, _))
-      } yield values.updateScalar(dest, resultType, if (valid) 0L else Failed)
+      } yield values.updateScalar(ids.dest, ids.resultType, if (valid) 0L else Failed)
     }
 
-  private def reserve(resultType: Int, dest: Int, pipe: Int, count: Int, end: PipeEnd): Op =
-    step { (execution, memory) =>
+  private def reserve(execution: InvocationState, ids: ResultIds, pipe: Int, count: Int, end: PipeEnd)
+      : Flow[Unit] =
+    advancing(execution) {
+      val memory = execution.memory
       val values = execution.values
       for {
         handle   <- address(values, pipe)
         packets  <- scalar(values, count)
         reserved <- reserveOnce(memory, handle, packets & Index, end)
-      } yield values.updateScalar(dest, resultType, reserved)
+      } yield values.updateScalar(ids.dest, ids.resultType, reserved)
     }
 
-  private def query(resultType: Int, dest: Int, pipe: Int)(read: (MemoryState, Pointer) => Either[Fault, Long]): Op =
-    step((execution, memory) =>
-      address(execution.values, pipe).flatMap(read(memory, _)).map(execution.values.updateScalar(dest, resultType, _))
-    )
+  private def groupReserve(
+      execution: InvocationState,
+      ids: ResultIds,
+      scope: Int,
+      pipe: Int,
+      count: Int,
+      end: PipeEnd
+  ): Flow[Unit] = {
+    val values = execution.values
+    for {
+      group   <- scalar(values, scope)
+      _       <- Either.cond(isWorkgroupOrSubgroup(group), (), scopeFault("pipe reservation", group))
+      handle  <- address(values, pipe)
+      packets <- scalar(values, count)
+      _       <- suspend(
+        execution,
+        CollectiveRequest(
+          CollectiveKind.PipeReservation,
+          _,
+          _,
+          group.toInt,
+          CollectivePayload.PipeReservation(ids.resultType, ids.dest, handle, packets & 0xffffffffL, end)
+        )
+      )
+    } yield ()
+  }
+
+  private def query(execution: InvocationState, ids: ResultIds, pipe: Int)(
+      read: (MemoryState, Pointer) => Either[Fault, Long]
+  ): Flow[Unit] = advancing(execution)(
+    address(execution.values, pipe).flatMap(read(execution.memory, _))
+      .map(execution.values.updateScalar(ids.dest, ids.resultType, _))
+  )
 }

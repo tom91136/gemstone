@@ -8,22 +8,23 @@ import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
 
 object Validation {
-  // the issue cases are told apart by name, not by payload
-  @SuppressWarnings(Array("baumkuchen:duplicate-shape"))
   enum Issue {
     case VersionTooOld(opcode: NonEmpty[String], required: Version, selected: Version)
     case TargetTooOld(opcode: NonEmpty[String], required: Target, selected: Target)
     case InvalidOperands(opcode: NonEmpty[String], detail: NonEmpty[String])
     case InvalidModifiers(opcode: NonEmpty[String], detail: NonEmpty[String])
+    case InvalidOperandValue(opcode: NonEmpty[String], position: Int, violation: OperandViolation)
     case Incomplete(detail: NonEmpty[String])
 
     def message: NonEmpty[String] = this match {
       case VersionTooOld(opcode, required, selected) => s"$opcode requires PTX ISA $required, module declares $selected"
       case TargetTooOld(opcode, required, selected)  =>
         s"$opcode requires ${required.render}, module targets ${selected.render}"
-      case InvalidOperands(opcode, detail)  => s"$opcode: $detail"
-      case InvalidModifiers(opcode, detail) => s"$opcode: $detail"
-      case Incomplete(detail)               => detail
+      case InvalidOperands(opcode, detail)                  => s"$opcode: $detail"
+      case InvalidModifiers(opcode, detail)                 => s"$opcode: $detail"
+      case InvalidOperandValue(opcode, position, violation) =>
+        s"$opcode: operand ${position + 1}: ${violation.message}"
+      case Incomplete(detail) => detail
     }
   }
 
@@ -101,9 +102,20 @@ object Validation {
           instruction.meta.entries.filter(entry =>
             version >= entry.introduced && target >= requiredTarget(instruction, entry)
           ).flatMap(_.forms)
-        )
+        ) match {
+          case ValidationOutcome.Accepted => operandValues(instruction)
+          case other                      => other
+        }
       case other => other
     }
+
+  /** The immediates of `instruction` that break the operand rules of the document. */
+  private def operandValues(instruction: Instruction): ValidationOutcome[Issue] =
+    OperandRules.violations(instruction).map((position, violation) =>
+      Issue.InvalidOperandValue(instruction.opcode, position, violation)
+    ).refine[NonEmpty[Vec[Issue]]].toOption.fold[ValidationOutcome[Issue]](ValidationOutcome.Accepted)(
+      ValidationOutcome.Rejected(_)
+    )
 
   /** A combination is superseded by a more specific matching one, so `cvt.f32.bf16` takes its own note over the note
     * for `.bf16` destinations.
@@ -145,7 +157,8 @@ object Validation {
         if (matchingMods.isEmpty)
           ValidationOutcome.Rejected(Vec.nonEmpty(Issue.InvalidModifiers(
             instruction.opcode,
-            s"unsupported modifier sequence: ${instruction.mods.map(_.name.raw).mkString(".")}"
+            s"unsupported modifier sequence: ${instruction.mods.map(_.name.raw).mkString(".")}" +
+              ModifierDomains.diagnose(instruction.definition, instruction.mods).fold("")(why => s" (${why.message})")
           )))
         else {
           val complete = matchingMods.filter(_.complete)

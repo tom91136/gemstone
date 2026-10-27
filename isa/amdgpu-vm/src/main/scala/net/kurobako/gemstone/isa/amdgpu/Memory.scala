@@ -3,8 +3,6 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.semantics.prelude.*
 
 /** Memory a lane of a rendered AMDGPU definition reads and writes by address, little-endian. */
-// the port the renderer prints; loads differ only in result type
-@SuppressWarnings(Array("baumkuchen:numbered-family"))
 private[isa] trait Memory[A] {
   def load8(address: A): UInt[8]
   def load16(address: A): UInt[16]

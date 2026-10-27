@@ -64,7 +64,8 @@ class ISASuite extends munit.FunSuite {
   test("SOPK literal instructions decode through their literal layout") {
     val target      = Target("gfx803")
     val instruction = parse("s_setreg_imm32_b32 hwreg(1, 0, 32), 0x1234")
-    val decoded     = InstructionDecoder.decode(Vec.toArray(encoded(instruction, target)), 0, target).value
+    val decoded     =
+      InstructionDecoder.decode(CodeStream(Vec.toArray(encoded(instruction, target)), TargetMode(target)), 0).value
     assertEquals(decoded.definition, instruction.definition)
     assertEquals(decoded.format, EncodingFormat.SOPK_INST_LITERAL)
     assertEquals(decoded.size.raw, 8)

@@ -33,7 +33,7 @@ object ExecutionHandler {
     case request @ Operation.WriteAllocation(allocation, offset, bytes) =>
       encode(request, session.write(allocation, offset, bytes))
     case request @ Operation.ReadAllocation(allocation, offset, size) =>
-      encode(request, session.read(allocation, offset, size))
+      encode(request, session.read(AllocationRange(allocation, offset, size)))
     case request @ Operation.LoadProgram(encoding, image) =>
       encode(request, session.load(encoding, image))
     case request @ Operation.DescribeSpecialization(image) =>

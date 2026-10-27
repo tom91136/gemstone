@@ -107,8 +107,6 @@ wmma.store.d.sync.aligned.$cLayout.$shape.global.f32 [%cp],${registers("c", 8)},
       r    <- 0 until m
       col  <- 0 until n
     } {
-      // The oracle accumulates in the hardware's order, so it folds over boxed floats.
-      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val expected = (0 until 16).foldLeft(c(r, col))((sum, k) => sum + a(r, k, warp) * b(k, col))
       assertEquals(readFloat(memory, warp * 16384 + 8192 + index(r, col, cLayout) * 4), expected)
     }
@@ -199,6 +197,11 @@ st.global.v4.f32 [%cp],${registers("c", 4)};
       source(s"setp.ne.u32 %skip,%lane,0; @%skip bra END; $body END:"),
       memory
     ).left.exists(_.message.contains("all 32 lanes")))
+  }
+
+  test("ldmatrix through a generic pointer to global memory faults") {
+    val text = source("ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%a0},[%base];")
+    assert(run(text, DeviceMemory(64)).left.exists(_.isInstanceOf[Fault.Misaligned]))
   }
 
   private val tileFill = (0 until 8).map(i => s"add.u32 %r1,%r0,$i;\nst.shared.b32 [%ap+${i * 128}],%r1;").mkString(
@@ -424,6 +427,22 @@ st.global.b32 [%cp],%r1;
       val high    = memory.readInt8(address.offset(1L)).toOption.get.toInt & 255
       assertEquals(low | (high << 8), lane + part * 32)
     }
+  }
+
+  test("wmma.load from shared memory outside the shared windows faults") {
+    val load = s"wmma.load.a.sync.aligned.row.m16n16k16.shared.f16 ${registers("a", 8)},[%base],16;"
+    assert(run(source(load), DeviceMemory(512)).left.exists { fault =>
+      fault.isInstanceOf[Fault.Misaligned] && fault.message.contains("shared windows")
+    })
+  }
+
+  test("wmma.store to shared memory outside the shared windows faults and writes nothing") {
+    val store  = s"wmma.store.d.sync.aligned.row.m16n16k16.shared.f32 [%base],${registers("c", 8)},16;"
+    val values = (0 until 8).map(i => s"mov.f32 %c$i,0f3f800000;").mkString("\n")
+    val memory = DeviceMemory(1024)
+    val before = memory.words(0, 256)
+    assert(run(source(s"$values\n$store"), memory).left.exists(_.isInstanceOf[Fault.Misaligned]))
+    assertEquals(memory.words(0, 256), before)
   }
 
   test("WMMA rejects nonuniform pointers, misalignment and out-of-bounds loads") {

@@ -44,8 +44,10 @@ object Definition {
     * other names the steps assign are temporaries. An effect, such as a store, or one under a condition, a selection of
     * it or `Term.Constant("()")`, is assigned to any name and kept in order with every machine operation, as is each
     * machine operation when there is an effect. `requirements` must hold of the operands for the instruction to encode.
-    * Reading a name that is neither declared nor assigned is an error. Each assignment to a name in `kept` stays a
-    * binding of its own, as long sums that later steps read several times need to.
+    * Reading a name that is neither declared nor assigned is an error. A write to a declared name under a condition
+    * keeps the name's previous value where the condition fails, so it is an error only in a loop or when its value or
+    * condition reads a binding made under a condition. Each assignment to a name in `kept` stays a binding of its own,
+    * as long sums that later steps read several times need to.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def of(
@@ -60,7 +62,7 @@ object Definition {
     val inputs                   = mutable.LinkedHashSet.empty[String]
     val outputs                  = mutable.LinkedHashSet.empty[String]
     val contexts                 = mutable.LinkedHashMap.empty[String, String]
-    val body                     = Vec.newBuilder[Statement]
+    var body                     = Vec.newBuilder[Statement]
     val taken                    = mutable.HashSet.from(steps.map(_.name) ++ declared.map(_.name))
     val ordered                  = steps.exists(_.value.hasEffect)
     val indices                  = Iterator.from(0)
@@ -69,20 +71,97 @@ object Definition {
       if (taken.add(name)) name else fresh()
     }
     var known: Map[String, Type] = types
-    val undeclared               = steps.foldLeft(Option.empty[String]) { (failure, step) =>
-      failure.orElse {
-        val expanded = step.value.expand
-        expanded.variables.filterNot(values.contains).find(!types.contains(_)) match {
-          case Some(missing) => Some(s"$name reads $missing, which is neither declared nor assigned")
-          case None          =>
-            expanded.variables.filterNot(values.contains).foreach(inputs += _)
-            expanded.contexts.foreach((context, tpe) => contexts(context) = tpe)
-            val value = expanded.substitute(values.get)
+    val bound                    = mutable.HashSet.empty[String]
+    var scopes                   = List.empty[Option[Term]]
+    val scoped                   = mutable.HashSet.empty[String]
+
+    def read(term: Term): Either[String, Term] = {
+      val expanded = term.expand
+      val unbound  = expanded.variables.filterNot(values.contains).filterNot(bound)
+      unbound.find(!types.contains(_)) match {
+        case Some(missing) => Left(s"$name reads $missing, which is neither declared nor assigned")
+        case None          =>
+          unbound.foreach(inputs += _)
+          expanded.contexts.foreach((context, tpe) => contexts(context) = tpe)
+          Right(expanded.substitute(values.get))
+      }
+    }
+
+    def block(inner: Vec[Term.Step], variables: Set[String], scope: Option[Term]): Either[String, Vec[Term.Step]] = {
+      val outer = body
+      body = Vec.newBuilder[Statement]
+      bound ++= variables
+      scopes = scope :: scopes
+      val failure = run(inner)
+      scopes = scopes.tail
+      bound --= variables
+      val statements = body.result()
+      body = outer
+      failure.toLeft(statements.map {
+        case Statement(Target.Binding(binding), value) => Term.Step(binding, value)
+        case Statement(_, value)                       => Term.Step("", value)
+      })
+    }
+
+    def conditioned(step: Term.Step): Option[String] =
+      if (scopes.contains(None)) Some(s"$name writes ${step.name} in a loop")
+      else {
+        val guard = scopes.flatten.reduceLeft[Term]((left, right) => Term.Binary("&", left, right))
+        (for {
+          value    <- read(step.value)
+          previous <- read(Term.Variable(step.name))
+        } yield Term.Select(guard, value, previous)).fold(
+          Some(_),
+          selected =>
+            if (selected.hasEffect || selected.variables.exists(scoped))
+              Some(s"$name writes ${step.name} from a value under a condition")
+            else {
+              values(step.name) = selected
+              outputs += step.name
+              None
+            }
+        )
+      }
+
+    def one(step: Term.Step): Option[String] = step.value match {
+      case Term.Each(variable, source, inner) =>
+        val emitted = for {
+          header <- read(source).map(Typer.typedTerm(_, known))
+          nested <- block(inner, Set(variable), None)
+        } yield Term.Each(variable, header, nested)
+        emitted.fold(Some(_), effect => { body += Statement(Target.Effect, effect); None })
+      case Term.When(condition, inner) =>
+        val emitted = for {
+          raw <- read(condition)
+          header = Typer.condition(raw, known)
+          nested <- block(inner, Set.empty, Some(raw))
+        } yield Term.When(header, nested)
+        emitted.fold(
+          Some(_),
+          {
+            case Term.When(_, Vec()) => None
+            case effect              =>
+              body += Statement(Target.Effect, effect)
+              None
+          }
+        )
+      case _ if types.contains(step.name) && scopes.nonEmpty => conditioned(step)
+      case _                                                 =>
+        read(step.value).fold(
+          Some(_),
+          value => {
             if (value.hasEffect || (ordered && value.contexts.nonEmpty) || kept(step.name)) value match {
-              case Term.Context(result = None) | Term.Select(_, Term.Context(result = None), Term.Constant("()")) =>
+              case Term.Context(result = None, effect = true) |
+                  Term.Select(_, Term.Context(result = None), Term.Constant("()")) =>
                 body += Statement(Target.Effect, Typer.typedTerm(value, known))
+              case Term.Context(result = None) =>
+                val binding = fresh()
+                if (scopes.nonEmpty) scoped += binding
+                body += Statement(Target.Binding(binding), Typer.typedTerm(value, known))
+                values(step.name) = Term.Variable(binding)
               case _ =>
-                val binding        = fresh()
+                val binding = fresh()
+                if (scopes.nonEmpty) scoped += binding
                 val (tpe, settled) = Typer.settle(value, known, None)
                 body += Statement(Target.Binding(binding), settled)
                 known = known.updated(binding, tpe)
@@ -94,10 +173,14 @@ object Definition {
               if (types.contains(step.name)) outputs += step.name
             }
             None
-        }
-      }
+          }
+        )
     }
-    undeclared.toLeft {
+
+    def run(list: Vec[Term.Step]): Option[String] =
+      list.foldLeft(Option.empty[String])((failure, step) => failure.orElse(one(step)))
+
+    run(steps).toLeft {
       val parameters = declared.filter(entry => inputs(entry.name)).map(entry => (entry.name, entry.tpe))
       val typed      = outputs.toVec.map(output => (output, Typer.settle(values(output), known, types.get(output))))
       val (shared, terms) = Term.share(typed.map(_._2.term), fresh)

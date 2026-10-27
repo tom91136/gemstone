@@ -10,16 +10,15 @@ private object VMFramePool {
 /** Frame storage of one workgroup, reused by later frames and, after a reset, by later workgroups. Cleared lanes are
   * kept by lane index, so a frame reuses a lane whichever frame last held it.
   */
-// the pool creates VMLanes and VMLanes returns to it; one file per type forbids merging them
-@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var", "baumkuchen:acyclic"))
-private class VMFramePool(laneCount: Int in 1 ~ 1024) {
+@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
+private class VMFramePool(laneCount: Int in 1 ~ 1024) extends VMLaneSource {
   private val idle        = java.util.Arrays.copyOf(VMFramePool.NoLists, laneCount)
   private val spare       = mutable.ArrayBuffer.empty[VMLanes]
   private val all         = mutable.ArrayBuffer.empty[VMLanes]
   private var outstanding = 0
   private var peak        = 0
 
-  def acquire(routine: VMIR.Routine): VMLanes = {
+  def acquire(routine: VMIR.Routine, observed: Boolean = false): VMLanes = {
     val lanes = if (spare.nonEmpty) spare.remove(spare.size - 1)
     else {
       val created = VMLanes(laneCount, this)
@@ -28,7 +27,7 @@ private class VMFramePool(laneCount: Int in 1 ~ 1024) {
     }
     outstanding += 1
     peak = math.max(peak, outstanding)
-    lanes.prepare(routine)
+    lanes.prepare(routine, observed)
     lanes
   }
 
@@ -55,13 +54,55 @@ private class VMFramePool(laneCount: Int in 1 ~ 1024) {
     peak = 0
   }
 
-  def take(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0): VMLane = idle(lane.raw) match {
-    case lanes: mutable.ArrayBuffer[VMLane] if lanes.nonEmpty =>
-      val reused = lanes.remove(lanes.size - 1)
-      reused.reserve(registerCount, predicateCount)
-      reused
-    case _ => VMLane(registerCount, predicateCount)
+  def take(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0): VMLane =
+    reusePlain(lane, registerCount, predicateCount) match {
+      case null   => VMLane(registerCount, predicateCount)
+      case reused => reused
+    }
+
+  def takeObserved(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0, owner: VMLanes): VMLane = {
+    val taken = reuseObserved(lane, registerCount, predicateCount) match {
+      case existing: VMObservedLane => existing
+      case _                        => VMObservedLane(registerCount, predicateCount)
+    }
+    taken.ownedBy(owner)
+    taken
   }
+
+  // an idle lane of the other kind is dropped, so a launch never meets a lane that reports when it should not
+  private def reusePlain(
+      lane: WorkgroupLane,
+      registerCount: Int >= 0,
+      predicateCount: Int >= 0
+  ): VMLane | Null =
+    idle(lane.raw) match {
+      case lanes: mutable.ArrayBuffer[VMLane] if lanes.nonEmpty =>
+        val reused = lanes.remove(lanes.size - 1)
+        reused match {
+          case _: VMObservedLane => null
+          case _                 =>
+            reused.reserve(registerCount, predicateCount)
+            reused
+        }
+      case _ => null
+    }
+
+  private def reuseObserved(
+      lane: WorkgroupLane,
+      registerCount: Int >= 0,
+      predicateCount: Int >= 0
+  ): VMLane | Null =
+    idle(lane.raw) match {
+      case lanes: mutable.ArrayBuffer[VMLane] if lanes.nonEmpty =>
+        val reused = lanes.remove(lanes.size - 1)
+        reused match {
+          case _: VMObservedLane =>
+            reused.reserve(registerCount, predicateCount)
+            reused
+          case _ => null
+        }
+      case _ => null
+    }
 
   def give(lane: WorkgroupLane, cleared: VMLane): Unit = idle(lane.raw) match {
     case lanes: mutable.ArrayBuffer[VMLane] => lanes += cleared

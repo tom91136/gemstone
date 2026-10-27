@@ -19,7 +19,7 @@ private object MachineSyntax {
       residual: BigInt
   ) derives ReadWriter
 
-  private case class Resolved(target: Target, address: Int >= 0, database: NVDisasm.Database, form: NVDisasm.Form)
+  private case class Resolved(target: Target, address: Int >= 0, encoding: NVDisasm.Encoding)
 
   def print(instruction: DecodedInstruction, machine: DecodedInstruction.Machine): Either[String, String] =
     describe(instruction, machine).map(write(_))
@@ -46,7 +46,7 @@ private object MachineSyntax {
     address <- annotation.address.refine[Int >= 0].left.map(_.raw)
     database = target.database
     form <- database.byForm.get(annotation.form).toRight(s"unknown SASS form ${annotation.form}")
-  } yield Resolved(target, address, database, form)
+  } yield Resolved(target, address, NVDisasm.Encoding(database, form))
 
   def decode(
       source: String,
@@ -64,10 +64,10 @@ private object MachineSyntax {
   def encode(annotation: Annotation): Either[String, Array[Byte]] = resolve(annotation).flatMap(encode(annotation, _))
 
   private def encode(annotation: Annotation, resolved: Resolved): Either[String, Array[Byte]] = {
-    val form = resolved.form
+    val form = resolved.encoding.form
     for {
       _ <- Either.cond(
-        annotation.residual >= 0 && annotation.residual.bitLength <= resolved.database.width &&
+        annotation.residual >= 0 && annotation.residual.bitLength <= resolved.encoding.database.width &&
           (annotation.residual & form.assignedMask) == 0,
         (),
         "invalid residual instruction bits"
@@ -83,7 +83,7 @@ private object MachineSyntax {
           )
         } yield FieldDecoder.deposit(word, field.positions, value)
       }
-      encoded <- Encoder.encode(resolved.database, form, annotation.opcode, annotation.bindings, Some(preserved))
+      encoded <- Encoder.encode(resolved.encoding, annotation.opcode, annotation.bindings, Some(preserved))
     } yield encoded
   }
 }

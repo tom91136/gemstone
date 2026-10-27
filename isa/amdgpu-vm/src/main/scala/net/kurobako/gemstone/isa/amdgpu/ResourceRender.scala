@@ -49,17 +49,13 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
 
   private def loadSized(space: Space, at: Term, bytes: Term): Term = Term.context(
     (space.context, space.name),
-    "load",
-    Vec.empty,
-    Vec((at, Some(space.address)), (bytes, Some(Dword))),
+    MachineCall("load", Vec.empty, Vec((at, Some(space.address)), (bytes, Some(Dword)))),
     Some(Pair)
   )
 
   private def storeSized(space: Space, at: Term, bytes: Term, value: Term): Term = Term.context(
     (space.context, space.name),
-    "store",
-    Vec.empty,
-    Vec((at, Some(space.address)), (bytes, Some(Dword)), (value, Some(Pair))),
+    MachineCall("store", Vec.empty, Vec((at, Some(space.address)), (bytes, Some(Dword)), (value, Some(Pair)))),
     None,
     effect = true
   )
@@ -284,11 +280,13 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
       "texel",
       Term.context(
         Images,
-        "texel",
-        Vec.empty,
-        Vec((Architecture, None)) ++ descriptor(address.resource, 8).map(word => (word, Some(Dword))) ++
-          Vec.tabulate(5)(index => (coordinate(address, index), Some(Dword))) ++
-          Vec((Constant(s"dimension = $dimension"), None), (Constant(s"mip = ${address.mip}"), None)),
+        MachineCall(
+          "texel",
+          Vec.empty,
+          Vec((Architecture, None)) ++ descriptor(address.resource, 8).map(word => (word, Some(Dword))) ++
+            Vec.tabulate(5)(index => (coordinate(address, index), Some(Dword))) ++
+            Vec((Constant(s"dimension = $dimension"), None), (Constant(s"mip = ${address.mip}"), None))
+        ),
         Some(Pair)
       )
     )
@@ -324,8 +322,11 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
       }
     })
 
-  /** Component `index` of the registers from `first`, as a store reads it under `packing`. */
-  private def stored(first: VectorRegisterIndex, index: Int, packing: Packing, bank: RegisterBank): Term =
+  private case class Span(bank: RegisterBank, first: VectorRegisterIndex, packing: Packing)
+
+  /** Component `index` of the registers `span` names, as a store reads it. */
+  private def stored(span: Span, index: Int): Term = {
+    val Span(bank, first, packing) = span
     packing match {
       case Packing.Dword    => register(bank, first, index)
       case Packing.Unpacked => Render.truncate(register(bank, first, index), 16)
@@ -339,6 +340,7 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
         )
       case Packing.High => Render.truncate(Render.shiftRightLogical(register(bank, first, 0), Literal(16L)), 16)
     }
+  }
 
   /** The bytes of a texel of the format a buffer descriptor's dword 3 names. */
   private def texelBytes(steps: Bindings, word3: Term): Term = {
@@ -419,10 +421,11 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
         steps.result
       case Instruction.FormatStore(src, address: MemoryAddress.Buffer, format, count, packing, bank) =>
         val fixed                                         = generation
+        val span                                          = Span(bank, src, packing)
         def read(index: Int, widened: Term => Term): Term =
           if (index >= count) Literal(0L)
-          else if (packing == Packing.Dword) stored(src, index, packing, bank)
-          else widened(stored(src, index, packing, bank))
+          else if (packing == Packing.Dword) stored(span, index)
+          else widened(stored(span, index))
         format match {
           case Some(named) if !named.valid => ()
           case Some(named)                 =>
@@ -559,9 +562,11 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
           enabled.map(component =>
             Term.context(
               Images,
-              "information",
-              Vec.empty,
-              machine ++ Vec((level, Some(Dword)), (Constant(s"component = $component"), None)),
+              MachineCall(
+                "information",
+                Vec.empty,
+                machine ++ Vec((level, Some(Dword)), (Constant(s"component = $component"), None))
+              ),
               Some(Dword)
             )
           ),
@@ -589,11 +594,12 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
         )
       case ImageOperation.Store(converted) =>
         val located = texel(address, steps)
+        val span    = Span(bank, data, packing)
         val values  = Vec.tabulate(4) { component =>
           enabled.indexOf(component) match {
             case -1   => Literal(0L)
             case read =>
-              val value = stored(data, read, packing, bank)
+              val value = stored(span, read)
               if (packing == Packing.Dword || !converted) value
               else
                 Render.primitive(words(1), value)((word1: UInt[32], value: UInt[16]) =>
@@ -650,14 +656,9 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
   /** A read-modify-write of `bytes` at a buffer or image address: the old value, the value `update` stores over it in
     * range, and the old value into `dest` when the instruction returns it.
     */
-  def exchanged(
-      address: MemoryAddress,
-      dest: VectorRegisterIndex,
-      bytes: Int in (4, 8),
-      returnValue: Boolean,
-      update: Term => Term,
-      bank: RegisterBank = RegisterBank.Vector
-  ): Option[Term.Steps] = {
+  def exchanged(exchange: Exchange, update: Term => Term): Option[Term.Steps] = {
+    val Exchange(address, dest, bytes, returnValue, bank) = exchange
+
     val steps   = Bindings()
     val located = address match {
       case buffer: MemoryAddress.Buffer => Some(aligned(Buffered(buffer, steps).located(bytes, bytes), bytes, steps))

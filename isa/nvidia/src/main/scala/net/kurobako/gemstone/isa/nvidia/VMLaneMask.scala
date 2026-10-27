@@ -53,6 +53,7 @@ private class VMLaneMask @scala.annotation.publicInBinary private (
 ) derives CanEqual {
   def isEmpty: Boolean                      = count == 0
   def nonEmpty: Boolean                     = count != 0
+  def size: Int in 0 ~ 1024                 = count
   def positiveSize: Option[Int in 1 ~ 1024] = VMLaneMask.PositiveSizes(count)
   def headOption: Option[WorkgroupLane]     = {
     val wordIndex = words.indexWhere(_ != 0L)

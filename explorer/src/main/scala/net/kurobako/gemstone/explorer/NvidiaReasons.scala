@@ -125,12 +125,29 @@ private object NvidiaReasons {
     ("QGMMA", ".*_URa_Rb_Rc_".r, s"$unproduced It takes B from registers, which no wgmma.mma_async form does."),
     ("BGMMA", ".*_URa_Rb_Rc_".r, s"$unproduced It takes B from registers, which no wgmma.mma_async form does."),
     ("WARPGROUP", "warpgroup_wait_.*".r, unproduced),
-    ("WARPGROUPSET", ".*".r, unproduced)
+    ("WARPGROUPSET", ".*".r, unproduced),
+    (
+      "FMNMX",
+      "fmnmx_pred__.*".r,
+      s"$unproduced ptxas lowers a binary32 min or max followed by setp to FMNMX and FSETP, never to FMNMX.IS_A."
+    ),
+    (
+      "HMNMX2",
+      "hmnmx2_pred(_fixed)?__.*".r,
+      s"$unproduced ptxas lowers a half min or max followed by a lane-wise setp to HMNMX2 and HSET2, never to " +
+        "HMNMX2.IS_A."
+    ),
+    (
+      "VHMNMX",
+      "vhmnmx__(RCR|RCxR|RUR)".r,
+      s"$unproduced It takes a source from a constant bank or a uniform register, which ptxas moves into a register first."
+    ),
+    (
+      "VIMNMX",
+      "vimnmx_pred__(RCR_RCR|RCxR_RCxR)".r,
+      s"$unproduced It takes a source from a constant bank, which ptxas moves into a register first."
+    )
   )
-
-  /** Uniform-datapath bulk and tensor operations, which issue once per warp: their lowering is guarded by an election.
-    */
-  private val warpIssued = Set("UBLKCP", "UBLKRED", "UMEMSETS", "UTMALDG", "UTMASTG", "UTMAREDG")
 
   /** Tensor memory loads and stores ptxas does not emit: it lowers tcgen05.ld and tcgen05.st to LDTM and STTM. */
   private val tensorMemory = Set("LDT", "STT")
@@ -180,11 +197,6 @@ private object NvidiaReasons {
           "One lane of each warp issues a tensor memory copy, shift or commit, or a release store or reduction, which " +
             "the VM completes when issued."
         ))
-      else if (mnemonic == "RPCMOV" && Set("rpcmov_dstPc_", "rpcmov_srcPc_")(form))
-        Some(Unavailable.Mechanics(
-          "It moves a 32-bit half of the return address register, which ptxas uses as scratch around warp-aggregated " +
-            "mbarrier arrivals."
-        ))
       else if (tensorProducts(mnemonic) && !form.contains("one"))
         Some(Unavailable.Mechanics(
           "One lane of each warp issues a tcgen05 product, whose element types and shape the instruction descriptor " +
@@ -194,11 +206,6 @@ private object NvidiaReasons {
         Some(Unavailable.Mechanics(
           "One lane of each warp requests a cluster launch control cancellation; the VM reserves every CTA at launch, " +
             "so it writes the failed response and completes the mbarrier transaction."
-        ))
-      else if (warpIssued(mnemonic) && !form.contains("one"))
-        Some(Unavailable.Mechanics(
-          "One lane of each warp issues an asynchronous bulk or tensor copy, reduction or fill, which the VM completes " +
-            "when issued."
         ))
       else
         unemitted.collectFirst {

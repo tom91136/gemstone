@@ -26,6 +26,16 @@ class ModelSuite extends munit.FunSuite {
     found.forms.flatMap(found.language.model.describe(found, _)).map(value => ScalaBackend.show(value.definition))
   }
 
+  test("SPIR-V operands state the constraint the table places on them") {
+    assertEquals(
+      entry(SPIRVModel, None, "OpTypeVector").forms.head.operands.map(_.detail),
+      Vec("Id", "Id, must be a scalar type", "Literal, must be one of 2, 3, 4, 8, 16")
+    )
+    val scope = entry(SPIRVModel, None, "OpControlBarrier").forms.head.operands.head
+    assertEquals(scope.domain.map(_.summary), Some("Scope"))
+    assert(scope.domain.exists(_.values.contains("2" -> "Workgroup")), scope.domain)
+  }
+
   test("SPIR-V forms show a definition per type under the grammar's operand names") {
     assertEquals(
       entry(SPIRVModel, None, "OpIAdd").forms.head.operands.map(_.name),
@@ -86,6 +96,52 @@ class ModelSuite extends munit.FunSuite {
       atomic
     )
     assertEquals(described(SPIRVModel, None, "OpStore"), Vec.empty[String])
+  }
+
+  test("SPIR-V control flow is machine semantics, and declarations and no-ops come from the grammar's class") {
+    def semantics(mnemonic: String): Semantics = {
+      val found = entry(SPIRVModel, None, mnemonic)
+      SPIRVModel.semanticsOf(found, found.forms.head)
+    }
+    semantics("OpBranchConditional") match {
+      case Semantics.Machine(definitions) =>
+        assertEquals(
+          definitions.map(value => (value.instance, ScalaBackend.show(value.definition))),
+          Vec(
+            (
+              "OpBranchConditional(bool)",
+              """def OpBranchConditional(condition: Bool)(using machine: Machine): Unit = {
+                |  machine.branch(condition, 2, 3)
+                |  ()
+                |}""".stripMargin
+            )
+          )
+        )
+      case other => fail(other.toString)
+    }
+    Vec("OpLabel", "OpPhi", "OpFunctionCall", "OpReturn", "OpKill", "OpUnreachable", "OpAbortKHR").foreach { mnemonic =>
+      semantics(mnemonic) match {
+        case Semantics.Machine(_) => ()
+        case other                => fail(s"$mnemonic: $other")
+      }
+    }
+    assertEquals(
+      semantics("OpTypeInt"),
+      Semantics.LoadTime("Read as the module loads, as the grammar's Type-Declaration class.")
+    )
+    assertEquals(
+      semantics("OpFunction"),
+      Semantics.LoadTime("Read as the module loads, as the grammar's Function class.")
+    )
+    assertEquals(
+      semantics("OpLine"),
+      Semantics.LoadTime("Read as the module loads, as the grammar's Debug class.")
+    )
+    assertEquals(semantics("OpNop"), Semantics.NoOp("OpNop takes no operands and has no result."))
+    semantics("OpControlBarrier") match {
+      case Semantics.Machine(_) => ()
+      case other                => fail(other.toString)
+    }
   }
 
   test("SPIR-V reasons come from the grammar's requirements and the VM's lowering of each instance") {
@@ -198,6 +254,43 @@ class ModelSuite extends munit.FunSuite {
       ),
       load
     )
+  }
+
+  test("AMDGPU scalar control flow is machine semantics and other mechanics stay unavailable") {
+    def semantics(target: String, mnemonic: String): Semantics = {
+      val found = entry(AMDGPUModel, Some(target), mnemonic)
+      AMDGPUModel.semanticsOf(found, found.forms.head)
+    }
+    semantics("gfx1030", "s_cbranch_scc1") match {
+      case Semantics.Machine(definitions) =>
+        assertEquals(
+          definitions.map(value => ScalaBackend.show(value.definition)),
+          Vec(
+            """def s_cbranch_scc1(SIMM16: SInt[16], SSRC_SPECIAL_SCC: Bool)(using machine: Machine): Unit = {
+              |  machine.branch(SSRC_SPECIAL_SCC, machine.pc() + 4 + UInt[64](4) * SIMM16.to[UInt[64]])
+              |  ()
+              |}""".stripMargin
+          )
+        )
+      case other => fail(s"$other")
+    }
+    def isMachine(found: Semantics): Boolean = found match {
+      case Semantics.Machine(_) => true
+      case _                    => false
+    }
+    Vec("s_branch", "s_swappc_b64", "s_endpgm", "s_trap", "s_code_end", "s_waitcnt", "s_sleep").foreach(mnemonic =>
+      assert(isMachine(semantics("gfx1030", mnemonic)), mnemonic)
+    )
+    Vec("s_cbranch_g_fork", "s_cbranch_i_fork", "s_cbranch_join").foreach(mnemonic =>
+      assert(isMachine(semantics("gfx90a", mnemonic)), mnemonic)
+    )
+    Vec("s_movrels_b32", "s_movreld_b32", "s_subvector_loop_begin", "s_subvector_loop_end").foreach(mnemonic =>
+      assert(isMachine(semantics("gfx1030", mnemonic)), mnemonic)
+    )
+    assert(semantics("gfx1030", "s_add_u32") match {
+      case Semantics.Lane(_) => true
+      case _                 => false
+    })
   }
 
   test("AMDGPU buffer and image forms define their addressing and texel conversions over the descriptor operands") {
@@ -608,10 +701,16 @@ class ModelSuite extends munit.FunSuite {
       SASSModel.instances(Some("sm_89"), "BMOV", "bmov_pquad_bar__RBR").map(_.map(_.text)),
       Right(Vec("BMOV.32 B1, B10"))
     )
-    assertEquals(
-      unavailable("sm_89", "BMOV", "bmov_pquad_bar__RBR"),
-      Unavailable.Mechanics("It reads barrier, convergence or matrix state the VM keeps outside registers.")
-    )
+    val barrierMove = entry(SASSModel, Some("sm_89"), "BMOV")
+    val barrierForm = barrierMove.forms.find(_.name == "bmov_pquad_bar__RBR").getOrElse(fail("no form"))
+    SASSModel.semanticsOf(barrierMove, barrierForm) match {
+      case Semantics.Machine(definitions) =>
+        assertEquals(
+          definitions.map(value => ScalaBackend.show(value.definition)),
+          Vec("def BMOV(B10: UInt[64]): (B1: UInt[64]) =\n  (B1 = B10.to[UInt[32]].to[UInt[64]])")
+        )
+      case other => fail(other.toString)
+    }
     val uniform = described(SASSModel, Some("sm_89"), "R2UR")
     assert(uniform.exists(_.startsWith("def R2UR(Pu: Bool, Ra: UInt[32])(using warp: Warp)")), uniform)
   }
@@ -631,6 +730,48 @@ class ModelSuite extends munit.FunSuite {
     val opcode   = encoding.fields.find(_.name == "OP").getOrElse(fail("no OP field"))
     assertEquals(fixedValue(encoding, opcode.positions), BigInt(3))
     assertEquals(form.operands.map(_.name), Vec("VDST", "SRC0", "VSRC1"))
+  }
+
+  test("AMDGPU encodings mark the operand slots their opcode does not read") {
+    def field(mnemonic: String, name: String): View.Field = {
+      val encoding = entry(AMDGPUModel, Some("gfx906"), mnemonic).forms.head.encoding.getOrElse(fail("no encoding"))
+      encoding.fields.find(_.name == name).getOrElse(fail(s"no $name field in $mnemonic"))
+    }
+    assert(field("s_getpc_b64", "SSRC0").ignored)
+    assert(!field("s_getpc_b64", "SDST").ignored)
+    assert(!field("s_mov_b32", "SSRC0").ignored)
+    assert(!field("s_mov_b32", "SDST").ignored)
+    val literal = entry(AMDGPUModel, Some("gfx1030"), "v_add_f32").forms.find(_.name == "RDNA2 VOP2_INST_LITERAL")
+    assert(literal.flatMap(_.encoding).flatMap(_.fields.find(_.name == "SRC0")).exists(!_.ignored))
+  }
+
+  test("AMDGPU encodings and operands list the values each field takes") {
+    def form(target: String, mnemonic: String): View.Form = entry(AMDGPUModel, Some(target), mnemonic).forms.head
+    def field(form: View.Form, name: String): View.Field  =
+      form.encoding.flatMap(_.fields.find(_.name == name)).getOrElse(fail(s"no $name field in ${form.name}"))
+    val getpc = form("gfx906", "s_getpc_b64")
+    assertEquals(field(getpc, "SSRC0").domain, None)
+    assertEquals(
+      field(getpc, "SDST").domain.map(_.summary),
+      Some("s0-s101, flat_scratch_lo/hi, xnack_mask_lo/hi, vcc_lo/hi, ttmp0-15, m0, exec_lo/hi")
+    )
+    val move   = form("gfx1030", "s_mov_b32")
+    val source = field(move, "SSRC0").domain.getOrElse(fail("no domain for SSRC0"))
+    assert(source.summary.startsWith("s0-s105, vcc_lo/hi, ttmp0-15, m0, null, exec_lo/hi, inline -16..64"))
+    assert(source.summary.endsWith("9 float constants, src_vccz, src_execz, src_scc, literal"))
+    assert(source.values.contains("128-192" -> "inline 0..64"))
+    assert(source.values.contains("193-208" -> "inline -1..-16"))
+    assert(source.values.contains("108-123" -> "ttmp0-15"))
+    assertEquals(move.operands.find(_.name == "SSRC0").flatMap(_.domain), Some(source))
+    val immediate = form("gfx1030", "s_movk_i32")
+    assertEquals(
+      field(immediate, "SIMM16").domain.map(_.summary),
+      Some("16-bit signed integer -32768..32767")
+    )
+    assertEquals(
+      immediate.operands.find(_.name == "SIMM16").flatMap(_.domain).map(_.values),
+      Some(Vec("field" -> "16-bit signed integer -32768..32767"))
+    )
   }
 
   test("PTX targets narrow the catalogue and operands keep their model names") {

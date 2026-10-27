@@ -27,7 +27,7 @@ object PTXGenerator extends Generator {
       "PTXSuite",
       instances.flatMap((mnemonic, instance, declared) =>
         InstructionSemantics.describe(mnemonic, instance, declared).toOption
-          .filter(definition => !NvidiaCases.excluded(definition))
+          .filter(definition => NvidiaCases.included(definition))
           .map(Case(instance, None, _, Lookup.Registers(declared)))
       ).distinctBy(found =>
         if (NvidiaCases.product(found.definition)) Right(ScalaBackend.show(found.definition)) else Left(found.instance)

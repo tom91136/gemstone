@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.domain.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.targetName
 private object VMIR {
@@ -25,21 +26,15 @@ private object VMIR {
       offsetIndex(index, words, 127, "scalar register span exceeds the register bank").unsafe[ScalarRegisterIndex]
   }
 
-  private def swapsM0(isa: ISA): Boolean = isa match {
-    case ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 | ISA.CDNA5 | ISA.GFX11_7 => true
-    case _                                                             => false
-  }
+  private def sourceRegister(isa: ISA, source: Src): Option[ScalarRegisterIndex] =
+    Src.encode(isa, source).flatMap(_.toInt.refine[ScalarRegisterIndex].toOption)
 
-  /** M0's SGPR: s124, or s125 from RDNA3 on, which encodes the null register as s124. */
+  /** M0's SGPR: the code the source operand domain gives it, s124 until RDNA3 and s125 from there on. */
   def m0Register(isa: ISA): ScalarRegisterIndex =
-    if (swapsM0(isa)) EncodingConstants.Fixed.NullSgpr else EncodingConstants.Fixed.M0
+    sourceRegister(isa, Src.M0).getOrElse(throw IllegalStateException(s"$isa has no M0 source"))
 
-  /** The SGPR that reads zero and discards writes from RDNA1 on: s125, or s124 from RDNA3 on. */
-  def nullRegister(isa: ISA): Option[ScalarRegisterIndex] = isa match {
-    case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 | ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4 => None
-    case modern if swapsM0(modern) => Some(EncodingConstants.Fixed.M0)
-    case _                         => Some(EncodingConstants.Fixed.NullSgpr)
-  }
+  /** The SGPR that reads zero and discards writes, where the source operand domain has one: from RDNA1 on. */
+  def nullRegister(isa: ISA): Option[ScalarRegisterIndex] = sourceRegister(isa, Src.Null)
 
   enum ScalarBranchCondition derives CanEqual {
     case Always, SccZero, SccNonZero, VccZero, VccNonZero, ExecZero, ExecNonZero
@@ -319,6 +314,7 @@ private object VMIR {
     case ReciprocalSquareRootF16, ExponentBase2F16, LogarithmBase2F16, SineF16, CosineF16
     case FrexpMantissaF16, FrexpExponentF16, F16FromI16, F16FromU16, U16FromF16
     case OffsetF32FromI4, SignedNormFromF16, UnsignedNormFromF16, SaturatePackU8FromI16
+    case SaturatePackI4FromI8, SaturatePackU4FromU8
     case I32FromI16, U32FromU16, F32FromBF16
 
     /** GFX6 and GFX7's reciprocals, square-root reciprocals and logarithm bounding infinite results to the largest
@@ -333,6 +329,9 @@ private object VMIR {
     /** One 8-bit float, or two from the low word as a binary32 pair, in CDNA3's FNUZ or the OCP formats. */
     case F32FromE4M3, F32FromE5M2, F32FromE4M3Fnuz, F32FromE5M2Fnuz
     case PairF32FromE4M3, PairF32FromE5M2, PairF32FromE4M3Fnuz, PairF32FromE5M2Fnuz
+
+    /** One OCP 8-bit float widened exactly to binary16, or two from the low word packed into a dword. */
+    case F16FromE4M3, F16FromE5M2, PackedF16FromE4M3, PackedF16FromE5M2
 
     /** gfx950's V_PRNG_B32, one step of its linear feedback shift register. */
     case PseudoRandom
@@ -404,6 +403,7 @@ private object VMIR {
 
   enum VectorBinary64Operation derives CanEqual {
     case LoadExponent, Add, Multiply, Maximum, Minimum, MaximumPropagate, MinimumPropagate
+    case AddU64, SubtractU64, MultiplyLowU64, MaximumI64, MaximumU64, MinimumI64, MinimumU64
   }
 
   enum VectorPackedBinaryOperation derives CanEqual {
@@ -414,6 +414,8 @@ private object VMIR {
 
   enum PackedTernaryOperation derives CanEqual {
     case FusedMultiplyAddF16, MultiplyAddU16, MultiplyAddI16, Maximum3PropagateF16, Minimum3PropagateF16
+    case Maximum3F16, Minimum3F16, Maximum3I16, Maximum3U16, Minimum3I16, Minimum3U16
+    case AddMaximumI16, AddMaximumU16, AddMinimumI16, AddMinimumU16
   }
 
   enum VectorTernaryOperation derives CanEqual {
@@ -433,6 +435,7 @@ private object VMIR {
     case MultiplyAddU32U16, MultiplyAddI32I16, MultiplyAddI16, MultiplyAddF16, DivisionFixupF16
     case Minimum3PropagateF32, Maximum3PropagateF32, Minimum3PropagateF16, Maximum3PropagateF16
     case MaximumMinimumPropagateF32, MinimumMaximumPropagateF32, MaximumMinimumPropagateF16, MinimumMaximumPropagateF16
+    case AddMaximumI32, AddMaximumU32, AddMinimumI32, AddMinimumU32, MultiplyAddU32
 
     /** gfx950's V_ASHR_PK_I8_I32 and V_ASHR_PK_U8_I32: SRC0 and SRC1 shifted by SRC2, saturated into two bytes. */
     case ShiftRightPackI8, ShiftRightPackU8
@@ -936,6 +939,11 @@ private object VMIR {
         position: Int in 0 ~ 3,
         modifiers: SourceModifiers
     )
+
+    /** V_CVT_PK_*8_F16: the binary16 halves of SRC0, low half first, rounded to nearest even into the low word of
+      * `dest` as bytes in the 8-bit `format`.
+      */
+    case VConvertPackedHalf(dest: VectorRegisterIndex, src: InstructionSource, format: Minifloat)
 
     /** A gfx950 V_CVT_SCALEF32 conversion (CDNA4 ISA, 12.11): `conversion` names which sources hold the elements, the
       * stochastic rounding seed and the scale, and the OP_SEL bits of `selection` the bytes or words they take.

@@ -7,8 +7,6 @@ import net.kurobako.gemstone.constraint.auto.*
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. Every conversion and arithmetic helper rounds
   * once; NaN results are quiet and keep the leading payload bits of their source.
   */
-// raw operands and width keep each arithmetic call allocation-free
-@SuppressWarnings(Array("baumkuchen:data-clump"))
 object IEEE754 {
   enum Rounding derives CanEqual {
     case NearestEven, TowardZero, Up, Down, NearestAway

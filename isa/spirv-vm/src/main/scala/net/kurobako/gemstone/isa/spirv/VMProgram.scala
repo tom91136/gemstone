@@ -28,6 +28,7 @@ private object VMProgram {
     case VectorType(component: Int, count: Int > 0)
     case Array(element: Int, count: Long >= 0)
     case Structure(members: Vec[Int])
+    case Tensor(rank: Int, element: Int)
     case Pointer(storageClass: Int, pointee: Int)
     case Function
     case Event
@@ -59,7 +60,7 @@ private object VMProgram {
     * holds whole in row-major lanes, so its `use` constrains only how it may be combined. The VM types its values as
     * vectors of `rows * columns` components; `nv` marks SPV_NV_cooperative_matrix's type.
     */
-  case class CooperativeMatrix(component: Int, rows: Int, columns: Int, use: Long, nv: Boolean)
+  case class CooperativeMatrix(component: Int, rows: Int, columns: Int, use: Long, nv: Boolean) derives CanEqual
 
   object TensorLayout {
     val BlockSize: Int  = 0
@@ -86,9 +87,9 @@ private object VMProgram {
   /** An SPV_NV_tensor_addressing view, whose values the VM types as vectors of [[TensorView.Lanes]] 32-bit words. */
   case class TensorView(dimensions: Int in 1 ~ 5, hasDimensions: Boolean, permutation: Vec[Int])
 
-  // the type id is read on every constant of the hot path, and hoisting it turns the patterns into nested ones
-  @SuppressWarnings(Array("baumkuchen:common-factor"))
   enum Constant {
+    def typeId: Int
+
     case Bits(typeId: Int, lanes: Vec[Long])
     case NullPointer(typeId: Int, pointee: Int, storageClass: Int)
 
@@ -105,13 +106,13 @@ private object VMProgram {
     case FunctionPointer(typeId: Int, function: Int)
 
     def value: VMValue = this match {
-      case Bits(typeId, lanes)                        => VMValue.Bits(typeId, Vec.toArray(lanes))
-      case NullPointer(typeId, pointee, storageClass) => VMValue.Address(typeId, Pointer(0L, pointee, storageClass))
+      case Bits(_, lanes)                        => VMValue.Bits(typeId, Vec.toArray(lanes))
+      case NullPointer(_, pointee, storageClass) => VMValue.Address(typeId, Pointer(0L, pointee, storageClass))
       // Global addresses are only known per dispatch, which replaces these placeholders.
-      case GlobalAddress(typeId = typeId)    => VMValue.Address(typeId, Pointer(0L, typeId, 0))
-      case Composite(typeId, lanes, _)       => VMValue.Bits(typeId, Vec.toArray(lanes))
-      case Sampler(typeId, _)                => VMValue.Address(typeId, Pointer(0L, typeId, 0))
-      case FunctionPointer(typeId, function) => VMValue.Bits(typeId, Array(function.toLong))
+      case _: GlobalAddress             => VMValue.Address(typeId, Pointer(0L, typeId, 0))
+      case Composite(_, lanes, _)       => VMValue.Bits(typeId, Vec.toArray(lanes))
+      case _: Sampler                   => VMValue.Address(typeId, Pointer(0L, typeId, 0))
+      case FunctionPointer(_, function) => VMValue.Bits(typeId, Array(function.toLong))
     }
   }
 
@@ -210,7 +211,7 @@ private object VMProgram {
     case Some(RuntimeType.Pointer(storageClass, pointee)) => Right(Constant.NullPointer(typeId, pointee, storageClass))
     case Some(RuntimeType.Texture(_, _, _) | RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.CubeTexture(_) |
         RuntimeType.MultisampledTexture(_) | RuntimeType.InputAttachment(_, _) | RuntimeType.SampledImage(_) |
-        RuntimeType.Pipe | RuntimeType.Sampler) if opcode == "OpUndef" =>
+        RuntimeType.Pipe | RuntimeType.Sampler | RuntimeType.Tensor(_, _)) if opcode == "OpUndef" =>
       Right(Constant.NullPointer(typeId, typeId, 0))
     case _ =>
       scalarLeafCount(types, typeId) match {
@@ -223,8 +224,6 @@ private object VMProgram {
 }
 
 /** One loaded module: decoded tables, eager storage layouts and globals, which [[LoadedProgram]] lowers and runs. */
-// LoadedProgram sits above the ops and lowering that see this, which keeps them acyclic
-@SuppressWarnings(Array("baumkuchen:single-implementation"))
 private abstract class VMProgram(tables: Tables) extends Backend.Program {
   export tables.*
 
@@ -365,7 +364,7 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
           RuntimeType.ReserveId | RuntimeType.DeviceEvent | RuntimeType.Queue | RuntimeType.Pipe |
           RuntimeType.StorageImage(_, _, _, _, _, _) | RuntimeType.Texture(_, _, _) |
           RuntimeType.CubeTexture(_) | RuntimeType.Sampler | RuntimeType.SampledImage(_) |
-          RuntimeType.Pointer(_, _)) => 8
+          RuntimeType.Pointer(_, _) | RuntimeType.Tensor(_, _)) => 8
       case Some(RuntimeType.VectorType(component, n)) =>
         typeSizeOf(component) * (if (n == 3 && !vulkan && !cooperativeMatrices.contains(typeId)) 4: Int >= 0 else n)
       case Some(RuntimeType.MatrixType(column, count)) => typeSizeOf(column) * count

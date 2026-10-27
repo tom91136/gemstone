@@ -121,7 +121,7 @@ class ConstantSuite extends munit.FunSuite {
       ).toOption.get
       val completion = service.launch(program, task).fold(error => fail(error.message), identity)
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(storage, 0L, 8), Right(LittleEndian.toVec(123L, 8)))
+      assertEquals(service.read(AllocationRange(storage, 0L, 8)), Right(LittleEndian.toVec(123L, 8)))
     }
   }
 
@@ -175,6 +175,7 @@ class ConstantSuite extends munit.FunSuite {
           LaunchGeometry.Dimensions.One,
           Vec(KernelTask.Argument.Memory(output, 0L))
         ).toOption.get
+        val outputRange = AllocationRange(output, 0L, 8)
         for (values <- Vec(Vec(17, 29), Vec(31, 47))) {
           val bytes = Vec.from(values).flatMap(n => LittleEndian.toVec(n.toLong, 4))
           assert(service.write(storage, alias.offset, bytes).isRight)
@@ -182,7 +183,7 @@ class ConstantSuite extends munit.FunSuite {
           assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
           val expected = selected.fold(values)(index => Vec.fill(2)(values(index)))
             .flatMap(value => LittleEndian.toVec(value.toLong, 4))
-          assertEquals(service.read(output, 0L, 8), Right(expected))
+          assertEquals(service.read(outputRange), Right(expected))
         }
       }
     }
@@ -236,7 +237,7 @@ class ConstantSuite extends munit.FunSuite {
       ).toOption.get
       val completion = service.launch(program, task).fold(e => fail(e.message), identity)
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(output, 0L, 4), Right(LittleEndian.toVec(42L, 4)))
+      assertEquals(service.read(AllocationRange(output, 0L, 4)), Right(LittleEndian.toVec(42L, 4)))
     }
   }
 
@@ -306,13 +307,14 @@ class ConstantSuite extends munit.FunSuite {
         LaunchGeometry.Dimensions.One,
         Vec(KernelTask.Argument.Memory(output, 0L))
       ).toOption.get
+      val outputWord = AllocationRange(output, 0L, 4)
       for (value <- Vec(29, 47)) {
         assert(service.write(table, 20L, LittleEndian.toVec(value.toLong, 4)).isRight)
         val completion = service.launch(program, task).fold(e => fail(e.message), identity)
         assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-        assertEquals(service.read(output, 0L, 4), Right(LittleEndian.toVec(value.toLong, 4)))
+        assertEquals(service.read(outputWord), Right(LittleEndian.toVec(value.toLong, 4)))
       }
-      val pointer = java.nio.ByteBuffer.wrap(service.read(storage, 16L, 8).toOption.get.toArray)
+      val pointer = java.nio.ByteBuffer.wrap(service.read(AllocationRange(storage, 16L, 8)).toOption.get.toArray)
         .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong()
       assert(service.write(storage, 16L, LittleEndian.toVec(pointer - 4L, 8)).isRight)
       bindings.foreach { case (name, allocation, offset) =>
@@ -320,7 +322,7 @@ class ConstantSuite extends munit.FunSuite {
       }
       val completion = service.launch(program, task).fold(e => fail(e.message), identity)
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(output, 0L, 4), Right(LittleEndian.toVec(17L, 4)))
+      assertEquals(service.read(outputWord), Right(LittleEndian.toVec(17L, 4)))
     }
     assert(Cubin.relocateConstants(module, Map.empty).left.exists(_.contains("unbound")))
     val invalid = relocation.copy(bytes = LittleEndian.toVec(8L, 8) ++ LittleEndian.toVec((1L << 32) | 99L, 8))

@@ -39,7 +39,7 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
       offset: Long,
       size: Int in 0 ~ 8 = 4
   ): Long =
-    service.read(id, offset.unsafe[Long >= 0], size.widen[Int >= 0])
+    service.read(AllocationRange(id, offset.unsafe[Long >= 0], size.widen[Int >= 0]))
       .map(bytes => LittleEndian.decode(bytes, 0, size)).toOption.get
   private def launch(service: ExecutionSession, program: ProgramId, pointer: KernelTask.Argument): CompletionId = {
     val task = KernelTask.validated(

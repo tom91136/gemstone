@@ -12,13 +12,24 @@ object View {
     case Slot(name: String, detail: String)
   }
 
-  case class OperandSlot(name: String, kind: String, detail: String = "")
+  /** The values an operand field accepts: a one-line `summary` and every value as a (codes, meaning) row. */
+  case class Domain(summary: String, values: Vec[(String, String)])
+
+  case class OperandSlot(name: String, kind: String, detail: String = "", domain: Option[Domain] = None)
 
   /** A modifier or operand position that takes one of `values`. */
   case class Choice(name: String, values: Vec[String])
 
-  /** The instruction word bits a field occupies, least significant value bit first. */
-  case class Field(name: String, positions: Vec[Int], detail: String)
+  /** The instruction word bits a field occupies, least significant value bit first; `ignored` marks an operand slot the
+    * instruction does not read, and `domain` lists the values the field takes where the catalogue models them.
+    */
+  case class Field(
+      name: String,
+      positions: Vec[Int],
+      detail: String,
+      ignored: Boolean = false,
+      domain: Option[Domain] = None
+  )
 
   /** A `width`-bit instruction word; `fixed` maps the bit positions every encoding of the form shares to their value.
     */

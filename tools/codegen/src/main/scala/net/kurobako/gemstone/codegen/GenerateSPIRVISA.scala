@@ -91,10 +91,10 @@ object GenerateSPIRVISA {
   private val command = Command("GenerateSPIRVISA", "Generate SPIR-V ISA sources")(
     Opts.subcommands(
       Command("instructions", "Generate instruction sources")((
-        Opts.argument[String]("grammar").map(Path.of(_)),
-        Opts.argument[String]("extinst-directory").map(Path.of(_)),
-        Opts.argument[String]("generated-source-root").map(Path.of(_)),
-        Opts.argument[String]("generated-native-root").map(Path.of(_))
+        CodegenCommand.path("grammar"),
+        CodegenCommand.path("extinst-directory"),
+        CodegenCommand.path("generated-source-root"),
+        CodegenCommand.path("generated-native-root")
       ).mapN(Instructions(_, _, _, _)))
     )
   )
@@ -119,6 +119,7 @@ object GenerateSPIRVISA {
           base.resolve("PipeLayout.scala")              -> PipeABI.scalaSource,
           base.resolve("ExtendedInstruction.scala")     -> renderExtendedInstructions(extended),
           base.resolve("InstructionRequirements.scala") -> renderRequirements(grammar),
+          base.resolve("OperandConstraintTable.scala")  -> renderOperandConstraints(grammar),
           base.resolve("Instruction.scala")             -> renderInstructions(grammar)
         ) ++ enumerants).toMap
       )
@@ -422,7 +423,8 @@ object GenerateSPIRVISA {
       case (operand, index) if operand.name.exists(_.toLowerCaseRoot.startsWith("operand")) =>
         index
     }
-    val bases = entry.operands.zipWithIndex.map { case (operand, index) =>
+    val letters = generic.zipWithIndex.toMap
+    val bases   = entry.operands.zipWithIndex.map { case (operand, index) =>
       val name =
         if (operand.kind == "IdResultType") "resultType"
         else if (operand.kind == "IdResult") "dest"
@@ -436,7 +438,7 @@ object GenerateSPIRVISA {
           case Some(value) if value.startsWith("operand") =>
             if (operand.quantifier.contains("*")) "srcs"
             else if (generic.size == 1) "src"
-            else s"src${letter(generic.indexOf(index))}"
+            else s"src${letter(letters(index))}"
           case _ => normaliseField(operand.name.getOrElse(operand.kind))
         }
       name
@@ -737,6 +739,75 @@ object GenerateSPIRVISA {
           |$values
           |}
           |""".stripMargin
+  }
+
+  private def renderOperandConstraints(grammar: Grammar): String = {
+    val entries         = grammar.entries.toVector.map(entry => entry.name.raw -> entry).toMap
+    val kindNames       = grammar.kinds.toVector.map(_.kind.raw).toSet
+    val parametricKinds = grammar.kinds.collect {
+      case value if value.enumerants.exists(_.parameters.nonEmpty) => value.kind.raw
+    }.toSet
+    val kinds = SPIRVOperandConstraints.kinds.collect {
+      case (kind, constraint, source) if kindNames(kind) =>
+        s"KindRule(OperandKind.$kind, ${renderConstraint(constraint)}, ${Emission.literal(source)})"
+    }
+    val families = SPIRVOperandConstraints.families.map { (family, rules) =>
+      val rows =
+        rules.flatMap(rule => entries.get(rule.opcode).map(entry => renderOperandRule(parametricKinds, entry, rule)))
+      if (rows.isEmpty) s"  private def $family: Vec[OperandRule] = Vec.empty[OperandRule]"
+      else s"  private def $family: Vec[OperandRule] = Vec(\n${rows.map(row => s"    $row").mkString(",\n")}\n  )"
+    }
+    val rules = SPIRVOperandConstraints.families.map(_._1).mkString(" ++ ")
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
+      s"""|package net.kurobako.gemstone.isa.spirv
+        |
+        |import net.kurobako.gemstone.collection.*
+        |
+        |${GeneratedHeader.annotation()}object OperandConstraintTable {
+        |  val kinds: Vec[KindRule] = ${Emission.collection("Vec", kinds)}
+        |
+        |  val rules: Vec[OperandRule] = $rules
+        |
+        |${families.mkString("\n\n")}
+        |}
+        |""".stripMargin
+  }
+
+  /** The row `OperandConstraintTable` holds for `rule`. */
+  private def renderOperandRule(
+      parametricKinds: Set[String],
+      entry: Entry,
+      rule: SPIRVOperandConstraints.Rule
+  ): String = {
+    val positions = entry.operands.zipWithIndex.collect {
+      case (operand, index) if operand.name.fold(operand.kind.raw)(_.raw) == rule.operand => index
+    }
+    require(positions.size == 1, s"${rule.opcode} has ${positions.size} operands named ${rule.operand}")
+    val index   = positions.head
+    val operand = entry.operands(index)
+    require(operand.quantifier.forall(_.raw == "*"), s"${rule.opcode} ${rule.operand} is optional")
+    val prior = entry.operands.take(index)
+    require(
+      prior.forall(earlier => earlier.quantifier.isEmpty && !parametricKinds(earlier.kind.raw)),
+      s"${rule.opcode} ${rule.operand} follows an optional, repeated or parametric operand"
+    )
+    val quantifier = if (operand.quantifier.isDefined) "Repeated" else "One"
+    s"OperandRule(${Emission.literal(rule.opcode)}, $index, ${Emission.literal(rule.operand)}, " +
+      s"OperandQuantifier.$quantifier, ${renderConstraint(rule.constraint)}, ${Emission.literal(rule.source)})"
+  }
+
+  private def renderConstraint(constraint: SPIRVOperandConstraints.Constraint): String = constraint match {
+    case SPIRVOperandConstraints.Constraint.Type              => "OperandConstraint.Type"
+    case SPIRVOperandConstraints.Constraint.Declares(opcodes) =>
+      s"OperandConstraint.Declares(${Emission.collection("Vec", opcodes.map(Emission.literal))})"
+    case SPIRVOperandConstraints.Constraint.Value(kind) =>
+      s"OperandConstraint.Value(OperandConstraint.ValueClass.$kind)"
+    case SPIRVOperandConstraints.Constraint.ScopeId           => "OperandConstraint.ScopeId"
+    case SPIRVOperandConstraints.Constraint.MemorySemanticsId => "OperandConstraint.MemorySemanticsId"
+    case SPIRVOperandConstraints.Constraint.ScalarComponent   => "OperandConstraint.ScalarComponent"
+    case SPIRVOperandConstraints.Constraint.ByteWidth         => "OperandConstraint.ByteWidth"
+    case SPIRVOperandConstraints.Constraint.OneOf(values)     =>
+      s"OperandConstraint.OneOf(Vec(${values.map(value => s"${value}L").mkString(", ")}))"
   }
 
   private def syncRoot(root: Path, outputs: Map[Path, String]): Unit = {

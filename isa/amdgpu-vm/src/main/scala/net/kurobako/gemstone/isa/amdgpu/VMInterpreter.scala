@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import AmdGpuMachine.*
 import EncodingConstants.*
 import IntegerSemantics.*
 import VMArithmetic.*
@@ -32,12 +33,12 @@ private object VMInterpreter {
     inline val Yield   = -5
   }
   private val NextStep: Either[Fault, Int]    = Right(Step.Next)
+  private val ExitStep: Either[Fault, Int]    = Right(Step.Exit)
+  private val Completed: Either[Fault, Unit]  = Right(())
   private val BlockedStep: Either[Fault, Int] = Right(Step.Blocked)
   private val YieldStep: Either[Fault, Int]   = Right(Step.Yield)
 
-  // MODE's VSKIP bit and the conditional branch stack pointer, CSP, in its bits 31 to 29
-  private inline val VectorSkipShift   = 28
-  private inline val VectorSkip        = 1 << VectorSkipShift
+  // the conditional branch stack pointer, CSP, in MODE's bits 31 to 29
   private inline val StackPointerShift = 29
 
   // a resident wave yields after this many backward branches, so a spin on another workgroup lets that one run
@@ -194,10 +195,12 @@ private object VMInterpreter {
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress)
     // One shared step result per branch target, so taken and fall-through branches allocate nothing.
     val jumps: Array[Either[Fault, Int]] = Array.tabulate(program.instructions.size + 1)(Right(_))
-    if (dispatch.cooperative) runResident(program, jumps, dispatchMemory, dispatch, control)
+    // a wave reads at most one range per lane, so the buffer never grows
+    val reads = AddressSpace.ReadRangeBuffer(kernel.waveSize.widen[Int > 0])
+    if (dispatch.cooperative) runResident(program, jumps, reads, dispatchMemory, dispatch, control)
     else
       Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group) =>
-        runGroup(program, jumps, dispatchMemory, dispatch, group, control)
+        runGroup(program, jumps, reads, dispatchMemory, dispatch, group, control)
       )
   }
 
@@ -208,6 +211,7 @@ private object VMInterpreter {
   private def runResident(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
+      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       control: TaskControl
@@ -224,6 +228,7 @@ private object VMInterpreter {
           ResidentGroup(
             program,
             jumps,
+            reads,
             dispatchMemory,
             dispatch,
             dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]),
@@ -260,6 +265,7 @@ private object VMInterpreter {
   private class ResidentGroup(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
+      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       group: Coordinates,
@@ -276,7 +282,20 @@ private object VMInterpreter {
     private val waves     = Array.tabulate(waveCount) { waveIndex =>
       val start = waveIndex * waveSize
       val lanes = math.min(waveSize, localCount - start).unsafe[Int where Between[1, 64]]
-      WaveRun(program, jumps, dispatchMemory, dispatch.geometry, group, start, lanes, lds, barriers, control, gws)
+      WaveRun(
+        program,
+        jumps,
+        reads,
+        dispatchMemory,
+        dispatch.geometry,
+        group,
+        start,
+        lanes,
+        lds,
+        barriers,
+        control,
+        gws
+      )
     }
     private val finished = Array.fill(waveCount)(false)
     private val arrived  = Array.fill(waveCount)(false)
@@ -323,6 +342,7 @@ private object VMInterpreter {
   private def runGroup(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
+      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       group: Coordinates,
@@ -355,6 +375,7 @@ private object VMInterpreter {
               WaveRun(
                 program,
                 jumps,
+                reads,
                 dispatchMemory,
                 dispatch.geometry,
                 group,
@@ -393,11 +414,15 @@ private object VMInterpreter {
   }
 
   // Register, PC and barrier state are updated directly in the measured wave interpreter loop; null avoids allocating
-  // optional-state wrappers for every instruction. Lane kernels take their operands unpacked for the same reason.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null", "baumkuchen:data-clump"))
+  // optional-state wrappers for every instruction.
+  @SuppressWarnings(Array(
+    "scalafix:DisableSyntax.var",
+    "scalafix:DisableSyntax.null"
+  ))
   private class WaveRun(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
+      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       geometry: LaunchGeometry,
       group: Coordinates,
@@ -408,29 +433,30 @@ private object VMInterpreter {
       control: TaskControl,
       // the GWS resources of a cooperative dispatch, whose waves also yield on sleeps and spins; null otherwise
       gws: GlobalWaveSyncResources | Null
-  ) extends AMDGPUSinks[Long, Either[Fault, Int]] {
+  ) extends AMDGPUSinks[Long, Either[Fault, Int]] with PendingMachineOps {
     private val kernel             = program.source
     private val operations         = program.instructions
     private val skippedOperations  = program.skipped
     private val instructionIndices = program.instructionIndices
     private val instructionOffsets = program.instructionOffsets
     private val waveSize           = kernel.waveSize
-    private val scalar             = Array.ofDim[Long](128)
-    private val vector             = VectorRegisters(waveSize)
-    private val accumulator        = VectorRegisters(waveSize)
-    private val routed             = Array.ofDim[Long](lanes)
-    private val routedHigh         = Array.ofDim[Long](lanes)
-    private val preservedHalves    = Array.ofDim[Long](lanes)
+    // the wave's ordinal within its workgroup, which the timeline names the unit by
+    private val waveIndex: Int >= 0 = (localStart / waveSize).unsafe[Int >= 0]
+    private val scalar              = Array.ofDim[Long](128)
+    private val vector              = VectorRegisters(waveSize)
+    private val accumulator         = VectorRegisters(waveSize)
+    private val routed              = Array.ofDim[Long](lanes)
+    private val routedHigh          = Array.ofDim[Long](lanes)
+    private val preservedHalves     = Array.ofDim[Long](lanes)
     // A vector comparison defines only the wave's lane bits of VCC. On a wave32 target the compiler keeps scratch values
     // in vcc_hi (s107), so the upper half survives a comparison while s106/s107 still round-trip through the register.
     private val carry        = LaneBits(lanes, 0L)
     private val active       = LaneBits(lanes, geometry.liveLanes(group, localStart.unsafe[Int >= 0], lanes))
     private var scalarCarry  = false
     private var mode         = kernel.initialMode
-    private val modeWritable =
-      if (ModeRegister.ieeeSupported(program.isa)) -1 else ~(ModeRegister.DX10Clamp | ModeRegister.IEEE)
-    private val m0        = program.m0
-    private val discarded = program.discarded
+    private val modeWritable = ModeRegister.writable(program.isa)
+    private val m0           = program.m0
+    private val discarded    = program.discarded
     // The 4096-byte floor proves the per-lane allocation is positive.
     private val scratch          = ScratchMemory(lanes, math.max(4096, kernel.privateSegmentSize).unsafe[Int > 0])
     private var conditionMask    = 0L
@@ -453,7 +479,7 @@ private object VMInterpreter {
       def enabled(value: Int, bit: Int): Boolean       = (value & (1 << bit)) != 0
       def reserve(count: Int > 0): ScalarRegisterIndex = {
         val start = nextUserSgpr
-        require(count <= 128 - start, "user scalar registers exceed the register bank")
+        Predef.require(count <= 128 - start, "user scalar registers exceed the register bank")
         nextUserSgpr += count
         start.unsafe[ScalarRegisterIndex]
       }
@@ -908,13 +934,12 @@ private object VMInterpreter {
 
     // Per-lane accesses report a fault or null so local and private lanes allocate nothing.
     private val loaded = LongRef(0L)
-    private val reads  = AddressSpace.ReadRangeBuffer()
 
     /** Reads at most eight bytes from a located access into `loaded`. */
     private def readValue(at: Long, lane: Lane, bytes: Int in 1 ~ 8, coherent: Boolean): Fault | Null =
       located match {
         case Location.Global =>
-          if (coherent && (bytes == 4 || bytes == 8) && !dispatchMemory.isImmutable(at, bytes))
+          if (coherent && (bytes == 4 || bytes == 8) && dispatchMemory.isMutable(at, bytes))
             AddressSpace.store(loaded, dispatchMemory.atomicModifyValue(at, if (bytes == 4) 4 else 8)(identity))
           else dispatchMemory.readValueInto(at, bytes, loaded)
         case Location.Private =>
@@ -1242,15 +1267,7 @@ private object VMInterpreter {
           writeLDS(lds, secondAddress, vectorBytes(file, srcB, lane, bytes.widen))
           null
         }
-      case Instruction.CacheWritebackInvalidate =>
-        dispatchMemory.memory.flushHostWrites().flatMap { _ =>
-          dispatchMemory.memory.invalidateHostReads()
-          NextStep
-        }
-      case Instruction.CacheInvalidate =>
-        // A following ordinary load must not reuse bytes cached before acquire.
-        dispatchMemory.memory.invalidateHostReads()
-        NextStep
+      case Instruction.CacheWritebackInvalidate => ScalarControl.writebackInvalidate(this)
       case other => Left(Fault.IllegalInstruction(s"unhandled AMDGPU instruction $other"))
     }
 
@@ -1462,8 +1479,9 @@ private object VMInterpreter {
         (0 until load.count).foreach { register =>
           val value =
             if (register < kept) LittleEndian.decode(bytes, register * size, size.widen[Int in 0 ~ 8]) else 0L
-          scalar(load.dest + register) =
-            if (load.signed) Bits.low32(Bits.signExtend(value, (size * 8).unsafe[Int in 1 ~ 64])).toLong else value
+          if (load.dest + register != discarded)
+            scalar(load.dest + register) =
+              if (load.signed) Bits.low32(Bits.signExtend(value, (size * 8).unsafe[Int in 1 ~ 64])).toLong else value
         }
         Step.Next
       }
@@ -1546,43 +1564,243 @@ private object VMInterpreter {
       }
     }
 
+    inline def pc: Long = programCounter(instructionIndex)
+
+    inline def advance: Flow[Int] = NextStep
+    inline def done: Flow[Unit]   = Completed
+
+    inline def uniform(operand: InstructionSource): Long = source(operand, 0)
+
+    inline def uniformPair(operand: InstructionSource): Long = sourceScalar64(operand)
+
+    inline def condition(condition: ScalarBranchCondition): Long = if (holds(condition)) 1L else 0L
+
+    inline def jump(target: Int): Flow[Int] = jumps(target)
+
+    inline def jumpTo(target: Long): Flow[Int] = programIndex(target) match {
+      case Some(index) => jumps(index)
+      case None        =>
+        Left(Fault.Backend(f"AMDGPU setpc at 0x$pc%X targets non-instruction 0x$target%X"))
+    }
+
+    inline def branch(condition: Long, taken: Int): Flow[Int] = if (condition != 0L) jumps(taken) else NextStep
+
+    inline def branch(condition: Long, taken: Int, otherwise: Int): Flow[Int] =
+      jumps(if (condition != 0L) taken else otherwise)
+
+    inline def exit: Flow[Int] = dispatchMemory.memory.flushHostWrites() match {
+      case Left(fault) => Left(fault)
+      case _           => ExitStep
+    }
+
+    inline def read(lane: Lane, operand: InstructionSource): Long = source(operand, lane)
+
+    inline def compute(primitive: Primitive[Primitive.Unary], first: Long): Long = primitive.function(first)
+
+    inline def compute(primitive: Primitive[Primitive.Binary], first: Long, second: Long): Long =
+      primitive.function(first, second)
+
+    inline def compute(primitive: Primitive[Primitive.Ternary], first: Long, second: Long, third: Long): Long =
+      primitive.function(first, second, third)
+
+    inline def require[A](condition: Long, label: String)(inline fault: => Fault)(inline next: => Flow[A]): Flow[A] =
+      if (condition != 0L) next else Left(fault)
+
+    inline def writePair(target: ScalarRegisterIndex, value: Long)(inline next: => Flow[Int]): Flow[Int] = {
+      writeScalar64(target, value)
+      next
+    }
+
+    inline def callTo(link: ScalarRegisterIndex, returnAddress: Long, target: Long): Flow[Int] =
+      called(link, returnAddress, target)
+
+    inline def fork(mask: Long, taken: Int): Flow[Int] = forked(mask, taken)
+
+    inline def forkTo(mask: Long, taken: Long): Flow[Int] = programIndex(taken) match {
+      case Some(index) => forked(mask, index)
+      case None        =>
+        Left(Fault.Backend(f"AMDGPU fork at 0x$pc%X targets non-instruction 0x$taken%X"))
+    }
+
+    inline def join(saved: Long): Flow[Int] = joined(saved)
+
+    inline def trap(code: Int): Flow[Int] = Left(Fault.Trap(f"AMDGPU s_trap $code%d at pc 0x$pc%x"))
+
+    inline def halt(reason: String): Flow[Int] = Left(Fault.Backend(f"AMDGPU $reason at pc 0x$pc%x"))
+
+    inline def fenceHost: Flow[Int] = dispatchMemory.memory.flushHostWrites().flatMap(_ => NextStep)
+
+    inline def barrier: Flow[Int] = arrive
+
+    private def arrive: Flow[Int] = Right(Step.Arrive)
+
+    inline def initBarrier(id: Long, count: Long): Flow[Int] =
+      barriers.initialise(id.toInt, count.toInt).flatMap(_ => NextStep)
+
+    inline def joinBarrier(id: Long): Flow[Int] = barriers.join(id.toInt, localStart / waveSize).flatMap(_ => NextStep)
+
+    inline def leaveBarrier(inline next: Long => Flow[Int]): Flow[Int] =
+      next(if (barriers.leave(localStart / waveSize)) 1L else 0L)
+
+    inline def signalBarrier(id: Long, count: Long)(inline next: Long => Flow[Int]): Flow[Int] =
+      barriers.signal(id.toInt, localStart / waveSize, count.toInt).flatMap(first => next(if (first) 1L else 0L))
+
+    inline def awaitBarrier(id: Long): Flow[Int] = barriers.await(id.toInt, localStart / waveSize).flatMap { ready =>
+      // A named barrier releases its waves when its phase moves past the one they last saw.
+      if (ready) NextStep else blocked(MachineUnit.Reason.Barrier(barrierName(id.toInt)))
+    }
+
+    inline def writeCarry(value: Long)(inline next: => Flow[Int]): Flow[Int] = {
+      scalarCarry = value != 0L
+      next
+    }
+
+    inline def writeMode(value: Long)(inline next: => Flow[Int]): Flow[Int] = {
+      mode = value.toInt
+      next
+    }
+
+    inline def writeWord(target: ScalarRegisterIndex, value: Long)(inline next: => Flow[Int]): Flow[Int] = {
+      writeScalar32(target, value)
+      next
+    }
+
+    inline def writeSlot(target: ScalarRegisterIndex, value: Long)(inline next: => Flow[Int]): Flow[Int] = {
+      if (target.raw != discarded) scalar(target) = value
+      next
+    }
+
+    inline def relativeOffset: Long = Bits.low32(scalar(m0)).toLong
+
+    inline def scalarAt(index: Long): Long =
+      source(InstructionSource.Scalar(index.toInt.unsafe[ScalarRegisterIndex]), 0)
+
+    inline def writeScalarAt(index: Long, value: Long)(inline next: => Flow[Int]): Flow[Int] = {
+      writeScalar32(index.toInt.unsafe[ScalarRegisterIndex], value)
+      next
+    }
+
+    inline def requireScalars(destination: Long, origin: Long, words: Int)(inline next: => Flow[Int]): Flow[Int] =
+      if (destination < 0L || destination + words > 128L || origin + words > 128L)
+        Left(Fault.Backend(s"relative SGPR move from s$origin to s$destination is out of range"))
+      else next
+
+    inline def bind(value: Long)(inline next: Long => Flow[Int]): Flow[Int] = next(value)
+
+    // the host's monotonic clock, at 1 GHz for the shader clock and 100 MHz for real time
+    inline def clock(source: Clock): Long = source match {
+      case Clock.RealTime => platform.monotonicNanos / 10L
+      case _              => platform.monotonicNanos
+    }
+
+    inline def waveId: Long = (localStart / waveSize).toLong
+
+    // A following ordinary load must not reuse bytes cached before acquire.
+    inline def invalidateHostReads: Flow[Int] = {
+      dispatchMemory.memory.invalidateHostReads()
+      NextStep
+    }
+
+    inline def writebackInvalidateHost: Flow[Int] = fenceHost.flatMap(_ => invalidateHostReads)
+
+    inline def localCounter(
+        offset: Int,
+        decrement: Boolean,
+        dest: VectorRegisterIndex,
+        bank: RegisterBank
+    ): Flow[Int] = {
+      val at    = offset.toLong
+      val old   = LittleEndian.decode(ldsBytes(lds, at, 4), 0, 4)
+      val count = java.lang.Long.bitCount(active.bits).toLong
+      writeLDS(lds, at, LittleEndian.toArray(Bits.low32(if (decrement) old - count else old + count).toLong, 4))
+      val registers = this.registers(bank, dest)
+      foreachActive(lane => registers(lane) = old)
+      NextStep
+    }
+
+    inline def globalWaveSync(
+        name: String,
+        operation: GlobalWaveSyncOperation,
+        offset: Int,
+        data: VectorRegisterIndex,
+        bank: RegisterBank
+    ): Flow[Int] = waveSync(name, operation, offset, data, bank)
+
+    private def waveSync(
+        name: String,
+        operation: GlobalWaveSyncOperation,
+        offset: Int,
+        data: VectorRegisterIndex,
+        bank: RegisterBank
+    ): Flow[Int] = gws match {
+      case null      => Left(Fault.Unsupported(s"$name needs GWS resources, which only a cooperative dispatch has"))
+      case resources =>
+        if (active.isEmpty) NextStep
+        else {
+          val resource = ((Bits.low32(scalar(m0)).toInt >>> 16) + offset) & (GlobalWaveSyncResources.Count - 1)
+          val lane     = java.lang.Long.numberOfTrailingZeros(active.bits)
+          val value    = Bits.low32(registers(bank, data)(lane)).toLong
+          gwsWait = resources.step(operation, resource, value, gwsWait)
+          // A GWS resource is a launch-wide barrier or semaphore, which the shared vocabulary has no reason for; the
+          // wave reports the wait for the resource as a memory wait, the nearest the vocabulary offers.
+          if (gwsWait == GlobalWaveSyncResources.Idle) NextStep else blocked(MachineUnit.Reason.Memory)
+        }
+    }
+
+    // calls and returns share this primitive: the saved return address in the scalar pair is the frame
+    private def called(link: ScalarRegisterIndex, returnAddress: Long, target: Long): Flow[Int] =
+      kernel.emulatedCalls.get(target) match {
+        case Some(call) =>
+          foreachActive { lane =>
+            def component(doubleRegister: VectorRegisterIndex, singleRegister: VectorRegisterIndex): Double =
+              if (call.double) IEEE754.binary64ToDouble(pair(vector, doubleRegister, lane))
+              else IEEE754.binary32ToFloat(Bits.low32(vector(singleRegister)(lane))).toDouble
+            val (resultReal, resultImaginary) = call.function(component(0, 0), component(2, 1))
+            if (call.double) {
+              val realBits      = IEEE754.doubleToBinary64(resultReal)
+              val imaginaryBits = IEEE754.doubleToBinary64(resultImaginary)
+              vector(0)(lane) = Bits.low32(realBits).toLong
+              vector(1)(lane) = Bits.high32(realBits).toLong
+              vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+              vector(3)(lane) = Bits.high32(imaginaryBits).toLong
+            } else {
+              vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).toLong
+              vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
+            }
+          }
+          NextStep
+        case None =>
+          programIndex(target) match {
+            case Some(targetIndex) =>
+              writeScalar64(link, returnAddress)
+              Right(targetIndex)
+            case None =>
+              kernel.functionTargets.get(target) match {
+                case Some(name) => Left(Fault.Unsupported(s"AMDGPU call to $name is not implemented"))
+                case None => Left(Fault.Backend(f"AMDGPU call target 0x$target%X is not present in the code object"))
+              }
+          }
+      }
+
     // Split the instruction switch into JIT-sized methods. The complete switch is too large for C2 to compile.
     def step(index: Int): Either[Fault, Int] = operations(index) match {
-      case Instruction.End        => dispatchMemory.memory.flushHostWrites().map(_ => Step.Exit)
-      case Instruction.Trap(code) =>
-        Left(Fault.Trap(f"AMDGPU s_trap $code%d at pc 0x${programCounter(index)}%x"))
-      case Instruction.Wait  => dispatchMemory.memory.flushHostWrites().flatMap(_ => NextStep)
-      case Instruction.Sleep =>
+      case Instruction.End        => ScalarControl.end(this)
+      case Instruction.Trap(code) => ScalarControl.trap(this)(code)
+      case Instruction.Wait       => ScalarControl.fence(this)
+      case Instruction.Sleep      =>
         dispatchMemory.memory.flushHostWrites().flatMap(_ => if (resident) YieldStep else NextStep)
       case Instruction.SGprIndexOff                       => NextStep
-      case Instruction.Barrier                            => Right(Step.Arrive)
-      case Instruction.BarrierSignal(id, isFirst, fromM0) =>
-        val value = source(id, 0)
-        val count = if (fromM0) ((value >>> 16) & 0x7f).toInt else 0
-        barriers.signal(barrierId(value, fromM0), localStart / waveSize, count).flatMap { first =>
-          if (isFirst) scalarCarry = first
-          NextStep
-        }
-      case Instruction.BarrierInit(id, fromM0, count) =>
-        barriers.initialise(barrierId(source(id, 0), fromM0), ((source(count, 0) >>> 16) & 0xffff).toInt)
-          .flatMap(_ => NextStep)
-      case Instruction.BarrierJoin(id, fromM0) =>
-        barriers.join(barrierId(source(id, 0), fromM0), localStart / waveSize).flatMap(_ => NextStep)
-      case Instruction.BarrierLeave =>
-        scalarCarry = barriers.leave(localStart / waveSize)
-        NextStep
-      case Instruction.BarrierWait(id) =>
-        barriers.await(id, localStart / waveSize).flatMap { ready =>
-          if (ready) NextStep else Right(Step.Blocked)
-        }
-      case Instruction.Branch(condition, target) => jumps(if (holds(condition)) target else index + 1)
-      case Instruction.BranchRelative(_, _)      =>
+      case Instruction.Barrier                            => ScalarControl.barrier(this)
+      case Instruction.BarrierSignal(id, isFirst, fromM0) => ScalarControl.signal(Execute, this)(id, isFirst, fromM0)
+      case Instruction.BarrierInit(id, fromM0, count)     => ScalarControl.initBarrier(Execute, this)(id, fromM0, count)
+      case Instruction.BarrierJoin(id, fromM0)            => ScalarControl.joinBarrier(Execute, this)(id, fromM0)
+      case Instruction.BarrierLeave                       => ScalarControl.leaveBarrier(this)
+      case Instruction.BarrierWait(id)                    => ScalarControl.awaitBarrier(Execute, this)(id)
+      case Instruction.Branch(condition, target)          => ScalarControl.branch(this)(condition, target)
+      case Instruction.BranchRelative(_, _)               =>
         Left(Fault.Backend("unresolved AMDGPU branch reached execution"))
-      case Instruction.Call(dest, target) =>
-        writeScalar64(dest, programCounter(index) + 4L)
-        jumps(target)
+      case Instruction.Call(dest, target) => ScalarControl.call(Execute, this)(dest, target)
       case Instruction.CallRelative(_, _) => Left(Fault.Backend("unresolved AMDGPU call reached execution"))
-      case Instruction.Halt(reason)       => Left(Fault.Backend(f"AMDGPU $reason at pc 0x${programCounter(index)}%x"))
       case Instruction.SLoad(dest, count, base, offset, scalarOffset, elementBytes, signed) =>
         val unaligned = Execute.scalarAddress(
           pair(scalar, base),
@@ -1598,78 +1816,18 @@ private object VMInterpreter {
           case Right(bytes) =>
             (0 until count).foreach { register =>
               val value = LittleEndian.decode(bytes, register * elementBytes, elementBytes)
-              scalar(dest + register) =
-                if (signed) Bits.low32(Bits.signExtend(value, (elementBytes * 8).unsafe[Int in 1 ~ 64])).toLong
-                else value
+              if (dest + register != discarded)
+                scalar(dest + register) =
+                  if (signed) Bits.low32(Bits.signExtend(value, (elementBytes * 8).unsafe[Int in 1 ~ 64])).toLong
+                  else value
             }
             NextStep
         }
-      case Instruction.SSetReg =>
-        NextStep
-      case Instruction.SSetMode(offset, size, src) =>
-        val mask = (Bits.mask(size) << offset).toInt & modeWritable
-        mode = (mode & ~mask) | ((source(src, 0).toInt << offset) & mask)
-        NextStep
-      case Instruction.SGetMode(dest, offset, size) =>
-        scalar(dest) = (Integer.toUnsignedLong(mode) >>> offset) & Bits.mask(size)
-        NextStep
-      case Instruction.SGetPc(dest, offset) =>
-        writeScalar64(dest, programCounter(index) + 4L)
-        NextStep
-      case Instruction.SReadWaveId(dest) =>
-        writeScalar32(dest, (localStart / waveSize).toLong)
-        NextStep
-      // the host's monotonic clock, at 1 GHz for the shader clock and 100 MHz for real time
-      case Instruction.SReadClock(dest, clock) =>
-        val now = platform.monotonicNanos
-        clock match {
-          case Clock.Shader       => writeScalar64(dest, now)
-          case Clock.ShaderCycles => scalar(dest) = now & 0xfffffL
-          case Clock.RealTime     => writeScalar64(dest, now / 10L)
-        }
-        NextStep
-      case Instruction.SSetPc(src) =>
-        val target = sourceScalar64(src)
-        programIndex(target)
-          .map(index => Right(index))
-          .getOrElse(Left(Fault.Backend(
-            f"AMDGPU setpc at 0x${programCounter(index)}%X targets non-instruction 0x$target%X"
-          )))
-      case Instruction.SSwapPc(dest, src) =>
-        val target = sourceScalar64(src)
-        kernel.emulatedCalls.get(target) match {
-          case Some(call) =>
-            foreachActive { lane =>
-              def component(doubleRegister: VectorRegisterIndex, singleRegister: VectorRegisterIndex): Double =
-                if (call.double) IEEE754.binary64ToDouble(pair(vector, doubleRegister, lane))
-                else IEEE754.binary32ToFloat(Bits.low32(vector(singleRegister)(lane))).toDouble
-              val (resultReal, resultImaginary) = call.function(component(0, 0), component(2, 1))
-              if (call.double) {
-                val realBits      = IEEE754.doubleToBinary64(resultReal)
-                val imaginaryBits = IEEE754.doubleToBinary64(resultImaginary)
-                vector(0)(lane) = Bits.low32(realBits).toLong
-                vector(1)(lane) = Bits.high32(realBits).toLong
-                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
-                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
-              } else {
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).toLong
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
-              }
-            }
-            NextStep
-          case None =>
-            programIndex(target) match {
-              // Calls and returns share this primitive: the saved return address in the scalar pair is the frame.
-              case Some(targetIndex) =>
-                writeScalar64(dest, programCounter(index) + 4L)
-                Right(targetIndex)
-              case None =>
-                kernel.functionTargets.get(target) match {
-                  case Some(name) => Left(Fault.Unsupported(s"AMDGPU call to $name is not implemented"))
-                  case None => Left(Fault.Backend(f"AMDGPU call target 0x$target%X is not present in the code object"))
-                }
-            }
-        }
+      case state @ (Instruction.SSetReg | _: Instruction.SSetMode | _: Instruction.SGetMode | _: Instruction.SGetPc |
+          _: Instruction.SReadWaveId | _: Instruction.SReadClock | _: Instruction.Halt | Instruction.CacheInvalidate) =>
+        stepState(state)
+      case Instruction.SSetPc(src)               => ScalarControl.setPc(this)(src)
+      case Instruction.SSwapPc(dest, src)        => ScalarControl.swapPc(Execute, this)(dest, src)
       case load: Instruction.Load                => stepMemory(load)
       case store: Instruction.Store              => stepMemory(store)
       case atomic: Instruction.Atomic            => updatedAtomically(atomic)
@@ -1678,147 +1836,104 @@ private object VMInterpreter {
       case extended: Instruction.AtomicExtended  => AtomicStaged.extendedAtomic(Execute, extended)(this)
       case counter: Instruction.LocalCounter     => counted(counter)
       case moved: Instruction.SMoveRelative      => movedRelative(moved)
-      case sync: Instruction.GlobalWaveSync      => globalWaveSync(sync)
+      case sync: Instruction.GlobalWaveSync      => ScalarControl.globalWaveSync(this)(sync)
       case pair: Instruction.LoadPair            => stepMemory(pair)
       case pair: Instruction.StorePair           => stepMemory(pair)
       case transposed: Instruction.LoadTranspose => transposedLoad(transposed)
       case Instruction.CacheWritebackInvalidate  => stepMemory(Instruction.CacheWritebackInvalidate)
-      case Instruction.CacheInvalidate           => stepMemory(Instruction.CacheInvalidate)
       case resource @ (_: Instruction.FormatLoad | _: Instruction.FormatStore | _: Instruction.LoadLocal |
           _: Instruction.StoreLocal | _: Instruction.SBufferLoad | _: Instruction.Image | _: Instruction.WithStatus) =>
         stepResource(resource)
       case other => stepStaged(other)
     }
 
+    private def stepState(instruction: Instruction): Either[Fault, Int] = instruction match {
+      case Instruction.SSetReg                     => NextStep
+      case Instruction.SSetMode(offset, size, src) =>
+        ScalarControl.setMode(Execute, this)(offset, size, src, modeWritable)
+      case Instruction.SGetMode(dest, offset, size) => ScalarControl.getMode(Execute, this)(dest, offset, size)
+      case Instruction.SGetPc(dest, _)              => ScalarControl.getPc(Execute, this)(dest)
+      case Instruction.SReadWaveId(dest)            => ScalarControl.readWaveId(this)(dest)
+      case Instruction.SReadClock(dest, clock)      => ScalarControl.readClock(Execute, this)(dest, clock)
+      case Instruction.Halt(reason)                 => ScalarControl.halt(this)(reason)
+      case Instruction.CacheInvalidate              => ScalarControl.invalidate(this)
+      case other                                    =>
+        Left(Fault.IllegalInstruction(s"unhandled AMDGPU instruction $other"))
+    }
+
     private def skipped(index: Int): Boolean = skippedOperations.nonEmpty && skippedOperations(index)
 
     /** Steps the instruction at `index`, or skips it as a vector instruction while VSKIP is set. */
     def stepOrSkip(index: Int): Either[Fault, Int] =
-      if ((mode & VectorSkip) != 0 && skipped(index)) NextStep else step(index)
+      if ((mode & (1 << ScalarControl.VectorSkipShift)) != 0 && skipped(index)) NextStep else step(index)
 
     /** The scalar stores and the branch stack, which execution dispatches apart from the frequent instructions. */
 
     private def stepScalar(instruction: Instruction): Either[Fault, Int] = instruction match {
-      case store: Instruction.SStore => scalarStore(store)
-      case branch @ (_: Instruction.ForkIndirect | _: Instruction.ForkRelative | _: Instruction.Fork |
-          _: Instruction.Join | _: Instruction.SetVectorSkip | _: Instruction.SubvectorLoopRelative |
-          _: Instruction.SubvectorLoop) => branchStack(branch, instructionIndex)
+      case store: Instruction.SStore              => scalarStore(store)
+      case Instruction.Fork(mask, target)         => ScalarControl.fork(this)(mask, target)
+      case Instruction.ForkIndirect(mask, target) => ScalarControl.forkIndirect(this)(mask, target)
+      case Instruction.Join(saved)                => ScalarControl.join(this)(saved)
+      case loop: Instruction.SubvectorLoop        => subvectorLoop(loop)
+      case branch @ (_: Instruction.ForkRelative | _: Instruction.SetVectorSkip | _: Instruction.SubvectorLoopRelative) =>
+        branchStack(branch)
       case other => Left(Fault.IllegalInstruction(s"unhandled AMDGPU instruction $other"))
     }
 
-    /** The fork and join of the conditional branch stack, whose pointer is MODE's CSP field, each entry the address and
-      * EXEC of a deferred side in four SGPRs from four times its index; and S_SETVSKIP.
+    /** The conditional branch stack, whose pointer is MODE's CSP field, each entry the address and EXEC of a deferred
+      * side in four SGPRs from four times its index, forks to the instruction `target` the lanes of EXEC `mask` has
+      * set.
       */
-    private def branchStack(operation: Instruction, index: Int): Either[Fault, Int] = {
-      val pointer                                                        = (mode >>> StackPointerShift) & 7
-      def fork(mask: InstructionSource, target: Int): Either[Fault, Int] = {
-        val exec                                      = active.register
-        val taken                                     = sourceScalar64(mask) & exec
-        val other                                     = ~sourceScalar64(mask) & exec
-        def push(address: Long, deferred: Long): Unit = {
-          writeScalar64((pointer * 4).unsafe[ScalarRegisterIndex], address)
-          writeScalar64((pointer * 4 + 2).unsafe[ScalarRegisterIndex], deferred)
-          mode = (mode & ~(7 << StackPointerShift)) | (((pointer + 1) & 7) << StackPointerShift)
-        }
-        if (taken == exec) jumps(target)
-        else if (other == exec) NextStep
-        else if (java.lang.Long.bitCount(other) < java.lang.Long.bitCount(taken)) {
-          active.register = other
-          push(programCounter(target), taken)
-          NextStep
-        } else {
-          active.register = taken
-          push(programCounter(index) + 4L, other)
-          jumps(target)
-        }
+    private def forked(mask: Long, target: Int): Either[Fault, Int] = {
+      val pointer                                   = (mode >>> StackPointerShift) & 7
+      val exec                                      = active.register
+      val taken                                     = mask & exec
+      val other                                     = ~mask & exec
+      def push(address: Long, deferred: Long): Unit = {
+        writeScalar64((pointer * 4).unsafe[ScalarRegisterIndex], address)
+        writeScalar64((pointer * 4 + 2).unsafe[ScalarRegisterIndex], deferred)
+        mode = (mode & ~(7 << StackPointerShift)) | (((pointer + 1) & 7) << StackPointerShift)
       }
+      if (taken == exec) jumps(target)
+      else if (other == exec) NextStep
+      else if (java.lang.Long.bitCount(other) < java.lang.Long.bitCount(taken)) {
+        active.register = other
+        push(programCounter(target), taken)
+        NextStep
+      } else {
+        active.register = taken
+        push(pc + 4L, other)
+        jumps(target)
+      }
+    }
+
+    /** Pops the deferred side of a fork unless the pointer is already at the depth `saved` names. */
+    private def joined(saved: Long): Either[Fault, Int] = {
+      val pointer = (mode >>> StackPointerShift) & 7
+      if (Bits.low32(saved).toLong == pointer.toLong) NextStep
+      else {
+        val popped  = (pointer - 1) & 7
+        val address = pair(scalar, (popped * 4).unsafe[ScalarRegisterIndex])
+        mode = (mode & ~(7 << StackPointerShift)) | (popped << StackPointerShift)
+        active.register = pair(scalar, (popped * 4 + 2).unsafe[ScalarRegisterIndex])
+        programIndex(address).fold(
+          Left(Fault.Backend(f"AMDGPU join at 0x$pc%X returns to non-instruction 0x$address%X"))
+        )(Right(_))
+      }
+    }
+
+    /** S_SETVSKIP, and the relative forms of the branch stack, which the compiler resolves before execution. */
+    private def branchStack(operation: Instruction): Either[Fault, Int] =
       operation match {
-        case Instruction.ForkIndirect(mask, target) =>
-          val address = sourceScalar64(target)
-          programIndex(address).fold(
-            Left(Fault.Backend(f"AMDGPU fork at 0x${programCounter(index)}%X targets non-instruction 0x$address%X"))
-          )(fork(mask, _))
-        case Instruction.Fork(mask, target) => fork(mask, target)
-        case Instruction.Join(saved)        =>
-          if (Bits.low32(source(saved, 0)).toLong == pointer.toLong) NextStep
-          else {
-            val popped  = (pointer - 1) & 7
-            val address = pair(scalar, (popped * 4).unsafe[ScalarRegisterIndex])
-            mode = (mode & ~(7 << StackPointerShift)) | (popped << StackPointerShift)
-            active.register = pair(scalar, (popped * 4 + 2).unsafe[ScalarRegisterIndex])
-            programIndex(address).fold(
-              Left(
-                Fault.Backend(f"AMDGPU join at 0x${programCounter(index)}%X returns to non-instruction 0x$address%X")
-              )
-            )(Right(_))
-          }
-        case Instruction.SubvectorLoop(begin, state, target) =>
-          val exec = active.register
-          val low  = Bits.low32(exec).toLong
-          val high = Bits.high32(exec).toLong
-          val held = Bits.low32(source(InstructionSource.Scalar(state), 0)).toLong
-          if (begin)
-            if (exec == 0L) jumps(target)
-            else {
-              writeScalar32(state, if (low != 0L) high else 0L)
-              if (low != 0L) active.register = low
-              NextStep
-            }
-          else if (waveSize == 64 && high == 0L && held != 0L) {
-            writeScalar32(state, low)
-            active.register = held << 32
-            jumps(target)
-          } else {
-            if (high != 0L) active.register = (high << 32) | held
-            NextStep
-          }
-        case Instruction.SetVectorSkip(src, bit) =>
-          val set = (source(src, 0) >>> (source(bit, 0) & 31L).toInt) & 1L
-          mode = (mode & ~VectorSkip) | (set.toInt << VectorSkipShift)
-          NextStep
-        case other => Left(Fault.Backend(s"unresolved AMDGPU $other reached execution"))
+        case Instruction.SetVectorSkip(src, bit) => ScalarControl.setVectorSkip(Execute, this)(src, bit)
+        case other                               => Left(Fault.Backend(s"unresolved AMDGPU $other reached execution"))
       }
-    }
 
-    // the resource is M0[21:16] plus the offset's low six bits
-    private def globalWaveSync(sync: Instruction.GlobalWaveSync): Either[Fault, Int] = gws match {
-      case null =>
-        Left(Fault.Unsupported(s"${sync.name} needs GWS resources, which only a cooperative dispatch has"))
-      case resources =>
-        if (active.isEmpty) NextStep
-        else {
-          val resource = ((Bits.low32(scalar(m0)).toInt >>> 16) + sync.offset) & (GlobalWaveSyncResources.Count - 1)
-          val lane     = java.lang.Long.numberOfTrailingZeros(active.bits)
-          val value    = Bits.low32(registers(sync.bank, sync.data)(lane)).toLong
-          gwsWait = resources.step(sync.operation, resource, value, gwsWait)
-          if (gwsWait == GlobalWaveSyncResources.Idle) NextStep else BlockedStep
-        }
-    }
+    private def movedRelative(move: Instruction.SMoveRelative): Either[Fault, Int] =
+      ScalarControl.moveRelative(Execute, this)(move.dest, move.src, move.words, move.relativeSource, move.relativeDest)
 
-    private def movedRelative(move: Instruction.SMoveRelative): Either[Fault, Int] = {
-      val offsets                                = Bits.low32(scalar(m0)).toInt
-      def offset(bits: Boolean, shift: Int): Int =
-        if (!bits) 0 else if (move.relativeSource && move.relativeDest) (offsets >>> shift) & 0x3ff else offsets
-      val destination = move.dest + offset(move.relativeDest, shift = 16)
-      val origin      = move.src match {
-        case InstructionSource.Scalar(index) => Right(index + offset(move.relativeSource, shift = 0))
-        case _ if !move.relativeSource       => Right(-1)
-        case other => Left(Fault.Backend(s"s_movrels requires a scalar register source, found $other"))
-      }
-      origin.flatMap { from =>
-        if (destination < 0 || destination + move.words > 128 || from + move.words > 128)
-          Left(Fault.Backend(s"relative SGPR move from s$from to s$destination is out of range"))
-        else {
-          (0 until move.words).foreach { word =>
-            val value =
-              if (from < 0) Bits.low32(sourceScalar64(move.src) >>> (word * 32)).toLong
-              else source(InstructionSource.Scalar((from + word).unsafe[ScalarRegisterIndex]), 0)
-            writeScalar32((destination + word).unsafe[ScalarRegisterIndex], value)
-          }
-          NextStep
-        }
-      }
-    }
+    private def subvectorLoop(loop: Instruction.SubvectorLoop): Either[Fault, Int] =
+      ScalarControl.subvectorLoop(Execute, this)(loop.begin, loop.state, loop.target, waveSize == 64)
 
     // A wave's lanes take part in one LDS update.
     // Kept out of step, which inlining every update's lanes would push past HotSpot's huge-method limit.
@@ -1829,15 +1944,8 @@ private object VMInterpreter {
     private def updatedAtomically(atomic: Instruction.Atomic): Either[Fault, Int] =
       AtomicStaged.atomic(Execute, atomic)(this)
 
-    private def counted(counter: Instruction.LocalCounter): Either[Fault, Int] = {
-      val at    = counter.offset.toLong
-      val old   = LittleEndian.decode(ldsBytes(lds, at, 4), 0, 4)
-      val count = java.lang.Long.bitCount(active.bits).toLong
-      writeLDS(lds, at, LittleEndian.toArray(Bits.low32(if (counter.decrement) old - count else old + count).toLong, 4))
-      val registers = this.registers(counter.bank, counter.dest)
-      foreachActive(lane => registers(lane) = old)
-      NextStep
-    }
+    private def counted(counter: Instruction.LocalCounter): Either[Fault, Int] =
+      ScalarControl.localCounter(this)(counter)
 
     /** Executes an instruction with staged semantics. */
     def stepStaged(instruction: Instruction): Either[Fault, Int] =
@@ -3376,7 +3484,7 @@ private object VMInterpreter {
         inline kernel: Long => Long
     ): Either[Fault, Int] = {
       def lanes(instruction: Instruction.VOutputModified): Either[Fault, Int] =
-        if (!ModeRegister.outputModifierApplies(mode, instruction.width)) stepStaged(instruction.ignored)
+        if (ModeRegister.outputModifierDisabled(mode, instruction.width)) stepStaged(instruction.ignored)
         else {
           val next = stepStaged(instruction.applied)
           if (next.isRight) rewriteResult(instruction.dest, instruction.width)(kernel)
@@ -3967,17 +4075,58 @@ private object VMInterpreter {
     }
 
     private val observer: LaunchObserver | Null = control.observer.orNull
+    // the ordinal of the issue the observer is being shown, taken once per instruction
+    private var currentIssue: Long = 0L
+    // why the wave is parked, when it is; a step that blocks it names the reason it waits for
+    private var blockReason: MachineUnit.Reason | Null = null
 
     private object View extends WaveView {
       def lanes: Int in 1 ~ 64                                     = WaveRun.this.lanes
       def exec: Long                                               = active.bits
       def scalar(index: Int in 0 ~ 127): Long                      = WaveRun.this.scalar(index)
       def vector(index: Int in 0 ~ 255, lane: Int in 0 ~ 63): Long = WaveRun.this.vector(index)(lane)
+      def unit: MachineUnit                                        = machineUnit(MachineUnit.State.Running)
+      def issued: Long                                             = currentIssue
     }
 
-    private def observe(): Fault | Null = observer.nn.instruction(location, View) match {
-      case Left(fault) => fault
-      case Right(())   => null
+    private def observe(issue: Long): Fault | Null = {
+      currentIssue = issue
+      observer.nn.instruction(location, View) match {
+        case Left(fault) => fault
+        case Right(())   => null
+      }
+    }
+
+    /** The unit the wave runs as, which the timeline follows as it parks and finishes. */
+    private def machineUnit(state: MachineUnit.State): MachineUnit =
+      MachineUnit(group, waveIndex, lanes.widen[Int >= 0], state)
+
+    /** A change in what a unit is doing, which the timeline records between the issues it surrounds. */
+    private def transition(kind: MachineEvent.Kind, at: => Fault.Location): Unit =
+      if (observer != null) {
+        observer.nn.transition(MachineEvent(machineUnit(kind.state), kind, control.issued(), Some(at)))
+      }
+
+    /** The wave parks, waiting for `reason`; the machine releases it, and the wave runs again. */
+    private def park(reason: MachineUnit.Reason): Unit = {
+      blockReason = reason
+      transition(MachineEvent.Kind.Blocked(reason), location)
+    }
+
+    /** The machine released the wave, which runs again. */
+    private def resume(): Unit = {
+      transition(MachineEvent.Kind.Resumed, location)
+      blockReason = null
+    }
+
+    /** The name of the barrier `id` names: the two implicit workgroup barriers, or a named one. */
+    private def barrierName(id: Int): String =
+      if (id == -1 || id == -2) s"workgroup barrier ${-id - 1}" else s"barrier $id"
+
+    /** A step that parks the wave on `reason`, which the machine releases. */
+    private def blocked(reason: MachineUnit.Reason): Either[Fault, Int] = {
+      blockReason = reason
+      BlockedStep
     }
 
     // A wave executes its lanes together, so only a lone active lane identifies the faulting one.
@@ -3992,6 +4141,8 @@ private object VMInterpreter {
     )
 
     def run(): Either[Fault, WaveBoundary] = {
+      // A wave the machine released runs again; the timeline records the change before the wave's next issue.
+      if (blockReason != null) resume()
       var boundary: WaveBoundary | Null = null
       var failure: Fault | Null         = null
       var steps                         = 0
@@ -4000,7 +4151,9 @@ private object VMInterpreter {
           case Left(fault) => failure = fault.at(location)
           case _           =>
             steps += 1
-            val stopped = if (observer == null) null else observe()
+            // The launch's issue ordinal is its timeline's time axis; only an observed launch needs one.
+            val issue   = if (observer == null) 0L else control.nextIssue()
+            val stopped = if (observer == null) null else observe(issue)
             if (stopped != null) failure = stopped.at(location)
             else stepOrSkip(instructionIndex) match {
               case Left(Fault.Memory(message)) =>
@@ -4011,15 +4164,20 @@ private object VMInterpreter {
                 // Matching the unboxed Int avoids boxed equality per instruction.
                 val next: Int = value
                 next match {
-                  case Step.Next   => instructionIndex += 1
-                  case Step.Exit   => boundary = WaveBoundary.End
+                  case Step.Next => instructionIndex += 1
+                  case Step.Exit =>
+                    transition(MachineEvent.Kind.Retired, location)
+                    boundary = WaveBoundary.End
                   case Step.Arrive =>
+                    park(MachineUnit.Reason.Barrier("workgroup barrier"))
                     instructionIndex += 1
                     boundary = WaveBoundary.Barrier
                   case Step.Blocked =>
+                    park(blockReason.nn)
                     stalledRun = steps == 1
                     boundary = WaveBoundary.Suspended
                   case Step.Yield =>
+                    park(MachineUnit.Reason.Members)
                     instructionIndex += 1
                     boundary = WaveBoundary.Suspended
                   case target =>
@@ -4041,10 +4199,6 @@ private object VMInterpreter {
   /** Row and bank masks gate destination writes; a bank is four consecutive lanes of a row. */
   def dppLaneEnabled(lane: Lane, rowMask: Int, bankMask: Int): Boolean =
     (rowMask & (1 << (lane / 16))) != 0 && (bankMask & (1 << ((lane >>> 2) & 3))) != 0
-
-  /** A barrier ID an operand gives, or M0 does in bits [5:0], signed so that it can name the workgroup barriers. */
-  private def barrierId(value: Long, fromM0: Boolean): Int =
-    if (fromM0) ((value << 58) >> 58).toInt else value.toInt
 
   private def pair(registers: Array[Long], first: ScalarRegisterIndex): Long =
     Bits.join32(registers(first), registers(first.offsetBy(1)))

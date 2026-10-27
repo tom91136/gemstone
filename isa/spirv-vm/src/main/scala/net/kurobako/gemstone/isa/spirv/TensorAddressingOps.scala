@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.spirv
 
 import Op.*
 import VMInvocation.*
+import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -19,102 +20,147 @@ private object TensorAddressingOps {
   private val TensorViewOperand = 0x1
   private val DecodeFunc        = 0x2
 
-  def lower(site: Site): PartialFunction[Instruction, Op] = {
-    case Instruction.CreateTensorLayoutNV(t, d) =>
-      layout(site, id(t)) { _ =>
-        val lanes = Array.ofDim[Long](TensorLayout.Lanes)
-        java.util.Arrays.fill(lanes, TensorLayout.BlockSize, TensorLayout.BlockSize + 5, 1L)
-        val created = VMValue.Bits(id(t), lanes)
-        step((execution, _) => Right(execution.values.update(id(d), created)))
-      }
-    case Instruction.TensorLayoutSetDimensionNV(t, d, source, dimensions) =>
-      layout(site, id(t)) { shape =>
-        update(t, d, source, dimensions, shape.dimensions) { (lanes, inputs) =>
-          inputs.indices.foreach { at =>
-            lanes(TensorLayout.Dimension + at) = inputs(at)
-            lanes(TensorLayout.Span + at) = inputs(at)
-            lanes(TensorLayout.Offset + at) = 0L
-          }
-          lanes(TensorLayout.Stride + inputs.length - 1) = 1L
-          (inputs.length - 2 to 0 by -1).foreach { at =>
-            val block = math.max(lanes(TensorLayout.BlockSize + at + 1), 1L)
-            lanes(TensorLayout.Stride + at) =
-              (lanes(TensorLayout.Stride + at + 1) * ((inputs(at + 1) + block - 1) / block)) & Word
-          }
-        }
-      }
-    case Instruction.TensorLayoutSetStrideNV(t, d, source, strides) =>
-      layout(site, id(t))(shape => replace(t, d, source, strides, shape.dimensions, TensorLayout.Stride))
-    case Instruction.TensorLayoutSetBlockSizeNV(t, d, source, sizes) =>
-      layout(site, id(t))(shape => replace(t, d, source, sizes, shape.dimensions, TensorLayout.BlockSize))
-    case Instruction.TensorLayoutSliceNV(t, d, source, slices) =>
-      layout(site, id(t)) { shape =>
-        update(t, d, source, slices, shape.dimensions * 2) { (lanes, inputs) =>
-          (0 until shape.dimensions).foreach { at =>
-            lanes(TensorLayout.Offset + at) = (lanes(TensorLayout.Offset + at) + inputs(at * 2)) & Word
-            lanes(TensorLayout.Span + at) = inputs(at * 2 + 1)
-          }
-        }
-      }
-    case Instruction.TensorLayoutSetClampValueNV(t, d, source, value) =>
-      layout(site, id(t))(_ =>
-        update(t, d, source, Vec(value), 1)((lanes, inputs) => lanes(TensorLayout.ClampValue) = inputs(0))
-      )
-    case Instruction.CreateTensorViewNV(t, d) =>
-      view(site, id(t)) { _ =>
-        val lanes = Array.ofDim[Long](TensorView.Lanes)
-        lanes(TensorView.Clip + 1) = Word
-        lanes(TensorView.Clip + 3) = Word
-        val created = VMValue.Bits(id(t), lanes)
-        step((execution, _) => Right(execution.values.update(id(d), created)))
-      }
-    case Instruction.TensorViewSetDimensionNV(t, d, source, dimensions) =>
-      view(site, id(t)) { shape =>
-        update(t, d, source, dimensions, shape.dimensions) { (lanes, inputs) =>
-          inputs.indices.foreach(at => lanes(TensorView.Dimension + at) = inputs(at))
-          lanes(TensorView.Stride + inputs.length - 1) = 1L
-          (inputs.length - 2 to 0 by -1).foreach(at =>
-            lanes(TensorView.Stride + at) = (lanes(TensorView.Stride + at + 1) * inputs(at + 1)) & Word
-          )
-        }
-      }
-    case Instruction.TensorViewSetStrideNV(t, d, source, strides) =>
-      view(site, id(t))(shape => replace(t, d, source, strides, shape.dimensions, TensorView.Stride))
-    case Instruction.TensorViewSetClipNV(t, d, source, rowOffset, rowSpan, columnOffset, columnSpan) =>
-      view(site, id(t))(_ =>
-        replace(t, d, source, Vec(rowOffset, rowSpan, columnOffset, columnSpan), 4, TensorView.Clip)
-      )
-    case Instruction.CooperativeMatrixLoadTensorNV(t, d, pointer, source, tensorLayout, _, operands) =>
-      transfer(site, id(t), id(pointer), id(source), id(tensorLayout), operands, Some(id(d)))
-    case Instruction.CooperativeMatrixStoreTensorNV(pointer, source, tensorLayout, _, operands) =>
-      transfer(site, site.program.valueType(id(source)), id(pointer), id(source), id(tensorLayout), operands, None)
+  def lower: PartialFunction[Instruction, Op] = {
+    case instruction if TensorAddressingSemantics.transfers(instruction) => TensorAddressingOp(instruction)
   }
 
-  private def layout(site: Site, typeId: Int)(op: TensorLayout => Op): Op =
-    site.program.tensorLayouts.get(typeId).fold(Fail(Fault.InvalidRequest(s"%$typeId is not a tensor layout type")))(op)
+  private class TensorAddressingOp(instruction: Instruction) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      TensorAddressingSemantics.tensorAddressing(InvocationMachine(execution))(instruction)
+  }
 
-  private def view(site: Site, typeId: Int)(op: TensorView => Op): Op =
-    site.program.tensorViews.get(typeId).fold(Fail(Fault.InvalidRequest(s"%$typeId is not a tensor view type")))(op)
+  /** Runs the tensor layout, view or tensor transfer `instruction` names, then continues after it. */
+  def execute(execution: InvocationState, instruction: Instruction): Flow[Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.CreateTensorLayoutNV(t, d) =>
+        advancing(execution)(layoutType(values, id(t)).map(_ => values.update(id(d), createdLayout(id(t)))))
+      case Instruction.TensorLayoutSetDimensionNV(t, d, source, dimensions) =>
+        advancing(execution)(layoutType(values, id(t)).flatMap(shape =>
+          update(values, t, d, source, dimensions, shape.dimensions) { (lanes, inputs) =>
+            inputs.indices.foreach { at =>
+              lanes(TensorLayout.Dimension + at) = inputs(at)
+              lanes(TensorLayout.Span + at) = inputs(at)
+              lanes(TensorLayout.Offset + at) = 0L
+            }
+            lanes(TensorLayout.Stride + inputs.length - 1) = 1L
+            (inputs.length - 2 to 0 by -1).foreach { at =>
+              val block = math.max(lanes(TensorLayout.BlockSize + at + 1), 1L)
+              lanes(TensorLayout.Stride + at) =
+                (lanes(TensorLayout.Stride + at + 1) * ((inputs(at + 1) + block - 1) / block)) & Word
+            }
+          }
+        ))
+      case Instruction.TensorLayoutSetStrideNV(t, d, source, strides) =>
+        advancing(execution)(layoutType(values, id(t)).flatMap(shape =>
+          replace(values, t, d, source, strides, shape.dimensions, TensorLayout.Stride)
+        ))
+      case Instruction.TensorLayoutSetBlockSizeNV(t, d, source, sizes) =>
+        advancing(execution)(layoutType(values, id(t)).flatMap(shape =>
+          replace(values, t, d, source, sizes, shape.dimensions, TensorLayout.BlockSize)
+        ))
+      case Instruction.TensorLayoutSliceNV(t, d, source, slices) =>
+        advancing(execution)(layoutType(values, id(t)).flatMap(shape =>
+          update(values, t, d, source, slices, shape.dimensions * 2) { (lanes, inputs) =>
+            (0 until shape.dimensions).foreach { at =>
+              lanes(TensorLayout.Offset + at) = (lanes(TensorLayout.Offset + at) + inputs(at * 2)) & Word
+              lanes(TensorLayout.Span + at) = inputs(at * 2 + 1)
+            }
+          }
+        ))
+      case Instruction.TensorLayoutSetClampValueNV(t, d, source, value) =>
+        advancing(execution)(layoutType(values, id(t)).flatMap(_ =>
+          update(values, t, d, source, Vec(value), 1)((lanes, inputs) => lanes(TensorLayout.ClampValue) = inputs(0))
+        ))
+      case Instruction.CreateTensorViewNV(t, d) =>
+        advancing(execution)(viewType(values, id(t)).map(_ => values.update(id(d), createdView(id(t)))))
+      case Instruction.TensorViewSetDimensionNV(t, d, source, dimensions) =>
+        advancing(execution)(viewType(values, id(t)).flatMap(shape =>
+          update(values, t, d, source, dimensions, shape.dimensions) { (lanes, inputs) =>
+            inputs.indices.foreach(at => lanes(TensorView.Dimension + at) = inputs(at))
+            lanes(TensorView.Stride + inputs.length - 1) = 1L
+            (inputs.length - 2 to 0 by -1).foreach(at =>
+              lanes(TensorView.Stride + at) = (lanes(TensorView.Stride + at + 1) * inputs(at + 1)) & Word
+            )
+          }
+        ))
+      case Instruction.TensorViewSetStrideNV(t, d, source, strides) =>
+        advancing(execution)(viewType(values, id(t)).flatMap(shape =>
+          replace(values, t, d, source, strides, shape.dimensions, TensorView.Stride)
+        ))
+      case Instruction.TensorViewSetClipNV(t, d, source, rowOffset, rowSpan, columnOffset, columnSpan) =>
+        advancing(execution)(viewType(values, id(t)).flatMap(_ =>
+          replace(values, t, d, source, Vec(rowOffset, rowSpan, columnOffset, columnSpan), 4, TensorView.Clip)
+        ))
+      case Instruction.CooperativeMatrixLoadTensorNV(t, d, pointer, source, tensorLayout, _, operands) =>
+        advancing(execution)(transfer(
+          execution,
+          id(t),
+          id(pointer),
+          id(source),
+          id(tensorLayout),
+          operands,
+          Some(id(d))
+        ))
+      case Instruction.CooperativeMatrixStoreTensorNV(pointer, source, tensorLayout, _, operands) =>
+        advancing(execution)(
+          transfer(
+            execution,
+            values.program.valueType(id(source)),
+            id(pointer),
+            id(source),
+            id(tensorLayout),
+            operands,
+            None
+          )
+        )
+      case _ => Left(Fault.Unsupported(s"${instruction.opcode} is not a tensor addressing operation"))
+    }
+  }
+
+  private def advancing(execution: InvocationState)(outcome: => Flow[Unit]): Flow[Unit] =
+    outcome.map(_ => execution.pc += 1)
+
+  private def layoutType(values: InvocationValues, typeId: Int): Either[Fault, TensorLayout] =
+    values.program.tensorLayouts.get(typeId).toRight(Fault.InvalidRequest(s"%$typeId is not a tensor layout type"))
+
+  private def viewType(values: InvocationValues, typeId: Int): Either[Fault, TensorView] =
+    values.program.tensorViews.get(typeId).toRight(Fault.InvalidRequest(s"%$typeId is not a tensor view type"))
+
+  private def createdLayout(typeId: Int): VMValue = {
+    val lanes = Array.ofDim[Long](TensorLayout.Lanes)
+    java.util.Arrays.fill(lanes, TensorLayout.BlockSize, TensorLayout.BlockSize + 5, 1L)
+    VMValue.Bits(typeId, lanes)
+  }
+
+  private def createdView(typeId: Int): VMValue = {
+    val lanes = Array.ofDim[Long](TensorView.Lanes)
+    lanes(TensorView.Clip + 1) = Word
+    lanes(TensorView.Clip + 3) = Word
+    VMValue.Bits(typeId, lanes)
+  }
 
   /** A copy of `source` that `change` updates with the 32-bit values of `inputs`, of which there must be `count`. */
-  private def update(resultType: Operand, dest: Operand, source: Operand, inputs: Vec[Operand], count: Int)(
-      change: (Array[Long], Array[Long]) => Unit
-  ): Op =
+  private def update(
+      values: InvocationValues,
+      resultType: Operand,
+      dest: Operand,
+      source: Operand,
+      inputs: Vec[Operand],
+      count: Int
+  )(change: (Array[Long], Array[Long]) => Unit): Flow[Unit] =
     if (inputs.length != count)
-      Fail(Fault.InvalidRequest(s"tensor state update takes $count operands, not ${inputs.length}"))
+      Left(Fault.InvalidRequest(s"tensor state update takes $count operands, not ${inputs.length}"))
     else {
       val (typeId, target, state, ids) = (id(resultType), id(dest), id(source), inputs.map(id(_)))
-      step { (execution, _) =>
-        val values = execution.values
-        val read   = Array.ofDim[Long](count)
-        for {
-          lanes <- bits(values, state)
-          _     <- words(values, ids, read)
-        } yield {
-          val copy = lanes.clone()
-          change(copy, read)
-          values.update(target, VMValue.Bits(typeId, copy))
-        }
+      val read                         = Array.ofDim[Long](count)
+      for {
+        lanes <- bits(values, state)
+        _     <- words(values, ids, read)
+      } yield {
+        val copy = lanes.clone()
+        change(copy, read)
+        values.update(target, VMValue.Bits(typeId, copy))
       }
     }
 
@@ -134,27 +180,30 @@ private object TensorAddressingOps {
   }
 
   private def replace(
+      values: InvocationValues,
       resultType: Operand,
       dest: Operand,
       source: Operand,
       inputs: Vec[Operand],
       count: Int,
       at: Int
-  ): Op =
-    update(resultType, dest, source, inputs, count)((lanes, inputs) =>
+  ): Flow[Unit] =
+    update(values, resultType, dest, source, inputs, count)((lanes, inputs) =>
       inputs.indices.foreach(index => lanes(at + index) = inputs(index))
     )
 
   private def transfer(
-      site: Site,
+      execution: InvocationState,
       matrixType: Int,
       pointer: Int,
       source: Int,
       tensorLayout: Int,
       operands: Operand,
       dest: Option[Int]
-  ): Op = {
-    val program = site.program
+  ): Flow[Unit] = {
+    val values  = execution.values
+    val program = values.program
+    val memory  = execution.memory
     val words   = Vec.from(operands.words.map(_.raw))
     val mask    = words.head
     (
@@ -165,44 +214,42 @@ private object TensorAddressingOps {
       ))
     ) match {
       case _ if (mask & DecodeFunc) != 0 =>
-        Fail(
+        Left(
           Fault.Unsupported("a tensor load's DecodeFunc calls a SPIR-V function for each element, which no VM op makes")
         )
-      case (_, _, Some(None)) => Fail(Fault.InvalidRequest("a tensor load or store's TensorView is not a tensor view"))
+      case (_, _, Some(None)) =>
+        Left(Fault.InvalidRequest("a tensor load or store's TensorView is not a tensor view"))
       case (Some(shape), Some(layoutShape), viewOperand) =>
-        lowered(program.scalarMemoryWidth(shape.component).map { width =>
+        program.scalarMemoryWidth(shape.component).flatMap { width =>
           val viewing = viewOperand.flatten
-          step { (execution, memory) =>
-            val values = execution.values
-            for {
-              base   <- address(values, pointer)
-              lanes  <- bits(values, source)
-              state  <- bits(values, tensorLayout)
-              viewed <- viewing.fold[Either[Fault, Option[(Array[Long], TensorView)]]](Right(None))((at, shape) =>
-                bits(values, at).map(view => Some((view, shape)))
-              )
-              places <- Either.cond(
-                (0 until layoutShape.dimensions).forall(at => state(TensorLayout.Span + at) != 0L) &&
-                  viewed.forall((view, shape) =>
-                    !shape.hasDimensions || (0 until shape.dimensions).forall(at =>
-                      view(TensorView.Dimension + at) != 0L
-                    )
-                  ),
-                Addressing(state, layoutShape, viewed, shape.columns, dest.isEmpty).indices(shape.rows * shape.columns),
-                Fault.InvalidRequest("a tensor layout or view addresses through a zero span or dimension")
-              )
-              access = MatrixAccess(base, places, width, sparse = true)
-              result <- dest.fold[AddressSpace.ReadResult[Unit]](access.write(memory, lanes)) { target =>
-                val clamp = state(TensorLayout.ClampValue) &
-                  (if (width >= 4) Word else (1L << (width * 8)) - 1L)
-                val loaded = lanes.clone()
-                places.indices.foreach(at => if (places(at) == Clamped) loaded(at) = clamp)
-                access.read(memory, loaded).map(read => values.update(target, VMValue.Bits(matrixType, read)))
-              }
-            } yield result
-          }
-        })
-      case _ => Fail(Fault.InvalidRequest("a tensor load or store needs a cooperative matrix and a tensor layout"))
+          for {
+            base   <- address(values, pointer)
+            lanes  <- bits(values, source)
+            state  <- bits(values, tensorLayout)
+            viewed <- viewing.fold[Either[Fault, Option[(Array[Long], TensorView)]]](Right(None))((at, shape) =>
+              bits(values, at).map(view => Some((view, shape)))
+            )
+            places <- Either.cond(
+              (0 until layoutShape.dimensions).forall(at => state(TensorLayout.Span + at) != 0L) &&
+                viewed.forall((view, shape) =>
+                  !shape.hasDimensions || (0 until shape.dimensions).forall(at =>
+                    view(TensorView.Dimension + at) != 0L
+                  )
+                ),
+              Addressing(state, layoutShape, viewed, shape.columns, dest.isEmpty).indices(shape.rows * shape.columns),
+              Fault.InvalidRequest("a tensor layout or view addresses through a zero span or dimension")
+            )
+            access = MatrixAccess(base, places, width, sparse = true)
+            result <- dest.fold[AddressSpace.ReadResult[Unit]](access.write(memory, lanes)) { target =>
+              val clamp = state(TensorLayout.ClampValue) &
+                (if (width >= 4) Word else (1L << (width * 8)) - 1L)
+              val loaded = lanes.clone()
+              places.indices.foreach(at => if (places(at) == Clamped) loaded(at) = clamp)
+              access.read(memory, loaded).map(read => values.update(target, VMValue.Bits(matrixType, read)))
+            }
+          } yield result
+        }
+      case _ => Left(Fault.InvalidRequest("a tensor load or store needs a cooperative matrix and a tensor layout"))
     }
   }
 
@@ -213,13 +260,11 @@ private object TensorAddressingOps {
   private val Clamped = -2L
 
   private object Addressing {
-    @SuppressWarnings(Array("baumkuchen:unused-member"))
     private object Clamp {
-      val Undefined: Long    = 0L
-      val Constant: Long     = 1L
-      val ClampToEdge: Long  = 2L
-      val Repeat: Long       = 3L
-      val MirrorRepeat: Long = 4L
+      val Undefined: Long   = 0L
+      val Constant: Long    = 1L
+      val ClampToEdge: Long = 2L
+      val Repeat: Long      = 3L
     }
   }
 

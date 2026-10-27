@@ -23,6 +23,21 @@ private[isa] trait Memory {
   def storeShared[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit
   def storeLocal[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit
 
+  def reduceGlobal(
+      address: UInt[64],
+      data: Array[Byte],
+      operator: TensorMap.Reduction,
+      element: TensorMap.Element
+  ): Unit
+
+  def storeGlobalMasked(destination: UInt[64], source: UInt[64], bytes: UInt[64], mask: UInt[64]): Unit
+
+  /** Makes the writes to host-mapped memory visible to the host. */
+  def fence(): Unit
+
+  /** `map` with the value `value` replacing its field `field`, at `index` for the fields that repeat. */
+  def replaceTensorMap(map: Array[Byte], field: TensorMap.Field, index: Int, value: UInt[64]): Array[Byte]
+
   /** The bytes of a function parameter's storage from `offset`. */
   def loadParameter[T](parameter: Int, offset: UInt[64])(using Type.Reified[T]): T
   def storeParameter[T](parameter: Int, offset: UInt[64], value: T)(using Type.Reified[T]): Unit

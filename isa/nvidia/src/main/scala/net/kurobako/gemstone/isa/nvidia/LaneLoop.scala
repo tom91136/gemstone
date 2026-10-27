@@ -15,8 +15,7 @@ import net.kurobako.gemstone.vm.*
   * other's values stage their writes in the context's `effects`. Each expansion is a method of its own, which keeps the
   * dispatch that selects it below the JIT's size limits. A value class, so running an instruction allocates no sinks.
   */
-// lane kernels take their operands unpacked so a loop allocates no operand holders
-@SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null", "baumkuchen:data-clump"))
+@SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
 private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[Long, Either[Fault, Unit]] {
   inline def effects: VMWriteBuffer = context.effects
 
@@ -611,7 +610,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
     lanes(context, effects, destination, address, width, access)
   }
 
-  /** A load of consecutive elements, coherent as one access where [[VMMemoryAccess.coherentVector]] allows. */
+  /** A load of consecutive elements, one access where [[VMMemoryAccess.splitVector]] does not split it. */
   inline def loadVector(destinations: Vec[Register], address: Value, width: ScalarBitWidth, access: MemoryAccess)(
       inline element: (Long, Long) => Long,
       inline value: Long => Long
@@ -632,7 +631,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       else everyLane(context) { lane =>
         val base  = context.read(lane, address)
         val start = element(base, 0L)
-        if (!VMMemoryAccess.coherentVector(context, access, start, totalBytes)) {
+        if (VMMemoryAccess.splitVector(context, access, start, totalBytes)) {
           var result = Completed
           var index  = 0
           while (index < destinations.size && result.isRight) {
@@ -747,7 +746,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         VMMemoryAccess.misaligned(context, access, lane, start, totalBytes) match {
           case fault: Fault => Left(fault)
           case null         =>
-            if (!VMMemoryAccess.coherentVector(context, access, start, totalBytes)) {
+            if (VMMemoryAccess.splitVector(context, access, start, totalBytes)) {
               var index = 0
               while (index < sources.size) {
                 VMMemoryAccess.stageStore(
@@ -843,7 +842,10 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       inline element: (TensorMemory.Product, TensorMemoryOperands[Long]) => Long
   ): Either[Fault, Unit] = {
     def products(context: VMContext, operation: Tcgen05.Multiply): Either[Fault, Unit] =
-      VMTensorMemory.multiply(context, operation)(element)
+      MachineSemantics.tensorMemoryMultiply(VMMachineOps(context))(operation) match {
+        case Left(fault) => Left(fault)
+        case _           => Completed
+      }
     products(context, operation)
   }
 

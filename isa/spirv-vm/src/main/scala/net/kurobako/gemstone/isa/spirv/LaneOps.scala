@@ -12,8 +12,6 @@ private object LaneOps {
   trait Kernel2 { def apply(a: Long, b: Long): Long }
 
   /** The static kind of an operand value. */
-  // the id is read on every value of the hot path, and hoisting it turns the patterns into nested ones
-  @SuppressWarnings(Array("baumkuchen:common-factor"))
   enum Typed {
     case Undefined(id: Int)
     case Opaque(id: Int, typeId: Int)

@@ -31,7 +31,7 @@ private object VMControlCompiler {
   def lower(using context: VMCompilationContext): Boolean = {
     import context.*
     def barrier(operand: Operand): VMIR.Register = {
-      if (!OperandQueries.isRegister(operand, RegisterBank.B)) unsupported("invalid convergence barrier register")
+      if (!VMRegisters.isBarrier(operand)) unsupported("invalid convergence barrier register")
       registerLayout.barrier(
         OperandQueries.registerIndex(operand).refine[Int in 0 ~ 15].getOrElse(
           unsupported("convergence barrier register is outside B0-B15")
@@ -59,19 +59,19 @@ private object VMControlCompiler {
         true
       case _: Form.Bmov =>
         requireModifiers(Set(Modifier.`32`, Modifier.CLEAR))
-        if (operands.size != 2 || !operands.exists(OperandQueries.isRegister(_, RegisterBank.B)))
+        if (operands.size != 2 || !operands.exists(VMRegisters.isBarrier))
           unsupported("barrier move requires a barrier register")
         def value(operand: Operand): Value.Register =
-          if (OperandQueries.isRegister(operand, RegisterBank.B)) Value.Register(barrier(operand))
+          if (VMRegisters.isBarrier(operand)) Value.Register(barrier(operand))
           else destination(operand)
         if (operands.head != OperandQueries.Zero)
           emit(Move(
             value(operands.head).slot,
-            if (OperandQueries.isRegister(operands(1), RegisterBank.B)) value(operands(1)) else source(operands(1)),
+            if (VMRegisters.isBarrier(operands(1))) value(operands(1)) else source(operands(1)),
             32
           ))
         if (modifiers.contains(Modifier.CLEAR)) {
-          if (!OperandQueries.isRegister(operands(1), RegisterBank.B))
+          if (!VMRegisters.isBarrier(operands(1)))
             unsupported("barrier clear requires a barrier source")
           emit(Move(barrier(operands(1)), Value.Immediate(0L), 32))
         }

@@ -212,21 +212,19 @@ private object VMIntegerCompiler {
         extendedMinMax()
         true
       // __vminu4, __vmaxs2 and their kin: the lanes' minima or maxima as the predicate selects
-      case _: Form.Vimnmx
-          if modifiers.size == 1 && PartialFunction.cond(modifiers.head) {
-            case Modifier.`U8x4` | Modifier.`S8x4` | Modifier.`U16x2` | Modifier.`S16x2` => true
-          } =>
-        val data = minMaxData
+      case _: Form.Vimnmx if laneMinMax =>
+        val (outputs, data) = minMaxOperands
         if (data.size != 4) unsupported("VIMNMX on lanes requires a destination, two sources and a selector")
+        val format               = modifiers.filterNot(_ == Modifier.RELU).head
         val lanes: Int in (2, 4) =
-          if (PartialFunction.cond(modifiers.head) { case Modifier.`U8x4` | Modifier.`S8x4` => true }) 4 else 2
-        val signed = PartialFunction.cond(modifiers.head) { case Modifier.`S8x4` | Modifier.`S16x2` => true }
-        def extremum(operation: VideoOperation) = {
+          if (PartialFunction.cond(format) { case Modifier.`U8x4` | Modifier.`S8x4` => true }) 4 else 2
+        val signed = PartialFunction.cond(format) { case Modifier.`S8x4` | Modifier.`S16x2` => true }
+        def lanewise(operation: VideoOperation, left: Value, right: Value) = {
           val result = temp()
           emit(VideoSimd(
             result.slot,
-            source(data(1)),
-            source(data(2)),
+            left,
+            right,
             Value.Immediate(0L),
             operation,
             lanes,
@@ -238,14 +236,25 @@ private object VMIntegerCompiler {
           ))
           result
         }
-        store(
-          data.head,
-          select(
-            extremum(VideoOperation.Minimum),
-            extremum(VideoOperation.Maximum),
-            predicateSource(data(3))
-          )
+        def extremum(operation: VideoOperation) = lanewise(operation, source(data(1)), source(data(2)))
+        val selected                            = select(
+          extremum(VideoOperation.Minimum),
+          extremum(VideoOperation.Maximum),
+          predicateSource(data(3))
         )
+        val result = if (modifiers.contains(Modifier.RELU))
+          lanewise(VideoOperation.Maximum, selected, Value.Immediate(0L))
+        else selected
+        if (outputs.exists(value => !OperandQueries.isAlwaysPredicate(value))) {
+          if (lanes != 2 || outputs.size != 2) unsupported("VIMNMX predicate outputs require two 16-bit lanes")
+          val different          = binary(IntegerOperation.BitwiseXor, result, source(data(1)))
+          def zero(value: Value) = compare(Comparison.Equal, NumericFormat.Unsigned(32), value, Value.Immediate(0L))
+          val low                = zero(binary(IntegerOperation.BitwiseAnd, different, Value.Immediate(0xffffL)))
+          val high               = zero(binary(IntegerOperation.ShiftRightLogical, different, Value.Immediate(16L)))
+          writePredicate(outputs(1), high)
+          writePredicate(outputs(0), low)
+        }
+        store(data.head, result)
         true
       case _: Form.Imnmx | _: Form.Uimnmx | _: Form.Vimnmx | _: Form.Uvimnmx =>
         minMax()
@@ -1204,32 +1213,49 @@ private object VMIntegerCompiler {
     store(OperandQueries.without(operands.head, OperandSelector.CC), select(a, b, chooseA))
   }
 
-  /** The destination and inputs of a min/max whose predicate outputs, if any, are all discarded into PT. The outputs
-    * follow the destination, or precede it in the sm_120 64-bit form.
+  /** The predicate outputs of a min/max and the rest of its operands. The outputs follow the destination, or precede it
+    * in the sm_120 64-bit form.
     */
-  private def minMaxData(using context: VMCompilationContext): Vec[Operand] = {
+  private def minMaxOperands(using context: VMCompilationContext): (outputs: Vec[Operand], data: Vec[Operand]) = {
     import context.*
     val predicate: Operand => Boolean = { case Operand.Predicate(_, _, _) => true; case _ => false }
     val start                         = if (predicate(operands.head)) 0 else 1
     val outputs                       = operands.drop(start).takeWhile(predicate)
-    if (outputs.exists(value => !OperandQueries.isAlwaysPredicate(value)))
-      unsupported("integer min/max predicate outputs")
-    operands.take(start) ++ operands.drop(start + outputs.size)
+    (outputs, operands.take(start) ++ operands.drop(start + outputs.size))
+  }
+
+  /** A `VIMNMX` on 8-bit or 16-bit lanes, which clamps negative 16-bit lanes to zero under `RELU`. */
+  private def laneMinMax(using context: VMCompilationContext): Boolean = {
+    import context.*
+    val format = modifiers.filterNot(_ == Modifier.RELU)
+    format.size == 1 && PartialFunction.cond(format.head) {
+      case Modifier.`U8x4` | Modifier.`S8x4` | Modifier.`U16x2` => !modifiers.contains(Modifier.RELU)
+      case Modifier.`S16x2`                                     => true
+    }
   }
 
   private def minMax()(using context: VMCompilationContext): Unit = {
     import context.*
-    requireModifiers(minMaxModifiers)
-    val data = minMaxData
+    requireModifiers(minMaxModifiers + Modifier.RELU)
+    val (outputs, data) = minMaxOperands
     if (data.size != 4 && !(data.size == 5 && OperandQueries.isNeverPredicate(data.last)))
       unsupported("integer min/max extended comparison")
     val width: ScalarBitWidth = if (modifiers.exists(_.is64BitInteger)) 64 else 32
     val signed                = !modifiers.exists(PartialFunction.cond(_) { case Modifier.U32 | Modifier.U64 => true })
-    val a                     = source(data(1), width)
-    val b                     = source(data(2), width)
-    val low                   = binary(IntegerOperation.Minimum(signed), a, b, width)
-    val high                  = binary(IntegerOperation.Maximum(signed), a, b, width)
-    store(data.head, select(low, high, predicateSource(data(3)), width), width)
+    val relu                  = modifiers.contains(Modifier.RELU)
+    if (relu && (!signed || width != 32)) unsupported("RELU clamps signed 32-bit min/max")
+    val a        = source(data(1), width)
+    val b        = source(data(2), width)
+    val low      = binary(IntegerOperation.Minimum(signed), a, b, width)
+    val high     = binary(IntegerOperation.Maximum(signed), a, b, width)
+    val selected = select(low, high, predicateSource(data(3)), width)
+    val result   = if (relu) binary(IntegerOperation.Maximum(true), selected, Value.Immediate(0L)) else selected
+    if (outputs.exists(value => !OperandQueries.isAlwaysPredicate(value))) {
+      if (!relu || outputs.size != 2) unsupported("integer min/max predicate outputs")
+      val same = compare(Comparison.Equal, NumericFormat.Unsigned(32), result, a)
+      outputs.foreach(writePredicate(_, same))
+    }
+    store(data.head, result, width)
   }
 
   private def videoMinMax()(using context: VMCompilationContext): Unit = {

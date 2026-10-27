@@ -50,14 +50,20 @@ object Term {
   private def names(term: Term, name: String): Boolean = term match {
     case Variable(variable) => variable == name
     case Let(binder, _, _)  => binder == name || term.children.exists(names(_, name))
+    case Each(binder, _, _) => binder == name || term.children.exists(names(_, name))
     case _                  => term.children.exists(names(_, name))
   }
 
+  private[gemstone] def showBody(body: Vec[Step]): String =
+    body.map(step => if (step.name.isEmpty) step.value.show else s"${step.name} = ${step.value.show}").mkString("; ")
+
   /** Whether `term` reads `name` where no binding of its own shadows it. */
   def reads(term: Term, name: String): Boolean = term match {
-    case Variable(variable)       => variable == name
-    case Let(binder, value, body) => reads(value, name) || (binder != name && reads(body, name))
-    case _                        => term.children.exists(reads(_, name))
+    case Variable(variable)         => variable == name
+    case Let(binder, value, body)   => reads(value, name) || (binder != name && reads(body, name))
+    case Each(binder, source, body) =>
+      reads(source, name) || (binder != name && body.exists(step => reads(step.value, name)))
+    case _ => term.children.exists(reads(_, name))
   }
 
   private def rename(term: Term, from: String, to: String): Term = term match {
@@ -65,23 +71,21 @@ object Term {
     case _                => term.mapChildren(rename(_, from, to))
   }
 
-  /** `method` of the context `owner` names, as its type and name, over `arguments` each of the type it gives or fixed
+  /** `call` on the context `owner` names, as its type and name, over its arguments each of the type it gives or fixed
     * per instruction.
     */
   def context(
       owner: (contextType: String, context: String),
-      method: String,
-      typeArguments: Vec[Type],
-      arguments: Vec[(Term, Option[Type])],
+      call: MachineCall,
       result: Option[Type],
       effect: Boolean = false
   ): Term = Context(
     owner.contextType,
     owner.context,
-    method,
-    typeArguments,
-    arguments.map(_._1),
-    arguments.map(_._2),
+    call.method,
+    call.typeArguments,
+    call.arguments.map(_._1),
+    call.arguments.map(_._2),
     result,
     effect
   )
@@ -178,12 +182,14 @@ object Term {
     }
 
     /** `values` assigned to `targets` in order, each read before any is written. */
-    def parallel(scope: Scope[?], targets: Vec[String], values: Vec[Term]): Steps =
-      if (values.exists(value => targets.exists(reads(value, _)))) {
+    def parallel(scope: Scope[?], targets: Vec[String], values: Vec[Term]): Steps = {
+      val read = values.flatMap(_.variables).toSet
+      if (targets.exists(read)) {
         val temporaries = values.map(_ => scope.temporary())
         concat(temporaries.zip(values).map((temporary, value) => assign(scope, temporary, value))) ++
           Steps(targets.zip(temporaries).map((target, temporary) => Step(target, Variable(temporary))))
       } else concat(targets.zip(values).map((target, value) => assign(scope, target, value)))
+    }
 
     /** A result into `target` and the flag `next` computes from it into `flag`. When an operand reads the target, the
       * result goes through a temporary, so the flag sees the operands' old values.
@@ -223,14 +229,17 @@ object Term {
     /** The steps with each operand's last write left at the operand's type: a register holds the low bits of a narrower
       * value zero-extended, which the operand's type already says.
       */
-    def settled(types: Map[String, Type]): Steps = Steps(all.zipWithIndex.map { case (Step(name, value), index) =>
-      val read = all.drop(index + 1).exists(later => reads(later.value, name))
-      (types.get(name).map(_.unranged), value) match {
-        case (Some(Type.Integer(width, _)), Term.Call(function, Vec(inner)))
-            if !read && function == s"zext$width" => Step(name, inner)
-        case _ => Step(name, value)
-      }
-    })
+    def settled(types: Map[String, Type]): Steps = {
+      val laterReads = all.scanRight(Set.empty[String])((step, read) => read ++ step.value.variables)
+      Steps(all.zipWithIndex.map { case (Step(name, value), index) =>
+        val read = laterReads(index + 1).contains(name)
+        (types.get(name).map(_.unranged), value) match {
+          case (Some(Type.Integer(width, _)), Term.Call(function, Vec(inner)))
+              if !read && function == s"zext$width" => Step(name, inner)
+          case _ => Step(name, value)
+        }
+      })
+    }
   }
 }
 
@@ -267,6 +276,14 @@ enum Term derives CanEqual {
       effect: Boolean
   )
 
+  /** `body` run once for each value `source` yields, which it reads as `variable`. The statements of a body may bind
+    * names, which only the rest of the body reads; one with no name is an effect.
+    */
+  case Each(variable: String, source: Term, body: Vec[Term.Step])
+
+  /** `body` run where `condition` holds, under the same rules as [[Each]]. */
+  case When(condition: Term, body: Vec[Term.Step])
+
   /** The terms this one is built from, in order. */
   def children: Vec[Term] = this match {
     case Unary(_, value)                        => Vec(value)
@@ -276,6 +293,8 @@ enum Term derives CanEqual {
     case Let(_, value, body)                    => Vec(value, body)
     case Primitive(arguments = arguments)       => arguments
     case Context(arguments = arguments)         => arguments
+    case Each(_, source, body)                  => source +: body.map(_.value)
+    case When(condition, body)                  => condition +: body.map(_.value)
     case Variable(_) | Literal(_) | Constant(_) => Vec.empty
   }
 
@@ -290,6 +309,9 @@ enum Term derives CanEqual {
       Primitive(owner, method, arguments.map(function), parameters, result)
     case Context(contextType, context, method, typeArguments, arguments, parameters, result, effect) =>
       Context(contextType, context, method, typeArguments, arguments.map(function), parameters, result, effect)
+    case Each(variable, source, body) =>
+      Each(variable, function(source), body.map(step => step.copy(value = function(step.value))))
+    case When(condition, body) => When(function(condition), body.map(step => step.copy(value = function(step.value))))
     case Variable(_) | Literal(_) | Constant(_) => this
   }
 
@@ -299,6 +321,9 @@ enum Term derives CanEqual {
     case Call(_, _)             => Term.fold(mapChildren(_.substitute(names)))
     case Let(name, value, body) =>
       Let(name, value.substitute(names), body.substitute(other => if (other == name) None else names(other)))
+    case Each(variable, source, body) =>
+      val inner: String => Option[Term] = other => if (other == variable) None else names(other)
+      Each(variable, source.substitute(names), body.map(step => step.copy(value = step.value.substitute(inner))))
     case _ => mapChildren(_.substitute(names))
   }
 
@@ -318,6 +343,9 @@ enum Term derives CanEqual {
       case Let(name, value, body) =>
         visit(value, bound)
         visit(body, bound + name)
+      case Each(variable, source, body) =>
+        visit(source, bound)
+        body.foreach(step => visit(step.value, bound + variable))
       case _ => term.children.foreach(visit(_, bound))
     }
     visit(this, Set.empty)
@@ -366,6 +394,9 @@ enum Term derives CanEqual {
       case Constant(code)                                                     => code
       case Context(context = context, method = method, arguments = arguments) =>
         arguments.map(_.show).mkString(s"$context.$method(", ", ", ")")
+      case Each(variable, source, body) =>
+        s"for ($variable <- ${source.show}) { ${Term.showBody(body)} }"
+      case When(condition, body) => s"if (${condition.show}) { ${Term.showBody(body)} }"
     }
   }
 }

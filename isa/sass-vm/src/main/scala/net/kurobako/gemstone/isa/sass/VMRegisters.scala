@@ -14,6 +14,9 @@ private object VMRegisters {
   // Register operands beyond the highest one a kernel names, such as the rest of a pair or quad.
   private final val ExtentMargin = 8
 
+  def isBarrier(operand: Operand): Boolean =
+    OperandQueries.isRegister(operand, RegisterBank.B) && OperandQueries.registerIndex(operand) < BarrierCount
+
   private def slot(base: Int, index: Int): VMIR.Register = VMIR.Register((base + index).unsafe[Int >= 0])
 
   object Layout {

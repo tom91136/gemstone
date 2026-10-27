@@ -48,8 +48,10 @@ private object OpenCLBuiltins {
     "_Z18get_num_sub_groupsv"     -> (_.numSubgroups)
   )
 
-  def lower(site: Site, name: String, resultType: Int, dest: Int, arguments: Vec[Int]): Option[Op] = {
+  def lower(site: Site, name: String, ids: ResultIds, arguments: Vec[Int]): Option[Op] = {
     val program                              = site.program
+    val resultType                           = ids.resultType
+    val dest                                 = ids.dest
     def integerScalar: Option[Int in 1 ~ 64] = program.integerShape(resultType).collect { case (width, 1) => width }
     inline def scalarResult(label: String)(inline value: Invocation => Long): Op = integerScalar match {
       case None        => Fail(Fault.InvalidRequest(s"OpenCL $label result type %$resultType is not an integer scalar"))
@@ -142,12 +144,11 @@ private object OpenCLBuiltins {
           if (arguments.size != 3)
             Fail(Fault.InvalidRequest(s"OpenCL $shuffle expects current, next, and delta arguments"))
           else CollectiveOps.intelShift(
-            resultType,
-            dest,
+            ids,
             arguments(0),
             arguments(1),
             arguments(2),
-            CollectiveOps.ShuffleDirection.Up,
+            Collective.ShuffleDirection.Up,
             "OpenCL subgroup shuffle-up"
           )
         )

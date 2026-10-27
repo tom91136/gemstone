@@ -171,7 +171,7 @@ class BulkTensorSuite extends munit.FunSuite {
     val source               = memory.start.raw
     def describe(base: Long) = {
       val bytes = TensorMaps.tiled(base, TensorMap.Element.F32, Vec(w.toLong, h.toLong), Vec(w * 4L), Vec(32, 8))
-      assert(TensorMap.replace(bytes, TensorMap.Field.Interleave, 0, 1L).isRight)
+      TensorMaps.replace(bytes, TensorMap.Field.Interleave, 0, 1L)
       bytes
     }
     val result = execute(
@@ -210,7 +210,7 @@ class BulkTensorSuite extends munit.FunSuite {
       |""".stripMargin)
     val memory = DeviceMemory(4096)
     val bytes  = TensorMaps.tiled(memory.start.raw, TensorMap.Element.F32, Vec(40L, 20L), Vec(160L), Vec(32, 8))
-    assert(TensorMap.replace(bytes, TensorMap.Field.Interleave, 0, 1L).isRight)
+    TensorMaps.replace(bytes, TensorMap.Field.Interleave, 0, 1L)
     assertEquals(execute(kernel, 1, 32, Map(map("load", bytes)), memory), Right(()))
   }
 

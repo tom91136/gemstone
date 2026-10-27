@@ -8,8 +8,8 @@ import net.kurobako.gemstone.semantics.render.*
   * and so fault for most of them.
   */
 object NvidiaCases {
-  def excluded(definition: Definition): Boolean =
-    definition.contexts.exists(context => context.tpe.split('.').last == "Memory")
+  def included(definition: Definition): Boolean =
+    definition.contexts.forall(context => context.tpe.split('.').last != "Memory")
 
   /** Whether `definition` is one element of a matrix product, from the rows and column it reads to `d`. */
   def product(definition: Definition): Boolean =

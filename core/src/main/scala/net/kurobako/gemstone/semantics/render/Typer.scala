@@ -266,15 +266,26 @@ private[gemstone] object Typer {
       }
       Typed(ordered, Some(Type.Bool), 1, None)
     case Term.Binary(operator, left, right) =>
-      val (l, r)                      = (numeric(typed(left, types)).settled, numeric(typed(right, types)).settled)
-      val signed                      = operator.endsWith("s")
+      val (l, r) = (numeric(typed(left, types)).settled, numeric(typed(right, types)).settled)
+      val signed = operator.endsWith("s")
+      val widest = Vec(l, r).flatMap(_.tpe).collect { case Type.Integer(bits, _) => bits.raw }.maxOption
+      val target = Type.Integer(width(widest.getOrElse(64)), signed)
+      def meets(value: Typed): Boolean = value.tpe.exists {
+        case Type.Integer(bits, _) => bits.raw < widest.getOrElse(64)
+        case _                     => false
+      }
       def operand(value: Typed): Term =
-        if (signed != value.signed && value.bits == 64 && value.tpe.nonEmpty)
+        if (meets(value)) convert(value.term, target)
+        else if (signed != value.signed && value.bits == 64 && value.tpe.nonEmpty)
           convert(value.term, Type.Integer(64, signed))
         else value.term
+      def effective(value: Typed): Option[Type] =
+        if (meets(value)) Some(target)
+        else if (signed != value.signed && value.bits == 64 && value.tpe.nonEmpty) Some(Type.Integer(64, signed))
+        else value.tpe
       Typed(
         Term.Binary(operator.stripSuffix("s").stripSuffix("u"), operand(l), operand(r)),
-        l.tpe.orElse(r.tpe),
+        effective(l).orElse(effective(r)),
         l.bits,
         None
       )
@@ -356,6 +367,9 @@ private[gemstone] object Typer {
         case tpe => tpe.getOrElse(Type.unsigned(64))
       }
       Typed(Term.Call("blend", Vec(asType(m, tpe), asType(a, tpe), asType(b, tpe))), Some(tpe), 64, None)
+    case Term.Call("uniform", Vec(value)) =>
+      val operand = typed(value, types).settled
+      Typed(Term.Call("uniform", Vec(operand.term)), operand.tpe, operand.bits, None)
     case Term.Call(function, arguments) =>
       Typed(
         Term.Call(function, arguments.map(argument => typed(argument, types).settled.term)),
@@ -382,7 +396,8 @@ private[gemstone] object Typer {
         bits,
         None
       )
-    case Term.Let(_, _, _) => typed(term.expand, types)
+    case Term.Let(_, _, _)                    => typed(term.expand, types)
+    case Term.Each(_, _, _) | Term.When(_, _) => Typed(term, None, 64, None)
   }
 
   /** The branches of a selection at one type: truth values stay so unless the other branch is a number. */

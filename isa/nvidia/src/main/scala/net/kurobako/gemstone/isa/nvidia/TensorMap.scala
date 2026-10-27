@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import TensorMapping.*
+import TensorMapping.Field as Read
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 /** The 128-byte tensor map that tensor copies describe their global tensor and box with. Fields `tensormap.replace`
@@ -68,7 +71,6 @@ private[isa] object TensorMap {
     def size: Int in 0 ~ 8    = bytes.unsafe[Int in 0 ~ 8]
     def tf32: Boolean         = this == TF32 || this == TF32Flushed
     def sharedBytes: Int      = if (stored == 0) bytes else stored
-    def packed: Boolean       = values > 1
 
     /** The `tensormap.replace.tile.elemtype` immediate that names this element. */
     def instruction: Int = this match {
@@ -160,7 +162,8 @@ private[isa] object TensorMap {
   ) {
 
     /** Elements of the box along each dimension, as the traversal stride thins it. */
-    def boxElements: Vec[Int] = box.zip(traversal).map((size, stride) => (size + stride - 1) / stride)
+    def boxElements: Vec[Int] =
+      box.zip(traversal).map((size, stride) => Execute.elements(size.toLong, stride.toLong).toInt)
 
   }
 
@@ -177,9 +180,6 @@ private[isa] object TensorMap {
   private inline val AtomicityBits = 0x380000L
   private inline val SwizzleHigh   = 0x400000L
 
-  private def field(bytes: Array[Byte], offset: Int, mask: Long): Int =
-    ((word(bytes, offset) & mask) >>> java.lang.Long.numberOfTrailingZeros(mask)).toInt
-
   private def insert(bytes: Array[Byte], offset: Int, mask: Long)(value: Long): Unit =
     LittleEndian.write(
       (word(bytes, offset) & ~mask) | ((value << java.lang.Long.numberOfTrailingZeros(mask)) & mask),
@@ -195,91 +195,150 @@ private[isa] object TensorMap {
   private def boxWord(index: Int): Int  = if (index == 0) 0x34 else 0x38
   private def boxBits(index: Int): Long = if (index == 0) 0xffL << 24 else 0xffL << ((index - 1) * 8)
 
-  private val modes = Mode.values
+  /** Bits of a map word: `width` bits from bit `shift` of the `bytes`-byte little-endian word at byte `offset`, shifted
+    * up by `into` in the field they build.
+    */
+  case class Bits(offset: Int, bytes: Int, shift: Int, width: Int, into: Int = 0)
+
+  /** The bits a field is built from, added to `bias`, and sign-extended from 32 bits when `signed`. */
+  case class Layout(bits: Vec[Bits], bias: Long = 0L, signed: Boolean = false)
+
+  /** Where a field of a tensor map sits, at `axis` where the field repeats. */
+  def layout(field: Read, axis: Int): Layout = {
+    def word(offset: Int, shift: Int, width: Int, into: Int = 0): Bits =
+      Bits(offset = offset, bytes = 4, shift = shift, width = width, into = into)
+    field match {
+      case Read.Address    => Layout(Vec(Bits(offset = 0, bytes = 8, shift = 0, width = 64)))
+      case Read.Rank       => Layout(Vec(word(offset = 8, shift = 4, width = 3)), bias = 1L)
+      case Read.Mode       => Layout(Vec(word(offset = 0x40, shift = 0, width = 32)))
+      case Read.Element    => Layout(Vec(word(offset = 8, shift = 7, width = 4)))
+      case Read.Tf32       => Layout(Vec(word(offset = 8, shift = 16, width = 1)))
+      case Read.Interleave => Layout(Vec(word(offset = 8, shift = 11, width = 2)))
+      case Read.Swizzle    =>
+        Layout(Vec(
+          word(offset = 8, shift = 13, width = 2),
+          word(offset = 8, shift = 22, width = 1, into = 2)
+        ))
+      case Read.Atomicity => Layout(Vec(word(offset = 8, shift = 19, width = 3)))
+      case Read.FillMode  => Layout(Vec(word(offset = 8, shift = 15, width = 1)))
+      case Read.Dimension => Layout(Vec(word(offset = 0x20 + 4 * axis, shift = 0, width = 32)), bias = 1L)
+      case Read.Stride    =>
+        Layout(Vec(
+          word(offset = 0x0c + 4 * (axis - 1), shift = 0, width = 32, into = 4),
+          word(offset = 0x1c, shift = 4 * (axis - 1), width = 4, into = 36)
+        ))
+      case Read.Box =>
+        Layout(
+          Vec(if (axis == 0) word(offset = 0x34, shift = 24, width = 8)
+          else word(offset = 0x38, shift = 8 * (axis - 1), width = 8)),
+          bias = 1L
+        )
+      case Read.Traversal => Layout(Vec(word(offset = 0x34, shift = 3 * axis, width = 3)), bias = 1L)
+      case Read.Channels  => Layout(Vec(word(offset = 0x48, shift = 0, width = 32)), signed = true)
+      case Read.Pixels    => Layout(Vec(word(offset = 0x4c, shift = 0, width = 32)), signed = true)
+      case Read.Lower     => Layout(Vec(word(offset = 0x50 + 4 * axis, shift = 0, width = 32)), signed = true)
+      case Read.Upper     => Layout(Vec(word(offset = 0x5c + 4 * axis, shift = 0, width = 32)), signed = true)
+    }
+  }
+
+  /** The field `kind` at `axis` of a tensor map whose words `load` reads, built from the bits `layout` gives. */
+  inline def field[V](inline algebra: Algebra[V], inline load: (Int, Int) => V, kind: Read, axis: Int): V = {
+    val spec  = layout(kind, axis)
+    val value = spec.bits.tail.foldLeft(bits(algebra, load, spec.bits(0)))((built, range) =>
+      algebra.or(built, bits(algebra, load, range))
+    )
+    val biased = if (spec.bias == 0L) value else algebra.add(value, algebra.literal(spec.bias))
+    if (spec.signed) algebra.signExtend(biased, 32) else biased
+  }
+
+  private inline def bits[V](inline algebra: Algebra[V], inline load: (Int, Int) => V, range: Bits): V = {
+    val part =
+      algebra.field(load(range.offset, range.bytes), range.shift, range.width.unsafe[Int in 1 ~ 64], signed = false)
+    if (range.into == 0) part else algebra.shiftLeft(part, algebra.literal(range.into.toLong))
+  }
+
+  /** 1 where a tensor map decodes: its rank is from 1 to 5, its mode is one of the four and its element type is named.
+    */
+  inline def valid[V](inline algebra: Algebra[V], rank: V, mode: V, values: V): V =
+    algebra.and(
+      algebra.and(
+        algebra.lessOrEqual(algebra.literal(1L), rank, signed = false),
+        algebra.lessOrEqual(rank, algebra.literal(5L), signed = false)
+      ),
+      algebra.and(
+        algebra.lessOrEqual(mode, algebra.literal(Mode.Im2colWide128.ordinal.toLong), signed = false),
+        algebra.notEqual(values, algebra.literal(0L))
+      )
+    )
+
+  private def read(bytes: Array[Byte], kind: Read, axis: Int = 0): Long =
+    field(Execute, (offset, width) => LittleEndian.decode(bytes, offset, width.unsafe[Int in 0 ~ 8]), kind, axis)
 
   def decode(bytes: Array[Byte]): Either[Fault, Descriptor] = {
-    val rank  = field(bytes, Flags, RankBits) + 1
-    val mode  = modes.lift(word(bytes, 0x40).toInt)
-    val types = Element.decode(field(bytes, Flags, ElementBits), field(bytes, Flags, TF32Bit) != 0)
-    (rank.refine[Int in 1 ~ 5].toOption, mode, types) match {
-      case (Some(validRank), Some(validMode), Some(element)) =>
-        val dimensions = Vec.tabulate(rank)(index => word(bytes, 0x20 + index * 4) + 1L)
-        val strides    = Vec.tabulate(rank - 1)(index =>
-          (word(bytes, 0x0c + index * 4) | (field(bytes, 0x1c, strideHigh(index)).toLong << 32)) << 4
-        )
-        val box                      = Vec.tabulate(rank)(index => field(bytes, boxWord(index), boxBits(index)) + 1)
-        def signed(offset: Int): Int = word(bytes, offset).toInt
+    val decoded = Element.decode(read(bytes, Read.Element).toInt, read(bytes, Read.Tf32) != 0L)
+    val valid   =
+      TensorMap.valid(Execute, read(bytes, Read.Rank), read(bytes, Read.Mode), decoded.fold(0L)(_.values.toLong))
+    decoded match {
+      case Some(element) if valid != 0L =>
+        val rank = read(bytes, Read.Rank).toInt.unsafe[Int in 1 ~ 5]
         Right(Descriptor(
-          LittleEndian.decode(bytes, 0, 8),
-          validRank,
+          read(bytes, Read.Address),
+          rank,
           element,
-          field(bytes, Flags, InterleaveBit),
-          field(bytes, Flags, SwizzleBits) | (field(bytes, Flags, SwizzleHigh) << 2),
-          field(bytes, Flags, AtomicityBits),
-          field(bytes, Flags, NaNFillBit) != 0,
-          dimensions,
-          strides,
-          box,
-          Vec.tabulate(rank)(index => field(bytes, 0x34, traversalBits(index)) + 1),
-          validMode,
-          word(bytes, 0x48).toInt,
-          word(bytes, 0x4c).toInt,
-          Vec.tabulate(3)(index => signed(0x50 + index * 4)),
-          Vec.tabulate(3)(index => signed(0x5c + index * 4))
+          read(bytes, Read.Interleave).toInt,
+          read(bytes, Read.Swizzle).toInt,
+          read(bytes, Read.Atomicity).toInt,
+          read(bytes, Read.FillMode) != 0L,
+          Vec.tabulate(rank)(axis => read(bytes, Read.Dimension, axis)),
+          Vec.tabulate(rank - 1)(axis => read(bytes, Read.Stride, axis + 1)),
+          Vec.tabulate(rank)(axis => read(bytes, Read.Box, axis).toInt),
+          Vec.tabulate(rank)(axis => read(bytes, Read.Traversal, axis).toInt),
+          Mode.values(read(bytes, Read.Mode).toInt),
+          read(bytes, Read.Channels).toInt,
+          read(bytes, Read.Pixels).toInt,
+          Vec.tabulate(3)(axis => read(bytes, Read.Lower, axis).toInt),
+          Vec.tabulate(3)(axis => read(bytes, Read.Upper, axis).toInt)
         ))
       case _ => Left(Fault.Backend("invalid tensor map"))
     }
   }
 
-  /** Replaces one field as `tensormap.replace` does, or reports why the value is invalid. */
-  def replace(bytes: Array[Byte], field: Field, ordinal: Int, value: Long): Either[Fault, Unit] = {
-    def invalid = Left(Fault.Backend(s"invalid tensor map $field value $value"))
-    field match {
-      case Field.GlobalAddress   => Right(LittleEndian.write(value, bytes, 0, 8))
-      case Field.Rank            => Right(insert(bytes, Flags, RankBits)(value))
-      case Field.BoxDimension    => Right(insert(bytes, boxWord(ordinal), boxBits(ordinal))(value - 1L))
-      case Field.GlobalDimension => Right(LittleEndian.write(value - 1L, bytes, 0x20 + ordinal * 4, 4))
-      case Field.GlobalStride    =>
-        val units = value >>> 4
-        LittleEndian.write(units, bytes, 0x0c + ordinal * 4, 4)
-        Right(insert(bytes, 0x1c, strideHigh(ordinal))(units >>> 32))
-      case Field.ElementStride => Right(insert(bytes, 0x34, traversalBits(ordinal))(value - 1L))
-      case Field.ElementType   =>
-        // ptxas sets the TF32 flag for the TF32 types and leaves it as it was for the others
-        Element.fromInstruction(value.toInt).fold(invalid) { element =>
-          if (element.tf32) insert(bytes, Flags, TF32Bit)(1L)
-          Right(insert(bytes, Flags, ElementBits)(element.code.toLong))
-        }
-      case Field.Interleave => if (value > 2) invalid else Right(insert(bytes, Flags, InterleaveBit)(value))
-      case Field.Swizzle    =>
-        if (value > 4) invalid
-        else {
-          insert(bytes, Flags, SwizzleHigh)(value >>> 2)
-          Right(insert(bytes, Flags, SwizzleBits)(value))
-        }
-      case Field.SwizzleAtomicity => if (value > 3) invalid else Right(insert(bytes, Flags, AtomicityBits)(value))
-      case Field.FillMode         => Right(insert(bytes, Flags, NaNFillBit)(value))
-    }
+  /** The largest value `tensormap.replace` accepts for `field`, where it has one. */
+  def limit(field: Field): Option[Long] = field match {
+    case Field.Interleave       => Some(2L)
+    case Field.Swizzle          => Some(4L)
+    case Field.SwizzleAtomicity => Some(3L)
+    case _                      => None
   }
 
-  /** The shared-memory offset a byte offset within a box lands at under the descriptor's swizzle, given the shared
-    * address the box starts at.
-    */
-  def swizzled(descriptor: Descriptor, start: Long, offset: Long): Long = {
-    val address = start + offset
-    val row     = address >>> 7
-    val bits    = descriptor.swizzle match {
-      case 1 | 4 => MatrixDescriptor.swizzled(address, 32)
-      case 2     => MatrixDescriptor.swizzled(address, 64)
-      case 3     =>
-        descriptor.atomicity match {
-          case 1 => address ^ ((row & 3L) << 5)
-          case 2 => address ^ ((row & 3L) << 5) ^ ((row & 1L) << 3)
-          case 3 => address ^ ((row & 1L) << 6)
-          case _ => MatrixDescriptor.swizzled(address, 128)
-        }
-      case _ => address
-    }
-    bits - start
+  /** Whether `tensormap.replace` accepts `value` for `field`. */
+  def accepts(field: Field, value: Long): Boolean = field match {
+    case Field.ElementType => Element.fromInstruction(value.toInt).isDefined
+    case _                 => limit(field).forall(value <= _)
+  }
+
+  /** Writes a value `accepts` takes into one field. */
+  def update(bytes: Array[Byte], field: Field, ordinal: Int, value: Long): Unit = field match {
+    case Field.GlobalAddress   => LittleEndian.write(value, bytes, 0, 8)
+    case Field.Rank            => insert(bytes, Flags, RankBits)(value)
+    case Field.BoxDimension    => insert(bytes, boxWord(ordinal), boxBits(ordinal))(value - 1L)
+    case Field.GlobalDimension => LittleEndian.write(value - 1L, bytes, 0x20 + ordinal * 4, 4)
+    case Field.GlobalStride    =>
+      val units = value >>> 4
+      LittleEndian.write(units, bytes, 0x0c + ordinal * 4, 4)
+      insert(bytes, 0x1c, strideHigh(ordinal))(units >>> 32)
+    case Field.ElementStride => insert(bytes, 0x34, traversalBits(ordinal))(value - 1L)
+    case Field.ElementType   =>
+      // ptxas sets the TF32 flag for the TF32 types and leaves it as it was for the others
+      Element.fromInstruction(value.toInt).foreach { element =>
+        if (element.tf32) insert(bytes, Flags, TF32Bit)(1L)
+        insert(bytes, Flags, ElementBits)(element.code.toLong)
+      }
+    case Field.Interleave => insert(bytes, Flags, InterleaveBit)(value)
+    case Field.Swizzle    =>
+      insert(bytes, Flags, SwizzleHigh)(value >>> 2)
+      insert(bytes, Flags, SwizzleBits)(value)
+    case Field.SwizzleAtomicity => insert(bytes, Flags, AtomicityBits)(value)
+    case Field.FillMode         => insert(bytes, Flags, NaNFillBit)(value)
   }
 }

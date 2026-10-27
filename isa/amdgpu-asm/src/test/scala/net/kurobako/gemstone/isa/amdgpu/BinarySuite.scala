@@ -188,6 +188,63 @@ class BinarySuite extends munit.FunSuite {
     }
   }
 
+  test("trap temporary codes decode to the ttmp names llvm-mc prints") {
+    // LLVM MC: gfx8 maps ttmp0-11 to 112-123, while gfx9 and gfx10 map ttmp0-15 to 108-123.
+    Seq(
+      (Target("tahiti"), "s_setpc_b64 ttmp[2:3]", "72 20 80 be"),
+      (Target("tonga"), "s_mov_b32 s0, ttmp0", "70 00 80 be"),
+      (Target("tonga"), "s_mov_b64 s[0:1], ttmp[0:1]", "70 01 80 be"),
+      (Target("tonga"), "s_mov_b32 ttmp0, s0", "00 00 f0 be"),
+      (Target("tonga"), "s_load_dwordx4 ttmp[4:7], s[2:3], s4", "01 1d 08 c0 04 00 00 00"),
+      (Target("gfx908"), "s_mov_b32 s0, ttmp15", "7b 00 80 be"),
+      (Target("gfx908"), "s_mov_b64 s[0:1], ttmp[14:15]", "7a 01 80 be"),
+      (Target("gfx908"), "s_load_dwordx4 ttmp[4:7], s[2:3], s4", "01 1c 08 c0 04 00 00 00"),
+      (Target("gfx1030"), "s_mov_b32 s0, ttmp0", "6c 03 80 be"),
+      (Target("gfx1030"), "s_mov_b64 s[0:1], ttmp[0:1]", "6c 04 80 be"),
+      (Target("gfx1030"), "s_mov_b64 ttmp[2:3], s[0:1]", "00 04 ee be")
+    ).foreach { case (target, source, expected) =>
+      assertEquals(encoded(parse(source), target), hex(expected), source)
+      assertEquals(Printer.render(disassembled(hex(expected), target)), source, source)
+    }
+    assert(!Printer.render(disassembled(hex("6c 00 80 be"), Target("tonga"))).contains("ttmp"))
+  }
+
+  test("implicit sources are encoded only where the ISA table or LLVM provides them") {
+    val vccz                         = "fb 02 00 81"
+    val execz                        = "fc 02 00 81"
+    val pops                         = "ef 02 00 81"
+    def target(name: String): Target = name.refine[Target].getOrElse(fail(name))
+    Seq(
+      "gfx600"  -> Seq("src_vccz" -> vccz, "src_execz" -> execz),
+      "gfx802"  -> Seq("src_vccz" -> vccz, "src_execz" -> execz),
+      "gfx900"  -> Seq("src_vccz" -> vccz, "src_execz" -> execz, "src_pops_exiting_wave_id" -> pops),
+      "gfx908"  -> Seq("src_vccz" -> vccz, "src_execz" -> execz, "src_pops_exiting_wave_id" -> pops),
+      "gfx1030" -> Seq("src_vccz" -> vccz, "src_execz" -> execz, "src_pops_exiting_wave_id" -> pops),
+      "gfx1170" -> Seq("src_vccz" -> vccz, "src_execz" -> execz)
+    ).foreach { case (cpu, accepted) =>
+      accepted.foreach { case (name, bytes) =>
+        assertEquals(
+          Binary.encode(parse(s"s_add_i32 s0, $name, s2"), TargetMode(target(cpu))),
+          Right(hex(bytes)),
+          s"$cpu $name"
+        )
+      }
+    }
+    Seq(
+      "gfx600"  -> Seq("src_pops_exiting_wave_id"),
+      "gfx802"  -> Seq("src_pops_exiting_wave_id"),
+      "gfx1100" -> Seq("src_vccz", "src_execz", "src_pops_exiting_wave_id"),
+      "gfx1150" -> Seq("src_vccz", "src_execz", "src_pops_exiting_wave_id"),
+      "gfx1170" -> Seq("src_pops_exiting_wave_id"),
+      "gfx1200" -> Seq("src_vccz", "src_execz", "src_pops_exiting_wave_id"),
+      "gfx1250" -> Seq("src_vccz", "src_execz", "src_pops_exiting_wave_id")
+    ).foreach { case (cpu, rejected) =>
+      rejected.foreach { name =>
+        assert(Binary.encode(parse(s"s_add_i32 s0, $name, s2"), TargetMode(target(cpu))).isLeft, s"$cpu $name")
+      }
+    }
+  }
+
   test("literal truncation, mismatched widths, reserved bits, and trailing bytes are rejected") {
     val target                 = Target("gfx1030")
     def encode(source: String) = Binary.encode(parse(source), TargetMode(target))
@@ -451,5 +508,28 @@ class BinarySuite extends munit.FunSuite {
       assert(Binary.encode(instruction, TargetMode(target)).isLeft, s"$target $control")
     }
     assert(Binary.decode(hex("fa 02 00 7e 01 61 01 ff"), TargetMode(Target("gfx90a"))).isLeft)
+  }
+
+  test("codes outside an operand domain are decode errors naming the field, code, family and domain") {
+    // buffer_load_dword v1, v2, s[4:7], s125 offen: GFX9 and CDNA2 have no null register at s125
+    val bufferLoad = Vec(0x00, 0x10, 0x00, 0xe0, 0x02, 0x01, 0x01, 0x7d).map(_.toByte)
+    Vec(Target("gfx900") -> "gfx9", Target("gfx90a") -> "cdna2").foreach { case (target, family) =>
+      assert(
+        Binary.decode(bufferLoad, TargetMode(target)).left.toOption.exists {
+          case CodecError.InvalidEncoding(message) =>
+            message.contains(s"SOFFSET code 125 is outside the ssrc_nolit domain on $family")
+          case _ => false
+        },
+        target.name
+      )
+    }
+    // s_mov_b32 s2, source code 209: reserved on RDNA3
+    assert(Binary.decode(
+      Vec(0xd1, 0x00, 0x82, 0xbe).map(_.toByte),
+      TargetMode(Target("gfx1100"))
+    ).left.toOption.exists {
+      case CodecError.InvalidEncoding(message) => message.contains("SSRC0 code 209 is outside the src domain on rdna3")
+      case _                                   => false
+    })
   }
 }

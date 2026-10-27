@@ -18,8 +18,6 @@ private object VMCompilationContext {
 }
 
 /** Instruction-local lowering facilities shared by the instruction families. Architectural state is explicit VMIR. */
-// the seam that keeps the instruction families independent of VMCompiler
-@SuppressWarnings(Array("baumkuchen:single-implementation"))
 private trait VMCompilationContext {
   def module: Cubin.Module
   def kernel: Cubin.Kernel
@@ -95,9 +93,9 @@ private trait VMCompilationContext {
   final def barrierValue(value: Operand): Value =
     if (OperandQueries.isRegister(value)) source(value) else Value.Immediate(barrierId(value).toLong)
 
-  /** A general register operand without selectors. */
-  final def bareRegister(value: Operand): Boolean =
-    OperandQueries.qualifiers(value).isEmpty && OperandQueries.isRegister(value)
+  /** An operand that is not a general register without selectors. */
+  final def qualifiedOrNonRegister(value: Operand): Boolean =
+    OperandQueries.qualifiers(value).nonEmpty || !OperandQueries.isRegister(value)
 
   /** A general register operand or the zero register, without selectors. */
   final def bareRegisterOrZero(value: Operand): Boolean =

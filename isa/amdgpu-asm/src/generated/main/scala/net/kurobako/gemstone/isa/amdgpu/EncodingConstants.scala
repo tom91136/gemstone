@@ -4,6 +4,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.constraint.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
+// mirrors LLVM's full tables so the copy stays easy to resync
 @SuppressWarnings(Array("baumkuchen:unused-member"))
 private object EncodingConstants {
   object Source {

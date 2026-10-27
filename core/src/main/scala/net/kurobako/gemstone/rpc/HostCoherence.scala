@@ -43,8 +43,8 @@ private class HostCoherence(
 
   def accessible(address: GuestAddress, size: Int >= 0): Boolean = everything || hostBackedAt(address, size)
 
-  private def available(address: GuestAddress, size: Int >= 0): Boolean =
-    address.raw > 0 && address.raw <= Long.MaxValue - size && accessible(address, size)
+  private def unavailable(address: GuestAddress, size: Int >= 0): Boolean =
+    address.raw <= 0 || address.raw > Long.MaxValue - size || !accessible(address, size)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def poll(id: CompletionId): Either[ExecutionFailure, HostMemoryBatch] = lock.withLock {
@@ -114,7 +114,7 @@ private class HostCoherence(
   )(update: Long => Long): Either[Fault, Long] =
     if ((size != 4 && size != 8) || address.raw % size != 0)
       Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
-    else if (!available(address, size.widen[Int >= 0]))
+    else if (unavailable(address, size.widen[Int >= 0]))
       Left(Fault.Memory("host atomic address is unavailable or overflows"))
     else syncLock.withLock {
       val atomicSize: Int in (1, 2, 4, 8) = if (size == 4) 4 else 8
@@ -141,7 +141,7 @@ private class HostCoherence(
     size.refine[Int in (1, 2, 4, 8)].toOption.filter(width => address.raw % width == 0)
       .toRight(Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage"))
       .flatMap { atomicSize =>
-        if (!available(address, size.widen[Int >= 0]))
+        if (unavailable(address, size.widen[Int >= 0]))
           Left(Fault.Memory("host atomic address is unavailable or overflows"))
         else syncLock.withLock {
           val request =
@@ -211,13 +211,13 @@ private class HostCoherence(
 
   def read(completion: Completion, address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
     lock.withLock {
-      if (!available(address, size))
+      if (unavailable(address, size))
         Left(Fault.Memory(s"host memory read at ${address.show} ($size bytes) is unavailable or overflows"))
       else completion.hostMemory.read(address, size).toRight(AddressSpace.Pending)
     }
 
   def write(completion: Completion, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] = lock.withLock {
-    if (!available(address, bytes.nonNegativeSize))
+    if (unavailable(address, bytes.nonNegativeSize))
       Left(Fault.Memory(s"host memory write at ${address.show} (${bytes.size} bytes) is unavailable or overflows"))
     else {
       val atomicWidth: Int in (0, 1, 2, 4, 8) = bytes.size.refine[Int in (1, 2, 4, 8)].toOption

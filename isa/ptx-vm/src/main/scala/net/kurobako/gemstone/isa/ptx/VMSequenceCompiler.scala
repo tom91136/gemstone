@@ -55,9 +55,9 @@ private object VMSequenceCompiler {
           if has(Modifier.Rs) =>
         Some(stochasticQuad(instruction, modifiers, destination, Vec(a, b, e, f), bits))
       case Form.Atom(destination, address, value, policy) if lanes(modifiers).nonEmpty =>
-        Some(vectorAtomic(instruction, Some(destination), address, value, policy, modifiers))
+        Some(vectorAtomic(instruction, Some(destination), Access(address, value, modifiers), policy))
       case Form.Red(address, value, policy) if lanes(modifiers).nonEmpty =>
-        Some(vectorAtomic(instruction, None, address, value, policy, modifiers))
+        Some(vectorAtomic(instruction, None, Access(address, value, modifiers), policy))
       case Form.Fma(dest = destination)
           if has(Modifier.Relu) && has(Modifier.Rn) && !has(Modifier.Sat) =>
         val unclamped = modifiers.filterNot(_ == Modifier.Relu)
@@ -79,6 +79,10 @@ private object VMSequenceCompiler {
             if (has(Modifier.Bf16) || has(Modifier.Bf16x2)) PackedFloatFormat.BF16x2 else PackedFloatFormat.F16x2
           )
         ))
+      case Form.Min(dest = destination, srcC = None) if reluInteger(modifiers) =>
+        Some(reluExtremum(instruction, destination, modifiers))
+      case Form.Max(dest = destination, srcC = None) if reluInteger(modifiers) =>
+        Some(reluExtremum(instruction, destination, modifiers))
       case Form.Fma(destination, left, right, addend) if has(Modifier.F32x2) =>
         Some(pairFma(destination, left, right, addend, modifiers))
       case Form.Setp(Operand.WithPredicate(low, high), left, right, other)
@@ -88,7 +92,7 @@ private object VMSequenceCompiler {
           if modifiers.lastOption.exists(_.isPackedHalf) =>
         Some(packedSet(destination, left, right, other, modifiers))
       case Form.Cvt(destination, source, second, third) if narrowConversion(modifiers).nonEmpty =>
-        Some(convert(instruction, destination, source, second, third, modifiers))
+        Some(convert(instruction, Transfer(destination, source, modifiers), second, third))
       // a register wider than a signed destination format holds the result sign-extended (PTX ISA 6.5.1)
       case Form.Cvt(dest = destination, secondarySrc = None, roundingBits = None)
           if narrowSigned(modifiers).nonEmpty =>
@@ -217,13 +221,12 @@ private object VMSequenceCompiler {
   private def vectorAtomic(
       instruction: Instruction,
       destination: Option[Operand],
-      address: Operand,
-      value: Operand,
-      policy: Option[Operand],
-      modifiers: Vec[Modifier]
+      access: Access,
+      policy: Option[Operand]
   )(using scope: Scope): Lowered = {
-    val (space, rest) = VMInstructionCompiler.atomicSpace(modifiers)
-    val count         = lanes(modifiers).getOrElse(1)
+    val Access(address, value, modifiers) = access
+    val (space, rest)                     = VMInstructionCompiler.atomicSpace(modifiers)
+    val count                             = lanes(modifiers).getOrElse(1)
     VMInstructionCompiler.atomicOperation(rest.filterNot(PartialFunction.cond(_) {
       case Modifier.V2 | Modifier.V4 | Modifier.V8 => true
     })) match {
@@ -532,17 +535,16 @@ private object VMSequenceCompiler {
 
   private def convert(
       instruction: Instruction,
-      destination: Operand,
-      source: Operand,
+      transfer: Transfer,
       second: Option[Operand],
-      third: Option[Operand],
-      modifiers: Vec[Modifier]
+      third: Option[Operand]
   )(using scope: Scope): Lowered = {
-    val (target, origin) = narrowConversion(modifiers).getOrElse((Modifier.F32, Modifier.F32))
-    val relu             = modifiers.contains(Modifier.Relu)
-    val saturate         = modifiers.contains(Modifier.Satfinite)
-    val scaled           = modifiers.contains(Modifier.ScaledN2Ue8m0)
-    val rounding         = modifiers.collectFirst {
+    val Transfer(destination, source, modifiers) = transfer
+    val (target, origin)                         = narrowConversion(modifiers).getOrElse((Modifier.F32, Modifier.F32))
+    val relu                                     = modifiers.contains(Modifier.Relu)
+    val saturate                                 = modifiers.contains(Modifier.Satfinite)
+    val scaled                                   = modifiers.contains(Modifier.ScaledN2Ue8m0)
+    val rounding                                 = modifiers.collectFirst {
       case Modifier.Rn => ConversionRounding.RN
       case Modifier.Rz => ConversionRounding.RZ
       case Modifier.Rp => ConversionRounding.RP
@@ -591,6 +593,44 @@ private object VMSequenceCompiler {
       modifiers.forall(PartialFunction.cond(_) {
         case Modifier.F32 | Modifier.Ftz | Modifier.NaN | Modifier.Abs | Modifier.Relu => true
       })
+
+  private def reluInteger(modifiers: Vec[Modifier]): Boolean =
+    modifiers.contains(Modifier.Relu) && (modifiers.contains(Modifier.S16x2) || modifiers.contains(Modifier.S32))
+
+  private def reluExtremum(instruction: Instruction, destination: Operand, modifiers: Vec[Modifier])(using
+      scope: Scope
+  ): Lowered = {
+    val unclamped            = modifiers.filterNot(_ == Modifier.Relu)
+    val unclampedInstruction = instruction.copy(mods = instruction.mods.filterNot(_ == Modifier.Relu))
+    for {
+      extremum <- VMInstructionCompiler.lowerOperation(unclampedInstruction, unclamped)
+      target   <- scope.register(destination)
+    } yield Vec(
+      extremum,
+      if (unclamped.contains(Modifier.S32))
+        VMIR.Instruction.IntegerBinary(
+          IntegerOperation.Maximum(true),
+          target,
+          Value.Register(target),
+          Value.Immediate(0L),
+          32
+        )
+      else
+        VMIR.Instruction.VideoSimd(
+          target,
+          Value.Register(target),
+          Value.Immediate(0L),
+          Value.Immediate(0L),
+          VideoOperation.Maximum,
+          2,
+          true,
+          true,
+          true,
+          false,
+          false
+        )
+    )
+  }
 
   /** `min` and `max` of three binary32 values: the two-input operation on the first pair, then on the third. */
   private def extremum(

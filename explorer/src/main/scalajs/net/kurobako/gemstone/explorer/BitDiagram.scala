@@ -28,8 +28,9 @@ object BitDiagram {
               val field = encoding.fields(index)
               td(
                 colSpan   := members.size,
-                styleAttr := s"background: ${colour(index)}",
-                title     := field.detail,
+                styleAttr := (if (field.ignored) "" else s"background: ${colour(index)}"),
+                cls       := (if (field.ignored) "bit-ignored" else ""),
+                title     := (if (field.ignored) "not read by this opcode" else DomainView.tooltip(field)),
                 if (field.name.length <= members.size * 3) field.name else "..."
               )
             case (None, members) => td(colSpan := members.size, cls := "bit-unassigned")
@@ -48,6 +49,14 @@ object BitDiagram {
         cls := "bit-legend",
         encoding.fields.zipWithIndex.map((field, index) =>
           span(cls := "bit-key", styleAttr := s"background: ${colour(index)}", title := field.detail, field.name)
+        )
+      ),
+      div(
+        cls := "bit-domains",
+        encoding.fields.flatMap(field =>
+          if (field.ignored)
+            Some(div(cls := "bit-domain bit-domain-ignored", s"${field.detail}: not read by this opcode"))
+          else field.domain.map(domain => DomainView.field(field.detail, domain))
         )
       )
     )

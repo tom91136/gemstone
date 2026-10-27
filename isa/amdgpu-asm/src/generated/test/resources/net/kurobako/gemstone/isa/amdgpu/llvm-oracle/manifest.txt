@@ -1,5 +1,5 @@
 # Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
-selected-positive-cases=4154
+selected-positive-cases=4155
 selected-diagnostic-cases=1066
 file=bonaire.s
 file=fiji.s

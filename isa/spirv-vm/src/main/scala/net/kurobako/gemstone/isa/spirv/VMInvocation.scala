@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv
 import VMCollectives.Request as CollectiveRequest
 import VMMemory.*
 import VMProgram.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
@@ -56,6 +57,52 @@ private object VMInvocation {
         case _                      => null
       }
 
+    private def leafCount(key: Int): Int =
+      if (program.scalarSlot(key)) 1
+      else objects(key) match {
+        case VMValue.Bits(_, lanes) => lanes.length
+        case _                      => 0
+      }
+
+    /** The first of `keys` that holds no numeric value, or -1. */
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def absent(keys: Array[Int]): Int = {
+      var at    = 0
+      var found = -1
+      while (at < keys.length && found < 0) {
+        if (leafCount(keys(at)) == 0) found = keys(at)
+        at += 1
+      }
+      found
+    }
+
+    /** Leaf `index` of the numeric value `key` holds. */
+    def leaf(key: Int, index: Int): Long =
+      if (program.scalarSlot(key)) scalars(key)
+      else objects(key) match {
+        case VMValue.Bits(_, lanes) => lanes(index)
+        case _                      => 0L
+      }
+
+    /** Leaf `index` of the leaves, in order, of the first `count` of `keys`. */
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def leafAt(keys: Array[Int], count: Int, index: Int): Long = {
+      var remaining = index
+      var at        = 0
+      var found     = 0L
+      while (at < count) {
+        val size = leafCount(keys(at))
+        if (remaining < size) {
+          found = leaf(keys(at), remaining)
+          at = count
+        } else {
+          remaining -= size
+          at += 1
+        }
+      }
+      found
+    }
+
     def write(key: Int, typeId: Int, lanes: Array[Long]): Unit =
       if (program.scalarSlot(key) && lanes.length == 1) scalars(key) = lanes(0)
       else update(key, VMValue.Bits(typeId, lanes))
@@ -70,6 +117,14 @@ private object VMInvocation {
       destination: Int,
       stack: Int
   )
+
+  /** An op that calls a function several times, in progress: the call it issued last, and the values the calls before
+    * it returned. The op runs again as each call returns, at the same position and call depth.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  class CallLoop(val pc: Int, val depth: Int, val results: Array[Long]) {
+    var call = 0
+  }
 
   /** The launch coordinates and subgroup placement of one invocation. */
   case class Invocation(
@@ -99,6 +154,11 @@ private object VMInvocation {
     def enqueuedWorkgroupSize(axis: Int): Long   = axisOf(axis).select(geometry.groupSize).toLong
     def workDim: Int                             = geometry.workDim
     def vector(select: Int => Long): Array[Long] = Array(select(0), select(1), select(2))
+
+    /** The invocation's index within its workgroup, with x varying fastest. It names the invocation within its
+      * workgroup, and is the lane a fault at the invocation is reported against.
+      */
+    def linearLocal: Long = (local(2) * workgroupSize(1) + local(1)) * workgroupSize(0) + local(0)
   }
 
   private def axisOf(index: Int): Axis = index match {
@@ -144,7 +204,9 @@ private object VMInvocation {
       var pc: Int,
       var currentLabel: Int,
       var predecessor: Int,
-      val calls: mutable.ArrayDeque[CallFrame]
+      val calls: mutable.ArrayDeque[CallFrame],
+      val timeline: VMTimeline,
+      var memory: MemoryState
   ) derives CanEqual {
     private enum Status derives CanEqual {
       case Running
@@ -153,6 +215,8 @@ private object VMInvocation {
       case Completed
     }
     val storage: Arena                       = Arena()
+    var partials: Array[Long]                = Array.emptyLongArray
+    var loops: List[CallLoop]                = Nil
     private var status: Status               = Status.Running
     def completed: Boolean                   = status == Status.Completed
     def memoryPending: Boolean               = status == Status.WaitingMemory
@@ -160,11 +224,63 @@ private object VMInvocation {
       case Status.WaitingCollective(request) => Some(request)
       case _                                 => None
     }
-    def complete(): Unit                          = status = Status.Completed
-    def awaitMemory(): Unit                       = status = Status.WaitingMemory
-    def memoryReady(): Unit                       = if (memoryPending) status = Status.Running
-    def suspend(request: CollectiveRequest): Unit = status = Status.WaitingCollective(request)
-    def resume(): Unit                            = status = Status.Running
+
+    /** The invocation's index within its workgroup, which names the unit it runs as. */
+    def ordinal: Int >= 0 = invocation.linearLocal.toInt.unsafe[Int >= 0]
+
+    /** The unit this invocation runs as, in the state given. */
+    def unit(state: MachineUnit.State): MachineUnit =
+      timeline.unit(invocation.groupId, ordinal, state)
+
+    /** A change in what this invocation is doing, which the timeline draws between the issues it surrounds. */
+    private def transition(kind: MachineEvent.Kind): Unit =
+      timeline.transition(
+        invocation.groupId,
+        ordinal,
+        kind,
+        Some(timeline.location(pc, invocation.groupId, ordinal))
+      )
+
+    /** The invocation finished: it issues nothing more. */
+    def complete(): Unit = {
+      status = Status.Completed
+      transition(MachineEvent.Kind.Retired)
+    }
+
+    /** The invocation waits for memory it cannot read yet. A retried read finds it waiting already, and does not park
+      * it again.
+      */
+    def awaitMemory(): Unit =
+      if (!memoryPending) {
+        status = Status.WaitingMemory
+        transition(MachineEvent.Kind.Blocked(MachineUnit.Reason.Memory))
+      }
+
+    /** The memory the invocation waited for has arrived, so it runs on. */
+    def memoryReady(): Unit =
+      if (memoryPending) {
+        status = Status.Running
+        transition(MachineEvent.Kind.Resumed)
+      }
+
+    /** The invocation waits at a collective rendezvous until the lanes that meet there arrive. */
+    def suspend(request: CollectiveRequest): Unit = {
+      val parking = suspended.isEmpty
+      status = Status.WaitingCollective(request)
+      if (parking) transition(MachineEvent.Kind.Blocked(MachineUnit.Reason.Collective(VMTimeline.name(request))))
+    }
+
+    /** The collective the invocation waited at resolved, so it runs on. */
+    def resume(): Unit = {
+      status = Status.Running
+      transition(MachineEvent.Kind.Resumed)
+    }
+
+    /** The invocation stops waiting without the machine releasing it: the launch faults instead. */
+    def abandon(): Unit = status = Status.Running
+
+    /** The request the invocation waits with changes, without the invocation stopping to wait. */
+    def remark(request: CollectiveRequest): Unit = status = Status.WaitingCollective(request)
 
     /** The invocation stopped at a point another lane or the scheduler must resolve. */
     def yielded: Boolean = status != Status.Running || quadRequest.nonEmpty || reconvergenceJoin.nonEmpty
@@ -174,6 +290,7 @@ private object VMInvocation {
     var reconvergedReturn                                              = false
     var quadRequest: Option[QuadRequest]                               = None
     var gradients: Option[(Array[Double], Array[Double])]              = None
+    var texels: Option[ImageOps.ImageLevel]                            = None
     var fragmentQuad                                                   = false
     var subgroupReconvergence                                          = false
     var helperInvocation                                               = false
@@ -200,19 +317,22 @@ private object VMInvocation {
       stagedValues
     }
 
-    def reset(nextInvocation: Invocation, function: Function): Unit = {
+    def reset(nextInvocation: Invocation, function: Function, nextMemory: MemoryState): Unit = {
       invocation = nextInvocation
+      memory = nextMemory
       currentFunction = function
       pc = function.start + 1
       currentLabel = -1
       predecessor = -1
       calls.clear()
+      loops = Nil
       status = Status.Running
       quadRequest = None
       reconvergenceRegions.clear()
       reconvergenceJoin = None
       reconvergedReturn = false
       gradients = None
+      texels = None
       fragmentQuad = false
       subgroupReconvergence = false
       helperInvocation = false

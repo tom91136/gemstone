@@ -21,14 +21,14 @@ private object TaskValidation {
       descriptorBindings: Vec[DescriptorBinding]
   ): Either[ExecutionFailure, Unit] = {
     val word                                  = abi.MachineWordSize.toLong
-    def registered(id: AllocationId): Boolean = allocations.entry(id) != null
+    def absent(id: AllocationId): Boolean     = allocations.entry(id) == null
     def size(id: AllocationId): Long          = allocations.entry(id).size.toLong
     def lastScalarWord(index: Int >= 0): Long = task.arguments(index.raw) match {
       case KernelTask.Argument.Scalar(bytes) => bytes.length.toLong - word
       case _                                 => -1L
     }
     task.arguments.collectFirst {
-      case KernelTask.Argument.Memory(region, _, _) if !registered(region) =>
+      case KernelTask.Argument.Memory(region, _, _) if absent(region) =>
         ExecutionFailure.NotFound(s"kernel argument refers to unregistered allocation $region")
       case KernelTask.Argument.Memory(region, offset, _) if offset > size(region) =>
         ExecutionFailure.InvalidRequest(s"kernel argument offset $offset is outside allocation $region")
@@ -41,15 +41,15 @@ private object TaskValidation {
           ExecutionFailure.InvalidRequest(s"kernel argument $index has no descriptor binding")
       }
     }.orElse(task.argumentBuffer.collect {
-      case buffer if !registered(buffer.region) =>
+      case buffer if absent(buffer.region) =>
         ExecutionFailure.NotFound(s"argument buffer refers to unregistered allocation ${buffer.region}")
       case buffer if buffer.offset >= size(buffer.region) =>
         ExecutionFailure.InvalidRequest("argument buffer offset is outside its allocation")
     }).orElse(task.pointerRelocations.collectFirst {
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), _, _, _)
-          if !registered(source) =>
+          if absent(source) =>
         ExecutionFailure.NotFound(s"pointer relocation refers to unregistered source allocation $source")
-      case KernelTask.PointerRelocation(target = target) if !registered(target) =>
+      case KernelTask.PointerRelocation(target = target) if absent(target) =>
         ExecutionFailure.NotFound(s"pointer relocation refers to unregistered target allocation $target")
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), sourceOffset, _, _)
           if sourceOffset > size(source) - word =>

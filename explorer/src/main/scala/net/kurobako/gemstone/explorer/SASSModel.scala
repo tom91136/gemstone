@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.explorer
 
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
@@ -159,7 +160,8 @@ object SASSModel extends Model {
       form: NVDisasm.Form,
       fields: Vec[NVDisasm.Syntax.Field],
       mnemonic: String
-  ): Either[String, Spelling] =
+  ): Either[String, Spelling] = {
+    val counters = form.opcodes.exists(_.name.startsWith("CS2"))
     fields.foldLeft[Either[String, Spelling]](
       Right(Spelling(Map.empty, Map.empty, Vec.empty, Vec.empty, 0, 0, Spelling.Bank.Outside))
     ) { (spelt, field) =>
@@ -222,7 +224,7 @@ object SASSModel extends Model {
           case kind if kind.isFloatingImmediate && field.default.nonEmpty => Right(state)
           case kind if kind.isFloatingImmediate                           => Right(state.spell(field, "1"))
           // CS2R and CS2UR read the counters, as a pair unless `.32`
-          case NVDisasm.FieldKind.SpecialRegister if form.opcodes.exists(_.name.startsWith("CS2")) =>
+          case NVDisasm.FieldKind.SpecialRegister if counters =>
             symbol("SR_CLOCKLO", "SR_LANEID")
           case NVDisasm.FieldKind.SpecialRegister               => symbol("SR_LANEID")
           case NVDisasm.FieldKind.PredicateRegister             => symbol("PR")
@@ -240,6 +242,7 @@ object SASSModel extends Model {
         else next
       )
     }
+  }
 
   def immediate(field: NVDisasm.Syntax.Field): Boolean =
     field.category == NVDisasm.FieldKind.Immediate || field.category == NVDisasm.FieldKind.SignedImmediate
@@ -492,9 +495,20 @@ object SASSModel extends Model {
 
   private def form(database: NVDisasm.Database, form: NVDisasm.Form): View.Form = {
     val fields   = NVDisasm.Syntax.fields(form.syntax, includeMarkedOptionals = true)
+    val domains  = SassDomains.fields(database, form).toMap
     val operands = fields.filter(_.category.isOperand).map(field =>
-      View.OperandSlot(field.binding, field.kind, field.default.fold("")(value => s"default $value"))
+      View.OperandSlot(
+        field.binding,
+        field.kind,
+        Vec(field.default.map(value => s"default $value"), domains.get(field.binding).map(_.describe)).flatten
+          .mkString("; ")
+      )
     )
+    val encoded = fields.flatMap(field =>
+      domains.get(field.binding).toVec.flatMap(domain =>
+        Vec(field.binding -> domain, form.encodedBinding(field) -> domain)
+      )
+    ).toMap
     val choices = fields.filterNot(_.category.isOperand).flatMap(field =>
       Option.when(database.vocabulary(field).nonEmpty)(
         View.Choice(s"${field.kind}:${field.binding}", database.vocabulary(field).map(_.name).distinct)
@@ -520,7 +534,12 @@ object SASSModel extends Model {
       Some(View.Encoding(
         database.width,
         form.fields.map(field =>
-          View.Field(label(field.expression), field.positions, s"${field.name} = ${render(field.expression)}")
+          View.Field(
+            label(field.expression),
+            field.positions,
+            s"${field.name} = ${render(field.expression)}" +
+              encoded.get(label(field.expression)).fold("")(domain => s"; ${domain.describe}")
+          )
         ),
         constants ++ opcode
       ))
@@ -787,36 +806,76 @@ object SASSModel extends Model {
       }
     )
 
-  /** The definition an instance lowers to, under the operand table's names in its operand order, with its constant
-    * operands' offsets as parameters.
+  /** What `InstructionSemantics` lowers an instance with: its target, parsed instruction, the types of its constant
+    * operands by offset, and the requirements its encoding gives.
     */
-  def definition(instance: Instance, mnemonic: String, formName: String): Either[Unrendered, Definition] = {
-    val (sm, instruction, operands, order, constants, _) = instance
+  private case class Lowering(
+      target: Int >= 35,
+      instruction: Instruction,
+      constants: Map[Long, (name: String, tpe: Type)],
+      requirements: Vec[Term]
+  )
+
+  private def lowering(instance: Instance, formName: String): Either[Unrendered, Lowering] = {
+    val (sm, text, _, _, constants, _) = instance
     for {
       found <- (for {
         target   <- sm.refine[Int >= 35].left.map(_ => s"no SASS target sm_$sm")
         selected <- Target.parse(s"sm_$sm")
         form     <- selected.database.byForm.get(formName).toRight(s"no form $formName")
-        program  <- Parser.parseProgram(s"${separated(instruction)};").left.map(_.message)
+        program  <- Parser.parseProgram(s"${separated(text)};").left.map(_.message)
         parsed   <- program.statements.collectFirst { case Program.Statement.Operation(operation, _, _) => operation }
-          .toRight(s"$instruction is not an instruction")
+          .toRight(s"$text is not an instruction")
       } yield (target, selected, form, parsed)).left.map(Unrendered.Rejected(_))
       (target, selected, form, parsed) = found
-      fields                           = encoding(selected.database, form, instruction, constants.map(_.binding))
+      fields                           = encoding(selected.database, form, text, constants.map(_.binding))
+    } yield Lowering(
+      target,
+      parsed,
+      constants.flatMap((binding, offset) => fields.types.get(binding).map(tpe => offset -> (binding, tpe))).toMap,
+      fields.requirements
+    )
+  }
+
+  /** The definition an instance lowers to, under the operand table's names in its operand order, with its constant
+    * operands' offsets as parameters.
+    */
+  def definition(instance: Instance, mnemonic: String, formName: String): Either[Unrendered, Definition] = {
+    val (_, _, operands, order, _, _) = instance
+    for {
+      lowered    <- lowering(instance, formName)
       definition <- InstructionSemantics.describe(
         mnemonic,
-        target,
-        parsed,
+        lowered.target,
+        lowered.instruction,
         operands,
-        constants.flatMap((binding, offset) => fields.types.get(binding).map(tpe => offset -> (binding, tpe))).toMap,
+        lowered.constants,
         order,
-        fields.requirements
+        lowered.requirements
       )
     } yield {
       // an offset the definition does not read, as where a comparison ignores its sources, constrains nothing
       val parameters = definition.parameters.map(_.name).toSet
       definition.copy(requirements = definition.requirements.filter(mentions(_).subsetOf(parameters)))
     }
+  }
+
+  private def machine(instance: Instance, mnemonic: String, formName: String)
+      : Vec[Either[Unrendered, Definition]] = {
+    val (_, _, operands, order, _, _) = instance
+    lowering(instance, formName).fold(
+      failure => Vec(Left(failure)),
+      lowered =>
+        InstructionSemantics.machine(
+          mnemonic,
+          lowered.target,
+          lowered.instruction,
+          operands,
+          lowered.constants,
+          order,
+          lowered.requirements
+        )
+    )
   }
 
   private def mentions(term: Term): Set[String] = term match {
@@ -827,6 +886,46 @@ object SASSModel extends Model {
     case Term.Select(condition, whenTrue, whenFalse) =>
       mentions(condition) ++ mentions(whenTrue) ++ mentions(whenFalse)
     case _ => Set.empty
+  }
+
+  private val machined =
+    ConcurrentHashMap[(View.Entry, View.Form), Vec[(instance: Instance, outcome: Either[Unrendered, Definition])]]()
+
+  override protected def clearOutcomes(): Unit = machined.clear()
+
+  private val orderingOnly: OrderingOnly = OrderingOnly(
+    ("LDGDEPBAR", "ldgdepbar_", "loads complete synchronously in the VM, so no dependency barrier is pending."),
+    ("PREEXIT", ".*", "dependent launches wait for kernel completion, so there is no early launch to release."),
+    ("ENDCOLLECTIVE", ".*", "the VM checks the warp synchronisation it closes at load, so it runs nothing."),
+    (
+      "USETMAXREG",
+      "usetmaxreg(Alloc)?__(Ib|URb)_dealloc",
+      "the VM does not bound a warp's registers, so register-count hints have no effect."
+    ),
+    ("UTMACCTL", ".*", "the VM reads tensor maps when used, so there is no tensor-map cache to control."),
+    (
+      "WARPGROUP",
+      "warpgroup_(arrive|depbar)_",
+      "warpgroup matrix products complete when issued, so no group is pending."
+    )
+  )
+
+  override def semanticsOf(entry: View.Entry, form: View.Form): Semantics =
+    orderingOnly.semantics(entry.mnemonic, form.name).getOrElse(machineSemantics(entry, form))
+
+  private def machineSemantics(entry: View.Entry, form: View.Form): Semantics = {
+    val outcomes = machined.computeIfAbsent(
+      (entry, form),
+      _ =>
+        instances(entry.target, entry.mnemonic, form.name).toOption.toVec.flatten.flatMap(instance =>
+          machine(instance, entry.mnemonic, form.name).map((instance, _))
+        )
+    )
+    val defined = machineDefinitions(entry, form)(
+      outcomes.flatMap((instance, outcome) => outcome.toOption.map(Described(instance.text, _)))
+    )
+    val reasons = outcomes.collect { case (_, Left(Unrendered.Undefined(reason))) => reason }.distinct
+    withMachineDefinitions(entry, form, defined, reasons)
   }
 
   protected def render(entry: View.Entry, form: View.Form): Either[Unavailable, Vec[Described]] = {

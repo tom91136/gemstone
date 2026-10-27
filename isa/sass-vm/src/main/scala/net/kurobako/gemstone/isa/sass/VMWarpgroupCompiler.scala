@@ -106,7 +106,7 @@ private object VMWarpgroupCompiler {
       val metadata = sparsityOperands.headOption.getOrElse(unsupported(s"$mnemonic.SP requires a metadata register"))
       Sparsity(source(metadata), sparsityOperands.lift(1).fold(Value.Immediate(0L))(literal(_)))
     }
-    if (!bareRegister(operands.head)) unsupported(s"unsupported $mnemonic destination")
+    if (qualifiedOrNonRegister(operands.head)) unsupported(s"unsupported $mnemonic destination")
     val shape        = Shape(64.unsafe[Int > 0], n.unsafe[Int > 0], k.unsafe[Int > 0])
     val packed       = if (sparse) shape.copy(k = (k / 2).unsafe[Int > 0]) else shape
     val registers    = Warpgroup.accumulatorRegisters(n, d)

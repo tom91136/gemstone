@@ -56,7 +56,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
       assert(service.releaseAllocation(id).isLeft)
       val expected = Vector.fill(8)(0x55.toByte) ++
         Vector.fill(4)(Vector(255.toByte, 0.toByte, 0.toByte, 255.toByte)).flatten ++ Vector.fill(8)(0x55.toByte)
-      assertEquals(right(service.read(id, 0L, 32)).toVector, expected)
+      assertEquals(right(service.read(AllocationRange(id, 0L, 32))).toVector, expected)
       right(service.releaseCompletion(completion))
       assert(service.readGraphicsStatistics(completion).isLeft)
       right(service.releaseAllocation(id))
@@ -119,7 +119,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
       }
       val _ = first.copyToArray(expected, 96)
       val _ = second.copyToArray(expected, 100)
-      assertEquals(right(service.read(id, 0L, 128)), Vec.from(expected))
+      assertEquals(right(service.read(AllocationRange(id, 0L, 128))), Vec.from(expected))
       right(service.releaseCompletion(completion))
       for (
         invalid <- Vec(
@@ -135,7 +135,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
           area,
           Vec(0, 0, 0, 0)
         )))).isLeft)
-      assertEquals(right(service.read(id, 0L, 128)), Vec.from(expected))
+      assertEquals(right(service.read(AllocationRange(id, 0L, 128))), Vec.from(expected))
       right(service.releaseAllocation(id))
     }
   }
@@ -156,7 +156,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         area,
         Vec(0, 0, 0, 0)
       )))).isLeft)
-      assertEquals(right(service.read(id, 0L, 8)).toVector, Vector.fill(8)(0.toByte))
+      assertEquals(right(service.read(AllocationRange(id, 0L, 8))).toVector, Vector.fill(8)(0.toByte))
       right(service.releaseAllocation(id))
     }
   }

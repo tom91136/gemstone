@@ -167,8 +167,6 @@ class Server private (
       case NonFatal(error) => scribe.error("RPC accept loop terminated unexpectedly", error)
     }
 
-  // joining is the barrier that keeps workers off memory the owner releases next, so a timeout would defeat it
-  @SuppressWarnings(Array("baumkuchen:unbounded-wait"))
   override def close(): Unit = if (closed.compareAndSet(false, true)) {
     // Stop accepting first, then snapshot threads before listener closure can remove them.
     def shutdownConnections(): Unit = {

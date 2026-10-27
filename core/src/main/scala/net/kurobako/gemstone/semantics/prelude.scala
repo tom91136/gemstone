@@ -89,8 +89,6 @@ object prelude {
     inline def apply(bits: UInt[8]): ScaleE8M0 = wrap(bits, 8)
   }
 
-  // PrimitiveLayout renders the owner, so each primitive must be a member of its own companion
-  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   object Float16 {
     inline def apply(value: Float): Float16  = IEEE754.floatToBinary16(value).toLong
     inline def apply(value: Double): Float16 = IEEE754.doubleToBinary16(value).toLong
@@ -113,8 +111,6 @@ object prelude {
     def maximum(left: Float16, right: Float16): Float16 = FloatingPoint[16](IEEE754.maximum(left, right, 16))
   }
 
-  // PrimitiveLayout renders the owner, so each primitive must be a member of its own companion
-  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   object Float32 {
     inline def apply(value: Float): Float32  = IEEE754.floatToBinary32(value).toLong
     inline def apply(value: Double): Float32 = IEEE754.floatToBinary32(value.toFloat).toLong
@@ -137,8 +133,6 @@ object prelude {
     def maximum(left: Float32, right: Float32): Float32 = FloatingPoint[32](IEEE754.maximum(left, right, 32))
   }
 
-  // PrimitiveLayout renders the owner, so each primitive must be a member of its own companion
-  @SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
   object Float64 {
     inline def apply(value: Double): Float64 = IEEE754.doubleToBinary64(value)
 
@@ -214,6 +208,38 @@ object prelude {
 
     inline given unsigned[W <: Int]: Convert[UInt[W]] = Unsigned[W](constValue[W])
     inline given signed[W <: Int]: Convert[SInt[W]]   = Signed[W](constValue[W])
+  }
+
+  /** What a machine definition requests effects, checks and control from, as [[MachineAlgebra]] names them. */
+  trait Machine {
+    def pc(): UInt[64]
+    def jump(target: Int): Unit
+    def jump(target: UInt[64]): Unit
+    def jumpTo(target: UInt[64]): Unit
+    def branch(condition: Bool, taken: Int): Unit
+    def branch(condition: Bool, taken: UInt[64]): Unit
+    def branch(condition: Bool, taken: Int, otherwise: Int): Unit
+    def branch(condition: Bool, taken: UInt[64], otherwise: UInt[64]): Unit
+    def exit(): Unit
+    def park(barrier: UInt[64], count: UInt[64], blocking: Boolean): Unit
+    def require(condition: Bool, label: String): Unit
+    def load[T](space: Space, address: UInt[64]): T
+    def store[T](space: Space, address: UInt[64], value: T): Unit
+    def loadBytes(space: Space, address: UInt[64], length: UInt[64]): Array[Byte]
+    def storeBytes(space: Space, address: UInt[64], data: Array[Byte]): Unit
+  }
+
+  /** What a definition across the lanes of a unit reads from, as [[UnitAlgebra]] names them. */
+  trait Lanes {
+    type View
+
+    def converged(): Bool
+    def index(): UInt[64]
+    def size(): UInt[64]
+    def gather(operand: Any): View
+    def gatherLoad[T](lanes: Int, space: Space, address: UInt[64], offset: Long): View
+    def peer(view: View, index: UInt[64]): UInt[64]
+    def active(index: UInt[64]): UInt[64]
   }
 
   /** The value of type `T` a 64-bit value truncates or extends to. */
@@ -514,6 +540,8 @@ object prelude {
   /** The bits of `whenSet` where `mask` is set, and of `whenClear` elsewhere. */
   inline def blend[W <: Int](mask: UInt[W], whenSet: UInt[W], whenClear: UInt[W]): UInt[W] =
     (mask & whenSet) | (~mask & whenClear)
+
+  inline def uniform[T](value: T): T = value
 
   /** The high `W` bits of the `2W`-bit product. */
   inline def multiplyHigh[W <: Int](left: UInt[W], right: UInt[W]): UInt[W] = {

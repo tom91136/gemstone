@@ -32,7 +32,11 @@ class NvidiaStagedSuite extends munit.FunSuite {
   ))
 
   private def show(instruction: Instruction)(using munit.Location): String =
-    StepRenderer.definition("op", Vec(instruction), names, Vec("d", "p", "a", "b", "c", "e", "q", "r"), Vec.empty)
+    StepRenderer.definition(
+      StepRenderer.Spec("op", Vec("d", "p", "a", "b", "c", "e", "q", "r"), Vec.empty),
+      Vec(instruction),
+      names
+    )
       .fold(failure => fail(failure.message), ScalaBackend.show(_))
 
   test("three-input logic matches its truth table for every table") {
@@ -346,7 +350,11 @@ class NvidiaStagedSuite extends munit.FunSuite {
       val a                                      = fragment(Role.A, operand)
       val c                                      = fragment(Role.C, result)
       StepRenderer.definition(
-        "mma",
+        StepRenderer.Spec(
+          "mma",
+          Vec("c") ++ Vec.tabulate(shape.k)(index => s"a$index") ++ Vec.tabulate(shape.k)(index => s"b$index"),
+          Vec.empty
+        ),
         Vec(Instruction.Tensor(Operation.Multiply(
           a,
           fragment(Role.B, operand),
@@ -359,9 +367,7 @@ class NvidiaStagedSuite extends munit.FunSuite {
           Matrix.accumulation(89, shape, operand, result, ConversionRounding.RN),
           saturate
         ))),
-        names,
-        Vec("c") ++ Vec.tabulate(shape.k)(index => s"a$index") ++ Vec.tabulate(shape.k)(index => s"b$index"),
-        Vec.empty
+        names
       ).fold(failure => fail(failure.message), ScalaBackend.show(_))
     }
     assertEquals(

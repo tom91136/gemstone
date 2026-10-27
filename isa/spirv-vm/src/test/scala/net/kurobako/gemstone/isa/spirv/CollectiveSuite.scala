@@ -203,8 +203,6 @@ class CollectiveSuite extends munit.FunSuite {
         case "Or"  => a | b
         case _     => a ^ b
       }
-      // The oracle reduces in the subgroup's order, so it folds over boxed longs.
-      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val expected = (0 until 80).flatMap { global =>
         val start = global / 40 * 40 + (if (subgroup) global % 40 / 32 * 32 else 0)
         val end   = math.min(global / 40 * 40 + 40, start + (if (subgroup) 32 else 40))
@@ -347,6 +345,35 @@ class CollectiveSuite extends munit.FunSuite {
     assertEquals(output, littleEndian(expected.map(_.toLong), 32))
   }
 
+  test("control barriers accept at most one memory order") {
+    for (
+      (semantics, valid) <- Seq(
+        0x0  -> true,
+        0x2  -> true,
+        0x4  -> true,
+        0x8  -> true,
+        0x10 -> true,
+        0x6  -> false,
+        0x18 -> false,
+        0x1e -> false
+      )
+    ) {
+      val module = kernel(
+        "%ulong",
+        "OpControlBarrier %workgroup %workgroup %semantics\n%result = OpIAdd %ulong %high %index",
+        s"%semantics = OpConstant %uint $semantics"
+      )
+      val (result, _) = outcome(module, testDimensions(4), testDimensions(2), Vec.empty, 8 * 8)
+      if (valid) assertEquals(result, Right(()), s"semantics $semantics")
+      else
+        assertEquals(
+          result,
+          Left(Fault.InvalidRequest(f"OpControlBarrier memory semantics 0x$semantics%x are invalid or unsupported")),
+          s"semantics $semantics"
+        )
+    }
+  }
+
   test("control barriers accept every memory scope and propagate memory fence failures") {
     for {
       scope       <- 0 to 6
@@ -413,6 +440,30 @@ class CollectiveSuite extends munit.FunSuite {
     assertEquals(
       dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
       littleEndian(Seq.fill(8)(7L), 32)
+    )
+  }
+
+  test("OpGroupNonUniformPartitionEXT matches floating-point zeros of either sign") {
+    val module = kernel(
+      "%uint",
+      """
+        %is_first = OpIEqual %bool %index %zero_long
+        %is_second = OpIEqual %bool %index %one_long
+        %zero = OpSelect %float %is_second %positive_zero %one_float
+        %sample = OpSelect %float %is_first %negative_zero %zero
+        %ballot = OpGroupNonUniformPartitionEXT %uint4 %sample
+        %result = OpCompositeExtract %uint %ballot 0
+      """,
+      """
+        %uint4 = OpTypeVector %uint 4
+        %negative_zero = OpConstant %float -0.0
+        %positive_zero = OpConstant %float 0.0
+        %one_float = OpConstant %float 1.0
+      """
+    )
+    assertEquals(
+      dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
+      littleEndian(Seq(3L, 3L, 252L, 252L, 252L, 252L, 252L, 252L), 32)
     )
   }
 
@@ -570,6 +621,45 @@ class CollectiveSuite extends munit.FunSuite {
     assertEquals(
       dispatch(module, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
       littleEndian(Seq.fill(8)(7L + 5 * 16 + 256 + 3 * 2048), 32)
+    )
+  }
+
+  test("a floating-point all-equal takes zeros of either sign as equal and a NaN as unequal") {
+    val constants = """
+        %clear_bit = OpConstant %uint 0
+        %set_bit = OpConstant %uint 1
+        %sign_shift = OpConstant %uint 31
+        %nan_bits = OpConstant %uint 2143289344
+      """
+    val zeros     = kernel(
+      "%uint",
+      """
+        %odd = OpBitwiseAnd %uint %index32 %set_bit
+        %sign = OpShiftLeftLogical %uint %odd %sign_shift
+        %value = OpBitcast %float %sign
+        %equal = OpSubgroupAllEqualKHR %bool %value
+        %result = OpSelect %uint %equal %set_bit %clear_bit
+      """,
+      constants
+    )
+    assertEquals(
+      dispatch(zeros, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
+      littleEndian(Seq.fill(8)(1L), 32)
+    )
+    val nan = kernel(
+      "%uint",
+      """
+        %first_lane = OpIEqual %bool %index32 %clear_bit
+        %bits = OpSelect %uint %first_lane %nan_bits %clear_bit
+        %value = OpBitcast %float %bits
+        %equal = OpSubgroupAllEqualKHR %bool %value
+        %result = OpSelect %uint %equal %set_bit %clear_bit
+      """,
+      constants
+    )
+    assertEquals(
+      dispatch(nan, testDimensions(8), Dimensions.One, Vec.empty, 8 * 4),
+      littleEndian(Seq.fill(8)(0L), 32)
     )
   }
 

@@ -113,7 +113,7 @@ private object VMTensorCompiler {
   }
 
   private def destinations(operand: Operand, count: Int)(using context: VMCompilationContext): Vec[Register] = {
-    if (!context.bareRegister(operand)) context.unsupported("unsupported matrix fragment destination")
+    if (context.qualifiedOrNonRegister(operand)) context.unsupported("unsupported matrix fragment destination")
     Vec.tabulate(count)(offset => context.destination(operand, offset).slot)
   }
 
@@ -171,7 +171,7 @@ private object VMTensorCompiler {
     import context.*
     if (sm < 80) unsupported("DMMA requires sm_80 or higher")
     requireOperands(4, "DMMA requires destination, A, B and accumulator")
-    if (!bareRegister(operands.head)) unsupported("unsupported DMMA destination")
+    if (qualifiedOrNonRegister(operands.head)) unsupported("unsupported DMMA destination")
     val matrix   = shape
     val rounding = modifiers.collectFirst {
       case Modifier.RZ => ConversionRounding.RZ
@@ -231,7 +231,7 @@ private object VMTensorCompiler {
       case _ => None
     }).getOrElse(unsupported(s"unsupported HMMA.884 modifiers ${modifiers.mkString(".")}"))
     val addendPair = if (addendSlots < slots) step / 2 * 2 else step * 2
-    if (!bareRegister(operands.head)) unsupported("unsupported HMMA.884 destination")
+    if (qualifiedOrNonRegister(operands.head)) unsupported("unsupported HMMA.884 destination")
     val destination = registerBase(operands.head, "HMMA.884 destination")
     if (destination.index > 253)
       unsupported("HMMA.884 destination register pair exceeds the physical register file")

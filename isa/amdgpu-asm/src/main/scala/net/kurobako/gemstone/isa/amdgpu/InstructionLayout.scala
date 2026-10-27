@@ -40,6 +40,23 @@ private object InstructionLayout {
   }
   case class Condition(field: EncodingField, values: Vector[Int], included: Boolean) derives ReadWriter
 
+  // a condition on a field the layout lacks never holds
+  private class CompiledCondition(field: Option[InstructionLayout.Field], values: Array[Int], included: Boolean) {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def holds(word: InstructionWord): Boolean = field match {
+      case Some(present) =>
+        val actual = present.get(word)
+        var found  = false
+        var i      = 0
+        while (!found && i < values.length) {
+          found = values(i) == actual
+          i += 1
+        }
+        found == included
+      case None => false
+    }
+  }
+
   object Catalogue {
     lazy val all: Vec[InstructionLayout] = resources.json[Vector[InstructionLayout]](getClass, "layouts.json").toVec
 
@@ -64,6 +81,41 @@ private case class InstructionLayout(
   val fixedPrefix: BigInt                                 = BigInt(prefix, 16)
   val wordMask: InstructionWord                           = InstructionWord.from(fixedMask)
   val wordPrefix: InstructionWord                         = InstructionWord.from(fixedPrefix)
+  val embedded: Boolean = byName.contains(EncodingField.LITERAL) || byName.contains(EncodingField.LITERAL64)
+  val literalField: Option[InstructionLayout.Field] = byName.get(EncodingField.LITERAL)
+
+  private def compileConditions(clauses: Vector[Vector[InstructionLayout.Condition]])
+      : Array[Array[InstructionLayout.CompiledCondition]] =
+    clauses.map(_.map(condition =>
+      InstructionLayout.CompiledCondition(byName.get(condition.field), condition.values.toArray, condition.included)
+    ).toArray).toArray
+
+  private def compiledLiteral(bytes: Int): Option[Array[Array[InstructionLayout.CompiledCondition]]] =
+    format.withLiteral(bytes).flatMap(InstructionLayout.Catalogue.forFormat(isa, _))
+      .map(candidate => compileConditions(candidate.conditions))
+
+  private lazy val compiled0 = Some(compileConditions(conditions))
+  private lazy val compiled4 = compiledLiteral(4)
+  private lazy val compiled8 = compiledLiteral(8)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def conditionsHold(clauses: Array[Array[InstructionLayout.CompiledCondition]], word: InstructionWord)
+      : Boolean = {
+    var held = clauses.isEmpty
+    var i    = 0
+    while (!held && i < clauses.length) {
+      val clause = clauses(i)
+      var all    = true
+      var j      = 0
+      while (all && j < clause.length) {
+        all = clause(j).holds(word)
+        j += 1
+      }
+      held = all
+      i += 1
+    }
+    held
+  }
 
   def matches(word: InstructionWord): Boolean = word.masked(wordMask) == wordPrefix
 
@@ -87,15 +139,15 @@ private case class InstructionLayout(
 
   /** Whether the encoding conditions hold; a trailing source literal selects the conditions of the literal variant. */
   def accepts(word: InstructionWord, literalBytes: Int): Boolean = {
-    val candidate =
-      if (literalBytes == 0) Some(this)
-      else format.withLiteral(literalBytes).flatMap(InstructionLayout.Catalogue.forFormat(isa, _))
-    candidate.exists(candidate =>
-      candidate.conditions.isEmpty || candidate.conditions.exists(_.forall(condition =>
-        byName.get(condition.field).exists(field =>
-          condition.values.exists(value => field.get(word) == value) == condition.included
-        )
-      ))
-    )
+    val compiled = literalBytes match {
+      case 0     => compiled0
+      case 4     => compiled4
+      case 8     => compiled8
+      case bytes => compiledLiteral(bytes)
+    }
+    compiled match {
+      case Some(clauses) => conditionsHold(clauses, word)
+      case None          => false
+    }
   }
 }

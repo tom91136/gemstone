@@ -48,9 +48,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   private def ballot(predicate: Term): Term =
     Term.context(
       Wave,
-      "ballot",
-      Vec.empty,
-      Vec((guard.fold(predicate)(Render.and(_, predicate)), Some(Type.Bool))),
+      MachineCall("ballot", Vec.empty, Vec((guard.fold(predicate)(Render.and(_, predicate)), Some(Type.Bool)))),
       Some(Type.unsigned(64))
     )
 
@@ -62,7 +60,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   private def bit(mask: Term): Term = Render.and(Render.shiftRightLogical(mask, Lane), Literal(1L))
 
   /** A source as a lane reads it: registers, state and literals named, constants as their bits. */
-  private def source(value: InstructionSource): Term = value match {
+  def source(value: InstructionSource): Term = value match {
     case InstructionSource.Scalar(index)         => naming.scalar(index)
     case InstructionSource.VectorRegister(index) => naming.vector(index)
     case InstructionSource.Constant(raw)         => Literal(raw)
@@ -96,7 +94,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   }
 
   /** A source read as 64 bits. */
-  private def pair(value: InstructionSource, read: PairRead): Term = value match {
+  def pair(value: InstructionSource, read: PairRead): Term = value match {
     case InstructionSource.Scalar(index)         => naming.scalarPair(index)
     case InstructionSource.VectorRegister(index) => naming.vectorPair(index)
     case InstructionSource.Literal(raw)          =>
@@ -125,7 +123,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   }
 
   private def read(value: Term, index: Term): Term =
-    Term.context(Wave, "read", Vec.empty, Vec((value, Some(dword)), (index, Some(dword))), Some(dword))
+    Term.context(Wave, MachineCall("read", Vec.empty, Vec((value, Some(dword)), (index, Some(dword)))), Some(dword))
 
   /** The VGPR `index` past the register `field` of M0 offsets it by, or 256 where that is beyond the last. */
   private def relative(index: Int, field: RelativeField): Term = {
@@ -140,7 +138,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   }
 
   private def relativeRead(index: Int, field: RelativeField): Term =
-    Term.context(Wave, "vgpr", Vec.empty, Vec((relative(index, field), Some(dword))), Some(dword))
+    Term.context(Wave, MachineCall("vgpr", Vec.empty, Vec((relative(index, field), Some(dword)))), Some(dword))
 
   /** A write of `value` to the VGPR M0 offsets, which a lane DPP leaves out keeps its dword through, and which goes
     * nowhere unless `paired` holds.
@@ -148,11 +146,13 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   private def relativeWrite(index: Int, field: RelativeField, value: => Term, paired: Option[Term] = None): Term =
     Term.context(
       Wave,
-      "writeVgpr",
-      Vec.empty,
-      Vec(
-        (paired.fold(relative(index, field))(Select(_, relative(index, field), Literal(256L))), Some(dword)),
-        (guard.fold(value)(enabled => Select(Render.not(enabled), relativeRead(index, field), value)), Some(dword))
+      MachineCall(
+        "writeVgpr",
+        Vec.empty,
+        Vec(
+          (paired.fold(relative(index, field))(Select(_, relative(index, field), Literal(256L))), Some(dword)),
+          (guard.fold(value)(enabled => Select(Render.not(enabled), relativeRead(index, field), value)), Some(dword))
+        )
       ),
       None,
       effect = true
@@ -1172,9 +1172,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
     instruction.relative.fold(read(bank(instruction.bank, instruction.src), from))(field =>
       Term.context(
         Wave,
-        "vgprAt",
-        Vec.empty,
-        Vec((relative(instruction.src, field), Some(dword)), (from, Some(dword))),
+        MachineCall("vgprAt", Vec.empty, Vec((relative(instruction.src, field), Some(dword)), (from, Some(dword)))),
         Some(dword)
       )
     )
@@ -1237,12 +1235,14 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
         target,
         Term.context(
           Wave,
-          "permute",
-          Vec.empty,
-          Vec(
-            (kernel(bank(registers, src)), Some(dword)),
-            (destination(naming.vector(address), Lane, lanes), Some(dword)),
-            (target, Some(dword))
+          MachineCall(
+            "permute",
+            Vec.empty,
+            Vec(
+              (kernel(bank(registers, src)), Some(dword)),
+              (destination(naming.vector(address), Lane, lanes), Some(dword)),
+              (target, Some(dword))
+            )
           ),
           Some(dword)
         )
@@ -1560,23 +1560,17 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
   /** A read-modify-write of `bytes` at a lane's address: the old value, the value `update` stores over it, and the old
     * value into `dest` when the instruction returns it.
     */
-  private def exchanged(
-      address: MemoryAddress,
-      dest: VectorRegisterIndex,
-      bytes: Int in (4, 8),
-      returnValue: Boolean,
-      registers: RegisterBank,
-      update: Term => Term
-  ): Option[Term.Steps] = located(address).map { (space, unaligned) =>
-    val at = aligned(space, unaligned, bytes)
-    Term.Steps(
-      Term.Step("old", load(space, at, bytes)),
-      Term.Step("_", store(space, at, update(Variable("old")), bytes))
-    ) ++
-      (if (returnValue) returned(dest, bytes, registers, Variable("old")) else Term.Steps.empty)
-  }.orElse(
-    naming.isa.flatMap(ResourceRender(naming, _).exchanged(address, dest, bytes, returnValue, update, registers))
-  )
+  private def exchanged(exchange: Exchange, update: Term => Term): Option[Term.Steps] = {
+    val Exchange(address, dest, bytes, returnValue, bank) = exchange
+    located(address).map { (space, unaligned) =>
+      val at = aligned(space, unaligned, bytes)
+      Term.Steps(
+        Term.Step("old", load(space, at, bytes)),
+        Term.Step("_", store(space, at, update(Variable("old")), bytes))
+      ) ++
+        (if (returnValue) returned(dest, bytes, bank, Variable("old")) else Term.Steps.empty)
+    }.orElse(naming.isa.flatMap(ResourceRender(naming, _).exchanged(exchange, update)))
+  }
 
   /** An atomic's address in `space`, which [[AtomicAlignment]] requires aligned to its `bytes`. */
   private def aligned(space: Space, at: Term, bytes: Int): Term =
@@ -1587,11 +1581,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
 
   class AtomicTerms(instruction: Instruction.Atomic) extends Sink.Binary[Term, Option[Term.Steps]] {
     inline def apply(inline kernel: (Term, Term) => Term): Option[Term.Steps] = exchanged(
-      instruction.address,
-      instruction.dest,
-      instruction.bytes,
-      instruction.returnValue,
-      instruction.bank,
+      Exchange(instruction.address, instruction.dest, instruction.bytes, instruction.returnValue, instruction.bank),
       old => kernel(old, memoryOperand(instruction.src, instruction.bytes, instruction.bank))
     )
   }
@@ -1616,11 +1606,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
 
   inline def compareSwap(instruction: Instruction.CompareSwap)(inline kernel: (Term, Term, Term) => Term)
       : Option[Term.Steps] = exchanged(
-    instruction.address,
-    instruction.dest,
-    instruction.bytes,
-    instruction.returnValue,
-    instruction.bank,
+    Exchange(instruction.address, instruction.dest, instruction.bytes, instruction.returnValue, instruction.bank),
     old =>
       kernel(
         old,

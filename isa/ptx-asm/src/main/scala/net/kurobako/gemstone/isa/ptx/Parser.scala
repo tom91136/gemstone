@@ -44,8 +44,7 @@ object Parser {
       case Program(values) => Left(SourceError(SourcePosition.Start, s"expected one statement, found ${values.size}"))
     }
 
-  // shares the Failure channel Cursor uses, so parse has one handler for both stages
-  @SuppressWarnings(Array("baumkuchen:throwing-helper", "scalafix:DisableSyntax.var"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def tokenise(source: String): (Array[Token], Array[Token], Token) = {
     val tokens       = mutable.ArrayBuffer.empty[Token]
     val comments     = mutable.ArrayBuffer.empty[Token]

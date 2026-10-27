@@ -199,15 +199,24 @@ private object ELF {
   private def describeGlobals(
       globalSymbols: Map[NonEmpty[String], elf.Symbol],
       globalRelocations: Vec[(Long, Long)]
-  ): Vec[CodeObjectGlobal] = Vec.from(
-    globalSymbols.view.map { case (name, symbol) =>
-      val pointerOffsets = globalRelocations.collect {
-        case (address, _) if address >= symbol.value && address - symbol.value <= symbol.size.toLong - 8L =>
-          (address - symbol.value).toInt.unsafe[Int >= 0]
-      }.distinct.sorted
-      CodeObjectGlobal(name, GuestAddress(symbol.value), symbol.size, pointerOffsets)
-    }.toSeq.sortBy(global => (global.address.raw, global.name))
-  )
+  ): Vec[CodeObjectGlobal] = {
+    val addresses = globalRelocations.map(_._1).distinct.sorted.toArray
+    Vec.from(
+      globalSymbols.view.map { case (name, symbol) =>
+        val pointerOffsets = Vec.from(
+          addresses.view.drop(firstAtOrAbove(addresses, symbol.value))
+            .takeWhile(_ - symbol.value <= symbol.size.toLong - 8L)
+            .map(address => (address - symbol.value).toInt.unsafe[Int >= 0])
+        )
+        CodeObjectGlobal(name, GuestAddress(symbol.value), symbol.size, pointerOffsets)
+      }.toSeq.sortBy(global => (global.address.raw, global.name))
+    )
+  }
+
+  private def firstAtOrAbove(addresses: Array[Long], address: Long): Int = {
+    val at = java.util.Arrays.binarySearch(addresses, address)
+    if (at >= 0) at else -at - 1
+  }
 
   // Target IDs use ASCII; ELF symbol names below may contain non-ASCII UTF-8.
   private val TargetPrefix = "amdgcn-amd-amdhsa--".getBytes(StandardCharsets.US_ASCII)

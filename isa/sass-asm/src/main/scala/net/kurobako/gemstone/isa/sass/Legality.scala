@@ -22,14 +22,14 @@ object Legality {
     }
 
   def check(
-      database: NVDisasm.Database,
-      form: NVDisasm.Form,
+      encoding: NVDisasm.Encoding,
       bindings: Map[String, BigInt]
   ): Either[NVDisasm.CandidateFailure, Unit] = {
+    val form       = encoding.form
     val conditions = form.conditions.filter(_.requires.forall(bindings.contains))
     conditions.foldLeft[Either[NVDisasm.CandidateFailure, Unit]](Right(())) { (result, condition) =>
       result.flatMap(_ =>
-        evaluate(database, condition.expression, bindings).left.map(message =>
+        evaluate(encoding.database, condition.expression, bindings).left.map(message =>
           NVDisasm.CandidateFailure(NVDisasm.FailureCategory.Unsupported, message)
         ).flatMap { value =>
           Either.cond(

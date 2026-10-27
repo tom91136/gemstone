@@ -69,7 +69,8 @@ object Codegen {
       "instructions",
       ptx,
       path("isa/ptx-asm/src/generated/main/scala"),
-      References.PTXISAVersion
+      References.PTXISAVersion,
+      path("isa/ptx-asm/src/generated/main/resources")
     ))
     GeneratePTXISA.main(Array(
       "tests",
@@ -115,6 +116,12 @@ object Codegen {
       path("native/generated")
     ))
     GenerateAMDGPUOracle.main(Array(amdgpu, path("isa/amdgpu-asm/src/generated/test/resources")))
+    GenerateAMDGPUDomains.main(Array(
+      amdgpu,
+      path("isa/amdgpu-asm/src/generated/main/scala"),
+      path("isa/amdgpu-asm/src/generated/main/resources"),
+      path("isa/amdgpu-asm/src/generated/test/resources/net/kurobako/gemstone/isa/amdgpu/llvm-oracle")
+    ))
 
     val spirv   = prepare(root, References.SPIRV)
     val unified = spirv.resolve("khronos/spirv-headers/include/spirv/unified1")

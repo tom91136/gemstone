@@ -57,8 +57,10 @@ object ExecutionSession {
 
   private def memoryFault(error: ExecutionFailure): Fault = Fault.Memory(s"memory operation failed: ${error.message}")
 
-  private def outOfRange(id: AllocationId, offset: Long >= 0, size: Int >= 0, limit: Int > 0): ExecutionFailure =
-    ExecutionFailure.InvalidRequest(s"allocation $id: byte range $offset + $size exceeds allocation size $limit")
+  private def outOfRange(range: AllocationRange, limit: Int > 0): ExecutionFailure =
+    ExecutionFailure.InvalidRequest(
+      s"allocation ${range.allocation}: byte range ${range.offset} + ${range.size} exceeds allocation size $limit"
+    )
 
   private val Written: Either[Fault, Unit] = Right(())
 
@@ -349,9 +351,9 @@ class ExecutionSession(
     override def lock: ReentrantLock           = stateLock
     override def index: AllocationAddressIndex = state.get().addresses
 
-    override protected def unregistered(id: AllocationId): Fault = memoryFault(notRegistered(id))
-    override protected def outside(id: AllocationId, offset: Long >= 0, size: Int >= 0, limit: Int > 0): Fault =
-      memoryFault(outOfRange(id, offset, size, limit))
+    override protected def unregistered(id: AllocationId): Fault                  = memoryFault(notRegistered(id))
+    override protected def outside(range: AllocationRange, limit: Int > 0): Fault =
+      memoryFault(outOfRange(range, limit))
 
     override def read(
         entry: AllocationAddressIndex.Entry,
@@ -443,13 +445,13 @@ class ExecutionSession(
 
   private object BindingMemory extends AddressSpace {
     override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-      ExecutionSession.this.read(region, offset, size).left.map(memoryFault(_))
+      ExecutionSession.this.read(AllocationRange(region, offset, size)).left.map(memoryFault(_))
     override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
       ExecutionSession.this.write(region, offset, bytes).left.map(memoryFault(_))
     override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
         update: Long => Long
     ): Either[Fault, Long] =
-      ExecutionSession.this.atomicModifyValue(region, offset, size)(update).left.map(memoryFault(_))
+      ExecutionSession.this.atomicModifyValue(AllocationScalar(region, offset, size))(update).left.map(memoryFault(_))
     override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
       Storage.address(region, offset)
     override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] =
@@ -776,23 +778,23 @@ class ExecutionSession(
       val entry = state.get().addresses.entry(id)
       if (entry == null) Left(notRegistered(id))
       else if (!ByteRange.contains(entry.size, offset, size.toLong))
-        Left(outOfRange(id, offset, size, entry.size))
+        Left(outOfRange(AllocationRange(id, offset, size), entry.size))
       else access(entry.allocation, offset.toInt)
     }
 
-  def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[ExecutionFailure, Vec[Byte]] =
-    accessAllocation(id, offset, size)((allocation, start) =>
-      allocation.storage.read(start, size)(live =>
-        if (!live) Left(notRegistered(id))
-        else Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + size)))
+  def read(range: AllocationRange): Either[ExecutionFailure, Vec[Byte]] =
+    accessAllocation(range.allocation, range.offset, range.size)((allocation, start) =>
+      allocation.storage.read(start, range.size)(live =>
+        if (!live) Left(notRegistered(range.allocation))
+        else Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + range.size)))
       )
     )
 
-  def readValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[ExecutionFailure, Long] =
-    accessAllocation(id, offset, size)((allocation, start) =>
-      allocation.storage.read(start, size)(live =>
-        if (!live) Left(notRegistered(id))
-        else Right(LittleEndian.decode(allocation.bytes, start, size.widen[Int in 0 ~ 8]))
+  def readValue(scalar: AllocationScalar): Either[ExecutionFailure, Long] =
+    accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>
+      allocation.storage.read(start, scalar.size)(live =>
+        if (!live) Left(notRegistered(scalar.allocation))
+        else Right(LittleEndian.decode(allocation.bytes, start, scalar.size.widen[Int in 0 ~ 8]))
       )
     )
 
@@ -804,22 +806,20 @@ class ExecutionSession(
       )
     )
 
-  def writeValue(id: AllocationId, offset: Long >= 0, value: Long, size: Int in 1 ~ 8): Either[ExecutionFailure, Unit] =
-    accessAllocation(id, offset, size)((allocation, start) =>
-      allocation.storage.write(start, size)(live =>
-        if (!live) Left(notRegistered(id))
-        else Right(LittleEndian.write(value, allocation.bytes, start, size.widen[Int in 0 ~ 8]))
+  def writeValue(scalar: AllocationScalar, value: Long): Either[ExecutionFailure, Unit] =
+    accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>
+      allocation.storage.write(start, scalar.size)(live =>
+        if (!live) Left(notRegistered(scalar.allocation))
+        else Right(LittleEndian.write(value, allocation.bytes, start, scalar.size.widen[Int in 0 ~ 8]))
       )
     )
 
-  def atomicModifyValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
-      update: Long => Long
-  ): Either[ExecutionFailure, Long] =
-    accessAllocation(id, offset, size)((allocation, start) =>
-      allocation.storage.write(start, size) { live =>
-        if (!live) Left(notRegistered(id))
+  def atomicModifyValue(scalar: AllocationScalar)(update: Long => Long): Either[ExecutionFailure, Long] =
+    accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>
+      allocation.storage.write(start, scalar.size) { live =>
+        if (!live) Left(notRegistered(scalar.allocation))
         else {
-          val width    = size.widen[Int in 0 ~ 8]
+          val width    = scalar.size.widen[Int in 0 ~ 8]
           val previous = LittleEndian.decode(allocation.bytes, start, width)
           LittleEndian.write(update(previous), allocation.bytes, start, width)
           Right(previous)

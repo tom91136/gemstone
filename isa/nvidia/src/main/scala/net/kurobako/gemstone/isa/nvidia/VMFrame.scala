@@ -19,4 +19,8 @@ private class VMFrame(
     val localBase: Long,
     val continuation: Option[VMFrame.Continuation],
     var live: VMLaneMask
-)
+) {
+
+  /** The interpreter's handle for this frame in its ready queue, which assigns it when it first queues a cohort. */
+  var readyId = 0
+}

@@ -70,9 +70,14 @@ private object VMCompiler {
     }.map { (program, registerCount) =>
       val constants = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
       val block     = constants.slice(kernel.parameterBase, kernel.parameterBase.raw + kernel.parameterSize)
+      // The slot names the explorer shows: the general and uniform banks this kernel addresses, in slot order.
+      val layout = VMRegisters.Layout.of(kernel, functions)
+      val names  = Vec.tabulate(layout.generalCount.raw + layout.uniformCount.raw) { slot =>
+        layout.spelling(VMIR.Register(slot.unsafe[Int >= 0])).get.unsafe[NonEmpty[String]]
+      }
       VMIR.Kernel(
         Entry(
-          Routine(kernel.name, program, registerCount, VMRegisters.PredicateCount),
+          Routine(kernel.name, program, registerCount, VMRegisters.PredicateCount, registerNames = names),
           kernel.parameters.map(parameter =>
             KernelParameter(s"param${parameter.ordinal}", parameter.offset, parameter.size)
           ),
@@ -136,8 +141,8 @@ private object VMCompiler {
     // BSYNC falls through to the setup target; BMOV may restore the token into a different B register.
     instructions.filter(is[Form.Bssy]).foreach { setup =>
       val target = setup.operands match {
-        case Vec(token, end) if OperandQueries.isRegister(token, RegisterBank.B) => codeTarget(end)
-        case _ => fail("invalid convergence barrier setup")
+        case Vec(token, end) if VMRegisters.isBarrier(token) => codeTarget(end)
+        case _                                               => fail("invalid convergence barrier setup")
       }
       if (target <= setup.address || !at(target - 16).exists(is[Form.Bsync]))
         fail("convergence barrier target must be forward and immediately after its BSYNC")

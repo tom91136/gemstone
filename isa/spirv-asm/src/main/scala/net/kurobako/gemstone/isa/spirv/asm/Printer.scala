@@ -9,15 +9,22 @@ object Printer {
     val header   = module.header
     val metadata = s"; SPIR-V\n; Version: ${header.version}\n; Generator: ${header.generator.toUnsigned}\n" +
       s"; Bound: ${header.bound.toUnsigned}\n; Schema: ${header.schema.toUnsigned}\n; Endianness: ${module.endianness}\n"
-    val imports = module.instructions.collect { case Instruction.ExtInstImport(dest, name) =>
-      dest.words.head.raw -> LiteralString.decode(name.words)
-    }.toMap
+    val imports  = importMap(module)
     val comments = module.comments.groupMap(_.before.raw)(comment => s"; ${comment.text}")
     val lines    = module.instructions.zipWithIndex.flatMap { case (instruction, index) =>
       comments.getOrElse(index, Vec.empty[String]) :+ render(instruction, imports)
     } ++ comments.getOrElse(module.instructions.size, Vec.empty[String])
     metadata + lines.mkString("\n") + "\n"
   }
+
+  /** The instruction as the module writes it, its extended instruction set under the module's imports. */
+  def render(module: Module, instruction: Instruction): String = render(instruction, importMap(module))
+
+  /** The extended instruction set each import names, by the id that names it. */
+  private def importMap(module: Module): Map[Int, String] =
+    module.instructions.collect { case Instruction.ExtInstImport(dest, name) =>
+      dest.words.head.raw -> LiteralString.decode(name.words)
+    }.toMap
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def render(instruction: Instruction, imports: Map[Int, String]): String = {

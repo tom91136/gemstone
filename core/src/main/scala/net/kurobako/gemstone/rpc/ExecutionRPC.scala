@@ -160,6 +160,9 @@ object ExecutionRPC {
       size: Int > 0
   ) derives Codec
 
+  case class AllocationRange(allocation: AllocationId, offset: Long >= 0, size: Int >= 0)
+  case class AllocationScalar(allocation: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
+
   // Symbol codecs stay with the protocol so that their names derive through nativeName.
   @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[KernelSymbol] = Codec.derived

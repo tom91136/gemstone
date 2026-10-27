@@ -4,19 +4,21 @@ import com.raquo.laminar.api.L.*
 import com.raquo.laminar.codecs.BooleanAsAttrPresenceCodec
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
-import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.string.*
 import org.scalajs.dom
 
 /** Instruction catalogue, register files and an assembler bench for PTX, SASS, AMDGPU and SPIR-V. */
 object Explorer {
   enum Page(val title: String) derives CanEqual {
+    case Program      extends Page("Program")
     case Instructions extends Page("Instructions")
     case Registers    extends Page("Registers")
     case Translator   extends Page("Assembler")
   }
 
-  private val ListLimit = 400
+  // the results list renders only the rows near the viewport, so every row must have this height
+  private val RowHeight = 22
+  private val Overscan  = 20
   private val open      = htmlAttr("open", BooleanAsAttrPresenceCodec)
 
   def main(arguments: Array[String]): Unit = {
@@ -24,7 +26,7 @@ object Explorer {
   }
 
   def application: HtmlElement = {
-    val page    = Var(Page.Instructions)
+    val page    = Var(Page.Program)
     val targets = Language.values.toVec.map(language => language -> Var(language.model.defaultTarget)).toMap
     div(
       cls := "explorer",
@@ -39,7 +41,8 @@ object Explorer {
         ))
       ),
       child <-- page.signal.map {
-        case Page.Instructions => instructions(targets)
+        case Page.Program      => ProgramPage(targets)
+        case Page.Instructions => instructions(targets, () => page.set(Page.Program))
         case Page.Registers    => registers(targets)
         case Page.Translator   => translator(targets)
       }
@@ -58,7 +61,10 @@ object Explorer {
   private def rank(entry: View.Entry, needle: String): Int =
     if (entry.key == needle) 0 else if (entry.key.startsWith(needle)) 1 else 2
 
-  private def instructions(targets: Map[Language, Var[Option[String]]]): HtmlElement = {
+  private def instructions(
+      targets: Map[Language, Var[Option[String]]],
+      onProgramPage: () => Unit
+  ): HtmlElement = {
     val query    = Var("")
     val enabled  = Var(Language.values.toSet)
     val chosen   = Var(Option.empty[View.Entry])
@@ -68,6 +74,12 @@ object Explorer {
       selected.filter((language, _) => enabled(language)).toVec
         .flatMap((language, target) => language.model.entries(target).filter(_.searchText.contains(needle)))
         .map(entry => ((rank(entry, needle), entry.key, entry.language.ordinal), entry)).sortBy(_._1).map(_._2)
+    }
+    val viewport = Var((0.0, 0.0))
+    val shown    = results.combineWith(viewport.signal).map { (found, top, visible) =>
+      val first = math.min(found.size, math.max(0, (top / RowHeight).toInt - Overscan))
+      val last  = math.min(found.size, ((top + visible) / RowHeight).toInt + 1 + Overscan)
+      (total = found.size, first = first, rows = found.slice(first, last))
     }
     div(
       cls := "page instructions",
@@ -94,7 +106,16 @@ object Explorer {
         p(cls := "count", child.text <-- results.map(found => s"${found.size} instructions")),
         ul(
           cls := "results",
-          children <-- results.map(_.take(ListLimit)).split(identity)((entry, _, _) =>
+          inContext { list =>
+            def measure(): Unit = viewport.set((list.ref.scrollTop, list.ref.clientHeight.toDouble))
+            Seq(
+              onMountCallback(_ => measure()),
+              onScroll --> (_ => measure()),
+              windowEvents(_.onResize) --> (_ => measure())
+            )
+          },
+          child <-- shown.map(window => li(cls := "spacer", height := s"${window.first * RowHeight}px")),
+          children <-- shown.map(_.rows).split(identity)((entry, _, _) =>
             li(
               cls <-- chosen.signal.map(current => if (current.contains(entry)) "chosen" else ""),
               onClick.mapTo(Some(entry)) --> chosen,
@@ -102,20 +123,25 @@ object Explorer {
               entry.mnemonic
             )
           ),
-          child.maybe <-- results.map(found =>
-            Option.when(found.size > ListLimit)(li(cls := "more", s"${found.size - ListLimit} more; refine the search"))
+          child <-- shown.map(window =>
+            li(cls := "spacer", height := s"${(window.total - window.first - window.rows.size) * RowHeight}px")
           )
         )
       ),
-      mainTag(child <-- chosen.signal.map(_.fold(div(cls := "empty", "Select an instruction."))(entry(_))))
+      mainTag(child <--
+        chosen.signal.map(_.fold(div(cls := "empty", "Select an instruction."))(entry(_, targets, onProgramPage))))
     )
   }
 
-  private def entry(value: View.Entry): HtmlElement = div(
+  private def entry(
+      value: View.Entry,
+      targets: Map[Language, Var[Option[String]]],
+      onProgramPage: () => Unit
+  ): HtmlElement = div(
     cls := "entry",
     h2(span(cls := "badge", value.language.title), value.mnemonic),
     p(s"${value.formNames.size} ${if (value.formNames.size == 1) "form" else "forms"}"),
-    value.forms.zipWithIndex.map((form, index) => this.form(value, form, index < 3))
+    value.forms.zipWithIndex.map((form, index) => this.form(value, form, index < 3, targets, onProgramPage))
   )
 
   private def syntax(tokens: Vec[View.Token]): HtmlElement = pre(
@@ -126,7 +152,13 @@ object Explorer {
     }
   )
 
-  private def form(entry: View.Entry, value: View.Form, expanded: Boolean): HtmlElement = {
+  private def form(
+      entry: View.Entry,
+      value: View.Form,
+      expanded: Boolean,
+      targets: Map[Language, Var[Option[String]]],
+      onProgramPage: () => Unit
+  ): HtmlElement = {
     val opened = Var(expanded)
     detailsTag(
       inContext(details =>
@@ -144,7 +176,12 @@ object Explorer {
           cls := "operands",
           thead(tr(th("#"), th("Operand"), th("Kind"), th("Detail"))),
           tbody(value.operands.zipWithIndex.map((operand, index) =>
-            tr(td(index.toString), td(operand.name), td(operand.kind), td(operand.detail))
+            tr(
+              td(index.toString),
+              td(operand.name),
+              td(operand.kind),
+              td(operand.detail, operand.domain.map(domain => DomainView.operand(domain)))
+            )
           ))
         )
       ),
@@ -168,20 +205,17 @@ object Explorer {
       div(
         cls := "semantics",
         h4("Semantics"),
-        child <-- opened.signal.distinct.map(if (_) semanticsOf(entry, value) else emptyNode)
+        child <-- opened.signal.distinct.map(if (_)
+          MachineSemanticsPanel.render(
+            entry.language.model.semanticsOf(entry, value),
+            entry.language,
+            () => targets(entry.language).now(),
+            Some(onProgramPage)
+          )
+        else emptyNode)
       )
     )
   }
-
-  private def semanticsOf(entry: View.Entry, value: View.Form): Node =
-    entry.language.model.semantics(entry, value) match {
-      case Left(reason) =>
-        p(cls := "pending", reason.summary, reason.detail.map(detail => span(cls := "detail", s" $detail")))
-      case Right(described) =>
-        div(described.map(item =>
-          div(pre(cls := "instance", item.instance), pre(ScalaBackend.source(item.definition)))
-        ))
-    }
 
   private def registers(targets: Map[Language, Var[Option[String]]]): HtmlElement = {
     val language = Var(Language.SASS)

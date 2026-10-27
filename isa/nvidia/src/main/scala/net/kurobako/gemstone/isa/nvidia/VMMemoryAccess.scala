@@ -151,13 +151,13 @@ private object VMMemoryAccess {
   /** CUB's scan descriptors rely on coherent aligned status/value transfers, including 16-byte double descriptors. This
     * target behaviour is stronger than PTX's minimum vector ordering; it is not a general 128-bit atomic guarantee.
     */
-  def coherentVector(context: VMContext, access: MemoryAccess, address: Long, size: Int >= 0): Boolean =
-    (access == MemoryAccess.Global(false) || access == MemoryAccess.Generic(false)) &&
+  def splitVector(context: VMContext, access: MemoryAccess, address: Long, size: Int >= 0): Boolean =
+    !((access == MemoryAccess.Global(false) || access == MemoryAccess.Generic(false)) &&
       size > 0 && size <= 16 &&
       (size & (size.raw - 1)) == 0 &&
       (address & (size.raw - 1).toLong) == 0L &&
       !VMAddressSpace.isShared(address) && !VMAddressSpace.isLocal(address) &&
-      context.workgroup.withBuffer(address, size)((_, _) => false)(true)
+      context.workgroup.withBuffer(address, size)((_, _) => false)(true))
 
   /** The misaligned-address fault of an access of `size` bytes at `address`, or null where it is aligned to the largest
     * power of two dividing `size`. NVIDIA GPUs fault such an access in every state space; parameter buffers are exempt,

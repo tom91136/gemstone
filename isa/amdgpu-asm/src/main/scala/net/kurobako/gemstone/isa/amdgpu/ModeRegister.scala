@@ -15,7 +15,10 @@ private object ModeRegister {
   /** GFX12 retired IEEE mode and DX10 clamping, so its MODE bits 8 and 9 always read as clear. */
   def ieeeSupported(isa: ISA): Boolean = isa != ISA.RDNA4 && isa != ISA.CDNA5
 
+  /** The MODE bits a write changes; the others keep their value. */
+  def writable(isa: ISA): Int = if (ieeeSupported(isa)) -1 else ~(DX10Clamp | IEEE)
+
   /** Hardware ignores OMOD under IEEE mode or when the result width keeps output denormals. */
-  def outputModifierApplies(mode: Int, width: Int in (16, 32, 64)): Boolean =
-    (mode & (IEEE | (if (width == 32) Denormal32Output else Denormal16And64Output))) == 0
+  def outputModifierDisabled(mode: Int, width: Int in (16, 32, 64)): Boolean =
+    (mode & (IEEE | (if (width == 32) Denormal32Output else Denormal16And64Output))) != 0
 }

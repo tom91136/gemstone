@@ -6,6 +6,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
+import net.kurobako.gemstone.vm.*
 
 class CooperativeVectorSuite extends munit.FunSuite {
 
@@ -417,6 +418,35 @@ class CooperativeVectorSuite extends munit.FunSuite {
     assertEquals(
       words(memory, grad, offset = 0, count = 36),
       outer.map(value => single(value.toFloat)) ++ sums.map(single)
+    )
+  }
+
+  test("a cooperative vector load of a type that is not a vector fails when the module loads") {
+    val module = spv"""
+      OpCapability Shader
+      OpCapability VulkanMemoryModel
+      OpCapability CooperativeVectorNV
+      OpExtension "SPV_NV_cooperative_vector"
+      OpMemoryModel Logical Vulkan
+      OpEntryPoint GLCompute %main "main"
+      OpExecutionMode %main LocalSize 1 1 1
+      %void = OpTypeVoid
+      %fn = OpTypeFunction %void
+      %float = OpTypeFloat 32
+      %uint = OpTypeInt 32 0
+      %uint_0 = OpConstant %uint 0
+      %ptr = OpTypePointer Function %float
+      %pointer = OpUndef %ptr
+      %main = OpFunction %void None %fn
+      %entry = OpLabel
+      %load = OpCooperativeVectorLoadNV %float %pointer %uint_0 None
+      OpReturn
+      OpFunctionEnd
+    """
+    val at = module.instructions.indexWhere(_.opcode.raw == "OpCooperativeVectorLoadNV")
+    assertEquals(
+      SPIRVLowering.failures(module, environment(module)).map(_(at)),
+      Right(Some(Fault.InvalidRequest("OpCooperativeVectorLoadNV type %4 is not a cooperative vector")))
     )
   }
 

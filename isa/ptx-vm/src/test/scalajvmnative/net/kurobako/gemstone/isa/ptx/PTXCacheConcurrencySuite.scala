@@ -156,10 +156,13 @@ class PTXCacheConcurrencySuite extends munit.FunSuite {
       }
 
       launch(firstSession, first, firstOutput)
-      assertEquals(firstSession.read(firstOutput, 0L, 4).map(LittleEndian.decode(_, 0, 4)), Right(17L))
+      assertEquals(firstSession.read(AllocationRange(firstOutput, 0L, 4)).map(LittleEndian.decode(_, 0, 4)), Right(17L))
       assertEquals(firstSession.unload(first), Right(()))
       launch(secondSession, second, secondOutput)
-      assertEquals(secondSession.read(secondOutput, 0L, 4).map(LittleEndian.decode(_, 0, 4)), Right(29L))
+      assertEquals(
+        secondSession.read(AllocationRange(secondOutput, 0L, 4)).map(LittleEndian.decode(_, 0, 4)),
+        Right(29L)
+      )
     }.get
   }
 }

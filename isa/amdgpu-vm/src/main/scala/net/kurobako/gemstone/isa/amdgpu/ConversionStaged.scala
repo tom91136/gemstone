@@ -12,7 +12,8 @@ private object ConversionStaged {
   inline def staged[V, R](inline algebra: Algebra[V], instruction: Instruction)(inline sinks: AMDGPUSinks[V, R])(
       otherwise: => R
   ): R = instruction match {
-    case narrowed: Instruction.VConvertNarrow => sinks.section(FloatSemantics.narrow(algebra, narrowed)(sinks))
+    case narrowed: Instruction.VConvertNarrow   => sinks.section(FloatSemantics.narrow(algebra, narrowed)(sinks))
+    case packed: Instruction.VConvertPackedHalf => sinks.section(FloatSemantics.packedHalf(algebra, packed)(sinks))
     case scaled: Instruction.VScaledConvert => sinks.section(ScaledConversionSemantics.convert(algebra, scaled)(sinks))
     case stochastic: Instruction.VConvertStochasticHalf =>
       sinks.section(ScaledConversionSemantics.stochasticHalf(algebra, stochastic)(sinks))

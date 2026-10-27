@@ -303,8 +303,6 @@ private object VMCompiler {
     } yield DeviceFunction(routine, parameters, returns)
 
   /** Frame-local offsets of `.local` variables followed by the parameters whose address is taken. */
-  // Runs once per routine at compile time, and the offsets are Map values either way.
-  @SuppressWarnings(Array("baumkuchen:loop-boxing"))
   private def frameLocals(statements: Vec[Statement], spilled: Vec[Parameter])
       : Either[Error, (Map[NonEmpty[String], Long], Int >= 0)] =
     spilled.traverse { parameter =>

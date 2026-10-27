@@ -5,15 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 object RegisterBank {
-  private val known                              = Vec(R, UR, B, SB)
-  def fromSpelling(value: String): RegisterBank  = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
-  def capacity(value: RegisterBank): Option[Int] = value match {
-    case R          => Some(256)
-    case UR         => Some(256)
-    case B          => Some(16)
-    case SB         => Some(6)
-    case Unknown(_) => None
-  }
+  private val known                             = Vec(R, UR, B, SB)
+  def fromSpelling(value: String): RegisterBank = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
+
+  /** The registers the tables' largest vocabulary of `value` names, zero register included. */
+  def capacity(value: RegisterBank): Option[Int] = SassDomains.bankSize(value.spelling)
 }
 
 enum RegisterBank(val spellingValue: NonEmpty[String]) derives CanEqual {

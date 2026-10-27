@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.explorer
 
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.spirv.*
@@ -43,16 +44,34 @@ object SPIRVModel extends Model {
     definition.decoder(RawInstruction(definition.opcodeNumber, words)).toOption
   }
 
+  private def operandDetail(shape: OperandShape, constraint: Option[OperandConstraint]): String =
+    constraint.fold(shape.kind.category.toString)(value => s"${shape.kind.category}, must be ${value.describe}")
+
+  /** The values a Scope or MemorySemantics operand takes, listed under its constraint. */
+  private def domainOf(constraint: OperandConstraint): Option[View.Domain] = constraint match {
+    case OperandConstraint.ScopeId           => Some(View.Domain("Scope", valuesOf(OperandKind.Scope)))
+    case OperandConstraint.MemorySemanticsId =>
+      Some(View.Domain("MemorySemantics", valuesOf(OperandKind.MemorySemantics)))
+    case _ => None
+  }
+
+  private def valuesOf(kind: OperandKind): Vec[(String, String)] =
+    Instruction.operandKinds.get(kind).fold(Vec.empty[(String, String)])(
+      _.enumerants.map(value => value.value.toString -> value.name.raw)
+    )
+
   private def form(definition: Instruction.Definition): View.Form = {
     val number   = definition.opcodeNumber.toInt
     val names    = instance(definition).map(SPIRVInstances.operandNames(_))
-    val operands = definition.shapes.zipWithIndex.map((shape, index) =>
+    val operands = definition.shapes.zipWithIndex.map { (shape, index) =>
+      val constraint = OperandConstraintCheck.of(definition.opcode.raw, index, shape.kind)
       View.OperandSlot(
         names.flatMap(_.lift(index)).getOrElse(s"word ${index + 1}"),
         quantified(shape),
-        shape.kind.category.toString
+        operandDetail(shape, constraint),
+        constraint.flatMap(domainOf)
       )
-    )
+    }
     View.Form(
       definition.opcode.raw,
       Vec[View.Token](View.Token.Text(definition.opcode.raw)) ++ definition.shapes.flatMap(shape =>
@@ -228,9 +247,82 @@ object SPIRVModel extends Model {
       Unavailable.NotModelled(s"Requires ${capabilities.mkString(" or ")}: ${families.mkString(", ")}.")
     }
 
+  override def semanticsOf(entry: View.Entry, form: View.Form): Semantics = {
+    val outcomes = machined.computeIfAbsent((entry, form), _ => MachineSemantics.machine(entry.mnemonic))
+    if (outcomes.nonEmpty) {
+      withMachineOutcomes(entry, form, outcomes)
+    } else
+      definitions.get(entry.mnemonic).flatMap(definition =>
+        loaded(definition).map(Semantics.LoadTime(_)).orElse(noOp(definition).map(Semantics.NoOp(_)))
+      ).orElse(noOps.get(entry.mnemonic).map(Semantics.NoOp(_)))
+        .getOrElse(Semantics.of(semantics(entry, form), Vec.empty))
+  }
+
+  private val machined =
+    ConcurrentHashMap[(View.Entry, View.Form), Vec[(instance: String, outcome: Either[Unrendered, Definition])]]()
+
+  override protected def clearOutcomes(): Unit = machined.clear()
+
+  private val loadedReasons = ConcurrentHashMap[String, Option[String]]()
+
+  /** Why the VM reads `definition` as it loads a module, whether it lowers it to an op that does nothing or the loader
+    * reads it alone.
+    */
+  private def loaded(definition: Instruction.Definition): Option[String] =
+    loadedReasons.computeIfAbsent(
+      definition.opcode.raw,
+      _ => loadTime(definition, family(definition).isRight).orElse(loadTimeReasons.get(definition.opcode.raw))
+    )
+
+  private def grammarClass(definition: Instruction.Definition): String =
+    requirements(definition).fold("")(_.grammarClass)
+
+  /** Why `definition` has no effect of its own: it dispatches to an extended instruction, or the grammar files it with
+    * the miscellaneous instructions and gives it neither operands nor a result.
+    */
+  private def noOp(definition: Instruction.Definition): Option[String] =
+    if (dispatching(definition.opcode.raw)) Some("an extended instruction is described under its own entry.")
+    else
+      Option.when(grammarClass(definition) == "Miscellaneous" && definition.shapes.isEmpty)(
+        s"${definition.opcode} takes no operands and has no result."
+      )
+
+  /** Instructions with no effect of their own, and why the VM has none. */
+  private val noOps: Map[String, String] = Map(
+    "OpenCL.std prefetch" -> "a cache hint with no observable effect.",
+    "OpLoopMerge"         -> "a structured merge; the VM reconverges lanes there, outside the machine semantics.",
+    "OpSelectionMerge"    -> "a structured merge; the VM reconverges lanes there, outside the machine semantics.",
+    "OpLoopControlINTEL"  -> "a loop control hint with no observable effect.",
+    "OpAssumeTrueKHR"     -> "an assumption the VM does not check.",
+    "OpLifetimeStart"     -> "a lifetime marker; the VM checks only that its range lies in storage.",
+    "OpLifetimeStop"      -> "a lifetime marker; the VM checks only that its range lies in storage.",
+    "OpCommitReadPipe" -> "packets are visible once reserved and transferred, so a commit has nothing left to publish.",
+    "OpCommitWritePipe" ->
+      "packets are visible once reserved and transferred, so a commit has nothing left to publish.",
+    "OpGroupCommitReadPipe" ->
+      "packets are visible once reserved and transferred, so a commit has nothing left to publish.",
+    "OpGroupCommitWritePipe" ->
+      "packets are visible once reserved and transferred, so a commit has nothing left to publish."
+  )
+
+  /** Instructions the loader resolves as the module loads, which the grammar files outside its declaration classes. */
+  private val loadTimeReasons: Map[String, String] = Map(
+    "OpAliasDomainDeclINTEL"             -> "an alias domain the loader reads, which only permits optimisations.",
+    "OpAliasScopeDeclINTEL"              -> "an alias scope the loader reads, which only permits optimisations.",
+    "OpAliasScopeListDeclINTEL"          -> "an alias scope list the loader reads, which only permits optimisations.",
+    "OpConstantFunctionPointerINTEL"     -> "a function pointer constant the loader resolves to its function.",
+    "OpCompositeConstructContinuedINTEL" -> "a continuation the loader merges into the construct it follows.",
+    "OpSizeOf"              -> "the size of the pointee's layout, which the VM computes as the module loads.",
+    "OpConstantPipeStorage" -> "a pipe storage constant the loader lays out as a pipe header.",
+    "OpTypeTensorARM"       -> "a tensor type the loader reads, whose rank and element type its accesses use."
+  )
+
   /** Grammar classes of module-level declarations, which the VM reads as it loads a module rather than runs. */
   private val declarations =
     Set("Annotation", "Constant-Creation", "Debug", "Extension", "Function", "Mode-Setting", "Type-Declaration")
+
+  /** Extension-class instructions that execute, dispatching to the extended instruction set they name. */
+  private val dispatching = Set("OpExtInst", "OpExtInstWithForwardRefsKHR")
 
   /** Why the instances of an entry the VM lowers have no definition: the VM rejects them as unimplemented, no staged
     * family takes them, or none renders and loads.
@@ -258,27 +350,40 @@ object SPIRVModel extends Model {
       case Array(set, name) =>
         unmodelled(ExtendedInstruction.grammar.get(set).flatMap(_.get(name)).fold(Vec.empty[String])(_.capabilities))
           .getOrElse(reason(instances, "extended instructions"))
+      case _ if dispatching(entry.mnemonic) =>
+        Unavailable.Mechanics("dispatches to the extended instruction; see the extended instruction set entries")
+      case _ if entry.mnemonic.matches("OpDPd[xy].*|OpFwidth.*") =>
+        Unavailable.NotModelled("derivatives need fragment quads, which compute does not have.")
       case _ =>
         definitions.get(entry.mnemonic).fold[Unavailable](
           Unavailable.NotInstantiated(s"${entry.mnemonic} is not in the grammar.")
         ) { definition =>
-          val required     = requirements(definition)
-          val grammarClass = required.fold("")(_.grammarClass)
-          // the loader reads core declarations, but an extension's only where it defines what they declare
-          val core = required.forall(_.version != "None")
           family(definition).fold(
             fault =>
-              unmodelled(required.fold(Vec.empty[String])(_.capabilities)).getOrElse(
-                if (declarations(grammarClass) && (if (values(grammarClass)) declared(definition, core) else core))
-                  Unavailable.Mechanics(s"Read as the module loads, as the grammar's $grammarClass class.")
-                else if (declarations(grammarClass))
-                  Unavailable.NotImplemented(s"${definition.opcode} is not read when the module loads")
-                else Unavailable.NotImplemented(fault.message.raw)
+              unmodelled(requirements(definition).fold(Vec.empty[String])(_.capabilities)).getOrElse(
+                loadTime(definition).map(Unavailable.Mechanics(_)).getOrElse(
+                  if (declarations(grammarClass(definition)))
+                    Unavailable.NotImplemented(s"${definition.opcode} is not read when the module loads")
+                  else Unavailable.NotImplemented(fault.message.raw)
+                )
               ),
             reason(instances, _)
           )
         }
     }
+  }
+
+  /** Why the VM reads `definition` as it loads a module rather than runs it: the grammar files it in a declaration
+    * class, and the VM lowers it, or the loader reads core declarations, but an extension's only where it defines what
+    * they declare.
+    */
+  private def loadTime(definition: Instruction.Definition, lowered: Boolean = false): Option[String] = {
+    val declaration = grammarClass(definition)
+    val core        = requirements(definition).forall(_.version != "None")
+    Option.when(
+      !dispatching(definition.opcode.raw) && declarations(declaration) &&
+        (lowered || (if (values(declaration)) declared(definition, core) else core))
+    )(s"Read as the module loads, as the grammar's $declaration class.")
   }
 
   /** Declaration classes whose instructions define a type or a constant, which the loader may not know. */

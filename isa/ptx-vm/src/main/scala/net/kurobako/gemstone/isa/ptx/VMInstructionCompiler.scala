@@ -274,6 +274,7 @@ private object VMInstructionCompiler {
     Opcode.Cos,
     Opcode.Tanh
   )
+  private val ScalarBf16Opcodes              = Set(Opcode.Fma, Opcode.Min, Opcode.Max)
   private val ScalarFloatTypes               = Set(Modifier.F16, Modifier.F32, Modifier.F64)
   private val DirectedRoundings              = Set(Modifier.Rz, Modifier.Rm, Modifier.Rp)
   private val DirectedPackedFloat32Modifiers = DirectedRoundings ++
@@ -307,6 +308,7 @@ private object VMInstructionCompiler {
               case _          => Set(Modifier.Rn)
             })
         else if (bf16 && opcode == Opcode.Fma) Set(Modifier.Bf16, Modifier.Rn, Modifier.Relu)
+        else if (bf16 && (opcode == Opcode.Min || opcode == Opcode.Max)) Set(Modifier.Bf16, Modifier.NaN)
         else if (bf16) Set(Modifier.Bf16, Modifier.Rn)
         else ScalarFloatTypes ++
           (opcode match {
@@ -339,7 +341,7 @@ private object VMInstructionCompiler {
       if (threeInput && (modifiers.contains(Modifier.Xorsign) || !modifiers.contains(Modifier.F32)))
         invalid("three-input min and max take binary32 operands without xorsign")
       else if (threeInput) Right(())
-      else if (bf16 && opcode != Opcode.Fma)
+      else if (bf16 && !ScalarBf16Opcodes(opcode))
         Left(Error.Unsupported(
           instruction.qualifiedOpcode,
           "scalar bf16 arithmetic is not implemented for this operation"
@@ -468,6 +470,9 @@ private object VMInstructionCompiler {
         else if (has(Modifier.NaN)) FloatOperation.Maximum
         else FloatOperation.MaximumNumber
       if (endsWith(Modifier.F16x2, Modifier.Bf16x2)) packed(floating, destination, left, right)
+      else if (endsWith(Modifier.Bf16)) binary(destination, left, right)(
+        VMIR.Instruction.FloatBinaryPacked(floating, _, _, _, PackedFloatFormat.BF16x2, floatControl(modifiers))
+      )
       else if (hasAny(FloatTypes)) float(floating, destination, left, right)
       else integer(
         if (minimum) IntegerOperation.Minimum(signed) else IntegerOperation.Maximum(signed),
@@ -908,7 +913,7 @@ private object VMInstructionCompiler {
         VMMemoryCompiler.loadNonCoherent(destination, address, modifiers)
       case Form.St(address, source, policy) if policy.isEmpty == !has(Modifier.L2CacheHint) =>
         cachePolicy(policy).flatMap(_ => VMMemoryCompiler.store(address, source, modifiers))
-      case Form.Mov(destination, source) => move(destination, source, modifiers)
+      case Form.Mov(destination, source) => move(Transfer(destination, source, modifiers))
       case _                             => unaryAndVideo()
     }
     def unaryAndVideo(): Lowered = instruction.form match {
@@ -1602,7 +1607,8 @@ private object VMInstructionCompiler {
     extensions()
   }
 
-  private def move(destination: Operand, source: Operand, modifiers: Vec[Modifier])(using scope: Scope): Lowered =
+  private def move(transfer: Transfer)(using scope: Scope): Lowered = {
+    val Transfer(destination, source, modifiers) = transfer
     modifiers match {
       case Vec(Modifier.B128) =>
         for {
@@ -1641,6 +1647,7 @@ private object VMInstructionCompiler {
       case _ =>
         Left(Error.Unsupported(s"mov.${modifiers.map(_.name.raw).mkString(".")}", "no handwritten semantic family"))
     }
+  }
 
   private def predicateBinary(operation: PredicateOperation, destination: Operand, left: Operand, right: Operand)(
       using scope: Scope

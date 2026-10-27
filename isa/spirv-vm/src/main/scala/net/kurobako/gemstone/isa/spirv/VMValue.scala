@@ -11,9 +11,9 @@ private object VMValue {
   }
 }
 
-// the type id is read on every value of the hot path, so hoisting it out would allocate a wrapper for each
-@SuppressWarnings(Array("baumkuchen:common-factor"))
 private enum VMValue {
+  def typeId: Int
+
   case Bits(typeId: Int, lanes: Array[Long])
   case Address(typeId: Int, pointer: Pointer)
 }

@@ -340,7 +340,17 @@ lazy val nvidia = module(projectMatrix.in(file("isa/nvidia")))
   .settings(Publishing.library("The execution VM PTX and SASS share."))
   .dependsOn(core % "compile->compile;test->test")
   .settings(name := "gemstone-isa-nvidia")
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = Seq(
+      libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scala3Version % Test,
+      Test / javaOptions += {
+        val converter = fileConverter.value
+        "-Dgemstone.nvidia.classpath=" + (Test / fullClasspath).value
+          .map(entry => converter.toPath(entry.data).toString).mkString(java.io.File.pathSeparator)
+      }
+    )
+  )
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
   .jsPlatform(scalaVersions = Seq(scala3Version), settings = jsSettings)
 
@@ -415,7 +425,17 @@ lazy val amdgpuVm = module(projectMatrix.in(file("isa/amdgpu-vm")))
   .settings(Publishing.library("AMDGPU wave execution."))
   .dependsOn(amdgpuAsm % "compile->compile;test->test")
   .settings(name := "gemstone-isa-amdgpu-vm")
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = Seq(
+      libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scala3Version % Test,
+      Test / javaOptions += {
+        val converter = fileConverter.value
+        "-Dgemstone.amdgpu.classpath=" + (Test / fullClasspath).value
+          .map(entry => converter.toPath(entry.data).toString).mkString(java.io.File.pathSeparator)
+      }
+    )
+  )
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
   .jsPlatform(scalaVersions = Seq(scala3Version), settings = jsSettings)
 
@@ -449,12 +469,23 @@ lazy val spirvVm = module(projectMatrix.in(file("isa/spirv-vm")))
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
     axisValues = Seq.empty,
-    configure = _.settings(Test / fork := true)
+    configure = _.settings(
+      Test / fork := true,
+      libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scala3Version % Test,
+      Test / javaOptions += {
+        val converter = fileConverter.value
+        "-Dgemstone.spirv.classpath=" + (Test / fullClasspath).value
+          .map(entry => converter.toPath(entry.data).toString).mkString(java.io.File.pathSeparator)
+      }
+    )
   )
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
   .jsPlatform(scalaVersions = Seq(scala3Version), settings = jsSettings)
 
 lazy val explorerSite = taskKey[Path]("Static instruction explorer: index.html, stylesheet and the optimised script.")
+
+lazy val explorerServe     = taskKey[Unit]("Serve the built explorer over HTTP, for a browser.")
+lazy val explorerServePort = settingKey[Int]("Port the explorer server listens on.")
 
 lazy val explorer = module(projectMatrix.in(file("explorer")))
   .dependsOn(ptxVm, sassVm, amdgpuVm, spirvVm)
@@ -483,6 +514,25 @@ lazy val explorer = module(projectMatrix.in(file("explorer")))
         IO.copyDirectory((Compile / fullLinkJS / scalaJSLinkerOutputDirectory).value, output)
         IO.copyDirectory(root / "explorer/src/main/site", output)
         output.toPath
+      },
+      explorerServePort :=
+        sys.props
+          .get("explorer.port")
+          .flatMap(_.toIntOption)
+          .orElse(sys.env.get("EXPLORER_PORT").flatMap(_.toIntOption))
+          .getOrElse(8080),
+      explorerServe := Def.uncached {
+        val log     = streams.value.log
+        val output  = explorerSite.value
+        val port    = explorerServePort.value
+        val address = ExplorerServer.start(output, port) match {
+          case Right(bound) => bound
+          case Left(error)  => throw new MessageOnlyException(error)
+        }
+        log.info(s"Serving $output at http://localhost:${address.getPort}/")
+        log.info("Rebuild with explorerJS/explorerSite, reload the page to pick the new script up, Ctrl-C to stop.")
+        log.info("Pass -Dexplorer.port=NNNN or set EXPLORER_PORT to serve on another port.")
+        ExplorerServer.await()
       }
     )
   )

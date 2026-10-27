@@ -16,7 +16,8 @@ import scala.util.boundary.break
 
 private[isa] object VMInterpreter {
 
-  private case class Cohort(pc: Pc, lanes: VMLaneMask, frame: VMFrame)
+  // The unit a cohort runs as: its identity follows it as it splits, parks and finishes, so a timeline can draw it.
+  private case class Cohort(id: Int >= 0, pc: Pc, lanes: VMLaneMask, frame: VMFrame)
   private case class ClusterWaiting(cohort: Cohort, phase: Long, arrival: Boolean)
 
   /** Cluster barrier phases shared by the workgroups of one cluster, which a phase completes for once every live lane
@@ -51,6 +52,139 @@ private[isa] object VMInterpreter {
       reduction: Option[BarrierReduction] = None,
       resumeOnArrival: Boolean = false
   )
+
+  /** Cohorts ready to run in arrival order, at most one per frame and pc: a cohort arriving where one is already queued
+    * joins its lanes. An index by frame and pc finds that cohort without scanning the queue, and a cohort taken from
+    * the middle leaves an empty slot that is dropped when it reaches the head. The index is an open-addressing table
+    * that deletes by shifting entries back, so steady-state adds and removals allocate nothing; it doubles only when
+    * more cohorts are queued at once than ever before.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
+  private class ReadyQueue {
+    private class Slot {
+      var cohort: Cohort | Null = null
+    }
+
+    private val order  = mutable.ArrayDeque.empty[Slot]
+    private val spare  = mutable.ArrayBuffer.empty[Slot]
+    private var frames = 0
+    private var count  = 0
+
+    // a key is never zero because frame handles start at one, so zero marks a free entry
+    private var keys  = Array.ofDim[Long](8)
+    private var slots = Array.ofDim[Slot | Null](8)
+    private var shift = 61
+
+    def size: Int         = count
+    def isEmpty: Boolean  = count == 0
+    def nonEmpty: Boolean = count != 0
+
+    private def key(pc: Pc, frame: VMFrame): Long = {
+      if (frame.readyId == 0) {
+        frames += 1
+        frame.readyId = frames
+      }
+      (frame.readyId.toLong << 32) | (pc.toInt.toLong & 0xffffffffL)
+    }
+
+    private def home(at: Long): Int = ((at * 0x9e3779b97f4a7c15L) >>> shift).toInt
+
+    /** The table position of the key, or -1 when it is absent. */
+    private def find(at: Long): Int = {
+      val mask = keys.length - 1
+      var i    = home(at)
+      while (keys(i) != 0L && keys(i) != at) i = (i + 1) & mask
+      if (keys(i) == at) i else -1
+    }
+
+    private def place(at: Long, slot: Slot): Unit = {
+      val mask = keys.length - 1
+      var i    = home(at)
+      while (keys(i) != 0L) i = (i + 1) & mask
+      keys(i) = at
+      slots(i) = slot
+    }
+
+    private def put(at: Long, slot: Slot): Unit = {
+      if ((count + 1) * 2 > keys.length) {
+        val oldKeys  = keys
+        val oldSlots = slots
+        keys = Array.ofDim[Long](oldKeys.length * 2)
+        slots = Array.ofDim[Slot | Null](oldKeys.length * 2)
+        shift -= 1
+        var i = 0
+        while (i < oldKeys.length) {
+          if (oldKeys(i) != 0L) place(oldKeys(i), oldSlots(i).nn)
+          i += 1
+        }
+      }
+      place(at, slot)
+    }
+
+    /** Frees the table position, moving back the entries after it that probe through it. */
+    private def erase(position: Int): Unit = {
+      val mask = keys.length - 1
+      var hole = position
+      var next = (position + 1) & mask
+      while (keys(next) != 0L) {
+        if (((next - home(keys(next))) & mask) >= ((next - hole) & mask)) {
+          keys(hole) = keys(next)
+          slots(hole) = slots(next)
+          hole = next
+        }
+        next = (next + 1) & mask
+      }
+      keys(hole) = 0L
+      slots(hole) = null
+    }
+
+    /** Queues the cohort, or adds its lanes to the cohort already queued at its pc in its frame. */
+    def add(cohort: Cohort): Unit = {
+      val at       = key(cohort.pc, cohort.frame)
+      val position = find(at)
+      if (position < 0) {
+        val slot = if (spare.isEmpty) Slot() else spare.remove(spare.length - 1)
+        slot.cohort = cohort
+        order += slot
+        put(at, slot)
+        count += 1
+      } else {
+        val queued   = slots(position).nn
+        val existing = queued.cohort.nn
+        queued.cohort = existing.copy(lanes = existing.lanes.union(cohort.lanes))
+      }
+    }
+
+    def removeHead(): Cohort = {
+      var slot = order.removeHead()
+      while (slot.cohort eq null) {
+        spare += slot
+        slot = order.removeHead()
+      }
+      val cohort = slot.cohort.nn
+      erase(find(key(cohort.pc, cohort.frame)))
+      slot.cohort = null
+      spare += slot
+      count -= 1
+      cohort
+    }
+
+    /** Removes the cohort queued at the pc in the frame, or returns null when there is none. */
+    def take(pc: Pc, frame: VMFrame): Cohort | Null = {
+      val position = find(key(pc, frame))
+      if (position < 0) null
+      else {
+        val queued = slots(position).nn
+        val cohort = queued.cohort
+        queued.cohort = null
+        erase(position)
+        count -= 1
+        cohort
+      }
+    }
+
+    def cohorts: Iterable[Cohort] = order.map(_.cohort).collect { case cohort: Cohort => cohort }
+  }
 
   private class Block(val laneCount: Int in 1 ~ 1024) {
     val workgroup: VMWorkgroup = VMWorkgroup(laneCount)
@@ -335,7 +469,14 @@ private[isa] object VMInterpreter {
   ) {
     private val workgroup = block.workgroup
     private val effects   = block.effects
-    private val root = VMFrame(kernel.entry.routine, block.frames.acquire(kernel.entry.routine), 0L, None, initialLive)
+    private val observing = device.control.observer.isDefined
+    private val root      = VMFrame(
+      kernel.entry.routine,
+      block.frames.acquire(kernel.entry.routine, observing),
+      0L,
+      None,
+      initialLive
+    )
     private val context = VMContext(
       kernel,
       geometry,
@@ -350,13 +491,20 @@ private[isa] object VMInterpreter {
       cluster.nonEmpty
     )
     private var live         = initialLive
-    private val ready        = mutable.ArrayDeque.empty[Cohort]
+    private val ready        = ReadyQueue()
     private var stalled      = 0
-    private val waiting      = mutable.ArrayBuffer.empty[Waiting]
     private val barrierMasks = mutable.Map.empty[BarrierKey, VMLaneMask]
     private val operations   = mutable.Map.empty[BarrierKey, Option[Option[PredicateOperation]]]
     private val counts       = mutable.Map.empty[BarrierKey, Int]
     private val warpMembers  = mutable.Map.empty[BarrierKey, Long]
+    private var units        = 0
+
+    // Waiting cohorts by barrier key, in arrival order within a key. Emptied lists are kept for the next key, and the
+    // two scratch lists hold one release at a time.
+    private val waiting      = mutable.HashMap.empty[BarrierKey, mutable.ArrayBuffer[Waiting]]
+    private val spareWaiting = mutable.ArrayBuffer.empty[mutable.ArrayBuffer[Waiting]]
+    private val resumed      = mutable.ArrayBuffer.empty[Waiting]
+    private val released     = mutable.ArrayBuffer.empty[Waiting]
 
     private val warpArrivals       = Array.ofDim[VMLaneMask.Builder | Null]((workgroup.laneCount + 31) >>> 5)
     private val warpArrivalMembers = Array.ofDim[Long](warpArrivals.length)
@@ -373,20 +521,55 @@ private[isa] object VMInterpreter {
 
     private def fail(fault: Fault)(using Run): Nothing = break(Left(fault))
 
-    private val observing = device.control.observer.isDefined
+    /** A fresh identity for a unit of execution. A cohort that splits into several gives each part its own, so a
+      * timeline can draw the diverging paths apart.
+      */
+    private def mintUnit(): Int >= 0 = {
+      val id = units
+      units += 1
+      id.unsafe[Int >= 0]
+    }
 
-    private def observe(frame: VMFrame, pc: Pc, active: VMLaneMask)(using Run): Unit = device.control.observer.foreach {
-      observer =>
-        val at = location(frame, pc, active)
-        observer.instruction(at, View(frame, active)) match {
+    /** The unit a cohort runs as, which the timeline follows as it splits, parks and finishes. */
+    private def unit(cohort: Cohort, state: MachineUnit.State): MachineUnit =
+      MachineUnit(group, cohort.id, cohort.lanes.size.widen[Int >= 0], state)
+
+    private def observe(frame: VMFrame, cohort: Cohort, active: VMLaneMask, issue: Long)(using Run): Unit =
+      device.control.observer.foreach { observer =>
+        val at = location(frame, cohort.pc, active)
+        observer.instruction(at, View(frame, active, unit(cohort, MachineUnit.State.Running), issue)) match {
           case Left(fault) => fail(fault.at(at))
           case Right(())   => ()
         }
+      }
+
+    /** A change in what a unit is doing, which the timeline records between the issues it surrounds. */
+    private inline def transition(cohort: Cohort, inline kind: MachineEvent.Kind, inline at: Fault.Location): Unit =
+      if (observing) device.control.observer.foreach { observer =>
+        val event = kind
+        observer.transition(MachineEvent(unit(cohort, event.state), event, device.control.issued(), Some(at)))
+      }
+
+    /** A unit whose lanes have all left the machine finishes. */
+    private inline def retire(cohort: Cohort): Unit =
+      transition(cohort, MachineEvent.Kind.Retired, location(cohort.frame, cohort.pc, cohort.lanes))
+
+    private inline def resume(value: Waiting)(using Run): Unit = {
+      transition(
+        value.cohort,
+        MachineEvent.Kind.Resumed,
+        location(value.cohort.frame, value.cohort.pc, value.cohort.lanes)
+      )
+      advance(value.cohort, value.cohort.lanes)
     }
 
-    private class View(frame: VMFrame, active: VMLaneMask) extends CohortView {
-      def function: NonEmpty[String] = frame.routine.name
-      def lanes: Vec[Int >= 0]       = {
+    private class View(frame: VMFrame, active: VMLaneMask, machine: MachineUnit, issue: Long) extends CohortView {
+      def function: NonEmpty[String]            = frame.routine.name
+      def unit: MachineUnit                     = machine
+      def issued: Long                          = issue
+      def registerNames: Vec[NonEmpty[String]]  = frame.routine.registerNames
+      def predicateNames: Vec[NonEmpty[String]] = frame.routine.predicateNames
+      def lanes: Vec[Int >= 0]                  = {
         val indices = Vec.newBuilder[Int >= 0]
         active.foreachLane(lane => indices += lane.toInt.unsafe[Int >= 0])
         indices.result()
@@ -414,14 +597,7 @@ private[isa] object VMInterpreter {
     private def enqueue(cohort: Cohort): Unit = {
       val lanes = cohort.lanes.intersect(live)
       if (lanes.nonEmpty) {
-        var existing = 0
-        while (
-          existing < ready.size &&
-          (ready(existing).pc.toInt != cohort.pc.toInt || (ready(existing).frame ne cohort.frame))
-        )
-          existing += 1
-        if (existing == ready.size) ready += (if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes))
-        else ready(existing) = ready(existing).copy(lanes = ready(existing).lanes.union(lanes))
+        ready.add(if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes))
       }
     }
 
@@ -448,7 +624,7 @@ private[isa] object VMInterpreter {
         fail(Fault.Backend(
           s"device function ${function.routine.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
         ))
-      val lanes = block.frames.acquire(function.routine)
+      val lanes = block.frames.acquire(function.routine, observing)
       call.lanes.foreachLane { lane =>
         val source = caller.lanes(lane)
         val target = lanes(lane)
@@ -473,7 +649,7 @@ private[isa] object VMInterpreter {
         Some(VMFrame.Continuation(caller, cohort.pc, returnParameters, function.returnParameters)),
         call.lanes
       )
-      enqueue(Cohort(Pc.Entry, call.lanes, frame))
+      enqueue(Cohort(mintUnit(), Pc.Entry, call.lanes, frame))
     }
 
     private def synchroniseWarpInstruction(memberMask: Value, cohort: Cohort): (VMLaneMask, VMLaneMask) = {
@@ -509,18 +685,23 @@ private[isa] object VMInterpreter {
           if (sync.members.isEmpty) clusterArrived = VMLaneMask.Empty
           else sync.members.foreach(_.clusterArrived = VMLaneMask.Empty)
         }
-        val pending = clusterWaiting.toVector
+        val pending  = clusterWaiting.toVector
+        val departed = pending.filterNot(_.arrival).groupMapReduce(_.phase)(_.cohort.lanes)(_.union(_))
         clusterWaiting.clear()
         pending.foreach { entry =>
           val participants = if (entry.arrival) clusterArrived
-          else pending.filter(value => !value.arrival && value.phase == entry.phase)
-            .foldLeft(VMLaneMask.Empty)((mask, value) => mask.union(value.cohort.lanes))
+          else departed.getOrElse(entry.phase, VMLaneMask.Empty)
           val released = entry.cohort.lanes.intersect(live).filterLanes { lane =>
             val warp = live.warpBits(lane.raw)
             if (entry.arrival && entry.phase < clusterPhase) true
             else (entry.arrival || entry.phase < clusterPhase) && (participants.warpBits(lane.raw) & warp) == warp
           }
           if (!entry.arrival) released.foreachLane(lane => clusterWaitedPhase(lane.raw) = entry.phase)
+          transition(
+            entry.cohort,
+            MachineEvent.Kind.Resumed,
+            location(entry.cohort.frame, entry.cohort.pc, released)
+          )
           advance(entry.cohort, released)
           val remaining = entry.cohort.lanes.intersect(live).subtract(released)
           if (remaining.nonEmpty) clusterWaiting += entry.copy(cohort = entry.cohort.copy(lanes = remaining))
@@ -561,7 +742,7 @@ private[isa] object VMInterpreter {
       }
     }
 
-    private def reduce(released: Vec[Waiting])(using Run): Unit =
+    private def reduce(released: mutable.ArrayBuffer[Waiting])(using Run): Unit =
       released.view.flatMap(_.reduction).headOption.foreach { first =>
         var reduced = first.result.combination.contains(PredicateOperation.And)
         var count   = 0L
@@ -598,20 +779,64 @@ private[isa] object VMInterpreter {
         )
       }
 
+    private def park(value: Waiting): Unit = {
+      val parked = waiting.getOrElse(value.key, null)
+      if (parked != null) parked += value
+      else {
+        val fresh =
+          if (spareWaiting.isEmpty) mutable.ArrayBuffer.empty[Waiting] else spareWaiting.remove(spareWaiting.length - 1)
+        fresh += value
+        waiting(value.key) = fresh
+      }
+    }
+
+    private def canResume(value: Waiting, arrived: VMLaneMask): Boolean =
+      value.resumeOnArrival && value.cohort.lanes.filterLanes { lane =>
+        val members = live.warpBits(lane.raw)
+        (arrived.warpBits(lane.raw) & members) != members
+      }.isEmpty
+
+    /** Moves the parked cohorts that resume on arrival to `resumed`, leaving the others in order. */
+    private def takeResumable(parked: mutable.ArrayBuffer[Waiting], arrived: VMLaneMask): Unit = {
+      var kept  = 0
+      var index = 0
+      while (index < parked.length) {
+        val value = parked(index)
+        if (canResume(value, arrived)) resumed += value
+        else {
+          parked(kept) = value
+          kept += 1
+        }
+        index += 1
+      }
+      parked.dropRightInPlace(parked.length - kept)
+    }
+
+    /** Moves the parked cohorts with a participating lane to `released`, leaving the others in order. */
+    private def takeParticipating(parked: mutable.ArrayBuffer[Waiting], participants: VMLaneMask): Unit = {
+      var kept  = 0
+      var index = 0
+      while (index < parked.length) {
+        val value = parked(index)
+        if (value.cohort.lanes.intersect(participants).nonEmpty) released += value
+        else {
+          parked(kept) = value
+          kept += 1
+        }
+        index += 1
+      }
+      parked.dropRightInPlace(parked.length - kept)
+    }
+
     private def releaseBarrier(key: BarrierKey)(using Run): Unit = {
-      val arrived                            = barrierMasks.getOrElse(key, VMLaneMask.Empty)
-      def canResume(value: Waiting): Boolean =
-        value.key == key && value.resumeOnArrival && value.cohort.lanes.filterLanes { lane =>
-          val members = live.warpBits(lane.raw)
-          (arrived.warpBits(lane.raw) & members) != members
-        }.isEmpty
-      val resumed = Vec.from(waiting.filter(canResume(_)))
-      waiting.filterInPlace(value => !canResume(value))
-      resumed.foreach(value => advance(value.cohort, value.cohort.lanes))
+      val arrived = barrierMasks.getOrElse(key, VMLaneMask.Empty)
+      val parked  = waiting.getOrElse(key, null)
+      resumed.clear()
+      if (parked != null) takeResumable(parked, arrived)
+      resumed.foreach(resume)
       participants(key, arrived).foreach { participants =>
-        val released =
-          Vec.from(waiting.filter(value => value.key == key && value.cohort.lanes.intersect(participants).nonEmpty))
-        waiting.filterInPlace(value => value.key != key || value.cohort.lanes.intersect(participants).isEmpty)
+        released.clear()
+        if (parked != null) takeParticipating(parked, participants)
         val remaining = arrived.subtract(participants)
         if (remaining.nonEmpty) barrierMasks(key) = remaining
         else {
@@ -628,7 +853,11 @@ private[isa] object VMInterpreter {
           case _ => ()
         }
         reduce(released)
-        released.foreach(value => advance(value.cohort, value.cohort.lanes))
+        released.foreach(resume)
+      }
+      if (parked != null && parked.isEmpty) {
+        val _ = waiting.remove(key)
+        spareWaiting += parked
       }
     }
 
@@ -657,15 +886,25 @@ private[isa] object VMInterpreter {
         case _ =>
           counts(key) = arrival.count
           operations(key) = operation
-          waiting += Waiting(cohort.copy(lanes = arrival.lanes), key, reduction, resume)
+          park(Waiting(cohort.copy(lanes = arrival.lanes), key, reduction, resume))
           barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(arrival.lanes)
+          transition(
+            cohort,
+            MachineEvent.Kind.Blocked(MachineUnit.Reason.Barrier(s"barrier ${arrival.id}")),
+            location(cohort.frame, cohort.pc, arrival.lanes)
+          )
           releaseBarrier(key)
       }
     }
 
     private def arriveWarp(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey)(using Run): Unit = {
-      waiting += Waiting(cohort.copy(lanes = lanes), key)
+      park(Waiting(cohort.copy(lanes = lanes), key))
       barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(lanes)
+      transition(
+        cohort,
+        MachineEvent.Kind.Blocked(MachineUnit.Reason.Barrier(key.describe)),
+        location(cohort.frame, cohort.pc, lanes)
+      )
       releaseBarrier(key)
     }
 
@@ -698,6 +937,11 @@ private[isa] object VMInterpreter {
           clusterWaiting += ClusterWaiting(cohort.copy(lanes = lanes.result()), phase, false)
         )
       }
+      transition(
+        cohort,
+        MachineEvent.Kind.Blocked(MachineUnit.Reason.Cluster(s"cluster phase $clusterPhase")),
+        location(cohort.frame, cohort.pc, active)
+      )
       releaseCluster()
     }
 
@@ -719,7 +963,7 @@ private[isa] object VMInterpreter {
           // A lane is in exactly one cohort, running, ready or waiting, and leaves a frame's live set only by returning
           // or exiting from it. Once none are live, no cohort or waiter can run in or read this frame again.
           if (frame.live.isEmpty) block.frames.release(frame.lanes)
-          advance(Cohort(continuation.pc, mask, continuation.caller), mask)
+          advance(Cohort(mintUnit(), continuation.pc, mask, continuation.caller), mask)
       }
     }
 
@@ -747,7 +991,15 @@ private[isa] object VMInterpreter {
       context.frame = frame
       context.pc = cohort.pc
       context.active = active
-      if (observing && active.nonEmpty) observe(frame, cohort.pc, active)
+      // The launch's issue ordinal is its timeline's time axis; only an observed launch needs one.
+      val issue = if (observing) device.control.nextIssue() else 0L
+      if (observing) observe(frame, cohort, active, issue)
+      if (observing) {
+        // The guard is read before the issue is observed, so it is collected here rather than by the lane's own read.
+        context.use.clear()
+        instruction.predication.foreach(predication => context.use.readPredicate(predication.predicate))
+        frame.lanes.begin(context.use)
+      }
       effects.clear()
       val outcome = if (active.isEmpty) Advanced else VMSemantics.execute(instruction.instruction, LaneLoop(context))
       val result  = outcome match {
@@ -768,12 +1020,13 @@ private[isa] object VMInterpreter {
             case _ => ()
           }
         case Right(Step.Jump(target)) =>
-          enqueue(cohort.copy(pc = target, lanes = active))
+          // The lanes that jump and the lanes that fall through are separate units from here on.
+          enqueue(cohort.copy(id = mintUnit(), pc = target, lanes = active))
           advance(cohort, skipped)
         case Right(Step.Branches(arms, fallThrough)) =>
           var arm = 0
           while (arm < arms.size) {
-            enqueue(cohort.copy(pc = arms(arm).target, lanes = arms(arm).lanes))
+            enqueue(cohort.copy(id = mintUnit(), pc = arms(arm).target, lanes = arms(arm).lanes))
             arm += 1
           }
           advance(cohort, skipped.union(fallThrough))
@@ -816,30 +1069,36 @@ private[isa] object VMInterpreter {
         case Right(Step.Return(mask)) =>
           complete(cohort, mask)
           advance(cohort, skipped)
+          if (skipped.isEmpty) retire(cohort)
           releaseCluster()
           releaseAll()
         case Right(Step.Exit(mask)) =>
           frame.live = frame.live.subtract(mask)
           live = live.subtract(mask)
           advance(cohort, skipped)
+          if (skipped.isEmpty) retire(cohort)
           releaseCluster()
           releaseAll()
+      }
+      if (observing) {
+        frame.lanes.end()
+        device.control.observer.foreach(_.registers(issue, context.use.result(frame.routine)))
       }
     }
 
     private def start(): Unit = {
       val _ = workgroup.allocateBuffer(parameterBlock.clone())
-      enqueue(Cohort(Pc.Entry, initialLive, root))
+      enqueue(Cohort(mintUnit(), Pc.Entry, initialLive, root))
     }
 
     def finished: Boolean = live.isEmpty
     def runnable: Boolean = ready.nonEmpty && !stuck
 
     def describeWaits: Vec[String] =
-      Vec.from(waiting.map(value =>
+      Vec.from(waiting.values.flatMap(_.map(value =>
         s"${value.key.describe}, ${value.cohort.frame.routine.name} pc ${value.cohort.pc}"
-      )) ++
-        (if (stuck) Vec.from(ready.map(value => s"collective, ${value.frame.routine.name} pc ${value.pc}"))
+      ))) ++
+        (if (stuck) Vec.from(ready.cohorts.map(value => s"collective, ${value.frame.routine.name} pc ${value.pc}"))
          else Vec.empty)
 
     private def deadlock()(using Run): Nothing = {
@@ -861,11 +1120,8 @@ private[isa] object VMInterpreter {
       val instruction = instructions(cohort.pc.toInt)
       warpMemberMask(instruction.instruction) match {
         case Some(memberMask) =>
-          var index = 0
-          while (index < ready.size)
-            if (ready(index).pc.toInt == cohort.pc.toInt && (ready(index).frame eq frame))
-              cohort = cohort.copy(lanes = cohort.lanes.union(ready.remove(index).lanes))
-            else index += 1
+          val queued = ready.take(cohort.pc, frame)
+          if (queued ne null) cohort = cohort.copy(lanes = cohort.lanes.union(queued.lanes))
           val (runnable, delayed) =
             if (warpgroupWide(instruction.instruction)) synchroniseWarpgroupInstruction(cohort)
             else synchroniseWarpInstruction(memberMask, cohort)

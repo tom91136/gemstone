@@ -38,11 +38,21 @@ class TaskControl(
   private val cancelled = AtomicBoolean()
   private val granted   = AtomicLong()
   private val leases    = AtomicLongArray(Cells * Stride)
+  private val issues    = AtomicLong()
   // Refills share the read side; reclaiming takes the write side so no granted lease is still on its way to a cell.
   private val reclaim = PlatformConcurrency.readWriteLock()
 
   def cancel(): Unit       = cancelled.set(true)
   def isCancelled: Boolean = cancelled.get()
+
+  /** The ordinal of the next issue within the launch, counting every issue in order. A backend that reports a timeline
+    * takes its time axis from here; under a sequential workgroup schedule the order is the order the machine issued in,
+    * and under a parallel one it is the order the workers happened to reach it in.
+    */
+  def nextIssue(): Long = issues.getAndIncrement()
+
+  /** The issues the launch has made so far. */
+  def issued(): Long = issues.get()
 
   def checkpoint(cost: Int > 0 = 1): Either[Fault, Unit] = checkpoint(cost.widen[Long > 0])
 

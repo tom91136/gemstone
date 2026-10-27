@@ -3,8 +3,6 @@ package net.kurobako.gemstone.isa.nvidia
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
-// a newtype needs a ClassTag and .raw on the hot path
-@SuppressWarnings(Array("baumkuchen:alias-with-operations"))
 private object WorkgroupLane {
   def fromIndex(index: Int): WorkgroupLane =
     index.unsafe[Int in 0 ~ 1023].toShortExact

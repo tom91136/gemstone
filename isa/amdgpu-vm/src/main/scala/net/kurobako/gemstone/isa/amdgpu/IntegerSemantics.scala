@@ -12,8 +12,6 @@ import net.kurobako.gemstone.semantics.prelude.*
 /** AMDGPU integer, bit, move, scalar and lane semantics over lane operands: `a` is SRC0 and `b` SRC1, so the reversed
   * shifts take their amount from `a`. Operations the semantics do not cover take `otherwise`.
   */
-// enum-dispatch arms must stay lexical to inline into staged kernels
-@SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
 private object IntegerSemantics {
 
   inline def vectorBinary[V, R](inline algebra: Algebra[V], operation: VectorBinaryOperation, clamp: Boolean)(
@@ -374,6 +372,26 @@ private object IntegerSemantics {
       )
     case VectorTernaryOperation.AndOr32 =>
       sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) => algebra.or(algebra.and(a, b), c))
+    case VectorTernaryOperation.AddMaximumI32 =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
+        algebra.addSaturatedPicked(a, b, c, 32, maximum = true, signed = true)
+      )
+    case VectorTernaryOperation.AddMaximumU32 =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
+        algebra.addSaturatedPicked(a, b, c, 32, maximum = true, signed = false)
+      )
+    case VectorTernaryOperation.AddMinimumI32 =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
+        algebra.addSaturatedPicked(a, b, c, 32, maximum = false, signed = true)
+      )
+    case VectorTernaryOperation.AddMinimumU32 =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
+        algebra.addSaturatedPicked(a, b, c, 32, maximum = false, signed = false)
+      )
+    case VectorTernaryOperation.MultiplyAddU32 =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
+        algebra.truncate(algebra.add(algebra.multiply(algebra.truncate(a, 32), algebra.truncate(b, 32)), c), 32)
+      )
     case VectorTernaryOperation.BitFieldInsert32 =>
       sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) => algebra.blend(a, b, c))
     case VectorTernaryOperation.AddShiftLeftU32 =>
@@ -2033,6 +2051,23 @@ private object IntegerSemantics {
       8
     )
 
+    /** V_SAT_PK4_I4_I8 and V_SAT_PK4_U4_U8: each byte of `value` saturated to a nibble, the lowest byte in the lowest.
+      */
+    inline def saturatedNibbles(value: V, inline signed: Boolean): V = {
+      def nibble(index: Int): V = algebra.shiftLeft(
+        algebra.and(
+          algebra.clamp(
+            algebra.field(value, 8 * index, 8, signed),
+            if (signed) -8L else 0L,
+            if (signed) 7L else 15L
+          ),
+          algebra.literal(15L)
+        ),
+        algebra.literal(4L * index)
+      )
+      algebra.or(algebra.or(nibble(0), nibble(1)), algebra.or(nibble(2), nibble(3)))
+    }
+
     /** V_LERP_U8: each byte the rounded mean of the two sources' bytes, rounding up where the third's low bit is set.
       */
     inline def lerpBytes(a: V, b: V, c: V): V =
@@ -2281,6 +2316,24 @@ private object IntegerSemantics {
           maximum,
           signed
         ),
+        algebra.extend(third, width, signed),
+        maximum,
+        signed
+      ),
+      width
+    )
+
+    /** The sum of two operands saturated at `width` bits, then the maximum or minimum with a third, as `width` bits. */
+    inline def addSaturatedPicked(
+        first: V,
+        second: V,
+        third: V,
+        width: Int in 1 ~ 64,
+        inline maximum: Boolean,
+        inline signed: Boolean
+    ): V = algebra.truncate(
+      algebra.pick(
+        algebra.extend(algebra.addSaturated(first, second, width, signed), width, signed),
         algebra.extend(third, width, signed),
         maximum,
         signed

@@ -204,10 +204,9 @@ object FieldDecoder {
   }
 
   private def decode(database: NVDisasm.Database, form: NVDisasm.Form, word: BigInt): Vec[Candidate] = {
-    val raw = form.fields.map(field => field.name -> extract(word, field.positions)).toMap
-    form.opcodes.filter(opcode =>
-      form.opcodeFields.nonEmpty && form.opcodeFields.forall(field => raw(field.name) == opcode.value)
-    )
+    val raw          = form.fields.map(field => field.name -> extract(word, field.positions)).toMap
+    val opcodeValues = form.opcodeFields.map(field => raw(field.name)).distinct
+    form.opcodes.filter(opcode => opcodeValues.size == 1 && opcodeValues.head == opcode.value)
       .flatMap(opcode =>
         resolve(database, form, raw, Map.empty).toVec.map { state =>
           Candidate(form, opcode.name, state.values, raw, state.issues.distinct, state.floats)

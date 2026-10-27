@@ -8,8 +8,6 @@ import net.kurobako.gemstone.constraint.*
 import scala.collection.immutable.IntMap
 
 /** Field-level machine decoding shared by the VM compiler and the disassembler. */
-// the instruction cursor is passed unpacked so decoding allocates no cursor per instruction
-@SuppressWarnings(Array("baumkuchen:data-clump"))
 private object InstructionDecoder {
 
   /** One machine instruction: its layout, catalogue encoding, fixed bits and literal. */
@@ -104,25 +102,56 @@ private object InstructionDecoder {
     }.groupMap(_._1)(_._2).view.mapValues(_.distinct).toMap
 
   /** Every layout and exact catalogue entry consistent with the bytes, in layout priority order. */
-  def candidates(bytes: Array[Byte], offset: Int, target: Target): Vec[Decoded] =
-    matching(bytes, offset, target).flatMap { case (entry, word) =>
-      entry.opcodes.getOrElse(entry.layout.get(word, EncodingField.OP).toInt, NoEncodings)
-        .flatMap(decoded(entry.layout, word, bytes, offset, target))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def candidates(stream: CodeStream, offset: Int): Vec[Decoded] =
+    if (stream.bytes.length - offset < 4) Vec.empty
+    else {
+      val bytes   = stream.bytes
+      val target  = stream.target
+      val low     = LittleEndian.decode(bytes, offset, 4)
+      val entries = tables.getOrElse(target.isa, Vec.empty[Entry])
+      val result  = Vec.newBuilder[Decoded]
+      var i       = 0
+      while (i < entries.length) {
+        val entry = entries(i)
+        val width = entry.layout.bits / 8
+        if (
+          !DualFormats(entry.layout.format) && (low & entry.lowMask) == entry.lowPrefix &&
+          bytes.length - offset >= width
+        ) {
+          val word = InstructionWord.read(bytes, offset, width)
+          if (entry.layout.matches(word)) {
+            val op    = entry.layout.get(word, EncodingField.OP).toInt
+            val cands = entry.opcodes.getOrElse(op, NoEncodings)
+            var c     = 0
+            while (c < cands.length) {
+              decoded(entry.layout, word, stream, offset)(cands(c)) match {
+                case Some(dec) => result += dec
+                case None      =>
+              }
+              c += 1
+            }
+          }
+        }
+        i += 1
+      }
+      result.result()
     }
 
   /** The single instruction the VM executes: the first matching layout's canonical entry, falling back to the base
     * format, the literal variant, VOPC for VOP3-encoded compares and VOP3 for VOP3P-encoded opcodes.
     */
-  def decode(bytes: Array[Byte], offset: Int, target: Target): Either[NonEmpty[String], Decoded] = {
-    val exact = candidates(bytes, offset, target)
-    val found = if (exact.nonEmpty) exact
-    else matching(bytes, offset, target).flatMap { case (entry, word) =>
+  def decode(stream: CodeStream, offset: Int): Either[NonEmpty[String], Decoded] = {
+    val target = stream.target
+    val exact  = candidates(stream, offset)
+    val found  = if (exact.nonEmpty) exact
+    else matching(stream, offset).flatMap { case (entry, word) =>
       fallbacks(entry.layout.format).view.flatMap(format =>
         encodings(entry.layout, format).getOrElse(entry.layout.get(word, EncodingField.OP).toInt, NoEncodings)
-      ).flatMap(decoded(entry.layout, word, bytes, offset, target))
+      ).flatMap(decoded(entry.layout, word, stream, offset))
     }
     found.headOption.toRight[NonEmpty[String]](
-      if (truncated(bytes, offset, target)) s"truncated instruction at byte $offset"
+      if (truncated(stream, offset)) s"truncated instruction at byte $offset"
       else s"unknown instruction encoding for ${target.name} at byte $offset"
     )
       .flatMap { first =>
@@ -138,7 +167,9 @@ private object InstructionDecoder {
   }
 
   /** Decodes a dual-issue pair when the bytes carry a VOPD prefix. */
-  def dual(bytes: Array[Byte], offset: Int, target: Target): Option[Either[NonEmpty[String], Dual]] =
+  def dual(stream: CodeStream, offset: Int): Option[Either[NonEmpty[String], Dual]] = {
+    val bytes  = stream.bytes
+    val target = stream.target
     Option.when(bytes.length - offset >= 4)(LittleEndian.decode(bytes, offset, 4)).flatMap { low =>
       DualFormats.toVec.flatMap(InstructionLayout.Catalogue.forFormat(target, _))
         .find(layout => (low & layout.wordMask.low & 0xffffffffL) == (layout.wordPrefix.low & 0xffffffffL))
@@ -178,12 +209,14 @@ private object InstructionDecoder {
           } yield Dual(layout, x, y, word, Option.when(literal)(LittleEndian.decode(bytes, offset + width, 4)), size)
         }
     }
+  }
 
   /** Whether a layout's fixed bits match the first dword but the instruction or its literal runs past the bytes. */
-  private def truncated(bytes: Array[Byte], offset: Int, target: Target): Boolean =
+  private def truncated(stream: CodeStream, offset: Int): Boolean = {
+    val bytes = stream.bytes
     bytes.length - offset >= 4 && {
       val low = LittleEndian.decode(bytes, offset, 4)
-      tables.getOrElse(target.isa, Vec.empty[Entry]).exists(entry =>
+      tables.getOrElse(stream.target.isa, Vec.empty[Entry]).exists(entry =>
         (low & entry.lowMask) == entry.lowPrefix && !DualFormats(entry.layout.format) &&
           (bytes.length - offset < entry.layout.bits / 8 || {
             val word = InstructionWord.read(bytes, offset, entry.layout.bits / 8)
@@ -191,12 +224,14 @@ private object InstructionDecoder {
           })
       )
     }
+  }
 
-  private def matching(bytes: Array[Byte], offset: Int, target: Target): Vec[(Entry, InstructionWord)] =
-    if (bytes.length - offset < 4) Vec.empty
+  private def matching(stream: CodeStream, offset: Int): Vec[(Entry, InstructionWord)] =
+    if (stream.bytes.length - offset < 4) Vec.empty
     else {
-      val low = LittleEndian.decode(bytes, offset, 4)
-      tables.getOrElse(target.isa, Vec.empty[Entry]).flatMap { entry =>
+      val bytes = stream.bytes
+      val low   = LittleEndian.decode(bytes, offset, 4)
+      tables.getOrElse(stream.target.isa, Vec.empty[Entry]).flatMap { entry =>
         val width = entry.layout.bits / 8
         if (
           DualFormats(entry.layout.format) || (low & entry.lowMask) != entry.lowPrefix || bytes.length - offset < width
@@ -220,39 +255,59 @@ private object InstructionDecoder {
     (variant.toVec ++ Vec(format.base) ++ format.withLiteral(4).toVec ++ alias.toVec).distinct.filterNot(_ == format)
   }
 
-  private def decoded(
-      layout: InstructionLayout,
-      word: InstructionWord,
-      bytes: Array[Byte],
-      offset: Int,
-      target: Target
-  )(candidate: (Opcode, Metadata.Encoding)): Option[Decoded] = {
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def decoded(layout: InstructionLayout, word: InstructionWord, stream: CodeStream, offset: Int)(
+      candidate: (Opcode, Metadata.Encoding)
+  ): Option[Decoded] = {
     val (definition, encoding) = candidate
-    val operands = encoding.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC)
-    val embedded = layout.byName.contains(EncodingField.LITERAL) || layout.byName.contains(EncodingField.LITERAL64)
-    val source   =
-      if (embedded) 0
-      else operands.flatMap(_.field).filter(SourceFields).flatMap(field =>
-        SourceOperand.literalSize(layout.get(word, field).toInt, layout.isa).rawElements
-      ).maxOption.getOrElse(0)
-    // Instruction literals such as the FMAAK constant follow the word whatever the source selectors say.
-    val instruction =
-      if (embedded || source > 0) 0
-      else if (layout.memoryLiteral(word)) 4
-      else if (operands.exists(_.field.contains(EncodingField.LITERAL64))) 8
-      else if (operands.exists(_.field.contains(EncodingField.LITERAL))) 4
-      else 0
-    val trailing = source.max(instruction)
-    for {
-      size <- (layout.bits / 8 + trailing).refine[Int > 0].toOption
-      if encoding.supports(target) && bytes.length - offset >= size && layout.accepts(word, source)
-    } yield {
-      val embeddedLiteral = layout.byName.get(EncodingField.LITERAL).map(_.get(word))
-      val literal         = embeddedLiteral.orElse(Option.when(trailing > 0)(
-        if (trailing == 8) LittleEndian.decode(bytes, offset + layout.bits / 8, 8)
-        else LittleEndian.decode(bytes, offset + layout.bits / 8, 4)
-      ))
-      Decoded(layout, definition, encoding, word, literal, if (embeddedLiteral.nonEmpty) 4 else trailing, size)
+    val bytes                  = stream.bytes
+    if (!encoding.supports(stream.target)) None
+    else {
+      val embedded     = layout.embedded
+      var source       = 0
+      var hasLiteral64 = false
+      var hasLiteral   = false
+      val ops          = encoding.operands
+      var i            = 0
+      while (i < ops.length) {
+        val info = ops(i)
+        if (!info.implicitOperand && info.kind != OperandKind.EXEC) {
+          info.field match {
+            case Some(field) =>
+              if (!embedded && SourceFields.contains(field)) {
+                val code = layout.get(word, field).toInt
+                if (code == Source.LITERAL_CONST || code == Source.LITERAL64_CONST) {
+                  val lit = SourceOperand.literalSize(code, layout.isa).fold(0)(_.raw)
+                  if (lit > source) source = lit
+                }
+              }
+              if (field == EncodingField.LITERAL64) hasLiteral64 = true
+              else if (field == EncodingField.LITERAL) hasLiteral = true
+            case None =>
+          }
+        }
+        i += 1
+      }
+      val instruction =
+        if (embedded || source > 0) 0
+        else if (layout.memoryLiteral(word)) 4
+        else if (hasLiteral64) 8
+        else if (hasLiteral) 4
+        else 0
+      val trailing = math.max(source, instruction)
+      val rawSize  = layout.bits / 8 + trailing
+      if (rawSize > 0 && bytes.length - offset >= rawSize && layout.accepts(word, source)) {
+        val size            = rawSize.unsafe[Int > 0]
+        val embeddedLiteral = layout.literalField.map(_.get(word))
+        val literal         = embeddedLiteral match {
+          case Some(value) => Some(value)
+          case None        =>
+            if (trailing == 8) Some(LittleEndian.decode(bytes, offset + layout.bits / 8, 8))
+            else if (trailing > 0) Some(LittleEndian.decode(bytes, offset + layout.bits / 8, 4))
+            else None
+        }
+        Some(Decoded(layout, definition, encoding, word, literal, if (embeddedLiteral.nonEmpty) 4 else trailing, size))
+      } else None
     }
   }
 }

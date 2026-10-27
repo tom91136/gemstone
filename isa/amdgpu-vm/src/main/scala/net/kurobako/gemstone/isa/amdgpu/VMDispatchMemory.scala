@@ -52,12 +52,10 @@ private class VMDispatchMemory(
   private val globalMemory      = kernel.globalMemory
   private val globalMemoryLocks = kernel.globalMemoryLocks
   // Dispatch-constant images, read-only for the kernel.
-  private val immutable = Array(
-    KernargAddress       -> kernarg,
-    DispatchAddress      -> dispatch,
-    QueueApertureAddress -> QueueApertures,
-    readOnlyAddress      -> kernel.readOnly
-  )
+  private val immutableBases  = Array(KernargAddress, DispatchAddress, QueueApertureAddress, readOnlyAddress)
+  private val immutableImages = Array(kernarg, dispatch, QueueApertures, kernel.readOnly)
+  private val localBases      = immutableBases ++ globalMemory.map(_._1)
+  private val localImages     = immutableImages ++ globalMemory.map(_._2)
   // Heap and stack addresses lie outside the ELF image; reject them before scanning its symbols and sections.
   private val aliasStart = allocations.view.map(_.address.raw).minOption.getOrElse(Long.MaxValue)
   private val aliasEnd   = allocations.view.map(region =>
@@ -68,11 +66,11 @@ private class VMDispatchMemory(
     if (base > Long.MaxValue - bytes.length) Long.MaxValue else base + bytes.length
   }.maxOption.getOrElse(Long.MinValue)
 
-  def isImmutable(address: Long, size: Int >= 0): Boolean = immutableIndex(address, size) >= 0
+  def isMutable(address: Long, size: Int >= 0): Boolean = immutableIndex(address, size) < 0
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def isExternal(address: Long, size: Int >= 0): Boolean =
-    aliasedRegion(address) == null && !isImmutable(address, size) && globalRegionIndex(address, size) < 0
+    aliasedRegion(address) == null && isMutable(address, size) && globalRegionIndex(address, size) < 0
 
   // These memory-instruction helpers consume the allocation-free null sentinel returned by aliasedRegion.
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -81,11 +79,10 @@ private class VMDispatchMemory(
     if (binding != null) memory.read(binding.binding.region, binding.offsetOf(address), size)
     else {
       val image = localImage(address, size)
-      if (image == null) annotate("memory read", address, size, memory.read(GuestAddress(address), size))
+      if (image < 0) annotate("memory read", address, size, memory.read(GuestAddress(address), size))
       else {
-        val (base, bytes) = image
-        val offset        = (address - base).toInt
-        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
+        val offset = (address - localBases(image)).toInt
+        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(localImages(image), offset, offset + size)))
       }
     }
   }
@@ -96,12 +93,12 @@ private class VMDispatchMemory(
     if (binding != null) memory.readValueInto(binding.binding.region, binding.offsetOf(address), size, into)
     else {
       val image = localImage(address, size)
-      if (image == null) memory.readValueInto(GuestAddress(address), size, into) match {
+      if (image < 0) memory.readValueInto(GuestAddress(address), size, into) match {
         case null         => null
         case fault: Fault => annotated("memory read", address, size, fault)
       }
       else {
-        into.elem = LittleEndian.decode(image._2, (address - image._1).toInt, size)
+        into.elem = LittleEndian.decode(localImages(image), (address - localBases(image)).toInt, size)
         null
       }
     }
@@ -158,14 +155,13 @@ private class VMDispatchMemory(
     }
   }
 
-  // Null is the allocation-free miss sentinel for the dispatch-local and code-object images.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def localImage(address: Long, size: Int): (Long, Array[Byte]) | Null = {
+  // -1 is the miss sentinel for the dispatch-local and code-object images, indexing localBases and localImages.
+  private def localImage(address: Long, size: Int): Int = {
     val local = immutableIndex(address, size)
-    if (local >= 0) immutable(local)
+    if (local >= 0) local
     else {
       val global = globalRegionIndex(address, size)
-      if (global >= 0) globalMemory(global) else null
+      if (global >= 0) immutableImages.length + global else -1
     }
   }
 
@@ -173,9 +169,8 @@ private class VMDispatchMemory(
   private def immutableIndex(address: Long, size: Int): Int = {
     var index = 0
     var found = -1
-    while (index < immutable.length && found < 0) {
-      val (base, bytes) = immutable(index)
-      if (ByteRange.contains(bytes.length, address - base, size.toLong)) found = index
+    while (index < immutableImages.length && found < 0) {
+      if (ByteRange.contains(immutableImages(index).length, address - immutableBases(index), size.toLong)) found = index
       index += 1
     }
     found

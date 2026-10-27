@@ -43,10 +43,12 @@ object InstructionSemantics {
     * is `function(r,p)` or `prototype(r,p)`.
     */
   private[isa] case class PTXLowering(
-      steps: Vec[VMIR.Instruction],
+      predicated: Vec[VMIR.PredicatedInstruction],
       routine: Routine,
       registers: Vec[(name: String, declared: String)]
   ) {
+    val steps: Vec[VMIR.Instruction] = predicated.map(_.instruction)
+
     private val types = registers.flatMap((name, declared) => tpe(declared).map(name -> _)).toMap
 
     /** The name and type of each register slot the instruction names. */
@@ -106,13 +108,12 @@ object InstructionSemantics {
       case other => Unrendered.Malformed(other.message.raw)
     }.flatMap {
       kernel =>
-        val routine = kernel.entry.routine
-        val program = routine.program
-        val steps   = program.instructions.indices.toVec.collect {
-          case pc if program.source(Pc(pc.unsafe[Int >= 0])).exists(_ == 0L) =>
-            program.instructions(pc).instruction
+        val routine    = kernel.entry.routine
+        val program    = routine.program
+        val predicated = program.instructions.indices.toVec.collect {
+          case pc if program.source(Pc(pc.unsafe[Int >= 0])).exists(_ == 0L) => program.instructions(pc)
         }
-        Either.cond(steps.nonEmpty, PTXLowering(steps, routine, registers), Unrendered.Unstaged(Vec.empty))
+        Either.cond(predicated.nonEmpty, PTXLowering(predicated, routine, registers), Unrendered.Unstaged(Vec.empty))
     }
   }
 
@@ -131,6 +132,29 @@ object InstructionSemantics {
   def describe(mnemonic: String, instruction: String, registers: Vec[(name: String, declared: String)])
       : Either[Unrendered, Definition] =
     lowering(instruction, registers).flatMap(lowered =>
-      StepRenderer.definition(mnemonic, lowered.steps, lowered.names, registers.map(_.name), Vec.empty)
+      StepRenderer.definition(
+        StepRenderer.Spec(mnemonic, registers.map(_.name), Vec.empty),
+        lowered.steps,
+        lowered.names
+      )
+    )
+
+  /** The machine definitions of the instructions `instruction` lowers to that have machine semantics, named `mnemonic`
+    * and declared as [[describe]] declares them, or why one has none; a failure to lower is the only result when it
+    * does not lower.
+    */
+  def machine(
+      mnemonic: String,
+      instruction: String,
+      registers: Vec[(name: String, declared: String)]
+  ): Vec[Either[Unrendered, Definition]] =
+    lowering(instruction, registers).fold(
+      failure => Vec(Left(failure)),
+      lowered =>
+        StepRenderer.machine(
+          StepRenderer.Spec(mnemonic, registers.map(_.name), Vec.empty),
+          lowered.predicated,
+          lowered.names
+        )
     )
 }

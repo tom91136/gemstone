@@ -25,29 +25,35 @@ private[isa] object Machine {
 
   private val warpContext     = ("net.kurobako.gemstone.isa.nvidia.Warp", "warp")
   private val launchContext   = ("net.kurobako.gemstone.isa.nvidia.Launch", "launch")
-  private val memoryContext   = ("net.kurobako.gemstone.isa.nvidia.Memory", "memory")
   private val constantContext = ("net.kurobako.gemstone.isa.nvidia.Constants", "constants")
+
+  val memoryContext: (String, String) = ("net.kurobako.gemstone.isa.nvidia.Memory", "memory")
 
   private val u32 = Type.unsigned(32)
   private val u64 = Type.unsigned(64)
 
-  private def warp(method: String): Term = Term.context(warpContext, method, Vec.empty, Vec.empty, Some(u32))
+  private def warp(method: String): Term =
+    Term.context(warpContext, MachineCall(method, Vec.empty, Vec.empty), Some(u32))
 
   /** A lane's index in its warp, and the number of lanes from its warp's first. */
   val lane: Term      = warp("laneId")
   val warpLanes: Term = warp("lanes")
 
   def members(mask: Term): Term =
-    Term.context(warpContext, "members", Vec.empty, Vec((mask, Some(u32))), Some(u32))
+    Term.context(warpContext, MachineCall("members", Vec.empty, Vec((mask, Some(u32)))), Some(u32))
 
   def participants(mask: Term): Term =
-    Term.context(warpContext, "participants", Vec.empty, Vec((mask, Some(u32))), Some(u32))
+    Term.context(warpContext, MachineCall("participants", Vec.empty, Vec((mask, Some(u32)))), Some(u32))
 
   def ballot(voter: Term, mask: Term): Term =
-    Term.context(warpContext, "ballot", Vec.empty, Vec((voter, Some(Type.Bool)), (mask, Some(u32))), Some(u32))
+    Term.context(
+      warpContext,
+      MachineCall("ballot", Vec.empty, Vec((voter, Some(Type.Bool)), (mask, Some(u32)))),
+      Some(u32)
+    )
 
   def shuffle(operand: Term, tpe: Type, lane: Term): Term =
-    Term.context(warpContext, "shuffle", Vec(tpe), Vec((operand, Some(tpe)), (lane, Some(u32))), Some(tpe))
+    Term.context(warpContext, MachineCall("shuffle", Vec(tpe), Vec((operand, Some(tpe)), (lane, Some(u32)))), Some(tpe))
 
   /** The binary32 operands of the lanes of `members` reduced to their minimum or maximum, ignoring NaN operands unless
     * `propagateNaN`.
@@ -56,9 +62,11 @@ private[isa] object Machine {
     val tpe = Type.Float(32)
     Term.context(
       warpContext,
-      s"reduce${if (maximum) "Maximum" else "Minimum"}${if (propagateNaN) "" else "Number"}",
-      Vec(tpe),
-      Vec((value, Some(tpe)), (members, Some(u32))),
+      MachineCall(
+        s"reduce${if (maximum) "Maximum" else "Minimum"}${if (propagateNaN) "" else "Number"}",
+        Vec(tpe),
+        Vec((value, Some(tpe)), (members, Some(u32)))
+      ),
       Some(tpe)
     )
   }
@@ -69,15 +77,13 @@ private[isa] object Machine {
   def matching(all: Boolean, value: Term, tpe: Type, members: Term): Term =
     Term.context(
       warpContext,
-      if (all) "matchAll" else "matchAny",
-      Vec(tpe),
-      Vec((value, Some(tpe)), (members, Some(u32))),
+      MachineCall(if (all) "matchAll" else "matchAny", Vec(tpe), Vec((value, Some(tpe)), (members, Some(u32)))),
       Some(u32)
     )
 
   /** The value of the warp's lowest active lane. */
   def leader(value: Term, tpe: Type): Term =
-    Term.context(warpContext, "leader", Vec(tpe), Vec((value, Some(tpe))), Some(tpe))
+    Term.context(warpContext, MachineCall("leader", Vec(tpe), Vec((value, Some(tpe)))), Some(tpe))
 
   /** The operands of the lanes of `members` combined by `operation` at `tpe`, or `None` for one no warp reduces by. */
   def reduce(operation: IntegerOperation, tpe: Type, value: Term, members: Term): Option[Term] = (operation match {
@@ -89,14 +95,19 @@ private[isa] object Machine {
     case IntegerOperation.Maximum(_) => Some("reduceMaximum")
     case _                           => None
   }).map(method =>
-    Term.context(warpContext, method, Vec(tpe), Vec((value, Some(tpe)), (members, Some(u32))), Some(tpe))
+    Term.context(warpContext, MachineCall(method, Vec(tpe), Vec((value, Some(tpe)), (members, Some(u32)))), Some(tpe))
   )
 
   /** `value`, read from a cluster cancellation response whose high word is `high`. */
   def cancelledCta(value: Term, high: Term): Term =
-    Term.context(launchContext, "cancelledCta", Vec.empty, Vec((value, Some(u64)), (high, Some(u64))), Some(u64))
+    Term.context(
+      launchContext,
+      MachineCall("cancelledCta", Vec.empty, Vec((value, Some(u64)), (high, Some(u64)))),
+      Some(u64)
+    )
 
-  private def launch(method: String): Term = Term.context(launchContext, method, Vec.empty, Vec.empty, Some(u32))
+  private def launch(method: String): Term =
+    Term.context(launchContext, MachineCall(method, Vec.empty, Vec.empty), Some(u32))
 
   /** The method of each state space's loads. */
   def loadMethod(access: MemoryAccess): String = "load" + spaceSuffix(access)
@@ -122,24 +133,29 @@ private[isa] object Machine {
   }
 
   def load(method: String, tpe: Type, address: Term): Term =
-    Term.context(memoryContext, method, Vec(tpe), Vec((address, Some(u64))), Some(tpe))
+    Term.context(memoryContext, MachineCall(method, Vec(tpe), Vec((address, Some(u64)))), Some(tpe))
 
   def store(method: String, tpe: Type, address: Term, value: Term): Term =
-    Term.context(memoryContext, method, Vec(tpe), Vec((address, Some(u64)), (value, Some(tpe))), None, effect = true)
+    Term.context(
+      memoryContext,
+      MachineCall(method, Vec(tpe), Vec((address, Some(u64)), (value, Some(tpe)))),
+      None,
+      effect = true
+    )
 
   def loadParameter(parameter: Parameter, tpe: Type, offset: Term): Term = Term.context(
     memoryContext,
-    "loadParameter",
-    Vec(tpe),
-    Vec((Term.Constant(parameter.raw.toString), None), (offset, Some(u64))),
+    MachineCall("loadParameter", Vec(tpe), Vec((Term.Constant(parameter.raw.toString), None), (offset, Some(u64)))),
     Some(tpe)
   )
 
   def storeParameter(parameter: Parameter, tpe: Type, offset: Term, value: Term): Term = Term.context(
     memoryContext,
-    "storeParameter",
-    Vec(tpe),
-    Vec((Term.Constant(parameter.raw.toString), None), (offset, Some(u64)), (value, Some(tpe))),
+    MachineCall(
+      "storeParameter",
+      Vec(tpe),
+      Vec((Term.Constant(parameter.raw.toString), None), (offset, Some(u64)), (value, Some(tpe)))
+    ),
     None,
     effect = true
   )
@@ -147,17 +163,15 @@ private[isa] object Machine {
   /** A read of `tpe` at `offset` in constant bank `bank`. */
   def constant(tpe: Type, bank: Long, offset: Term): Term = Term.context(
     constantContext,
-    "load",
-    Vec(tpe),
-    Vec((Term.Literal(bank), Some(u32)), (offset, Some(u32))),
+    MachineCall("load", Vec(tpe), Vec((Term.Literal(bank), Some(u32)), (offset, Some(u32)))),
     Some(tpe)
   )
 
   /** The unsigned type of an access of `width` bits. */
   def bits(width: Int in 1 ~ 64): Type = Type.unsigned(width)
 
-  val localBase: Term    = Term.context(memoryContext, "localBase", Vec.empty, Vec.empty, Some(u64))
-  val sharedWindow: Term = Term.context(memoryContext, "sharedWindow", Vec.empty, Vec.empty, Some(u64))
+  val localBase: Term    = Term.context(memoryContext, MachineCall("localBase", Vec.empty, Vec.empty), Some(u64))
+  val sharedWindow: Term = Term.context(memoryContext, MachineCall("sharedWindow", Vec.empty, Vec.empty), Some(u64))
 
   def threadId(axis: Axis): Term     = launch(s"threadId$axis")
   def blockId(axis: Axis): Term      = launch(s"blockId$axis")
@@ -180,8 +194,8 @@ private[isa] object Machine {
   def clusterId(axis: Axis): Term    = launch(s"clusterId$axis")
   def clusterCount(axis: Axis): Term = launch(s"clusterCount$axis")
   val explicitCluster: Term          = launch("explicitCluster")
-  val clock: Term                    = Term.context(launchContext, "clock", Vec.empty, Vec.empty, Some(u64))
-  val globalTimer: Term              = Term.context(launchContext, "globalTimer", Vec.empty, Vec.empty, Some(u64))
+  val clock: Term       = Term.context(launchContext, MachineCall("clock", Vec.empty, Vec.empty), Some(u64))
+  val globalTimer: Term = Term.context(launchContext, MachineCall("globalTimer", Vec.empty, Vec.empty), Some(u64))
 
   def counter(counter: Term, part: CounterPart): Term = part match {
     case CounterPart.Whole => counter

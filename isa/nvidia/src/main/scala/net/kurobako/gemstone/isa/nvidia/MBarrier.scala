@@ -6,6 +6,7 @@ import net.kurobako.gemstone.vm.*
 private object MBarrier {
   type Count = Long in 0L ~ 1048575L
   val MaximumCount: Long = (1L << 20) - 1L
+  val PendingShift: Int  = 43
 
   private def count(value: Long, detail: => NonEmpty[String]): Either[Fault, Count] =
     value.refine[Count].left.map(_ => Fault.Backend(detail))
@@ -49,7 +50,7 @@ private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
 
   def state: Long =
     (((MaximumCount + 1L - expected) & MaximumCount) << 1) |
-      (((MaximumCount + 1L - pendingArrivals) & MaximumCount) << 43) |
+      (((MaximumCount + 1L - pendingArrivals) & MaximumCount) << PendingShift) |
       ((phase & 1L) << 63)
 
   /** Arrives `count` times with `expectedBytes` more transaction bytes and returns the token. `drop` also lowers the

@@ -16,10 +16,11 @@ object Binary {
     decodeStatementAt(Vec.toArray(bytes), offset, mode)
 
   def decodeStatementAt(bytes: Array[Byte], offset: Int >= 0, mode: TargetMode): Either[CodecError, DecodedStatement] =
-    DualIssueCodec.decode(bytes, offset, mode.target).getOrElse(
-      decodeAt(bytes, offset, mode).map(value =>
-        DecodedStatement(Statement.Instruction(value.instruction), value.size)
-      )
+    decodeStatementAt(CodeStream(bytes, mode), offset)
+
+  private[asm] def decodeStatementAt(code: CodeStream, offset: Int >= 0): Either[CodecError, DecodedStatement] =
+    DualIssueCodec.decode(code, offset).getOrElse(
+      decodeAt(code, offset).map(value => DecodedStatement(Statement.Instruction(value.instruction), value.size))
     )
 
   def encode(instruction: Instruction, mode: TargetMode): Either[CodecError, Vec[Byte]] = {
@@ -31,13 +32,13 @@ object Binary {
   }
 
   def decode(bytes: Vec[Byte], mode: TargetMode): Either[CodecError, Instruction] =
-    decodeAt(Vec.toArray(bytes), 0, mode).flatMap { decoded =>
+    decodeAt(CodeStream(Vec.toArray(bytes), mode), 0).flatMap { decoded =>
       if (decoded.size.raw == bytes.size) Right(decoded.instruction)
       else Left(CodecError.InvalidEncoding(s"trailing bytes after instruction: ${bytes.size - decoded.size}"))
     }
 
-  private def decodeAt(bytes: Array[Byte], offset: Int >= 0, mode: TargetMode): Either[CodecError, DecodedInstruction] =
-    if (offset > bytes.length || bytes.length - offset < 4)
+  private def decodeAt(code: CodeStream, offset: Int >= 0): Either[CodecError, DecodedInstruction] =
+    if (offset > code.bytes.length || code.bytes.length - offset < 4)
       Left(CodecError.InvalidEncoding(s"truncated instruction at byte $offset"))
-    else InstructionCodec.decode(bytes, offset, mode)
+    else InstructionCodec.decode(code, offset)
 }

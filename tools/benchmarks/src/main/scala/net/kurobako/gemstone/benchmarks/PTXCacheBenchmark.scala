@@ -2,6 +2,7 @@ package net.kurobako.gemstone.benchmarks
 
 import cats.syntax.all.*
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -9,11 +10,10 @@ import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.ptx.*
+import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 /** Concurrent module loads and unloads through the same backend used by the server. */
-// submit returns the future of each client, which the map exists to collect
-@SuppressWarnings(Array("baumkuchen:effectful-transform"))
 object PTXCacheBenchmark {
   private case class Options(workers: Int > 0, images: Int > 0, iterations: Int > 0, entries: Int > 0)
 
@@ -39,27 +39,28 @@ object PTXCacheBenchmark {
     val executor = Executors.newFixedThreadPool(parsed.workers)
     try {
       val measured = Measurement {
-        val clients = images.map { image =>
-          executor.submit(() =>
-            Measurement {
-              (0 until parsed.iterations).foldLeft(0L) { (total, _) =>
-                val _ = barrier.await(60, TimeUnit.SECONDS)
-                Using.resource(backend.load(image).fold(
-                  error => throw IllegalStateException(error.message),
-                  identity
-                )) {
-                  program =>
-                    val kernels =
-                      program.symbols.fold(error => throw IllegalStateException(error.message), _.kernels.size)
-                    // Keep every reference live until all clients have loaded, including identical images.
+        val tasks = images.map { image =>
+          (
+              () =>
+                Measurement {
+                  (0 until parsed.iterations).foldLeft(0L) { (total, _) =>
                     val _ = barrier.await(60, TimeUnit.SECONDS)
-                    total + kernels
+                    Using.resource(backend.load(image).fold(
+                      error => throw IllegalStateException(error.message),
+                      identity
+                    )) {
+                      program =>
+                        val kernels =
+                          program.symbols.fold(error => throw IllegalStateException(error.message), _.kernels.size)
+                        // Keep every reference live until all clients have loaded, including identical images.
+                        val _ = barrier.await(60, TimeUnit.SECONDS)
+                        total + kernels
+                    }
+                  }
                 }
-              }
-            }
-          )
+          ): Callable[Measurement[Long]]
         }
-        clients.map(_.get(120, TimeUnit.SECONDS))
+        executor.invokeAll(tasks.asJava, 120, TimeUnit.SECONDS).asScala.map(_.get()).toVector
       }
       val operations: Long > 0 = parsed.workers.widen[Long > 0] * parsed.iterations.widen[Long > 0]
       val allocated            = measured.value.map(_.allocatedBytes)

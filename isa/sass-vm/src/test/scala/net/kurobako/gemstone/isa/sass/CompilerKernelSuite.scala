@@ -55,8 +55,6 @@ class CompilerKernelSuite extends munit.FunSuite {
       val kernel = load(89, sgemm, "scalar_sgemm").copy(functions = Vec(DecodedFunction("scalar_sgemm", instructions)))
       val a      = Vec.tabulate(8 * inner)(index => 0.5f * (index / inner + 1) + 0.125f * (index % inner + 1))
       val b      = Vec.tabulate(inner * 4)(index => 0.25f * (index / 4 + 1) * (index % 4 + 1))
-      // The oracle accumulates in the kernel's order, so it folds over boxed floats.
-      @SuppressWarnings(Array("baumkuchen:loop-boxing"))
       val expected = Vec.tabulate(32)(index =>
         (0 until inner).foldLeft(0f)((sum, k) => sum + a(index / 4 * inner + k) * b(k * 4 + index % 4))
       )

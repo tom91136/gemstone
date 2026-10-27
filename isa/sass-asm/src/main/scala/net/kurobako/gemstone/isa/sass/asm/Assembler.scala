@@ -65,7 +65,7 @@ object Assembler {
           bindings <- FormatParser.parse(database, form, address, encodingText)
           opcode   <- form.opcodes.find(value => bindings.get("Opcode").contains(value.value))
             .toRight(s"missing opcode binding for ${form.name}")
-          bytes <- Encoder.encode(database, form, opcode.name, bindings)
+          bytes <- Encoder.encode(NVDisasm.Encoding(database, form), opcode.name, bindings)
           // Canonical FORMAT spellings can normalise signed immediates and omit defaults.
           encoded <- verified(bytes, address, target)(
             equivalent(instruction, _),

@@ -335,6 +335,13 @@ class FloatSemanticsSuite extends munit.FunSuite {
       case VectorBinary64Operation.Minimum          => IEEE754.minNum(a, b, 64)
       case VectorBinary64Operation.MaximumPropagate => IEEE754.maximum(a, b, 64)
       case VectorBinary64Operation.MinimumPropagate => IEEE754.minimum(a, b, 64)
+      case VectorBinary64Operation.AddU64           => a + b
+      case VectorBinary64Operation.SubtractU64      => a - b
+      case VectorBinary64Operation.MultiplyLowU64   => a * b
+      case VectorBinary64Operation.MaximumI64       => math.max(a, b)
+      case VectorBinary64Operation.MinimumI64       => math.min(a, b)
+      case VectorBinary64Operation.MaximumU64       => if (java.lang.Long.compareUnsigned(a, b) >= 0) a else b
+      case VectorBinary64Operation.MinimumU64       => if (java.lang.Long.compareUnsigned(a, b) <= 0) a else b
     }
     for {
       operation <- VectorBinary64Operation.values.toVector

@@ -47,7 +47,9 @@ private class VMContext(
   // Reused by one instruction at a time, so per-lane memory reads allocate nothing.
   val scalar: LongRef                     = LongRef(0L)
   val reads: AddressSpace.ReadRangeBuffer = AddressSpace.ReadRangeBuffer()
-  private var scratch                     = Array.ofDim[Long](4)
+  // The registers the current issue touches; the interpreter starts and stops its collection around the instruction.
+  val use: VMRegisterUse = VMRegisterUse()
+  private var scratch    = Array.ofDim[Long](4)
 
   def lane(lane: WorkgroupLane): VMLane = frame.lanes(lane)
 

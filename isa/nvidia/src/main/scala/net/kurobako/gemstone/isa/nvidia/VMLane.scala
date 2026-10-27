@@ -17,7 +17,7 @@ private object VMLane {
   * registers read as zero and unwritten predicates as undefined.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
+private open class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
   private var registers: Array[Long] = VMLane.NoValues
   // Reused lane storage: clearing zeroes registers only up to this high-water mark.
   private var used = 0

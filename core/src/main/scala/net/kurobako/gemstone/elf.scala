@@ -201,7 +201,8 @@ object elf {
       }
       def contains(segment: Segment): Boolean = segment.offset <= section.offset &&
         segment.offset + segment.fileSize >= section.end
-      val holding = segments.filter(contains(_))
+      val holding    = segments.filter(contains(_))
+      val holdingEnd = holding.foldLeft(Long.MinValue)((end, segment) => end.max(segment.offset + segment.fileSize))
       for {
         _ <- Either.cond(
           sections.lift(section.index).contains(section) && section.sectionType != SectionType.NoBits,
@@ -221,9 +222,7 @@ object elf {
           growth <= 0 ||
             holding.forall(segment => segment.offset + segment.fileSize == section.end) ||
             later.forall(other =>
-              other.address == 0L || holding.forall(segment =>
-                other.offset >= segment.offset + segment.fileSize
-              )
+              other.address == 0L || other.offset >= holdingEnd
             ),
           (),
           s"section ${section.name} does not end its segment": NonEmpty[String]

@@ -15,6 +15,9 @@ object CodeObject {
 /** ELF input with a validated header; full indexing is deferred until it is needed. */
 case class CodeObject private (image: Vec[Byte]) {
 
+  /** The processor target recorded in the code object's ISA note, which selects instruction encodings. */
+  def target: Either[CodeObjectError, Target] = ELF.index(image).map(_.target)
+
   /** Executable bytes with locally resolvable relocations applied to a private copy. */
   def executableSections: Either[CodeObjectError, Vec[ExecutableSection]] = ELF.executableSections(image)
 

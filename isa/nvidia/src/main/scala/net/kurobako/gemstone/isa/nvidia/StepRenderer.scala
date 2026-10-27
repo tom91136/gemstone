@@ -22,16 +22,12 @@ private[isa] object StepRenderer {
     instructions.traverse(NvidiaStaged.staged(Render, _)(sinks)(None)).map(Term.Steps.concat(_))
   }
 
-  /** The instructions' semantics as a definition named `name`. Operands and state are declared with the types `names`
-    * gives them, those in `order` first and in that order.
+  case class Spec(name: String, order: Vec[String], requirements: Vec[Term])
+
+  /** The instructions' semantics as the definition `spec` names. Operands and state are declared with the types `names`
+    * gives them, those in `spec.order` first and in that order.
     */
-  def definition(
-      name: String,
-      instructions: Vec[Instruction],
-      names: Names,
-      order: Vec[String],
-      requirements: Vec[Term]
-  ): Either[Unrendered, Definition] = {
+  def definition(spec: Spec, instructions: Vec[Instruction], names: Names): Either[Unrendered, Definition] = {
     val sinks    = StepRenderer(names)
     val rendered = instructions.map(instruction =>
       NvidiaStaged.staged(Render, instruction)(sinks)(None).toRight(instruction.productPrefix)
@@ -40,15 +36,66 @@ private[isa] object StepRenderer {
       case Vec() =>
         Definition.from(
           Term.Steps.concat(rendered.flatMap(_.toOption)),
-          name,
+          spec.name,
           names,
-          order,
-          requirements,
+          spec.order,
+          spec.requirements,
           settle = true
         )
           .left.map(Unrendered.Undefined(_))
       case unstaged => Left(Unrendered.Unstaged(unstaged))
     }
+  }
+
+  /** The machine semantics of those of `instructions` that have some, each as the definition `spec` names over `names`
+    * and declared in `spec.order`, or why it is not one. A machine instruction runs under its predicate, if it has one,
+    * after the unpredicated lane steps before it, which bind what it reads. When no instruction has machine semantics,
+    * the unpredicated lane steps form one definition if they read or write a name in `state`, the machine state, or a
+    * predicated store does; no other predicated step is rendered.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def machine(spec: Spec, instructions: Vec[PredicatedInstruction], names: Names, state: Set[String] = Set.empty)
+      : Vec[Either[Unrendered, Definition]] = {
+    val sinks      = StepRenderer(names)
+    val lane       = mutable.ArrayBuffer.empty[Term.Steps]
+    val defined    = mutable.ArrayBuffer.empty[Either[Unrendered, Definition]]
+    var skipped    = false
+    var guardedOut = false
+    instructions.foreach { case PredicatedInstruction(instruction, predication) =>
+      val guard = predication.map(guardTerm(names, _))
+      MachineSemantics.render(instruction, NvidiaMachineRender(names, guard)) match {
+        case Some(steps) =>
+          defined +=
+            Definition.from(Term.Steps.concat(Vec.from(lane)) ++ steps, spec.name, names, spec.order, spec.requirements)
+              .left.map(Unrendered.Undefined(_))
+        case None =>
+          (NvidiaStaged.staged(Render, instruction)(sinks)(None), guard) match {
+            case (Some(steps), None)                                   => lane += steps
+            case (Some(steps), Some(condition)) if storesMemory(steps) =>
+              guardedOut = true
+              lane += Term.Steps(Term.Step("machine", Term.When(condition, steps.all)))
+            case _ => skipped ||= predication.nonEmpty
+          }
+      }
+    }
+    val steps = Term.Steps.concat(Vec.from(lane))
+    if (defined.isEmpty && !skipped && (guardedOut || touches(steps, state)))
+      Vec(Definition.from(steps, spec.name, names, spec.order, spec.requirements).left.map(Unrendered.Undefined(_)))
+    else Vec.from(defined)
+  }
+
+  private def storesMemory(steps: Term.Steps): Boolean = steps.all.exists(_.name == Machine.memory)
+
+  /** Whether `steps` assign a name in `state` or read one. */
+  private def touches(steps: Term.Steps, state: Set[String]): Boolean = {
+    val read = steps.all.flatMap(_.value.variables).toSet
+    steps.all.exists(step => state(step.name)) || state.exists(read)
+  }
+
+  /** The condition that holds on the lanes `predication` selects, over `names`. */
+  private def guardTerm(names: Names, predication: ExecutionPredicate): Term = {
+    val holds = names.read(predication.predicate)
+    if (predication.negated) Render.not(holds) else holds
   }
 
   def carry(names: Names): String = names.declare(Machine.carry, Type.Bool)
@@ -75,9 +122,9 @@ private[isa] object StepRenderer {
 
   /** The operands of an element of a matrix product as state, with each bound intermediate a step. */
   class MatrixTerms(names: Names, operation: Matrix.Operation.Multiply) extends MatrixOperands[Term] {
-    private val bindings    = Vec.newBuilder[Term.Step]
-    private val slots       = mutable.HashMap.empty[Int, String]
-    private def scale: Type = operation.scaling.map(_.format) match {
+    private val bindings          = Vec.newBuilder[Term.Step]
+    private val slots             = mutable.HashMap.empty[Int, String]
+    protected def scaleType: Type = operation.scaling.map(_.format) match {
       case Some(Matrix.ScaleFormat.UE4M3) => Type.Encoded(Minifloat.E4M3)
       case _                              => Type.Encoded(Minifloat.E8M0)
     }
@@ -86,8 +133,8 @@ private[isa] object StepRenderer {
     def c: Term                     = Term.Variable(names.declare("c", elementType(operation.c.element)))
     def selection(index: Int): Term =
       Term.Variable(names.declare(s"e${Matrix.selectionField(operation.a.element, index)}", Type.unsigned(2)))
-    def scaleA(block: Int): Term              = Term.Variable(names.declare(s"sa$block", scale))
-    def scaleB(block: Int): Term              = Term.Variable(names.declare(s"sb$block", scale))
+    def scaleA(block: Int): Term              = Term.Variable(names.declare(s"sa$block", scaleType))
+    def scaleB(block: Int): Term              = Term.Variable(names.declare(s"sb$block", scaleType))
     def bind(name: String, value: Term): Term = {
       names.keep(name)
       bindings ++= assign(names, name, value).all

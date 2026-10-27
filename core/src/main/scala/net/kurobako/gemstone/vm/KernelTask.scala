@@ -16,6 +16,8 @@ object KernelTask {
     case Descriptor
   }
 
+  def zeroExtended(bytes: Vec[Byte], width: Int): Vec[Byte] = bytes ++ Vec.fill(width - bytes.size)(0.toByte)
+
   case class ArgumentBuffer(region: AllocationId, offset: Long >= 0) derives Codec
 
   enum RelocationSource derives Codec, CanEqual {

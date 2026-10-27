@@ -22,8 +22,6 @@ import scala.util.control.NonFatal
 /** Typed SPIR-V kernel execution. Guest memory is accessed through the address space; unbound program globals,
   * Workgroup and private storage use dispatch-, group- and invocation-owned apertures.
   */
-// ops and address spaces are polymorphic by design, and the loops run per dispatch or per instruction of one kind
-@SuppressWarnings(Array("baumkuchen:megamorphic-call"))
 private object VMInterpreter {
   import Operand.*
 
@@ -422,7 +420,8 @@ private object VMInterpreter {
     val parallel             = workgroups.shouldParallel(geometry.groupTotal, geometry.groupVolume.widen[Long >= 0])
     val state                = MemoryState(storage)
     val sequential           = Reuse(totalLocal)
-    val ops                  = instrumented(programOps, dispatch.kernelName, control.observer)
+    val timeline             = VMTimeline(dispatch.kernelName, control)
+    val ops                  = instrumented(programOps, timeline)
 
     def runGroup(group: Coordinates, groupState: MemoryState, reuse: Reuse): Either[Fault, Unit] = {
       val activeGroupSize = geometry.activeGroupSize(group) match {
@@ -487,7 +486,9 @@ private object VMInterpreter {
             stageValues,
             reused,
             template,
-            privateImage
+            privateImage,
+            timeline,
+            groupState
           ) match {
             case Left(error)  => return Left(error)
             case Right(value) => value
@@ -511,7 +512,7 @@ private object VMInterpreter {
           } else
             // Deferred host reads retain a frame only when the lane actually suspends.
             resumeInvocation(program, ops, execution, groupState, control) match {
-              case Left(error)                      => return Left(located(error, dispatch.kernelName, execution))
+              case Left(error)                      => return Left(located(error, timeline, execution))
               case Right(()) if execution.completed => reuse.execution = execution
               case Right(()) if (hasCollectives && execution.memoryPending) || execution.preempted =>
                 executions += execution
@@ -527,7 +528,7 @@ private object VMInterpreter {
         linearLocal += 1
       }
       if (hasCollectives || executions.nonEmpty)
-        runWorkgroup(program, dispatch.kernelName, ops, executions, groupState, control)
+        runWorkgroup(program, timeline, ops, executions, groupState, control)
       else Right(())
     }
 
@@ -547,7 +548,9 @@ private object VMInterpreter {
       bindings: Map[Int, VMValue],
       reused: InvocationState | Null,
       template: InvocationValues,
-      privateImage: Array[Byte]
+      privateImage: Array[Byte],
+      timeline: VMTimeline,
+      memory: MemoryState
   ): Either[Fault, InvocationState] = {
     val execution =
       if (reused == null)
@@ -558,10 +561,12 @@ private object VMInterpreter {
           function.start + 1,
           -1,
           -1,
-          mutable.ArrayDeque.empty[CallFrame]
+          mutable.ArrayDeque.empty[CallFrame],
+          timeline,
+          memory
         )
       else {
-        reused.reset(invocation, function)
+        reused.reset(invocation, function, memory)
         reused
       }
     bindings.foreach { case (variable, value) => execution.values.update(variable, value) }
@@ -588,7 +593,8 @@ private object VMInterpreter {
   // The instruction loop exits as soon as the invocation completes, suspends, or faults. Executed instructions are
   // charged in batches so lanes do not contend on the shared allowance; a charge precedes every exit, so an exhausted
   // budget still wins over the outcome of the instructions it no longer covered.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  // ops are polymorphic by design, and the loops run per dispatch or per instruction of one kind
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var", "baumkuchen:megamorphic-call"))
   private def resumeInvocation(
       program: VMProgram,
       ops: Array[Op],
@@ -639,33 +645,34 @@ private object VMInterpreter {
     )
   }
 
-  private def location(kernel: NonEmpty[String], execution: InvocationState): Fault.Location = {
-    val invocation = execution.invocation
-    val lane       = (invocation.local(2) * invocation.workgroupSize(1) + invocation.local(1)) *
-      invocation.workgroupSize(0) + invocation.local(0)
-    Fault.Location(
-      kernel,
-      None,
-      Some(execution.pc.toLong.unsafe[Long >= 0]),
-      Some(invocation.groupId),
-      Some(lane.toInt.unsafe[Int >= 0])
-    )
-  }
-
-  private def located(fault: Fault, kernel: NonEmpty[String], execution: InvocationState): Fault =
-    fault.at(location(kernel, execution))
+  private def located(fault: Fault, timeline: VMTimeline, execution: InvocationState): Fault =
+    fault.at(timeline.location(execution.pc, execution.invocation.groupId, execution.ordinal))
 
   /** The program's ops, each preceded by a call to `observer` when one is attached. */
-  private def instrumented(ops: Array[Op], kernel: NonEmpty[String], observer: Option[LaunchObserver]): Array[Op] =
-    observer.fold(ops)(observer => ops.map(Observed(_, kernel, observer)))
+  private def instrumented(ops: Array[Op], timeline: VMTimeline): Array[Op] =
+    timeline.observer.fold(ops)(observer => ops.map(Observed(_, timeline, observer)))
 
-  private class Observed(op: Op, kernel: NonEmpty[String], observer: LaunchObserver) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      observer.instruction(location(kernel, execution), View(execution)).flatMap(_ => op.run(execution, memory))
+  private class Observed(op: Op, timeline: VMTimeline, observer: LaunchObserver) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
+      // The launch's issue ordinal is its timeline's time axis; only an observed launch needs one.
+      val issue = timeline.issue()
+      observer
+        .instruction(
+          timeline.location(execution.pc, execution.invocation.groupId, execution.ordinal),
+          View(execution, issue)
+        )
+        .flatMap(_ => op.run(execution, memory))
+    }
   }
 
-  private class View(execution: InvocationState) extends InvocationView {
-    def function: Int = execution.currentFunction.id
+  private class View(execution: InvocationState, issue: Long) extends InvocationView {
+    def function: Int             = execution.currentFunction.id
+    def unit: MachineUnit         = execution.unit(MachineUnit.State.Running)
+    def issued: Long              = issue
+    override def pc: Int          = execution.pc
+    override def label: Int       = execution.currentLabel
+    override def predecessor: Int = execution.predecessor
+    override def callDepth: Int   = execution.calls.size
 
     def value(id: Int): Option[InvocationView.Value] = execution.values.get(id).map {
       case VMValue.Bits(_, lanes)      => InvocationView.Value.Bits(Vec.from(lanes))
@@ -682,7 +689,7 @@ private object VMInterpreter {
   )
   private def runWorkgroup(
       program: VMProgram,
-      kernel: NonEmpty[String],
+      timeline: VMTimeline,
       ops: Array[Op],
       executions: mutable.ArrayBuffer[InvocationState],
       memory: MemoryState,
@@ -697,7 +704,7 @@ private object VMInterpreter {
           execution.reconvergenceJoin.isEmpty
         )
           resumeInvocation(program, ops, execution, memory, control) match {
-            case Left(error) => return Left(located(error, kernel, execution))
+            case Left(error) => return Left(located(error, timeline, execution))
             case Right(())   => ()
           }
         index += 1
@@ -786,7 +793,7 @@ private object VMInterpreter {
           case BuiltIn.SubgroupLeMask => (0, local + 1)
           case _                      => (0, local)
         }
-        Right(Array.tabulate(4)(CollectiveOps.ballotLanes(from, Math.min(until, invocation.maxSubgroupSize), _)))
+        Right(Array.tabulate(4)(Collective.ballotLanes(from, Math.min(until, invocation.maxSubgroupSize), _)))
       // The Vulkan runtime exposes one physical device in each device group.
       case BuiltIn.DeviceIndex if program.vulkan => Right(Array(0L))
       case BuiltIn.SubgroupSize                  => Right(Array(invocation.subgroupSize.toLong))

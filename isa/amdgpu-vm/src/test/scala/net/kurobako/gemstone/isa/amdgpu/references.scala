@@ -654,6 +654,13 @@ private object references {
       case VectorConvertOperation.SaturatePackU8FromI16 =>
         def byte(value: Long): Long = Bits.signExtend(value & 0xffffL, 16).max(0L).min(255L)
         byte(source) | (byte(source >>> 16) << 8)
+      case VectorConvertOperation.SaturatePackI4FromI8 =>
+        (0 until 4).map(index =>
+          (Bits.signExtend((source >>> (8 * index)) & 0xffL, 8).max(-8L).min(7L) & 0xfL) << (4 * index)
+        )
+          .sum
+      case VectorConvertOperation.SaturatePackU4FromU8 =>
+        (0 until 4).map(index => ((source >>> (8 * index)) & 0xffL).min(15L) << (4 * index)).sum
       case VectorConvertOperation.F32FromE4M3     => eightBit(source, Minifloat.E4M3)
       case VectorConvertOperation.F32FromE5M2     => eightBit(source, Minifloat.E5M2)
       case VectorConvertOperation.F32FromE4M3Fnuz => eightBit(source, Minifloat.E4M3FNUZ)
@@ -670,6 +677,12 @@ private object references {
       case VectorConvertOperation.PairF32FromE5M2Fnuz =>
         eightBit(source, Minifloat.E5M2FNUZ) |
           (eightBit(source >>> 8, Minifloat.E5M2FNUZ) << 32)
+      case VectorConvertOperation.F16FromE4M3       => eightBitHalf(source, Minifloat.E4M3)
+      case VectorConvertOperation.F16FromE5M2       => eightBitHalf(source, Minifloat.E5M2)
+      case VectorConvertOperation.PackedF16FromE4M3 =>
+        eightBitHalf(source, Minifloat.E4M3) | (eightBitHalf(source >>> 8, Minifloat.E4M3) << 16)
+      case VectorConvertOperation.PackedF16FromE5M2 =>
+        eightBitHalf(source, Minifloat.E5M2) | (eightBitHalf(source >>> 8, Minifloat.E5M2) << 16)
       case operation => clampF16(IEEE754.doubleToBinary16(halfOperation(operation, half.toDouble)).toLong, clamp)
     }
   }
@@ -677,6 +690,10 @@ private object references {
   /** The low byte as the 8-bit float `format`, as binary32. */
   private def eightBit(source: Long, format: Minifloat): Long =
     IEEE754.floatToBinary32(format.toDouble(source & 0xffL).toFloat).toLong
+
+  /** The low byte as the 8-bit float `format`, as binary16. */
+  private def eightBitHalf(source: Long, format: Minifloat): Long =
+    IEEE754.doubleToBinary16(format.toDouble(source & 0xffL)).toLong
 
   /** The binary16 unary operations in binary64, before their one rounding to binary16. */
   private def halfOperation(operation: VectorConvertOperation, x: Double): Double = operation match {

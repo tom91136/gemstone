@@ -8,8 +8,6 @@ import scala.collection.mutable
 
 /** Resolves symbolic branch targets of lowered NVIDIA code into program counters. */
 private[isa] object VMAssembler {
-  // the pre-assembly line beside Branch and BranchTable
-  @SuppressWarnings(Array("baumkuchen:duplicate-shape"))
   enum Statement {
     case Label(name: NonEmpty[String])
     case Execute(instruction: Instruction, predication: Option[ExecutionPredicate] = None)

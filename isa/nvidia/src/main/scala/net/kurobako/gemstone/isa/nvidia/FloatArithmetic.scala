@@ -10,8 +10,6 @@ import scala.annotation.targetName
 /** NVIDIA floating-point arithmetic on IEEE binary16, binary32 and binary64 values, and on bfloat16 values as their
   * bits. NaN results are canonical where the hardware canonicalises them.
   */
-// the Float16, Float32 and Float64 overloads differ in operand and result types
-@SuppressWarnings(Array("baumkuchen:near-duplicate-code"))
 private[isa] object FloatArithmetic {
   private inline def unary[W <: Int](value: FloatingPoint[W])(inline function: Long => Long): FloatingPoint.Named[W] =
     fromRaw[FloatingPoint.Named[W]](function(toRaw(value)))

@@ -11,14 +11,14 @@ import scala.collection.mutable
   */
 object Encoder {
   def encode(
-      database: NVDisasm.Database,
-      form: NVDisasm.Form,
+      encoding: NVDisasm.Encoding,
       opcode: String,
       bindings: Map[String, BigInt],
       preserved: Option[BigInt] = None
   ): Either[String, Array[Byte]] = {
-    val opcodeValues = form.opcodes.filter(_.name == opcode).map(_.value).distinct
-    val opcodeValue  = opcodeValues match {
+    val NVDisasm.Encoding(database, form) = encoding
+    val opcodeValues                      = form.opcodes.filter(_.name == opcode).map(_.value).distinct
+    val opcodeValue                       = opcodeValues match {
       case Vec(value)               => Right(value)
       case values if values.isEmpty => Left(s"unknown opcode $opcode for ${form.name}")
       case _                        => Left(s"ambiguous opcode $opcode for ${form.name}")
@@ -36,7 +36,7 @@ object Encoder {
         case value                                               => Right(value.getOrElse(BigInt(0)))
       }
       values        <- withOpcode
-      _             <- Legality.check(database, form, Legality.completeBindings(form, values)).left.map(_.message)
+      _             <- Legality.check(encoding, Legality.completeBindings(form, values)).left.map(_.message)
       _             <- validatePositions(database, form)
       encodedFields <- form.fields.traverse { field =>
         val oldField = preserved.map(word => FieldDecoder.extract(word, field.positions))

@@ -73,8 +73,6 @@ class AtomicOperationSuite extends munit.FunSuite {
     ).value
     val memory = RegionMemory(allocation -> (16 + groups.raw * 8))
     LittleEndian.write(old, memory.array(allocation), 0, 8)
-    // The reference model boxes one seed per test case.
-    @SuppressWarnings(Array("baumkuchen:loop-boxing"))
     val expected = (0 until groups).scanLeft(old) { (previous, _) =>
       if (op == "add" || op == "flatadd") (previous + operand) & mask
       else if (op.endsWith("inc")) { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }

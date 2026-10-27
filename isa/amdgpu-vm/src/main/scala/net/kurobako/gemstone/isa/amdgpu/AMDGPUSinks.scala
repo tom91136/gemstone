@@ -11,8 +11,6 @@ import net.kurobako.gemstone.semantics.*
   * values it reads. Dword operands arrive as their low 32 bits unless a shape says otherwise; register pairs as 64
   * bits; source modifiers apply before the kernel. Flag kernels see the result last.
   */
-// sink operands stay unpacked so a hot expansion allocates no operand holders
-@SuppressWarnings(Array("baumkuchen:data-clump"))
 private trait AMDGPUSinks[V, R] {
 
   /** `body` as a unit of its own, which execution compiles to a method of its own. */

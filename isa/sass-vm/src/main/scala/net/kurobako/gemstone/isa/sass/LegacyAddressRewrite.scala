@@ -77,8 +77,8 @@ private object LegacyAddressRewrite {
     case _: Form.Sts | _: Form.Stl | _: Form.Stg => true
     case _                                       => false
   }
-  private def isReconvergenceSetup(instruction: DecodedInstruction): Boolean =
-    LegacyControlFlow.setupKind(instruction).nonEmpty
+  private def isOrdinary(instruction: DecodedInstruction): Boolean =
+    LegacyControlFlow.setupKind(instruction).isEmpty
   private def isAdd(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
     case _: Form.Iadd | _: Form.Iadd32i => true
     case _                              => false
@@ -483,7 +483,7 @@ private object LegacyAddressRewrite {
 
     val region = instructions.slice(previousCarryWriter, highIndex + 1)
     if (
-      region.exists(instruction => isControlFlow(instruction) && !isReconvergenceSetup(instruction)) ||
+      region.exists(instruction => isControlFlow(instruction) && isOrdinary(instruction)) ||
       controlFlowTargets.exists(address => address > low.address && address <= high.address)
     )
       throw IllegalArgumentException(
@@ -505,7 +505,7 @@ private object LegacyAddressRewrite {
         !independentPredicate(instruction) &&
         !explicitLoadIndependent(instruction, protectedRegisters) && !isSchedulingBarrier(instruction) &&
         !isMemBar(instruction) &&
-        !isReconvergenceSetup(instruction) && !genericMemoryIndependent(instruction, protectedRegisters)
+        isOrdinary(instruction) && !genericMemoryIndependent(instruction, protectedRegisters)
       }
     )
       throw IllegalArgumentException(
@@ -586,9 +586,9 @@ private object LegacyAddressRewrite {
     * shared or a generic form. The test is a global address-space query of Ra and Rb, which the VM lowers directly; the
     * carry it reads has no other consumer, so its producer becomes a NOP.
     */
-  private def isWindowTest(instruction: DecodedInstruction): Boolean =
-    isPredicateForm(instruction) && instruction.guard.isEmpty && OperandQueries.isZero(instruction.operands(1)) &&
-      OperandQueries.isZero(instruction.operands(3)) && isGeneralRegister(instruction.operands(4))
+  private def isNotWindowTest(instruction: DecodedInstruction): Boolean =
+    !isPredicateForm(instruction) || instruction.guard.nonEmpty || !OperandQueries.isZero(instruction.operands(1)) ||
+      !OperandQueries.isZero(instruction.operands(3)) || !isGeneralRegister(instruction.operands(4))
 
   private def windowTests(instructions: Vec[DecodedInstruction]): Vec[DecodedInstruction] = {
     val zeroCarry = Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC))
@@ -599,7 +599,7 @@ private object LegacyAddressRewrite {
           OperandQueries.isZero(instruction.operands(2))
       )(registerIndex(instruction.operands(1))).flatten
     instructions.indices.foldLeft(instructions) { (current, index) =>
-      if (!isWindowTest(current(index))) current
+      if (isNotWindowTest(current(index))) current
       else {
         val base = registerIndex(current(index).operands(2))
         val pair = (index - 4 until index).filter(_ >= 0).findLast(earlier =>
@@ -615,8 +615,9 @@ private object LegacyAddressRewrite {
   private def rewriteFunction(original: DecodedFunction): DecodedFunction = {
     val function        = original.copy(instructions = windowTests(original.instructions))
     val instructions    = function.instructions
-    val hasAuxiliaryLea = instructions.exists(instruction => isAuxiliaryHigh(instruction) && !isWindowTest(instruction))
-    val targets         = controlFlowTargets(instructions)
+    val hasAuxiliaryLea =
+      instructions.exists(instruction => isAuxiliaryHigh(instruction) && isNotWindowTest(instruction))
+    val targets = controlFlowTargets(instructions)
     if (
       hasAuxiliaryLea &&
       instructions.indices.exists(index =>
@@ -629,7 +630,7 @@ private object LegacyAddressRewrite {
 
     val originalIndices = instructions.zipWithIndex.map((instruction, index) => instruction.address -> index).toMap
     val rewrites        = instructions.zipWithIndex.foldLeft(Map.empty[Int, DecodedInstruction]) {
-      case (current, (high, highIndex)) if isAuxiliaryHigh(high) && !isWindowTest(high) =>
+      case (current, (high, highIndex)) if isAuxiliaryHigh(high) && isNotWindowTest(high) =>
         val view         = guardedView(instructions, highIndex, targets)
         val position     = view.indexWhere(_.address == high.address)
         val replacements = rewriteHigh(view, high, position, targets)

@@ -23,9 +23,9 @@ object GenerateSASSISA {
   case class Bundle(targets: Vector[(String, String)], tables: Vector[Table])
 
   private val command = Command("GenerateSASSISA", "Generate SASS forms from pinned recovered descriptions")((
-    Opts.argument[String]("references").map(Path.of(_)),
-    Opts.argument[String]("generated-source-root").map(Path.of(_)),
-    Opts.argument[String]("generated-resource-root").map(Path.of(_))
+    CodegenCommand.path("references"),
+    CodegenCommand.path("generated-source-root"),
+    CodegenCommand.path("generated-resource-root")
   ).tupled)
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
@@ -41,7 +41,13 @@ object GenerateSASSISA {
       val resources = resourceRoot.resolve(PackageRoot)
       val catalogue = resources.resolve("decoders.json")
       GeneratedFiles.write(catalogue, renderJson(upickle.default.writeJs(renderCatalogue(bundle))))
-      GeneratedFiles.removeUnexpected(resources, Set(catalogue), _ => true)
+      val domains =
+        GenerateSASSDomains.render(bundle.tables.map(table => table.digest -> table.description), bundle.targets)
+      val tables = resources.resolve("domains.json")
+      val report = resources.resolve("domains-report.md")
+      GeneratedFiles.write(tables, domains.json)
+      GeneratedFiles.write(report, domains.report)
+      GeneratedFiles.removeUnexpected(resources, Set(catalogue, tables, report), _ => true)
       Console.out.println(
         s"generated ${SASSInstructionRenderer.cases(shapes).size} typed instructions for ${bundle.targets.size} targets (${bundle.tables.size} descriptions)"
       )
@@ -181,6 +187,7 @@ object GenerateSASSISA {
       values.toVector.sortBy(_._1).map((name, value) => strings(name) -> value)
 
     val digests   = bundle.tables.map(_.digest)
+    val positions = digests.zipWithIndex.toMap
     val databases = bundle.tables.map { table =>
       val decoder = Decoder(table)
       Database(
@@ -221,7 +228,7 @@ object GenerateSASSISA {
         )
       )
     }
-    val targets = bundle.targets.map((name, digest) => strings(name) -> digests.indexOf(digest))
+    val targets = bundle.targets.map((name, digest) => strings(name) -> positions(digest))
     Catalogue(
       strings.result,
       expressions.result,

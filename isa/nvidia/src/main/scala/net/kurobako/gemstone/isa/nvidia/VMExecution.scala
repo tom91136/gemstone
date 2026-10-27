@@ -17,6 +17,8 @@ private object VMExecution {
 
   case class Arm(target: Pc, lanes: VMLaneMask)
 
+  type Flow[A] = Either[Fault, A]
+
   // Shared results keep the per-instruction path from allocating one per step.
   val Completed: Either[Fault, Unit] = Right(())
   val Advanced: Either[Fault, Step]  = Right(Step.Advance)

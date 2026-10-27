@@ -19,108 +19,55 @@ private object ControlOps {
         Instruction.AssumeTrueKHR(_) | Instruction.LoopControlINTEL(_) => Next
     case Instruction.Label(label)                                         => Label(id(label))
     case Instruction.Phi(_, _, _)                                         => phi(site)
-    case Instruction.Branch(target)                                       => Branch(site.label(target))
+    case Instruction.Branch(target)                                       => Branch(block(site, target))
     case Instruction.BranchConditional(condition, whenTrue, whenFalse, _) =>
-      Conditional(id(condition), site.label(whenTrue), site.label(whenFalse))
-    case Instruction.Switch(selector, default, targets)         => switch(site, selector, default, targets)
-    case Instruction.LoopMerge(merge, _, _)                     => Merge(id(merge), loop = true)
-    case Instruction.SelectionMerge(merge, _)                   => Merge(id(merge), loop = false)
-    case Instruction.Return()                                   => Return
-    case Instruction.ReturnValue(value)                         => ReturnValue(id(value))
-    case Instruction.Kill() | Instruction.TerminateInvocation() => Kill
-    case Instruction.Unreachable()        => Fail(Fault.InvalidRequest("OpUnreachable was reached"))
-    case Instruction.AbortKHR(_, message) =>
-      Dynamic { (execution, _) =>
-        val lanes =
-          Option(execution.values.lanes(id(message))).fold("")(_.map(java.lang.Long.toHexString(_)).mkString(" "))
-        Left(Fault.Backend(s"OpAbortKHR terminated the invocation with message [$lanes]"))
-      }
-    case Instruction.PoisonKHR(resultType, dest)                       => zero(site, resultType, dest, "OpPoisonKHR")
-    case Instruction.Undef(resultType, dest)                           => zero(site, resultType, dest, "OpUndef")
+      Conditional(id(condition), block(site, whenTrue), block(site, whenFalse))
+    case Instruction.Switch(selector, default, targets) => switch(site, selector, default, targets)
+    case Instruction.LoopMerge(merge, _, _)             => Merge(id(merge), loop = true)
+    case Instruction.SelectionMerge(merge, _)           => Merge(id(merge), loop = false)
+    case Instruction.Return()                           => Return
+    case Instruction.ReturnValue(value)                 => ReturnValue(id(value))
+    case Instruction.Kill()                             => Kill
+    case Instruction.TerminateInvocation()              => Terminate
+    case Instruction.Unreachable()                      => Unreachable
+    case Instruction.AbortKHR(_, message)               => Abort(id(message))
+    case Instruction.PoisonKHR(resultType, dest)        => zero(site, ResultIds(resultType, dest), "OpPoisonKHR")
+    case Instruction.Undef(resultType, dest)            => zero(site, ResultIds(resultType, dest), "OpUndef")
     case Instruction.FunctionCall(resultType, dest, called, arguments) =>
-      call(site, id(resultType), id(dest), id(called), arguments.map(id(_)))
+      call(site, ResultIds(resultType, dest), id(called), arguments.map(id(_)))
     case Instruction.FunctionPointerCallINTEL(resultType, dest, sources) if sources.nonEmpty =>
-      PointerCall(site, id(resultType), id(dest), id(sources.head), sources.tail.map(id(_)))
+      PointerCall(Indirect(
+        id(sources.head),
+        sources.tail.map(id(_)).toArray,
+        function => call(site, ResultIds(resultType, dest), function, sources.tail.map(id(_)))
+      ))
   }
 
+  private def block(site: Site, label: Operand): Block = Block.resolved(id(label), site.label(label))
+
   private class Label(label: Int) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
-      execution.currentLabel = label
-      execution.pc += 1
-      if (execution.fragmentQuad || execution.subgroupReconvergence) {
-        val regions = execution.reconvergenceRegions
-        val merge   = regions.indexWhere(_.merge == label)
-        if (merge >= 0) {
-          regions.remove(merge + 1, regions.size - merge - 1)
-          execution.reconvergenceJoin = Some(ReconvergenceJoin.Merge(label))
-        } else {
-          // A continue may bypass nested selection merges on its way to the loop header.
-          val header = regions.indexWhere(region => region.loop && region.header == label)
-          if (header >= 0) regions.remove(header + 1, regions.size - header - 1)
-        }
-      }
-      Done
-    }
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.label(InvocationMachine(execution))(label)
   }
 
   /** The consecutive OpPhi instructions at one block entry read their predecessor values before any is written. A phi
     * is scalar when its destination and every incoming value live in the scalar bank, so it stages bare bits.
     */
-  private class Phi(
-      dests: Array[Int],
-      types: Array[Int],
-      parents: Array[Array[Int]],
-      sources: Array[Array[Int]],
-      scalar: Array[Boolean],
-      next: Int
-  ) extends Op {
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private def edge(labels: Array[Int], predecessor: Int): Int = {
-      var index = labels.length - 1
-      while (index >= 0 && labels(index) != predecessor) index -= 1
-      index
-    }
-
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
-      val values                = execution.values
-      val bits                  = execution.phiBits(dests.length)
-      val staged                = execution.phiValues(dests.length)
-      var index                 = 0
-      var missing: Fault | Null = null
-      while (index < dests.length && missing == null) {
-        val incoming = edge(parents(index), execution.predecessor)
-        if (incoming >= 0 && scalar(index)) bits(index) = values.scalars(sources(index)(incoming))
-        else (if (incoming < 0) None else values.get(sources(index)(incoming))) match {
-          case Some(value) => staged(index) = retag(value, types(index))
-          case None        =>
-            missing =
-              Fault.InvalidRequest(s"OpPhi %${dests(index)} has no incoming value for label %${execution.predecessor}")
-        }
-        index += 1
-      }
-      if (missing != null) Left(missing)
-      else {
-        index = 0
-        while (index < dests.length) {
-          if (scalar(index)) values.scalars(dests(index)) = bits(index)
-          else {
-            values.update(dests(index), staged(index).nn)
-            staged(index) = null
-          }
-          index += 1
-        }
-        execution.pc = next
-        Done
-      }
-    }
+  private class Phi(group: Phis) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.phi(InvocationMachine(execution))(group)
   }
 
-  private def zero(site: Site, resultType: Operand, dest: Operand, opcode: String): Op =
-    zeroValue(site.program.types, id(resultType), id(dest), opcode) match {
-      case Left(error)     => Fail(error)
-      case Right(constant) => Define(id(dest), constant.value)
+  private def zero(site: Site, ids: ResultIds, opcode: String): Op =
+    zeroValue(site.program.types, ids.resultType, ids.dest, opcode) match {
+      case Left(error) => Fail(error)
+      case Right(_)    => Zero(ids.dest, ids.resultType, opcode)
     }
+
+  private class Zero(dest: Int, resultType: Int, opcode: String) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      CompositeSemantics.zero(InvocationMachine(execution))(dest, resultType, opcode)
+  }
 
   private def phi(site: Site): Op = {
     val instructions = site.program.module.instructions
@@ -136,22 +83,19 @@ private object ControlOps {
         ))
       case None =>
         val phis = group.collect { case Instruction.Phi(resultType, dest, incoming) =>
-          (id(resultType), id(dest), incoming)
+          (id(resultType), id(dest), ControlSemantics.edges(incoming))
         }
-        // A later pair for the same parent wins, as in a sequential scan.
-        def edges(incoming: Vec[Operand]): Vector[(Int, Int)] =
-          incoming.reverseIterator.map(pair => pair.words(1).raw -> pair.words(0).raw).toVector.distinctBy(_._1)
-        val sources = phis.map(phi => edges(phi._3).map(_._2).toArray).toArray
-        Phi(
+        val sources = phis.map(_._3.map(_.value).toArray).toArray
+        Phi(Phis(
           phis.map(_._2).toArray,
           phis.map(_._1).toArray,
-          phis.map(phi => edges(phi._3).map(_._1).toArray).toArray,
+          phis.map(_._3.map(_.parent).toArray).toArray,
           sources,
           phis.indices.map(index =>
             site.program.scalarSlot(phis(index)._2) && sources(index).forall(site.program.scalarSlot)
           ).toArray,
           site.pc + group.size
-        )
+        ))
     }
   }
 
@@ -160,48 +104,19 @@ private object ControlOps {
     case _                        => false
   }
 
-  private def jump(execution: InvocationState, target: Either[Fault, Int]): AddressSpace.ReadResult[Unit] =
-    target match {
-      case Left(error) => Left(error)
-      case Right(pc)   =>
-        execution.predecessor = execution.currentLabel
-        execution.pc = pc
-        Done
-    }
-
-  private class Branch(target: Either[Fault, Int]) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = jump(execution, target)
+  private class Branch(target: Block) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.branch(InvocationMachine(execution))(target)
   }
 
-  private class Conditional(condition: Int, whenTrue: Either[Fault, Int], whenFalse: Either[Fault, Int])
-      extends Op {
+  private class Conditional(condition: Int, whenTrue: Block, whenFalse: Block) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      scalar(execution.values, condition) match {
-        case Left(error) => Left(error)
-        case Right(test) => jump(execution, if (test != 0L) whenTrue else whenFalse)
-      }
+      ControlSemantics.branchConditional(InvocationMachine(execution))(condition, whenTrue, whenFalse)
   }
 
-  private class Switch(
-      selector: Int,
-      selectorMask: Long,
-      default: Either[Fault, Int],
-      literals: Array[Long],
-      targets: Array[Either[Fault, Int]]
-  ) extends Op {
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private class Switch(selector: Int, cases: Cases) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      scalar(execution.values, selector) match {
-        case Left(error)  => Left(error)
-        case Right(value) =>
-          var target = default
-          var index  = 0
-          while (index < literals.length) {
-            if ((literals(index) & selectorMask) == (value & selectorMask)) target = targets(index)
-            index += 1
-          }
-          jump(execution, target)
-      }
+      ControlSemantics.switch(InvocationMachine(execution))(selector, cases)
   }
 
   private def switch(site: Site, selector: Operand, default: Operand, targets: Vec[Operand]): Op = {
@@ -214,13 +129,12 @@ private object ControlOps {
         val selectorType = site.program.valueType(id(selector))
         Switch(
           id(selector),
-          mask(site.program.scalarWidth(selectorType)),
-          site.label(default),
-          targets.map { pair =>
-            val low = pair.words.head.toUnsigned.toLong
-            if (pair.words.length == 3) low | (pair.words(1).toUnsigned.toLong << 32) else low
-          }.toArray,
-          targets.map(pair => site.label(Operand(OperandKind.IdRef, Vec.nonEmpty(pair.words.last)))).toArray
+          Cases(
+            mask(site.program.scalarWidth(selectorType)),
+            ControlSemantics.literals(targets),
+            targets.map(pair => block(site, Operand(OperandKind.IdRef, Vec.nonEmpty(pair.words.last)))).toArray,
+            block(site, default)
+          )
         )
     }
   }
@@ -238,95 +152,39 @@ private object ControlOps {
     }
   }
 
-  private def finishFragmentReturn(execution: InvocationState): Unit = {
-    execution.reconvergedReturn = false
-    if (execution.fragmentQuad || execution.subgroupReconvergence)
-      execution.reconvergenceRegions.filterInPlace(_.function != execution.currentFunction.id)
-  }
-
-  /** Lanes that reconverge pause at the return until their neighbours reach it. */
-  private def pauseReturn(execution: InvocationState): Boolean =
-    if ((execution.fragmentQuad || execution.subgroupReconvergence) && !execution.reconvergedReturn) {
-      finishFragmentReturn(execution)
-      execution.reconvergenceJoin = Some(ReconvergenceJoin.FunctionReturn(execution.currentFunction.id))
-      true
-    } else false
-
-  private def resume(execution: InvocationState, frame: CallFrame): Unit = {
-    execution.storage.top = frame.stack
-    execution.currentFunction = frame.function
-    execution.pc = frame.pc
-    execution.currentLabel = frame.currentLabel
-    execution.predecessor = frame.predecessor
-  }
-
   private object Return extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      if (pauseReturn(execution)) Done
-      else {
-        finishFragmentReturn(execution)
-        execution.calls.removeLastOption() match {
-          case None =>
-            execution.complete()
-            Done
-          case Some(frame) =>
-            if (execution.values.program.runtimeType(frame.resultType).contains(RuntimeType.Void)) {
-              resume(execution, frame)
-              Done
-            } else
-              Left(Fault.InvalidRequest(
-                s"SPIR-V function %${execution.currentFunction.id} returned no value to %${frame.destination}"
-              ))
-        }
-      }
+      ControlSemantics.returnControl(InvocationMachine(execution))
   }
 
   private class ReturnValue(value: Int) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      if (pauseReturn(execution)) Done
-      else {
-        finishFragmentReturn(execution)
-        execution.values.get(value) match {
-          case None           => Left(undefined(value))
-          case Some(returned) =>
-            execution.calls.removeLastOption() match {
-              case None        => Left(Fault.InvalidRequest("SPIR-V entry point returned a value"))
-              case Some(frame) =>
-                execution.values.update(frame.destination, retag(returned, frame.resultType))
-                resume(execution, frame)
-                Done
-            }
-        }
-      }
+      ControlSemantics.returnValue(InvocationMachine(execution))(value)
   }
 
   private object Kill extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      if (!execution.fragmentInvocation) Left(Fault.InvalidRequest("OpKill requires a fragment invocation"))
-      else {
-        val cleared = execution.sampleMask match {
-          case Some(pointer) =>
-            memory.write(pointer, Array.ofDim[Byte](execution.values.program.typeSize(pointer.pointee)))
-          case None => Right(())
-        }
-        cleared.map { _ =>
-          execution.fragmentKilled = true
-          execution.complete()
-          execution.calls.clear()
-        }
-      }
+      ControlSemantics.kill(InvocationMachine(execution))
   }
 
-  private class Define(dest: Int, value: VMValue) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
-      execution.values.update(dest, value)
-      execution.pc += 1
-      Done
-    }
+  private object Terminate extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.terminate(InvocationMachine(execution))
+  }
+
+  private object Unreachable extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.unreachable(InvocationMachine(execution))
+    override def failure: Option[Fault] = Some(InvocationMachine.unreachableFault)
+  }
+
+  private class Abort(message: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.abort(InvocationMachine(execution))(message)
   }
 
   /** A direct call; bodiless OpenCL builtins lower to their own ops. */
-  def call(site: Site, resultType: Int, dest: Int, called: Int, arguments: Vec[Int]): Op =
+  def call(site: Site, ids: ResultIds, called: Int, arguments: Vec[Int]): Op =
     site.program.functions.get(called) match {
       case None         => Fail(Fault.InvalidRequest(s"OpFunctionCall references undefined function %$called"))
       case Some(callee) =>
@@ -335,59 +193,18 @@ private object ControlOps {
             s"OpFunctionCall %$called expects ${callee.parameters.size} arguments, received ${arguments.size}"
           ))
         else
-          site.program.names.get(called).flatMap(OpenCLBuiltins.lower(site, _, resultType, dest, arguments))
-            .getOrElse(Call(callee, arguments.toArray, resultType, dest))
+          site.program.names.get(called).flatMap(OpenCLBuiltins.lower(site, _, ids, arguments))
+            .getOrElse(Call(Callee(callee, arguments.toArray, ids.resultType, ids.dest)))
     }
 
-  private class Call(callee: Function, arguments: Array[Int], resultType: Int, dest: Int) extends Op {
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private class Call(callee: Callee) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      if (execution.calls.size >= 128) Left(Fault.Backend("SPIR-V function call depth exceeds 128 frames"))
-      else {
-        var index   = 0
-        var failure = Option.empty[Fault]
-        while (index < arguments.length && failure.isEmpty) {
-          val (parameterId, parameterType) = callee.parameters(index)
-          transfer(execution.values, arguments(index), parameterId, parameterType) match {
-            case Left(error) => failure = Some(error)
-            case Right(())   => ()
-          }
-          index += 1
-        }
-        failure.toLeft {
-          execution.calls.append(
-            CallFrame(
-              execution.currentFunction,
-              execution.pc + 1,
-              execution.currentLabel,
-              execution.predecessor,
-              resultType,
-              dest,
-              execution.storage.top
-            )
-          )
-          execution.currentFunction = callee
-          execution.pc = callee.start + 1
-          execution.currentLabel = -1
-          execution.predecessor = -1
-        }
-      }
+      ControlSemantics.call(InvocationMachine(execution))(callee)
   }
 
   /** The callee of an Intel function pointer is only known when the call executes. */
-  private class PointerCall(site: Site, resultType: Int, dest: Int, pointer: Int, arguments: Vec[Int])
-      extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
-      val program = site.program
-      execution.values.get(pointer) match {
-        case Some(VMValue.Bits(_, Array(token)))
-            if program.ownsFunctionPointer(token) && (token & 0xffffffffL) > 0 && (token & 0xffffffffL) <=
-              Int.MaxValue &&
-              program.functions.contains((token & 0xffffffffL).toInt) =>
-          call(site, resultType, dest, (token & 0xffffffffL).toInt, arguments).run(execution, memory)
-        case Some(_) => Left(Fault.InvalidRequest("OpFunctionPointerCallINTEL has an invalid function pointer"))
-        case None    => Left(undefined(pointer))
-      }
-    }
+  private class PointerCall(call: Indirect) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      ControlSemantics.callIndirect(InvocationMachine(execution))(call)
   }
 }

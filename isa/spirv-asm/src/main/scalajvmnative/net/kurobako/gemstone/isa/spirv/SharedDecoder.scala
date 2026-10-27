@@ -12,8 +12,6 @@ import scala.collection.mutable
 /** Share immutable instruction graphs between live modules, including specialized variants. The pool owns only weak
   * references to instructions; compilation and execution state remain private to each loaded program.
   */
-// the map interns each instruction in the pool: its result does not depend on the order or number of calls
-@SuppressWarnings(Array("baumkuchen:effectful-transform"))
 class SharedDecoder {
   private val lock         = ReentrantLock()
   private val released     = ReferenceQueue[Instruction]()
@@ -36,19 +34,21 @@ class SharedDecoder {
     case Some(_) => reclaim()
   }
 
+  private def intern(instruction: Instruction): Instruction = {
+    val hash   = instruction.hashCode()
+    val bucket = instructions.getOrElse(hash, Nil)
+    bucket.view.flatMap(reference => Option(reference.get())).find(_ == instruction) match {
+      case Some(shared) => shared
+      case None         =>
+        instructions.update(hash, Entry(instruction, hash) :: bucket)
+        instruction
+    }
+  }
+
   def decode(bytes: Vec[Byte]): Either[ISA.DecodeError, Module] = ISA.decode(bytes).map { module =>
     lock.withLock {
       reclaim()
-      module.copy(instructions = module.instructions.map { instruction =>
-        val hash   = instruction.hashCode()
-        val bucket = instructions.getOrElse(hash, Nil)
-        bucket.view.flatMap(reference => Option(reference.get())).find(_ == instruction) match {
-          case Some(shared) => shared
-          case None         =>
-            instructions.update(hash, Entry(instruction, hash) :: bucket)
-            instruction
-        }
-      })
+      module.copy(instructions = module.instructions.map(intern))
     }
   }
 }

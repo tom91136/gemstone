@@ -86,34 +86,43 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def selectedDirty(selected: Vec[HostMemoryRange]): Addresses = {
     val result = Addresses()
+    val masks  = mutable.LongMap.empty[java.util.BitSet]
+    selected.foreach { range =>
+      val last    = range.address.raw + range.size.toLong
+      var address = range.address.raw
+      while (address < last) {
+        val number = address >> 12
+        val base   = number << 12
+        val end    = math.min(base + pageSize, last)
+        if (changed.pages.contains(number))
+          masks.getOrElseUpdate(number, java.util.BitSet(pageSize)).set((address - base).toInt, (end - base).toInt)
+        address = base + pageSize
+      }
+    }
     changed.pages.view.foreach { (number, dirty) =>
-      pages.get(number).foreach { page =>
-        val base = number << 12
-        val mask = java.util.BitSet(pageSize)
-        selected.foreach { range =>
-          val start = math.max(base, range.address.raw)
-          val end   = math.min(base + pageSize, range.address.raw + range.size.toLong)
-          if (start < end) mask.set((start - base).toInt, (end - base).toInt)
-        }
-        def expand(words: java.util.BitSet, width: Int in (1, 2, 4, 8)): Unit = {
-          var index = words.nextSetBit(0)
-          while (index >= 0) {
-            val start = index * width
-            val next  = mask.nextSetBit(start)
-            if (next >= start && next < start + width) mask.set(start, start + width)
-            index = words.nextSetBit(index + 1)
+      masks.get(number).foreach { mask =>
+        pages.get(number).foreach { page =>
+          val base                                                              = number << 12
+          def expand(words: java.util.BitSet, width: Int in (1, 2, 4, 8)): Unit = {
+            var index = words.nextSetBit(0)
+            while (index >= 0) {
+              val start = index * width
+              val next  = mask.nextSetBit(start)
+              if (next >= start && next < start + width) mask.set(start, start + width)
+              index = words.nextSetBit(index + 1)
+            }
           }
-        }
-        expand(page.words8, 8)
-        expand(page.words4, 4)
-        expand(page.words2, 2)
-        expand(page.words1, 1)
-        mask.and(dirty)
-        var offset = mask.nextSetBit(0)
-        while (offset >= 0) {
-          val end = math.min(mask.nextClearBit(offset), pageSize)
-          result.add(base + offset.toLong, end - offset)
-          offset = mask.nextSetBit(end)
+          expand(page.words8, 8)
+          expand(page.words4, 4)
+          expand(page.words2, 2)
+          expand(page.words1, 1)
+          mask.and(dirty)
+          var offset = mask.nextSetBit(0)
+          while (offset >= 0) {
+            val end = math.min(mask.nextClearBit(offset), pageSize)
+            result.add(base + offset.toLong, end - offset)
+            offset = mask.nextSetBit(end)
+          }
         }
       }
     }

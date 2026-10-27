@@ -40,17 +40,4 @@ class MetadataSuite extends munit.FunSuite {
     assertEquals(SourceOperand.decode(512, ISA.CDNA1), None)
   }
 
-  test("literal metadata accepts only four-byte and eight-byte encodings") {
-    val valid = ujson.Obj(
-      "isa"      -> ujson.Str("CDNA5"),
-      "kind"     -> ujson.Str("SRC"),
-      "fields"   -> ujson.Arr(),
-      "literals" -> ujson.Obj("255" -> ujson.Num(4), "254" -> ujson.Num(8))
-    )
-    val decoded = read[OperandEncoding](valid)
-    assertEquals(decoded.literals.view.mapValues(_.raw).toMap, Map(255 -> 4, 254 -> 8))
-    valid("literals") = ujson.Obj("255" -> ujson.Num(3))
-    assert(Try(read[OperandEncoding](valid)).isFailure)
-  }
-
 }

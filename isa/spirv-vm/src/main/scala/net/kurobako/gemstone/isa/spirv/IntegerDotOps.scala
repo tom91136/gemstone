@@ -65,8 +65,7 @@ private object IntegerDotOps {
     } yield (packed, accumulator.map(id(_))) match {
       case (None, Some(addend)) if !IntegerDotSemantics.exact(component._1, component._2) =>
         wide(
-          resultType = resultType,
-          dest = ids.result,
+          ids = ResultIds(resultType, ids.result),
           first = first,
           second = ids(1),
           addend = addend,
@@ -91,8 +90,7 @@ private object IntegerDotOps {
 
   /** An accumulating vector product summed exactly, for components too wide for a 64-bit sum. */
   private def wide(
-      resultType: Int,
-      dest: Int,
+      ids: ResultIds,
       first: Int,
       second: Int,
       addend: Int,
@@ -112,7 +110,7 @@ private object IntegerDotOps {
         val sum = a.indices.foldLeft(exact(start, result, signed))((sum, lane) =>
           sum + exact(a(lane), component, signed) * exact(b(lane), component, secondSign)
         )
-        values.updateScalar(dest, resultType, IntegerArithmetic.clampToWidth(sum, result, signed))
+        values.updateScalar(ids.dest, ids.resultType, IntegerArithmetic.clampToWidth(sum, result, signed))
       }
     }
   }

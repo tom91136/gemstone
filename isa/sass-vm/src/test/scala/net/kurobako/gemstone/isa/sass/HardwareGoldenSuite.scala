@@ -1169,4 +1169,962 @@ class HardwareGoldenSuite extends munit.FunSuite {
       checkGrid(sm, cvta, 2, cvtaTable, Vec(1024))
     }
   }
+
+  // RTX 5070 Laptop GPU sm_120, driver 615.78.08, CUDA 13.2, 2026-10-24: minmax_pred. On sm_120 ptxas lowers the probe's
+  // PTX to plain IMNMX and HMNMX2 chains, so the rows are the PTX results. ptxas 13.3 fuses the probe's setp.eq of a result
+  // lane against the same lane of a into the predicate outputs of VIMNMX on sm_90, and the three-input half chains into
+  // VHMNMX, so the predicate words are those setp outcomes: P0 is the low lane and P1 the high lane
+
+  private val vibMaxS16 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001 00000001
+      |00000000 00000001 -> 00000001 00000001 00000000
+      |00000001 00010000 -> 00010001 00000000 00000001
+      |c0000100 01000100 -> 01000100 00000000 00000001
+      |c0003fff c0003fff -> c0003fff 00000001 00000001
+      |c0003fff c0004000 -> c0004000 00000001 00000000
+      |00000000 00010001 -> 00010001 00000000 00000000
+      |"""
+  )
+
+  private val vibMinS16 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001 00000001
+      |00000001 00010000 -> 00000000 00000001 00000000
+      |00008000 80000000 -> 80008000 00000000 00000001
+      |c0000100 01000100 -> c0000100 00000001 00000001
+      |c0003fff 3fffc000 -> c000c000 00000001 00000000
+      |c0008000 8000c000 -> 80008000 00000000 00000001
+      |00000000 80008000 -> 80008000 00000000 00000000
+      |"""
+  )
+
+  private val vibMaxU16 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001 00000001
+      |00000000 00000001 -> 00000001 00000001 00000000
+      |00000001 00010000 -> 00010001 00000000 00000001
+      |c0000100 01000100 -> c0000100 00000001 00000001
+      |c0003fff 3fffc000 -> c000c000 00000001 00000000
+      |c000fffe fffec000 -> fffefffe 00000000 00000001
+      |00000000 00010001 -> 00010001 00000000 00000000
+      |"""
+  )
+
+  private val vibMinU16 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001 00000001
+      |00000001 00010000 -> 00000000 00000001 00000000
+      |00010000 00000001 -> 00000000 00000000 00000001
+      |c0000100 01000100 -> 01000100 00000000 00000001
+      |c0003fff c0003fff -> c0003fff 00000001 00000001
+      |c000fffe fffec000 -> c000c000 00000001 00000000
+      |00010001 00000000 -> 00000000 00000000 00000000
+      |"""
+  )
+
+  private val vibMaxS16Relu = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001 00000001
+      |00000000 00000001 -> 00000001 00000001 00000000
+      |00000001 00010000 -> 00010001 00000000 00000001
+      |80000000 80000001 -> 00000001 00000000 00000000
+      |c0000100 01000100 -> 01000100 00000000 00000001
+      |c0003fff c0004000 -> 00004000 00000000 00000000
+      |00000000 80008000 -> 00000000 00000001 00000001
+      |00000000 80017fff -> 00007fff 00000001 00000000
+      |"""
+  )
+
+  private val vibMinS16Relu = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001 00000001
+      |00000001 00010000 -> 00000000 00000001 00000000
+      |00010000 00000001 -> 00000000 00000000 00000001
+      |00018000 80000001 -> 00000000 00000000 00000000
+      |c0000100 01000100 -> 00000100 00000000 00000001
+      |c0003fff 3fffc000 -> 00000000 00000000 00000000
+      |00000000 00010001 -> 00000000 00000001 00000001
+      |00010001 7fff8001 -> 00010000 00000001 00000000
+      |"""
+  )
+
+  private val vibMaxS16ImmA = rows(
+    """
+      |00000000 -> 00000005 00000001 00000000
+      |00000005 -> 00000005 00000001 00000001
+      |80000000 -> fffe0005 00000000 00000000
+      |80000005 -> fffe0005 00000000 00000001
+      |ff0000ff -> fffe00ff 00000000 00000001
+      |ff008000 -> fffe0005 00000000 00000000
+      |2fbbc890 -> 2fbb0005 00000001 00000000
+      |388652f5 -> 388652f5 00000001 00000001
+      |"""
+  )
+
+  private val vibMinS16ImmA = rows(
+    """
+      |00000000 -> fffe0000 00000000 00000001
+      |0000007f -> fffe0005 00000000 00000000
+      |80000000 -> 80000000 00000001 00000001
+      |8000007f -> 80000005 00000001 00000000
+      |ff0000ff -> ff000005 00000001 00000000
+      |ff008000 -> ff008000 00000001 00000001
+      |2fbbc890 -> fffec890 00000000 00000001
+      |388652f5 -> fffe0005 00000000 00000000
+      |"""
+  )
+
+  private val vibMaxU16ImmA = rows(
+    """
+      |00000000 -> fffe0005 00000000 00000000
+      |00000005 -> fffe0005 00000000 00000001
+      |fffe0000 -> fffe0005 00000001 00000000
+      |fffe0005 -> fffe0005 00000001 00000001
+      |ff0000ff -> fffe00ff 00000000 00000001
+      |"""
+  )
+
+  private val vibMinU16ImmA = rows(
+    """
+      |00000000 -> 00000000 00000001 00000001
+      |0000007f -> 00000005 00000001 00000000
+      |ffff0000 -> fffe0000 00000000 00000001
+      |ffff007f -> fffe0005 00000000 00000000
+      |ff0000ff -> ff000005 00000001 00000000
+      |"""
+  )
+
+  private val vibMaxS16ReluImmA = rows(
+    """
+      |00000000 -> 00000005 00000001 00000000
+      |00000005 -> 00000005 00000001 00000001
+      |80000000 -> 00000005 00000000 00000000
+      |80000005 -> 00000005 00000000 00000001
+      |ff0000ff -> 000000ff 00000000 00000001
+      |ff008000 -> 00000005 00000000 00000000
+      |2fbbc890 -> 2fbb0005 00000001 00000000
+      |388652f5 -> 388652f5 00000001 00000001
+      |"""
+  )
+
+  private val vibMinS16ReluImmA = rows(
+    """
+      |00000000 -> 00000000 00000001 00000001
+      |0000007f -> 00000005 00000001 00000000
+      |00010000 -> 00000000 00000000 00000001
+      |0001007f -> 00000005 00000000 00000000
+      |ff0000ff -> 00000005 00000000 00000000
+      |"""
+  )
+
+  private val vibMaxS16ImmB = rows(
+    """
+      |00000000 -> 00007fff 00000001 00000000
+      |00007fff -> 00007fff 00000001 00000001
+      |ff0000ff -> ff007fff 00000001 00000000
+      |ff007fff -> ff007fff 00000001 00000001
+      |"""
+  )
+
+  private val vibMinS16ImmB = rows(
+    """
+      |00000000 -> 80000000 00000000 00000001
+      |80000000 -> 80000000 00000001 00000001
+      |ff0000ff -> 800000ff 00000000 00000001
+      |"""
+  )
+
+  private val vibMaxU16ImmB = rows(
+    """
+      |00000000 -> 80007fff 00000000 00000000
+      |00007fff -> 80007fff 00000000 00000001
+      |80000000 -> 80007fff 00000001 00000000
+      |80007fff -> 80007fff 00000001 00000001
+      |ff0000ff -> ff007fff 00000001 00000000
+      |ff007fff -> ff007fff 00000001 00000001
+      |2fbbc890 -> 8000c890 00000000 00000001
+      |388652f5 -> 80007fff 00000000 00000000
+      |"""
+  )
+
+  private val vibMinU16ImmB = rows(
+    """
+      |00000000 -> 00000000 00000001 00000001
+      |00008000 -> 00007fff 00000001 00000000
+      |80010000 -> 80000000 00000000 00000001
+      |80018000 -> 80007fff 00000000 00000000
+      |ff0000ff -> 800000ff 00000000 00000001
+      |ff008000 -> 80007fff 00000000 00000000
+      |2fbbc890 -> 2fbb7fff 00000001 00000000
+      |388652f5 -> 388652f5 00000001 00000001
+      |"""
+  )
+
+  private val vibMaxS16ReluImmB = rows(
+    """
+      |00000000 -> 00007fff 00000001 00000000
+      |00007fff -> 00007fff 00000001 00000001
+      |80000000 -> 00007fff 00000000 00000000
+      |80007fff -> 00007fff 00000000 00000001
+      |ff0000ff -> 00007fff 00000000 00000000
+      |ff007fff -> 00007fff 00000000 00000001
+      |2fbbc890 -> 2fbb7fff 00000001 00000000
+      |"""
+  )
+
+  private val vibMinS16ReluImmB = rows(
+    """
+      |00000000 -> 00000000 00000001 00000001
+      |00008000 -> 00000000 00000001 00000000
+      |00010000 -> 00000000 00000000 00000001
+      |00018000 -> 00000000 00000000 00000000
+      |ff0000ff -> 000000ff 00000000 00000001
+      |ff008000 -> 00000000 00000000 00000000
+      |"""
+  )
+
+  private val vibMaxRelu32 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000000 00000001 -> 00000001 00000000
+      |00000001 00000000 -> 00000001 00000001
+      |80000000 00000000 -> 00000000 00000000
+      |80000000 00000001 -> 00000001 00000000
+      |9abcdef0 00008000 -> 00008000 00000000
+      |9abcdef0 80000000 -> 00000000 00000000
+      |01010101 00000000 -> 01010101 00000001
+      |01010101 7fffffff -> 7fffffff 00000000
+      |"""
+  )
+
+  private val vibMinRelu32 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000001 00000000 -> 00000000 00000000
+      |00000001 00000001 -> 00000001 00000001
+      |00000002 00000001 -> 00000001 00000000
+      |80000000 00000000 -> 00000000 00000000
+      |9abcdef0 00008000 -> 00000000 00000000
+      |01010101 00000000 -> 00000000 00000000
+      |01010101 00000001 -> 00000001 00000000
+      |01010101 7fffffff -> 01010101 00000001
+      |"""
+  )
+
+  private val vibMaxRelu32Imm7 = rows(
+    """
+      |00000000 -> 00000007 00000000
+      |0000007f -> 0000007f 00000001
+      |80000000 -> 00000007 00000000
+      |a67a1192 -> 00000007 00000000
+      |2fd4ae46 -> 2fd4ae46 00000001
+      |"""
+  )
+
+  private val vibMinRelu32Imm7 = rows(
+    """
+      |00000000 -> 00000000 00000001
+      |00000001 -> 00000001 00000001
+      |0000007f -> 00000007 00000000
+      |80000000 -> 00000000 00000000
+      |a67a1192 -> 00000000 00000000
+      |2fd4ae46 -> 00000007 00000000
+      |"""
+  )
+
+  private val vibMaxRelu32ImmM7 = rows(
+    """
+      |00000000 -> 00000000 00000001
+      |00000001 -> 00000001 00000001
+      |80000000 -> 00000000 00000000
+      |a67a1192 -> 00000000 00000000
+      |2fd4ae46 -> 2fd4ae46 00000001
+      |"""
+  )
+
+  private val vibMinRelu32ImmM7 = rows(
+    """
+      |00000000 -> 00000000 00000001
+      |00000001 -> 00000000 00000000
+      |80000000 -> 00000000 00000000
+      |a67a1192 -> 00000000 00000000
+      |2fd4ae46 -> 00000000 00000000
+      |"""
+  )
+
+  private val vibMaxRelu32Imm0 = rows(
+    """
+      |00000000 -> 00000000 00000001
+      |00000001 -> 00000001 00000001
+      |80000000 -> 00000000 00000000
+      |a67a1192 -> 00000000 00000000
+      |2fd4ae46 -> 2fd4ae46 00000001
+      |"""
+  )
+
+  private val uniformMaxRelu32 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000001 00000000 -> 00000001 00000001
+      |80000000 00000000 -> 00000000 00000000
+      |00000000 00000007 -> 00000007 00000000
+      |80000000 00000007 -> 00000007 00000000
+      |00000000 80000000 -> 00000000 00000001
+      |00000001 80000000 -> 00000001 00000001
+      |80000000 80000000 -> 00000000 00000000
+      |00000000 00010000 -> 00010000 00000000
+      |80000000 00010000 -> 00010000 00000000
+      |"""
+  )
+
+  private val uniformMinRelu32 = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000001 00000000 -> 00000000 00000000
+      |80000000 00000000 -> 00000000 00000000
+      |00000001 00000007 -> 00000001 00000001
+      |0000007f 00000007 -> 00000007 00000000
+      |00000000 80000000 -> 00000000 00000001
+      |00000001 80000000 -> 00000000 00000000
+      |80000000 80000000 -> 00000000 00000000
+      |00000001 00010000 -> 00000001 00000001
+      |00ffffff 00010000 -> 00010000 00000000
+      |"""
+  )
+
+  private val vibMaxS16Scalar = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000000 00000001 -> 00000001 00000000
+      |00000000 00000002 -> 00000002 00000000
+      |00000000 00008000 -> 00000000 00000001
+      |00008000 00008000 -> ffff8000 00000001
+      |00008000 00008001 -> ffff8001 00000000
+      |00008000 0000c000 -> ffffc000 00000000
+      |00008001 00008000 -> ffff8001 00000001
+      |0000ff00 000000ff -> 000000ff 00000000
+      |0000ff00 00008000 -> ffffff00 00000001
+      |0000ff00 0000fffe -> fffffffe 00000000
+      |00000e75 0000cbbe -> 00000e75 00000001
+      |"""
+  )
+
+  private val vibMinS16Scalar = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000000 00000001 -> 00000000 00000001
+      |00000000 00008000 -> ffff8000 00000000
+      |00000000 00008001 -> ffff8001 00000000
+      |00000001 00000000 -> 00000000 00000000
+      |00000002 00000000 -> 00000000 00000000
+      |00008000 00000000 -> ffff8000 00000001
+      |00008000 00000001 -> ffff8000 00000001
+      |0000ff00 000000ff -> ffffff00 00000001
+      |0000ff00 00008000 -> ffff8000 00000000
+      |00007551 000033d1 -> 000033d1 00000000
+      |00000b6f 00006c74 -> 00000b6f 00000001
+      |"""
+  )
+
+  private val vhMaxF16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 00000000
+      |fc00bc00 bc00fc00 42003e00 -> 42003e00
+      |8000fc00 fc008000 56407e00 -> 56408000
+      |7e003e00 3e007e00 7bff3bff -> 7bff3e00
+      |3e00bc00 3e00bc00 3e00bc00 -> 3e00bc00
+      |0a4109bc b40335d7 0179f92c -> 0a4135d7
+      |84000000 00008400 7c018400 -> 00000000
+      |"""
+  )
+
+  private val vhMinF16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 80000000
+      |fc00bc00 bc00fc00 42003e00 -> fc00fc00
+      |8000fc00 fc008000 56407e00 -> fc00fc00
+      |7e003e00 3e007e00 7bff3bff -> 3e003bff
+      |3e00bc00 3e00bc00 3e00bc00 -> 3e00bc00
+      |0a4109bc b40335d7 0179f92c -> b403f92c
+      |84000000 00008400 7c018400 -> 84008400
+      |"""
+  )
+
+  private val vhMaxNanF16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 00000000
+      |fc00bc00 bc00fc00 42003e00 -> 42003e00
+      |8000fc00 fc008000 56407e00 -> 56407fff
+      |7e003e00 3e007e00 7bff3bff -> 7fff7fff
+      |3e00bc00 3e00bc00 3e00bc00 -> 3e00bc00
+      |0a4109bc b40335d7 0179f92c -> 0a4135d7
+      |84000000 00008400 7c018400 -> 7fff0000
+      |"""
+  )
+
+  private val vhMinNanF16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 80000000
+      |fc00bc00 bc00fc00 42003e00 -> fc00fc00
+      |8000fc00 fc008000 56407e00 -> fc007fff
+      |7e003e00 3e007e00 7bff3bff -> 7fff7fff
+      |3e00bc00 3e00bc00 3e00bc00 -> 3e00bc00
+      |0a4109bc b40335d7 0179f92c -> b403f92c
+      |84000000 00008400 7c018400 -> 7fff8400
+      |"""
+  )
+
+  private val vhMaxBf16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 00000000
+      |4000bf80 bf804000 4000ffc0 -> 40004000
+      |ffff7f80 7f80ffff 7f818080 -> 7f807f80
+      |80005f00 5f008000 007f4120 -> 5f005f00
+      |4f007fc0 4f007fc0 4f007fc0 -> 4f007fff
+      |8b1f2643 81a6dcfc ab03e5ae -> 81a62643
+      |"""
+  )
+
+  private val vhMinBf16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 80000000
+      |4000bf80 bf804000 4000ffc0 -> bf80bf80
+      |ffff7f80 7f80ffff 7f818080 -> 7f808080
+      |80005f00 5f008000 007f4120 -> 80008000
+      |4f007fc0 4f007fc0 4f007fc0 -> 4f007fff
+      |8b1f2643 81a6dcfc ab03e5ae -> ab03e5ae
+      |"""
+  )
+
+  private val vhMaxNanBf16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 00000000
+      |4000bf80 bf804000 4000ffc0 -> 40007fff
+      |ffff7f80 7f80ffff 7f818080 -> 7fff7fff
+      |80005f00 5f008000 007f4120 -> 5f005f00
+      |4f007fc0 4f007fc0 4f007fc0 -> 4f007fff
+      |8b1f2643 81a6dcfc ab03e5ae -> 81a62643
+      |"""
+  )
+
+  private val vhMinNanBf16x2 = rows(
+    """
+      |00000000 00000000 80000000 -> 80000000
+      |4000bf80 bf804000 4000ffc0 -> bf807fff
+      |ffff7f80 7f80ffff 7f818080 -> 7fff7fff
+      |80005f00 5f008000 007f4120 -> 80008000
+      |4f007fc0 4f007fc0 4f007fc0 -> 4f007fff
+      |8b1f2643 81a6dcfc ab03e5ae -> ab03e5ae
+      |"""
+  )
+
+  private val vhMaxF16x2Assoc = rows(
+    """
+      |00000000 00000000 80000000 -> 00000000
+      |fc00bc00 bc00fc00 42003e00 -> 42003e00
+      |8000fc00 fc008000 56407e00 -> 56408000
+      |7e003e00 3e007e00 7bff3bff -> 7bff3e00
+      |3e00bc00 3e00bc00 3e00bc00 -> 3e00bc00
+      |0a4109bc b40335d7 0179f92c -> 0a4135d7
+      |84000000 00008400 7c018400 -> 00000000
+      |"""
+  )
+
+  private val vhMinNanBf16x2Assoc = rows(
+    """
+      |00000000 00000000 80000000 -> 80000000
+      |4000bf80 bf804000 4000ffc0 -> bf807fff
+      |ffff7f80 7f80ffff 7f818080 -> 7fff7fff
+      |80005f00 5f008000 007f4120 -> 80008000
+      |4f007fc0 4f007fc0 4f007fc0 -> 4f007fff
+      |8b1f2643 81a6dcfc ab03e5ae -> ab03e5ae
+      |"""
+  )
+
+  private val vhMaxF16 = rows(
+    """
+      |00000000 00000000 00000000 -> 00000000
+      |00003c00 00000000 00003c00 -> 00003c00
+      |00007bff 00000000 00007bff -> 00007bff
+      |0000ffff 00000000 0000ffff -> 00000000
+      |00006400 00000000 00006400 -> 00006400
+      |0000d238 000070ee 0000fcd2 -> 000070ee
+      |00000000 00007e00 00007e00 -> 00000000
+      |"""
+  )
+
+  private val vhMinF16 = rows(
+    """
+      |00000000 00000000 00000000 -> 00000000
+      |00003c00 00000000 00003c00 -> 00000000
+      |00007bff 00000000 00007bff -> 00000000
+      |0000ffff 00000000 0000ffff -> 00000000
+      |00006400 00000000 00006400 -> 00000000
+      |0000d238 000070ee 0000fcd2 -> 0000d238
+      |00000000 00007e00 00007e00 -> 00000000
+      |"""
+  )
+
+  private val vhMaxBf16 = rows(
+    """
+      |00000000 00000000 00000000 -> 00000000
+      |00008080 00004f00 00007f00 -> 00007f00
+      |00004049 0000ff7f 00003fc0 -> 00004049
+      |00007f81 00003f80 00003e80 -> 00003f80
+      |000042c8 00000100 00004120 -> 000042c8
+      |00003656 00000013 000041be -> 000041be
+      |00000000 00007fc0 00007fc0 -> 00000000
+      |00000000 0000ffc0 0000ffc0 -> 00000000
+      |"""
+  )
+
+  private val vhMinBf16 = rows(
+    """
+      |00000000 00000000 00000000 -> 00000000
+      |00008080 00004f00 00007f00 -> 00008080
+      |00004049 0000ff7f 00003fc0 -> 0000ff7f
+      |00007f81 00003f80 00003e80 -> 00003e80
+      |000042c8 00000100 00004120 -> 00000100
+      |00003656 00000013 000041be -> 00000013
+      |00000000 00007fc0 00007fc0 -> 00000000
+      |00000000 0000ffc0 0000ffc0 -> 00000000
+      |"""
+  )
+
+  private val vhMaxNanF16 = rows(
+    """
+      |00000000 00000000 00000000 -> 00000000
+      |00003c00 00000000 00003c00 -> 00003c00
+      |00007bff 00000000 00007bff -> 00007bff
+      |0000ffff 00000000 0000ffff -> 00007fff
+      |00006400 00000000 00006400 -> 00006400
+      |0000d238 000070ee 0000fcd2 -> 00007fff
+      |00000000 00007e00 00007e00 -> 00007fff
+      |"""
+  )
+
+  private val vhMinNanBf16 = rows(
+    """
+      |00000000 00000000 00000000 -> 00000000
+      |00008080 00004f00 00007f00 -> 00008080
+      |00004049 0000ff7f 00003fc0 -> 0000ff7f
+      |00007f81 00003f80 00003e80 -> 00007fff
+      |000042c8 00000100 00004120 -> 00000100
+      |00003656 00000013 000041be -> 00000013
+      |00000000 00007fc0 00007fc0 -> 00007fff
+      |00000000 0000ffc0 0000ffc0 -> 00007fff
+      |"""
+  )
+
+  private val vhMaxF16x2ImmMid = rows(
+    """
+      |00000000 80000000 -> 3c000000
+      |8400bc00 02007bff -> 3c007bff
+      |38007c00 7c016400 -> 3c007c00
+      |fe004248 38003bff -> 3c004248
+      |3e007b00 04004248 -> 3e007b00
+      |1fcded50 265210fe -> 3c0010fe
+      |84000000 7c018400 -> 3c000000
+      |"""
+  )
+
+  private val vhMaxF16x2ImmLast = rows(
+    """
+      |00000000 80000000 -> 3c000000
+      |8400bc00 02007bff -> 3c007bff
+      |38007c00 7c016400 -> 3c007c00
+      |fe004248 38003bff -> 3c004248
+      |3e007b00 04004248 -> 3e007b00
+      |1fcded50 265210fe -> 3c0010fe
+      |84000000 7c018400 -> 3c000000
+      |"""
+  )
+
+  private val vhMinF16x2ImmMid = rows(
+    """
+      |00000000 80000000 -> 8000bc00
+      |8400bc00 02007bff -> 8400bc00
+      |38007c00 7c016400 -> 3800bc00
+      |fe004248 38003bff -> 3800bc00
+      |3e007b00 04004248 -> 0400bc00
+      |1fcded50 265210fe -> 1fcded50
+      |84000000 7c018400 -> 8400bc00
+      |"""
+  )
+
+  private val vhMaxNanF16x2ImmMid = rows(
+    """
+      |00000000 80000000 -> 7fff0000
+      |8400bc00 02007bff -> 7fff7bff
+      |38007c00 7c016400 -> 7fff7c00
+      |fe004248 38003bff -> 7fff4248
+      |3e007b00 04004248 -> 7fff7b00
+      |1fcded50 265210fe -> 7fff10fe
+      |84000000 7c018400 -> 7fff0000
+      |"""
+  )
+
+  private val vhMinBf16x2ImmMid = rows(
+    """
+      |00000000 80000000 -> 8000bf80
+      |0000bf80 3f7fbf80 -> 0000bf80
+      |00007f80 ffc07f80 -> 0000bf80
+      |00002f80 3e802f80 -> 0000bf80
+      |ff7fff7f ff7f3f00 -> ff7fff7f
+      |1e5d596f fe139467 -> fe13bf80
+      |80800000 7fc18080 -> 8080bf80
+      |3f800000 7fff3f80 -> 3f80bf80
+      |"""
+  )
+
+  private val vhMaxNanBf16x2ImmLast = rows(
+    """
+      |00000000 80000000 -> 7fff0000
+      |0000bf80 3f7fbf80 -> 7fff0000
+      |00007f80 ffc07f80 -> 7fff7f80
+      |00002f80 3e802f80 -> 7fff2f80
+      |ff7fff7f ff7f3f00 -> 7fff3f00
+      |1e5d596f fe139467 -> 7fff596f
+      |80800000 7fc18080 -> 7fff0000
+      |3f800000 7fff3f80 -> 7fff3f80
+      |"""
+  )
+
+  private val vibMaxRelu32EqB = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000000 00000001 -> 00000001 00000001
+      |00000000 80000000 -> 00000000 00000000
+      |00000001 00000000 -> 00000001 00000000
+      |80000000 00000000 -> 00000000 00000001
+      |80000000 00000001 -> 00000001 00000001
+      |80000000 80000000 -> 00000000 00000000
+      |9abcdef0 00008000 -> 00008000 00000001
+      |9abcdef0 80000000 -> 00000000 00000000
+      |deadbeef 00000000 -> 00000000 00000001
+      |01010101 00000000 -> 01010101 00000000
+      |01010101 7fffffff -> 7fffffff 00000001
+      |"""
+  )
+
+  private val vibMinRelu32EqB = rows(
+    """
+      |00000000 00000000 -> 00000000 00000001
+      |00000000 00000001 -> 00000000 00000000
+      |00000001 00000001 -> 00000001 00000001
+      |00000001 00000002 -> 00000001 00000000
+      |80000000 00000000 -> 00000000 00000001
+      |80000000 00000001 -> 00000000 00000000
+      |9abcdef0 00008000 -> 00000000 00000000
+      |deadbeef 00000000 -> 00000000 00000001
+      |01010101 00000000 -> 00000000 00000001
+      |01010101 00000001 -> 00000001 00000001
+      |01010101 7fffffff -> 01010101 00000000
+      |01010101 80000000 -> 00000000 00000000
+      |"""
+  )
+
+  private val minMaxPairs = Vec[(String, String, Vec[String], Vec[String], Vec[Row])](
+    (
+      "VibMaxS16",
+      "VIMNMX.S16x2 R9, P0, P1, R0, R9, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7", "R11"),
+      vibMaxS16
+    ),
+    (
+      "VibMinS16",
+      "VIMNMX.S16x2 R9, P0, P1, R0, R9, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7", "R11"),
+      vibMinS16
+    ),
+    (
+      "VibMaxU16",
+      "VIMNMX.U16x2 R9, P0, P1, R0, R9, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7", "R11"),
+      vibMaxU16
+    ),
+    (
+      "VibMinU16",
+      "VIMNMX.U16x2 R9, P0, P1, R0, R9, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7", "R11"),
+      vibMinU16
+    ),
+    (
+      "VibMaxS16Relu",
+      "VIMNMX.S16x2.RELU R9, P0, P1, R0, R9, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7", "R11"),
+      vibMaxS16Relu
+    ),
+    (
+      "VibMinS16Relu",
+      "VIMNMX.S16x2.RELU R9, P0, P1, R0, R9, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7", "R11"),
+      vibMinS16Relu
+    ),
+    (
+      "VibMaxS16ImmA",
+      "VIMNMX.S16x2 R9, P0, P1, R2, -0x1fffb, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMaxS16ImmA
+    ),
+    (
+      "VibMinS16ImmA",
+      "VIMNMX.S16x2 R9, P0, P1, R2, -0x1fffb, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMinS16ImmA
+    ),
+    (
+      "VibMaxU16ImmA",
+      "VIMNMX.U16x2 R9, P0, P1, R2, -0x1fffb, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMaxU16ImmA
+    ),
+    (
+      "VibMinU16ImmA",
+      "VIMNMX.U16x2 R9, P0, P1, R2, -0x1fffb, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMinU16ImmA
+    ),
+    (
+      "VibMaxS16ReluImmA",
+      "VIMNMX.S16x2.RELU R9, P0, P1, R2, -0x1fffb, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMaxS16ReluImmA
+    ),
+    (
+      "VibMinS16ReluImmA",
+      "VIMNMX.S16x2.RELU R9, P0, P1, R2, -0x1fffb, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMinS16ReluImmA
+    ),
+    (
+      "VibMaxS16ImmB",
+      "VIMNMX.S16x2 R9, P0, P1, R2, -0x7fff8001, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMaxS16ImmB
+    ),
+    (
+      "VibMinS16ImmB",
+      "VIMNMX.S16x2 R9, P0, P1, R2, -0x7fff8001, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMinS16ImmB
+    ),
+    (
+      "VibMaxU16ImmB",
+      "VIMNMX.U16x2 R9, P0, P1, R2, -0x7fff8001, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMaxU16ImmB
+    ),
+    (
+      "VibMinU16ImmB",
+      "VIMNMX.U16x2 R9, P0, P1, R2, -0x7fff8001, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMinU16ImmB
+    ),
+    (
+      "VibMaxS16ReluImmB",
+      "VIMNMX.S16x2.RELU R9, P0, P1, R2, -0x7fff8001, !PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMaxS16ReluImmB
+    ),
+    (
+      "VibMinS16ReluImmB",
+      "VIMNMX.S16x2.RELU R9, P0, P1, R2, -0x7fff8001, PT; SEL R7, RZ, 0x1, !P1; SEL R11, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7", "R11"),
+      vibMinS16ReluImmB
+    )
+  )
+
+  private val minMaxWords = Vec[(String, String, Vec[String], Vec[String], Vec[Row])](
+    (
+      "VibMaxRelu32",
+      "VIMNMX.RELU R9, P0, P0, R0, R9, !PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7"),
+      vibMaxRelu32
+    ),
+    (
+      "VibMinRelu32",
+      "VIMNMX.RELU R9, P0, P0, R0, R9, PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R0", "R9"),
+      Vec("R9", "R7"),
+      vibMinRelu32
+    ),
+    (
+      "VibMaxRelu32Imm7",
+      "VIMNMX.RELU R9, P0, P0, R2, 0x7, !PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7"),
+      vibMaxRelu32Imm7
+    ),
+    (
+      "VibMinRelu32Imm7",
+      "VIMNMX.RELU R9, P0, P0, R2, 0x7, PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7"),
+      vibMinRelu32Imm7
+    ),
+    (
+      "VibMaxRelu32ImmM7",
+      "VIMNMX.RELU R9, P0, P0, R2, -0x7, !PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7"),
+      vibMaxRelu32ImmM7
+    ),
+    (
+      "VibMinRelu32ImmM7",
+      "VIMNMX.RELU R9, P0, P0, R2, -0x7, PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7"),
+      vibMinRelu32ImmM7
+    ),
+    (
+      "VibMaxRelu32Imm0",
+      "VIMNMX.RELU R9, P0, P0, R2, RZ, !PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2"),
+      Vec("R9", "R7"),
+      vibMaxRelu32Imm0
+    ),
+    (
+      "UniformMaxRelu32",
+      "R2UR UR6, R6; VIMNMX.RELU R9, P0, P0, R2, UR6, !PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2", "R6"),
+      Vec("R9", "R7"),
+      uniformMaxRelu32
+    ),
+    (
+      "UniformMinRelu32",
+      "R2UR UR6, R6; VIMNMX.RELU R9, P0, P0, R2, UR6, PT; SEL R7, RZ, 0x1, !P0",
+      Vec("R2", "R6"),
+      Vec("R9", "R7"),
+      uniformMinRelu32
+    )
+  )
+
+  private val minMaxScalars = Vec[(String, String, Vec[String], Vec[String], Vec[Row])](
+    (
+      "VibMaxS16Scalar",
+      "VIMNMX.S16x2 R0, P0, P0, R0, R6, !PT; PRMT R9, R0, 0x9910, RZ; SEL R7, RZ, 0x1, !P0",
+      Vec("R0:u16", "R6:u16"),
+      Vec("R9", "R7"),
+      vibMaxS16Scalar
+    ),
+    (
+      "VibMinS16Scalar",
+      "VIMNMX.S16x2 R0, P0, P0, R0, R6, PT; PRMT R9, R0, 0x9910, RZ; SEL R7, RZ, 0x1, !P0",
+      Vec("R0:u16", "R6:u16"),
+      Vec("R9", "R7"),
+      vibMinS16Scalar
+    )
+  )
+
+  private val minMaxHalves = Vec[(String, String, Vec[String], Vec[String], Vec[Row])](
+    ("VhMaxF16x2", "VHMNMX R9, R0, R9, R6, !PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMaxF16x2),
+    ("VhMinF16x2", "VHMNMX R9, R0, R9, R6, PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMinF16x2),
+    ("VhMaxNanF16x2", "VHMNMX.NAN R9, R0, R9, R6, !PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMaxNanF16x2),
+    ("VhMinNanF16x2", "VHMNMX.NAN R9, R0, R9, R6, PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMinNanF16x2),
+    ("VhMaxBf16x2", "VHMNMX.BF16_V2 R9, R0, R9, R6, !PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMaxBf16x2),
+    ("VhMinBf16x2", "VHMNMX.BF16_V2 R9, R0, R9, R6, PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMinBf16x2),
+    ("VhMaxNanBf16x2", "VHMNMX.BF16_V2.NAN R9, R0, R9, R6, !PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMaxNanBf16x2),
+    ("VhMinNanBf16x2", "VHMNMX.BF16_V2.NAN R9, R0, R9, R6, PT", Vec("R0", "R9", "R6"), Vec("R9"), vhMinNanBf16x2),
+    ("VhMaxF16x2Assoc", "VHMNMX R9, R9, R6, R0, !PT", Vec("R0", "R6", "R9"), Vec("R9"), vhMaxF16x2Assoc),
+    (
+      "VhMinNanBf16x2Assoc",
+      "VHMNMX.BF16_V2.NAN R9, R9, R6, R0, PT",
+      Vec("R0", "R6", "R9"),
+      Vec("R9"),
+      vhMinNanBf16x2Assoc
+    ),
+    (
+      "VhMaxF16",
+      "VHMNMX R0, R0.H0_H0, R9.H0_H0, R6.H0_H0, !PT; LOP3.LUT R7, R0, 0xffff, RZ, 0xc0, !PT",
+      Vec("R0:u16", "R9:u16", "R6:u16"),
+      Vec("R7"),
+      vhMaxF16
+    ),
+    (
+      "VhMinF16",
+      "VHMNMX R0, R0.H0_H0, R9.H0_H0, R6.H0_H0, PT; LOP3.LUT R7, R0, 0xffff, RZ, 0xc0, !PT",
+      Vec("R0:u16", "R9:u16", "R6:u16"),
+      Vec("R7"),
+      vhMinF16
+    ),
+    (
+      "VhMaxBf16",
+      "VHMNMX.BF16_V2 R0, R0.H0_H0, R9.H0_H0, R6.H0_H0, !PT; LOP3.LUT R7, R0, 0xffff, RZ, 0xc0, !PT",
+      Vec("R0:u16", "R9:u16", "R6:u16"),
+      Vec("R7"),
+      vhMaxBf16
+    ),
+    (
+      "VhMinBf16",
+      "VHMNMX.BF16_V2 R0, R0.H0_H0, R9.H0_H0, R6.H0_H0, PT; LOP3.LUT R7, R0, 0xffff, RZ, 0xc0, !PT",
+      Vec("R0:u16", "R9:u16", "R6:u16"),
+      Vec("R7"),
+      vhMinBf16
+    ),
+    (
+      "VhMaxNanF16",
+      "VHMNMX.NAN R0, R0.H0_H0, R9.H0_H0, R6.H0_H0, !PT; LOP3.LUT R7, R0, 0xffff, RZ, 0xc0, !PT",
+      Vec("R0:u16", "R9:u16", "R6:u16"),
+      Vec("R7"),
+      vhMaxNanF16
+    ),
+    (
+      "VhMinNanBf16",
+      "VHMNMX.BF16_V2.NAN R0, R0.H0_H0, R9.H0_H0, R6.H0_H0, PT; LOP3.LUT R7, R0, 0xffff, RZ, 0xc0, !PT",
+      Vec("R0:u16", "R9:u16", "R6:u16"),
+      Vec("R7"),
+      vhMinNanBf16
+    ),
+    ("VhMaxF16x2ImmMid", "VHMNMX R9, R0, 1, -1, R9, !PT", Vec("R0", "R9"), Vec("R9"), vhMaxF16x2ImmMid),
+    ("VhMaxF16x2ImmLast", "VHMNMX R9, R0, 1, -1, R9, !PT", Vec("R0", "R9"), Vec("R9"), vhMaxF16x2ImmLast),
+    ("VhMinF16x2ImmMid", "VHMNMX R9, R0, 1, -1, R9, PT", Vec("R0", "R9"), Vec("R9"), vhMinF16x2ImmMid),
+    ("VhMaxNanF16x2ImmMid", "VHMNMX.NAN R9, R0, +QNAN , 0, R9, !PT", Vec("R0", "R9"), Vec("R9"), vhMaxNanF16x2ImmMid),
+    ("VhMinBf16x2ImmMid", "VHMNMX.BF16_V2 R9, R0, 1, -1, R9, PT", Vec("R0", "R9"), Vec("R9"), vhMinBf16x2ImmMid),
+    (
+      "VhMaxNanBf16x2ImmLast",
+      "VHMNMX.BF16_V2.NAN R9, R0, +QNAN , 0, R9, !PT",
+      Vec("R0", "R9"),
+      Vec("R9"),
+      vhMaxNanBf16x2ImmLast
+    )
+  )
+
+  for ((name, body, inputs, outputs, table) <- minMaxPairs ++ minMaxWords ++ minMaxScalars ++ minMaxHalves)
+    test(s"sm_90 hardware: minmax_pred $name as $body") {
+      check(90, inputs, body, outputs, table)
+    }
+
+  // ptxas 13.3 gives the setp against b the instruction of the setp against a, so the fused predicate disagrees with
+  // the sm_120 rows wherever a differs from b
+
+  for (
+    (name, body, table) <- Vec(
+      ("VibMaxRelu32EqB", "VIMNMX.RELU R9, P0, P0, R0, R9, !PT; SEL R7, RZ, 0x1, !P0", vibMaxRelu32EqB),
+      ("VibMinRelu32EqB", "VIMNMX.RELU R9, P0, P0, R0, R9, PT; SEL R7, RZ, 0x1, !P0", vibMinRelu32EqB)
+    )
+  )
+    test(s"sm_90 hardware: minmax_pred $name as $body".fail) {
+      check(90, Vec("R0", "R9"), body, Vec("R9", "R7"), table)
+    }
 }
