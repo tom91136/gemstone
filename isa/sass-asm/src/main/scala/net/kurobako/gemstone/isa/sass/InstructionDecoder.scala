@@ -128,7 +128,9 @@ object InstructionDecoder {
       val valid     = database.vocabulary(field).filter(_.value == value).map(_.name).filterNot(_.startsWith("INVALID"))
       val preferred = field.category match {
         case NVDisasm.FieldKind.SpecialRegister =>
-          valid.find(_.startsWith("SR_")).orElse(valid.find(_.startsWith("SR"))).orElse(valid.lastOption)
+          // Selector 255 is also spelled SRZ; keep that alias ahead of its generated SR255 name.
+          valid.find(_ == "SRZ").orElse(valid.find(_.startsWith("SR_")))
+            .orElse(valid.find(_.startsWith("SR"))).orElse(valid.lastOption)
         case category if category.isPredicate => valid.find(_.endsWith("T")).orElse(valid.headOption)
         case category if category.isRegister  => valid.minByOption(_.length)
         // legacy condition tests list flag aliases (ZFT, LEG, U) before the comparison names nvdisasm prints

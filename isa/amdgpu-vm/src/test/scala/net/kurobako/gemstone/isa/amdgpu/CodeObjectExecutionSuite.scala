@@ -2,6 +2,9 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
 import fixtures.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.LockSupport
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -53,6 +56,32 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     assertEquals(memory.getInt(output, 20), 7)
     assertEquals(memory.getInt(output, 24), 64)
     assertEquals(memory.getInt(output, 28), 160)
+  }
+
+  test("parallel workgroups keep staged host reads in their own waves") {
+    val allocation = AllocationId(1)
+    val memory     = ExclusiveReadsMemory()
+    memory.allocate(allocation, 4, GuestAddress(0x8000L))
+    memory.putInt(allocation, 0, 42)
+    val source = codeKernel(target = Target("gfx1030"))
+    val loads  = Vec.fill(16)(
+      Instruction.Load(2, MemoryAddress.Global(0, None, 0), 4, signed = false, LoadPlacement.Full)
+    )
+    val kernel = irKernel(
+      Vec(Instruction.VMove64(0, InstructionSource.Constant(0x8000L))) ++ loads :+ Instruction.End,
+      source
+    )
+    val dispatch = KernelTask.validated(
+      "parallel_reads",
+      testDimensions(32),
+      testDimensions(4096),
+      Vec.empty
+    ).value
+    val workers = WorkerPool(parallelism = 4, minGroups = 1L, minWorkItems = 1L)
+    try
+      (0 until 4).foreach(_ => assertEquals(executeKernel(kernel, dispatch, memory, workgroups = workers), Right(())))
+    finally workers.close()
+    assert(!memory.shared.get, "two waves prepared reads through the same buffer at once")
   }
 
   test("gfx1036 preserves a vcc_hi scratch counter across a vector comparison") {
@@ -328,7 +357,7 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
 
     val batches = scala.collection.mutable.ArrayBuffer.empty[Vec[(GuestAddress, Int >= 0)]]
     class TrackedMemory extends ForwardingMemory(memory) {
-      private val pending                                = java.util.concurrent.atomic.AtomicBoolean(!rawPointers)
+      private val pending                                = AtomicBoolean(!rawPointers)
       override def flushHostReads(): Either[Fault, Unit] = { pending.set(false); Right(()) }
       override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
         awaitRead(readDeferred(region, offset, size))
@@ -385,6 +414,19 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       Array.tabulate(64)(index => memory.getInt(output, (index * 4).unsafe[Int >= 0])).toSeq,
       expected.toSeq
     )
+  }
+
+  /** Memory that holds each batch of staged reads for a moment, and notes a batch two waves hand it at once. */
+  private class ExclusiveReadsMemory extends RegionMemory {
+    private val preparing = ConcurrentHashMap.newKeySet[AddressSpace.ReadRanges]()
+    val shared            = AtomicBoolean(false)
+
+    override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] = {
+      if (!preparing.add(ranges)) shared.set(true)
+      LockSupport.parkNanos(20_000L)
+      val _ = preparing.remove(ranges)
+      super.prepareReads(ranges)
+    }
   }
 
 }

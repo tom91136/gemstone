@@ -195,12 +195,10 @@ private object VMInterpreter {
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress)
     // One shared step result per branch target, so taken and fall-through branches allocate nothing.
     val jumps: Array[Either[Fault, Int]] = Array.tabulate(program.instructions.size + 1)(Right(_))
-    // a wave reads at most one range per lane, so the buffer never grows
-    val reads = AddressSpace.ReadRangeBuffer(kernel.waveSize.widen[Int > 0])
-    if (dispatch.cooperative) runResident(program, jumps, reads, dispatchMemory, dispatch, control)
+    if (dispatch.cooperative) runResident(program, jumps, dispatchMemory, dispatch, control)
     else
       Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group) =>
-        runGroup(program, jumps, reads, dispatchMemory, dispatch, group, control)
+        runGroup(program, jumps, dispatchMemory, dispatch, group, control)
       )
   }
 
@@ -211,7 +209,6 @@ private object VMInterpreter {
   private def runResident(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
-      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       control: TaskControl
@@ -228,7 +225,6 @@ private object VMInterpreter {
           ResidentGroup(
             program,
             jumps,
-            reads,
             dispatchMemory,
             dispatch,
             dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]),
@@ -265,7 +261,6 @@ private object VMInterpreter {
   private class ResidentGroup(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
-      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       group: Coordinates,
@@ -285,7 +280,6 @@ private object VMInterpreter {
       WaveRun(
         program,
         jumps,
-        reads,
         dispatchMemory,
         dispatch.geometry,
         group,
@@ -342,7 +336,6 @@ private object VMInterpreter {
   private def runGroup(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
-      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       group: Coordinates,
@@ -375,7 +368,6 @@ private object VMInterpreter {
               WaveRun(
                 program,
                 jumps,
-                reads,
                 dispatchMemory,
                 dispatch.geometry,
                 group,
@@ -422,7 +414,6 @@ private object VMInterpreter {
   private class WaveRun(
       program: Kernel,
       jumps: Array[Either[Fault, Int]],
-      reads: AddressSpace.ReadRangeBuffer,
       dispatchMemory: VMDispatchMemory,
       geometry: LaunchGeometry,
       group: Coordinates,
@@ -440,6 +431,8 @@ private object VMInterpreter {
     private val instructionIndices = program.instructionIndices
     private val instructionOffsets = program.instructionOffsets
     private val waveSize           = kernel.waveSize
+    // Loads share their staged host reads only within this wave; workgroups run concurrently.
+    private val reads = AddressSpace.ReadRangeBuffer(waveSize.widen[Int > 0])
     // the wave's ordinal within its workgroup, which the timeline names the unit by
     private val waveIndex: Int >= 0 = (localStart / waveSize).unsafe[Int >= 0]
     private val scalar              = Array.ofDim[Long](128)

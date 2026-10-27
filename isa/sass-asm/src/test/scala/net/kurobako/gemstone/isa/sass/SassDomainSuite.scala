@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import scala.collection.mutable
 
 class SassDomainSuite extends munit.FunSuite {
   private val tables: Vec[Target] = Vec.from(
@@ -58,15 +59,19 @@ class SassDomainSuite extends munit.FunSuite {
   }
 
   test("every domain value is a value of the vocabulary of its field kind") {
+    val checked = mutable.HashSet.empty[(String, FieldDomain)]
     tables.foreach { target =>
-      val database = target.database
+      val database     = target.database
+      val vocabularies = database.byVocabulary.map { (label, vocabulary) =>
+        label -> vocabulary.values.map(symbol => symbol.name -> symbol.value).toSet
+      }
       database.forms.foreach { form =>
         SassDomains.fields(database, form).foreach { (binding, domain) =>
-          database.byVocabulary.get(domain.label).foreach { vocabulary =>
-            val known = vocabulary.values.map(symbol => symbol.name -> symbol.value).toSet
-            domain.values.foreach(value =>
-              assert(known(value), s"${target.name} ${form.name}.$binding: ${value._1} is not in ${domain.label}")
-            )
+          vocabularies.get(domain.label).foreach { known =>
+            if (checked.add(database.digest -> domain))
+              domain.values.foreach(value =>
+                assert(known(value), s"${target.name} ${form.name}.$binding: ${value._1} is not in ${domain.label}")
+              )
           }
         }
       }
@@ -87,25 +92,32 @@ class SassDomainSuite extends munit.FunSuite {
     }.groupMap(_._1)(_._2)
 
   test("a register bound in the legality conditions is the bound of its domain") {
+    val checked = mutable.HashSet.empty[(String, String, FieldDomain, Vec[ConditionExpression.Binary])]
     tables.foreach { target =>
       val database = target.database
       database.forms.foreach { form =>
         registerBounds(form).foreach { (binding, bounds) =>
           SassDomains.field(database, form, binding).filter(_.bank.nonEmpty).foreach { domain =>
-            def legal(code: Int): Vec[Either[String, BigInt]] =
-              bounds.map(bound => Legality.evaluate(database, bound, Map(binding -> BigInt(code))))
-            val where = s"${target.name} ${form.name}.$binding ${domain.describe}"
-            (0 to 255).filter(domain.contains(_)).foreach(code =>
-              assert(legal(code).forall(_ != Right(BigInt(0))), s"$where=$code")
-            )
-            val top = domain.runs.collect { case DomainRun.Registers(_, first, last, base) => base + last - first }.max
-            if (top < 254 && !domain.contains(top + 1) && legal(top + 1).forall(_.isRight))
-              assert(
-                legal(top + 1).contains(Right(BigInt(0))) || bounds.exists(bound =>
-                  Legality.evaluate(database, bound.left, Map(binding -> BigInt(top + 1))) == Right(BigInt(1))
-                ),
-                s"$where above $top"
+            if (checked.add((database.digest, binding, domain, bounds))) {
+              def legal(code: Int): Vec[Either[String, BigInt]] = {
+                val bindings = Map(binding -> BigInt(code))
+                bounds.map(bound => Legality.evaluate(database, bound, bindings))
+              }
+              val where = s"${target.name} ${form.name}.$binding ${domain.describe}"
+              (0 to 255).filter(domain.contains(_)).foreach(code =>
+                assert(legal(code).forall(_ != Right(BigInt(0))), s"$where=$code")
               )
+              val top = domain.runs.collect { case DomainRun.Registers(_, first, last, base) =>
+                base + last - first
+              }.max
+              if (top < 254 && !domain.contains(top + 1) && legal(top + 1).forall(_.isRight))
+                assert(
+                  legal(top + 1).contains(Right(BigInt(0))) || bounds.exists(bound =>
+                    Legality.evaluate(database, bound.left, Map(binding -> BigInt(top + 1))) == Right(BigInt(1))
+                  ),
+                  s"$where above $top"
+                )
+            }
           }
         }
       }
@@ -131,16 +143,19 @@ class SassDomainSuite extends munit.FunSuite {
 
   test("every special register code of S2R has a spelling that round trips or a condition that refuses it") {
     tables.foreach { target =>
-      val specials = forms(target, "S2R").flatMap(form => SassDomains.fields(target.database, form))
+      val s2rForms    = forms(target, "S2R")
+      val parsedForms = s2rForms.filter(_.opcodes.forall(_.name == "S2R"))
+      val specials    = s2rForms.flatMap(form => SassDomains.fields(target.database, form))
         .collectFirst { case (_, found) if found.label == "SpecialRegister" => found }
         .getOrElse(fail(s"${target.name} S2R has no special register")).values
       specials.groupBy(_._2).foreach { (code, spellings) =>
         val encoded = spellings.flatMap((name, _) => Assembler.assemble(s"S2R R1, $name;", target).toOption)
         if (encoded.isEmpty)
           spellings.foreach { (name, _) =>
-            parsed(target, "S2R", s"S2R R1, $name").foreach((form, result) =>
+            parsedForms.foreach { form =>
+              val result = FormatParser.parse(target.database, form, 0, s"S2R R1, $name")
               assert(result.left.exists(refused(form, _)), s"${target.name} ${form.name} $name (code $code): $result")
-            )
+            }
           }
         encoded.foreach(found => assertEquals(bytes(printed(found, target), target).toSeq, found.toSeq, target.name))
       }
@@ -151,6 +166,21 @@ class SassDomainSuite extends munit.FunSuite {
     val target = Targets.target(35)
     assert(domain(target, "S2R", "SR").values.contains(("SM_SHADER_TYPE", BigInt(20))))
     assertEquals(printed(bytes("S2R R1, SR20;", target), target), "S2R R1, SR20;")
+  }
+
+  test("CS2R prefers the zero-register alias over its numeric selector") {
+    val aliased = tables.filter { target =>
+      forms(target, "CS2R").flatMap(form => SassDomains.fields(target.database, form))
+        .exists { (_, found) =>
+          found.label == "SpecialRegister" && found.values.contains(("SRZ", BigInt(255))) &&
+          found.values.contains(("SR255", BigInt(255)))
+        }
+    }
+    assertEquals(aliased.size, 11)
+    aliased.foreach { target =>
+      val text = "CS2R R4, SRZ;"
+      assertEquals(printed(bytes(text, target), target), text, target.name)
+    }
   }
 
   test("every convergence barrier of BSYNC round trips and the next one is rejected") {

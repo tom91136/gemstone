@@ -411,7 +411,7 @@ jobs:
           [ -z "$(find target/conformance/artifacts -maxdepth 1 -name 'sycl-shard-*' -print -quit)" ] ||
             cmake -DARTIFACTS=target/conformance/artifacts -P conformance/artifacts/Merge.cmake
       # a runner that runs out of memory is shut down without a trace, so the log samples it as the run goes; the server
-      # takes half the memory and the clients most of the rest, so sbt, which only drives the run, gets a sixth
+      # takes half the memory and the clients most of the rest, so sbt, which also compiles the emulator, gets a quarter
       - name: Emulate
         run: |
           while sleep 60; do
@@ -419,7 +419,7 @@ jobs:
           done &
           sampler=$!
           trap 'kill "$sampler"' EXIT
-          heap=$(awk '/^MemTotal:/ { printf "%dm", $2 / 1024 / 6 }' /proc/meminfo)
+          heap=$(awk '/^MemTotal:/ { printf "%dm", $2 / 1024 / 4 }' /proc/meminfo)
           sbt --server --batch "-J-Xmx$heap" 'set conformance / conformanceJfr := true' \
             "conformance/emulate --prebuilt --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
       # the server records one JFR file per run, in a temporary directory; rename it after the shard
