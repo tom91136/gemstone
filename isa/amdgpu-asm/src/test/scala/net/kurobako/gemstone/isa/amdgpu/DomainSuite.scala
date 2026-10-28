@@ -17,8 +17,11 @@ class DomainSuite extends munit.FunSuite {
         val code = table.encode(slot).getOrElse(fail(s"${domain.id} $isa: $slot has no code"))
         assertEquals(table.decode(code.toLong), Some(slot), s"${domain.id} $isa")
     }
-    domain.values(isa).filterNot(_.slot.isInstanceOf[Slot.Immediate]).foreach(value =>
-      assertEquals(domain.decode(isa, domain.encode(isa, value).get.toLong), Some(value))
+    domain.values(isa).foreach(value =>
+      value.slot match {
+        case Slot.Immediate(_) => ()
+        case _                 => assertEquals(domain.decode(isa, domain.encode(isa, value).get.toLong), Some(value))
+      }
     )
   }
 
@@ -27,18 +30,19 @@ class DomainSuite extends munit.FunSuite {
   }
 
   private def text(slot: Slot): Option[String] = slot match {
-    case Slot.Register(file, index) if file == RegisterFile.Scalar         => Some(s"s$index")
-    case Slot.Register(file, index) if file == RegisterFile.TrapTemporary  => Some(s"ttmp$index")
-    case Slot.Named(name) if !Set("null", "src_lds_direct").contains(name) => Some(name)
-    case Slot.Integer(value)                                               => Some(value.toString)
-    case Slot.Floating(value) if value != 0.15915494                       => Some(value.toString)
-    case _                                                                 => None
+    case Slot.Register(file, index) if file == RegisterFile.Scalar        => Some(s"s$index")
+    case Slot.Register(file, index) if file == RegisterFile.TrapTemporary => Some(s"ttmp$index")
+    case Slot.Named("null" | "src_lds_direct")                            => None
+    case Slot.Named(name)                                                 => Some(name)
+    case Slot.Integer(value)                                              => Some(value.toString)
+    case Slot.Floating(value) if value != 0.15915494                      => Some(value.toString)
+    case _                                                                => None
   }
 
   test("every scalar source value of the first SOP1 move assembles and disassembles to itself on each ISA family") {
     ISA.values.foreach { isa =>
       val mode   = TargetMode(target(isa), 64)
-      val values = Ssrc.table(isa).slots.flatMap(text(_)).toVector
+      val values = Ssrc.table(isa).slots.flatMap(text(_))
       assert(values.size > 100, isa.toString)
       val bytes = values.flatMap { value =>
         Parser.parse(s"s_mov_b32 s0, $value").toOption.flatMap(_.statements.headOption).flatMap { statement =>

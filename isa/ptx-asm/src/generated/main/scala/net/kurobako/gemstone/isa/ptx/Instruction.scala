@@ -6,8 +6,10 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import javax.annotation.processing.Generated
+import scala.collection.mutable
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object Instruction {
   type Decoder = (operands: Vec[Operand], mods: Vec[Modifier]) => Either[DecodeError, Form]
 
@@ -2691,8 +2693,8 @@ object Instruction {
 
     val remaining = allModifiers.drop(specificity)
     var successful: Option[(Definition, Form)] = None
-    val ambiguous = scala.collection.mutable.ArrayBuffer.empty[String]
-    val expected = scala.collection.mutable.ArrayBuffer.empty[Int]
+    val ambiguous = mutable.ArrayBuffer.empty[String]
+    val expected = mutable.ArrayBuffer.empty[Int]
     index = 0
     while (index < definitions.size) {
       val definition = definitions(index)
@@ -2730,7 +2732,7 @@ object Instruction {
     (name +: modifiers.map(_.name)).mkString(".")
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 case class Instruction(form: Form, mods: Vec[Modifier], pred: Option[Predication]) {
   def definition: Instruction.Definition = Instruction.Definition.fromOrdinal(form.ordinal)
 

@@ -8,6 +8,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.vm.*
+import scala.reflect.ClassTag
 
 class CooperativeMatrixSuite extends munit.FunSuite {
 
@@ -118,7 +119,7 @@ class CooperativeMatrixSuite extends munit.FunSuite {
     OpFunctionEnd
   """
 
-  private inline def grid[A: scala.reflect.ClassTag](
+  private inline def grid[A: ClassTag](
       rows: Int,
       columns: Int
   )(inline value: (Int, Int) => A): Vec[Vec[A]] =

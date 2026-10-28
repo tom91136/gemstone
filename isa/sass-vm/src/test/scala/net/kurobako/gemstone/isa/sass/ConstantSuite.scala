@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.sass
 
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -73,9 +76,9 @@ class ConstantSuite extends munit.FunSuite {
     )
     val bank        = base.sections.find(_.name == ".nv.constant4").get
     val target      = "__cuda_syscall_cp_async_bulk_tensor_2d_tile_unicast"
-    val names       = Vec.from(("\u0000" + target + "\u0000").getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val names       = Vec.from(("\u0000" + target + "\u0000").getBytes(StandardCharsets.UTF_8))
     val strings     = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
-    val symbolBytes = java.nio.ByteBuffer.allocate(48).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val symbolBytes = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
     // ELF STT_FUNC, SHN_UNDEF; CUDA R_CUDA_64 references an external device function.
     symbolBytes.putInt(24, 1).put(28, 2.toByte)
     val symbols = Cubin.Section(
@@ -196,9 +199,9 @@ class ConstantSuite extends munit.FunSuite {
       constants = Vec(".nv.constant4" -> Vec.fill(8)(0.toByte))
     )
     val bank        = base.sections.find(_.name == ".nv.constant4").get
-    val names       = Vec.from("\u0000malloc\u0000".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val names       = Vec.from("\u0000malloc\u0000".getBytes(StandardCharsets.UTF_8))
     val strings     = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
-    val symbolBytes = java.nio.ByteBuffer.allocate(48).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val symbolBytes = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
     symbolBytes.putInt(24, 1).put(28, 0x12.toByte)
     val symbols =
       Cubin.Section(strings.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
@@ -261,10 +264,10 @@ class ConstantSuite extends munit.FunSuite {
       7,
       0,
       0,
-      Vec.from("\u0000table\u0000".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+      Vec.from("\u0000table\u0000".getBytes(StandardCharsets.UTF_8))
     )
     val global      = Cubin.Section(strings.index + 1, ".nv.global.init", 1, 0, 8, 0, 0, base.globals.head.bytes)
-    val symbolBytes = java.nio.ByteBuffer.allocate(48).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val symbolBytes = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
     symbolBytes.putInt(24, 1).put(28, 1.toByte).putShort(30, global.index.toShort).putLong(40, 8L)
     val symbols =
       Cubin.Section(global.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
@@ -314,8 +317,8 @@ class ConstantSuite extends munit.FunSuite {
         assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
         assertEquals(service.read(outputWord), Right(LittleEndian.toVec(value.toLong, 4)))
       }
-      val pointer = java.nio.ByteBuffer.wrap(service.read(AllocationRange(storage, 16L, 8)).toOption.get.toArray)
-        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong()
+      val pointer = ByteBuffer.wrap(service.read(AllocationRange(storage, 16L, 8)).toOption.get.toArray)
+        .order(ByteOrder.LITTLE_ENDIAN).getLong()
       assert(service.write(storage, 16L, LittleEndian.toVec(pointer - 4L, 8)).isRight)
       bindings.foreach { case (name, allocation, offset) =>
         assert(service.bindGlobal(program, name, allocation, offset).isRight)

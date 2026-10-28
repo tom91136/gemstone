@@ -132,7 +132,6 @@ object AMDGPUDomainTypes {
     val name  = typeName(id)
     val cases = registerCases(name, shape) ++ namedCases(name, shape) ++ numberedCases(name, shape) ++
       constantCases(name, shape)
-    val self = s"$Package.$name"
     Vector(
       GeneratedHeader.scala("from the pinned AMD ISA XML, LLVM tables and MC oracle"),
       s"package $Package",

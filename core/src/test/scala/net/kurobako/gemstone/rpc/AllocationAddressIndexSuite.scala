@@ -2,6 +2,7 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import scala.util.Random
 
 class AllocationAddressIndexSuite extends munit.FunSuite {
   private type Allocations = Map[AllocationId, StoredAllocation]
@@ -48,7 +49,7 @@ class AllocationAddressIndexSuite extends munit.FunSuite {
   }
 
   test("lookups match a scan that prefers aliases and, among touching ranges, the range starting at the address") {
-    val random  = scala.util.Random(42L)
+    val random  = Random(42L)
     val aliases = (0 until 64).map(index => stored(0x1000L + index * 32L, 32, aliased = true)) ++ Vector(
       stored(Long.MaxValue - 15L, 16, aliased = true),
       stored(-64L, 32, aliased = true)

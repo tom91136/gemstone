@@ -18,9 +18,22 @@ import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 import scala.runtime.LongRef
+import scala.util.control.NonFatal
 
 object ExecutionSession {
+
+  /** `sliceCount` slices of `rowCount` rows of `rowBytes` bytes, starting at `offset` of an allocation. */
+  case class Rectangle(
+      offset: Long >= 0,
+      rowBytes: Int > 0,
+      rowCount: Int > 0,
+      sliceCount: Int > 0,
+      rowPitch: Int > 0,
+      slicePitch: Int > 0
+  ) derives CanEqual
+
   private val SyntheticAddressBase   = 0x400000000000L
   private val SyntheticAddressStride = 0x100000000L
 
@@ -116,7 +129,7 @@ object ExecutionSession {
 class ExecutionSession(
     backends: List[Backend],
     taskLimits: TaskControl.Limits = TaskControl.Limits.Default,
-    executionContext: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.parasitic,
+    executionContext: ExecutionContext = ExecutionContext.parasitic,
     parallelism: Int > 0 = 1,
     specialization: Option[Backend.Specialization] = None,
     graphics: Option[GraphicsBackend] = None,
@@ -267,10 +280,7 @@ class ExecutionSession(
         if (entry.isBinding) Left(ExecutionFailure.InvalidRequest(s"program $id has a global binding in progress"))
         else if (current.hasPendingCompletion(id))
           Left(ExecutionFailure.InvalidRequest(s"program $id is retained by pending execution"))
-        else {
-          entry.beginUnload()
-          Right(entry.loaded)
-        }
+        else { entry.beginUnload(); Right(entry.loaded) }
       }
     }
     reserved.map { program =>
@@ -334,7 +344,7 @@ class ExecutionSession(
                 .left.map(failure(_))
             }
           catch {
-            case scala.util.control.NonFatal(error) =>
+            case NonFatal(error) =>
               Left(ExecutionFailure.Failed(s"program global binding failed: ${throwables.detail(error)}"))
           }
         stateLock.withLock {
@@ -381,10 +391,7 @@ class ExecutionSession(
       val start = offset.toIntExact
       entry.allocation.storage.read(start, size) { live =>
         if (!live) unregistered(entry.id)
-        else {
-          into.elem = LittleEndian.decode(entry.allocation.bytes, start, size.widen[Int in 0 ~ 8])
-          null
-        }
+        else { into.elem = LittleEndian.decode(entry.allocation.bytes, start, size.widen[Int in 0 ~ 8]); null }
       }
     }
 
@@ -574,15 +581,12 @@ class ExecutionSession(
   private def startExecutionWorker(): Unit = {
     val startWorker = stateLock.withLock {
       if (closed || pendingCompletions.isEmpty || executionWorkers >= parallelism) false
-      else {
-        executionWorkers += 1
-        true
-      }
+      else { executionWorkers += 1; true }
     }
     if (startWorker)
       try executionContext.execute(ExecutionWorker())
       catch {
-        case scala.util.control.NonFatal(error) =>
+        case NonFatal(error) =>
           failPendingCompletions(ExecutionFailure.Failed(s"cannot schedule execution: ${throwables.detail(error)}"))
       }
   }
@@ -607,7 +611,7 @@ class ExecutionSession(
                   .left.map(failure(_))
               }
             catch {
-              case scala.util.control.NonFatal(error) =>
+              case NonFatal(error) =>
                 Left(ExecutionFailure.Failed(s"program executor failed: ${throwables.detail(error)}"))
               case error: Throwable =>
                 stateLock.withLock {
@@ -714,10 +718,8 @@ class ExecutionSession(
   def awaitCompletion(id: CompletionId): Either[ExecutionFailure, Unit] = stateLock.withLock {
     try {
       @tailrec def await(result: Either[ExecutionFailure, CompletionStatus]): Either[ExecutionFailure, Unit] =
-        if (result.contains(CompletionStatus.Pending) && !closed) {
-          stateChanged.await()
-          await(completion(id))
-        } else
+        if (result.contains(CompletionStatus.Pending) && !closed) { stateChanged.await(); await(completion(id)) }
+        else
           result.flatMap {
             case CompletionStatus.Succeeded     => Right(())
             case CompletionStatus.Failed(error) => Left(error)
@@ -805,6 +807,92 @@ class ExecutionSession(
         else Right { val _ = bytes.copyToArray(allocation.bytes, start, bytes.length) }
       )
     )
+
+  /** Packed size and allocation span of a rectangle of `sliceCount` slices of `rowCount` rows of `rowBytes` bytes. */
+  private def rectangleLayout(
+      rowBytes: Int > 0,
+      rowCount: Int > 0,
+      sliceCount: Int > 0,
+      rowPitch: Int > 0,
+      slicePitch: Int > 0
+  ): Either[ExecutionFailure, (Int, Long)] = {
+    val packedSlice = rowBytes.toLong * rowCount
+    if (rowCount > 1 && rowPitch < rowBytes)
+      Left(ExecutionFailure.InvalidRequest(s"rectangle row pitch $rowPitch is below the row size $rowBytes"))
+    else if (sliceCount > 1 && slicePitch.toLong < (rowCount - 1).toLong * rowPitch + rowBytes)
+      Left(ExecutionFailure.InvalidRequest(s"rectangle slice pitch $slicePitch is below the slice extent"))
+    else if (packedSlice > MaximumPayload || packedSlice * sliceCount > MaximumPayload)
+      Left(ExecutionFailure.InvalidRequest(s"rectangle of ${packedSlice * sliceCount} bytes exceeds the payload limit"))
+    else
+      Right(
+        (
+          (packedSlice * sliceCount).toInt,
+          (sliceCount - 1).toLong * slicePitch + (rowCount - 1).toLong * rowPitch + rowBytes
+        )
+      )
+  }
+
+  private inline def rectangleAccess[A](
+      id: AllocationId,
+      offset: Long >= 0,
+      layout: (Int, Long)
+  )(
+      inline access: (StoredAllocation, Int, Int) => Either[ExecutionFailure, A]
+  ): Either[ExecutionFailure, A] = {
+    val span = math.min(layout._2, Int.MaxValue.toLong).toInt.unsafe[Int >= 0]
+    accessAllocation(id, offset, span)((allocation, start) =>
+      if (layout._2 > span)
+        Left(ExecutionFailure.InvalidRequest(s"allocation $id: rectangle span ${layout._2} is too large"))
+      else access(allocation, start, span)
+    )
+  }
+
+  private inline def eachRectangleRow(rowBytes: Int, rowCount: Int, sliceCount: Int, rowPitch: Int, slicePitch: Int)(
+      inline visit: (Int, Int) => Unit
+  ): Unit =
+    for {
+      slice <- 0 until sliceCount
+      row   <- 0 until rowCount
+    } visit(slice * slicePitch + row * rowPitch, (slice * rowCount + row) * rowBytes)
+
+  def readRectangle(id: AllocationId, rectangle: Rectangle): Either[ExecutionFailure, Vec[Byte]] = {
+    import rectangle.*
+    rectangleLayout(rowBytes, rowCount, sliceCount, rowPitch, slicePitch).flatMap(layout =>
+      rectangleAccess(id, offset, layout)((allocation, start, span) =>
+        allocation.storage.read(start, span)(live =>
+          if (!live) Left(notRegistered(id))
+          else {
+            val packed = Array.ofDim[Byte](layout._1)
+            eachRectangleRow(rowBytes, rowCount, sliceCount, rowPitch, slicePitch)((from, to) =>
+              Array.copy(allocation.bytes, start + from, packed, to, rowBytes)
+            )
+            Right(Vec.unsafeWrapArray(packed))
+          }
+        )
+      )
+    )
+  }
+
+  def writeRectangle(id: AllocationId, rectangle: Rectangle, bytes: Vec[Byte]): Either[ExecutionFailure, Unit] = {
+    import rectangle.*
+    rectangleLayout(rowBytes, rowCount, sliceCount, rowPitch, slicePitch).flatMap(layout =>
+      if (bytes.length != layout._1)
+        Left(ExecutionFailure.InvalidRequest(s"rectangle needs ${layout._1} bytes, got ${bytes.length}"))
+      else
+        rectangleAccess(id, offset, layout)((allocation, start, span) =>
+          allocation.storage.write(start, span)(live =>
+            if (!live) Left(notRegistered(id))
+            else {
+              val packed = bytes.toArray
+              eachRectangleRow(rowBytes, rowCount, sliceCount, rowPitch, slicePitch)((to, from) =>
+                Array.copy(packed, from, allocation.bytes, start + to, rowBytes)
+              )
+              Right(())
+            }
+          )
+        )
+    )
+  }
 
   def writeValue(scalar: AllocationScalar, value: Long): Either[ExecutionFailure, Unit] =
     accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>

@@ -11,6 +11,8 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 import scala.util.Using
 
 class GraphicsSubmissionSuite extends munit.FunSuite {
@@ -162,9 +164,9 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
   }
 
   test("compute descriptor preparation retains sources and releases scratch on success and failure") {
-    val queued   = scala.collection.mutable.Queue.empty[Runnable]
-    val captured = scala.collection.mutable.ArrayBuffer.empty[(AddressSpace, AllocationId)]
-    object context extends scala.concurrent.ExecutionContext {
+    val queued   = mutable.Queue.empty[Runnable]
+    val captured = mutable.ArrayBuffer.empty[(AddressSpace, AllocationId)]
+    object context extends ExecutionContext {
       override def execute(runnable: Runnable): Unit     = queued.enqueue(runnable)
       override def reportFailure(error: Throwable): Unit = throw error
     }
@@ -285,10 +287,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
             limit = ExecutionRPC.MaximumElements
           )).isEmpty)
           right(service.releaseCompletion(completion))
-          if (!standalone) {
-            right(service.releaseAllocation(source))
-            right(service.releaseAllocation(placeholder))
-          }
+          if (!standalone) { right(service.releaseAllocation(source)); right(service.releaseAllocation(placeholder)) }
       }
     }
   }

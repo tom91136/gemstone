@@ -52,13 +52,10 @@ object OperandDomains {
   }
 
   object QualifiedOperand {
-    def fromSpelling(value: NonEmpty[String]): QualifiedOperand = value.raw match {
-      case "x" => QualifiedOperand.X
-      case "y" => QualifiedOperand.Y
-      case "z" => QualifiedOperand.Z
-      case "w" => QualifiedOperand.W
-      case _   => QualifiedOperand.Unknown(value)
-    }
+    private val bySpelling: Map[String, QualifiedOperand] =
+      Vector(X, Y, Z, W).view.map(operand => operand.spelling.raw -> operand).toMap
+
+    def fromSpelling(value: NonEmpty[String]): QualifiedOperand = bySpelling.getOrElse(value.raw, Unknown(value))
   }
 
   enum QualifiedOperand(val spelling: NonEmpty[String]) {

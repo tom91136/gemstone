@@ -1,11 +1,13 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
+import javax.annotation.processing.Generated
+
 object OperandKind {
   enum Category derives CanEqual { case BitEnum, Composite, Id, Literal, ValueEnum }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum OperandKind(val category: OperandKind.Category, val components: Vector[OperandKind]) derives CanEqual {
   case ImageOperands extends OperandKind(OperandKind.Category.BitEnum, Vector.empty)
   case FPFastMathMode extends OperandKind(OperandKind.Category.BitEnum, Vector.empty)

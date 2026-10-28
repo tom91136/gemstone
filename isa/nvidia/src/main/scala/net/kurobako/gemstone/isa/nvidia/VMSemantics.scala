@@ -9,9 +9,17 @@ import net.kurobako.gemstone.vm.*
 
 private object VMSemantics {
 
+  /** The result of [[stage]] for an instruction without staged semantics, which the interpreter's own cases handle.
+    */
+  val Unstaged: Either[Fault, Unit] = Left(Fault.IllegalInstruction("the instruction has no staged semantics"))
+
+  /** Runs a staged instruction on every active lane. */
+  def stage(instruction: Instruction, sinks: LaneLoop): Either[Fault, Unit] =
+    NvidiaStaged.staged(Execute, instruction)(sinks)(Unstaged)
+
   def execute(instruction: Instruction, sinks: LaneLoop): Either[Fault, Step] = {
-    val staged = NvidiaStaged.execute(instruction, sinks)
-    if (staged eq NvidiaStaged.Unstaged) executeStaged(instruction, sinks.context)
+    val staged = stage(instruction, sinks)
+    if (staged eq Unstaged) executeStaged(instruction, sinks.context)
     else advance(staged)
   }
 

@@ -63,7 +63,7 @@ class SharedServerSuite extends munit.FunSuite {
 
   for (count <- Vector[Int > 0](3, 5, 9))
     test(s"$count simultaneous clients retain independent server-issued allocation state") {
-      scala.util.Using.Manager { use =>
+      Using.Manager { use =>
         val server  = use(Server.start(Server.Settings(parallelism = 2)))
         val clients = Vector.fill(count)(
           use(connections.Client(
@@ -111,7 +111,7 @@ class SharedServerSuite extends munit.FunSuite {
     }
 
   test("process incarnation separates reused PIDs while same-process connections share state") {
-    scala.util.Using.Manager { use =>
+    Using.Manager { use =>
       val server     = use(Server.start(Server.Settings(parallelism = 2)))
       val client     = Control.register(server.endpoint)
       val first      = use(connections.Client(server.endpoint, client, process = 42L, incarnation = 17L))

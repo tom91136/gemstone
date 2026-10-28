@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.ptx
 
 import execution.*
+import java.util.regex.Pattern
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.constraint.*
   * conformance/unified/src/cuda/video.cu runs the same forms on hardware.
   */
 class SpecifiedInstructionSuite extends munit.FunSuite {
-  private val Sections = java.util.regex.Pattern.compile("; ")
+  private val Sections = Pattern.compile("; ")
 
   private type Expected = (Long, Long, Long) => Long
 

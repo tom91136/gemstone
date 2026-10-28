@@ -76,10 +76,7 @@ object Text {
     val current = mutable.StringBuilder()
     value.foreach { character =>
       if (separator(character)) {
-        if (current.nonEmpty) {
-          result += current.result()
-          current.clear()
-        }
+        if (current.nonEmpty) { result += current.result(); current.clear() }
       } else {
         val _ = current.append(character)
       }

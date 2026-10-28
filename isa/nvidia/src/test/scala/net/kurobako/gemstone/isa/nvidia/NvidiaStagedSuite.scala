@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.vm.*
+import scala.util.Random
 
 class NvidiaStagedSuite extends munit.FunSuite {
   private val register  = Register(0)
@@ -40,7 +41,7 @@ class NvidiaStagedSuite extends munit.FunSuite {
       .fold(failure => fail(failure.message), ScalaBackend.show(_))
 
   test("three-input logic matches its truth table for every table") {
-    val random = scala.util.Random(3)
+    val random = Random(3)
     for {
       table <- 0 to 255
       _     <- 0 until 16
@@ -66,7 +67,7 @@ class NvidiaStagedSuite extends munit.FunSuite {
   }
 
   test("carry chains match unsigned addition and subtraction with carries") {
-    val random  = scala.util.Random(5)
+    val random  = Random(5)
     val samples = Vector(0L, 1L, -1L, 0xffffffffL, 0x80000000L, Long.MinValue, Long.MaxValue) ++
       Vector.fill(24)(random.nextLong())
     for {

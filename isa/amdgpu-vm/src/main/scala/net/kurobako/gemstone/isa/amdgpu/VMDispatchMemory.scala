@@ -97,10 +97,7 @@ private class VMDispatchMemory(
         case null         => null
         case fault: Fault => annotated("memory read", address, size, fault)
       }
-      else {
-        into.elem = LittleEndian.decode(localImages(image), (address - localBases(image)).toInt, size)
-        null
-      }
+      else { into.elem = LittleEndian.decode(localImages(image), (address - localBases(image)).toInt, size); null }
     }
   }
 

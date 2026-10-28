@@ -50,10 +50,7 @@ private class GlobalWaveSyncResources derives CanEqual {
     case GlobalWaveSyncOperation.Barrier =>
       if (waiting != Idle) {
         if (flags(resource) == waiting) waiting
-        else {
-          queued(resource) -= 1
-          Idle
-        }
+        else { queued(resource) -= 1; Idle }
       } else if (counters(resource) <= 0) {
         // the last wave to arrive releases the others and itself, and sets the count for the next barrier
         flags(resource) ^= 1

@@ -15,7 +15,7 @@ import net.kurobako.gemstone.vm.*
 @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
 private class Interleaving(val parallelism: Int > 0 = 4)
     extends Workgroups {
-  val calls: AtomicInteger    = java.util.concurrent.atomic.AtomicInteger(0)
+  val calls: AtomicInteger    = AtomicInteger(0)
   private val lock            = ReentrantLock()
   private val changed         = lock.newCondition()
   private val slot            = ThreadLocal.withInitial[Int](() => -1)

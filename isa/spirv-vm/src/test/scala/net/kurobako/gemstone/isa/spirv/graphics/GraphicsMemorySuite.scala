@@ -9,6 +9,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 class GraphicsMemorySuite extends munit.FunSuite {
   private val allocation = AllocationId(1L)
@@ -279,7 +280,7 @@ class GraphicsMemorySuite extends munit.FunSuite {
       fail("cancelled preparation reached the shader")
     }
     assertEquals(result, Left(Fault.Cancelled))
-    val captured = scala.collection.mutable.ArrayBuffer.empty[(AddressSpace, GraphicsRange)]
+    val captured = mutable.ArrayBuffer.empty[(AddressSpace, GraphicsRange)]
     val failed   =
       GraphicsRuntime().withDescriptorBindings(Vec(binding), Backing(80), TaskControl()) { (memory, descriptors, _) =>
         captured += memory -> descriptors.head

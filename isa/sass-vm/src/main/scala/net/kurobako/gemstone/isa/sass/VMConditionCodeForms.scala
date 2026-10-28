@@ -6,6 +6,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
+import scala.collection.mutable
 
 /** Legacy `.CC` destinations whose condition-code effects are verified, and the flag state they leave behind. Flags an
   * instruction does not define become invalid rather than stale.
@@ -63,7 +64,7 @@ private object VMConditionCodeForms {
           _: Form.Iscadd32i => true
       case _ => false
     }
-    val flags                                                  = written.to(scala.collection.mutable.Set)
+    val flags                                                  = written.to(mutable.Set)
     def write(flag: VMConditionCodes.Flag, value: Value): Unit = {
       flags += flag
       emit(WriteConditionFlag(flag, value))

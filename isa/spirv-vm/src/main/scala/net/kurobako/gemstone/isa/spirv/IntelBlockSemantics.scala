@@ -85,10 +85,13 @@ private object IntelBlockSemantics {
   inline def texelInside[V](inline algebra: Algebra[V])(column: V, row: V, size: V, width: V, height: V, texel: V): V =
     algebra.and(
       algebra.and(
-        algebra.lessOrEqual(algebra.literal(0L), column, true),
-        algebra.lessOrEqual(algebra.add(column, size), algebra.multiply(width, texel), true)
+        algebra.lessOrEqual(algebra.literal(0L), column, signed = true),
+        algebra.lessOrEqual(algebra.add(column, size), algebra.multiply(width, texel), signed = true)
       ),
-      algebra.and(algebra.lessOrEqual(algebra.literal(0L), row, true), algebra.lessThan(row, height, true))
+      algebra.and(
+        algebra.lessOrEqual(algebra.literal(0L), row, signed = true),
+        algebra.lessThan(row, height, signed = true)
+      )
     )
 
   /** Binds the level of `image`, whose request writes its width, height, row stride and format after `lanes` partial
@@ -168,10 +171,10 @@ private object IntelBlockSemantics {
       height: V,
       texel: V
   ): V = {
-    val r = algebra.divide(at, padded, true)
-    val c = algebra.remainder(at, padded, true)
+    val r = algebra.divide(at, padded, signed = true)
+    val c = algebra.remainder(at, padded, signed = true)
     algebra.and(
-      algebra.and(algebra.lessThan(r, rows, true), algebra.lessThan(c, columns, true)),
+      algebra.and(algebra.lessThan(r, rows, signed = true), algebra.lessThan(c, columns, signed = true)),
       texelInside(algebra)(
         algebra.add(column, algebra.multiply(c, size)),
         algebra.add(row, r),
@@ -192,8 +195,8 @@ private object IntelBlockSemantics {
       stride: V,
       texel: V
   ): V = {
-    val r = algebra.divide(at, padded, true)
-    val c = algebra.remainder(at, padded, true)
+    val r = algebra.divide(at, padded, signed = true)
+    val c = algebra.remainder(at, padded, signed = true)
     texelOffset(algebra)(algebra.add(row, r), algebra.add(column, algebra.multiply(c, size)), stride, texel)
   }
 
@@ -274,18 +277,18 @@ private object IntelBlockSemantics {
     */
   inline def blockRow[V](inline algebra: Algebra[V])(lane: V, k: V, columns: V, subgroup: V): V =
     algebra.select(
-      algebra.lessOrEqual(columns, subgroup, true),
-      algebra.divide(algebra.add(algebra.multiply(k, subgroup), lane), columns, true),
-      algebra.divide(k, algebra.divide(columns, subgroup, true), true)
+      algebra.lessOrEqual(columns, subgroup, signed = true),
+      algebra.divide(algebra.add(algebra.multiply(k, subgroup), lane), columns, signed = true),
+      algebra.divide(k, algebra.divide(columns, subgroup, signed = true), signed = true)
     )
 
   inline def blockColumn[V](inline algebra: Algebra[V])(lane: V, k: V, columns: V, subgroup: V): V =
     algebra.select(
-      algebra.lessOrEqual(columns, subgroup, true),
-      algebra.remainder(algebra.add(algebra.multiply(k, subgroup), lane), columns, true),
+      algebra.lessOrEqual(columns, subgroup, signed = true),
+      algebra.remainder(algebra.add(algebra.multiply(k, subgroup), lane), columns, signed = true),
       algebra.add(
-        algebra.multiply(lane, algebra.divide(columns, subgroup, true)),
-        algebra.remainder(k, algebra.divide(columns, subgroup, true), true)
+        algebra.multiply(lane, algebra.divide(columns, subgroup, signed = true)),
+        algebra.remainder(k, algebra.divide(columns, subgroup, signed = true), signed = true)
       )
     )
 
@@ -328,15 +331,15 @@ private object IntelBlockSemantics {
     val c    = if (transposed) row else column
     val byte = algebra.multiply(algebra.add(x, algebra.add(algebra.multiply(block, width), c)), size)
     algebra.and(
-      algebra.and(algebra.lessThan(c, width, true), algebra.lessThan(r, height, true)),
+      algebra.and(algebra.lessThan(c, width, signed = true), algebra.lessThan(r, height, signed = true)),
       algebra.and(
         algebra.and(
-          algebra.lessOrEqual(algebra.literal(0L), byte, true),
-          algebra.lessOrEqual(algebra.add(byte, size), rowBytes, true)
+          algebra.lessOrEqual(algebra.literal(0L), byte, signed = true),
+          algebra.lessOrEqual(algebra.add(byte, size), rowBytes, signed = true)
         ),
         algebra.and(
-          algebra.lessOrEqual(algebra.literal(0L), algebra.add(y, r), true),
-          algebra.lessThan(algebra.add(y, r), rows, true)
+          algebra.lessOrEqual(algebra.literal(0L), algebra.add(y, r), signed = true),
+          algebra.lessThan(algebra.add(y, r), rows, signed = true)
         )
       )
     )
@@ -380,7 +383,11 @@ private object IntelBlockSemantics {
                     val blockRows  = kind match {
                       case Block2D.Transpose => w
                       case Block2D.Transform =>
-                        algebra.divide(algebra.add(h, algebra.subtract(packing, algebra.literal(1L))), packing, false)
+                        algebra.divide(
+                          algebra.add(h, algebra.subtract(packing, algebra.literal(1L))),
+                          packing,
+                          signed = false
+                        )
                       case _ => h
                     }
                     val blockColumns = algebra.primitive(if (transposed) h else w)(power(_: UInt[64]))
@@ -390,19 +397,29 @@ private object IntelBlockSemantics {
                         algebra.subtract(subgroup, algebra.literal(1L))
                       ),
                       subgroup,
-                      false
+                      signed = false
                     )
                     machine.repeat(blocks)(block =>
                       machine.repeat(perBlock) { k =>
                         val row    = blockRow(algebra)(lane, k, blockColumns, subgroup)
                         val column = blockColumn(algebra)(lane, k, blockColumns, subgroup)
                         val slot   = algebra.multiply(algebra.add(algebra.multiply(block, perBlock), k), valueBytes)
-                        machine.when(algebra.lessThan(row, blockRows, true))(
+                        def inside(at: V): V = blockInside(algebra)(transposed)(
+                          block = block,
+                          row = at,
+                          column = column,
+                          x = x,
+                          y = y,
+                          width = w,
+                          height = h,
+                          size = bytes,
+                          rowBytes = rb,
+                          rows = rs
+                        )
+                        machine.when(algebra.lessThan(row, blockRows, signed = true))(
                           if (store)
                             machine.loadElement(local, slot, valueBytes)(v =>
-                              machine.when(
-                                blockInside(algebra)(transposed)(block, row, column, x, y, w, h, bytes, rb, rs)
-                              )(
+                              machine.when(inside(row))(
                                 machine.storeElement(
                                   region,
                                   blockElement(algebra)(transposed)(block, row, column, x, y, w, bytes, p),
@@ -415,10 +432,8 @@ private object IntelBlockSemantics {
                             machine.setPartial(algebra.literal(0L), algebra.literal(0L))(
                               machine.repeat(algebra.literal(if (packed) 4L else 1L)) { part =>
                                 val rowAt = algebra.add(algebra.multiply(row, packing), part)
-                                machine.when(algebra.lessThan(part, packing, true))(
-                                  machine.when(
-                                    blockInside(algebra)(transposed)(block, rowAt, column, x, y, w, h, bytes, rb, rs)
-                                  )(
+                                machine.when(algebra.lessThan(part, packing, signed = true))(
+                                  machine.when(inside(rowAt))(
                                     machine.loadElement(
                                       region,
                                       blockElement(algebra)(transposed)(block, rowAt, column, x, y, w, bytes, p),
@@ -562,13 +577,42 @@ private object IntelBlockSemantics {
   ): Term.Steps = imageWrite(Render, machine)(image, coordinate, data, element, machine.leafCount(data))
 
   private def renderMediaRead(machine: SPIRVMachineRender, ids: Vec[Int], element: Int in 1 ~ 8): Term.Steps =
-    mediaRead(Render, machine)(ids(0), ids(1), ids(2), ids(3), ids(4), ids(5), element, machine.leafCount(ids(1)))
+    mediaRead(Render, machine)(
+      resultType = ids(0),
+      dest = ids(1),
+      image = ids(2),
+      coordinate = ids(3),
+      width = ids(4),
+      height = ids(5),
+      bytes = element,
+      lanes = machine.leafCount(ids(1))
+    )
 
   private def renderMediaWrite(machine: SPIRVMachineRender, ids: Vec[Int], element: Int in 1 ~ 8): Term.Steps =
-    mediaWrite(Render, machine)(ids(0), ids(1), ids(2), ids(3), ids(4), element, machine.leafCount(ids(4)))
+    mediaWrite(Render, machine)(
+      image = ids(0),
+      coordinate = ids(1),
+      width = ids(2),
+      height = ids(3),
+      data = ids(4),
+      bytes = element,
+      lanes = machine.leafCount(ids(4))
+    )
 
   private def renderBlock2D(machine: SPIRVMachineRender, mode: Block2D, operands: Vec[Operand]): Term.Steps = {
     val ids = operands.map(Operand.id)
-    block2D(Render, machine)(mode, ids(0), ids(1), ids(2), ids(3), ids(4), ids(5), ids(6), ids(7), ids(8), ids(9))
+    block2D(Render, machine)(
+      kind = mode,
+      size = ids(0),
+      width = ids(1),
+      height = ids(2),
+      count = ids(3),
+      region = ids(4),
+      rowBytes = ids(5),
+      rows = ids(6),
+      pitch = ids(7),
+      at = ids(8),
+      local = ids(9)
+    )
   }
 }

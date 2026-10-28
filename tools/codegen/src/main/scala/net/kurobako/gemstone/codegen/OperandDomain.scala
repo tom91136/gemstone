@@ -4,8 +4,6 @@ import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.string.*
 import upickle.default.*
 
-case class DomainFinding(check: String, subject: String, detail: String, resolution: Option[String])
-
 object OperandDomain {
   case class FloatConstant(text: String, code: Int) derives ReadWriter
   case class SubField(name: String, ranges: Vector[BitRange], domain: OperandDomain) derives ReadWriter

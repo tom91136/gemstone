@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import scala.annotation.tailrec
 
 object KernelArguments {
   enum Resolved {
@@ -23,7 +24,7 @@ object KernelArguments {
       address: (AllocationId, Long >= 0) => Either[Fault, GuestAddress]
   ): Either[Fault, Vec[Resolved]] = {
     val resolved = Vec.newBuilder[Resolved]
-    @scala.annotation.tailrec
+    @tailrec
     def loop(index: Int): Either[Fault, Vec[Resolved]] =
       if (index == task.arguments.length) Right(resolved.result())
       else

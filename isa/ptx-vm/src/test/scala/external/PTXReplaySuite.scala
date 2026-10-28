@@ -1,6 +1,7 @@
 package external
 
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.memory.*
@@ -83,7 +84,7 @@ class PTXReplaySuite extends munit.FunSuite {
       .isRight)
     val finished = memory.bytes(output)
     memory.array(output)(0) = 99
-    val observed = java.util.concurrent.atomic.AtomicInteger()
+    val observed = AtomicInteger()
     assert(replay.resume(first.head, (_, _, _) => Right(observed.incrementAndGet()).map(_ => ())).isRight)
     assertEquals(memory.bytes(output), finished)
     assertEquals(observed.get(), first.size)

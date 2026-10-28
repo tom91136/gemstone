@@ -13,6 +13,7 @@ import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import scala.util.Using
+import scala.util.control.NonFatal
 
 object Launch {
   case class Environment(set: Map[String, String], unset: Set[String]) {
@@ -103,7 +104,7 @@ object Launch {
         val cleanup = Thread(
           () =>
             try release()
-            catch { case scala.util.control.NonFatal(_) => () },
+            catch { case NonFatal(_) => () },
           "gemstone-client-release"
         )
         cleanup.setDaemon(true)
@@ -140,7 +141,7 @@ object Launch {
               }
             }
       }
-    catch { case scala.util.control.NonFatal(error) => Left(throwables.detail(error)) }
+    catch { case NonFatal(error) => Left(throwables.detail(error)) }
 
   def prepareEnvironment(
       apis: NonEmpty[Set[API]],

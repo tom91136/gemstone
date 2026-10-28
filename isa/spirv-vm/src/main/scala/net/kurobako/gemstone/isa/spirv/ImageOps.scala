@@ -25,7 +25,7 @@ private object ImageOps {
     def imaging(body: (InvocationState, MemoryState, InvocationValues) => AddressSpace.ReadResult[Unit])
         : AddressSpace.ReadResult[Unit] =
       body(execution, memory, execution.values).map(_ => execution.pc += 1)
-    SamplingSemantics.execute(execution, instruction).getOrElse(instruction match {
+    instruction match {
       case Instruction.SampledImage(resultType, dest, source, sampler) =>
         sampling { (_, _, values) =>
           for {
@@ -316,7 +316,7 @@ private object ImageOps {
           )
         }
       case _ => Left(Fault.Unsupported(s"${instruction.opcode} is not an image operation"))
-    })
+    }
   }
 
   /** The dimensions, array flag and cube flag of a sampled or storage image view; a cube has `cubeDimensions`. */
@@ -486,18 +486,6 @@ private object ImageOps {
         )
       } yield { data(lane) = layout.decode(word, lane); data }
   }
-
-  /** `stride` is the distance between rows in texels, which a row pitch may widen beyond `width`. */
-  case class ImageLevel(
-      pixels: Pointer,
-      width: Long,
-      height: Long,
-      format: Int,
-      samples: Int = 1,
-      layers: Long = 1,
-      depth: Long = 1,
-      stride: Long
-  )
 
   def imageLevels(memory: MemoryState, image: Pointer): AddressSpace.ReadResult[Int] =
     for {

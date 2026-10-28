@@ -1,7 +1,9 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 object SPIRV {
   final val Magic: Int = 119734787
   object Opcode {

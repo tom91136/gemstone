@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.unused
 
 object LaunchObserver {
   enum AccessKind {
@@ -20,15 +21,15 @@ trait LaunchObserver derives CanEqual {
   def instruction(at: Fault.Location, state: ArchitecturalState): Either[Fault, Unit]
 
   /** Called for each access to device-visible memory, before it happens. */
-  def memory(@scala.annotation.unused access: LaunchObserver.Access): Unit = ()
+  def memory(@unused access: LaunchObserver.Access): Unit = ()
 
   /** Called when a unit changes what it is doing, such as parking at a barrier or finishing. An issue is reported by
     * [[instruction]], so only the changes between issues come through here.
     */
-  def transition(@scala.annotation.unused event: MachineEvent): Unit = ()
+  def transition(@unused event: MachineEvent): Unit = ()
 
   /** Called after the instruction issued at `issued` has run, with the registers it read and wrote. A machine whose
     * view names no registers reports none.
     */
-  def registers(@scala.annotation.unused issued: Long, @scala.annotation.unused use: RegisterUse): Unit = ()
+  def registers(@unused issued: Long, @unused use: RegisterUse): Unit = ()
 }

@@ -1,11 +1,13 @@
 // Generated from the pinned AMDGPU instruction metadata. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import Opcode.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.string.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object InstructionDefs {
   val ComparisonOpcodes: Map[Opcode, ComparisonOpcode] = Map(
     SOPCInstructionDefs.SCmpEqF16 ->

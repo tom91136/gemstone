@@ -621,6 +621,27 @@ bool download(const PointerBinding &binding, void *bytes, size_t size) noexcept 
   }
 }
 
+struct RemoteVolume {
+  AllocationId allocation;
+  Rectangle rectangle;
+};
+
+bool uploadVolume(const RemoteVolume &volume, const void *bytes, size_t rowPitch, size_t slicePitch) noexcept {
+  try {
+    return uploadRectangle(*client, volume.allocation, volume.rectangle, bytes, rowPitch, slicePitch, TransferChunk);
+  } catch (...) {
+    return false;
+  }
+}
+
+bool downloadVolume(const RemoteVolume &volume, void *bytes, size_t rowPitch, size_t slicePitch) noexcept {
+  try {
+    return downloadRectangle(*client, volume.allocation, volume.rectangle, bytes, rowPitch, slicePitch, TransferChunk);
+  } catch (...) {
+    return false;
+  }
+}
+
 bool systemPagingEnabled() { return gemstone::environment::enabled(gemstone::environment::SystemPaging); }
 
 std::mutex stateMutex;
@@ -894,6 +915,60 @@ std::optional<CopySide> copySide(CUmemorytype type, const CudaArray *array, size
   return side;
 }
 
+std::optional<RemoteVolume> remoteVolume(CUdeviceptr device, const CopySide &side, const CUDA_MEMCPY3D &copy) {
+  size_t rows = 0;
+  size_t slices = 0;
+  size_t span = 0;
+  if (!sizeMul(copy.Height - 1, side.rowPitch, &rows) || !sizeMul(copy.Depth - 1, side.slicePitch, &slices)
+      || !sizeAdd(copy.WidthInBytes, rows, &span) || !sizeAdd(span, slices, &span))
+    return std::nullopt;
+  const auto start = device + side.base;
+  const auto binding = pointerBinding(start);
+  if (!binding || binding->remaining < span) return std::nullopt;
+  {
+    std::scoped_lock const lock{mirrorMutex};
+    // host-backed mirrors are copied locally by copyMirrored, never over RPC
+    if (mirrors.find(start, span)) return std::nullopt;
+  }
+  return RemoteVolume{.allocation = AllocationId{static_cast<int64_t>(binding->allocation)},
+                      .rectangle = {.offset = binding->offset,
+                                    .rowBytes = copy.WidthInBytes,
+                                    .rowCount = copy.Height,
+                                    .sliceCount = copy.Depth,
+                                    .rowPitch = side.rowPitch,
+                                    .slicePitch = side.slicePitch}};
+}
+
+// nullopt leaves the copy to the row-by-row path, which also reports any error; otherwise the bool is the transfer result
+std::optional<bool> copyVolumeRectangles(const CUDA_MEMCPY3D &copy, const CopySide &source, const CopySide &destination,
+                                         const CudaArray *srcArray, const CudaArray *dstArray) {
+  const bool fromHost = copy.srcMemoryType == CU_MEMORYTYPE_HOST;
+  const bool toHost = copy.dstMemoryType == CU_MEMORYTYPE_HOST;
+  if (fromHost && toHost) return std::nullopt;
+  const auto origin =
+      fromHost ? std::nullopt : remoteVolume(copy.srcMemoryType == CU_MEMORYTYPE_ARRAY ? srcArray->device : copy.srcDevice, source, copy);
+  const auto target = toHost
+                          ? std::nullopt
+                          : remoteVolume(copy.dstMemoryType == CU_MEMORYTYPE_ARRAY ? dstArray->device : copy.dstDevice, destination, copy);
+  if ((!fromHost && !origin) || (!toHost && !target)) return std::nullopt;
+  if (fromHost) {
+    if (!copy.srcHost) return std::nullopt;
+    return uploadVolume(*target, static_cast<const unsigned char *>(copy.srcHost) + source.base, source.rowPitch, source.slicePitch);
+  }
+  if (toHost) {
+    if (!copy.dstHost) return std::nullopt;
+    return downloadVolume(*origin, static_cast<unsigned char *>(copy.dstHost) + destination.base, destination.rowPitch,
+                          destination.slicePitch);
+  }
+  size_t packedSlice = 0;
+  size_t packedBytes = 0;
+  if (!sizeMul(copy.WidthInBytes, copy.Height, &packedSlice) || !sizeMul(packedSlice, copy.Depth, &packedBytes)) return std::nullopt;
+  const std::unique_ptr<unsigned char[]> staging{new (std::nothrow) unsigned char[packedBytes]};
+  if (!staging) return std::nullopt;
+  return downloadVolume(*origin, staging.get(), copy.WidthInBytes, packedSlice)
+         && uploadVolume(*target, staging.get(), copy.WidthInBytes, packedSlice);
+}
+
 CUresult copyVolume(const CUDA_MEMCPY3D &copy) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   if (copy.WidthInBytes == 0 || copy.Height == 0 || copy.Depth == 0) return CUDA_SUCCESS;
@@ -904,6 +979,8 @@ CUresult copyVolume(const CUDA_MEMCPY3D &copy) {
   const auto destination =
       copySide(copy.dstMemoryType, dstArray, copy.dstXInBytes, copy.dstY, copy.dstZ, copy.dstPitch, copy.dstHeight, copy);
   if (!source || !destination) return CUDA_ERROR_INVALID_VALUE;
+  if (const auto transferred = copyVolumeRectangles(copy, *source, *destination, srcArray, dstArray))
+    return *transferred ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 
   auto row = std::unique_ptr<unsigned char[]>{new (std::nothrow) unsigned char[copy.WidthInBytes]};
   if (!row) return CUDA_ERROR_UNKNOWN;

@@ -598,7 +598,7 @@ private object SamplingSemantics {
     else machine.swizzle(sample.image, algebra.literal(Results.toLong))(written()))
   }
 
-  private inline def checked[V, D, F[_]](inline algebra: Algebra[V], inline machine: SPIRVMachine[V, D, F])(
+  private inline def checked[V, D, F[_]](inline machine: SPIRVMachine[V, D, F])(
       condition: V,
       label: String
   )(inline fault: => Fault)(inline next: => F[Unit]): F[Unit] = machine.require(condition, label)(fault)(next)
@@ -636,7 +636,6 @@ private object SamplingSemantics {
         dims: V,
         arrayed: V,
         cube: V,
-        cn: V,
         present: V,
         channel: V,
         format: V,
@@ -685,14 +684,14 @@ private object SamplingSemantics {
             )
           )(finished(algebra, machine)(form, format, mode, selected))
         def verifiedFilter(): F[Unit] =
-          checked(algebra, machine)(
+          checked(machine)(
             algebra.or(
               algebra.equal(filter, nearest),
               algebra.equal(filter, lit(ImageDescriptor.Filter.Linear.toLong))
             ),
             "sample filter"
           )(Fault.Unsupported("sample filter is not nearest or linear"))(
-            checked(algebra, machine)(
+            checked(machine)(
               if (gathering) lit(1L)
               else algebra.or(
                 algebra.equal(filter, nearest),
@@ -700,7 +699,7 @@ private object SamplingSemantics {
               ),
               "integer filter"
             )(Fault.InvalidRequest("integer images require nearest filtering"))(
-              checked(algebra, machine)(
+              checked(machine)(
                 algebra.or(
                   machine.vulkan,
                   algebra.equal(
@@ -710,7 +709,7 @@ private object SamplingSemantics {
                 ),
                 "depth comparison"
               )(Fault.InvalidRequest("depth comparison and sampler disagree"))(
-                checked(algebra, machine)(
+                checked(machine)(
                   if (gathering || form.explicit) lit(1L)
                   else algebra.or(
                     present,
@@ -759,16 +758,16 @@ private object SamplingSemantics {
       )
     }
 
-    def operated(dims: V, arrayed: V, cube: V, cn: V, present: V, channel: V, format: V, levels: V): F[Unit] = {
+    def operated(dims: V, arrayed: V, cube: V, present: V, channel: V, format: V, levels: V): F[Unit] = {
       def lodded(next: V => F[Unit]): F[Unit] =
         if (lodMask == ImageOperands.Bias || lodMask == ImageOperands.Lod)
-          checked(algebra, machine)(algebra.equal(machine.count(operands(1)), lit(1L)), "sample LOD scalar")(
+          checked(machine)(algebra.equal(machine.count(operands(1)), lit(1L)), "sample LOD scalar")(
             Fault.InvalidRequest("sample LOD is not scalar")
           )(next(widen(algebra)(machine.leaf(operands(1), 0))))
         else next(lit(0L))
       def gradiented(next: => F[Unit]): F[Unit] =
         if (lodMask == ImageOperands.Grad)
-          checked(algebra, machine)(
+          checked(machine)(
             algebra.and(
               algebra.lessOrEqual(lit(0L), machine.count(operands(1)), signed = true),
               algebra.lessOrEqual(lit(0L), machine.count(operands(2)), signed = true)
@@ -797,10 +796,10 @@ private object SamplingSemantics {
             )
           )
         else
-          checked(algebra, machine)(algebra.equal(cube, lit(0L)), "cube gather offsets")(
+          checked(machine)(algebra.equal(cube, lit(0L)), "cube gather offsets")(
             Fault.InvalidRequest("cube gather does not allow ConstOffsets")
           )(
-            checked(algebra, machine)(
+            checked(machine)(
               algebra.equal(machine.count(operands(offsetIndex)), lit(8L)),
               "gather offsets"
             )(Fault.InvalidRequest("gather ConstOffsets requires four two-dimensional offsets"))(
@@ -811,10 +810,10 @@ private object SamplingSemantics {
           )
       def offset(next: => F[Unit]): F[Unit] =
         if ((mask & offsetMask) == 0) next
-        else checked(algebra, machine)(algebra.equal(cube, lit(0L)), "cube offset")(
+        else checked(machine)(algebra.equal(cube, lit(0L)), "cube offset")(
           Fault.InvalidRequest("cube sampling does not allow ConstOffset")
         )(
-          checked(algebra, machine)(
+          checked(machine)(
             algebra.equal(machine.count(operands(offsetIndex)), dims),
             "offset dimensionality"
           )(Fault.InvalidRequest("image ConstOffset dimensionality does not match"))(
@@ -845,7 +844,7 @@ private object SamplingSemantics {
                     gathering || !form.explicit || lodMask == ImageOperands.Lod || lodMask == ImageOperands.Grad,
                     "explicit sampling"
                   )(Fault.Unsupported("explicit sampling requires Lod or Grad"))(
-                    checked(algebra, machine)(
+                    checked(machine)(
                       if (gathering || form.explicit) lit(1L)
                       else algebra.or(
                         present,
@@ -862,7 +861,7 @@ private object SamplingSemantics {
                       ),
                       "implicit level of detail"
                     )(Fault.Unsupported("implicit LOD with distinct min/mag filters needs fragment derivatives"))(
-                      levelling(dims, arrayed, cube, cn, present, channel, format, levels, lod)
+                      levelling(dims, arrayed, cube, present, channel, format, levels, lod)
                     )
                   )
                 )
@@ -887,7 +886,7 @@ private object SamplingSemantics {
                   )
                 )(machine.done)
               )(
-                checked(algebra, machine)(
+                checked(machine)(
                   algebra.and(
                     algebra.lessOrEqual(algebra.add(dims, arrayed), cn, signed = true),
                     reg(algebra, machine)(Checked)
@@ -895,7 +894,7 @@ private object SamplingSemantics {
                   "sample coordinates"
                 )(Fault.InvalidRequest("invalid sample coordinate dimensionality"))(
                   directed(algebra, machine)(dims, cube)(
-                    checked(algebra, machine)(
+                    checked(machine)(
                       algebra.or(
                         algebra.equal(cube, lit(0L)),
                         algebra.equal(wordAt(ImageDescriptor.SamplerWord.Unnormalized), lit(0L))
@@ -906,7 +905,6 @@ private object SamplingSemantics {
                         dims,
                         arrayed,
                         cube,
-                        cn,
                         present,
                         channel,
                         algebra.and(formatWord, lit(ImageDescriptor.Flags.FormatMask)),
@@ -932,14 +930,14 @@ private object SamplingSemantics {
       def channelled(next: V => F[Unit]): F[Unit] = form.gather match {
         case Gather.Component(component) =>
           machine.scalar(component)(c =>
-            checked(algebra, machine)(algebra.lessThan(c, lit(4L), signed = false), "gather component")(
+            checked(machine)(algebra.lessThan(c, lit(4L), signed = false), "gather component")(
               Fault.InvalidRequest("gather component must be in [0,3]")
             )(next(c))
           )
         case _ => next(lit(0L))
       }
       def gathered(channel: V): F[Unit] =
-        checked(algebra, machine)(
+        checked(machine)(
           if (gathering) algebra.or(algebra.equal(dims, lit(2L)), cube) else lit(1L),
           "gather image"
         )(Fault.InvalidRequest("gather requires a 2D or cube image"))(quadded(dims, arrayed, cube, cn, channel))
@@ -966,7 +964,7 @@ private object SamplingSemantics {
           algebra.select(integral, algebra.primitive(supplied)(Sampling.converted(_: UInt[64])), supplied)
         )
       }(
-        checked(algebra, machine)(
+        checked(machine)(
           if (form.projective)
             algebra.and(
               algebra.and(algebra.equal(arrayed, lit(0L)), algebra.equal(cube, lit(0L))),

@@ -321,17 +321,14 @@ private object VMInterpreter {
         val waiting = arrived.count(identity)
         if (live == 0) Right(Residency.Complete)
         else {
-          if (waiting == live) {
-            java.util.Arrays.fill(arrived, false)
-            progressed = true
-          }
+          if (waiting == live) { java.util.Arrays.fill(arrived, false); progressed = true }
           Right(if (progressed) Residency.Progressed else Residency.Stalled)
         }
       }
     }
   }
 
-  // Wave rendezvous is a measured mutable state machine; null marks a wave not yet started or already finished.
+  // Wave rendezvous is a measured mutable state machine; null marks an unstarted or finished wave.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def runGroup(
       program: Kernel,
@@ -882,10 +879,7 @@ private object VMInterpreter {
       var index   = 0
       while (index < 8) {
         val word = Bits.low32(scalar(first + index)).toLong
-        if (word != imageWords(index)) {
-          imageWords(index) = word
-          changed = true
-        }
+        if (word != imageWords(index)) { imageWords(index) = word; changed = true }
         index += 1
       }
       if (changed) imageDecoded = ImageResource.decode(program.isa, imageWords)
@@ -938,10 +932,7 @@ private object VMInterpreter {
         case Location.Private =>
           val storage = scratch(lane)
           if (!ByteRange.contains(storage.length, at, bytes.toLong)) privateFault(at, bytes)
-          else {
-            loaded.elem = LittleEndian.decode(storage, at.toInt, bytes)
-            null
-          }
+          else { loaded.elem = LittleEndian.decode(storage, at.toInt, bytes); null }
         case Location.Local =>
           val offset = checkedLdsOffset(lds, at, bytes)
           loaded.elem =
@@ -959,10 +950,7 @@ private object VMInterpreter {
         case Location.Private =>
           val storage = scratch(lane)
           if (!ByteRange.contains(storage.length, at, bytes.toLong)) privateFault(at, bytes)
-          else {
-            LittleEndian.write(value, storage, at.toInt, bytes)
-            null
-          }
+          else { LittleEndian.write(value, storage, at.toInt, bytes); null }
         case Location.Local =>
           val offset = checkedLdsOffset(lds, at, bytes)
           if (offset == InvalidLdsOffset) writeLDS(lds, at, LittleEndian.toArray(value, bytes.widen))
@@ -1002,10 +990,7 @@ private object VMInterpreter {
         case Location.Private =>
           val storage = scratch(lane)
           if (!ByteRange.contains(storage.length, at, bytes.toLong)) privateFault(at, bytes)
-          else {
-            writeVectorBytes(registers, load.dest, lane, storage, at.toInt, bytes)
-            null
-          }
+          else { writeVectorBytes(registers, load.dest, lane, storage, at.toInt, bytes); null }
         case Location.Local =>
           val offset = checkedLdsOffset(lds, at, bytes)
           if (offset == InvalidLdsOffset) writeVectorBytes(registers, load.dest, lane, ldsBytes(lds, at, bytes))
@@ -1132,10 +1117,7 @@ private object VMInterpreter {
           case Location.Private =>
             val storage = scratch(lane)
             if (!ByteRange.contains(storage.length, at, data.length.toLong)) privateFault(at, data.length)
-            else {
-              Array.copy(data, 0, storage, at.toInt, data.length)
-              null
-            }
+            else { Array.copy(data, 0, storage, at.toInt, data.length); null }
           case Location.Local =>
             writeLDS(lds, at, data)
             null

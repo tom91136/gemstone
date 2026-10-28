@@ -64,10 +64,7 @@ private object AccessLayout {
             case Some(descriptors) =>
               if (selected < 0 || selected >= descriptors.size || element)
                 failure = Fault.InvalidRequest(s"descriptor array index $selected is out of range")
-              else {
-                source = descriptors(selected.toInt)
-                offset = address(source.address)
-              }
+              else { source = descriptors(selected.toInt); offset = address(source.address) }
             case None =>
               val stride = program.arrayStrides.get(typeId) match {
                 case Some(width) => width.raw.toLong

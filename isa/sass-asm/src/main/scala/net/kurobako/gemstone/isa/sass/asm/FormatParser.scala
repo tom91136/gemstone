@@ -190,10 +190,7 @@ object FormatParser {
         case Piece.Fixed("{" | "}", _) if !braced => ()
         case Piece.Fixed(value, optional)         =>
           if (!optional || introduces(index + 1)) {
-            if (operands && !value.startsWith(".") && !text.endsWith(" ")) {
-              text ++= " "
-              operands = false
-            }
+            if (operands && !value.startsWith(".") && !text.endsWith(" ")) { text ++= " "; operands = false }
             text ++= (if (value == ",") ", " else value)
             adjacent = false
           }

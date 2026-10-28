@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.rpc
 
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
@@ -115,6 +116,8 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.ReleaseAllocation(allocation),
     Operation.WriteAllocation(allocation, 4L, Vec[Byte](1, 2, 3)),
     Operation.ReadAllocation(allocation, 4L, 3),
+    Operation.WriteAllocationRectangle(allocation, 4L, 2, 3, 2, 5, 20, Vec.fill(12)(1.toByte)),
+    Operation.ReadAllocationRectangle(allocation, 4L, 2, 3, 2, 5, 20),
     Operation.LoadProgram(ProgramEncoding.SPIRVOpenCLCompute, Vec[Byte](3, 2, 35, 7)),
     Operation.DescribeSpecialization(Vec[Byte](3, 2, 35, 7)),
     Operation.SpecializeImage(
@@ -469,7 +472,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
     decoded match {
       case Right(CompletionStatus.Failed(ExecutionFailure.Failed(detail))) =>
         assert(detail.raw.startsWith("fault?at \u00e9"))
-        assert(detail.raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= ExecutionRPC.MaximumTextBytes)
+        assert(detail.raw.getBytes(StandardCharsets.UTF_8).length <= ExecutionRPC.MaximumTextBytes)
       case other => fail(s"unexpected decode: $other")
     }
   }

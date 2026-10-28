@@ -2,7 +2,9 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 object SsrcSpecialScc extends Domain[SsrcSpecialScc] {
   val id: String = "ssrc_special_scc"
 
@@ -14,7 +16,7 @@ object SsrcSpecialScc extends Domain[SsrcSpecialScc] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum SsrcSpecialScc extends DomainValue derives CanEqual {
   case SrcScc
   case SrcVccz

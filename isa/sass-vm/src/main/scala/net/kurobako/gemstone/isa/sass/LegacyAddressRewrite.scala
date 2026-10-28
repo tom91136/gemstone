@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import scala.collection.mutable
 
 /** Conservative opaque-predicate proof for CUDA 11.8 Maxwell/Pascal generic-address sequences. */
 private object LegacyAddressRewrite {
@@ -377,12 +378,12 @@ private object LegacyAddressRewrite {
         seek(index - 1)
       }
     }
-    val pending = scala.collection.mutable.ArrayDeque(
+    val pending = mutable.ArrayDeque(
       ProofState(0, PredicateOrigin.Replaced, addressValid = false, guardStable = false),
       ProofState(highIndex + 1, PredicateOrigin.Original, true, true)
     )
-    val consumers  = scala.collection.mutable.Set.empty[Int]
-    val otherReads = scala.collection.mutable.Set.empty[Int]
+    val consumers  = mutable.Set.empty[Int]
+    val otherReads = mutable.Set.empty[Int]
     @annotation.tailrec
     def visit(seen: Set[ProofState]): Unit =
       if (pending.nonEmpty) {

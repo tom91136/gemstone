@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.annotation.targetName
+import scala.util.Try
 
 /** Locale-independent text operations for identifiers and other machine-readable text. */
 object string {
@@ -67,7 +68,7 @@ object string {
       case _                            => (unsigned, 10)
     }
     if (digits.isEmpty || digits.startsWith("-") || digits.startsWith("+")) None
-    else scala.util.Try(Integer.parseInt(if (negative) s"-$digits" else digits, radix)).toOption
+    else Try(Integer.parseInt(if (negative) s"-$digits" else digits, radix)).toOption
   }
 
   /** ASCII digit of `radix`, independent of Unicode digit categories. */

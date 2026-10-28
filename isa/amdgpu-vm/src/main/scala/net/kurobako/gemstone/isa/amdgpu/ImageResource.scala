@@ -5,6 +5,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
+import scala.annotation.tailrec
 
 /** Image resource descriptors: decoding, texel addressing, and the conversions of texels a descriptor's format and
   * destination selects define; the functions over prelude types are what definitions call and execution runs.
@@ -57,7 +58,7 @@ private[isa] object ImageResource {
   private val PitchHigh      = BitField(offset = 13, width = 1)
 
   /** The selects of a store that leaves each channel where it is. */
-  val IdentitySelects = 0xfacL
+  val IdentitySelects: Long = 0xfacL
 
   /** The data format dword 1 names. */
   def format(generation: ResourceGeneration, word1: Long): TexelFormat = generation match {
@@ -314,9 +315,11 @@ private[isa] case class ImageResource(
 
   private def levelBytes(level: Int): Long = rowBytes(level) * levelHeight(level) * slices(level)
 
-  private def levelOffset(level: Int): Long = (0 until level).foldLeft(0L)((offset, previous) =>
-    (offset + levelBytes(previous)).alignUp(LevelAlignment)
-  )
+  private def levelOffset(level: Int): Long = {
+    @tailrec def from(previous: Int, offset: Long): Long =
+      if (previous >= level) offset else from(previous + 1, (offset + levelBytes(previous)).alignUp(LevelAlignment))
+    from(0, 0L)
+  }
 
   /** The address of texel (`x`, `y`, `slice`) of `level` counted from the base level, or -1 outside the image. */
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))

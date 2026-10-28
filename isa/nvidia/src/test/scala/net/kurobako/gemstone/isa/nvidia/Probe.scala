@@ -5,9 +5,10 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import scala.annotation.publicInBinary
 import scala.collection.mutable
 
-@scala.annotation.publicInBinary
+@publicInBinary
 private[isa] object Probe {
 
   /** A matrix element's operands: C first, then the elements of A's row and B's column in turn. */

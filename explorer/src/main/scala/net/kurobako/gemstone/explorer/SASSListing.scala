@@ -3,6 +3,7 @@ package net.kurobako.gemstone.explorer
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import scala.collection.mutable
 
 /** SASS instruction addresses are byte offsets within the kernel's code section, so a listing decodes the cubin and
   * reports each instruction at its own address.
@@ -21,7 +22,7 @@ private object SASSListing {
 
   /** Appends the instructions of `kernel`, or why its code section or one of its instructions cannot be read. */
   private def append(
-      lines: scala.collection.mutable.Builder[ProgramLine, Vec[ProgramLine]],
+      lines: mutable.Builder[ProgramLine, Vec[ProgramLine]],
       module: Cubin.Module,
       kernel: Cubin.Kernel,
       target: Target

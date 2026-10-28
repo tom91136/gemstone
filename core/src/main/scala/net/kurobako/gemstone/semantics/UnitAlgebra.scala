@@ -13,6 +13,8 @@ object UnitAlgebra {
 }
 
 /** The operations across the lanes of a unit: its views, and where it converges and loads. */
+// UnitView names UnitAlgebra.Slot in its own signatures
+@SuppressWarnings(Array("baumkuchen:acyclic"))
 trait UnitAlgebra[V, O, W, L, F[_]] extends Any with UnitView[V, O, W, L, F] {
 
   /** 1 where every unit with an active lane has all its lanes active, otherwise 0. */

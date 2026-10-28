@@ -168,10 +168,7 @@ object Definition {
                 values(step.name) = Term.Variable(binding)
                 if (types.contains(step.name)) outputs += step.name
             }
-            else {
-              values(step.name) = value
-              if (types.contains(step.name)) outputs += step.name
-            }
+            else { values(step.name) = value; if (types.contains(step.name)) outputs += step.name }
             None
           }
         )

@@ -201,7 +201,7 @@ st.global.v4.f32 [%cp],${registers("c", 4)};
 
   test("ldmatrix through a generic pointer to global memory faults") {
     val text = source("ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%a0},[%base];")
-    assert(run(text, DeviceMemory(64)).left.exists(_.isInstanceOf[Fault.Misaligned]))
+    assert(run(text, DeviceMemory(64)).left.exists { case Fault.Misaligned(_) => true; case _ => false })
   }
 
   private val tileFill = (0 until 8).map(i => s"add.u32 %r1,%r0,$i;\nst.shared.b32 [%ap+${i * 128}],%r1;").mkString(
@@ -431,8 +431,9 @@ st.global.b32 [%cp],%r1;
 
   test("wmma.load from shared memory outside the shared windows faults") {
     val load = s"wmma.load.a.sync.aligned.row.m16n16k16.shared.f16 ${registers("a", 8)},[%base],16;"
-    assert(run(source(load), DeviceMemory(512)).left.exists { fault =>
-      fault.isInstanceOf[Fault.Misaligned] && fault.message.contains("shared windows")
+    assert(run(source(load), DeviceMemory(512)).left.exists {
+      case fault: Fault.Misaligned => fault.message.contains("shared windows")
+      case _                       => false
     })
   }
 
@@ -441,7 +442,7 @@ st.global.b32 [%cp],%r1;
     val values = (0 until 8).map(i => s"mov.f32 %c$i,0f3f800000;").mkString("\n")
     val memory = DeviceMemory(1024)
     val before = memory.words(0, 256)
-    assert(run(source(s"$values\n$store"), memory).left.exists(_.isInstanceOf[Fault.Misaligned]))
+    assert(run(source(s"$values\n$store"), memory).left.exists { case Fault.Misaligned(_) => true; case _ => false })
     assertEquals(memory.words(0, 256), before)
   }
 

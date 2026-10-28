@@ -1,10 +1,12 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object InstructionRequirements {
   private def names(field: String): Vec[String] = Vec.from(field.split(',')).filter(_.nonEmpty)
 

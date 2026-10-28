@@ -193,10 +193,7 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
             case valid       => valid
           }
         else Completed
-      if (result.isLeft) {
-        clear(count)
-        return result
-      }
+      if (result.isLeft) { clear(count); return result }
       index += 1
     }
     // System-scope stores publish together before any other effect of the instruction.

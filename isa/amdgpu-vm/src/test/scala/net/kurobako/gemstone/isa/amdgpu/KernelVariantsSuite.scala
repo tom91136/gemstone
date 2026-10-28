@@ -2,12 +2,13 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.either.*
+import scala.collection.mutable
 
 class KernelVariantsSuite extends munit.FunSuite {
   test("a usable architecture variant does not inspect the generic kernel body") {
     val target    = "wrapped_target_archE1030E"
     val generic   = "wrapped_target_archE4294967295E"
-    val inspected = scala.collection.mutable.ArrayBuffer.empty[String]
+    val inspected = mutable.ArrayBuffer.empty[String]
     val aliases   = KernelVariants.select(
       Set(target, generic),
       "gfx1030",

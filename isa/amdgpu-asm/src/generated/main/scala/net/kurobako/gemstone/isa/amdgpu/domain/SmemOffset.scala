@@ -2,10 +2,12 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object SmemOffset extends Domain[SmemOffset] {
   val id: String = "smem_offset"
 
@@ -33,7 +35,7 @@ object SmemOffset extends Domain[SmemOffset] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum SmemOffset extends DomainValue derives CanEqual {
   case Sgpr(index: Int in 0 ~ 105)
   case Ttmp(index: Int in 0 ~ 15)

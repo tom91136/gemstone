@@ -283,7 +283,7 @@ class AMDGPUGfx1250Suite extends munit.FunSuite {
   }
 
   test("the renamed program counter instructions decode as their GFX12 counterparts") {
-    import InstructionSource.Scalar
+    import InstructionSource.*
     assertEquals(decoded(gfx1250, 0x02, 0x48, 0x80, 0xbe), Instruction.SSetPc(Scalar(2)))
     assertEquals(decoded(gfx1250, 0x02, 0x49, 0x84, 0xbe), Instruction.SSwapPc(4, Scalar(2)))
     assertEquals(decoded(gfx1250, 0x08, 0x00, 0x04, 0xba), Instruction.CallRelative(4, 8))

@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
 import references.*
+import scala.util.Random
 
 class IntegerSemanticsSuite extends munit.FunSuite {
   private def minMax(operation: ScalarMinMaxOperation, left: Long, right: Long): (Long, Boolean) = {
@@ -112,7 +113,7 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   }
 
   private val samples: Vector[Long] = {
-    val random = scala.util.Random(11)
+    val random = Random(11)
     Vector(0L, 1L, 2L, 15L, 16L, 31L, 32L, 0x7fffL, 0x8000L, 0xffffL, 0x7fffffffL, 0x80000000L, 0xffffffffL) ++
       Vector.fill(40)(random.nextLong() & 0xffffffffL)
   }
@@ -638,7 +639,7 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   }
 
   private val wide: Vector[Long] = {
-    val random = scala.util.Random(29)
+    val random = Random(29)
     samples ++ Vector(-1L, Long.MinValue, Long.MaxValue, 0x8000000000000000L + 5L, 0xffffffff00000000L) ++
       Vector.fill(30)(random.nextLong())
   }
@@ -668,7 +669,7 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   }
 
   test("staged selects, bit counts and three-input truth tables match the interpreter's formulas") {
-    val random = scala.util.Random(31)
+    val random = Random(31)
     for {
       a <- wide.take(40)
       b <- wide.take(40)
@@ -801,7 +802,7 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   }
 
   test("staged 64-bit multiply-adds match the interpreter's formulas and carry") {
-    val random = scala.util.Random(37)
+    val random = Random(37)
     for {
       signed <- Vector(false, true)
       clamp  <- Vector(false, true)
@@ -955,7 +956,7 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   }
 
   test("staged lane selection matches the interpreter's DPP, swizzle, permute and lane formulas") {
-    val random = scala.util.Random(41)
+    val random = Random(41)
     for {
       control <- 0 until 0x170
       lane    <- 0 until 64
@@ -997,7 +998,7 @@ class IntegerSemanticsSuite extends munit.FunSuite {
   }
 
   test("staged memory address and data computations match the interpreter's formulas") {
-    val random = scala.util.Random(43)
+    val random = Random(43)
     for (_ <- 0 until 2000) {
       val (base, offset, other) = (random.nextLong(), random.nextLong(), random.nextLong())
       val displacement          = random.nextInt().toLong

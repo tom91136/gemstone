@@ -7,12 +7,13 @@ import VMProgram.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
+import scala.annotation.publicInBinary
 
 /** Op builders for [[OpBuilder]]: each expansion defines its own op class with the kernel inlined, so running it calls
   * no lane kernel. The scalar form applies when every operand and the result live in the scalar bank. Operand lane
   * counts may differ only where the instruction broadcasts; the shorter operand repeats.
   */
-@scala.annotation.publicInBinary
+@publicInBinary
 private[isa] object StagedOps {
 
   class Unary(site: Site, resultType: Int, dest: Int, a: Int) {
@@ -1227,10 +1228,7 @@ private[isa] object StagedOps {
                       lane += 1
                     }
                     if (failure != null) Left(failure)
-                    else {
-                      execution.pc += 1
-                      Done
-                    }
+                    else { execution.pc += 1; Done }
                 }
             }
         }

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.binary.IEEE754.*
 import net.kurobako.gemstone.binary.Minifloat.*
+import scala.util.Random
 
 class MinifloatSuite extends munit.FunSuite {
   private val narrow = Vector(E4M3, E5M2, E4M3FNUZ, E5M2FNUZ, E2M3, E3M2, E2M1, E8M0)
@@ -64,7 +65,7 @@ class MinifloatSuite extends munit.FunSuite {
   }
 
   test("binary32 values round to bfloat16 as the IEEE-754 conversion does") {
-    val random = scala.util.Random(16)
+    val random = Random(16)
     (0 until 20000).foreach { _ =>
       val value = java.lang.Float.intBitsToFloat(random.nextInt()).toDouble
       if (!value.isNaN)

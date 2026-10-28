@@ -4,7 +4,7 @@ import net.kurobako.gemstone.constraint.*
 import scala.annotation.unused
 
 object PlatformMetrics {
-  val platform = "native"
+  val platform: String = "native"
 
   def allocatedBytes: Option[Long >= 0] = None
 

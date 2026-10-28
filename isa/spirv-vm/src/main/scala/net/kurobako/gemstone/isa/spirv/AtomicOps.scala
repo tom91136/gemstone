@@ -14,7 +14,7 @@ import net.kurobako.gemstone.vm.*
 private object AtomicOps {
   import Operand.*
 
-  def lower(using site: Site): PartialFunction[Instruction, Op] = {
+  def lower(using Site): PartialFunction[Instruction, Op] = {
     case Instruction.AtomicStore(pointer, scope, semantics, value) =>
       store(id(pointer), id(scope), id(semantics), id(value))
     case Instruction.AtomicLoad(t, d, pointer, scope, semantics) =>

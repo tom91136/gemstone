@@ -13,6 +13,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
+import scala.util.Try
 import scala.util.Using
 
 class ExecutionSessionSuite extends munit.FunSuite {
@@ -473,7 +474,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
         val allocation = session.registerAllocation(8).toOption.get
         val program    = session.load(encoding, Vec[Byte](1)).toOption.get
         assertEquals(session.bindGlobal(program, "global", allocation, 0L), Right(()))
-        val unloading = FutureTask(() => scala.util.Try(session.unload(program)))
+        val unloading = FutureTask(() => Try(session.unload(program)))
         val worker    = Thread(unloading)
         worker.start()
         try {
@@ -916,6 +917,83 @@ class ExecutionSessionSuite extends munit.FunSuite {
         }
         assert(otherBackend.programClosed.get())
       }
+    }
+  }
+
+  private def filled(service: ExecutionSession, size: Int > 0): AllocationId = {
+    val allocation = service.registerAllocation(size).toOption.get
+    assertEquals(service.write(allocation, 0L, Vec.tabulate(size)(index => index.toByte)), Right(()))
+    allocation
+  }
+
+  test("rectangle reads gather pitched rows across slices") {
+    Using.resource(ExecutionSession(Nil)) { service =>
+      val allocation = filled(service, 64)
+      val rows       = service.readRectangle(allocation, ExecutionSession.Rectangle(3L, 2, 3, 2, 5, 20))
+      assertEquals(rows.map(_.toList), Right(List[Byte](3, 4, 8, 9, 13, 14, 23, 24, 28, 29, 33, 34)))
+      val single = service.readRectangle(allocation, ExecutionSession.Rectangle(7L, 4, 1, 1, 4, 4))
+      assertEquals(single, service.read(AllocationRange(allocation, 7L, 4)))
+      val wide = service.readRectangle(allocation, ExecutionSession.Rectangle(0L, 1, 1, 3, 1, 31))
+      assertEquals(wide.map(_.toList), Right(List[Byte](0, 31, 62)))
+    }
+  }
+
+  test("rectangle writes scatter packed rows and leave gaps untouched") {
+    Using.resource(ExecutionSession(Nil)) { service =>
+      val allocation = filled(service, 64)
+      val packed     = Vec[Byte](-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11, -12)
+      assertEquals(
+        service.writeRectangle(allocation, ExecutionSession.Rectangle(3L, 2, 3, 2, 5, 20), packed),
+        Right(())
+      )
+      val expected = (0 until 64).map(_.toByte).toArray
+      val targets  = for {
+        slice  <- 0 until 2
+        row    <- 0 until 3
+        column <- 0 until 2
+      } yield 3 + slice * 20 + row * 5 + column
+      targets.zip(packed).foreach((index, value) => expected(index) = value)
+      assertEquals(service.read(AllocationRange(allocation, 0L, 64)).map(_.toList), Right(expected.toList))
+      assertEquals(service.readRectangle(allocation, ExecutionSession.Rectangle(3L, 2, 3, 2, 5, 20)), Right(packed))
+    }
+  }
+
+  test("rectangle transfers reject geometry outside the allocation or the protocol") {
+    Using.resource(ExecutionSession(Nil)) { service =>
+      val allocation                                      = filled(service, 64)
+      def invalid[A](result: Either[ExecutionFailure, A]) = result match {
+        case Left(ExecutionFailure.InvalidRequest(_)) => ()
+        case other                                    => fail(s"expected an invalid request, got $other")
+      }
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(40L, 2, 3, 2, 5, 20)))
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(63L, 2, 1, 1, 2, 2)))
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(64L, 1, 1, 1, 1, 1)))
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(0L, 4, 2, 1, 3, 8)))
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(0L, 2, 3, 2, 5, 10)))
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(0L, 1, 2, 2, 2147483647, 2147483647)))
+      invalid(service.readRectangle(allocation, ExecutionSession.Rectangle(0L, 1048576, 1024, 1, 1048576, 1073741824)))
+      invalid(service.writeRectangle(allocation, ExecutionSession.Rectangle(0L, 2, 2, 1, 4, 8), Vec[Byte](1, 2, 3)))
+      invalid(service.writeRectangle(allocation, ExecutionSession.Rectangle(62L, 2, 2, 1, 4, 8), Vec[Byte](1, 2, 3, 4)))
+      assertEquals(
+        service.read(AllocationRange(allocation, 0L, 64)).map(_.toList),
+        Right((0 until 64).map(_.toByte).toList)
+      )
+      service.readRectangle(AllocationId(9999L), ExecutionSession.Rectangle(0L, 1, 1, 1, 1, 1)) match {
+        case Left(ExecutionFailure.InvalidRequest(_)) => fail("an unknown allocation is not an invalid request")
+        case Left(_)                                  => ()
+        case Right(value)                             => fail(s"unexpected bytes $value")
+      }
+    }
+  }
+
+  test("rectangle operations dispatch through the execution handler") {
+    Using.resource(ExecutionSession(Nil)) { service =>
+      val allocation = filled(service, 64)
+      val request    = Operation.ReadAllocationRectangle(allocation, 3L, 2, 3, 2, 5, 20)
+      val reply      = ExecutionHandler(request, service).map(bytes =>
+        request.replyCodec.decode(bytes, ExecutionRPC.Limits).fold(error => fail(error), identity)
+      )
+      assertEquals(reply.map(_.toList), Right(List[Byte](3, 4, 8, 9, 13, 14, 23, 24, 28, 29, 33, 34)))
     }
   }
 }

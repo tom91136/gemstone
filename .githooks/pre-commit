@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+native=()
+scala=false
+while IFS= read -r -d '' path; do
+  case "$path" in
+    native/* | conformance/*)
+      case "/$path" in */generated/* | */licences/* | */third_party/* | */vendor/*) continue ;; esac
+      case "${path,,}" in *.c | *.cc | *.cpp | *.cu | *.cxx | *.hip) native+=("$path") ;; esac
+      ;;
+  esac
+  case "$path" in *.scala | *.sbt) scala=true ;; esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+failed=false
+
+if ((${#native[@]})); then
+  expected=$(sed -n 's/^set(conformance_clang_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+  actual=$(clang-format --version | sed -n 's/.*version \([0-9.]*\).*/\1/p')
+  if [[ "$actual" != "$expected" ]]; then
+    echo "pre-commit: clang-format $actual, CI formats with $expected" >&2
+    exit 1
+  fi
+  for path in "${native[@]}"; do
+    git show ":$path" | clang-format --dry-run --Werror --assume-filename="$path" >/dev/null || failed=true
+  done
+  $failed && echo "pre-commit: staged C/C++ is not clang-formatted; run: sbt native/format conformance/format" >&2
+fi
+
+if $scala; then
+  if ! git diff --quiet -- '*.scala' '*.sbt'; then
+    echo "pre-commit: unstaged Scala changes present; scalafmt checks the working tree" >&2
+  fi
+  for task in scalafmtCheckAll scalafmtSbtCheck; do
+    if ! sbt --client "$task" >/dev/null; then
+      echo "pre-commit: $task failed; run: sbt scalafmtAll scalafmtSbt" >&2
+      failed=true
+    fi
+  done
+fi
+
+! $failed

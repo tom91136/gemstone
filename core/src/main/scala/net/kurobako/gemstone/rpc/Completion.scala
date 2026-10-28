@@ -86,10 +86,7 @@ private class Completion(
 
   def finish(result: CompletionStatus, statistics: Option[GraphicsStatistics] = None): Unit = {
     require(result != CompletionStatus.Pending, "completion cannot finish as pending")
-    if (isPending) {
-      currentGraphicsStatistics = statistics
-      currentStatus = result
-    }
+    if (isPending) { currentGraphicsStatistics = statistics; currentStatus = result }
   }
 
   def record(relocation: KernelTask.PointerRelocation): Unit = {

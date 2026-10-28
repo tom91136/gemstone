@@ -448,7 +448,7 @@ object Journal {
   // Parse one bounded MessagePack record at a time and retain only event metadata and file locations.
   def open(file: Path, limits: Limits = Limits()): Reader = {
     val input = RandomAccessFile(file.toFile, "r")
-    // Ownership transfers to Reader after validation; failures close the not-yet-transferred handle below.
+    // Ownership transfers to Reader after validation; failures close the untransferred handle below.
     try {
       ensure(input.length() <= limits.maxArchiveBytes.raw, "archive exceeds reader byte limit")
       val (header, declared)           = readHeader(input, limits)

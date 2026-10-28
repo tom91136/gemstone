@@ -3,6 +3,8 @@ package net.kurobako.gemstone.server
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
@@ -19,8 +21,8 @@ private object connections {
       operation: String,
       payload: Array[Byte] = Array.emptyByteArray
   ): Array[Byte] = {
-    val tag = operation.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-    java.nio.ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw + tag.length + payload.length)
+    val tag = operation.getBytes(StandardCharsets.UTF_8)
+    ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw + tag.length + payload.length)
       .putInt(ExecutionRPC.RequestMagic).putLong(client).putLong(process).putLong(incarnation)
       .putInt(tag.length).putInt(payload.length).put(tag).put(payload).array()
   }

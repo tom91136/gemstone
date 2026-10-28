@@ -2,10 +2,12 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object SrcNolds extends Domain[SrcNolds] {
   val id: String = "src_nolds"
 
@@ -46,7 +48,7 @@ object SrcNolds extends Domain[SrcNolds] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum SrcNolds extends DomainValue derives CanEqual {
   case Sgpr(index: Int in 0 ~ 105)
   case Ttmp(index: Int in 0 ~ 15)

@@ -1,9 +1,11 @@
 // Generated SASS typed logical instruction forms from pinned NVIDIA descriptions. Regenerate with: sbt codegen
 
 package net.kurobako.gemstone.isa.sass
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object Form {
   type Acqbulk = AcqbulkNoOperands
   type Acqshminit = AcqshminitNoOperands
@@ -470,7 +472,7 @@ object Form {
   type Xmad = XmadRegRegConstReg | XmadRegRegImmReg | XmadRegRegRegConst | XmadRegRegRegReg
   type Yield = YieldNoOperands | YieldPred
 }
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum Form(operandValues: Operand*) derives CanEqual {
   val operands: Vec[Operand] = operandValues.toVec
   case AcqbulkNoOperands() extends Form()

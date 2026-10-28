@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import scala.annotation.*
+import scala.util.Random
 
 /** Operands that probe staged semantics at their edges, and comparisons against the kernels they replaced. */
 object StagedTesting {
@@ -12,7 +13,7 @@ object StagedTesting {
   val floatWidths: Seq[Int in (16, 32, 64)] = Seq(16, 32, 64)
   val integerWidths: Seq[Int in 1 ~ 64]     = Seq(8, 16, 32, 64)
 
-  private val random = scala.util.Random(0x5eed)
+  private val random = Random(0x5eed)
 
   /** Encodings at `width` bits: zeros, units, subnormals, extremes, infinities, NaNs and random patterns. */
   def floats(width: Int in (16, 32, 64)): Vector[Long] = {

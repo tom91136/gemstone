@@ -1,10 +1,12 @@
 // Generated SASS instruction decoders and checked operand constructors. Regenerate with: sbt codegen
 
 package net.kurobako.gemstone.isa.sass
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 import Instruction.*
 import InstructionOperand.*
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object InstructionDefinitions0 {
   val decoders: Vec[FormDecoder] = Vec(
     FormDecoder(Definitions0.AcqbulkNoOperands)(Form.AcqbulkNoOperands.apply),

@@ -1,5 +1,6 @@
 package net.kurobako.gemstone
 
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
@@ -91,7 +92,7 @@ class StringSuite extends munit.FunSuite {
 
   test("UTF-8 decoding preserves Unicode and rejects malformed input") {
     val text   = "kernel_λ_😀"
-    val bytes  = text.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val bytes  = text.getBytes(StandardCharsets.UTF_8)
     val padded = Array[Byte](0) ++ bytes ++ Array[Byte](0)
     assertEquals(decodeUtf8(padded, 1, bytes.length), Right(text))
     assertEquals(decodeUtf8(Array.emptyByteArray, offset = 0, length = 0), Right(""))

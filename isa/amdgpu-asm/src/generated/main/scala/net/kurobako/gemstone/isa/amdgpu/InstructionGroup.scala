@@ -1,6 +1,8 @@
 // Generated from the pinned AMDGPU machine metadata. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import upickle.default.*
 
 object InstructionGroup {
@@ -10,7 +12,7 @@ object InstructionGroup {
   def fromName(name: String): Option[InstructionGroup] = byName.get(name)
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum InstructionGroup derives CanEqual {
   case `ATOMIC`
   case `SWMMAC`

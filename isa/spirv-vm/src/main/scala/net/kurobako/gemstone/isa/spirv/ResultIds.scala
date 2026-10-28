@@ -1,8 +1,5 @@
 package net.kurobako.gemstone.isa.spirv
 
-/** The result type id and result id of an instruction, packed into one value. */
-private opaque type ResultIds = Long
-
 private object ResultIds {
   inline def apply(resultType: Int, dest: Int): ResultIds = (resultType.toLong << 32) | (dest.toLong & 0xffffffffL)
 
@@ -13,3 +10,6 @@ private object ResultIds {
     inline def dest: Int       = ids.toInt
   }
 }
+
+/** The result type id and result id of an instruction, packed into one value. */
+private opaque type ResultIds = Long

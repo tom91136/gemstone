@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.server
 
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFileAttributeView
@@ -147,7 +148,7 @@ class CLIProcessSuite extends munit.FunSuite {
           val source  = s".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry kernel() { $body }"
           val program = client.call(ExecutionRPC.Operation.LoadProgram(
             ProgramEncoding.PTXText,
-            Vec.from(source.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            Vec.from(source.getBytes(StandardCharsets.UTF_8))
           )).toOption.get
           val one = LaunchGeometry.Dimensions.One
           client.call(ExecutionRPC.Operation.Launch(

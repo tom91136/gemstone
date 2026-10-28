@@ -6,6 +6,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.util.Using
 
 /** Records a PTX launch on the real VM and lays its timeline out. */
 class TraceSuite extends munit.FunSuite {
@@ -27,7 +28,7 @@ class TraceSuite extends munit.FunSuite {
 
   /** Runs `body` under the loaded program, which is closed afterwards. */
   private def withProgram[A](body: ProgramRun.Loaded => A): A =
-    scala.util.Using.resource(
+    Using.resource(
       ProgramRun
         .load(ProgramListing.Image(Language.PTX, Vec.from(source.getBytes(StandardCharsets.UTF_8)), None))
         .toOption
@@ -128,7 +129,7 @@ class TraceSuite extends munit.FunSuite {
   }
 
   test("the page's example program runs over several workgroups and writes one word per lane") {
-    scala.util.Using.resource(
+    Using.resource(
       ProgramRun
         .load(ProgramListing.Image(Language.PTX, Vec.from(Examples.ptx.getBytes(StandardCharsets.UTF_8)), None))
         .toOption

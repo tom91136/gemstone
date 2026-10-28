@@ -337,7 +337,7 @@ object ProgramPage {
             tr(
               th(name),
               lanes.map { lane =>
-                td(cells.get((name, lane)).fold("-")(bits))
+                td(cells.get((name, lane)).fold("-")(bits(_)))
               }
             )
           })

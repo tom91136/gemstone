@@ -1,10 +1,12 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.collection.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 private object VOP2InstructionDefs {
   case object VAddCoCiU32 extends Opcode("v_add_co_ci_u32", 1371)
 

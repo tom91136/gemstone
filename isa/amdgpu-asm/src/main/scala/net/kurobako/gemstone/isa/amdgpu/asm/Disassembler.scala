@@ -16,11 +16,11 @@ object Disassembler {
 class Disassembler(mode: TargetMode) {
   def decode(bytes: Vec[Byte]): Either[Disassembler.Error, Program] = {
     val statements = Vec.newBuilder[Program.Statement]
-    val code       = CodeStream(Vec.toArray(bytes), mode)
+    val code       = Vec.toArray(bytes)
     @tailrec
     def loop(offset: Int >= 0): Either[Disassembler.Error, Program] =
       if (offset.raw == bytes.size) Right(Program(statements.result()))
-      else Binary.decodeStatementAt(code, offset) match {
+      else Binary.decodeStatementAt(code, offset, mode) match {
         case Left(error)    => Left(Disassembler.Error.Instruction(offset, error))
         case Right(decoded) =>
           statements += decoded.statement

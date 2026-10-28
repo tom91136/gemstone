@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.spirv
 
 import Op.*
 import VMInvocation.*
-import VMMemory.*
 import VMProgram.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -19,15 +18,6 @@ private object TensorAddressingOps {
 
   private val TensorViewOperand = 0x1
   private val DecodeFunc        = 0x2
-
-  def lower: PartialFunction[Instruction, Op] = {
-    case instruction if TensorAddressingSemantics.transfers(instruction) => TensorAddressingOp(instruction)
-  }
-
-  private class TensorAddressingOp(instruction: Instruction) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      TensorAddressingSemantics.tensorAddressing(InvocationMachine(execution))(instruction)
-  }
 
   /** Runs the tensor layout, view or tensor transfer `instruction` names, then continues after it. */
   def execute(execution: InvocationState, instruction: Instruction): Flow[Unit] = {

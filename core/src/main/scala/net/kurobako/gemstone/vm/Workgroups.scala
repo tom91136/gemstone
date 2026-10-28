@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.tailrec
 
 object Workgroups {
   object Sequential extends Workgroups {
@@ -28,7 +29,7 @@ trait Workgroups {
   )(task: Long >= 0 => Either[Fault, Unit]): Either[Fault, Unit] =
     if (parallel) parallelFor(taskCount)(task)
     else {
-      @scala.annotation.tailrec
+      @tailrec
       def loop(index: Long >= 0): Either[Fault, Unit] =
         if (index == taskCount) Right(())
         else task(index) match {

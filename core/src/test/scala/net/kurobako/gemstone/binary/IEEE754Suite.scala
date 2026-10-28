@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.binary
 
+import java.math.BigDecimal
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.util.Random
@@ -9,12 +10,12 @@ class IEEE754Suite extends munit.FunSuite {
   private val narrowWidths = Seq[Int in (16, 32, 64)](16, 32)
   private val allWidths    = Seq[Int in (16, 32, 64)](16, 32, 64)
 
-  private def exactRound(value: java.math.BigDecimal, width: Int in (16, 32, 64), rounding: IEEE754.Rounding): Long = {
+  private def exactRound(value: BigDecimal, width: Int in (16, 32, 64), rounding: IEEE754.Rounding): Long = {
     // reference: walk the finite encodings around the binary64 nearest value
-    val nearest                                   = IEEE754.fromDouble(value.doubleValue, width)
-    val sign                                      = 1L << (width - 1)
-    def decoded(bits: Long): java.math.BigDecimal = java.math.BigDecimal(IEEE754.toDouble(bits, width))
-    def next(bits: Long, up: Boolean): Long       =
+    val nearest                             = IEEE754.fromDouble(value.doubleValue, width)
+    val sign                                = 1L << (width - 1)
+    def decoded(bits: Long): BigDecimal     = BigDecimal(IEEE754.toDouble(bits, width))
+    def next(bits: Long, up: Boolean): Long =
       if ((bits & ~sign) == 0L) { if (up) 1L else sign | 1L }
       else if (((bits & sign) == 0L) == up) bits + 1L
       else bits - 1L
@@ -51,7 +52,7 @@ class IEEE754Suite extends munit.FunSuite {
       if Math.abs(value) < (if (width == 16) 65504.0 else Float.MaxValue.toDouble)
     } assertEquals(
       IEEE754.fromDouble(value, width, rounding),
-      exactRound(java.math.BigDecimal(value), width, rounding),
+      exactRound(BigDecimal(value), width, rounding),
       clues(value, width, rounding)
     )
     for (rounding <- roundings) {
@@ -158,9 +159,9 @@ class IEEE754Suite extends munit.FunSuite {
       val y       = random.nextInt(0x7c00).toLong
       val z       = random.nextInt(0x7c00).toLong | (if (random.nextBoolean()) 0x8000L else 0L)
       val product =
-        java.math.BigDecimal(IEEE754.toDouble(x, 16)).multiply(java.math.BigDecimal(IEEE754.toDouble(y, 16)))
-      val sum = product.add(java.math.BigDecimal(IEEE754.toDouble(z, 16)))
-      if (sum.abs().compareTo(java.math.BigDecimal(65504.0)) < 0 && sum.signum() != 0)
+        BigDecimal(IEEE754.toDouble(x, 16)).multiply(BigDecimal(IEEE754.toDouble(y, 16)))
+      val sum = product.add(BigDecimal(IEEE754.toDouble(z, 16)))
+      if (sum.abs().compareTo(BigDecimal(65504.0)) < 0 && sum.signum() != 0)
         assertEquals(
           IEEE754.fusedMultiplyAdd(x, y, z, 16),
           exactRound(sum, 16, IEEE754.Rounding.NearestEven),
@@ -182,7 +183,7 @@ class IEEE754Suite extends munit.FunSuite {
         width
       )
       val (a, b, c) = (value(), value(), value() * Math.pow(2.0, -random.nextInt(scale)))
-      val exact     = java.math.BigDecimal(a).multiply(java.math.BigDecimal(b)).add(java.math.BigDecimal(c))
+      val exact     = BigDecimal(a).multiply(BigDecimal(b)).add(BigDecimal(c))
       if (exact.signum() != 0 && Math.abs(exact.doubleValue) < (if (width == 16) 65504.0 else 1.0e30))
         assertEquals(
           IEEE754.fusedMultiplyAdd(

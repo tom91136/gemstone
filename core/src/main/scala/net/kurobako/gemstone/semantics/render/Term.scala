@@ -7,6 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import scala.annotation.targetName
 import scala.annotation.threadUnsafe
 import scala.collection.mutable
+import scala.util.hashing.MurmurHash3
 
 object Term {
 
@@ -372,7 +373,7 @@ enum Term derives CanEqual {
     case _                      => children.exists(_.hasEffect)
   }
 
-  @threadUnsafe override lazy val hashCode: Int = scala.util.hashing.MurmurHash3.caseClassHash(this)
+  @threadUnsafe override lazy val hashCode: Int = MurmurHash3.caseClassHash(this)
 
   /** Pseudo-code, one binding per line, with every compound operand parenthesised so no precedence table is needed. */
   def show: String = {

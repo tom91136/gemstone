@@ -158,7 +158,7 @@ class JournalSuite extends munit.FunSuite {
       Using.resource(Journal.Writer(file, Journal.Header(profile, schema = ExecutionRPC.Schema.canonical + "changed")))(
         _ => ()
       )
-      val started = java.util.concurrent.atomic.AtomicBoolean(false)
+      val started = AtomicBoolean(false)
       val _       = intercept[IOException] {
         Replay.run(
           Replay.Options(file),

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import fixtures.*
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -25,7 +26,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
     header(4) = 2
     header(5) = 1
     header(18) = 224.toByte
-    val target = "amdgcn-amd-amdhsa--gfx900\u0000".getBytes(java.nio.charset.StandardCharsets.US_ASCII)
+    val target = "amdgcn-amd-amdhsa--gfx900\u0000".getBytes(StandardCharsets.US_ASCII)
     Array.copy(target, 0, header, 24, target.length)
     val program = CodeObject.decode(Vec.unsafeWrapArray(header)).value
 

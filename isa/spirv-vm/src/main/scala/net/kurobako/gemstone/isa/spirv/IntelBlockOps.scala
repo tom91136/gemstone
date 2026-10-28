@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.spirv
 
+import MemoryOps.*
 import Op.*
 import VMInvocation.*
 import VMMemory.*
@@ -30,11 +31,28 @@ private object IntelBlockOps {
       )
     case Instruction.SubgroupImageMediaBlockReadINTEL(t, d, image, coordinate, width, height) =>
       shaped(site, id(t))((bytes, lanes) =>
-        MediaBlockRead(id(t), id(d), id(image), id(coordinate), id(width), id(height), bytes, lanes)
+        MediaBlockRead(
+          resultType = id(t),
+          dest = id(d),
+          image = id(image),
+          coordinate = id(coordinate),
+          width = id(width),
+          height = id(height),
+          bytes = bytes,
+          lanes = lanes
+        )
       )
     case Instruction.SubgroupImageMediaBlockWriteINTEL(image, coordinate, width, height, data) =>
       shaped(site, site.program.valueType(id(data)))((bytes, lanes) =>
-        MediaBlockWrite(id(image), id(coordinate), id(width), id(height), id(data), bytes, lanes)
+        MediaBlockWrite(
+          image = id(image),
+          coordinate = id(coordinate),
+          width = id(width),
+          height = id(height),
+          data = id(data),
+          bytes = bytes,
+          lanes = lanes
+        )
       )
     case Instruction.SubgroupBlockPrefetchINTEL(pointer, _, _)              => prefetch(id(pointer))
     case Instruction.Subgroup2DBlockPrefetchINTEL(srcBasePointer = pointer) => prefetch(id(pointer))
@@ -200,17 +218,17 @@ private object IntelBlockOps {
           Fault.InvalidRequest(s"2D block of $width x $height x $count elements of $size bytes is invalid")
         )
         _ <- IntelBlockSemantics.block2D(Execute, InvocationMachine(execution))(
-          kind,
-          operands(0),
-          operands(1),
-          operands(2),
-          operands(3),
-          operands(4),
-          operands(5),
-          operands(6),
-          operands(7),
-          operands(8),
-          operands(9)
+          kind = kind,
+          size = operands(0),
+          width = operands(1),
+          height = operands(2),
+          count = operands(3),
+          region = operands(4),
+          rowBytes = operands(5),
+          rows = operands(6),
+          pitch = operands(7),
+          at = operands(8),
+          local = operands(9)
         )
       } yield ()
     }

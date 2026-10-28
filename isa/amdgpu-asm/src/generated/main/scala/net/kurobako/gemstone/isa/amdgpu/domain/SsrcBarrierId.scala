@@ -2,9 +2,11 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object SsrcBarrierId extends Domain[SsrcBarrierId] {
   val id: String = "ssrc_barrier_id"
 
@@ -16,7 +18,7 @@ object SsrcBarrierId extends Domain[SsrcBarrierId] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum SsrcBarrierId extends DomainValue derives CanEqual {
   case M0
   case Integer(value: Int in -4 ~ 31)

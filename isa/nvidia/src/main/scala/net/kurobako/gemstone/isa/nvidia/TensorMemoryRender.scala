@@ -21,7 +21,7 @@ private[isa] object TensorMemoryRender {
       enable: Term,
       index: Term,
       negate: Option[(a: Term, b: Term)]
-  ) extends StepRenderer.MatrixTerms(names, multiply) with TensorMemoryOperands[Term] {
+  ) extends MatrixTerms(names, multiply) with TensorMemoryOperands[Term] {
     private def read(method: String, tpe: Type, position: Option[Int]): Term =
       access(method, Vec(tpe), tpe, position)
     private def readUntyped(method: String, tpe: Type, position: Option[Int]): Term =
@@ -39,10 +39,10 @@ private[isa] object TensorMemoryRender {
     private def negated(element: Matrix.Element, flag: Option[Term], value: Term): Term =
       flag.fold(value)(set => Render.select(set, TensorSemantics.negation(Render, element, value), value))
     override def a(at: Int): Term =
-      negated(multiply.a.element, negate.map(_.a), read("a", StepRenderer.elementType(multiply.a.element), Some(at)))
+      negated(multiply.a.element, negate.map(_.a), read("a", MatrixTerms.elementType(multiply.a.element), Some(at)))
     override def b(at: Int): Term =
-      negated(multiply.b.element, negate.map(_.b), read("b", StepRenderer.elementType(multiply.b.element), Some(at)))
-    override def c: Term                  = read("c", StepRenderer.elementType(multiply.c.element), None)
+      negated(multiply.b.element, negate.map(_.b), read("b", MatrixTerms.elementType(multiply.b.element), Some(at)))
+    override def c: Term                  = read("c", MatrixTerms.elementType(multiply.c.element), None)
     override def selection(at: Int): Term = readUntyped("selection", Type.unsigned(2), Some(at))
     override def scaleA(block: Int): Term = read("scaleA", scaleType, Some(block))
     override def scaleB(block: Int): Term = read("scaleB", scaleType, Some(block))

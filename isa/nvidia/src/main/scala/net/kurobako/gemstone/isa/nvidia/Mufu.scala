@@ -107,10 +107,7 @@ private[isa] object Mufu {
     var target  = 0
     var pending = mask
     while (pending != 0L) {
-      if ((pending & 1L) != 0L) {
-        if ((value & 1L) != 0L) result |= 1L << target
-        value >>>= 1
-      }
+      if ((pending & 1L) != 0L) { if ((value & 1L) != 0L) result |= 1L << target; value >>>= 1 }
       pending >>>= 1
       target += 1
     }
@@ -233,10 +230,7 @@ private[isa] object Mufu {
       var sum          = c0Term - c1Term + c2Term
       sum = sum + (RcpBias >>> ((64 - 56) + 23))
       var resultExponent = 127L
-      if ((sum >>> 56) == 0L) {
-        resultExponent -= 1
-        sum = sum << 1
-      }
+      if ((sum >>> 56) == 0L) { resultExponent -= 1; sum = sum << 1 }
       val result = format(
         sign = if (isNegative(scaled)) 1L else 0L,
         exponent = resultExponent,
@@ -260,10 +254,7 @@ private[isa] object Mufu {
         val lower     = lowerSignificand(scaled, RsqrtM)
         var index     = upperSignificand(scaled, RsqrtM)
         val odd       = logarithm % 2 != 0
-        if (odd) {
-          logarithm -= 1
-          index += 1L << RsqrtM
-        }
+        if (odd) { logarithm -= 1; index += 1L << RsqrtM }
         if (!odd && fraction(scaled) == 0L) scale(One, -logarithm / 2)
         else {
           val (c0, c1, c2) = rsqrtTable(index.toInt)
@@ -296,10 +287,7 @@ private[isa] object Mufu {
             var logarithm = (if (subnormal) -24 else 0) + ilogb(scaled)
             var index     = upperSignificand(scaled, SqrtM)
             val lower     = lowerSignificand(scaled, SqrtM)
-            if (logarithm % 2 != 0) {
-              logarithm -= 1
-              index += 1L << SqrtM
-            }
+            if (logarithm % 2 != 0) { logarithm -= 1; index += 1L << SqrtM }
             val (c0, c1, c2) = sqrtTable(index.toInt)
             val c0Term       = c0.toLong << 33
             val c1Term       = (c1.toLong * lower) << 18

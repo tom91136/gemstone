@@ -2,11 +2,13 @@ package net.kurobako.gemstone.codegen
 
 import net.kurobako.gemstone.string.*
 import scala.collection.immutable.SortedMap
+import scala.collection.mutable
 
 /** Maps each operand field of every encoding to the domain of its operand type. */
 object AMDGPUOperandFields {
   import AMDGPUDomainRules.*
   import AMDGPUOperandDomains.*
+  import GenerateAMDGPUISA.*
 
   case class Operand(field: String, kind: String, implicitOperand: Boolean)
   case class Encoding(isa: String, format: String, opcode: Int, operands: Vector[Operand])
@@ -50,11 +52,6 @@ object AMDGPUOperandFields {
     }.toVector
   }
 
-  def bitMask(ranges: collection.Seq[ujson.Value]): BigInt =
-    ranges.foldLeft(BigInt(0)) { (bits, range) =>
-      bits | (((BigInt(1) << range("bits").num.toInt) - 1) << range("offset").num.toInt)
-    }
-
   def readLayouts(layouts: ujson.Value): Vector[Layout] = layouts.arr.map { layout =>
     val mask = BigInt(layout("mask").str, 16)
     Layout(
@@ -87,7 +84,7 @@ object AMDGPUOperandFields {
       _.flatMap(_.operands.collect { case o if !o.implicitOperand && o.field.nonEmpty => o.field }).toSet
     ).toMap
     val findings = Vector.newBuilder[Finding]
-    val narrowed = scala.collection.mutable.SortedMap.empty[String, OperandDomain]
+    val narrowed = mutable.SortedMap.empty[String, OperandDomain]
     def typed(format: String, layout: Option[Layout], field: String, operand: Operand): String =
       domains.get(operand.kind) match {
         case None =>

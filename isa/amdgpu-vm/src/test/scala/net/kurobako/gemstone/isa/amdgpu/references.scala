@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import EncodingConstants.*
 import VMIR.*
+import java.math.BigDecimal
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.prelude.*
@@ -500,9 +501,9 @@ private object references {
     */
   def divisionFusedMultiplyAdd(a: Double, b: Double, c: Double, width: Int): Long = {
     val power = (if (math.abs(c) >= 1.0) 1 else -1) * (if (width == 64) 128 else 64)
-    val exact = java.math.BigDecimal(a).multiply(java.math.BigDecimal(b)).add(java.math.BigDecimal(c))
-    val value = if (power > 0) exact.multiply(java.math.BigDecimal(2).pow(power))
-    else exact.divide(java.math.BigDecimal(2).pow(-power))
+    val exact = BigDecimal(a).multiply(BigDecimal(b)).add(BigDecimal(c))
+    val value = if (power > 0) exact.multiply(BigDecimal(2).pow(power))
+    else exact.divide(BigDecimal(2).pow(-power))
     if (exact.signum == 0) IEEE754.fromDouble(IEEE754.fma(a, b, c), if (width == 64) 64 else 32)
     else if (width == 64) IEEE754.doubleToBinary64(value.doubleValue)
     else IEEE754.floatToBinary32(value.floatValue).toLong

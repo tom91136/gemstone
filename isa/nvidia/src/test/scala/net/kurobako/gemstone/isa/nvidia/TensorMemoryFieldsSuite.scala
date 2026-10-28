@@ -4,9 +4,11 @@ import VMIR.*
 import net.kurobako.gemstone.collection.*
 
 class TensorMemoryFieldsSuite extends munit.FunSuite {
+  private val sparseModes = Seq(false, true)
+
   test("every kind takes at most five descriptor fields, sparse or not") {
     Tcgen05.Kind.values.foreach { kind =>
-      Seq(false, true).foreach { sparse =>
+      sparseModes.foreach { sparse =>
         val multiply = Tcgen05.Multiply(
           kind = kind,
           architecture = 100,

@@ -83,10 +83,7 @@ private object InvocationMachine {
       index = 0
       while (index < destinations.length) {
         if (group.scalar(index)) values.scalars(destinations(index)) = bits(index)
-        else {
-          values.update(destinations(index), staged(index).nn)
-          staged(index) = null
-        }
+        else { values.update(destinations(index), staged(index).nn); staged(index) = null }
         index += 1
       }
       execution.pc = group.next
@@ -684,7 +681,17 @@ private object InvocationMachine {
       stride: Int,
       element: Int
   )(inline next: => Flow[Unit]): Flow[Unit] =
-    asyncCopy(execution, target, typeId, scope, destination, source, count, stride, element) match {
+    asyncCopy(
+      execution,
+      target = target,
+      typeId = typeId,
+      scopeId = scope,
+      destinationId = destination,
+      sourceId = source,
+      countId = count,
+      strideId = stride,
+      elementId = element
+    ) match {
       case Left(error) => Left(error)
       case Right(())   => next
     }
@@ -888,10 +895,7 @@ private object InvocationMachine {
       index += 1
     }
     if (absent >= 0) Left(undefined(absent))
-    else {
-      values.update(target, VMValue.Bits(typeId, result))
-      next
-    }
+    else { values.update(target, VMValue.Bits(typeId, result)); next }
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -1184,8 +1188,8 @@ private object InvocationMachine {
           s"OpenCL.std printf format expects at least ${conversions.size} arguments, received ${arguments.length}"
         )
       )
-      printed <- conversions.zipWithIndex.foldLeft[Flow[Vector[Event.PrintArgument]]](Right(Vector.empty)) {
-        case (result, (conversion, index)) =>
+      printed <- conversions.indices.foldLeft[Flow[Vector[Event.PrintArgument]]](Right(Vector.empty)) {
+        (result, index) =>
           result.flatMap { found =>
             val source = arguments(index)
             values.get(source) match {
@@ -1200,7 +1204,7 @@ private object InvocationMachine {
                         ))
                     }
                 }
-              case Some(VMValue.Address(_, pointer)) if conversion == 's' =>
+              case Some(VMValue.Address(_, pointer)) if conversions(index) == 's' =>
                 readCString(memory, pointer).map(argument => found :+ Event.PrintArgument.Text(argument))
               case Some(VMValue.Address(_, pointer)) => Right(found :+ Event.PrintArgument.Pointer(pointer.address))
               case None                              => Left(undefined(source))
@@ -1380,10 +1384,7 @@ private object InvocationMachine {
         val selected = component.toInt
         if (selected < 0 || selected >= lanes.length)
           Left(Fault.InvalidRequest(s"OpVectorExtractDynamic index $selected is out of range"))
-        else {
-          values.updateScalar(target, typeId, lanes(selected))
-          next
-        }
+        else { values.updateScalar(target, typeId, lanes(selected)); next }
       case (None, _) => Left(undefined(vector))
       case (_, None) => Left(undefined(index))
       case _         => Left(Fault.Unsupported("OpVectorExtractDynamic requires a scalar index"))

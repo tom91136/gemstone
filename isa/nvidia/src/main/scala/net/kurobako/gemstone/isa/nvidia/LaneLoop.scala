@@ -341,10 +341,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         val storage = context.lane(lane)
         val state   = storage.conditionCodes.state(flag)
         if (state < 0) Left(undefinedFlag(context, lane, flag))
-        else {
-          storage.setRegister(destination, kernel(state.toLong))
-          Completed
-        }
+        else { storage.setRegister(destination, kernel(state.toLong)); Completed }
       }
     lanes(context, destination, flag)
   }
@@ -356,10 +353,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         val storage = context.lane(lane)
         val state   = storage.conditionCodes.state(flag)
         if (state < 0) Left(undefinedFlag(context, lane, flag))
-        else {
-          storage.setPredicate(destination, kernel(state.toLong) != 0L)
-          Completed
-        }
+        else { storage.setPredicate(destination, kernel(state.toLong) != 0L); Completed }
       }
     lanes(context, destination, flag)
   }
@@ -420,10 +414,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       val members = context.read(lane, memberMask) & context.active.warpBits(lane.raw)
       val votes   = gather(context, lane, members, voter)
       if (votes < 0L) Left(undefinedVote(context, lane, members, voter))
-      else {
-        effects.stageRegister(lane, destination, kernel(votes, members))
-        Completed
-      }
+      else { effects.stageRegister(lane, destination, kernel(votes, members)); Completed }
     }
     lanes(context, effects, destination, voter, memberMask)
   }
@@ -440,10 +431,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       val members = context.read(lane, memberMask) & context.active.warpBits(lane.raw)
       val votes   = gather(context, lane, members, voter)
       if (votes < 0L) Left(undefinedVote(context, lane, members, voter))
-      else {
-        effects.stage(VMWrite.Predicate(lane, destination, kernel(votes, members) != 0L))
-        Completed
-      }
+      else { effects.stage(VMWrite.Predicate(lane, destination, kernel(votes, members) != 0L)); Completed }
     }
     lanes(context, effects, destination, voter, memberMask)
   }
@@ -465,10 +453,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         val members = mask & context.active.warpBits(lane.raw)
         if ((mask & (1L << index)) == 0L) Left(absent("elect.sync", lane))
         else if (members == 0L) Left(Fault.Backend("elect.sync has no participating lane"))
-        else {
-          effects.stage(VMWrite.Predicate(lane, leader, isLeader(index, choose(members)) != 0L))
-          Completed
-        }
+        else { effects.stage(VMWrite.Predicate(lane, leader, isLeader(index, choose(members)) != 0L)); Completed }
       }
       if (leaders.isRight) elected.foreach { register =>
         context.active.foreachLane { lane =>
@@ -576,10 +561,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         : Either[Fault, Unit] = everyLane(context) { lane =>
       val highBits = context.read(lane, high)
       if ((highBits & 1L) == 0L) Left(Fault.Backend("cannot query CTA coordinates from a failed cancellation"))
-      else {
-        effects.stageRegister(lane, destination, kernel(context.read(lane, low), highBits))
-        Completed
-      }
+      else { effects.stageRegister(lane, destination, kernel(context.read(lane, low), highBits)); Completed }
     }
     lanes(context, effects, destination, low, high)
   }

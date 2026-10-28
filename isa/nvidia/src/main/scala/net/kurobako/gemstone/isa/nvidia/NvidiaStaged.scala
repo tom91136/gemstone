@@ -1,21 +1,10 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
-import net.kurobako.gemstone.binary.Widths.*
-import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.vm.*
 
 /** The NVIDIA instructions with staged semantics, matched once in [[staged]] for both executing and rendering them. */
 private[isa] object NvidiaStaged {
-
-  /** The result of [[execute]] for an instruction without staged semantics, which the interpreter's own cases handle.
-    */
-  val Unstaged: Either[Fault, Unit] = Left(Fault.IllegalInstruction("the instruction has no staged semantics"))
-
-  /** Runs a staged instruction on every active lane. */
-  def execute(instruction: Instruction, sinks: LaneLoop): Either[Fault, Unit] =
-    staged(Execute, instruction)(sinks)(Unstaged)
 
   /** The semantics of `instruction` in `algebra`, consumed by `sinks`; `otherwise` when it has none. Each family is a
     * method of its own once expanded, which keeps every expansion within the JIT's method size limits.

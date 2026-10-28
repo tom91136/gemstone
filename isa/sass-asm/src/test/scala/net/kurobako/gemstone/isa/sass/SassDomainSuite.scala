@@ -141,11 +141,12 @@ class SassDomainSuite extends munit.FunSuite {
     }
   }
 
-  test("every special register code of S2R has a spelling that round trips or a condition that refuses it") {
-    tables.foreach { target =>
+  tables.foreach { target =>
+    test(s"every special register code of S2R in ${target.name} has a round trip spelling or a refusing condition") {
+      val database    = target.database
       val s2rForms    = forms(target, "S2R")
       val parsedForms = s2rForms.filter(_.opcodes.forall(_.name == "S2R"))
-      val specials    = s2rForms.flatMap(form => SassDomains.fields(target.database, form))
+      val specials    = s2rForms.flatMap(form => SassDomains.fields(database, form))
         .collectFirst { case (_, found) if found.label == "SpecialRegister" => found }
         .getOrElse(fail(s"${target.name} S2R has no special register")).values
       specials.groupBy(_._2).foreach { (code, spellings) =>
@@ -153,7 +154,7 @@ class SassDomainSuite extends munit.FunSuite {
         if (encoded.isEmpty)
           spellings.foreach { (name, _) =>
             parsedForms.foreach { form =>
-              val result = FormatParser.parse(target.database, form, 0, s"S2R R1, $name")
+              val result = FormatParser.parse(database, form, 0, s"S2R R1, $name")
               assert(result.left.exists(refused(form, _)), s"${target.name} ${form.name} $name (code $code): $result")
             }
           }

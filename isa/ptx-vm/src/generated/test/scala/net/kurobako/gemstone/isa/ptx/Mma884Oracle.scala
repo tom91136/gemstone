@@ -9,7 +9,7 @@ object Mma884Oracle {
   enum Layout derives CanEqual { case Row, Col }
   enum Mode derives CanEqual { case Plain, Alias, ZeroAlias }
   case class Variant(accum: Accumulator, aLayout: Layout, bLayout: Layout, mode: Mode, entryName: NonEmpty[String])
-  val resource = "/mma884/oracle.ptx"
+  val resource: String = "/mma884/oracle.ptx"
   val variants: Vec[Variant] = Vec(
     Variant(Accumulator.F32, Layout.Row, Layout.Row, Mode.Plain, "mma884_f32_row_row_plain": NonEmpty[String]),
     Variant(Accumulator.F32, Layout.Row, Layout.Row, Mode.Alias, "mma884_f32_row_row_alias": NonEmpty[String]),

@@ -727,11 +727,11 @@ object GenerateSPIRVISA {
   private def renderEnumerants(kind: OperandKind): String = {
     val raw        = kind.kind
     val objectName = if (ScalaKeywords(raw)) s"`$raw`" else raw
-    val values     = kind.enumerants.map { enumerant =>
+    val constants  = kind.enumerants.map { enumerant =>
       val name: String = enumerant.name
-      val safe         = Identifiers.upperCamel(name, "Value", "Value")
-      s"    final val $safe: Int = ${enumerant.value.toInt}"
-    }.mkString("\n")
+      Identifiers.upperCamel(name, "Value", "Value") -> enumerant.value
+    }
+    val values = constants.map { case (safe, value) => s"    final val $safe: Int = ${value.toInt}" }.mkString("\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
       s"""|package net.kurobako.gemstone.isa.spirv
           |

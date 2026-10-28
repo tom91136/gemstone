@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URI
@@ -21,6 +22,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import scala.jdk.CollectionConverters.*
+import scala.sys.process.Process
 import scala.util.Using
 import scala.util.control.NonFatal
 
@@ -438,7 +440,7 @@ object References {
   }
 
   private def run(command: Vector[String]): Unit = {
-    val status = scala.sys.process.Process(command).!
+    val status = Process(command).!
     require(status == 0, s"${command.mkString(" ")} exited with $status")
   }
 
@@ -542,7 +544,7 @@ object References {
       case "?"     => "[^/]"
       case literal => Pattern.quote(literal)
     }).mkString.r
-    path => regex.matches(path.toString.replace(java.io.File.separatorChar, '/'))
+    path => regex.matches(path.toString.replace(File.separatorChar, '/'))
   }
 
   private def delete(path: Path): Unit =

@@ -1,10 +1,12 @@
 // Generated PTX instruction forms from the pinned NVIDIA ISA 9.3 specification. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.ptx
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum Form(operandValues: Operand*) {
   case Abs(dest: Operand, srcA: Operand) extends Form(dest, srcA)
   case Activemask(dest: Operand) extends Form(dest)

@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.nio.file.Path
@@ -33,7 +34,7 @@ object ExtractSASS {
     bytes
   }
 
-  private def resource(name: String): java.io.InputStream =
+  private def resource(name: String): InputStream =
     Option(getClass.getResourceAsStream(ResourceRoot + name))
       .getOrElse(throw IllegalArgumentException(s"missing SASS extraction resource $name"))
 

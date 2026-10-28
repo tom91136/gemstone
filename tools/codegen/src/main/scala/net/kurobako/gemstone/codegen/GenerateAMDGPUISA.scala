@@ -7,15 +7,19 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilder
 import javax.xml.parsers.DocumentBuilderFactory
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.string.*
+import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.Node
+import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.Process
 import scala.sys.process.ProcessLogger
+import scala.util.Try
 import scala.util.Using
 import upickle.default.*
 
@@ -379,7 +383,7 @@ for name in sorted(module.instructions):
   def renderTargetDefaults(tables: ujson.Value): (scalaSource: String, nativeSource: String) = {
     val features    = tables("SubtargetFeature").obj
     val generations = tables("GCNSubtargetFeatureGeneration").obj.keySet.toSet
-    @scala.annotation.tailrec
+    @tailrec
     def expand(enabled: Set[String]): Set[String] = {
       val next = enabled ++ enabled.flatMap(name => features(name)("Implies").arr.map(_("def").str))
       if (next == enabled) enabled else expand(next)
@@ -425,7 +429,7 @@ for name in sorted(module.instructions):
   }
 
   private def layoutMetadata(value: ujson.Value): Option[ujson.Value] = {
-    val opcodes = AMDGPUOperandFields.bitMask(
+    val opcodes = bitMask(
       value("fields").arr.filter(field => OpcodeFields(field("name").str)).flatMap(_("ranges").arr)
     )
     val mask     = BigInt(value("mask").str, 16) & ~opcodes
@@ -972,9 +976,9 @@ for name in sorted(module.instructions):
     )
   }
 
-  def xmlDocument(input: Path): org.w3c.dom.Document = documentBuilder().parse(input.toFile)
+  def xmlDocument(input: Path): Document = documentBuilder().parse(input.toFile)
 
-  private def documentBuilder(): javax.xml.parsers.DocumentBuilder = {
+  private def documentBuilder(): DocumentBuilder = {
     val factory = DocumentBuilderFactory.newInstance()
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
     factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
@@ -1405,6 +1409,11 @@ for name in sorted(module.instructions):
       )
     }
 
+  def bitMask(ranges: collection.Seq[ujson.Value]): BigInt =
+    ranges.foldLeft(BigInt(0)) { (bits, range) =>
+      bits | (((BigInt(1) << range("bits").num.toInt) - 1) << range("offset").num.toInt)
+    }
+
   def microcodeFields(element: Element): Vector[Element] =
     optionalDirect(element, "MicrocodeFormat").flatMap(optionalDirect(_, "BitMap"))
       .fold(Vector.empty[Element])(directChildren(_, "Field"))
@@ -1421,7 +1430,7 @@ for name in sorted(module.instructions):
               directChildren(_, "PredefinedValue")
             )
               .flatMap(value =>
-                scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
+                Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
                   requiredText(value, "Name") -> ujson.Str(number.toString)
                 )
               )
@@ -1435,7 +1444,7 @@ for name in sorted(module.instructions):
         }
         val values = optionalDirect(operand, "OperandPredefinedValues")
           .fold(Vector.empty[Element])(directChildren(_, "PredefinedValue")).flatMap { value =>
-            scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
+            Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
               requiredText(value, "Name").toLowerCaseRoot -> ujson.Str(number.toString)
             )
           }

@@ -2,7 +2,9 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 object FlatScratch extends Domain[FlatScratch] {
   val id: String = "flat_scratch"
 
@@ -13,7 +15,7 @@ object FlatScratch extends Domain[FlatScratch] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum FlatScratch extends DomainValue derives CanEqual {
   case FlatScratchAll
   case Value

@@ -3,6 +3,7 @@ package net.kurobako.gemstone.vm
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import scala.annotation.unused
 
 object Backend {
 
@@ -10,24 +11,24 @@ object Backend {
   trait Program extends AutoCloseable {
 
     /** Programs that expose program-scoped function pointers bind their identity before any launch observes them. */
-    def bindFunctionPointerNamespace(@scala.annotation.unused id: ProgramId): Either[Fault, Unit] = Right(())
+    def bindFunctionPointerNamespace(@unused id: ProgramId): Either[Fault, Unit] = Right(())
     def symbols: Either[Fault, ProgramSymbols]
     def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata]
-    def global(@scala.annotation.unused name: NonEmpty[String]): Either[Fault, ProgramGlobal] =
+    def global(@unused name: NonEmpty[String]): Either[Fault, ProgramGlobal] =
       Left(Fault.Unsupported("program global metadata is unavailable"))
     def bindGlobal(
-        @scala.annotation.unused name: NonEmpty[String],
-        @scala.annotation.unused binding: GlobalBinding,
-        @scala.annotation.unused memory: AddressSpace
+        @unused name: NonEmpty[String],
+        @unused binding: GlobalBinding,
+        @unused memory: AddressSpace
     ): Either[Fault, Unit] = Left(Fault.Unsupported("program globals cannot be bound"))
     def writeGlobal(
-        @scala.annotation.unused name: NonEmpty[String],
-        @scala.annotation.unused offset: Long >= 0,
-        @scala.annotation.unused bytes: Vec[Byte]
+        @unused name: NonEmpty[String],
+        @unused offset: Long >= 0,
+        @unused bytes: Vec[Byte]
     ): Either[Fault, Unit] = Left(Fault.Unsupported("program globals are not writable"))
 
     /** Compiles a kernel ahead of its launches, so that an invalid program is reported here and not by `execute`. */
-    def build(@scala.annotation.unused name: NonEmpty[String]): Either[Fault, Unit] = Right(())
+    def build(@unused name: NonEmpty[String]): Either[Fault, Unit] = Right(())
     def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit]
     override def close(): Unit = ()
   }

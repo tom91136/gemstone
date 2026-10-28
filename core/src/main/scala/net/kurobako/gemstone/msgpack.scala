@@ -46,10 +46,7 @@ object msgpack {
       if (reserve(1)) emit(value)
 
     private def writeRawShort(value: Int): Unit =
-      if (reserve(2)) {
-        emit(value >>> 8)
-        emit(value)
-      }
+      if (reserve(2)) { emit(value >>> 8); emit(value) }
 
     private def writeRawInt(value: Int): Unit =
       if (reserve(4)) {
@@ -65,10 +62,7 @@ object msgpack {
     }
 
     private def writeRawBytes(value: Array[Byte]): Unit =
-      if (reserve(value.length)) {
-        Array.copy(value, 0, mutableBytes, length, value.length)
-        length += value.length
-      }
+      if (reserve(value.length)) { Array.copy(value, 0, mutableBytes, length, value.length); length += value.length }
 
     def writeNil(): Unit = writeRawByte(0xc0)
 
@@ -90,10 +84,7 @@ object msgpack {
 
     def writeLong(value: Long): Unit =
       if (value >= Int.MinValue && value <= Int.MaxValue) writeInt(value.toInt)
-      else {
-        writeRawByte(0xd3)
-        writeRawLong(value)
-      }
+      else { writeRawByte(0xd3); writeRawLong(value) }
 
     def writeFloat(value: Float): Unit = {
       writeRawByte(0xca)
@@ -115,10 +106,8 @@ object msgpack {
       }
 
     private def writeSized8(size: Int, marker8: Int, marker16: Int, marker32: Int): Unit =
-      if (size <= 0xff) {
-        writeRawByte(marker8)
-        writeRawByte(size)
-      } else writeSized(size, marker16, marker32)
+      if (size <= 0xff) { writeRawByte(marker8); writeRawByte(size) }
+      else writeSized(size, marker16, marker32)
 
     def writeArrayHeader(size: Int >= 0): Unit =
       if (size > limits.maximumElements)
@@ -140,10 +129,7 @@ object msgpack {
     def writeBytes(value: Array[Byte]): Unit =
       if (value.length > limits.maximumBytes)
         reject(s"byte collection exceeds the ${limits.maximumBytes}-byte limit")
-      else {
-        writeSized8(value.length, marker8 = 0xc4, marker16 = 0xc5, marker32 = 0xc6)
-        writeRawBytes(value)
-      }
+      else { writeSized8(value.length, marker8 = 0xc4, marker16 = 0xc5, marker32 = 0xc6); writeRawBytes(value) }
 
     def reject(message: String): Unit = if (failure.isEmpty) failure = Some(message)
 
@@ -196,10 +182,8 @@ object msgpack {
       take(2).map(offset => ((bytes(offset) & 0xff) << 8) | (bytes(offset + 1) & 0xff))
 
     def tryReadNil(): Either[String, Boolean] =
-      if (peek() == 0xc0) {
-        mutableCursor += 1
-        Right(true)
-      } else Right(false)
+      if (peek() == 0xc0) { mutableCursor += 1; Right(true) }
+      else Right(false)
 
     def readBoolean(): Either[String, Boolean] = readRawByte().flatMap {
       case 0xc2  => Right(false)

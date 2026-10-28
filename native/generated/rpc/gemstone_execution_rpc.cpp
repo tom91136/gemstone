@@ -106,6 +106,14 @@ Result<std::vector<uint8_t>> Client::call(const ReadAllocation &request) {
   return implementation->call<std::vector<uint8_t>>(operation::ReadAllocation, request);
 }
 
+Result<Unit> Client::call(const WriteAllocationRectangle &request) {
+  return implementation->call<Unit>(operation::WriteAllocationRectangle, request);
+}
+
+Result<std::vector<uint8_t>> Client::call(const ReadAllocationRectangle &request) {
+  return implementation->call<std::vector<uint8_t>>(operation::ReadAllocationRectangle, request);
+}
+
 Result<ProgramId> Client::call(const LoadProgram &request) {
   return implementation->call<ProgramId>(operation::LoadProgram, request);
 }

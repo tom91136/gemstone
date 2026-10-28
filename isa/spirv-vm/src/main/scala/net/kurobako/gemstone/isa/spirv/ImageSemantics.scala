@@ -38,5 +38,8 @@ private object ImageSemantics {
 
   /** The forms the explorer shows: sampled-image construction, sampling, texel access and image queries. */
   def render(instruction: Instruction, machine: SPIRVMachineRender): Option[Term.Steps] =
-    Option.when(handles(instruction))(image(machine)(instruction))
+    SamplingSemantics.render(instruction, machine) match {
+      case form @ Some(_) => form
+      case None           => Option.when(handles(instruction))(image(machine)(instruction))
+    }
 }

@@ -56,6 +56,109 @@ inline bool downloadAllocation(Client &client, AllocationId allocation, uint64_t
   return true;
 }
 
+/** Rows of `rowBytes` bytes at `rowPitch` intervals, `rowCount` rows per slice and `sliceCount` slices at `slicePitch` intervals. */
+struct Rectangle {
+  uint64_t offset = 0;
+  size_t rowBytes = 0;
+  size_t rowCount = 0;
+  size_t sliceCount = 0;
+  size_t rowPitch = 0;
+  size_t slicePitch = 0;
+};
+
+/** Visits each row as (allocation offset, slice, row), stopping at the first false. */
+template <class Visit> bool forEachRectangleRow(const Rectangle &rectangle, Visit visit) {
+  for (size_t slice = 0; slice < rectangle.sliceCount; ++slice)
+    for (size_t row = 0; row < rectangle.rowCount; ++row)
+      if (!visit(rectangle.offset + (slice * rectangle.slicePitch) + (row * rectangle.rowPitch), slice, row)) return false;
+  return true;
+}
+
+namespace detail {
+
+/** Visits blocks of whole slices when one slice fits in `chunkLimit`, otherwise of whole rows, as (slice, row, slices, rows). A row
+ * pitch above the wire limit limits blocks to single rows, and a slice pitch above it to single slices. */
+template <class Send> bool forEachRectangleBlock(const Rectangle &rectangle, size_t chunkLimit, Send send) {
+  constexpr size_t wireLimit = INT32_MAX;
+  if (rectangle.rowBytes == 0 || rectangle.rowCount == 0 || rectangle.sliceCount == 0 || rectangle.rowBytes > chunkLimit
+      || chunkLimit > MaximumPayload)
+    return false;
+  if (rectangle.rowCount > 1 && rectangle.rowPitch < rectangle.rowBytes) return false;
+  const bool rowsFit = rectangle.rowCount == 1 || rectangle.rowPitch <= wireLimit;
+  const bool slicesFit = rectangle.sliceCount == 1 || rectangle.slicePitch <= wireLimit;
+  const size_t sliceBytes = rectangle.rowBytes * rectangle.rowCount;
+  if (rowsFit && sliceBytes <= chunkLimit) {
+    const size_t slices = slicesFit ? std::min(rectangle.sliceCount, chunkLimit / sliceBytes) : size_t{1};
+    for (size_t slice = 0; slice < rectangle.sliceCount; slice += slices)
+      if (!send(slice, size_t{0}, std::min(slices, rectangle.sliceCount - slice), rectangle.rowCount)) return false;
+    return true;
+  }
+  const size_t rows = rowsFit ? chunkLimit / rectangle.rowBytes : size_t{1};
+  for (size_t slice = 0; slice < rectangle.sliceCount; ++slice)
+    for (size_t row = 0; row < rectangle.rowCount; row += rows)
+      if (!send(slice, row, size_t{1}, std::min(rows, rectangle.rowCount - row))) return false;
+  return true;
+}
+
+inline int32_t wireValue(size_t value) { return static_cast<int32_t>(value); }
+
+} // namespace detail
+
+/** Writes host rows laid out at `hostRowPitch` and `hostSlicePitch` to an allocation rectangle in bounded requests, one per block of whole
+ * rows or slices. */
+inline bool uploadRectangle(Client &client, AllocationId allocation, const Rectangle &rectangle, const void *host, size_t hostRowPitch,
+                            size_t hostSlicePitch, size_t chunkLimit) {
+  const auto *source = static_cast<const uint8_t *>(host);
+  if (rectangle.rowBytes > chunkLimit)
+    return forEachRectangleRow(rectangle, [&](uint64_t offset, size_t slice, size_t row) {
+      return uploadAllocation(client, allocation, offset, source + (slice * hostSlicePitch) + (row * hostRowPitch), rectangle.rowBytes,
+                              chunkLimit);
+    });
+  return detail::forEachRectangleBlock(rectangle, chunkLimit, [&](size_t slice, size_t row, size_t slices, size_t rows) {
+    std::vector<uint8_t> packed(slices * rows * rectangle.rowBytes);
+    auto *target = packed.data();
+    for (size_t z = 0; z < slices; ++z)
+      for (size_t y = 0; y < rows; ++y, target += rectangle.rowBytes)
+        std::memcpy(target, source + ((slice + z) * hostSlicePitch) + ((row + y) * hostRowPitch), rectangle.rowBytes);
+    return static_cast<bool>(client.call(WriteAllocationRectangle{
+        .allocation = allocation,
+        .offset = {static_cast<int64_t>(rectangle.offset + (slice * rectangle.slicePitch) + (row * rectangle.rowPitch))},
+        .rowBytes = {detail::wireValue(rectangle.rowBytes)},
+        .rowCount = {detail::wireValue(rows)},
+        .sliceCount = {detail::wireValue(slices)},
+        .rowPitch = {detail::wireValue(rows > 1 ? rectangle.rowPitch : rectangle.rowBytes)},
+        .slicePitch = {detail::wireValue(slices > 1 ? rectangle.slicePitch : rectangle.rowBytes * rows)},
+        .bytes = std::move(packed)}));
+  });
+}
+
+/** Reads an allocation rectangle into host rows laid out at `hostRowPitch` and `hostSlicePitch` in bounded requests. */
+inline bool downloadRectangle(Client &client, AllocationId allocation, const Rectangle &rectangle, void *host, size_t hostRowPitch,
+                              size_t hostSlicePitch, size_t chunkLimit) {
+  auto *target = static_cast<uint8_t *>(host);
+  if (rectangle.rowBytes > chunkLimit)
+    return forEachRectangleRow(rectangle, [&](uint64_t offset, size_t slice, size_t row) {
+      return downloadAllocation(client, allocation, offset, target + (slice * hostSlicePitch) + (row * hostRowPitch), rectangle.rowBytes,
+                                chunkLimit);
+    });
+  return detail::forEachRectangleBlock(rectangle, chunkLimit, [&](size_t slice, size_t row, size_t slices, size_t rows) {
+    auto result = client.call(ReadAllocationRectangle{
+        .allocation = allocation,
+        .offset = {static_cast<int64_t>(rectangle.offset + (slice * rectangle.slicePitch) + (row * rectangle.rowPitch))},
+        .rowBytes = {detail::wireValue(rectangle.rowBytes)},
+        .rowCount = {detail::wireValue(rows)},
+        .sliceCount = {detail::wireValue(slices)},
+        .rowPitch = {detail::wireValue(rows > 1 ? rectangle.rowPitch : rectangle.rowBytes)},
+        .slicePitch = {detail::wireValue(slices > 1 ? rectangle.slicePitch : rectangle.rowBytes * rows)}});
+    if (!result || result.value().size() != slices * rows * rectangle.rowBytes) return false;
+    const auto *source = result.value().data();
+    for (size_t z = 0; z < slices; ++z)
+      for (size_t y = 0; y < rows; ++y, source += rectangle.rowBytes)
+        std::memcpy(target + ((slice + z) * hostSlicePitch) + ((row + y) * hostRowPitch), source, rectangle.rowBytes);
+    return true;
+  });
+}
+
 /** Batch nearby reads, but publish only the exact dirty intervals. Fetching a gap
  * must never overwrite host bytes which the dispatch did not write.
  */

@@ -2,7 +2,9 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 object SdstNull extends Domain[SdstNull] {
   val id: String = "sdst_null"
 
@@ -12,7 +14,7 @@ object SdstNull extends Domain[SdstNull] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum SdstNull extends DomainValue derives CanEqual {
   case Null
   def slot: Slot = this match {

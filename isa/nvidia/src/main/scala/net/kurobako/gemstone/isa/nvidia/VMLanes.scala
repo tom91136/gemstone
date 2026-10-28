@@ -4,17 +4,17 @@ import net.kurobako.gemstone.constraint.*
 
 private object VMLanes {
   private val NoLanes = Array.empty[VMLane | Null]
-}
 
-private trait VMLaneSource {
-  def take(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0): VMLane
-  def takeObserved(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0, owner: VMLanes): VMLane
-  def give(lane: WorkgroupLane, cleared: VMLane): Unit
+  trait Source {
+    def take(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0): VMLane
+    def takeObserved(lane: WorkgroupLane, registerCount: Int >= 0, predicateCount: Int >= 0, owner: VMLanes): VMLane
+    def give(lane: WorkgroupLane, cleared: VMLane): Unit
+  }
 }
 
 /** Lane storage of one frame, taken per lane on first use from `pool`. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-private class VMLanes(laneCount: Int in 1 ~ 1024, pool: VMLaneSource) {
+private class VMLanes(laneCount: Int in 1 ~ 1024, pool: VMLanes.Source) {
   private val lanes                     = java.util.Arrays.copyOf(VMLanes.NoLanes, laneCount)
   private var registerCount             = 0: Int >= 0
   private var predicateCount            = 0: Int >= 0

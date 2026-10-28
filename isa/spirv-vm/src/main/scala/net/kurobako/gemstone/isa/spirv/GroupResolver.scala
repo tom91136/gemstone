@@ -199,10 +199,7 @@ private class GroupResolver(
     var begun = if (resume) foldStarted else !bare
     while (index < limit) {
       val found = holder(index.toInt)
-      if (found >= 0) {
-        total = if (begun) combine(total, values(found)) else values(found)
-        begun = true
-      }
+      if (found >= 0) { total = if (begun) combine(total, values(found)) else values(found); begun = true }
       index += 1L
     }
     foldColumn = operand

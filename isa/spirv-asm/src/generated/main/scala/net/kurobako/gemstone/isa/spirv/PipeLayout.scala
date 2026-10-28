@@ -1,7 +1,9 @@
 // Generated from Gemstone PipeABI. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 object PipeLayout {
   inline val ReadIndex = 0
   inline val WriteIndex = 4

@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv
 import ExtendedInstruction.GlslStd450 as Glsl
 import ExtendedInstruction.OpenClStd as OpenCL
 import LaneOps.*
+import MemoryOps.*
 import Op.*
 import OpBuilder.*
 import VMInvocation.*
@@ -75,7 +76,7 @@ private object ExtendedOps {
       }
     )
 
-  private def valueTypes(sources: Vec[Int], function: String)(using site: Site): Either[Fault, Vec[Int]] =
+  private def valueTypes(sources: Vec[Int], function: String)(using Site): Either[Fault, Vec[Int]] =
     dataTypes(sources, _ => Fault.InvalidRequest(s"OpenCL.std $function operands are not value types"))
 
   private def elementwise(resultType: Int, sources: Vec[Int], name: String, set: String = "OpenCL.std")(using
@@ -157,10 +158,7 @@ private object ExtendedOps {
     ops.find(_ ne unmatched).getOrElse(unsupported)
   }
 
-  private def glsl(ids: ResultIds, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op =
+  private def glsl(ids: ResultIds, opcode: Int, sources: Vec[Int])(using Site, Instruction): Op =
     opcode match {
       case Glsl.SAbs | Glsl.SSign | Glsl.UMin | Glsl.SMin | Glsl.UMax | Glsl.SMax | Glsl.UClamp | Glsl.SClamp | Glsl.FindILsb |
           Glsl.FindSMsb | Glsl.FindUMsb => glslInteger(ids.resultType, opcode, sources)
@@ -221,10 +219,7 @@ private object ExtendedOps {
       case _                                              => unsupported
     }
 
-  private def glslInteger(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+  private def glslInteger(resultType: Int, opcode: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op = {
     val unary    = opcode == Glsl.SAbs || opcode == Glsl.SSign || opcode >= Glsl.FindILsb
     val required = if (unary) 1 else if (opcode == Glsl.UClamp || opcode == Glsl.SClamp) 3 else 2
     if (sources.size != required) Fail(Fault.InvalidRequest(s"GLSL integer opcode $opcode has the wrong operand count"))
@@ -246,9 +241,8 @@ private object ExtendedOps {
 
   // FMin and FMax permit the same numeric operand preference for NaNs as NMin and NMax.
   private def glslNumericMinMax(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     val required = if (opcode == Glsl.FClamp || opcode == Glsl.NClamp) 3 else 2
     if (sources.size != required) Fail(Fault.InvalidRequest("GLSL numeric min/max has the wrong operand count"))
     else if (site.program.floatingShape(resultType).isEmpty)
@@ -315,9 +309,8 @@ private object ExtendedOps {
   }
 
   private def glslLengthDistance(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op =
+      site: Site
+  )(using Instruction): Op =
     if (sources.size != (if (opcode == Glsl.Length) 1 else 2))
       Fail(Fault.InvalidRequest("GLSL Length/Distance operand count is invalid"))
     else site.program.floatingShape(resultType) match {
@@ -342,10 +335,7 @@ private object ExtendedOps {
         }
     }
 
-  private def glslPack(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op =
+  private def glslPack(resultType: Int, opcode: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op =
     if (sources.size != 1) Fail(Fault.InvalidRequest("GLSL packing expects one operand"))
     else typed(site, sources.head) match {
       case Typed.Undefined(value)    => Fail(undefined(value))
@@ -374,9 +364,8 @@ private object ExtendedOps {
     }
 
   private def glslDecompose(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     val program     = site.program
     val pointerForm = opcode == Glsl.Modf || opcode == Glsl.Frexp
     val modf        = opcode == Glsl.Modf || opcode == Glsl.ModfStruct
@@ -411,9 +400,8 @@ private object ExtendedOps {
   }
 
   private def glslGeometric(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     val arity = if (opcode == Glsl.Reflect) 2 else 3
     site.program.floatingShape(resultType) match {
       case Some((width, count)) if sources.size == arity =>
@@ -507,10 +495,7 @@ private object ExtendedOps {
     OpenCL.Powr         -> "powr"
   )
 
-  private def openCL(ids: ResultIds, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op =
+  private def openCL(ids: ResultIds, opcode: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op =
     opcode match {
       case OpenCL.Copysign =>
         count("OpenCL.std copysign", sources, 2)(
@@ -683,7 +668,7 @@ private object ExtendedOps {
       (opcode >= OpenCL.SMad24 && opcode <= OpenCL.UMul24) ||
       (opcode >= OpenCL.UAbsDiff && opcode <= OpenCL.UMadHi)
 
-  private def integerUnary(resultType: Int, source: Int, name: String)(using site: Site, instruction: Instruction): Op =
+  private def integerUnary(resultType: Int, source: Int, name: String)(using site: Site)(using Instruction): Op =
     typed(site, source) match {
       case Typed.Undefined(value)    => Fail(undefined(value))
       case Typed.Opaque(_, _)        => Fail(Fault.InvalidRequest(s"OpenCL.std $name operand is a pointer"))
@@ -696,9 +681,8 @@ private object ExtendedOps {
     }
 
   private def openCLInteger(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     import OpenCL.*
     val arity = opcode match {
       case `SClamp` | `UClamp` | `SMadHi` | `UMadHi` | `SMadSat` | `UMadSat` | `SMad24` | `UMad24` => 3
@@ -728,10 +712,7 @@ private object ExtendedOps {
     }
   }
 
-  private def openCLCommon(resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+  private def openCLCommon(resultType: Int, opcode: Int, sources: Vec[Int])(using Site, Instruction): Op = {
     val (name, arity) = opcode match {
       case OpenCL.Fclamp     => "clamp"      -> 3
       case OpenCL.Degrees    => "degrees"    -> 1
@@ -749,9 +730,8 @@ private object ExtendedOps {
   }
 
   private def ldexp(resultType: Int, source: Int, exponentValue: Int, set: ExtendedSet)(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     val glsl                       = set == ExtendedSet.GLSL
     val mismatch: NonEmpty[String] =
       if (glsl) "GLSL Ldexp requires matching floating values and integer exponents"
@@ -772,7 +752,7 @@ private object ExtendedOps {
     })
   }
 
-  private def nan(resultType: Int, source: Int)(using site: Site, instruction: Instruction): Op =
+  private def nan(resultType: Int, source: Int)(using site: Site)(using Instruction): Op =
     typed(site, source) match {
       case Typed.Undefined(value)    => Fail(undefined(value))
       case Typed.Opaque(_, _)        => Fail(Fault.InvalidRequest("OpenCL.std nan payload is a pointer"))
@@ -785,9 +765,8 @@ private object ExtendedOps {
     }
 
   private def integerPower(resultType: Int, source: Int, power: Int, opcode: Int)(using
-      site: Site,
-      instruction: Instruction
-  ): Op =
+      site: Site
+  )(using Instruction): Op =
     lowered(valueTypes(Vec(source, power), "integer-power").flatMap {
       types =>
         (
@@ -807,7 +786,7 @@ private object ExtendedOps {
         }
     })
 
-  private def ilogb(resultType: Int, source: Int)(using site: Site, instruction: Instruction): Op =
+  private def ilogb(resultType: Int, source: Int)(using site: Site)(using Instruction): Op =
     typed(site, source) match {
       case Typed.Undefined(value)    => Fail(undefined(value))
       case Typed.Opaque(_, _)        => Fail(Fault.InvalidRequest("OpenCL.std ilogb input is not floating-point"))
@@ -821,9 +800,8 @@ private object ExtendedOps {
     }
 
   private def pointerMath(resultType: Int, source: Int, output: Int, opcode: Int)(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     val program = site.program
     val shapes  = typed(site, source) match {
       case Typed.Undefined(value) => Left(undefined(value))
@@ -848,7 +826,7 @@ private object ExtendedOps {
     }
   }
 
-  private def remquo(resultType: Int, sources: Vec[Int])(using site: Site, instruction: Instruction): Op = {
+  private def remquo(resultType: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op = {
     val program = site.program
     program.floatingShape(resultType) match {
       case Some(shape @ (_, count))
@@ -885,10 +863,7 @@ private object ExtendedOps {
     }
 
   /** A cross product of two three- or four-lane vectors. */
-  private def cross(set: ExtendedSet, resultType: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op =
+  private def cross(set: ExtendedSet, resultType: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op =
     count("OpenCL.std cross", sources, 2)(lowered(geometricShape("cross", sources).flatMap { (width, count) =>
       if (count != 3 && count != 4) Left(Fault.InvalidRequest("OpenCL.std cross requires 3- or 4-component vectors"))
       else if (!site.program.floatingShape(resultType).contains((width, count)))
@@ -898,9 +873,8 @@ private object ExtendedOps {
 
   /** Lengths, distances and normalisation. */
   private def geometric(set: ExtendedSet, resultType: Int, opcode: Int, sources: Vec[Int])(using
-      site: Site,
-      instruction: Instruction
-  ): Op = {
+      site: Site
+  )(using Instruction): Op = {
     val name = opcode match {
       case OpenCL.Distance     => "distance"
       case OpenCL.Length       => "length"
@@ -925,7 +899,7 @@ private object ExtendedOps {
     }))
   }
 
-  private def halfLoad(resultType: Int, sources: Vec[Int])(using site: Site, instruction: Instruction): Op = {
+  private def halfLoad(resultType: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op = {
     val vector = sources.size == 3
     if ((!vector && sources.size != 2) || (vector && sources.size != 3))
       Fail(Fault.InvalidRequest("OpenCL.std half load has an invalid operand count"))
@@ -939,7 +913,7 @@ private object ExtendedOps {
   /** A literal OpenCL.std operand; vector widths are encoded as literal words, not ids. */
   private def unsignedLiteral(word: Int): Long = word.toLong & 0xffffffffL
 
-  private def halfStore(sources: Vec[Int], rounded: Boolean)(using site: Site, instruction: Instruction): Op = {
+  private def halfStore(sources: Vec[Int], rounded: Boolean)(using site: Site)(using Instruction): Op = {
     val expected = if (rounded) 4 else 3
     if (sources.size != expected) Fail(Fault.InvalidRequest(s"OpenCL.std half store expects $expected operands"))
     else typed(site, sources(0)) match {
@@ -961,7 +935,14 @@ private object ExtendedOps {
         site.program.scalarMemoryWidth(component) match {
           case Left(error)        => Fail(error)
           case Right(elementSize) =>
-            VectorLoad(sources(0), sources(1), count.raw, elementSize, ids.dest, ids.resultType)
+            VectorLoad(
+              offset = sources(0),
+              pointer = sources(1),
+              count = count.raw,
+              size = elementSize,
+              dest = ids.dest,
+              resultType = ids.resultType
+            )
         }
       case Some(RuntimeType.VectorType(_, count)) =>
         Fail(Fault.InvalidRequest(
@@ -1031,7 +1012,7 @@ private object ExtendedOps {
       ExtendedSemantics.shuffle(Execute, InvocationMachine(execution))(operands, total, count, dest, resultType)
   }
 
-  private def bitselect(resultType: Int, sources: Vec[Int])(using site: Site, instruction: Instruction): Op = {
+  private def bitselect(resultType: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op = {
     val invalid = Fault.InvalidRequest("OpenCL.std bitselect operands are undefined or pointer values")
     lowered(dataTypes(sources, _ => invalid).left.map(_ => invalid).flatMap { types =>
       val shape = site.program.numericShape(resultType)
@@ -1043,7 +1024,7 @@ private object ExtendedOps {
     })
   }
 
-  private def select(resultType: Int, sources: Vec[Int])(using site: Site, instruction: Instruction): Op = {
+  private def select(resultType: Int, sources: Vec[Int])(using site: Site)(using Instruction): Op = {
     val invalid = Fault.InvalidRequest("OpenCL.std select operands are undefined or pointer values")
     lowered(dataTypes(sources, _ => invalid).left.map(_ => invalid).flatMap { types =>
       (

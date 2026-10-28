@@ -5,6 +5,7 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 class ScalarControlSuite extends munit.FunSuite {
   private def run(operations: Instruction*): Either[String, Unit] =
@@ -91,7 +92,7 @@ class ScalarControlSuite extends munit.FunSuite {
   }
 
   test("global_wbinv flushes host writes, then drops the host reads the wave cached") {
-    val events = scala.collection.mutable.ArrayBuffer.empty[String]
+    val events = mutable.ArrayBuffer.empty[String]
     class Recording extends ForwardingMemory(RegionMemory()) {
       override def flushHostWrites(): Either[Fault, Unit] = {
         events += "flush"

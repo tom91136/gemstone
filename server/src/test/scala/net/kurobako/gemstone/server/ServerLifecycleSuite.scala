@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.server
 
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import net.kurobako.gemstone.*
@@ -69,7 +70,7 @@ class ServerLifecycleSuite extends munit.FunSuite {
         assert(started.await(2, TimeUnit.SECONDS))
         val waiter = Thread(() =>
           try { val _ = client.awaitCompletion(completion) }
-          catch { case _: java.io.IOException => () }
+          catch { case _: IOException => () }
         )
         waiter.start()
         val closer = Thread(() => server.close())

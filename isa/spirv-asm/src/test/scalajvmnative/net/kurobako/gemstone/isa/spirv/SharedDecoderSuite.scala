@@ -13,6 +13,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.sys.runtime
 import scala.util.Using
 
 class SharedDecoderSuite extends munit.FunSuite {
@@ -27,7 +28,7 @@ class SharedDecoderSuite extends munit.FunSuite {
   private def collected(reclaimed: => Boolean, attempts: Int = 30): Boolean =
     if (attempts == 0) false
     else {
-      scala.sys.runtime.gc()
+      runtime.gc()
       Thread.sleep(20)
       if (reclaimed) true else collected(reclaimed, attempts - 1)
     }

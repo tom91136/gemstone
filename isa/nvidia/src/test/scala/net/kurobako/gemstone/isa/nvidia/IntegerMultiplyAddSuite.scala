@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.semantics.*
+import scala.util.Random
 
 class IntegerMultiplyAddSuite extends munit.FunSuite {
   private val register = Register(0)
@@ -123,7 +124,7 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
         signed = true
       )
     )
-    val random = scala.util.Random(0x5eedL)
+    val random = Random(0x5eedL)
     val values = boundaryValues ++ Vec.fill(256)(random.nextLong())
 
     operations.foreach { operation =>
@@ -154,7 +155,7 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
   // PTX ISA 9.7.1.4, 9.7.1.6 and 9.7.1.7: t = a * b; mad.hi adds c to t<2n-1..n>, mad.wide to t, mul24 and mad24 use
   // 24-bit operands and t<31..0> or t<47..16>; .sat clamps the signed 32-bit sum.
   test("mad.hi, mad.wide, mul24 and mad24 match the PTX ISA") {
-    val random = scala.util.Random(0x24L)
+    val random = Random(0x24L)
     val values = boundaryValues ++ Vec(0x7fffffL, 0x800000L, 0xffffffL, 0x80000000L) ++ Vec.fill(128)(random.nextLong())
     def run(operation: IntegerMultiplyAddOperation, a: Long, b: Long, c: Long): Long = {
       val probe = Probe(a, b, c)

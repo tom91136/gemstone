@@ -1,14 +1,17 @@
 package net.kurobako.gemstone.codegen
 
+import java.io.StringReader
 import java.nio.file.Files
 import java.nio.file.Path
-import net.kurobako.gemstone.codegen.AMDGPUDomainRules.Override
-import net.kurobako.gemstone.codegen.AMDGPUOperandDomains.Entry
-import net.kurobako.gemstone.codegen.AMDGPUOperandDomains.Evidence
+import javax.xml.parsers.DocumentBuilderFactory
+import net.kurobako.gemstone.codegen.AMDGPUDomainRules.*
+import net.kurobako.gemstone.codegen.AMDGPUOperandDomains.*
 import net.kurobako.gemstone.codegen.OperandDomain.*
-import net.kurobako.gemstone.codegen.OperandDomainLLVM.RegisterDef
-import net.kurobako.gemstone.codegen.OperandDomainOracle.Observation
-import net.kurobako.gemstone.isa.catalogue.BitRange
+import net.kurobako.gemstone.codegen.OperandDomainLLVM.{read as _, *}
+import net.kurobako.gemstone.codegen.OperandDomainOracle.{read as _, *}
+import net.kurobako.gemstone.isa.catalogue.*
+import org.w3c.dom.Document
+import org.xml.sax.InputSource
 import scala.collection.immutable.SortedMap
 import upickle.default.*
 
@@ -17,13 +20,13 @@ class OperandDomainSuite extends munit.FunSuite {
   private def document(types: String) =
     xmlDocument(s"<Root><OperandTypes>$types</OperandTypes></Root>")
 
-  private def xmlDocument(text: String): org.w3c.dom.Document = {
-    val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+  private def xmlDocument(text: String): Document = {
+    val factory = DocumentBuilderFactory.newInstance()
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
     factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
     factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
     factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-    factory.newDocumentBuilder().parse(org.xml.sax.InputSource(java.io.StringReader(text)))
+    factory.newDocumentBuilder().parse(InputSource(StringReader(text)))
   }
 
   private def value(name: String, code: Int) =

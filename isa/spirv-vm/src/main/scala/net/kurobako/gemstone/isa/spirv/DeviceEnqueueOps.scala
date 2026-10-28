@@ -20,15 +20,6 @@ private object DeviceEnqueueOps {
   private val SubgroupSize             = 32L
   private val ProfilingCommandExecTime = 1L
 
-  def lower: PartialFunction[Instruction, Op] = {
-    case instruction if DeviceEnqueueSemantics.transfers(instruction) => DeviceEnqueueOp(instruction)
-  }
-
-  private class DeviceEnqueueOp(instruction: Instruction) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      DeviceEnqueueSemantics.enqueue(InvocationMachine(execution))(instruction)
-  }
-
   /** Runs the device-side operation `instruction` names, then continues after it. */
   def execute(execution: InvocationState, instruction: Instruction): Flow[Unit] = {
     val values = execution.values

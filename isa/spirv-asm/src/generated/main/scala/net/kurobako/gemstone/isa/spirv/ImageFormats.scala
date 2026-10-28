@@ -1,9 +1,11 @@
 // Generated from ImageFormats. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.graphics.GraphicsFormats.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 private object ImageFormats {
   private val integer0 = Some(IntegerImageFormat.Layout(4, 4, false, true))
   private val integer1 = Some(IntegerImageFormat.Layout(1, 1, false, false))

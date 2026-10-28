@@ -1,10 +1,12 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.collection.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 private object InterpolationInstructionDefs {
   case object VInterpP10F16F32 extends Opcode("v_interp_p10_f16_f32", 1963)
 

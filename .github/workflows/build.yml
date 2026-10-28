@@ -458,3 +458,7 @@ jobs:
           for report in $(find reports -name junit.xml | sort); do
             echo "- ${report#reports/}: $(grep -om1 'tests="[0-9]*" failures="[0-9]*" skipped="[0-9]*"' "$report")"
           done | tee -a "$GITHUB_STEP_SUMMARY"
+      - if: ${{ needs.conformance.result != 'success' }}
+        run: |
+          echo "conformance shards: ${{ needs.conformance.result }}"
+          exit 1

@@ -1,9 +1,11 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object OperandConstraintTable {
   val kinds: Vec[KindRule] = Vec(
     KindRule(OperandKind.IdResultType, OperandConstraint.Type, "SPIRV-Tools validate_id.cpp IdPass"),

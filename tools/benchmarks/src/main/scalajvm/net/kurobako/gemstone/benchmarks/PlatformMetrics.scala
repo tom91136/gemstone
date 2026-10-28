@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.benchmarks
 
+import com.sun.management.ThreadMXBean
 import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
@@ -9,10 +10,10 @@ import net.kurobako.gemstone.constraint.*
 import scala.util.Try
 
 object PlatformMetrics {
-  val platform = "jvm"
+  val platform: String = "jvm"
 
   private lazy val allocationBean = ManagementFactory.getThreadMXBean match {
-    case value: com.sun.management.ThreadMXBean if value.isThreadAllocatedMemorySupported =>
+    case value: ThreadMXBean if value.isThreadAllocatedMemorySupported =>
       if (!value.isThreadAllocatedMemoryEnabled) value.setThreadAllocatedMemoryEnabled(true)
       Some(value)
     case _ => None

@@ -8,8 +8,13 @@ class AMDGPUDomainTypesSuite extends munit.FunSuite {
 
   test("a domain spans the widest bounds and every name its ISA families list") {
     val shape = AMDGPUDomainTypes.shapeOf(Vector(
-      Union(Vector(registers, Named("vcc_lo", 106), IntegerRange(0, 64, 128))),
-      Union(Vector(Registers("sgpr", 0, 101, 0), Named("tba_lo", 108), IntegerRange(-1, -16, 193), Literal(4, 255)))
+      Union(Vector(registers, Named("vcc_lo", 106), IntegerRange(first = 0, last = 64, code = 128))),
+      Union(Vector(
+        Registers("sgpr", first = 0, last = 101, code = 0),
+        Named("tba_lo", 108),
+        IntegerRange(first = -1, last = -16, code = 193),
+        Literal(bytes = 4, code = 255)
+      ))
     )).get
     assertEquals(shape.registers.toMap, Map("sgpr" -> 105))
     assertEquals(shape.named, Vector("vcc_lo", "tba_lo"))
@@ -24,7 +29,8 @@ class AMDGPUDomainTypesSuite extends munit.FunSuite {
   }
 
   test("the rendered enum carries refined register cases and converts to slots") {
-    val shape  = AMDGPUDomainTypes.shapeOf(Vector(Union(Vector(registers, Named("m0", 125), Literal(4, 255))))).get
+    val shape =
+      AMDGPUDomainTypes.shapeOf(Vector(Union(Vector(registers, Named("m0", 125), Literal(bytes = 4, code = 255))))).get
     val source = AMDGPUDomainTypes.render("ssrc", shape)
     assert(source.contains("enum Ssrc extends DomainValue"), source)
     assert(source.contains("case Sgpr(index: Int in 0 ~ 105)"), source)
@@ -34,7 +40,7 @@ class AMDGPUDomainTypesSuite extends munit.FunSuite {
   }
 
   test("a case named like its domain is called Value") {
-    val shape  = AMDGPUDomainTypes.shapeOf(Vector(Registers("vgpr", 0, 255, 0))).get
+    val shape  = AMDGPUDomainTypes.shapeOf(Vector(Registers("vgpr", first = 0, last = 255, code = 0))).get
     val source = AMDGPUDomainTypes.render("vgpr", shape)
     assert(source.contains("case Value(index: Int in 0 ~ 255)"), source)
     assertEquals(AMDGPUDomainTypes.typeName("simm8@7"), "Simm8At7")

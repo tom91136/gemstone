@@ -1,5 +1,6 @@
 package net.kurobako.gemstone
 
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.prelude.*
@@ -142,7 +143,7 @@ class ConstraintWidenSuite extends munit.FunSuite {
 
   test("inline generic predicates resolve at the call site and inputs are evaluated once") {
     inline def positive[P](value: Int where P): Long > 0 = value.widen[Long > 0]
-    val calls                                            = java.util.concurrent.atomic.AtomicInteger(0)
+    val calls                                            = AtomicInteger(0)
     def produce(): Int in 1 ~ 3                          = calls.incrementAndGet().unsafe[Int in 1 ~ 3]
     assertEquals(positive(produce()).raw, 1L)
     assertEquals(calls.get(), 1)

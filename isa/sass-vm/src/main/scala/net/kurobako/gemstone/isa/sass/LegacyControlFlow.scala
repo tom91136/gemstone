@@ -188,10 +188,7 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
     // functions entered through a register start their own stacks, as direct callees do
     val indirect = entries.filter { entry =>
       val unreached = !stacks.contains(entry)
-      if (unreached) {
-        reach(entry, Nil, Set.empty, entry)
-        drain()
-      }
+      if (unreached) { reach(entry, Nil, Set.empty, entry); drain() }
       unreached
     }
     // code reached only indirectly, such as switch cases, or not at all falls through from its predecessor, as it

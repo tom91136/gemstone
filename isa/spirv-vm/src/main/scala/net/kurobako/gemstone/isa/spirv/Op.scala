@@ -32,14 +32,6 @@ private object Op {
       }
     }
 
-  /** A hint that reads nothing: it faults only when its pointer operand is not an address. */
-  def prefetch(pointer: Int): Op = Prefetch(pointer)
-
-  private class Prefetch(pointer: Int) extends Op {
-    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      MemoryAccessSemantics.prefetch(InvocationMachine(execution))(pointer)
-  }
-
   /** Suspends the invocation at a collective rendezvous built from its current position. */
   inline def suspend(
       execution: InvocationState,

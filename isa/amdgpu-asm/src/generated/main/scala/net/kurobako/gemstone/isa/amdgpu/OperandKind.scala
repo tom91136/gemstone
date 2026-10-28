@@ -1,6 +1,8 @@
 // Generated from the pinned AMDGPU machine metadata. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import upickle.default.*
 
 object OperandKind {
@@ -10,7 +12,7 @@ object OperandKind {
   def fromName(name: String): Option[OperandKind] = byName.get(name)
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum OperandKind derives CanEqual {
   case `ACCVGPR`
   case `ATTR`

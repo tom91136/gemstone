@@ -39,6 +39,6 @@ enum Unavailable(val summary: String, val detail: Option[String] = None) derives
   case NotInstantiated(message: String)
       extends Unavailable("No instance of this form can be written yet.", Some(message))
 
-  /** Not yet classified. */
+  /** No other reason applies to the form. */
   case Unclassified extends Unavailable("Not yet described.")
 }

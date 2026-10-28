@@ -8,9 +8,10 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
+import scala.util.Random
 
 class FloatSemanticsSuite extends munit.FunSuite {
-  private val random = scala.util.Random(23)
+  private val random = Random(23)
 
   private def f32(value: Float): Long  = IEEE754.floatToBinary32(value).toLong
   private def f64(value: Double): Long = IEEE754.doubleToBinary64(value)

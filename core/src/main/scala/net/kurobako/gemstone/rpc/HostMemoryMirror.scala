@@ -181,10 +181,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   private def storeIfAbsent(address: Long, value: Byte): Unit = {
     val page  = pages.getOrElseUpdate(number(address), Page())
     val index = offset(address)
-    if (!page.valid.get(index)) {
-      page.bytes(index) = value
-      page.valid.set(index)
-    }
+    if (!page.valid.get(index)) { page.bytes(index) = value; page.valid.set(index) }
   }
 
   /** Record a value returned by a native atomic operation without making it dirty for publication. */
@@ -273,7 +270,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
 
   def takeDirty(selected: Vec[HostMemoryRange]): Vec[HostMemoryBytes] = take(selectedDirty(selected))
 
-  /** Acquire discards stale host reads, retaining writes other lanes have not yet published. */
+  /** Acquire discards stale host reads, retaining unpublished writes from other lanes. */
   def invalidateClean(): Unit =
     pages.filterInPlace { (number, page) =>
       val dirty = java.util.BitSet(pageSize)

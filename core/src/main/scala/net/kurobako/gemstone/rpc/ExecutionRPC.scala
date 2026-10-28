@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.rpc
 
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -124,7 +125,7 @@ object ExecutionRPC {
   }
 
   private def truncateUtf8(value: String, maximumBytes: Int): String =
-    if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= maximumBytes) value
+    if (value.getBytes(StandardCharsets.UTF_8).length <= maximumBytes) value
     else {
       val result = mutable.StringBuilder()
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -202,6 +203,25 @@ object ExecutionRPC {
         extends Operation[Unit]
     case ReadAllocation(allocation: AllocationId, offset: Long >= 0, size: Int >= 0)
         extends Operation[Vec[Byte]]
+    case WriteAllocationRectangle(
+        allocation: AllocationId,
+        offset: Long >= 0,
+        rowBytes: Int > 0,
+        rowCount: Int > 0,
+        sliceCount: Int > 0,
+        rowPitch: Int > 0,
+        slicePitch: Int > 0,
+        bytes: Vec[Byte]
+    ) extends Operation[Unit]
+    case ReadAllocationRectangle(
+        allocation: AllocationId,
+        offset: Long >= 0,
+        rowBytes: Int > 0,
+        rowCount: Int > 0,
+        sliceCount: Int > 0,
+        rowPitch: Int > 0,
+        slicePitch: Int > 0
+    ) extends Operation[Vec[Byte]]
     case LoadProgram(encoding: ProgramEncoding, image: Vec[Byte])
         extends Operation[ProgramId]
     case DescribeSpecialization(image: Vec[Byte])

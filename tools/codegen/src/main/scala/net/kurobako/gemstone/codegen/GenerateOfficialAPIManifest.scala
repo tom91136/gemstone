@@ -3,6 +3,7 @@ package net.kurobako.gemstone.codegen
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
+import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.constraint.*
@@ -83,7 +84,7 @@ object GenerateOfficialAPIManifest {
       surface.headers.flatMap(header => Vector("-include", header)) ++ Vector("-")
     val diagnostics = mutable.StringBuilder()
     val output      = try
-      Process(command).#<(java.io.ByteArrayInputStream(Array.emptyByteArray)).!!(
+      Process(command).#<(ByteArrayInputStream(Array.emptyByteArray)).!!(
         ProcessLogger { line =>
           val _ = diagnostics.append(line).append('\n')
         }

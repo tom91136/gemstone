@@ -80,7 +80,16 @@ private object MemoryOps {
     case Instruction.LifetimeStart(pointer, size) => lifetime("OpLifetimeStart", pointer, size)
     case Instruction.LifetimeStop(pointer, size)  => lifetime("OpLifetimeStop", pointer, size)
     case Instruction.GroupAsyncCopy(t, d, scope, destination, source, count, stride, _) =>
-      GroupAsyncCopy(id(d), id(t), id(scope), id(destination), id(source), id(count), id(stride), -1)
+      GroupAsyncCopy(
+        target = id(d),
+        typeId = id(t),
+        scope = id(scope),
+        destination = id(destination),
+        source = id(source),
+        count = id(count),
+        stride = id(stride),
+        element = -1
+      )
     case Instruction.GroupWaitEvents(scope, count, events) => GroupWaitEvents(id(scope), id(count), id(events))
     case Instruction.UntypedGroupAsyncCopyKHR(
           resultType = t,
@@ -92,7 +101,24 @@ private object MemoryOps {
           numElements = count,
           stride = stride
         ) =>
-      GroupAsyncCopy(id(d), id(t), id(scope), id(destination), id(source), id(count), id(stride), id(element))
+      GroupAsyncCopy(
+        target = id(d),
+        typeId = id(t),
+        scope = id(scope),
+        destination = id(destination),
+        source = id(source),
+        count = id(count),
+        stride = id(stride),
+        element = id(element)
+      )
+  }
+
+  /** A hint that reads nothing: it faults only when its pointer operand is not an address. */
+  def prefetch(pointer: Int): Op = Prefetch(pointer)
+
+  private class Prefetch(pointer: Int) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
+      MemoryAccessSemantics.prefetch(InvocationMachine(execution))(pointer)
   }
 
   /** SPV_INTEL_variable_length_array: `length` elements of `element` in function storage, released as the function's

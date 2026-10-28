@@ -13,6 +13,9 @@ private object ImageLowering {
 
   private class ImageOp(instruction: Instruction) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      ImageSemantics.image(InvocationMachine(execution))(instruction)
+      SamplingSemantics.execute(execution, instruction) match {
+        case Some(flow) => flow
+        case None       => ImageSemantics.image(InvocationMachine(execution))(instruction)
+      }
   }
 }

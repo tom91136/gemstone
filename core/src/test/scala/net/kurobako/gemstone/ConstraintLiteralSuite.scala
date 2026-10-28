@@ -1,5 +1,6 @@
 package net.kurobako.gemstone
 
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import scala.compiletime.testing.typeCheckErrors
@@ -92,7 +93,7 @@ class ConstraintLiteralSuite extends munit.FunSuite {
     assert(diagnostic("") == "invalid input: ")
     assert(diagnostic("a\u0000b") == "invalid input: a\u0000b")
     assert(dimensions(4, "kernel") == "kernel has 4 elements")
-    val calls                  = java.util.concurrent.atomic.AtomicInteger(0)
+    val calls                  = AtomicInteger(0)
     val once: NonEmpty[String] = s"count ${calls.incrementAndGet()}"
     assert(once == "count 1")
     assertEquals(calls.get(), 1)

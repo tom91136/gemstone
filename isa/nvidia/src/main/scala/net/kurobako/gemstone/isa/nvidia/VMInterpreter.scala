@@ -80,10 +80,7 @@ private[isa] object VMInterpreter {
     def nonEmpty: Boolean = count != 0
 
     private def key(pc: Pc, frame: VMFrame): Long = {
-      if (frame.readyId == 0) {
-        frames += 1
-        frame.readyId = frames
-      }
+      if (frame.readyId == 0) { frames += 1; frame.readyId = frames }
       (frame.readyId.toLong << 32) | (pc.toInt.toLong & 0xffffffffL)
     }
 
@@ -603,10 +600,7 @@ private[isa] object VMInterpreter {
 
     private def advance(cohort: Cohort, lanes: VMLaneMask)(using Run): Unit =
       if (cohort.pc.toInt == Int.MaxValue) fail(Fault.Backend("program counter overflow"))
-      else {
-        stalled = 0
-        enqueue(cohort.copy(pc = Pc(cohort.pc.unwrap + 1), lanes = lanes))
-      }
+      else { stalled = 0; enqueue(cohort.copy(pc = Pc(cohort.pc.unwrap + 1), lanes = lanes)) }
 
     private def enterCall(
         cohort: Cohort,
@@ -686,7 +680,13 @@ private[isa] object VMInterpreter {
           else sync.members.foreach(_.clusterArrived = VMLaneMask.Empty)
         }
         val pending  = clusterWaiting.toVector
-        val departed = pending.filterNot(_.arrival).groupMapReduce(_.phase)(_.cohort.lanes)(_.union(_))
+        val departed = mutable.LongMap.empty[VMLaneMask]
+        pending.foreach { entry =>
+          if (!entry.arrival) departed.update(
+            entry.phase,
+            departed.get(entry.phase).fold(entry.cohort.lanes)(_.union(entry.cohort.lanes))
+          )
+        }
         clusterWaiting.clear()
         pending.foreach { entry =>
           val participants = if (entry.arrival) clusterArrived
@@ -803,10 +803,7 @@ private[isa] object VMInterpreter {
       while (index < parked.length) {
         val value = parked(index)
         if (canResume(value, arrived)) resumed += value
-        else {
-          parked(kept) = value
-          kept += 1
-        }
+        else { parked(kept) = value; kept += 1 }
         index += 1
       }
       parked.dropRightInPlace(parked.length - kept)
@@ -819,10 +816,7 @@ private[isa] object VMInterpreter {
       while (index < parked.length) {
         val value = parked(index)
         if (value.cohort.lanes.intersect(participants).nonEmpty) released += value
-        else {
-          parked(kept) = value
-          kept += 1
-        }
+        else { parked(kept) = value; kept += 1 }
         index += 1
       }
       parked.dropRightInPlace(parked.length - kept)
@@ -833,7 +827,7 @@ private[isa] object VMInterpreter {
       val parked  = waiting.getOrElse(key, null)
       resumed.clear()
       if (parked != null) takeResumable(parked, arrived)
-      resumed.foreach(resume)
+      resumed.foreach(resume(_))
       participants(key, arrived).foreach { participants =>
         released.clear()
         if (parked != null) takeParticipating(parked, participants)
@@ -853,7 +847,7 @@ private[isa] object VMInterpreter {
           case _ => ()
         }
         reduce(released)
-        released.foreach(resume)
+        released.foreach(resume(_))
       }
       if (parked != null && parked.isEmpty) {
         val _ = waiting.remove(key)
@@ -1130,10 +1124,7 @@ private[isa] object VMInterpreter {
         case None => ()
       }
       if (cohort.lanes.isEmpty) stalled += 1
-      else {
-        stalled = 0
-        step(cohort, instruction)
-      }
+      else { stalled = 0; step(cohort, instruction) }
     }
 
     /** Every ready cohort has waited in turn for lanes that have not moved since. */

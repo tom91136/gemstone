@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 import scala.util.control.NonFatal
 
 /** The Vulkan shader boundary. Native callers supply bytes and specialization values; all entry selection, lowering and
@@ -59,7 +60,7 @@ object ShaderPreparation {
   }
 
   private def descriptorsOf(program: VMProgram, arguments: Vec[Int]): Either[Fault, Vec[ShaderDescriptor]] = {
-    val counts = scala.collection.mutable.Map.empty[Int, Int >= 0]
+    val counts = mutable.Map.empty[Int, Int >= 0]
     arguments.flatMap(variable => program.descriptorBindings.get(variable).map(variable -> _)).traverse {
       case (variable, (set, binding)) =>
         val element = counts.getOrElse(variable, 0: Int >= 0)

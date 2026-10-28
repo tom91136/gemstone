@@ -9,6 +9,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.util.Using
 
 class VMMemoryConcurrencySuite extends munit.FunSuite {
   private def storage(memory: AddressSpace, globals: Array[Byte]): VMMemory.Storage =
@@ -21,7 +22,7 @@ class VMMemoryConcurrencySuite extends munit.FunSuite {
     val pointer    =
       VMMemory.Pointer(VMMemory.apertureAddress(VMMemory.GlobalAperture, 0), 0, StorageClass.CrossWorkgroup)
     val start = CyclicBarrier(workers)
-    scala.util.Using.resource(threads.Pool(workers)) { pool =>
+    Using.resource(threads.Pool(workers)) { pool =>
       val tasks = Vec.tabulate(workers) { _ =>
         val task: Callable[Vec[Long]] = () => {
           val memory = VMMemory.MemoryState(shared)

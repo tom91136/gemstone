@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
+import scala.util.Random
 
 /** tcgen05 kernels, their inputs and their expected results, shared by the PTX suites and the SASS suites that run
   * ptxas's output for them. Every kernel assembles with CUDA 13.3 `ptxas -arch=sm_100a` (`sm_103a` for tcgen05.ld.red);
@@ -616,7 +617,7 @@ object TensorMemoryCases {
 
   private def copiesProduct: Product = {
     val setup  = Setup(512)
-    val random = scala.util.Random(5)
+    val random = Random(5)
     random.nextBytes(32768).zipWithIndex.foreach((value, offset) => setup.put(offset, value.toLong, 1))
     for {
       lane   <- 0 until 128

@@ -1,11 +1,13 @@
 package net.kurobako.gemstone.vm
 
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 
 object WorkerPool {
@@ -28,7 +30,7 @@ class WorkerPool(
     minWorkItems: Long >= 0 = 32L,
     reporter: Throwable => Unit = _.printStackTrace(),
     measurement: Option[WorkerPool.Measurement => Unit] = None
-) extends Workgroups with scala.concurrent.ExecutionContext with AutoCloseable {
+) extends Workgroups with ExecutionContext with AutoCloseable {
   private class Job(
       val count: Long >= 0,
       val grain: Int in 1 ~ 128,
@@ -73,12 +75,9 @@ class WorkerPool(
       task: Long >= 0 => Either[Fault, Unit],
       rejected: Option[Throwable => Unit] = None
   ): Job = lock.withLock {
-    if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed", failure.orNull)
+    if (closed) throw RejectedExecutionException("execution pool is closed", failure.orNull)
     val job = Job(count, grainFor(count), task, rejected)
-    if (count > 0L) {
-      queue.append(job)
-      workReady.signalAll()
-    }
+    if (count > 0L) { queue.append(job); workReady.signalAll() }
     job
   }
 
@@ -96,10 +95,7 @@ class WorkerPool(
       job.next = end
       job.active += 1
       job.observed.foreach(_ += Thread.currentThread().getName)
-      if (job.next < job.count) {
-        queue.append(job)
-        workReady.signal()
-      }
+      if (job.next < job.count) { queue.append(job); workReady.signal() }
       Some((job, start, length.toIntExact))
     }
   }
@@ -216,7 +212,7 @@ class WorkerPool(
     val enqueued =
       try Right(enqueue(taskCount, task))
       catch {
-        case error: java.util.concurrent.RejectedExecutionException =>
+        case error: RejectedExecutionException =>
           Left(Fault.Backend(s"execution pool rejected task: ${throwables.detail(error)}"))
       }
     enqueued match {

@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.isa.ptx.Program.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import scala.collection.mutable
 
 /** PTX instruction addresses are ordinals within the routine, which the compiler numbers by counting the instructions
   * of the flattened body. Blocks are flattened in place, so a listing walks them in the same order.
@@ -27,7 +28,7 @@ private object PTXListing {
   private def routine(
       function: String,
       body: Vec[Statement],
-      lines: scala.collection.mutable.Builder[ProgramLine, Vec[ProgramLine]]
+      lines: mutable.Builder[ProgramLine, Vec[ProgramLine]]
   ): Unit = {
     var ordinal                                = 0L
     def walk(statements: Vec[Statement]): Unit = statements.foreach {

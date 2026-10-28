@@ -5,6 +5,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import scala.annotation.tailrec
+import scala.annotation.unused
 import scala.runtime.LongRef
 
 object AddressSpace {
@@ -93,7 +95,7 @@ object AddressSpace {
 trait AddressSpace derives CanEqual {
   import AddressSpace.*
 
-  @scala.annotation.tailrec
+  @tailrec
   final def awaitRead[A](read: => ReadResult[A]): Either[Fault, A] = read match {
     case Left(_: Pending.type) => flushHostReads() match {
         case Left(fault) => Left(fault)
@@ -148,13 +150,13 @@ trait AddressSpace derives CanEqual {
     write(region, offset, LittleEndian.toVec(value, size.widen[Int in 0 ~ 8]))
 
   def atomicModifyValue(
-      @scala.annotation.unused region: AllocationId,
-      @scala.annotation.unused offset: Long >= 0,
-      @scala.annotation.unused size: Int in 1 ~ 8
-  )(@scala.annotation.unused update: Long => Long): Either[Fault, Long] =
+      @unused region: AllocationId,
+      @unused offset: Long >= 0,
+      @unused size: Int in 1 ~ 8
+  )(@unused update: Long => Long): Either[Fault, Long] =
     Left(Fault.Unsupported("memory does not support atomic modification"))
 
-  def prepareReads(@scala.annotation.unused ranges: ReadRanges): Either[Fault, Unit] = Ready
+  def prepareReads(@unused ranges: ReadRanges): Either[Fault, Unit] = Ready
 
   def prepareSystemReads(ranges: ReadRanges): Either[Fault, Unit] = prepareReads(ranges)
 

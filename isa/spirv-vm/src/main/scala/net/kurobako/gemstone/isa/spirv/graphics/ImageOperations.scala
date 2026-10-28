@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.graphics
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.isa.spirv.ImageFormats.*
+import scala.collection.mutable
 
 /** Transfer and attachment operations share exactly the same storage and texel conversion as draws. */
 private class ImageOperations(memory: GraphicsAccess) {
@@ -244,7 +245,7 @@ private class ImageOperations(memory: GraphicsAccess) {
     val de         = Array(region.destinationEnd.x, region.destinationEnd.y, region.destinationEnd.z)
     val dimensions =
       Array(src.width(region.source.level), src.height(region.source.level), src.depth(region.source.level))
-    val compressed = scala.collection.mutable.Map.empty[Long, Array[Float]]
+    val compressed                                                         = mutable.Map.empty[Long, Array[Float]]
     def sample(layer: Int, coordinates: Array[Int]): (Long, Array[Double]) = {
       val c      = coordinates.indices.map(i => math.max(0, math.min(dimensions(i) - 1, coordinates(i)))).toArray
       val offset = src.offset(region.source.level, region.source.baseLayer.raw + layer, c(0), c(1), c(2))

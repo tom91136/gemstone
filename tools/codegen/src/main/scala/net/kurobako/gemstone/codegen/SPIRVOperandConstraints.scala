@@ -19,7 +19,7 @@ object SPIRVOperandConstraints {
     case OneOf(values: Vector[Long])
   }
 
-  final case class Rule(opcode: String, operand: String, constraint: Constraint, source: String)
+  case class Rule(opcode: String, operand: String, constraint: Constraint, source: String)
 
   /** Constraints on every operand of a kind, whichever instruction it appears in. */
   val kinds: Vector[(String, Constraint, String)] = Vector(

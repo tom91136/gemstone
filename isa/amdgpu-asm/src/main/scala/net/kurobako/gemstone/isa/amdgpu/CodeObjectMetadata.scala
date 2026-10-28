@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
 /** AMDGPU MessagePack metadata from the ELF note already owned by the Scala code-object decoder. */
@@ -45,7 +46,7 @@ object CodeObjectMetadata {
       size: Int
   ): Either[CodeObjectError, Option[Vec[KernelManifest]]] = {
     val limit = start + size
-    @scala.annotation.tailrec
+    @tailrec
     def loop(
         offset: Int,
         found: Vec[KernelManifest]
@@ -83,7 +84,7 @@ object CodeObjectMetadata {
       decode: => Either[CodeObjectError, A]
   ): Either[CodeObjectError, Vec[A]] = {
     val decoded = Vec.newBuilder[A]
-    @scala.annotation.tailrec
+    @tailrec
     def loop(remaining: Int): Either[CodeObjectError, Vec[A]] =
       if (remaining == 0) Right(decoded.result())
       else

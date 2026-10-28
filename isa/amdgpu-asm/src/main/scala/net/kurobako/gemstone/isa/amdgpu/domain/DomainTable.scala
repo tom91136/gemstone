@@ -61,9 +61,13 @@ class DomainTable(val id: String, val runs: Vector[Run], rules: Vector[DomainTab
     found
   }
 
+  private val unaligned = (0, 1)
+
   private val alignmentSteps: Map[RegisterFile, Vector[(Int, Int)]] =
     rules.groupBy(_.file).view.mapValues { fileRules =>
-      fileRules.sortBy(_.fromBits).scanLeft((0, 1))((step, rule) => (rule.fromBits, step._2.max(rule.alignment))).tail
+      fileRules.sortBy(_.fromBits).scanLeft(unaligned)((step, rule) =>
+        (rule.fromBits, step._2.max(rule.alignment))
+      ).tail
     }.toMap
 
   /** The code of the first register of a `bits`-wide operand, all its registers in one run and the first legal. */

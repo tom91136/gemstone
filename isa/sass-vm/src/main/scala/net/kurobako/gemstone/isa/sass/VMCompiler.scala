@@ -17,6 +17,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.reflect.TypeTest
 import scala.util.control.NonFatal
 
 /** Compile SASS register operations to the shared NVIDIA execution IR, preserving physical register aliases. */
@@ -117,7 +118,7 @@ private object VMCompiler {
     val instructions = function.instructions
     val layout       = VMRegisters.Layout.of(kernel, functions)
     val reductions   = LegacyRangeReduction.inputs(module.sm, function, layout)
-    def is[A <: Form](instruction: DecodedInstruction)(using scala.reflect.TypeTest[Form, A]) =
+    def is[A <: Form](instruction: DecodedInstruction)(using TypeTest[Form, A]) =
       OperandQueries.is[A](instruction.operation)
     def at(address: Int): Option[DecodedInstruction] = instructions.find(_.address.raw == address)
     val collectiveEnds                               = instructions.filter(i =>
@@ -292,7 +293,7 @@ private object VMCompiler {
       val registerLayout: VMRegisters.Layout
   ) extends VMCompilationContext {
     private val code         = mutable.ArrayBuffer.empty[VMAssembler.Statement]
-    private val writtenFlags = scala.collection.mutable.Set.empty[VMConditionCodes.Flag]
+    private val writtenFlags = mutable.Set.empty[VMConditionCodes.Flag]
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var temporaryCount = 0
 

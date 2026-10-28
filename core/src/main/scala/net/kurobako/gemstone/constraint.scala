@@ -2,6 +2,7 @@ package net.kurobako.gemstone
 
 import scala.annotation.publicInBinary
 import scala.annotation.targetName
+import scala.collection.immutable.Iterable
 import scala.language.implicitConversions
 import scala.util.NotGiven
 import upickle.default.ReadWriter
@@ -286,7 +287,7 @@ object constraint extends Unrefined {
       def nonEmpty(value: String): Boolean = value != null && value.nonEmpty
     }
 
-    given [A <: scala.collection.immutable.Iterable[?]]: HasElements[A] with {
+    given [A <: Iterable[?]]: HasElements[A] with {
       @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
       def nonEmpty(value: A): Boolean = value != null && value.nonEmpty
     }

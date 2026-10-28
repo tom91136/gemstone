@@ -4,7 +4,7 @@ package net.kurobako.gemstone.codegen
 object GeneratedHeader {
 
   /** Repository command that regenerates every checked-in generated artifact. */
-  val Regenerate = "sbt codegen"
+  val Regenerate: String = "sbt codegen"
 
   def scala(subject: String): String = line("//", subject)
 
@@ -15,5 +15,5 @@ object GeneratedHeader {
 
   /** Standard `javax.annotation.processing.Generated` marker (`java.compiler`, SOURCE retention). */
   def annotation(): String =
-    s"""@javax.annotation.processing.Generated(Array("$Regenerate"))\n"""
+    s"""@Generated(Array("$Regenerate"))\n"""
 }

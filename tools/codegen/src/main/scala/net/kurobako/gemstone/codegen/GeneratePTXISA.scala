@@ -6,7 +6,7 @@ import com.monovore.decline.Opts
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import net.kurobako.gemstone.collection.Vec
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 import org.jsoup.Jsoup
@@ -208,13 +208,13 @@ object GeneratePTXISA {
       require(values.map(scalaCaseName(_)).distinct.size == values.size, s"ambiguous PTX $name names")
       val cases =
         values.map(value => s"  case ${scalaCaseName(value)} extends $name(${Emission.literal(value)})").mkString("\n")
-      val entries = values.map(value => s"${Emission.literal(value)} -> ${scalaCaseName(value)}").mkString(", ")
+      val known = if (extra.isEmpty) "values" else values.map(scalaCaseName(_)).mkString("Vector(", ", ", ")")
       GeneratedHeader.scala("from the pinned PTX syntax domains") +
         s"""|package net.kurobako.gemstone.isa.ptx
             |import net.kurobako.gemstone.constraint.*
             |
             |object $name {
-            |  private lazy val byName: Map[String, $name] = Map($entries)
+            |  private lazy val byName: Map[String, $name] = $known.view.map(value => value.name.raw -> value).toMap
             |  def apply(name: NonEmpty[String]): $name = byName.getOrElse(name.raw, $fallback)
             |  def unapply(value: $name): Some[NonEmpty[String]] = Some(value.name)
             |$members}
@@ -293,14 +293,13 @@ object GeneratePTXISA {
     val names = domainDefinitions(sections).flatMap(_.forms).flatMap(form => form.required ++ form.optional)
       .filter(_.values.size > 1).map(_.name).distinct.sorted
     require(names.map(scalaCaseName(_)).distinct.size == names.size, "ambiguous PTX slot names")
-    val cases   = names.map(name => s"  case ${scalaCaseName(name)} extends ModifierSlot(${Emission.literal(name)})")
-    val entries = names.map(name => s"${Emission.literal(name)} -> ${scalaCaseName(name)}").mkString(", ")
+    val cases = names.map(name => s"  case ${scalaCaseName(name)} extends ModifierSlot(${Emission.literal(name)})")
     GeneratedHeader.scala("from the pinned PTX syntax domains") +
       s"""|package net.kurobako.gemstone.isa.ptx
           |import net.kurobako.gemstone.constraint.*
           |
           |object ModifierSlot {
-          |  private lazy val byName: Map[String, ModifierSlot] = Map($entries)
+          |  private lazy val byName: Map[String, ModifierSlot] = values.view.map(slot => slot.name.raw -> slot).toMap
           |  def apply(name: String): Option[ModifierSlot] = byName.get(name)
           |}
           |
@@ -873,6 +872,7 @@ object GeneratePTXISA {
         |import net.kurobako.gemstone.isa.*
         |import net.kurobako.gemstone.collection.*
         |import net.kurobako.gemstone.collection.Vec.*
+        |import scala.collection.mutable
         |
         |${GeneratedHeader.annotation()}object Instruction {
         |  type Decoder = (operands: Vec[Operand], mods: Vec[Modifier]) => Either[DecodeError, Form]
@@ -923,8 +923,8 @@ object GeneratePTXISA {
         |
         |    val remaining = allModifiers.drop(specificity)
         |    var successful: Option[(Definition, Form)] = None
-        |    val ambiguous = scala.collection.mutable.ArrayBuffer.empty[String]
-        |    val expected = scala.collection.mutable.ArrayBuffer.empty[Int]
+        |    val ambiguous = mutable.ArrayBuffer.empty[String]
+        |    val expected = mutable.ArrayBuffer.empty[Int]
         |    index = 0
         |    while (index < definitions.size) {
         |      val definition = definitions(index)

@@ -11,6 +11,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.collection.mutable
 
 /** SPIR-V test scaffolding: every test assembles, loads and dispatches through these entry points. */
 private object fixtures extends munit.Assertions {
@@ -101,7 +102,7 @@ private object fixtures extends munit.Assertions {
   /** Covering set in which every pair of values from two different dimensions appears in at least one row. */
   def pairwise(sizes: Int*): Seq[Seq[Int]] = {
     val dimensions = sizes.indices
-    val uncovered  = scala.collection.mutable.LinkedHashSet.from(for {
+    val uncovered  = mutable.LinkedHashSet.from(for {
       i <- dimensions
       j <- dimensions if i < j
       a <- 0 until sizes(i)

@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.server
 
+import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
@@ -116,7 +117,7 @@ object protocol {
       .fold(message => throw IllegalArgumentException(s"invalid execution payload size: $message"), identity)
     require(size <= ExecutionRPC.MaximumPayload, s"invalid execution payload size: $size")
     val tag       = readExactly(input, tagSize, EOFException(_))
-    val operation = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(tag)).toString
+    val operation = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(tag)).toString
       .refine[NonEmpty[String]].fold(message => throw IllegalArgumentException(message), identity)
     Header(client, session, operation, size)
   }
@@ -166,12 +167,12 @@ object protocol {
   }
 
   object Control {
-    val Magic          = 0x474d4331
-    val RegisterClient = 1
-    val ReleaseClient  = 2
-    val Shutdown       = 3
-    val Finish         = 4
-    val ResponseMagic  = 0x474d5331
+    val Magic: Int          = 0x474d4331
+    val RegisterClient: Int = 1
+    val ReleaseClient: Int  = 2
+    val Shutdown: Int       = 3
+    val Finish: Int         = 4
+    val ResponseMagic: Int  = 0x474d5331
 
     private val TimeoutMillis: Int > 0 = 5000
 
@@ -202,7 +203,7 @@ object protocol {
         writeRequest(output, operation, client)
         val input   = DataInputStream(channel.input)
         val payload = readResponse(input, operation)
-        read(DataInputStream(java.io.ByteArrayInputStream(payload)))
+        read(DataInputStream(ByteArrayInputStream(payload)))
       }
 
     def writeRequest(output: DataOutputStream, operation: Int, client: Option[ClientId] = None): Unit = {
@@ -233,7 +234,7 @@ object protocol {
     def finish(input: DataInputStream, output: DataOutputStream): Unit = {
       writeRequest(output, Finish)
       val payload = readResponse(input, Finish)
-      if (java.nio.ByteBuffer.wrap(payload).getInt() != 0) throw IOException("RPC connection finish failed")
+      if (ByteBuffer.wrap(payload).getInt() != 0) throw IOException("RPC connection finish failed")
     }
   }
 }

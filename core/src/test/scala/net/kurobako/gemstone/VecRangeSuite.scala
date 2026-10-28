@@ -4,6 +4,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import scala.collection.immutable.ArraySeq
 import scala.compiletime.testing.typeCheckErrors
 
 class VecRangeSuite extends munit.FunSuite {
@@ -62,8 +63,8 @@ class VecRangeSuite extends munit.FunSuite {
     assertEquals(extended, Vec("1", "1", "2", "2", "3", "3"))
     assertEquals(extended.positiveSize.raw, 6)
     bytes match {
-      case _: scala.collection.immutable.ArraySeq.ofByte => ()
-      case _                                             => fail("byte tabulation must retain primitive storage")
+      case _: ArraySeq.ofByte => ()
+      case _                  => fail("byte tabulation must retain primitive storage")
     }
   }
 

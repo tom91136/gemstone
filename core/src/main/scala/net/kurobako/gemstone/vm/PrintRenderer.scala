@@ -1,10 +1,13 @@
 package net.kurobako.gemstone.vm
 
+import java.math.MathContext
+import java.math.RoundingMode
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.Event.*
+import scala.annotation.tailrec
 import scala.collection.mutable
 
 /** Renders a structured device-`printf` event into text. Mirrors the C `printf` subset the interpreter emits:
@@ -21,7 +24,7 @@ object PrintRenderer {
       if (percent < 0) format.length else percent
     }
 
-    @scala.annotation.tailrec
+    @tailrec
     def loop(index: Int, argumentIndex: Int): Either[String, Int] = {
       val literal = literalEnd(index)
       if (literal > index) output.append(format.substring(index, literal))
@@ -228,7 +231,7 @@ object PrintRenderer {
   // ties-to-even rule. Decimal string conversion first would change ties.
   private def decimalFloat(value: Double, conversion: Char, precision: Int, alternate: Boolean): String = {
     val exact                                       = BigDecimal.exact(value).bigDecimal
-    val rounding                                    = java.math.RoundingMode.HALF_EVEN
+    val rounding                                    = RoundingMode.HALF_EVEN
     def exponent(number: java.math.BigDecimal): Int =
       if (number.signum() == 0) 0 else number.precision() - number.scale() - 1
     def point(text: String): String = if (alternate && !text.contains('.')) text + "." else text
@@ -242,10 +245,10 @@ object PrintRenderer {
     }
     if (conversion == 'f') point(exact.setScale(precision, rounding).toPlainString)
     else if (conversion == 'e')
-      scientific(exact.round(java.math.MathContext(precision + 1, rounding)), precision, strip = false)
+      scientific(exact.round(MathContext(precision + 1, rounding)), precision, strip = false)
     else {
       val significant = math.max(1, precision)
-      val rounded     = exact.round(java.math.MathContext(significant, rounding))
+      val rounded     = exact.round(MathContext(significant, rounding))
       val power       = exponent(rounded)
       if (power < -4 || power >= significant) scientific(rounded, significant - 1, strip = true)
       else trim(point(rounded.setScale(significant - power - 1, rounding).toPlainString))

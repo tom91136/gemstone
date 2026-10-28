@@ -258,10 +258,7 @@ private object VMInvocation {
 
     /** The memory the invocation waited for has arrived, so it runs on. */
     def memoryReady(): Unit =
-      if (memoryPending) {
-        status = Status.Running
-        transition(MachineEvent.Kind.Resumed)
-      }
+      if (memoryPending) { status = Status.Running; transition(MachineEvent.Kind.Resumed) }
 
     /** The invocation waits at a collective rendezvous until the lanes that meet there arrive. */
     def suspend(request: CollectiveRequest): Unit = {
@@ -290,7 +287,7 @@ private object VMInvocation {
     var reconvergedReturn                                              = false
     var quadRequest: Option[QuadRequest]                               = None
     var gradients: Option[(Array[Double], Array[Double])]              = None
-    var texels: Option[ImageOps.ImageLevel]                            = None
+    var texels: Option[ImageLevel]                                     = None
     var fragmentQuad                                                   = false
     var subgroupReconvergence                                          = false
     var helperInvocation                                               = false

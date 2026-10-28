@@ -123,7 +123,7 @@ private object ArithmeticOps {
   )
 
   // Wrapping addition, subtraction and multiplication take their width from the result and broadcast operands.
-  private def wrapping(left: Operand, right: Operand)(using site: Site)(staged: => Op): Op =
+  private def wrapping(left: Operand, right: Operand)(using Site)(staged: => Op): Op =
     lowered(
       data(Vec(left, right), value => Fault.InvalidRequest(s"SPIR-V value %${value.id} is not numeric")).map(_ =>
         staged
@@ -136,7 +136,7 @@ private object ArithmeticOps {
       inline shape: Int => Option[S],
       resultKind: String,
       operandKind: String
-  )(using site: Site, canEqual: CanEqual[S, S]): Either[Fault, S] =
+  )(using Site, CanEqual[S, S]): Either[Fault, S] =
     data(
       Vec(operands.left, operands.right),
       value => Fault.InvalidRequest(s"$opcode ${side(value.id, operands.left)} operand %${value.id} is a pointer")
@@ -173,7 +173,7 @@ private object ArithmeticOps {
 
   private def side(value: Int, left: Operand): String = if (value == id(left)) "left" else "right"
 
-  private def division(name: String, operands: BinaryOperands)(using site: Site)(staged: => Op): Op =
+  private def division(name: String, operands: BinaryOperands)(using Site)(staged: => Op): Op =
     lowered(sameIntegerShapes(name, operands).map(_ => staged))
 
   private def negate(resultType: Operand, source: Operand)(using site: Site)(staged: => Op): Op = lowered(

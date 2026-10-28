@@ -1,10 +1,12 @@
 // Generated SASS typed logical instruction forms from pinned NVIDIA descriptions. Regenerate with: sbt codegen
 
 package net.kurobako.gemstone.isa.sass
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object Instruction {
   object Modifier {
     private lazy val known: Map[String, Modifier] = Vec[Modifier](
@@ -9489,7 +9491,7 @@ object Instruction {
   }
 }
 import Instruction.*
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 case class Instruction(
     form: Form,
     modifiers: Vec[Modifier] = Vec.empty,

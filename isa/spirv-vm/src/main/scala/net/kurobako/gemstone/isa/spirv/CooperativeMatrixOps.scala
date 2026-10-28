@@ -39,7 +39,15 @@ private object CooperativeMatrixOps {
       lowered(for {
         origin <- scalarArray(site.program, site.program.valueType(id(source)))
         result <- scalarArray(site.program, id(t))
-      } yield BitCastArray(id(source), origin._1, origin._2, id(d), result._1, result._2, id(t)))
+      } yield BitCastArray(
+        source = id(source),
+        have = origin._1,
+        from = origin._2,
+        target = id(d),
+        count = result._1,
+        to = result._2,
+        typeId = id(t)
+      ))
     case Instruction.ExtractSubArrayQCOM(t, d, source, index) =>
       lowered(site.program.scalarLeafCount(id(t)).map(_ => SubArrayExtract(id(source), id(index), id(d), id(t))))
     case Instruction.CompositeExtractCoopMatQCOM(t, d, source) =>

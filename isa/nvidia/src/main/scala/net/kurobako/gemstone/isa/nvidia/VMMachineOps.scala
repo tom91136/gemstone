@@ -360,10 +360,7 @@ private[isa] object VMMachineOps {
     val pointer = ((base + top - storage.stack - bytes) & -alignment) - base
     if (java.lang.Long.compareUnsigned(bytes, VMAddressSpace.LocalFrameSize) > 0 || pointer < stackBottom(context))
       Left(stackOverflow(context, lane, pointer))
-    else {
-      storage.stack = top - pointer
-      Right(pointer)
-    }
+    else { storage.stack = top - pointer; Right(pointer) }
   }
 
   def stackRestore(context: VMContext, lane: WorkgroupLane, pointer: Long): Either[Fault, Unit] = {

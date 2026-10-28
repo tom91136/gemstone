@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.sass
 
+import java.util.regex.Pattern
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 
@@ -18,7 +19,7 @@ class IntegerFormsSuite extends munit.FunSuite {
   private def pair(sm: Int, body: String, low: Long, high: Long)(using munit.Location): Unit =
     check(sm, s"$body; LDC.64 R2, c[0x0][0x160]; STG.E.64 [R2], R4; EXIT", Vec(low.toInt, high.toInt))
 
-  private val Sections = java.util.regex.Pattern.compile("; ")
+  private val Sections = Pattern.compile("; ")
 
   private def holds(predicate: String): String = s"SEL R4, RZ, 0x1, !$predicate"
 

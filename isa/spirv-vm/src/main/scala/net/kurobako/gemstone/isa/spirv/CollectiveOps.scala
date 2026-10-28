@@ -242,7 +242,7 @@ private object CollectiveOps {
     var index = 0
     while (index < subgroups.length) {
       val participants = Vec.from(executions.view.filter(_.invocation.subgroupIndex == subgroups(index)))
-      // A preempted lane has not reached its next convergence point, so the active set is not yet known.
+      // A preempted lane has not reached its next convergence point, so the active set is unknown.
       val settled = !participants.exists(_.preempted)
       if (settled) resolved += resolveReconvergence(mutable.ArrayBuffer.from(participants))
       val requests   = participants.flatMap(_.suspended)
@@ -411,6 +411,8 @@ private object CollectiveOps {
       memory: MemoryState
   ): Either[Fault, Unit] =
     outcomes(program, participants, expected, memory).map(complete(participants, _))
+
+  private val BallotWords: Vec[Int] = Vec(0, 1, 2, 3)
 
   private val ArithmeticFaults: Map[CollectiveKind, String] = Map(
     CollectiveKind.IntegerAdd      -> "OpGroupIAdd",
@@ -646,7 +648,7 @@ private object CollectiveOps {
           operators,
           Array.empty
         )
-        GroupResolution.allEqual(Execute, unit)(floating, 0, 0)
+        GroupResolution.allEqual(Execute, unit)(floating, source = 0, target = 0)
         unit.results
       }
       Right(Vec.from(Array.tabulate[Option[VMValue]](participants.size) { at =>
@@ -789,7 +791,7 @@ private object CollectiveOps {
               val words = 4
               val unit  =
                 subgroupUnit(participants, positions, GroupResolver.extent(positions, words * 32), columns, words)
-              GroupResolution.ballot(Execute, unit)(0, Vec(0, 1, 2, 3))
+              GroupResolution.ballot(Execute, unit)(0, BallotWords)
               unit.shareEqualResults()
               Right(Vec.from(unit.results.map(lanes => Some(VMValue.Bits(resultType, lanes)))))
             }

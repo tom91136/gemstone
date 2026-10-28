@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.vm
 
+import java.util.concurrent.ConcurrentLinkedQueue
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -79,9 +80,9 @@ class DeviceSuite extends munit.FunSuite {
   }
 
   private class Recording extends LaunchObserver {
-    val instructions: java.util.concurrent.ConcurrentLinkedQueue[Fault.Location] =
+    val instructions: ConcurrentLinkedQueue[Fault.Location] =
       java.util.concurrent.ConcurrentLinkedQueue[Fault.Location]()
-    val accesses: java.util.concurrent.ConcurrentLinkedQueue[LaunchObserver.Access] =
+    val accesses: ConcurrentLinkedQueue[LaunchObserver.Access] =
       java.util.concurrent.ConcurrentLinkedQueue[LaunchObserver.Access]()
     override def instruction(at: Fault.Location, state: ArchitecturalState): Either[Fault, Unit] =
       Right(instructions.add(at)).map(_ => ())

@@ -1,13 +1,15 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.spirv.OperandDecoder.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object Instruction {
   type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
 
@@ -14362,7 +14364,7 @@ object Instruction {
     }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) derives CanEqual {
   case Nop() extends Instruction(Instruction.Definition.Nop)
   case Undef(resultType: Operand, dest: Operand) extends Instruction(Instruction.Definition.Undef, resultType, dest)

@@ -34,6 +34,40 @@ object ExecutionHandler {
       encode(request, session.write(allocation, offset, bytes))
     case request @ Operation.ReadAllocation(allocation, offset, size) =>
       encode(request, session.read(AllocationRange(allocation, offset, size)))
+    case request @ Operation.WriteAllocationRectangle(
+          allocation,
+          offset,
+          rowBytes,
+          rowCount,
+          sliceCount,
+          rowPitch,
+          slicePitch,
+          bytes
+        ) =>
+      encode(
+        request,
+        session.writeRectangle(
+          allocation,
+          ExecutionSession.Rectangle(offset, rowBytes, rowCount, sliceCount, rowPitch, slicePitch),
+          bytes
+        )
+      )
+    case request @ Operation.ReadAllocationRectangle(
+          allocation,
+          offset,
+          rowBytes,
+          rowCount,
+          sliceCount,
+          rowPitch,
+          slicePitch
+        ) =>
+      encode(
+        request,
+        session.readRectangle(
+          allocation,
+          ExecutionSession.Rectangle(offset, rowBytes, rowCount, sliceCount, rowPitch, slicePitch)
+        )
+      )
     case request @ Operation.LoadProgram(encoding, image) =>
       encode(request, session.load(encoding, image))
     case request @ Operation.DescribeSpecialization(image) =>

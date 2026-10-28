@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server.backend
 
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
@@ -14,6 +15,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.LongMap
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 import scala.util.Using
 
 class HostMemoryExecutionSuite extends munit.FunSuite {
@@ -27,7 +29,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   private def bytes(address: Long, value: Long, size: Int in 0 ~ 8): Map[Long, Byte] =
     encoded(value, size).zipWithIndex.map((byte, index) => (address + index.toLong) -> byte).toMap
 
-  private object Async extends scala.concurrent.ExecutionContext {
+  private object Async extends ExecutionContext {
     override def execute(runnable: Runnable): Unit = {
       val thread = Thread(runnable); thread.setDaemon(true); thread.start()
     }
@@ -278,7 +280,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ret;
       }"""
     val requests       = mutable.ArrayBuffer.empty[HostMemoryAtomic]
-    val replaced       = java.util.concurrent.atomic.AtomicBoolean(false)
+    val replaced       = AtomicBoolean(false)
     val (_, writes, _) = runImage(
       ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
@@ -445,10 +447,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       Vec.empty,
       bytes(0x1000, 1, 4) ++ bytes(0x8000, 0, 8),
       beforeRead = (range, _) =>
-        if (range.address.raw == 0x1000L) {
-          reads += range
-          bytes(address = 0x1000, value = 11, 4)
-        } else Map.empty,
+        if (range.address.raw == 0x1000L) { reads += range; bytes(address = 0x1000, value = 11, 4) }
+        else Map.empty,
       beforeSync = (sync, _) => {
         syncs += sync
         assertEquals(sync.atomic.map(_.operation), Some(HostMemoryAtomicOperation.Load))

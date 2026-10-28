@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.explorer
 
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -91,7 +92,7 @@ object ProgramRun {
 
   /** The AMDGPU target embedded in a code object's ISA note, such as `gfx900`. */
   private def codeObjectTarget(image: Vec[Byte]): Option[String] = {
-    val text = String(Vec.toArray(image), java.nio.charset.StandardCharsets.ISO_8859_1)
+    val text = String(Vec.toArray(image), StandardCharsets.ISO_8859_1)
     val at   = text.indexOf("amdgcn-amd-amdhsa--")
     Option.when(at >= 0) {
       text.substring(at + "amdgcn-amd-amdhsa--".length).takeWhile(_.isLetterOrDigit)

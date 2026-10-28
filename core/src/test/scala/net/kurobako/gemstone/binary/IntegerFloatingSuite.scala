@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.binary
 
+import java.math.BigDecimal
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.util.Random
@@ -40,7 +41,7 @@ class IntegerFloatingSuite extends munit.FunSuite {
     } {
       val integer   = if (unsigned) BigInt(value) & ((BigInt(1) << 64) - 1) else BigInt(value)
       val nearest   = if (width == 32) integer.toFloat.toDouble else integer.toDouble
-      val exact     = BigInt(java.math.BigDecimal(nearest).toBigIntegerExact)
+      val exact     = BigInt(BigDecimal(nearest).toBigIntegerExact)
       val direction = rounding match {
         case IEEE754.Rounding.NearestEven => 0
         case IEEE754.Rounding.Up          => 1

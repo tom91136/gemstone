@@ -37,10 +37,11 @@ object Liveness {
         while (at >= 0) {
           val step = steps(indices(at))
           if (at + 1 < indices.size) next(indices(at)) = indices(at + 1)
-          val reads  = step.use.reads.map(name => RegisterKey.of(step, name))
-          val writes = step.use.writes.map(name => RegisterKey.of(step, name))
+          val reads   = step.use.reads.map(name => RegisterKey.of(step, name))
+          val readSet = reads.toSet
+          val writes  = step.use.writes.map(name => RegisterKey.of(step, name))
           writes.foreach { key =>
-            if (live.contains(key) && !reads.contains(key)) {
+            if (live.contains(key) && !readSet.contains(key)) {
               live -= key
               open.remove(key).foreach { end =>
                 intervals.getOrElseUpdate(key, mutable.ArrayBuffer.empty) += ((indices(at).toLong + 1L, end))
@@ -48,10 +49,7 @@ object Liveness {
             }
           }
           reads.foreach { key =>
-            if (!live.contains(key)) {
-              live += key
-              open(key) = indices(at).toLong + 1L
-            }
+            if (!live.contains(key)) { live += key; open(key) = indices(at).toLong + 1L }
           }
           perStep(indices(at)) = live.size
           at -= 1
@@ -66,10 +64,7 @@ object Liveness {
       var live                                   = 0
       def place(unit: UnitKey, count: Int): Unit = {
         val previous = contribution.getOrElse(unit, 0)
-        if (previous != count) {
-          live += count - previous
-          contribution(unit) = count
-        }
+        if (previous != count) { live += count - previous; contribution(unit) = count }
       }
       val retirements = trace.changes
         .filter(_.kind == MachineEvent.Kind.Retired)

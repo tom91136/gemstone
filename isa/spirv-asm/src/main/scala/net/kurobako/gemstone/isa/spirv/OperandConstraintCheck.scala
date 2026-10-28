@@ -187,10 +187,7 @@ object OperandConstraintCheck {
     var found    = false
     while (i < operands.length && !found) {
       val op = operands(i)
-      if (op.kind == OperandKind.IdResultType) {
-        result = Operand.id(op)
-        found = true
-      }
+      if (op.kind == OperandKind.IdResultType) { result = Operand.id(op); found = true }
       i += 1
     }
     result

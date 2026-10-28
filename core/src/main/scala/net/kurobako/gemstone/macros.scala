@@ -1,5 +1,6 @@
 package net.kurobako.gemstone
 
+import java.math.BigDecimal
 import scala.quoted.*
 
 /** Compile-time checks for numeric bounds, memberships and multiples. No arithmetic-result inference. */
@@ -135,7 +136,7 @@ object macros {
   private def real(using q: Quotes)(single: Boolean, tpe: q.reflect.TypeRepr): Double = {
     import q.reflect.*
     def exact(value: BigInt, rounded: Double): Double =
-      if (BigInt(java.math.BigDecimal(rounded).toBigInteger) != value)
+      if (BigInt(BigDecimal(rounded).toBigInteger) != value)
         report.errorAndAbort(
           s"Integer bound $value is not exactly representable as a ${if (single) "Float" else "Double"}; " +
             "use a bound the carrier represents exactly"

@@ -18,6 +18,8 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.annotation.tailrec
+import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 import scala.util.Using
 
 class SPIRVProgramExecutorSuite extends munit.FunSuite {
@@ -50,7 +52,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     """)
     Using.resource(SPIRVBackend(Validation.Environment.OpenCLCompute).load(bytes).value) { program =>
       val task   = KernelTask.validated("print_value", Dimensions.One, Dimensions.One, Vec.empty).value
-      val events = scala.collection.mutable.ArrayBuffer.empty[Event]
+      val events = mutable.ArrayBuffer.empty[Event]
       assertEquals(
         program.execute(task, TaskContext(RejectingMemory(), TaskControl(), event => { events += event; Right(()) })),
         Right(())
@@ -201,7 +203,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
       val queued = AtomicReference(Option.empty[Runnable])
       Using.resource(PooledWorkgroups()) { pool =>
         val workgroups = if (parallel) pool else Workgroups.Sequential
-        class CapturingSubmissions extends scala.concurrent.ExecutionContext {
+        class CapturingSubmissions extends ExecutionContext {
           override def execute(runnable: Runnable): Unit     = assert(queued.compareAndSet(None, Some(runnable)))
           override def reportFailure(error: Throwable): Unit = throw error
         }

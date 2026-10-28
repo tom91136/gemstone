@@ -1,6 +1,8 @@
 // Generated from the pinned AMDGPU machine metadata. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import upickle.default.*
 
@@ -30,7 +32,7 @@ object EncodingField {
   def fromName(name: String): Option[EncodingField] = byName.get(name)
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum EncodingField derives CanEqual {
   case `A16`
   case `ABID`

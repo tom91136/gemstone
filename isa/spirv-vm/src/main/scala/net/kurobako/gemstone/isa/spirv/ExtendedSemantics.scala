@@ -85,7 +85,14 @@ private object ExtendedSemantics {
             typeId = resultType
           ))
         case "OpenCL.std vloadn" =>
-          Some(vectorLoad(machine)(sources(0), sources(1), rows, bytes.unsafe[Int in 1 ~ 8], dest, resultType))
+          Some(vectorLoad(machine)(
+            offset = sources(0),
+            pointer = sources(1),
+            count = rows,
+            size = bytes.unsafe[Int in 1 ~ 8],
+            target = dest,
+            typeId = resultType
+          ))
         case _ => None
       }
   }

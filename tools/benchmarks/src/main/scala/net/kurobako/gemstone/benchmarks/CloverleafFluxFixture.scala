@@ -5,7 +5,7 @@ import net.kurobako.gemstone.constraint.*
 /** One bounded, deterministic neighbouring-cell flux calculation over six input and two output arrays. */
 object CloverleafFluxFixture {
   val rowStride: Int > 0 = 32
-  val dt                 = 0.125
+  val dt: Double         = 0.125
 
   private def value(array: Int, index: Int): Double =
     0.5 + array.toDouble * 0.125 + (index % 17).toDouble * 0.03125

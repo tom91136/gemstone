@@ -30,6 +30,18 @@ private object VMMemory {
       matrixLayout: Option[MatrixLayout] = None
   )
 
+  /** `stride` is the distance between rows in texels, which a row pitch may widen beyond `width`. */
+  case class ImageLevel(
+      pixels: Pointer,
+      width: Long,
+      height: Long,
+      format: Int,
+      samples: Int = 1,
+      layers: Long = 1,
+      depth: Long = 1,
+      stride: Long
+  )
+
   private inline val ApertureShift = 56
   private inline val OffsetMask    = (1L << ApertureShift) - 1L
   private inline val Alignment     = 16
@@ -310,10 +322,7 @@ private object VMMemory {
         if (target != null) {
           val at = offsetIn(target, pointer.address, size)
           if (at < 0) Left(outOfRange(target, pointer.address, size))
-          else {
-            LittleEndian.write(value, target, at, size.widen[Int in 0 ~ 8])
-            AddressSpace.Ready
-          }
+          else { LittleEndian.write(value, target, at, size.widen[Int in 0 ~ 8]); AddressSpace.Ready }
         } else if (pointer.address == 0L) Left(nullWrite(pointer))
         else {
           forgetRelocations(pointer.address, size.widen)

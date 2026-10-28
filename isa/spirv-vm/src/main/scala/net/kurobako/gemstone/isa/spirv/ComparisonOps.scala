@@ -23,7 +23,7 @@ private object ComparisonOps {
   private val floatingFamilies =
     Seq(CoreFamily.OrderedComparison, CoreFamily.UnorderedComparison, CoreFamily.Classification)
 
-  def lower(using site: Site): PartialFunction[Instruction, Op] = {
+  def lower(using Site): PartialFunction[Instruction, Op] = {
     case instruction @ Instruction.IEqual(t, d, a, b) =>
       integerEquality("OpIEqual", BinaryOperands(t, d, a, b), instruction)
     case instruction @ Instruction.INotEqual(t, d, a, b) =>

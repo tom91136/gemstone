@@ -3,11 +3,14 @@ package net.kurobako.gemstone.server
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
+import java.io.EOFException
+import java.io.IOException
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
@@ -92,21 +95,21 @@ class ProtocolSuite extends munit.FunSuite {
 
   test("exact reads preserve empty frames, partial-read diagnostics, and stream position") {
     val input = DataInputStream(FragmentedInput(ByteArrayInputStream(Array[Byte](1, 2, 3))))
-    assertEquals(readExactly(input, 0, java.io.EOFException(_)).toSeq, Seq.empty[Byte])
-    assertEquals(readExactly(input, 2, java.io.EOFException(_)).toSeq, Seq[Byte](1, 2))
-    val error = intercept[java.io.EOFException](readExactly(input, 2, java.io.EOFException(_)))
+    assertEquals(readExactly(input, 0, EOFException(_)).toSeq, Seq.empty[Byte])
+    assertEquals(readExactly(input, 2, EOFException(_)).toSeq, Seq[Byte](1, 2))
+    val error = intercept[EOFException](readExactly(input, 2, EOFException(_)))
     assertEquals(error.getMessage, "expected 2 bytes, received 1")
   }
 
   test("malformed UTF-8 tags are rejected") {
     val frame = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes - 4 + 1)
       .putLong(1L).putLong(1L).putLong(1L).putInt(1).putInt(0).put(0xff.toByte).array()
-    intercept[java.nio.charset.CharacterCodingException](readHeader(DataInputStream(ByteArrayInputStream(frame))))
+    intercept[CharacterCodingException](readHeader(DataInputStream(ByteArrayInputStream(frame))))
   }
 
   test("response framing rejects the wrong magic without waiting for a header") {
     val input = DataInputStream(ByteArrayInputStream(ByteBuffer.allocate(Integer.BYTES).putInt(0).array()))
-    val error = intercept[java.io.IOException](Frame.readResponse(input, 64))
+    val error = intercept[IOException](Frame.readResponse(input, 64))
     assertEquals(error.getMessage, "unexpected RPC response magic")
   }
 
@@ -115,8 +118,8 @@ class ProtocolSuite extends munit.FunSuite {
       val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes)
         .putInt(ExecutionRPC.ResponseMagic).putInt(status).putInt(size).array()
       val input = DataInputStream(ByteArrayInputStream(prefix))
-      val error = intercept[java.io.IOException](Frame.readResponse(input, maximum))
-      assertEquals(error.getClass, classOf[java.io.IOException])
+      val error = intercept[IOException](Frame.readResponse(input, maximum))
+      assertEquals(error.getClass, classOf[IOException])
     }
   }
 
@@ -127,7 +130,7 @@ class ProtocolSuite extends munit.FunSuite {
       Frame.readResponse(DataInputStream(ByteArrayInputStream(frame)), frame.length).toSeq,
       frame.toSeq
     )
-    intercept[java.io.EOFException] {
+    intercept[EOFException] {
       Frame.readResponse(DataInputStream(ByteArrayInputStream(frame.dropRight(1))), frame.length)
     }
   }

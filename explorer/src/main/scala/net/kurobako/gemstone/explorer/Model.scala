@@ -76,6 +76,8 @@ trait Model {
   protected def clearOutcomes(): Unit = ()
 
   // the caches hold one target's definitions, so a walk over the targets stays bounded
+  // tracks which target the mutable caches hold; an immutable form would thread them through every caller
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var cachedTarget: Option[String] = None
 
   private def retarget(target: Option[String]): Unit =

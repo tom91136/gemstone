@@ -1,5 +1,6 @@
 package net.kurobako.gemstone
 
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
@@ -30,7 +31,7 @@ class ConstraintSuite extends munit.FunSuite {
   private object ForeignName extends Newtype[Foreign.Type]
 
   test("refine reports failures as values, unsafe throws them, and both evaluate their input once") {
-    val evaluations = java.util.concurrent.atomic.AtomicInteger()
+    val evaluations = AtomicInteger()
     def input: Int  = evaluations.incrementAndGet()
     assertEquals(input.refine[Int > 0].map(_.raw), Right(1))
     assertEquals(input.unsafe[Int in 1 ~ 8].raw, 2)
@@ -152,7 +153,7 @@ class ConstraintSuite extends munit.FunSuite {
     assertEquals(OtherName("kernel").raw, refinedText: String)
     assertEquals(collection, names)
     assertEquals(Foreign.read(foreign), 7)
-    val calls                  = java.util.concurrent.atomic.AtomicInteger(0)
+    val calls                  = AtomicInteger(0)
     def produce(): Nested.Type = { val _ = calls.incrementAndGet(); Nested(Small(8)) }
     assertEquals(produce().raw, 8)
     assertEquals(calls.get(), 1)

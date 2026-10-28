@@ -1,9 +1,11 @@
 #include "transfer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -106,4 +108,98 @@ TEST_CASE("bounded dirty reads respect gap and payload limits without publishing
   CHECK_FALSE(readDirtyRanges(*client, spans, apply, 256, 0));
   CHECK_FALSE(readDirtyRanges(*client, spans, apply, 256, TransferChunk + 1));
   CHECK(fixture.reads.load() == reads + 2);
+}
+
+TEST_CASE("rectangle transfers gather and scatter rows in bounded requests") {
+  using namespace gemstone::execution;
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  auto client = Client::fromEnvironment();
+  REQUIRE(client);
+  constexpr size_t rowBytes = 5;
+  constexpr size_t rowCount = 4;
+  constexpr size_t sliceCount = 3;
+  constexpr size_t rowPitch = 8;
+  constexpr size_t slicePitch = 40;
+  constexpr size_t offset = 3;
+  constexpr size_t size = offset + (sliceCount * slicePitch);
+  const auto allocation = client->call(RegisterAllocation{{static_cast<int64_t>(size)}});
+  REQUIRE(allocation);
+  REQUIRE(client->call(WriteAllocation{allocation.value(), 0, std::vector<uint8_t>(size, 7)}));
+  const Rectangle rectangle{.offset = offset,
+                            .rowBytes = rowBytes,
+                            .rowCount = rowCount,
+                            .sliceCount = sliceCount,
+                            .rowPitch = rowPitch,
+                            .slicePitch = slicePitch};
+
+  constexpr size_t hostRowPitch = 6;
+  constexpr size_t hostSlicePitch = 30;
+  std::vector<uint8_t> host(sliceCount * hostSlicePitch, 0);
+  for (size_t index = 0; index < host.size(); ++index)
+    host[index] = static_cast<uint8_t>(index + 1);
+
+  const auto expected = [&] {
+    std::vector<uint8_t> bytes(size, 7);
+    for (size_t slice = 0; slice < sliceCount; ++slice)
+      for (size_t row = 0; row < rowCount; ++row)
+        std::memcpy(bytes.data() + offset + (slice * slicePitch) + (row * rowPitch),
+                    host.data() + (slice * hostSlicePitch) + (row * hostRowPitch), rowBytes);
+    return bytes;
+  }();
+
+  // limits split the region into whole slices, then whole rows, then single rows, and finally row chunks
+  for (const auto &[limit, requests] : {std::pair<size_t, unsigned>{1024, 1}, {40, 2}, {20, 3}, {10, 6}, {5, 12}, {4, 0}}) {
+    REQUIRE(client->call(WriteAllocation{allocation.value(), 0, std::vector<uint8_t>(size, 7)}));
+    const auto writes = fixture.rectangleWrites.load();
+    REQUIRE(uploadRectangle(*client, allocation.value(), rectangle, host.data(), hostRowPitch, hostSlicePitch, limit));
+    CHECK(fixture.rectangleWrites.load() - writes == requests);
+    auto stored = client->call(ReadAllocation{.allocation = allocation.value(), .offset = 0, .size = {static_cast<int32_t>(size)}});
+    REQUIRE(stored);
+    CHECK(stored.value() == expected);
+
+    std::vector<uint8_t> back(host.size(), 0xee);
+    const auto reads = fixture.rectangleReads.load();
+    REQUIRE(downloadRectangle(*client, allocation.value(), rectangle, back.data(), hostRowPitch, hostSlicePitch, limit));
+    CHECK(fixture.rectangleReads.load() - reads == requests);
+    for (size_t slice = 0; slice < sliceCount; ++slice)
+      for (size_t row = 0; row < rowCount; ++row)
+        for (size_t column = 0; column < hostRowPitch; ++column) {
+          const auto index = (slice * hostSlicePitch) + (row * hostRowPitch) + column;
+          CHECK(back[index] == (column < rowBytes ? host[index] : 0xee));
+        }
+  }
+
+  CHECK_FALSE(uploadRectangle(*client, allocation.value(), rectangle, host.data(), hostRowPitch, hostSlicePitch, 0));
+  CHECK_FALSE(uploadRectangle(*client, allocation.value(),
+                              {.offset = offset,
+                               .rowBytes = rowBytes,
+                               .rowCount = rowCount,
+                               .sliceCount = sliceCount,
+                               .rowPitch = rowBytes - 1,
+                               .slicePitch = slicePitch},
+                              host.data(), hostRowPitch, hostSlicePitch, 1024));
+
+  // pitches beyond the wire limit cannot be allocated in a test, so the block split is checked directly
+  using Block = std::array<size_t, 4>;
+  const auto blocksOf = [](const Rectangle &shape, size_t limit) {
+    std::vector<Block> blocks;
+    REQUIRE(detail::forEachRectangleBlock(shape, limit, [&](size_t slice, size_t row, size_t slices, size_t rows) {
+      blocks.push_back({slice, row, slices, rows});
+      return true;
+    }));
+    return blocks;
+  };
+  constexpr size_t wide = size_t{INT32_MAX} + 1;
+  CHECK((blocksOf({.rowBytes = 4, .rowCount = 3, .sliceCount = 1, .rowPitch = INT32_MAX}, 1024) == std::vector<Block>{{0, 0, 1, 3}}));
+  CHECK((blocksOf({.rowBytes = 4, .rowCount = 3, .sliceCount = 1, .rowPitch = wide}, 1024)
+         == std::vector<Block>{{0, 0, 1, 1}, {0, 1, 1, 1}, {0, 2, 1, 1}}));
+  CHECK((blocksOf({.rowBytes = 4, .rowCount = 3, .sliceCount = 2, .rowPitch = wide, .slicePitch = 3 * wide}, 1024)
+         == std::vector<Block>{{0, 0, 1, 1}, {0, 1, 1, 1}, {0, 2, 1, 1}, {1, 0, 1, 1}, {1, 1, 1, 1}, {1, 2, 1, 1}}));
+  CHECK((blocksOf({.rowBytes = 4, .rowCount = 1, .sliceCount = 2, .rowPitch = wide, .slicePitch = 8}, 1024)
+         == std::vector<Block>{{0, 0, 2, 1}}));
+  CHECK((blocksOf({.rowBytes = 4, .rowCount = 3, .sliceCount = 2, .rowPitch = 8, .slicePitch = wide}, 1024)
+         == std::vector<Block>{{0, 0, 1, 3}, {1, 0, 1, 3}}));
+  CHECK((blocksOf({.rowBytes = 4, .rowCount = 3, .sliceCount = 2, .rowPitch = 8, .slicePitch = wide}, 8)
+         == std::vector<Block>{{0, 0, 1, 2}, {0, 2, 1, 1}, {1, 0, 1, 2}, {1, 2, 1, 1}}));
 }

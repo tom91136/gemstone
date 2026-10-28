@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.ptx
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -101,7 +102,7 @@ class PTXCacheConcurrencySuite extends munit.FunSuite {
         assert(entered.await(5, TimeUnit.SECONDS))
         thread.start()
         thread.interrupt()
-        val error = intercept[java.util.concurrent.ExecutionException](waiter.get(2, TimeUnit.SECONDS))
+        val error = intercept[ExecutionException](waiter.get(2, TimeUnit.SECONDS))
         error.getCause match {
           case _: InterruptedException => ()
           case other                   => fail(s"expected interrupted waiter, got $other")

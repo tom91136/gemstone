@@ -7,12 +7,15 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.msgpack.*
 import scala.annotation.publicInBinary
+import scala.annotation.tailrec
 import scala.compiletime.constValue
 import scala.compiletime.erasedValue
+import scala.compiletime.ops.int
 import scala.compiletime.summonInline
 import scala.deriving.Mirror
 import scala.quoted.*
 import scala.reflect.ClassTag
+import scala.reflect.Enum
 import scala.util.NotGiven
 
 object Wire {
@@ -168,7 +171,7 @@ object Wire {
       reader =>
         reader.readArrayHeader().flatMap { count =>
           val mutableBuilder = Vec.newBuilder[A]
-          @scala.annotation.tailrec
+          @tailrec
           def read(index: Int): Either[String, Vec[A]] =
             if (index == count.raw) Right(mutableBuilder.result())
             else
@@ -236,7 +239,7 @@ object Wire {
             if (count != arity) Left(s"expected $name product array of size $arity, got $count")
             else {
               val mutableValues = Array.ofDim[Any](codecs.length)
-              @scala.annotation.tailrec
+              @tailrec
               def loop(index: Int): Either[String, A] =
                 if (index == codecs.length) Right(mirror.fromProduct(Tuple.fromArray(mutableValues)))
                 else
@@ -305,7 +308,7 @@ object Wire {
       case _: (head *: tail) => summonInline[Codec[head]] +: codecsOf[tail]
     }
 
-    private type Half[T <: Tuple] = scala.compiletime.ops.int./[Tuple.Size[T], 2]
+    private type Half[T <: Tuple] = int./[Tuple.Size[T], 2]
 
     // Mutation branches duplicate recursive inline expansion beyond the JVM method-size limit.
     @SuppressWarnings(Array("stryker4s.mutation.StringLiteral"))
@@ -406,7 +409,7 @@ object Wire {
           limits: Limits
       ): Either[String, (String, Array[Byte])] =
         value match {
-          case enumValue: scala.reflect.Enum =>
+          case enumValue: Enum =>
             val sumCase = cases(enumValue.ordinal)
             val writer  = Writer(limits)
             sumCase.codec.write(writer, value)

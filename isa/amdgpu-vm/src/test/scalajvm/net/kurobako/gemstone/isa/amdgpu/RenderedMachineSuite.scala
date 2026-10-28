@@ -37,8 +37,8 @@ class RenderedMachineSuite extends munit.FunSuite {
     assertEquals(errors("def broken(): Int = \"text\"").size, 1)
   }
 
-  test("rendered scalar control instructions compile") {
-    Instances.foreach { (target, text, operands) =>
+  Instances.foreach { (target, text, operands) =>
+    test(s"rendered scalar control instruction $target $text compiles") {
       val definition = machine(target, text, operands).fold(failure => fail(failure), identity)
       assertEquals(errors(ScalaBackend.source(definition)), Nil, s"$target $text")
     }

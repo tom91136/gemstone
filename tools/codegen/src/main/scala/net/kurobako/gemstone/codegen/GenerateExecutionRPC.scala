@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 import com.monovore.decline.Command
-import com.monovore.decline.Opts
+import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import net.kurobako.gemstone.graphics.*
 import net.kurobako.gemstone.rpc.*
@@ -48,7 +48,7 @@ object GenerateExecutionRPC {
     case Wire.Constraint.MultipleOf(divisor)      => s"MultipleOf${numberName(divisor)}"
     case Wire.Constraint.MinimumLength(min)       => s"MinimumLength$min"
     case Wire.Constraint.NotContains(value)       =>
-      s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
+      s"NotContains${value.getBytes(StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
     case Wire.Constraint.AnyOf(alternatives) =>
       s"AnyOf${alternatives.map(_.map(constraintName(_)).mkString).mkString("Or")}"
   }
@@ -235,7 +235,7 @@ object GenerateExecutionRPC {
         val size = if (underlying == Shape.Text) "textLength(value.value)" else "value.value.size()"
         s"$size >= ${min}U"
       case Wire.Constraint.NotContains(excluded) =>
-        val bytes   = excluded.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        val bytes   = excluded.getBytes(StandardCharsets.UTF_8)
         val literal = bytes.view.map(byte => f"\\x${byte & 0xff}%02x").mkString
         s"value.value.find(std::string_view(\"$literal\", ${bytes.length})) == std::string::npos"
       case Wire.Constraint.AnyOf(alternatives) =>

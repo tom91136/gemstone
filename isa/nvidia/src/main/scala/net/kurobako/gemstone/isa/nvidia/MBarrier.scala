@@ -76,10 +76,7 @@ private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
 
   def expectBytes(count: Count): Either[Fault, Unit] =
     if (pendingBytes + count > MaximumCount) Left(Fault.Backend(s"invalid mbarrier transaction count: $count"))
-    else {
-      pendingBytes += count
-      Right(())
-    }
+    else { pendingBytes += count; Right(()) }
 
   def completeBytes(count: Count): Either[Fault, Unit] =
     if (pendingBytes - count < -MaximumCount)

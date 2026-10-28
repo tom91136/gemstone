@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.binary.{IntegerArithmetic as _, *}
 import net.kurobako.gemstone.semantics.prelude.*
+import scala.util.Random
 
 /** The 8-bit float conversions over the core minifloat codecs give what the format-specific rounding they replace gave,
   * which conformance/unified/src/cuda/conversions.cu checks against an RTX 4060 Ti (sm_89).
@@ -37,7 +38,7 @@ class Float8Suite extends munit.FunSuite {
   }
 
   test("binary32 values about every E4M3 and E5M2 step convert as the format-specific rounding did") {
-    val random = scala.util.Random(0xf8)
+    val random = Random(0xf8)
     val inputs = (0L until 0x100000000L by 0x1001L) ++ Seq.fill(100000)(random.nextLong() & 0xffffffffL) ++
       Seq(0x7f800000L, 0xff800000L, 0x7fc00000L, 0x43e00000L, 0x43e80000L, 0x47600000L, 0x47700000L, 0x80000000L)
     inputs.foreach { bits =>

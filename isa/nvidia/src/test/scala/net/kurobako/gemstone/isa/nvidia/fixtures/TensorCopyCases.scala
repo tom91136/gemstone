@@ -141,9 +141,9 @@ object TensorCopyCases {
       |}
       |""".stripMargin
 
-  val Channels = 4
-  val Width    = 10
-  val Images   = 16
+  val Channels: Int = 4
+  val Width: Int    = 10
+  val Images: Int   = 16
 
   /** Channel `c` of pixel `w` of image `n`. */
   // callers name the coordinates

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.publicInBinary
 
 private object VMLaneMask {
   val MaximumLanes: Int = 1024
@@ -46,7 +47,7 @@ private object VMLaneMask {
 }
 
 /** Compact immutable set of active lanes. */
-private class VMLaneMask @scala.annotation.publicInBinary private (
+private class VMLaneMask @publicInBinary private (
     private val words: Array[Long],
     private val count: Int in 0 ~ 1024,
     private val limit: Int
@@ -128,10 +129,7 @@ private class VMLaneMask @scala.annotation.publicInBinary private (
     val inputLimit = Math.max(limit, other.limit)
     while (index < inputLimit) {
       val word = operation(words(index), other.words(index))
-      if (word != words(index)) {
-        if (combined eq words) combined = words.clone()
-        combined(index) = word
-      }
+      if (word != words(index)) { if (combined eq words) combined = words.clone(); combined(index) = word }
       size += java.lang.Long.bitCount(word)
       if (word != 0L) last = index + 1
       index += 1

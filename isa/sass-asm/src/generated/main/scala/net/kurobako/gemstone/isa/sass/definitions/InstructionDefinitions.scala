@@ -1,9 +1,11 @@
 // Generated SASS instruction decoding by mnemonic. Regenerate with: sbt codegen
 
 package net.kurobako.gemstone.isa.sass
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.collection.*
 import Instruction.*
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object InstructionDefinitions {
   lazy val decoders: Vec[FormDecoder] = Vec(
     InstructionDefinitions0.decoders,

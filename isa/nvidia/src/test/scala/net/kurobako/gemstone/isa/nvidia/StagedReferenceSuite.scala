@@ -10,6 +10,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.util.Random
 
 /** The staged semantics against the interpreter's hand-written formulas they replaced, kept here as the reference. */
 class StagedReferenceSuite extends munit.FunSuite {
@@ -18,7 +19,7 @@ class StagedReferenceSuite extends munit.FunSuite {
   private val operand   = Value.Immediate(0L)
 
   private val samples: Vector[Long] = {
-    val random = scala.util.Random(17)
+    val random = Random(17)
     Vector(
       0L,
       1L,
@@ -396,7 +397,7 @@ class StagedReferenceSuite extends munit.FunSuite {
   }
 
   test("byte permutes match the reference") {
-    val random = scala.util.Random(23)
+    val random = Random(23)
     for {
       mode    <- BytePermuteMode.values.toVector
       control <- (0L until 0x10000L by 7L) ++ Vector.fill(64)(random.nextLong())
@@ -506,7 +507,7 @@ class StagedReferenceSuite extends munit.FunSuite {
   }
 
   test("shuffles select the reference lane and validity") {
-    val random    = scala.util.Random(29)
+    val random    = Random(29)
     val selectors = Vector(0L, 1L, 3L, 16L, 31L, 33L, random.nextLong())
     val clamps    = Vector(0L, 7L, 31L, 0x1f00L, 0x181fL, 0x1c03L, 0xffffffffL, random.nextLong())
     for {
@@ -537,7 +538,7 @@ class StagedReferenceSuite extends munit.FunSuite {
   }
 
   test("votes, elections and reductions match the reference over every member set") {
-    val random = scala.util.Random(31)
+    val random = Random(31)
     for {
       _ <- 0 until 400
     } {

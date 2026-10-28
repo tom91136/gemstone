@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.compiletime.testing.Error
 import scala.compiletime.testing.typeCheckErrors
 
 class RegisterBoundsSuite extends munit.FunSuite {
@@ -110,7 +111,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
     )))
   }
 
-  private def unsatisfied(errors: List[scala.compiletime.testing.Error]): Boolean =
+  private def unsatisfied(errors: List[Error]): Boolean =
     errors.exists(_.message.contains("does not satisfy"))
 
   test("register indices, atomic widths, and scratch sizes are bounded at compile time") {

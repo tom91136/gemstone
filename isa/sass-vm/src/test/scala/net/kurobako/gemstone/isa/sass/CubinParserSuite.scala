@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
@@ -92,7 +94,7 @@ import net.kurobako.gemstone.constraint.*
     val sections = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections
     val module   = Cubin.decode(Vec.unsafeWrapArray(image)).value
     val kernel   = module.kernels.head
-    val buffer   = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val buffer   = ByteBuffer.wrap(image).order(ByteOrder.LITTLE_ENDIAN)
     // CUDA libraries can leave SHI_REGISTERS unset, retaining EIATTR_REGCOUNT in .nv.info.
     val sectionTable = buffer.getLong(40).toInt
     buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, module.sections(kernel.section).info & 0x00ffffff)
@@ -114,7 +116,7 @@ import net.kurobako.gemstone.constraint.*
     val kernel       = module.kernels.head
     val info         = module.sections.find(_.name == ".nv.info").get
     val table        = module.sections.find(_.kind == 2).get
-    val buffer       = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val buffer       = ByteBuffer.wrap(image).order(ByteOrder.LITTLE_ENDIAN)
     val sectionTable = buffer.getLong(40).toInt
     // cuBLAS CUTLASS images retain matching old links in .nv.info and .text after stripping sections.
     Vec(info.index, kernel.section).foreach(index =>

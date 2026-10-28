@@ -1703,7 +1703,7 @@ class MachineSemanticsSuite extends munit.FunSuite {
 
   test("an f16 tensor memory product renders the dot product over K from its f16 operands") {
     assertEquals(
-      outline(tensorMemoryMultiply(Tcgen05.Kind.F16, Value.Immediate(Product128x64 | (1L << 4))), 11, 5),
+      outline(tensorMemoryMultiply(Tcgen05.Kind.F16, Value.Immediate(Product128x64 | (1L << 4))), head = 11, tail = 5),
       """def `tcgen05.mma`(dst: UInt[64], src: UInt[64], size: UInt[64], bar: UInt[64])(using tensors: Tensors): Unit = {
         |  val v0 = tensors.product(VMIR.Tcgen05.Kind.F16, false, false, false, 0, UInt[64](0x8100010), dst, src, size, bar)
         |  for (run <- tensors.indices(tensors.size(v0))) {
@@ -1725,7 +1725,11 @@ class MachineSemanticsSuite extends munit.FunSuite {
 
   test("an fp8 tensor memory product renders its element conversions at the types of A and B") {
     assertEquals(
-      outline(tensorMemoryMultiply(Tcgen05.Kind.F8F6F4, Value.Immediate(Product128x64 | (1L << 4))), 11, 5),
+      outline(
+        tensorMemoryMultiply(Tcgen05.Kind.F8F6F4, Value.Immediate(Product128x64 | (1L << 4))),
+        head = 11,
+        tail = 5
+      ),
       """def `tcgen05.mma`(dst: UInt[64], src: UInt[64], size: UInt[64], bar: UInt[64])(using tensors: Tensors): Unit = {
         |  val v0 = tensors.product(VMIR.Tcgen05.Kind.F8F6F4, false, false, false, 0, UInt[64](0x8100010), dst, src, size, bar)
         |  for (run <- tensors.indices(tensors.size(v0))) {
@@ -1749,8 +1753,8 @@ class MachineSemanticsSuite extends munit.FunSuite {
     assertEquals(
       outline(
         tensorMemoryMultiply(Tcgen05.Kind.MXF8F6F4, Value.Immediate((1L << 27) | (8L << 17) | (1L << 23))),
-        12,
-        5
+        head = 12,
+        tail = 5
       ),
       """def `tcgen05.mma`(dst: UInt[64], src: UInt[64], size: UInt[64], bar: UInt[64], left: UInt[64], right: UInt[64])(using tensors: Tensors): Unit = {
         |  val v0 = tensors.product(VMIR.Tcgen05.Kind.MXF8F6F4, false, false, false, 0, UInt[64](0x8900000), dst, src, size, bar, left, right)
@@ -1775,7 +1779,7 @@ class MachineSemanticsSuite extends munit.FunSuite {
   test("an f16 tensor memory product with a register descriptor picks its formats by the descriptor") {
     val product = tensorMemoryMultiply(Tcgen05.Kind.F16, row)
     assertEquals(
-      outline(product, 14, 5),
+      outline(product, head = 14, tail = 5),
       """def `tcgen05.mma`(row: UInt[64], dst: UInt[64], src: UInt[64], size: UInt[64], bar: UInt[64])(using tensors: Tensors): Unit = {
         |  val v0 = tensors.product(VMIR.Tcgen05.Kind.F16, false, false, false, 0, row, dst, src, size, bar)
         |  for (run <- tensors.indices(tensors.size(v0))) {
@@ -1809,7 +1813,7 @@ class MachineSemanticsSuite extends munit.FunSuite {
   test("an fp8 tensor memory product with a register descriptor converts each operand by its format field") {
     val product = tensorMemoryMultiply(Tcgen05.Kind.F8F6F4, row)
     assertEquals(
-      outline(product, 14, 5),
+      outline(product, head = 14, tail = 5),
       """def `tcgen05.mma`(row: UInt[64], dst: UInt[64], src: UInt[64], size: UInt[64], bar: UInt[64])(using tensors: Tensors): Unit = {
         |  val v0 = tensors.product(VMIR.Tcgen05.Kind.F8F6F4, false, false, false, 0, row, dst, src, size, bar)
         |  for (run <- tensors.indices(tensors.size(v0))) {
@@ -1842,7 +1846,7 @@ class MachineSemanticsSuite extends munit.FunSuite {
   test("a block-scaled tensor memory product with a register descriptor picks its scale format by the descriptor") {
     val product = tensorMemoryMultiply(Tcgen05.Kind.MXF4NVF4, row)
     assertEquals(
-      outline(product, 13, 5),
+      outline(product, head = 13, tail = 5),
       """def `tcgen05.mma`(row: UInt[64], dst: UInt[64], src: UInt[64], size: UInt[64], bar: UInt[64], left: UInt[64], right: UInt[64])(using tensors: Tensors): Unit = {
         |  val v0 = tensors.product(VMIR.Tcgen05.Kind.MXF4NVF4, false, false, false, 0, row, dst, src, size, bar, left, right)
         |  for (run <- tensors.indices(tensors.size(v0))) {

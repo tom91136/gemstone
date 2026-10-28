@@ -110,7 +110,7 @@ public:
     uint64_t offset;
     std::optional<uint64_t> range = std::nullopt;
   };
-  std::atomic<unsigned> launches{0}, reads{0}, programLoads{0}, programUnloads{0}, kernelBuilds{0};
+  std::atomic<unsigned> launches{0}, reads{0}, rectangleReads{0}, rectangleWrites{0}, programLoads{0}, programUnloads{0}, kernelBuilds{0};
   std::atomic_bool completionEntered{false};
 
   explicit RpcFixture(bool unixSocket = false) {
@@ -535,6 +535,35 @@ private:
         const auto count = static_cast<size_t>(request.size.value);
         GEMSTONE_RPC_REQUIRE(offset + count <= bytes.size());
         encodePayload(result, std::vector<uint8_t>(bytes.data() + offset, bytes.data() + offset + count));
+      } else if (operationTag == operation::WriteAllocationRectangle) {
+        ++rectangleWrites;
+        const auto request = decodePayload<WriteAllocationRectangle>(payload);
+        auto &bytes = allocations.at(static_cast<uint64_t>(request.allocation.value));
+        const auto rowBytes = static_cast<size_t>(request.rowBytes.value);
+        GEMSTONE_RPC_REQUIRE(request.bytes.size() == rowBytes * request.rowCount.value * request.sliceCount.value);
+        size_t source = 0;
+        for (int32_t slice = 0; slice < request.sliceCount.value; ++slice)
+          for (int32_t row = 0; row < request.rowCount.value; ++row, source += rowBytes) {
+            const auto offset = static_cast<uint64_t>(request.offset.value) + (static_cast<uint64_t>(slice) * request.slicePitch.value)
+                                + (static_cast<uint64_t>(row) * request.rowPitch.value);
+            GEMSTONE_RPC_REQUIRE(offset + rowBytes <= bytes.size());
+            std::memcpy(bytes.data() + offset, request.bytes.data() + source, rowBytes);
+          }
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::ReadAllocationRectangle) {
+        ++rectangleReads;
+        const auto request = decodePayload<ReadAllocationRectangle>(payload);
+        auto &bytes = allocations.at(static_cast<uint64_t>(request.allocation.value));
+        const auto rowBytes = static_cast<size_t>(request.rowBytes.value);
+        std::vector<uint8_t> packed;
+        for (int32_t slice = 0; slice < request.sliceCount.value; ++slice)
+          for (int32_t row = 0; row < request.rowCount.value; ++row) {
+            const auto offset = static_cast<uint64_t>(request.offset.value) + (static_cast<uint64_t>(slice) * request.slicePitch.value)
+                                + (static_cast<uint64_t>(row) * request.rowPitch.value);
+            GEMSTONE_RPC_REQUIRE(offset + rowBytes <= bytes.size());
+            packed.insert(packed.end(), bytes.data() + offset, bytes.data() + offset + rowBytes);
+          }
+        encodePayload(result, packed);
       } else if (operationTag == operation::LoadProgram) {
         const auto request = decodePayload<LoadProgram>(payload);
         programImage = request.image;

@@ -18,7 +18,7 @@ object Binary {
   def decodeStatementAt(bytes: Array[Byte], offset: Int >= 0, mode: TargetMode): Either[CodecError, DecodedStatement] =
     decodeStatementAt(CodeStream(bytes, mode), offset)
 
-  private[asm] def decodeStatementAt(code: CodeStream, offset: Int >= 0): Either[CodecError, DecodedStatement] =
+  private def decodeStatementAt(code: CodeStream, offset: Int >= 0): Either[CodecError, DecodedStatement] =
     DualIssueCodec.decode(code, offset).getOrElse(
       decodeAt(code, offset).map(value => DecodedStatement(Statement.Instruction(value.instruction), value.size))
     )

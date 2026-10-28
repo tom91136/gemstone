@@ -4,8 +4,10 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
+import scala.compiletime.constValue
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 
@@ -43,7 +45,7 @@ object collection {
       val until = untilValue.value
       if (from > until) throw IllegalArgumentException(s"invalid integer range [$from, $until)")
       // Empty ranges have no elements whose refinement needs to be materialised.
-      inline if (scala.compiletime.constValue[From] >= scala.compiletime.constValue[Until])
+      inline if (constValue[From] >= constValue[Until])
         ArraySeq.empty[Int where (AtLeast[From] & LessThan[Until])](using tag)
       else {
         val count = until.toLong - from.toLong
@@ -87,7 +89,7 @@ object collection {
 
     /** The maximal runs of consecutive integers in `values`, each as its first and last value, in ascending order. */
     def runs(values: IterableOnce[Int]): Vec[(Int, Int)] =
-      from(values.iterator.toVector.sorted.distinct.foldLeft(Vector.empty[(Int, Int)]) {
+      from(Vector.from(values).sorted.distinct.foldLeft(Vector.empty[(Int, Int)]) {
         case (done :+ ((first, last)), value) if value == last + 1 => done :+ ((first, value))
         case (done, value)                                         => done :+ ((value, value))
       })
@@ -97,7 +99,7 @@ object collection {
 
     /** Every adjacent pair satisfies ordered; empty and singleton vectors are monotonic. */
     def monotonic(ordered: (A, A) => Boolean): Boolean = {
-      @scala.annotation.tailrec
+      @tailrec
       def loop(index: Int): Boolean =
         index >= values.size || (ordered(values(index - 1), values(index)) && loop(index + 1))
       loop(1)

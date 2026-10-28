@@ -393,6 +393,28 @@ void restoreGlobalPointers(RuntimeState &runtime, const AllocationRef &allocatio
   }
 }
 
+void encodeGlobalPointers(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, uint8_t *bytes, size_t size) {
+  std::scoped_lock const guard(runtime.lock);
+  const auto global = runtime.globalStorage.find(allocation->id);
+  if (global == runtime.globalStorage.end()) return;
+  for (size_t position = 0; position + sizeof(uint64_t) <= size; ++position) {
+    const auto pointer = readNative<uint64_t>(bytes, position);
+    const auto target = findAllocation(runtime, reinterpret_cast<void *>(pointer));
+    if (!target) continue;
+    const uint64_t relative = pointer - reinterpret_cast<uint64_t>(target->base);
+    const auto bound = runtime.globalStorage.find(target->id);
+    // Ordinary allocations retain their registered native address, matching typed kernel arguments.
+    const uint64_t encoded = bound != runtime.globalStorage.end() && bound->second->kernelObject == global->second->kernelObject
+                                     && relative <= bound->second->size
+                                 ? bound->second->elfAddress + relative
+                                 : pointer;
+    std::memcpy(bytes + position, &encoded, sizeof(encoded));
+    auto &fields = global->second->pointerOffsets;
+    if (!(fields ^ contains(offset + position))) fields.push_back(offset + position);
+    position += sizeof(uint64_t) - 1;
+  }
+}
+
 int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
   std::scoped_lock const transfer(allocation->transferLock);
   if (allocation->retired) return -1;
@@ -405,33 +427,11 @@ int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset
       std::fprintf(stderr, "%02x", sample[index]);
     std::fprintf(stderr, "\n");
   }
-  const auto *bytes = static_cast<const uint8_t *>(allocation->base) + offset;
-  std::vector<uint8_t> relocated;
-  {
-    std::scoped_lock const guard(runtime.lock);
-    const auto global = runtime.globalStorage.find(allocation->id);
-    if (global != runtime.globalStorage.end()) {
-      relocated.assign(bytes, bytes + size);
-      for (size_t position = 0; position + sizeof(uint64_t) <= size; ++position) {
-        const auto pointer = readNative<uint64_t>(relocated.data(), position);
-        const auto target = findAllocation(runtime, reinterpret_cast<void *>(pointer));
-        if (!target) continue;
-        const uint64_t relative = pointer - reinterpret_cast<uint64_t>(target->base);
-        const auto bound = runtime.globalStorage.find(target->id);
-        // Ordinary allocations retain their registered native address, matching typed kernel arguments.
-        const uint64_t encoded = bound != runtime.globalStorage.end() && bound->second->kernelObject == global->second->kernelObject
-                                         && relative <= bound->second->size
-                                     ? bound->second->elfAddress + relative
-                                     : pointer;
-        std::memcpy(relocated.data() + position, &encoded, sizeof(encoded));
-        auto &fields = global->second->pointerOffsets;
-        if (!(fields ^ contains(offset + position))) fields.push_back(offset + position);
-        position += sizeof(uint64_t) - 1;
-      }
-      bytes = relocated.data();
-    }
-  }
-  if (!uploadAllocation(*runtime.client, AllocationId{static_cast<int64_t>(allocation->id)}, offset, bytes, size, TransferBatch)) {
+  const auto *mirror = static_cast<const uint8_t *>(allocation->base) + offset;
+  std::vector<uint8_t> relocated(mirror, mirror + size);
+  encodeGlobalPointers(runtime, allocation, offset, relocated.data(), size);
+  if (!uploadAllocation(*runtime.client, AllocationId{static_cast<int64_t>(allocation->id)}, offset, relocated.data(), size,
+                        TransferBatch)) {
     if (trace)
       std::fprintf(stderr, "Gemstone HSA upload failed allocation=%lu offset=%zu size=%zu error=%s\n", allocation->id, offset, size,
                    runtime.client->error().c_str());
@@ -458,6 +458,38 @@ int download(RuntimeState &runtime, const AllocationRef &allocation, size_t offs
       std::fprintf(stderr, "%02x", sample[index]);
     std::fprintf(stderr, "\n");
   }
+  return 0;
+}
+
+int downloadRows(RuntimeState &runtime, const AllocationRef &allocation, const Rectangle &rectangle, uint8_t *host, size_t hostRowPitch,
+                 size_t hostSlicePitch) {
+  std::scoped_lock const transfer(allocation->transferLock);
+  if (allocation->retired) return -1;
+  if (!downloadRectangle(*runtime.client, AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, host, hostRowPitch, hostSlicePitch,
+                         TransferBatch))
+    return -1;
+  for (size_t slice = 0; slice < rectangle.sliceCount; ++slice)
+    for (size_t row = 0; row < rectangle.rowCount; ++row)
+      restoreGlobalPointers(runtime, allocation, rectangle.offset + (slice * rectangle.slicePitch) + (row * rectangle.rowPitch),
+                            rectangle.rowBytes);
+  return 0;
+}
+
+int uploadRows(RuntimeState &runtime, const AllocationRef &allocation, const Rectangle &rectangle, const uint8_t *host, size_t hostRowPitch,
+               size_t hostSlicePitch) {
+  std::scoped_lock const transfer(allocation->transferLock);
+  if (allocation->retired) return -1;
+  std::vector<uint8_t> packed(rectangle.sliceCount * rectangle.rowCount * rectangle.rowBytes);
+  auto *target = packed.data();
+  for (size_t slice = 0; slice < rectangle.sliceCount; ++slice)
+    for (size_t row = 0; row < rectangle.rowCount; ++row, target += rectangle.rowBytes) {
+      std::memcpy(target, host + (slice * hostSlicePitch) + (row * hostRowPitch), rectangle.rowBytes);
+      encodeGlobalPointers(runtime, allocation, rectangle.offset + (slice * rectangle.slicePitch) + (row * rectangle.rowPitch), target,
+                           rectangle.rowBytes);
+    }
+  if (!uploadRectangle(*runtime.client, AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, packed.data(), rectangle.rowBytes,
+                       rectangle.rowBytes * rectangle.rowCount, TransferBatch))
+    return -1;
   return 0;
 }
 
@@ -1222,9 +1254,8 @@ template <typename Byte> struct Pitched {
   size_t rowPitch, slicePitch;
 };
 
-/** Copies `slices` slices of `rows` rows of `row` bytes between pitched layouts, each in order, moving each side's span
- * between host and device at most once.
- */
+/** Copies `slices` slices of `rows` rows of `row` bytes between pitched layouts, each in order. A device side moves only its
+ * rows, once in each direction. */
 hsa_status_t copyPitched(RuntimeState &runtime, Pitched<unsigned char> to, Pitched<const unsigned char> from, size_t row, size_t rows,
                          size_t slices) {
   if (row == 0 || rows == 0 || slices == 0) return HSA_STATUS_SUCCESS;
@@ -1233,37 +1264,46 @@ hsa_status_t copyPitched(RuntimeState &runtime, Pitched<unsigned char> to, Pitch
   const gemstone::MemoryRange input{.base = reinterpret_cast<uintptr_t>(from.base), .size = span(from)};
   const gemstone::MemoryRange output{.base = reinterpret_cast<uintptr_t>(to.base), .size = span(to)};
   if (!input.valid() || !output.valid()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  std::vector<AllocationRef> sources;
-  std::vector<AllocationRef> destinations;
+  AllocationRef source;
+  AllocationRef destination;
   {
     std::scoped_lock const guard(runtime.lock);
     if (!findAllocation(runtime, from.base, input.size) && !findAllocation(runtime, to.base, output.size)
         && !runtime.registrations.find(input.base, input.size) && !runtime.registrations.find(output.base, output.size))
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    for (const auto &[_, allocation] : runtime.allocations) {
-      const gemstone::MemoryRange backing{.base = reinterpret_cast<uintptr_t>(allocation->base), .size = allocation->size};
-      if (backing.overlaps(input) && allocation->pool == GpuPool) sources.push_back(allocation);
-      if (backing.overlaps(output) && allocation->pool == GpuPool) destinations.push_back(allocation);
-    }
+    const auto deviceSide = [&](const gemstone::MemoryRange &range, AllocationRef &side) {
+      for (const auto &[_, allocation] : runtime.allocations) {
+        const gemstone::MemoryRange backing{.base = reinterpret_cast<uintptr_t>(allocation->base), .size = allocation->size};
+        if (allocation->pool != GpuPool || !backing.overlaps(range)) continue;
+        if (range.base < backing.base || range.end() > backing.end()) return false;
+        side = allocation;
+      }
+      return true;
+    };
+    if (!deviceSide(input, source) || !deviceSide(output, destination)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
-  const auto transfer = [&](const AllocationRef &allocation, gemstone::MemoryRange range, bool read) {
-    const auto base = reinterpret_cast<uintptr_t>(allocation->base);
-    const auto begin = std::max(base, range.base);
-    const auto end = std::min(base + allocation->size, range.end());
-    return read ? download(runtime, allocation, begin - base, end - begin) : upload(runtime, allocation, begin - base, end - begin);
+  const auto rectangleOf = [&](const AllocationRef &allocation, const unsigned char *base, size_t rowPitch, size_t slicePitch) {
+    return Rectangle{.offset = reinterpret_cast<uintptr_t>(base) - reinterpret_cast<uintptr_t>(allocation->base),
+                     .rowBytes = row,
+                     .rowCount = rows,
+                     .sliceCount = slices,
+                     .rowPitch = rowPitch,
+                     .slicePitch = slicePitch};
   };
-  // Only device-owned storage is remote-authoritative between commands; the bytes between rows a copy leaves alone must be
-  // current before its span goes back.
-  for (const auto &allocation : sources)
-    if (transfer(allocation, input, true) != 0) return HSA_STATUS_ERROR;
-  if (output.size != row * rows * slices)
-    for (const auto &allocation : destinations)
-      if (transfer(allocation, output, true) != 0) return HSA_STATUS_ERROR;
+  // source rows are current before destination rows are written; the bytes between rows never travel
+  if (source) {
+    const auto rectangle = rectangleOf(source, from.base, from.rowPitch, from.slicePitch);
+    if (downloadRows(runtime, source, rectangle, static_cast<uint8_t *>(source->base) + rectangle.offset, from.rowPitch, from.slicePitch)
+        != 0)
+      return HSA_STATUS_ERROR;
+  }
   for (size_t z = 0; z < slices; ++z)
     for (size_t y = 0; y < rows; ++y)
       std::memmove(to.base + (z * to.slicePitch) + (y * to.rowPitch), from.base + (z * from.slicePitch) + (y * from.rowPitch), row);
-  for (const auto &allocation : destinations)
-    if (transfer(allocation, output, false) != 0) return HSA_STATUS_ERROR;
+  if (destination) {
+    const auto rectangle = rectangleOf(destination, to.base, to.rowPitch, to.slicePitch);
+    if (uploadRows(runtime, destination, rectangle, to.base, to.rowPitch, to.slicePitch) != 0) return HSA_STATUS_ERROR;
+  }
   return HSA_STATUS_SUCCESS;
 }
 

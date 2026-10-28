@@ -548,6 +548,20 @@ cl_int writeAllocation(const std::shared_ptr<Allocation> &allocation, size_t off
   return CL_SUCCESS;
 }
 
+// The execution service stores device addresses in linked structures. Kernel
+// completion translates them for the host, but a later map reads the raw
+// remote bytes again. Reapply the known translations to the mapped range.
+void reapplyPointerRelocations(const std::shared_ptr<Allocation> &allocation, size_t offset, void *bytes, size_t size) {
+  std::scoped_lock const relocationsLock(pointerRelocationsMutex);
+  for (const auto &[pointerOffset, target] : allocation->pointerRelocations) {
+    if (pointerOffset < offset || pointerOffset - offset > size || sizeof(uintptr_t) > size - (pointerOffset - offset)) continue;
+    if (!target.first || target.first->released.load(std::memory_order_acquire) || target.second > target.first->size) continue;
+    const uintptr_t address = reinterpret_cast<uintptr_t>(target.first->data()) + target.second;
+    std::memcpy(static_cast<uint8_t *>(allocation->data()) + pointerOffset, &address, sizeof(address));
+    std::memcpy(static_cast<uint8_t *>(bytes) + pointerOffset - offset, &address, sizeof(address));
+  }
+}
+
 cl_int readAllocation(const std::shared_ptr<Allocation> &allocation, size_t offset, void *bytes, size_t size) {
   if (!validRange(allocation, offset, size) || (size != 0 && !bytes)) return CL_INVALID_VALUE;
   auto &state = remote;
@@ -558,17 +572,63 @@ cl_int readAllocation(const std::shared_ptr<Allocation> &allocation, size_t offs
   } else if (size != 0) {
     std::memcpy(bytes, static_cast<uint8_t *>(allocation->data()) + offset, size);
   }
-  std::scoped_lock const relocationsLock(pointerRelocationsMutex);
-  // The execution service stores device addresses in linked structures. Kernel
-  // completion translates them for the host, but a later map reads the raw
-  // remote bytes again. Reapply the known translations to the mapped range.
-  for (const auto &[pointerOffset, target] : allocation->pointerRelocations) {
-    if (pointerOffset < offset || pointerOffset - offset > size || sizeof(uintptr_t) > size - (pointerOffset - offset)) continue;
-    if (!target.first || target.first->released.load(std::memory_order_acquire) || target.second > target.first->size) continue;
-    const uintptr_t address = reinterpret_cast<uintptr_t>(target.first->data()) + target.second;
-    std::memcpy(static_cast<uint8_t *>(allocation->data()) + pointerOffset, &address, sizeof(address));
-    std::memcpy(static_cast<uint8_t *>(bytes) + pointerOffset - offset, &address, sizeof(address));
+  reapplyPointerRelocations(allocation, offset, bytes, size);
+  return CL_SUCCESS;
+}
+
+bool validRectangle(const std::shared_ptr<Allocation> &allocation, const Rectangle &rectangle) {
+  constexpr size_t maximum = std::numeric_limits<size_t>::max();
+  if (!allocation || rectangle.rowBytes == 0 || rectangle.rowCount == 0 || rectangle.sliceCount == 0) return false;
+  size_t extent = rectangle.rowBytes;
+  for (const auto &[count, pitch] :
+       {std::pair{rectangle.rowCount, rectangle.rowPitch}, std::pair{rectangle.sliceCount, rectangle.slicePitch}}) {
+    if (count > 1 && pitch != 0 && count - 1 > (maximum - extent) / pitch) return false;
+    extent += (count - 1) * pitch;
   }
+  return validRange(allocation, rectangle.offset, extent);
+}
+
+// Rows of the host side sit at hostRowPitch and hostSlicePitch from host; pitches of zero repeat the first row.
+cl_int writeAllocationRectangle(const std::shared_ptr<Allocation> &allocation, const Rectangle &rectangle, const void *host,
+                                size_t hostRowPitch, size_t hostSlicePitch) {
+  if (!validRectangle(allocation, rectangle) || !host) return CL_INVALID_VALUE;
+  const auto *source = static_cast<const uint8_t *>(host);
+  forEachRectangleRow(rectangle, [&](uint64_t offset, size_t slice, size_t row) {
+    invalidatePointerRelocations(allocation, offset, rectangle.rowBytes);
+    std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, source + (slice * hostSlicePitch) + (row * hostRowPitch),
+                rectangle.rowBytes);
+    return true;
+  });
+  auto &state = remote;
+  if (state.ready() && !allocation->hostBacked) {
+    std::scoped_lock const lock(remoteMutex);
+    if (!uploadRectangle(*state.client(), AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, host, hostRowPitch, hostSlicePitch,
+                         MaximumPayload / 2))
+      return CL_OUT_OF_RESOURCES;
+  }
+  return CL_SUCCESS;
+}
+
+cl_int readAllocationRectangle(const std::shared_ptr<Allocation> &allocation, const Rectangle &rectangle, void *host, size_t hostRowPitch,
+                               size_t hostSlicePitch) {
+  if (!validRectangle(allocation, rectangle) || !host) return CL_INVALID_VALUE;
+  auto *target = static_cast<uint8_t *>(host);
+  auto *mirror = static_cast<uint8_t *>(allocation->data());
+  auto &state = remote;
+  const bool fetched = state.ready() && !allocation->hostBacked;
+  if (fetched) {
+    std::scoped_lock const lock(remoteMutex);
+    if (!downloadRectangle(*state.client(), AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, host, hostRowPitch,
+                           hostSlicePitch, MaximumPayload / 2))
+      return CL_OUT_OF_RESOURCES;
+  }
+  forEachRectangleRow(rectangle, [&](uint64_t offset, size_t slice, size_t row) {
+    auto *hostRow = target + (slice * hostSlicePitch) + (row * hostRowPitch);
+    if (fetched) std::memcpy(mirror + offset, hostRow, rectangle.rowBytes);
+    else std::memcpy(hostRow, mirror + offset, rectangle.rowBytes);
+    reapplyPointerRelocations(allocation, offset, hostRow, rectangle.rowBytes);
+    return true;
+  });
   return CL_SUCCESS;
 }
 
@@ -3403,19 +3463,16 @@ cl_int enqueueReadBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool blocki
     const auto *bufferOrigin = copiedBufferOrigin.data();
     const auto *hostOrigin = copiedHostOrigin.data();
     const auto *region = copiedRegion.data();
-    cl_int result = CL_SUCCESS;
-    std::vector<uint8_t> row(region[0]);
-    for (size_t z = 0; z < region[2]; ++z) {
-      for (size_t y = 0; y < region[1]; ++y) {
-        const size_t sourceOffset =
-            mem->origin + ((bufferOrigin[2] + z) * sourceSlice) + ((bufferOrigin[1] + y) * sourceRow) + bufferOrigin[0];
-        const size_t targetOffset = ((hostOrigin[2] + z) * targetSlice) + ((hostOrigin[1] + y) * targetRow) + hostOrigin[0];
-        result = readAllocation(mem->allocation, sourceOffset, row.data(), row.size());
-        if (result != CL_SUCCESS) return result;
-        std::memcpy(static_cast<uint8_t *>(output) + targetOffset, row.data(), row.size());
-      }
-    }
-    return CL_SUCCESS;
+    const Rectangle rectangle{.offset = mem->origin + (bufferOrigin[2] * sourceSlice) + (bufferOrigin[1] * sourceRow) + bufferOrigin[0],
+                              .rowBytes = region[0],
+                              .rowCount = region[1],
+                              .sliceCount = region[2],
+                              .rowPitch = sourceRow,
+                              .slicePitch = sourceSlice};
+    return readAllocationRectangle(mem->allocation, rectangle,
+                                   static_cast<uint8_t *>(output) + (hostOrigin[2] * targetSlice) + (hostOrigin[1] * targetRow)
+                                       + hostOrigin[0],
+                                   targetRow, targetSlice);
   };
   return submitCommand(queue, type, blocking, count, waits, std::move(execute), event);
 }
@@ -3449,19 +3506,16 @@ cl_int enqueueWriteBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool block
     const auto *bufferOrigin = copiedBufferOrigin.data();
     const auto *hostOrigin = copiedHostOrigin.data();
     const auto *region = copiedRegion.data();
-    cl_int result = CL_SUCCESS;
-    std::vector<uint8_t> row(region[0]);
-    for (size_t z = 0; z < region[2]; ++z) {
-      for (size_t y = 0; y < region[1]; ++y) {
-        const size_t sourceOffset = ((hostOrigin[2] + z) * sourceSlice) + ((hostOrigin[1] + y) * sourceRow) + hostOrigin[0];
-        const size_t targetOffset =
-            mem->origin + ((bufferOrigin[2] + z) * targetSlice) + ((bufferOrigin[1] + y) * targetRow) + bufferOrigin[0];
-        std::memcpy(row.data(), static_cast<const uint8_t *>(input) + sourceOffset, row.size());
-        result = writeAllocation(mem->allocation, targetOffset, row.data(), row.size());
-        if (result != CL_SUCCESS) return result;
-      }
-    }
-    return CL_SUCCESS;
+    const Rectangle rectangle{.offset = mem->origin + (bufferOrigin[2] * targetSlice) + (bufferOrigin[1] * targetRow) + bufferOrigin[0],
+                              .rowBytes = region[0],
+                              .rowCount = region[1],
+                              .sliceCount = region[2],
+                              .rowPitch = targetRow,
+                              .slicePitch = targetSlice};
+    return writeAllocationRectangle(mem->allocation, rectangle,
+                                    static_cast<const uint8_t *>(input) + (hostOrigin[2] * sourceSlice) + (hostOrigin[1] * sourceRow)
+                                        + hostOrigin[0],
+                                    sourceRow, sourceSlice);
   };
   return submitCommand(queue, type, blocking, count, waits, std::move(execute), event);
 }
@@ -3501,31 +3555,28 @@ cl_int enqueueCopyBufferRect(_cl_command_queue *queue, _cl_mem *source, _cl_mem 
     const auto *sourceOrigin = copiedSourceOrigin.data();
     const auto *targetOrigin = copiedTargetOrigin.data();
     const auto *region = copiedRegion.data();
-    cl_int result = CL_SUCCESS;
+    const Rectangle from{.offset = source->origin + (sourceOrigin[2] * sourceSlice) + (sourceOrigin[1] * sourceRow) + sourceOrigin[0],
+                         .rowBytes = region[0],
+                         .rowCount = region[1],
+                         .sliceCount = region[2],
+                         .rowPitch = sourceRow,
+                         .slicePitch = sourceSlice};
+    const Rectangle to{.offset = target->origin + (targetOrigin[2] * targetSlice) + (targetOrigin[1] * targetRow) + targetOrigin[0],
+                       .rowBytes = region[0],
+                       .rowCount = region[1],
+                       .sliceCount = region[2],
+                       .rowPitch = targetRow,
+                       .slicePitch = targetSlice};
     std::vector<uint8_t> packed(region[0] * rowCount);
-    size_t packedOffset = 0;
-    for (size_t z = 0; z < region[2]; ++z) {
-      for (size_t y = 0; y < region[1]; ++y) {
-        const size_t sourceOffset =
-            source->origin + ((sourceOrigin[2] + z) * sourceSlice) + ((sourceOrigin[1] + y) * sourceRow) + sourceOrigin[0];
-        result = readAllocation(source->allocation, sourceOffset, packed.data() + packedOffset, region[0]);
-        if (result != CL_SUCCESS) return result;
-        packedOffset += region[0];
-      }
-    }
-    packedOffset = 0;
-    for (size_t z = 0; z < region[2]; ++z) {
-      for (size_t y = 0; y < region[1]; ++y) {
-        const size_t sourceOffset =
-            source->origin + ((sourceOrigin[2] + z) * sourceSlice) + ((sourceOrigin[1] + y) * sourceRow) + sourceOrigin[0];
-        const size_t targetOffset =
-            target->origin + ((targetOrigin[2] + z) * targetSlice) + ((targetOrigin[1] + y) * targetRow) + targetOrigin[0];
-        result = writeAllocation(target->allocation, targetOffset, packed.data() + packedOffset, region[0]);
-        if (result != CL_SUCCESS) return result;
-        copyPointerRelocations(source->allocation, sourceOffset, target->allocation, targetOffset, region[0]);
-        packedOffset += region[0];
-      }
-    }
+    auto result = readAllocationRectangle(source->allocation, from, packed.data(), region[0], region[0] * region[1]);
+    if (result != CL_SUCCESS) return result;
+    result = writeAllocationRectangle(target->allocation, to, packed.data(), region[0], region[0] * region[1]);
+    if (result != CL_SUCCESS) return result;
+    forEachRectangleRow(from, [&](uint64_t sourceOffset, size_t slice, size_t row) {
+      copyPointerRelocations(source->allocation, sourceOffset, target->allocation, to.offset + (slice * targetSlice) + (row * targetRow),
+                             region[0]);
+      return true;
+    });
     return CL_SUCCESS;
   };
   return submitCommand(queue, type, false, count, waits, std::move(execute), event);
@@ -3697,15 +3748,14 @@ std::vector<uint8_t> fillTexel(const ImageShape &image, const void *colour) {
 
 // Copies the rows of an image mapping between the packed texels and the mapped pointer.
 cl_int copyMappedRows(const std::shared_ptr<_cl_mem> &mem, const BufferMapping &mapping, const ImageRows &rows, bool toHost) {
-  for (size_t z = 0; z < rows.region[2]; ++z)
-    for (size_t y = 0; y < rows.region[1]; ++y) {
-      const size_t offset = mapping.offset + (z * rows.imageSlice) + (y * rows.imageRow);
-      auto *host = static_cast<uint8_t *>(mapping.pointer) + (z * rows.hostSlice) + (y * rows.hostRow);
-      const auto status = toHost ? readAllocation(mem->allocation, offset, host, rows.region[0])
-                                 : writeAllocation(mem->allocation, offset, host, rows.region[0]);
-      if (status != CL_SUCCESS) return status;
-    }
-  return CL_SUCCESS;
+  const Rectangle rectangle{.offset = mapping.offset,
+                            .rowBytes = rows.region[0],
+                            .rowCount = rows.region[1],
+                            .sliceCount = rows.region[2],
+                            .rowPitch = rows.imageRow,
+                            .slicePitch = rows.imageSlice};
+  return toHost ? readAllocationRectangle(mem->allocation, rectangle, mapping.pointer, rows.hostRow, rows.hostSlice)
+                : writeAllocationRectangle(mem->allocation, rectangle, mapping.pointer, rows.hostRow, rows.hostSlice);
 }
 
 } // namespace
@@ -3808,14 +3858,14 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillImage(cl_command_queue queueValue, 
       queue, CL_COMMAND_FILL_IMAGE, false, count, waits,
       [=] {
         const auto &image = *retained->image;
-        for (size_t z = 0; z < box.region[2]; ++z)
-          for (size_t y = 0; y < box.region[1]; ++y) {
-            const size_t offset = retained->origin + ((box.origin[2] + z) * image.slicePitch) + ((box.origin[1] + y) * image.rowPitch)
-                                  + (box.origin[0] * image.elementSize);
-            if (const auto status = writeAllocation(retained->allocation, offset, row.data(), row.size()); status != CL_SUCCESS)
-              return status;
-          }
-        return CL_SUCCESS;
+        const Rectangle rectangle{.offset = retained->origin + (box.origin[2] * image.slicePitch) + (box.origin[1] * image.rowPitch)
+                                            + (box.origin[0] * image.elementSize),
+                                  .rowBytes = row.size(),
+                                  .rowCount = box.region[1],
+                                  .sliceCount = box.region[2],
+                                  .rowPitch = image.rowPitch,
+                                  .slicePitch = image.slicePitch};
+        return writeAllocationRectangle(retained->allocation, rectangle, row.data(), 0, 0);
       },
       event);
 }

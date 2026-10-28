@@ -1,7 +1,9 @@
 // Generated from LLVM AMDGPUDimProps. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 enum ImageDimension(val encoding: Int, val assemblyName: String, val coordinates: Int, val gradients: Int)
     derives CanEqual {
   case Image1d extends ImageDimension(encoding = 0, assemblyName = "SQ_RSRC_IMG_1D", coordinates = 1, gradients = 2)

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -50,7 +51,7 @@ class CubinTextRelocationSuite extends munit.FunSuite {
     val text   = base.sections.head.copy(size = size.unsafe[Int >= 0], bytes = Vec.fill(size)(0.toByte))
     val global =
       Cubin.Section(base.sections.nonNegativeSize, ".nv.global.init", 1, 3L, 48, 0, 0, Vec.fill(48)(0.toByte))
-    val names   = Vec.from(("\u0000" + symbol.raw + "\u0000").getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val names   = Vec.from(("\u0000" + symbol.raw + "\u0000").getBytes(StandardCharsets.UTF_8))
     val strings = Cubin.Section(global.index + 1, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
     val bytes   = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
     bytes.putInt(24, 1).put(28, 1.toByte).putShort(30, global.index.toShort).putLong(32, 16L).putLong(40, 32L)
@@ -185,7 +186,7 @@ class CubinTextRelocationSuite extends munit.FunSuite {
       val base    = Harness.module(sm, Vec(Entry("relocated", if (sm < 70) 0x140 else 0x160, Vec(8))))
       val size    = listing.size * width
       val text    = base.sections.head.copy(size = size.unsafe[Int >= 0], bytes = Vec.fill(size)(0.toByte))
-      val names   = Vec.from("\u0000malloc\u0000".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+      val names   = Vec.from("\u0000malloc\u0000".getBytes(StandardCharsets.UTF_8))
       val strings = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
       val bytes   = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
       bytes.putInt(24, 1).put(28, 0x12.toByte)

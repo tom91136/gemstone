@@ -788,10 +788,7 @@ private object VMLoader {
             case Instruction.FunctionCall(function = called) => result.contains(id(called))
             case _                                           => false
           }
-        ) {
-          result += function.id
-          changed = true
-        }
+        ) { result += function.id; changed = true }
       }
     }
     result.toSet

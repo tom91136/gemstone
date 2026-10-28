@@ -1,9 +1,11 @@
 // Generated encoding constants from pinned AMD and LLVM inputs. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 // mirrors LLVM's full tables so the copy stays easy to resync
 @SuppressWarnings(Array("baumkuchen:unused-member"))
 private object EncodingConstants {

@@ -12,7 +12,7 @@ import net.kurobako.gemstone.isa.nvidia.*
   * shared memory image in, loads each lane's A fragment, accumulator and metadata words, multiplies and stores D.
   */
 object WarpgroupProducts {
-  val SharedBytes = 65536
+  val SharedBytes: Int = 65536
 
   private val KeptColumns = Vec(Vec(0, 1), Vec(0, 2), Vec(0, 3), Vec(1, 2), Vec(1, 3), Vec(2, 3))
 

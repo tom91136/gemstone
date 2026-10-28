@@ -11,6 +11,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.AllocationAddressIndex.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 import scala.runtime.LongRef
 
 private object CompletionMemory {
@@ -188,7 +189,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     if (address.raw <= 0 || end < address.raw) Vec.from(size.refine[Int > 0].toOption.map(address -> _))
     else if (size == 0) Vec.empty
     else {
-      val collected = scala.collection.mutable.ArrayBuilder.ofLong()
+      val collected = mutable.ArrayBuilder.ofLong()
       collected += address.raw
       collected += end
       storage.index.boundaries(address.raw, end, collected)

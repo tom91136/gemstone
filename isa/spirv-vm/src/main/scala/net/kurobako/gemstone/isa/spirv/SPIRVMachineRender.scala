@@ -493,13 +493,13 @@ private class SPIRVMachineRender(scope: Scope[Int])
             cluster = cluster
           ) =>
         reduced(kind, operation, scalar(dest), scalar(source), cluster)
-      case Collective.Value(kind, _, _, source, operation, cluster, _) =>
+      case Collective.Value(kind = kind, source = source, operation = operation, cluster = cluster) =>
         kind match {
           case VMCollectives.Kind.AllEqual       => allEqualed(scalar(source), scalar(dest))
           case VMCollectives.Kind.BroadcastFirst => firstBroadcast(scalar(source), scalar(dest))
           case _ => reduced(kind, operation.toLong, scalar(dest), scalar(source), cluster)
         }
-      case Collective.Shuffle(_, _, source, lane, selection, _) =>
+      case Collective.Shuffle(source = source, lane = lane, selection = selection) =>
         shuffled(selection, scalar(source), scalar(lane), scalar(dest))
       case Collective.Broadcast(_, scopeId, source, local) =>
         GroupResolution.broadcast(this)(
@@ -508,15 +508,16 @@ private class SPIRVMachineRender(scope: Scope[Int])
           scalar(source),
           scalar(dest)
         )
-      case Collective.Ballot(_, _, predicate, _) => ballotted(scalar(predicate), dest)
-      case Collective.Partition(_, source)       =>
+      case Collective.Ballot(predicate = predicate) => ballotted(scalar(predicate), dest)
+      case Collective.Partition(_, source)          =>
         gather(UnitAlgebra.Slot.First, scalar(source)) { view =>
           Term.Steps.concat(scope.operands(dest).zipWithIndex.map((found, word) =>
             binding(found.name, GroupResolution.partitionWord(Render, this)((), view, word, floatingOf(source)))
           ))
         }
-      case Collective.BallotQuery(_, _, source, mode, bit, _) => queried(dest, source, mode, bit)
-      case Collective.MatrixMultiply(_, operands, _)          =>
+      case Collective.BallotQuery(source = source, mode = mode, bit = bit) => queried(dest, source, mode, bit)
+      case Collective.MatrixMultiply(_, operands, _)                       =>
+        val lanes: Vec[(Term, Option[Type])] = operands.flatMap(operand => leaves(operand).map(lane => (lane, None)))
         Term.Steps.concat(scope.operands(dest).zipWithIndex.map((found, word) =>
           binding(
             found.name,
@@ -524,8 +525,7 @@ private class SPIRVMachineRender(scope: Scope[Int])
               MachineCall(
                 "matrixMultiply",
                 Vec.empty,
-                Vec[(Term, Option[Type])]((Term.Literal(word.toLong), None)) ++
-                  operands.flatMap(leaves(_)).map(lane => (lane, None))
+                Vec[(Term, Option[Type])]((Term.Literal(word.toLong), None)) ++ lanes
               ),
               Word
             )
@@ -819,7 +819,7 @@ private class SPIRVMachineRender(scope: Scope[Int])
   inline def vulkan: Term = imaged("vulkan", Vec.empty)
 
   inline def integral(operand: Int): Term = typeOf(operand) match {
-    case _: Type.Float => Term.Literal(0L)
+    case Type.Float(_) => Term.Literal(0L)
     case _             => Term.Literal(1L)
   }
 
@@ -1192,23 +1192,31 @@ private class SPIRVMachineRender(scope: Scope[Int])
 
   inline def pipe(instruction: Instruction): Term.Steps =
     instruction match {
-      case Instruction.WritePipe(_, d, pipe, packet, _, _) => valued(Pipe, "write", d, operands(pipe, packet))
-      case Instruction.ReadPipe(_, d, pipe, packet, _, _)  => valued(Pipe, "read", d, operands(pipe, packet))
-      case Instruction.ReservedWritePipe(_, d, pipe, reserved, index, packet, _, _) =>
+      case Instruction.WritePipe(dest = d, pipe = pipe, pointer = packet) =>
+        valued(Pipe, "write", d, operands(pipe, packet))
+      case Instruction.ReadPipe(dest = d, pipe = pipe, pointer = packet) =>
+        valued(Pipe, "read", d, operands(pipe, packet))
+      case Instruction.ReservedWritePipe(
+            dest = d,
+            pipe = pipe,
+            reserveId = reserved,
+            index = index,
+            pointer = packet
+          ) =>
         valued(Pipe, "reservedWrite", d, operands(pipe, reserved, index, packet))
-      case Instruction.ReservedReadPipe(_, d, pipe, reserved, index, packet, _, _) =>
+      case Instruction.ReservedReadPipe(dest = d, pipe = pipe, reserveId = reserved, index = index, pointer = packet) =>
         valued(Pipe, "reservedRead", d, operands(pipe, reserved, index, packet))
-      case Instruction.ReserveWritePipePackets(_, d, pipe, count, _, _) =>
+      case Instruction.ReserveWritePipePackets(dest = d, pipe = pipe, numPackets = count) =>
         valued(Pipe, "reserveWrite", d, operands(pipe, count))
-      case Instruction.ReserveReadPipePackets(_, d, pipe, count, _, _) =>
+      case Instruction.ReserveReadPipePackets(dest = d, pipe = pipe, numPackets = count) =>
         valued(Pipe, "reserveRead", d, operands(pipe, count))
-      case Instruction.GroupReserveWritePipePackets(_, d, group, pipe, count, _, _) =>
+      case Instruction.GroupReserveWritePipePackets(dest = d, execution = group, pipe = pipe, numPackets = count) =>
         valued(Pipe, "groupReserveWrite", d, operands(group, pipe, count))
-      case Instruction.GroupReserveReadPipePackets(_, d, group, pipe, count, _, _) =>
+      case Instruction.GroupReserveReadPipePackets(dest = d, execution = group, pipe = pipe, numPackets = count) =>
         valued(Pipe, "groupReserveRead", d, operands(group, pipe, count))
-      case Instruction.IsValidReserveId(_, d, reserved)    => valued(Pipe, "isValidReserveId", d, operands(reserved))
-      case Instruction.GetNumPipePackets(_, d, pipe, _, _) => valued(Pipe, "numPackets", d, operands(pipe))
-      case Instruction.GetMaxPipePackets(_, d, pipe, _, _) => valued(Pipe, "maxPackets", d, operands(pipe))
+      case Instruction.IsValidReserveId(_, d, reserved) => valued(Pipe, "isValidReserveId", d, operands(reserved))
+      case Instruction.GetNumPipePackets(dest = d, pipe = pipe) => valued(Pipe, "numPackets", d, operands(pipe))
+      case Instruction.GetMaxPipePackets(dest = d, pipe = pipe) => valued(Pipe, "maxPackets", d, operands(pipe))
       case Instruction.CreatePipeFromPipeStorage(_, d, storage) => valued(Pipe, "fromStorage", d, operands(storage))
       case _                                                    => Term.Steps.empty
     }
@@ -1329,7 +1337,7 @@ private class SPIRVMachineRender(scope: Scope[Int])
   private def renderImage(instruction: Instruction): Term.Steps = {
     import Operand.*
     def read(method: String, dest: Operand, arguments: Vec[Term]) = lanewise(Images, method, id(dest), arguments)
-    SamplingSemantics.render(instruction, this).getOrElse(instruction match {
+    instruction match {
       case Instruction.SampledImage(_, d, i, s)              => read("sampledImage", d, operands(i, s))
       case Instruction.Image(_, d, s)                        => read("image", d, operands(s))
       case Instruction.ImageSampleImplicitLod(_, d, i, c, m) =>
@@ -1364,7 +1372,7 @@ private class SPIRVMachineRender(scope: Scope[Int])
       case Instruction.ImageWrite(i, c, texel, m)            =>
         effect(Images, "write", operands(i, c, texel) ++ modifiers(m))
       case _ => Term.Steps.empty
-    })
+    }
   }
 
   inline def arrayLength(structure: Int, member: Int, declared: Option[Int], target: Int, typeId: Int)(

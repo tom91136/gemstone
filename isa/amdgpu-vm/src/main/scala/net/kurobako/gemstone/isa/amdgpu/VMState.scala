@@ -80,10 +80,7 @@ private object VMState {
       }
 
     def initialise(id: Int, count: Int): Either[Fault, Unit] = namedBarrier(id).map { barrier =>
-      if (barrier != 0) {
-        expected(barrier) = count
-        arrivals(barrier) = 0
-      }
+      if (barrier != 0) { expected(barrier) = count; arrivals(barrier) = 0 }
     }
 
     def join(id: Int, wave: Int): Either[Fault, Unit] = namedBarrier(id).map { barrier =>

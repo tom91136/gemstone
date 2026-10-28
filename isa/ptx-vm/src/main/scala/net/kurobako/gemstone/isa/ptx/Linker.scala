@@ -65,10 +65,7 @@ private object Linker {
     statements.foreach { statement =>
       statement match {
         case Statement.Directive(path = path) if path.raw == Vec("version") =>
-          if (versionSeen) {
-            result += Vec.from(current)
-            current.clear()
-          }
+          if (versionSeen) { result += Vec.from(current); current.clear() }
           versionSeen = true
         case _ => ()
       }

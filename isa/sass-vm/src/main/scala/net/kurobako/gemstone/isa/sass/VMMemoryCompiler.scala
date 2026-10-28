@@ -405,10 +405,7 @@ private object VMMemoryCompiler {
       else storeOf(pointer, Vec.tabulate(words)(register(data, _)), elementWidth, space)
     if (loading && operands.size == 3)
       zeroFilled(memory, if (OperandQueries.isZero(data)) Vec.empty else results, operands(2))
-    else {
-      if (operands.size != 2) unsupported("unsupported memory operands")
-      emit(memory)
-    }
+    else { if (operands.size != 2) unsupported("unsupported memory operands"); emit(memory) }
   }
 
   /** A 256-bit global access, as `ld.global.v8.b32` and `st.global.v8.b32` from sm_100: words 0 to 3 in the group a

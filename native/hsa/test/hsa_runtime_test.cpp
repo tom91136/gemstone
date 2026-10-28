@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "gemstone/hsa/global.hpp"
+#include "gemstone/hsa/memory_copy.hpp"
 #include <gemstone/test_support.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
@@ -1214,4 +1215,79 @@ TEST_CASE("HSA images are linear over their data and read through a descriptor o
   REQUIRE((hsa_ext_image_destroy(gpu, image) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_ext_image_destroy(gpu, image) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
   REQUIRE((hsa_memory_free(data) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA pitched copies move only the rows between device and host", "[hsa][pitched]") {
+  MemoryLockSession const session;
+  const auto gpu = agentOf(HSA_DEVICE_TYPE_GPU);
+  const auto coarse = regionWithFlag(gpu, HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED);
+  constexpr size_t row = 4;
+  constexpr size_t rows = 3;
+  constexpr size_t devicePitch = 8;
+  constexpr size_t deviceSlice = 32;
+  constexpr size_t hostPitch = 6;
+  constexpr size_t hostSlice = 24;
+  constexpr size_t peerPitch = 12;
+  constexpr size_t peerSlice = 40;
+  constexpr uint8_t gap = 0xee;
+  const auto value = [](size_t z, size_t y, size_t c) { return static_cast<uint8_t>((z * 40) + (y * 9) + c + 1); };
+  std::vector<uint8_t> host(2 * hostSlice, gap);
+  for (size_t z = 0; z < 2; ++z)
+    for (size_t y = 0; y < rows; ++y)
+      for (size_t c = 0; c < row; ++c)
+        host[(z * hostSlice) + (y * hostPitch) + c] = value(z, y, c);
+  void *device = nullptr;
+  void *peer = nullptr;
+  REQUIRE((hsa_memory_allocate(coarse, 2 * deviceSlice, &device) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_allocate(coarse, 2 * peerSlice, &peer) == HSA_STATUS_SUCCESS));
+
+  std::vector<uint8_t> background(2 * deviceSlice, 0xaa);
+  REQUIRE((hsa_memory_copy(device, background.data(), background.size()) == HSA_STATUS_SUCCESS));
+  REQUIRE((gemstone_hsa_memory_copy_pitched(device, devicePitch, deviceSlice, host.data(), hostPitch, hostSlice, row, rows, 2)
+           == HSA_STATUS_SUCCESS));
+  std::vector<uint8_t> stored(2 * deviceSlice);
+  REQUIRE((hsa_memory_copy(stored.data(), device, stored.size()) == HSA_STATUS_SUCCESS));
+  std::vector<uint8_t> expectedStored(2 * deviceSlice, 0xaa);
+  for (size_t z = 0; z < 2; ++z)
+    for (size_t y = 0; y < rows; ++y)
+      for (size_t c = 0; c < row; ++c)
+        expectedStored[(z * deviceSlice) + (y * devicePitch) + c] = value(z, y, c);
+  CHECK(stored == expectedStored);
+
+  std::vector<uint8_t> out(2 * hostSlice, gap);
+  REQUIRE((gemstone_hsa_memory_copy_pitched(out.data(), hostPitch, hostSlice, device, devicePitch, deviceSlice, row, rows, 2)
+           == HSA_STATUS_SUCCESS));
+  CHECK(out == host);
+
+  std::vector<uint8_t> flat(2 * hostSlice, gap);
+  REQUIRE((gemstone_hsa_memory_copy_pitched(flat.data(), hostPitch, hostSlice, device, devicePitch, deviceSlice, row, rows, 1)
+           == HSA_STATUS_SUCCESS));
+  CHECK(std::vector<uint8_t>(flat.begin(), flat.begin() + hostSlice) == std::vector<uint8_t>(host.begin(), host.begin() + hostSlice));
+  CHECK(std::vector<uint8_t>(flat.begin() + hostSlice, flat.end()) == std::vector<uint8_t>(hostSlice, gap));
+
+  std::vector<uint8_t> seed(2 * peerSlice, 0xbb);
+  std::vector<uint8_t> peerBytes(seed.size());
+  REQUIRE((hsa_memory_copy(peer, seed.data(), seed.size()) == HSA_STATUS_SUCCESS));
+  REQUIRE(
+      (gemstone_hsa_memory_copy_pitched(peer, peerPitch, peerSlice, device, devicePitch, deviceSlice, row, rows, 2) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_copy(peerBytes.data(), peer, peerBytes.size()) == HSA_STATUS_SUCCESS));
+  std::vector<uint8_t> expectedPeer(seed);
+  for (size_t z = 0; z < 2; ++z)
+    for (size_t y = 0; y < rows; ++y)
+      for (size_t c = 0; c < row; ++c)
+        expectedPeer[(z * peerSlice) + (y * peerPitch) + c] = value(z, y, c);
+  CHECK(peerBytes == expectedPeer);
+
+  REQUIRE((hsa_memory_copy(peer, seed.data(), seed.size()) == HSA_STATUS_SUCCESS));
+  REQUIRE(
+      (gemstone_hsa_memory_copy_pitched(peer, peerPitch, peerSlice, device, devicePitch, deviceSlice, row, rows, 1) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_copy(peerBytes.data(), peer, peerBytes.size()) == HSA_STATUS_SUCCESS));
+  expectedPeer = seed;
+  for (size_t y = 0; y < rows; ++y)
+    for (size_t c = 0; c < row; ++c)
+      expectedPeer[(y * peerPitch) + c] = value(0, y, c);
+  CHECK(peerBytes == expectedPeer);
+
+  REQUIRE((hsa_memory_free(device) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(peer) == HSA_STATUS_SUCCESS));
 }

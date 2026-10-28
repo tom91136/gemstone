@@ -15,8 +15,9 @@ private object TensorArmSemantics {
   private val Unsupported      = 0x4 | 0x8
 
   def handles(instruction: Instruction): Boolean = instruction match {
-    case _: Instruction.TensorQuerySizeARM | _: Instruction.TensorReadARM | _: Instruction.TensorWriteARM => true
-    case _                                                                                                => false
+    case Instruction.TensorQuerySizeARM(_, _, _, _) | Instruction.TensorReadARM(_, _, _, _, _) |
+        Instruction.TensorWriteARM(_, _, _, _) => true
+    case _ => false
   }
 
   /** The mask word of the tensor operands, then the words that follow it. */
@@ -175,25 +176,25 @@ private object TensorArmSemantics {
       case Instruction.TensorReadARM(resultType, dest, tensor, coordinates, operands)
           if supported(operandWords(operands)) =>
         Some(read(Render, machine)(
-          id(tensor),
-          id(coordinates),
-          rank,
-          machine.leafCount(id(dest)),
-          id(resultType),
-          bytes,
-          outOfBounds(operandWords(operands)),
-          id(dest),
-          id(resultType)
+          tensor = id(tensor),
+          coordinates = id(coordinates),
+          rank = rank,
+          count = machine.leafCount(id(dest)),
+          element = id(resultType),
+          bytes = bytes,
+          fill = outOfBounds(operandWords(operands)),
+          target = id(dest),
+          typeId = id(resultType)
         )(machine.advance))
       case Instruction.TensorWriteARM(tensor, coordinates, source, operands) if supported(operandWords(operands)) =>
         Some(write(Render, machine)(
-          id(tensor),
-          id(coordinates),
-          id(source),
-          rank,
-          machine.leafCount(id(source)),
-          id(source),
-          bytes
+          tensor = id(tensor),
+          coordinates = id(coordinates),
+          source = id(source),
+          rank = rank,
+          count = machine.leafCount(id(source)),
+          element = id(source),
+          bytes = bytes
         )(machine.advance))
       case _ => None
     }

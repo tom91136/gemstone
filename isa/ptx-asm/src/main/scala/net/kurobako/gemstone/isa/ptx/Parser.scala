@@ -267,10 +267,7 @@ object Parser {
       var separator = DirectiveSeparator.Space
       while (!eof && !at(";") && !at("}") && current.offset < lineEnd)
         if (accept(",")) separator = DirectiveSeparator.Comma
-        else {
-          arguments += DirectiveArgument(separator, operand())
-          separator = DirectiveSeparator.Space
-        }
+        else { arguments += DirectiveArgument(separator, operand()); separator = DirectiveSeparator.Space }
       val _ = accept(";")
       Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Line)
     }
@@ -281,10 +278,7 @@ object Parser {
       var separator = DirectiveSeparator.Space
       while (!eof && !at(";") && !at("="))
         if (accept(",")) separator = DirectiveSeparator.Comma
-        else {
-          arguments += DirectiveArgument(separator, operand())
-          separator = DirectiveSeparator.Space
-        }
+        else { arguments += DirectiveArgument(separator, operand()); separator = DirectiveSeparator.Space }
       val initialiser = if (accept("=")) {
         val values = operandsUntil(";")
         if (values.isEmpty) fail("initialiser")
@@ -428,10 +422,7 @@ object Parser {
         var separator = DirectiveSeparator.Space
         while (!eof && !at(".") && !at("{") && !at(";"))
           if (accept(",")) separator = DirectiveSeparator.Comma
-          else {
-            arguments += DirectiveArgument(separator, operand())
-            separator = DirectiveSeparator.Space
-          }
+          else { arguments += DirectiveArgument(separator, operand()); separator = DirectiveSeparator.Space }
         directives += Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Line)
       }
       Vec.from(directives)

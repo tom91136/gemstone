@@ -16,6 +16,8 @@ import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 object Server {
+  private val AcceptStopMillis = 5000L
+
   object Settings {
     private def hostBound: Int      = math.max(1, math.min(64, sys.runtime.availableProcessors()))
     def defaultParallelism: Int > 0 = math.max(1, hostBound - 2).unsafe[Int > 0]
@@ -174,9 +176,13 @@ class Server private (
       throwables.closeAll(active.map((channel, _) => () => channel.close()) ++
         List(() => clients.close()) ++ active.map((_, thread) => () => thread.join()))
     }
+    def stopAccepting(): Unit = {
+      acceptThread.join(Server.AcceptStopMillis)
+      if (acceptThread.isAlive) throw IllegalStateException("RPC accept thread did not stop after the listener closed")
+    }
     try throwables.closeAll(List(
         () => listener.close(),
-        () => acceptThread.join(),
+        () => stopAccepting(),
         () => shutdownConnections(),
         () => pool.close()
       ))

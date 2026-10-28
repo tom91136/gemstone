@@ -2,9 +2,11 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object Param extends Domain[Param] {
   val id: String = "param"
 
@@ -15,7 +17,7 @@ object Param extends Domain[Param] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum Param extends DomainValue derives CanEqual {
   case P(index: Int in 0 ~ 20)
   def slot: Slot = this match {

@@ -1,10 +1,12 @@
 // Generated from ImageFormats. Regenerate with: sbt codegen
 package net.kurobako.gemstone.graphics
 
+import javax.annotation.processing.Generated
+
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.Wire.*
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 object GraphicsFormats {
   enum GraphicsDepthFormat derives CanEqual { case None, Unorm16, Float32 }
   enum GraphicsCompression derives CanEqual {

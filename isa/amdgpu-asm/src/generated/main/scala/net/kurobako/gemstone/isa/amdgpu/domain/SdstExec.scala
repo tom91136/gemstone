@@ -2,7 +2,9 @@
 
 package net.kurobako.gemstone.isa.amdgpu.domain
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+import javax.annotation.processing.Generated
+
+@Generated(Array("sbt codegen"))
 object SdstExec extends Domain[SdstExec] {
   val id: String = "sdst_exec"
 
@@ -13,7 +15,7 @@ object SdstExec extends Domain[SdstExec] {
   }
 }
 
-@javax.annotation.processing.Generated(Array("sbt codegen"))
+@Generated(Array("sbt codegen"))
 enum SdstExec extends DomainValue derives CanEqual {
   case ExecLo
   case ExecHi

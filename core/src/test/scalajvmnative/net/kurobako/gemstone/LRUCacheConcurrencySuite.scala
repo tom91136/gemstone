@@ -1,6 +1,7 @@
 package net.kurobako.gemstone
 
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
@@ -101,7 +102,7 @@ class LRUCacheConcurrencySuite extends munit.FunSuite {
     assert(first.contains(interrupted))
     Using.resource(threads.Pool(1)) { pool =>
       val retry    = pool.executor.submit(() => cache.get("key")(42))
-      val observed = intercept[java.util.concurrent.ExecutionException](retry.get(5, TimeUnit.SECONDS))
+      val observed = intercept[ExecutionException](retry.get(5, TimeUnit.SECONDS))
       assert(observed.getCause eq interrupted)
     }
   }

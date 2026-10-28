@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
@@ -14,7 +15,7 @@ class DeviceHeapConcurrencySuite extends munit.FunSuite {
     val counter = allocate(heap, 8)
     val pair    = allocate(heap, 8)
     val rounds  = 20000
-    val torn    = java.util.concurrent.atomic.AtomicBoolean(false)
+    val torn    = AtomicBoolean(false)
     val threads = Vec.tabulate(4) { worker =>
       Thread.ofPlatform().start { () =>
         (0 until rounds).foreach { round =>

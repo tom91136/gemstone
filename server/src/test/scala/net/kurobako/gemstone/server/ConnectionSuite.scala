@@ -7,6 +7,8 @@ import java.io.DataOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
@@ -22,7 +24,7 @@ class ConnectionSuite extends munit.FunSuite {
       Wire.Protocol[Operation].encodePayload(Operation.EnableHostMemory, ExecutionRPC.Limits).toOption.get
     val bytes  = ByteArrayOutputStream()
     val output = DataOutputStream(bytes)
-    val schema = ExecutionRPC.Schema.canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val schema = ExecutionRPC.Schema.canonical.getBytes(StandardCharsets.UTF_8)
     output.writeInt(ExecutionRPC.HelloMagic)
     output.writeInt(schema.length)
     output.write(schema)
@@ -42,10 +44,7 @@ class ConnectionSuite extends munit.FunSuite {
       class FailingOutput extends OutputStream {
         private val helloBytes               = AtomicInteger()
         override def write(value: Int): Unit =
-          if (helloBytes.incrementAndGet() > 8) {
-            attempts.incrementAndGet()
-            throw IOException("broken output")
-          }
+          if (helloBytes.incrementAndGet() > 8) { attempts.incrementAndGet(); throw IOException("broken output") }
       }
       val output = FailingOutput()
       files.temporary { directory =>
@@ -172,8 +171,8 @@ class ConnectionSuite extends munit.FunSuite {
     }
   }
   private def helloFrame(schema: String): Array[Byte] = {
-    val bytes = schema.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-    java.nio.ByteBuffer.allocate(
+    val bytes = schema.getBytes(StandardCharsets.UTF_8)
+    ByteBuffer.allocate(
       8 + bytes.length
     ).putInt(ExecutionRPC.HelloMagic).putInt(bytes.length).put(bytes).array()
   }
@@ -226,7 +225,7 @@ class ConnectionSuite extends munit.FunSuite {
   test("schema lengths are bounded before reading their bytes") {
     val factories = AtomicInteger()
     for (size <- Seq(-1, 0, ExecutionRPC.MaximumSchemaBytes.raw + 1)) {
-      val prefix = java.nio.ByteBuffer.allocate(8).putInt(ExecutionRPC.HelloMagic).putInt(size).array()
+      val prefix = ByteBuffer.allocate(8).putInt(ExecutionRPC.HelloMagic).putInt(size).array()
       assertEquals(serveBytes(prefix, factories).length, 0)
     }
     assertEquals(factories.get(), 0)

@@ -8,6 +8,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 class NonUniformSuite extends munit.FunSuite {
   // two complete subgroups and one partial subgroup
@@ -271,8 +272,8 @@ class NonUniformSuite extends munit.FunSuite {
 
   /** Defers every read that is not 8-byte aligned until the next host read flush. */
   private class DeferredMemory(memory: RegionMemory) extends ForwardingMemory(memory) {
-    private val pending                                = scala.collection.mutable.Set.empty[Long]
-    private val ready                                  = scala.collection.mutable.Set.empty[Long]
+    private val pending                                = mutable.Set.empty[Long]
+    private val ready                                  = mutable.Set.empty[Long]
     override def defersHostReads: Boolean              = true
     override def flushHostReads(): Either[Fault, Unit] = {
       val _ = ready.addAll(pending)

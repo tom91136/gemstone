@@ -190,10 +190,7 @@ class TensorSuite extends munit.FunSuite {
         b(lane * bCount + index / 2) |= half(matrixB(row)(group).toFloat) << (index % 2 * 16)
       }
     }
-    else {
-      a(0) = 0x4000L
-      b(0) = 0x4200L
-    }
+    else { a(0) = 0x4000L; b(0) = 0x4200L }
     def tile(lane: Int, value: (Int, Int) => Int): Vec[Long] = {
       val (group, thread) = (lane / 4, lane % 4)
       Vec(group, group + 8).map(row => packed(value(row, thread * 2), value(row, thread * 2 + 1)))

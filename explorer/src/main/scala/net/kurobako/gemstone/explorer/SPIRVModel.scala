@@ -69,7 +69,7 @@ object SPIRVModel extends Model {
         names.flatMap(_.lift(index)).getOrElse(s"word ${index + 1}"),
         quantified(shape),
         operandDetail(shape, constraint),
-        constraint.flatMap(domainOf)
+        constraint.flatMap(domainOf(_))
       )
     }
     View.Form(

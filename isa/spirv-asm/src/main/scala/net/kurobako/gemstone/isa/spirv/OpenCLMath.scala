@@ -26,6 +26,8 @@ package net.kurobako.gemstone.isa.spirv
  * ====================================================
  *
  */
+import scala.annotation.tailrec
+
 private object OpenCLMath {
   // Binary64 kernels; the interpreter rounds their results to the destination
   // width. Piecewise rational approximations avoid cancellation in erfc tails
@@ -287,11 +289,11 @@ private object OpenCLMath {
     else if (x < 0.0 && x != math.floor(x) && sinPiPositive(-x) > 0.0) -1
     else 1
   private def gammaSeries(x: Double): Double = {
-    @scala.annotation.tailrec
+    @tailrec
     def ascending(i: Int, num: Double, den: Double): Double =
       if (i == gammaNumerator.length) num / den
       else ascending(i + 1, num / x + gammaNumerator(i), den / x + gammaDenominator(i))
-    @scala.annotation.tailrec
+    @tailrec
     def descending(i: Int, num: Double, den: Double): Double =
       if (i < 0) num / den
       else descending(i - 1, num * x + gammaNumerator(i), den * x + gammaDenominator(i))
@@ -376,7 +378,7 @@ private object OpenCLMath {
       val q = 1.0 +
         y *
         (r1 + y * (r2 + y * (r3 + y * (r4 + y * (r5 + y * r6)))))
-      @scala.annotation.tailrec
+      @tailrec
       def product(k: Int, accumulated: Double): Double =
         if (k < 2) accumulated else product(k - 1, accumulated * (y + k))
       0.5 * y + p / q + math.log(product(i - 1, 1.0))

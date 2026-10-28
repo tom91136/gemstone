@@ -506,10 +506,8 @@ private object VMInterpreter {
               }
             case _ => false
           }
-          if (hasStaticCollectives) {
-            reuse.lanesStates(linearLocal) = execution
-            executions += execution
-          } else
+          if (hasStaticCollectives) { reuse.lanesStates(linearLocal) = execution; executions += execution }
+          else
             // Deferred host reads retain a frame only when the lane actually suspends.
             resumeInvocation(program, ops, execution, groupState, control) match {
               case Left(error)                      => return Left(located(error, timeline, execution))
@@ -565,10 +563,7 @@ private object VMInterpreter {
           timeline,
           memory
         )
-      else {
-        reused.reset(invocation, function, memory)
-        reused
-      }
+      else { reused.reset(invocation, function, memory); reused }
     bindings.foreach { case (variable, value) => execution.values.update(variable, value) }
     execution.storage.reset(privateImage)
     var builtin = 0
@@ -631,10 +626,7 @@ private object VMInterpreter {
         case Right(())   =>
           slices += 1
           // Lanes that run on, such as spin-waits, yield so other subgroups make independent forward progress.
-          if (slices == SliceCharges) {
-            execution.preempted = true
-            return Right(())
-          }
+          if (slices == SliceCharges) { execution.preempted = true; return Right(()) }
       }
     }
     charge().flatMap(_ =>

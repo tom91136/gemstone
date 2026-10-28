@@ -2,6 +2,8 @@ package net.kurobako.gemstone.server
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.protocol.*
 import scala.util.Using
@@ -36,7 +38,7 @@ class ClientsSuite extends munit.FunSuite {
   }
 
   test("failure notifying one closed client does not skip other clients or leave leases live") {
-    val notifications = java.util.concurrent.atomic.AtomicInteger()
+    val notifications = AtomicInteger()
     val clients       = Clients(
       () => ExecutionSession(Nil),
       _ => {
@@ -70,7 +72,7 @@ class ClientsSuite extends munit.FunSuite {
     cleanup.start()
     try {
       assert(entered.await(2, TimeUnit.SECONDS))
-      val acquired = java.util.concurrent.atomic.AtomicBoolean()
+      val acquired = AtomicBoolean()
       val other    = Thread { () =>
         val _ = clients.register(); acquired.set(true)
       }

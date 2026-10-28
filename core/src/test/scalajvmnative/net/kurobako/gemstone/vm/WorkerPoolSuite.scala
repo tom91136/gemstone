@@ -1,5 +1,9 @@
 package net.kurobako.gemstone.vm
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
 import net.kurobako.gemstone.*
@@ -11,16 +15,13 @@ class WorkerPoolSuite extends munit.FunSuite {
 
   // Blocking waits must run outside the suite monitor held by MUnit's by-name assert.
   test("large dispatches yield to queued work within a bounded number of groups") {
-    val entered = java.util.concurrent.CountDownLatch(1)
-    val release = java.util.concurrent.CountDownLatch(1)
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
     val visited = AtomicInteger()
     Using.resource(WorkerPool(1)) { pool =>
       val large = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
         pool.parallelFor(65536L) { index =>
-          if (index == 0L) {
-            entered.countDown()
-            assertEquals(release.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
-          }
+          if (index == 0L) { entered.countDown(); assertEquals(release.await(5L, TimeUnit.SECONDS), true) }
           val _ = visited.incrementAndGet()
           Right(())
         }
@@ -29,88 +30,82 @@ class WorkerPoolSuite extends munit.FunSuite {
       caller.start()
       val short = java.util.concurrent.FutureTask[Int](() => visited.get())
       try {
-        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+        assertEquals(entered.await(5L, TimeUnit.SECONDS), true)
         pool.execute(short)
       } finally release.countDown()
-      val precedingGroups = short.get(5L, java.util.concurrent.TimeUnit.SECONDS)
-      assertEquals(large.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+      val precedingGroups = short.get(5L, TimeUnit.SECONDS)
+      assertEquals(large.get(5L, TimeUnit.SECONDS), Right(()))
       caller.join()
       assert(precedingGroups <= 256, s"queued work waited for $precedingGroups groups from one dispatch")
     }
   }
 
   test("joining workgroups does not enter an unrelated launch that can block the caller") {
-    val entered       = java.util.concurrent.CountDownLatch(1)
-    val releaseGroup  = java.util.concurrent.CountDownLatch(1)
-    val releaseLaunch = java.util.concurrent.CountDownLatch(1)
+    val entered       = CountDownLatch(1)
+    val releaseGroup  = CountDownLatch(1)
+    val releaseLaunch = CountDownLatch(1)
     Using.resource(WorkerPool(1)) { pool =>
       val outer = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
         pool.parallelFor(3L) { index =>
-          if (index == 0L) {
-            entered.countDown()
-            assertEquals(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
-          }
+          if (index == 0L) { entered.countDown(); assertEquals(releaseGroup.await(5L, TimeUnit.SECONDS), true) }
           Right(())
         }
       )
       val unrelated = java.util.concurrent.FutureTask[Boolean](() =>
-        releaseLaunch.await(5L, java.util.concurrent.TimeUnit.SECONDS)
+        releaseLaunch.await(5L, TimeUnit.SECONDS)
       )
       pool.execute(outer)
       val completed = try {
-        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+        assertEquals(entered.await(5L, TimeUnit.SECONDS), true)
         pool.execute(unrelated)
         releaseGroup.countDown()
-        try { outer.get(1L, java.util.concurrent.TimeUnit.SECONDS); true }
-        catch { case _: java.util.concurrent.TimeoutException => false }
+        try { outer.get(1L, TimeUnit.SECONDS); true }
+        catch { case _: TimeoutException => false }
       } finally {
         releaseGroup.countDown()
         releaseLaunch.countDown()
       }
-      assertEquals(outer.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
-      assertEquals(unrelated.get(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+      assertEquals(outer.get(5L, TimeUnit.SECONDS), Right(()))
+      assertEquals(unrelated.get(5L, TimeUnit.SECONDS), true)
       assert(completed, "a workgroup join entered an unrelated launch before returning to its own caller")
     }
   }
 
   test("a workgroup join cannot be trapped in another dispatch's long group") {
-    val entered      = java.util.concurrent.CountDownLatch(1)
-    val releaseGroup = java.util.concurrent.CountDownLatch(1)
-    val releaseOther = java.util.concurrent.CountDownLatch(1)
+    val entered      = CountDownLatch(1)
+    val releaseGroup = CountDownLatch(1)
+    val releaseOther = CountDownLatch(1)
     Using.resource(WorkerPool(1)) { pool =>
       val outer = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
         pool.parallelFor(3L) { index =>
-          if (index == 0L) {
-            entered.countDown()
-            assertEquals(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
-          }
+          if (index == 0L) { entered.countDown(); assertEquals(releaseGroup.await(5L, TimeUnit.SECONDS), true) }
           Right(())
         }
       )
       val other = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
         pool.parallelFor(1L) { _ =>
-          assertEquals(releaseOther.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+          assertEquals(releaseOther.await(5L, TimeUnit.SECONDS), true)
           Right(())
         }
       )
       val caller = Thread(other, "independent-workgroup-caller")
       pool.execute(outer)
       val completed = try {
-        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+        assertEquals(entered.await(5L, TimeUnit.SECONDS), true)
         caller.start()
         // WAITING here means parallelFor has enqueued its job and is awaiting completion.
-        val deadline = platform.monotonicNanos + java.util.concurrent.TimeUnit.SECONDS.toNanos(5L)
+        val deadline = platform.monotonicNanos + TimeUnit.SECONDS.toNanos(5L)
         while (caller.getState != Thread.State.WAITING && platform.monotonicNanos < deadline) Thread.`yield`()
         assertEquals(caller.getState, Thread.State.WAITING)
         releaseGroup.countDown()
-        try { outer.get(1L, java.util.concurrent.TimeUnit.SECONDS); true }
-        catch { case _: java.util.concurrent.TimeoutException => false }
+        try { outer.get(1L, TimeUnit.SECONDS); true }
+        catch { case _: TimeoutException => false }
       } finally {
         releaseGroup.countDown()
         releaseOther.countDown()
       }
-      assertEquals(outer.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
-      assertEquals(other.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+      assertEquals(outer.get(5L, TimeUnit.SECONDS), Right(()))
+      assertEquals(other.get(5L, TimeUnit.SECONDS), Right(()))
       caller.join()
       assert(completed, "a completed dispatch's caller was executing another dispatch's long group")
     }
@@ -130,11 +125,11 @@ class WorkerPoolSuite extends munit.FunSuite {
   }
   test("ExecutionContext submissions can join nested workgroups when every worker is occupied") {
     Using.resource(WorkerPool(2, minGroups = 1, minWorkItems = 1)) { pool =>
-      val entered = java.util.concurrent.CountDownLatch(2)
+      val entered = CountDownLatch(2)
       val visited = AtomicInteger()
       val tasks   = Vector.fill(2)(java.util.concurrent.FutureTask[Either[Fault, Unit]] { () =>
         entered.countDown()
-        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+        assertEquals(entered.await(5L, TimeUnit.SECONDS), true)
         pool.parallelFor(8L) { _ =>
           pool.parallelFor(3L) { _ =>
             val _ = visited.incrementAndGet()
@@ -143,7 +138,7 @@ class WorkerPoolSuite extends munit.FunSuite {
         }
       })
       tasks.foreach(pool.execute(_))
-      tasks.foreach(task => assertEquals(task.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(())))
+      tasks.foreach(task => assertEquals(task.get(5L, TimeUnit.SECONDS), Right(())))
       assertEquals(visited.get(), 48)
       assertEquals(pool.parallelFor(1L)(_ => Left(Fault.Cancelled)), Left(Fault.Cancelled))
     }
@@ -151,7 +146,7 @@ class WorkerPoolSuite extends munit.FunSuite {
 
   test("ExecutionContext reports failed submissions and continues accepting work") {
     val observed = java.util.concurrent.atomic.AtomicReference(Option.empty[Throwable])
-    val reported = java.util.concurrent.CountDownLatch(1)
+    val reported = CountDownLatch(1)
     val error    = IllegalStateException("failed task")
     Using.resource(WorkerPool(
       1,
@@ -161,11 +156,11 @@ class WorkerPoolSuite extends munit.FunSuite {
       }
     )) { pool =>
       pool.execute(() => throw error)
-      assertEquals(reported.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
+      assertEquals(reported.await(5L, TimeUnit.SECONDS), true)
       assertEquals(observed.get(), Some(error))
       val next = java.util.concurrent.FutureTask[Int](() => 42)
       pool.execute(next)
-      assertEquals(next.get(5L, java.util.concurrent.TimeUnit.SECONDS), 42)
+      assertEquals(next.get(5L, TimeUnit.SECONDS), 42)
     }
   }
 
@@ -180,7 +175,7 @@ class WorkerPoolSuite extends munit.FunSuite {
     }
   }
   test("fatal workgroup errors wake callers with failure and reject subsequent submissions") {
-    val escaped  = java.util.concurrent.CountDownLatch(1)
+    val escaped  = CountDownLatch(1)
     val observed = java.util.concurrent.atomic.AtomicReference[Throwable]()
     val fatal    = LinkageError("broken workgroup linkage")
     Using.resource(WorkerPool(1)) { pool =>
@@ -192,10 +187,10 @@ class WorkerPoolSuite extends munit.FunSuite {
         throw fatal
       }
       assert(result.isLeft)
-      assert(escaped.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+      assert(escaped.await(5L, TimeUnit.SECONDS))
       assert(observed.get() eq fatal)
       assert(pool.parallelFor(1L)(_ => Right(())).isLeft)
-      intercept[java.util.concurrent.RejectedExecutionException](pool.execute(() => ()))
+      intercept[RejectedExecutionException](pool.execute(() => ()))
     }
   }
 

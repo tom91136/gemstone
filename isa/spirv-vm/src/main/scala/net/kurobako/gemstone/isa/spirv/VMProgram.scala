@@ -4,6 +4,7 @@ import VMMemory.*
 import VMProgram.*
 import cats.syntax.all.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
@@ -109,9 +110,9 @@ private object VMProgram {
       case Bits(_, lanes)                        => VMValue.Bits(typeId, Vec.toArray(lanes))
       case NullPointer(_, pointee, storageClass) => VMValue.Address(typeId, Pointer(0L, pointee, storageClass))
       // Global addresses are only known per dispatch, which replaces these placeholders.
-      case _: GlobalAddress             => VMValue.Address(typeId, Pointer(0L, typeId, 0))
+      case GlobalAddress(_, _, _, _)    => VMValue.Address(typeId, Pointer(0L, typeId, 0))
       case Composite(_, lanes, _)       => VMValue.Bits(typeId, Vec.toArray(lanes))
-      case _: Sampler                   => VMValue.Address(typeId, Pointer(0L, typeId, 0))
+      case Sampler(_, _)                => VMValue.Address(typeId, Pointer(0L, typeId, 0))
       case FunctionPointer(_, function) => VMValue.Bits(typeId, Array(function.toLong))
     }
   }
@@ -660,7 +661,7 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
       .toVector
 
   // Zero identifies direct VM execution; published namespaces are bound once.
-  private val functionPointerNamespace = java.util.concurrent.atomic.AtomicLong(0L)
+  private val functionPointerNamespace = AtomicLong(0L)
 
   def ownsFunctionPointer(token: Long): Boolean = (token >>> 32) == functionPointerNamespace.get()
 

@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.codegen
 
 import com.monovore.decline.*
-import java.nio.file.Path
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 

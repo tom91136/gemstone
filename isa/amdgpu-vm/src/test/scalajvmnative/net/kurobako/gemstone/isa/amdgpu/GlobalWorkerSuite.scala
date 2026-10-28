@@ -1,6 +1,10 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import VMIR.*
 import fixtures.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.LockSupport
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
@@ -22,6 +26,32 @@ class GlobalWorkerSuite extends munit.FunSuite {
     0xbe8400ff, 0x3000, 0xbe850080, 0xbe8600ff, 0x100, 0xbe8700ff, 0x20000, 0x8e088402, 0x7e000208,
     0xe05c1000, 0x80010100, 0xbf8c0f70, 0xbe8a00ff, 0x4000, 0xbe8b0080, 0xdc7c8000, 0xa0100, 0xbf810000
   )
+  test("parallel workgroups keep staged host reads in their own waves") {
+    val allocation = AllocationId(1)
+    val memory     = ExclusiveReadsMemory()
+    memory.allocate(allocation, 4, GuestAddress(0x8000L))
+    memory.putInt(allocation, 0, 42)
+    val source = codeKernel(target = Target("gfx1030"))
+    val loads  = Vec.fill(16)(
+      Instruction.Load(2, MemoryAddress.Global(0, None, 0), 4, signed = false, LoadPlacement.Full)
+    )
+    val kernel = irKernel(
+      Vec(Instruction.VMove64(0, InstructionSource.Constant(0x8000L))) ++ loads :+ Instruction.End,
+      source
+    )
+    val dispatch = KernelTask.validated(
+      "parallel_reads",
+      testDimensions(32),
+      testDimensions(4096),
+      Vec.empty
+    ).value
+    val workers = WorkerPool(parallelism = 4, minGroups = 1L, minWorkItems = 1L)
+    try
+      (0 until 4).foreach(_ => assertEquals(executeKernel(kernel, dispatch, memory, workgroups = workers), Right(())))
+    finally workers.close()
+    assert(!memory.shared.get, "two waves prepared reads through the same buffer at once")
+  }
+
   test("buffer loads and wide stores use unbound ELF globals on worker threads") {
     val epochs = Seq(17, 71)
     val modes  = Seq(false, true)
@@ -141,4 +171,18 @@ class GlobalWorkerSuite extends munit.FunSuite {
       Right(20)
     )
   }
+
+  /** Memory that holds each batch of staged reads for a moment, and notes a batch two waves hand it at once. */
+  private class ExclusiveReadsMemory extends RegionMemory {
+    private val preparing     = ConcurrentHashMap.newKeySet[AddressSpace.ReadRanges]()
+    val shared: AtomicBoolean = AtomicBoolean(false)
+
+    override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] = {
+      if (!preparing.add(ranges)) shared.set(true)
+      LockSupport.parkNanos(20_000L)
+      val _ = preparing.remove(ranges)
+      super.prepareReads(ranges)
+    }
+  }
+
 }

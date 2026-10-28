@@ -48,7 +48,7 @@ class SharedDecoder {
   def decode(bytes: Vec[Byte]): Either[ISA.DecodeError, Module] = ISA.decode(bytes).map { module =>
     lock.withLock {
       reclaim()
-      module.copy(instructions = module.instructions.map(intern))
+      module.copy(instructions = module.instructions.map(intern(_)))
     }
   }
 }

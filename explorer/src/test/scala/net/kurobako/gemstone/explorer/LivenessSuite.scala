@@ -43,7 +43,10 @@ class LivenessSuite extends munit.FunSuite {
     assertEquals(live.liveAt(trace, 2), Vec("%b"))
     assertEquals(
       live.registers.map(row => (row.name, row.spans)),
-      Vec(("%a", Vec(LiveSpan(1L, 2L, 1))), ("%b", Vec(LiveSpan(2L, 3L, 1))))
+      Vec(
+        ("%a", Vec(LiveSpan(start = 1L, end = 2L, units = 1))),
+        ("%b", Vec(LiveSpan(start = 2L, end = 3L, units = 1)))
+      )
     )
   }
 
@@ -64,7 +67,10 @@ class LivenessSuite extends munit.FunSuite {
     assertEquals(live.peak, 2)
     assertEquals(
       live.registers.map(row => (row.name, row.spans)),
-      Vec(("%a", Vec(LiveSpan(1L, 5L, 1))), ("%x", Vec(LiveSpan(3L, 4L, 1))))
+      Vec(
+        ("%a", Vec(LiveSpan(start = 1L, end = 5L, units = 1))),
+        ("%x", Vec(LiveSpan(start = 3L, end = 4L, units = 1)))
+      )
     )
   }
 
@@ -82,7 +88,11 @@ class LivenessSuite extends munit.FunSuite {
     assertEquals(live.pressure, Vec(0, 1, 2, 1))
     assertEquals(
       live.registers.head.spans,
-      Vec(LiveSpan(1L, 2L, 1), LiveSpan(2L, 3L, 2), LiveSpan(3L, 4L, 1))
+      Vec(
+        LiveSpan(start = 1L, end = 2L, units = 1),
+        LiveSpan(start = 2L, end = 3L, units = 2),
+        LiveSpan(start = 3L, end = 4L, units = 1)
+      )
     )
   }
 
