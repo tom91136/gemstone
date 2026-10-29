@@ -8,15 +8,14 @@ cmake_minimum_required(VERSION 3.25)
 # A route belongs to the group of the first pattern it matches; a route that matches none goes to shard 0 of the first
 # group, with a warning, so a new route still builds and runs. A group cuts its architectures, in route order, into
 # equal consecutive slices, one per shard, so a build selector keeps the compilers of its architecture together and
-# neighbouring architectures of a family share a shard. A run shard of a group with as many run as build shards takes
-# the artifacts of the build shard with its index, and those of every build shard of the group otherwise. A group with
-# a SPLIT variable builds its routes on every build shard, with the variable set to the shard index. Empty shards are
-# left out.
+# neighbouring architectures of a family share a shard. A group with a SPLIT variable builds its routes on every build
+# shard, with the variable set to the shard index. Empty shards are left out.
 #
 # Every build shard assembles the support closures its routes load, and closures of one key are identical, so only the
 # lowest build shard holding a key packs it, as the support artifact of that shard. A build entry names the paths it
-# leaves out of its package and the ones it packs as its support artifact; a run shard takes every support artifact of
-# its group. The SHARED directory of a split route holds the closure of each shard of it, so only shard 0 packs it.
+# leaves out of its package and the ones it packs as its support artifact. CI joins every build artifact into one full
+# package, which every run shard takes. The SHARED directory of a split route holds the closure of each shard of it, so
+# only shard 0 packs it.
 #
 # A run shard of a group with CASES <n> runs as n shards, each taking every n-th case of its routes through
 # CONFORMANCE_CASE_SHARD, for routes too long for one runner that slicing cannot cut.
@@ -121,23 +120,25 @@ foreach(group IN LISTS shard_groups)
   endif()
   set(supports)
   set(support_owners)
-  foreach(support slot IN ZIP_LISTS support_keys_${group} support_slots_${group})
-    set(owner 0)
-    if(slot GREATER_EQUAL 0)
-      math(EXPR owner "${slot} * ${shards} / ${units}")
-    endif()
-    list(FIND supports "${support}" index)
-    if(index LESS 0)
-      list(APPEND supports "${support}")
-      list(APPEND support_owners "${owner}")
-    else()
-      list(GET support_owners ${index} previous)
-      if(owner LESS previous)
-        list(REMOVE_AT support_owners ${index})
-        list(INSERT support_owners ${index} "${owner}")
+  if(MODE STREQUAL "build")
+    foreach(support slot IN ZIP_LISTS support_keys_${group} support_slots_${group})
+      set(owner 0)
+      if(slot GREATER_EQUAL 0)
+        math(EXPR owner "${slot} * ${shards} / ${units}")
       endif()
-    endif()
-  endforeach()
+      list(FIND supports "${support}" index)
+      if(index LESS 0)
+        list(APPEND supports "${support}")
+        list(APPEND support_owners "${owner}")
+      else()
+        list(GET support_owners ${index} previous)
+        if(owner LESS previous)
+          list(REMOVE_AT support_owners ${index})
+          list(INSERT support_owners ${index} "${owner}")
+        endif()
+      endif()
+    endforeach()
+  endif()
   math(EXPR last "${shards} - 1")
   foreach(shard RANGE ${last})
     set(routes)
@@ -180,13 +181,6 @@ foreach(group IN LISTS shard_groups)
       list(JOIN owned " " owned)
       list(APPEND entries "${entry},\"excluded\":\"${excluded}\",\"owned\":\"${owned}\"}")
     else()
-      set(artifacts "conformance-${group}-*")
-      if(shard_${group}_build EQUAL shard_${group}_run AND shard_${group}_split STREQUAL "")
-        set(artifacts "conformance-${group}-${shard}")
-        if(support_keys_${group})
-          string(APPEND artifacts ",conformance-${group}-*-support")
-        endif()
-      endif()
       set(cases "${shard_${group}_cases}")
       math(EXPR last_case "${cases} - 1")
       foreach(case RANGE ${last_case})
@@ -196,7 +190,7 @@ foreach(group IN LISTS shard_groups)
           set(selection "${case}/${cases}")
         endif()
         list(APPEND entries
-          "{\"shard\":\"${group}-${index}\",\"routes\":\"${routes}\",\"cases\":\"${selection}\",\"artifacts\":\"{build,${artifacts}}\"}")
+          "{\"shard\":\"${group}-${index}\",\"routes\":\"${routes}\",\"cases\":\"${selection}\"}")
       endforeach()
     endif()
   endforeach()

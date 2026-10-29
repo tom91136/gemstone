@@ -18,21 +18,27 @@ object NativeCodestyle {
   def format(roots: Seq[Path]): Unit =
     clangFormat(sources(roots), Seq("-i"), "clang-format failed")
 
-  def lint(roots: Seq[Path], database: Path, log: String => Unit): Unit = {
+  def lint(roots: Seq[Path], database: Path, log: String => Unit, shard: Int = 0, shards: Int = 1): Unit = {
     val files = sources(roots)
-    clangFormat(files, Seq("--dry-run", "--Werror"), "sources are not clang-formatted; run format")
-    tidy(files, database.toAbsolutePath.normalize, log)
+    clangFormat(
+      shardFiles(files, shard, shards),
+      Seq("--dry-run", "--Werror"),
+      "sources are not clang-formatted; run format"
+    )
+    tidy(files, database.toAbsolutePath.normalize, log, shard, shards)
   }
 
-  private def tidy(files: Seq[Path], database: Path, log: String => Unit): Unit = {
+  private def tidy(files: Seq[Path], database: Path, log: String => Unit, shard: Int, shards: Int): Unit = {
     val units = DatabaseFile.findAllMatchIn(Files.readString(database.resolve("compile_commands.json")))
       .map(entry => Path.of(entry.group(1).replace("\\\\", "\\").replace("\\\"", "\"")).normalize).toSet
     val (checked, rest) = files.partition(units)
-    val skipped         = rest.count(path => extension(path).exists(CompiledExtensions))
-    log(s"clang-tidy: ${checked.size} translation units; $skipped outside the compile database skipped")
+    val selected        = shardFiles(checked, shard, shards)
+    val skipped         = shardFiles(rest, shard, shards).count(path => extension(path).exists(CompiledExtensions))
+    val shardName       = if (shards > 1) s" (shard ${shard + 1}/$shards)" else ""
+    log(s"clang-tidy: ${selected.size} translation units$shardName; $skipped outside the compile database skipped")
     val pool = Executors.newFixedThreadPool(tidyJobs)
     try {
-      val runs = pool.invokeAll(checked.map { file =>
+      val runs = pool.invokeAll(selected.map { file =>
         (() => {
           val output  = Vector.newBuilder[String]
           val command =
@@ -45,6 +51,13 @@ object NativeCodestyle {
       if (runs.exists(_._1 != 0)) throw MessageOnlyException("clang-tidy reported errors; see .clang-tidy")
     } finally pool.shutdown()
   }
+
+  private def shardFiles(files: Seq[Path], shard: Int, shards: Int): Seq[Path] =
+    if (shards == 1) files
+    else
+      files.sortBy(path => -Files.size(path)).zipWithIndex.collect {
+        case (file, index) if index % shards == shard => file
+      }
 
   // template-heavy translation units take several GiB each, so free memory bounds parallelism before cores do
   private def tidyJobs: Int = {

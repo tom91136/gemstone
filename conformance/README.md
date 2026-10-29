@@ -79,13 +79,16 @@ miniapps.
 `cmake -DCONFORMANCE_TARGET_SET=<target set> -DMODE=build|run -P artifacts/Shards.cmake` prints the CI build or
 emulation shards as a GitHub Actions matrix.
 Its policy groups routes by the first pattern they match, and a route that matches none goes to the first group's
-shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. With equal
-build and run counts, run shard `n` emulates exactly what build shard `n` built. A shard names its routes in
+shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. The run shards
+use the same policy, so they cover exactly the routes the build shards built. A shard names its routes in
 `CONFORMANCE_SHARD_ROUTES`, so its own first route of each support closure builds that closure; the closures are
 identical, so the shards' artifacts unpack over each other. CI packs each closure once: the lowest build shard holding
-it uploads it as `conformance-<shard>-support`, which every run shard of the group takes, and SYCL shards past 0
-leave out `lib`. A group with `CASES <n>` runs each of its run shards as n shards; the driver keeps every n-th case of
-the routes through `CONFORMANCE_CASE_SHARD=<index>/<count>`. OpenCL runs this way, as one route too long for a runner.
+it uploads it as `conformance-<shard>-support`, and SYCL shards past 0 leave out `lib`. CI joins every build artifact
+into one full package, merges the SYCL shards, caches that package alone, and hands it to every run shard; the
+`conformance` artifact of a run is that package. `artifacts/Package.cmake` packs both the shard archives and the full
+package. A failed build shard leaves its backends out of the package, which is then not cached. A group with
+`CASES <n>` runs each of its run shards as n shards; the driver keeps every n-th case of the routes through
+`CONFORMANCE_CASE_SHARD=<index>/<count>`. OpenCL runs this way, as one route too long for a runner.
 
 CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
 beside the `report-<shard>` reports.

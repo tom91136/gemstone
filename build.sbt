@@ -117,17 +117,20 @@ ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 ThisBuild / scalafixConfig    := Baumkuchen.scalafixConfig((LocalRootProject / baseDirectory).value.toPath)
 
-lazy val offlineMode             = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
-lazy val conformanceDirectory    = settingKey[Path]("Conformance build, work, artifact, and report root.")
-lazy val conformanceTargetSet    = settingKey[String]("Conformance artifact matrix used by builds and emulation.")
-lazy val conformanceJfr          = settingKey[Boolean]("Record the conformance emulation server with JFR.")
-lazy val conformanceLintTargets  = settingKey[Seq[String]]("Conformance lint targets; lint is all of them.")
+lazy val offlineMode            = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
+lazy val conformanceDirectory   = settingKey[Path]("Conformance build, work, artifact, and report root.")
+lazy val conformanceTargetSet   = settingKey[String]("Conformance artifact matrix used by builds and emulation.")
+lazy val conformanceJfr         = settingKey[Boolean]("Record the conformance emulation server with JFR.")
+lazy val conformanceLintTargets = settingKey[Seq[String]]("Conformance lint targets; lint is all of them.")
+lazy val lintBackends           =
+  taskKey[Unit]("Lint the conformance backends selected by conformanceLintTargets.")
 lazy val conformanceHost         = taskKey[Path]("Built host conformance driver and its tests.")
 lazy val emulate                 = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val nativeArtifact          = taskKey[Path]("Built native runtime directory.")
 lazy val nativeCompileDatabase   = taskKey[Path]("Configured CMake build directory with compile_commands.json.")
 lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
+lazy val codestyleLint             = taskKey[Unit]("Lint the project's C and C++ sources.")
 lazy val checkEnvironment          = taskKey[Unit]("Check environment output freshness and declared names.")
 lazy val codegen                   = taskKey[Unit]("Update and format every checked-in generated source and fixture.")
 lazy val generateBenchmarkFixtures =
@@ -677,9 +680,28 @@ lazy val externalCodestyleSettings = Seq(
   nativeSourceDirectories := Seq(baseDirectory.value.toPath),
   nativeCompileDatabase   := Def.uncached(nativeArtifact.value),
   format                  := NativeCodestyle.format(nativeSourceDirectories.value),
-  lint                    := Def.uncached(
-    NativeCodestyle.lint(nativeSourceDirectories.value, nativeCompileDatabase.value, streams.value.log.info(_))
-  )
+  codestyleLint           := Def.uncached {
+    def envInt(name: String, default: Int): Int =
+      sys.env.get(name).fold(default) { value =>
+        value.toIntOption.getOrElse(
+          throw sbt.internal.util.MessageOnlyException(s"$name must be an integer, got '$value'")
+        )
+      }
+    val shard  = envInt("NATIVE_LINT_SHARD", 0)
+    val shards = envInt("NATIVE_LINT_SHARDS", 1)
+    if (shards < 1 || shard < 0 || shard >= shards)
+      throw sbt.internal.util.MessageOnlyException(
+        s"NATIVE_LINT_SHARD=$shard needs 0 <= shard < NATIVE_LINT_SHARDS=$shards"
+      )
+    NativeCodestyle.lint(
+      nativeSourceDirectories.value,
+      nativeCompileDatabase.value,
+      streams.value.log.info(_),
+      shard,
+      shards
+    )
+  },
+  lint := codestyleLint.value
 )
 
 lazy val native = project.in(file("native"))
@@ -829,8 +851,7 @@ lazy val conformance = project.in(file("conformance"))
       )
       conformanceDirectory.value / "artifacts"
     },
-    lint := Def.uncached {
-      val _ = lint.value
+    lintBackends := Def.uncached {
       val _ = conformanceArtifacts(
         baseDirectory.value.toPath,
         conformanceDirectory.value,
@@ -841,6 +862,10 @@ lazy val conformance = project.in(file("conformance"))
         false,
         streams.value.log.info
       )
+    },
+    lint := Def.uncached {
+      val _ = codestyleLint.value
+      val _ = lintBackends.value
     },
     conformanceHost := Def.uncached(
       CMake.build(
@@ -1079,16 +1104,18 @@ lazy val gemstone = project.in(file("."))
 addCommandAlias("gemstoneRun", "server/run run")
 
 // the conformance lint runs in containers, so it is separate from the checks that only need the checkout
-lazy val lintSourceTasks = Seq(
+lazy val lintCheckoutTasks = Seq(
   Option.when(Baumkuchen.enabled)("baumkuchenAnalyse"),
   Some("codegen/checkEnvironment"),
   Some("scalafmtCheckAll"),
   Some("scalafmtSbtCheck"),
   Some("scalafixAll --check"),
-  Some("mimaReportBinaryIssues"),
-  Some("native/lint")
+  Option.when(Publishing.previousRelease.isDefined)("mimaReportBinaryIssues")
 ).flatten.mkString(";")
 
+lazy val lintSourceTasks = s"$lintCheckoutTasks;native/lint"
+
+addCommandAlias("lintCheckout", lintCheckoutTasks)
 addCommandAlias("lintSources", lintSourceTasks)
 
 addCommandAlias("lint", s"$lintSourceTasks;conformance/lint")
