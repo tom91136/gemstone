@@ -29,11 +29,11 @@ namespace unified_matrix { namespace {
 
 #ifdef __gfx908__
   #define UNIFIED_CDNA 1
-#elif defined(__gfx90a__)
+#elifdef __gfx90a__
   #define UNIFIED_CDNA 2
 #elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
   #define UNIFIED_CDNA 3
-#elif defined(__gfx950__)
+#elifdef __gfx950__
   #define UNIFIED_CDNA 4
 #else
   #define UNIFIED_CDNA 0
@@ -517,7 +517,11 @@ double element(Format format, std::mt19937 &random, bool integral) {
 }
 
 DotResult dotResult(Format format) {
-  return format == Format::F16 ? DotResult::Half : format == Format::BF16 ? DotResult::BFloat16 : DotResult::Single;
+  switch (format) {
+    case Format::F16: return DotResult::Half;
+    case Format::BF16: return DotResult::BFloat16;
+    default: return DotResult::Single;
+  }
 }
 
 void runVariant(const Variant &variant, bool aligned) {
@@ -622,9 +626,11 @@ void runVariant(const Variant &variant, bool aligned) {
           left = std::ldexp(left, scaleA - 127);
           right = std::ldexp(right, scaleB - 127);
         }
-        if (chained && k % 2 == 0) pending = {left, right};
-        else if (chained) sum = alignedDot(pending.first, pending.second, left, right, sum, dotResult(shape.c));
-        else {
+        if (chained && k % 2 == 0) {
+          pending = {left, right};
+        } else if (chained) {
+          sum = alignedDot(pending.first, pending.second, left, right, sum, dotResult(shape.c));
+        } else {
           sum += left * right;
           if (grouped && (k + 1) % grouped == 0) sum = std::min(2147483647.0, std::max(-2147483648.0, sum));
         }

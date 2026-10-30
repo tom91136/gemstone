@@ -90,11 +90,14 @@ inline double alignedDot(double left0, double right0, double left1, double right
     int exponent;
   };
   const auto product = [](double left, double right) {
-    return Term{std::signbit(left) != std::signbit(right), std::fabs(left * right),
-                left == 0 || right == 0 ? 0 : std::ilogb(left) + std::ilogb(right) + 2};
+    return Term{.negative = std::signbit(left) != std::signbit(right),
+                .magnitude = std::fabs(left * right),
+                .exponent = left == 0 || right == 0 ? 0 : std::ilogb(left) + std::ilogb(right) + 2};
   };
   const Term terms[3] = {
-      product(left0, right0), product(left1, right1), {std::signbit(addend), std::fabs(addend), addend == 0 ? 0 : std::ilogb(addend)}};
+      product(left0, right0),
+      product(left1, right1),
+      {.negative = std::signbit(addend), .magnitude = std::fabs(addend), .exponent = addend == 0 ? 0 : std::ilogb(addend)}};
   bool any = false;
   int leading = 0;
   for (const auto &term : terms)

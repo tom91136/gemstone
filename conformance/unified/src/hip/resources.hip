@@ -67,7 +67,7 @@ __device__ uint32_t elementFlags(bool indexed) {
 #if defined(__GFX8__) || defined(__GFX9__)
   (void)indexed;
   return Identity | (4U << 12) | (4U << 15);
-#elif defined(__GFX10__)
+#elifdef __GFX10__
   return Identity | (20U << 12) | (1U << 24) | ((indexed ? 1U : 3U) << 28);
 #else
   return Identity | (20U << 12) | ((indexed ? 1U : 3U) << 28);
@@ -78,7 +78,7 @@ __device__ uint32_t elementFlags(bool indexed) {
 __device__ uint32_t unormFlags() {
 #if defined(__GFX8__) || defined(__GFX9__)
   return Identity | (0U << 12) | (10U << 15);
-#elif defined(__GFX10__)
+#elifdef __GFX10__
   return Identity | (56U << 12) | (1U << 24) | (1U << 28);
 #else
   return Identity | (42U << 12) | (1U << 28);
@@ -89,7 +89,7 @@ __device__ uint32_t unormFlags() {
 constexpr int VectorFormat =
 #if defined(__GFX8__) || defined(__GFX9__)
     14 | (4 << 4);
-#elif defined(__GFX10__)
+#elifdef __GFX10__
     75;
 #else
     61;
@@ -111,7 +111,7 @@ __global__ void rawBuffer(uint32_t *in, uint32_t *out, uint32_t *written, uint32
   const uint32_t i = threadIdx.x;
 #if defined(__GFX8__) || defined(__GFX9__)
   const int flags = static_cast<int>(Identity | (4U << 12) | (4U << 15));
-#elif defined(__GFX10__)
+#elifdef __GFX10__
   const int flags = static_cast<int>(Identity | (20U << 12) | (1U << 24) | (3U << 28));
 #else
   const int flags = static_cast<int>(Identity | (20U << 12) | (3U << 28));
@@ -272,17 +272,17 @@ bool imageSupport() {
 
 // tex1Dfetch from linear memory: a typed load indexed by element. Image-less targets compile the image kernels
 // empty.
-__global__ void fetchFloats(hipTextureObject_t texture, float *out) {
+__global__ void fetchFloats([[maybe_unused]] hipTextureObject_t texture, [[maybe_unused]] float *out) {
 #if !__HIP_NO_IMAGE_SUPPORT
   out[threadIdx.x] = tex1Dfetch<float>(texture, static_cast<int>(threadIdx.x));
 #endif
 }
-__global__ void fetchBytes(hipTextureObject_t texture, float4 *out) {
+__global__ void fetchBytes([[maybe_unused]] hipTextureObject_t texture, [[maybe_unused]] float4 *out) {
 #if !__HIP_NO_IMAGE_SUPPORT
   out[threadIdx.x] = tex1Dfetch<float4>(texture, static_cast<int>(threadIdx.x));
 #endif
 }
-__global__ void fetchInts(hipTextureObject_t texture, int2 *out) {
+__global__ void fetchInts([[maybe_unused]] hipTextureObject_t texture, [[maybe_unused]] int2 *out) {
 #if !__HIP_NO_IMAGE_SUPPORT
   out[threadIdx.x] = tex1Dfetch<int2>(texture, static_cast<int>(threadIdx.x));
 #endif
@@ -343,7 +343,8 @@ TEST_CASE("resources/hip/texture-fetch", "[unified][resources]") {
 
 namespace {
 // surf2Dread and surf2Dwrite: each texel is read, transformed and written to a second surface
-__global__ void transformBytes(hipSurfaceObject_t source, hipSurfaceObject_t target, int width, int height) {
+__global__ void transformBytes([[maybe_unused]] hipSurfaceObject_t source, [[maybe_unused]] hipSurfaceObject_t target, int width,
+                               int height) {
   const int x = static_cast<int>((blockIdx.x * blockDim.x) + threadIdx.x);
   const int y = static_cast<int>(blockIdx.y);
   if (x >= width || y >= height) return;
@@ -355,7 +356,7 @@ __global__ void transformBytes(hipSurfaceObject_t source, hipSurfaceObject_t tar
 #endif
 }
 
-__global__ void transformFloats(hipSurfaceObject_t source, hipSurfaceObject_t target, int width) {
+__global__ void transformFloats([[maybe_unused]] hipSurfaceObject_t source, [[maybe_unused]] hipSurfaceObject_t target, int width) {
   const int x = static_cast<int>(threadIdx.x);
   if (x >= width) return;
 #if !__HIP_NO_IMAGE_SUPPORT
@@ -433,7 +434,8 @@ TEST_CASE("resources/hip/surface", "[unified][resources]") {
 
 namespace {
 // image.atomic.add and image.getresinfo on the descriptor a surface object holds
-__global__ void imageAtomics(hipSurfaceObject_t surface, int *returned, int *info, int width, int height) {
+__global__ void imageAtomics([[maybe_unused]] hipSurfaceObject_t surface, [[maybe_unused]] int *returned, [[maybe_unused]] int *info,
+                             [[maybe_unused]] int width, [[maybe_unused]] int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   const Int32x8 resource = *reinterpret_cast<const Int32x8 *>(surface);
   const int x = static_cast<int>(threadIdx.x) % width;

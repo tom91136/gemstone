@@ -28,7 +28,7 @@ int main() {
     const auto environment = selection.environment
                              | map([](const std::string &key, const std::string &value) { return quoted(key) + ":" + quoted(value); })
                              | mk_string(",");
-    std::cout << fmt::format("{{\"device\":{},\"environment\":{{{}}}}}", quoted(conformance::physicalDeviceKey(selection.device)),
+    std::cout << fmt::format(R"({{"device":{},"environment":{{{}}}}})", quoted(conformance::physicalDeviceKey(selection.device)),
                              environment)
               << '\n';
     return 0;

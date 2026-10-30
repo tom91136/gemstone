@@ -61,6 +61,10 @@ if(BACKEND STREQUAL "hip")
 elseif(BACKEND STREQUAL "cuda")
   list(APPEND backend_cmake_arguments
     "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
+  # nvcc 11.8 builds the CUDA sources as C++17, so the lint holds them to it
+  if(CONFORMANCE_OUTPUT STREQUAL "lint")
+    list(APPEND backend_cmake_arguments -DCMAKE_CUDA_STANDARD=17)
+  endif()
   if(CONFORMANCE_COMPILER STREQUAL "clang")
     list(APPEND backend_cmake_arguments "-DCMAKE_CUDA_COMPILER=$ENV{CUDACXX}"
       "-DCMAKE_CUDA_FLAGS=--cuda-path=$ENV{CUDAToolkit_ROOT} --cuda-gpu-arch=${CUDA_ARCHITECTURES} -Wno-unknown-cuda-version")

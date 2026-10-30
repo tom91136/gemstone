@@ -37,7 +37,7 @@
   #endif
   #include <hsa/hsa.h>
   #include <hsa/hsa_ext_amd.h>
-#elif defined(CONFORMANCE_DEVICE_OPENCL)
+#elifdef CONFORMANCE_DEVICE_OPENCL
   #include <array>
   #include <cstddef>
   #include <map>
@@ -48,7 +48,7 @@
   #endif
   #include <CL/cl.h>
   #include <CL/cl_ext.h>
-#elif defined(CONFORMANCE_DEVICE_SYCL)
+#elifdef CONFORMANCE_DEVICE_SYCL
   #include <charconv>
   #include <cstddef>
   #include <map>
@@ -56,12 +56,12 @@
   #include <system_error>
 
   #include <sycl/sycl.hpp>
-#elif defined(CONFORMANCE_DEVICE_VULKAN)
+#elifdef CONFORMANCE_DEVICE_VULKAN
   #include <algorithm>
   #include <array>
 
   #include <vulkan/vulkan.h>
-#elif defined(CONFORMANCE_DEVICE_LEVELZERO)
+#elifdef CONFORMANCE_DEVICE_LEVELZERO
   #include <level_zero/ze_api.h>
 #endif
 
@@ -73,7 +73,7 @@ namespace {
 bool targetsArchitecture(std::string_view architecture) {
   #ifdef CONFORMANCE_DEVICE_HIP
   architecture = architecture.substr(0, architecture.find(':'));
-  #elif defined(CONFORMANCE_DEVICE_HSA)
+  #elifdef CONFORMANCE_DEVICE_HSA
   if (const auto gfx = architecture.find("gfx"); gfx != std::string_view::npos) architecture.remove_prefix(gfx);
   architecture = architecture.substr(0, architecture.find(':'));
   #endif
@@ -247,7 +247,7 @@ static DeviceSelection discoverPhysicalDevice() {
                               static_cast<uint8_t>(selected.address.slot), static_cast<uint8_t>(selected.address.function)),
       .environment = {
           {"CUDA_VISIBLE_DEVICES", visible}, {"CUDA_DEVICE_ORDER", "PCI_BUS_ID"}, {"ACC_DEVICE_NUM", "0"}, {"OMP_DEFAULT_DEVICE", "0"}}};
-#elif defined(CONFORMANCE_DEVICE_CUDA)
+#elifdef CONFORMANCE_DEVICE_CUDA
   int count = 0;
   if (cudaGetDeviceCount(&count) != cudaSuccess || count <= 0) throw std::runtime_error("cannot enumerate CUDA devices");
   std::vector<cudaDeviceProp> devices(static_cast<size_t>(count));
@@ -272,7 +272,7 @@ static DeviceSelection discoverPhysicalDevice() {
                           {"CUDA_DEVICE_ORDER", "PCI_BUS_ID"},
                           {"ACC_DEVICE_NUM", "0"},
                           {"OMP_DEFAULT_DEVICE", "0"}}};
-#elif defined(CONFORMANCE_DEVICE_HIP)
+#elifdef CONFORMANCE_DEVICE_HIP
   validateHipRuntimeVersion();
   int count = 0;
   if (hipGetDeviceCount(&count) != hipSuccess || count <= 0) throw std::runtime_error("cannot enumerate HIP devices");
@@ -301,7 +301,7 @@ static DeviceSelection discoverPhysicalDevice() {
       return {.device = physical,
               .environment = {{"ROCR_VISIBLE_DEVICES", hsa.selectors[i]}, {"HIP_VISIBLE_DEVICES", "0"}, {"OMP_DEFAULT_DEVICE", "0"}}};
   throw std::runtime_error("selected HIP device has no matching ROCr device for OpenMP/miniapp execution");
-#elif defined(CONFORMANCE_DEVICE_HSA)
+#elifdef CONFORMANCE_DEVICE_HSA
   static const HsaRuntime runtime;
   HsaDiscovery discovery;
   if (hsa_iterate_agents(collectHsaAgent, &discovery) != HSA_STATUS_SUCCESS) throw std::runtime_error("cannot enumerate HSA devices");
@@ -312,7 +312,7 @@ static DeviceSelection discoverPhysicalDevice() {
   return {.device = discovery.devices[selected],
           .environment = {{"ROCR_VISIBLE_DEVICES", discovery.selectors[selected]}, {"HIP_VISIBLE_DEVICES", "0"}},
           .nativeHandle = discovery.agents[selected].handle};
-#elif defined(CONFORMANCE_DEVICE_OPENCL)
+#elifdef CONFORMANCE_DEVICE_OPENCL
   cl_uint platformCount = 0;
   if (clGetPlatformIDs(0, nullptr, &platformCount) != CL_SUCCESS || platformCount == 0)
     throw std::runtime_error("cannot enumerate OpenCL platforms");
@@ -420,7 +420,7 @@ static DeviceSelection discoverPhysicalDevice() {
       && std::to_array(uuid) ^ exists([](uint8_t byte) { return byte != 0; }))
     return selection(makeUuidDevice(uuid));
   return selection(PhysicalDevice{.scheme = PhysicalDeviceScheme::Unknown, .value = {}});
-#elif defined(CONFORMANCE_DEVICE_VULKAN)
+#elifdef CONFORMANCE_DEVICE_VULKAN
   VkApplicationInfo application{};
   application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   uint32_t instanceVersion = VK_API_VERSION_1_0;
@@ -462,7 +462,7 @@ static DeviceSelection discoverPhysicalDevice() {
   }
   const auto index = selectDevice(descriptions);
   return {.device = identities[index], .environment = {{environment::VulkanDeviceId, fmt::to_string(index + 1)}}};
-#elif defined(CONFORMANCE_DEVICE_LEVELZERO)
+#elifdef CONFORMANCE_DEVICE_LEVELZERO
   if (zeInit(0) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot initialise Level Zero");
   uint32_t driverCount = 0;
   if (zeDriverGet(&driverCount, nullptr) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot list Level Zero drivers");
@@ -503,7 +503,7 @@ static DeviceSelection discoverPhysicalDevice() {
           .environment = {{"LZT_DEFAULT_DRIVER_IDX", fmt::to_string(candidate.driver)},
                           {"LZT_DEFAULT_DEVICE_IDX", fmt::to_string(candidate.device)}},
           .nativeHandle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(candidate.handle))};
-#elif defined(CONFORMANCE_DEVICE_SYCL)
+#elifdef CONFORMANCE_DEVICE_SYCL
   const auto all = sycl::device::get_devices();
   std::map<sycl::backend, size_t> ordinals;
   std::vector<sycl::device> devices;

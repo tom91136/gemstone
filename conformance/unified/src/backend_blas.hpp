@@ -251,7 +251,7 @@ private:
 template <ScalarType Kind> using Blas = Cublas<Kind>;
 } // namespace unified::backend
 
-#elif defined(UNIFIED_API_HIP)
+#elif defined(UNIFIED_API_HIP) // NOLINT(readability-use-concise-preprocessor-directives): nvcc includes this below C++23
 
   #include <hip/hip_runtime.h>
   #include <rocblas/rocblas.h>
@@ -500,7 +500,7 @@ private:
 template <ScalarType Kind> using Blas = Rocblas<Kind>;
 } // namespace unified::backend
 
-#elif defined(UNIFIED_API_SYCL)
+#elif defined(UNIFIED_API_SYCL) // NOLINT(readability-use-concise-preprocessor-directives): nvcc includes this below C++23
 
   #include <oneapi/mkl/blas.hpp>
   #include <oneapi/mkl/exceptions.hpp>

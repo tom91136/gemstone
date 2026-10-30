@@ -51,10 +51,11 @@ __device__ Int32x4 imageLoadMip2D(int mask, int x, int y, int mip, Int32x8 resou
 namespace {
 
 /** The descriptor a texture or surface object holds first. */
-__device__ Int32x8 descriptor(const void *object) { return *reinterpret_cast<const Int32x8 *>(object); }
+[[maybe_unused]] __device__ Int32x8 descriptor(const void *object) { return *reinterpret_cast<const Int32x8 *>(object); }
 
 // image.load.3d of each texel of a volume through its surface object; image-less targets compile it empty
-__global__ void readVolume(hipSurfaceObject_t surface, uint32_t *out, int width, int height, int depth) {
+__global__ void readVolume([[maybe_unused]] hipSurfaceObject_t surface, [[maybe_unused]] uint32_t *out, [[maybe_unused]] int width,
+                           [[maybe_unused]] int height, [[maybe_unused]] int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   const int i = static_cast<int>((blockIdx.x * blockDim.x) + threadIdx.x);
   if (i >= width * height * depth) return;
@@ -63,7 +64,8 @@ __global__ void readVolume(hipSurfaceObject_t surface, uint32_t *out, int width,
 }
 
 // image.load.2d of each texel of a plane through its surface object
-__global__ void readPlane(hipSurfaceObject_t surface, uint32_t *out, int width, int height) {
+__global__ void readPlane([[maybe_unused]] hipSurfaceObject_t surface, [[maybe_unused]] uint32_t *out, [[maybe_unused]] int width,
+                          [[maybe_unused]] int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   const int i = static_cast<int>((blockIdx.x * blockDim.x) + threadIdx.x);
   if (i >= width * height) return;
@@ -72,7 +74,8 @@ __global__ void readPlane(hipSurfaceObject_t surface, uint32_t *out, int width, 
 }
 
 // image.load.mip.2d of texel (x, y) of `level` through a texture object over a mipmapped array
-__global__ void readLevels(hipTextureObject_t texture, const int *coordinates, uint32_t *out, int count) {
+__global__ void readLevels([[maybe_unused]] hipTextureObject_t texture, [[maybe_unused]] const int *coordinates,
+                           [[maybe_unused]] uint32_t *out, [[maybe_unused]] int count) {
 #if !__HIP_NO_IMAGE_SUPPORT
   const int i = static_cast<int>((blockIdx.x * blockDim.x) + threadIdx.x);
   if (i >= count) return;

@@ -63,7 +63,7 @@ const std::vector<uint32_t> HalfInputs = {0x3c004000U, 0x40003c00U, 0x7e00bc00U,
 
 constexpr uint32_t HalfCount = 12;
 
-__global__ void halves(const uint32_t *in, uint32_t *out, uint32_t count) {
+__global__ void halves([[maybe_unused]] const uint32_t *in, [[maybe_unused]] uint32_t *out, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count * count) return;
 #if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 530

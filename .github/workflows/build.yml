@@ -144,7 +144,8 @@ jobs:
       - name: Pack
         if: ${{ !cancelled() }}
         run: |
-          pack() { tar -cf - "${@:2}" | zstd -T0 -q -12 --long=30 -f -o "target/ci/$1.tar.zst"; }
+          # sbt's disk cache links outputs into ~/.cache, which the unpacking jobs do not have
+          pack() { tar -chf - "${@:2}" | zstd -T0 -q -12 --long=30 -f -o "target/ci/$1.tar.zst"; }
           mkdir -p target/ci
           pack build target/native/build target/references/api-native target/references/level-zero \
             target/conformance/host target/out/jvm
