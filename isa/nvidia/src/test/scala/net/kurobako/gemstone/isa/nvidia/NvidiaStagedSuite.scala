@@ -7,10 +7,11 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.util.Random
 
-class NvidiaStagedSuite extends munit.FunSuite {
+class NvidiaStagedSuite extends Suite {
   private val register  = Register(0)
   private val predicate = Predicate(0)
   private val ra        = Value.Register(Register(1))

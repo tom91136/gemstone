@@ -3,9 +3,10 @@ package net.kurobako.gemstone.codegen
 import generator.*
 import java.nio.file.Files
 import java.nio.file.Path
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.files.*
 
-class GenerateOfficialAPIManifestSuite extends munit.FunSuite {
+class GenerateOfficialAPIManifestSuite extends Suite {
   private val cuda = """
 typedef int (*Notify)(const char *, int);
 extern int cuFixture(const char *name, Notify callback, int);
@@ -53,7 +54,7 @@ extern int clFixture(void);
   private def generate(input: Path, output: Path): Unit =
     GenerateOfficialAPIManifest.main(Array(
       "--clang",
-      sys.env.getOrElse("CLANG", "clang"),
+      "clang",
       input.toString,
       output.toString
     ))

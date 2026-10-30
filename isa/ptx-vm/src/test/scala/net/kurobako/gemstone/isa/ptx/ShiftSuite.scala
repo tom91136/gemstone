@@ -6,8 +6,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class ShiftSuite extends munit.FunSuite {
+class ShiftSuite extends Suite {
   private val shiftOperations = Vec("shl", "shr.s", "shr.u")
 
   test("integer shifts clamp counts for 16, 32, and 64-bit operands") {

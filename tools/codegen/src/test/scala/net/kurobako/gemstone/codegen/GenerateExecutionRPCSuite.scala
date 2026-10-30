@@ -2,9 +2,10 @@ package net.kurobako.gemstone.codegen
 
 import generator.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.files.*
 
-class GenerateExecutionRPCSuite extends munit.FunSuite {
+class GenerateExecutionRPCSuite extends Suite {
   test("native requests retain wire field order, integer widths and scalar newtype representations") {
     inDirectory { output =>
       GenerateExecutionRPC.main(Array(output.toString))

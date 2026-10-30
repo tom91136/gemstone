@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class MatrixSuite extends munit.FunSuite {
+class MatrixSuite extends Suite {
   private case class Scenario(left: Input, right: Input, out: String, expected: Vector[Double], body: Seq[String])
   private case class Access(pointer: String, value: String, indexes: String)
 

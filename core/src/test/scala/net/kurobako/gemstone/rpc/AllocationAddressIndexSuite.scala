@@ -2,9 +2,10 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class AllocationAddressIndexSuite extends munit.FunSuite {
+class AllocationAddressIndexSuite extends Suite {
   private type Allocations = Map[AllocationId, StoredAllocation]
 
   private val CoarseSizes = List(0, 1, 4, 32, 33, Int.MaxValue)

@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <gemstone/command_queue.hpp>
+#include <gemstone/test_support.hpp>
 
 TEST_CASE("Queued completion retains arguments and orders streams without blocking submission", "[queue]") {
   gemstone::CommandQueue queue(999);
@@ -25,7 +26,7 @@ TEST_CASE("Queued completion retains arguments and orders streams without blocki
   int result{};
   const auto first = queue.submit(&streamA, [owner, gate, &started, &result] {
     started.set_value();
-    if (gate.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return 1;
+    if (gate.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) != std::future_status::ready) return 1;
     result = *owner;
     return 0;
   });
@@ -36,7 +37,7 @@ TEST_CASE("Queued completion retains arguments and orders streams without blocki
                                      return 0;
                                    },
                                    {first});
-  const bool began = reached.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+  const bool began = reached.wait_for(gemstone_test::scaled(std::chrono::seconds(2))) == std::future_status::ready;
   const bool pending = !queue.ready(first) && !queue.ready(second);
   const bool retained = !lifetime.expired();
   auto wait = std::async(std::launch::async, [&] { return queue.wait(second); });
@@ -84,7 +85,7 @@ TEST_CASE("Legacy stream dependencies leave nonblocking streams independently ru
   auto progressed = ran.get_future();
   std::atomic_int sequence{0};
   queue.submit(&blocking, [gate, &sequence] {
-    if (gate.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return 1;
+    if (gate.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) != std::future_status::ready) return 1;
     sequence.store(1);
     return 0;
   });
@@ -93,7 +94,7 @@ TEST_CASE("Legacy stream dependencies leave nonblocking streams independently ru
     ran.set_value();
     return 0;
   });
-  const bool concurrent = progressed.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+  const bool concurrent = progressed.wait_for(gemstone_test::scaled(std::chrono::seconds(2))) == std::future_status::ready;
   const bool pending = !queue.ready(legacy);
   release.set_value();
   CHECK(queue.waitAll() == 0);
@@ -132,7 +133,7 @@ TEST_CASE("Blocking waits on a worker let later queued work run", "[queue]") {
   const auto wait = [&] {
     return queue.blocking([&] {
       std::unique_lock lock(mutex);
-      return changed.wait_for(lock, std::chrono::seconds(5), [&] { return signalled != 0; }) ? 0 : 1;
+      return changed.wait_for(lock, gemstone_test::scaled(std::chrono::seconds(5)), [&] { return signalled != 0; }) ? 0 : 1;
     });
   };
   const auto a = queue.submit(&first, wait);
@@ -159,7 +160,8 @@ TEST_CASE("Streams and events created by the queue order work and reject unknown
   CHECK(queue.eventTicket(event) == gemstone::CommandQueue::Ticket{});
   std::promise<void> release;
   auto gate = release.get_future().share();
-  queue.submit(stream, [gate] { return gate.wait_for(std::chrono::seconds(5)) == std::future_status::ready ? 0 : 1; });
+  queue.submit(stream,
+               [gate] { return gate.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) == std::future_status::ready ? 0 : 1; });
   REQUIRE(queue.recordEvent(event, stream));
   int other{};
   queue.configure(&other, true);

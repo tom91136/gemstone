@@ -37,6 +37,7 @@
 #include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
+#include "conformance/environment_keys.hpp"
 
 #include "device_selector.hpp"
 #include "environment.hpp"
@@ -234,7 +235,7 @@ TEST_CASE("case results report passes, failures and skips by full name", "[drive
   fs::create_directories(workloads);
   std::ofstream(workloads / "compact.toml") << "specs = ['[fixture],[failure]']\n";
   auto environment = baseEnvironment();
-  environment["CONFORMANCE_JOBS"] = "2";
+  environment[conformance::environment::JobCount] = "2";
   const auto result = runProcess({Driver.string(), "run", "--direct", "--artifacts", artifact.parent_path().string(), "--output",
                                   reports.string(), "--workloads", workloads.string(), "opencl"},
                                  directory.path, environment, 20s, {}, true);
@@ -278,7 +279,7 @@ TEST_CASE("parallel discovery reports progress before probes finish and preserve
     std::ofstream(artifact / "probe-barrier") << "wait for test release";
   }
   auto environment = baseEnvironment();
-  environment["CONFORMANCE_JOBS"] = "2";
+  environment[conformance::environment::JobCount] = "2";
   int interruption = 0;
   bool fail = false;
   SECTION("both routes complete") {}
@@ -594,21 +595,25 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
 
 TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[driver]") {
   using conformance::profile::ResolvedTarget;
-  ResolvedTarget first{
-      .id = "first", .backend = "hip", .architecture = "gfx1030", .environment = {{"CONFORMANCE_DEVICE", "a"}, {"VALUE", "1"}}};
+  ResolvedTarget first{.id = "first",
+                       .backend = "hip",
+                       .architecture = "gfx1030",
+                       .environment = {{conformance::environment::DevicePattern, "a"}, {"VALUE", "1"}}};
   auto duplicate = first;
   duplicate.id = "duplicate";
   auto selector = first;
   selector.id = "device";
-  selector.environment["CONFORMANCE_DEVICE"] = "b";
+  selector.environment[conformance::environment::DevicePattern] = "b";
   auto environment = first;
   environment.id = "environment";
   environment.environment["VALUE"] = "2";
   auto architecture = first;
   architecture.id = "architecture";
   architecture.architecture = "gfx1150";
-  ResolvedTarget ptx{.id = "cuda-ptx", .backend = "cuda", .architecture = "sm_89", .environment = {{"CONFORMANCE_CUDA_CODE", "ptx"}}};
-  ResolvedTarget sass{.id = "cuda-sass", .backend = "cuda", .architecture = "sm_89", .environment = {{"CONFORMANCE_CUDA_CODE", "sass"}}};
+  ResolvedTarget ptx{
+      .id = "cuda-ptx", .backend = "cuda", .architecture = "sm_89", .environment = {{conformance::environment::CudaCodeMode, "ptx"}}};
+  ResolvedTarget sass{
+      .id = "cuda-sass", .backend = "cuda", .architecture = "sm_89", .environment = {{conformance::environment::CudaCodeMode, "sass"}}};
   auto clang = ptx;
   clang.id = "cuda-ptx-clang";
   clang.compiler = "clang";
@@ -659,7 +664,7 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
                          .deviceLock = false};
   config.environment["EXPECTED_ENVIRONMENT"] = "value with spaces";
   config.environment["PROPAGATED_ENVIRONMENT"] = "value with spaces";
-  config.environment["CONFORMANCE_TARGET_ARCHITECTURE"] = "";
+  config.environment[conformance::environment::TargetArch] = "";
   CHECK(executeCase(config, {names[0], Fixture.stem().string(), 10, 0, 2}).status == 0);
   CHECK(executeCase(config, {names[1], Fixture.stem().string(), 10, 1, 2}).status == SkipReturnCode);
   CHECK(fs::is_regular_file(directory.path / Fixture.stem() / "0/result.txt"));
@@ -681,26 +686,26 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
   env["OMP_TARGET_OFFLOAD"] = "DISABLED";
   prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", "opencl");
   CHECK(env.at("OMP_TARGET_OFFLOAD") == "MANDATORY");
-  env["CONFORMANCE_VULKAN_CTS_TIMEOUT"] = "7200";
+  env[conformance::environment::VulkanCtsTimeoutSeconds] = "7200";
   prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", "vulkan");
   applySuiteIsolatedEnvironment(env, "vulkan");
-  CHECK(env.at("CONFORMANCE_VULKAN_CTS_TIMEOUT") == "7200");
-  CHECK_FALSE(env.contains("CONFORMANCE_DEVICE"));
+  CHECK(env.at(conformance::environment::VulkanCtsTimeoutSeconds) == "7200");
+  CHECK_FALSE(env.contains(conformance::environment::DevicePattern));
   CHECK_FALSE(env.contains("CUDA_HOME"));
   CHECK_FALSE(env.contains("ROCBLAS_TENSILE_LIBPATH"));
   CHECK(env.at("LD_LIBRARY_PATH") == (directory.path / "artifact/lib").string() + ":" + (directory.path / "support/lib").string());
-  for (const auto *key :
-       {"CONFORMANCE_TARGET_ARCHITECTURE", "CONFORMANCE_REPORT_DIRECTORY", "CONFORMANCE_TEST_IDENTITY", "CONFORMANCE_PHYSICAL_DEVICE",
-        "CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CL_DEVICE_INDEX", "ONEAPI_DEVICE_SELECTOR"})
+  for (const auto *key : {conformance::environment::TargetArch, conformance::environment::ReportDir, conformance::environment::TestName,
+                          conformance::environment::PhysicalDeviceName, "CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES",
+                          "ROCR_VISIBLE_DEVICES", "CL_DEVICE_INDEX", "ONEAPI_DEVICE_SELECTOR"})
     CHECK(conformance::reservedEnvironmentKey(key));
-  CHECK_FALSE(conformance::reservedEnvironmentKey("CONFORMANCE_CUDA_CODE"));
+  CHECK_FALSE(conformance::reservedEnvironmentKey(conformance::environment::CudaCodeMode));
   CHECK_FALSE(conformance::validEnvironmentEntry("BAD=KEY", "value"));
   CHECK_FALSE(conformance::validEnvironmentEntry("KEY", std::string("bad\0value", 9)));
   ExecutionConfig config;
   applyDeviceProbe(config, {.device = conformance::physicalDeviceKey(conformance::makePciDevice(2, 0, 0, 0)),
                             .environment = {{"CL_DEVICE_INDEX", "2"}}});
   CHECK(config.environment.at("CL_DEVICE_INDEX") == "2");
-  CHECK(config.environment.at("CONFORMANCE_PHYSICAL_DEVICE") == config.device);
+  CHECK(config.environment.at(conformance::environment::PhysicalDeviceName) == config.device);
   CHECK_THROWS(applyDeviceProbe(config, {config.device, {{"LD_PRELOAD", "unexpected"}}}));
 }
 
@@ -783,13 +788,17 @@ TEST_CASE("driver job count and physical keys reject invalid values", "[driver]"
 }
 
 TEST_CASE("emulated timeouts grow on smaller hosts and never drop below the recorded budget", "[driver]") {
-  CHECK(scaledTimeout(60, 32) == 60);
-  CHECK(scaledTimeout(60, 64) == 60);
-  CHECK(scaledTimeout(60, 256) == 60);
-  CHECK(scaledTimeout(60, 16) == 120);
-  CHECK(scaledTimeout(60, 1) == 240);
-  CHECK(scaledTimeout(60, 0) == 240);
-  CHECK(scaledTimeout(1, 24) == 1);
+  CHECK(scaledTimeout(60, 1, 32) == 60);
+  CHECK(scaledTimeout(60, 1, 64) == 60);
+  CHECK(scaledTimeout(60, 1, 256) == 60);
+  CHECK(scaledTimeout(60, 1, 16) == 120);
+  CHECK(scaledTimeout(60, 1, 1) == 240);
+  CHECK(scaledTimeout(60, 1, 0) == 240);
+  CHECK(scaledTimeout(1, 1, 24) == 1);
+  CHECK(scaledTimeout(60, 3, 32) == 180);
+  CHECK(scaledTimeout(60, 2, 16) == 240);
+  CHECK(scaledTimeout(60, 1.5, 32) == 90);
+  CHECK(scaledTimeout(UINT32_MAX, 4294967.295, 1) == UINT32_MAX);
 }
 
 TEST_CASE("timeout kills a TERM-resistant process tree within a fixed bound", "[driver][process]") {
@@ -818,11 +827,11 @@ TEST_CASE("only isolated SYCL handler matrices receive the longer timeout", "[dr
 }
 
 TEST_CASE("isolated OpenCL launchers preserve inherited CTS workload settings", "[driver]") {
-  const std::map<std::string, std::string> configured{{"CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "37"},
-                                                      {"CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS", "64"},
-                                                      {"CONFORMANCE_OPENCL_CTS_ELEMENTS", "16384"},
-                                                      {"CONFORMANCE_OPENCL_CTS_WIMPY", "0"},
-                                                      {"CONFORMANCE_OPENCL_CTS_TIMEOUT", "30"}};
+  const std::map<std::string, std::string> configured{{conformance::environment::OpenclCtsAtomicIterationCount, "37"},
+                                                      {conformance::environment::OpenclCtsAtomicThreadCount, "64"},
+                                                      {conformance::environment::OpenclCtsElementCount, "16384"},
+                                                      {conformance::environment::OpenclCtsWimpyOn, "0"},
+                                                      {conformance::environment::OpenclCtsTimeoutSeconds, "30"}};
   auto environment = [&] {
     std::list<conformance_test::Environment> overrides;
     for (const auto &[key, value] : configured)
@@ -833,9 +842,9 @@ TEST_CASE("isolated OpenCL launchers preserve inherited CTS workload settings", 
   for (const auto &[key, value] : configured)
     CHECK(environment.at(key) == value);
 
-  environment["CONFORMANCE_OPENCL_CTS_ELEMENTS"] = "";
+  environment[conformance::environment::OpenclCtsElementCount] = "";
   applySuiteIsolatedEnvironment(environment, "opencl");
-  CHECK(environment.at("CONFORMANCE_OPENCL_CTS_ELEMENTS").empty());
+  CHECK(environment.at(conformance::environment::OpenclCtsElementCount).empty());
 }
 
 TEST_CASE("dEQP inventories and QPA results preserve failures and skips", "[driver]") {
@@ -873,8 +882,8 @@ TEST_CASE("dEQP statuses go to the case log and failure record instead of the co
   fs::copy_file(Fixture, artifact / Fixture.filename());
   std::ofstream(artifact / "test-programs.txt") << Fixture.stem().string() << "\t10\tdeqp\n";
   auto environment = baseEnvironment();
-  environment["CONFORMANCE_SUPPORT_ROOT"] = directory.path.string();
-  environment["CONFORMANCE_VULKAN_DEVICE_ID"] = "1";
+  environment[conformance::environment::SupportDir] = directory.path.string();
+  environment[conformance::environment::VulkanDeviceId] = "1";
   const ExecutionConfig config{.directory = artifact.string(),
                                .reportDirectory = directory.path.string(),
                                .device = {},
@@ -1004,10 +1013,10 @@ TEST_CASE("vendor BLAS skips require the actual staged library and apply with or
   ExecutionConfig config;
   config.directory = artifact.string();
   config.device = conformance::physicalDeviceKey(conformance::makePciDevice(1, 0, 0, 0));
-  config.environment = {{"CONFORMANCE_TARGET_BACKEND", "cuda"},
-                        {"CONFORMANCE_TARGET_ARCHITECTURE", "sm_89"},
-                        {"CONFORMANCE_CUDA_CODE", "ptx"},
-                        {"CONFORMANCE_SUPPORT_ROOT", support.string()}};
+  config.environment = {{conformance::environment::TargetBackendName, "cuda"},
+                        {conformance::environment::TargetArch, "sm_89"},
+                        {conformance::environment::CudaCodeMode, "ptx"},
+                        {conformance::environment::SupportDir, support.string()}};
   const ScheduledCase test{.identity = "blas/f32/compact/gemm", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 1};
   const auto execute = [&] { return executeCase(config, test).status; };
   CHECK(execute() == SkipReturnCode);
@@ -1023,7 +1032,7 @@ TEST_CASE("vendor BLAS skips require the actual staged library and apply with or
   SECTION("an artifact-local library takes precedence over shared support") {
     std::ofstream(artifact / "lib/libcublas.so") << "different package";
   }
-  SECTION("SASS keeps executing") { config.environment["CONFORMANCE_CUDA_CODE"] = "sass"; }
+  SECTION("SASS keeps executing") { config.environment[conformance::environment::CudaCodeMode] = "sass"; }
   CHECK_THROWS(execute());
 }
 

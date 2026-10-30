@@ -3,13 +3,14 @@ package net.kurobako.gemstone.isa.amdgpu
 import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 
 /** Packed binary16 and bfloat16 atomic adds, which hipcc emits for `unsafeAtomicAdd(__half2*, __half2)` and
   * `__builtin_amdgcn_global_atomic_fadd_v2bf16` and `__builtin_amdgcn_ds_atomic_fadd_v2f16`/`_v2bf16`, e.g.
   * `global_atomic_pk_add_f16 v1, v3, s[2:3]` and `ds_pk_add_f16 v1, v4` under `--offload-arch=gfx942`.
   */
-class AMDGPUPackedAtomicSuite extends munit.FunSuite {
+class AMDGPUPackedAtomicSuite extends Suite {
   private val halves     = half(1.0f) | (half(0.5f) << 16)
   private val sums       = half(5.0f) | (half(2.5f) << 16)
   private val bfloats    = 0x3f80L | (0x3f00L << 16)

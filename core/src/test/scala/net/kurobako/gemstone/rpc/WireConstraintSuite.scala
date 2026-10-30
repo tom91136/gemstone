@@ -3,9 +3,10 @@ package net.kurobako.gemstone.rpc
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.Wire.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 
-class WireConstraintSuite extends munit.FunSuite {
+class WireConstraintSuite extends Suite {
   private object Count extends Newtype[Int >= 7]
   private object Label extends Newtype[NonEmpty[String]] {
     override protected def violation(value: NonEmpty[String]): Option[NonEmpty[String]] =

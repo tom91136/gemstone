@@ -4,9 +4,10 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class AlgebraIntegersSuite extends munit.FunSuite {
+class AlgebraIntegersSuite extends Suite {
   private val booleans = Vec(false, true)
 
   private val values = {

@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.testing.Suite
 
-class VMRegistersSuite extends munit.FunSuite {
+class VMRegistersSuite extends Suite {
   for (layout <- Vec(Harness.fullLayout, VMRegisters.Layout(24, 0), VMRegisters.Layout(32, 8)))
     test(
       s"lowered banks occupy distinct dense slots with ${layout.generalCount} general and ${layout.uniformCount} uniform"

@@ -19,8 +19,10 @@ object Server {
   private val AcceptStopMillis = 5000L
 
   object Settings {
-    private def hostBound: Int      = math.max(1, math.min(64, sys.runtime.availableProcessors()))
-    def defaultParallelism: Int > 0 = math.max(1, hostBound - 2).unsafe[Int > 0]
+    private def hostBound(threads: Long): Int    = math.max(1L, math.min(64L, threads)).toInt
+    private def parallelism(bound: Int): Int > 0 = math.max(1, bound - 2).unsafe[Int > 0]
+    private def availableThreads: Long > 0 = math.max(1L, sys.runtime.availableProcessors().toLong).unsafe[Long > 0]
+    def defaultParallelism: Int > 0        = parallelism(hostBound(availableThreads.raw))
 
     /** Parse and validate before acquiring any server resources. */
     def fromEnvironment(values: Map[String, String]): Either[String, Settings] = {
@@ -29,16 +31,19 @@ object Server {
           default: Long > 0,
           maximum: Long = Long.MaxValue,
           expected: String = "a positive integer"
-      ): Either[String, Long > 0] = values.get(name).fold[Either[String, Long > 0]](Right(default)) { value =>
-        configuration.positiveLong(value).filter(_.raw <= maximum).toRight(s"$name must be $expected: $value")
+      ): Either[String, Long > 0] = configuration.lookup(values, name).fold[Either[String, Long > 0]](Right(default)) {
+        value =>
+          configuration.positiveLong(value).filter(_.raw <= maximum).toRight(s"$name must be $expected: $value")
       }
       for {
-        instructions <- positive(env.ExecutionMaxInstructions, TaskControl.Limits.Default.maxInstructions)
-        parallelism  <- positive(
-          name = env.ExecutionParallelism,
-          default = defaultParallelism.widen[Long > 0],
-          maximum = hostBound,
-          expected = s"a positive integer at most the host bound $hostBound"
+        threads <- positive(env.ThreadCount, availableThreads)
+        bound = hostBound(threads.raw)
+        instructions <- positive(env.ExecutionMaxInstructionCount, TaskControl.Limits.Default.maxInstructions)
+        workers      <- positive(
+          name = env.ExecutionThreadCount,
+          default = parallelism(bound).widen[Long > 0],
+          maximum = bound,
+          expected = s"a positive integer at most the host bound $bound"
         )
         timeout <- positive(
           name = env.RpcTimeoutSeconds,
@@ -46,23 +51,23 @@ object Server {
           maximum = Int.MaxValue / 1000,
           expected = "positive seconds fitting an Int millisecond timeout"
         )
-        record <- values.get(env.Record)
-          .fold[Either[String, Option[Path]]](Right(None))(paths.parse(env.Record, _).map(Some(_)))
+        record <- configuration.lookup(values, env.RecordFile)
+          .fold[Either[String, Option[Path]]](Right(None))(paths.parse(env.RecordFile, _).map(Some(_)))
       } yield Settings(
         limits = TaskControl.Limits(instructions),
-        parallelism = parallelism.toIntExact,
+        parallelism = workers.toIntExact,
         requestTimeoutMillis = (timeout * 1000L).toIntExact,
         record = record,
-        tracePerformance = values.get(env.Trace).exists(configuration.traceEnabled(_, "perf"))
+        tracePerformance = configuration.lookup(values, env.TraceList).exists(configuration.traceEnabled(_, "perf"))
       )
     }
 
     /** A recorded profile goes through the same validation, so a capture from a wider host is rejected. */
     def replay(values: Map[String, String], profile: Journal.ExecutionProfile): Either[String, Settings] =
       fromEnvironment(
-        (values - env.Record)
-          .updated(env.ExecutionMaxInstructions, profile.maxInstructions.toString)
-          .updated(env.ExecutionParallelism, profile.parallelism.toString)
+        (values - env.RecordFile)
+          .updated(env.ExecutionMaxInstructionCount, profile.maxInstructions.toString)
+          .updated(env.ExecutionThreadCount, profile.parallelism.toString)
       )
   }
 

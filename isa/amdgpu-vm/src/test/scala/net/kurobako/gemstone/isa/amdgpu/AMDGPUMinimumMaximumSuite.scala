@@ -4,6 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 
 /** The IEEE 754-2019 minimum and maximum, which propagate NaN and order -0 below +0, as hipcc emits them for
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.testing.bits.*
   * and `v_pk_minimum_f16` under `--offload-arch=gfx1201`, and `v_minimum3_f32 v4, v4, v5, v5` and `v_pk_minimum3_f16`
   * under gfx950. Encodings from `llvm-mc -show-encoding`; v2 onwards hold the inputs and v4 the result.
   */
-class AMDGPUMinimumMaximumSuite extends munit.FunSuite {
+class AMDGPUMinimumMaximumSuite extends Suite {
 
   private val NaN32 = 0x7fc00000L
   private val NaN16 = 0x7e00L

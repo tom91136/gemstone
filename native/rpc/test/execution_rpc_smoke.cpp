@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "gemstone_execution_rpc.hpp"
+#include <gemstone/test_support.hpp>
 
 using namespace gemstone::execution;
 
@@ -52,7 +53,7 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   REQUIRE((completionResult));
   const auto completion = completionResult.value();
 
-  const auto completionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  const auto completionDeadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(10));
   for (;;) {
     auto status = memoryClient->call(QueryCompletion{completion});
     REQUIRE((status));

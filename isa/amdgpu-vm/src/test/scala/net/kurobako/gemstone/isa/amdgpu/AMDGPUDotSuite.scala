@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The GFX11 and GFX12 dot products and DX9 multiplies, which hipcc emits for `__builtin_amdgcn_sudot4`, `sudot8`,
   * `fdot2_f16_f16`, `fdot2_bf16_bf16` and `dot4_f32_fp8_bf8` (ROCm 7.1.1 `hipcc -O2 --offload-arch=gfx1100`:
@@ -9,7 +10,7 @@ import net.kurobako.gemstone.collection.*
   * `v_dot2_f16_f16 v4, v2, v3, v4`, `v_dot2_bf16_bf16 v1, v2, v3, v1`; gfx1201: `v_dot4_f32_fp8_bf8 v7, v2, v3, v6`).
   * Bytes from LLVM 22 `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`.
   */
-class AMDGPUDotSuite extends munit.FunSuite {
+class AMDGPUDotSuite extends Suite {
   private val gfx1100 = Target("gfx1100")
   private val gfx1201 = Target("gfx1201")
 

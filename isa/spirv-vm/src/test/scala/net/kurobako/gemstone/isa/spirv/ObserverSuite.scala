@@ -7,7 +7,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-class ObserverSuite extends munit.FunSuite {
+class ObserverSuite extends Suite {
   private val module = spv"""
     $openCL
     OpEntryPoint Kernel %main "store" %lid

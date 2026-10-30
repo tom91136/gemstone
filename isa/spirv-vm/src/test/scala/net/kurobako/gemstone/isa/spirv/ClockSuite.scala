@@ -7,7 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 
 /** SPV_KHR_shader_clock: glslang emits OpReadClockKHR for clockARB and clockRealtimeEXT, and icpx for SYCL's clock. */
-class ClockSuite extends munit.FunSuite {
+class ClockSuite extends Suite {
   private val module = spv"""
     OpCapability ShaderClockKHR
     $openCL
@@ -50,13 +50,15 @@ class ClockSuite extends munit.FunSuite {
   // Subgroup and workgroup clocks count the instructions the invocation issued; device clocks are nanoseconds since
   // the Unix epoch on a clock that never runs backwards
   test("OpReadClockKHR counts issued instructions within a subgroup and reads wall time at device scope") {
-    val memory  = RegionMemory()
-    val out     = memory.allocate(40L)
-    val started = platform.epochMillis * 1000000L
+    val memory = RegionMemory()
+    val out    = memory.allocate(40L)
+    // the device clock and the wall clock drift apart over a long process, so only the device clock bounds itself
+    val started = InvocationMachine.origin + platform.monotonicNanos
     assertEquals(run(module, "clock", memory, Vec(buffer(out))), Right(()))
-    val ended  = platform.epochMillis * 1000000L + 1000000L
+    val ended  = InvocationMachine.origin + platform.monotonicNanos
     val values = Vec.tabulate(5)(slot => LittleEndian.decode(memory.bytes(out), slot * 8, 8))
     assert(values(1) > values(0) && values(4) > values(0) && values(1) > values(4), values)
-    assert(values(2) >= started - 1000000L && values(2) <= values(3) && values(3) <= ended, values)
+    assert(values(2) >= started && values(2) <= values(3) && values(3) <= ended, values)
+    assert(math.abs(values(2) - platform.epochMillis * 1000000L) < 1000000000L, values)
   }
 }

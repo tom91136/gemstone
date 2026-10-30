@@ -4,12 +4,13 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
 /** Records a PTX launch on the real VM and lays its timeline out. */
-class TraceSuite extends munit.FunSuite {
+class TraceSuite extends Suite {
 
   private val source: String =
     """.version 8.0

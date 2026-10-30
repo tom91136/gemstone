@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class SampledImageSuite extends munit.FunSuite {
+class SampledImageSuite extends Suite {
   private val Dimensions       = List(1, 2)
   private val OffsetOperations = List("sample", "fetch")
   private val OffsetTexel      = Seq(.25f, 0f, 0f, 1f)

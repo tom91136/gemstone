@@ -10,8 +10,8 @@ import scala.concurrent.duration.*
 import scala.util.Using
 
 /** Native rendering assertions run against the real Scala execution service. */
-class VulkanGraphicsSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 360.seconds
+class VulkanGraphicsSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 360.seconds
   test("Vulkan image operations and graphics snapshots execute through RPC") {
     val directory  = native.directory
     val executable = directory.resolve("gemstone_vulkan_runtime_test")

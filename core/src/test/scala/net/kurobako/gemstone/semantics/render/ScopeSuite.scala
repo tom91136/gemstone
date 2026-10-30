@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.semantics.render
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class ScopeSuite extends munit.FunSuite {
+class ScopeSuite extends Suite {
   private val u32 = Type.unsigned(32)
   private val u64 = Type.unsigned(64)
 

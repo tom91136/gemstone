@@ -5,7 +5,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-class RegisterSlotSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+class RegisterSlotSuite extends Suite {
   test("predicates and general registers occupy separate banks") {
     val kernel = compileKernel(""".version 8.0
 .target sm_80

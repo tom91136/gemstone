@@ -2,7 +2,7 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.testing.*
 
-class FloatingWireSuite extends munit.FunSuite {
+class FloatingWireSuite extends Suite {
   // Independent MessagePack fixtures: marker and network-order IEEE 754 payload bytes.
   test("floating codecs use MessagePack widths and reject incomplete or wrong fields") {
     val floats      = summon[Wire.Codec[Float]]

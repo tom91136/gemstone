@@ -19,6 +19,7 @@
 #include <catch2/internal/catch_unique_ptr.hpp>
 
 #include "conformance/device.hpp"
+#include "conformance/environment_keys.hpp"
 
 int conformance_upstream_main(int argc, const char **argv);
 extern int gTestsPassed;
@@ -94,7 +95,7 @@ std::string listing() {
 
 std::vector<std::string> cases() {
   const std::string prefix = "cts/opencl/" CONFORMANCE_CTS_CATEGORY "/";
-  if (const auto *selected = std::getenv("CONFORMANCE_TEST_IDENTITY"); selected && *selected) {
+  if (const auto *selected = std::getenv(conformance::environment::TestName); selected && *selected) {
     const std::string identity(selected);
     if (identity.size() < prefix.size() || identity.compare(0, prefix.size(), prefix) != 0)
       throw std::runtime_error("selected test does not belong to this OpenCL CTS program");
@@ -124,32 +125,31 @@ public:
   void invoke() const override {
     (void)conformance::deviceSelection();
     std::vector<std::string> arguments{"opencl_cts_" CONFORMANCE_CTS_CATEGORY, name};
-    const auto *wimpy = std::getenv("CONFORMANCE_OPENCL_CTS_WIMPY");
-    const bool reduced = wimpy && std::string_view(wimpy) == "1";
-    if (reduced) arguments.emplace_back("--wimpy");
+    if (const auto *wimpy = std::getenv(conformance::environment::OpenclCtsWimpyOn); wimpy && *wimpy) {
+      const auto reduced = conformance::environment::boolean(wimpy);
+      if (!reduced) FAIL("CONFORMANCE_OPENCL_CTS_WIMPY_ON must be one of 1 true on y yes 0 false off n no");
+      if (*reduced) arguments.emplace_back("--wimpy");
+    }
     if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "compiler" || std::string_view(CONFORMANCE_CTS_CATEGORY) == "spirv_new") {
-      const auto *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
-      if (!support || !*support) FAIL("CONFORMANCE_SUPPORT_ROOT is required");
+      const auto *support = std::getenv(conformance::environment::SupportDir);
+      if (!support || !*support) FAIL("CONFORMANCE_SUPPORT_DIR is required");
       arguments.emplace_back("--spirv-binaries-path");
       arguments.push_back(std::string(support) + "/data/spirv_bin");
     }
     if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "compiler") {
-      const auto *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
+      const auto *support = std::getenv(conformance::environment::SupportDir);
       arguments.emplace_back("--include-test-directory");
       arguments.push_back(std::string(support) + "/data/includeTestDirectory");
       arguments.emplace_back("--second-include-test-directory");
       arguments.push_back(std::string(support) + "/data/secondIncludeTestDirectory");
     }
-    if (imageCategory()) {
-      const auto *small = std::getenv("CONFORMANCE_OPENCL_CTS_SMALL_IMAGES");
-      if (!small || std::string_view(small) != "0") arguments.emplace_back("small_images");
-    }
-    if (const auto *elements = std::getenv("CONFORMANCE_OPENCL_CTS_ELEMENTS"); elements && *elements && !imageCategory())
+    if (imageCategory()) arguments.emplace_back("small_images");
+    if (const auto *elements = std::getenv(conformance::environment::OpenclCtsElementCount); elements && *elements && !imageCategory())
       arguments.emplace_back(elements);
     // Explicit upstream stress controls; unset or empty retains upstream defaults.
     if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "c11_atomics") {
-      for (const auto &[key, option] : {std::pair{"CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "-internalIterations"},
-                                        std::pair{"CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS", "-maxDeviceThreads"}}) {
+      for (const auto &[key, option] : {std::pair{conformance::environment::OpenclCtsAtomicIterationCount, "-internalIterations"},
+                                        std::pair{conformance::environment::OpenclCtsAtomicThreadCount, "-maxDeviceThreads"}}) {
         if (const auto *value = std::getenv(key); value && *value) {
           const std::string_view text(value);
           int count = 0;

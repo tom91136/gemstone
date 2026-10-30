@@ -15,7 +15,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-class CodeObjectExecutionSuite extends munit.FunSuite {
+class CodeObjectExecutionSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   test("dispatch pointer exposes launch dimensions and segment sizes to OpenMP kernels") {

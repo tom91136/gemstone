@@ -5,12 +5,13 @@ import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-class PTXReplaySuite extends munit.FunSuite {
+class PTXReplaySuite extends Suite {
   private val image = Vec.from(
     """.version 8.0
       |.target sm_80

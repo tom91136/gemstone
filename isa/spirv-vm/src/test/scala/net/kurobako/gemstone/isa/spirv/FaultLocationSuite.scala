@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class FaultLocationSuite extends munit.FunSuite {
+class FaultLocationSuite extends Suite {
   private val module = spv"""
     $openCL
     OpEntryPoint Kernel %main "overrun" %lid

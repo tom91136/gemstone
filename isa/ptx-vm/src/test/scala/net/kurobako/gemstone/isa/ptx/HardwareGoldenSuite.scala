@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class HardwareGoldenSuite extends munit.FunSuite {
+class HardwareGoldenSuite extends Suite {
   import hardwareGolden.*
 
   // GT 710 sm_35, driver 470, CUDA 11.8; Quadro K620 sm_50, driver 580, CUDA 12.8; Titan X (Pascal) sm_61, driver

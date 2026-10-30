@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 
-class SASSPreprocessorSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 120.seconds
+class SASSPreprocessorSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
 
   test("selects the branches active without architecture semantics and preserves line offsets") {
     val source = "before\r\n##IF DEFINED(ARCH_SEMANTICS)\r\nmodern\r\n##ELSE\r\nlegacy\r\n##ENDIF\r\nafter\r\n"

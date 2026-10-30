@@ -4,7 +4,7 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 
-class PrivateBoundsSuite extends munit.FunSuite {
+class PrivateBoundsSuite extends Suite {
   private val OutOfRange = Seq(-1, 4)
 
   for {

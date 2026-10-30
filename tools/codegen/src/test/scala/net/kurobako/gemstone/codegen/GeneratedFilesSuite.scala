@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.codegen
 
 import java.nio.file.Files
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class GeneratedFilesSuite extends munit.FunSuite {
+class GeneratedFilesSuite extends Suite {
   test("generated writes replace complete files and preserve current timestamps") {
     generator.inDirectory { directory =>
       val output = directory.resolve("Instruction.scala")

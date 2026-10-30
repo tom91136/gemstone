@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class ConversionSuite extends munit.FunSuite {
+class ConversionSuite extends Suite {
   private val roundings  = Seq("RTE", "RTZ", "RTP", "RTN")
   private val LaneCounts = Seq(1, 2)
 

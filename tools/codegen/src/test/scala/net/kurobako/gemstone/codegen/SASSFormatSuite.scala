@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.codegen
 
-class SASSFormatSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class SASSFormatSuite extends Suite {
   import SASSFormat.*
 
   test("retains typed operands, qualifier prefixes, and comma literals") {

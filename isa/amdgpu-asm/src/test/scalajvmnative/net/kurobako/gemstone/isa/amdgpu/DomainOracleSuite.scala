@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class DomainOracleSuite extends munit.FunSuite {
+class DomainOracleSuite extends Suite {
   private val Operand =
     "(?:.*register not available on this GPU|invalid register alignment|expected a (?:20|21|24)-bit (?:un)?signed offset|invalid register class: vgpr tuples must be 64 bit aligned)".r
 

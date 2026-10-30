@@ -15,7 +15,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * registers, LLVM 22), expected values following the GCN3 and Vega ISA documents; a prologue in Gemstone's assembly
   * sets up the allocations' addresses.
   */
-class AMDGPUScalarStoreSuite extends munit.FunSuite {
+class AMDGPUScalarStoreSuite extends Suite {
   private val gfx906 = Target("gfx906")
   private val gfx90a = Target("gfx90a")
 

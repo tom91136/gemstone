@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class ForwardProgressSuite extends munit.FunSuite {
+class ForwardProgressSuite extends Suite {
   // Lane 0 of the first subgroup spins until lane 32, in the second subgroup, publishes a flag; with a barrier, the rest
   // of the first subgroup waits at a subgroup barrier meanwhile.
   private def spin(barrier: Boolean): Module = spv"""

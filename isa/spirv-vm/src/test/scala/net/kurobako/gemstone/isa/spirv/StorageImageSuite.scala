@@ -212,7 +212,7 @@ private object StorageImageSuite {
   )
 }
 
-class StorageImageSuite extends munit.FunSuite {
+class StorageImageSuite extends Suite {
   import StorageImageSuite.*
 
   for (format <- Formats) test(s"${format.name} texel codec saturates, rounds and widens lanes") {

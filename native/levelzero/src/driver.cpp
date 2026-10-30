@@ -36,6 +36,7 @@
 #include "gemstone/command_queue.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/copy_out.hpp>
+#include <gemstone/environment.hpp>
 #include <gemstone/memory.hpp>
 #include <gemstone/process.hpp>
 #include <gemstone/trace.hpp>
@@ -394,10 +395,13 @@ ze_result_t retainCommandEvents(Context *context, ze_event_handle_t signalHandle
   return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t ZE_APICALL init(ze_init_flags_t) { return ZE_RESULT_SUCCESS; }
+bool environmentAccepted() { return gemstone::environment::accepted(gemstone::environment::invalid()); }
+
+ze_result_t ZE_APICALL init(ze_init_flags_t) { return environmentAccepted() ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_UNINITIALIZED; }
 
 ze_result_t ZE_APICALL initDrivers(uint32_t *count, ze_driver_handle_t *drivers, ze_init_driver_type_desc_t *desc) {
   if (!count || !desc) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!environmentAccepted()) return ZE_RESULT_ERROR_UNINITIALIZED;
   if ((desc->flags & ZE_INIT_DRIVER_TYPE_FLAG_GPU) == 0) {
     *count = 0;
     return ZE_RESULT_ERROR_UNINITIALIZED;
@@ -413,6 +417,7 @@ ze_result_t ZE_APICALL initDrivers(uint32_t *count, ze_driver_handle_t *drivers,
 
 ze_result_t ZE_APICALL driverGet(uint32_t *count, ze_driver_handle_t *drivers) {
   if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!environmentAccepted()) return ZE_RESULT_ERROR_UNINITIALIZED;
   if (!drivers) {
     *count = 1;
   } else if (*count != 0) {

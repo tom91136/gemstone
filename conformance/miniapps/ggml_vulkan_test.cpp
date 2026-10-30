@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <conformance/device.hpp>
+#include <conformance/environment_keys.hpp>
 
 #include <ggml-alloc.h>
 #include <ggml-backend.h>
@@ -22,7 +23,7 @@ struct Graph {
 
   Graph() {
     const auto &selection = conformance::deviceSelection();
-    const auto index = std::stoul(selection.environment.at("CONFORMANCE_VULKAN_DEVICE_ID")) - 1;
+    const auto index = std::stoul(selection.environment.at(conformance::environment::VulkanDeviceId)) - 1;
     // Restrict GGML to the selected device before its independent enumeration.
     REQUIRE(setenv("GGML_VK_VISIBLE_DEVICES", std::to_string(index).c_str(), 1) == 0);
     backend.reset(ggml_backend_vk_init(0));

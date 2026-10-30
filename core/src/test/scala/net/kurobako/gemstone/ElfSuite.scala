@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class ElfSuite extends munit.FunSuite {
+class ElfSuite extends Suite {
   private val (symbolNames, symbolTable) = elfImage.symbols(
     Seq(elfImage.Symbol("kernel", 2, 3, 0x1010L, 4L), elfImage.Symbol("global", 1, 4, 8L, 8L))
   )

@@ -4,12 +4,13 @@ import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
 /** M0 and the null register, which RDNA3 onwards encodes as s125 and s124 and RDNA1 and RDNA2 as s124 and s125; each
   * with its LLVM bytes from `llvm-mc -show-encoding`: `s_mov_b32 m0, 17`, `s_mov_b64 null, s[0:1]`,
   * `s_mov_b32 null, s1`, `s_mov_b32 s2, m0`, `s_mov_b64 s[4:5], null` and `s_add_u32 s3, null, m0`.
   */
-class AMDGPUNullRegisterSuite extends munit.FunSuite {
+class AMDGPUNullRegisterSuite extends Suite {
   private val rdna2 = Vec(
     Vec(0x91, 0x03, 0xfc, 0xbe),
     Vec(0x00, 0x04, 0xfd, 0xbe),

@@ -2,9 +2,10 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The patch-and-run path must link and run in the browser's Scala.js build, not only on the JVM. */
-class SandboxJSSuite extends munit.FunSuite {
+class SandboxJSSuite extends Suite {
 
   test("SASS assembles, patches and runs on the real VM in Scala.js") {
     val result = SandboxRunner

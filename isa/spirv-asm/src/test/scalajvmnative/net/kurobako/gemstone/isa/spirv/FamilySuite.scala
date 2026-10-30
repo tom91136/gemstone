@@ -3,9 +3,10 @@ package net.kurobako.gemstone.isa.spirv
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.control.NonFatal
 
-class FamilySuite extends munit.FunSuite {
+class FamilySuite extends Suite {
   private val ids      = 1 to 16
   private val instance = IdRenderer.Instance(
     ids.map(id => id -> s"x$id").toMap,

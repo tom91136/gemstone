@@ -3,9 +3,10 @@ package net.kurobako.gemstone.binary
 import java.math.BigDecimal
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class IEEE754Suite extends munit.FunSuite {
+class IEEE754Suite extends Suite {
   private val roundings    = IEEE754.Rounding.values.toSeq
   private val narrowWidths = Seq[Int in (16, 32, 64)](16, 32)
   private val allWidths    = Seq[Int in (16, 32, 64)](16, 32, 64)

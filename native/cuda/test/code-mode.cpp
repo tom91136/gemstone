@@ -86,7 +86,7 @@ class FailureSession {
 public:
   FailureSession()
       : endpoint(fixture.endpoint()), rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str()),
-        rpcClient(gemstone::environment::RpcClient, "42"), targetArch(gemstone::environment::TargetArch, "compute_89") {
+        rpcClient(gemstone::environment::RpcClientId, "42"), targetArch(gemstone::environment::TargetArch, "compute_89") {
     REQUIRE(cuInit(0) == CUDA_SUCCESS);
     REQUIRE(cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS);
     REQUIRE(cuMemAlloc_v2(&allocation, 16) == CUDA_SUCCESS);
@@ -125,7 +125,7 @@ void *const LaunchParamBufferSize = reinterpret_cast<void *>(uintptr_t{0x2});
 } // namespace
 
 TEST_CASE("CUDA legacy linker symbols preserve every PTX input", "[cuda][code-mode]") {
-  const gemstone_test::Environment codeMode(gemstone::environment::CudaCode, "ptx");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "ptx");
   CUlinkState state = nullptr;
   REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
   std::string first(Ptx);
@@ -145,10 +145,10 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   gemstone_test::RpcFixture fixture;
   const auto endpoint = fixture.endpoint();
   const gemstone_test::Environment rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str());
-  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClient, "42");
+  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClientId, "42");
   const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, "compute_89");
   std::optional<gemstone_test::Environment> codeMode;
-  const auto setCodeMode = [&](const char *mode) { codeMode.emplace(gemstone::environment::CudaCode, mode); };
+  const auto setCodeMode = [&](const char *mode) { codeMode.emplace(gemstone::environment::CudaCodeMode, mode); };
 
   setCodeMode("cubin");
   CHECK((cuInit(0) == CUDA_ERROR_NOT_INITIALIZED));
@@ -375,7 +375,7 @@ TEST_CASE("CUDA architecture- and family-specific targets report their compute c
   gemstone_test::RpcFixture const fixture;
   const auto endpoint = fixture.endpoint();
   const gemstone_test::Environment rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str());
-  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClient, "42");
+  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClientId, "42");
   for (const auto &[target, major, minor] :
        {std::tuple{"sm_90a", 9, 0}, std::tuple{"sm_100f", 10, 0}, std::tuple{"sm_103a", 10, 3}, std::tuple{"compute_120f", 12, 0}}) {
     const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, target);

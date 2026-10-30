@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.nvidia
 
-class MBarrierSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class MBarrierSuite extends Suite {
   import MBarrier.*
 
   private def pendingCount(token: Long): Long = MaximumCount + 1L - ((token >>> 43) & MaximumCount)

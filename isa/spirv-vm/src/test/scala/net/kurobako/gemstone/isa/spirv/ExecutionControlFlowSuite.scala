@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class ExecutionControlFlowSuite extends munit.FunSuite {
+class ExecutionControlFlowSuite extends Suite {
   // SPIR-V 3.3.17: reaching OpUnreachable is undefined behaviour, so it faults the invocation that does
   test("OpUnreachable faults only the invocations that reach it") {
     val module = spv"""

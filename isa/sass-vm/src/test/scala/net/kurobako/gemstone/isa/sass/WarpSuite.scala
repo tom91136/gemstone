@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 
-class WarpSuite extends munit.FunSuite {
+class WarpSuite extends Suite {
   for {
     sm                    <- Vec(100, 103)
     (operation, expected) <- Vec("MIN" -> 0, "MAX" -> -1, "MIN.S32" -> -16, "MAX.S32" -> 15)

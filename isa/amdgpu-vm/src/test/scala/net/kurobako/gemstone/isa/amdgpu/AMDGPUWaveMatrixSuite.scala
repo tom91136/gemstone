@@ -12,7 +12,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class AMDGPUWaveMatrixSuite extends munit.FunSuite {
+class AMDGPUWaveMatrixSuite extends Suite {
   for ((halfResult, high) <- Seq((true, false), (true, true), (false, false)))
     test(s"RDNA3 WMMA half=$halfResult high=$high multiplies asymmetric matrices with overlapping destinations") {
       val memory     = RegionMemory()

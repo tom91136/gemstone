@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class StageInterfaceSuite extends munit.FunSuite {
+class StageInterfaceSuite extends Suite {
   private def origin(model: String): String = if (model == "Fragment") "OpExecutionMode %main OriginUpperLeft" else ""
 
   private def square(model: String): Module = spv"""

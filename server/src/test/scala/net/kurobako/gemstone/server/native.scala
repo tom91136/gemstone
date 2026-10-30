@@ -10,8 +10,8 @@ import scala.concurrent.duration.FiniteDuration
 private object native {
   lazy val directory: Path = Path.of(
     sys.env.getOrElse(
-      env.NativeDirectory,
-      throw IllegalStateException(s"${env.NativeDirectory} was not supplied by the build")
+      env.NativeDir,
+      throw IllegalStateException(s"${env.NativeDir} was not supplied by the build")
     )
   )
 
@@ -31,7 +31,7 @@ private object native {
       set: Map[String, String] = Map.empty,
       unset: Set[String] = Set.empty
   ): Launch.Environment =
-    Launch.Environment(Map(env.RpcEndpoint -> endpoint.toString, env.RpcClient -> client.raw.toString) ++ set, unset)
+    Launch.Environment(Map(env.RpcEndpoint -> endpoint.toString, env.RpcClientId -> client.raw.toString) ++ set, unset)
 
   def run(
       command: NonEmpty[Vec[String]],

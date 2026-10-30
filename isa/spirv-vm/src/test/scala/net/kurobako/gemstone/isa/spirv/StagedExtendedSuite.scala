@@ -8,11 +8,12 @@ import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.testing.Edges.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Staged GLSL.std.450 and OpenCL.std semantics against the hand-written kernels they replaced. The math helpers the
   * kernels called, such as `sinPi` and the musl adaptations, moved unchanged and serve both sides.
   */
-class StagedExtendedSuite extends munit.FunSuite {
+class StagedExtendedSuite extends Suite {
   private case class PointerOutcome(result: Double, stored: Long)
 
   private val ExponentEdges  = Seq(-1L, -2L, -40L, 1000L)

@@ -4,8 +4,9 @@ import MachineDefinitions.*
 import VMIR.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class MachineSemanticsSuite extends munit.FunSuite {
+class MachineSemanticsSuite extends Suite {
   private def shown(text: String): String = {
     val (target, _, operands) = Instances.find(_.text == text).getOrElse(fail(s"missing $text"))
     machine(target, text, operands).fold(failure => fail(failure), ScalaBackend.show(_))

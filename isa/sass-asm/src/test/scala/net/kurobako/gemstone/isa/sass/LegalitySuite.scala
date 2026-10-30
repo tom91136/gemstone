@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
+import net.kurobako.gemstone.testing.Suite
 
-class LegalitySuite extends munit.FunSuite {
+class LegalitySuite extends Suite {
   import ConditionExpression.*
 
   private val database = NVDisasm.Database("test", 128, Vec.empty, Vec.empty)

@@ -5,10 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Using
 
-class DeviceSuite extends munit.FunSuite {
+class DeviceSuite extends Suite {
   private val format = ProgramFormat("test")
 
   /** Writes the image's first byte to the first argument's allocation, printing it and charging one instruction per

@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 #include <fmt/format.h>
 
 namespace {
@@ -55,7 +57,7 @@ device = "*second*"
   const auto tests = conformance::profile::resolveTargets(resolved, {});
   REQUIRE(tests.size() == 2);
   CHECK(tests[0].environment.at("SHARED") == "target");
-  CHECK(tests[0].environment.at("CONFORMANCE_DEVICE") == "*first*");
+  CHECK(tests[0].environment.at(conformance::environment::DevicePattern) == "*first*");
   CHECK(tests[0].skips == std::vector<std::string>{"global/case", "local/case"});
   CHECK(tests[1].skips == std::vector<std::string>{"global/case"});
 
@@ -63,7 +65,7 @@ device = "*second*"
   REQUIRE(selected.size() == 1);
   CHECK(selected.front().id == "second-opencl");
   CHECK_FALSE(selected.front().architecture);
-  CHECK(selected.front().environment.at("CONFORMANCE_DEVICE") == "*second*");
+  CHECK(selected.front().environment.at(conformance::environment::DevicePattern) == "*second*");
 }
 
 TEST_CASE("machine profiles do not invent a fallback target", "[profile]") {
@@ -131,7 +133,7 @@ TEST_CASE("direct CUDA routes select strict PTX and SASS independently from the 
     CHECK(target.id == std::string("cuda-") + mode + "-sm_89");
     CHECK(target.backend == "cuda");
     CHECK(target.architecture == "sm_89");
-    CHECK(target.environment.at("CONFORMANCE_CUDA_CODE") == mode);
+    CHECK(target.environment.at(conformance::environment::CudaCodeMode) == mode);
     CHECK(target.environment.at("CUDA_FORCE_PTX_JIT") == (i == 0 ? "1" : "0"));
     CHECK(target.environment.at("CUDA_DISABLE_PTX_JIT") == (i == 0 ? "0" : "1"));
   }
@@ -153,11 +155,11 @@ TEST_CASE("compiler routes preserve code modes and reject unsupported combinatio
   CHECK(targets[2].id == "cuda-ptx-sm_80-clang");
   CHECK(targets[3].id == "cuda-sass-sm_80-clang");
   CHECK(targets[2].compiler == "clang");
-  CHECK(targets[3].environment.at("CONFORMANCE_CUDA_CODE") == "sass");
+  CHECK(targets[3].environment.at(conformance::environment::CudaCodeMode) == "sass");
   CHECK(targets[4].id == "cuda-ptx-sm_80-gcc");
   CHECK(targets[4].compiler == "gcc");
   CHECK(targets[4].backend == "cuda");
-  CHECK(targets[4].environment.at("CONFORMANCE_CUDA_CODE") == "ptx");
+  CHECK(targets[4].environment.at(conformance::environment::CudaCodeMode) == "ptx");
   CHECK(targets[5].backend == "hsa");
   for (const auto &route : {"cuda/sm_80/", "cuda/sm_80/../clang", "cuda/sm_80/unknown", "hip/gfx906/gcc", "hsa/gfx906/clang",
                             "cuda-sass/sm_80/gcc", "opencl//gcc"})
@@ -179,7 +181,7 @@ TEST_CASE("machine compiler selection requires a compatible backend and code mod
     architecture = "gfx906";
   }
   SECTION("GCC rejects SASS execution") {
-    mode = "CONFORMANCE_CUDA_CODE = 'sass'";
+    mode = "CONFORMANCE_CUDA_CODE_MODE = 'sass'";
     invalid = true;
   }
   SECTION("blank compiler is rejected") {
@@ -208,7 +210,7 @@ TEST_CASE("machine compiler selection requires a compatible backend and code mod
     REQUIRE(targets.size() == 1);
     CHECK(targets[0].compiler == "gcc");
     if (backend == "cuda") {
-      CHECK(targets[0].environment.at("CONFORMANCE_CUDA_CODE") == "ptx");
+      CHECK(targets[0].environment.at(conformance::environment::CudaCodeMode) == "ptx");
       CHECK(targets[0].environment.at("CUDA_FORCE_PTX_JIT") == "1");
     }
   }
@@ -220,7 +222,7 @@ TEST_CASE("machine CUDA code modes derive the driver JIT policy", "[profile]") {
   SECTION("unknown modes are rejected") { mode = "cubin"; }
   SECTION("SASS disables PTX JIT") {}
   std::ofstream(directory.path / "cuda.toml")
-      << "[[targets]]\nbackend = 'cuda'\narchitecture = 'sm_89'\nenvironment = { CONFORMANCE_CUDA_CODE = '" << mode << "' }\n";
+      << "[[targets]]\nbackend = 'cuda'\narchitecture = 'sm_89'\nenvironment = { CONFORMANCE_CUDA_CODE_MODE = '" << mode << "' }\n";
   const auto resolve = [&] {
     return conformance::profile::resolveTargets(conformance::profile::resolveProfile(directory.path, "cuda"), {});
   };

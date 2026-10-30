@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class ProgramExecutionSuite extends munit.FunSuite {
+class ProgramExecutionSuite extends Suite {
   test("loads isolated program state and executes a kernel task") {
     val source  = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)

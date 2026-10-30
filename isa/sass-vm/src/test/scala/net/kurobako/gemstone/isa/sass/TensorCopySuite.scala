@@ -6,12 +6,13 @@ import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
 // ptxas 13.3 output for the kernels of TensorCopyCases, decoded from its machine code as Gemstone loads a cubin:
 // UTMALDG.GATHER4 and UTMASTG.SCATTER4, UTMALDG.W and UTMALDG.W128 with their packed wHalo and wOffset, UTMALDG.2CTA,
 // and tile copies of the packed sub-byte types.
-class TensorCopySuite extends munit.FunSuite {
+class TensorCopySuite extends Suite {
   private def run(fixture: String, name: String, shared: Int, threads: Int, memory: Memory, arguments: Arg*)(
       blocks: Int = 1
   )(using munit.Location): Unit = {

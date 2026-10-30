@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class AtomicSuite extends munit.FunSuite {
+class AtomicSuite extends Suite {
   private val AtomicWidths = Seq(32, 64)
 
   private val semantics =

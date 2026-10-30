@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class VMConditionCodesSuite extends munit.FunSuite {
+class VMConditionCodesSuite extends Suite {
   import ConditionCodeReads.*
 
   test("ordinary carry writes supersede the two-bit IADD3 carry state") {

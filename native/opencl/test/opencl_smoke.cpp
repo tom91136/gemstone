@@ -64,7 +64,7 @@ void convertGeneratedSource() {
 } // namespace
 
 TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
-  const gemstone_test::Environment profile(gemstone::environment::Profile, "rusticl-amd");
+  const gemstone_test::Environment profile(gemstone::environment::ProfileName, "rusticl-amd");
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -114,7 +114,7 @@ TEST_CASE("OpenCL IL queries expose every supported SPIR-V revision consistently
 TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") { convertGeneratedSource(); }
 
 TEST_CASE("OpenCL generated source converts to SPIR-V through the compiler backend", "[opencl]") {
-  const gemstone_test::Environment translator(gemstone::environment::OpenclLlvmSpirv, "none");
+  const gemstone_test::Environment translator(gemstone::environment::OpenclLlvmSpirvExe, "none");
   convertGeneratedSource();
 }
 
@@ -593,7 +593,7 @@ TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unif
       const auto completionStatus = clWaitForEvents(1, &completed);
       CHECK((completionStatus == (failed || !waited ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS)));
       CHECK((waited));
-      REQUIRE((freeing.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
+      REQUIRE((freeing.wait_for(gemstone_test::scaled(std::chrono::seconds(3))) == std::future_status::ready));
       CHECK((freeing.get() == CL_SUCCESS));
       cl_unified_shared_memory_type_intel type{};
       REQUIRE((clGetMemAllocInfoINTEL(context, pointer, CL_MEM_ALLOC_TYPE_INTEL, sizeof(type), &type, nullptr) == CL_SUCCESS));
@@ -666,7 +666,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     REQUIRE((clSetUserEventStatus(gate, -1) == CL_SUCCESS));
     CHECK((clWaitForEvents(1, &completed) == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
     CHECK((waited == (mode != "unrelated" && !clearedList)));
-    REQUIRE((freeing.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
+    REQUIRE((freeing.wait_for(gemstone_test::scaled(std::chrono::seconds(3))) == std::future_status::ready));
     CHECK((freeing.get() == CL_SUCCESS));
     REQUIRE((clReleaseEvent(completed) == CL_SUCCESS));
     REQUIRE((clReleaseEvent(gate) == CL_SUCCESS));
@@ -783,7 +783,7 @@ TEST_CASE("OpenCL finish from an event callback waits for the queue", "[opencl]"
   REQUIRE((clSetUserEventStatus(start, CL_COMPLETE) == CL_SUCCESS));
   CHECK((finished.wait_for(std::chrono::milliseconds(200)) == std::future_status::timeout));
   REQUIRE((clSetUserEventStatus(gate, -1) == CL_SUCCESS));
-  REQUIRE((finished.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
+  REQUIRE((finished.wait_for(gemstone_test::scaled(std::chrono::seconds(3))) == std::future_status::ready));
   CHECK((finished.get() == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
   REQUIRE((clReleaseEvent(marker) == CL_SUCCESS));
   REQUIRE((clReleaseEvent(pending) == CL_SUCCESS));

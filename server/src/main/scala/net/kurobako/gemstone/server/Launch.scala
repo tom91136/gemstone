@@ -161,7 +161,7 @@ object Launch {
     val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
     val common               = Map[String, String](
       env.RpcEndpoint -> endpoint.toString,
-      env.RpcClient   -> s"$client"
+      env.RpcClientId -> s"$client"
     )
     val dynamic                                                                      = Map.newBuilder[String, String]
     def searchPath(name: String, own: Vector[Path], inherited: Vector[String]): Unit =
@@ -180,7 +180,7 @@ object Launch {
   }
 
   private val RemovedOverrides = Set(
-    env.Record,
+    env.RecordFile,
     "HSA_ENABLE_DTIF",
     "HSA_TOOLS_LIB",
     "OCL_ICD_VENDORS",

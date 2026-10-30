@@ -2,12 +2,13 @@ package net.kurobako.gemstone.isa.ptx
 
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
-class FaultLocationSuite extends munit.FunSuite {
+class FaultLocationSuite extends Suite {
   test("a faulting instruction reports its kernel, function, ordinal, workgroup and lane") {
     val source = """.version 8.0
                    |.target sm_80

@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-class ScalarControlSuite extends munit.FunSuite {
+class ScalarControlSuite extends Suite {
   private def run(operations: Instruction*): Either[String, Unit] =
     runIR(Vec.from(operations), RegionMemory()).left.map(_.message)
 

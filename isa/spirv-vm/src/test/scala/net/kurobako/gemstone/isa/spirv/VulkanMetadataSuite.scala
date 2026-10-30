@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class VulkanMetadataSuite extends munit.FunSuite {
+class VulkanMetadataSuite extends Suite {
   private val DefaultSize = Seq(4L, 3L, 2L)
   private val SizeIds     = Seq("%x", "%y", "%z")
 

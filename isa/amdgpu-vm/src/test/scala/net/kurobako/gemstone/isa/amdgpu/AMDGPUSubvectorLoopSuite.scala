@@ -4,13 +4,14 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** GFX10's S_SUBVECTOR_LOOP_BEGIN and S_SUBVECTOR_LOOP_END, which run a wave64's loop body once for each half of its
   * lanes, and S_GET_WAVEID_IN_WORKGROUP. The loop expectations match a gfx1036 (RDNA2) in wave64, running probe kernels
   * of the form `s_subvector_loop_begin s12, .Lend; <body>; s_subvector_loop_end s12, .Lbody` under a range of EXEC
   * values. Bytes from `llvm-mc -arch=amdgcn -mcpu=gfx1030 -mattr=+wavefrontsize64 -show-encoding`.
   */
-class AMDGPUSubvectorLoopSuite extends munit.FunSuite {
+class AMDGPUSubvectorLoopSuite extends Suite {
   private val gfx1010 = Target("gfx1010")
   private val gfx1030 = Target("gfx1030")
 

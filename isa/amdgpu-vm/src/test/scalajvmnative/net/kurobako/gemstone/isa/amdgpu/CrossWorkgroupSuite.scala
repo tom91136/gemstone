@@ -21,7 +21,7 @@ import scala.util.Using
   *
   * The raw words below are embedded little-endian gfx1030 machine code so JVM and Native tests share one fixture.
   */
-class CrossWorkgroupSuite extends munit.FunSuite {
+class CrossWorkgroupSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   private val counts             = Vec[Int > 0](1, 2, 3, 5, 9) // P=4; deduplicated controls, P+1 and 2P+1.

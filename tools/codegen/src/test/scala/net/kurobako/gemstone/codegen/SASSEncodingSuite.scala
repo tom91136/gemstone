@@ -2,8 +2,9 @@ package net.kurobako.gemstone.codegen
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
+import net.kurobako.gemstone.testing.Suite
 
-class SASSEncodingSuite extends munit.FunSuite {
+class SASSEncodingSuite extends Suite {
   private def parse(source: String): SASSDescription.Description =
     SASSDescription.parse(source).fold(error => fail(error.message), identity)
 

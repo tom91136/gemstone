@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.codegen
 
-class SASSOperandDomainsSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class SASSOperandDomainsSuite extends Suite {
   private def mask(offset: Int, bits: Int): String = "." * offset + "X" * bits + "." * (128 - offset - bits)
 
   private val description =

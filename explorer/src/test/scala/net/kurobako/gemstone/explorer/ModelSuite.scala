@@ -3,8 +3,9 @@ package net.kurobako.gemstone.explorer
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class ModelSuite extends munit.FunSuite {
+class ModelSuite extends Suite {
   private def entry(model: Model, target: Option[String], mnemonic: String): View.Entry =
     model.entries(target).find(_.mnemonic == mnemonic).getOrElse(fail(s"missing $mnemonic"))
 

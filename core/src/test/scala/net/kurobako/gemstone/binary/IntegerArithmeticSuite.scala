@@ -3,9 +3,10 @@ package net.kurobako.gemstone.binary
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class IntegerArithmeticSuite extends munit.FunSuite {
+class IntegerArithmeticSuite extends Suite {
   private val booleans = Vec(false, true)
 
   test("primitive carry, borrow, high products and saturation match arbitrary-precision arithmetic") {

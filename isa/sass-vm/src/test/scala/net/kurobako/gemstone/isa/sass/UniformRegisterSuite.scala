@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class UniformRegisterSuite extends munit.FunSuite {
+class UniformRegisterSuite extends Suite {
   test("general, uniform and predicate banks remain distinct while lowering uses temporaries") {
     check(
       120,

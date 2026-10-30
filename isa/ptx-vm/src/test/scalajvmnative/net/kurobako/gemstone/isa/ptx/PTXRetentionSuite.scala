@@ -3,9 +3,10 @@ package net.kurobako.gemstone.isa.ptx
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class PTXRetentionSuite extends munit.FunSuite {
+class PTXRetentionSuite extends Suite {
   import PTXCacheSuite.*
 
   test("a released program stays parsed for the next load of equal content") {

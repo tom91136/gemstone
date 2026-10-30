@@ -4,8 +4,9 @@ import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class PRMTSignExtensionSuite extends munit.FunSuite {
+class PRMTSignExtensionSuite extends Suite {
   test("PRMT sign-extension selectors replicate the selected byte sign bit") {
     val source = """.version 9.3
       |.target sm_80

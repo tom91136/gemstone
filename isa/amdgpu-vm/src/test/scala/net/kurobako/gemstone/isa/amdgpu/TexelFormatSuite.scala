@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class TexelFormatSuite extends munit.FunSuite {
+class TexelFormatSuite extends Suite {
   private def store(number: TexelNumber, width: Int in 1 ~ 32, value: Float): Long =
     TexelFormat.write(number, width, IEEE754.floatToBinary32(value).toLong)
 

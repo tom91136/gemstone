@@ -17,7 +17,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
-class CrossWorkgroupSuite extends munit.FunSuite {
+class CrossWorkgroupSuite extends Suite {
   private val groupCounts = Vec[Int > 0](1, 2, 3, 5, 9) // P=4: includes P+1 and 2P+1.
   private val widths      = Vec[Int > 0](31, 32, 33)
   private val header      = ".version 8.0\n.target sm_80\n.address_size 64\n"

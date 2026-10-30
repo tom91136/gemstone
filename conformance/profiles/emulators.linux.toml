@@ -5,13 +5,13 @@
 name = "rusticl-opencl"
 backend = "opencl"
 device = "*llvmpipe*"
-environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/rusticl.icd", OCL_ICD_FILENAMES = "/usr/lib64/libRusticlOpenCL.so.1", RUSTICL_ENABLE = "llvmpipe", CONFORMANCE_OPENCL_CTS_WIMPY = "1", CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS = "16", CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS = "128", CONFORMANCE_OPENCL_CTS_TIMEOUT = "600" }
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/rusticl.icd", OCL_ICD_FILENAMES = "/usr/lib64/libRusticlOpenCL.so.1", RUSTICL_ENABLE = "llvmpipe", CONFORMANCE_OPENCL_CTS_WIMPY_ON = "1", CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATION_COUNT = "16", CONFORMANCE_OPENCL_CTS_ATOMIC_THREAD_COUNT = "128", CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS = "600" }
 
 [[targets]]
 name = "portable-opencl"
 backend = "opencl"
 device = "*Portable*"
-environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/pocl.icd", OCL_ICD_FILENAMES = "/usr/lib64/libpocl.so.2", CONFORMANCE_OPENCL_CTS_WIMPY = "1", CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS = "16", CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS = "128", CONFORMANCE_OPENCL_CTS_TIMEOUT = "600" }
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/pocl.icd", OCL_ICD_FILENAMES = "/usr/lib64/libpocl.so.2", CONFORMANCE_OPENCL_CTS_WIMPY_ON = "1", CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATION_COUNT = "16", CONFORMANCE_OPENCL_CTS_ATOMIC_THREAD_COUNT = "128", CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS = "600" }
 # PoCL 7.1 implementation defects reproduced independently by the pinned OpenCL CTS.
 skips = [
   "cts/opencl/api/consistency_il_programs",

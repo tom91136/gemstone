@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class CubinParserSuite extends munit.FunSuite {
+class CubinParserSuite extends Suite {
   private def metadataElf(abi: Int, sm: Int, sections: Seq[elfImage.Section] = Seq.empty): Array[Byte] =
     elfImage.write(190, sections, imageType = 1, abiVersion = abi, flags = if (abi >= 8) sm << 8 else sm)
 

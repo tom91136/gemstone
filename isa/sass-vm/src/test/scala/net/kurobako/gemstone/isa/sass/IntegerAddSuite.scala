@@ -5,10 +5,11 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
-class IntegerAddSuite extends munit.FunSuite {
+class IntegerAddSuite extends Suite {
   private val Mask64     = (BigInt(1) << 64) - 1
   private val Constants  = Vec(0x00000000ffffffffL, 0x12345678ffffffffL, 0xffffffffffffffffL)
   private val Flags      = Vec(false, true)

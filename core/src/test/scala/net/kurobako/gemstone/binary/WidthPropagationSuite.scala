@@ -2,9 +2,10 @@ package net.kurobako.gemstone.binary
 
 import Widths.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 
-class WidthPropagationSuite extends munit.FunSuite {
+class WidthPropagationSuite extends Suite {
   test("runtime bit extraction retains its guaranteed bounds") {
     assertEquals(
       typeCheckErrors("""

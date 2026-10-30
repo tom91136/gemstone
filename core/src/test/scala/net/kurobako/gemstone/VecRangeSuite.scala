@@ -4,10 +4,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.testing.Suite
 import scala.collection.immutable.ArraySeq
 import scala.compiletime.testing.typeCheckErrors
 
-class VecRangeSuite extends munit.FunSuite {
+class VecRangeSuite extends Suite {
   test("range produces half-open elements with refined lower and upper bounds") {
     val values: Vec[Int where (AtLeast[-2] & LessThan[3])] = Vec.range[-2, 3]
     val atMostTwo: Int <= 2                                = values.last

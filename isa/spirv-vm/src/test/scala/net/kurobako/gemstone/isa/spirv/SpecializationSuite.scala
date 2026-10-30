@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class SpecializationSuite extends munit.FunSuite {
+class SpecializationSuite extends Suite {
   private val KindWidths = Seq(
     "OpTypeBool"  -> Seq[Int in (8, 16, 32, 64)](8),
     "OpTypeInt"   -> Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64),

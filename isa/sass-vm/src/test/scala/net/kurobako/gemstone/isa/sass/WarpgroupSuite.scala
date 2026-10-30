@@ -6,12 +6,13 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction as VMInstruction
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
 /** HGMMA, IGMMA, QGMMA and BGMMA as ptxas emits them for `wgmma.mma_async` on sm_90a, against the CPU product of the
   * PTX kernels they come from.
   */
-class WarpgroupSuite extends munit.FunSuite {
+class WarpgroupSuite extends Suite {
   WarpgroupFixtures.products.foreach { (listing, product) =>
     test(s"$listing: $product") {
       val found  = WarpgroupProducts.cases.find(_.name == product).getOrElse(fail(s"no product $product"))

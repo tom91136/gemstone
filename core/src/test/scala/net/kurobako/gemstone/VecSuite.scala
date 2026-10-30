@@ -1,10 +1,11 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
-class VecSuite extends munit.FunSuite {
+class VecSuite extends Suite {
   test("constructors own immutable indexed storage") {
     val mutableSource = mutable.ArrayBuffer(1, 2, 3)
     val values        = Vec.from(mutableSource)

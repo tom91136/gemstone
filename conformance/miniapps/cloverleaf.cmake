@@ -19,6 +19,6 @@ conformance_miniapp(cloverleaf
   LICENCE_FILE LICENCE.txt CloverLeaf.txt
   OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD
   DECKS decks/cloverleaf.in
-  ARGUMENTS --file [=[${CONFORMANCE_SUPPORT_ROOT}/data/decks/cloverleaf.in]=]
-    --out [=[${CONFORMANCE_REPORT_DIRECTORY}/clover.out]=]
+  ARGUMENTS --file [=[${CONFORMANCE_SUPPORT_DIR}/data/decks/cloverleaf.in]=]
+    --out [=[${CONFORMANCE_REPORT_DIR}/clover.out]=]
   ADAPT cloverleaf_adapt)

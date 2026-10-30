@@ -5,8 +5,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class SASSCaptureSuite extends munit.FunSuite {
+class SASSCaptureSuite extends Suite {
   private def ascii(value: String): Array[Byte]                             = value.getBytes(StandardCharsets.US_ASCII)
   private def text(value: Array[Byte]): String                              = String(value, StandardCharsets.US_ASCII)
   private def assertBytes(actual: Array[Byte], expected: Array[Byte]): Unit =

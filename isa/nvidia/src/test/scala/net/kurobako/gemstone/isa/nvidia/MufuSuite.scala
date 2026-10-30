@@ -1,13 +1,14 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.isa.nvidia.VMIR.MufuFlavour.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The special-function unit's approximations, against the hardware's own results.
   *
   * The rows are the probe results of the GPUs the repository's hardware tables were taken from, in the order of
   * `isa/ptx-vm/src/test/resources/net/kurobako/gemstone/isa/ptx/hardware/sm_*.txt`.
   */
-class MufuSuite extends munit.FunSuite {
+class MufuSuite extends Suite {
 
   private def check(name: String, rows: String)(function: Long => Long): Unit = {
     val wrong = rows.stripMargin.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>

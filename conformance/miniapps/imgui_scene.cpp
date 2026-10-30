@@ -10,6 +10,7 @@
 #include <imgui_impl_vulkan.h>
 
 #include <conformance/device.hpp>
+#include <conformance/environment_keys.hpp>
 
 #include <vulkan/vulkan.hpp>
 
@@ -50,7 +51,8 @@ public:
     vk::ApplicationInfo application("conformance-imgui", 1, "imgui", 1, VK_API_VERSION_1_1);
     instance = vk::createInstanceUnique(vk::InstanceCreateInfo({}, &application));
     auto devices = instance->enumeratePhysicalDevices();
-    const auto index = reference ? 0 : std::stoul(conformance::deviceSelection().environment.at("CONFORMANCE_VULKAN_DEVICE_ID")) - 1;
+    const auto index =
+        reference ? 0 : std::stoul(conformance::deviceSelection().environment.at(conformance::environment::VulkanDeviceId)) - 1;
     physical = devices.at(index);
     const auto families = physical.getQueueFamilyProperties();
     const auto graphics = std::find_if(families.begin(), families.end(),

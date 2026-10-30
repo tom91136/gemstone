@@ -7,10 +7,11 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
 /** Maxwell/Pascal generic memory: CUDA 11.8 pairs LEA/LEA.HI.X whose auxiliary predicate is unobservable. */
-class GenericMemorySuite extends munit.FunSuite {
+class GenericMemorySuite extends Suite {
   private def at(address: Int, text: String): DecodedInstruction =
     Listing.program(text).value.instructions.head.copy(address = address.unsafe[Int >= 0])
 

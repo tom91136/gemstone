@@ -6,8 +6,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.VMIR as NvidiaIR
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class WarpReductionSuite extends munit.FunSuite {
+class WarpReductionSuite extends Suite {
   private val reductionMasks = Vec(0xffffffffL, 0x55555555L, 1L)
   private val flags          = Vec(false, true)
 

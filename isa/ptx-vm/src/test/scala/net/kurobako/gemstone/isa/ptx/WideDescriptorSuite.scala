@@ -6,11 +6,12 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-class WideDescriptorSuite extends munit.FunSuite {
+class WideDescriptorSuite extends Suite {
   private val values = (0 until 4096).map { index =>
     val x = (index * 17 + 11) % 23 - 11; x * x
   }

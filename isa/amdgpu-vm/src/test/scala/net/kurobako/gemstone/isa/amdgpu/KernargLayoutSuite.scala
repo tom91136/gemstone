@@ -8,7 +8,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
-class KernargLayoutSuite extends munit.FunSuite {
+class KernargLayoutSuite extends Suite {
   test("listed arguments land at their metadata offsets with the hidden arguments the dispatch implies") {
     val memory      = ArrayMemory()
     val source      = memory.allocate(64L)

@@ -4,10 +4,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.msgpack.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 
 /** Exercise visibility as a caller outside the Gemstone package hierarchy. */
-class CoreVisibilitySuite extends munit.FunSuite {
+class CoreVisibilitySuite extends Suite {
   private case class Payload(value: Int) derives Wire.Codec
 
   test("derived codecs and runtime refinements work from an external package") {

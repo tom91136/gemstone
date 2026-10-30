@@ -1,11 +1,12 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Forms ptxas 13.3 emits for the conversions, saturating arithmetic and half-precision atomics of the unified CUDA
   * cases (conformance/unified/src/cuda), each run on one lane over a few inputs.
   */
-class CompilerFormSuite extends munit.FunSuite {
+class CompilerFormSuite extends Suite {
   import Harness.*
 
   private def single(sm: Int, body: String, expected: Int*)(using munit.Location): Unit =

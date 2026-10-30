@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class AMDGPUControlFlowSuite extends munit.FunSuite {
+class AMDGPUControlFlowSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   test("vector condition masks follow the wave width") {

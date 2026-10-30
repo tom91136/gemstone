@@ -5,11 +5,12 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Callee frames whose lanes have all returned hand their storage to later calls; these cover the ways a frame can
   * still be in use when some of its lanes return.
   */
-class FrameReuseSuite extends munit.FunSuite {
+class FrameReuseSuite extends Suite {
   private def run(source: String, threads: Int > 0, words: Int): Vec[Int] = {
     val memory = DeviceMemory(1024)
     val result = execute(

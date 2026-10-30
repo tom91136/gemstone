@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class VulkanDescriptorSuite extends munit.FunSuite {
+class VulkanDescriptorSuite extends Suite {
   for (
     (name, operation, expected, version) <- Seq(
       ("OpFMul", "OpFMul %float %a %b", 10.0, "1.3"),

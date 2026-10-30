@@ -6,7 +6,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 
-class IntegerDotProductSuite extends munit.FunSuite {
+class IntegerDotProductSuite extends Suite {
   private def dot(results: Int, body: String): Vec[Long] = {
     val module = spv"""
       OpCapability DotProductInput4x8Bit

@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.testing.Suite
 
-class InstructionSuite extends munit.FunSuite {
+class InstructionSuite extends Suite {
   test("every opcode accepts exactly its operand counts") {
     assertEquals(InstructionDefs.definitions.map(_.mnemonic).distinct.size, 2467)
     assertEquals(InstructionDefs.definitions.map(Instruction.operandCounts(_).size).sum, 2952)

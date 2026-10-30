@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class VectorLayoutSuite extends munit.FunSuite {
+class VectorLayoutSuite extends Suite {
   for {
     (width, count) <- Seq(32 -> 4, 32 -> 8, 32 -> 16, 64 -> 3, 64 -> 4, 64 -> 8)
     byValue        <- booleans

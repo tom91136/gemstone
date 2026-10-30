@@ -9,6 +9,8 @@
 #include <thread>
 #include <utility>
 
+#include <gemstone/test_support.hpp>
+
 #if __has_include(<hsa/hsa.h>)
   #include <hsa/hsa.h>
   #include <hsa/hsa_ext_amd.h>
@@ -190,7 +192,7 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
     hsa_signal_store_screlease(target->doorbell_signal, static_cast<hsa_signal_value_t>(index));
   }
   static void wait(hsa_signal_t signal) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(60));
     while (hsa_signal_load_scacquire(signal) == 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::yield();
     require(hsa_signal_load_scacquire(signal) == 0, "HSA dispatch failed or timed out");

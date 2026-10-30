@@ -17,7 +17,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * for MULLIT the R600 ISA's MUL_LIT; encodings are `llvm-mc -triple=amdgcn -mcpu=gfx601 -show-encoding`, the same
   * bytes on every GFX6 and GFX7 target. Inputs are in v2 onwards and the result in v4 unless named.
   */
-class AMDGPULegacySuite extends munit.FunSuite {
+class AMDGPULegacySuite extends Suite {
   private val targets = Vec(Target("gfx600"), Target("gfx601"), Target("gfx602"), Target("gfx700"), Target("gfx705"))
 
   private def f(value: Float): Long          = java.lang.Float.floatToRawIntBits(value).toLong & 0xffffffffL

@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class InstructionSemanticsSuite extends munit.FunSuite {
+class InstructionSemanticsSuite extends Suite {
   private def show(instruction: String, registers: (String, String)*): Either[String, String] =
     InstructionSemantics.describe("op", instruction, Vec.from(registers)).map(ScalaBackend.show(_)).left.map(_.message)
 

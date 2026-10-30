@@ -2,13 +2,14 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
 /** GFX11 onwards selects a 16-bit operand's high half in the 32-bit VOP1, VOP2 and VOPC encodings by bit 7 of its VGPR
   * number, which upstream LLVM 22 emits for half arithmetic on gfx1100 (`llc -mcpu=gfx1100`: `v_add_f16_e32 v0.l, v0.l,
   * v0.h`); bytes from ROCm 7.1.1 `llvm-mc -triple=amdgcn -mcpu=gfx1100 -mattr=+real-true16 -show-encoding`. Each lane's
   * v2 holds 1.0 low and 2.0 high and v3 0.5 low and 3.0 high.
   */
-class AMDGPUTrue16Suite extends munit.FunSuite {
+class AMDGPUTrue16Suite extends Suite {
   private val target = Target("gfx1100")
 
   private def run(code: Int*)(destination: Long, high: Long = 0x4000L): Long =

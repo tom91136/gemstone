@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.explorer
 
+import net.kurobako.gemstone.testing.Suite
+
 /** The SPIR-V describe pipeline loads each instance in the VM, which must run as it does on the JVM. */
-class SPIRVPipelineSuite extends munit.FunSuite {
+class SPIRVPipelineSuite extends Suite {
   private def entry(mnemonic: String): View.Entry =
     SPIRVModel.all.find(_.mnemonic == mnemonic).getOrElse(fail(s"missing $mnemonic"))
 

@@ -1380,10 +1380,11 @@ object GeneratePTXISA {
         |
         |import net.kurobako.gemstone.collection.*
         |import net.kurobako.gemstone.isa.ptx.asm.*
+        |import net.kurobako.gemstone.testing.Suite
         |
         |${GeneratedHeader.scala(
          s"from examples in the pinned NVIDIA PTX ISA ${version.source} specification"
-       )}${GeneratedHeader.annotation()}class DocumentationSuite extends munit.FunSuite {
+       )}${GeneratedHeader.annotation()}class DocumentationSuite extends Suite {
         |  private val examples: Vec[(String, String)] = Vec(
         |$values
         |  )

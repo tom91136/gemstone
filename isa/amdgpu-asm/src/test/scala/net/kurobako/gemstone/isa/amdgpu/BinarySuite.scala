@@ -5,9 +5,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class BinarySuite extends munit.FunSuite {
+class BinarySuite extends Suite {
   private val HalfLiteral = "0.5".r
 
   test("validation shares symbolic operand checking while retaining incomplete processor availability") {

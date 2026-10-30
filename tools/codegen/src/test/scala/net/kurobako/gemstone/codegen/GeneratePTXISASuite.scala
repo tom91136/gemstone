@@ -3,9 +3,10 @@ package net.kurobako.gemstone.codegen
 import generator.*
 import java.nio.file.Files
 import java.nio.file.Path
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.files.*
 
-class GeneratePTXISASuite extends munit.FunSuite {
+class GeneratePTXISASuite extends Suite {
   private def section(
       id: String,
       syntax: String,

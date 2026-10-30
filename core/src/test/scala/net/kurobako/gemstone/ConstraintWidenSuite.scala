@@ -4,11 +4,12 @@ import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 import scala.util.Try
 
 /** Proven implications, carrier widening, exact narrowing and sign-preserving arithmetic. */
-class ConstraintWidenSuite extends munit.FunSuite {
+class ConstraintWidenSuite extends Suite {
   test("widening a carrier retains its bounds and predicates") {
     val errors = typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*

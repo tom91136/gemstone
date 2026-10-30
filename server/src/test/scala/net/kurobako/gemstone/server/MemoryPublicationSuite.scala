@@ -11,10 +11,10 @@ import scala.concurrent.duration.*
 import scala.util.Using
 
 /** The same mixed-backing and pointer-publication scenarios run through every native API. */
-class MemoryPublicationSuite extends munit.FunSuite {
+class MemoryPublicationSuite extends Suite {
   private val Booleans = List(false, true)
 
-  override val munitTimeout: Duration = 150.seconds
+  override def baseTimeout: FiniteDuration = 150.seconds
   for {
     api  <- List("cuda", "hip", "hsa", "levelzero", "opencl")
     unix <- Booleans
@@ -39,8 +39,9 @@ class MemoryPublicationSuite extends munit.FunSuite {
             native.serverEnvironment(
               server.endpoint,
               server.client,
-              native.providerEnvironment ++ Map(env.MemoryProbe -> "review", "OCL_ICD_VENDORS" -> vendors.toString),
-              Set(env.SystemPaging, "UR_ADAPTERS_FORCE_LOAD")
+              native.providerEnvironment ++
+                Map(env.TestMemoryProbeList -> "review", "OCL_ICD_VENDORS" -> vendors.toString),
+              Set(env.SystemPagingOn, "UR_ADAPTERS_FORCE_LOAD")
             ),
             120.seconds
           )

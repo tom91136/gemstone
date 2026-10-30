@@ -4,13 +4,14 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** gfx950's lane swaps (CDNA4 ISA, V_PERMLANE16_SWAP_B32), which hipcc emits for `__builtin_amdgcn_permlane16_swap`,
   * GFX12's DS_BPERMUTE_FI_B32 and V_SWAP_B16, and the ADDTID accesses, whose address is the lane's index past a base
   * (CDNA4 ISA, DS_READ_ADDTID_B32). Bytes from LLVM 22 `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`, with
   * `-mattr=+real-true16` for V_SWAP_B16.
   */
-class AMDGPULaneExchangeSuite extends munit.FunSuite {
+class AMDGPULaneExchangeSuite extends Suite {
   private val gfx950  = Target("gfx950")
   private val gfx1201 = Target("gfx1201")
 

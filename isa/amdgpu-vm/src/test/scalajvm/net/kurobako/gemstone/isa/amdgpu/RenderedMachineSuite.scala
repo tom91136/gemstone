@@ -5,8 +5,13 @@ import dotty.tools.dotc.Driver
 import dotty.tools.dotc.reporting.StoreReporter
 import java.nio.file.Files
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
+import scala.concurrent.duration.*
 
-class RenderedMachineSuite extends munit.FunSuite {
+class RenderedMachineSuite extends Suite {
+  // each test runs the Scala compiler over every rendered form of a family
+  override def baseTimeout: FiniteDuration = 3.minutes
+
   private def errors(source: String): List[String] = {
     val directory = Files.createTempDirectory("gemstone-rendered-")
     try {

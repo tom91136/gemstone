@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class AMDGPULinkedGeometrySuite extends munit.FunSuite {
+class AMDGPULinkedGeometrySuite extends Suite {
   for (function <- Seq("__ockl_get_local_id", "__ockl_get_group_id", "__ockl_get_local_size"))
     test(s"$function executes its linked body after LLVM specializes away the dimension argument") {
       import InstructionSource.{VectorRegister as Register, *}

@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class TensorMemoryFieldsSuite extends munit.FunSuite {
+class TensorMemoryFieldsSuite extends Suite {
   private val sparseModes = Seq(false, true)
 
   test("every kind takes at most five descriptor fields, sparse or not") {

@@ -4,7 +4,7 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 
-class FunctionVariableSuite extends munit.FunSuite {
+class FunctionVariableSuite extends Suite {
   private def check(name: String, module: Module, expected: Long*) = test(name) {
     val memory = RegionMemory()
     val out    = memory.allocate(16L)

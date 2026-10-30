@@ -12,11 +12,12 @@ import net.kurobako.gemstone.constraint.auto.given
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.util.Try
 import scala.util.Using
 
-class ExecutionSessionSuite extends munit.FunSuite {
+class ExecutionSessionSuite extends Suite {
   private val encoding = ProgramEncoding.PTXText
 
   private type Execute = (KernelTask, AddressSpace, Event => Either[Fault, Unit]) => Either[Fault, Unit]

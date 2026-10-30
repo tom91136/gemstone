@@ -13,7 +13,7 @@ import net.kurobako.gemstone.testing.bits.*
   * then `ds_consume v2`), and GDS and GWS as HSA queues provide them: no GDS segment, and GWS resources only for
   * cooperative dispatches.
   */
-class AMDGPUDataShareSuite extends munit.FunSuite {
+class AMDGPUDataShareSuite extends Suite {
   import InstructionSource.*
 
   /** One lane with v2 to v7 from `inputs`: LDS address 0 starts as v4 and 4 and 8 as v6 and v7, or 0 to 8 as v[4:5]

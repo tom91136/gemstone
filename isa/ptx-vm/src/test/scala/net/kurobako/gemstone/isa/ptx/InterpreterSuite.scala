@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class InterpreterSuite extends munit.FunSuite {
+class InterpreterSuite extends Suite {
   for (width <- Vec(32, 64)) test(s"signed $width-bit extraction beyond the source replicates its sign") {
     val size  = width / 8
     val cases = Vec(

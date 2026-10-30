@@ -6,8 +6,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class AtomicExecutionSuite extends munit.FunSuite {
+class AtomicExecutionSuite extends Suite {
   private val casTargets = Vec("generic", "global", "acquire.sys.global", "shared", "generic-shared")
   private val widths     = Vec(32, 64)
   private val minGroups  = Vec[Int > 0](1, 5)

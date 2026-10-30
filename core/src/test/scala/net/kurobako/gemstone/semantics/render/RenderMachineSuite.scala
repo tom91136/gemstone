@@ -3,10 +3,11 @@ package net.kurobako.gemstone.semantics.render
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-class RenderMachineSuite extends munit.FunSuite {
+class RenderMachineSuite extends Suite {
   private type Flow[A] = Either[Fault, A]
 
   private class Toy(val operands: Map[String, Long], val memory: mutable.Map[(Space, Long), Long])

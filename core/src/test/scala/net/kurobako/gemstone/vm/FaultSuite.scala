@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class FaultSuite extends munit.FunSuite {
+class FaultSuite extends Suite {
   private val location = Fault.Location("saxpy", None, Some(0x1cL), Some(Coordinates(1, 0, 0)), Some(3))
 
   test("a located fault keeps its kind, detail and equality, and reports where it arose") {

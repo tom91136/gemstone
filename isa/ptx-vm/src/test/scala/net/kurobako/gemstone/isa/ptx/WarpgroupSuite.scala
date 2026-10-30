@@ -7,11 +7,12 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.WarpgroupProducts.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
 /** `wgmma.mma_async` on one warpgroup against a CPU product. The kernels are hand-written PTX that ptxas 13.3 assembles
   * for sm_90a.
   */
-class WarpgroupSuite extends munit.FunSuite {
+class WarpgroupSuite extends Suite {
   private def run(test: Case, edit: String => String = identity)(using munit.Location): Unit = {
     val launch  = WarpgroupProducts.launch(test)
     val lanesAt = launch.image.size

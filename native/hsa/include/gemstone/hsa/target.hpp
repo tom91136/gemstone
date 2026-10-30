@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include <gemstone/environment.hpp>
 #include <gemstone_amdgpu_target.hpp>
 
@@ -39,5 +42,13 @@ inline TargetVersion targetVersion(const char *target) noexcept {
 inline unsigned waveSize() noexcept { return gemstone::amdgpu::defaultWaveSize(targetArch()); }
 
 inline TargetVersion targetVersion() noexcept { return targetVersion(targetArch()); }
+
+inline std::optional<std::string> invalidEnvironment() {
+  if (auto problem = gemstone::environment::invalid()) return problem;
+  const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
+  if (value && targetVersion(value).major == 0)
+    return gemstone::environment::rejected(gemstone::environment::TargetArch, value, "a gfxNNN target");
+  return std::nullopt;
+}
 
 } // namespace gemstone::hsa

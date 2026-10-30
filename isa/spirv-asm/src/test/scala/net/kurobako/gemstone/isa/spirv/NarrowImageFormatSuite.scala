@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.spirv
 
-class NarrowImageFormatSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class NarrowImageFormatSuite extends Suite {
   test("half image lanes preserve every finite encoding including signed zero and subnormals") {
     val layout = ImageFormats.narrow(9).get
     for (code <- 0 until 65536) {

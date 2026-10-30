@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class DefinitionSuite extends munit.FunSuite {
+class DefinitionSuite extends Suite {
   private val u32 = Type.unsigned(32)
 
   private inline def scaled[V](inline algebra: Algebra[V], value: V, factor: Int): V =

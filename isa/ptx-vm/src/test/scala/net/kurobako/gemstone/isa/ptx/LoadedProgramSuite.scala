@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class LoadedProgramSuite extends munit.FunSuite {
+class LoadedProgramSuite extends Suite {
   private def bind(
       loaded: LoadedProgram,
       name: NonEmpty[String],

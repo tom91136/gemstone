@@ -3,9 +3,10 @@ package net.kurobako.gemstone.memory
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 
-class WrittenRangesSuite extends munit.FunSuite {
+class WrittenRangesSuite extends Suite {
   test("the transfer size is chosen by the caller without changing recorded intervals") {
     val ranges = WrittenRanges()
     ranges.add(5, 7)

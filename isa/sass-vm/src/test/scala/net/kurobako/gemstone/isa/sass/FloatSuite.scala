@@ -9,10 +9,11 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class FloatSuite extends munit.FunSuite {
+class FloatSuite extends Suite {
   private val Flags      = Vec(false, true)
   private val Conditions = Vec(-1.0f, 0.0f, Float.NaN)
   private val Divisors   = Vec(6.0, -6.0)

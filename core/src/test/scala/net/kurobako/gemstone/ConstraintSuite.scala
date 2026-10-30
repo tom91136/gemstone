@@ -5,11 +5,12 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.compiletime.testing.typeCheckErrors
 
 /** Runtime validation, nonempty values and newtypes. */
-class ConstraintSuite extends munit.FunSuite {
+class ConstraintSuite extends Suite {
   private object Small       extends Newtype[Int in 1 ~ 8]
   private object Name        extends Newtype[NonEmpty[String]]
   private object OtherName   extends Newtype[NonEmpty[String]]

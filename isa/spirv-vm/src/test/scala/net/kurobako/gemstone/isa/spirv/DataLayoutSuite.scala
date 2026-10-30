@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class DataLayoutSuite extends munit.FunSuite {
+class DataLayoutSuite extends Suite {
   private def resultId(module: Module)(select: PartialFunction[Instruction, Operand])(using munit.Location): Int =
     module.instructions.collectFirst(select).map(_.words.head.raw).getOrElse(fail("no matching instruction"))
 

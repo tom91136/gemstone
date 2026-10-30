@@ -9,11 +9,12 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Random
 
 /** The staged semantics against the interpreter's hand-written formulas they replaced, kept here as the reference. */
-class StagedReferenceSuite extends munit.FunSuite {
+class StagedReferenceSuite extends Suite {
   private val register  = Register(0)
   private val predicate = Predicate(0)
   private val operand   = Value.Immediate(0L)

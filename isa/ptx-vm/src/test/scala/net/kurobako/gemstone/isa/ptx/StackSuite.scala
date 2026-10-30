@@ -4,12 +4,13 @@ import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.testing.Suite
 
 /** `alloca`, `stacksave` and `stackrestore` as nvcc 13.3 (`nvcc -O3 -arch=sm_89 -ptx`) emits them for `alloca` in
   * device code and around a `__forceinline__` callee that allocates, and clang 22 emits them for `__builtin_alloca`:
   * the pointer is a local address, used directly or through cvta.local.
   */
-class StackSuite extends munit.FunSuite {
+class StackSuite extends Suite {
   private def run(body: String, threads: Int, outputs: Int, functions: String = "")(using
       munit.Location
   ): Either[String, Vec[Long]] = {

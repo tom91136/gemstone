@@ -32,8 +32,8 @@ built on core types (memories, workgroups, ELF images) live in core's test sourc
 ## Requirements
 
 JDK 25, sbt 2, CMake 3.25+, Ninja, Clang, `clang-format`, `clang-tidy`, a C++23 compiler, Python 3, and Podman (or
-Docker with `CONTAINER_EXECUTABLE=docker`) for conformance and fixture builds. Downloads are cached in `.cache/`;
-`GEMSTONE_OFFLINE=1` forbids them.
+Docker with `GEMSTONE_CONTAINER_EXE=docker`) for conformance and fixture builds. Downloads are cached in `.cache/`;
+`GEMSTONE_OFFLINE_ON=1` forbids them.
 
 ## Build and test
 
@@ -62,8 +62,16 @@ module's `target/stryker4s-report/`.
 
 `codegen` recovers the SASS encoding tables from pinned NVIDIA `nvdisasm` releases, which needs Linux x86_64 and
 `gcc`; decoding and assembly use the checked-in tables and need no NVIDIA tools. PTX and SASS test fixtures record
-the recipe that produced them; `GEMSTONE_VERIFY_FIXTURES=1` reproduces each recipe with the pinned tools and compares
+the recipe that produced them; `GEMSTONE_FIXTURE_VERIFY_ON=1` reproduces each recipe with the pinned tools and compares
 the result.
+
+Test timeouts suit a 32-thread host. With fewer threads they stretch up to fourfold, and `GEMSTONE_TIMEOUT_SCALE`
+(default 1, up to three decimals such as `1.5`) multiplies the result. `GEMSTONE_THREAD_COUNT` overrides the thread
+count, which defaults to the CPUs available to the process and also sizes execution workers, conformance jobs, and
+build parallelism. Scala.js tests read both from Node and default to `navigator.hardwareConcurrency`, or to one thread
+where Node lacks it. The native build fixes CTest timeouts when it configures. Integer settings take positive whole
+numbers and `_ON` settings take `1 true on y yes` or `0 false off n no` in any case; an empty value counts as unset,
+and any other value fails at startup.
 
 ## Running
 
@@ -75,14 +83,14 @@ sbt 'server/run inspect|replay <journal>'
 ```
 
 `--apis` defaults to `hsa,cuda,opencl,vulkan,levelzero`; without `--server` the launcher owns a server. Clients read
-`GEMSTONE_RPC_ENDPOINT` and `GEMSTONE_RPC_CLIENT`.
+`GEMSTONE_RPC_ENDPOINT` and `GEMSTONE_RPC_CLIENT_ID`.
 
 | Variable | Effect |
 | --- | --- |
-| `GEMSTONE_TRACE=cuda` | CUDA load and execution diagnostics |
-| `GEMSTONE_CUDA_CODE=ptx\|sass` | Strict CUDA code selection |
-| `GEMSTONE_EXECUTION_MAX_INSTRUCTIONS` | Per-task instruction budget |
-| `GEMSTONE_EXECUTION_PARALLELISM` | Execution workers (default: half the cores, at most 64) |
+| `GEMSTONE_TRACE_LIST=cuda` | CUDA load and execution diagnostics |
+| `GEMSTONE_CUDA_CODE_MODE=ptx\|sass` | Strict CUDA code selection |
+| `GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT` | Per-task instruction budget |
+| `GEMSTONE_EXECUTION_THREAD_COUNT` | Execution workers (default: two below the thread count, at most 62) |
 | `GEMSTONE_VULKAN_API_VERSION=1.0\|1.2` | Vulkan version (default 1.2); not certified |
 
 ## Library
@@ -197,11 +205,9 @@ sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [--prebuil
 
 | Variable | Effect |
 | --- | --- |
-| `CONFORMANCE_JOBS` | Concurrent emulated tests (default: half the cores, at most 16) |
+| `CONFORMANCE_JOB_COUNT` | Concurrent emulated tests (default: half the thread count, at most 16) |
 | `CMAKE_BUILD_PARALLEL_LEVEL` | Job budget shared across artifact containers |
-| `CONFORMANCE_ARTIFACT_PARALLELISM` | Concurrent artifact containers (default: cores / 8, at most 4) |
-| `CONFORMANCE_SYCL_SHARD` | Build only this zero-based shard of the SYCL CTS, as `artifacts/sycl-shard-<n>` (CI only) |
-| `SYCL_CTS_ENABLE_FULL_CONFORMANCE=ON` | Full SYCL CTS type matrices; the default for `build --sycl-cts-full` |
+| `CONFORMANCE_SYCL_SHARD_INDEX` | Build only this zero-based shard of the SYCL CTS, as `artifacts/sycl-shard-<n>` (CI only) |
 
 ## Benchmarks
 

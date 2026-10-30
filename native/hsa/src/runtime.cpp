@@ -982,6 +982,7 @@ extern "C" hsa_status_t hsa_init() {
     traceApiResult("hsa_init", status);
     return status;
   };
+  if (!gemstone::environment::accepted(gemstone::hsa::invalidEnvironment())) return reset(HSA_STATUS_ERROR_NOT_INITIALIZED);
   runtime.client = Client::fromEnvironment();
   runtime.aql = AqlRuntime::fromEnvironment(std::make_unique<PublicSignals>(runtime));
   if (!runtime.client || !runtime.aql || !runtime.client->call(Ping{})) return reset(HSA_STATUS_ERROR_NOT_INITIALIZED);
@@ -1155,7 +1156,7 @@ extern "C" hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attri
   // LLVM's AMDGPU offload plugin consumes the HSA ISA name as an LLVM target
   // triple, rather than the older human-readable AMD:AMDGPU spelling.
   const std::string name = std::string("amdgcn-amd-amdhsa--") + gemstone::hsa::targetArch()
-                           + (gemstone::environment::enabled(gemstone::environment::SystemPaging) ? ":xnack+" : "");
+                           + (gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? ":xnack+" : "");
   switch (attribute) {
     case HSA_ISA_INFO_NAME_LENGTH: return copyStatus(value, static_cast<uint32_t>(name.size()));
     case HSA_ISA_INFO_NAME:

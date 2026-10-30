@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import programs.*
 
-class MBarrierStorageSuite extends munit.FunSuite {
+class MBarrierStorageSuite extends Suite {
   private val address = VMAddressSpace.SharedBase + 16L
   private val alias   = VMAddressSpace.SharedWindowBase + 16L
   // ptxas initial TRANS64 representation for one arrival; subsequent hardware phase bits remain opaque.

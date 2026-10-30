@@ -7,12 +7,13 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 // The forms are those nvcc 13.3 emits for cuda::memcpy_async, cuda::ptx and cooperative_groups on sm_90 and that
 // `ptxas -arch=sm_90a` accepts (see the round-4 evidence in the report).
-class BulkTensorSuite extends munit.FunSuite {
+class BulkTensorSuite extends Suite {
   private val nanFills   = Vec(false, true)
   private val misaligned = Vec((-3, -2), (5, 7))
 

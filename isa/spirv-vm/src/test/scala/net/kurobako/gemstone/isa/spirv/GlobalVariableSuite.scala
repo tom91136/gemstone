@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class GlobalVariableSuite extends munit.FunSuite {
+class GlobalVariableSuite extends Suite {
   test("composite-initialised CrossWorkgroup globals materialise their initialiser") {
     val module = spv"""
       $openCL

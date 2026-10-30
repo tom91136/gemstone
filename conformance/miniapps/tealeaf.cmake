@@ -4,6 +4,6 @@ conformance_miniapp(tealeaf
   OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD
   DATA tea.problems
   DECKS decks/tealeaf.in
-  ARGUMENTS --file [=[${CONFORMANCE_SUPPORT_ROOT}/data/decks/tealeaf.in]=]
-    --problems [=[${CONFORMANCE_SUPPORT_ROOT}/data/miniapps/tealeaf/tea.problems]=]
-    --out [=[${CONFORMANCE_REPORT_DIRECTORY}/tea.out]=])
+  ARGUMENTS --file [=[${CONFORMANCE_SUPPORT_DIR}/data/decks/tealeaf.in]=]
+    --problems [=[${CONFORMANCE_SUPPORT_DIR}/data/miniapps/tealeaf/tea.problems]=]
+    --out [=[${CONFORMANCE_REPORT_DIR}/tea.out]=])

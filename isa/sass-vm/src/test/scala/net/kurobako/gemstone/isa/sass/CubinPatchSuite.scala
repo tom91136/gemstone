@@ -2,9 +2,10 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class CubinPatchSuite extends munit.FunSuite {
+class CubinPatchSuite extends Suite {
   private val image = fixtures.Fixture.copyAddCubin
 
   private def text(module: Cubin.Module, kernel: String): Vec[Byte] =

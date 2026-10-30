@@ -2,9 +2,10 @@ package net.kurobako.gemstone.codegen
 
 import generator.*
 import java.nio.file.Files
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.files.*
 
-class GeneratePTXDomainsSuite extends munit.FunSuite {
+class GeneratePTXDomainsSuite extends Suite {
   private def section(id: String, syntax: String): String =
     s"""<section id="$id"><h3>9.1. Arithmetic Instructions: add</h3>
        |<p>Syntax</p><div><pre>$syntax</pre></div>

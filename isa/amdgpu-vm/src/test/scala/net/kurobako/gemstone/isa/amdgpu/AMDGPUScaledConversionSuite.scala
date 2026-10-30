@@ -4,6 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** gfx950's scaled conversions (CDNA4 ISA, 7.3 and 12.11), which hipcc emits for `__builtin_amdgcn_cvt_scalef32_*`
   * (ROCm 7.1.1 `hipcc -O2 --offload-arch=gfx950`: `v_cvt_scalef32_f32_fp8 v13, v0, v12 op_sel:[1,0,0]`,
@@ -12,7 +13,7 @@ import net.kurobako.gemstone.constraint.*
   * and integer packs (`__builtin_amdgcn_prng_b32`, `ashr_pk_i8_i32`, `cvt_sr_bf16_f32`). Bytes from LLVM 22
   * `llvm-mc -triple=amdgcn -mcpu=gfx950 -show-encoding`.
   */
-class AMDGPUScaledConversionSuite extends munit.FunSuite {
+class AMDGPUScaledConversionSuite extends Suite {
   private val gfx950 = Target("gfx950")
 
   /** `result` after `code` with v2 onwards holding `inputs`, MODE.FP16_OVFL set when `saturating`. */

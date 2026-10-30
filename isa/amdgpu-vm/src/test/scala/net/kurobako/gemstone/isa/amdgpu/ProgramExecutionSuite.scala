@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class ProgramExecutionSuite extends munit.FunSuite {
+class ProgramExecutionSuite extends Suite {
   test("the code-object decoder rejects malformed input before VM loading") {
     assertEquals(
       CodeObject.decode(Vec.empty).left.map(_.message),

@@ -3,11 +3,12 @@ package net.kurobako.gemstone.explorer
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
 /** The examples the program page starts from must load, list and run on the real VM. */
-class SamplesSuite extends munit.FunSuite {
+class SamplesSuite extends Suite {
 
   private def bytes(text: String): Vec[Byte] = Hex.parse(text).toOption.get
 

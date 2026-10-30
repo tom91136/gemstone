@@ -2,9 +2,10 @@ package net.kurobako.gemstone.isa.nvidia
 
 import TensorMap.Element.*
 import TensorMap.Reduction.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Tensor reductions on bfloat16 elements. The PTX ISA leaves the NaN of a `.min` or `.max` between two NaNs open. */
-class TensorMapSuite extends munit.FunSuite {
+class TensorMapSuite extends Suite {
   private val one      = 0x3f80L
   private val negative = 0xbf80L
   private val quiet    = 0x7fc1L

@@ -5,9 +5,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
-class IndexedBranchSuite extends munit.FunSuite {
+class IndexedBranchSuite extends Suite {
   private def switchSource(arms: Int, guard: String = "", select: Option[Long] = None): String = {
     val labels = (0 until arms).map(index => s"ARM$index").mkString(", ")
     val bodies = (0 until arms).map(index => s"ARM$index: add.u32 %v, %v, ${index + 1}; bra JOIN;").mkString("\n")

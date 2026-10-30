@@ -7,13 +7,14 @@ import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 /** Matrix instructions as ptxas emits them, and the code it emits around them where an architecture has no tensor core
   * for a form, against the PTX they come from and, for sm_89, the words an RTX 4060 Ti stores.
   */
-class MatrixSuite extends munit.FunSuite {
+class MatrixSuite extends Suite {
   private def fromPtx(probe: MatrixProbes.Probe, input: Vec[Long]): Vec[Long] = {
     val program = PTXBackend().load(Vec.from(probe.ptx.getBytes(StandardCharsets.UTF_8))).value
     val memory  = Memory()

@@ -3,13 +3,14 @@ package net.kurobako.gemstone.isa.amdgpu
 import laneRuns.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 
 /** DPP on register pairs, which CDNA2 onwards allows with row_newbcast: `__builtin_amdgcn_update_dpp` on a double with
   * control 0x151 emits `v_mov_b64_dpp v[6:7], v[0:1] row_newbcast:1` under `hipcc --offload-arch=gfx942` and two
   * `v_mov_b32_dpp ... row_newbcast:1` under gfx90a.
   */
-class AMDGPUDataParallelPairSuite extends munit.FunSuite {
+class AMDGPUDataParallelPairSuite extends Suite {
 
   /** Lane `n` holds n + 0.5 in v[2:3], 2.0 in v[4:5] and 3.0 in v[6:7]; each lane's v4 and v5 afterwards. */
   private def run(target: Target, code: Vec[Int]): Vec[(Long, Long)] = {

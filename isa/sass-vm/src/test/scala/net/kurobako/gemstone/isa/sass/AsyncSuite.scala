@@ -9,12 +9,13 @@ import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 // ptxas 13.3 output for the PTX the PTX VM suites run: SYNCS mbarriers, UBLKCP/UBLKRED bulk copies, UTMALDG/UTMASTG/
 // UTMAREDG tensor copies, STAS/REDAS and cluster shared memory through SR_SWINHI and the c0 cluster fields.
-class AsyncSuite extends munit.FunSuite {
+class AsyncSuite extends Suite {
   private enum Parameter {
     case Buffer(region: AllocationId)
     case Bytes(bytes: Vec[Byte])

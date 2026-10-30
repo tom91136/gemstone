@@ -4,6 +4,7 @@ import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Operand and modifier spellings of matrix and mixed-precision instructions, each with its bytes from ROCm 7.1.1
   * `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`: SMFMAC into accumulation registers, which hipcc allocates
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.isa.amdgpu.asm.*
   * `index_key` spelling of SWMMAC's index set, and `v_fma_mix_f32`, which hipcc emits for `(float)h * (float)h + f` on
   * gfx942 (`v_fma_mix_f32 v1, v2, v3, v4 op_sel_hi:[1,1,0]`).
   */
-class MatrixSyntaxSuite extends munit.FunSuite {
+class MatrixSyntaxSuite extends Suite {
   private def roundTrip(target: Target, waveSize: Int in (32, 64), source: String, bytes: String)(using
       munit.Location
   ): Unit = {

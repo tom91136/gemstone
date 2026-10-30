@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
-class VendorCollectiveSuite extends munit.FunSuite {
+class VendorCollectiveSuite extends Suite {
 
   // glslangValidator -V --target-env vulkan1.1 of an 8-invocation compute shader whose first six invocations
   // reduce and scan through GL_AMD_shader_ballot's *InvocationsNonUniformAMD functions, and whose every invocation

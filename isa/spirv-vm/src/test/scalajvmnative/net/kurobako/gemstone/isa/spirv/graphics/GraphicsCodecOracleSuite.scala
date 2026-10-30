@@ -9,9 +9,9 @@ import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 
-class GraphicsCodecOracleSuite extends munit.FunSuite {
+class GraphicsCodecOracleSuite extends Suite {
   test("Scala compressed and vertex codecs match the frozen native oracle across random bit patterns") {
-    val directory = Path.of(sys.env(env.NativeDirectory))
+    val directory = Path.of(sys.env(env.NativeDir))
     val result    = process.run(
       command = Seq(directory.resolve("gemstone_graphics_reference").toString),
       directory = directory,

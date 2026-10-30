@@ -180,7 +180,7 @@ if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
   target_include_directories(conformance_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" PRIVATE src)
   target_link_libraries(conformance_driver PUBLIC glaze::glaze magic_enum::magic_enum Aspartame::Aspartame fmt::fmt-header-only)
   target_compile_definitions(conformance_driver PUBLIC
-    CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS="${CONFORMANCE_TIMEOUT_OPENCL_ISOLATED}"
+    CONFORMANCE_OPENCL_ISOLATED_TIMEOUT_SECONDS="${CONFORMANCE_TIMEOUT_OPENCL_ISOLATED}"
     CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS=${CONFORMANCE_TIMEOUT_SYCL_HANDLER_ISOLATED})
   add_executable(conformance src/main.cpp)
   target_include_directories(conformance SYSTEM PRIVATE "${fire_SOURCE_DIR}")
@@ -214,6 +214,7 @@ if(BUILD_TESTING)
   add_executable(conformance_fixture tests/fixture.cpp)
   target_compile_features(conformance_fixture PRIVATE cxx_std_23)
   target_link_libraries(conformance_fixture PRIVATE Catch2::Catch2)
+  target_include_directories(conformance_fixture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_executable(conformance_unit_tests
     tests/cuda_image_test.cpp
     tests/driver_test.cpp
@@ -525,8 +526,8 @@ configure_file(cmake/RuntimeDependencies.cmake
 string(CONCAT runtime_install_code
   "include([==[${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.cmake]==])\n"
   "set(runtime_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")\n"
-  "if(DEFINED ENV{CONFORMANCE_RUNTIME_INPUT} AND NOT \"\$ENV{CONFORMANCE_RUNTIME_INPUT}\" STREQUAL \"\")\n"
-  "  set(runtime_input \"\$ENV{CONFORMANCE_RUNTIME_INPUT}\")\n"
+  "if(DEFINED ENV{CONFORMANCE_RUNTIME_INPUT_DIR} AND NOT \"\$ENV{CONFORMANCE_RUNTIME_INPUT_DIR}\" STREQUAL \"\")\n"
+  "  set(runtime_input \"\$ENV{CONFORMANCE_RUNTIME_INPUT_DIR}\")\n"
   "else()\n"
   "  set(runtime_input \"\${runtime_root}\")\n"
   "endif()\n"

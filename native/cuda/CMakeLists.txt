@@ -25,7 +25,7 @@ if(BUILD_TESTING)
   target_include_directories(cuda_process_exit_test PRIVATE "${CUDA_INCLUDE_DIR}")
   target_link_libraries(cuda_process_exit_test PRIVATE gemstone_cuda)
   add_test(NAME cuda/process-exit COMMAND cuda_process_exit_test)
-  set_tests_properties(cuda/process-exit PROPERTIES TIMEOUT 10)
+  gemstone_set_tests_properties(cuda/process-exit PROPERTIES TIMEOUT 10)
   gemstone_memory_client(cuda gemstone_cuda)
   add_test(NAME cuda/header-compatibility COMMAND ${CMAKE_COMMAND}
     "-DCUDA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}"

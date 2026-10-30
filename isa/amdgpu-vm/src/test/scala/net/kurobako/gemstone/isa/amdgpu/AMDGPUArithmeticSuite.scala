@@ -9,8 +9,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 
-class AMDGPUArithmeticSuite extends munit.FunSuite {
+class AMDGPUArithmeticSuite extends Suite {
 
   /** The dword in `result` after `operations` on one gfx900 lane with `inputs` in v2 onwards. */
   private def run(inputs: Vec[Long], result: VectorRegisterIndex, operations: Instruction*): Int =

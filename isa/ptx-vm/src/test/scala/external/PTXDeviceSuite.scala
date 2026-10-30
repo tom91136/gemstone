@@ -3,11 +3,12 @@ package external
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class PTXDeviceSuite extends munit.FunSuite {
+class PTXDeviceSuite extends Suite {
   test("an embedder runs PTX through a device with only the public API") {
     val source = """.version 8.0
                    |.target sm_80

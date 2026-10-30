@@ -21,10 +21,11 @@ import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.testing.Suite
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-class ReplaySuite extends munit.FunSuite {
+class ReplaySuite extends Suite {
   import journal.*
   // The connection loop flag is mutable state confined to this final peer fixture.
   private class Peer(handle: (Array[Byte], DataInputStream, DataOutputStream) => Unit) extends AutoCloseable {

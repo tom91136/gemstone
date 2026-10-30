@@ -18,7 +18,7 @@ import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
-class ConnectionSuite extends munit.FunSuite {
+class ConnectionSuite extends Suite {
   private def frame: Array[Byte] = {
     val (operation, payload) =
       Wire.Protocol[Operation].encodePayload(Operation.EnableHostMemory, ExecutionRPC.Limits).toOption.get

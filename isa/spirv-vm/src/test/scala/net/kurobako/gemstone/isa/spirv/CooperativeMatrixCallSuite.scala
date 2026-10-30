@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class CooperativeMatrixCallSuite extends munit.FunSuite {
+class CooperativeMatrixCallSuite extends Suite {
 
   private def assembled(declarations: String, body: String, functions: String): Module = spv"""
     OpCapability CooperativeMatrixKHR

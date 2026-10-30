@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.codegen
 
 import java.nio.file.Files
+import net.kurobako.gemstone.testing.Suite
 
-class GenerateSPIRVConstantsSuite extends munit.FunSuite {
+class GenerateSPIRVConstantsSuite extends Suite {
   test("grammar constants preserve wire bits and regenerate both languages deterministically") {
     generator.inDirectory { root =>
       val grammar = root.resolve("grammar.json")

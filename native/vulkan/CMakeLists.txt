@@ -52,7 +52,7 @@ if(BUILD_TESTING)
   target_include_directories(gemstone_vulkan_process_exit PRIVATE "${VULKAN_INCLUDE_DIR}")
   target_link_libraries(gemstone_vulkan_process_exit PRIVATE gemstone_vulkan)
   add_test(NAME vulkan/process-exit COMMAND gemstone_vulkan_process_exit)
-  set_tests_properties(vulkan/process-exit PROPERTIES TIMEOUT 10)
+  gemstone_set_tests_properties(vulkan/process-exit PROPERTIES TIMEOUT 10)
 endif()
 
 target_compile_options(gemstone_vulkan PRIVATE

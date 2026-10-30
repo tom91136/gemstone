@@ -14,7 +14,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class ProgramGlobalBindingSuite extends munit.FunSuite {
+class ProgramGlobalBindingSuite extends Suite {
   private val Booleans = List(false, true)
 
   // gfx900: load through linked 0x3000, increment/store through kernarg pointer, reload linked global,

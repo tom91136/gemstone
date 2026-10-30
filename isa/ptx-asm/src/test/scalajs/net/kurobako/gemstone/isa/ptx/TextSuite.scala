@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class TextSuite extends munit.FunSuite {
+class TextSuite extends Suite {
   test("PTX text parses, validates and prints stably") {
     val source = """.version 8.0
                    |.target sm_80

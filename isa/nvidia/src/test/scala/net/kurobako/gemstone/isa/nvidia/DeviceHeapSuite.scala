@@ -6,7 +6,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class DeviceHeapSuite extends munit.FunSuite {
+class DeviceHeapSuite extends Suite {
   private def allocate(heap: DeviceHeap, size: Int > 0)(using munit.Location): GuestAddress =
     heap.allocate(size).fold(fault => fail(fault.message), identity)
 

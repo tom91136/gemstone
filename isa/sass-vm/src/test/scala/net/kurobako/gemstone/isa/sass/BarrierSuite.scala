@@ -7,10 +7,11 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class BarrierSuite extends munit.FunSuite {
+class BarrierSuite extends Suite {
   private val Flags         = Vec(false, true)
   private val OutOfRangeIds = Vec("4294967296", "-4294967296")
 

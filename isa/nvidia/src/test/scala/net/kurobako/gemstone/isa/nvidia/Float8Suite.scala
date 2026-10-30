@@ -3,12 +3,13 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.binary.{IntegerArithmetic as _, *}
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
 /** The 8-bit float conversions over the core minifloat codecs give what the format-specific rounding they replace gave,
   * which conformance/unified/src/cuda/conversions.cu checks against an RTX 4060 Ti (sm_89).
   */
-class Float8Suite extends munit.FunSuite {
+class Float8Suite extends Suite {
   private def minifloat(format: Float8Format): Minifloat = format match {
     case Float8Format.E4M3 => Minifloat.E4M3
     case Float8Format.E5M2 => Minifloat.E5M2

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class GLSLStd450Suite extends munit.FunSuite {
+class GLSLStd450Suite extends Suite {
   private val LaneCounts     = Seq(1, 4)
   private val Decompositions = Seq("Modf", "Frexp")
   private val Norms          = Seq("Length", "Distance")

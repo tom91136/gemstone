@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.codegen
 
-class GenerateAMDGPUISASuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class GenerateAMDGPUISASuite extends Suite {
   test("processor wave defaults follow explicit and inherited LLVM features") {
     def refs(names: String*): ujson.Arr = ujson.Arr.from(names.map(name => ujson.Obj("def" -> name)))
     val processors                      = ujson.Obj.from(Vector(

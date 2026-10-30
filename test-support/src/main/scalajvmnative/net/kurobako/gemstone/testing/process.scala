@@ -47,15 +47,16 @@ object process {
         .redirectOutput(stdout.toFile).redirectError(stderr.toFile)
       unset.foreach(builder.environment().remove(_))
       set.foreach { case (name, value) => builder.environment().put(name, value) }
+      val limit = timeouts.scaled(timeout)
       Using.resource(RunningProcess(builder.start())) { running =>
-        val completed = running.process.waitFor(timeout.toMillis, TimeUnit.MILLISECONDS)
+        val completed = running.process.waitFor(limit.toMillis, TimeUnit.MILLISECONDS)
         if (!completed) running.close()
         Result(
           command,
           if (completed) running.process.exitValue() else -1,
           Files.readString(stdout, StandardCharsets.UTF_8),
           Files.readString(stderr, StandardCharsets.UTF_8) +
-            (if (completed) "" else s"\nprocess timed out after $timeout\n")
+            (if (completed) "" else s"\nprocess timed out after $limit\n")
         )
       }
     }

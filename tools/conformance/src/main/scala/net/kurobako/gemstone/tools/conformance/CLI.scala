@@ -98,11 +98,19 @@ object CLI {
     Process(command, suite.root.toFile, variables.toSeq*).!
   }
 
-  private def positive(name: String, default: Int): Int = sys.env.get(name).fold(default) { value =>
-    value.toIntOption.filter(
-      _ > 0
-    ).getOrElse(throw IllegalArgumentException(s"$name must be a positive integer: $value"))
+  private def positive(name: String, default: Int): Int = configuration.lookup(sys.env, name).fold(default) { value =>
+    configuration.positiveLong(value).map(_.raw).filter(_ <= Int.MaxValue)
+      .fold(throw IllegalArgumentException(s"$name must be a positive integer: $value"))(_.toInt)
   }
+
+  private def timeoutScale: String =
+    configuration.lookup(sys.env, environment.TimeoutScale).fold(s"${environment.TimeoutScaleDefault.raw}") { value =>
+      configuration.scale(value).fold(
+        throw IllegalArgumentException(
+          s"${environment.TimeoutScale} must be a positive number with at most three decimals: $value"
+        )
+      )(_ => value)
+    }
 
   private def routes(emulation: Emulation): Vector[String] = {
     val inventory =
@@ -133,29 +141,29 @@ object CLI {
     val inherited = sys.env.filter((key, _) => key.startsWith("GEMSTONE_"))
     val exports   = (inherited ++ variables).toVector.sortBy(_._1).map((key, value) => s"export $key=${quoted(value)}")
     val routing   =
-      s"""unset CONFORMANCE_DEVICE
-         |case "$$CONFORMANCE_TARGET_BACKEND" in
+      s"""unset ${conformanceEnvironment.DevicePattern}
+         |case "$$${conformanceEnvironment.TargetBackendName}" in
          |  cuda|hip|hsa)
-         |    if [ -z "$$${environment.TargetArch}" ] && [ -n "$$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
-         |      export ${environment.TargetArch}="$$CONFORMANCE_TARGET_ARCHITECTURE"
+         |    if [ -z "$$${environment.TargetArch}" ] && [ -n "$$${conformanceEnvironment.TargetArch}" ]; then
+         |      export ${environment.TargetArch}="$$${conformanceEnvironment.TargetArch}"
          |    fi ;;
-         |  levelzero|vulkan) export CONFORMANCE_DEVICE='*Gemstone*' ;;
+         |  levelzero|vulkan) export ${conformanceEnvironment.DevicePattern}='*Gemstone*' ;;
          |esac
-         |if [ "$$CONFORMANCE_TARGET_BACKEND" = cuda ]; then
-         |  case "$$CONFORMANCE_CUDA_CODE" in
-         |    ptx|sass) export ${environment.CudaCode}="$$CONFORMANCE_CUDA_CODE" ;;
+         |if [ "$$${conformanceEnvironment.TargetBackendName}" = cuda ]; then
+         |  case "$$${conformanceEnvironment.CudaCodeMode}" in
+         |    ptx|sass) export ${environment.CudaCodeMode}="$$${conformanceEnvironment.CudaCodeMode}" ;;
          |    *) echo 'CUDA conformance requires an explicit ptx or sass route' >&2; exit 2 ;;
          |  esac
          |fi
-         |toolchain="$$CONFORMANCE_SUPPORT_ROOT/opencl-toolchain"
-         |if [ -z "$$${environment.OpenclCompiler}" ] && [ -x "$$toolchain/bin/compiler/clang" ]; then
-         |  export ${environment.OpenclCompiler}="$$toolchain/bin/compiler/clang"
+         |toolchain="$$${conformanceEnvironment.SupportDir}/opencl-toolchain"
+         |if [ -z "$$${environment.OpenclCompilerExe}" ] && [ -x "$$toolchain/bin/compiler/clang" ]; then
+         |  export ${environment.OpenclCompilerExe}="$$toolchain/bin/compiler/clang"
          |fi
-         |if [ -z "$$${environment.OpenclLlvmSpirv}" ] && [ -x "$$toolchain/bin/compiler/llvm-spirv" ]; then
-         |  export ${environment.OpenclLlvmSpirv}="$$toolchain/bin/compiler/llvm-spirv"
+         |if [ -z "$$${environment.OpenclLlvmSpirvExe}" ] && [ -x "$$toolchain/bin/compiler/llvm-spirv" ]; then
+         |  export ${environment.OpenclLlvmSpirvExe}="$$toolchain/bin/compiler/llvm-spirv"
          |fi
-         |if [ -z "$$${environment.OpenclLlvmLink}" ] && [ -x "$$toolchain/bin/compiler/llvm-link" ]; then
-         |  export ${environment.OpenclLlvmLink}="$$toolchain/bin/compiler/llvm-link"
+         |if [ -z "$$${environment.OpenclLlvmLinkExe}" ] && [ -x "$$toolchain/bin/compiler/llvm-link" ]; then
+         |  export ${environment.OpenclLlvmLinkExe}="$$toolchain/bin/compiler/llvm-link"
          |fi
          |""".stripMargin
     (exports :+ routing :+ s"exec ${client.map(quoted(_)).mkString(" ")} \"$$@\"").mkString("\n") + "\n"
@@ -187,22 +195,24 @@ object CLI {
 
   private def emulate(emulation: Emulation): Int = {
     val root       = emulation.suite.root
-    val processors = sys.runtime.availableProcessors()
-    val jobs       = positive("CONFORMANCE_JOBS", math.max(1, math.min(16, processors / 2)))
-    val workers    = positive(environment.ExecutionParallelism, math.max(1, math.min(64, processors / 2)))
+    val processors = positive(environment.ThreadCount, sys.runtime.availableProcessors())
+    val jobs       = positive(conformanceEnvironment.JobCount, math.max(1, math.min(16, processors / 2)))
+    val workers    = positive(environment.ExecutionThreadCount, math.max(1, math.min(64, processors / 2)))
     val settings   = Map(
-      "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS" -> "16",
-      "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"    -> "128",
-      "CONFORMANCE_OPENCL_CTS_ELEMENTS"          -> "256",
-      "CONFORMANCE_OPENCL_CTS_WIMPY"             -> "1",
-      "CONFORMANCE_OPENCL_CTS_TIMEOUT"           -> "600",
-      "OMP_NUM_TEAMS_DEV"                        -> s"$workers",
-      "OMP_TEAMS_THREAD_LIMIT_DEV"               -> "2",
-      environment.ExecutionMaxInstructions       -> MaxInstructions
+      conformanceEnvironment.OpenclCtsAtomicIterationCount -> "16",
+      conformanceEnvironment.OpenclCtsAtomicThreadCount    -> "128",
+      conformanceEnvironment.OpenclCtsElementCount         -> "256",
+      conformanceEnvironment.OpenclCtsWimpyOn              -> "1",
+      conformanceEnvironment.OpenclCtsTimeoutSeconds       -> "600",
+      conformanceEnvironment.ThreadCount                   -> s"$processors",
+      conformanceEnvironment.TimeoutScale                  -> timeoutScale,
+      "OMP_NUM_TEAMS_DEV"                                  -> s"$workers",
+      "OMP_TEAMS_THREAD_LIMIT_DEV"                         -> "2",
+      environment.ExecutionMaxInstructionCount             -> MaxInstructions
     ).map((key, default) => key -> sys.env.getOrElse(key, default)) ++ Map(
-      "CONFORMANCE_JOBS"               -> s"$jobs",
-      environment.ExecutionParallelism -> s"$workers",
-      environment.NativeDirectory      -> s"${emulation.server.native.toAbsolutePath}"
+      conformanceEnvironment.JobCount  -> s"$jobs",
+      environment.ExecutionThreadCount -> s"$workers",
+      environment.NativeDir            -> s"${emulation.server.native.toAbsolutePath}"
     )
     // the JVM reports the container's limit; the build JVM and the clients need the other half
     val memory = ManagementFactory.getOperatingSystemMXBean match {

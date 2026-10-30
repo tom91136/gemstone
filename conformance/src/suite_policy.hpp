@@ -10,6 +10,8 @@
 #include "cuda_architecture.hpp"
 #include <aspartame/all.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 namespace conformance::driver {
 
 // Audited payload gaps in the pinned vendor packages. New versions and untested
@@ -49,8 +51,8 @@ inline std::string_view suiteBlasSkip(std::string_view backend, std::string_view
 inline bool suiteUsesCatchSharding(std::string_view program) { return !program.starts_with("opencl_cts_"); }
 
 inline std::string_view suiteTimeoutEnvironment(std::string_view program) {
-  if (program == "vulkan_cts") return "CONFORMANCE_VULKAN_CTS_TIMEOUT";
-  return program.starts_with("opencl_cts_") ? std::string_view("CONFORMANCE_OPENCL_CTS_TIMEOUT") : std::string_view{};
+  if (program == "vulkan_cts") return environment::VulkanCtsTimeoutSeconds;
+  return program.starts_with("opencl_cts_") ? std::string_view(environment::OpenclCtsTimeoutSeconds) : std::string_view{};
 }
 
 inline uint32_t suiteTimeout(std::string_view program, uint32_t seconds, bool isolated) {
@@ -59,19 +61,19 @@ inline uint32_t suiteTimeout(std::string_view program, uint32_t seconds, bool is
 
 inline void applySuiteIsolatedEnvironment(std::map<std::string, std::string> &environment, std::string_view backend) {
   if (backend == "vulkan") {
-    environment.try_emplace("CONFORMANCE_VULKAN_CTS_TIMEOUT", "600");
+    environment.try_emplace(environment::VulkanCtsTimeoutSeconds, "600");
     return;
   }
   if (backend != "opencl") return;
-  environment.try_emplace("CONFORMANCE_OPENCL_CTS_ELEMENTS", "1024");
-  environment.try_emplace("CONFORMANCE_OPENCL_CTS_WIMPY", "1");
-  environment.try_emplace("CONFORMANCE_OPENCL_CTS_TIMEOUT", CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS);
+  environment.try_emplace(environment::OpenclCtsElementCount, "1024");
+  environment.try_emplace(environment::OpenclCtsWimpyOn, "1");
+  environment.try_emplace(environment::OpenclCtsTimeoutSeconds, CONFORMANCE_OPENCL_ISOLATED_TIMEOUT_SECONDS);
 }
 
 // Suite knobs a machine profile or the invoking environment may set.
 inline constexpr auto SuiteEnvironmentKeys = std::to_array<std::string_view>(
-    {"CONFORMANCE_VULKAN_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_ELEMENTS", "CONFORMANCE_OPENCL_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_WIMPY",
-     "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"});
+    {environment::VulkanCtsTimeoutSeconds, environment::OpenclCtsElementCount, environment::OpenclCtsTimeoutSeconds,
+     environment::OpenclCtsWimpyOn, environment::OpenclCtsAtomicIterationCount, environment::OpenclCtsAtomicThreadCount});
 
 inline bool suiteEnvironmentKey(std::string_view key) {
   using namespace aspartame;

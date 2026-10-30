@@ -5,8 +5,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
+import net.kurobako.gemstone.testing.Suite
 
-class LLVMOracleSuite extends munit.FunSuite {
+class LLVMOracleSuite extends Suite {
   test("LLVM selection covers every ISA and includes instruction pairs") {
     assertEquals(oracle.cases.size, oracle.selectedCaseCount)
     assert(oracle.cases.size >= 4154)

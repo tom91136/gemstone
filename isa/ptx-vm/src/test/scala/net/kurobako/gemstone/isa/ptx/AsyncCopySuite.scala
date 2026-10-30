@@ -5,10 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class AsyncCopySuite extends munit.FunSuite {
+class AsyncCopySuite extends Suite {
   test("cluster requirements record the shape the kernel's launches must use") {
     def source(directive: String): String =
       s".version 8.0\n.target sm_90\n.address_size 64\n.visible .entry kernel() $directive { ret; }"

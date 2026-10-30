@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class OperandPrinterSuite extends munit.FunSuite {
+class OperandPrinterSuite extends Suite {
   private def roundTrip(value: Operand): String = {
     val text = OperandPrinter.print(value).fold(fail(_), identity)
     assertEquals(OperandParser.parse(text), Right(value))

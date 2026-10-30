@@ -12,7 +12,7 @@ import scala.collection.mutable
 /** The timeline a launch records: the units its invocations run as, and the changes they go through between the issues
   * they make.
   */
-class TimelineSuite extends munit.FunSuite {
+class TimelineSuite extends Suite {
   private val module = spv"""
     $openCL
     OpEntryPoint Kernel %main "barrier" %lid

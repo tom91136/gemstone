@@ -5,9 +5,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Verifies the generated PTX instruction sum type and its colocated decoders. */
-class InstructionSuite extends munit.FunSuite {
+class InstructionSuite extends Suite {
   test("typed modifiers preserve duplicate types, fixed suffix order and vendor syntax") {
     def instruction(source: String): Instruction = Parser.parseStatement(source) match {
       case Right(Statement.Instruction(value)) => value

@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class HexSuite extends munit.FunSuite {
+class HexSuite extends Suite {
   test("pairs keep memory order and prefixed words are little-endian") {
     assertEquals(Hex.parse("01 05, 00 06"), Right(Vec[Byte](1, 5, 0, 6)))
     assertEquals(Hex.parse("/* 0x000000000000794d */"), Right(Vec[Byte](0x4d, 0x79, 0, 0, 0, 0, 0, 0)))

@@ -10,7 +10,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class ScalarNotSuite extends munit.FunSuite {
+class ScalarNotSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   // AMD Vega ISA SOP1: complement all destination bits, SCC = (result != 0).

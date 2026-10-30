@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class CodeObjectRelinkSuite extends munit.FunSuite {
+class CodeObjectRelinkSuite extends Suite {
   private val vectorCopy  = CodeObject.decode(Vec.unsafeWrapArray(bytes.hex(codeObjects.vectorCopyGfx906))).value
   private val noOperation = Vec.unsafeWrapArray(bytes.words(0xbf800000))
 

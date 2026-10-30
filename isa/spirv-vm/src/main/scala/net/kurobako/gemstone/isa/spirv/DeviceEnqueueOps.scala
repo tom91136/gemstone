@@ -6,6 +6,7 @@ import VMMemory.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.vm.*
 
 /** OpenCL device-side enqueue: queues, ND-ranges, events and block kernel queries. */
@@ -16,7 +17,7 @@ private object DeviceEnqueueOps {
   /** `get_default_queue` names the default device queue, which every device queue shares. */
   private val DefaultQueue = 1L
 
-  private val MaxWorkGroupSize         = environment.OpenclMaxWorkGroupSizeDefault.raw
+  private val MaxWorkGroupSize         = ExecutionRPC.OpenclMaxWorkGroupSize.raw.toLong
   private val SubgroupSize             = 32L
   private val ProfilingCommandExecTime = 1L
 

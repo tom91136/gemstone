@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-class KernelLaunchSuite extends munit.FunSuite {
+class KernelLaunchSuite extends Suite {
   private val stored = 0x12345678L
 
   private val Accumulate = """%previous = OpLoad %uint %slot

@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.vm.*
 
-class OpenCLImageSuite extends munit.FunSuite {
+class OpenCLImageSuite extends Suite {
   private val header =
     s"""OpCapability ImageBasic
        |OpCapability ImageReadWrite

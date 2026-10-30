@@ -11,6 +11,7 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.LongMap
@@ -18,7 +19,7 @@ import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.util.Using
 
-class HostMemoryExecutionSuite extends munit.FunSuite {
+class HostMemoryExecutionSuite extends Suite {
   private val Booleans       = List(false, true)
   private val PointerOffsets = List(0L, 8L)
 

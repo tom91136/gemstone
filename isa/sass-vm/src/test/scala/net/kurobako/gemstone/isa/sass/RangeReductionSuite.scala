@@ -3,9 +3,10 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class RangeReductionSuite extends munit.FunSuite {
+class RangeReductionSuite extends Suite {
   private def bits(value: Double): Int = java.lang.Float.floatToRawIntBits(value.toFloat)
 
   for {

@@ -338,6 +338,7 @@ object GenerateExecutionRPC {
        |inline constexpr uint32_t HelloResponseMagic = ${ExecutionRPC.HelloResponseMagic}U;
        |inline constexpr uint32_t MaximumSchemaBytes = ${ExecutionRPC.MaximumSchemaBytes}U;
        |inline constexpr uint32_t MaximumTagBytes = ${ExecutionRPC.MaximumTagBytes}U;
+       |inline constexpr uint32_t OpenclMaxWorkGroupSize = ${ExecutionRPC.OpenclMaxWorkGroupSize}U;
        |inline constexpr std::string_view Schema = ${Emission.literal(protocol.canonical)};
        |inline constexpr size_t RequestClientOffset = ${ExecutionRPC.RequestClientOffset}U;
        |inline constexpr size_t RequestSessionHighOffset = ${ExecutionRPC.RequestSessionHighOffset}U;
@@ -476,7 +477,7 @@ object GenerateExecutionRPC {
        |};
        |
        |std::unique_ptr<Client> Client::fromEnvironment() {
-       |  const auto client = environment::unsignedValue(environment::RpcClient, 0, std::numeric_limits<int64_t>::max());
+       |  const auto client = environment::unsignedValue(environment::RpcClientId, 0, std::numeric_limits<int64_t>::max());
        |  if (client == 0) return nullptr;
        |  const auto incarnation = processIncarnation(); if (incarnation == 0) return nullptr;
        |  return std::unique_ptr<Client>(new Client(std::make_unique<Impl>(client, static_cast<uint32_t>(::getpid()), incarnation)));

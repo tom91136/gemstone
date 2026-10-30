@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class EncoderSuite extends munit.FunSuite {
+class EncoderSuite extends Suite {
   private val opcodeField = NVDisasm.Assignment(
     "opcode",
     Vec(0, 1, 2, 3),

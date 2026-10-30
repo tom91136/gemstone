@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import programs.*
 
-class VMStateSuite extends munit.FunSuite {
+class VMStateSuite extends Suite {
   import ConditionCodeReads.*
 
   test("lane registers and predicates grow on demand and distinguish undefined predicates") {

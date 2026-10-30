@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class MachineSemanticsSuite extends munit.FunSuite {
+class MachineSemanticsSuite extends Suite {
   private val opcodes = Vec(
     "OpLabel",
     "OpBranch",

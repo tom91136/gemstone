@@ -3,12 +3,13 @@ package net.kurobako.gemstone.isa.amdgpu
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
 /** S_FMAAK_F32 and S_FMAMK_F32 carry one literal dword, which fills K and a literal source alike; bytes from ROCm 7.1.1
   * `llvm-mc -triple=amdgcn -mcpu=gfx1201 -show-encoding` for `s_fmaak_f32 s0, 0x40490fdb, s1, 0x40490fdb` and
   * `s_fmamk_f32 s0, 0x40490fdb, 0x40490fdb, s1`.
   */
-class AMDGPUSharedLiteralSuite extends munit.FunSuite {
+class AMDGPUSharedLiteralSuite extends Suite {
   private val target = Target("gfx1201")
 
   test("one literal fills K and the literal source") {

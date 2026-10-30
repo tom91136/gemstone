@@ -40,7 +40,7 @@ constexpr std::array<VkExtensionProperties, 3> SupportedDeviceExtensions{{
 }};
 
 VkResult implVkEnumerateInstanceVersion(uint32_t *version) {
-  if (!version) return VK_ERROR_INITIALIZATION_FAILED;
+  if (!version || !environmentAccepted()) return VK_ERROR_INITIALIZATION_FAILED;
   const auto supported = configuredApiVersion();
   if (!supported) return VK_ERROR_INITIALIZATION_FAILED;
   *version = *supported;
@@ -61,7 +61,8 @@ VkResult implVkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperti
 }
 
 VkResult implVkCreateInstance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *, VkInstance *instance) {
-  if (!info || info->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO || !instance) return VK_ERROR_INITIALIZATION_FAILED;
+  if (!info || info->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO || !instance || !environmentAccepted())
+    return VK_ERROR_INITIALIZATION_FAILED;
   const auto supported = configuredApiVersion();
   if (!supported) return VK_ERROR_INITIALIZATION_FAILED;
   // Vulkan 1.1 relaxed instance-version negotiation: newer application versions

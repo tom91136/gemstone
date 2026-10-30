@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.ptx
 import asm.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class OperandDomainsSuite extends munit.FunSuite {
+class OperandDomainsSuite extends Suite {
   test("known register parts and selectors have closed typed cases") {
     assertEquals(OperandDomains.RegisterPart.fromSpelling("hi"), OperandDomains.RegisterPart.Hi)
     assertEquals(OperandDomains.QualifiedOperand.fromSpelling("z"), OperandDomains.QualifiedOperand.Z)

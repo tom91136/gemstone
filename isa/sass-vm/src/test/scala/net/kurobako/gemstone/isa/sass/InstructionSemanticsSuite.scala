@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class InstructionSemanticsSuite extends munit.FunSuite {
+class InstructionSemanticsSuite extends Suite {
   private def show(instruction: String, operands: (String, String)*): Either[String, String] =
     asm.Parser.parseProgram(s"$instruction;").left.map(_.message).flatMap(_.statements.collectFirst {
       case asm.Program.Statement.Operation(operation, _, _) => operation

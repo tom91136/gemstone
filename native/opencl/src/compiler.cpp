@@ -129,7 +129,8 @@ constexpr std::string_view NoTranslator = "none";
 
 const std::string &compilerPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclCompiler); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclCompilerExe);
+        configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"clang", "clang++"}, {"/opt/intel/oneapi/compiler/*/bin/compiler/clang", "/opt/rocm/llvm/bin/clang"});
   }();
@@ -138,7 +139,8 @@ const std::string &compilerPath() {
 
 const std::string &spirvConverterPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmSpirv); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmSpirvExe);
+        configured && configured[0] != '\0')
       return std::string_view(configured) == NoTranslator ? std::string() : std::string(configured);
     return discoverExecutable({"llvm-spirv"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
@@ -149,7 +151,8 @@ const std::string &spirvConverterPath() {
 
 const std::string &bitcodeLinkerPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmLink); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmLinkExe);
+        configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"llvm-link"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-link", "/opt/rocm/llvm/bin/llvm-link",
@@ -396,7 +399,7 @@ bool deviceEnqueueSupported() { return !spirvConverterPath().empty(); }
 
 bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log) {
   if (compilerPath().empty()) {
-    log = std::string("no OpenCL compiler found (set ") + gemstone::environment::OpenclCompiler + " or install clang)";
+    log = std::string("no OpenCL compiler found (set ") + gemstone::environment::OpenclCompilerExe + " or install clang)";
     return false;
   }
   std::vector<std::string> optionArguments;
@@ -571,7 +574,7 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
                  std::string &log) {
   if (modules.empty()) return false;
   if (bitcodeLinkerPath().empty()) {
-    log = std::string("no llvm-link found (set ") + gemstone::environment::OpenclLlvmLink + " or install llvm-link)";
+    log = std::string("no llvm-link found (set ") + gemstone::environment::OpenclLlvmLinkExe + " or install llvm-link)";
     return false;
   }
   const TemporaryDirectory directory("gemstone-opencl-link-XXXXXX");

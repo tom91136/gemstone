@@ -8,7 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class VMAddressSpaceSuite extends munit.FunSuite {
+class VMAddressSpaceSuite extends Suite {
   private def execute(
       operations: Vec[Instruction],
       globals: Array[Byte],

@@ -15,7 +15,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 /** RDNA2 ISA section12.18: GLC gates return; DATA has replacement before comparison; unsigned INC resets when the
   * original value is at least its limit.
   */
-class AtomicOperationSuite extends munit.FunSuite {
+class AtomicOperationSuite extends Suite {
   private val allocation = AllocationId(1)
 
   private val bothWidths   = Seq(32, 64)

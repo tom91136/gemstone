@@ -5,8 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class CollectiveExecutionSuite extends munit.FunSuite {
+class CollectiveExecutionSuite extends Suite {
   private val inactiveLane         = (999, 999)
   private val highByteLane         = (0xff00, 1)
   private val legacyVoteThresholds = Vec(0, 8, 32, 40, 64)

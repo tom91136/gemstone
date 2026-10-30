@@ -7,11 +7,12 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class BinaryExecutionSuite extends munit.FunSuite {
+class BinaryExecutionSuite extends Suite {
   test("unsupported binary instructions report the kernel and offset directly") {
     val image   = Fixture.copyAddCubin.toArray
     val module  = Cubin.decode(Vec.unsafeWrapArray(image)).value

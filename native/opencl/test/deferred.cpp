@@ -9,6 +9,8 @@
 #include <CL/cl.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <gemstone/test_support.hpp>
+
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 
@@ -130,7 +132,7 @@ static void deferred(const std::string &command) {
     // This must return before the user signals the preceding command's gate.
     REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &one, &one, 0, nullptr, &second) == CL_SUCCESS));
     if (outOfOrder) {
-      const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+      const auto until = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(3));
       cl_int secondStatus = CL_QUEUED;
       do {
         REQUIRE((clGetEventInfo(second, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(secondStatus), &secondStatus, nullptr) == CL_SUCCESS));
@@ -238,7 +240,7 @@ static void deferred(const std::string &command) {
     pattern = 99;
   }
   REQUIRE((clSetUserEventStatus(gate, failure ? -1 : CL_COMPLETE) == CL_SUCCESS));
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(3));
   cl_int status = CL_QUEUED;
   if (!noEvent) do {
       REQUIRE((clGetEventInfo(first, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(status), &status, nullptr) == CL_SUCCESS));

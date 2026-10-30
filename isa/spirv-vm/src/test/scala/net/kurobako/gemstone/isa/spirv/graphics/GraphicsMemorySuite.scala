@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-class GraphicsMemorySuite extends munit.FunSuite {
+class GraphicsMemorySuite extends Suite {
   private val allocation = AllocationId(1L)
   private val base       = GuestAddress(0x10000L)
 

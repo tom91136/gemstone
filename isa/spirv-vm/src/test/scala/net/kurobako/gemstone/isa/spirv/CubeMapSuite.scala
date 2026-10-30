@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class CubeMapSuite extends munit.FunSuite {
+class CubeMapSuite extends Suite {
   private val faces             = Vector("+X", "-X", "+Y", "-Y", "+Z", "-Z")
   private val NoGradient        = (0.0, 0.0)
   private val CornerCoordinates = Seq(-1L, 4L)

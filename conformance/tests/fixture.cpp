@@ -13,8 +13,10 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 TEST_CASE("a comma, bracket[quoted] star* backslash\\ semi; quote\" unicode-π", "[fixture][pass]") {
-  if (const auto *report = std::getenv("CONFORMANCE_REPORT_DIRECTORY"))
+  if (const auto *report = std::getenv(conformance::environment::ReportDir))
     std::ofstream(std::filesystem::path(report) / "result.txt") << "pass\n";
   const auto *expected = std::getenv("EXPECTED_ENVIRONMENT");
   if (expected) {
@@ -22,7 +24,7 @@ TEST_CASE("a comma, bracket[quoted] star* backslash\\ semi; quote\" unicode-π",
     REQUIRE(value);
     REQUIRE(std::string(value) == expected);
   }
-  const auto *architecture = std::getenv("CONFORMANCE_TARGET_ARCHITECTURE");
+  const auto *architecture = std::getenv(conformance::environment::TargetArch);
   REQUIRE((architecture == nullptr || std::string_view(architecture).empty()));
 }
 
@@ -48,7 +50,9 @@ TEST_CASE("hung case", "[hang]") {
   }
   REQUIRE(child > 0);
   std::signal(SIGTERM, SIG_IGN);
-  const auto pids = std::filesystem::path(std::getenv("CONFORMANCE_REPORT_DIRECTORY")) / "hang.pids";
+  const auto *report = std::getenv(conformance::environment::ReportDir);
+  REQUIRE(report);
+  const auto pids = std::filesystem::path(report) / "hang.pids";
   std::ofstream(pids.string() + ".partial") << getppid() << ' ' << getpid() << ' ' << child;
   std::filesystem::rename(pids.string() + ".partial", pids);
   for (;;)

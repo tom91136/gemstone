@@ -7,9 +7,10 @@ import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class AssemblerSuite extends munit.FunSuite {
+class AssemblerSuite extends Suite {
   private lazy val code = Listing.words(Fixture.listing("copyAddSm89"), "copy_add", 89).value.flatMap(_._2).toArray
 
   test("parsing creates generated cases and printing preserves typed operands") {

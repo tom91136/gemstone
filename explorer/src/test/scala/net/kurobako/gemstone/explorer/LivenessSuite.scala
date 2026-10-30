@@ -2,10 +2,11 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class LivenessSuite extends munit.FunSuite {
+class LivenessSuite extends Suite {
 
   private val group                           = Coordinates(0, 0, 0)
   private def unit(ordinal: Int): MachineUnit =

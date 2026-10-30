@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class CollectiveSuite extends munit.FunSuite {
+class CollectiveSuite extends Suite {
   private val Operations          = Seq("Reduce", "InclusiveScan", "ExclusiveScan")
   private val InclusiveOperations = Seq("Reduce", "InclusiveScan")
   private val BitwiseOperators    = Seq("And", "Or", "Xor")

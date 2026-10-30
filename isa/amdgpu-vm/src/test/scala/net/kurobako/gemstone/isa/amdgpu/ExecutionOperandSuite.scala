@@ -13,7 +13,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class ExecutionOperandSuite extends munit.FunSuite {
+class ExecutionOperandSuite extends Suite {
   for (target <- Vec(Target("gfx900"), Target("gfx1036")))
     test(s"$target mask-producing instructions reset temporary masks and preserve architectural VCC width") {
       val zero                                          = InstructionSource.Constant(0L)

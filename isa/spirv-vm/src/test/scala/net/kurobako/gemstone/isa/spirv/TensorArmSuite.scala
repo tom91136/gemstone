@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class TensorArmSuite extends munit.FunSuite {
+class TensorArmSuite extends Suite {
 
   private val constants: String = Seq(0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 77L, 4294967295L)
     .map(value => s"%u$value = OpConstant %uint $value")

@@ -7,6 +7,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.toolchain.workarounds
 import scala.util.Using
 
 object BenchmarkRunner {
@@ -33,19 +34,22 @@ object BenchmarkRunner {
     )
   )
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq) match {
-    case Left(help) =>
-      Console.err.println(help)
-      if (help.errors.nonEmpty) sys.exit(2)
-    case Right(Action.List)                  => PlatformBenchmarks.cases.foreach((name, _) => Console.out.println(name))
-    case Right(Action.Run(options, measure)) =>
-      Using.resource(PlatformMetrics.startRecording(options.name, options.jfr)) { _ =>
-        (0 until options.warmups).foreach(_ => measure())
-        Vec.indices(options.samples.widen[Int >= 0]).foreach { sample =>
-          val started = platform.epochMillis
-          Console.out.println(ujson.write(result(options, sample, measure(), started)))
+  def main(arguments: Array[String]): Unit = {
+    workarounds.install()
+    command.parse(arguments.toSeq) match {
+      case Left(help) =>
+        Console.err.println(help)
+        if (help.errors.nonEmpty) sys.exit(2)
+      case Right(Action.List) => PlatformBenchmarks.cases.foreach((name, _) => Console.out.println(name))
+      case Right(Action.Run(options, measure)) =>
+        Using.resource(PlatformMetrics.startRecording(options.name, options.jfr)) { _ =>
+          (0 until options.warmups).foreach(_ => measure())
+          Vec.indices(options.samples.widen[Int >= 0]).foreach { sample =>
+            val started = platform.epochMillis
+            Console.out.println(ujson.write(result(options, sample, measure(), started)))
+          }
         }
-      }
+    }
   }
 
   def result(

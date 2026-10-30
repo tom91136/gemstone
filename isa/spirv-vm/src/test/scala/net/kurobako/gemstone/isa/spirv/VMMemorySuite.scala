@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class VMMemorySuite extends munit.FunSuite {
+class VMMemorySuite extends Suite {
   private def storage(memory: AddressSpace, globals: Array[Byte] = Array.emptyByteArray): VMMemory.Storage =
     VMMemory.Storage(memory, Vec.empty, globals, _ => Right(()))
 

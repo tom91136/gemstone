@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.amdgpu
 import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class AssemblerSuite extends munit.FunSuite {
+class AssemblerSuite extends Suite {
   private val target                   = Target("gfx1030")
   private def assemble(source: String) = Parser.parse(source).left.map(_.toString)
     .flatMap(Assembler.encode(_, TargetMode(target)).left.map(_.toString))

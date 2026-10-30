@@ -999,7 +999,7 @@ class RpcEnvironment {
 public:
   explicit RpcEnvironment(const std::string &endpoint)
       : endpoint(gemstone::environment::RpcEndpoint, endpoint.c_str()),
-        client(gemstone::environment::RpcClient, std::to_string(RpcFixture::ClientId).c_str()) {}
+        client(gemstone::environment::RpcClientId, std::to_string(RpcFixture::ClientId).c_str()) {}
   explicit RpcEnvironment(const RpcFixture &fixture) : RpcEnvironment(fixture.endpoint()) {}
 };
 } // namespace gemstone_test

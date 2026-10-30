@@ -12,11 +12,12 @@ import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class ConstantSuite extends munit.FunSuite {
+class ConstantSuite extends Suite {
   private val Flags = Vec(false, true)
 
   // cuda::barrier's init in conformance/unified/src/cuda/async_bulk.cu counts the block with ULDC.64 on sm_75

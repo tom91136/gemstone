@@ -5,7 +5,6 @@ import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import java.nio.file.Path
 import net.kurobako.gemstone.*
-import net.kurobako.gemstone.string.*
 
 object Codegen {
   case class Request(root: Path, action: Action)
@@ -40,14 +39,12 @@ object Codegen {
     case Request(root, Action.CheckEnvironment) => GenerateEnvironment.main(Array(s"$root", "--check"))
   }
 
-  // Mirrors `offlineMode` in build.sbt.
-  private def offline: Boolean = sys.env.get(environment.Offline).exists { value =>
-    value.toLowerCaseRoot match {
-      case "1" | "true" | "on"   => true
-      case "0" | "false" | "off" => false
-      case _                     => throw IllegalArgumentException(s"${environment.Offline} must be a boolean: $value")
-    }
-  }
+  // Mirrors `BuildEnvironment.offline` in the sbt build.
+  private def offline: Boolean =
+    configuration.enabled(
+      sys.env,
+      environment.OfflineOn
+    ).fold(message => throw IllegalArgumentException(message), identity)
 
   private def prepare(root: Path, bundle: References.Bundle): Path =
     References.prepare(bundle, root.resolve(".cache/references"), root.resolve("target/references"), offline)

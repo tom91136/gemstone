@@ -10,7 +10,7 @@ import scala.util.Try
 /** Checks each definition against executing its instance on edge-biased random inputs: results must agree bit for bit,
   * except that any NaN matches any other, and so must the machine state.
   */
-abstract class DifferentialSuite[H, L <: Lookup](reference: Reference[H, L], runs: Int = 64) extends munit.FunSuite {
+abstract class DifferentialSuite[H, L <: Lookup](reference: Reference[H, L], runs: Int = 64) extends Suite {
   def check(
       instance: String,
       target: Option[String],

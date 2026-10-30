@@ -3,9 +3,10 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class ListingSuite extends munit.FunSuite {
+class ListingSuite extends Suite {
   private def parse(text: String, sm: Int = 86): Either[String, Vec[DecodedInstruction]] =
     Listing.parse(text, "kernel", sm)
 

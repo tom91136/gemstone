@@ -15,7 +15,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.annotation.tailrec
 import scala.util.Random
 
-class AMDGPUMatrixSuite extends munit.FunSuite {
+class AMDGPUMatrixSuite extends Suite {
 
   // Register-to-element formulas AMD's matrix instruction calculator (1.3.2) prints with --detail-instruction, for one
   // instruction of each layout family: (lane, item) to (block, row or column, k) of A or B, and to (block, row, column)

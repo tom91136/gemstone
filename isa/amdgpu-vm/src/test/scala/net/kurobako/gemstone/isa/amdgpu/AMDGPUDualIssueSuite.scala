@@ -3,13 +3,14 @@ package net.kurobako.gemstone.isa.amdgpu
 import laneRuns.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
 /** gfx1250 dual issue: the 96-bit VOPD3 pairs, which add 64-bit, three-source, select-by-SGPR and two-input truth table
   * halves and negate the float sources NEGX and NEGY name, and the integer halves VOPD gains. The CDNA5 ISA describes
   * the operations; no ROCm compiler targets gfx1250, so the pairs are assembled by LLVM 22
   * `llvm-mc -triple=amdgcn -mcpu=gfx1250 -show-encoding`.
   */
-class AMDGPUDualIssueSuite extends munit.FunSuite {
+class AMDGPUDualIssueSuite extends Suite {
   private val gfx1250 = Target("gfx1250")
 
   private def single(value: Long): Float            = java.lang.Float.intBitsToFloat(value.toInt)

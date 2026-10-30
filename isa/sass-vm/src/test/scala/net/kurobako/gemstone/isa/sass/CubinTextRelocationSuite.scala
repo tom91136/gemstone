@@ -10,10 +10,11 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class CubinTextRelocationSuite extends munit.FunSuite {
+class CubinTextRelocationSuite extends Suite {
   private val symbol: NonEmpty[String] = "switch_table"
   private val address                  = GuestAddress(0x1fffffff8L)
   private val Flags                    = Vec(false, true)

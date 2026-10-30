@@ -104,7 +104,3 @@ About 13 tasks. V0 runs first, and its triage file guides every later task.
 - When the specification and spirv-val disagree and the module runs on drivers: reject (strict), or report as a warning (compatible)?
 - Which SPIR-V versions (1.0 to 1.6) and Vulkan versions (1.0 to 1.4) are in scope, and which extensions beyond those Gemstone executes?
 - Should validation also run as a standalone tool (a CLI next to the explorer) for modules Gemstone cannot execute?
-
-## Sibling task: PTX register-declaration typing
-
-PTX modifier domains, operand types and value limits are already checked (`isa/ptx-asm/src/main/scala/net/kurobako/gemstone/isa/ptx/Validation.scala`, from `isa/ptx-asm/src/generated/.../operand-domains.json`). The PTX ISA document's type-checking tables (Tables 26 to 28: which instruction types accept which register types, and the relaxed source and destination rules) are in `operand-domains.json` but not applied to register operands. Apply them using the register declarations in the module, with ptxas as the differential reference. One or two tasks, with the same checks as above for `ptxAsm` and `ptxVm`.

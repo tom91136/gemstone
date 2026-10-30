@@ -16,7 +16,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * on a `target("amdgcn.named.barrier", 0)` global to these forms with the barrier ID in M0's low bits and the count
   * from bit 16. The kernels are assembled by `llvm-mc -mcpu=gfx1250`, LLVM 22.
   */
-class AMDGPUNamedBarrierSuite extends munit.FunSuite {
+class AMDGPUNamedBarrierSuite extends Suite {
   private val gfx1250 = Target("gfx1250")
 
   /** Each lane's v2 after `code`, which stores it through s[6:7] at four times its lane, on `lanes` lanes. */

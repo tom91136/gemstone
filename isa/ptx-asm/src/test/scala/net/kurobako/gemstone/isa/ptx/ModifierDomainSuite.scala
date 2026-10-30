@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.testing.Suite
 
-class ModifierDomainSuite extends munit.FunSuite {
+class ModifierDomainSuite extends Suite {
   private val families = Set(
     "add",
     "mul",

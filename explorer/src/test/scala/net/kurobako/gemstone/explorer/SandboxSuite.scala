@@ -3,13 +3,14 @@ package net.kurobako.gemstone.explorer
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.spirv.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** The vertical slice of the real-VM sandbox: assemble a short program, patch an ISA template, run it, and read the PC,
   * register and memory evidence back from the VM's own recording.
   */
-class SandboxSuite extends munit.FunSuite {
+class SandboxSuite extends Suite {
 
   private def run(program: SandboxProgram)(using munit.Location): SandboxRun =
     SandboxRunner.run(program).fold(failure => fail(s"${failure.programPage}: ${failure.detail}"), identity)

@@ -19,7 +19,7 @@ template <class T> static void checkEncodingLimit(const Result<T> &result) {
 }
 
 TEST_CASE("execution RPC enforces wire encoding bounds", "[rpc]") {
-  const gemstone_test::Environment identity(gemstone::environment::RpcClient, "42");
+  const gemstone_test::Environment identity(gemstone::environment::RpcClientId, "42");
   const gemstone_test::Environment endpoint(gemstone::environment::RpcEndpoint, nullptr);
   auto client = Client::fromEnvironment();
   REQUIRE((client));
@@ -78,7 +78,7 @@ TEST_CASE("execution RPC round trips descriptor alternatives with mip tables and
 }
 
 TEST_CASE("native wire constraints reject invalid requests before opening a connection", "[rpc]") {
-  const gemstone_test::Environment identity(gemstone::environment::RpcClient, "42");
+  const gemstone_test::Environment identity(gemstone::environment::RpcClientId, "42");
   const gemstone_test::Environment endpoint(gemstone::environment::RpcEndpoint, nullptr);
   auto client = Client::fromEnvironment();
   REQUIRE(client);

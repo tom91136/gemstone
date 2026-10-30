@@ -13,7 +13,7 @@ import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-class CompletionMemorySuite extends munit.FunSuite {
+class CompletionMemorySuite extends Suite {
   private def checked[A](result: Either[Any, A]): A =
     result.fold(error => fail(s"unexpected failure: $error"), identity)
 

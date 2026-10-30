@@ -10,7 +10,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
-class GlobalBindingSuite extends munit.FunSuite {
+class GlobalBindingSuite extends Suite {
   private def value(routing: VMDispatchMemory, address: Long, size: Int in 1 ~ 8): Either[Fault, Long] =
     AddressSpace.scalar(routing.readValueInto(address, size, _))
 

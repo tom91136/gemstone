@@ -4,12 +4,13 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 
 /** VOP3 operations hipcc emits from HIP builtins and saturating arithmetic, each with the LLVM bytes of every target
   * that encodes it differently; v2, v3 and v4 hold the inputs and v4 the result.
   */
-class AMDGPUVectorMiscSuite extends munit.FunSuite {
+class AMDGPUVectorMiscSuite extends Suite {
   private def check(
       name: String,
       encodings: Vec[(Target, Vec[Int])],

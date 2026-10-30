@@ -7,9 +7,10 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class ExtractSASSSuite extends munit.FunSuite {
+class ExtractSASSSuite extends Suite {
   private val description = "ARCHITECTURE \"Fixture\"\nCLASS \"A\"\nFORMAT Opcode;\nEND;\n"
   private val bytes       = description.getBytes(UTF_8)
   private val digest      = sha256(bytes)

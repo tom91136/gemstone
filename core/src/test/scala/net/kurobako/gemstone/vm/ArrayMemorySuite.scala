@@ -2,8 +2,9 @@ package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class ArrayMemorySuite extends munit.FunSuite {
+class ArrayMemorySuite extends Suite {
   test("restoring a snapshot brings back its contents and drops allocations made since") {
     val memory   = ArrayMemory()
     val first    = memory.allocate(4L)

@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class WarpLaneSuite extends munit.FunSuite {
+class WarpLaneSuite extends Suite {
   test("fragment layouts accept a statically bounded warp lane") {
     val fragment = VMIR.Matrix.Fragment(
       VMIR.Matrix.Shape(8, 8, 4),

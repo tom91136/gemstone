@@ -12,7 +12,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class PTXBackendSuite extends munit.FunSuite {
+class PTXBackendSuite extends Suite {
   test("loads and executes PTX through the typed runtime boundary") {
     val source = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
     Using.resource(

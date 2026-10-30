@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.amdgpu
 import hardwareGolden.*
 import hardwareGoldenTables.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class HardwareGoldenSuite extends munit.FunSuite {
+class HardwareGoldenSuite extends Suite {
   private val gfx906  = Target("gfx906")
   private val gfx803  = Target("gfx803")
   private val gfx1036 = Target("gfx1036")

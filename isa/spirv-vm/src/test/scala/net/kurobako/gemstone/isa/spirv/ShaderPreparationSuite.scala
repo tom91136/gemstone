@@ -7,10 +7,11 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class ShaderPreparationSuite extends munit.FunSuite {
+class ShaderPreparationSuite extends Suite {
   private def shader(
       model: String,
       modes: String = "",

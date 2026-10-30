@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 
 /** GFX11 true16 operands, which upstream LLVM 22 `llc -mcpu=gfx1100` emits for half arithmetic (`v_add_f16_e32 v0.l,
   * v0.l, v0.h`): `.l` and `.h` name a VGPR's low and high halves, which the 32-bit encodings select by bit 7 of the
@@ -10,7 +11,7 @@ import net.kurobako.gemstone.isa.amdgpu.asm.*
   * -show-encoding`, but with the unused SRC2 of a promoted VOP2 encoded as the pinned LLVM oracle encodes it, inline 0
   * rather than v0.
   */
-class True16SyntaxSuite extends munit.FunSuite {
+class True16SyntaxSuite extends Suite {
   private val target = Target("gfx1100")
 
   for (

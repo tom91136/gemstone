@@ -2,12 +2,13 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Instructions as ptxas 13.3 (`ptxas -O3 -arch=sm_XX` on nvcc 13.3 and clang 22 PTX, disassembled by `nvdisasm -c`)
   * emits them for ordinary CUDA C++ or through the CUDA and CCCL headers, each named after its source, with the results
   * the matching PTX ISA 13.3 instruction specifies.
   */
-class EmittedInstructionSuite extends munit.FunSuite {
+class EmittedInstructionSuite extends Suite {
 
   /** Runs `body` on 32 threads, each storing `R4` to its word of the output. */
   private def lanes(sm: Int, body: String, expected: Vec[Int])(using munit.Location): Unit = check(

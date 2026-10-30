@@ -7,8 +7,9 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.Suite
 
-class AMDGPUModifierSuite extends munit.FunSuite {
+class AMDGPUModifierSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   for (

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class OpenCLMathSuite extends munit.FunSuite {
+class OpenCLMathSuite extends Suite {
   // binary64 references are mpmath 1.3.0 roundings at 100 decimal digits of the exact binary64 inputs
   private def check(actual: Double, expected: Double, ulps: Double, clue: String): Unit =
     if (expected.isInfinity) assertEquals(actual, expected, clue)

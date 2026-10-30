@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class IEEE754PlatformSuite extends munit.FunSuite {
+class IEEE754PlatformSuite extends Suite {
   test("the exact fused multiply-add that platforms without one use matches the JVM's") {
     val random           = Random(0xfa5L)
     def finite(): Double = {

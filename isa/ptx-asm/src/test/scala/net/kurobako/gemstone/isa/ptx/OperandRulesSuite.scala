@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.testing.Suite
 
-class OperandRulesSuite extends munit.FunSuite {
+class OperandRulesSuite extends Suite {
   private def validate(source: String): ValidationOutcome[Validation.Issue] =
     Parser.parseStatement(source) match {
       case Right(Program.Statement.Instruction(value)) => Validation.validate(value, Version(99, 0), Target(999))

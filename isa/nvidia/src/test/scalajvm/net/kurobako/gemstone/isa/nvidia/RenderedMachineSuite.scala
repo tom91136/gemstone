@@ -7,8 +7,9 @@ import dotty.tools.dotc.reporting.StoreReporter
 import java.nio.file.Files
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class RenderedMachineSuite extends munit.FunSuite {
+class RenderedMachineSuite extends Suite {
   private def errors(definition: Either[String, Definition]): List[String] =
     errors(definition.fold(failure => fail(failure), ScalaBackend.source(_)))
 

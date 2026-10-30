@@ -11,9 +11,10 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.{*, given}
 import net.kurobako.gemstone.rpc.Wire.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
-class ExecutionRPCSuite extends munit.FunSuite {
+class ExecutionRPCSuite extends Suite {
   private val allocation = AllocationId(1L)
   private val region     = AllocationId(1L)
   private val program    = ProgramId(2L)

@@ -3,12 +3,13 @@ package net.kurobako.gemstone.isa.amdgpu
 import VMIR.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.compiletime.testing.Error
 import scala.compiletime.testing.typeCheckErrors
 
-class RegisterBoundsSuite extends munit.FunSuite {
+class RegisterBoundsSuite extends Suite {
 
   test("decoder rejects scalar pairs that cross the 128-slot bank") {
     val target   = Target("gfx900")

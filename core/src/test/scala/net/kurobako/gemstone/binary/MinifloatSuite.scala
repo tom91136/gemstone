@@ -2,9 +2,10 @@ package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.binary.IEEE754.*
 import net.kurobako.gemstone.binary.Minifloat.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class MinifloatSuite extends munit.FunSuite {
+class MinifloatSuite extends Suite {
   private val narrow = Vector(E4M3, E5M2, E4M3FNUZ, E5M2FNUZ, E2M3, E3M2, E2M1, E8M0)
 
   test("every finite encoding of a narrow format converts back to itself") {

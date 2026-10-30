@@ -10,12 +10,13 @@ import net.kurobako.gemstone.isa.spirv.graphics.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.util.Using
 
-class GraphicsSubmissionSuite extends munit.FunSuite {
+class GraphicsSubmissionSuite extends Suite {
   private val format                                          = GraphicsFormat.Rgba8
   private val area                                            = GraphicsRect(0, 0, 2, 1)
   private def right[A](value: Either[ExecutionFailure, A]): A = value.fold(error => fail(error.message), identity)

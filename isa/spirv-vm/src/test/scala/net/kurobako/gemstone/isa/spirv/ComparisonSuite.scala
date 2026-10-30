@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class ComparisonSuite extends munit.FunSuite {
+class ComparisonSuite extends Suite {
   private val FloatPairs =
     Seq("0x1.800002p+128" -> "1.0", "1.0" -> "0x1.800002p+128", "0.0" -> "-0.0", "-1.0" -> "2.0", "2.0" -> "-1.0")
 

@@ -1,6 +1,8 @@
 package net.kurobako.gemstone
 
-class MessagePackSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class MessagePackSuite extends Suite {
   // MessagePack marker bytes are independent fixtures, deliberately not produced by a writer.
   private def reader(values: Int*): msgpack.Reader = {
     val bytes = values.map(_.toByte).toArray

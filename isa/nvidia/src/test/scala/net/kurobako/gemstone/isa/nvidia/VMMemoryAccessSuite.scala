@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 import programs.*
 import scala.collection.mutable
 
-class VMMemoryAccessSuite extends munit.FunSuite {
+class VMMemoryAccessSuite extends Suite {
   private val sharedBase = VMAddressSpace.SharedBase
   private val allocation = AllocationId(1)
 

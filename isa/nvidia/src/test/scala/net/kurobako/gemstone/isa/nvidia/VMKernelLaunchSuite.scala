@@ -9,7 +9,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class VMKernelLaunchSuite extends munit.FunSuite {
+class VMKernelLaunchSuite extends Suite {
   private val global = MemoryAccess.Global(system = false)
 
   private def kernel(parameters: Vec[KernelParameter], instructions: Vec[Instruction]): Kernel =

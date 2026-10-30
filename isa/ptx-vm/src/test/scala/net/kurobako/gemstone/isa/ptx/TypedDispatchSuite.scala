@@ -5,9 +5,10 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction as VMI
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
-class TypedDispatchSuite extends munit.FunSuite {
+class TypedDispatchSuite extends Suite {
   private val atomicOperations = Vec("add.u32", "min.u32", "max.u32", "and.b32", "exch.b32", "add.f32", "cas.b32")
 
   private def compileInstructions(body: String) = VMCompiler.compile(s""".version 8.0

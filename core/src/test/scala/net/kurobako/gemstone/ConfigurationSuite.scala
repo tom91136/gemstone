@@ -1,8 +1,9 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class ConfigurationSuite extends munit.FunSuite {
+class ConfigurationSuite extends Suite {
   test("positive decimal configuration rejects signs, whitespace and overflow") {
     for (value <- List("", "0", "00", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1.5", "9223372036854775808", "١"))
       assertEquals(configuration.positiveLong(value), None, value)

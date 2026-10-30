@@ -16,7 +16,7 @@ import scala.collection.mutable
 import scala.sys.runtime
 import scala.util.Using
 
-class SharedDecoderSuite extends munit.FunSuite {
+class SharedDecoderSuite extends Suite {
   private def module(value: Int): Module = spv"""
     %uint = OpTypeInt 32 0
     %spec = OpSpecConstant %uint $value

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
   * pointers and __spirv_PredicatedLoadINTEL and __spirv_PredicatedStoreINTEL calls, with SPV_NV_raw_access_chains'
   * byte-addressed chain hand-assembled from its specification.
   */
-class VendorMemorySuite extends munit.FunSuite {
+class VendorMemorySuite extends Suite {
   private val module = spv"""
     OpCapability MaskedGatherScatterINTEL
     OpCapability PredicatedIOINTEL

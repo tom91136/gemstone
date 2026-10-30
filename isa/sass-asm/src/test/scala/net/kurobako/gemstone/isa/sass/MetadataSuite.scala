@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class MetadataSuite extends munit.FunSuite {
+class MetadataSuite extends Suite {
   private def movRegReg: Instruction.Definition =
     Instruction.Definition.forMnemonic("MOV").find(_.name == "MovRegReg").getOrElse(fail("missing MovRegReg"))
 

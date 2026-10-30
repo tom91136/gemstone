@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "conformance/device.hpp"
+#include "conformance/environment_keys.hpp"
 
 #include "conformance_test_config.hpp"
 
@@ -29,7 +30,7 @@ std::string replaceAll(std::string value, std::string_view before, std::string_v
 }
 
 std::string expandArgument(std::string value) {
-  for (const auto *name : {"CONFORMANCE_SUPPORT_ROOT", "CONFORMANCE_REPORT_DIRECTORY"}) {
+  for (const auto *name : {conformance::environment::SupportDir, conformance::environment::ReportDir}) {
     const auto token = "${" + std::string(name) + '}';
     if (value.find(token) == std::string::npos) continue;
     const auto *configured = std::getenv(name);
@@ -62,7 +63,7 @@ TEST_CASE(conformance_test_identity, "[miniapp]") {
   for (auto argument : conformance_test_arguments())
     arguments.push_back(expandArgument(std::move(argument)));
 #if defined(CONFORMANCE_OPENCL_FLAT_DEVICE_ARGUMENT)
-  if (const auto *device = std::getenv("CONFORMANCE_OPENCL_DEVICE_INDEX"); device && *device) {
+  if (const auto *device = std::getenv(conformance::environment::OpenclDeviceIndex); device && *device) {
     arguments.emplace_back("--device");
     arguments.emplace_back(device);
   }

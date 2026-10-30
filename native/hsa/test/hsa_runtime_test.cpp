@@ -181,7 +181,7 @@ TEST_CASE("HSA agent wave size follows the processor while legacy calling conven
 TEST_CASE("HSA system paging ISA feature", "[hsa]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, "1");
+  const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, "1");
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
   const auto gpu = gpuAgent();
   REQUIRE((gpu.handle != 0));
@@ -220,7 +220,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   // execution endpoint is configured; it must not fall back to a physical
   // ROCr installation in the process.
   const gemstone_test::Environment noEndpoint(gemstone::environment::RpcEndpoint, nullptr);
-  const gemstone_test::Environment noClient(gemstone::environment::RpcClient, nullptr);
+  const gemstone_test::Environment noClient(gemstone::environment::RpcClientId, nullptr);
   REQUIRE((hsa_init() == HSA_STATUS_ERROR_NOT_INITIALIZED));
 
   const char *message = nullptr;
@@ -547,7 +547,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_signal_destroy(copySignal) == HSA_STATUS_SUCCESS));
   fixture.check();
   {
-    const gemstone_test::Environment paging(gemstone::environment::SystemPaging, "1");
+    const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, "1");
     for (uint32_t seed = 1; seed <= 16; ++seed) {
       std::array<uint32_t, 12> pageableOutput{};
       if (seed == 1) fixture.pauseNextCompletion();
@@ -739,7 +739,7 @@ namespace {
 struct MemoryLockSession {
   gemstone_test::RpcFixture server;
   gemstone_test::RpcEnvironment environment{server};
-  gemstone_test::Environment paging{gemstone::environment::SystemPaging, nullptr};
+  gemstone_test::Environment paging{gemstone::environment::SystemPagingOn, nullptr};
   MemoryLockSession() { REQUIRE((hsa_init() == HSA_STATUS_SUCCESS)); }
   ~MemoryLockSession() { (void)hsa_shut_down(); }
 };
@@ -988,7 +988,7 @@ TEST_CASE("HSA queue error callbacks may destroy each other's queues", "[hsa][qu
   const auto destroyOther = [](hsa_status_t, hsa_queue_t *, void *data) {
     auto &[pair, index] = *static_cast<Side *>(data);
     pair->entered.fetch_add(1, std::memory_order_acq_rel);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
     while (pair->entered.load(std::memory_order_acquire) < 2 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::yield();
     pair->destroyed[1 - index] = hsa_queue_destroy(pair->queues[1 - index].load());

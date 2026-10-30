@@ -13,7 +13,7 @@ import net.kurobako.gemstone.vm.*
 /** Cooperative dispatches keep every workgroup resident, so workgroups can wait on each other through GWS barriers and
   * semaphores or by spinning on memory. Other dispatches run workgroups to completion one after another.
   */
-class CooperativeDispatchSuite extends munit.FunSuite {
+class CooperativeDispatchSuite extends Suite {
 
   private case class GridSync(target: Target, userSgprs: Int, privateSegmentBuffer: Boolean, code: Vec[Int])
 

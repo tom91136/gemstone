@@ -3,10 +3,11 @@ package net.kurobako.gemstone.isa.ptx
 import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
 /** Matrix forms of the architectures after sm_89, against layouts and values the PTX ISA documents. */
-class MatrixFormsSuite extends munit.FunSuite {
+class MatrixFormsSuite extends Suite {
   private def source(target: String, body: String): String = s""".version 9.0
 .target $target
 .address_size 64

@@ -6,11 +6,12 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 
 // ptxas 13.3 output for the kernels of TensorMemoryCases, decoded from its machine code as Gemstone loads a cubin:
 // LDTM/STTM, UTCATOMSWS and UVIRTCOUNT, UTCCP, UTCSHIFT, UTCBAR and UTCHMMA/UTCIMMA/UTCQMMA/UTCOMMA, USTGR/UREDGR and
 // STAS.128, and SYNCS.ARRIVE.TMASK with its RPCMOV scratch moves.
-class TensorMemorySuite extends munit.FunSuite {
+class TensorMemorySuite extends Suite {
   private def kernel(fixture: String, name: String, sm: Int)(using munit.Location): Kernel =
     fromHex(TensorMemoryFixtures.code(fixture), sm, name)
 

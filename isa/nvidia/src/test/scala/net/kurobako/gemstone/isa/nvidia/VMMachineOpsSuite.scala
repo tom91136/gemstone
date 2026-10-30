@@ -13,7 +13,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 import programs.*
 import scala.collection.mutable
 
-class VMMachineOpsSuite extends munit.FunSuite {
+class VMMachineOpsSuite extends Suite {
   private val sharedBase = VMAddressSpace.SharedBase
 
   private class Fixture(lanes: Int in 1 ~ 1024 = 4) {

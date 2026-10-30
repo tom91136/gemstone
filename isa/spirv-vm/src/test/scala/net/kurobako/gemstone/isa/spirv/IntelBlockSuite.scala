@@ -8,7 +8,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
-class IntelBlockSuite extends munit.FunSuite {
+class IntelBlockSuite extends Suite {
   private val header =
     s"""OpCapability SubgroupBufferBlockIOINTEL
        |OpExtension "SPV_INTEL_subgroups"

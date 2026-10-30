@@ -6,7 +6,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.vm.*
 
-class UntypedPointerSuite extends munit.FunSuite {
+class UntypedPointerSuite extends Suite {
 
   // llvm-spirv --spirv-ext=+SPV_KHR_untyped_pointers of clang -x cl -cl-std=CL1.2 -target spir64 -O1 for a kernel that
   // fills a private array, indexes a structure array, exchanges through local memory across a barrier, adds

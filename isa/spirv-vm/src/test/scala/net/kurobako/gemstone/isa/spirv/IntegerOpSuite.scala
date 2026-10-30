@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class IntegerOpSuite extends munit.FunSuite {
+class IntegerOpSuite extends Suite {
   private val Widths      = Seq(8, 16, 32, 64)
   private val Signs       = Seq(false, true)
   private val FloatWidths = Seq(16, 32, 64)

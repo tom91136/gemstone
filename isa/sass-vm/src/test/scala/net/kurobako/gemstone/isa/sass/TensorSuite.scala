@@ -9,10 +9,11 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class TensorSuite extends munit.FunSuite {
+class TensorSuite extends Suite {
   private val Layouts             = Vec("row-col", "row-row", "col-col", "col-row")
   private val AccumulatorVariants = Vec("Alias", "Nonalias")
   private val Flags               = Vec(false, true)

@@ -45,7 +45,7 @@ object CMake {
         s"$directory",
         "--output-on-failure",
         "--parallel",
-        s"${java.lang.Runtime.getRuntime.availableProcessors}"
+        s"${BuildEnvironment.threadCount}"
       ),
       directory,
       log

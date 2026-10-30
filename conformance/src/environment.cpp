@@ -12,6 +12,8 @@
 
 #include <aspartame/all.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 #include "driver.hpp"
 #include "suite_policy.hpp"
 
@@ -30,7 +32,7 @@ std::map<std::string, std::string> baseEnvironment() {
 }
 void prepareRuntimeEnvironment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
                                const std::filesystem::path &support, std::string_view backend) {
-  environment["CONFORMANCE_SUPPORT_ROOT"] = support.string();
+  environment[environment::SupportDir] = support.string();
   // This map is used with env::empty, so absent variables really are absent.
   environment = environment ^ filter_keys([](const std::string &key) {
                   return !reservedEnvironmentKey(key) || key.starts_with("CONFORMANCE_") || key == "PATH";

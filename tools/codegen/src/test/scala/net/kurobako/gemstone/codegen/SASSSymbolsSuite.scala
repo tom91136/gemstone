@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 
-class SASSSymbolsSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 120.seconds
+class SASSSymbolsSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
 
   test("enumerations retain aliases, implicit values, quoted names and ranges") {
     val parsed =

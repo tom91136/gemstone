@@ -1,3 +1,4 @@
+
 #include "gemstone/hsa/doorbell_monitor.hpp"
 
 #include <array>
@@ -12,6 +13,8 @@
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <gemstone/test_support.hpp>
 
 namespace {
 
@@ -47,7 +50,7 @@ PacketResult capture(Captures &captures, uint64_t packetId, const void *raw) {
   return PacketResult::Accepted;
 }
 
-bool waitFor(Captures &captures, size_t count, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+bool waitFor(Captures &captures, size_t count, std::chrono::milliseconds timeout = gemstone_test::scaled(std::chrono::seconds(2))) {
   std::unique_lock<std::mutex> guard(captures.lock);
   return captures.changed.wait_for(guard, timeout, [&] { return captures.packetIds.size() >= count; });
 }

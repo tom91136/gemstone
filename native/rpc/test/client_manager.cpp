@@ -15,7 +15,7 @@
 
 TEST_CASE("client manager distinguishes disabled, misconfigured, and ready states") {
   const gemstone_test::Environment noEndpoint(gemstone::environment::RpcEndpoint, nullptr);
-  const gemstone_test::Environment noClient(gemstone::environment::RpcClient, nullptr);
+  const gemstone_test::Environment noClient(gemstone::environment::RpcClientId, nullptr);
   gemstone::execution::ClientManager disabled;
   REQUIRE((disabled.mode() == gemstone::execution::ClientMode::Disabled));
   REQUIRE((disabled.client() == nullptr));
@@ -25,6 +25,13 @@ TEST_CASE("client manager distinguishes disabled, misconfigured, and ready state
     gemstone::execution::ClientManager partial;
     REQUIRE((partial.mode() == gemstone::execution::ClientMode::Misconfigured));
     REQUIRE((partial.client() == nullptr));
+  }
+
+  {
+    const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, "maybe");
+    gemstone::execution::ClientManager invalid;
+    REQUIRE((invalid.mode() == gemstone::execution::ClientMode::Misconfigured));
+    REQUIRE(invalid.error().starts_with(gemstone::environment::SystemPagingOn));
   }
 
   gemstone_test::RpcFixture const fixture(GENERATE(false, true));

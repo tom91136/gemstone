@@ -16,6 +16,7 @@ import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.toolchain.workarounds
 import scala.util.Using
 import scala.util.control.NonFatal
 
@@ -39,8 +40,8 @@ object CLI {
     Opts.option[Endpoint]("server", help = "Connect to an existing Gemstone server").orNone,
     invocation
   ).tupled.mapValidated { (apis, serverEndpoint, command) =>
-    sys.env.get(env.NativeDirectory).filter(_.nonEmpty)
-      .fold[Either[String, Path]](Right(Path.of("native-build")))(paths.parse(env.NativeDirectory, _))
+    sys.env.get(env.NativeDir).filter(_.nonEmpty)
+      .fold[Either[String, Path]](Right(Path.of("native-build")))(paths.parse(env.NativeDir, _))
       .map(Launch.Options(apis.getOrElse(API.defaults), serverEndpoint, _, command._1, command._2))
       .toValidatedNel
   }
@@ -131,28 +132,31 @@ object CLI {
     )
   )
 
-  def main(arguments: Array[String]): Unit = command.parse(Vec.from(arguments)) match {
-    case Left(help) =>
-      Console.err.println(help)
-      sys.exit(if (help.errors.isEmpty) 0 else 2)
-    case Right(action) => try action match {
-          case Action.Inspect(file)      => Console.println(Journal.inspect(file))
-          case Action.Replay(file)       => Console.println(Replay.run(Replay.Options(file), replayEndpoint(_)))
-          case Action.Shutdown(endpoint) => protocol.Control.shutdown(endpoint)
-          case Action.Run(options)       =>
-            val status = Launch.validate(options) match {
-              case Left(error) => Console.err.println(s"gemstone: $error"); 2
-              case Right(_)    =>
-                Launch.run(options).fold(error => { Console.err.println(s"gemstone: $error"); 86 }, identity)
-            }
-            if (status != 0) sys.exit(status)
-          case Action.Serve(bind, endpointFile, record)           => serve(bind, endpointFile, record)
-          case Action.Assemble(format, input, output)             => assemble(format, input, output)
-          case Action.Disassemble(format, input, output, section) => disassemble(format, input, output, section)
+  def main(arguments: Array[String]): Unit = {
+    workarounds.install()
+    command.parse(Vec.from(arguments)) match {
+      case Left(help) =>
+        Console.err.println(help)
+        sys.exit(if (help.errors.isEmpty) 0 else 2)
+      case Right(action) => try action match {
+            case Action.Inspect(file)      => Console.println(Journal.inspect(file))
+            case Action.Replay(file)       => Console.println(Replay.run(Replay.Options(file), replayEndpoint(_)))
+            case Action.Shutdown(endpoint) => protocol.Control.shutdown(endpoint)
+            case Action.Run(options)       =>
+              val status = Launch.validate(options) match {
+                case Left(error) => Console.err.println(s"gemstone: $error"); 2
+                case Right(_)    =>
+                  Launch.run(options).fold(error => { Console.err.println(s"gemstone: $error"); 86 }, identity)
+              }
+              if (status != 0) sys.exit(status)
+            case Action.Serve(bind, endpointFile, record)           => serve(bind, endpointFile, record)
+            case Action.Assemble(format, input, output)             => assemble(format, input, output)
+            case Action.Disassemble(format, input, output, section) => disassemble(format, input, output, section)
+          }
+        catch {
+          case NonFatal(error) => Console.err.println(s"gemstone: ${throwables.detail(error)}"); sys.exit(86)
         }
-      catch {
-        case NonFatal(error) => Console.err.println(s"gemstone: ${throwables.detail(error)}"); sys.exit(86)
-      }
+    }
   }
 
   private def settings(): Server.Settings =

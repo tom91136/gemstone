@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.benchmarks
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class BenchmarkRunnerSuite extends munit.FunSuite {
+class BenchmarkRunnerSuite extends Suite {
   private def parse(arguments: String*): BenchmarkRunner.Action =
     BenchmarkRunner.command.parse(arguments).fold(help => fail(help.toString), identity)
 

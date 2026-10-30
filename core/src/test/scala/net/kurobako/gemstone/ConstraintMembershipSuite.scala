@@ -2,10 +2,11 @@ package net.kurobako.gemstone
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 
 /** Integer views, unions of intervals and floating-point bounds. */
-class ConstraintMembershipSuite extends munit.FunSuite {
+class ConstraintMembershipSuite extends Suite {
   test("prelude integers refine through their integer view") {
     type Register = UInt[5] in (0 ~ 17) | (24 ~ 31)
     val register = UInt[5](17).unsafe[Register]

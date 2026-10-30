@@ -4,12 +4,13 @@ import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
 /** NVIDIA GPUs fault a load, store or atomic whose address is not a multiple of its size, in every state space, with
   * `cudaErrorMisalignedAddress`; `%p` holds the 16-byte aligned base of the space the access names.
   */
-class AlignmentSuite extends munit.FunSuite {
+class AlignmentSuite extends Suite {
   private def run(base: String, access: String, offset: Int): Either[Fault, Unit] = {
     val source = s""".version 8.0
       |.target sm_80

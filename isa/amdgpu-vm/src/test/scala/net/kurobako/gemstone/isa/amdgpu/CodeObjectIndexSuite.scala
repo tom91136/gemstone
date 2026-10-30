@@ -9,7 +9,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class CodeObjectIndexSuite extends munit.FunSuite {
+class CodeObjectIndexSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   test("executable sections can be extracted without kernel descriptors or target metadata") {

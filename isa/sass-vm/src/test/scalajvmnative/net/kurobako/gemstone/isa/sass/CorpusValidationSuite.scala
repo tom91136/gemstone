@@ -6,11 +6,12 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 /** Validates the PTX corpus: checked-in `.ptx` files and every PTX source the SASS fixtures compile. */
-class CorpusValidationSuite extends munit.FunSuite {
+class CorpusValidationSuite extends Suite {
   private val files: Vec[(String, String)] = {
     val root = Iterator.iterate(Option(Path.of("").toAbsolutePath))(_.flatMap(path => Option(path.getParent)))
       .takeWhile(_.nonEmpty).flatten.find(path => Files.isRegularFile(path.resolve("build.sbt")))

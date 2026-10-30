@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import java.util.regex.Pattern
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Integer, predicate and uniform-datapath forms the NVIDIA disassembler tables list besides the ones ptxas favours:
   * the named LOP3 and PLOP3 operations, comparisons without a Boolean operation or with the constant `.F`/`.T` tests,
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.isa.sass.Harness.*
   * each is hand-assembled from its table entry, and its expected result follows the PTX ISA 13.3 instruction the form
   * implements.
   */
-class IntegerFormsSuite extends munit.FunSuite {
+class IntegerFormsSuite extends Suite {
 
   private def one(sm: Int, body: String, expected: Long)(using munit.Location): Unit =
     check(sm, s"$body; LDC.64 R2, c[0x0][0x160]; STG.E [R2], R4; EXIT", Vec(expected.toInt))

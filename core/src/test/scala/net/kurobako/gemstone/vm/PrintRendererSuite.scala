@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.Event.*
 
-class PrintRendererSuite extends munit.FunSuite {
+class PrintRendererSuite extends Suite {
   private def render(format: String, arguments: PrintArgument*): Either[String, String] =
     PrintRenderer.render(Print(format, Vec.from(arguments)), maxOutputChars = 1024 * 1024)
 

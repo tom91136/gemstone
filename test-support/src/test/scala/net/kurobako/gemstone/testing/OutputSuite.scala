@@ -5,7 +5,7 @@ import java.io.PrintStream
 import java.nio.charset.StandardCharsets.UTF_8
 import scala.util.Using
 
-class OutputSuite extends munit.FunSuite {
+class OutputSuite extends Suite {
   test("successful output is quiet; failure retains both streams and the original exception") {
     val bytes = ByteArrayOutputStream()
     Using.resource(PrintStream(bytes, true, UTF_8)) { stream =>

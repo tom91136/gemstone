@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class ExecutionPointerSuite extends munit.FunSuite {
+class ExecutionPointerSuite extends Suite {
   // SPIR-V 3.3.1 OpSizeOf: the run-time size of the pointee, as OpenCL lays out three-component vectors and structures
   test("OpSizeOf gives the size of the pointee type") {
     val module = spv"""

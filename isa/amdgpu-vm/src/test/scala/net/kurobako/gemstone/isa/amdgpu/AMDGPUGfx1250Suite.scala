@@ -5,6 +5,7 @@ import fixtures.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
 /** GFX12.5 vector instructions that extend GFX12 ones. The encodings are LLVM 22 `llvm-mc -triple=amdgcn -mcpu=gfx1250
@@ -12,7 +13,7 @@ import net.kurobako.gemstone.testing.either.*
   * `IntrinsicsAMDGPU.td`, whose selection patterns map `llvm.sadd.sat`/`llvm.uadd.sat` feeding `llvm.smax`/`llvm.umin`
   * to the add-min and add-max instructions without the clamp bit, and `llvm/test/CodeGen/AMDGPU/add-max.ll`.
   */
-class AMDGPUGfx1250Suite extends munit.FunSuite {
+class AMDGPUGfx1250Suite extends Suite {
   private val gfx1250 = Target("gfx1250")
 
   private val encodings: Map[String, Vec[Int]] = Map(

@@ -8,9 +8,10 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, *}
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class SharedMemorySuite extends munit.FunSuite {
+class SharedMemorySuite extends Suite {
   private def range(from: Long, count: Int): Vec[Long] = Vec.tabulate(count)(from + _)
 
   /** Patched probes add a 64-bit uniform pair whose high word must be ignored and whose low word wraps at 32 bits. */

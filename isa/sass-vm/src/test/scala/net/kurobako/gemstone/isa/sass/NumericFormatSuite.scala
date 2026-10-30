@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, *}
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 
-class NumericFormatSuite extends munit.FunSuite {
+class NumericFormatSuite extends Suite {
   test("integer and floating set instructions lower to typed comparison formats") {
     val formats = program(89, "ISET.GT.U32.AND R3, R0, R1, PT; FSET.GTU.AND R4, |R0|, |R1|, PT; EXIT", base = 0)
       .instructions()

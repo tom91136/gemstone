@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
-class TensorAddressingSuite extends munit.FunSuite {
+class TensorAddressingSuite extends Suite {
 
   // glslangValidator -V --target-env vulkan1.3 of a GL_NV_cooperative_matrix2 shader: an 8x8 float accumulator of 7
   // loaded from a 12x10 tensor sliced at (6, 4) with constant clamping to -1; stored through a 8x16 layout with row

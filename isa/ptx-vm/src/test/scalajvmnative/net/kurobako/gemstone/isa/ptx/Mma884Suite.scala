@@ -7,13 +7,14 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.ptx.Program.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
 /** Checks the 24 generated MMA884 variants against independently reconstructed lane coordinates and matrix results.
   * Fragment layouts:
   * https://docs.nvidia.com/cuda/archive/11.8.0/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma-m8n8k4
   */
-class Mma884Suite extends munit.FunSuite {
+class Mma884Suite extends Suite {
   private val AOffset = 0
   private val BOffset = 256
   private val COffset = 512

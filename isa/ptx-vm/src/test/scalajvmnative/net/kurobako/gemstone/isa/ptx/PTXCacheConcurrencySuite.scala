@@ -17,7 +17,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class PTXCacheConcurrencySuite extends munit.FunSuite {
+class PTXCacheConcurrencySuite extends Suite {
   import PTXCacheSuite.*
 
   test("a blocked PTX parse does not block a different image or an existing program's release") {

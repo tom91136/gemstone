@@ -4,7 +4,7 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 
-class DeviceEnqueueSuite extends munit.FunSuite {
+class DeviceEnqueueSuite extends Suite {
   private val header =
     s"""OpCapability DeviceEnqueue
        |OpCapability GenericPointer

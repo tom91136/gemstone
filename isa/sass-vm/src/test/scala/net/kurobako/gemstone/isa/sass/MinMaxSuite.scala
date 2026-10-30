@@ -6,10 +6,11 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
-class MinMaxSuite extends munit.FunSuite {
+class MinMaxSuite extends Suite {
   private class NestedKernel(
       val function: String,
       val listing: String,

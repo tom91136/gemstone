@@ -2,12 +2,13 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Floating-point and packed-half forms with the results an RTX 4060 Ti (sm_89) gives for them, or that the PTX ISA 9.0
   * instruction ptxas 13.3 lowers to them specifies. The sm_89 forms were assembled into a `nvcc -arch=sm_89` kernel in
   * place of its arithmetic and run with the CUDA driver; the others are ptxas output for the source each test names.
   */
-class FloatingFormSuite extends munit.FunSuite {
+class FloatingFormSuite extends Suite {
 
   /** Runs `body` after moving each value into its register and stores R20 onwards, one word per expected value. */
   private def words(sm: Int, values: Vec[(Int, Long)], body: String, expected: Long*)(using munit.Location): Unit =

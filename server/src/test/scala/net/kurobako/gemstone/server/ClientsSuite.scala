@@ -6,9 +6,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class ClientsSuite extends munit.FunSuite {
+class ClientsSuite extends Suite {
   test("released clients revoke existing leases and reject delayed acquisition") {
     Using.resource(Clients(() => ExecutionSession(Nil))) { clients =>
       val id = clients.register()

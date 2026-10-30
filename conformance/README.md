@@ -71,7 +71,7 @@ sh cmake/jobserver.sh -- cmake --build build/artifacts --target artifacts
 The budget defaults to `CMAKE_BUILD_PARALLEL_LEVEL` or the core count; do not add inner `-j` flags.
 `CONFORMANCE_ARTIFACT_PARALLELISM` caps concurrent containers (default: cores / 8, at most 4).
 
-CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANCE_SYCL_SHARD=<n>` writing
+CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANCE_SYCL_SHARD_INDEX=<n>` writing
 `artifacts/sycl-shard-<n>`; `cmake -DARTIFACTS=<artifact directory> -P artifacts/Merge.cmake` joins them into
 `artifacts/sycl`. Shard membership is in `cts/sycl/CMakeLists.txt`; shard 0 also builds the unified suite and the
 miniapps.
@@ -81,7 +81,7 @@ emulation shards as a GitHub Actions matrix.
 Its policy groups routes by the first pattern they match, and a route that matches none goes to the first group's
 shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. The run shards
 use the same policy, so they cover exactly the routes the build shards built. A shard names its routes in
-`CONFORMANCE_SHARD_ROUTES`, so its own first route of each support closure builds that closure; the closures are
+`CONFORMANCE_SHARD_ROUTE_LIST`, so its own first route of each support closure builds that closure; the closures are
 identical, so the shards' artifacts unpack over each other. CI packs each closure once: the lowest build shard holding
 it uploads it as `conformance-<shard>-support`, and SYCL shards past 0 leave out `lib`. CI joins every build artifact
 into one full package, merges the SYCL shards, caches that package alone, and hands it to every run shard; the
@@ -112,17 +112,24 @@ one invocation only. Omit `--machine` to use the profile named after the local h
 Machine profiles select backends, architectures, devices, environment, and skips. `--direct --workloads workloads`
 replaces profiles with explicit `backend[/architecture[/compiler]]` routes and uses no profile environment or skips.
 `--isolated-launcher --launcher -- <command>` runs each case through a launcher that owns its device, deduplicating
-identical routes. `CONFORMANCE_JOBS` sets case parallelism (default: the processor count). Each case writes `output.log`
+identical routes. `CONFORMANCE_JOB_COUNT` sets case parallelism (default: the thread count). Each case writes `output.log`
 to its report directory; failures print the exit status or timeout and the log path. Each run writes `junit.xml`, the
 resolved workload as `<workload>.toml`, and every target's effective `environment.txt` to its report directory.
 
+Timeouts suit a 32-thread host. Isolated launchers stretch them up to fourfold on hosts with fewer threads, and
+`CONFORMANCE_TIMEOUT_SCALE` (default 1, up to three decimals such as `1.5`) multiplies every timeout.
+`CONFORMANCE_THREAD_COUNT` overrides the thread count, which defaults to the CPUs available to the process.
+`sbt conformance/emulate` sets both from `GEMSTONE_THREAD_COUNT` and `GEMSTONE_TIMEOUT_SCALE` unless they are already
+set. Integer settings take positive whole numbers and `_ON` settings take `1 true on y yes` or `0 false off n no` in
+any case; an empty value counts as unset, and any other value fails before the run starts.
+
 CUDA routes are `cuda-ptx` and `cuda-sass`; `cuda/sm_*` expands to both. They share one artifact; a route sets only
-`CONFORMANCE_CUDA_CODE`, from which the runner derives NVIDIA's `CUDA_FORCE_PTX_JIT`/`CUDA_DISABLE_PTX_JIT` and the
-`sbt` launcher derives `GEMSTONE_CUDA_CODE`. PTX mode rejects cubin-only images and SASS mode never falls back to PTX.
+`CONFORMANCE_CUDA_CODE_MODE`, from which the runner derives NVIDIA's `CUDA_FORCE_PTX_JIT`/`CUDA_DISABLE_PTX_JIT` and the
+`sbt` launcher derives `GEMSTONE_CUDA_CODE_MODE`. PTX mode rejects cubin-only images and SASS mode never falls back to PTX.
 Explicit memory fixtures are assembled to cubins by the pinned `ptxas`. BLAS kernels absent from the pinned vendor
 package are reported as unsupported. `-DCONFORMANCE_CUDA_CUBIN_ONLY=ON` builds fatbinaries without PTX in a separate
 output directory. Large GEMM cases can exceed Gemstone's default instruction budget; raise
-`GEMSTONE_EXECUTION_MAX_INSTRUCTIONS` for them.
+`GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT` for them.
 
 ## Workloads
 
@@ -145,12 +152,11 @@ ones, `include_programs` takes globs, exact `exclude_programs` win, `specs` filt
 
 | Environment variable | Effect |
 | --- | --- |
-| `CONFORMANCE_OPENCL_CTS_ELEMENTS` | OpenCL input count; empty keeps the upstream default |
-| `CONFORMANCE_OPENCL_CTS_WIMPY` | Reduced OpenCL stress; `0` disables it |
-| `CONFORMANCE_OPENCL_CTS_SMALL_IMAGES` | Small image sizes in the OpenCL image programs; `0` runs the full size sweep |
-| `CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS` / `_THREADS` | OpenCL C11 atomic stress |
-| `CONFORMANCE_OPENCL_CTS_TIMEOUT` | OpenCL per-case deadline in seconds (default 600) |
-| `CONFORMANCE_VULKAN_CTS_TIMEOUT` | Vulkan per-case deadline in seconds (default 600; 7,200 in `lavapipe.linux`) |
+| `CONFORMANCE_OPENCL_CTS_ELEMENT_COUNT` | OpenCL input count; empty keeps the upstream default |
+| `CONFORMANCE_OPENCL_CTS_WIMPY_ON` | Reduced OpenCL stress; `0` disables it |
+| `CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATION_COUNT` / `_THREAD_COUNT` | OpenCL C11 atomic stress |
+| `CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS` | OpenCL per-case deadline in seconds (default 600) |
+| `CONFORMANCE_VULKAN_CTS_TIMEOUT_SECONDS` | Vulkan per-case deadline in seconds (default 600; 7,200 in `lavapipe.linux`) |
 
 Unless the profile or the invoking environment sets them, isolated launchers use 1,024 OpenCL elements and wimpy
 mode; `sbt conformance/emulate` passes smaller defaults. `vulkan-cts` and `vulkan-info` expand glob selectors against

@@ -7,9 +7,10 @@ import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class ConditionCodeSuite extends munit.FunSuite {
+class ConditionCodeSuite extends Suite {
   private val Flags     = Vec(false, true)
   private val ZeroTests = Vec("Z", "NZ")
 

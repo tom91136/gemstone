@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-class NonUniformSuite extends munit.FunSuite {
+class NonUniformSuite extends Suite {
   // two complete subgroups and one partial subgroup
   private final val Count = 69
   private val Operations  = Seq("Reduce", "InclusiveScan", "ExclusiveScan")

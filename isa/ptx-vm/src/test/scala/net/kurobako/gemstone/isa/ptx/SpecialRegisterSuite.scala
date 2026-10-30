@@ -5,9 +5,10 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.testing.Suite
 
 // PTX ISA 13.3 chapter 10, Special Registers.
-class SpecialRegisterSuite extends munit.FunSuite {
+class SpecialRegisterSuite extends Suite {
   private val soleClusterIds = Vec(0L, 1L)
 
   private val reads = Vec(

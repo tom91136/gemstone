@@ -6,9 +6,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
-class TensorSuite extends munit.FunSuite {
+class TensorSuite extends Suite {
   private val layouts = Vec("row", "col")
   private val flags   = Vec(false, true)
 

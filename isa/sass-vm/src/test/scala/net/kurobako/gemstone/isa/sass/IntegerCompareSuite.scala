@@ -4,9 +4,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class IntegerCompareSuite extends munit.FunSuite {
+class IntegerCompareSuite extends Suite {
   private def mask(flags: Boolean*): Vec[Long] = Vec.from(flags).map(flag => if (flag) 0xffffffffL else 0L)
 
   test("compiler-produced ISET.X compares signed and unsigned 64-bit values across low-word ties and borrows") {

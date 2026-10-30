@@ -10,9 +10,10 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class JournalSuite extends munit.FunSuite {
+class JournalSuite extends Suite {
   import journal.*
   test("archive preserves sequenced frames and normalises client identities") {
     temporary { file =>

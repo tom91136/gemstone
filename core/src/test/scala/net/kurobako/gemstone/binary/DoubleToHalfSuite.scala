@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class DoubleToHalfSuite extends munit.FunSuite {
+class DoubleToHalfSuite extends Suite {
   private val halfWidth: Int in (16, 32, 64) = 16
 
   test("binary64 conversion rounds once around every finite half midpoint, for both signs") {

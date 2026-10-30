@@ -1,8 +1,9 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.testing.Suite
 
-class StringLocaleSuite extends munit.FunSuite {
+class StringLocaleSuite extends Suite {
   test("numeric formatting is independent of the default locale") {
     val previous = java.util.Locale.getDefault
     try {

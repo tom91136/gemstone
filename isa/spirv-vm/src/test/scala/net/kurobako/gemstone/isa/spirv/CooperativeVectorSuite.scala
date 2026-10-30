@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.vm.*
 
-class CooperativeVectorSuite extends munit.FunSuite {
+class CooperativeVectorSuite extends Suite {
 
   // glslangValidator -V --target-env vulkan1.3 of a GL_NV_cooperative_vector shader on two invocations: each loads
   // eight halves, multiplies them by a row-major 4x8 half matrix with stride 24 plus a half bias, by the same memory

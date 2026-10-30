@@ -5,10 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.text.*
 
-class ParserSuite extends munit.FunSuite {
+class ParserSuite extends Suite {
   private def roundTrip(source: String): Unit = {
     val first = parse(source)
     val text  = Printer.render(first)

@@ -60,6 +60,6 @@ if(BUILD_TESTING)
   add_dependencies(gemstone_levelzero_process_exit level_zero_loader gemstone_levelzero)
   set_target_properties(gemstone_levelzero_process_exit PROPERTIES BUILD_RPATH "$ORIGIN")
   add_test(NAME level-zero/process-exit COMMAND gemstone_levelzero_process_exit)
-  set_tests_properties(level-zero/process-exit PROPERTIES TIMEOUT 10
+  gemstone_set_tests_properties(level-zero/process-exit PROPERTIES TIMEOUT 10
     ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
 endif()

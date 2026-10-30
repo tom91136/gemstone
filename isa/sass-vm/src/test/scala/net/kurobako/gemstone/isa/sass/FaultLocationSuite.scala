@@ -2,9 +2,10 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class FaultLocationSuite extends munit.FunSuite {
+class FaultLocationSuite extends Suite {
   test("a faulting instruction reports its kernel, function, byte address, workgroup and lone lane") {
     val kernel = load(35, Fixture.listing("cacheInvalidateSm35"), "cache_probe")
     kernel.run(1)(Arg.zeros(4), Arg.words(0L)) match {

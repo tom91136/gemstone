@@ -7,10 +7,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 import references.*
 import scala.util.Random
 
-class IntegerSemanticsSuite extends munit.FunSuite {
+class IntegerSemanticsSuite extends Suite {
   private def minMax(operation: ScalarMinMaxOperation, left: Long, right: Long): (Long, Boolean) = {
     val sinks = Values(left & 0xffffffffL, right & 0xffffffffL)
     Values.flagged(

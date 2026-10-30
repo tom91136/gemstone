@@ -2,8 +2,9 @@ package net.kurobako.gemstone.codegen
 
 import java.nio.file.Path
 import net.kurobako.gemstone.codegen.OperandDomain.*
+import net.kurobako.gemstone.testing.Suite
 
-class AMDGPUDomainTypesSuite extends munit.FunSuite {
+class AMDGPUDomainTypesSuite extends Suite {
   private val registers = Registers("sgpr", first = 0, last = 105, code = 0)
 
   test("a domain spans the widest bounds and every name its ISA families list") {

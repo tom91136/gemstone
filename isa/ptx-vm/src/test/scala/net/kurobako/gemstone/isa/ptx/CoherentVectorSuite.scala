@@ -6,11 +6,12 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 
-class CoherentVectorSuite extends munit.FunSuite {
+class CoherentVectorSuite extends Suite {
   private val packed = (668L << 32) | 101L
   private val scopes = Vec("cta", "gpu")
   private val spaces = Vec("", ".global")

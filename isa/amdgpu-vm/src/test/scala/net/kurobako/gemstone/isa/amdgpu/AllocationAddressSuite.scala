@@ -9,7 +9,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class AllocationAddressSuite extends munit.FunSuite {
+class AllocationAddressSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   // gfx900: env+8 contains a nested pointer absent from direct args. Increment its pointee,

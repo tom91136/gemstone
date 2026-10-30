@@ -8,7 +8,7 @@ import scala.util.Using
 /** Checks that no method of a class in the packages of `owners`, subpackages and nested and anonymous classes included,
   * is too large for the JIT. A package is read from the class path entry its owner comes from.
   */
-class MethodSizeCheck(owners: Class[?]*) extends munit.FunSuite {
+class MethodSizeCheck(owners: Class[?]*) extends Suite {
 
   /** Whether the classes of this name, nested and anonymous ones included, are left out. */
   protected def excluded(name: String): Boolean = false

@@ -2,9 +2,10 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The transcendental unit's operations against the hardware's own results. */
-class TranscendentalUnitSuite extends munit.FunSuite {
+class TranscendentalUnitSuite extends Suite {
 
   private def check(rows: String, digits: Int)(function: Long => Long): Unit = {
     val wrong = rows.stripMargin.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <gemstone/environment.hpp>
+#include <gemstone/test_support.hpp>
 
 #include <environment_keys.hpp>
 
@@ -95,14 +96,14 @@ inline std::vector<char> image(const std::filesystem::path &directory, const cha
   return bytes;
 }
 
-// GEMSTONE_MEMORY_PROBE is a comma-separated list of test probe names; "all" selects every probe.
+// GEMSTONE_TEST_MEMORY_PROBE_LIST is a comma-separated list of test probe names; "all" selects every probe.
 inline bool probeEnabled(std::string_view name) {
-  return gemstone::environment::listed(gemstone::environment::MemoryProbe,
+  return gemstone::environment::listed(gemstone::environment::TestMemoryProbeList,
                                        [&](std::string_view token) { return token == name || token == "all"; });
 }
-inline bool concurrencyMode() { return gemstone::environment::present(gemstone::environment::MemoryConcurrencyDirectory); }
+inline bool concurrencyMode() { return gemstone::environment::present(gemstone::environment::TestMemoryConcurrencyDir); }
 inline std::string allocationKind(const char *fallback) {
-  const auto *kind = gemstone::environment::value(gemstone::environment::MemoryAllocationKind);
+  const auto *kind = gemstone::environment::value(gemstone::environment::TestMemoryAllocationMode);
   return kind && std::string(kind) != "default" ? kind : fallback;
 }
 
@@ -175,7 +176,7 @@ template <class Backend> int compareTraffic(Backend &backend) {
   auto host = std::async(std::launch::async, [&] {
     auto published = std::atomic_ref<Word>(input[0]);
     auto acknowledged = std::atomic_ref<Word>(input[2]);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(90));
     std::exception_ptr failure;
     for (unsigned round = 0; round < 32; ++round) {
       // High bits exercise unsigned values across the full word width.
@@ -216,7 +217,7 @@ template <class Backend> int compareTraffic(Backend &backend) {
 // File rendezvous with a test-only Backend wrapper. No timing-based races.
 inline void checkpoint(const std::filesystem::path &directory, unsigned launch, const char *phase, const auto &action) {
   const auto suffix = std::to_string(launch) + "-" + phase;
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(30));
   while (!std::filesystem::exists(directory / ("device-" + suffix))) {
     std::ifstream failure(directory / ("failure-" + std::to_string(launch)));
     if (failure.good()) {
@@ -259,7 +260,7 @@ template <class Word> void publishCounter(const std::filesystem::path &directory
   require(counter.good(), "cannot publish contention address");
 }
 template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, unsigned launch) {
-  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir));
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
   constexpr unsigned lanes = 128;
@@ -286,7 +287,7 @@ template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, 
   std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4\n";
 }
 template <class Word, class Backend> void atomicCase(Backend &backend, unsigned launch) {
-  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir));
   const bool fenced = probeEnabled("fence");
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
@@ -300,7 +301,7 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
     publishCounter(directory, launch, input);
     checkpoint(directory, launch, "before", [] {});
     auto state = std::atomic_ref<Word>(input[0]);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(90));
     std::exception_ptr failure;
     for (unsigned round = 0; round < 32; ++round) {
       input[1] = 73 + round;
@@ -340,7 +341,7 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
 }
 
 template <class Backend> int atomicProbe(Backend &backend) {
-  const char *bits = gemstone::environment::value(gemstone::environment::MemoryAtomicBits);
+  const char *bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
   if (probeEnabled("multilane")) {
     if (bits && std::string(bits) == "64") multiLaneAtomicCase<uint64_t>(backend, 0);
     else multiLaneAtomicCase<uint32_t>(backend, 0);
@@ -360,7 +361,7 @@ template <class Backend> int concurrent(Backend &backend) {
   if (!backend.concurrentCapabilities()) {
     std::cout << "implementation concurrency probe beyond advertised allocation capabilities\n";
   }
-  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir));
   auto *input = static_cast<uint32_t *>(backend.allocate(128));
   auto *storage = static_cast<unsigned char *>(backend.allocate(65536 + 128));
   unsigned launch = 0;
@@ -411,7 +412,7 @@ template <class Word, class Backend> int submission(Backend &backend) {
   std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   auto handshake = [&] {
     auto state = std::atomic_ref<Word>(input[0]);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
     for (unsigned round = 0; round < 32; ++round) {
       input[1] = 73 + round;
       state.store(1, std::memory_order_release);
@@ -424,7 +425,7 @@ template <class Word, class Backend> int submission(Backend &backend) {
   };
   std::atomic_bool returned{false};
   auto rescue = std::async(std::launch::async, [&] {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(2));
     while (!returned.load(std::memory_order_acquire)) {
       if (std::chrono::steady_clock::now() >= deadline) {
         handshake();
@@ -463,7 +464,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
     input[i][1] = 71 + i + n;
     auto flag = std::atomic_ref<Word>(input[i][0]);
     flag.store(1, std::memory_order_release);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
     while (flag.load(std::memory_order_acquire) != 2) {
       require(std::chrono::steady_clock::now() < deadline, "independent queue stopped progressing");
       std::this_thread::yield();
@@ -477,7 +478,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
   std::atomic_ref<Word>(input[0][0]).store(0, std::memory_order_release);
   std::atomic_bool secondProgress{false};
   auto rescue = std::async(std::launch::async, [&] {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(2));
     while (!secondProgress.load(std::memory_order_acquire)) {
       if (std::chrono::steady_clock::now() >= deadline) {
         for (unsigned n = 1; n < 32; ++n)
@@ -489,7 +490,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
     return false;
   });
   backend.overlapSubmit(1, input[0], reinterpret_cast<uint32_t *>(output[1]), sizeof(Word) == 4 ? 11 : 12);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+  const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
   while (std::atomic_ref<Word>(input[0][0]).load(std::memory_order_acquire) != 2) {
     require(std::chrono::steady_clock::now() < deadline, "producer kernel did not release the waiting consumer");
     std::this_thread::yield();
@@ -517,7 +518,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
 // Actual concurrent kernels, with flags providing deterministic ordering. No speed gate.
 template <class Backend> int reviewCases(Backend &backend) {
   auto wait = [](uint32_t &word, uint32_t value) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
     while (std::atomic_ref<uint32_t>(word).load(std::memory_order_acquire) != value) {
       require(std::chrono::steady_clock::now() < deadline, "memory review handshake stopped progressing");
       std::this_thread::yield();
@@ -579,11 +580,11 @@ template <class Backend> int run(Backend &backend) {
     return compareTraffic(backend);
   }
   if (probeEnabled("overlap")) {
-    const auto *bits = gemstone::environment::value(gemstone::environment::MemoryAtomicBits);
+    const auto *bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
     return bits && std::string(bits) == "64" ? overlap<uint64_t>(backend) : overlap<uint32_t>(backend);
   }
   if (probeEnabled("submission")) {
-    const auto *bits = gemstone::environment::value(gemstone::environment::MemoryAtomicBits);
+    const auto *bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
     return bits && std::string(bits) == "64" ? submission<uint64_t>(backend) : submission<uint32_t>(backend);
   }
   if (probeEnabled("atomic")) return atomicProbe(backend);

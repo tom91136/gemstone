@@ -6,6 +6,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <gemstone/test_support.hpp>
+
 namespace gemstone_test {
 
 // The queued read must finish before a synchronous free retires its storage.
@@ -29,11 +31,11 @@ void queuedLifetime(Allocate allocate, Copy copy, Callback callback, Free free) 
       [](void *data) {
         auto &gate = *static_cast<Gate *>(data);
         gate.started->set_value();
-        gate.release.wait_for(std::chrono::seconds(5));
+        gate.release.wait_for(gemstone_test::scaled(std::chrono::seconds(5)));
       },
       &gate);
   copy(observed.data(), memory, sizeof(source), false);
-  const bool began = reached.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+  const bool began = reached.wait_for(gemstone_test::scaled(std::chrono::seconds(2))) == std::future_status::ready;
   std::promise<void> freeing;
   auto entered = freeing.get_future();
   auto freed = std::async(std::launch::async, [&] {

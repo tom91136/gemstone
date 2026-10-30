@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
+import net.kurobako.gemstone.testing.Suite
 
-class InstructionOperandSuite extends munit.FunSuite {
+class InstructionOperandSuite extends Suite {
   private def wrapped(value: Operand): Operand =
     Operand.Qualified(Operand.Unary(value, negative = true, not = false, absolute = true), Vec(OperandSelector.H0_H0))
 

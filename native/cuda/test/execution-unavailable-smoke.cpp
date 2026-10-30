@@ -205,7 +205,7 @@ bool resolvedEntryPointsBehave() {
 } // namespace
 
 TEST_CASE("CUDA facade fails closed without execution service", "[cuda]") {
-  const gemstone_test::Environment noClient(gemstone::environment::RpcClient, nullptr);
+  const gemstone_test::Environment noClient(gemstone::environment::RpcClientId, nullptr);
   const gemstone_test::Environment noEndpoint(gemstone::environment::RpcEndpoint, nullptr);
   const CUresult status = cuInit(0);
   REQUIRE((status == CUDA_ERROR_NOT_INITIALIZED));
@@ -229,7 +229,7 @@ TEST_CASE("CUDA runtime stream synchronisation waits only for the requested stre
   auto synchronised = std::async(std::launch::async, [context, idle] {
     return cuCtxSetCurrent(context) == CUDA_SUCCESS ? cudaStreamSynchronize(idle) : cudaErrorInvalidValue;
   });
-  const bool prompt = synchronised.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+  const bool prompt = synchronised.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) == std::future_status::ready;
   release.set_value();
   CHECK(prompt);
   CHECK((synchronised.get() == cudaSuccess));

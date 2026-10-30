@@ -1,6 +1,8 @@
 package samples
 
-class SamplesSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class SamplesSuite extends Suite {
   for ((isa, sample) <- Samples.all)
     test(s"$isa: the assembled kernel adds 3, the edited one 5, and the extended one 6") {
       sample() match {

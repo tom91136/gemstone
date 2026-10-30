@@ -9,10 +9,11 @@ import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class MemorySuite extends munit.FunSuite {
+class MemorySuite extends Suite {
   private def operands(text: String): Vec[Operand] = OperandParser.parseMany(text).value
 
   private def statement(text: String, address: Int): DecodedInstruction =

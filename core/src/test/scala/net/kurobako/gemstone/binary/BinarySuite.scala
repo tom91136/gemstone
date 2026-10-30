@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Try
 
-class BinarySuite extends munit.FunSuite {
+class BinarySuite extends Suite {
   test("width conversions preserve finite scalar choices and allow general whole-byte widths") {
     val scalarBits: Int in (8, 16, 32, 64)                     = 32
     val scalarBytes: Int in (1, 2, 4, 8)                       = scalarBits.toMemoryValueByteWidth

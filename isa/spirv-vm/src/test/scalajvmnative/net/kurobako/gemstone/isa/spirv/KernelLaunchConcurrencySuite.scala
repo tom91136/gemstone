@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class KernelLaunchConcurrencySuite extends munit.FunSuite {
+class KernelLaunchConcurrencySuite extends Suite {
 
   /** Work-item value `(group + seed) * 1000 + local * 10 + global`; with `barrier`, the group term comes from the
     * work-item `producer` through Workgroup memory.

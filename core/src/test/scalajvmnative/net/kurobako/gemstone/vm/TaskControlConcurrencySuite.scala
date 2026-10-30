@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
-class TaskControlConcurrencySuite extends munit.FunSuite {
+class TaskControlConcurrencySuite extends Suite {
   test("instruction budgets are shared across workers and reject an oversized charge without consuming it") {
     val control  = TaskControl(TaskControl.Limits(1000L))
     val accepted = AtomicInteger()

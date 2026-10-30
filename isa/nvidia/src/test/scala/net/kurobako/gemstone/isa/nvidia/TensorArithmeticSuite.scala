@@ -5,11 +5,12 @@ import VMIR.Matrix.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The per-element arithmetic of `mma` against results measured on an RTX 4060 Ti (sm_89, ptxas 13.3): each vector
   * fills row 0 of A, column 0 of B and C[0][0] of one `mma.sync.aligned` and reads back D[0][0], all as raw bits.
   */
-class TensorArithmeticSuite extends munit.FunSuite {
+class TensorArithmeticSuite extends Suite {
   private val measured =
     """
       |F16_F32_K16 4aed,c6e4,b3e9,2c75,b481,2aa0,296d,4fa3,395e,cd6e,c8bd,b845,b2d7,26ec,cb9e,c865|0,8000,44bb,a489,a732,2a51,51f1,a9aa,b283,c09d,368c,bf2a,c343,af1b,b65e,b286|43eadefd|44033a55

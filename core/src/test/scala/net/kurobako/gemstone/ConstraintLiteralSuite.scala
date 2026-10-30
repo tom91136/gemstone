@@ -3,10 +3,11 @@ package net.kurobako.gemstone
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.compiletime.testing.typeCheckErrors
 
 /** Compile-time literal checks, string proofs and domain satisfiability. */
-class ConstraintLiteralSuite extends munit.FunSuite {
+class ConstraintLiteralSuite extends Suite {
   private inline def assertUnsatisfiable(inline code: String): Unit =
     assert(typeCheckErrors(code).exists(_.message.contains("Unsatisfiable constraint")))
 

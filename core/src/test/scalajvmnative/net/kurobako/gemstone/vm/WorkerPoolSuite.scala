@@ -8,9 +8,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class WorkerPoolSuite extends munit.FunSuite {
+class WorkerPoolSuite extends Suite {
   private given CanEqual[Thread.State, Thread.State] = CanEqual.derived
 
   // Blocking waits must run outside the suite monitor held by MUnit's by-name assert.

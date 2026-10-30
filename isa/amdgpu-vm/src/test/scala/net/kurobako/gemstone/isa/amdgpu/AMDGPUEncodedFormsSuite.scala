@@ -18,7 +18,7 @@ import net.kurobako.gemstone.vm.*
   * `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`, except `v_accvgpr_mov_b32_e64 a5, a2` and
   * `v_pk_fmac_f16_e64 v5, v2, v3`, which LLVM does not accept and the catalogue encodes.
   */
-class AMDGPUEncodedFormsSuite extends munit.FunSuite {
+class AMDGPUEncodedFormsSuite extends Suite {
   private val gfx906  = Target("gfx906")
   private val gfx90a  = Target("gfx90a")
   private val gfx950  = Target("gfx950")

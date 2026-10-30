@@ -3,12 +3,13 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
 /** Constant banks a uniform register selects, `cx[URa][offset]`: nvdisasm 13.3.73 (`nvdisasm -b SM90` on the raw words)
   * prints each word as its text, which assembles back to it.
   */
-class IndexedConstantSuite extends munit.FunSuite {
+class IndexedConstantSuite extends Suite {
   private val sm90 = Target.of(90).value
 
   private def bytes(hex: String): Array[Byte] = hex.grouped(2).map(Integer.parseInt(_, 16).toByte).toArray

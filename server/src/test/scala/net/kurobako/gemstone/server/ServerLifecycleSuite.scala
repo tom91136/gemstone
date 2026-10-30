@@ -15,7 +15,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class ServerLifecycleSuite extends munit.FunSuite {
+class ServerLifecycleSuite extends Suite {
   test("startup failure closes the journal and marks it unreplayable") {
     files.temporary { directory =>
       val archive = directory.resolve("failed.msgpack")

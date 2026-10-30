@@ -7,10 +7,11 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction as VMInstruction
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
-class LeaSuite extends munit.FunSuite {
+class LeaSuite extends Suite {
   private def is(instruction: DecodedInstruction, mnemonic: String, modifiers: Instruction.Modifier*): Boolean =
     instruction.mnemonic.raw == mnemonic && instruction.modifiers == Vec.from(modifiers)
 

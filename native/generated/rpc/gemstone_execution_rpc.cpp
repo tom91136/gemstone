@@ -57,7 +57,7 @@ class Client::Impl {
 };
 
 std::unique_ptr<Client> Client::fromEnvironment() {
-  const auto client = environment::unsignedValue(environment::RpcClient, 0, std::numeric_limits<int64_t>::max());
+  const auto client = environment::unsignedValue(environment::RpcClientId, 0, std::numeric_limits<int64_t>::max());
   if (client == 0) return nullptr;
   const auto incarnation = processIncarnation(); if (incarnation == 0) return nullptr;
   return std::unique_ptr<Client>(new Client(std::make_unique<Impl>(client, static_cast<uint32_t>(::getpid()), incarnation)));

@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class CodeObjectPatchSuite extends munit.FunSuite {
+class CodeObjectPatchSuite extends Suite {
   private val endProgram  = bytes.words(0xbf810000)
   private val noOperation = bytes.words(0xbf800000)
   private val image       = CodeObject.decode(Vec.unsafeWrapArray(elfImage.amdgpu(

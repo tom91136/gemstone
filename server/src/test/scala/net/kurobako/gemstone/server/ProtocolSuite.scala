@@ -15,9 +15,10 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class ProtocolSuite extends munit.FunSuite {
+class ProtocolSuite extends Suite {
   private val Booleans = Seq(false, true)
 
   private class FragmentedInput(source: InputStream) extends InputStream {

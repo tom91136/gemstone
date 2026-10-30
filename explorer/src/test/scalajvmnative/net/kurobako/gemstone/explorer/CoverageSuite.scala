@@ -2,18 +2,19 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 import scala.io.Codec
 import scala.io.Source
 import scala.util.Using
 import scala.util.matching.Regex
 
-class CoverageSuite extends munit.FunSuite {
+class CoverageSuite extends Suite {
   // classifying every target of every ISA takes about six minutes on a 32-core host
-  override val munitTimeout: Duration = 15.minutes
-  private val lanes                   = Set("Lane", "Machine", "Both", "LoadTime")
-  private val exceptions              = Set("NoOp", "NotModelled", "NotImplemented", "NotInstantiated")
-  private val ratchetPath             = "explorer/src/test/resources/coverage/ratchet.tsv"
+  override def baseTimeout: FiniteDuration = 15.minutes
+  private val lanes                        = Set("Lane", "Machine", "Both", "LoadTime")
+  private val exceptions                   = Set("NoOp", "NotModelled", "NotImplemented", "NotInstantiated")
+  private val ratchetPath                  = "explorer/src/test/resources/coverage/ratchet.tsv"
 
   private case class Classified(isa: String, target: Option[String], mnemonic: String, name: String, actual: String) {
     def label: String = s"$isa ${target.getOrElse("-")} $mnemonic $name"

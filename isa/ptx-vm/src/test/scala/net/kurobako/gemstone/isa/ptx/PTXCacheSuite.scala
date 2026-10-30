@@ -26,7 +26,7 @@ object PTXCacheSuite {
   val image: Vec[Byte] = Vec.from(source.getBytes(StandardCharsets.UTF_8))
 }
 
-class PTXCacheSuite extends munit.FunSuite {
+class PTXCacheSuite extends Suite {
   import PTXCacheSuite.*
 
   test("images with colliding CRC32 hashes retain independent cache entries and lifetimes") {

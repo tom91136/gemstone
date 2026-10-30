@@ -3,9 +3,10 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 
 // NaN results as an RTX 4060 Ti computes them
-class FusedMultiplyAddNaNSuite extends munit.FunSuite {
+class FusedMultiplyAddNaNSuite extends Suite {
   private val first      = 0x7ff8000000000001L
   private val second     = 0xfff8000000000002L
   private val signalling = 0x7ff0000000000003L

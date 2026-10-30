@@ -5,8 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class SyntaxSuite extends munit.FunSuite {
+class SyntaxSuite extends Suite {
   test("empty line comments are valid trivia") {
     assert(Parser.parse("//\n.version 9.2;").isRight)
   }

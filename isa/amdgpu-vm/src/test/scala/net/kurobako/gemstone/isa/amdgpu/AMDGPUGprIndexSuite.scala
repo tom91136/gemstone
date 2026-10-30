@@ -4,13 +4,14 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** GFX9 VGPR indexing mode, which hipcc emits for a dynamic index into a vector held in registers, e.g.
   * `typedef float f16v __attribute__((ext_vector_type(16))); out[i] = v[k & 15];` under
   * `hipcc --offload-arch=gfx906 -O3`, which reads `s_set_gpr_idx_on s4, gpr_idx(SRC0)`, `v_mov_b32_e32 v19, v1`,
   * `s_set_gpr_idx_off` and writes with `gpr_idx(DST)`.
   */
-class AMDGPUGprIndexSuite extends munit.FunSuite {
+class AMDGPUGprIndexSuite extends Suite {
   // llvm-mc -triple=amdgcn -mcpu=gfx906 -show-encoding
   private val onSource        = Vec(0x00, 0x01, 0x11, 0xbf) // s_set_gpr_idx_on s0, gpr_idx(SRC0)
   private val onDestination   = Vec(0x00, 0x08, 0x11, 0xbf) // s_set_gpr_idx_on s0, gpr_idx(DST)

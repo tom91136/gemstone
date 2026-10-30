@@ -4,9 +4,10 @@ import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The sm_89 matrix probes, run from their PTX, against the words an RTX 4060 Ti stores. */
-class MatrixProbeSuite extends munit.FunSuite {
+class MatrixProbeSuite extends Suite {
   MatrixProbes.probes.foreach { probe =>
     probe.measured.foreach(measured =>
       test(s"${probe.name} matches the measured words") {

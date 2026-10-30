@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.semantics
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class AlgebraSuite extends munit.FunSuite {
+class AlgebraSuite extends Suite {
   private val values =
     Seq(0L, 1L, -1L, 2L, 0x80L, Long.MinValue, Long.MaxValue, 0x8877665544332211L, 0x0123456789abcdefL)
 

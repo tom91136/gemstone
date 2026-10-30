@@ -25,6 +25,10 @@ object ExecutionRPC {
   val MaximumTextBytes: Int > 0   = 8192
   val Limits: msgpack.Limits      = msgpack.Limits(MaximumElements, MaximumPayload, MaximumTextBytes)
 
+  // The emulator executes any work-group size but only at interpreter throughput, and the OpenCL CTS scales its total
+  // work with the advertised bound. Larger sizes make whole conformance tests exceed their per-test budget.
+  val OpenclMaxWorkGroupSize: Int > 0 = 128
+
   // Fixed prefix, followed by the UTF-8 operation tag and then the MessagePack payload.
   val RequestClientOffset: Int > 0       = 4
   val RequestSessionHighOffset: Int > 0  = 12

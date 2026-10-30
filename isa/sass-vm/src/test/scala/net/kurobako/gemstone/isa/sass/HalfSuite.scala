@@ -8,9 +8,10 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class HalfSuite extends munit.FunSuite {
+class HalfSuite extends Suite {
   private val Flags = Vec(false, true)
 
   private def kernel(name: String, function: String, sm: Int = 89): Kernel = load(sm, Fixture.listing(name), function)

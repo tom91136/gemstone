@@ -3,14 +3,15 @@ package net.kurobako.gemstone.isa.nvidia.fixtures
 import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.configuration
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 import scala.util.control.NonFatal
 
-/** Set GEMSTONE_VERIFY_FIXTURES=1 to reproduce fixtures with NVIDIA tools on the JVM. */
-abstract class NvidiaFixtureSuite extends munit.FunSuite {
-  override def munitTimeout: Duration = 3.minutes
+/** Set GEMSTONE_FIXTURE_VERIFY_ON=1 to reproduce fixtures with NVIDIA tools on the JVM. */
+abstract class NvidiaFixtureSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 3.minutes
 
   protected def reproduces(name: String)(
       tools: (ptxas: String, nvdisasm: Option[String]),
@@ -30,11 +31,11 @@ abstract class NvidiaFixtureSuite extends munit.FunSuite {
       tools: (ptxas: String, nvdisasm: Option[String]),
       inputs: Vec[(String, String)]
   )(check: (Path, Vec[String] => Unit) => Unit)(using munit.Location): Unit = {
-    val enabled = sys.env.get(env.VerifyFixtures) match {
-      case None | Some("0") => false
-      case Some("1")        => true
-      case Some(value)      => throw IllegalArgumentException(s"GEMSTONE_VERIFY_FIXTURES must be 0 or 1, got $value")
-    }
+    val enabled =
+      configuration.enabled(
+        sys.env,
+        env.FixtureVerifyOn
+      ).fold(message => throw IllegalArgumentException(message), identity)
     test(if (enabled) munit.TestOptions(name) else munit.TestOptions(name).ignore) {
       val directory = files.Directory("gemstone-nvidia-fixture-")
       val log       = directory.path.resolve("recipe.log")

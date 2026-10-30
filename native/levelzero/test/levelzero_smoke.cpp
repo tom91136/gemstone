@@ -12,6 +12,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ze_api.h>
 
+#include <gemstone/test_support.hpp>
+
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 
@@ -839,7 +841,7 @@ TEST_CASE("Level Zero completed fences can be destroyed before queue synchronisa
     ze_fence_handle_t fence = nullptr;
     REQUIRE((zeFenceCreate(queue, &fenceDesc, &fence) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, fence) == ZE_RESULT_SUCCESS));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
     auto completed = zeFenceQueryStatus(fence);
     while (completed == ZE_RESULT_NOT_READY && std::chrono::steady_clock::now() < deadline)
       completed = zeFenceQueryStatus(fence);
@@ -910,7 +912,7 @@ TEST_CASE("Level Zero completed transfers release allocations before their event
           REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
           REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
         }
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
         auto completed = zeEventQueryStatus(event);
         while (completed == ZE_RESULT_NOT_READY && std::chrono::steady_clock::now() < deadline)
           completed = zeEventQueryStatus(event);

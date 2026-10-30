@@ -16,7 +16,7 @@ import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
-class TransportSuite extends munit.FunSuite {
+class TransportSuite extends Suite {
 
   test("endpoints preserve escaped Unix paths and distinguish bind port zero from a destination") {
     val endpoint = Endpoint.Unix(Path.of("/tmp/socket with # and % and λ"))

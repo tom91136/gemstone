@@ -6,7 +6,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.testing.*
 
-class AssemblySuite extends munit.FunSuite {
+class AssemblySuite extends Suite {
   private val gfx1030 = Assembly.Format.AMDGPU(amdgpu.Target("gfx1030"))
   private val sm89    = sass.Target.parse("sm_89").fold(fail(_), identity)
 

@@ -4,10 +4,11 @@ import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import scala.compiletime.testing.typeChecks
 
-class ISASuite extends munit.FunSuite {
+class ISASuite extends Suite {
   test("default wave width follows processor features including CDNA5") {
     for (
       (target, width) <- Vec(

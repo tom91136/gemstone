@@ -4,8 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.*
+import net.kurobako.gemstone.testing.Suite
 
-class AssemblySuite extends munit.FunSuite {
+class AssemblySuite extends Suite {
   private def parse(source: String): Module     = Parser.parse(source).fold(error => fail(error.toString), identity)
   private def encode(module: Module): Vec[Byte] = ISA.encode(module).fold(error => fail(error.toString), identity)
   private def roundTrip(module: Module): Unit   = {

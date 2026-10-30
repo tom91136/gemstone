@@ -4,8 +4,9 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class CodeWordsSuite extends munit.FunSuite {
+class CodeWordsSuite extends Suite {
   private def bytes(words: Long*): Array[Byte] = words.toArray.flatMap(LittleEndian.toArray(_, 8))
 
   private def words(code: Array[Byte], generation: Generation): Either[String, Vec[(Int >= 0, Array[Byte])]] =

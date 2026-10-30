@@ -8,8 +8,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class VectorRegisterSuite extends munit.FunSuite {
+class VectorRegisterSuite extends Suite {
   private val widths   = Vec(16, 32, 64)
   private val prefixes = Vec("", "%")
 

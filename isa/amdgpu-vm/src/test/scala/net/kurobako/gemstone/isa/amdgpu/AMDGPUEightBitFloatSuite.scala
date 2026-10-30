@@ -4,6 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The 8-bit float conversions (MI300 ISA, 7.2), which hipcc emits for `__builtin_amdgcn_cvt_f32_fp8`,
   * `cvt_pk_f32_bf8`, `cvt_pk_fp8_f32` and `cvt_sr_fp8_f32` (`-O3 --offload-arch=gfx942`: `v_cvt_f32_fp8_sdwa v2, v1
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.constraint.*
   * gfx1201: `v_cvt_f32_fp8_e64 v2, v1 byte_sel:1`), in CDNA3's FNUZ formats and the OCP formats of gfx950 and GFX12.
   * Bytes from ROCm 7.1.1 `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`.
   */
-class AMDGPUEightBitFloatSuite extends munit.FunSuite {
+class AMDGPUEightBitFloatSuite extends Suite {
   private val gfx942  = Target("gfx942")
   private val gfx950  = Target("gfx950")
   private val gfx1201 = Target("gfx1201")

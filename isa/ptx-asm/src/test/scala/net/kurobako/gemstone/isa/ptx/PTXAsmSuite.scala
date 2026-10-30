@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.ptx
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.testing.Suite
 
-class PTXAsmSuite extends munit.FunSuite {
+class PTXAsmSuite extends Suite {
   test("PTX text bytes round trip whole programs and stabilise canonically") {
     val source = """// module comment
                   |.version 9.3

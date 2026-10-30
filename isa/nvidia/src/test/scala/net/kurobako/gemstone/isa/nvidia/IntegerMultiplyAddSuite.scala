@@ -5,9 +5,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class IntegerMultiplyAddSuite extends munit.FunSuite {
+class IntegerMultiplyAddSuite extends Suite {
   private val register = Register(0)
   private val operand  = Value.Immediate(0L)
 

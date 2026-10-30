@@ -4,14 +4,14 @@ name = "cuda-ptx"
 backend = "cuda"
 architecture = "sm_89"
 device = "*RTX 4060 Ti*"
-environment = { CONFORMANCE_CUDA_CODE = "ptx" }
+environment = { CONFORMANCE_CUDA_CODE_MODE = "ptx" }
 
 [[targets]]
 name = "cuda-sass"
 backend = "cuda"
 architecture = "sm_89"
 device = "*RTX 4060 Ti*"
-environment = { CONFORMANCE_CUDA_CODE = "sass" }
+environment = { CONFORMANCE_CUDA_CODE_MODE = "sass" }
 
 [[targets]]
 name = "amd-hsa"

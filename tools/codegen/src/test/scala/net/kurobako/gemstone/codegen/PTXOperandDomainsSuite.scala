@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.testing.Suite
 import org.jsoup.Jsoup
 
-class PTXOperandDomainsSuite extends munit.FunSuite {
+class PTXOperandDomainsSuite extends Suite {
   private def table(caption: String, rows: String): String =
     s"""<table><caption><span class="caption-text">$caption</span></caption><tbody>$rows</tbody></table>"""
 

@@ -4,13 +4,14 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** V_MOVRELS_B32, V_MOVRELD_B32, V_MOVRELSD_B32, V_MOVRELSD_2_B32 and V_SWAPREL_B32 in every encoding: the DPP, DPP8,
   * SDWA and VOP3 forms apply their routing, selection and placement to the register M0 offsets, as on a gfx1036 (RDNA2)
   * with the probe kernels `s_mov_b32 m0, N; v_movrels_b32_dpp v32, v17 quad_perm:[1,0,3,2]` and the like, whose results
   * these expectations match. Bytes from `llvm-mc -arch=amdgcn -mcpu=<target> -show-encoding`.
   */
-class AMDGPURelativeMoveSuite extends munit.FunSuite {
+class AMDGPURelativeMoveSuite extends Suite {
   private val gfx1030 = Target("gfx1030")
   private val gfx1100 = Target("gfx1100")
   private val gfx1201 = Target("gfx1201")

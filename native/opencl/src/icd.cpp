@@ -228,7 +228,7 @@ struct OpenCLIdentity {
 };
 
 OpenCLIdentity openclIdentity() {
-  const char *profile = gemstone::environment::value(gemstone::environment::Profile);
+  const char *profile = gemstone::environment::value(gemstone::environment::ProfileName);
   if (profile) {
     if (std::strcmp(profile, "amd") == 0)
       return {.platformName = "AMD Accelerated Parallel Processing",
@@ -241,7 +241,8 @@ OpenCLIdentity openclIdentity() {
       return {.platformName = "rusticl", .deviceName = "AMD Gemstone GPU", .vendor = "Advanced Micro Devices, Inc.", .vendorId = 0x1002};
     if (std::strcmp(profile, "rusticl-intel") == 0)
       return {.platformName = "rusticl", .deviceName = "Intel Gemstone GPU", .vendor = "Intel(R) Corporation", .vendorId = 0x8086};
-    if (std::strcmp(profile, "rusticl-llvmpipe") == 0)
+    // llvmpipe has no OpenCL driver of its own; Mesa serves it through rusticl
+    if (std::strcmp(profile, "rusticl-llvmpipe") == 0 || std::strcmp(profile, "llvmpipe") == 0)
       return {.platformName = "rusticl", .deviceName = "llvmpipe Gemstone GPU", .vendor = "Mesa", .vendorId = 0x10005};
   }
   return {.platformName = "Intel(R) OpenCL Gemstone Graphics",
@@ -282,28 +283,13 @@ bool readRemote(Client &client, uint64_t id, uint64_t offset, void *bytes, size_
   return downloadAllocation(client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, MaximumPayload / 2);
 }
 
-bool scanBufferPointerRelocations() { return gemstone::environment::enabled(gemstone::environment::OpenclScanBufferPointers); }
+bool scanBufferPointerRelocations() { return gemstone::environment::enabled(gemstone::environment::OpenclScanBufferPointersOn); }
 
-cl_ulong maxMemAllocSize() {
-  // Keep the advertised limit below the remote service's practical per-allocation
-  // envelope.  The environment override remains available for larger deployments.
-  return gemstone::environment::unsignedValue(gemstone::environment::OpenclMaxMemAllocSize,
-                                              gemstone::environment::OpenclMaxMemAllocSizeDefault);
-}
-
-cl_ulong localMemSize() {
-  return gemstone::environment::unsignedValue(gemstone::environment::OpenclLocalMemSize, gemstone::environment::OpenclLocalMemSizeDefault);
-}
-
-// The emulator executes any work-group size but only at interpreter throughput,
-// and the OpenCL CTS scales its total work with the advertised bound. Sizes above
-// this make whole conformance tests exceed their per-test budget, so advertise
-// the largest size the emulated suite can complete. Enqueue enforces the bound.
-size_t maxWorkGroupSize() {
-  return gemstone::environment::unsignedValue(gemstone::environment::OpenclMaxWorkGroupSize,
-                                              gemstone::environment::OpenclMaxWorkGroupSizeDefault);
-}
-
+// Keep the advertised limit below the remote service's practical per-allocation envelope.
+constexpr cl_ulong MaxMemAllocSize = cl_ulong{1} << 28;
+constexpr cl_ulong LocalMemSize = cl_ulong{1} << 16;
+// Enqueue enforces the advertised bound.
+constexpr size_t MaxWorkGroupSize = gemstone::execution::OpenclMaxWorkGroupSize;
 constexpr size_t MaxSubgroupSize = 32;
 constexpr size_t Image2DMaxSize = 16384;
 constexpr size_t Image3DMaxSize = 2048;
@@ -387,7 +373,7 @@ constexpr size_t MaxGlobalVariableSize = 65536;
 constexpr size_t PreferredGlobalVariableTotalSize = 1U << 20;
 
 std::array<size_t, 3> maxWorkItemSizes() {
-  const size_t maxGroup = maxWorkGroupSize();
+  const size_t maxGroup = MaxWorkGroupSize;
   return {maxGroup, maxGroup, std::min<size_t>(maxGroup, 64)};
 }
 
@@ -1172,6 +1158,7 @@ extern "C" {
 
 CL_API_ENTRY cl_int CL_API_CALL clGetPlatformIDs(cl_uint entries, cl_platform_id *platforms, cl_uint *count) {
   initialiseDispatch();
+  if (!gemstone::environment::accepted(gemstone::environment::invalid())) return CL_PLATFORM_NOT_FOUND_KHR;
   (void)remote.mode();
   if (!platforms && !count) return CL_INVALID_VALUE;
   if (entries == 0 && platforms) return CL_INVALID_VALUE;
@@ -1261,7 +1248,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_FEATURE_CAPABILITIES_INTEL: return outputScalar(size, output, written, cl_device_feature_capabilities_intel{0});
     case CL_DEVICE_MAX_COMPUTE_UNITS: return outputScalar(size, output, written, cl_uint{16});
     case CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS: return outputScalar(size, output, written, cl_uint{3});
-    case CL_DEVICE_MAX_WORK_GROUP_SIZE: return outputScalar(size, output, written, maxWorkGroupSize());
+    case CL_DEVICE_MAX_WORK_GROUP_SIZE: return outputScalar(size, output, written, MaxWorkGroupSize);
     case CL_DEVICE_MAX_WORK_ITEM_SIZES: return outputBytes(size, output, written, workSizes.data(), sizeof(workSizes));
     case CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR:
     case CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT:
@@ -1279,7 +1266,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF: return outputScalar(size, output, written, cl_uint{1});
     case CL_DEVICE_MAX_CLOCK_FREQUENCY: return outputScalar(size, output, written, cl_uint{1000});
     case CL_DEVICE_ADDRESS_BITS: return outputScalar(size, output, written, cl_uint{64});
-    case CL_DEVICE_MAX_MEM_ALLOC_SIZE: return outputScalar(size, output, written, maxMemAllocSize());
+    case CL_DEVICE_MAX_MEM_ALLOC_SIZE: return outputScalar(size, output, written, MaxMemAllocSize);
     case CL_DEVICE_MAX_READ_IMAGE_ARGS: return outputScalar(size, output, written, cl_uint{128});
     case CL_DEVICE_MAX_WRITE_IMAGE_ARGS:
     case CL_DEVICE_MAX_READ_WRITE_IMAGE_ARGS: return outputScalar(size, output, written, cl_uint{64});
@@ -1313,7 +1300,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE: return outputScalar(size, output, written, cl_ulong{0x10000});
     case CL_DEVICE_MAX_CONSTANT_ARGS: return outputScalar(size, output, written, cl_uint{8});
     case CL_DEVICE_LOCAL_MEM_TYPE: return outputScalar(size, output, written, cl_uint{CL_LOCAL});
-    case CL_DEVICE_LOCAL_MEM_SIZE: return outputScalar(size, output, written, localMemSize());
+    case CL_DEVICE_LOCAL_MEM_SIZE: return outputScalar(size, output, written, LocalMemSize);
     // This provider is an emulator, so fp64 is a supported device feature.
     // DPC++/IGC lowers it through Intel's DP emulation path, enabled by the
     // explicit compiler configuration.
@@ -1426,8 +1413,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_PLATFORM: return outputScalar(size, output, written, reinterpret_cast<cl_platform_id>(&platform));
     case CL_DEVICE_SVM_CAPABILITIES: return outputScalar(size, output, written, svm);
     case CL_DEVICE_IL_VERSION: return outputString(size, output, written, DeviceILVersionString);
-    case CL_DEVICE_MAX_NUM_SUB_GROUPS:
-      return outputScalar(size, output, written, static_cast<cl_uint>(maxWorkGroupSize() / MaxSubgroupSize));
+    case CL_DEVICE_MAX_NUM_SUB_GROUPS: return outputScalar(size, output, written, static_cast<cl_uint>(MaxWorkGroupSize / MaxSubgroupSize));
     case CL_DEVICE_SUB_GROUP_SIZES_INTEL: {
       static const size_t sizes[] = {8, 16, 32};
       return outputBytes(size, output, written, sizes, sizeof(sizes));
@@ -1793,7 +1779,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreatePipe(cl_context value, cl_mem_flags flag
   if ((flags & ~(CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS)) != 0 || (properties && properties[0] != 0))
     return fail(error, CL_INVALID_VALUE);
   const size_t bytes = pipe::Packets + (size_t{packetSize} * packets);
-  if (packetSize == 0 || packetSize > PipeMaxPacketSize || packets == 0 || bytes > maxMemAllocSize())
+  if (packetSize == 0 || packetSize > PipeMaxPacketSize || packets == 0 || bytes > MaxMemAllocSize)
     return fail(error, CL_INVALID_PIPE_SIZE);
   cl_int status = CL_SUCCESS;
   auto allocation = allocate(bytes, &status);
@@ -2033,7 +2019,7 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
   }
   shape.slicePitch = shape.rowPitch * imageHeight(*desc);
   const size_t bytes = shape.slicePitch * imageSlices(*desc);
-  if (bytes > maxMemAllocSize()) return fail(error, CL_INVALID_IMAGE_SIZE);
+  if (bytes > MaxMemAllocSize) return fail(error, CL_INVALID_IMAGE_SIZE);
   // Host data uses the caller's pitches; the device copy is tightly packed unless it aliases another object.
   const size_t hostRow = source || desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
   size_t hostSlice = desc->image_slice_pitch;
@@ -3240,7 +3226,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel value, cl_dev
   // OpenCL permits a null device when the kernel's program has one device.
   if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
   switch (name) {
-    case CL_KERNEL_WORK_GROUP_SIZE: return outputScalar(size, output, written, maxWorkGroupSize());
+    case CL_KERNEL_WORK_GROUP_SIZE: return outputScalar(size, output, written, MaxWorkGroupSize);
     case CL_KERNEL_COMPILE_WORK_GROUP_SIZE:
       return outputBytes(size, output, written, kernel->requiredWorkGroupSize.data(), sizeof(kernel->requiredWorkGroupSize));
     case CL_KERNEL_LOCAL_MEM_SIZE: {
@@ -4166,7 +4152,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
       if (local[index] != 0 && total > std::numeric_limits<size_t>::max() / local[index]) return CL_INVALID_WORK_GROUP_SIZE;
       total *= local[index];
     }
-    if (total > maxWorkGroupSize()) return CL_INVALID_WORK_GROUP_SIZE;
+    if (total > MaxWorkGroupSize) return CL_INVALID_WORK_GROUP_SIZE;
   }
   if (local) {
     const bool uniform = uniformWorkGroups(*kernel->program);
@@ -4630,7 +4616,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_devi
   if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
   constexpr size_t subgroupSize = MaxSubgroupSize;
   if (name == CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE) return outputScalar(size, output, written, subgroupSize);
-  if (name == CL_KERNEL_MAX_NUM_SUB_GROUPS) return outputScalar(size, output, written, maxWorkGroupSize() / subgroupSize);
+  if (name == CL_KERNEL_MAX_NUM_SUB_GROUPS) return outputScalar(size, output, written, MaxWorkGroupSize / subgroupSize);
   if (name == CL_KERNEL_COMPILE_NUM_SUB_GROUPS) return outputScalar(size, output, written, size_t{0});
   if (name == CL_KERNEL_COMPILE_SUB_GROUP_SIZE_INTEL) return outputScalar(size, output, written, size_t{0});
   if (name == CL_KERNEL_SUB_GROUP_COUNT_FOR_NDRANGE) {
@@ -4650,7 +4636,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_devi
     size_t count = 0;
     std::memcpy(&count, input, sizeof(count));
     size_t local[3] = {0, 0, 0};
-    if (count != 0 && count <= maxWorkGroupSize() / subgroupSize) {
+    if (count != 0 && count <= MaxWorkGroupSize / subgroupSize) {
       local[0] = count * subgroupSize;
       local[1] = 1;
       local[2] = 1;

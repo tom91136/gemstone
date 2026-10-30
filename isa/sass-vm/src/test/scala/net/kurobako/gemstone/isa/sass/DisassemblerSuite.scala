@@ -6,9 +6,10 @@ import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class DisassemblerSuite extends munit.FunSuite {
+class DisassemblerSuite extends Suite {
   private lazy val database = decoder(89)
   private lazy val text     = Fixture.listing("copyAddSm89")
   private lazy val listing  = Listing.parse(text, "copy_add", 89).value

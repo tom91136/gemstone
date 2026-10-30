@@ -7,9 +7,10 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
-class InstructionSemanticsSuite extends munit.FunSuite {
+class InstructionSemanticsSuite extends Suite {
   private def vector(index: VectorRegisterIndex): InstructionSource = InstructionSource.VectorRegister(index)
   private def scalar(index: ScalarRegisterIndex): InstructionSource = InstructionSource.Scalar(index)
 

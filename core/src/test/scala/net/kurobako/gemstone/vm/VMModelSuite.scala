@@ -4,8 +4,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class VMModelSuite extends munit.FunSuite {
+class VMModelSuite extends Suite {
   private val booleans = Vec(false, true)
 
   test("inactive groups remain inactive across the Int narrowing boundary") {

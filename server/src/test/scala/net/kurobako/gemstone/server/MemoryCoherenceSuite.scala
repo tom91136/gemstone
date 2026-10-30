@@ -11,14 +11,15 @@ import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.concurrent.duration.*
 import scala.util.Using
 
 /** RPC traffic, forced interleavings, host-memory extensions and workgroups regressions across all APIs. */
-class MemoryCoherenceSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 150.seconds
+class MemoryCoherenceSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 150.seconds
 
   private enum Scenario derives CanEqual {
     case Device, OrdinaryHost, Concurrent, Submission, Overlap, Compare
@@ -94,15 +95,15 @@ class MemoryCoherenceSuite extends munit.FunSuite {
               (if (fenced) Vector("fence") else Vector.empty) ++
               (if (atomicProbe) Vector("atomic") else Vector.empty)
           val base = native.providerEnvironment ++ Map(
-            env.MemoryProbe          -> probes.mkString(","),
-            env.MemoryAllocationKind -> allocationKind,
-            "OCL_ICD_VENDORS"        -> vendors.toString
+            env.TestMemoryProbeList      -> probes.mkString(","),
+            env.TestMemoryAllocationMode -> allocationKind,
+            "OCL_ICD_VENDORS"            -> vendors.toString
           ) ++
-            (if (atomicProbe) Map(env.MemoryAtomicBits -> atomicWidth.toString)
+            (if (atomicProbe) Map(env.TestMemoryAtomicBits -> atomicWidth.toString)
              else Map.empty[String, String]) ++
-            (if (concurrent) Map(env.MemoryConcurrencyDirectory -> checkpoint.directory.toString)
+            (if (concurrent) Map(env.TestMemoryConcurrencyDir -> checkpoint.directory.toString)
              else Map.empty[String, String])
-          val paging    = if (ordinary) Map(env.SystemPaging -> "1") else Map.empty[String, String]
+          val paging    = if (ordinary) Map(env.SystemPagingOn -> "1") else Map.empty[String, String]
           val arguments = Vector(client.toString) ++ (if (ordinary) Vector("ordinary") else Vector.empty)
           val result    = native.run(
             Vec.from(arguments).unsafe,
@@ -111,7 +112,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
               server.endpoint,
               server.client,
               base ++ paging,
-              if (ordinary) Set.empty else Set(env.SystemPaging, "UR_ADAPTERS_FORCE_LOAD")
+              if (ordinary) Set.empty else Set(env.SystemPagingOn, "UR_ADAPTERS_FORCE_LOAD")
             ),
             120.seconds
           )

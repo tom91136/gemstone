@@ -8,7 +8,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
-class LRUCacheConcurrencySuite extends munit.FunSuite {
+class LRUCacheConcurrencySuite extends Suite {
   private class HashKey(val name: String, hash: () => Int) {
     override def hashCode(): Int             = hash()
     override def equals(other: Any): Boolean = other match {

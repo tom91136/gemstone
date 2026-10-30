@@ -20,7 +20,7 @@ import net.kurobako.gemstone.vm.*
 import scala.concurrent.duration.*
 import scala.util.Using
 
-class CLIProcessSuite extends munit.FunSuite {
+class CLIProcessSuite extends Suite {
   // The same process checks can target a freshly linked Native CLI from the JVM test runner.
   private val executable = sys.props.get("gemstone.cli.executable").fold {
     val classpath = sys.props("gemstone.cli.classpath")
@@ -134,9 +134,9 @@ class CLIProcessSuite extends munit.FunSuite {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$GEMSTONE_RPC_CLIENT\" > client-id; exec sleep 60"
+            "printf '%s' \"$GEMSTONE_RPC_CLIENT_ID\" > client-id; exec sleep 60"
           ),
-          environment = Map(env.NativeDirectory -> native.directory.toString)
+          environment = Map(env.NativeDir -> native.directory.toString)
         ))
         val clientFile = directory.resolve("client-id")
         val deadline   = monotonicNanos + TimeUnit.SECONDS.toNanos(10)
@@ -202,8 +202,8 @@ class CLIProcessSuite extends munit.FunSuite {
           native.serverEnvironment(
             Endpoint.parse(endpoint("endpoint").str).fold(fail(_), identity),
             endpoint("client").num.toLong.refine[ClientId].fold(fail(_), identity),
-            Map("LD_LIBRARY_PATH" -> nativeDirectory.toString, env.MemoryProbe -> "rpc_only"),
-            Set(env.SystemPaging, env.MemoryConcurrencyDirectory, env.Record)
+            Map("LD_LIBRARY_PATH" -> nativeDirectory.toString, env.TestMemoryProbeList -> "rpc_only"),
+            Set(env.SystemPagingOn, env.TestMemoryConcurrencyDir, env.RecordFile)
           ),
           20.seconds
         )

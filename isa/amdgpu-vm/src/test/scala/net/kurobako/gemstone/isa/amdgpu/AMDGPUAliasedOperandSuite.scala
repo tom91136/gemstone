@@ -15,7 +15,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * own instruction names, with the destination overlapping a source where the encoding allows. Bytes from LLVM 22
   * `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`.
   */
-class AMDGPUAliasedOperandSuite extends munit.FunSuite {
+class AMDGPUAliasedOperandSuite extends Suite {
   private val gfx900  = Target("gfx900")
   private val gfx950  = Target("gfx950")
   private val gfx1030 = Target("gfx1030")

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Using
 
-class ProgramExecutionConcurrencySuite extends munit.FunSuite {
+class ProgramExecutionConcurrencySuite extends Suite {
   test("concurrent loads of one code-object program isolate relocated globals") {
     val program = CodeObject.decode(Vec.unsafeWrapArray(minimalCodeObject(globalPointer = true))).value
     Using.resource(threads.Pool(4)) { pool =>

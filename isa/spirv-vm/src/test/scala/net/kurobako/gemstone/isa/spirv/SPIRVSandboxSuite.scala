@@ -4,10 +4,11 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.spirv.asm.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class SPIRVSandboxSuite extends munit.FunSuite {
+class SPIRVSandboxSuite extends Suite {
 
   private val branchModule =
     """OpCapability Addresses

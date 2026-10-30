@@ -4,9 +4,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class LogicSuite extends munit.FunSuite {
+class LogicSuite extends Suite {
   private def operand(text: String): Operand = asm.OperandParser.parse(text).value
 
   private val patterns = Vec(0, 1, 2, 3, 31, 32, 0x80000000, -1, 0x55555555, 0xaaaaaaaa)

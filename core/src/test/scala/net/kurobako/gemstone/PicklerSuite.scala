@@ -2,12 +2,13 @@ package net.kurobako.gemstone
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.pickler.given
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Try
 import upickle.default.ReadWriter
 import upickle.default.read
 import upickle.default.write
 
-class PicklerSuite extends munit.FunSuite {
+class PicklerSuite extends Suite {
   private case class Named(name: NonEmpty[String]) derives ReadWriter
   private case class Field(offset: Int >= 0, bits: Int in 1 ~ 64, scale: Double in 0.0 ~ 1.0) derives ReadWriter
   private case class PlainField(offset: Int, bits: Int, scale: Double) derives ReadWriter

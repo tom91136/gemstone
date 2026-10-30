@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
   * specifications: SPV_KHR_constant_data, SPV_EXT_replicated_composites, SPV_INTEL_long_composites,
   * SPV_EXT_long_vector, OpTypeOpaque, SPV_INTEL_unstructured_loop_controls, named barriers and SPV_EXT_split_barrier.
   */
-class ExtensionDeclarationSuite extends munit.FunSuite {
+class ExtensionDeclarationSuite extends Suite {
   private def kernel(capabilities: String, declarations: String, body: String, count: Int): Vec[Long] = {
     val module = spv"""
       $capabilities

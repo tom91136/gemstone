@@ -94,7 +94,7 @@ void Arena::destroy(const VkAllocationCallbacks *provided) noexcept {
   auto *block = blocks;
   while (block) {
     auto *next = block->next;
-    if (block->used && gemstone::environment::value(gemstone::environment::VulkanValidateAllocators)) {
+    if (block->used && gemstone::environment::enabled(gemstone::environment::VulkanValidateAllocatorsOn)) {
       std::fprintf(stderr, "Gemstone Vulkan: host storage outlived its allocator\n");
       std::abort();
     }

@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class CallExecutionSuite extends munit.FunSuite {
+class CallExecutionSuite extends Suite {
   for (width <- Vec(32, 64))
     test(s"predicated $width-bit calls permit uninitialised local return loads before lane broadcast") {
       val source = s""".version 6.0

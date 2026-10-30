@@ -8,9 +8,10 @@ import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
-class LaunchSuite extends munit.FunSuite {
+class LaunchSuite extends Suite {
   private val endpoint = Endpoint.Tcp("127.0.0.1", Port(43123))
   private val client   = ClientId(7L)
   private val root     = Path.of("/opt/gemstone")
@@ -69,7 +70,7 @@ class LaunchSuite extends munit.FunSuite {
     assertEquals(environment.set("OCL_ICD_VENDORS"), library(API.OpenCL).toString)
     assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), library(API.LevelZero).toString)
     assertEquals(environment.set(env.RpcEndpoint), s"$endpoint")
-    assertEquals(environment.set(env.RpcClient), s"$client")
+    assertEquals(environment.set(env.RpcClientId), s"$client")
   }
 
   test("Vulkan loader directory is absent when Vulkan is not selected") {
@@ -82,7 +83,7 @@ class LaunchSuite extends munit.FunSuite {
     val result = Launch.launch(
       selected(API.CUDA),
       root,
-      Map(env.ExecutionMaxInstructions -> "not-a-number")
+      Map(env.ExecutionMaxInstructionCount -> "not-a-number")
     )(_ => 0)
     assert(result.isLeft)
     assert(result.swap.exists(_.contains("invalid execution profile")))
@@ -105,10 +106,10 @@ class LaunchSuite extends munit.FunSuite {
   test("child receives an isolated client from a shared server") {
     Using.resource(Server.start(Server.Settings(parallelism = 2))) { server =>
       val result = Launch.launch(apis, directory, Map.empty, Some(server.endpoint)) { environment =>
-        val first  = environment.set(env.RpcClient)
+        val first  = environment.set(env.RpcClientId)
         val second = Launch.launch(apis, directory, Map.empty, Some(server.endpoint)) { other =>
           assertEquals(other.set(env.RpcEndpoint), server.endpoint.toString)
-          other.set(env.RpcClient)
+          other.set(env.RpcClientId)
         }
         first -> second
       }

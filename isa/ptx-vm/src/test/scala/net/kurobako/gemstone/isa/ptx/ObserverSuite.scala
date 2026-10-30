@@ -4,13 +4,14 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 import scala.util.Using
 
-class ObserverSuite extends munit.FunSuite {
+class ObserverSuite extends Suite {
   private val source = """.version 8.0
                          |.target sm_80
                          |.address_size 64

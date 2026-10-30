@@ -14,7 +14,7 @@ import net.kurobako.gemstone.vm.*
   * gfx1036 under the Linux 7.2 KFD behaves so: misaligned global, flat and DS atomics abort the queue with
   * HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION, and `s_load_dword` at offsets 1 and 6 reads the dwords at 0 and 4.
   */
-class AlignmentSuite extends munit.FunSuite {
+class AlignmentSuite extends Suite {
   private val targets = Vec(Target("gfx803"), Target("gfx90a"), Target("gfx942"), Target("gfx1100"), Target("gfx1201"))
   private val widths  = Vec[Int in (4, 8)](4, 8)
 

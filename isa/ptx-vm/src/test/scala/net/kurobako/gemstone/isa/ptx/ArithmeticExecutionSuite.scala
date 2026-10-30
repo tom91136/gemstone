@@ -5,8 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class ArithmeticExecutionSuite extends munit.FunSuite {
+class ArithmeticExecutionSuite extends Suite {
   private val convertedOffsets = Vec(0L, 4L, 8L)
 
   for (space <- Vec("const", "global"))

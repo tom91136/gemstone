@@ -11,6 +11,7 @@ constexpr size_t MemoryMapAlignment = 64;
 // Image resource address-space bounds are distinct from the RPC allocation limit.
 constexpr VkDeviceSize MaxImageResourceSize = VkDeviceSize{1} << 31;
 
+bool environmentAccepted();
 std::optional<uint32_t> configuredApiVersion();
 void fillProperties(VkPhysicalDeviceProperties *properties);
 void fillFeatures(VkPhysicalDeviceFeatures *features);

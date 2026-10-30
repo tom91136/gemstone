@@ -5,8 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class CountedBarrierSuite extends munit.FunSuite {
+class CountedBarrierSuite extends Suite {
   for ((count, peerMask, barrierId) <- Vec((64, 32, "mov.u32 %id, 0;"), (32, 1, "shr.u32 %id, %lane, 5;")))
     test(s"register barriers synchronise $count threads independently and reset for reuse") {
       val kernel = compileKernel(s""".version 8.0

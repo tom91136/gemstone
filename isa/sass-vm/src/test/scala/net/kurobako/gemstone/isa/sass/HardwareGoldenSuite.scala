@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.fixtures.HardwareGoldenFixtures.*
+import net.kurobako.gemstone.testing.Suite
 
-class HardwareGoldenSuite extends munit.FunSuite {
+class HardwareGoldenSuite extends Suite {
   import hardwareGolden.*
 
   private val Cuda   = Vec(35, 50, 61, 70, 89, 90)

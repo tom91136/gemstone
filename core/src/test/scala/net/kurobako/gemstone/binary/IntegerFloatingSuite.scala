@@ -3,9 +3,10 @@ package net.kurobako.gemstone.binary
 import java.math.BigDecimal
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Random
 
-class IntegerFloatingSuite extends munit.FunSuite {
+class IntegerFloatingSuite extends Suite {
   private val booleans          = Vec(false, true)
   private val widths            = Vec[Int in (32, 64)](32, 64)
   private val directedRoundings = IEEE754.Rounding.values.filterNot(_ == IEEE754.Rounding.NearestAway)

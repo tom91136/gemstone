@@ -5,8 +5,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class ClusterExecutionSuite extends munit.FunSuite {
+class ClusterExecutionSuite extends Suite {
   test("bulk stores repeat the byte mask in each 16-byte chunk and preserve other bytes") {
     val kernel = compileKernel(""".version 8.6
       |.target sm_100

@@ -3,12 +3,13 @@ package net.kurobako.gemstone.isa.ptx
 import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Instructions as nvcc 13.3 (`nvcc -O3 -arch=sm_XX -ptx`) and clang 22 (`clang++ -x cuda --cuda-gpu-arch=sm_XX -S
   * --cuda-device-only -O3`) emit them for ordinary CUDA C++ or through the CUDA and CCCL headers, each named after its
   * source, with the results the PTX ISA 13.3 specifies.
   */
-class EmittedInstructionSuite extends munit.FunSuite {
+class EmittedInstructionSuite extends Suite {
 
   /** The 64-bit words `body` stores from `%out` on, after running on one thread with `%in` addressing `inputs`. */
   private def run(registers: String, body: String, inputs: Vec[Long], outputs: Int, target: String = "sm_90")(using

@@ -4,11 +4,12 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 import scala.util.Using
 
-class GenerateSASSISASuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 120.seconds
+class GenerateSASSISASuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
 
   private def mask(offset: Int): String = "." * offset + "XXXX" + "." * (124 - offset)
   private val description               =

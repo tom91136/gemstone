@@ -8,6 +8,7 @@
 #include <aspartame/all.hpp>
 
 #include "conformance/device.hpp"
+#include "conformance/environment_keys.hpp"
 
 #include "device_selector.hpp"
 #include <fmt/format.h>
@@ -390,7 +391,7 @@ static DeviceSelection discoverPhysicalDevice() {
   const std::map<std::string, std::string> execution{{"CL_PLATFORM_INDEX", fmt::to_string(candidate.platformIndex)},
                                                      {"CL_DEVICE_INDEX", fmt::to_string(candidate.deviceIndex)},
                                                      {"CL_DEVICE_TYPE", candidate.typeName},
-                                                     {"CONFORMANCE_OPENCL_DEVICE_INDEX", fmt::to_string(candidate.flatDeviceIndex)}};
+                                                     {environment::OpenclDeviceIndex, fmt::to_string(candidate.flatDeviceIndex)}};
   const auto selection = [&](PhysicalDevice device) {
     return DeviceSelection{
         .device = device, .environment = execution, .nativeHandle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(candidate.device))};
@@ -460,7 +461,7 @@ static DeviceSelection discoverPhysicalDevice() {
                              : PhysicalDevice{.scheme = PhysicalDeviceScheme::Unknown, .value = {}});
   }
   const auto index = selectDevice(descriptions);
-  return {.device = identities[index], .environment = {{"CONFORMANCE_VULKAN_DEVICE_ID", fmt::to_string(index + 1)}}};
+  return {.device = identities[index], .environment = {{environment::VulkanDeviceId, fmt::to_string(index + 1)}}};
 #elif defined(CONFORMANCE_DEVICE_LEVELZERO)
   if (zeInit(0) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot initialise Level Zero");
   uint32_t driverCount = 0;
@@ -529,7 +530,7 @@ static DeviceSelection discoverPhysicalDevice() {
   const auto address = device.get_info<sycl::ext::intel::info::device::pci_address>();
   PciAddress pci;
   if (!parsePciAddress(address, pci)) throw std::runtime_error("invalid SYCL PCI identity: " + address);
-  if (const auto *expected = std::getenv("CONFORMANCE_PHYSICAL_DEVICE"); expected && *expected && devices.size() != 1)
+  if (const auto *expected = std::getenv(environment::PhysicalDeviceName); expected && *expected && devices.size() != 1)
     throw std::runtime_error("propagated SYCL selector did not isolate exactly one GPU");
   return {.device =
               makePciDevice(pci.domain, static_cast<uint8_t>(pci.bus), static_cast<uint8_t>(pci.slot), static_cast<uint8_t>(pci.function)),
@@ -542,7 +543,7 @@ static DeviceSelection discoverPhysicalDevice() {
 const DeviceSelection &deviceSelection() {
   static const auto selected = [] {
     auto result = discoverPhysicalDevice();
-    if (const auto *expected = std::getenv("CONFORMANCE_PHYSICAL_DEVICE");
+    if (const auto *expected = std::getenv(environment::PhysicalDeviceName);
         expected && *expected && physicalDeviceKey(result.device) != expected)
       throw std::runtime_error("execution device " + physicalDeviceKey(result.device) + " differs from locked/probed device " + expected);
     return result;

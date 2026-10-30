@@ -11,16 +11,16 @@
 
 TEST_CASE("HSA target and trace environment", "[hsa]") {
   {
-    const gemstone_test::Environment trace(gemstone::environment::Trace, nullptr);
+    const gemstone_test::Environment trace(gemstone::environment::TraceList, nullptr);
     REQUIRE((!gemstone::traceEnabled("hsa", "api")));
   }
   {
-    const gemstone_test::Environment trace(gemstone::environment::Trace, "hsa.api,hsa.packets");
+    const gemstone_test::Environment trace(gemstone::environment::TraceList, "hsa.api,hsa.packets");
     REQUIRE((gemstone::traceEnabled("hsa", "api")));
     REQUIRE((gemstone::traceEnabled("hsa", "packets")));
     REQUIRE((!gemstone::traceEnabled("hsa", "memory")));
   }
-  const gemstone_test::Environment trace(gemstone::environment::Trace, "all");
+  const gemstone_test::Environment trace(gemstone::environment::TraceList, "all");
   REQUIRE((gemstone::traceEnabled("hsa", "loaders")));
   const gemstone_test::Environment defaultTarget(gemstone::environment::TargetArch, nullptr);
   REQUIRE((std::strcmp(gemstone::hsa::targetArch(), "gfx900") == 0));

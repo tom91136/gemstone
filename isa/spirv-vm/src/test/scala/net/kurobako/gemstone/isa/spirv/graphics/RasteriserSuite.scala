@@ -10,7 +10,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class RasteriserSuite extends munit.FunSuite {
+class RasteriserSuite extends Suite {
   private val stencil = GraphicsStencil(
     fail = GraphicsStencilOp.Keep,
     pass = GraphicsStencilOp.Keep,

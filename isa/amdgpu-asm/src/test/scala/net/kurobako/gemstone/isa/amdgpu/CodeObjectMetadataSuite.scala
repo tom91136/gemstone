@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class CodeObjectMetadataSuite extends munit.FunSuite {
+class CodeObjectMetadataSuite extends Suite {
   test("decode the server-owned AMDGPU launch manifest") {
     val result = CodeObjectMetadata.decode(Vec.unsafeWrapArray(codeObject(hidden = false))).value
 

@@ -25,12 +25,12 @@
 #include "gemstone/hsa/doorbell_monitor.hpp"
 #include "gemstone/hsa/target.hpp"
 #include "gemstone_execution_rpc.hpp"
+#include <gemstone/environment.hpp>
 #include <gemstone/trace.hpp>
 
 #ifdef GEMSTONE_HSAKMT_TEST_SUPPORT
   #include <span>
 
-  #include <gemstone/environment.hpp>
   #include <gemstone/process.hpp>
 
   #include "hsakmt_test_support.hpp"
@@ -435,7 +435,7 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
   }
   if (!pending.empty() && !aql->installCodeObject(image, pending)) {
     const auto detail = aql->lastError();
-    if (const char *dump = gemstone::environment::value(gemstone::environment::HsaRejectedCodeObject); dump && dump[0] != '\0')
+    if (const char *dump = gemstone::environment::value(gemstone::environment::HsaRejectedCodeObjectFile); dump && dump[0] != '\0')
       (void)gemstone::writeFile(dump, image.data(), image.size());
     std::fprintf(stderr, "Gemstone rejected AMDGPU code object: %s\n", detail.c_str());
     return reject(detail.empty() ? "execution service rejected AMDGPU code object" : detail);
@@ -477,6 +477,7 @@ extern "C" HSAKMT_STATUS hsaKmtOpenKFD() {
     runtime.openCount = 0;
     return status;
   };
+  if (!gemstone::environment::accepted(gemstone::hsa::invalidEnvironment())) return reset(HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED);
   runtime.client = Client::fromEnvironment();
   runtime.runtime = AqlRuntime::fromEnvironment(std::make_unique<gemstone::hsa::RocrSignals>());
   if (!runtime.client || !runtime.runtime || !runtime.client->call(Ping{})) return reset(HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED);

@@ -4,10 +4,11 @@ import javax.annotation.processing.Generated
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import net.kurobako.gemstone.testing.Suite
 
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Regenerate with: sbt codegen
 @Generated(Array("sbt codegen"))
-class DocumentationSuite extends munit.FunSuite {
+class DocumentationSuite extends Suite {
   private val examples: Vec[(String, String)] = Vec(
     "integer-arithmetic-instructions-add" -> "@p  add.u32     x,y,z;",
     "integer-arithmetic-instructions-add" -> "add.sat.s32 c,c,1;",

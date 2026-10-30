@@ -6,8 +6,9 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class FmaRoundingSuite extends munit.FunSuite {
+class FmaRoundingSuite extends Suite {
   for (width <- Vec(32, 64)) test(s"fma.f$width rounds once in every directed mode") {
     val one      = if (width == 32) 0x3f800000L else 0x3ff0000000000000L
     val half     = if (width == 32) 0x3f000000L else 0x3fe0000000000000L

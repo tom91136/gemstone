@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.codegen
 
-class SASSInstructionModelSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class SASSInstructionModelSuite extends Suite {
   private def form(name: String, format: String, opcode: String): SASSDescription.InstructionClass = {
     val formatSection = SASSDescription.Section("FORMAT", format, Vector.empty)
     val opcodeSection = SASSDescription.Section(

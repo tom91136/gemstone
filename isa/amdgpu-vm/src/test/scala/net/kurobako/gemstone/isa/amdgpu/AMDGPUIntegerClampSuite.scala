@@ -8,7 +8,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class AMDGPUIntegerClampSuite extends munit.FunSuite {
+class AMDGPUIntegerClampSuite extends Suite {
   private val clamps = Seq(false, true)
 
   // Fixed LLVM gfx803 VOP3 encodings: v2, s[8:9], v3, v4, optionally s[10:11].

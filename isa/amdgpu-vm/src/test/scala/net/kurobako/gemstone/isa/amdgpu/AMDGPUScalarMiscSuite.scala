@@ -5,12 +5,13 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** SALU forms outside the common arithmetic: GFX12 signed sub-dword loads, which hipcc emits for a uniform
   * `signed char` (`s_load_i8 s0, s[0:1], s4 offset:0x0` under `--offload-arch=gfx1201`), EXEC writes, relative SGPR
   * moves and bit replication; each with its LLVM bytes from `llvm-mc -show-encoding`.
   */
-class AMDGPUScalarMiscSuite extends munit.FunSuite {
+class AMDGPUScalarMiscSuite extends Suite {
   import InstructionSource.*
 
   private val gfx1201 = Target("gfx1201")

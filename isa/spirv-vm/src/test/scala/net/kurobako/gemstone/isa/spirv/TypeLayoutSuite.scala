@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
 import scala.compiletime.testing.typeCheckErrors
 
 /** Layout queries address types by numeric ID, so these modules spell their IDs numerically. */
-class TypeLayoutSuite extends munit.FunSuite {
+class TypeLayoutSuite extends Suite {
   private def module(declarations: String)(using munit.Location): Module = assemble(s"$openCL\n$declarations")
 
   private def program(declarations: String)(using munit.Location): Program = load(module(declarations)).value

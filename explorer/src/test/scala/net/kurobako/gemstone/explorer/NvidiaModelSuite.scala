@@ -2,11 +2,12 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 
-class NvidiaModelSuite extends munit.FunSuite {
+class NvidiaModelSuite extends Suite {
   // the per-target sweeps lower every form of a catalogue
-  override val munitTimeout: Duration = 5.minutes
+  override def baseTimeout: FiniteDuration = 5.minutes
 
   private def entry(model: Model, target: Option[String], mnemonic: String): View.Entry =
     model.entries(target).find(_.mnemonic == mnemonic).getOrElse(fail(s"missing $mnemonic"))

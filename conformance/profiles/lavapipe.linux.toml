@@ -4,4 +4,4 @@
 name = "lavapipe-vulkan"
 backend = "vulkan"
 device = "*llvmpipe*"
-environment = { VK_LOADER_DRIVERS_SELECT = "*lvp*", CONFORMANCE_VULKAN_CTS_TIMEOUT = "7200" }
+environment = { VK_LOADER_DRIVERS_SELECT = "*lvp*", CONFORMANCE_VULKAN_CTS_TIMEOUT_SECONDS = "7200" }

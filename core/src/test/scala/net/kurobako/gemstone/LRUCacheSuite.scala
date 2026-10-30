@@ -3,8 +3,9 @@ package net.kurobako.gemstone
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class LRUCacheSuite extends munit.FunSuite {
+class LRUCacheSuite extends Suite {
   private class HashKey(val name: String, hash: () => Int) {
     override def hashCode(): Int             = hash()
     override def equals(other: Any): Boolean = other match {

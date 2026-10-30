@@ -14,7 +14,7 @@ import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 /** Socket-level isolation coverage shared by both server implementations. */
-class SharedServerSuite extends munit.FunSuite {
+class SharedServerSuite extends Suite {
 
   private def register(client: connections.Client, size: Long in 1L ~ 2147483647L): AllocationId =
     client.call(Operation.RegisterAllocation(size)).fold(

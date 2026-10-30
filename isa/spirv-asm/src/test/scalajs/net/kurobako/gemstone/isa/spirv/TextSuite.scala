@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.isa.spirv.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class TextSuite extends munit.FunSuite {
+class TextSuite extends Suite {
   test("SPIR-V text assembles to a binary that disassembles to the same text") {
     val source = """OpCapability Shader
                    |OpMemoryModel Logical GLSL450

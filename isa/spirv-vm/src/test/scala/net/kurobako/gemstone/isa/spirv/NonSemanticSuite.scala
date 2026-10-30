@@ -4,7 +4,7 @@ import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 
-class NonSemanticSuite extends munit.FunSuite {
+class NonSemanticSuite extends Suite {
 
   // clang -x cl -cl-std=CL1.2 -target spir64 -emit-llvm -fsigned-zeros -fno-slp-vectorize -g -c debug.cl, then
   // llvm-spirv --spirv-ext=+SPV_KHR_subgroup_rotate,+SPV_KHR_bit_instructions,+SPV_INTEL_subgroups,+SPV_KHR_linkonce_odr

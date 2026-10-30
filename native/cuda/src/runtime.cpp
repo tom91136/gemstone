@@ -252,7 +252,7 @@ std::optional<int> configuredPtxVersion() {
 }
 
 bool codeRequired(std::string_view mode) {
-  const char *value = gemstone::environment::value(gemstone::environment::CudaCode);
+  const char *value = gemstone::environment::value(gemstone::environment::CudaCodeMode);
   return value && mode == value;
 }
 
@@ -260,15 +260,12 @@ bool ptxCodeRequired() { return codeRequired("ptx"); }
 
 bool sassCodeRequired() { return codeRequired("sass"); }
 
-// An unknown mode must not silently admit both encodings.
-bool codeModeValid() {
-  const char *value = gemstone::environment::value(gemstone::environment::CudaCode);
-  if (!value || *value == '\0' || std::string_view(value) == "ptx" || std::string_view(value) == "sass") return true;
-  static std::once_flag reported;
-  std::call_once(reported, [value] {
-    std::fprintf(stderr, "Gemstone CUDA: %s must be ptx or sass, not %s\n", gemstone::environment::CudaCode, value);
-  });
-  return false;
+bool environmentAccepted() {
+  auto problem = gemstone::environment::invalid();
+  const char *target = gemstone::environment::value(gemstone::environment::TargetArch);
+  if (!problem && target && !configuredPtxVersion())
+    problem = gemstone::environment::rejected(gemstone::environment::TargetArch, target, "a compute_NN or sm_NN target");
+  return gemstone::environment::accepted(problem);
 }
 
 std::optional<std::pair<int, int>> computeCapability() {
@@ -570,7 +567,7 @@ Client *client = nullptr;
 
 CUresult executionReady() noexcept {
   if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
-  if (!codeModeValid()) return CUDA_ERROR_NOT_INITIALIZED;
+  if (!environmentAccepted()) return CUDA_ERROR_NOT_INITIALIZED;
   try {
     client = executionManager.ready() ? executionManager.client() : nullptr;
     return client ? CUDA_SUCCESS : CUDA_ERROR_NOT_INITIALIZED;
@@ -642,7 +639,7 @@ bool downloadVolume(const RemoteVolume &volume, void *bytes, size_t rowPitch, si
   }
 }
 
-bool systemPagingEnabled() { return gemstone::environment::enabled(gemstone::environment::SystemPaging); }
+bool systemPagingEnabled() { return gemstone::environment::enabled(gemstone::environment::SystemPagingOn); }
 
 std::mutex stateMutex;
 CUdeviceptr nextDeviceAddress = 0x0000400000000000;
@@ -3525,7 +3522,7 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrHostNativeAtomicSupported: *value = 1; break;
     case cudaDevAttrSingleToDoublePrecisionPerfRatio: *value = SingleToDoublePrecisionPerfRatio; break;
     // Managed, pinned and registered allocations share the native atomic path.
-    // Ordinary pageable memory is an experimental opt-in through GEMSTONE_SYSTEM_PAGING.
+    // Ordinary pageable memory is an experimental opt-in through GEMSTONE_SYSTEM_PAGING_ON.
     case cudaDevAttrPageableMemoryAccess: *value = 0; break;
     case cudaDevAttrConcurrentManagedAccess: *value = 1; break;
     case cudaDevAttrComputePreemptionSupported: *value = 1; break;

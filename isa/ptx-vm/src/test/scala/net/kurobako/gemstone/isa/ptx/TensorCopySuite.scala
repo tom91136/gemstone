@@ -7,9 +7,10 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
 // The kernels and expectations are TensorCopyCases', shared with the SASS suite that runs ptxas's output for them.
-class TensorCopySuite extends munit.FunSuite {
+class TensorCopySuite extends Suite {
   private def map(bytes: Array[Byte]): Argument = Argument(Vec.from(bytes).unsafe[NonEmpty[Vec[Byte]]])
 
   private def place(memory: DeviceMemory, at: Long, values: Vec[Long]): Unit =

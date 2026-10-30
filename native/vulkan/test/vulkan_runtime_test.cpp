@@ -746,7 +746,7 @@ TEST_CASE("Vulkan profiles select the reported device identity", "[vulkan][devic
       {"intel", "Intel Gemstone Vulkan GPU", 0x8086},
       {"llvmpipe", "llvmpipe (Gemstone Vulkan)", 0x10005},
   }));
-  const gemstone_test::Environment selected(gemstone::environment::Profile, profile);
+  const gemstone_test::Environment selected(gemstone::environment::ProfileName, profile);
   VkPhysicalDeviceProperties properties{};
   vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &properties);
   REQUIRE(properties.deviceName == name);
@@ -3475,7 +3475,7 @@ TEST_CASE("Vulkan occlusion query availability and partial results remain indepe
   }
   auto submit = submitInfo(commands[0]);
   REQUIRE(vkQueueSubmit(runtime.queue, 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
   while (vkGetEventStatus(runtime.device, entered) != VK_EVENT_SET && std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
   REQUIRE(vkGetEventStatus(runtime.device, entered) == VK_EVENT_SET);

@@ -19,7 +19,7 @@ import scala.collection.mutable
 import scala.util.Using
 
 /** Embedded gfx900 words shared by the JVM and Native tests. */
-class GlobalWorkerSuite extends munit.FunSuite {
+class GlobalWorkerSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   private val code = words(

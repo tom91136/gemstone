@@ -2,10 +2,11 @@ package net.kurobako.gemstone.codegen
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 
-class SASSConditionsSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 120.seconds
+class SASSConditionsSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
 
   import SASSConditions.*
 

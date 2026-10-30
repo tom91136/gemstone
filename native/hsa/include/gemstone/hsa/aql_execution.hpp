@@ -76,7 +76,7 @@ public:
  */
 class AqlRuntime {
 public:
-  /** Null when GEMSTONE_RPC_CLIENT does not name an execution service client. */
+  /** Null when GEMSTONE_RPC_CLIENT_ID does not name an execution service client. */
   static std::unique_ptr<AqlRuntime> fromEnvironment(std::unique_ptr<Signals> signals);
   ~AqlRuntime();
   AqlRuntime(const AqlRuntime &) = delete;

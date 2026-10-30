@@ -1,10 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Try
 import upickle.default.read
 
-class MetadataSuite extends munit.FunSuite {
+class MetadataSuite extends Suite {
   test("catalogue decoding validates interned strings at the JSON boundary") {
     def catalogue(text: String): ujson.Value = ujson.Obj(
       "strings"   -> ujson.Arr(text),

@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class InstructionSuite extends munit.FunSuite {
+class InstructionSuite extends Suite {
   private def minimum(shapes: Vec[OperandShape]): Vec[Word] =
     shapes.filter(_.quantifier == OperandQuantifier.One).flatMap(shape => minimum(shape.kind))
 

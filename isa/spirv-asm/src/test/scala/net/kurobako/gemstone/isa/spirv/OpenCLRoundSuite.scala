@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.spirv
 
-class OpenCLRoundSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class OpenCLRoundSuite extends Suite {
   private def bits(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)
 
   test("round is exact at the binary64 edges where adding one half is not") {

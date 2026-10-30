@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
-class FragmentDiscardSuite extends munit.FunSuite {
+class FragmentDiscardSuite extends Suite {
   // SPIR-V 3.3.17: OpTerminateInvocation stops the invocation as OpKill does
   private def discard(terminator: String) = s"""
     %discarded = OpLoad %float %in

@@ -7,7 +7,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
-class PipeSuite extends munit.FunSuite {
+class PipeSuite extends Suite {
   private val header =
     s"""OpCapability Pipes
        |OpCapability Groups

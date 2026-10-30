@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 
-class Bfloat16NaNSuite extends munit.FunSuite {
+class Bfloat16NaNSuite extends Suite {
   test("OpConvertFToBF16INTEL keeps NaN sign and leading payload, quieted") {
     val expected = Seq(
       0x7fc00000L -> 0x7fc0L,

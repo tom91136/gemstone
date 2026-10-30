@@ -18,6 +18,8 @@
 #include <aspartame/all.hpp>
 #include <glaze/toml.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 #include "environment.hpp"
 #include <fmt/format.h>
 
@@ -65,17 +67,17 @@ void validateCompiler(std::string_view backend, std::string_view compiler) {
   throw std::invalid_argument(fmt::format("unsupported compiler {} for backend {}", compiler, backend));
 }
 
-// CONFORMANCE_CUDA_CODE is the single CUDA code-mode setting; the driver JIT policy follows from it.
+// CONFORMANCE_CUDA_CODE_MODE is the single CUDA code-mode setting; the driver JIT policy follows from it.
 void applyCudaCode(ResolvedTarget &target) {
   if (target.backend != "cuda") return;
-  const auto code = [&] { return target.environment ^ get_maybe(std::string("CONFORMANCE_CUDA_CODE")); };
+  const auto code = [&] { return target.environment ^ get_maybe(std::string(environment::CudaCodeMode)); };
   if (target.compiler == "gcc") {
     if (code() ^ exists([](const std::string &mode) { return mode != "ptx"; }))
       throw std::invalid_argument("GCC CUDA offload requires PTX execution");
-    target.environment["CONFORMANCE_CUDA_CODE"] = "ptx";
+    target.environment[environment::CudaCodeMode] = "ptx";
   }
   code() ^ for_each([&](const std::string &mode) {
-    if (mode != "ptx" && mode != "sass") throw std::invalid_argument("CONFORMANCE_CUDA_CODE must be ptx or sass");
+    if (mode != "ptx" && mode != "sass") throw std::invalid_argument("CONFORMANCE_CUDA_CODE_MODE must be ptx or sass");
     const bool ptx = mode == "ptx";
     target.environment["CUDA_FORCE_PTX_JIT"] = ptx ? "1" : "0";
     target.environment["CUDA_DISABLE_PTX_JIT"] = ptx ? "0" : "1";
@@ -117,6 +119,8 @@ void validate(std::string_view name, const Profile &profile) {
         throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable for {}", name, target.backend));
       if (reservedEnvironmentKey(key))
         throw std::invalid_argument(fmt::format("machine profile environment must not define reserved variable: {}", key));
+      if (const auto problem = invalidSuiteSetting(key, value))
+        throw std::invalid_argument(fmt::format("machine profile {}: {}", name, *problem));
     }
     validateSkips(name, "target " + id, target.skips);
   }
@@ -130,6 +134,8 @@ void validate(std::string_view name, const Profile &profile) {
       throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable", name));
     if (reservedEnvironmentKey(key))
       throw std::invalid_argument(fmt::format("machine profile environment must not define reserved variable: {}", key));
+    if (const auto problem = invalidSuiteSetting(key, value))
+      throw std::invalid_argument(fmt::format("machine profile {}: {}", name, *problem));
   }
   validateSkips(name, "global", profile.skips);
 }
@@ -194,7 +200,7 @@ std::vector<ResolvedTarget> resolveTargets(const Profile &profile, const std::ve
                                    .compiler = target.compiler};
            target.environment ^ for_each([&](const std::string &key, const std::string &value) { resolved.environment[key] = value; });
            applyCudaCode(resolved);
-           resolved.environment["CONFORMANCE_DEVICE"] = target.device.value_or("");
+           resolved.environment[environment::DevicePattern] = target.device.value_or("");
            return resolved;
          })
          | to_vector();
@@ -228,7 +234,7 @@ std::vector<ResolvedTarget> directTargets(const std::vector<std::string> &routes
         append({.id = fmt::format("{}-{}{}", name, *arch, suffix),
                 .backend = backend,
                 .architecture = arch,
-                .environment = {{"CONFORMANCE_CUDA_CODE", mode}},
+                .environment = {{environment::CudaCodeMode, mode}},
                 .skips = {},
                 .compiler = compiler});
       }

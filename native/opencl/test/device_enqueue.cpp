@@ -111,7 +111,7 @@ TEST_CASE("OpenCL advertises device-side enqueue with the required limits", "[op
 }
 
 TEST_CASE("OpenCL reports device-side enqueue as unsupported without a SPIR-V translator", "[opencl][device-enqueue]") {
-  const gemstone_test::Environment translator(gemstone::environment::OpenclLlvmSpirv, "none");
+  const gemstone_test::Environment translator(gemstone::environment::OpenclLlvmSpirvExe, "none");
   Session session;
   auto *const device = session.device;
   CHECK(info<cl_device_device_enqueue_capabilities>(device, CL_DEVICE_DEVICE_ENQUEUE_CAPABILITIES) == 0);

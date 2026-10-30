@@ -3,9 +3,14 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.testing.Suite
 import scala.collection.mutable
+import scala.concurrent.duration.*
 
-class SassDomainSuite extends munit.FunSuite {
+class SassDomainSuite extends Suite {
+  // walks the operand domains of every distinct SASS table
+  override def baseTimeout: FiniteDuration = 60.seconds
+
   private val tables: Vec[Target] = Vec.from(
     (35 to 130).flatMap(sm => Target.parse(sm.toString).toOption).groupBy(_.database.digest).values.map(_.minBy(_.sm))
       .toVector.sortBy(_.sm.raw)

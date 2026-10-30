@@ -30,31 +30,44 @@ TEST_CASE("environment integers reject overflow, signs and trailing text", "[rpc
     CHECK_FALSE(positiveInteger(raw).has_value());
   CHECK(positiveInteger("00017") == 17);
   CHECK(positiveInteger("18446744073709551615") == std::numeric_limits<uint64_t>::max());
-  Override limit(OpenclMaxMemAllocSize);
-  CHECK(unsignedValue(OpenclMaxMemAllocSize, 7, 19) == 7);
+  Override limit(RpcTimeoutSeconds);
+  CHECK(unsignedValue(RpcTimeoutSeconds, 7, 19) == 7);
   limit.set("19");
-  CHECK(unsignedValue(OpenclMaxMemAllocSize, 7, 19) == 19);
+  CHECK(unsignedValue(RpcTimeoutSeconds, 7, 19) == 19);
   limit.set("20");
-  CHECK(unsignedValue(OpenclMaxMemAllocSize, 7, 19) == 7);
+  CHECK(unsignedValue(RpcTimeoutSeconds, 7, 19) == 7);
 }
 
-TEST_CASE("paging honours false and malformed values instead of presence", "[rpc]") {
-  Override paging(SystemPaging);
-  CHECK_FALSE(enabled(SystemPaging));
-  for (const auto *raw : {"1", "true", "TRUE", "On"}) {
+TEST_CASE("booleans take CMake truth values and reject anything else", "[rpc]") {
+  Override paging(SystemPagingOn);
+  CHECK_FALSE(enabled(SystemPagingOn));
+  CHECK_FALSE(invalid());
+  for (const auto *raw : {"1", "true", "TRUE", "On", "y", "Yes"}) {
     paging.set(raw);
-    CHECK(enabled(SystemPaging));
+    CHECK(enabled(SystemPagingOn));
+    CHECK_FALSE(invalid());
   }
-  for (const auto *raw : {"0", "false", "FALSE", "Off"}) {
+  for (const auto *raw : {"0", "false", "FALSE", "Off", "n", "NO"}) {
     paging.set(raw);
-    CHECK_FALSE(enabled(SystemPaging, true));
+    CHECK_FALSE(enabled(SystemPagingOn));
+    CHECK_FALSE(invalid());
   }
-  for (const auto *raw : {"", "2", "yes", " true", "false "}) {
+  paging.set("");
+  CHECK_FALSE(present(SystemPagingOn));
+  CHECK_FALSE(invalid());
+  for (const auto *raw : {"2", "enabled", " true", "false "}) {
     paging.set(raw);
     CHECK_FALSE(boolean(raw).has_value());
-    CHECK_FALSE(enabled(SystemPaging));
-    CHECK(enabled(SystemPaging, true));
+    CHECK(invalid().value_or("").starts_with(SystemPagingOn));
   }
+}
+
+TEST_CASE("enumerated settings reject unknown choices", "[rpc]") {
+  Override mode(CudaCodeMode);
+  mode.set("ptx");
+  CHECK_FALSE(invalid());
+  mode.set("cubin");
+  CHECK(invalid() == "GEMSTONE_CUDA_CODE_MODE must be one of ptx sass, not 'cubin'");
 }
 
 TEST_CASE("HSA paging inherits RPC timeout and independently validates overrides", "[rpc]") {
@@ -67,16 +80,18 @@ TEST_CASE("HSA paging inherits RPC timeout and independently validates overrides
   CHECK(hsaPagingTimeoutSeconds() == 7);
   hsa.set("13");
   CHECK(hsaPagingTimeoutSeconds() == 13);
+  CHECK_FALSE(invalid());
   for (const auto *raw : {"0", "-1", "+1", "1 ", "2147484", "18446744073709551616"}) {
     hsa.set(raw);
-    CHECK(hsaPagingTimeoutSeconds() == 7);
+    CHECK(invalid().value_or("").starts_with(HsaPagingTimeoutSeconds));
   }
+  hsa.set(nullptr);
   rpc.set("2147484"); // First second count that overflows a signed 32-bit millisecond timeout.
-  CHECK(std::cmp_equal(rpcTimeoutSeconds(), RpcTimeoutSecondsDefault));
+  CHECK(invalid().value_or("").starts_with(RpcTimeoutSeconds));
 }
 
 TEST_CASE("trace scopes and categories match exactly", "[rpc]") {
-  Override trace(Trace);
+  Override trace(TraceList);
   CHECK_FALSE(gemstone::traceEnabled("rpc", "memory"));
   for (const auto *raw : {"all", "rpc", "rpc.memory", "cuda, \trpc.memory\t ,perf"}) {
     trace.set(raw);
@@ -91,7 +106,7 @@ TEST_CASE("trace scopes and categories match exactly", "[rpc]") {
 }
 
 TEST_CASE("RPC client environment rejects invalid signed identities", "[rpc]") {
-  Override client(RpcClient);
+  Override client(RpcClientId);
   for (const auto *raw : {"", "0", "-1", "+1", " 1", "1 ", "9223372036854775808", "18446744073709551616"}) {
     client.set(raw);
     CHECK_FALSE(gemstone::execution::Client::fromEnvironment());

@@ -260,7 +260,7 @@ if(architecture)
   if(CONFORMANCE_OUTPUT STREQUAL "both")
     file(REMOVE_RECURSE "${support}")
     execute_process(
-      COMMAND "${CMAKE_COMMAND}" -E env "CONFORMANCE_RUNTIME_INPUT=${overlay}"
+      COMMAND "${CMAKE_COMMAND}" -E env "CONFORMANCE_RUNTIME_INPUT_DIR=${overlay}"
         "${CMAKE_COMMAND}" --install "${build}"
         --component support --prefix "${support}" --strip
       COMMAND_ERROR_IS_FATAL ANY)
@@ -281,7 +281,7 @@ else()
       --component architecture --prefix "${artifact}" --strip
     COMMAND_ERROR_IS_FATAL ANY)
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "CONFORMANCE_RUNTIME_INPUT=${artifact}"
+    COMMAND "${CMAKE_COMMAND}" -E env "CONFORMANCE_RUNTIME_INPUT_DIR=${artifact}"
       "${CMAKE_COMMAND}" --install "${build}"
       --component support --prefix "${artifact}" --strip
     COMMAND_ERROR_IS_FATAL ANY)

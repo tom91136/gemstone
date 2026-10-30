@@ -10,16 +10,16 @@ import scala.concurrent.duration.*
 
 object NvidiaFixtureProcess {
   private def compilerEnvironment(ptxas: String): (String, String) = ptxas match {
-    case "11.8.89" => env.Cuda11889 -> env.Cuda11889Image
-    case "13.3.33" => env.Cuda13333 -> env.Cuda13333Image
-    case "13.3.73" => env.Cuda13373 -> env.Cuda13373Image
+    case "11.8.89" => env.FixtureCuda11889Dir -> env.FixtureCuda11889Image
+    case "13.3.33" => env.FixtureCuda13333Dir -> env.FixtureCuda13333Image
+    case "13.3.73" => env.FixtureCuda13373Dir -> env.FixtureCuda13373Image
     case other     => throw IllegalArgumentException(s"Unregistered CUDA fixture version: $other")
   }
 
   private def disassemblerEnvironment(nvdisasm: String): String = nvdisasm match {
-    case "11.8.86" => env.Nvdisasm11886
-    case "13.2.78" => env.Nvdisasm13278
-    case "13.3.73" => env.Nvdisasm13373
+    case "11.8.86" => env.FixtureNvdisasm11886Exe
+    case "13.2.78" => env.FixtureNvdisasm13278Exe
+    case "13.3.73" => env.FixtureNvdisasm13373Exe
     case other     => throw IllegalArgumentException(s"Unregistered nvdisasm fixture version: $other")
   }
 

@@ -2,8 +2,9 @@ package net.kurobako.gemstone.text
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class DelimitedSuite extends munit.FunSuite {
+class DelimitedSuite extends Suite {
   private def split(text: String, separator: Char = ',') =
     Delimited.splitTopLevel(text, _ == separator).map(_.map(segment => segment.offset.raw -> segment.text))
 

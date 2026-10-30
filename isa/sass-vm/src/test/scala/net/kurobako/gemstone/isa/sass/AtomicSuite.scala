@@ -1,12 +1,13 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Atomics as ptxas 13.3 emits them for atomicAdd on __half2 and __nv_bfloat162, atomicMin and atomicCAS through
   * generic pointers, and the compare-and-store loops of the bfloat16 and shared fallbacks
   * (conformance/unified/src/cuda/half_atomics.cu): a generic ATOM or RED acts on the window its address falls in.
   */
-class AtomicSuite extends munit.FunSuite {
+class AtomicSuite extends Suite {
   import Harness.*
 
   /** Zeroes four shared words but the third, all ones; runs `body` on 32 lanes; lanes 0 to 3 then store one word each.

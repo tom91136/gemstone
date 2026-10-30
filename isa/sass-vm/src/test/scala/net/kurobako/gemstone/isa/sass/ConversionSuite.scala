@@ -7,9 +7,10 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class ConversionSuite extends munit.FunSuite {
+class ConversionSuite extends Suite {
   private def opcode(instruction: DecodedInstruction, name: String, modifiers: String*): Boolean =
     instruction.mnemonic.raw == name && instruction.modifiers.map(_.name) == Vec.from(modifiers)
 

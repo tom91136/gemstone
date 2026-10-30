@@ -4,13 +4,14 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
 /** The Maxwell and Pascal forms ptxas (CUDA 11.8, `ptxas -arch=sm_50`) gives the scalar video instructions, saturating
   * high multiplies and generic atomics of conformance/unified/src/cuda/video.cu and half_atomics.cu, with the PTX ISA
   * 13.3 results of the PTX they come from.
   */
-class LegacyVideoSuite extends munit.FunSuite {
+class LegacyVideoSuite extends Suite {
   import Harness.*
 
   private val a = 0x807f80ffL

@@ -330,6 +330,9 @@ template <hsa_region_global_flag_t Flag> hsa_status_t findRegion(hsa_region_t re
   return HSA_STATUS_INFO_BREAK;
 }
 
+// property queries answer without initialising, so they check the environment hsa_init would
+bool environmentAccepted() { return gemstone::environment::accepted(gemstone::hsa::invalidEnvironment()); }
+
 bool ensureInitialised() {
   (void)commands();
   auto &runtime = state();
@@ -1019,6 +1022,7 @@ extern "C" hipError_t hipFreeAsync(void *pointer, hipStream_t stream) {
 extern "C" hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t) { return remember(!pool ? hipErrorInvalidValue : hipSuccess); }
 
 extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t attribute, int device) {
+  if (!environmentAccepted()) return remember(hipErrorNotInitialized);
   if (!value || device != 0) return remember(hipErrorInvalidValue);
   switch (attribute) {
     case hipDeviceAttributeMaxThreadsPerBlock:
@@ -1040,7 +1044,7 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeManagedMemory:
     case hipDeviceAttributeCooperativeLaunch: *value = 1; break;
     case hipDeviceAttributePageableMemoryAccess:
-      *value = gemstone::environment::enabled(gemstone::environment::SystemPaging) ? 1 : 0;
+      *value = gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? 1 : 0;
       break;
     default: *value = 0; break;
   }
@@ -1048,6 +1052,7 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
 }
 
 extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properties, int device) {
+  if (!environmentAccepted()) return remember(hipErrorNotInitialized);
   if (!properties || device != 0) return remember(hipErrorInvalidValue);
   std::memset(properties, 0, sizeof(*properties));
   const std::string target = gemstone::hsa::targetArch();
@@ -1076,7 +1081,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->managedMemory = 1;
   properties->hostNativeAtomicSupported = 1;
   properties->concurrentManagedAccess = 1;
-  properties->pageableMemoryAccess = gemstone::environment::enabled(gemstone::environment::SystemPaging) ? 1 : 0;
+  properties->pageableMemoryAccess = gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? 1 : 0;
   return remember(hipSuccess);
 }
 
@@ -1117,6 +1122,7 @@ static_assert(PageableMemoryAccess + sizeof(int) <= Size, "legacy layout out of 
 #undef hipGetDeviceProperties
 extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *properties, int device) {
   using namespace legacy_properties;
+  if (!environmentAccepted()) return remember(hipErrorNotInitialized);
   if (!properties || device != 0) return remember(hipErrorInvalidValue);
   if (sizeof(size_t) != 8) return remember(hipErrorNotSupported);
   auto *bytes = static_cast<unsigned char *>(properties);
@@ -1146,7 +1152,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   write(CooperativeLaunch, 1);
   write(ManagedMemory, 1);
   write(ConcurrentManagedAccess, 1);
-  write(PageableMemoryAccess, (gemstone::environment::enabled(gemstone::environment::SystemPaging) ? 1 : 0));
+  write(PageableMemoryAccess, (gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? 1 : 0));
   return remember(hipSuccess);
 }
 

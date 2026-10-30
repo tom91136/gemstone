@@ -5,10 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.ptx.asm.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.text.*
 import scala.collection.mutable
 
-class ParserSuite extends munit.FunSuite {
+class ParserSuite extends Suite {
   private def roundTrip(source: String): Program = {
     val parsed = Parser.parse(source).fold(error => fail(error.toString), identity)
     assertEquals(Parser.parse(Printer.render(parsed)), Right(parsed))

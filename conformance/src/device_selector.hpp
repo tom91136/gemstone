@@ -10,6 +10,8 @@
 
 #include <aspartame/all.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 #include <fmt/format.h>
 
 namespace conformance {
@@ -22,7 +24,7 @@ inline bool globMatches(std::string_view pattern, std::string_view value) {
 inline size_t selectDevice(const std::vector<std::string> &descriptions) {
   using namespace aspartame;
   if (descriptions.empty()) throw std::runtime_error("no GPU devices were discovered");
-  const char *configured = std::getenv("CONFORMANCE_DEVICE");
+  const char *configured = std::getenv(environment::DevicePattern);
   if (!configured || !*configured) return 0;
   const auto matches = descriptions ^ zip_with_index()
                        ^ filter([&](const std::string &description, size_t) { return globMatches(configured, description); });

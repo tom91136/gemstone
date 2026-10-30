@@ -9,7 +9,7 @@ import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class DecoderSuite extends munit.FunSuite {
+class DecoderSuite extends Suite {
   private def reference(name: String): Expression = Expression.Reference(name, None, relaxed = false)
   private def form(name: String, fields: Vec[NVDisasm.Assignment]): NVDisasm.Form = NVDisasm.Form(
     name,

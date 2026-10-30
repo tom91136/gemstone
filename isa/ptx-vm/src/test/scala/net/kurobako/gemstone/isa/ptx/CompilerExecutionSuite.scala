@@ -6,8 +6,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class CompilerExecutionSuite extends munit.FunSuite {
+class CompilerExecutionSuite extends Suite {
   private def scalar32(value: Int): Argument = Argument(LittleEndian.toVec(value.toLong, 4).unsafe)
 
   test("compiler SAXPY PTX executes float multiply-add for each lane") {

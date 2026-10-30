@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <string_view>
 
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/environment.hpp>
@@ -15,6 +16,8 @@
 #include "graphics_state.hpp"
 
 namespace gemstone::vulkan {
+bool environmentAccepted() { return gemstone::environment::accepted(gemstone::environment::invalid()); }
+
 std::optional<uint32_t> configuredApiVersion() {
   const char *value = gemstone::environment::value(gemstone::environment::VulkanApiVersion);
   if (!value || std::strcmp(value, "1.2") == 0) return VK_API_VERSION_1_2;
@@ -31,17 +34,20 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   properties->deviceID = 1;
   properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU;
   const char *name = "Gemstone Vulkan Compute Device";
-  if (const char *profile = std::getenv(gemstone::environment::Profile)) {
-    if (std::strcmp(profile, "amd") == 0) {
+  if (const char *raw = gemstone::environment::value(gemstone::environment::ProfileName)) {
+    // a rusticl profile names the Mesa driver, whose Vulkan side reports the same vendor
+    std::string_view profile(raw);
+    if (profile.starts_with("rusticl-")) profile.remove_prefix(std::string_view("rusticl-").size());
+    if (profile == "amd") {
       name = "AMD Gemstone Vulkan GPU";
       properties->vendorID = 0x1002;
-    } else if (std::strcmp(profile, "nvidia") == 0) {
+    } else if (profile == "nvidia") {
       name = "NVIDIA Gemstone Vulkan GPU";
       properties->vendorID = 0x10de;
-    } else if (std::strcmp(profile, "intel") == 0) {
+    } else if (profile == "intel") {
       name = "Intel Gemstone Vulkan GPU";
       properties->vendorID = 0x8086;
-    } else if (std::strcmp(profile, "llvmpipe") == 0) {
+    } else if (profile == "llvmpipe") {
       name = "llvmpipe (Gemstone Vulkan)";
       properties->vendorID = 0x10005;
     }

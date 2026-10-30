@@ -25,7 +25,7 @@ on:
 permissions:
   contents: read
 env:
-  CONTAINER_EXECUTABLE: docker
+  GEMSTONE_CONTAINER_EXE: docker
   # small is the soraws-uk hardware (CUDA sm_89, gfx1030, OpenCL, SYCL, Level Zero); complete is every CUDA and GFX target
   CONFORMANCE_TARGET_SET: ${{ inputs.conformance == 'small' && 'default' || 'complete' }}
   CONFORMANCE_WORKLOAD: ${{ inputs.conformance == 'small' && 'compact' || 'full' }}
@@ -63,7 +63,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential \
-            cmake liblz4-dev libzstd-dev zlib1g-dev python3 spirv-tools unzip xz-utils zstd
+            cmake libgc-dev liblz4-dev libzstd-dev zlib1g-dev python3 spirv-tools unzip xz-utils zstd
           tools=~/.local/tools
           if [ ! -x "$tools/bin/make" ] || [ ! -x "$tools/bin/ninja" ]; then
             curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz | tar -xz -C "$RUNNER_TEMP"
@@ -229,12 +229,12 @@ jobs:
       - name: Conformance artifacts
         if: ${{ !cancelled() }}
         env:
-          CONFORMANCE_SHARD_ROUTES: ${{ matrix.routes }}
+          CONFORMANCE_SHARD_ROUTE_LIST: ${{ matrix.routes }}
           SPLIT: ${{ matrix.split }}
         run: |
           [ -z "$SPLIT" ] || export "${SPLIT?}"
           mkdir -p target/conformance/artifacts
-          sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_SHARD_ROUTES"
+          sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_SHARD_ROUTE_LIST"
       # every job populates the same dependency set, so one of them saves it
       - name: Download cache contents
         id: downloads
@@ -322,7 +322,7 @@ jobs:
       matrix:
         platform: [JVM, JS, Native]
     env:
-      GEMSTONE_OFFLINE: 1
+      GEMSTONE_OFFLINE_ON: 1
     steps:
       - *checkout
       - *java
@@ -351,7 +351,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      GEMSTONE_OFFLINE: 1
+      GEMSTONE_OFFLINE_ON: 1
     steps:
       - *checkout
       - *java
@@ -412,8 +412,8 @@ jobs:
       matrix:
         isa: [PTX, SASS, SASSHopper, SASSBlackwell, AMDGPU, AMDGPUMatrix, AMDGPUResource, SPIRV]
     env:
-      GEMSTONE_OFFLINE: 1
-      GEMSTONE_EXECUTION_PARALLELISM: 2
+      GEMSTONE_OFFLINE_ON: 1
+      GEMSTONE_EXECUTION_THREAD_COUNT: 2
     steps:
       - *checkout
       - *java
@@ -433,7 +433,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.shards.outputs.run) }}
     env:
-      GEMSTONE_OFFLINE: 1
+      GEMSTONE_OFFLINE_ON: 1
       CONFORMANCE_CASE_SHARD: ${{ matrix.cases }}
     steps:
       - *free-disk

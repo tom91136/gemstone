@@ -7,12 +7,14 @@
 #include "scoped_environment.hpp"
 
 #define UNIFIED_API_CUDA 1
+#include <conformance/environment_keys.hpp>
+
 #include "../unified/src/memory_files.hpp"
 
 TEST_CASE("CUDA embedded images default to PTX and honour explicit code modes", "[cuda-images]") {
   for (const char *mode : std::array<const char *, 3>{nullptr, "ptx", "sass"}) {
     CAPTURE(mode ? mode : "unset");
-    const conformance_test::Environment code("CONFORMANCE_CUDA_CODE", mode);
+    const conformance_test::Environment code(conformance::environment::CudaCodeMode, mode);
     const bool sass = mode && std::string_view(mode) == "sass";
     const auto expected = [sass](const auto &ptx, const auto &binary) {
       const auto &selected = sass ? binary : ptx;

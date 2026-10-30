@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 
-class ProgramTraversalSuite extends munit.FunSuite {
+class ProgramTraversalSuite extends Suite {
   private val program = Parser.parse(
     """.version 8.0
       |.target sm_80

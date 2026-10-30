@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
-class GroupAsyncCopySuite extends munit.FunSuite {
+class GroupAsyncCopySuite extends Suite {
   private final val Count = 4
   private val sentinel    = 0xffffffffL
 

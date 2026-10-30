@@ -4,6 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** The matrix core under MODE (MI300 ISA, 7.1 and 7.3): MFMA has no CLAMP field, so MODE.FP16_OVFL clamps it, an
   * overflowing f32 result saturating to the largest finite magnitude while infinite operands keep their infinities, and
@@ -12,7 +13,7 @@ import net.kurobako.gemstone.constraint.*
   * -show-encoding` for `v_mfma_f32_4x4x1_16b_f32 v[4:7], v2, v3, v[4:7]` and `v_mfma_i32_4x4x4_16b_i8 v[4:7], v2, v3,
   * v[4:7]`.
   */
-class AMDGPUMatrixModeSuite extends munit.FunSuite {
+class AMDGPUMatrixModeSuite extends Suite {
   private val target = Target("gfx942")
   private val single = Vec(0x04, 0x00, 0xc2, 0xd3, 0x02, 0x07, 0x12, 0x04)
   private val bytes  = Vec(0x04, 0x00, 0xd2, 0xd3, 0x02, 0x07, 0x12, 0x04)

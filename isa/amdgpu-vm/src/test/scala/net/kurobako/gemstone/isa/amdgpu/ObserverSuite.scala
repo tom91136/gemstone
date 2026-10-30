@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-class ObserverSuite extends munit.FunSuite {
+class ObserverSuite extends Suite {
   private val operations = Vec(
     Instruction.SMove(5, InstructionSource.Constant(42L)),
     Instruction.Wait,

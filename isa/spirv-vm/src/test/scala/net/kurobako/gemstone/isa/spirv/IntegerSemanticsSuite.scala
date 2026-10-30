@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class IntegerSemanticsSuite extends munit.FunSuite {
+class IntegerSemanticsSuite extends Suite {
   private def ref(id: Int): Operand = Operand(OperandKind.IdRef, Vec.nonEmpty(Word(id)))
 
   private val u32 = Shape.Scalar(Type.unsigned(32))

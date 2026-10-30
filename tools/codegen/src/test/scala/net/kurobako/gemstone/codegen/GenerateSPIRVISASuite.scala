@@ -2,8 +2,9 @@ package net.kurobako.gemstone.codegen
 
 import java.nio.file.Files
 import java.nio.file.Path
+import net.kurobako.gemstone.testing.Suite
 
-class GenerateSPIRVISASuite extends munit.FunSuite {
+class GenerateSPIRVISASuite extends Suite {
   private val grammar  = """{
     "magic_number":"0x07230203", "major_version":1,"minor_version":6,"revision":1,
     "instructions":[

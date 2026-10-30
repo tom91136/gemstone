@@ -6,9 +6,10 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 
-class IntegerMultiplySuite extends munit.FunSuite {
+class IntegerMultiplySuite extends Suite {
   private val XmadCases = Vec(
     (0x8001ffffL, 0xffff8001L, 0xffff0003L),
     (0x1234abcdL, 0x5678fedcL, 0x76543210L),

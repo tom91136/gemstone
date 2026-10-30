@@ -22,7 +22,7 @@ import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.util.Using
 
-class SPIRVProgramExecutorSuite extends munit.FunSuite {
+class SPIRVProgramExecutorSuite extends Suite {
   private val Booleans = Vec(false, true)
 
   private val encoding = ProgramEncoding.SPIRVOpenCLCompute

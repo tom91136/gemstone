@@ -5,10 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.Suite
 import scala.concurrent.duration.*
 
-class HostMemoryMirrorSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 120.seconds
+class HostMemoryMirrorSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
 
   private def at(address: Long): GuestAddress = GuestAddress(address)
 

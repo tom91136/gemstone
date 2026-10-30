@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-class VMMemoryConcurrencySuite extends munit.FunSuite {
+class VMMemoryConcurrencySuite extends Suite {
   private def storage(memory: AddressSpace, globals: Array[Byte]): VMMemory.Storage =
     VMMemory.Storage(memory, Vec.empty, globals, _ => Right(()))
 

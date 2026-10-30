@@ -2,12 +2,13 @@ package net.kurobako.gemstone.isa.spirv
 
 import fixtures.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-class ReplaySuite extends munit.FunSuite {
+class ReplaySuite extends Suite {
   private val image = ISA.encode(spv"""
     $openCL
     OpEntryPoint Kernel %main "squares" %gid

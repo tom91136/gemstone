@@ -3,6 +3,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/environment.hpp>
@@ -14,7 +15,7 @@ namespace gemstone::execution {
 enum class ClientMode { Disabled, Ready, Misconfigured };
 
 /** Lazily connects one facade process to the execution service. The service
- * location comes from `GEMSTONE_RPC_CLIENT`/`GEMSTONE_RPC_ENDPOINT`; a `Ping`
+ * location comes from `GEMSTONE_RPC_CLIENT_ID`/`GEMSTONE_RPC_ENDPOINT`; a `Ping`
  * handshake confirms the transport before the connection is published as ready.
  */
 class ClientManager {
@@ -41,20 +42,23 @@ public:
 private:
   void ensure() {
     std::call_once(initialised, [this] {
-      const char *endpoint = environment::value(environment::RpcEndpoint);
-      const char *client = environment::value(environment::RpcClient);
-      const bool hasEndpoint = endpoint && endpoint[0] != '\0';
-      const bool hasClient = client && client[0] != '\0';
-      if (!hasEndpoint && !hasClient) return;
-      if (!hasEndpoint || !hasClient) {
+      if (auto problem = environment::invalid()) {
         state = ClientMode::Misconfigured;
-        failure = std::string(environment::RpcEndpoint) + " and " + environment::RpcClient + " must be set together";
+        failure = std::move(*problem);
+        return;
+      }
+      const char *endpoint = environment::value(environment::RpcEndpoint);
+      const char *client = environment::value(environment::RpcClientId);
+      if (!endpoint && !client) return;
+      if (!endpoint || !client) {
+        state = ClientMode::Misconfigured;
+        failure = std::string(environment::RpcEndpoint) + " and " + environment::RpcClientId + " must be set together";
         return;
       }
       instance = Client::fromEnvironment();
       if (!instance) {
         state = ClientMode::Misconfigured;
-        failure = std::string(environment::RpcClient) + " must be a positive signed 64-bit integer";
+        failure = std::string(environment::RpcClientId) + " must be a positive signed 64-bit integer";
         return;
       }
       if (!instance->call(Ping{})) {

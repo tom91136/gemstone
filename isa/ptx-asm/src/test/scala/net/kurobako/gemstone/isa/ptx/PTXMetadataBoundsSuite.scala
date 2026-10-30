@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.ptx
 
-class PTXMetadataBoundsSuite extends munit.FunSuite {
+import net.kurobako.gemstone.testing.Suite
+
+class PTXMetadataBoundsSuite extends Suite {
   test("generated metadata stays within the declared modifier target and form bounds") {
     for {
       definition     <- Instruction.definitions

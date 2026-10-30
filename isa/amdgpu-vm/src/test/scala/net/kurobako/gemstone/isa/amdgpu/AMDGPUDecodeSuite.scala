@@ -6,9 +6,10 @@ import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
-class AMDGPUDecodeSuite extends munit.FunSuite {
+class AMDGPUDecodeSuite extends Suite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   test("scalar ALU operations decode their operation and operands") {

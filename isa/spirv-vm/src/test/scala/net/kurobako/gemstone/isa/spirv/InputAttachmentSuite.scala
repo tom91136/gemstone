@@ -8,7 +8,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.testing.either.*
 
-class InputAttachmentSuite extends munit.FunSuite {
+class InputAttachmentSuite extends Suite {
   private case class Format(name: String, value: Int, components: Int, texelBytes: Int, integer: Boolean = false)
 
   private val formats = Seq(

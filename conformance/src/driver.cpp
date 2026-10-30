@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -30,11 +31,23 @@
 #include <utility>
 #include <vector>
 
+#ifdef __linux__
+  #include <sched.h>
+#elifdef _WIN32
+  #include <bit>
+
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
+#endif
+
 #include <aspartame/all.hpp>
 #include <glaze/json.hpp>
 #include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
+#include "conformance/environment_keys.hpp"
 
 #include "device_selector.hpp"
 #include "environment.hpp"
@@ -81,21 +94,60 @@ void validateRunOptions(RunOptions &c) {
   c.artifacts = fs::absolute(c.artifacts).lexically_normal();
   c.output = fs::absolute(c.output).lexically_normal();
 }
+uint32_t positiveSetting(const char *name, uint32_t fallback) {
+  const auto *raw = std::getenv(name);
+  if (!raw || !*raw) return fallback;
+  const std::string_view value(raw);
+  uint32_t result = 0;
+  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+  if (error != std::errc{} || end != value.data() + value.size() || result == 0)
+    throw std::invalid_argument(fmt::format("{} must be a positive 32-bit integer, not '{}'", name, value));
+  return result;
+}
+double positiveScale(const char *name) {
+  const auto *raw = std::getenv(name);
+  if (!raw || !*raw) return 1.0;
+  const std::string_view value(raw);
+  const auto dot = std::min(value.find('.'), value.size());
+  const auto fraction = value.substr(std::min(dot + 1, value.size()));
+  uint32_t whole = 0;
+  uint32_t thousandths = 0;
+  const auto parsed = [](std::string_view digits, uint32_t &out) {
+    const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), out);
+    return !digits.empty() && error == std::errc{} && end == digits.data() + digits.size();
+  };
+  const bool valid = parsed(value.substr(0, dot), whole) && (dot == value.size() || (fraction.size() <= 3 && parsed(fraction, thousandths)))
+                     && (whole > 0 || thousandths > 0);
+  if (!valid) throw std::invalid_argument(fmt::format("{} must be a positive number with at most three decimals, not '{}'", name, value));
+  for (auto digits = fraction.size(); digits < 3; ++digits)
+    thousandths *= 10;
+  return static_cast<double>(whole) + static_cast<double>(thousandths) / 1000.0;
+}
 } // namespace
-uint32_t scaledTimeout(uint32_t seconds, uint32_t hardwareConcurrency) {
-  const auto scale =
-      std::clamp(static_cast<double>(TimeoutReferenceCores) / static_cast<double>(std::max(1U, hardwareConcurrency)), 1.0, 4.0);
-  return static_cast<uint32_t>(std::lround(static_cast<double>(seconds) * scale));
+uint32_t availableThreadCount() {
+#ifdef __linux__
+  if (cpu_set_t set; sched_getaffinity(0, sizeof(set), &set) == 0) return static_cast<uint32_t>(std::max(1, CPU_COUNT(&set)));
+#elifdef _WIN32
+  // Both masks are zero once a process spans processor groups.
+  if (DWORD_PTR process = 0, system = 0; GetProcessAffinityMask(GetCurrentProcess(), &process, &system) && process != 0)
+    return static_cast<uint32_t>(std::popcount(process));
+#endif
+  return std::max(1U, std::thread::hardware_concurrency());
+}
+uint32_t scaledTimeout(uint32_t seconds, double scale, uint32_t threads) {
+  const auto factor = std::clamp(static_cast<double>(TimeoutReferenceCores) / static_cast<double>(std::max(1U, threads)), 1.0, 4.0);
+  return static_cast<uint32_t>(
+      std::min(std::round(static_cast<double>(seconds) * scale * factor), static_cast<double>(std::numeric_limits<uint32_t>::max())));
 }
 int32_t configuredJobs(std::string_view configured, uint32_t hardwareConcurrency) {
   if (configured.empty()) return static_cast<int32_t>(std::max(1U, hardwareConcurrency));
   uint32_t result = 0;
   const auto [end, error] = std::from_chars(configured.data(), configured.data() + configured.size(), result);
   if (error != std::errc{} || end != configured.data() + configured.size() || result == 0 || result > INT32_MAX)
-    throw std::invalid_argument("CONFORMANCE_JOBS must be a positive 32-bit integer");
+    throw std::invalid_argument("CONFORMANCE_JOB_COUNT must be a positive 32-bit integer");
   return static_cast<int32_t>(result);
 }
-void selectCaseShard(std::vector<TargetExecution> &targets, std::string_view shard) {
+std::pair<uint32_t, uint32_t> caseShard(std::string_view shard) {
   const auto field = [&](std::string_view value) {
     uint32_t result = 0;
     const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
@@ -108,6 +160,10 @@ void selectCaseShard(std::vector<TargetExecution> &targets, std::string_view sha
   const auto index = field(shard.substr(0, separator));
   const auto count = field(shard.substr(separator + 1));
   if (index >= count) throw std::invalid_argument("CONFORMANCE_CASE_SHARD index must be below its count");
+  return {index, count};
+}
+void selectCaseShard(std::vector<TargetExecution> &targets, std::string_view shard) {
+  const auto [index, count] = caseShard(shard);
   size_t ordinal = 0;
   for (auto &target : targets) {
     std::vector<ScheduledCase> selected;
@@ -223,7 +279,7 @@ std::vector<profile::ResolvedTarget> uniqueRoutes(const std::vector<profile::Res
     // An isolated launcher replaces the native provider and physical device.
     // Distinct CUDA code-mode routes still select different runtime paths.
     const auto mode = target.backend == "cuda"
-                          ? target.environment ^ get_maybe(std::string("CONFORMANCE_CUDA_CODE")) ^ get_or_else(std::string{})
+                          ? target.environment ^ get_maybe(std::string(environment::CudaCodeMode)) ^ get_or_else(std::string{})
                           : std::string{};
     if (!isolated || seen.emplace(target.backend, target.architecture, mode, target.compiler).second) result.push_back(target);
     else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
@@ -340,7 +396,7 @@ void applyDeviceProbe(ExecutionConfig &configuration, const conformance::DeviceP
     configuration.environment[key] = value;
   }
   configuration.device = probe.device;
-  configuration.environment["CONFORMANCE_PHYSICAL_DEVICE"] = probe.device;
+  configuration.environment[environment::PhysicalDeviceName] = probe.device;
 }
 static conformance::DeviceProbeResult probeDevice(const RunOptions &configuration, const fs::path &artifact,
                                                   const std::map<std::string, std::string> &environment, const std::string &id) {
@@ -420,7 +476,7 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
                          : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
     std::vector<std::string> vulkanCases;
     if (deqp) {
-      const auto archive = fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan";
+      const auto archive = fs::path(environment.at(environment::SupportDir)) / "data/vulkan";
       vulkanCases = workload.vulkanMustpass.empty() ? workload.vulkanCases
                                                     : deqpMustpassCases(archive, workload.vulkanMustpass, workload.vulkanCases);
       const auto path = reports / (program.name + "-discovery-cases.txt");
@@ -474,7 +530,8 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
     const auto count = static_cast<uint32_t>(names.size());
     // Physical device throughput does not depend on host cores.
     const auto budget = [&](uint32_t seconds) {
-      return configuration.isolatedLauncher ? scaledTimeout(seconds, std::thread::hardware_concurrency()) : seconds;
+      return scaledTimeout(seconds, configuration.timeoutScale,
+                           configuration.isolatedLauncher ? configuration.threads : TimeoutReferenceCores);
     };
     const auto key = suiteTimeoutEnvironment(program.name);
     const auto timeout =
@@ -498,8 +555,8 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
   auto environment = baseEnvironment();
   for (const auto &[key, value] : target.environment)
     environment[key] = value;
-  environment["CONFORMANCE_TARGET_BACKEND"] = target.backend;
-  environment["CONFORMANCE_TARGET_ARCHITECTURE"] = target.architecture.value_or("");
+  environment[environment::TargetBackendName] = target.backend;
+  environment[environment::TargetArch] = target.architecture.value_or("");
   if (configuration.isolatedLauncher) applySuiteIsolatedEnvironment(environment, target.backend);
   prepareRuntimeEnvironment(environment, artifact, support, target.backend);
   const auto reports = runDirectory / target.id;
@@ -534,15 +591,15 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     const auto entry = config.environment.find(key);
     return entry == config.environment.end() ? std::string_view{} : entry->second;
   };
-  const auto backend = environmentValue("CONFORMANCE_TARGET_BACKEND");
-  const auto support = environmentValue("CONFORMANCE_SUPPORT_ROOT");
+  const auto backend = environmentValue(environment::TargetBackendName);
+  const auto support = environmentValue(environment::SupportDir);
   if (test.program == "unified" && !support.empty() && (backend == "cuda" || backend == "hip")) {
     const auto *const libraryName = backend == "cuda" ? "libcublas.so" : "librocblas.so";
     // Match the same artifact-first search order as the runtime environment.
     const auto reason =
         std::vector{fs::path(config.directory), fs::path(support)} ^ map([&](const fs::path &root) { return root / "lib" / libraryName; })
         ^ find([](const fs::path &library) { return fs::is_regular_file(library); }) ^ map([&](const fs::path &library) {
-            return suiteBlasSkip(backend, environmentValue("CONFORMANCE_TARGET_ARCHITECTURE"), environmentValue("CONFORMANCE_CUDA_CODE"),
+            return suiteBlasSkip(backend, environmentValue(environment::TargetArch), environmentValue(environment::CudaCodeMode),
                                  fs::canonical(library).filename().string(), test.program, test.identity);
           })
         ^ filter([](std::string_view skip) { return !skip.empty(); });
@@ -562,11 +619,11 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     arguments = {program.string(),
                  "--deqp-case=" + test.identity,
                  "--deqp-log-filename=" + (report / "result.qpa").string(),
-                 "--deqp-archive-dir=" + (fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan").string(),
+                 "--deqp-archive-dir=" + (fs::path(environment.at(environment::SupportDir)) / "data/vulkan").string(),
                  "--deqp-log-images=disable",
                  "--deqp-log-shader-sources=disable",
                  "--deqp-shadercache=disable",
-                 "--deqp-vk-device-id=" + environment.at("CONFORMANCE_VULKAN_DEVICE_ID")};
+                 "--deqp-vk-device-id=" + environment.at(environment::VulkanDeviceId)};
     fs::remove(report / "result.qpa");
   } else {
     if (gtest) {
@@ -577,8 +634,8 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     }
     arguments.insert(arguments.begin(), program.string());
   }
-  environment["CONFORMANCE_TEST_IDENTITY"] = test.identity;
-  environment["CONFORMANCE_REPORT_DIRECTORY"] = report.string();
+  environment[environment::TestName] = test.identity;
+  environment[environment::ReportDir] = report.string();
   const auto outputPath = report / "output.log";
   std::ofstream output(outputPath, std::ios::binary);
   output.exceptions(std::ios::failbit | std::ios::badbit);
@@ -725,6 +782,16 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
 }
 int32_t run(RunOptions configuration) {
   validateRunOptions(configuration);
+  configuration.threads = positiveSetting(environment::ThreadCount, availableThreadCount());
+  configuration.timeoutScale = positiveScale(environment::TimeoutScale);
+  const auto *jobs = std::getenv(environment::JobCount);
+  const auto jobCount = configuredJobs(jobs ? jobs : "", configuration.threads);
+  const auto *shard = std::getenv(environment::CaseShard);
+  if (shard && *shard) (void)caseShard(shard);
+  auto settings = baseEnvironment();
+  if (const auto *mode = std::getenv(environment::CudaCodeMode)) settings[environment::CudaCodeMode] = mode;
+  for (const auto &[key, value] : settings)
+    if (const auto problem = invalidSuiteSetting(key, value)) throw std::invalid_argument(*problem);
   std::vector<profile::ResolvedTarget> targets;
   std::string name = "direct";
   if (configuration.direct) {
@@ -747,8 +814,6 @@ int32_t run(RunOptions configuration) {
   }
   if (std::string buffer; glz::write_file_toml(workload, (reports / (configuration.workload + ".toml")).string(), buffer))
     throw std::runtime_error("cannot write resolved workload to " + reports.string());
-  const auto *jobs = std::getenv("CONFORMANCE_JOBS");
-  const auto jobCount = configuredJobs(jobs ? jobs : "", std::thread::hardware_concurrency());
   const auto workers = std::min(static_cast<size_t>(jobCount), targets.size());
   const auto started = std::chrono::steady_clock::now();
   std::cout << "conformance reports: " << reports << '\n';
@@ -798,7 +863,7 @@ int32_t run(RunOptions configuration) {
   for (auto &value : discovered)
     if (value) prepared.push_back(std::move(*value));
   // Neighbouring cases of a suite often share a cost, so interleaving spreads them across the shards of a route.
-  if (const auto *shard = std::getenv("CONFORMANCE_CASE_SHARD"); shard && *shard) {
+  if (shard && *shard) {
     selectCaseShard(prepared, shard);
     std::cout << "conformance case shard: " << shard << '\n';
   }

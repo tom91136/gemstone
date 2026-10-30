@@ -11,7 +11,7 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-class AMDGPUMatrixF32Suite extends munit.FunSuite {
+class AMDGPUMatrixF32Suite extends Suite {
   private def run(operations: Vec[Instruction], target: Target, memory: RegionMemory, lanes: Int > 0): Unit = {
     val task = KernelTask.validated("kernel", Dimensions(lanes, 1, 1), Dimensions.One, Vec.empty).value
     assertEquals(runIR(operations, memory, codeKernel(target = target), task), Right(()))

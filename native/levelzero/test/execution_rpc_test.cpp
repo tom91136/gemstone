@@ -20,6 +20,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ze_api.h>
 
+#include <gemstone/test_support.hpp>
+
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "../../rpc/test/wire.hpp"
@@ -702,7 +704,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   server.pauseCompletion = true;
   ze_result_t launchStatus = ZE_RESULT_NOT_READY;
   std::thread launchThread([&] { launchStatus = zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr); });
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
   while (!server.completionEntered.load() && std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
   const bool entered = server.completionEntered.load();

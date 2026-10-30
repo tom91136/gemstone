@@ -2,10 +2,11 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 
 /** The GFX11.5 and GFX12 SALU floating-point operations hipcc emits for uniform float and half arithmetic. */
-class AMDGPUScalarFloatSuite extends munit.FunSuite {
+class AMDGPUScalarFloatSuite extends Suite {
   private val NaN = 0x7fc00000L
 
   // /opt/rocm/llvm/bin/llvm-mc -triple=amdgcn -mcpu=gfx1151 -show-encoding, operands s0, s1, s2

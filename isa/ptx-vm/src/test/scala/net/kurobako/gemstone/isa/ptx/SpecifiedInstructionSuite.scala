@@ -5,13 +5,14 @@ import java.util.regex.Pattern
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Valid PTX that nvcc and clang do not emit for ordinary source but inline assembly and hand-written PTX use, with the
   * results the PTX ISA 13.3 pseudocode gives. Where ptxas lowers an instruction differently from the pseudocode from
   * sm_70, the inputs keep to where both agree, or the results are the hardware's where they cannot;
   * conformance/unified/src/cuda/video.cu runs the same forms on hardware.
   */
-class SpecifiedInstructionSuite extends munit.FunSuite {
+class SpecifiedInstructionSuite extends Suite {
   private val Sections = Pattern.compile("; ")
 
   private type Expected = (Long, Long, Long) => Long

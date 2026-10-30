@@ -6,8 +6,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class LinkerSuite extends munit.FunSuite {
+class LinkerSuite extends Suite {
   test("linked modules isolate private data and functions while preserving local shadowing") {
     def module(entry: String, result: Int): String = s""".version 8.0
       .target sm_80

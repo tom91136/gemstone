@@ -32,5 +32,5 @@ conformance_miniapp(minibude
   EXCLUDE data makedeck
   OPENMP_DEFINITIONS OMP_TARGET
   DATA data
-  ARGUMENTS --deck [=[${CONFORMANCE_SUPPORT_ROOT}/data/miniapps/minibude/data/bm1]=] -n 1 -i 1 -p 1 -w 1
+  ARGUMENTS --deck [=[${CONFORMANCE_SUPPORT_DIR}/data/miniapps/minibude/data/bm1]=] -n 1 -i 1 -p 1 -w 1
   ADAPT minibude_adapt)

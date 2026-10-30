@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Using
 
-class CodeObjectIndexConcurrencySuite extends munit.FunSuite {
+class CodeObjectIndexConcurrencySuite extends Suite {
   test("a real ELF index validates descriptors and materialises one shared kernel lazily") {
     val image   = minimalCodeObject()
     val indexed = ELF.index(Vec.from(image)).value

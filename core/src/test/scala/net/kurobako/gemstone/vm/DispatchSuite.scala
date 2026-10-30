@@ -7,9 +7,10 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 import scala.jdk.CollectionConverters.*
 
-class DispatchSuite extends munit.FunSuite {
+class DispatchSuite extends Suite {
   private class Operands(left: String, right: String) extends Sink.Binary[Term, Term] {
     inline def apply(inline kernel: (Term, Term) => Term): Term = kernel(Term.Variable(left), Term.Variable(right))
   }

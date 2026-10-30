@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
-class MachineSemanticsSuite extends munit.FunSuite {
+class MachineSemanticsSuite extends Suite {
   import MachineDefinitions.*
 
   private def shown(definition: Either[String, Definition]): String =

@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
-class FragmentQuadSuite extends munit.FunSuite {
+class FragmentQuadSuite extends Suite {
   private def divergentFlow(flow: String): String = flow match {
     case "selection"                   => """
         %below        = OpFOrdLessThan %bool %x %float_3

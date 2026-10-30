@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
-class IntelArithmeticSuite extends munit.FunSuite {
+class IntelArithmeticSuite extends Suite {
 
   // glslangValidator -V of a GL_INTEL_shader_integer_functions2 compute shader reading `int a[2]; uint b[2]` and
   // writing `int s[6]; uint u[8]; uvec2 v` through countLeadingZeros, countTrailingZeros, absoluteDifference,

@@ -7,10 +7,11 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.testing.Edges.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
 /** Staged core instruction semantics against the hand-written kernels they replaced. */
-class StagedSemanticsSuite extends munit.FunSuite {
+class StagedSemanticsSuite extends Suite {
   private val FieldRanges     = (0L to 70L) ++ Seq(0x7fffffffL, 0x80000000L, 0xffffffffL)
   private val ExtendedOpcodes =
     Seq(SPIRV.Opcode.IAddCarry, SPIRV.Opcode.ISubBorrow, SPIRV.Opcode.UMulExtended, SPIRV.Opcode.SMulExtended)

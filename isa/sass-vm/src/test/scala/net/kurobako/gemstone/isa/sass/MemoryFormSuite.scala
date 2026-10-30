@@ -3,11 +3,12 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 
 /** Memory, atomic and mbarrier forms as ptxas emits them (fixtures in `MemoryFormFixtures`), with results an RTX 4060
   * Ti produced for the sm_89 kernels.
   */
-class MemoryFormSuite extends munit.FunSuite {
+class MemoryFormSuite extends Suite {
   import Harness.*
 
   private def opcodes(kernel: Kernel): Vec[String] =

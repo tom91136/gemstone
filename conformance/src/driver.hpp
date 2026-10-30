@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <glaze/core/meta.hpp>
@@ -26,6 +27,7 @@ inline constexpr int32_t SkipReturnCode = 4;
 /// Upper bound accepted for a test program timeout, in seconds.
 inline constexpr uint64_t MaximumTimeoutSeconds = uint64_t{24} * 60 * 60;
 
+uint32_t availableThreadCount();
 struct RunOptions {
   std::string workload = "compact";
   std::filesystem::path artifacts, output, profiles, workloads;
@@ -33,6 +35,8 @@ struct RunOptions {
   std::vector<std::string> selectors, launcher;
   bool isolatedLauncher = false;
   bool direct = false;
+  uint32_t threads = availableThreadCount();
+  double timeoutScale = 1.0;
 };
 struct Workload {
   std::vector<std::string> specs{"*"};
@@ -116,8 +120,9 @@ public:
 
 int32_t configuredJobs(std::string_view configured, uint32_t hardwareConcurrency);
 // Keeps every count-th case, from the index-th, of the cases of all targets in order, and drops targets left without cases.
+std::pair<uint32_t, uint32_t> caseShard(std::string_view shard);
 void selectCaseShard(std::vector<TargetExecution> &targets, std::string_view shard);
-uint32_t scaledTimeout(uint32_t seconds, uint32_t hardwareConcurrency);
+uint32_t scaledTimeout(uint32_t seconds, double scale, uint32_t threads);
 std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const Workload &workload, const std::filesystem::path &artifact,
                                          const std::map<std::string, std::string> &environment, const std::string &id,
                                          const std::filesystem::path &reports);

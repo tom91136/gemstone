@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class AtomicConcurrencySuite extends munit.FunSuite {
+class AtomicConcurrencySuite extends Suite {
 
   /** The first arriving workgroup publishes `seed` behind a release flag; later ones copy it if the flag is set. */
   private val publication = spv"""

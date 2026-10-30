@@ -20,7 +20,7 @@ namespace {
 gemstone_test::RpcFixture fixture;
 const std::string Endpoint = fixture.endpoint();
 const gemstone_test::Environment RpcEndpoint(gemstone::environment::RpcEndpoint, Endpoint.c_str());
-const gemstone_test::Environment RpcClient(gemstone::environment::RpcClient, "42");
+const gemstone_test::Environment RpcClient(gemstone::environment::RpcClientId, "42");
 
 constexpr size_t Width = 6;
 constexpr size_t Height = 4;

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 
 /** SDWA selections, sign extension, source modifiers, clamp and output placement on the VOP1 and VOP2 operations the
@@ -9,7 +10,7 @@ import net.kurobako.gemstone.testing.bits.*
   * `hipcc --offload-arch=gfx906 -O3` on `max((int)(short)(s >> 16), (int)(short)s)`, which emits
   * `v_max_i32_sdwa v3, sext(v1), sext(v1) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_0`.
   */
-class AMDGPUSubDwordSuite extends munit.FunSuite {
+class AMDGPUSubDwordSuite extends Suite {
 
   // /opt/rocm/llvm/bin/llvm-mc -triple=amdgcn -show-encoding with -mcpu=gfx803, gfx906 and gfx1030; v2, v3 and v4 hold
   // the inputs and v4 the result

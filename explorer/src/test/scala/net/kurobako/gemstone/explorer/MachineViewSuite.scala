@@ -2,6 +2,7 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.testing.Suite
 
 object MachineViewSuite {
 
@@ -48,7 +49,7 @@ object MachineViewSuite {
     SemanticsParts.parts(FixtureModel.semanticsOf(FixtureEntry, form(name)))
 }
 
-class MachineViewSuite extends munit.FunSuite {
+class MachineViewSuite extends Suite {
   import MachineViewSuite.*
 
   test("Semantics.Lane renders the existing per-lane definitions") {

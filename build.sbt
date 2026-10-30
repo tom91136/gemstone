@@ -83,7 +83,7 @@ Global / concurrentRestrictions ++= Seq(
   Tags.limit(JSSlotWait, 1),
   Tags.limit(NativeTags.Link, 1),
   Tags.limit(ScalaJSTags.Link, 1),
-  Tags.limit(Tags.ForkedTestGroup, math.min(2, math.max(1, java.lang.Runtime.getRuntime.availableProcessors / 8)))
+  Tags.limit(Tags.ForkedTestGroup, math.min(2, math.max(1, BuildEnvironment.threadCount / 8)))
 )
 
 lazy val projectOrganisation = "net.kurobako"
@@ -132,20 +132,15 @@ lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
 lazy val codestyleLint             = taskKey[Unit]("Lint the project's C and C++ sources.")
 lazy val checkEnvironment          = taskKey[Unit]("Check environment output freshness and declared names.")
+lazy val checkStandalone           = taskKey[Unit]("Check that conformance references nothing outside itself.")
 lazy val codegen                   = taskKey[Unit]("Update and format every checked-in generated source and fixture.")
 lazy val generateBenchmarkFixtures =
   inputKey[Path]("Build benchmark fixtures in pinned toolchain containers: cuda, hip, hsa, opencl, or fixtures.")
 
-Global / offlineMode := sys.env.get("GEMSTONE_OFFLINE").exists { value =>
-  value.toLowerCase(java.util.Locale.ROOT) match {
-    case "1" | "true" | "on"   => true
-    case "0" | "false" | "off" => false
-    case _ => throw sbt.internal.util.MessageOnlyException(s"GEMSTONE_OFFLINE must be a boolean: $value")
-  }
-}
+Global / offlineMode          := BuildEnvironment.offline
 Global / conformanceDirectory := (LocalRootProject / baseDirectory).value.toPath / "target/conformance"
 
-lazy val containerExecutable = sys.env.getOrElse("CONTAINER_EXECUTABLE", "podman")
+lazy val containerExecutable = BuildEnvironment.containerExecutable
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -173,9 +168,9 @@ lazy val forkedTestSettings = Seq(
   Test / javaOptions ++= Seq("-Xmx4g", "-Xss6m")
 )
 
-// Scala Native's default Immix collector intermittently hands back corrupt references in the multithreaded binaries
-// here, where Commix runs them cleanly.
-lazy val nativeGC = scala.scalanative.build.GC.commix
+// Immix and Commix in Scala Native 0.5.12 grow their heaps without bound once several threads allocate, whatever
+// their maximum; Boehm keeps the same tests in a fourteenth of the memory. toolchain/check tracks each defect.
+lazy val nativeGC = scala.scalanative.build.GC.boehm
 
 // Scala Native has no class path: a binary embeds the resources its modules read at runtime.
 lazy val nativeTestSettings = Seq(
@@ -259,13 +254,56 @@ lazy val codestyle = project.in(file("codestyle"))
   .aggregate(publicapiPlugin)
   .settings(name := "gemstone-codestyle", publish / skip := true)
 
+// Workarounds for defects in the toolchains Gemstone builds with; toolchain/check shows each one is still needed.
+lazy val toolchain = projectMatrix.in(file("toolchain"))
+  .disablePlugins(Stryker4sPlugin)
+  .settings(commonSettings, name := "gemstone-toolchain", publish / skip := true)
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .jsPlatform(scalaVersions = Seq(scala3Version))
+
+// One check binary per collector, so the suite can show each Scala Native defect under every collector it affects.
+def toolchainCheckBinary(gc: scala.scalanative.build.GC): Project =
+  Project(s"toolchainCheck${gc.name.capitalize}", file(s"toolchain/check/${gc.name}"))
+    .enablePlugins(ScalaNativePlugin)
+    .disablePlugins(Stryker4sPlugin)
+    .dependsOn(toolchain.native(scala3Version))
+    .settings(
+      commonSettings,
+      publish / skip := true,
+      Compile / unmanagedSourceDirectories += baseDirectory.value.toPath.getParent.resolve(
+        "src/main/scalanative"
+      ).toFile,
+      Compile / nativeConfig ~= (_.withGC(gc))
+    )
+
+lazy val toolchainCheckBoehm  = toolchainCheckBinary(scala.scalanative.build.GC.boehm)
+lazy val toolchainCheckCommix = toolchainCheckBinary(scala.scalanative.build.GC.commix)
+lazy val toolchainCheckImmix  = toolchainCheckBinary(scala.scalanative.build.GC.immix)
+
+lazy val toolchainCheck = module(project.in(file("toolchain/check")))
+  .dependsOn(testSupport.jvm(scala3Version) % "test->compile")
+  .settings(
+    name := "gemstone-toolchain-check",
+    Test / javaOptions ++= Def.uncached {
+      val converter = fileConverter.value
+      Seq(
+        "boehm"  -> (toolchainCheckBoehm / Compile / nativeLink).value,
+        "commix" -> (toolchainCheckCommix / Compile / nativeLink).value,
+        "immix"  -> (toolchainCheckImmix / Compile / nativeLink).value
+      ).map((collector, binary) => s"-Dgemstone.toolchain.check.$collector=${converter.toPath(binary)}")
+    }
+  )
+
 // No dependency on core: its own tests can use these utilities without a cycle. Fixtures that need core types
 // live in core test sources, which dependants consume through test->test.
 lazy val testSupport = projectMatrix.in(file("test-support"))
   .disablePlugins(Stryker4sPlugin)
+  .dependsOn(toolchain)
   .settings(
     commonSettings,
     hostedSourceSettings,
+    CheckedInSources.settings,
     name                                   := "gemstone-test-support",
     publish / skip                         := true,
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion
@@ -335,7 +373,8 @@ lazy val samples = module(project.in(file("samples")))
     ptxVm.jvm(scala3Version),
     sassVm.jvm(scala3Version),
     amdgpuVm.jvm(scala3Version),
-    spirvVm.jvm(scala3Version)
+    spirvVm.jvm(scala3Version),
+    testSupport.jvm(scala3Version) % "test->compile"
   )
   .settings(name := "gemstone-samples", publish / skip := true, Compile / mainClass := Some("samples.Samples"))
 
@@ -467,7 +506,7 @@ lazy val spirvVm = module(projectMatrix.in(file("isa/spirv-vm")))
   .dependsOn(spirvAsm % "compile->compile;test->test")
   .settings(
     name := "gemstone-isa-spirv-vm",
-    Test / envVars += ("GEMSTONE_NATIVE_DIRECTORY" -> s"${(native / nativeArtifact).value}")
+    Test / envVars += ("GEMSTONE_NATIVE_DIR" -> s"${(native / nativeArtifact).value}")
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
@@ -522,7 +561,6 @@ lazy val explorer = module(projectMatrix.in(file("explorer")))
         sys.props
           .get("explorer.port")
           .flatMap(_.toIntOption)
-          .orElse(sys.env.get("EXPLORER_PORT").flatMap(_.toIntOption))
           .getOrElse(8080),
       explorerServe := Def.uncached {
         val log     = streams.value.log
@@ -534,7 +572,7 @@ lazy val explorer = module(projectMatrix.in(file("explorer")))
         }
         log.info(s"Serving $output at http://localhost:${address.getPort}/")
         log.info("Rebuild with explorerJS/explorerSite, reload the page to pick the new script up, Ctrl-C to stop.")
-        log.info("Pass -Dexplorer.port=NNNN or set EXPLORER_PORT to serve on another port.")
+        log.info("Pass -Dexplorer.port=NNNN to serve on another port.")
         ExplorerServer.await()
       }
     )
@@ -586,6 +624,7 @@ lazy val semanticsCheckAMDGPUResource = semanticsCheckOf("AMDGPUResource")
 lazy val semanticsCheckSPIRV          = semanticsCheckOf("SPIRV")
 
 lazy val server = module(projectMatrix.in(file("server")))
+  .dependsOn(toolchain)
   .dependsOn(core % "compile->compile;test->test", ptxVm, sassVm, amdgpuVm, spirvVm)
   .dependsOn(publicapiPlugin % "plugin->compile")
   .settings(
@@ -593,7 +632,7 @@ lazy val server = module(projectMatrix.in(file("server")))
     publish / skip := true,
     Compile / scalacOptions += s"-P:publicapi:$rootPackage.server",
     Test / scalacOptions -= s"-P:publicapi:$rootPackage.server",
-    Test / envVars += ("GEMSTONE_NATIVE_DIRECTORY" -> s"${(native / nativeArtifact).value}"),
+    Test / envVars += ("GEMSTONE_NATIVE_DIR" -> s"${(native / nativeArtifact).value}"),
     libraryDependencies ++= Seq(
       "com.monovore"  %% "decline"   % declineVersion,
       "com.outr"      %% "scribe"    % scribeVersion,
@@ -606,7 +645,7 @@ lazy val server = module(projectMatrix.in(file("server")))
     axisValues = Seq.empty,
     configure = _.settings(
       Compile / run / fork          := true,
-      Compile / run / envVars += ("GEMSTONE_NATIVE_DIRECTORY" -> s"${(native / nativeArtifact).value}"),
+      Compile / run / envVars += ("GEMSTONE_NATIVE_DIR" -> s"${(native / nativeArtifact).value}"),
       Compile / run / baseDirectory := (LocalRootProject / baseDirectory).value,
       Test / fork                   := true,
       Test / javaOptions += Def.uncached {
@@ -627,7 +666,7 @@ lazy val server = module(projectMatrix.in(file("server")))
   )
 
 lazy val benchmarks = module(projectMatrix.in(file("tools/benchmarks")))
-  .dependsOn(core, ptxVm, sassVm, amdgpuVm, spirvVm, server)
+  .dependsOn(core, ptxVm, sassVm, amdgpuVm, spirvVm, server, toolchain)
   .settings(
     name           := "gemstone-benchmarks",
     publish / skip := true,
@@ -670,7 +709,8 @@ lazy val benchmarks = module(projectMatrix.in(file("tools/benchmarks")))
 lazy val conformanceTool = module(project.in(file("tools/conformance")))
   .dependsOn(core.jvm(scala3Version))
   .settings(
-    name                 := "gemstone-conformance-tool",
+    name := "gemstone-conformance-tool",
+    Compile / unmanagedSourceDirectories += baseDirectory.value / "src/generated/main/scala",
     Compile / run / fork := true,
     Compile / run / javaOptions += "--sun-misc-unsafe-memory-access=allow",
     libraryDependencies += "com.monovore" %% "decline" % declineVersion
@@ -680,27 +720,9 @@ lazy val externalCodestyleSettings = Seq(
   nativeSourceDirectories := Seq(baseDirectory.value.toPath),
   nativeCompileDatabase   := Def.uncached(nativeArtifact.value),
   format                  := NativeCodestyle.format(nativeSourceDirectories.value),
-  codestyleLint           := Def.uncached {
-    def envInt(name: String, default: Int): Int =
-      sys.env.get(name).fold(default) { value =>
-        value.toIntOption.getOrElse(
-          throw sbt.internal.util.MessageOnlyException(s"$name must be an integer, got '$value'")
-        )
-      }
-    val shard  = envInt("NATIVE_LINT_SHARD", 0)
-    val shards = envInt("NATIVE_LINT_SHARDS", 1)
-    if (shards < 1 || shard < 0 || shard >= shards)
-      throw sbt.internal.util.MessageOnlyException(
-        s"NATIVE_LINT_SHARD=$shard needs 0 <= shard < NATIVE_LINT_SHARDS=$shards"
-      )
-    NativeCodestyle.lint(
-      nativeSourceDirectories.value,
-      nativeCompileDatabase.value,
-      streams.value.log.info(_),
-      shard,
-      shards
-    )
-  },
+  codestyleLint           := Def.uncached(
+    NativeCodestyle.lint(nativeSourceDirectories.value, nativeCompileDatabase.value, streams.value.log.info(_))
+  ),
   lint := codestyleLint.value
 )
 
@@ -727,7 +749,7 @@ lazy val native = project.in(file("native"))
           "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
           s"-DCONTAINER_EXECUTABLE=$containerExecutable",
           s"-DROCM_VERSION=$rocmVersion",
-          s"-DCMAKE_BUILD_TYPE=${sys.env.getOrElse("CMAKE_BUILD_TYPE", "Release")}",
+          s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
           s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
           s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
           s"-DHSA_INCLUDE_DIR=${references / "api-native/amd/hsa/runtime/hsa-runtime/inc"}",
@@ -795,11 +817,10 @@ def conformanceArtifacts(
     s"-DCONFORMANCE_WORK_DIRECTORY=${directory / "work"}",
     s"-DCONFORMANCE_CCACHE_DIRECTORY=${root / ".cache/ccache"}",
     s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}",
-    s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${if (syclCtsFull) "ON"
-      else sys.env.getOrElse("SYCL_CTS_ENABLE_FULL_CONFORMANCE", "OFF")}",
-    s"-DCONFORMANCE_SYCL_SHARD=${sys.env.getOrElse("CONFORMANCE_SYCL_SHARD", "")}",
-    s"-DCONFORMANCE_SHARD_ROUTES=${sys.env.getOrElse("CONFORMANCE_SHARD_ROUTES", "")}"
-  ) ++ sys.env.get("CONFORMANCE_ARTIFACT_PARALLELISM").map(value => s"-DCONFORMANCE_ARTIFACT_PARALLELISM=$value"),
+    s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${if (syclCtsFull) "ON" else "OFF"}",
+    s"-DCONFORMANCE_SYCL_SHARD_INDEX=${BuildEnvironment.syclShardIndex}",
+    s"-DCONFORMANCE_SHARD_ROUTE_LIST=${BuildEnvironment.shardRouteList}"
+  ),
   log = log,
   buildTargets = targets,
   // each lint route sizes its clang-tidy pool from free memory, so concurrent routes would oversubscribe it
@@ -817,6 +838,7 @@ lazy val conformance = project.in(file("conformance"))
     nativeCompileDatabase  := Def.uncached(conformanceHost.value),
     conformanceJfr         := true,
     conformanceLintTargets := Seq("lint"),
+    checkStandalone        := Def.uncached(ConformanceStandalone.check(baseDirectory.value.toPath)),
     build                  := {
       val arguments = Def.setting {
         val conformance = baseDirectory.value.toPath
@@ -1020,11 +1042,14 @@ lazy val testsJVM =
     native,
     conformance
   )
-lazy val testsJS     = platformTests("testsJS", VirtualAxis.js)
-lazy val testsNative = platformTests("testsNative", VirtualAxis.native)
+lazy val testsJS = platformTests("testsJS", VirtualAxis.js)
+// a JVM suite, but it links and runs Scala Native binaries
+lazy val testsNative = platformTests("testsNative", VirtualAxis.native, toolchainCheck)
 
 lazy val gemstone = project.in(file("."))
   .disablePlugins(Stryker4sPlugin)
+  .aggregate(toolchain.projectRefs *)
+  .aggregate(toolchainCheck, toolchainCheckBoehm, toolchainCheckCommix, toolchainCheckImmix)
   .aggregate(testSupport.projectRefs *)
   .aggregate(codegenProject, samples, conformanceTool)
   .aggregate(core.projectRefs *)
@@ -1107,6 +1132,7 @@ addCommandAlias("gemstoneRun", "server/run run")
 lazy val lintCheckoutTasks = Seq(
   Option.when(Baumkuchen.enabled)("baumkuchenAnalyse"),
   Some("codegen/checkEnvironment"),
+  Some("conformance/checkStandalone"),
   Some("scalafmtCheckAll"),
   Some("scalafmtSbtCheck"),
   Some("scalafixAll --check"),

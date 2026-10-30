@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.text
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.Suite
 
-class SourceCursorSuite extends munit.FunSuite {
+class SourceCursorSuite extends Suite {
   test("lookahead and failed consumption preserve the cursor") {
     val cursor = SourceCursor("abc")
     assert(cursor.has(2))

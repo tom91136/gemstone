@@ -5,13 +5,14 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 import scala.concurrent.duration.*
 import scala.util.Using
 
 /** The native driver client exercises the CUDA shim, shared execution transport and PTX execution together. */
-class CUDACrossWorkgroupSuite extends munit.FunSuite {
-  override val munitTimeout: Duration = 120.seconds
+class CUDACrossWorkgroupSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
 
   private def runtimeDirectory = {
     val path = native.directory
@@ -38,7 +39,7 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
           native.serverEnvironment(
             server.endpoint,
             server.client,
-            Map(env.TestLibrary -> runtime.toString, env.TargetArch -> "sm_80", env.SystemPaging -> "1")
+            Map(env.TestCudaLibraryFile -> runtime.toString, env.TargetArch -> "sm_80", env.SystemPagingOn -> "1")
           ),
           90.seconds
         )
@@ -72,8 +73,8 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
           native.serverEnvironment(
             server.endpoint,
             server.client,
-            Map(env.TestLibrary -> directory.resolve("libcuda.so.1").toString),
-            Set(env.SystemPaging)
+            Map(env.TestCudaLibraryFile -> directory.resolve("libcuda.so.1").toString),
+            Set(env.SystemPagingOn)
           ),
           30.seconds
         )

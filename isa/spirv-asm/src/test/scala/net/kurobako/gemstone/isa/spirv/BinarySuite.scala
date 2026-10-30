@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.spirv
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.testing.Suite
 
-class BinarySuite extends munit.FunSuite {
+class BinarySuite extends Suite {
   // Fixed bytes and boundary values below are independent expectations for the wire/bit representation.
   // Do not derive these from the encoder or the constants whose values these cases verify.
 

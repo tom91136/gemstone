@@ -5,7 +5,7 @@ import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
 
-class TestingSuite extends munit.FunSuite {
+class TestingSuite extends Suite {
   test("processes keep exit status, both streams, environment changes and working directory") {
     files.temporary { root =>
       val result = process.run(

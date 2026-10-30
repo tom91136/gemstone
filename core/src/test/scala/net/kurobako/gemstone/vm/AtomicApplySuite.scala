@@ -5,7 +5,7 @@ import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
-class AtomicApplySuite extends munit.FunSuite {
+class AtomicApplySuite extends Suite {
   private val floating = Set(AtomicOperation.FloatAdd, AtomicOperation.FloatMinimum, AtomicOperation.FloatMaximum)
 
   test("applying an operation directly gives what its staged execution gives") {

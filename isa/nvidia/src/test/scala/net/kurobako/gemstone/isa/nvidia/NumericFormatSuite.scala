@@ -9,7 +9,7 @@ import net.kurobako.gemstone.testing.*
 import programs.*
 import scala.compiletime.testing.typeCheckErrors
 
-class NumericFormatSuite extends munit.FunSuite {
+class NumericFormatSuite extends Suite {
   private val Flags = Vec(false, true)
 
   private val IntegralRoundings: Vec[ConversionRounding] =

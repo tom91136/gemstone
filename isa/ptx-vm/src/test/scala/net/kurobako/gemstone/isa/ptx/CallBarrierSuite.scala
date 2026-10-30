@@ -5,8 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.Suite
 
-class CallBarrierSuite extends munit.FunSuite {
+class CallBarrierSuite extends Suite {
   test("an arrival survives returning while another call waits for the same CTA barrier") {
     val kernel = compileKernel(""".version 8.0
       |.target sm_80

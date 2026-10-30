@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
 /** The timeline an observed launch records: the ordinal of every issue and every change a wave makes between them. */
-class TimelineSuite extends munit.FunSuite {
+class TimelineSuite extends Suite {
 
   private val gfx906 = Target("gfx906")
 

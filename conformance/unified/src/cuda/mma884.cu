@@ -14,6 +14,7 @@
 #include <cuda_runtime_api.h>
 
 #include "conformance/device.hpp"
+#include "conformance/environment_keys.hpp"
 
 #include "memory_files.hpp"
 #include "test_support.hpp"
@@ -35,14 +36,14 @@ struct DeviceBuffer {
   DeviceBuffer &operator=(const DeviceBuffer &) = delete;
 };
 
-// The embedded image follows CONFORMANCE_CUDA_CODE, so a launcher whose strict code mode disagrees rejects it.
+// The embedded image follows CONFORMANCE_CUDA_CODE_MODE, so a launcher whose strict code mode disagrees rejects it.
 CUmodule loadModule() {
   const auto code = image("mma884.ptx");
-  const char *mode = std::getenv("CONFORMANCE_CUDA_CODE");
+  const char *mode = std::getenv(conformance::environment::CudaCodeMode);
   CUmodule module{};
   check(cuModuleLoadData(&module, code.data()), mode && std::string_view(mode) == "sass"
                                                     ? "cuModuleLoadData of the SASS image"
-                                                    : "cuModuleLoadData of the PTX image (CONFORMANCE_CUDA_CODE is not sass)");
+                                                    : "cuModuleLoadData of the PTX image (CONFORMANCE_CUDA_CODE_MODE is not sass)");
   return module;
 }
 

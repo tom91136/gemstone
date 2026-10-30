@@ -52,7 +52,7 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((word(656) == 1));       // cooperativeLaunch
   REQUIRE((word(356) & (1 << 7))); // arch.hasDoubles
   REQUIRE((word(356) & (1 << 5))); // arch.hasGlobalInt64Atomics
-  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, "1");
+  const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, "1");
   REQUIRE((query(properties.data(), 0) == hipSuccess));
   REQUIRE((word(784) == 1)); // pageableMemoryAccess in Polyregion's 792-byte ABI
   hipDeviceProp_tR0600 current{};
@@ -403,7 +403,7 @@ void crossWorkgroupLaunchAndCopyback() {
   // HIP advertises pageable host access to Polyregion. A stream wait must
   // expose writes to an ordinary host allocation before it returns.
   {
-    const gemstone_test::Environment paging(gemstone::environment::SystemPaging, "1");
+    const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, "1");
     for (uint32_t seed = 1; seed <= 32; ++seed) {
       std::array<uint32_t, 4> host{0, 0, 0, 0};
       auto *output = host.data();
@@ -780,7 +780,7 @@ TEST_CASE("HIP device-reset lifetime", "[hip]") { deviceResetLifetime(); }
 TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unified-memory]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, nullptr);
+  const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, nullptr);
   std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
   REQUIRE((hipHostRegister(host.data(), sizeof(host), hipHostRegisterMapped) == hipSuccess));
   void *device = nullptr;
@@ -820,7 +820,7 @@ TEST_CASE("HIP registered host flags round trip", "[hip][unified-memory]") {
 TEST_CASE("HIP registered subranges retain ownership and permit address reuse", "[hip][unified-memory]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
-  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, nullptr);
+  const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, nullptr);
   std::array<uint32_t, 16> host{};
   for (unsigned iteration = 0; iteration < 3; ++iteration) {
     REQUIRE((hipHostRegister(host.data() + 1, 4 * sizeof(uint32_t), 0) == hipSuccess));
@@ -841,7 +841,7 @@ void unifiedMemoryRoundTrip(unsigned kind) {
   fixture.kernelMetadata(
       12, 2, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}, {.width = 4, .offset = 8, .kind = 1, .containsPointers = 0}});
   const gemstone_test::RpcEnvironment environment(fixture);
-  const gemstone_test::Environment paging(gemstone::environment::SystemPaging, nullptr);
+  const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, nullptr);
   std::array<uint32_t, 16> storage{};
   void *memory = storage.data();
   if (kind == 0) REQUIRE((hipMallocManaged(&memory, sizeof(storage)) == hipSuccess));

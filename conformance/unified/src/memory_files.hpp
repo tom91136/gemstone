@@ -4,6 +4,8 @@
 #include <string_view>
 #include <vector>
 
+#include <conformance/environment_keys.hpp>
+
 #include "memory_image.hpp"
 #ifdef UNIFIED_API_CUDA
   #include "atomic_image.hpp"
@@ -24,7 +26,7 @@
 inline std::vector<char> image(std::string_view name) {
   auto select = [&]() -> std::vector<char> {
 #ifdef UNIFIED_API_CUDA
-    const char *code = std::getenv("CONFORMANCE_CUDA_CODE");
+    const char *code = std::getenv(conformance::environment::CudaCodeMode);
     if (code && std::string_view(code) == "sass") {
       if (name == "mma884.ptx") return {mma884_sass_image.begin(), mma884_sass_image.end()};
       if (name == "exchange.ptx") return {exchange_sass_image.begin(), exchange_sass_image.end()};

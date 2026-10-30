@@ -14,7 +14,7 @@ import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
-class UnixTransportSuite extends munit.FunSuite {
+class UnixTransportSuite extends Suite {
   private def withPair(timeout: Int > 0 = 5000)(body: (Channel, Channel) => Unit): Unit = files.temporary { directory =>
     Using.Manager { use =>
       val path     = directory.resolve("transport.sock")

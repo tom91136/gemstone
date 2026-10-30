@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.isa.spirv
 
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.bits.*
 import scala.util.Random
 
-class OpenCLMathPlatformSuite extends munit.FunSuite {
+class OpenCLMathPlatformSuite extends Suite {
   test("the portable IEEE remainder matches the JVM's") {
     val random = Random(0x1eeeL)
     val edges  = Seq(

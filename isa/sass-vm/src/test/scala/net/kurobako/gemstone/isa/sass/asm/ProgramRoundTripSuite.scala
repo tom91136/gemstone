@@ -4,9 +4,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.text.*
 
-class ProgramRoundTripSuite extends munit.FunSuite {
+class ProgramRoundTripSuite extends Suite {
   private def target(sm: Int): Target         = Target.parse(s"SM$sm").fold(fail(_), identity(_))
   private def parsed(source: String): Program =
     Parser.parseProgram(source).fold(error => fail(error.message), identity(_))

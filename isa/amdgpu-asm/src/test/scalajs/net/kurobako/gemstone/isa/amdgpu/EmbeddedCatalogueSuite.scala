@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.testing.Suite
 
-class EmbeddedCatalogueSuite extends munit.FunSuite {
+class EmbeddedCatalogueSuite extends Suite {
   private val target = "gfx1030".refine[Target].fold(error => fail(error.raw), identity)
 
   // LLVM MC gfx1030: v_add_f32_e32 v0, v1, v2

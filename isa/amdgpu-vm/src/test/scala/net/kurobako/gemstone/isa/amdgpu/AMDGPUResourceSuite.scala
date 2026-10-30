@@ -14,7 +14,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * it Gemstone's assembly. RDNA2 expectations were measured on a gfx1036 (run as gfx1030) through HIP with descriptors
   * built on the host; GCN5 and later generations follow the ISA documents and Mesa's descriptor definitions.
   */
-class AMDGPUResourceSuite extends munit.FunSuite {
+class AMDGPUResourceSuite extends Suite {
 
   private val Identity = 0xfacL
 

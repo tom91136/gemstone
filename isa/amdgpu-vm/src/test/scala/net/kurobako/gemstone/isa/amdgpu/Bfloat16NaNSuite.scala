@@ -2,8 +2,9 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
+import net.kurobako.gemstone.testing.Suite
 
-class Bfloat16NaNSuite extends munit.FunSuite {
+class Bfloat16NaNSuite extends Suite {
   private def single(bits: Long): Float32 = fromRaw[Float32](bits)
 
   test("V_CVT_PK_BF16_F32 keeps NaN sign and leading payload, quieted") {

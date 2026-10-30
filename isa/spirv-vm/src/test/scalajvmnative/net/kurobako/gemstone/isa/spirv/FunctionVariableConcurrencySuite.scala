@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
-class FunctionVariableConcurrencySuite extends munit.FunSuite {
+class FunctionVariableConcurrencySuite extends Suite {
   private val module = spv"""
     $openCL
     OpEntryPoint Kernel %main "groups" %global_ids

@@ -314,7 +314,7 @@ bool AqlRuntime::relocations(const Kernel &kernel, uint64_t kernarg, std::option
       // is no environment object. Null buffer arguments are legal too.
       if ((field.offset == 0 && pointer == UINT64_MAX) || pointer == 0) continue;
       if (const auto target = resolve(pointer)) relocate(field.offset, *target);
-      else if (!environment::enabled(environment::SystemPaging)) return false;
+      else if (!environment::enabled(environment::SystemPagingOn)) return false;
     }
   }
   return true;
@@ -382,7 +382,7 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative) {
                  grid[1], grid[2], group[0], group[1], group[2], pointerRelocations.size());
   auto *connection = client();
   if (!connection) return failed("Gemstone execution RPC client is not configured");
-  if (environment::enabled(environment::SystemPaging)) {
+  if (environment::enabled(environment::SystemPagingOn)) {
     if (const auto enabled = connection->call(EnableHostMemory{}); !enabled)
       return failed(enabled.error().detail, packetFailure(enabled.error().kind));
   }

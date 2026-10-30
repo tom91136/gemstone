@@ -85,7 +85,7 @@ TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") {
     const gemstone::TemporaryDirectory directory("gemstone-hsakmt-XXXXXX");
     REQUIRE((directory));
     const auto dump = directory.file("rejected.co");
-    const gemstone_test::Environment rejectedCodeObject(gemstone::environment::HsaRejectedCodeObject, dump.c_str());
+    const gemstone_test::Environment rejectedCodeObject(gemstone::environment::HsaRejectedCodeObjectFile, dump.c_str());
     fixture.rejectNext(gemstone::execution::operation::LoadProgram);
     const std::array<gemstone::hsakmt::LoadedKernel, 1> rejected{{{.object = 0x123600, .name = "add", .kernargSize = 12}}};
     REQUIRE((!gemstone::hsakmt::installCodeObject(codeObject, rejected)));

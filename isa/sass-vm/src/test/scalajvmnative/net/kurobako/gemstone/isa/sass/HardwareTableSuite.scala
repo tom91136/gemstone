@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.Suite
 import scala.util.Using
 
 /** Every straight-line op_kernel op of the hardware probes, from `hardware/sm_<n>.txt`: the instructions between the
@@ -9,7 +10,7 @@ import scala.util.Using
   * loaded register holds, the registers stored, and sampled `inputs -> outputs` rows. Whole-warp ops are `kernel`
   * blocks: the op_kernel's machine code from the probe's cubin, the constant banks it reads, and its first warp.
   */
-class HardwareTableSuite extends munit.FunSuite {
+class HardwareTableSuite extends Suite {
   import hardwareGolden.*
 
   private case class Op(

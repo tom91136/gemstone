@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.bits.*
 import net.kurobako.gemstone.vm.*
 import scala.reflect.ClassTag
 
-class CooperativeMatrixSuite extends munit.FunSuite {
+class CooperativeMatrixSuite extends Suite {
 
   // icpx 2026.1 -fsycl -O2 of a joint_matrix kernel on a 16-lane sub-group: an 8x16 float accumulator filled with 1,
   // bfloat16 8x16 A and 16x16 B loaded row-major with stride 16, joint_matrix_mad, joint_matrix_apply doubling every

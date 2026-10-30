@@ -3,8 +3,9 @@ package net.kurobako.gemstone.isa.sass.asm
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
+import net.kurobako.gemstone.testing.Suite
 
-class OperandParserSuite extends munit.FunSuite {
+class OperandParserSuite extends Suite {
   test("preserves register classes and SASS zero-register sentinels") {
     assertEquals(OperandParser.parse("R17"), Right(Operand.Register(RegisterBank.R, 17)))
     assertEquals(OperandParser.parse("URZ"), Right(Operand.Register(RegisterBank.UR, 255)))
