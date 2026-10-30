@@ -20,7 +20,7 @@ namespace {
 constexpr int Rows = 32;
 __host__ __device__ inline int slot(int row) { return ((row * 5) + 3) % Rows; }
 
-template <int Count, bool Transpose> __global__ void load(const uint16_t *source, uint32_t *destination) {
+template <int Count, bool Transpose> __global__ void load([[maybe_unused]] const uint16_t *source, [[maybe_unused]] uint32_t *destination) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
   __shared__ alignas(16) uint16_t tile[Rows * 8];
   const unsigned lane = threadIdx.x % 32;
@@ -90,7 +90,7 @@ TEST_CASE("runtime/cuda/matrix-moves/ldmatrix", "[unified][runtime][tensor][comp
 }
 
 namespace {
-__global__ void transpose(const uint32_t *source, uint32_t *destination) {
+__global__ void transpose([[maybe_unused]] const uint32_t *source, [[maybe_unused]] uint32_t *destination) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
   const unsigned lane = threadIdx.x % 32;
   uint32_t result = 0;
@@ -121,7 +121,8 @@ TEST_CASE("runtime/cuda/matrix-moves/movmatrix", "[unified][runtime][tensor][com
 }
 
 namespace {
-template <int Count, bool Transpose> __global__ void store(const uint32_t *source, uint16_t *destination) {
+template <int Count, bool Transpose>
+__global__ void store([[maybe_unused]] const uint32_t *source, [[maybe_unused]] uint16_t *destination) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   __shared__ alignas(16) uint16_t tile[Rows * 8];
   const unsigned lane = threadIdx.x % 32;
@@ -177,7 +178,7 @@ TEST_CASE("runtime/cuda/matrix-moves/stmatrix", "[unified][runtime][tensor][comp
 namespace {
 // C (64 x 32, f32) += A (64 x 64, bf16, row-major) * B (64 x 32, bf16, row-major) with four warps, each staging its
 // operands through shared memory and taking every fragment from ldmatrix.
-__global__ void gemm(const __nv_bfloat16 *a, const __nv_bfloat16 *b, float *c) {
+__global__ void gemm([[maybe_unused]] const __nv_bfloat16 *a, [[maybe_unused]] const __nv_bfloat16 *b, [[maybe_unused]] float *c) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   constexpr int m = 64;
   constexpr int n = 32;

@@ -154,7 +154,7 @@ TEST_CASE("rectangle transfers gather and scatter rows in bounded requests") {
     const auto writes = fixture.rectangleWrites.load();
     REQUIRE(uploadRectangle(*client, allocation.value(), rectangle, host.data(), hostRowPitch, hostSlicePitch, limit));
     CHECK(fixture.rectangleWrites.load() - writes == requests);
-    auto stored = client->call(ReadAllocation{.allocation = allocation.value(), .offset = 0, .size = {static_cast<int32_t>(size)}});
+    auto stored = client->call(ReadAllocation{.allocation = allocation.value(), .offset = {0}, .size = {static_cast<int32_t>(size)}});
     REQUIRE(stored);
     CHECK(stored.value() == expected);
 

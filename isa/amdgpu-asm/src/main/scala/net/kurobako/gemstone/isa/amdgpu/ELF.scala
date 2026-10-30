@@ -275,7 +275,7 @@ private object ELF {
       // Device-library helpers such as __ockl_* are local functions; only dispatchable kernels have the ABI descriptor
       // required to prepare an AQL launch.
       records <- functions.collect {
-        case (symbol @ elf.Symbol(Some(name), _, _, _, _), inferred) if descriptors.contains(s"$name.kd") =>
+        case (symbol @ elf.Symbol(Some(name), _, _, _, _, _), inferred) if descriptors.contains(s"$name.kd") =>
           kernelRecord(image, descriptors(s"$name.kd"), name, symbol, inferred).map((name: String) -> _)
       }.sequence.map(_.toMap)
       _ <- Either.cond(records.nonEmpty, (), CodeObjectError.Invalid("AMDGPU code object has no kernel symbols"))
@@ -287,7 +287,7 @@ private object ELF {
           section.index.raw -> section
       }.toMap
       globalSymbols = rawSymbols.collect {
-        case symbol @ elf.Symbol(Some(name), kind, section, _, _)
+        case symbol @ elf.Symbol(Some(name), kind, section, _, _, _)
             if kind.raw == SymbolKind.Object && globalSections.contains(section) =>
           name -> symbol
       }.toMap
@@ -324,7 +324,7 @@ private object ELF {
           )
           relocated <- relocateText(image, section)
           entries   <- symbols.collect {
-            case symbol @ elf.Symbol(Some(name), _, index, _, _) if index == section.index =>
+            case symbol @ elf.Symbol(Some(name), _, index, _, _, _) if index == section.index =>
               image.symbolOffset(symbol)
                 .leftMap(_ => CodeObjectError.Invalid(s"symbol $name exceeds section ${section.name}"))
                 .map { case (_, offset) => ExecutableSection.Symbol(name, offset, symbol.size) }
@@ -471,7 +471,7 @@ private object ELF {
 
   private def descriptorIndex(symbols: Vec[elf.Symbol]): Either[CodeObjectError, Map[String, elf.Symbol]] =
     symbols.foldLeft[Either[CodeObjectError, Map[String, elf.Symbol]]](Right(Map.empty)) {
-      case (Right(descriptors), symbol @ elf.Symbol(Some(name), kind, _, _, _))
+      case (Right(descriptors), symbol @ elf.Symbol(Some(name), kind, _, _, _, _))
           if kind.raw == SymbolKind.Object && name.endsWith(".kd") =>
         Either.cond(
           !descriptors.contains(name),

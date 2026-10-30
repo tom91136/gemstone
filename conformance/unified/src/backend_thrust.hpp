@@ -905,7 +905,7 @@ public:
   template <class T> std::vector<T> asyncInterleavedStreams(const std::vector<T> &input) {
     using namespace aspartame;
     const auto even = input ^ stride(2);
-    const auto odd = input ^ drop(1) ^ stride(2);
+    const auto odd = input | drop(1) | stride(2) | to_vector();
 
     thrust::device_vector<T> evenDevice(even.begin(), even.end());
     thrust::device_vector<T> oddDevice(odd.begin(), odd.end());

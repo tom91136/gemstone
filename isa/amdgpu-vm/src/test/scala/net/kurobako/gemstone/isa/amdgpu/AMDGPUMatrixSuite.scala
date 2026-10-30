@@ -326,9 +326,9 @@ class AMDGPUMatrixSuite extends Suite {
     } {
       val (block, row, column) =
         (matrix.outputBlock(lane, item), matrix.outputRow(lane, item), matrix.outputColumn(lane, item))
-      val bit                                  = matrix.outputBit(item) + (if (high) 16 else 0)
-      val addend                               = decode(matrix.c, bits(c, lane, bit, matrix.c.width))
-      def product(sum: Double, k: Int): Double = {
+      val bit                                = matrix.outputBit(item) + (if (high) 16 else 0)
+      val addend                             = decode(matrix.c, bits(c, lane, bit, matrix.c.width))
+      def operands(k: Int): (Double, Double) = {
         val aLane = matrix.aSource(block = block, row = row, k = k, lane = lane, blockBroadcast = cbsz, blockId = abid)
         val aItem = matrix.aItem(block = block, row = row, k = k)
         val left  = decode(matrix.a, bits(a, aLane, aItem * matrix.a.width, matrix.a.width))
@@ -348,11 +348,45 @@ class AMDGPUMatrixSuite extends Suite {
             ((scale(1)(column + matrix.n * (dense / 32)) >>> (8 * second)) & 0xffL).toInt - 127
           )
         }
-        sum + math.scalb(if ((negate & 1) != 0) -left else left, scaleA) *
+        (
+          math.scalb(if ((negate & 1) != 0) -left else left, scaleA),
           math.scalb(if ((negate & 2) != 0) -right else right, scaleB)
+        )
+      }
+      def product(sum: Double, k: Int): Double = {
+        val (left, right) = operands(k)
+        sum + left * right
+      }
+      def dot2(sum: Double, k: Int): Double = {
+        val ((left0, right0), (left1, right1)) = (operands(k), operands(k + 1))
+        val a = fromRaw[UInt[32]](encode(matrix.a, left0) | (encode(matrix.a, left1) << 16))
+        val b = fromRaw[UInt[32]](encode(matrix.b, right0) | (encode(matrix.b, right1) << 16))
+        val c = encode(matrix.c, sum)
+        decode(
+          matrix.c,
+          matrix.c match {
+            case MatrixFormat.F16  => toRaw(Dots.halvesAligned(a, b, fromRaw[Float16](c)))
+            case MatrixFormat.BF16 => toRaw(Dots.bfloat16Aligned(a, b, fromRaw[BFloat16](c)))
+            case _                 =>
+              toRaw(
+                if (matrix.a == MatrixFormat.F16) Dots.halvesToFloatAligned(a, b, fromRaw[Float32](c))
+                else Dots.bfloat16ToFloatAligned(a, b, fromRaw[Float32](c))
+              )
+          }
+        )
       }
       @tailrec def accumulate(sum: Double, k: Int): Double =
-        if (k == matrix.storedK) sum else accumulate(product(sum, k), k + 1)
+        if (k == matrix.storedK) sum
+        else if (matrix.chained) accumulate(dot2(sum, k), k + 2)
+        else {
+          val next = product(sum, k)
+          accumulate(
+            if (clamp && matrix.grouped > 0 && (k + 1) % matrix.grouped == 0)
+              math.max(Int.MinValue.toDouble, math.min(Int.MaxValue.toDouble, next))
+            else next,
+            k + 1
+          )
+        }
       val exact    = accumulate(if ((negate & 4) != 0) -addend else addend, 0)
       val expected =
         if (matrix.c == MatrixFormat.I32)
@@ -512,6 +546,14 @@ class AMDGPUMatrixSuite extends Suite {
         clamp = true
       )
       checkProduct("gfx1100", "v_wmma_i32_16x16x16_iu4", "neg_lo:[1,1,0]", waveSize = waveSize)
+      checkProduct(
+        "gfx1100",
+        "v_wmma_i32_16x16x16_iu4",
+        "neg_lo:[0,1,0] clamp",
+        waveSize = waveSize,
+        signedA = false,
+        clamp = true
+      )
     }
   }
 

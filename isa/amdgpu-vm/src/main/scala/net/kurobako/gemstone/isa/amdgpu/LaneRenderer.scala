@@ -1781,8 +1781,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
       val chain                  = Vec.newBuilder[Term.Step]
       def stepName(k: Int): String = if (k < 0) s"d$item" else s"d${item}k$k"
       chain += Term.Step(stepName(-1), start)
-      (0 until shape.storedK).foreach { k =>
-        val sum   = Variable(stepName(k - 1))
+      def operands(k: Int): (Term, Term, Term, Term) = {
         val aLane =
           matrixLane(lane =>
             shape.aSource(
@@ -1835,17 +1834,22 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
               bWidth.unsafe[Int in 1 ~ 64]
             )
           } else matrixBits(instruction.srcB, operand(instruction.srcB, 2), Some(bLane), bBit, bWidth)
-        val (scaleA, scaleB) = controls.scales.fold((Literal(0L): Term, Literal(0L): Term))(scales =>
-          (
-            matrixScale(scales.a, scales.selectionA, matrixLane(lane => row(lane) + shape.m * (k / 32))),
-            matrixScale(scales.b, scales.selectionB, matrixLane(lane => column(lane) + shape.n * (k / 32)))
+        val (scaleA, scaleB) =
+          controls.scales.fold((Literal(if (shape.grouped > 0) k.toLong else 0L): Term, Literal(0L): Term))(scales =>
+            (
+              matrixScale(scales.a, scales.selectionA, matrixLane(lane => row(lane) + shape.m * (k / 32))),
+              matrixScale(scales.b, scales.selectionB, matrixLane(lane => column(lane) + shape.n * (k / 32)))
+            )
           )
-        )
-        chain +=
-          Term.Step(
-            stepName(k),
-            step(sum, inputA(a), inputB(matrixInput(controls, b, bBit, bWidth, 1)), scaleA, scaleB)
-          )
+        (inputA(a), inputB(matrixInput(controls, b, bBit, bWidth, 1)), scaleA, scaleB)
+      }
+      (0 until shape.storedK by (if (shape.chained) 2 else 1)).foreach { k =>
+        val sum                    = Variable(stepName(k - 1))
+        val (a, b, scaleA, scaleB) = operands(k)
+        if (shape.chained) {
+          val (nextA, nextB, _, _) = operands(k + 1)
+          chain += Term.Step(stepName(k + 1), step(sum, a, b, nextA, nextB))
+        } else chain += Term.Step(stepName(k), step(sum, a, b, scaleA, scaleB))
       }
       chain += Term.Step(s"element$item", result(Variable(stepName(shape.storedK - 1))))
       chain.result()

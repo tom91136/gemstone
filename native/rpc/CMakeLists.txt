@@ -13,11 +13,8 @@ target_include_directories(gemstone_execution_client PUBLIC
   "${GEMSTONE_NATIVE_INCLUDE_DIRECTORY}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../generated/rpc"
   "${CMAKE_CURRENT_SOURCE_DIR}/../generated")
-target_compile_features(gemstone_execution_client PUBLIC cxx_std_23)
 target_link_libraries(gemstone_execution_client PUBLIC Threads::Threads glaze::glaze)
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(gemstone_execution_client PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+gemstone_project_target(gemstone_execution_client)
 
 if(BUILD_TESTING)
   foreach(test_name IN ITEMS execution_rpc_smoke execution_rpc_session_loss request_bounds process_identity memory_ranges command_queue client_manager transfer environment completion)

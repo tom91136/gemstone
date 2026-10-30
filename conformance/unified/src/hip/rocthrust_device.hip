@@ -198,7 +198,7 @@ template <template <class, class> class Check> inline void checkAllDistributions
   // the failing ones are named instead of hiding the remaining probes behind
   // the first failure.
   std::string failures;
-  const auto check = [what, &failures](const char *name, auto run) {
+  const auto check = [&failures](const char *name, auto run) {
     try {
       if (run() == 1) return;
       failures += fmt::format(" {} (out-of-range sample)", name);

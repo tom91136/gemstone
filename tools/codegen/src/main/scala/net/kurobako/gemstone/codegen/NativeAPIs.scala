@@ -106,7 +106,8 @@ cuMemHostGetDevicePointer_v2 cuMemHostGetFlags cuMemHostRegister_v2 cuMemHostUnr
 cuMemPoolDestroy cuMemPoolGetAttribute cuMemPoolSetAttribute cuMemPoolTrimTo cuMemSetMemPool cuMemcpy
 cuMemcpy2DAsync_v2 cuMemcpy2DUnaligned_v2 cuMemcpy2D_v2 cuMemcpy3DAsync_v2 cuMemcpy3D_v2 cuMemcpyAsync
 cuMemcpyDtoDAsync_v2 cuMemcpyDtoD_v2 cuMemcpyDtoHAsync_v2 cuMemcpyDtoH_v2 cuMemcpyHtoDAsync_v2 cuMemcpyHtoD_v2
-cuMemsetD8Async cuMemsetD8_v2 cuModuleGetFunction cuModuleGetGlobal_v2 cuModuleGetLoadingMode cuModuleGetSurfRef
+cuMemsetD16Async cuMemsetD16_v2 cuMemsetD32Async cuMemsetD32_v2 cuMemsetD8Async cuMemsetD8_v2 cuModuleGetFunction
+cuModuleGetGlobal_v2 cuModuleGetLoadingMode cuModuleGetSurfRef
 cuModuleGetTexRef cuModuleLoadData cuModuleLoadDataEx cuModuleLoadFatBinary cuModuleUnload
 cuOccupancyAvailableDynamicSMemPerBlock cuOccupancyMaxActiveBlocksPerMultiprocessor
 cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags cuOccupancyMaxActiveClusters cuPointerGetAttribute
@@ -125,10 +126,13 @@ cudaStreamIsCapturing cudaStreamQuery cudaStreamSynchronize cudaStreamWaitEvent"
         // vendor libraries still request these older ABI names directly
         legacy = Vector(
           "cuGraphExecKernelNodeSetParams" -> "decltype(cuGraphExecKernelNodeSetParams_v2)",
+          "cuGraphExecUpdate"              -> "decltype(cuGraphExecUpdate_v2)",
           "cuGraphInstantiate"             -> "decltype(cuGraphInstantiateWithFlags)",
           "cuGraphKernelNodeGetParams"     -> "decltype(cuGraphKernelNodeGetParams_v2)",
           "cuMemPrefetchAsync"             -> "decltype(cuMemPrefetchAsync_v2)",
+          "cuProfilerStop"                 -> "CUresult()",
           "cuStreamBatchMemOp"             -> "decltype(cuStreamBatchMemOp_v2)",
+          "cuStreamBeginCapture"           -> "decltype(cuStreamBeginCapture_v2)",
           "cuStreamWaitValue32"            -> "decltype(cuStreamWaitValue32_v2)"
         )
       )

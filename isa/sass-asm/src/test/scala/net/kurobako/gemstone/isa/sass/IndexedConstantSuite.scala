@@ -27,4 +27,17 @@ class IndexedConstantSuite extends Suite {
     assertEquals(Assembler.assemble(text, sm90).map(_.toSeq), Right(bytes(word).toSeq))
     assertEquals(Parser.parse(text).flatMap(Printer.print(_)), Right(text))
   }
+
+  private val sm80 = Target.of(80).value
+
+  for (
+    (text, word) <- Vec(
+      "LDC R2, c[2][R0-0x8000];" -> "827b02000000a0000008000000240e00",
+      "LDC R2, c[2][R0-0x7ff4];" -> "827b02000003a0000008000000240e00",
+      "LDC R2, c[2][R0+0x7ff4];" -> "827b020000fd9f000008000000240e00"
+    )
+  ) test(s"$text decodes with a signed register offset") {
+    val decoded = InstructionDecoder.decode(0, bytes(word), sm80).value
+    assertEquals(Printer.print(decoded.operation), Right(text))
+  }
 }

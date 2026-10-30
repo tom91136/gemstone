@@ -566,7 +566,7 @@ std::shared_ptr<Kernel> resolveModuleKernel(Module &module, const std::string &n
   gemstone::hsa::ExecutableKernelMetadata metadata;
   if (!gemstone::hsa::copyExecutableKernelMetadata(module.executable, name, metadata)) return {};
   hsa_executable_symbol_t symbol{};
-  if (hsa_executable_get_symbol_by_name(module.executable, name.c_str(), &state().gpu, &symbol) != HSA_STATUS_SUCCESS) return {};
+  if (hsa_executable_get_symbol_by_name(module.executable, metadata.symbol.c_str(), &state().gpu, &symbol) != HSA_STATUS_SUCCESS) return {};
   uint64_t object = 0;
   if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) != HSA_STATUS_SUCCESS) return {};
   auto kernel = std::make_shared<Kernel>();
@@ -1095,7 +1095,6 @@ constexpr size_t Name = 0;
 constexpr size_t NameSize = 256;
 constexpr size_t TotalGlobalMem = 256;
 constexpr size_t SharedMemPerBlock = 264;
-constexpr size_t RegsPerBlock = 272;
 constexpr size_t WarpSize = 276;
 constexpr size_t MaxThreadsPerBlock = 280;
 constexpr size_t MaxThreadsDim = 284;
@@ -1685,8 +1684,8 @@ extern "C" hipError_t hipModuleLaunchKernel(hipFunction_t function, unsigned int
   LaunchBuffer launchBuffer;
   if (!parseLaunchBuffer(extra, launchBuffer)) return remember(hipErrorInvalidValue);
   if (traceModules())
-    std::fprintf(stderr, "Gemstone HIP module launch f=%p grid=%u,%u,%u block=%u,%u,%u args=%p\n", function, gridX, gridY, gridZ, blockX,
-                 blockY, blockZ, static_cast<void *>(args));
+    std::fprintf(stderr, "Gemstone HIP module launch f=%p grid=%u,%u,%u block=%u,%u,%u args=%p\n", static_cast<void *>(function), gridX,
+                 gridY, gridZ, blockX, blockY, blockZ, static_cast<void *>(args));
   return dispatchKernel(functionState->kernel, dim3(gridX, gridY, gridZ), dim3(blockX, blockY, blockZ), args, shared, stream, launchBuffer);
 }
 
@@ -1726,8 +1725,8 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipExtModuleLaunchKernel(hipFunction_t
   LaunchBuffer launchBuffer;
   if (!parseLaunchBuffer(extra, launchBuffer)) return remember(hipErrorInvalidValue);
   if (traceModules())
-    std::fprintf(stderr, "Gemstone HIP ext module launch f=%p global=%u,%u,%u local=%u,%u,%u args=%p\n", function, globalX, globalY,
-                 globalZ, localX, localY, localZ, static_cast<void *>(args));
+    std::fprintf(stderr, "Gemstone HIP ext module launch f=%p global=%u,%u,%u local=%u,%u,%u args=%p\n", static_cast<void *>(function),
+                 globalX, globalY, globalZ, localX, localY, localZ, static_cast<void *>(args));
   const dim3 global(globalX, globalY, globalZ);
   // Like the vendor extended launch path, fit a nominal workgroup inside a smaller whole grid.
   const dim3 local(std::min(localX, globalX), std::min(localY, globalY), std::min(localZ, globalZ));

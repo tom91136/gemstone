@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 import net.kurobako.gemstone.string.*
@@ -112,6 +113,30 @@ object InstructionDecoder {
       .orElse(Option.when(
         !form.encodedNames(form.encodedBinding(field))
       )(database.defaultValues(field).headOption).flatten)
+
+    /** The bits a form stores for `field`, counting those its scale drops. */
+    private def storedWidth(field: Field): Option[Int] = {
+      val binding = form.encodedBinding(field)
+      val widths  = form.fields.flatMap { assignment =>
+        assignment.expression match {
+          case Expression.Reference(`binding`, None, _) => Some(assignment.positions.size)
+          case Expression.Scale(Expression.Reference(`binding`, None, _), factor) if factor.bitCount == 1 =>
+            Some(assignment.positions.size + factor.bitLength - 1)
+          case _ => None
+        }
+      }
+      Option.when(widths.nonEmpty)(widths.sum)
+    }
+
+    /** A constant bank offset is declared one bit wider than the form stores, as an absolute offset is unsigned; an
+      * offset added to a register is signed over the stored bits.
+      */
+    private def registerDisplacement(children: Vec[FormatPiece], base: Operand.Register, value: BigInt): BigInt =
+      children.collectFirst {
+        case FormatPiece.Field(field, Some(_)) if field.category == NVDisasm.FieldKind.SignedImmediate => field
+      }.flatMap(field => fieldWidth(field).zip(storedWidth(field)).headOption).fold(value) { (declared, stored) =>
+        if (!OperandQueries.isZero(base) && value >= 0 && stored < declared) signed(value, stored) else value
+      }
 
     private def isDefault(field: Field, value: BigInt): Boolean = database.defaultValues(field).contains(value) &&
       FieldDecoder.Attribute.names.forall(name => attribute(field, name) == 0)
@@ -329,7 +354,13 @@ object InstructionDecoder {
           case Vec(Operand.Symbol("c"), bank, offset) if OperandQueries.integer(bank).nonEmpty =>
             Vec(Operand.ConstantBank(OperandQueries.integer(bank).get, offset))
           case Vec(base: Operand.Register, displacement) if OperandQueries.integer(displacement).nonEmpty =>
-            Vec(addressOperand(base, None, OperandQueries.integer(displacement).get, scale, mode))
+            Vec(addressOperand(
+              base,
+              None,
+              registerDisplacement(children, base, OperandQueries.integer(displacement).get),
+              scale,
+              mode
+            ))
           case Vec(base: Operand.Register, index: Operand.Register, offset)
               if OperandQueries.integer(offset).nonEmpty =>
             Vec(addressOperand(base, Some(index), OperandQueries.integer(offset).get, scale, mode))

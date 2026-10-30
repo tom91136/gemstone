@@ -16,7 +16,7 @@ void checkTensor(cudaError_t result) {
   if (result != cudaSuccess) throw std::runtime_error(std::string("CUDA tensor test: ") + cudaGetErrorString(result));
 }
 
-__global__ void tensorGemm(const half *a, const half *b, float *c) {
+__global__ void tensorGemm([[maybe_unused]] const half *a, [[maybe_unused]] const half *b, [[maybe_unused]] float *c) {
 #if __CUDA_ARCH__ >= 700
   using namespace nvcuda;
   const size_t tile = (blockIdx.x * 2) + (threadIdx.x / 32);

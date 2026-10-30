@@ -880,7 +880,7 @@ public:
   template <class T> std::vector<T> asyncInterleavedStreams(const std::vector<T> &input) {
     using namespace aspartame;
     const auto even = input ^ stride(2);
-    const auto odd = input ^ drop(1) ^ stride(2);
+    const auto odd = input | drop(1) | stride(2) | to_vector();
     if (input.empty()) return {};
 
     const auto device = queue.get_device();

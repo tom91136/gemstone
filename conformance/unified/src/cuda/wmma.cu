@@ -65,8 +65,9 @@ template <> struct Fragment<Kind::Double> {
 // One warp loads A, B and C, from global memory or a shared copy, and stores D = A * B + C row-major.
 template <int Arch, Kind Element, class Memory, class Accumulator, int M, int N, int K, bool ColumnA, bool ColumnB, bool Shared,
           Bits Operation = Bits::None>
-__global__ void product(const Memory *a, const Memory *b, const Accumulator *c, Accumulator *d, unsigned lda, unsigned ldb, unsigned ldc,
-                        unsigned sizeA, unsigned sizeB) {
+__global__ void product([[maybe_unused]] const Memory *a, [[maybe_unused]] const Memory *b, [[maybe_unused]] const Accumulator *c,
+                        [[maybe_unused]] Accumulator *d, [[maybe_unused]] unsigned lda, [[maybe_unused]] unsigned ldb,
+                        [[maybe_unused]] unsigned ldc, [[maybe_unused]] unsigned sizeA, [[maybe_unused]] unsigned sizeB) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
   using namespace nvcuda;
   if constexpr (__CUDA_ARCH__ >= Arch * 10 && (Operation != Bits::And || __CUDA_ARCH__ < 1000)) {

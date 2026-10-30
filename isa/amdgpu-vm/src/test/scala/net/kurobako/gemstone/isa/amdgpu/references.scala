@@ -841,6 +841,8 @@ private object references {
       case DualVectorOperation.DotHalvesF32        => dot2F32F16(a, b, addend).toLong
       case DualVectorOperation.DotAlignedHalvesF32 =>
         toRaw(Dots.halvesToFloatAligned(fromRaw[UInt[32]](a), fromRaw[UInt[32]](b), fromRaw[Float32](addend)))
+      case DualVectorOperation.DotAlignedBFloat16F32 =>
+        toRaw(Dots.bfloat16ToFloatAligned(fromRaw[UInt[32]](a), fromRaw[UInt[32]](b), fromRaw[Float32](addend)))
       case DualVectorOperation.DotBFloat16F32 =>
         def bfloat(value: Long): Float = float((value & 0xffffL) << 16)
         bits(IEEE754.fma(bfloat(a), bfloat(b), bfloat(a >>> 16) * bfloat(b >>> 16)) + float(addend))

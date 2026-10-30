@@ -63,9 +63,9 @@ using Ints3 = int __attribute__((ext_vector_type(3)));
 
 constexpr uint32_t LocalResults = 9;
 
-__global__ void localTransposes(uint32_t *out, uint32_t *supported) {
-  const uint32_t lane = threadIdx.x;
+__global__ void localTransposes([[maybe_unused]] uint32_t *out, [[maybe_unused]] uint32_t *supported) {
 #ifdef __gfx950__
+  const uint32_t lane = threadIdx.x;
   __shared__ __attribute__((aligned(16))) uint8_t lds[64 * 16];
   for (uint32_t index = 0; index < 16; ++index)
     lds[(lane * 16) + index] = pattern(lane, index);
@@ -117,9 +117,10 @@ using Shorts8 = short __attribute__((ext_vector_type(8)));
 
 constexpr uint32_t GlobalResults = 6;
 
-__global__ void globalTransposes(const uint8_t *data, uint32_t *out, uint32_t *supported) {
-  const uint32_t lane = threadIdx.x;
+__global__ void globalTransposes([[maybe_unused]] const uint8_t *data, [[maybe_unused]] uint32_t *out,
+                                 [[maybe_unused]] uint32_t *supported) {
 #ifdef __GFX12__
+  const uint32_t lane = threadIdx.x;
   using Halves = __attribute__((address_space(1))) Shorts8 *;
   using Pair = __attribute__((address_space(1))) Ints2 *;
   const auto at = reinterpret_cast<uintptr_t>(data + lane * 16);

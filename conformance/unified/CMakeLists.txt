@@ -20,11 +20,7 @@ target_link_libraries(unified PRIVATE Catch2::Catch2 conformance_device magic_en
 target_compile_definitions(unified PRIVATE
   CONFORMANCE_BACKEND_NAME="${CONFORMANCE_BACKEND}")
 target_link_libraries(unified PRIVATE ${CMAKE_DL_LIBS})
-set_target_properties(unified PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED YES
-  CXX_EXTENSIONS NO
-  OUTPUT_NAME unified)
+set_target_properties(unified PROPERTIES OUTPUT_NAME unified)
 
 # Compiles an OpenCL C kernel for the HSA architecture and embeds the code object as `<name>_image` in
 # `<name>_image.hpp`.
@@ -61,7 +57,8 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hsa")
   conformance_embed_opencl(images src/hsa/images.cl)
   conformance_embed_opencl(struct_alignment src/hsa/struct_alignment.cl)
   target_sources(unified PRIVATE src/hsa/runtime.cpp src/hsa/memory.cpp src/hsa/images.cpp src/hsa/struct_alignment.cpp)
-  target_include_directories(unified PRIVATE ${HSA_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+  target_include_directories(unified SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+  target_include_directories(unified PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   target_compile_definitions(unified PRIVATE
     CONFORMANCE_DEVICE_TARGETS="${CMAKE_HIP_ARCHITECTURES}")
   target_link_libraries(unified PRIVATE ${HSA_LIBRARY})
@@ -120,11 +117,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
   endif()
   string(REPLACE ";" "," cuda_device_targets "${conformance_cuda_architecture}")
   target_compile_definitions(unified PRIVATE CONFORMANCE_DEVICE_TARGETS="${cuda_device_targets}")
-  set_target_properties(unified PROPERTIES
-    CUDA_STANDARD 17
-    CUDA_STANDARD_REQUIRED YES
-    CUDA_EXTENSIONS NO
-    CUDA_RUNTIME_LIBRARY Static)
+  set_target_properties(unified PROPERTIES CUDA_RUNTIME_LIBRARY Static)
 
 elseif(CONFORMANCE_BACKEND STREQUAL "hip")
   enable_language(HIP)
@@ -192,17 +185,13 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     if(ROCBLAS_TENSILE_AVAILABLE)
       target_compile_definitions(unified PRIVATE CONFORMANCE_HIP_HAS_TENSILE=1)
     endif()
-    target_include_directories(unified PRIVATE "${ROCBLAS_INCLUDE_DIR}")
-    target_compile_options(unified PRIVATE "$<$<COMPILE_LANGUAGE:HIP>:-I${ROCBLAS_INCLUDE_DIR}>")
+    target_include_directories(unified SYSTEM PRIVATE "${ROCBLAS_INCLUDE_DIR}")
+    target_compile_options(unified PRIVATE "$<$<COMPILE_LANGUAGE:HIP>:-isystem;${ROCBLAS_INCLUDE_DIR}>")
     # amdclang++'s implicit --hip-link search must see the selected ROCm tree
     # before any distribution compatibility runtime.
     target_link_options(unified PRIVATE "-L${ROCBLAS_LIBRARY_DIR}")
     target_link_libraries(unified PRIVATE "${ROCBLAS_LIBRARY}")
   endif()
-  set_target_properties(unified PROPERTIES
-    HIP_STANDARD 20
-    HIP_STANDARD_REQUIRED YES
-    HIP_EXTENSIONS NO)
   if(CONFORMANCE_HIP_ENABLE_ROCBLAS)
     install(DIRECTORY /opt/rocm/lib/rocblas/library DESTINATION lib/rocblas
       COMPONENT support OPTIONAL PATTERN "TensileManifest.txt" EXCLUDE)
@@ -305,7 +294,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
       # Retain one atomic operation per work-item, matching the native fixtures.
       list(APPEND memory_options -nogpulib -mllvm -amdgpu-atomic-optimizer-strategy=None)
       if(CONFORMANCE_BACKEND STREQUAL "hip")
-        target_include_directories(unified PRIVATE "${CONFORMANCE_HIP_INCLUDE}")
+        target_include_directories(unified SYSTEM PRIVATE "${CONFORMANCE_HIP_INCLUDE}")
       endif()
     else()
       list(APPEND memory_options -DUNIFIED_MEMORY_ATOMIC32=1)
@@ -353,6 +342,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
   target_include_directories(unified PRIVATE "${memory_output}")
 endif()
 
+conformance_project_target(unified)
 conformance_register_test_program(unified ${CONFORMANCE_TIMEOUT_UNIFIED})
 
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|hip)$")

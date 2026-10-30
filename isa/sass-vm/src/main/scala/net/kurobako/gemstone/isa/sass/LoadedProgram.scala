@@ -128,11 +128,13 @@ class LoadedProgram(
       module.kernels.find(_.name == name).toRight(Fault.NotFound(s"cubin kernel '$name' is not present")).flatMap {
         kernel =>
           val functions = decoded.get(name).fold {
-            val code = module.sections(kernel.section).bytes
-            if (code.isEmpty) Left(Fault.InvalidProgram("empty SASS code section"))
-            else Target.of(module.sm).flatMap(CodeSection.decode(Vec.toArray(code), _))
-              .left.map(error => Fault.InvalidProgram(s"${kernel.name} sm_${module.sm} $error"))
-              .map(section => Vec(DecodedFunction(kernel.name, section.instructions)))
+            Cubin.link(module, kernel).left.map(Fault.InvalidProgram(_)).flatMap { linked =>
+              val code = linked.text
+              if (code.isEmpty) Left(Fault.InvalidProgram("empty SASS code section"))
+              else Target.of(module.sm).flatMap(CodeSection.decode(Vec.toArray(code), _))
+                .left.map(error => Fault.InvalidProgram(s"${kernel.name} sm_${module.sm} $error"))
+                .map(section => Vec(DecodedFunction(kernel.name, section.instructions)))
+            }
           }(Right(_))
           functions.flatMap { functions =>
             val globalSymbols = bindings.asScala.toVec.flatMap((global, bound) =>

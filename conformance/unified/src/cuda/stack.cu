@@ -50,7 +50,7 @@ __device__ __noinline__ uint32_t weigh(const uint32_t *values, uint32_t count) {
 }
 #endif
 
-__global__ void dynamic(const uint32_t *in, uint32_t *out) {
+__global__ void dynamic([[maybe_unused]] const uint32_t *in, [[maybe_unused]] uint32_t *out) {
 #if defined(CUDA_STACK_ALLOCA) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 520
   const uint32_t count = 4U + ((threadIdx.x * 7U) % 29U);
   auto *first = static_cast<uint32_t *>(__builtin_alloca(count * sizeof(uint32_t)));
@@ -99,7 +99,8 @@ TEST_CASE("stack/cuda/alloca", "[unified][stack]") {
 
 namespace {
 // Inlined into the loop, each round's allocation is released with stackrestore before the next.
-__device__ __forceinline__ uint32_t scratch(const uint32_t *in, uint32_t count, uint32_t salt) {
+__device__ __forceinline__ uint32_t scratch([[maybe_unused]] const uint32_t *in, [[maybe_unused]] uint32_t count,
+                                            [[maybe_unused]] uint32_t salt) {
 #if defined(CUDA_STACK_ALLOCA) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 520
   #ifdef __clang__
   // ptxas merges clang's 8-byte local stores into 16-byte ones, which fault on hardware below 16-byte alignment.

@@ -543,7 +543,7 @@ class SpecifiedInstructionSuite extends Suite {
       val relu = if (sign != 0L) 0L else if ((even & 0x7fffffffL) >= 0x7f800000L) 0x7f7fe000L else even
       assertEquals(
         result,
-        if (isNaN(bits)) Vec(away, away - 0x2000L, 0x7fffffffL, 0x7fffffffL, 0x7fffffffL)
+        if (isNaN(bits)) Vec(away, away - 0x2000L, 0x7fffe000L, 0x7fffe000L, 0x7fffe000L)
         else
           Vec(
             away,

@@ -322,7 +322,7 @@ void transfers() {
   auto *staging = session.buffer(std::vector<uint8_t>(64, 0));
   check(clEnqueueCopyImageToBuffer(session.queue, copy, staging, origin, innerRegion, 8, 0, nullptr, nullptr), "copy to buffer");
   const auto staged = session.read<uint8_t>(staging, 64);
-  CHECK((staged ^ drop(8) ^ take(window.size())) == window);
+  CHECK((staged | drop(8) | take(window.size()) | to_vector()) == window);
 
   auto *restored = session.image(CL_MEM_READ_WRITE, format, describe(CL_MEM_OBJECT_IMAGE2D, 3, 2));
   check(clEnqueueCopyBufferToImage(session.queue, staging, restored, 8, origin, innerRegion, 0, nullptr, nullptr), "copy to image");

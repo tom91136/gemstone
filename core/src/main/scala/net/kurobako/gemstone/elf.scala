@@ -72,7 +72,8 @@ object elf {
       kind: Int in 0 ~ 15,
       section: Int in 0 ~ 65535,
       value: Long,
-      size: Int >= 0
+      size: Int >= 0,
+      other: Int in 0 ~ 255
   )
 
   case class Relocation(offset: Long, symbol: Long >= 0, kind: Long >= 0, addend: Option[Long])
@@ -325,7 +326,8 @@ object elf {
           (bytes(start + 4) & 15).unsafe[Int in 0 ~ 15],
           LittleEndian.decodeUInt16(bytes, start + 6),
           LittleEndian.decodeInt64(bytes, start + 8),
-          size
+          size,
+          (bytes(start + 5) & 255).unsafe[Int in 0 ~ 255]
         )
       }.sequence
   }

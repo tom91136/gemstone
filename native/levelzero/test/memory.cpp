@@ -47,20 +47,24 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
         }
     }
     require(device != nullptr, "selected Level Zero device unavailable");
-    ze_context_desc_t const cd{.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC};
+    ze_context_desc_t cd{};
+    cd.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
     check(zeContextCreate(driver, &cd, &context));
     auto code = image(GEMSTONE_MEMORY_IMAGE_DIRECTORY, fixture);
-    ze_module_desc_t md{.stype = ZE_STRUCTURE_TYPE_MODULE_DESC};
+    ze_module_desc_t md{};
+    md.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
     md.format = ZE_MODULE_FORMAT_IL_SPIRV;
     md.inputSize = code.size() - 1;
     md.pInputModule = reinterpret_cast<const uint8_t *>(code.data());
     check(zeModuleCreate(context, device, &md, &module, nullptr));
-    ze_kernel_desc_t kd{.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    ze_kernel_desc_t kd{};
+    kd.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
     kd.pKernelName = "probe";
     check(zeKernelCreate(module, &kd, &kernel));
     check(zeKernelSetIndirectAccess(kernel, ZE_KERNEL_INDIRECT_ACCESS_FLAG_HOST | ZE_KERNEL_INDIRECT_ACCESS_FLAG_SHARED
                                                 | ZE_KERNEL_INDIRECT_ACCESS_FLAG_DEVICE));
-    ze_command_queue_desc_t qd{.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    ze_command_queue_desc_t qd{};
+    qd.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     qd.mode = asynchronous ? ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS : ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
     check(zeCommandListCreateImmediate(context, device, &qd, &list));
   }
@@ -72,7 +76,8 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
   }
   ze_command_list_handle_t overlapLists[2]{};
   void overlapSubmit(unsigned i, void *input, uint32_t *output, unsigned mode) {
-    ze_command_queue_desc_t desc{.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    ze_command_queue_desc_t desc{};
+    desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
     check(zeCommandListCreateImmediate(context, device, &desc, &overlapLists[i]));
     enqueue(input, output, reinterpret_cast<uint32_t *>(input), mode, 1, overlapLists[i], nullptr, 0, nullptr);
@@ -85,7 +90,8 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
   }
 
   [[nodiscard]] void *allocateDevice(size_t size) const {
-    ze_device_mem_alloc_desc_t const desc{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
+    ze_device_mem_alloc_desc_t desc{};
+    desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
     void *p{};
     check(zeMemAllocDevice(context, &desc, size, 64, device, &p));
     return p;
@@ -99,8 +105,10 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
   }
   [[nodiscard]] void *allocateBacking(size_t size) const {
     void *p{};
-    ze_device_mem_alloc_desc_t const dd{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
-    ze_host_mem_alloc_desc_t const hd{.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC};
+    ze_device_mem_alloc_desc_t dd{};
+    dd.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+    ze_host_mem_alloc_desc_t hd{};
+    hd.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
     if (kind == "host") check(zeMemAllocHost(context, &hd, size, 64, &p));
     else check(zeMemAllocShared(context, &dd, &hd, size, 64, device, &p));
     return p;
@@ -129,7 +137,8 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
     this->raw = raw;
   }
   [[nodiscard]] bool concurrentCapabilities() const {
-    ze_device_memory_access_properties_t properties{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES};
+    ze_device_memory_access_properties_t properties{};
+    properties.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES;
     check(zeDeviceGetMemoryAccessProperties(device, &properties));
     const auto shared = ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT
                         | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;

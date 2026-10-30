@@ -204,7 +204,8 @@ uint32_t predicateReference(const std::vector<uint32_t> &in, uint32_t t) {
 constexpr uint32_t CarrylessCount = 4;
 
 // clmad needs PTX ISA 9.3, which nvcc 13.3 emits and clang does not; `supported` reports whether it was compiled.
-__global__ void carryless(const uint32_t *in, uint64_t *out, uint32_t *supported, uint32_t count) {
+__global__ void carryless([[maybe_unused]] const uint32_t *in, [[maybe_unused]] uint64_t *out, [[maybe_unused]] uint32_t *supported,
+                          uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count * count) return;
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800 && __CUDACC_VER_MAJOR__ >= 13 && !defined(__clang__)

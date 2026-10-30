@@ -31,6 +31,7 @@
 #include <aspartame/string.hpp>
 #include <aspartame/string_view.hpp>
 #include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 
 #include "gemstone/command_queue.hpp"
 #include "gemstone/environment.hpp"
@@ -1559,7 +1560,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseContext(cl_context value) {
   auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   if (release(context)) {
-    context->destructorCallbacks ^ reverse() ^ for_each([&](auto callback, void *user) {
+    context->destructorCallbacks | reverse() | for_each([&](auto callback, void *user) {
       if (callback) callback(value, user);
     });
     destroyObject(context);
@@ -2464,7 +2465,7 @@ cl_int loadProgramIL(_cl_program *program) {
       program->remoteId = 0;
       return CL_INVALID_BINARY;
     }
-    program->kernelNames = catalogue.value().kernels ^ map([](const auto &kernel) { return kernel.name.value; }) ^ mk_string(";");
+    program->kernelNames = catalogue.value().kernels | map([](const auto &kernel) { return kernel.name.value; }) | mk_string(";");
     globals = std::move(catalogue.value().globals);
   }
   if (const auto status = bindProgramGlobals(program, globals); status != CL_SUCCESS) {

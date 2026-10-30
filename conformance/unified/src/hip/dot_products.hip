@@ -19,14 +19,16 @@ using namespace hip_support;
 
 // The GFX11 and GFX12 dot products hipcc emits from builtins, each checked against a host reference: v_dot4_i32_iu8
 // and v_dot8_i32_iu4, whose NEG_LO bits sign each source's elements, v_dot2_f16_f16 and v_dot2_bf16_bf16, and GFX12's
-// v_dot4_f32 of OCP 8-bit floats. Floating-point inputs keep every product and sum exact.
+// v_dot4_f32 of OCP 8-bit floats. Floating-point inputs keep every product and sum exact, which gfx1100 to gfx1103 and gfx1150
+// to gfx1153 lose to their fixed-point accumulator.
 namespace {
 
 constexpr uint32_t IntegerResults = 4;
 
 // __builtin_amdgcn_sudot4 and sudot8: v_dot4_i32_iu8 and v_dot8_i32_iu4 with neg_lo naming the signed sources, the
 // clamp saturating the signed sum.
-__global__ void integerDots(const uint32_t *a, const uint32_t *b, const int32_t *c, int32_t *out, uint32_t *supported, uint32_t count) {
+__global__ void integerDots([[maybe_unused]] const uint32_t *a, [[maybe_unused]] const uint32_t *b, [[maybe_unused]] const int32_t *c,
+                            [[maybe_unused]] int32_t *out, [[maybe_unused]] uint32_t *supported, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
 #if defined(__GFX11__) || defined(__GFX12__)
@@ -92,7 +94,8 @@ using Shorts2 = short __attribute__((ext_vector_type(2)));
 
 // __builtin_amdgcn_fdot2_f16_f16 and fdot2_bf16_bf16: v_dot2_f16_f16 and v_dot2_bf16_bf16. Small multiples of a
 // quarter keep the products and sums exact in both formats.
-__global__ void halfDots(const float *a, const float *b, const float *c, uint32_t *out, uint32_t *supported, uint32_t count) {
+__global__ void halfDots([[maybe_unused]] const float *a, [[maybe_unused]] const float *b, [[maybe_unused]] const float *c,
+                         [[maybe_unused]] uint32_t *out, [[maybe_unused]] uint32_t *supported, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
 #if defined(__GFX11__) || defined(__GFX12__)
@@ -134,10 +137,14 @@ TEST_CASE("intrinsics/hip/half-dots", "[unified][intrinsics]") {
   finish("half dots");
   if (supported.download()[0] == 0) SKIP("half dots need GFX11 or GFX12");
   const auto actual = out.download();
+  const bool aligned = alignedDots(architecture());
   for (size_t i = 0; i < count; ++i) {
-    const float expected = (a[2 * i] * b[2 * i]) + (a[(2 * i) + 1] * b[(2 * i) + 1]) + c[i];
-    if (actual[2 * i] != halfBits(expected) || actual[(2 * i) + 1] != bfloatBits(expected))
-      throw std::runtime_error(fmt::format("half dot {}: {:#x} and {:#x} for {}", i, actual[2 * i], actual[(2 * i) + 1], expected));
+    const float exact = (a[2 * i] * b[2 * i]) + (a[(2 * i) + 1] * b[(2 * i) + 1]) + c[i];
+    const auto summed = [&](DotResult result) { return alignedDot(a[2 * i], b[2 * i], a[(2 * i) + 1], b[(2 * i) + 1], c[i], result); };
+    const uint32_t wantedHalf = aligned ? halfBitsOf(summed(DotResult::Half)) : halfBits(exact);
+    const uint32_t wantedBfloat = aligned ? bfloatBits(static_cast<float>(summed(DotResult::BFloat16))) : bfloatBits(exact);
+    if (actual[2 * i] != wantedHalf || actual[(2 * i) + 1] != wantedBfloat)
+      throw std::runtime_error(fmt::format("half dot {}: {:#x} and {:#x} for {}", i, actual[2 * i], actual[(2 * i) + 1], exact));
   }
 }
 
@@ -156,7 +163,8 @@ double eightBit(uint32_t code, bool e5m2) {
 
 // __builtin_amdgcn_dot4_f32_fp8_bf8 and its siblings: v_dot4_f32_*8_*8. The codes keep clear of NaN and infinity, and
 // their products and sums stay exact in binary32.
-__global__ void eightBitDots(const uint32_t *a, const uint32_t *b, const float *c, float *out, uint32_t *supported, uint32_t count) {
+__global__ void eightBitDots([[maybe_unused]] const uint32_t *a, [[maybe_unused]] const uint32_t *b, [[maybe_unused]] const float *c,
+                             [[maybe_unused]] float *out, [[maybe_unused]] uint32_t *supported, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
 #ifdef __GFX12__

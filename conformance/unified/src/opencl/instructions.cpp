@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <CL/cl.h>
@@ -36,9 +37,8 @@ constexpr const char *SaturateSource = R"cl(
   })cl";
 
 template <class R, class T> R clamped(T value) {
-  const __int128 wide = value;
-  if (wide < std::numeric_limits<R>::min()) return std::numeric_limits<R>::min();
-  if (wide > std::numeric_limits<R>::max()) return std::numeric_limits<R>::max();
+  if (std::cmp_less(value, std::numeric_limits<R>::min())) return std::numeric_limits<R>::min();
+  if (std::cmp_greater(value, std::numeric_limits<R>::max())) return std::numeric_limits<R>::max();
   return static_cast<R>(value);
 }
 

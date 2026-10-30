@@ -27,16 +27,12 @@ std::string hex(uint64_t value) {
   return text;
 }
 
-uint16_t bitsOf(__half value) {
-  uint16_t bits = 0;
-  std::memcpy(&bits, &value, sizeof(bits));
-  return bits;
-}
+uint16_t bitsOf(__half value) { return __half_raw(value).x; }
 
 __half halfOf(uint16_t bits) {
-  __half value{};
-  std::memcpy(&value, &bits, sizeof(bits));
-  return value;
+  __half_raw raw{};
+  raw.x = bits;
+  return raw;
 }
 
 using unified::support::bitsFloat;

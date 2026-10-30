@@ -50,14 +50,16 @@ namespace {
 #define MMA_SP_FORM(NAME, ARCH, MAXIMUM, K, BITS, CBITS, REGS, PTX)                                                                        \
   struct NAME {                                                                                                                            \
     static constexpr int architecture = (ARCH), maximum = (MAXIMUM), k = (K), bits = (BITS), cBits = (CBITS);                              \
-    __device__ static void run(uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c, uint32_t e) {                         \
+    __device__ static void run([[maybe_unused]] uint32_t *d, [[maybe_unused]] const uint32_t *a, [[maybe_unused]] const uint32_t *b,       \
+                               [[maybe_unused]] const uint32_t *c, [[maybe_unused]] uint32_t e) {                                          \
       MMA_SP_SM##ARCH(REGS, PTX);                                                                                                          \
     }                                                                                                                                      \
   };
 #define MMA_SP_SM8X_FORM(NAME, K, BITS, REGS, PTX)                                                                                         \
   struct NAME {                                                                                                                            \
     static constexpr int architecture = 80, maximum = 89, k = (K), bits = (BITS), cBits = 32;                                              \
-    __device__ static void run(uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c, uint32_t e) {                         \
+    __device__ static void run([[maybe_unused]] uint32_t *d, [[maybe_unused]] const uint32_t *a, [[maybe_unused]] const uint32_t *b,       \
+                               [[maybe_unused]] const uint32_t *c, [[maybe_unused]] uint32_t e) {                                          \
       MMA_SP_SM8X(REGS, PTX);                                                                                                              \
     }                                                                                                                                      \
   };

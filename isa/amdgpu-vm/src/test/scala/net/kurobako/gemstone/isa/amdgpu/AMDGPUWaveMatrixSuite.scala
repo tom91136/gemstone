@@ -7,12 +7,25 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.semantics.prelude.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class AMDGPUWaveMatrixSuite extends Suite {
+
+  /** `start` plus the 16 products as RDNA3 sums them: a V_DOT2 over each pair of K, accumulating in binary16 or 32. */
+  private def chained(a: Int => Float, b: Int => Float, start: Long, halfResult: Boolean): Long =
+    (0 until 16 by 2).foldLeft(start) { (sum, k) =>
+      def pair(value: Int => Float): UInt[32] = fromRaw[UInt[32]](
+        (IEEE754.floatToBinary16(value(k)).toLong & 0xffffL) |
+          ((IEEE754.floatToBinary16(value(k + 1)).toLong & 0xffffL) << 16)
+      )
+      if (halfResult) toRaw(Dots.halvesAligned(pair(a), pair(b), fromRaw[Float16](sum)))
+      else toRaw(Dots.halvesToFloatAligned(pair(a), pair(b), fromRaw[Float32](sum)))
+    }
+
   for ((halfResult, high) <- Seq((true, false), (true, true), (false, false)))
     test(s"RDNA3 WMMA half=$halfResult high=$high multiplies asymmetric matrices with overlapping destinations") {
       val memory     = RegionMemory()
@@ -95,12 +108,17 @@ class AMDGPUWaveMatrixSuite extends Suite {
         row    <- 0 until 16
         column <- 0 until 16
       } {
-        val lane     = column + (row % 2) * 16
-        val offset   = (3072 + row / 2 * 128 + lane * 4).unsafe[Int >= 0]
-        val result   = memory.getInt(allocation, offset)
-        val expected = (0 until 16).map(k => a(row, k) * b(k, column)).sum + c(row, column)
-        if (halfResult) assertEquals((result >>> (if (high) 16 else 0)) & 0xffff, half(expected), clues(row, column))
-        else assertEquals(result, java.lang.Float.floatToRawIntBits(expected), clues(row, column))
+        val lane   = column + (row % 2) * 16
+        val offset = (3072 + row / 2 * 128 + lane * 4).unsafe[Int >= 0]
+        val result = memory.getInt(allocation, offset)
+        val start  = if (halfResult) half(c(row, column)).toLong
+        else java.lang.Float.floatToRawIntBits(c(row, column)) & 0xffffffffL
+        val expected = chained(a(row, _), b(_, column), start, halfResult)
+        assertEquals(
+          (result >>> (if (high) 16 else 0)).toLong & (if (halfResult) 0xffffL else 0xffffffffL),
+          expected,
+          clues(row, column)
+        )
       }
     }
 
@@ -132,8 +150,10 @@ class AMDGPUWaveMatrixSuite extends Suite {
         val offset                         = (register * 256 + lane * 4).unsafe[Int >= 0]
         def pair(value: Int => Float): Int = half(value(k(lane, register, 0))) |
           (half(value(k(lane, register, 1))) << 16)
-        memory.putInt(allocation, offset, pair(a(lane % 16, _)))
-        memory.putInt(allocation, (2048 + offset).unsafe[Int >= 0], pair(b(_, lane % 16)))
+        // gfx11's upper half wave reads the lower's A and B, whatever its own registers hold
+        val sign = if (target == Target("gfx1100") && lane >= 32) -1.0f else 1.0f
+        memory.putInt(allocation, offset, pair(index => sign * a(lane % 16, index)))
+        memory.putInt(allocation, (2048 + offset).unsafe[Int >= 0], pair(index => sign * b(index, lane % 16)))
       }
       for (register <- 0 until 4)
         memory.putInt(
@@ -182,10 +202,19 @@ class AMDGPUWaveMatrixSuite extends Suite {
       register <- 0 until 4
     } {
       val (r, column) = (row(lane, register), lane % 16)
-      val expected    = (0 until 16).map(index => a(r, index) * b(index, column)).sum + c(r, column)
+      val expected    =
+        if (target == Target("gfx1100"))
+          chained(
+            a(r, _),
+            b(_, column),
+            java.lang.Float.floatToRawIntBits(c(r, column)) & 0xffffffffL,
+            halfResult = false
+          )
+        else java.lang.Float.floatToRawIntBits((0 until 16).map(index => a(r, index) * b(index, column)).sum +
+          c(r, column)) & 0xffffffffL
       assertEquals(
-        memory.getInt(allocation, (5120 + register * 256 + lane * 4).unsafe[Int >= 0]),
-        java.lang.Float.floatToRawIntBits(expected),
+        memory.getInt(allocation, (5120 + register * 256 + lane * 4).unsafe[Int >= 0]).toLong & 0xffffffffL,
+        expected,
         clues(lane, register)
       )
     }

@@ -50,7 +50,7 @@ constexpr uint32_t Tf32Count = 7;
 __global__ void tf32(const uint32_t *in, uint32_t *out, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
-  const float x = __uint_as_float(in[i]);
+  [[maybe_unused]] const float x = __uint_as_float(in[i]);
   uint32_t *o = out + (static_cast<size_t>(i) * Tf32Count);
   for (uint32_t field = 0; field < Tf32Count; ++field)
     o[field] = 0xdeadbeefU;
@@ -88,7 +88,7 @@ uint32_t tf32Reference(uint32_t bits, char mode, bool satfinite, bool relu) {
     const uint32_t rounded = (magnitude < 0x7f800000U ? bits + 0x1000U : bits) & 0xffffe000U;
     return satfinite && (rounded & 0x7f800000U) == 0x7f800000U ? rounded - 0x2000U : rounded;
   }
-  if (isNan(bits)) return 0x7fffffffU;
+  if (isNan(bits)) return 0x7fffe000U;
   if (relu && sign && magnitude != 0) return 0U;
   uint32_t rounded = magnitude;
   if (magnitude < 0x7f800000U) {

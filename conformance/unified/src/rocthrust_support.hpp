@@ -164,7 +164,7 @@ template <class T> inline KeyValues<T> thrustSetByKey(const KeyValues<T> &left, 
 
 template <class T> inline std::vector<Pair<T>> pairValues(const std::vector<T> &keys, int32_t base) {
   using namespace aspartame;
-  return keys ^ zip(payload(keys.size(), base)) ^ map([](const T &key, int32_t value) { return Pair<T>(key, value); });
+  return keys | zip(payload(keys.size(), base)) | map([](const T &key, int32_t value) { return Pair<T>(key, value); }) | to_vector();
 }
 
 template <class T> inline std::vector<Pair<T>> hostPairs(const thrust::device_vector<Pair<T>> &values, size_t count) {

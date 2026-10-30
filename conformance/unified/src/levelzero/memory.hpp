@@ -41,20 +41,24 @@ struct Backend {
         }
     }
     require(device != nullptr, "selected Level Zero device unavailable");
-    ze_context_desc_t cd{.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC};
+    ze_context_desc_t cd{};
+    cd.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
     check(zeContextCreate(driver, &cd, &context));
     auto code = image(fixture);
-    ze_module_desc_t md{.stype = ZE_STRUCTURE_TYPE_MODULE_DESC};
+    ze_module_desc_t md{};
+    md.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
     md.format = ZE_MODULE_FORMAT_IL_SPIRV;
     md.inputSize = code.size() - 1;
     md.pInputModule = reinterpret_cast<const uint8_t *>(code.data());
     check(zeModuleCreate(context, device, &md, &module, nullptr));
-    ze_kernel_desc_t kd{.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    ze_kernel_desc_t kd{};
+    kd.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
     kd.pKernelName = "probe";
     check(zeKernelCreate(module, &kd, &kernel));
     check(zeKernelSetIndirectAccess(kernel, ZE_KERNEL_INDIRECT_ACCESS_FLAG_HOST | ZE_KERNEL_INDIRECT_ACCESS_FLAG_SHARED
                                                 | ZE_KERNEL_INDIRECT_ACCESS_FLAG_DEVICE));
-    ze_command_queue_desc_t qd{.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    ze_command_queue_desc_t qd{};
+    qd.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     qd.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
     check(zeCommandListCreateImmediate(context, device, &qd, &list));
   }
@@ -68,8 +72,10 @@ struct Backend {
   }
   [[nodiscard]] void *allocate(size_t size) const {
     void *p{};
-    ze_device_mem_alloc_desc_t dd{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
-    ze_host_mem_alloc_desc_t hd{.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC};
+    ze_device_mem_alloc_desc_t dd{};
+    dd.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+    ze_host_mem_alloc_desc_t hd{};
+    hd.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
     if (kind == "host") check(zeMemAllocHost(context, &hd, size, 64, &p));
     else check(zeMemAllocShared(context, &dd, &hd, size, 64, device, &p));
     return p;
@@ -94,23 +100,27 @@ struct Backend {
     check(zeCommandListHostSynchronize(list, UINT64_MAX));
   }
   void ordered(uint32_t *input, uint32_t *middle, uint32_t *output, unsigned count, bool crossQueue) {
-    ze_command_queue_desc_t qd{.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    ze_command_queue_desc_t qd{};
+    qd.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     qd.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
     ze_command_queue_handle_t first{};
     ze_command_queue_handle_t second{};
     check(zeCommandQueueCreate(context, device, &qd, &first));
     check(zeCommandQueueCreate(context, device, &qd, &second));
-    ze_command_list_desc_t ld{.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC};
+    ze_command_list_desc_t ld{};
+    ld.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
     ze_command_list_handle_t producer{};
     ze_command_list_handle_t consumer{};
     check(zeCommandListCreate(context, device, &ld, &producer));
     check(zeCommandListCreate(context, device, &ld, &consumer));
-    ze_event_pool_desc_t pd{.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC};
+    ze_event_pool_desc_t pd{};
+    pd.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
     pd.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
     pd.count = 2;
     ze_event_pool_handle_t pool{};
     check(zeEventPoolCreate(context, &pd, 1, &device, &pool));
-    ze_event_desc_t ed{.stype = ZE_STRUCTURE_TYPE_EVENT_DESC};
+    ze_event_desc_t ed{};
+    ed.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
     ed.signal = ed.wait = ZE_EVENT_SCOPE_FLAG_HOST;
     ze_event_handle_t produced{};
     ze_event_handle_t consumed{};

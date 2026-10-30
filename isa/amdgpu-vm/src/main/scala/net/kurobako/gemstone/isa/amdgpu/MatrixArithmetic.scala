@@ -88,6 +88,24 @@ private[isa] object MatrixArithmetic {
   def multiplyAdd(a: SInt[64], b: SInt[64], sum: SInt[64]): SInt[64] =
     fromRaw[SInt[64]](bits(sum) + bits(a) * bits(b))
 
+  /** [[multiplyAdd]] for element `index` of K, after which a sum saturates to 32 bits under `clamp` at the end of each
+    * group of `group` elements.
+    */
+  def groupedMultiplyAdd(
+      a: SInt[64],
+      b: SInt[64],
+      sum: SInt[64],
+      index: SInt[64],
+      group: Int,
+      clamp: Boolean
+  ): SInt[64] = {
+    val total = bits(sum) + bits(a) * bits(b)
+    fromRaw[SInt[64]](
+      if (clamp && (bits(index) + 1) % group == 0) math.max(Int.MinValue.toLong, math.min(Int.MaxValue.toLong, total))
+      else total
+    )
+  }
+
   // the element's bits may arrive with or without their sign extended
   def signed8(value: SInt[8]): SInt[64]      = fromRaw[SInt[64]](bits(value).toByte.toLong)
   def unsigned8(value: UInt[8]): SInt[64]    = fromRaw[SInt[64]](bits(value) & 0xffL)

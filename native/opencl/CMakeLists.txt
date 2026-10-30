@@ -6,14 +6,13 @@ add_library(gemstone_opencl SHARED
   src/compiler.cpp
   src/icd.cpp
   ../generated/opencl/gemstone_opencl_unsupported.cpp)
+target_include_directories(gemstone_opencl SYSTEM PRIVATE "${OPENCL_INCLUDE_DIR}")
 target_include_directories(gemstone_opencl PRIVATE
-  "${OPENCL_INCLUDE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../generated/opencl"
   "${CMAKE_CURRENT_SOURCE_DIR}/../generated/spirv"
 )
 target_compile_definitions(gemstone_opencl PRIVATE CL_TARGET_OPENCL_VERSION=300)
-target_compile_features(gemstone_opencl PRIVATE cxx_std_20)
-target_compile_options(gemstone_opencl PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter -Wno-deprecated-declarations)
+gemstone_project_target(gemstone_opencl)
 target_link_libraries(gemstone_opencl PRIVATE gemstone_execution_client)
 target_link_options(gemstone_opencl PRIVATE -Wl,-Bsymbolic)
 gemstone_require_abi_implementations(
@@ -30,9 +29,8 @@ if(BUILD_TESTING)
   gemstone_memory_client(opencl gemstone_opencl)
   function(gemstone_opencl_test target source)
     add_executable("${target}" "${source}")
-    target_include_directories("${target}" PRIVATE "${OPENCL_INCLUDE_DIR}")
+    target_include_directories("${target}" SYSTEM PRIVATE "${OPENCL_INCLUDE_DIR}")
     target_compile_definitions("${target}" PRIVATE CL_TARGET_OPENCL_VERSION=300)
-    target_compile_features("${target}" PRIVATE cxx_std_20)
     gemstone_test_target("${target}")
     target_link_libraries("${target}" PRIVATE gemstone_opencl ${ARGN})
   endfunction()
@@ -65,9 +63,9 @@ if(BUILD_TESTING)
   gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8)
 
   add_executable(gemstone_opencl_process_exit test/process_exit.cpp)
-  target_include_directories(gemstone_opencl_process_exit PRIVATE "${OPENCL_INCLUDE_DIR}")
+  gemstone_project_target(gemstone_opencl_process_exit)
+  target_include_directories(gemstone_opencl_process_exit SYSTEM PRIVATE "${OPENCL_INCLUDE_DIR}")
   target_compile_definitions(gemstone_opencl_process_exit PRIVATE CL_TARGET_OPENCL_VERSION=300)
-  target_compile_features(gemstone_opencl_process_exit PRIVATE cxx_std_20)
   target_link_libraries(gemstone_opencl_process_exit PRIVATE gemstone_opencl)
   add_test(NAME opencl/process-exit COMMAND gemstone_opencl_process_exit)
   gemstone_set_tests_properties(opencl/process-exit PROPERTIES TIMEOUT 10)

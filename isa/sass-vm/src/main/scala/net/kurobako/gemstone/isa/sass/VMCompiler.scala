@@ -111,9 +111,16 @@ private object VMCompiler {
       if (table.size != 0 && target.exists(_.name.startsWith(".nv.global")))
         fail("relocations in kernel code, constants or globals are not implemented")
     }
-    val original        = functions.find(_.name == kernel.name).getOrElse(fail(s"missing SASS for ${kernel.name}"))
-    val textRelocations = Cubin.TextRelocation.resolve(module, kernel, original, boundSymbols.keySet)
+    val image       = functions.find(_.name == kernel.name).getOrElse(fail(s"missing SASS for ${kernel.name}"))
+    val relocations = Cubin.TextRelocation.resolve(module, kernel, image, boundSymbols.keySet)
       .fold(error => fail(error.raw), identity)
+    val (linkedCalls, textRelocations) =
+      relocations.partition((_, relocation) => relocation.call && relocation.symbol == kernel.name)
+    val original = image.copy(instructions = image.instructions.map { instruction =>
+      linkedCalls.get(instruction.address).fold(instruction)(call =>
+        instruction.rewrite(operands = instruction.operands.init :+ Operand.Integer(call.addend))
+      )
+    })
     val function     = LegacyAddressRewrite(module.sm, resolveLegacyTargets(generation, original))
     val instructions = function.instructions
     val layout       = VMRegisters.Layout.of(kernel, functions)

@@ -299,7 +299,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-transform/i32/n11", "[unified][ro
   thrust::device_vector<P> devicePairs(first.size());
   thrust::transform(deviceFirst.begin(), deviceFirst.end(), deviceSecond.begin(), devicePairs.begin(), PairFromValues{});
   thrust::transform(devicePairs.begin(), devicePairs.end(), devicePairs.begin(), devicePairs.begin(), PairSelfAdd<P>{});
-  const auto expected = first ^ zip(second) ^ map([](int32_t head, int32_t tail) { return P(head + head, tail + tail); });
+  const auto expected = first | zip(second) | map([](int32_t head, int32_t tail) { return P(head + head, tail + tail); }) | to_vector();
   const auto actual = iota(size_t{0}, first.size()) | map([&](size_t index) -> P { return devicePairs[index]; }) | to_vector();
   {
     INFO("pair-transform: field association mismatch");

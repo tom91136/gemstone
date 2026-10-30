@@ -46,7 +46,8 @@ shard_group(amd BUILD 9 RUN 3 PATTERN "^(hip|hsa)/")
 shard_group(opencl BUILD 1 RUN 1 CASES 4 PATTERN "^opencl$")
 shard_group(levelzero BUILD 1 RUN 1 PATTERN "^levelzero$")
 shard_group(sycl BUILD 4 RUN 1 SPLIT CONFORMANCE_SYCL_SHARD_INDEX SHARED lib PATTERN "^sycl$")
-shard_group(vulkan BUILD 0 RUN 0 PATTERN "^vulkan$")
+shard_group(vulkan BUILD 1 RUN 1 PATTERN "^vulkan$")
+shard_group(openacc BUILD 4 RUN 4 PATTERN "^openacc/")
 
 include("${CMAKE_CURRENT_LIST_DIR}/Targets.cmake")
 

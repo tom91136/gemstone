@@ -104,7 +104,8 @@ using Floats2 = float __attribute__((ext_vector_type(2)));
 
 // __builtin_amdgcn_cvt_f32_fp8 and _bf8 (v_cvt_f32_fp8 with an SDWA or byte_sel byte), cvt_pk_f32_fp8, cvt_pk_fp8_f32,
 // cvt_pk_bf8_f32 and cvt_sr_fp8_f32 and _bf8, which merge into a previous dword.
-__global__ void eightBit(const float *values, const uint32_t *codes, const uint32_t *seeds, uint32_t *out, uint32_t *format,
+__global__ void eightBit([[maybe_unused]] const float *values, [[maybe_unused]] const uint32_t *codes,
+                         [[maybe_unused]] const uint32_t *seeds, [[maybe_unused]] uint32_t *out, [[maybe_unused]] uint32_t *format,
                          uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
@@ -194,8 +195,9 @@ namespace {
 using Bfloats2 = __bf16 __attribute__((ext_vector_type(2)));
 
 // __builtin_amdgcn_fdot2_f32_bf16: v_dot2c_f32_bf16_e32 on gfx950, v_dot2_f32_bf16 on GFX11 and GFX12. Small integers
-// keep every product and sum exact.
-__global__ void bfloatDot(const float *a, const float *b, float *out, uint32_t *supported, uint32_t count) {
+// keep every product and sum exact, which gfx1100 to gfx1103 and gfx1150 to gfx1153 lose to their fixed-point accumulator.
+__global__ void bfloatDot([[maybe_unused]] const float *a, [[maybe_unused]] const float *b, [[maybe_unused]] float *out,
+                          [[maybe_unused]] uint32_t *supported, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
 #if defined(__gfx950__) || defined(__GFX11__) || defined(__GFX12__)
@@ -228,8 +230,11 @@ TEST_CASE("intrinsics/hip/bfloat16-dot", "[unified][intrinsics]") {
   finish("bfloat16 dot");
   if (supported.download()[0] == 0) SKIP("bfloat16 dot products need gfx950, GFX11 or GFX12");
   const auto actual = out.download();
+  const bool aligned = alignedDots(architecture());
   for (size_t i = 0; i < count; ++i) {
-    const float expected = (a[2 * i] * b[2 * i]) + (a[(2 * i) + 1] * b[(2 * i) + 1]) + c[i];
+    const float expected = aligned
+                               ? static_cast<float>(alignedDot(a[2 * i], b[2 * i], a[(2 * i) + 1], b[(2 * i) + 1], c[i], DotResult::Single))
+                               : (a[2 * i] * b[2 * i]) + (a[(2 * i) + 1] * b[(2 * i) + 1]) + c[i];
     if (actual[i] != expected) throw std::runtime_error(fmt::format("bfloat16 dot {}: {} instead of {}", i, actual[i], expected));
   }
 }
@@ -237,7 +242,7 @@ TEST_CASE("intrinsics/hip/bfloat16-dot", "[unified][intrinsics]") {
 namespace {
 // __builtin_amdgcn_permlane16_var and permlanex16_var: v_permlane16_var_b32 and v_permlanex16_var_b32 on GFX12, each
 // lane's source lane in its own VGPR.
-__global__ void variablePermutes(uint32_t *out, uint32_t *supported) {
+__global__ void variablePermutes(uint32_t *out, [[maybe_unused]] uint32_t *supported) {
   const uint32_t lane = threadIdx.x;
   uint32_t row = 0;
   uint32_t crossed = 0;

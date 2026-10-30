@@ -10,14 +10,10 @@ set_target_properties(gemstone_hip_runtime PROPERTIES
   SOVERSION 7
   BUILD_RPATH "$ORIGIN"
   INSTALL_RPATH "$ORIGIN")
-target_include_directories(gemstone_hip_runtime PRIVATE
-  ${HIP_INCLUDE_DIR}
-  ${HSA_INCLUDE_DIR}
-  ../hsa/include
-  ../generated/hip)
-target_compile_features(gemstone_hip_runtime PRIVATE cxx_std_17)
+target_include_directories(gemstone_hip_runtime SYSTEM PRIVATE ${HIP_INCLUDE_DIR} ${HSA_INCLUDE_DIR})
+target_include_directories(gemstone_hip_runtime PRIVATE ../hsa/include ../generated/hip)
 target_compile_definitions(gemstone_hip_runtime PRIVATE __HIP_PLATFORM_AMD__=1)
-target_compile_options(gemstone_hip_runtime PRIVATE -Wall -Wextra -Werror -Wno-pedantic -Wno-attributes)
+gemstone_project_target(gemstone_hip_runtime)
 # A vendor libhsa-runtime64.so.1 loads before LD_PRELOAD and its SONAME would capture the HSA provider's internal calls,
 # so HIP embeds a private provider and binds to it with -Bsymbolic.
 target_link_libraries(gemstone_hip_runtime PRIVATE
@@ -32,19 +28,18 @@ gemstone_require_abi_implementations(
 if(BUILD_TESTING)
   gemstone_memory_client(hip gemstone_hip_runtime)
   add_executable(gemstone_hip_fatbinary_exit_test test/fatbinary_exit.cpp)
-  target_include_directories(gemstone_hip_fatbinary_exit_test PRIVATE ${HIP_INCLUDE_DIR})
+  gemstone_project_target(gemstone_hip_fatbinary_exit_test)
+  target_include_directories(gemstone_hip_fatbinary_exit_test SYSTEM PRIVATE ${HIP_INCLUDE_DIR})
   target_compile_definitions(gemstone_hip_fatbinary_exit_test PRIVATE __HIP_PLATFORM_AMD__=1)
   target_link_libraries(gemstone_hip_fatbinary_exit_test PRIVATE gemstone_hip_runtime)
   add_test(NAME hip/fatbinary-exit-lifetime COMMAND gemstone_hip_fatbinary_exit_test)
   gemstone_set_tests_properties(hip/fatbinary-exit-lifetime PROPERTIES TIMEOUT 10)
   add_executable(gemstone_hip_runtime_test test/hip_runtime_test.cpp)
-  target_include_directories(gemstone_hip_runtime_test PRIVATE ${HIP_INCLUDE_DIR})
+  target_include_directories(gemstone_hip_runtime_test SYSTEM PRIVATE ${HIP_INCLUDE_DIR})
   target_compile_definitions(gemstone_hip_runtime_test PRIVATE __HIP_PLATFORM_AMD__=1)
   target_link_libraries(gemstone_hip_runtime_test PRIVATE gemstone_hip_runtime)
   gemstone_test_target(gemstone_hip_runtime_test)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(gemstone_hip_runtime_test PRIVATE -Wno-attributes -Wno-pedantic -Wno-deprecated-declarations)
-  endif()
+  target_compile_options(gemstone_hip_runtime_test PRIVATE -Wno-deprecated-declarations)
   gemstone_discover_tests(gemstone_hip_runtime_test
     TEST_PREFIX "hip/"
     PROPERTIES TIMEOUT 60)

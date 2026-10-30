@@ -294,6 +294,8 @@ function(configure_miniapp app model stage target_output)
   elseif(CONFORMANCE_BACKEND STREQUAL "openacc")
     set(TARGET_DEVICE gpu CACHE STRING "" FORCE)
     set(CUDA_ARCH "cc${conformance_cuda_architecture}" CACHE STRING "" FORCE)
+    # Upstream passes CUDA_ARCH only when compiling; without it the device link falls back to NVHPC's default target
+    set(CXX_EXTRA_LINK_FLAGS "-gpu=cc${conformance_cuda_architecture}" CACHE STRING "" FORCE)
   endif()
   if(model STREQUAL "kokkos")
     configure_kokkos()

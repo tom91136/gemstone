@@ -1015,6 +1015,16 @@ template <class Copy> CUresult copyAsync(const Copy *copy, CUstream stream) {
   return enqueueCommand(stream, [volume = volumeCopy(*copy)] { return copyVolume(volume); });
 }
 
+template <class T> CUresult memsetNow(CUdeviceptr destination, T value, size_t count) {
+  if (count > std::numeric_limits<uint32_t>::max() || destination % sizeof(T) != 0) return CUDA_ERROR_INVALID_VALUE;
+  try {
+    std::vector<T> buffer(count, value);
+    return cuMemcpyHtoD_v2(destination, buffer.data(), count * sizeof(T));
+  } catch (...) {
+    return CUDA_ERROR_UNKNOWN;
+  }
+}
+
 struct Global {
   std::string name;
   CUdeviceptr address{};
@@ -2521,15 +2531,9 @@ CUresult cuMemcpyDtoD_v2(CUdeviceptr destination, CUdeviceptr source, size_t siz
   }
 }
 
-CUresult cuMemsetD8_v2(CUdeviceptr destination, unsigned char value, size_t count) {
-  if (count > std::numeric_limits<uint32_t>::max()) return CUDA_ERROR_INVALID_VALUE;
-  try {
-    std::vector<uint8_t> buffer(count, value);
-    return cuMemcpyHtoD_v2(destination, buffer.data(), count);
-  } catch (...) {
-    return CUDA_ERROR_UNKNOWN;
-  }
-}
+CUresult cuMemsetD8_v2(CUdeviceptr destination, unsigned char value, size_t count) { return memsetNow(destination, value, count); }
+CUresult cuMemsetD16_v2(CUdeviceptr destination, unsigned short value, size_t count) { return memsetNow(destination, value, count); }
+CUresult cuMemsetD32_v2(CUdeviceptr destination, unsigned int value, size_t count) { return memsetNow(destination, value, count); }
 
 CUresult cuMemcpy(CUdeviceptr destination, CUdeviceptr source, size_t size) {
   const bool toDevice = devicePointer(destination);
@@ -2557,6 +2561,14 @@ CUresult cuMemcpyDtoDAsync_v2(CUdeviceptr destination, CUdeviceptr source, size_
 
 CUresult cuMemsetD8Async(CUdeviceptr destination, unsigned char value, size_t count, CUstream stream) {
   return enqueueCommand(stream, [=] { return cuMemsetD8_v2(destination, value, count); });
+}
+
+CUresult cuMemsetD16Async(CUdeviceptr destination, unsigned short value, size_t count, CUstream stream) {
+  return enqueueCommand(stream, [=] { return cuMemsetD16_v2(destination, value, count); });
+}
+
+CUresult cuMemsetD32Async(CUdeviceptr destination, unsigned int value, size_t count, CUstream stream) {
+  return enqueueCommand(stream, [=] { return cuMemsetD32_v2(destination, value, count); });
 }
 
 CUresult cuMemcpy2D_v2(const CUDA_MEMCPY2D *copy) { return copyNow(copy); }
@@ -3863,6 +3875,10 @@ GEMSTONE_CUDA_ALIAS(cuMemcpyDtoD_ptds, cuMemcpyDtoD_v2)
 GEMSTONE_CUDA_ALIAS(cuMemcpyDtoD_v2_ptds, cuMemcpyDtoD_v2)
 GEMSTONE_CUDA_ALIAS(cuMemsetD8_ptds, cuMemsetD8_v2)
 GEMSTONE_CUDA_ALIAS(cuMemsetD8_v2_ptds, cuMemsetD8_v2)
+GEMSTONE_CUDA_ALIAS(cuMemsetD16_ptds, cuMemsetD16_v2)
+GEMSTONE_CUDA_ALIAS(cuMemsetD16_v2_ptds, cuMemsetD16_v2)
+GEMSTONE_CUDA_ALIAS(cuMemsetD32_ptds, cuMemsetD32_v2)
+GEMSTONE_CUDA_ALIAS(cuMemsetD32_v2_ptds, cuMemsetD32_v2)
 GEMSTONE_CUDA_ALIAS(cuMemcpy_ptds, cuMemcpy)
 GEMSTONE_CUDA_ALIAS(cuMemcpyAsync_ptsz, cuMemcpyAsync)
 GEMSTONE_CUDA_ALIAS(cuMemcpyHtoDAsync_ptsz, cuMemcpyHtoDAsync_v2)
@@ -3872,6 +3888,8 @@ GEMSTONE_CUDA_ALIAS(cuMemcpyDtoHAsync_v2_ptsz, cuMemcpyDtoHAsync_v2)
 GEMSTONE_CUDA_ALIAS(cuMemcpyDtoDAsync_ptsz, cuMemcpyDtoDAsync_v2)
 GEMSTONE_CUDA_ALIAS(cuMemcpyDtoDAsync_v2_ptsz, cuMemcpyDtoDAsync_v2)
 GEMSTONE_CUDA_ALIAS(cuMemsetD8Async_ptsz, cuMemsetD8Async)
+GEMSTONE_CUDA_ALIAS(cuMemsetD16Async_ptsz, cuMemsetD16Async)
+GEMSTONE_CUDA_ALIAS(cuMemsetD32Async_ptsz, cuMemsetD32Async)
 GEMSTONE_CUDA_ALIAS(cuMemcpy2DUnaligned_v2, cuMemcpy2D_v2)
 GEMSTONE_CUDA_ALIAS(cuMemcpy2DUnaligned, cuMemcpy2D)
 GEMSTONE_CUDA_ALIAS(cuLinkCreate, cuLinkCreate_v2)

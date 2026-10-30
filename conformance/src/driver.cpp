@@ -121,7 +121,7 @@ double positiveScale(const char *name) {
   if (!valid) throw std::invalid_argument(fmt::format("{} must be a positive number with at most three decimals, not '{}'", name, value));
   for (auto digits = fraction.size(); digits < 3; ++digits)
     thousandths *= 10;
-  return static_cast<double>(whole) + static_cast<double>(thousandths) / 1000.0;
+  return static_cast<double>(whole) + (static_cast<double>(thousandths) / 1000.0);
 }
 } // namespace
 uint32_t availableThreadCount() {
@@ -416,7 +416,7 @@ std::string deqpExactCaseList(const std::vector<std::string> &names) {
   // file contents to path characters so a selector cannot introduce another line.
   if (const auto invalid = names ^ find([](const std::string &name) { return !validIdentifier(name); }))
     throw std::runtime_error("Vulkan CTS selectors without vulkan_mustpass must be literal case names: " + *invalid);
-  return names ^ to<std::set>() ^ mk_string("", "\n", "\n");
+  return names | to<std::set>() | mk_string("", "\n", "\n");
 }
 std::vector<std::string> deqpMustpassCases(const fs::path &root, const fs::path &manifest, const std::vector<std::string> &patterns) {
   const auto base = fs::canonical(root);
@@ -586,7 +586,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   if (!validName(test.program)) throw std::invalid_argument("invalid test program");
   if (config.skips
       ^ exists([&](const std::string &pattern) { return globMatches(pattern, test.program) || globMatches(pattern, test.identity); }))
-    return {.status = SkipReturnCode, .output = "SKIP " + test.identity + ": machine profile\n"};
+    return {.status = SkipReturnCode, .output = "SKIP " + test.identity + ": machine profile\n", .message = {}};
   const auto environmentValue = [&](const char *key) -> std::string_view {
     const auto entry = config.environment.find(key);
     return entry == config.environment.end() ? std::string_view{} : entry->second;
@@ -597,13 +597,14 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     const auto *const libraryName = backend == "cuda" ? "libcublas.so" : "librocblas.so";
     // Match the same artifact-first search order as the runtime environment.
     const auto reason =
-        std::vector{fs::path(config.directory), fs::path(support)} ^ map([&](const fs::path &root) { return root / "lib" / libraryName; })
-        ^ find([](const fs::path &library) { return fs::is_regular_file(library); }) ^ map([&](const fs::path &library) {
+        (std::vector{fs::path(config.directory), fs::path(support)} | map([&](const fs::path &root) { return root / "lib" / libraryName; })
+         | find([](const fs::path &library) { return fs::is_regular_file(library); }))
+        ^ map([&](const fs::path &library) {
             return suiteBlasSkip(backend, environmentValue(environment::TargetArch), environmentValue(environment::CudaCodeMode),
                                  fs::canonical(library).filename().string(), test.program, test.identity);
           })
         ^ filter([](std::string_view skip) { return !skip.empty(); });
-    if (reason) return {.status = SkipReturnCode, .output = fmt::format("SKIP {}: {}\n", test.identity, *reason)};
+    if (reason) return {.status = SkipReturnCode, .output = fmt::format("SKIP {}: {}\n", test.identity, *reason), .message = {}};
   }
   const auto programs = testPrograms(config.directory, Workload{});
   const auto selected = programs ^ find_cref([&](const TestProgram &candidate) { return candidate.name == test.program; });
@@ -756,7 +757,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
           try {
             result = execute(target.config, test);
           } catch (const std::exception &error) {
-            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what())};
+            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}};
           }
           result.elapsed = std::chrono::steady_clock::now() - begin;
           lock.lock();

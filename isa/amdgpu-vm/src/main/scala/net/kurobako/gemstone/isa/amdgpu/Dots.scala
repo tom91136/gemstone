@@ -5,9 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
 
-/** The floating-point dot products that round once into their result: V_DOT2_F16_F16 and V_DOT2_BF16_BF16 (GFX11 on)
-  * and V_DOT4_F32_*8_*8 (GFX12 and gfx1170). Each product of two elements is exact, and so is their sum with the addend
-  * for all but addends of widely apart magnitude.
+/** The floating-point dot products. V_DOT2_F16_F16 and V_DOT2_BF16_BF16 (GFX11 on) and V_DOT4_F32_*8_*8 (GFX12 and
+  * gfx1170) round once into their result: each product of two elements is exact, and so is their sum with the addend
+  * for all but addends of widely apart magnitude. RDNA3 and RDNA3.5 align the terms of the V_DOT2 forms instead.
   */
 private[isa] object Dots {
   private inline def bits[T](value: T): Long = toRaw[T](value)
@@ -45,7 +45,7 @@ private[isa] object Dots {
       val sum = low + high + c.toDouble
       if (sum.isNaN) fromRaw[Float32](0xffc00000L) else Float32(sum)
     } else {
-      val terms = Vec(product(aLow, bLow), product(aHigh, bHigh), single(bits(c)))
+      val terms = Vec(product16(aLow, bLow), product16(aHigh, bHigh), single32(bits(c)))
       val scale = terms.map(_.scale).min
       val exact = terms.map(term => term.signed << (term.scale - scale)).sum
       // an exact zero is -0 only when every term is
@@ -69,81 +69,165 @@ private[isa] object Dots {
     }
   }
 
-  /** A finite binary16 or binary32 value, or the exact product of two binary16 ones, as `magnitude * 2^scale`; `top` is
-    * the bit position its significand format leads at, and denormals keep the least normal exponent.
+  /** A floating-point format of the dot product operands: `flushed` formats take a denormal as a signed zero. */
+  private case class Format(exponentBits: Int, fractionBits: Int, flushed: Boolean) {
+    val width: Int       = 1 + exponentBits + fractionBits
+    val bias: Int        = (1 << (exponentBits - 1)) - 1
+    private val exponent = (1L << exponentBits) - 1L
+    private val fraction = (1L << fractionBits) - 1L
+
+    def negative(value: Long): Boolean    = (value & (1L << (width - 1))) != 0L
+    def field(value: Long): Int           = ((value >>> fractionBits) & exponent).toInt
+    def isNaN(value: Long): Boolean       = field(value) == exponent && (value & fraction) != 0L
+    def infinite(value: Long): Boolean    = field(value) == exponent && (value & fraction) == 0L
+    def zero(value: Long): Boolean        = (value & ((1L << (width - 1)) - 1L)) == 0L || (flushed && field(value) == 0)
+    def quiet(value: Long): Long          = value | (1L << (fractionBits - 1))
+    def infinity(negative: Boolean): Long =
+      (if (negative) 1L << (width - 1) else 0L) | (exponent << fractionBits)
+  }
+
+  private val Half    = Format(5, 10, flushed = false)
+  private val BFloat  = Format(8, 7, flushed = true)
+  private val Single  = Format(8, 23, flushed = false)
+  private val Flushed = Format(8, 23, flushed = true)
+
+  /** A finite value, or the exact product of two, as `magnitude * 2^scale`; `top` is the exponent the alignment takes
+    * it at, and denormals keep the least normal exponent.
     */
   private case class Term(negative: Boolean, magnitude: Long, scale: Int, top: Int) {
     def signed: BigInt = if (negative) -BigInt(magnitude) else BigInt(magnitude)
   }
 
-  private def exponent16(half: Int): Int     = math.max((half >>> 10) & 0x1f, 1) - 15
-  private def significand16(half: Int): Long =
-    if ((half & 0x7c00) == 0) (half & 0x3ff).toLong else ((half & 0x3ff) | 0x400).toLong
+  private def exponent(value: Long, format: Format): Int = math.max(format.field(value), 1) - format.bias
 
-  private def product(a: Int, b: Int): Term = {
-    val exponent = exponent16(a) + exponent16(b)
-    Term(((a ^ b) & 0x8000) != 0, significand16(a) * significand16(b), exponent - 20, exponent + 2)
+  private def significand(value: Long, format: Format): Long = {
+    val fraction = value & ((1L << format.fractionBits) - 1L)
+    if (format.field(value) == 0) if (format.flushed) 0L else fraction else fraction | (1L << format.fractionBits)
   }
 
-  private def single(value: Long): Term = {
-    val exponent = math.max(((value >>> 23) & 0xffL).toInt, 1) - 127
-    val fraction = value & 0x7fffffL
+  private def product(a: Long, b: Long, format: Format): Term = {
+    val power = exponent(a, format) + exponent(b, format)
     Term(
-      (value & 0x80000000L) != 0L,
-      if ((value & 0x7f800000L) == 0L) fraction else fraction | 0x800000L,
-      exponent - 23,
-      exponent
+      format.negative(a) != format.negative(b),
+      significand(a, format) * significand(b, format),
+      power - 2 * format.fractionBits,
+      power + 2
     )
   }
 
-  /** V_DOT2_F32_F16 as RDNA3.5 computes it, ignoring its clamp. A binary16 NaN gives 0xffc00a3d and an invalid product
-    * or sum of infinities the negative default NaN, a NaN addend in their absence, quieted; infinities pass. Finite
-    * terms align to a grid 26 bits below the leading bit of the largest non-zero one, each truncated toward zero, and
-    * those whose sign differs from the addend's add as their one's complement, losing a unit of the grid each; the sum
-    * then rounds once to nearest even.
+  private def single(value: Long, format: Format): Term = {
+    val power = exponent(value, format)
+    Term(format.negative(value), significand(value, format), power - format.fractionBits, power)
+  }
+
+  private def product16(a: Int, b: Int): Term = product(a.toLong, b.toLong, Half)
+
+  private def single32(value: Long): Term = single(value, Single)
+
+  /** How an aligned dot product ends: the encodings of its special results, and the rounding of a finite sum
+    * `sum * 2^scale`.
     */
-  def halvesToFloatAligned(a: UInt[32], b: UInt[32], c: Float32): Float32 = {
-    val halves = Vec(bits(a) & 0xffffL, bits(a) >>> 16, bits(b) & 0xffffL, bits(b) >>> 16).map(_.toInt)
-    val addend = bits(c)
-    def infinite(half: Int): Boolean = (half & 0x7fff) == 0x7c00
-    def zero(half: Int): Boolean     = (half & 0x7fff) == 0
-    val pairs                        = Vec((halves(0), halves(2)), (halves(1), halves(3)))
-    // the signs of the infinite terms
-    val infinities = pairs.filter((x, y) => infinite(x) || infinite(y)).map((x, y) => ((x ^ y) & 0x8000) != 0) ++
-      (if ((addend & 0x7fffffffL) == 0x7f800000L) Vec((addend & 0x80000000L) != 0L) else Vec.empty[Boolean])
-    if (halves.exists(IEEE754.isNaN(_, 16))) fromRaw[Float32](0xffc00a3dL)
-    else if (pairs.exists((x, y) => (infinite(x) && zero(y)) || (zero(x) && infinite(y))))
-      fromRaw[Float32](0xffc00000L)
-    else if (infinities.distinct.size > 1) fromRaw[Float32](0xffc00000L)
-    else if (IEEE754.isNaN(addend, 32)) fromRaw[Float32](addend | IEEE754.quietBit(32))
-    else if (infinities.nonEmpty) fromRaw[Float32](if (infinities.head) 0xff800000L else 0x7f800000L)
+  private enum Result(val format: Format, val nanOperand: Long, val invalid: Long) derives CanEqual {
+    case ToSingle   extends Result(Flushed, 0xffc00a3dL, 0xffc00000L)
+    case ToHalf     extends Result(Half, 0xfe3dL, 0xfe00L)
+    case ToBFloat16 extends Result(BFloat, 0xfffdL, 0xffc0L)
+
+    def round(sum: Long, scale: Int): Long = this match {
+      case ToHalf =>
+        val rounded =
+          IEEE754.encodeSum(sum, scale, exponentBits = 5, fieldBits = 10, kept = 10, IEEE754.Rounding.NearestEven)
+        if ((rounded & 0x7fffL) == 0L) 0L else rounded
+      case ToSingle   => flushedSingle(sum, scale)
+      case ToBFloat16 => flushedSingle(sum, scale) >>> 16
+    }
+  }
+
+  /** `sum * 2^scale` as a normal binary32 rounded to nearest even, or zero where the rounded value is denormal. */
+  private def flushedSingle(sum: Long, scale: Int): Long = {
+    val magnitude = math.abs(sum)
+    val dropped   = math.max(64 - java.lang.Long.numberOfLeadingZeros(magnitude) - 24, 0)
+    val rounded   = roundBits(magnitude, dropped) << dropped
+    if (rounded == 0L || 63 - java.lang.Long.numberOfLeadingZeros(rounded) + scale < -126) 0L
+    else
+      IEEE754.encodeSum(
+        if (sum < 0L) -rounded else rounded,
+        scale,
+        exponentBits = 8,
+        fieldBits = 23,
+        kept = 23,
+        IEEE754.Rounding.NearestEven
+      )
+  }
+
+  /** `magnitude` shifted right by `dropped` bits, rounded to nearest even. */
+  private def roundBits(magnitude: Long, dropped: Int): Long =
+    if (dropped == 0) magnitude
     else {
-      val terms   = pairs.map(product(_, _)) :+ single(addend)
+      val kept      = magnitude >>> dropped
+      val remainder = magnitude & ((1L << dropped) - 1L)
+      val half      = 1L << (dropped - 1)
+      if (remainder > half || (remainder == half && (kept & 1L) != 0L)) kept + 1L else kept
+    }
+
+  /** The two products of the elements of `a` and `b` and the addend `c` on RDNA3 and RDNA3.5, which do not round the
+    * sum once: finite terms align to a grid 26 bits below the exponent of the largest non-zero one, each truncated
+    * toward zero, and those whose sign differs from the addend's add as their one's complement, losing a unit of the
+    * grid each. Zeros take part with their signs, and the sum then rounds to nearest even once. Any NaN element gives
+    * `result.nanOperand`, an invalid product or sum of infinities `result.invalid`, a NaN addend in their absence
+    * itself quieted, and infinities pass. A zero sum is positive.
+    */
+  private def aligned(a: Long, b: Long, raw: Long, element: Format, result: Result): Long = {
+    val mask   = (1L << element.width) - 1L
+    val addend = result.format
+    val c      = raw & ((1L << addend.width) - 1L)
+    val pairs  = Vec((a & mask, b & mask), ((a >>> element.width) & mask, (b >>> element.width) & mask))
+    def infinite(x: Long, y: Long): Boolean = element.infinite(x) || element.infinite(y)
+    val infinities = pairs.filter(infinite).map((x, y) => element.negative(x) != element.negative(y)) ++
+      (if (addend.infinite(c)) Vec(addend.negative(c)) else Vec.empty[Boolean])
+    if (pairs.exists((x, y) => element.isNaN(x) || element.isNaN(y))) result.nanOperand
+    else if (
+      pairs.exists((x, y) => (element.infinite(x) && element.zero(y)) || (element.zero(x) && element.infinite(y)))
+    )
+      result.invalid
+    else if (infinities.distinct.size > 1) result.invalid
+    else if (addend.isNaN(c)) addend.quiet(c)
+    else if (infinities.nonEmpty) addend.infinity(infinities.head)
+    else {
+      val terms   = pairs.map(product(_, _, element)) :+ single(c, addend)
       val leading = terms.filter(_.magnitude != 0L).map(_.top)
-      if (leading.isEmpty) Float32(0.0f)
+      if (leading.isEmpty) 0L
       else {
         val grid     = leading.max - 26
-        val negative = (addend & 0x80000000L) != 0L
+        val negative = addend.negative(c)
         val sum      = terms.map { term =>
-          val aligned =
+          val shifted =
             if (term.scale >= grid) term.magnitude << (term.scale - grid)
             else if (grid - term.scale >= 64) 0L
             else term.magnitude >>> (grid - term.scale)
-          if (term.negative == negative) aligned else ~aligned
+          if (term.negative == negative) shifted else ~shifted
         }.sum
-        fromRaw[Float32](
-          IEEE754.encodeSum(
-            if (negative) -sum else sum,
-            grid,
-            exponentBits = 8,
-            fieldBits = 23,
-            kept = 23,
-            IEEE754.Rounding.NearestEven
-          )
-        )
+        result.round(if (negative) -sum else sum, grid)
       }
     }
   }
+
+  /** V_DOT2_F32_F16 as RDNA3 and RDNA3.5 compute it, ignoring its clamp; see [[aligned]]. A binary32 denormal addend is
+    * zero.
+    */
+  def halvesToFloatAligned(a: UInt[32], b: UInt[32], c: Float32): Float32 =
+    fromRaw[Float32](aligned(bits(a), bits(b), bits(c), Half, Result.ToSingle))
+
+  /** V_DOT2_F32_BF16 as RDNA3 and RDNA3.5 compute it; see [[aligned]]. Denormal bfloat16 elements are zero. */
+  def bfloat16ToFloatAligned(a: UInt[32], b: UInt[32], c: Float32): Float32 =
+    fromRaw[Float32](aligned(bits(a), bits(b), bits(c), BFloat, Result.ToSingle))
+
+  /** V_DOT2_F16_F16 as RDNA3 and RDNA3.5 compute it, rounding the aligned sum to binary16; see [[aligned]]. */
+  def halvesAligned(a: UInt[32], b: UInt[32], c: Float16): Float16 =
+    fromRaw[Float16](aligned(bits(a), bits(b), bits(c), Half, Result.ToHalf))
+
+  /** V_DOT2_BF16_BF16 as RDNA3 and RDNA3.5 compute it, truncating the binary32 aligned sum to bfloat16. */
+  def bfloat16Aligned(a: UInt[32], b: UInt[32], c: BFloat16): BFloat16 =
+    fromRaw[BFloat16](aligned(bits(a), bits(b), bits(c), BFloat, Result.ToBFloat16))
 
   /** The bytes of `a` in `formatA` and of `b` in `formatB` multiplied pairwise and added to `c`. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))

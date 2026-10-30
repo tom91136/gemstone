@@ -14,6 +14,28 @@ device = "*RTX 4060 Ti*"
 environment = { CONFORMANCE_CUDA_CODE_MODE = "sass" }
 
 [[targets]]
+name = "cuda-ptx-clang"
+backend = "cuda"
+architecture = "sm_89"
+device = "*RTX 4060 Ti*"
+compiler = "clang"
+environment = { CONFORMANCE_CUDA_CODE_MODE = "ptx" }
+
+[[targets]]
+name = "cuda-sass-clang"
+backend = "cuda"
+architecture = "sm_89"
+device = "*RTX 4060 Ti*"
+compiler = "clang"
+environment = { CONFORMANCE_CUDA_CODE_MODE = "sass" }
+
+[[targets]]
+name = "nvidia-openacc"
+backend = "openacc"
+architecture = "sm_89"
+device = "*RTX 4060 Ti*"
+
+[[targets]]
 name = "amd-hsa"
 backend = "hsa"
 architecture = "gfx1030"
@@ -128,3 +150,21 @@ environment = { OverrideDefaultFP64Settings = "1", IGC_EnableDPEmulation = "1", 
 name = "intel-levelzero"
 backend = "levelzero"
 device = "levelzero:*Arc*A750*"
+
+[[targets]]
+name = "nvidia-vulkan"
+backend = "vulkan"
+device = "*RTX 4060 Ti*"
+environment = { VK_LOADER_DRIVERS_SELECT = "*nvidia*" }
+
+[[targets]]
+name = "amd-vulkan"
+backend = "vulkan"
+device = "*RADV*"
+environment = { VK_LOADER_DRIVERS_SELECT = "*radeon*" }
+
+[[targets]]
+name = "intel-vulkan"
+backend = "vulkan"
+device = "*Arc*A750*"
+environment = { VK_LOADER_DRIVERS_SELECT = "*intel_icd*" }

@@ -6,9 +6,13 @@ if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_
   message(FATAL_ERROR "C++23 and glaze need GCC 13 or clang 19 or newer, found ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 endif()
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+# Per target rather than directory-wide, so fetched dependencies keep their own standard and warnings
+function(gemstone_project_target target)
+  set_target_properties("${target}" PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  target_compile_options("${target}" PRIVATE
+    "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Werror>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang>:-Wno-overlength-strings>")
+endfunction()
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
@@ -117,8 +121,7 @@ if(BUILD_TESTING)
       "${GEMSTONE_NATIVE_INCLUDE_DIRECTORY}"
       "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/generated"
       "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/test")
-    target_compile_options("${target}" PRIVATE
-      "$<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Werror>")
+    gemstone_project_target("${target}")
   endfunction()
 
   # Matches gemstone_test::timeoutFactor, fixed when the build configures.
@@ -252,9 +255,9 @@ if(BUILD_TESTING)
 
   function(gemstone_memory_client api provider)
     add_executable(gemstone_memory_${api} test/memory.cpp)
-    target_compile_features(gemstone_memory_${api} PRIVATE cxx_std_20)
-    target_include_directories(gemstone_memory_${api} PRIVATE "$<TARGET_PROPERTY:${provider},INCLUDE_DIRECTORIES>"
-      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/test")
+    gemstone_project_target(gemstone_memory_${api})
+    target_include_directories(gemstone_memory_${api} SYSTEM PRIVATE "$<TARGET_PROPERTY:${provider},INCLUDE_DIRECTORIES>")
+    target_include_directories(gemstone_memory_${api} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/test")
     target_compile_definitions(gemstone_memory_${api} PRIVATE GEMSTONE_MEMORY_IMAGE_DIRECTORY="${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}")
     if(api STREQUAL "levelzero")
       target_link_libraries(gemstone_memory_${api} PRIVATE ze_loader)
@@ -274,7 +277,6 @@ if(BUILD_TESTING)
     endif()
     if(api STREQUAL "hip")
       target_compile_definitions(gemstone_memory_${api} PRIVATE __HIP_PLATFORM_AMD__=1)
-      target_compile_options(gemstone_memory_${api} PRIVATE -Wno-attributes)
     elseif(api STREQUAL "opencl")
       target_compile_definitions(gemstone_memory_${api} PRIVATE CL_TARGET_OPENCL_VERSION=300)
     endif()

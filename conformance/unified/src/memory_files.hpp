@@ -23,7 +23,7 @@
   #include "memory64_image.hpp"
 #endif
 
-inline std::vector<char> image(std::string_view name) {
+inline std::vector<char> image([[maybe_unused]] std::string_view name) {
   auto select = [&]() -> std::vector<char> {
 #ifdef UNIFIED_API_CUDA
     const char *code = std::getenv(conformance::environment::CudaCodeMode);

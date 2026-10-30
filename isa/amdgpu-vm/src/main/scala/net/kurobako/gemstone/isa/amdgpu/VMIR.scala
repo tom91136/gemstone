@@ -349,7 +349,7 @@ private object VMIR {
   enum DualVectorOperation derives CanEqual {
     case Move, AddF32, SubtractF32, ReverseSubtractF32, MultiplyF32, FmaF32, MinimumF32, MaximumF32
     case ConditionalMask, AddU32, ShiftLeft32, And32
-    case MultiplyLegacyF32, DotHalvesF32, DotAlignedHalvesF32, DotBFloat16F32
+    case MultiplyLegacyF32, DotHalvesF32, DotAlignedHalvesF32, DotBFloat16F32, DotAlignedBFloat16F32
     case SubtractU32, MinimumI32, MaximumI32, ShiftRight32, ShiftRightArithmetic32
     case AddF64, MultiplyF64, FmaF64, MinimumF64, MaximumF64, BitOperation2
 
@@ -490,9 +490,12 @@ private object VMIR {
     case UnsignedNibbles extends DotOperation(4, signed = false)
     case Halves          extends DotOperation(16, signed = false)
 
-    /** V_DOT2_F32_F16 on RDNA3 and RDNA3.5, which sums through a fixed-point accumulator as [[Dots]] describes. */
-    case AlignedHalves  extends DotOperation(16, signed = false)
-    case BFloat16Halves extends DotOperation(16, signed = false)
+    /** The V_DOT2 forms on RDNA3 and RDNA3.5, which sum through a fixed-point accumulator as [[Dots]] describes. */
+    case AlignedHalves                   extends DotOperation(16, signed = false)
+    case AlignedBFloat16Halves           extends DotOperation(16, signed = false)
+    case AlignedHalvesToHalf             extends DotOperation(16, signed = false)
+    case AlignedBFloat16HalvesToBFloat16 extends DotOperation(16, signed = false)
+    case BFloat16Halves                  extends DotOperation(16, signed = false)
 
     case MixedBytes(signedA: Boolean, signedB: Boolean)         extends DotOperation(8, signed = true)
     case MixedNibbles(signedA: Boolean, signedB: Boolean)       extends DotOperation(4, signed = true)

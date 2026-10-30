@@ -158,14 +158,14 @@ private[isa] object IntegerArithmetic {
   }
 
   /** `cvt.rn` and `cvt.rz` to TF32: binary32 rounded to the format, clamped at zero where `relu` and to the largest
-    * finite value where `saturate`; NaN is the canonical binary32 NaN.
+    * finite value where `saturate`; NaN is the canonical binary32 NaN with its low 13 bits cleared.
     */
   // call sites name these arguments, which the argument checks enforce
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def toTensorFloat32(value: Float32, towardZero: Boolean, relu: Boolean, saturate: Boolean): UInt[32] = {
     val exact = value.toDouble
     UInt[32](
-      if (exact.isNaN) VMArithmetic.CanonicalNaN32
+      if (exact.isNaN) VMArithmetic.CanonicalNaN32 & 0xffffe000L
       else if (relu && (exact < 0.0 || (exact == 0.0 && 1.0 / exact < 0.0))) 0L
       else if (exact.isInfinite && !saturate) value.bits.raw
       else

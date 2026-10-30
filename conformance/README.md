@@ -31,7 +31,7 @@ backend's support unless their runtime closure differs, as GCC's offload plugins
 | Target set | Matrix |
 | --- | --- |
 | `default` | CUDA `sm_89`, HIP/HSA `gfx1030`, OpenCL, SYCL, Level Zero, Vulkan |
-| `complete` | CUDA `sm_35`-`sm_120` (11.8 up to `sm_70`, 13.3 after), the architecture-specific `sm_90a`, `sm_100a`, `sm_103a`, and `sm_120a`, the family-specific `sm_100f`, `sm_103f`, and `sm_120f`, and AMD `gfx803`-`gfx1201` |
+| `complete` | CUDA `sm_35`-`sm_120` (11.8 up to `sm_70`, 13.3 after), the architecture-specific `sm_90a`, `sm_100a`, `sm_103a`, and `sm_120a`, the family-specific `sm_100f`, `sm_103f`, and `sm_120f`, AMD `gfx803`-`gfx1201`, OpenCL, SYCL, Level Zero, Vulkan, and OpenACC `sm_50`-`sm_120` (NVHPC 25.7 up to `sm_70`, 26.5 after, base targets only) |
 | `legacy-gfx803` | HIP and HSA `gfx803`, without rocBLAS |
 
 Select a set with `-DCONFORMANCE_TARGET_SET=<name>`, or override parts of it with `-DCONFORMANCE_BACKENDS`,

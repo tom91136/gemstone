@@ -1,8 +1,9 @@
 # Values the CMake driver supplies (CUDA_IMAGE, CUDA_PACKAGE_VERSION,
-# ROCM_VERSION) carry no usable default here; their authority is
-# Toolchains.cmake or build.sbt, and a fallback would only let the two drift
-# apart. CUDA_IMAGE names no image so BuildKit, which rejects a blank FROM in
-# any stage, still builds the routes that leave it unset.
+# NVHPC_IMAGE, NVHPC_VERSION, ROCM_VERSION) carry no usable default here; their
+# authority is Toolchains.cmake or build.sbt, and a fallback would only let the
+# two drift apart. CUDA_IMAGE and NVHPC_IMAGE name no image so BuildKit, which
+# rejects a blank FROM in any stage, still builds the routes that leave them
+# unset.
 ARG UBUNTU_IMAGE=docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
 ARG CUDA_IMAGE=cuda-image-not-supplied
 ARG SYCL_IMAGE=docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c
@@ -12,7 +13,7 @@ ARG ONEAPI_DPCPP_PACKAGE=2026.1.0-235
 ARG ONEAPI_MKL_PACKAGE=2026.1.0-236
 ARG ONEDPL_VERSION=2022.13
 ARG ONEDPL_PACKAGE=2022.13.0-107
-ARG NVHPC_IMAGE=nvcr.io/nvidia/nvhpc@sha256:25621a24ed39fe0dce3e9458e56e3f11194c122ac0206a44532246a58972a854
+ARG NVHPC_IMAGE=nvhpc-image-not-supplied
 
 ARG CUDA_PACKAGE_VERSION
 ARG CMAKE_VERSION=3.31.10
@@ -498,16 +499,17 @@ RUN ln -s /opt/intel/oneapi/compiler/latest/bin/compiler/clang-tidy /usr/local/b
 FROM ${NVHPC_IMAGE} AS toolchain-openacc
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
-ARG NVHPC_VERSION=26.5
+ARG NVHPC_VERSION
 COPY --from=network-config /etc/apt/apt.conf.d/80-retries /etc/apt/apt.conf.d/80-retries
 COPY --from=network-config /root/.curlrc /root/.curlrc
 ENV CURL_HOME=/root
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache ninja-build patchelf \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=cmake-release /opt/cmake /opt/cmake
 ENV NVHPC_ROOT="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}" \
-    PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin:${PATH}" \
+    PATH="/opt/cmake/bin:/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin:${PATH}" \
     CC="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin/nvc" \
     CXX="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin/nvc++" \
     CPATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/include" \

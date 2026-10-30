@@ -323,7 +323,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/pair-scan/i32/n11", "[unified][rocthru
   const thrust::device_vector<Pair<int32_t>> source(input.begin(), input.end());
   thrust::device_vector<Pair<int32_t>> output(input.size());
   thrust::inclusive_scan(source.begin(), source.end(), output.begin(), PairPlus<int32_t>{});
-  const auto expected = input ^ scan_left(Pair<int32_t>{int32_t{}, 0}, PairPlus<int32_t>{}) ^ drop(1);
+  const auto expected = input | scan_left(Pair<int32_t>{int32_t{}, 0}, PairPlus<int32_t>{}) | drop(1) | to_vector();
   {
     INFO("pair-scan");
     REQUIRE((std::vector<Pair<int32_t>>(output.begin(), output.end())) == expected);

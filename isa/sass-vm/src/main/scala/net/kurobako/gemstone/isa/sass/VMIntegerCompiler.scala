@@ -1050,7 +1050,11 @@ private object VMIntegerCompiler {
         case Operand.ConstantBank(_, offset)     => OperandQueries.integer(offset).nonEmpty
         case other                               => immediate(other)
       }
-      kind && (!OperandQueries.negative(operand) || OperandQueries.isRegister(plainOperand))
+      val negatable = plainOperand match {
+        case _: Operand.ConstantBank => true
+        case other                   => OperandQueries.isRegister(other)
+      }
+      kind && (!OperandQueries.negative(operand) || negatable)
     }
     if (!operands.drop(1).forall(operand => supported(operand) || (plain && immediate(operand))))
       unsupported("legacy IADD3 has unsupported source operand")

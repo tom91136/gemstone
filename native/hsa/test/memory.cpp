@@ -80,7 +80,7 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
     check(hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr));
     check(hsa_executable_freeze(executable, nullptr));
     hsa_executable_symbol_t symbol{};
-    check(hsa_executable_get_symbol_by_name(executable, "probe", &gpu, &symbol));
+    check(hsa_executable_get_symbol_by_name(executable, "probe.kd", &gpu, &symbol));
     check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel));
     check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &argumentSize));
     check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &groupSize));

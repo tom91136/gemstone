@@ -69,10 +69,7 @@ template <class T> void run(const char *kernelName) {
   check(hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr), "load");
   check(hsa_executable_freeze(executable, nullptr), "freeze");
   hsa_executable_symbol_t symbol{};
-  auto status = hsa_executable_get_symbol_by_name(executable, kernelName, &gpu, &symbol);
-  if (status != HSA_STATUS_SUCCESS)
-    status = hsa_executable_get_symbol_by_name(executable, (std::string(kernelName) + ".kd").c_str(), &gpu, &symbol);
-  check(status, "symbol");
+  check(hsa_executable_get_symbol_by_name(executable, (std::string(kernelName) + ".kd").c_str(), &gpu, &symbol), "symbol");
   uint64_t kernelObject = 0;
   uint32_t argumentSize = 0;
   uint32_t groupSize = 0;

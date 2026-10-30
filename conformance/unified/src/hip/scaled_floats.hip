@@ -76,8 +76,9 @@ using Halves2 = _Float16 __attribute__((ext_vector_type(2)));
 using Bfloats2 = __bf16 __attribute__((ext_vector_type(2)));
 
 // Each lane converts its codes and values by its power-of-two scale.
-__global__ void scaledConversions(const uint32_t *codes, const float *values, const float *scales, uint32_t *out, uint32_t *supported,
-                                  uint32_t count) {
+__global__ void scaledConversions([[maybe_unused]] const uint32_t *codes, [[maybe_unused]] const float *values,
+                                  [[maybe_unused]] const float *scales, [[maybe_unused]] uint32_t *out,
+                                  [[maybe_unused]] uint32_t *supported, uint32_t count) {
   const uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i >= count) return;
 #ifdef __gfx950__
@@ -89,7 +90,7 @@ __global__ void scaledConversions(const uint32_t *codes, const float *values, co
   const Floats2 nibbles = __builtin_amdgcn_cvt_scalef32_pk_f32_fp4(code, scale, 3);
   o[2] = __float_as_uint(nibbles.x);
   o[3] = __float_as_uint(nibbles.y);
-  const Shorts2 packed = __builtin_amdgcn_cvt_scalef32_pk_fp8_f32((Shorts2){0x1234, 0x5678}, values[static_cast<size_t>(i) * 4],
+  const Shorts2 packed = __builtin_amdgcn_cvt_scalef32_pk_fp8_f32(Shorts2{0x1234, 0x5678}, values[static_cast<size_t>(i) * 4],
                                                                   values[(static_cast<size_t>(i) * 4) + 1], scale, false);
   o[4] = static_cast<uint16_t>(packed.x) | (static_cast<uint32_t>(static_cast<uint16_t>(packed.y)) << 16);
   o[5] = __builtin_amdgcn_cvt_scalef32_pk_fp4_f32(0x12345678U, values[(static_cast<size_t>(i) * 4) + 2],
@@ -181,9 +182,10 @@ using Uints6 = unsigned __attribute__((ext_vector_type(6)));
 
 // __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32 packs SRC0's and SRC1's elements in turn into six dwords, and
 // cvt_scalef32_pk32_f32_fp6 widens them back.
-__global__ void sixBitBlocks(const float *values, const float *scales, uint32_t *packed, float *widened, uint32_t *supported) {
-  const uint32_t i = threadIdx.x;
+__global__ void sixBitBlocks([[maybe_unused]] const float *values, [[maybe_unused]] const float *scales, [[maybe_unused]] uint32_t *packed,
+                             [[maybe_unused]] float *widened, [[maybe_unused]] uint32_t *supported) {
 #ifdef __gfx950__
+  const uint32_t i = threadIdx.x;
   Floats16 a;
   Floats16 b;
   for (int e = 0; e < 16; ++e) {
@@ -244,9 +246,9 @@ using Uints2 = unsigned __attribute__((ext_vector_type(2)));
 
 // __builtin_amdgcn_permlane16_swap and permlane32_swap: v_permlane16_swap_b32 and v_permlane32_swap_b32, the first
 // operand's lanes below each 16- or 32-lane boundary trading places with the second's above it.
-__global__ void laneSwaps(uint32_t *out, uint32_t *supported) {
-  const uint32_t lane = threadIdx.x;
+__global__ void laneSwaps([[maybe_unused]] uint32_t *out, [[maybe_unused]] uint32_t *supported) {
 #ifdef __gfx950__
+  const uint32_t lane = threadIdx.x;
   const Uints2 rows = __builtin_amdgcn_permlane16_swap(1000U + lane, 2000U + lane, false, false);
   const Uints2 halves = __builtin_amdgcn_permlane32_swap(1000U + lane, 2000U + lane, false, false);
   out[static_cast<size_t>(lane) * 4] = rows.x;

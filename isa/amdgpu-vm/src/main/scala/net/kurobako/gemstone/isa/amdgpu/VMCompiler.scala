@@ -1562,7 +1562,7 @@ private object VMCompiler {
       case format if format.base == EncodingFormat.VOP3P && matrix(machine) =>
         decodeWaveMatrix(machine, target, waveSize)
       case format if format.base == EncodingFormat.VOP3P => decodeVOP3P(machine, target).map(alignedDot(_, target))
-      case format if format.base == EncodingFormat.VOP3  => decodeVOP3(machine, target)
+      case format if format.base == EncodingFormat.VOP3  => decodeVOP3(machine, target).map(alignedDot(_, target))
       case EncodingFormat.DS | EncodingFormat.VDS        => decodeDS(machine, target).map(zeroingHalves(_, target))
       case EncodingFormat.MUBUF | EncodingFormat.MTBUF | EncodingFormat.VBUFFER =>
         decodeBuffer(machine, target).map(zeroingHalves(_, target))
@@ -1579,10 +1579,17 @@ private object VMCompiler {
   }
 
   private def alignedDot(instruction: Instruction, target: Target): Instruction = instruction match {
-    case dot @ Instruction.VDot(operation = DotOperation.Halves)
-        if target.isa == ISA.RDNA3 || target.isa == ISA.RDNA3_5 =>
-      dot.copy(operation = DotOperation.AlignedHalves)
-    case other => other
+    case dot @ Instruction.VDot(operation = operation) if target.isa == ISA.RDNA3 || target.isa == ISA.RDNA3_5 =>
+      operation match {
+        case DotOperation.Halves                   => dot.copy(operation = DotOperation.AlignedHalves)
+        case DotOperation.BFloat16Halves           => dot.copy(operation = DotOperation.AlignedBFloat16Halves)
+        case DotOperation.HalvesToHalf             => dot.copy(operation = DotOperation.AlignedHalvesToHalf)
+        case DotOperation.BFloat16HalvesToBFloat16 =>
+          dot.copy(operation = DotOperation.AlignedBFloat16HalvesToBFloat16)
+        case _ => dot
+      }
+    case half: Instruction.VHalfResult => half.copy(operation = alignedDot(half.operation, target))
+    case other                         => other
   }
 
   /** ECC, which the CDNA parts enable, makes a 16-bit load write its whole register, zeroing the half it leaves. */
@@ -1653,18 +1660,22 @@ private object VMCompiler {
               if (target.isa == ISA.RDNA3 || target.isa == ISA.RDNA3_5) DualVectorOperation.DotAlignedHalvesF32
               else DualVectorOperation.DotHalvesF32
             )
-          case VDualDot2accF32Bf16 => Right(DualVectorOperation.DotBFloat16F32)
-          case VDualSubNcU32       => Right(DualVectorOperation.SubtractU32)
-          case VDualMinI32         => Right(DualVectorOperation.MinimumI32)
-          case VDualMaxI32         => Right(DualVectorOperation.MaximumI32)
-          case VDualLshrrevB32     => Right(DualVectorOperation.ShiftRight32)
-          case VDualAshrrevI32     => Right(DualVectorOperation.ShiftRightArithmetic32)
-          case VDualAddF64         => Right(DualVectorOperation.AddF64)
-          case VDualMulF64         => Right(DualVectorOperation.MultiplyF64)
-          case VDualFmaF64         => Right(DualVectorOperation.FmaF64)
-          case VDualMinNumF64      => Right(DualVectorOperation.MinimumF64)
-          case VDualMaxNumF64      => Right(DualVectorOperation.MaximumF64)
-          case VDualBitop2B32      => Right(DualVectorOperation.BitOperation2)
+          case VDualDot2accF32Bf16 =>
+            Right(
+              if (target.isa == ISA.RDNA3 || target.isa == ISA.RDNA3_5) DualVectorOperation.DotAlignedBFloat16F32
+              else DualVectorOperation.DotBFloat16F32
+            )
+          case VDualSubNcU32   => Right(DualVectorOperation.SubtractU32)
+          case VDualMinI32     => Right(DualVectorOperation.MinimumI32)
+          case VDualMaxI32     => Right(DualVectorOperation.MaximumI32)
+          case VDualLshrrevB32 => Right(DualVectorOperation.ShiftRight32)
+          case VDualAshrrevI32 => Right(DualVectorOperation.ShiftRightArithmetic32)
+          case VDualAddF64     => Right(DualVectorOperation.AddF64)
+          case VDualMulF64     => Right(DualVectorOperation.MultiplyF64)
+          case VDualFmaF64     => Right(DualVectorOperation.FmaF64)
+          case VDualMinNumF64  => Right(DualVectorOperation.MinimumF64)
+          case VDualMaxNumF64  => Right(DualVectorOperation.MaximumF64)
+          case VDualBitop2B32  => Right(DualVectorOperation.BitOperation2)
           case other => Left[NonEmpty[String], DualVectorOperation](s"dual-issue ${other.mnemonic} is not implemented")
         }
         third <- opcode match {

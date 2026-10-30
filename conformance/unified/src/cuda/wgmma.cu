@@ -145,8 +145,9 @@ __global__ void supported(uint32_t *out) {
 
 // A and B arrive row-major as encoded bytes: A by row over its (packed) columns, B by column of D over K. Each thread
 // copies its share into shared memory, loads D and A's fragment from `c` and `a`, multiplies along K and stores D.
-__global__ void gemm(Form form, Kind kind, const uint8_t *a, const uint8_t *b, const uint32_t *c, const uint32_t *fragments,
-                     const uint32_t *metadata, uint32_t *d, uint32_t keep) {
+__global__ void gemm([[maybe_unused]] Form form, [[maybe_unused]] Kind kind, [[maybe_unused]] const uint8_t *a,
+                     [[maybe_unused]] const uint8_t *b, [[maybe_unused]] const uint32_t *c, [[maybe_unused]] const uint32_t *fragments,
+                     [[maybe_unused]] const uint32_t *metadata, [[maybe_unused]] uint32_t *d, [[maybe_unused]] uint32_t keep) {
 #ifdef __CUDA_ARCH_FEAT_SM90_ALL
   constexpr int sharedBytes = 32768;
   __shared__ __align__(1024) uint8_t shared[sharedBytes];

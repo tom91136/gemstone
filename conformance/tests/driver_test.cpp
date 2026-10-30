@@ -213,9 +213,9 @@ backend = "sycl"
     }
     if (options.workloads.empty()) options.workloads = directory.path / "workloads";
     const auto *const backend = !inclusion.contains("opencl_cts") ? "sycl" : "opencl";
-    const auto target =
-        prepareTarget(options, loadWorkload(options), {.id = backend, .backend = backend, .architecture = std::nullopt, .environment = {}},
-                      directory.path / "probe");
+    const auto target = prepareTarget(options, loadWorkload(options),
+                                      {.id = backend, .backend = backend, .architecture = std::nullopt, .environment = {}, .skips = {}},
+                                      directory.path / "probe");
     if (!target) FAIL("probe target was omitted");
     CHECK(target->config.deviceLock == !(options.direct || options.isolatedLauncher));
     CHECK(target->config.device == "pci-0123456789abcdef0123456789abcdef");
@@ -511,7 +511,7 @@ TEST_CASE("cases on one physical device run one at a time while other devices ru
       if (config.deviceLock) --active[config.device];
     }
     if (!config.deviceLock && test.index == 3) throw std::runtime_error("executor failure");
-    return CaseResult{.status = config.deviceLock ? 0 : SkipReturnCode, .output = {}};
+    return CaseResult{.status = config.deviceLock ? 0 : SkipReturnCode, .output = {}, .message = {}};
   });
   CHECK(exclusive);
   CHECK(peak >= 2);
@@ -598,7 +598,8 @@ TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[dri
   ResolvedTarget first{.id = "first",
                        .backend = "hip",
                        .architecture = "gfx1030",
-                       .environment = {{conformance::environment::DevicePattern, "a"}, {"VALUE", "1"}}};
+                       .environment = {{conformance::environment::DevicePattern, "a"}, {"VALUE", "1"}},
+                       .skips = {}};
   auto duplicate = first;
   duplicate.id = "duplicate";
   auto selector = first;
@@ -610,10 +611,16 @@ TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[dri
   auto architecture = first;
   architecture.id = "architecture";
   architecture.architecture = "gfx1150";
-  ResolvedTarget ptx{
-      .id = "cuda-ptx", .backend = "cuda", .architecture = "sm_89", .environment = {{conformance::environment::CudaCodeMode, "ptx"}}};
-  ResolvedTarget sass{
-      .id = "cuda-sass", .backend = "cuda", .architecture = "sm_89", .environment = {{conformance::environment::CudaCodeMode, "sass"}}};
+  ResolvedTarget ptx{.id = "cuda-ptx",
+                     .backend = "cuda",
+                     .architecture = "sm_89",
+                     .environment = {{conformance::environment::CudaCodeMode, "ptx"}},
+                     .skips = {}};
+  ResolvedTarget sass{.id = "cuda-sass",
+                      .backend = "cuda",
+                      .architecture = "sm_89",
+                      .environment = {{conformance::environment::CudaCodeMode, "sass"}},
+                      .skips = {}};
   auto clang = ptx;
   clang.id = "cuda-ptx-clang";
   clang.compiler = "clang";

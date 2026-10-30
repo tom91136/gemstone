@@ -163,7 +163,7 @@ template <class T, class Backend> void transformBinary(Backend &backend, size_t 
   const auto input = values<T>(size, 1);
 
   const auto right = values<T>(size, 7);
-  const auto expected = input ^ zip(right) ^ map(Combine<T>{});
+  const auto expected = input | zip(right) | map(Combine<T>{}) | to_vector();
   REQUIRE(backend.transformBinary(input, right) == expected);
 }
 
@@ -243,7 +243,7 @@ template <class T, class Backend> void transformReduce(Backend &backend, size_t 
   using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  REQUIRE(backend.transformReduce(input) == (input ^ map(Square<T>{}) ^ fold_left(T{}, Plus<T>{})));
+  REQUIRE(backend.transformReduce(input) == (input | map(Square<T>{}) | fold_left(T{}, Plus<T>{})));
 }
 
 template <class T, class Backend> void innerProduct(Backend &backend, size_t size) {
@@ -251,7 +251,7 @@ template <class T, class Backend> void innerProduct(Backend &backend, size_t siz
   const auto input = values<T>(size, 1);
 
   const auto right = values<T>(size, 7);
-  const auto expected = input ^ zip(right) ^ map([](T a, T b) { return static_cast<T>(a * b); }) ^ fold_left(T{}, Plus<T>{});
+  const auto expected = input | zip(right) | map([](T a, T b) { return static_cast<T>(a * b); }) | fold_left(T{}, Plus<T>{});
   REQUIRE(backend.innerProduct(input, right) == expected);
 }
 
@@ -259,7 +259,7 @@ template <class T, class Backend> void inclusiveScan(Backend &backend, size_t si
   using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  REQUIRE(backend.inclusiveScan(input) == (input ^ scan_left(T{}, Plus<T>{}) ^ tail()));
+  REQUIRE(backend.inclusiveScan(input) == (input | scan_left(T{}, Plus<T>{}) | tail() | to_vector()));
 }
 
 template <class T, class Backend> void exclusiveScan(Backend &backend, size_t size) {
@@ -273,7 +273,7 @@ template <class T, class Backend> void transformInclusiveScan(Backend &backend, 
   using namespace aspartame;
   const auto input = values<T>(size, 1);
 
-  REQUIRE(backend.transformInclusiveScan(input) == (input ^ map(Square<T>{}) ^ scan_left(T{}, Plus<T>{}) ^ tail()));
+  REQUIRE(backend.transformInclusiveScan(input) == (input | map(Square<T>{}) | scan_left(T{}, Plus<T>{}) | tail() | to_vector()));
 }
 
 template <class T, class Backend> void transformExclusiveScan(Backend &backend, size_t size) {
@@ -315,8 +315,9 @@ template <class T, class Backend> void sortDescending(Backend &backend, size_t s
 
 template <class T, class Backend> void sortByKey(Backend &backend, size_t size) {
   using namespace aspartame;
-  const auto keys = values<T>(size, 4) ^ zip_with_index()
-                    ^ map([&](T key, size_t index) { return static_cast<T>((key * static_cast<T>(size + 1)) + static_cast<T>(index)); });
+  const auto keys = values<T>(size, 4) | zip_with_index()
+                    | map([&](T key, size_t index) { return static_cast<T>((key * static_cast<T>(size + 1)) + static_cast<T>(index)); })
+                    | to_vector();
   const auto actual = backend.sortByKey(keys, support::payload(size));
   REQUIRE((actual.keys ^ is_sorted()));
   REQUIRE_THAT(actual.keys, unified::KeyPermutation(actual.values, keys));

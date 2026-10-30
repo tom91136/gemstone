@@ -75,7 +75,7 @@ public:
   template <class T> std::vector<T> transformUnary(const std::vector<T> &input) { return input ^ map(algorithms::Affine<T>{}); }
 
   template <class T> std::vector<T> transformBinary(const std::vector<T> &left, const std::vector<T> &right) {
-    return left ^ zip(right) ^ map(algorithms::Combine<T>{});
+    return left | zip(right) | map(algorithms::Combine<T>{}) | to_vector();
   }
 
   template <class T> std::vector<T> replaceIf(const std::vector<T> &input, T replacement) {
@@ -104,7 +104,7 @@ public:
   template <class T> T reduce(const std::vector<T> &input) { return input ^ fold_left(T{}, algorithms::Plus<T>{}); }
 
   template <class T> T transformReduce(const std::vector<T> &input) {
-    return input ^ map(algorithms::Square<T>{}) ^ fold_left(T{}, algorithms::Plus<T>{});
+    return input | map(algorithms::Square<T>{}) | fold_left(T{}, algorithms::Plus<T>{});
   }
 
   template <class T> T innerProduct(const std::vector<T> &left, const std::vector<T> &right) {

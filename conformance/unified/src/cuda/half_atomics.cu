@@ -48,7 +48,7 @@ uint32_t halves(float low, float high) { return halfBits(low) | halfBits(high) <
 uint32_t bfloats(float low, float high) { return bfloat(low) | bfloat(high) << 16; }
 
 // Counters: [0] __half2, [1] __nv_bfloat162, [2] __half in the low half, [3] __nv_bfloat16 in the low half.
-__device__ __noinline__ void accumulate(uint32_t *counters, uint32_t *previous) {
+__device__ __noinline__ void accumulate([[maybe_unused]] uint32_t *counters, [[maybe_unused]] uint32_t *previous) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
   const __half2_raw old = atomicAdd(reinterpret_cast<__half2 *>(&counters[0]), __halves2half2(__float2half(1.0F), __float2half(0.5F)));
   uint32_t word = 0;

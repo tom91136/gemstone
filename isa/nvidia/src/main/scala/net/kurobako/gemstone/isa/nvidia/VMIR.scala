@@ -499,7 +499,10 @@ private[isa] object VMIR {
       * products, Ampere and Ada 8 with one extra alignment bit (4 for TF32), Hopper and Blackwell 16 with two (8 for
       * TF32). Ada fuses 16 FP8 products with 13 fraction bits; Hopper and the Blackwell data-centre parts convert FP8
       * to half precision for two half-precision blocks from zero and add C after; consumer Blackwell fuses 32, and all
-      * 64 of packed E2M1 with 12 extra bits, the fewest that every measured sum agrees with.
+      * 64 of packed E2M1 with 12 extra bits, the fewest that every measured sum agrees with. Saturating integer
+      * products clamp after every 16 products (32 for 4-bit elements), as measured on Ada, except on consumer
+      * Blackwell, which clamps once after the whole K as measured, and for 4-bit elements from Hopper on, which ptxas
+      * sums exactly in 8-bit products before adding C with one saturating add.
       */
     def accumulation(
         architecture: Int,
@@ -508,8 +511,10 @@ private[isa] object VMIR {
         result: Element,
         rounding: ConversionRounding
     ): Accumulation =
-      if (input.integer) Accumulation.Exact(if (input.bits == 4) 32 else 16)
-      else if (input == Element.F64) Accumulation.Fused(rounding)
+      if (input.integer) {
+        val saturatesOnce = architecture >= (if (input.bits == 4) 90 else 120)
+        Accumulation.Exact(if (saturatesOnce) shape.k else if (input.bits == 4) 32 else 16)
+      } else if (input == Element.F64) Accumulation.Fused(rounding)
       else if (shape == Shape(8, 8, 4) && architecture >= 80) Accumulation.Emulated
       else {
         val generation    = if (architecture < 80) 0 else if (architecture < 90) 1 else 2

@@ -12,15 +12,17 @@ using namespace memory_patterns;
 uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
   const auto selected = conformance::deviceSelection().nativeHandle;
   auto *device = reinterpret_cast<ze_device_handle_t>(selected);
-  ze_device_memory_access_properties_t properties{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES};
+  ze_device_memory_access_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES;
   check(zeDeviceGetMemoryAccessProperties(device, &properties));
   if (wide) {
-    ze_device_module_properties_t module{.stype = ZE_STRUCTURE_TYPE_DEVICE_MODULE_PROPERTIES};
+    ze_device_module_properties_t module{};
+    module.stype = ZE_STRUCTURE_TYPE_DEVICE_MODULE_PROPERTIES;
     check(zeDeviceGetModuleProperties(device, &module));
     if (!(module.flags & ZE_DEVICE_MODULE_FLAG_INT64_ATOMICS)) SKIP("64-bit atomics unavailable");
   }
   auto flags = kind == "host" ? properties.hostAllocCapabilities : properties.sharedSingleDeviceAllocCapabilities;
-  const auto needed =
+  const ze_memory_access_cap_flags_t needed =
       ZE_MEMORY_ACCESS_CAP_FLAG_RW
       | (atomic ? ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC
                 : 0);

@@ -55,7 +55,7 @@ __device__ void threadSync() {
 
 // Each warp stores eight columns of its 32 lanes with the 32x32b shape, then reads them back with the 16x256b and
 // 16x64b shapes, whose registers map to lanes and columns as the PTX ISA data movement figures show.
-__global__ void movement(uint32_t *out) {
+__global__ void movement([[maybe_unused]] uint32_t *out) {
 #ifdef __CUDA_ARCH_FEAT_SM100_ALL
   __shared__ uint32_t slot;
   const uint32_t thread = threadIdx.x;
@@ -127,7 +127,8 @@ size_t swizzled(int row, int byte) {
 
 // One thread issues a 128x64x16 BF16 product into tensor memory from 128-byte swizzled K-major A and B in shared
 // memory, commits it to an mbarrier, and every thread reads back its row of D.
-__global__ void product(const uint4 *image, uint64_t adesc, uint64_t bdesc, uint32_t idesc, float *out) {
+__global__ void product([[maybe_unused]] const uint4 *image, [[maybe_unused]] uint64_t adesc, [[maybe_unused]] uint64_t bdesc,
+                        [[maybe_unused]] uint32_t idesc, [[maybe_unused]] float *out) {
 #ifdef __CUDA_ARCH_FEAT_SM100_ALL
   __shared__ alignas(1024) uint4 tiles[2 * TileBytes / 16];
   __shared__ alignas(8) uint64_t barrier;
@@ -233,7 +234,8 @@ EncodeTiled encodeTiled() {
 
 // gather4 reads columns 2 to 5 of rows 5, 2, 9 and 17 of a 16-row tensor into four box rows, then scatter4 writes
 // them to columns 4 to 7 of rows 1, 3, 4 and 20 of another.
-__global__ void gather(const __grid_constant__ CUtensorMap load, const __grid_constant__ CUtensorMap store, uint32_t *out) {
+__global__ void gather([[maybe_unused]] const __grid_constant__ CUtensorMap load,
+                       [[maybe_unused]] const __grid_constant__ CUtensorMap store, [[maybe_unused]] uint32_t *out) {
 #ifdef __CUDA_ARCH_FEAT_SM100_ALL
   __shared__ alignas(128) uint32_t box[16];
   __shared__ alignas(8) uint64_t barrier;

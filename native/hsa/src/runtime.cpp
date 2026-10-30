@@ -29,6 +29,7 @@
 #include <aspartame/string.hpp>
 #include <aspartame/unordered_map.hpp>
 #include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 
 #include "gemstone/environment.hpp"
 #include "gemstone/hsa/allocation.hpp"
@@ -700,8 +701,9 @@ bool awaitQueuedDispatches(RuntimeState &runtime) {
   std::vector<std::pair<QueueRef, uint64_t>> pending;
   {
     std::scoped_lock const guard(runtime.lock);
-    pending = runtime.queues ^ values() ^ filter([](const QueueRef &queue) { return queue->aql->active(); })
-              ^ map([](const QueueRef &queue) { return std::pair{queue, __atomic_load_n(queue->aql->writeIndex(), __ATOMIC_ACQUIRE)}; });
+    pending = runtime.queues | values() | filter([](const QueueRef &queue) { return queue->aql->active(); })
+              | map([](const QueueRef &queue) { return std::pair{queue, __atomic_load_n(queue->aql->writeIndex(), __ATOMIC_ACQUIRE)}; })
+              | to_vector();
   }
   // The queue read index only advances after the worker mirrors writes back.
   // Give up rather than stall an allocation forever on a wedged queue.
@@ -1338,9 +1340,10 @@ hsa_status_t registerHostView(RuntimeState &runtime, void *ptr, size_t size, boo
   {
     std::scoped_lock const guard(runtime.lock);
     if (!allowOverlap && runtime.registrations.overlaps(range)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    covered = runtime.allocations ^ values() ^ map([](const AllocationRef &allocation) {
+    covered = runtime.allocations | values() | map([](const AllocationRef &allocation) {
                 return gemstone::MemoryRange{.base = reinterpret_cast<uintptr_t>(allocation->base), .size = allocation->size};
-              });
+              })
+              | to_vector();
   }
   std::vector<void *> created;
   for (const auto missing : gemstone::missingMemoryRanges(range, covered)) {
@@ -2184,12 +2187,8 @@ hsa_status_t loadCodeObject(hsa_executable_t executableHandle, hsa_agent_t agent
       runtime.kernels.emplace(kernel->object, kernel);
     }
     executableValue->kernels.insert(executableValue->kernels.end(), kernels.begin(), kernels.end());
-    for (const auto &kernel : kernels) {
-      executableValue->kernelNames.emplace(kernel->metadata.name, kernel);
+    for (const auto &kernel : kernels)
       executableValue->kernelNames.emplace(kernel->metadata.symbol, kernel);
-      if (kernel->metadata.symbol.size() > 3 && (kernel->metadata.symbol ^ ends_with(".kd")))
-        executableValue->kernelNames.emplace(kernel->metadata.symbol ^ strip_suffix(".kd"), kernel);
-    }
     executableValue->globals.insert(executableValue->globals.end(), globals.begin(), globals.end());
     executableValue->globalStorage.insert(executableValue->globalStorage.end(), globalStorage.begin(), globalStorage.end());
     for (const auto &global : globals)
@@ -2386,9 +2385,10 @@ bool gemstone::hsa::copyExecutableKernelMetadata(hsa_executable_t executableHand
   std::scoped_lock const guard(runtime.lock);
   const auto executableValue = executable(runtime, executableHandle);
   if (!executableValue) return false;
-  const auto found = executableValue->kernelNames.find(std::string(name));
-  if (found == executableValue->kernelNames.end()) return false;
-  metadata = found->second->metadata;
+  const auto found = executableValue->kernels
+                     ^ find([&](const KernelRef &kernel) { return kernel->metadata.name == name || kernel->metadata.symbol == name; });
+  if (!found) return false;
+  metadata = (*found)->metadata;
   return true;
 }
 
@@ -2498,9 +2498,10 @@ extern "C" hsa_status_t hsa_amd_memory_fill(void *ptr, uint32_t value, size_t co
     std::scoped_lock const guard(runtime.lock);
     if (!findAllocation(runtime, ptr, bytes) && !runtime.registrations.find(range.base, bytes)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     fragments =
-        runtime.allocations ^ values() ^ filter([&](const AllocationRef &allocation) {
+        runtime.allocations | values() | filter([&](const AllocationRef &allocation) {
           return gemstone::MemoryRange{.base = reinterpret_cast<uintptr_t>(allocation->base), .size = allocation->size}.overlaps(range);
-        });
+        })
+        | to_vector();
   }
   std::fill_n(static_cast<uint32_t *>(ptr), count, value);
   for (const auto &allocation : fragments) {

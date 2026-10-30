@@ -41,7 +41,7 @@ constexpr int BlockInts = 1024;
 
 // cuda::memcpy_async completes through cuda::barrier: cp.async on sm_80 and a bulk copy with mbarrier transactions
 // from sm_90.
-__global__ void barrierCopy(const int4 *input, int4 *output) {
+__global__ void barrierCopy([[maybe_unused]] const int4 *input, [[maybe_unused]] int4 *output) {
 #if __CUDA_ARCH__ >= 700
   using Barrier = cuda::barrier<cuda::thread_scope_block>;
   __shared__ alignas(128) int4 staged[BlockInts / 4];
@@ -88,7 +88,7 @@ namespace {
 // Bulk copies in, stores, reductions and a shared-to-shared copy, each completing through an mbarrier transaction
 // or a bulk group. The shared-to-shared copy needs a launch with a cluster; without one, sm_90 hardware ends the launch
 // with an illegal instruction.
-__global__ void bulkCopies(const int *input, int *output) {
+__global__ void bulkCopies([[maybe_unused]] const int *input, [[maybe_unused]] int *output) {
 #if __CUDA_ARCH__ >= 900
   __shared__ alignas(128) int loaded[256];
   __shared__ alignas(128) int copied[256];
@@ -180,8 +180,10 @@ EncodeTiled encodeTiled() {
 
 // A 2D box loaded through a tensor map, read back in shared-memory order, then stored and add-reduced through two
 // more maps over the same box.
-__global__ void tensorTile(const __grid_constant__ CUtensorMap load, const __grid_constant__ CUtensorMap store,
-                           const __grid_constant__ CUtensorMap reduce, float *shared, int x, int y) {
+__global__ void tensorTile([[maybe_unused]] const __grid_constant__ CUtensorMap load,
+                           [[maybe_unused]] const __grid_constant__ CUtensorMap store,
+                           [[maybe_unused]] const __grid_constant__ CUtensorMap reduce, [[maybe_unused]] float *shared,
+                           [[maybe_unused]] int x, [[maybe_unused]] int y) {
 #if __CUDA_ARCH__ >= 900
   constexpr int tileBytes = 1024;
   __shared__ alignas(1024) float box[tileBytes / 4];
@@ -313,7 +315,7 @@ struct ClusterView {
 
 // Each CTA of a cluster publishes a slice, reads its neighbour's through distributed shared memory, adds to it and
 // pushes a bulk copy into it that completes on the neighbour's mbarrier.
-__global__ void clusterExchange(int *output) {
+__global__ void clusterExchange([[maybe_unused]] int *output) {
 #if __CUDA_ARCH__ >= 900
   __shared__ alignas(128) int slice[64];
   __shared__ alignas(128) int received[64];

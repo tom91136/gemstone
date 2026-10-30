@@ -27,7 +27,7 @@ public:
 
   template <class T> std::vector<T> asyncScan(const std::vector<T> &input) {
     using namespace aspartame;
-    return std::async(std::launch::async, [input] { return input ^ scan_left(T{}, support::Plus<T>{}) ^ tail(); }).get();
+    return std::async(std::launch::async, [input] { return input | scan_left(T{}, support::Plus<T>{}) | tail() | to_vector(); }).get();
   }
 
   template <class T> std::vector<T> asyncInclusiveScanCounting(size_t size) {
@@ -77,7 +77,7 @@ public:
     auto left = std::async(std::launch::async, [input] { return input ^ map(support::Affine<T>{}); });
     auto right = std::async(std::launch::async, [input] { return input ^ map(support::Square<T>{}); });
     auto join = std::async(std::launch::async, [left = std::move(left), right = std::move(right)]() mutable {
-      return left.get() ^ zip(right.get()) ^ map(support::Combine<T>{});
+      return left.get() | zip(right.get()) | map(support::Combine<T>{}) | to_vector();
     });
     return join.get();
   }
@@ -85,7 +85,8 @@ public:
   template <class T> std::vector<T> asyncInterleavedStreams(const std::vector<T> &input) {
     using namespace aspartame;
     auto evenFuture = std::async(std::launch::async, [even = input ^ stride(2)] { return even ^ map(support::Affine<T>{}); });
-    auto oddFuture = std::async(std::launch::async, [odd = input ^ drop(1) ^ stride(2)] { return odd ^ map(support::Square<T>{}); });
+    auto oddFuture =
+        std::async(std::launch::async, [odd = input | drop(1) | stride(2) | to_vector()] { return odd ^ map(support::Square<T>{}); });
     const auto transformedEven = evenFuture.get();
     const auto transformedOdd = oddFuture.get();
     return iota(size_t{0}, input.size())

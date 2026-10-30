@@ -55,7 +55,10 @@ namespace {
 #define MMA_FORM(NAME, ARCH, M, K, ABITS, BBITS, CBITS, REGS, PTX)                                                                         \
   struct NAME {                                                                                                                            \
     static constexpr int architecture = (ARCH), m = (M), k = (K), aBits = (ABITS), bBits = (BBITS), cBits = (CBITS);                       \
-    __device__ static void run(uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c) { MMA_SM##ARCH(REGS, PTX); }          \
+    __device__ static void run([[maybe_unused]] uint32_t *d, [[maybe_unused]] const uint32_t *a, [[maybe_unused]] const uint32_t *b,       \
+                               [[maybe_unused]] const uint32_t *c) {                                                                       \
+      MMA_SM##ARCH(REGS, PTX);                                                                                                             \
+    }                                                                                                                                      \
   };
 
 MMA_FORM(F16F16K8, 75, 16, 8, 16, 16, 16, MMA_2_1_2_2, "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16")
@@ -189,8 +192,10 @@ Domain floating(const std::function<uint32_t(double)> &encode, const std::functi
                 }};
 }
 
-// An integer sum that wraps, or clamps to 32 bits after every `chunk` products and at the end of each instruction.
+// An integer sum that wraps, or clamps to 32 bits after every `chunk` products and at the end of each instruction. Consumer
+// Blackwell clamps only at the end, as do 4-bit products from Hopper, which ptxas sums in 8-bit products.
 Domain integer(int lowA, int highA, int lowB, int highB, int bits, bool saturate, int chunk, int32_t lowC, int32_t highC) {
+  if (capability() >= (bits == 4 ? 90 : 120)) chunk = INT32_MAX;
   auto field = [bits](double value) {
     const auto word = static_cast<uint32_t>(static_cast<int64_t>(value));
     return bits == 32 ? word : word & ((1U << bits) - 1U);
@@ -294,7 +299,8 @@ TEST_CASE("runtime/cuda/mma/fp8", "[unified][runtime][tensor][compact]") {
 
 namespace {
 // m8n8k4 binary64: A, B and C as above, with one register per element.
-__global__ void doubleTile(const double *a, const double *b, const double *c, double *d, int steps) {
+__global__ void doubleTile([[maybe_unused]] const double *a, [[maybe_unused]] const double *b, [[maybe_unused]] const double *c,
+                           [[maybe_unused]] double *d, [[maybe_unused]] int steps) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   const int lane = static_cast<int>(threadIdx.x % 32);
   const int depth = steps * 4;

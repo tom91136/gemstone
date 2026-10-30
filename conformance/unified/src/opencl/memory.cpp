@@ -25,7 +25,7 @@ uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
   if (kind == "svm") {
     cl_device_svm_capabilities flags{};
     check(clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES, sizeof(flags), &flags, nullptr));
-    const auto needed = CL_DEVICE_SVM_FINE_GRAIN_BUFFER | (atomic ? CL_DEVICE_SVM_ATOMICS : 0);
+    const cl_device_svm_capabilities needed = CL_DEVICE_SVM_FINE_GRAIN_BUFFER | (atomic ? CL_DEVICE_SVM_ATOMICS : 0);
     if ((flags & needed) != needed) SKIP("fine-grained SVM or SVM atomics unavailable");
   } else {
     if (deviceString(device, CL_DEVICE_EXTENSIONS).find("cl_intel_unified_shared_memory") == std::string::npos)
@@ -33,10 +33,11 @@ uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
     cl_device_unified_shared_memory_capabilities_intel flags{};
     const auto name = kind == "usm_host" ? CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL : CL_DEVICE_SINGLE_DEVICE_SHARED_MEM_CAPABILITIES_INTEL;
     check(clGetDeviceInfo(device, name, sizeof(flags), &flags, nullptr));
-    const auto needed = CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL
-                        | (atomic ? CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL
-                                        | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL
-                                  : 0);
+    const cl_device_unified_shared_memory_capabilities_intel needed =
+        CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL
+        | (atomic ? CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL
+                        | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL
+                  : 0);
     if ((flags & needed) != needed) SKIP("USM allocation lacks required capabilities");
   }
   return selected;

@@ -20,7 +20,7 @@ class CompilerFormSuite extends Suite {
       (0x3f803000, ".RZ", 0x3f802000),
       (0xbf803000, ".RELU", 0),
       (0x7f7fffff, ".SATFINITE", 0x7f7fe000),
-      (0x7fc00001, "", 0x7fffffff)
+      (0x7fc00001, "", 0x7fffe000)
     )
   )
     test(f"sm_90 F2FP.TF32.F32.PACK_B$modifiers of 0x$input%08x") {

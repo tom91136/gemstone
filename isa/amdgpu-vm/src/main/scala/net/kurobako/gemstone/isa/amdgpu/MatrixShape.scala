@@ -23,6 +23,7 @@ private[isa] object MatrixShape {
       case _                                             => None
     }
     val ocp                                     = isa == ISA.CDNA4 || isa == ISA.RDNA4
+    val rdna3                                   = isa == ISA.RDNA3 || isa == ISA.RDNA3_5
     def scaled(code: Int): Option[MatrixFormat] = code match {
       case 0 => Some(MatrixFormat.FP8)
       case 1 => Some(MatrixFormat.BF8)
@@ -91,7 +92,9 @@ private[isa] object MatrixShape {
               b,
               c,
               if (selected == MatrixLayout.Core) 64 else waveSize,
-              sparse
+              sparse,
+              chained = rdna3 && (a == MatrixFormat.F16 || a == MatrixFormat.BF16),
+              grouped = if (rdna3 && a.integer) 16 / a.width else 0
             )
             Right(if (isa == ISA.CDNA4) shape.split else shape)
           case _ => Left(s"$mnemonic has no matrix shape on $isa")
@@ -127,7 +130,9 @@ private[isa] object MatrixShape {
 /** The shape of a matrix instruction: `blocks` products of an M x K matrix A and a K x N matrix B added to M x N
   * matrices C into D, with the formats of A, B and C/D. A 4:2 sparse A holds K/2 elements per row, the two of each
   * group of four that an index selects. `chunkA` and `chunkB`, when non-zero, split the K elements a lane holds into
-  * runs of that many, as gfx950 lays out its widest operands.
+  * runs of that many, as gfx950 lays out its widest operands. A `chained` shape sums its floating-point products as a
+  * chain of the V_DOT2 instructions, two consecutive elements of K a step. A `grouped` shape saturates its integer sum
+  * under CLAMP after every `grouped` elements of K, rather than once at the end.
   */
 private[isa] case class MatrixShape(
     layout: MatrixLayout,
@@ -141,7 +146,9 @@ private[isa] case class MatrixShape(
     waveSize: Int = 64,
     sparse: Boolean = false,
     chunkA: Int = 0,
-    chunkB: Int = 0
+    chunkB: Int = 0,
+    chained: Boolean = false,
+    grouped: Int = 0
 ) {
 
   /** The K elements of A that registers hold. */
@@ -240,7 +247,9 @@ private[isa] case class MatrixShape(
   private lazy val outputs  =
     Array.tabulate(waveSize * outputItems)(index => output(index / outputItems, index % outputItems))
 
-  /** Whether each group of 16 lanes holds all of A and B, as gfx11 requires; a lane reads them from its own group. */
+  /** Whether each group of 16 lanes of the low half wave holds all of A and B, as gfx11 requires; a lane reads them
+    * from the group its position in a half wave names, so wave64's upper half reads the lower's.
+    */
   def replicated: Boolean = layout == MatrixLayout.Wave11
 
   /** The lane and item that hold each element of A, at index `(block * m + row) * storedK + k`, and of B, at index
@@ -278,15 +287,15 @@ private[isa] case class MatrixShape(
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def bItem(block: Int, k: Int, column: Int): Int = bLocated._2((block * n + column) * this.k + k)
 
-  /** The lane `lane` reads element `k` of row `row` of block `block` of A from: in its own group of 16 lanes on gfx11,
-    * and under a broadcast from block `blockId` of each group of `1 << blockBroadcast` blocks, as AMD's matrix
-    * instruction calculator and the CDNA1 ISA define CBSZ and ABID.
+  /** The lane `lane` reads element `k` of row `row` of block `block` of A from: in the group of 16 lanes its position
+    * in a half wave names on gfx11, and under a broadcast from block `blockId` of each group of `1 << blockBroadcast`
+    * blocks, as AMD's matrix instruction calculator and the CDNA1 ISA define CBSZ and ABID.
     */
   // call sites name these arguments, which the argument checks enforce
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def aSource(block: Int, row: Int, k: Int, lane: Int, blockBroadcast: Int, blockId: Int): Int =
     aLane(block = block >> blockBroadcast << blockBroadcast | blockId, row = row, k = k) +
-      (if (replicated) lane / 16 * 16 else 0)
+      (if (replicated) lane % 32 / 16 * 16 else 0)
 
   /** The lane `lane` reads element `k` of column `column` of block `block` of B from, under the lane-group permutation
     * `laneGroups`.
@@ -295,7 +304,7 @@ private[isa] case class MatrixShape(
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def bSource(block: Int, k: Int, column: Int, lane: Int, laneGroups: Int): Int =
     MatrixShape.laneGroup(
-      bLane(block = block, k = k, column = column) + (if (replicated) lane / 16 * 16 else 0),
+      bLane(block = block, k = k, column = column) + (if (replicated) lane % 32 / 16 * 16 else 0),
       laneGroups
     )
 

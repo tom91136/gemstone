@@ -172,7 +172,7 @@ void expectPermutation(std::vector<uint32_t> values, uint32_t base, std::string_
     if (values[i] != base + i) throw std::runtime_error(fmt::format("{}: fetch {} is {}", what, i, values[i]));
 }
 
-__global__ void architecture(uint32_t *out) {
+__global__ void architecture([[maybe_unused]] uint32_t *out) {
 #ifdef __CUDA_ARCH__
   *out = __CUDA_ARCH__ / 10;
 #endif
@@ -226,7 +226,8 @@ TEST_CASE("atomics/cuda/integer-operations", "[unified][atomics]") {
 
 namespace {
 // Floating-point additions whose every partial sum is exact, and binary16 compare-and-swap.
-__global__ void floats(float *globalFloat, double *globalDouble, uint32_t *halves, float *blockFloat, double *blockDouble) {
+__global__ void floats(float *globalFloat, [[maybe_unused]] double *globalDouble, uint32_t *halves, float *blockFloat,
+                       double *blockDouble) {
   __shared__ float f;
   __shared__ double d;
   __shared__ unsigned short h[2];
@@ -295,7 +296,7 @@ TEST_CASE("atomics/cuda/floating-operations", "[unified][atomics]") {
 
 namespace {
 // cuda::atomic_ref at each scope and memory order, the scoped atomic intrinsics and fences.
-__global__ void scoped(int *global, unsigned long long *wide, int *out) {
+__global__ void scoped([[maybe_unused]] int *global, [[maybe_unused]] unsigned long long *wide, [[maybe_unused]] int *out) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
   __shared__ int local[4];
   if (threadIdx.x < 4) local[threadIdx.x] = threadIdx.x == 2 ? 1 << 30 : 0;
@@ -432,7 +433,7 @@ TEST_CASE("barriers/cuda/named-and-counted", "[unified][barriers]") {
 
 namespace {
 // An mbarrier that each thread arrives on once directly and once when its cp.async copy lands, over three phases.
-__global__ void phases(const uint32_t *in, uint32_t *out) {
+__global__ void phases([[maybe_unused]] const uint32_t *in, [[maybe_unused]] uint32_t *out) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   __shared__ alignas(8) unsigned long long barrier;
   __shared__ uint32_t staged[Threads];

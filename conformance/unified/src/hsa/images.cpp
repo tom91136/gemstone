@@ -158,9 +158,7 @@ TEST_CASE("resources/hsa/image-extension", "[unified][resources]") {
   check(hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr), "load");
   check(hsa_executable_freeze(executable, nullptr), "freeze");
   hsa_executable_symbol_t symbol{};
-  auto status = hsa_executable_get_symbol_by_name(executable, "image_transform", &gpu, &symbol);
-  if (status != HSA_STATUS_SUCCESS) status = hsa_executable_get_symbol_by_name(executable, "image_transform.kd", &gpu, &symbol);
-  check(status, "symbol");
+  check(hsa_executable_get_symbol_by_name(executable, "image_transform.kd", &gpu, &symbol), "symbol");
   uint64_t kernelObject = 0;
   uint32_t argumentSize = 0;
   uint32_t groupSize = 0;

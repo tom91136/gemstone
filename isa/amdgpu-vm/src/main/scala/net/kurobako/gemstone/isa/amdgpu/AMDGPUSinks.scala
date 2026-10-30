@@ -492,7 +492,9 @@ private trait AMDGPUSinks[V, R] {
   /** A matrix instruction on a complete wave: each element of D this lane holds folds `step` over K from `addend` of
     * its element of C, with the bits of the elements of A's row and B's column the shape and the broadcasts lay out,
     * after the instruction's negations and absolute value and `inputA` and `inputB`'s conversion, and the E8M0 scales
-    * of A and B for block-scaled products; `result` makes the element of D from the sum.
+    * of A and B for block-scaled products; `result` makes the element of D from the sum. A chained shape's `step` takes
+    * two consecutive elements of K, the second pair in place of the scales, and a grouped shape's the index of K in
+    * place of A's scale.
     */
   inline def multiplyMatrices(instruction: Instruction.VMatrix)(
       inline addend: V => V,

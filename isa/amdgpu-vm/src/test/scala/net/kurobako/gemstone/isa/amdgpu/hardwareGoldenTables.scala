@@ -23036,6 +23036,196 @@ object hardwareGoldenTables {
         |b216b180 238027ab 41ff62dc -> 41ff529c
         |ade4c4e1 3871be07 c10038b6 -> bf36966c
         |"""
+    ),
+    Golden(
+      op = "Fdot2Bf16",
+      form = "v_dot2_f32_bf16 v2, v2, v3, v4",
+      code = "CC1A4002 1C120702",
+      loads = "2=0 3=1 4=2",
+      outputs = "2",
+      rows = """
+        |3fc04080 4010c080 3f800000 -> c13a0001
+        |3f807fc0 ff807f80 007fffff -> ffc00a3d
+        |7f81007f ff80ff00 00000001 -> ffc00a3d
+        |7fc00000 ff000000 00000001 -> ffc00a3d
+        |80017f80 3f807f7f 7f7fffff -> 7f800000
+        |0001007f ff007fc0 007fffff -> ffc00a3d
+        |7f80ff80 00010001 ff000000 -> ffc00000
+        |7f007f80 007f0001 ff000000 -> ffc00000
+        |3f807f80 007f0001 7f800001 -> ffc00000
+        |00017f00 7fc0007f ff800000 -> ffc00a3d
+        |bf80007f 80018000 80000001 -> 00000000
+        |ff80ff80 8001ff00 bf800000 -> ffc00000
+        |80010080 80000000 00000000 -> 00000000
+        |8000ff00 8080bf80 80000000 -> 7f000001
+        |ff007fc0 ff008000 ff000000 -> ffc00a3d
+        |40823ea6 c000c02d bdbd9f47 -> c11180fe
+        |be81bf6a 406e3f55 c0bcea54 -> c0f33c14
+        |3f21beed 3e95bf6b 3e867777 -> 3f5eddbc
+        |c07dbf40 40bec0dd 41cc93ee -> 40e8f7b7
+        |bfb5c10d 3f6fbf23 3e4bc149 -> 408fad4a
+        |be123f84 be1a3e54 41e3b7fb -> 41e59925
+        |40a43f8d c068bfbe 4298d4cd -> 4260cf3a
+        |4124c136 be43c16f 3f74f9f8 -> 4328eb4a
+        |bf5cbea3 c0e340fe c1b26a9d -> c195dcdd
+        |4130c033 c154c0c7 be8a190e -> c300a06c
+        |3eaebf0d bee9c106 c147cfd2 -> c1007b4a
+        |be02c04a 4051c17b c2105cb8 -> 41502301
+        |4056bf94 40f0c1cf 402e0510 -> 4266dc51
+        |3db9c14f c1e83eb3 3c80961a -> c0e4106a
+        |3ef53e30 bff4bfcc be721e26 -> bfb615c5
+        |c1fe3e05 3e5ec0db 43454fd8 -> 433d8a2a
+        |3f3cc15e 41783e3e 42de67d3 -> 42f005b3
+        |42b3c1c7 c2d3421b 43d25c7e -> c61c05bd
+        |419841ab c29bc0ad 3de5f16f -> c4c67e4a
+        |bf12be14 4026befa 41591657 -> 41428c67
+        |c7085dbd a2253316 5d374b98 -> 5d374b99
+        |bcb3c2ce a838d9e6 57bc82bb -> 5d392b90
+        |5ab1c0b0 bce0ba46 33fbcf48 -> d81ae000
+        |33c147f9 45c95957 1c2a512f -> 61d11f00
+        |"""
+    ),
+    Golden(
+      op = "Fdot2F16F16",
+      form = "v_dot2_f16_f16 v5, v2, v3, v4",
+      code = "D6660005 04120702",
+      loads = "2=0 3=1 4=2",
+      outputs = "5",
+      rows = """
+        |3800b400 34000000 0000be00 -> 0000bd80
+        |7e00bc00 bc0003ff 3fda7bff -> 0000fe3d
+        |03ff0400 04007800 64710001 -> 00004000
+        |f8008000 3c007c01 5ead7bff -> 0000fe3d
+        |7e000001 7bff0400 75d47bff -> 0000fe3d
+        |00008400 03fff800 ae877e00 -> 00007e00
+        |fc008400 80007c00 f646fc00 -> 0000fe00
+        |840003ff 00010000 d57c0000 -> 00000000
+        |bc008000 7800f800 83c40400 -> 0000f800
+        |00018001 bc007c00 579d7e00 -> 00007e00
+        |8000fc00 7bff7bff f898f800 -> 0000fc00
+        |7e007c00 7c01bc00 bf810000 -> 0000fe3d
+        |7c000001 7800bc00 669ebc00 -> 00007c00
+        |fc00f800 f80003ff c27afc00 -> 0000fe00
+        |84008001 03ff7800 d7e87bff -> 00007bff
+        |41223a8e 3fc3c540 c07d4af4 -> 00004b4b
+        |341b3f9c c7654718 84672f72 -> 000049db
+        |4268b4d2 3952c31f 9694bb0e -> 000040a4
+        |c24eb555 43cb43cb 05d644bf -> 0000c86b
+        |3010b024 3e3dbb38 6bb1c05d -> 0000bf78
+        |c86249b0 3c8ac39f eb913bd8 -> 0000d28a
+        |4bbe486b 4bb1c113 af4daac7 -> 00005abe
+        |400fbb5a 3da63513 aff1b55c -> 0000407a
+        |c39bb406 46d74b6f de1ed421 -> 0000d5fd
+        |cad0c81e b595bd8b 93cf2fae -> 00004c12
+        |4badb86d 439e3a89 6c5fb116 -> 0000533b
+        |b719446b 408c320c 6fc53470 -> 00002ea3
+        |36ba4a7d c8584f18 30bec6ef -> 00005d96
+        |45854f14 3826c419 0229379a -> 0000d70b
+        |4e184461 ce12c3a9 99672fd3 -> 0000e0c1
+        |b4443eca 2f1b4c49 df823d2e -> 00004f97
+        |b39aae19 bdd3c010 d75d4104 -> 00004218
+        |4ff9bad0 a678293c 0df59934 -> 0000babf
+        |54df35c2 25b73c4c f1ebb6b5 -> 00003ed4
+        |b69e341d b3873457 1b92dc13 -> 0000dc12
+        |8367c9e7 fbab818a 17d47b8d -> 00007b8d
+        |7b57fb0b fa3902ae c6b17a52 -> 0000fc00
+        |f9f10190 fbc103da 792e727f -> 00007c00
+        |80147854 0208df7c 4b6a8009 -> 0000fc00
+        |"""
+    ),
+    Golden(
+      op = "Fdot2Bf16Bf16",
+      form = "v_dot2_bf16_bf16 v5, v2, v3, v4",
+      code = "D6670005 04120702",
+      loads = "2=0 3=1 4=2",
+      outputs = "5",
+      rows = """
+        |3f807f80 7fc03f80 25d2007f -> 0000fffd
+        |7f7f7f00 00803f80 9fb98001 -> 00007f00
+        |bf80bf80 7f7f8000 6cb17f80 -> 00007f80
+        |80800080 80018001 1d450001 -> 00000000
+        |007f8000 00808080 c3528001 -> 00000000
+        |7f7f7f80 80010080 59b18000 -> 00007f80
+        |00000080 7f80bf80 65443f80 -> 0000ffc0
+        |8001ff80 80000000 fdcdff00 -> 0000ffc0
+        |ff00ff00 ff00ff00 ad4f8000 -> 00007f80
+        |7f818000 ff007f7f f7420080 -> 0000fffd
+        |80000000 7f7f007f 7fc9ff80 -> 0000ff80
+        |bf80007f 00017f81 3974bf80 -> 0000fffd
+        |00008001 0080ff80 89768000 -> 0000ffc0
+        |ff00007f 007fbf80 68090080 -> 00000080
+        |40273ff8 c038bedf ed343e6b -> 0000c101
+        |3ea83e8d 409e400b b46f3f56 -> 00004043
+        |3fc3c037 3f17bec6 2677bebf -> 00003fd0
+        |40fac09b 3f29bf2c 89193fb6 -> 0000411d
+        |bf163e2f c148be77 a73a40e3 -> 00004166
+        |40b7c104 3f2f4167 d440bf54 -> 0000c2e8
+        |c1003e4f 3f063e46 4bc7407d -> 0000be47
+        |c0d0bfa6 40883ea1 9a1a3efe -> 0000c1dc
+        |be84c0e7 c0544130 5073bd1a -> 0000c29d
+        |41163ff4 402ebfaa 1586bdb8 -> 000041b6
+        |40563ffe c046c0f1 9efa3db0 -> 0000c1c9
+        |c0904073 3ef24029 551d403e -> 0000412d
+        |3de341f5 bf1fbfb2 fdaec251 -> 0000c2bd
+        |4101c18b 3ee8beed 9d7640e2 -> 00004196
+        |40aac175 3ed2beae 0763c2b3 -> 0000c2a4
+        |404abdfd bfa1c146 a869439e -> 0000439c
+        |3d19c036 42d8c2b5 4cdcbb60 -> 00004382
+        |bc9e40ee 3e943dff 0e513ac5 -> 00003f6c
+        |bdcd3d01 3d7bbeac e8adbf6f -> 0000bf73
+        |bdf8bfc2 bf02bf5d 0b48c057 -> 0000bffe
+        |b2355189 d425a6d8 2f465346 -> 00005346
+        |4efbc18d a20fa81e 9172ad07 -> 0000b18c
+        |ccbedd5e c3a5bcd0 74f44bb1 -> 00005ab4
+        |3ecb27f1 2a9c5224 33a16591 -> 00006591
+        |"""
+    ),
+    Golden(
+      op = "DualFdot2Bf16",
+      form = "v_dual_dot2acc_f32_bf16 v0, v1, v2 :: v_dual_mov_b32 v3, v4",
+      code = "CB500501 00020104",
+      loads = "1=0 2=1 0=2",
+      outputs = "0",
+      rows = """
+        |0080ff80 7f7f0001 80000000 -> ffc00000
+        |7f810000 80803f80 7f7fffff -> ffc00a3d
+        |ff807fc0 7f7f0000 007fffff -> ffc00a3d
+        |8001007f ff803f80 3f800000 -> ffc00000
+        |ff807f7f 7f7f0000 007fffff -> ff800000
+        |80000080 7f7f7fc0 3f800000 -> ffc00a3d
+        |7f808001 bf807fc0 3f800000 -> ffc00a3d
+        |7f00007f 00017f81 80000001 -> ffc00a3d
+        |7f81007f 00007f00 00800000 -> ffc00a3d
+        |bf807f80 7fc08001 7f800000 -> ffc00a3d
+        |80008080 00000000 bf800000 -> bf800000
+        |0000ff00 00007f00 00000000 -> ff800000
+        |0080007f 8000ff00 00000001 -> 00000000
+        |ff007f80 7f7f0000 00000000 -> ffc00000
+        |40383fa1 3eeec084 be8960d3 -> c083da0c
+        |bec0bfab 3ef940cc bf032612 -> c1136161
+        |3fb83f43 c0dabf86 3e74009d -> c125a23e
+        |c0ee3e88 bfa43f5f c04586af -> 40d5942a
+        |bf333fb3 3f73c081 3ccae35b -> c0c8d83e
+        |bf483ea1 bf5a3e53 bea8c3ae -> 3ecd0913
+        |414fbf95 3ecc3e4e 412f74c4 -> 417e2f94
+        |bfa0c100 406a3e40 bf87aad7 -> c0e42ab6
+        |3e203e5a bf6cbf78 3e96424f -> bd68ad8a
+        |400f3e45 3eafc12d 3f132603 -> bf3ddbfe
+        |bef5bf8f bfcc402d 417000b1 -> 414be2f1
+        |408fc0c6 bec74161 bd4bf409 -> c2b198c6
+        |bff43ff0 3f763fbb bd4bf944 -> 3f5b906d
+        |c163c110 418d4142 3fd3d108 -> c3b2c330
+        |c1dec103 c1e5bdaf 4035b185 -> 44477878
+        |3f913dd8 3e1c3f15 c21c2f9b -> c21b4007
+        |3f553e0d 424042da 44296ef9 -> 44372b89
+        |3eb1beb5 be7d4175 44453294 -> 4443d2aa
+        |befa40ad 4001bec1 39f39149 -> c0416264
+        |3ef13dbf 3d873cbe c0303517 -> c02e154a
+        |a1f5b218 4a8a3dd2 6c601c66 -> 6c601c66
+        |cca956d6 b1965c42 d36a5f2a -> 73a22c00
+        |ba9137e1 d60fc712 c44ded6c -> 5121fe00
+        |cf69b9dd 3309b80a e97d8368 -> e97d8368
+        |"""
     )
   )
 

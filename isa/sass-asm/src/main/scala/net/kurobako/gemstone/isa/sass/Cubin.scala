@@ -111,8 +111,44 @@ object Cubin {
       else relocationGlobals(module, table).flatMap(globals => entries.traverse(resolve(_, globals)))
     }
 
-  /** Symbolic CUDA address halves attached to immediate moves, and calls to the driver's device runtime, before VM
-    * register lowering. An address half of this kernel's own code is a code address, an offset in its section.
+  /** A kernel's code followed by that of the functions it references, and their callees in turn, each at its offset in
+    * the combined image.
+    */
+  case class Linked(sections: Vec[Section]) {
+    val bases: Map[Int, Int] = sections.map(_.index.raw).zip(sections.scanLeft(0)(_ + _.bytes.size)).toMap
+    def text: Vec[Byte]      = sections.flatMap(_.bytes)
+  }
+
+  private def referencedFunctions(module: Module, section: Int): Either[NonEmpty[String], Vec[Int]] =
+    module.sections.filter(table => table.isRelocation && table.info == section).flatTraverse { table =>
+      relocationEntries(table).flatMap { entries =>
+        if (entries.isEmpty) Right(Vec.empty[Int])
+        else
+          relocationSymbols(module, table).map(symbols =>
+            entries.flatMap(entry => Option.when(entry.symbol < symbols.size.toLong)(symbols(entry.symbol.toInt)))
+              .filter(symbol =>
+                symbol.kind.raw == SymbolKind.Function && symbol.section > 0 &&
+                  module.sections.lift(symbol.section).exists(_.name.startsWith(".text."))
+              ).map(_.section.raw)
+          )
+      }
+    }
+
+  def link(module: Module, kernel: Kernel): Either[NonEmpty[String], Linked] = {
+    def visit(order: Vec[Int], pending: Vec[Int]): Either[NonEmpty[String], Vec[Int]] = pending.headOption match {
+      case None          => Right(order)
+      case Some(section) =>
+        referencedFunctions(module, section).flatMap { found =>
+          val fresh = found.distinct.filterNot(order.contains)
+          visit(order ++ fresh, pending.tail ++ fresh)
+        }
+    }
+    visit(Vec(kernel.section.raw), Vec(kernel.section.raw)).map(order => Linked(order.map(module.sections(_))))
+  }
+
+  /** Symbolic CUDA address halves attached to immediate moves, and calls to the driver's device runtime or to linked
+    * code, before VM register lowering. An address half of linked code is a code address, an offset in the combined
+    * image.
     */
   object TextRelocation {
     def resolve(
@@ -121,7 +157,6 @@ object Cubin {
         function: DecodedFunction,
         boundSymbols: Set[NonEmpty[String]]
     ): Either[NonEmpty[String], Map[Int >= 0, TextRelocation]] = {
-      val text             = module.sections(kernel.section)
       val generation       = Generation.of(module.sm)
       val instructionBytes = generation.instructionBytes
       val instructions     = function.instructions.map(instruction => instruction.address -> instruction).toMap
@@ -147,69 +182,81 @@ object Cubin {
             case (_: Form.Umov, Operand.Register(RegisterBank.UR, _))                => true
             case _                                                                   => false
           })
-      module.sections.filter(section => section.isRelocation && section.info == kernel.section.raw).flatTraverse {
-        table =>
-          for {
-            entries <- relocationEntries(table)
-            symbols <- if (entries.isEmpty) Right(Vec.empty[elf.Symbol]) else relocationSymbols(module, table)
-            globals <- if (entries.isEmpty) Right((_: Long >= 0) => Left[NonEmpty[String], Global]("no symbols"))
-            else relocationGlobals(module, table)
-            resolved <- entries.traverse { relocation =>
-              val symbol =
-                Option.when(relocation.symbol < symbols.size.toLong)(symbols(relocation.symbol.toInt))
-                  .filter(_.kind.raw == SymbolKind.Function)
-              for {
-                _ <- check(
-                  relocation.offset >= 0 && relocation.offset <= text.bytes.size.toLong - instructionBytes &&
-                    relocation.offset % instructionBytes == 0,
-                  "cubin text relocation exceeds or misaligns its instruction"
-                )
-                offset      <- relocation.offset.toInt.refine[Int >= 0]
-                instruction <- instructions.get(offset)
-                  .toRight[NonEmpty[String]]("cubin text relocation has no decoded instruction")
-                found <- symbol.flatMap(found => found.name.map(found -> _)) match {
-                  case Some((_, name)) if call(relocation.kind) =>
-                    check(
-                      DriverFunctions.contains(name) &&
-                        (instruction.operation.form match {
-                          case _: Form.Jcal | _: Form.Call => true
-                          case _                           => false
-                        }),
-                      s"calls to device function '$name' outside the kernel are not linked"
-                    ).map(_ => TextRelocation(name, 0L, high = false, call = true))
-                  case Some((found, _)) if found.section > 0 && found.section == kernel.section =>
-                    for {
-                      upper <- high(relocation.kind)
-                      _     <- check(move(instruction), "cubin text relocation requires an immediate 32-bit MOV")
-                    } yield TextRelocation(kernel.name, found.value + relocation.addend.getOrElse(0L), upper)
-                  case _ =>
-                    for {
-                      upper <- high(relocation.kind)
-                      _     <- check(
-                        move(instruction),
-                        "cubin text relocation requires an immediate 32-bit MOV, MOV32I or UMOV"
-                      )
-                      immediate <- OperandQueries.integer(instruction.operands(1))
-                        .toRight[NonEmpty[String]]("cubin text relocation requires an immediate move source")
-                      _ <- check(
-                        relocation.addend.nonEmpty || immediate == 0,
-                        "nonzero implicit cubin text relocation addend is not implemented"
-                      )
-                      global <- globals(relocation.symbol)
-                      _ <- check(boundSymbols(global.name), s"unbound cubin text relocation target '${global.name}'")
-                    } yield TextRelocation(global.name, relocation.addend.getOrElse(0L), upper)
-                }
-              } yield offset -> found
-            }
-          } yield resolved
-      }.flatMap { entries =>
-        check(entries.map(_._1).distinct.size == entries.size, "overlapping cubin text relocations")
-          .map(_ => entries.toMap)
+      def calling(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
+        case _: Form.Cal | _: Form.Jcal | _: Form.Call => true
+        case _                                         => false
+      }
+      link(module, kernel).flatMap { linked =>
+        module.sections.filter(section => section.isRelocation && linked.bases.contains(section.info)).flatTraverse {
+          table =>
+            val text = module.sections(table.info)
+            val base = linked.bases(table.info)
+            for {
+              entries <- relocationEntries(table)
+              symbols <- if (entries.isEmpty) Right(Vec.empty[elf.Symbol]) else relocationSymbols(module, table)
+              globals <- if (entries.isEmpty) Right((_: Long >= 0) => Left[NonEmpty[String], Global]("no symbols"))
+              else relocationGlobals(module, table)
+              resolved <- entries.traverse { relocation =>
+                val symbol =
+                  Option.when(relocation.symbol < symbols.size.toLong)(symbols(relocation.symbol.toInt))
+                    .filter(_.kind.raw == SymbolKind.Function)
+                def inImage(found: elf.Symbol): Boolean = found.section > 0 && linked.bases.contains(found.section)
+                def address(found: elf.Symbol): Long    =
+                  linked.bases(found.section) + found.value + relocation.addend.getOrElse(0L)
+                for {
+                  _ <- check(
+                    relocation.offset >= 0 && relocation.offset <= text.bytes.size.toLong - instructionBytes &&
+                      relocation.offset % instructionBytes == 0,
+                    "cubin text relocation exceeds or misaligns its instruction"
+                  )
+                  offset      <- (base + relocation.offset).toInt.refine[Int >= 0]
+                  instruction <- instructions.get(offset)
+                    .toRight[NonEmpty[String]]("cubin text relocation has no decoded instruction")
+                  found <- symbol.flatMap(found => found.name.map(found -> _)) match {
+                    case Some((found, _)) if call(relocation.kind) && inImage(found) =>
+                      check(calling(instruction), "cubin call relocation requires a call instruction")
+                        .map(_ => TextRelocation(kernel.name, address(found), high = false, call = true))
+                    case Some((_, name)) if call(relocation.kind) =>
+                      check(
+                        DriverFunctions.contains(name) && calling(instruction),
+                        s"calls to device function '$name' outside the kernel are not linked"
+                      ).map(_ => TextRelocation(name, 0L, high = false, call = true))
+                    case Some((found, _)) if inImage(found) =>
+                      for {
+                        upper <- high(relocation.kind)
+                        _     <- check(move(instruction), "cubin text relocation requires an immediate 32-bit MOV")
+                      } yield TextRelocation(kernel.name, address(found), upper)
+                    case _ =>
+                      for {
+                        upper <- high(relocation.kind)
+                        _     <- check(
+                          move(instruction),
+                          "cubin text relocation requires an immediate 32-bit MOV, MOV32I or UMOV"
+                        )
+                        immediate <- OperandQueries.integer(instruction.operands(1))
+                          .toRight[NonEmpty[String]]("cubin text relocation requires an immediate move source")
+                        _ <- check(
+                          relocation.addend.nonEmpty || immediate == 0,
+                          "nonzero implicit cubin text relocation addend is not implemented"
+                        )
+                        global <- globals(relocation.symbol)
+                        _ <- check(boundSymbols(global.name), s"unbound cubin text relocation target '${global.name}'")
+                      } yield TextRelocation(global.name, relocation.addend.getOrElse(0L), upper)
+                  }
+                } yield offset -> found
+              }
+            } yield resolved
+        }.flatMap { entries =>
+          check(entries.map(_._1).distinct.size == entries.size, "overlapping cubin text relocations")
+            .map(_ => entries.toMap)
+        }
       }
     }
   }
 
-  /** An address half of `symbol` plus `addend`, or with `call`, a call to the driver function `symbol`. */
+  /** An address half of `symbol` plus `addend`, or with `call`, a call to the driver function `symbol`. A relocation of
+    * the kernel's own name names linked code, the combined image offset `addend`.
+    */
   case class TextRelocation(symbol: NonEmpty[String], addend: Long, high: Boolean, call: Boolean = false)
 
   private val ConstantSection = "\\.nv\\.constant[1-9][0-9]*(?:\\..*)?".r
@@ -530,14 +577,26 @@ object Cubin {
           } yield (section.link.raw -> symbol) -> registers
       }.sequence)
     }.map(_.toMap)
+    callees = deviceFunctions(parsed, sections)
     kernels <- sections.filter(section =>
-      section.name.startsWith(".text.") && sections.exists(_.name == s".nv.info.${section.name.stripPrefix(".text.")}")
+      section.name.startsWith(".text.") && !callees(section.name.stripPrefix(".text.")) &&
+        sections.exists(_.name == s".nv.info.${section.name.stripPrefix(".text.")}")
     ).traverse(section => kernel(section, sections, registerCounts))
     globals <- sections.filter(_.kind == SectionType.SymbolTable)
       .flatMap(table => parsed.symbolTables.getOrElse(table.index, Vec.empty[elf.Symbol]))
       .traverse(global(_, sections))
       .map(_.flatten)
   } yield Module(sm.widen[Int >= 35], sections, kernels, globals)
+
+  private val EntryPoint = 0x10
+
+  /** Names of the functions that are not kernel entry points: those whose symbol lacks `STO_CUDA_ENTRY`. */
+  private def deviceFunctions(parsed: Image, sections: Vec[Section]): Set[String] =
+    sections.filter(_.kind == SectionType.SymbolTable).flatMap { table =>
+      parsed.symbolTables.getOrElse(table.index, Vec.empty[elf.Symbol]).filter(symbol =>
+        symbol.kind.raw == SymbolKind.Function && symbol.section > 0 && (symbol.other & EntryPoint) == 0
+      ).flatMap(_.name.map(_.raw))
+    }.toSet
 
   private def global(symbol: elf.Symbol, sections: Vec[Section]): Either[NonEmpty[String], Option[Global]] = {
     val target = symbol.section

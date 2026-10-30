@@ -24,6 +24,7 @@
 #include <aspartame/string.hpp>
 #include <aspartame/string_view.hpp>
 #include <aspartame/vector.hpp>
+#include <aspartame/view.hpp>
 
 #include <gemstone/environment.hpp>
 #include <gemstone/process.hpp>
@@ -112,7 +113,7 @@ std::vector<std::string> expandPattern(std::string_view pattern) {
 // so sorting the expansion keeps a rolling `latest` install ahead of an older one.
 std::string findFirstGlob(const std::vector<std::string> &patterns) {
   for (const auto &pattern : patterns) {
-    const auto newest = expandPattern(pattern) ^ filter([](const std::string &candidate) { return executable(candidate); }) ^ max();
+    const auto newest = expandPattern(pattern) | filter([](const std::string &candidate) { return executable(candidate); }) | max();
     if (newest) return *newest;
   }
   return {};
@@ -854,12 +855,12 @@ bool imageTypeName(const std::string &name) {
 std::string withoutLibraryOption(const std::string &options) {
   std::vector<std::string> arguments;
   if (!splitOptions(options, arguments, nullptr)) return options;
-  return arguments ^ filter([](const std::string &argument) { return argument != "-create-library"; })
-         ^ map([](const std::string &argument) {
+  return arguments | filter([](const std::string &argument) { return argument != "-create-library"; })
+         | map([](const std::string &argument) {
              const bool needsQuotes = argument ^ exists([](char value) { return std::isspace(static_cast<unsigned char>(value)) != 0; });
              return needsQuotes ? '"' + argument + '"' : argument;
            })
-         ^ mk_string(" ");
+         | mk_string(" ");
 }
 
 namespace {

@@ -1056,6 +1056,10 @@ private object FloatSemantics {
       sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
         algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloatAligned(x, y, z))
       )
+    case DotOperation.AlignedBFloat16Halves =>
+      sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
+        algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.bfloat16ToFloatAligned(x, y, z))
+      )
     case DotOperation.BFloat16Halves =>
       sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
         algebra.saturated(clamp, algebra.dotBFloat16(a, b, c), 32)
@@ -1086,6 +1090,14 @@ private object FloatSemantics {
                 case DotOperation.BFloat16HalvesToBFloat16 =>
                   sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
                     algebra.primitive(a, b, algebra.truncate(c, 16))(Dots.bfloat16)
+                  )
+                case DotOperation.AlignedHalvesToHalf =>
+                  sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
+                    algebra.primitive(a, b, algebra.truncate(c, 16))(Dots.halvesAligned)
+                  )
+                case DotOperation.AlignedBFloat16HalvesToBFloat16 =>
+                  sinks.vectorTernary(dest, srcA, srcB, srcC, SourceModifiers.Unmodified, 32)((a, b, c) =>
+                    algebra.primitive(a, b, algebra.truncate(c, 16))(Dots.bfloat16Aligned)
                   )
                 case DotOperation.EightBitFloats(formatA, formatB) =>
                   sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
@@ -1304,6 +1316,10 @@ private object FloatSemantics {
     case DualVectorOperation.DotAlignedHalvesF32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
         algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloatAligned(x, y, z))
+      )
+    case DualVectorOperation.DotAlignedBFloat16F32 =>
+      dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
+        algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.bfloat16ToFloatAligned(x, y, z))
       )
     case DualVectorOperation.DotBFloat16F32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, c, _) => algebra.dotBFloat16(a, b, c))

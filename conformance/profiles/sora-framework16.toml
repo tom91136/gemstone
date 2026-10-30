@@ -1,4 +1,4 @@
-# Ryzen AI 9 HX 370, Radeon 890M (gfx1150), and the CUDA target from Polyregion.
+# Ryzen AI 9 HX 370 with Radeon 890M (gfx1150), and GeForce RTX 5070 Laptop GPU (sm_120).
 [[targets]]
 name = "cuda-ptx"
 backend = "cuda"
@@ -14,6 +14,28 @@ device = "*sm_120*"
 environment = { CONFORMANCE_CUDA_CODE_MODE = "sass" }
 
 [[targets]]
+name = "cuda-ptx-clang"
+backend = "cuda"
+architecture = "sm_120"
+device = "*sm_120*"
+compiler = "clang"
+environment = { CONFORMANCE_CUDA_CODE_MODE = "ptx" }
+
+[[targets]]
+name = "cuda-sass-clang"
+backend = "cuda"
+architecture = "sm_120"
+device = "*sm_120*"
+compiler = "clang"
+environment = { CONFORMANCE_CUDA_CODE_MODE = "sass" }
+
+[[targets]]
+name = "nvidia-openacc"
+backend = "openacc"
+architecture = "sm_120"
+device = "*sm_120*"
+
+[[targets]]
 name = "amd-hsa"
 backend = "hsa"
 architecture = "gfx1150"
@@ -24,8 +46,45 @@ name = "amd-hip"
 backend = "hip"
 architecture = "gfx1150"
 device = "*gfx1150*"
+# ROCr on this APU rejects the per-engine copies that libomptarget spreads across SDMA engines, so OpenMP offload
+# fails to load its image.
+environment = { LIBOMPTARGET_AMDGPU_USE_MULTIPLE_SDMA_ENGINES = "false" }
 
 [[targets]]
 name = "amd-opencl"
 backend = "opencl"
-device = "*AMD*"
+device = "*gfx1150*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/amdocl64.icd" }
+# Known defects in the AMD proprietary OpenCL 2.0 runtime, shared with the gfx1036 APU of soraws-uk.
+skips = [
+  "cts/opencl/api/negative_create_command_queue",
+  "cts/opencl/api/negative_create_command_queue_with_properties",
+  "cts/opencl/api/negative_create_context",
+  "cts/opencl/api/negative_create_context_from_type",
+  "cts/opencl/api/negative_get_device_ids",
+  "cts/opencl/api/negative_invalid_arg_queue",
+  "cts/opencl/api/negative_invalid_arg_sampler",
+  "cts/opencl/api/negative_set_read_write_image_arg",
+  "cts/opencl/basic/progvar_prog_scope_misc",
+  "cts/opencl/compiler/get_program_info_kernel_names",
+  # Rejects unsetting exec-info SVM pointers (size 0, NULL) with CL_INVALID_VALUE.
+  "cts/opencl/svm/svm_set_kernel_exec_info_svm_ptrs",
+]
+
+[[targets]]
+name = "nvidia-opencl"
+backend = "opencl"
+device = "*NVIDIA*RTX 5070*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/nvidia.icd" }
+
+[[targets]]
+name = "amd-vulkan"
+backend = "vulkan"
+device = "*RADV*"
+environment = { VK_LOADER_DRIVERS_SELECT = "*radeon*" }
+
+[[targets]]
+name = "nvidia-vulkan"
+backend = "vulkan"
+device = "*RTX 5070*"
+environment = { VK_LOADER_DRIVERS_SELECT = "*nvidia*" }

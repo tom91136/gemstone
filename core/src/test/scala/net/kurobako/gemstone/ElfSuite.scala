@@ -146,7 +146,7 @@ class ElfSuite extends Suite {
     val padded = Vec.unsafeWrapArray(bytes.words(1, 0x00020011, 42, 0, 8, 0, 0, 0))
     assertEquals(
       elf.symbols(padded, names, 32),
-      Right(Vec(elf.Symbol(Some("k"), 1, 2, 42L, 8)))
+      Right(Vec(elf.Symbol(Some("k"), 1, 2, 42L, 8, 0)))
     )
     assert(elf.symbols(padded, names, 0).isLeft)
     assert(elf.symbols(padded.take(24), names, 16).isLeft)

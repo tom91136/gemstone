@@ -254,7 +254,7 @@ std::vector<uint32_t> videoReference(uint32_t a, uint32_t b, bool byteMerged) {
   const auto ge = scalarVideo(
       {Operation::Ge, Select::Word, Select::Word, byteMerged ? Select::B2 : Select::H1, false, true, true, false, false, Secondary::Plain},
       a, b, c);
-  return scalars ^ append(ge) ^ concat(mads);
+  return scalars | append(ge) | concat(mads) | to_vector();
 }
 
 } // namespace

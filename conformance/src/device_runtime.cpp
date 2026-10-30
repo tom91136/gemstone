@@ -483,11 +483,13 @@ static DeviceSelection discoverPhysicalDevice() {
     if (zeDeviceGet(drivers[driverIndex], &deviceCount, devices.data()) != ZE_RESULT_SUCCESS)
       throw std::runtime_error("cannot get Level Zero devices");
     for (uint32_t deviceIndex = 0; deviceIndex < deviceCount; ++deviceIndex) {
-      ze_device_properties_t properties{.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+      ze_device_properties_t properties{};
+      properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
       if (zeDeviceGetProperties(devices[deviceIndex], &properties) != ZE_RESULT_SUCCESS)
         throw std::runtime_error("cannot query Level Zero device");
       if (properties.type != ZE_DEVICE_TYPE_GPU) continue;
-      ze_pci_ext_properties_t pci{.stype = ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES};
+      ze_pci_ext_properties_t pci{};
+      pci.stype = ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES;
       PhysicalDevice physical = makeUuidDevice(properties.uuid.id);
       if (zeDevicePciGetPropertiesExt(devices[deviceIndex], &pci) == ZE_RESULT_SUCCESS)
         physical = makePciDevice(pci.address.domain, static_cast<uint8_t>(pci.address.bus), static_cast<uint8_t>(pci.address.device),

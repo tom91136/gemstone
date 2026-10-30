@@ -302,7 +302,7 @@ namespace {
 // selectors reverse each row of 16 lanes.
 __global__ void lanePermutation(uint32_t *out, uint32_t *supported) {
   const uint32_t lane = threadIdx.x;
-  const uint32_t value = (lane * 10U) + 1U;
+  [[maybe_unused]] const uint32_t value = (lane * 10U) + 1U;
   uint32_t row = 0;
   uint32_t crossed = 0;
   uint32_t half = 0;
@@ -509,7 +509,7 @@ TEST_CASE("intrinsics/hip/append-consume", "[unified][intrinsics]") {
 namespace {
 // unsafeAtomicAdd on __half2 (global_atomic_pk_add_f16 on GFX90A, GFX94x, GFX950 and GFX12), and the bfloat16 and LDS
 // packed adds through their builtins where the targets have them.
-__global__ void packedAtomics(__half2 *halves, uint32_t *bfloats, uint32_t *shared, uint32_t *supported) {
+__global__ void packedAtomics(__half2 *halves, [[maybe_unused]] uint32_t *bfloats, uint32_t *shared, uint32_t *supported) {
   __shared__ uint32_t local[4];
   if (threadIdx.x < 4) local[threadIdx.x] = 0;
   __syncthreads();
@@ -612,7 +612,7 @@ TEST_CASE("intrinsics/hip/uniform-floats", "[unified][intrinsics]") {
 namespace {
 // __builtin_amdgcn_update_dpp on a double with row_newbcast:1, which GFX90A routes as two 32-bit DPP moves and GFX94x
 // and GFX950 as v_mov_b64_dpp.
-__global__ void broadcastPairs(const double *in, double *out, uint32_t *supported) {
+__global__ void broadcastPairs(const double *in, double *out, [[maybe_unused]] uint32_t *supported) {
   double value = in[threadIdx.x];
 #if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
   value = __builtin_amdgcn_update_dpp(0.0, value, 0x151, 0xf, 0xf, false);

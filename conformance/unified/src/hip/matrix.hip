@@ -6,6 +6,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <aspartame/all.hpp>
@@ -451,8 +452,6 @@ int outputBit(const Shape &shape, const Controls &controls, int item) {
   return item * width(shape.c);
 }
 
-int words(int items, int bits) { return ((items * bits) + 31) / 32; }
-
 uint64_t bitsAt(const std::vector<uint32_t> &registers, int count, int lane, int bit, int bits) {
   uint64_t value = 0;
   for (int offset = 0; offset < bits; ++offset) {
@@ -497,7 +496,10 @@ template <class Op> Variant variant(const char *name, unsigned families, Shape s
           static_cast<int>(sizeof(typename Op::C) / 4)};
 }
 
+using hip_support::alignedDot;
+using hip_support::alignedDots;
 using hip_support::check;
+using hip_support::DotResult;
 
 // A value of `format` for the generator's draw: small dyadic magnitudes every format holds exactly.
 double element(Format format, std::mt19937 &random, bool integral) {
@@ -514,7 +516,11 @@ double element(Format format, std::mt19937 &random, bool integral) {
   }
 }
 
-void runVariant(const Variant &variant) {
+DotResult dotResult(Format format) {
+  return format == Format::F16 ? DotResult::Half : format == Format::BF16 ? DotResult::BFloat16 : DotResult::Single;
+}
+
+void runVariant(const Variant &variant, bool aligned) {
   const auto &shape = variant.shape;
   const auto &controls = variant.controls;
   std::mt19937 random(0x5eed + static_cast<unsigned>(std::hash<std::string>{}(variant.name)));
@@ -573,17 +579,21 @@ void runVariant(const Variant &variant) {
       }
   }
   std::vector<uint32_t> expected = c;
+  const bool chained = aligned && shape.layout == Layout::Wave11 && (shape.a == Format::F16 || shape.a == Format::BF16);
+  // the integer sum saturates after every 16 bits of A's elements
+  const int grouped = aligned && shape.layout == Layout::Wave11 && integer(shape.a) && controls.clamp ? 16 / width(shape.a) : 0;
   for (int lane = 0; lane < lanes; ++lane)
     for (int item = 0; item < cItems; ++item) {
       const auto [block, row, column] = output(shape, lane, item);
       double sum = decode(shape.c, bitsAt(c, cWords, lane, outputBit(shape, controls, item), width(shape.c)));
       if (controls.negate & 4) sum = -sum;
+      std::pair<double, double> pending;
       for (int k = 0; k < aDepth; ++k) {
         const int source = shape.layout == Layout::Core && controls.blockBroadcast
                                ? (block >> controls.blockBroadcast << controls.blockBroadcast) + controls.blockId
                                : block;
         const int aKey = (((source * shape.m) + row) * aDepth) + k;
-        const int fromA = aLane[aKey] + (shape.layout == Layout::Wave11 ? lane / 16 * 16 : 0);
+        const int fromA = aLane[aKey] + (shape.layout == Layout::Wave11 ? lane % 32 / 16 * 16 : 0);
         double left = decode(shape.a, bitsAt(a, aWords, fromA, aItem[aKey] * width(shape.a), width(shape.a)));
         int dense = k;
         if (shape.sparse) {
@@ -592,7 +602,7 @@ void runVariant(const Variant &variant) {
           dense = (4 * (k / 2)) + static_cast<int>((index >> ((4 * (aItem[aKey] / 2)) + (2 * (aItem[aKey] % 2)))) & 3);
         }
         const int bKey = (((block * shape.n) + column) * shape.k) + dense;
-        int fromB = bLane[bKey] + (shape.layout == Layout::Wave11 ? lane / 16 * 16 : 0);
+        int fromB = bLane[bKey] + (shape.layout == Layout::Wave11 ? lane % 32 / 16 * 16 : 0);
         switch (controls.laneGroups) {
           case 1: fromB %= 32; break;
           case 2: fromB = (fromB % 32) + 32; break;
@@ -612,7 +622,12 @@ void runVariant(const Variant &variant) {
           left = std::ldexp(left, scaleA - 127);
           right = std::ldexp(right, scaleB - 127);
         }
-        sum += left * right;
+        if (chained && k % 2 == 0) pending = {left, right};
+        else if (chained) sum = alignedDot(pending.first, pending.second, left, right, sum, dotResult(shape.c));
+        else {
+          sum += left * right;
+          if (grouped && (k + 1) % grouped == 0) sum = std::min(2147483647.0, std::max(-2147483648.0, sum));
+        }
       }
       if (integer(shape.c))
         sum = controls.clamp ? std::min(2147483647.0, std::max(-2147483648.0, sum))
@@ -666,7 +681,7 @@ constexpr Shape sparse(int m, int n, int k, Format a, Format c, int chunkA = 0, 
           .chunkA = chunkA,
           .chunkB = chunkB};
 }
-constexpr Shape wave64(Layout layout, int k, Format a, Format b, Format c, bool sparse = false) {
+[[maybe_unused]] constexpr Shape wave64(Layout layout, int k, Format a, Format b, Format c, bool sparse = false) {
   return {.layout = layout,
           .m = 16,
           .n = 16,
@@ -941,6 +956,7 @@ TEST_CASE(UNIFIED_MATRIX_CASE, "[unified][runtime][tensor][compact]") {
   if ((selected & (Gfx11 | Gfx12)) && properties.warpSize != 32) SKIP("the WMMA cases run in wave32");
 #endif
   const auto chosen = variants() ^ filter([&](const Variant &variant) { return (variant.families & selected) != 0; });
-  chosen ^ for_each(runVariant);
+  const bool aligned = alignedDots(architecture);
+  chosen ^ for_each([&](const Variant &variant) { runVariant(variant, aligned); });
   REQUIRE(!chosen.empty());
 }

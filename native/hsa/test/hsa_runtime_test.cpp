@@ -482,7 +482,8 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   uint64_t object = 0;
   REQUIRE((hsa_executable_get_symbol(executable, nullptr, "add.kd", gpu, 0, &kernel) == HSA_STATUS_SUCCESS));
   hsa_executable_symbol_t modernKernel{};
-  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &modernKernel) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &modernKernel) == HSA_STATUS_ERROR_INVALID_SYMBOL_NAME));
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add.kd", &gpu, &modernKernel) == HSA_STATUS_SUCCESS));
   REQUIRE(kernel.handle == modernKernel.handle);
   REQUIRE((hsa_executable_symbol_get_info(kernel, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
   hsa_queue_t *queue = nullptr;
@@ -655,7 +656,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_memory_copy(bss, &scalarAddress, sizeof(scalarAddress)) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_memory_copy(&scalarResult, bss, sizeof(scalarResult)) == HSA_STATUS_SUCCESS));
   REQUIRE((scalarResult == scalarAddress));
-  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &kernel) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add.kd", &gpu, &kernel) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_symbol_get_info(kernel, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argumentMemory) == HSA_STATUS_SUCCESS));
@@ -693,7 +694,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_freeze(executable, nullptr) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &kernel) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add.kd", &gpu, &kernel) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_symbol_get_info(kernel, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue) == HSA_STATUS_SUCCESS));
   constexpr std::array<uint32_t, 6> expectations{37, 37, 73, 73, 91, 111};
@@ -877,7 +878,7 @@ TEST_CASE("HSA rejected launch reports an exception and leaves the completion si
   REQUIRE((hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_freeze(executable, nullptr) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &symbol) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add.kd", &gpu, &symbol) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
 
   const auto kernarg = regionWithFlag(gpu, HSA_REGION_GLOBAL_FLAG_KERNARG);

@@ -103,8 +103,8 @@ inline std::string poseOptions() {
                                                                          {"T0", T0},
                                                                          {"T1", T1},
                                                                          {"T2", T2}}};
-  return coefficients ^ map([](std::string_view name, float value) { return fmt::format("-DPOSE_{}={:a}F", name, value); })
-         ^ append(fmt::format("-DPOSE_TAG_MASK={}u", TagMask)) ^ mk_string(" ");
+  return coefficients | map([](std::string_view name, float value) { return fmt::format("-DPOSE_{}={:a}F", name, value); })
+         | append(fmt::format("-DPOSE_TAG_MASK={}u", TagMask)) | mk_string(" ");
 }
 
 struct Element {

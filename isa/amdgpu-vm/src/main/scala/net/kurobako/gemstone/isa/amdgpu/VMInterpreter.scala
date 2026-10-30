@@ -3834,12 +3834,14 @@ private object VMInterpreter {
           val (bLanes, bHeld)        = (shape.bLanes, shape.bHeld)
           val outputs                = shape.outputElements
           val (sparse, replicated)   = (shape.sparse, shape.replicated)
+          val chained                = shape.chained
+          val grouped                = shape.grouped > 0
           val scaled                 = controls.scales.nonEmpty
           val (broadcast, blockId)   = (controls.blockBroadcast, controls.blockId)
           val results                = Array.ofDim[Long](items, count)
           var lane                   = 0
           while (lane < count) {
-            val group = if (replicated) lane / 16 * 16 else 0
+            val group = if (replicated) lane % 32 / 16 * 16 else 0
             var item  = 0
             while (item < items) {
               val flat   = outputs(lane * items + item)
@@ -3856,14 +3858,27 @@ private object VMInterpreter {
                 val aItem = aHeld(aBase + k)
                 val dense = if (sparse) 4 * (k / 2) + operands.index(aLane, aItem) else k
                 val bLane = MatrixShape.laneGroup(bLanes(bBase + dense) + group, controls.laneGroups)
-                sum = step(
-                  sum,
-                  left(aLane * aItems + aItem),
-                  right(bLane * bItems + bHeld(bBase + dense)),
-                  if (scaled) operands.scaleA(row, dense / 32) else 0L,
-                  if (scaled) operands.scaleB(column, dense / 32) else 0L
-                )
-                k += 1
+                if (chained) {
+                  val nextA = aLanes(aFrom + k + 1) + group
+                  val nextB = MatrixShape.laneGroup(bLanes(bBase + k + 1) + group, controls.laneGroups)
+                  sum = step(
+                    sum,
+                    left(aLane * aItems + aItem),
+                    right(bLane * bItems + bHeld(bBase + dense)),
+                    left(nextA * aItems + aHeld(aBase + k + 1)),
+                    right(nextB * bItems + bHeld(bBase + k + 1))
+                  )
+                  k += 2
+                } else {
+                  sum = step(
+                    sum,
+                    left(aLane * aItems + aItem),
+                    right(bLane * bItems + bHeld(bBase + dense)),
+                    if (scaled) operands.scaleA(row, dense / 32) else if (grouped) k.toLong else 0L,
+                    if (scaled) operands.scaleB(column, dense / 32) else 0L
+                  )
+                  k += 1
+                }
               }
               results(item)(lane) = result(sum)
               item += 1

@@ -143,7 +143,7 @@ object CLI {
     val routing   =
       s"""unset ${conformanceEnvironment.DevicePattern}
          |case "$$${conformanceEnvironment.TargetBackendName}" in
-         |  cuda|hip|hsa)
+         |  cuda|hip|hsa|openacc)
          |    if [ -z "$$${environment.TargetArch}" ] && [ -n "$$${conformanceEnvironment.TargetArch}" ]; then
          |      export ${environment.TargetArch}="$$${conformanceEnvironment.TargetArch}"
          |    fi ;;
@@ -219,9 +219,9 @@ object CLI {
       case system: OperatingSystemMXBean => system.getTotalMemorySize
       case _                             => Long.MaxValue
     }
-    val heap      = s"-Xmx${math.min(math.max(8L, math.min(28L, 2L + jobs.toLong * 6L)) << 10, memory / 2 >> 20)}m"
-    val directory = Files.createDirectories(root.resolve("target/conformance"))
-    val session   = Files.createTempDirectory(directory, "server-")
+    val heap = s"-Xmx${math.min(math.max(8L, math.min(28L, 2L + jobs.toLong * 6L)) << 10, memory / 2 >> 20)}m"
+    // a Unix socket path is limited to 107 bytes, which a deep checkout would exceed
+    val session   = Files.createTempDirectory("gemstone-conformance-")
     val recording = emulation.server.jfr.map { jfr =>
       prune(Files.createDirectories(jfr), RetainedRecordings - 1)
       Files.createTempDirectory(jfr, "emulate-").resolve("server.jfr")

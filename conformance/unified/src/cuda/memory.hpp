@@ -16,8 +16,8 @@ struct Backend {
     return reinterpret_cast<F>(p);
   }
   Backend(std::string kind, uint64_t selected, const char *fixture)
-      : kind(std::move(kind)), library(dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL)), contextDestroy(symbol<Release>("cuCtxDestroy_v2")),
-        moduleUnload(symbol<Release>("cuModuleUnload")) {
+      : kind(std::move(kind)), library(dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL)), moduleUnload(symbol<Release>("cuModuleUnload")),
+        contextDestroy(symbol<Release>("cuCtxDestroy_v2")) {
     require(library != nullptr, "CUDA library");
 
     check(symbol<int (*)(unsigned)>("cuInit")(0));

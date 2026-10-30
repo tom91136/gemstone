@@ -15,7 +15,7 @@ namespace unified::async {
 // SYCL queue/event, or a host future as the implementation vehicle.
 template <class T> std::vector<T> referenceScan(const std::vector<T> &input) {
   using namespace aspartame;
-  return input ^ scan_left(T{}, support::Plus<T>{}) ^ tail();
+  return input | scan_left(T{}, support::Plus<T>{}) | tail() | to_vector();
 }
 
 template <class T> std::vector<T> referenceFutureChain(const std::vector<T> &input) {
@@ -30,8 +30,9 @@ template <class T> std::vector<T> referenceEventChain(const std::vector<T> &inpu
 
 template <class T> std::vector<T> referenceInterleaved(const std::vector<T> &input) {
   using namespace aspartame;
-  return input ^ zip_with_index()
-         ^ map([](T value, size_t index) { return index % 2 == 0 ? support::Affine<T>{}(value) : support::Square<T>{}(value); });
+  return input | zip_with_index()
+         | map([](T value, size_t index) { return index % 2 == 0 ? support::Affine<T>{}(value) : support::Square<T>{}(value); })
+         | to_vector();
 }
 
 template <class T> std::vector<T> referenceSort(std::vector<T> input) {

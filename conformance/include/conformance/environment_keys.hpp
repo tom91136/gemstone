@@ -1,10 +1,11 @@
 #pragma once
 
-#include <algorithm>
-#include <iterator>
+#include <array>
 #include <optional>
-#include <string>
 #include <string_view>
+
+#include <aspartame/array.hpp>
+#include <aspartame/string_view.hpp>
 
 namespace conformance::environment {
 inline constexpr char CaseShard[] = "CONFORMANCE_CASE_SHARD";
@@ -35,12 +36,13 @@ inline constexpr char SyclShardIndex[] = "CONFORMANCE_SYCL_SHARD_INDEX";
 
 // CMake truth values, matching Gemstone.
 inline std::optional<bool> boolean(std::string_view value) {
-  constexpr std::string_view truthy[] = {"1", "true", "on", "y", "yes"};
-  constexpr std::string_view falsy[] = {"0", "false", "off", "n", "no"};
-  std::string lower(value);
-  std::ranges::transform(lower, lower.begin(), [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c; });
-  if (std::ranges::find(truthy, lower) != std::end(truthy)) return true;
-  if (std::ranges::find(falsy, lower) != std::end(falsy)) return false;
+  using namespace aspartame;
+  using namespace std::string_view_literals;
+  constexpr auto truthy = std::array{"1"sv, "true"sv, "on"sv, "y"sv, "yes"sv};
+  constexpr auto falsy = std::array{"0"sv, "false"sv, "off"sv, "n"sv, "no"sv};
+  const auto matches = [&](std::string_view name) { return name ^ equals_ignore_case(value); };
+  if (truthy ^ exists(matches)) return true;
+  if (falsy ^ exists(matches)) return false;
   return std::nullopt;
 }
 } // namespace conformance::environment
