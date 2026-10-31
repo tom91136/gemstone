@@ -56,6 +56,7 @@ object Cubin {
     val KeplerCall            = 0x0cL
     val MaxwellCall           = 0x2aL
     val VoltaCall             = 0x3aL
+    val HopperCall            = 0x4bL
   }
 
   /** CUDA device-runtime functions the driver links into a module, by the address the VM binds each to: an address no
@@ -173,6 +174,7 @@ object Cubin {
         case RelocationKind.KeplerCall  => generation == Generation.Kepler
         case RelocationKind.MaxwellCall => generation == Generation.Maxwell
         case RelocationKind.VoltaCall   => generation == Generation.Modern
+        case RelocationKind.HopperCall  => module.sm >= 90
         case _                          => false
       }
       def move(instruction: DecodedInstruction): Boolean =

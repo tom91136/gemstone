@@ -90,6 +90,9 @@ endfunction()
 add_compile_options(
   "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.>"
   "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build>")
+# NVHPC targets the build machine's CPU by default, which the machine running the artifacts may lack
+add_compile_options("$<$<COMPILE_LANG_AND_ID:C,NVHPC>:-tp=x86-64-v3>" "$<$<COMPILE_LANG_AND_ID:CXX,NVHPC>:-tp=x86-64-v3>")
+add_link_options("$<$<LINK_LANG_AND_ID:C,NVHPC>:-tp=x86-64-v3>" "$<$<LINK_LANG_AND_ID:CXX,NVHPC>:-tp=x86-64-v3>")
 if(UNIX)
   foreach(_conformance_language IN ITEMS C CXX CUDA HIP)
     set(CMAKE_${_conformance_language}_ARCHIVE_CREATE

@@ -236,6 +236,9 @@ jobs:
           [ -z "$SPLIT" ] || export "${SPLIT?}"
           mkdir -p target/conformance/artifacts
           sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_SHARD_ROUTE_LIST"
+      - name: Disk usage
+        if: ${{ always() }}
+        run: df -h
       # every job populates the same dependency set, so one of them saves it
       - name: Download cache contents
         id: downloads
@@ -345,6 +348,8 @@ jobs:
           git ls-files -z --cached --others --exclude-standard | xargs -0 touch -c -h -d "@$(git log -1 --format=%ct)"
           for archive in target/ci/*.tar.zst; do zstd -dc --long=30 "$archive" | tar -xf -; done
       - run: sbt --server --batch 'tests${{ matrix.platform }}/testFull'
+      - if: matrix.platform == 'JVM'
+        run: sbt --server --batch 'gemstoneRun -- printenv GEMSTONE_RPC_ENDPOINT'
 
   ctest:
     needs: build

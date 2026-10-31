@@ -174,8 +174,9 @@ class CubinTextRelocationSuite extends Suite {
   }
 
   // ptxas calls the driver's malloc through JCAL (sm_35 R_CUDA_ABS32_26, sm_50 R_CUDA_ABS32_32) or CALL.ABS.NOINC
-  // (sm_70 R_CUDA_ABS47_34) relocated to an undefined function, with the size and result in R4:R5.
-  for ((sm, kind) <- Vec(35 -> 0x0cL, 50 -> 0x2aL, 70 -> 0x3aL))
+  // (sm_70 R_CUDA_ABS47_34, sm_90 R_CUDA_ABS55_16_34) relocated to an undefined function, with the size and result
+  // in R4:R5.
+  for ((sm, kind) <- Vec(35 -> 0x0cL, 50 -> 0x2aL, 70 -> 0x3aL, 90 -> 0x4bL, 120 -> 0x4bL))
     test(s"sm_$sm calls relocated to the driver's malloc allocate device memory") {
       val width   = if (sm < 70) 8 else 16
       val call    = if (sm < 70) "JCAL 0x0" else "CALL.ABS.NOINC 0x0"

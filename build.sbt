@@ -1126,7 +1126,7 @@ lazy val gemstone = project.in(file("."))
     cleanFiles += baseDirectory.value / "target"
   )
 
-addCommandAlias("gemstoneRun", "server/run run")
+addCommandAlias("gemstoneRun", "server/run -- run")
 
 // the conformance lint runs in containers, so it is separate from the checks that only need the checkout
 lazy val lintCheckoutTasks = Seq(
