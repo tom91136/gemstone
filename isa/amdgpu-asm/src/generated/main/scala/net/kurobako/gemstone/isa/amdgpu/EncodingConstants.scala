@@ -7,7 +7,7 @@ import net.kurobako.gemstone.constraint.*
 
 @Generated(Array("sbt codegen"))
 // mirrors LLVM's full tables so the copy stays easy to resync
-@SuppressWarnings(Array("baumkuchen:unused-member"))
+@SuppressWarnings(Array("bonsai:unused-member"))
 private object EncodingConstants {
   object Source {
     val SGPR_MIN: Int = 0

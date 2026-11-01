@@ -10,7 +10,7 @@ Small and medium items, in priority order. Larger efforts have their own plans: 
 | 4 | Image programs back in `compact` | Copy, fill and read/write image programs were excluded from the compact workload for per-row RPC cost, now gone | `conformance/workloads/compact.toml` | XS | a full CI conformance run | open |
 | 5 | PTX register-declaration typing | Tables 26 to 28 of the PTX ISA are in `operand-domains.json` but not applied to register operands | `isa/ptx-asm/.../ptx/Validation.scala` | M | | open |
 | 6 | Parked SPIR-V and NV renders | Explorer renders for the SPIR-V image level and descriptor logic, device enqueue and event forms, and the NV tensor layouts and views | `isa/spirv-vm`, `isa/nvidia` render instances | M | | open |
-| 7 | nvidia barrier cohort queue | The barrier release and warp arrival scans in `VMInterpreter` are the two true baumkuchen complexity findings | `isa/nvidia/.../VMInterpreter.scala` | M | | open |
+| 7 | nvidia barrier cohort queue | The barrier release and warp arrival scans in `VMInterpreter` are the two true bonsai complexity findings | `isa/nvidia/.../VMInterpreter.scala` | M | | open |
 | 8 | AMDGPU gfx1250 and gfx1251 | About 1025 forms are NotImplemented and need hardware evidence | `explorer/src/test/resources/coverage/policy.tsv` | L | hardware access | blocked |
 
 ## 1. Render-cycle refactor benchmark

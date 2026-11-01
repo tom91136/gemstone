@@ -1561,7 +1561,7 @@ for name in sorted(module.instructions):
     val header =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIDefines.h"), StandardCharsets.UTF_8)
     GeneratedHeader.scala("encoding constants from pinned AMD and LLVM inputs") +
-      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}// mirrors LLVM's full tables so the copy stays easy to resync\n@SuppressWarnings(Array(\"baumkuchen:unused-member\"))\nprivate object EncodingConstants {\n" +
+      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}// mirrors LLVM's full tables so the copy stays easy to resync\n@SuppressWarnings(Array(\"bonsai:unused-member\"))\nprivate object EncodingConstants {\n" +
       renderOperandConstants(header) + renderSharedConstants(result, references) + relocations + "\n" +
       renderELFMachines(Files.readString(
         references.resolve("llvm/llvm/include/llvm/BinaryFormat/ELF.h"),

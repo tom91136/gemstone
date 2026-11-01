@@ -115,7 +115,7 @@ ThisBuild / developers := List(
 ThisBuild / scalaVersion      := scala3Version
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
-ThisBuild / scalafixConfig    := Baumkuchen.scalafixConfig((LocalRootProject / baseDirectory).value.toPath)
+ThisBuild / scalafixConfig    := Bonsai.scalafixConfig((LocalRootProject / baseDirectory).value.toPath)
 
 lazy val offlineMode            = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
 lazy val conformanceDirectory   = settingKey[Path]("Conformance build, work, artifact, and report root.")
@@ -1130,7 +1130,7 @@ addCommandAlias("gemstoneRun", "server/run -- run")
 
 // the conformance lint runs in containers, so it is separate from the checks that only need the checkout
 lazy val lintCheckoutTasks = Seq(
-  Option.when(Baumkuchen.enabled)("baumkuchenAnalyse"),
+  Option.when(Bonsai.enabled)("bonsaiAnalyse"),
   Some("codegen/checkEnvironment"),
   Some("conformance/checkStandalone"),
   Some("scalafmtCheckAll"),

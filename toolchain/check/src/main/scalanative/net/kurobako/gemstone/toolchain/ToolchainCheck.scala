@@ -31,8 +31,8 @@ object ToolchainCheck {
     unistd._exit(status)
   }
 
-  /** One thread churns a small heap and drops weak references. Under Commix the reference handler deadlocks itself
-    * within seconds.
+  /** One thread churns a small heap and drops weak references while another collects every millisecond, so the race
+    * does not hinge on heap size. Under Commix the reference handler deadlocks itself within seconds.
     */
   private def referenceHandler(): Unit = {
     val progress = AtomicLong()
@@ -44,6 +44,7 @@ object ToolchainCheck {
         if (i % 64 == 0) { val _ = WeakReference(new Array[Byte](64)) }
       }
     }
+    daemon(() => while (true) { System.gc(); Thread.sleep(1) })
     val (last, _) = (1 to 10).foldLeft((-1L, 0)) { case ((previous, still), _) =>
       Thread.sleep(1000)
       val now  = progress.get()

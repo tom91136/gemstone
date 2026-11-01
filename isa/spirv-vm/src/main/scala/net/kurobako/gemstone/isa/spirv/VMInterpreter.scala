@@ -589,7 +589,7 @@ private object VMInterpreter {
   // charged in batches so lanes do not contend on the shared allowance; a charge precedes every exit, so an exhausted
   // budget still wins over the outcome of the instructions it no longer covered.
   // ops are polymorphic by design, and the loops run per dispatch or per instruction of one kind
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var", "baumkuchen:megamorphic-call"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var", "bonsai:megamorphic-call"))
   private def resumeInvocation(
       program: VMProgram,
       ops: Array[Op],

@@ -976,7 +976,7 @@ private[isa] object VMIR {
   }
 
   // conversions pass a rounding mode and a clamp together
-  @SuppressWarnings(Array("baumkuchen:exclusive-options"))
+  @SuppressWarnings(Array("bonsai:exclusive-options"))
   enum Instruction derives CanEqual {
     case Tensor(operation: Matrix.Operation)
 

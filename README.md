@@ -22,7 +22,7 @@ checks every instruction's availability against the module's `.version` and `.ta
 | `explorer` | Instruction explorer: search, encodings, register files, assembly, lane and machine semantics, and an instruction sandbox; loads a compiled program, runs it on the VM, and steps through its issue timeline and register pressure. Models build for the JVM and Scala.js (`sbt explorerJS/explorerSite` writes `target/explorer/`, `sbt explorerJS/explorerServe` serves it on port 8080) |
 | `isa/semantics-check` | Every definition the explorer shows, generated, compiled, and checked against the VM on random operands |
 | `samples` | Library API samples: assemble, run, disassemble and edit a kernel for each ISA (`sbt samples/run`) |
-| `codestyle/publicapi` | Compiler plugin that limits the server to the public API of core and the ISAs; sbt-baumkuchen provides the Scalafix rules and cycle checks |
+| `codestyle/publicapi` | Compiler plugin that limits the server to the public API of core and the ISAs; sbt-bonsai provides the Scalafix rules and cycle checks |
 | `conformance` | Independent CMake conformance project, see [its README](conformance/README.md) |
 
 `build.sbt` holds project wiring, `project/` generic build utilities, and `tools/codegen` the pinned references
@@ -55,7 +55,7 @@ under `src/test/scalajvmnative` need threads, files, child processes, or class-p
 VM sit outside `test`: `semanticsCheckAll` runs them one ISA project at a time and fails at the end, naming every
 failing project; CI runs each ISA project as its own job. A project regenerates its definitions only when the
 classes they render from change. `codegen` regenerates checked-in outputs and CI fails if it
-changes the tree. `baumkuchenAnalyse` rejects binary files: embed binary data as text at its use site, with the commands that produce
+changes the tree. `bonsaiAnalyse` rejects binary files: embed binary data as text at its use site, with the commands that produce
 it in a comment. `native/lint` and `conformance/lint` check `clang-format`, project conventions, and `.clang-tidy`
 identifier naming against each build's compile database. Coverage writes `target/coverage/`; mutation writes each
 module's `target/stryker4s-report/`.

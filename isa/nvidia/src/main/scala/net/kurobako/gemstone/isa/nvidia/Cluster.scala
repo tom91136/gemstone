@@ -6,7 +6,7 @@ import net.kurobako.gemstone.vm.*
 
 /** The CTAs of a cluster, which rendered machine definitions address by the shared addresses that name them. */
 // rendered definitions compile against this prelude trait
-@SuppressWarnings(Array("baumkuchen:data-clump"))
+@SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] trait Cluster {
   type Cta
 

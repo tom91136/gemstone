@@ -14,7 +14,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** Lowers one PTX instruction to the NVIDIA VM within a routine [[VMCompiler.Scope]]. */
 // the operand lists mirror the PTX instruction forms they lower
-@SuppressWarnings(Array("baumkuchen:data-clump"))
+@SuppressWarnings(Array("bonsai:data-clump"))
 private object VMInstructionCompiler {
   private enum CarryForm(val subtract: Boolean, val carryIn: Boolean) {
     case AddCc extends CarryForm(subtract = false, carryIn = false)

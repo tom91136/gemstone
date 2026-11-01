@@ -140,7 +140,7 @@ private object VMIR {
 
   /** Per-lane memory operands; byte offsets are signed. */
   // Scratch carries a vector offset and a scalar base together in the SVE with SADDR hardware mode
-  @SuppressWarnings(Array("baumkuchen:exclusive-options"))
+  @SuppressWarnings(Array("bonsai:exclusive-options"))
   enum MemoryAddress {
 
     /** A 64-bit vector address, or a scalar base plus a 32-bit vector offset. */

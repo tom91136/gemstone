@@ -31,7 +31,7 @@ object InstructionSemantics {
     * joined into one value, and `naming` names and types what they use.
     */
   // the semantics-check reference runs the lowering the rendered semantics describe
-  @SuppressWarnings(Array("baumkuchen:test-only-member"))
+  @SuppressWarnings(Array("bonsai:test-only-member"))
   private[isa] case class SASSLowering(
       prologue: Vec[VMIR.Instruction],
       steps: Vec[VMIR.Instruction],

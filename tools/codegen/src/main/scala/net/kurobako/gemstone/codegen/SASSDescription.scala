@@ -13,7 +13,7 @@ object SASSDescription {
   case class Description(preamble: String, classes: Vector[InstructionClass])
 
   // the lossless round trip and unknown-section retention SASSDescriptionSuite checks need the verbatim text
-  @SuppressWarnings(Array("baumkuchen:test-only-member"))
+  @SuppressWarnings(Array("bonsai:test-only-member"))
   case class InstructionClass(
       name: String,
       alternate: Boolean,
