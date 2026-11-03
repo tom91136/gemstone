@@ -14,11 +14,7 @@ object Measurement {
     val value     = body
     val elapsed   = math.max(0L, platform.monotonicNanos - started)
     val after     = PlatformMetrics.allocatedBytes
-    val allocated = for {
-      start <- before
-      end   <- after
-      if end >= start
-    } yield end - start
+    val allocated = before.zip(after).collect { case (start, end) if end >= start => end - start }
     Measurement(value, elapsed.unsafe[Long >= 0], allocated)
   }
 

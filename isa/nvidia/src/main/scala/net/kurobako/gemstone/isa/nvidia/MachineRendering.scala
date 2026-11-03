@@ -34,6 +34,7 @@ private[isa] object MachineRendering {
       case Instruction.Trap                       => Some(machine.trap)
       case Instruction.Fence                      => Some(machine.fenceHost)
       case Instruction.Convergence(token, action) => Some(convergence(machine)(token, action))
+      case Instruction.Yield                      => Some(machine.yieldLanes(machine.advance))
       case Instruction.ReturnStackPush(address)   => Some(returnStackPush(Render, machine)(address))
       case _                                      => None
     }
@@ -55,7 +56,9 @@ private[isa] object MachineRendering {
       case copy: Instruction.AsyncTensor                  => Some(renderTensorCopy(copy, machine))
       case Instruction.TensorMapReplace(address, field, index, value) =>
         Some(renderTensorMapReplace(address, field, index, value, machine))
-      case _ => None
+      case Instruction.AsyncCommit(bulk)      => Some(machine.asyncCommit(bulk)(machine.advance))
+      case Instruction.AsyncWait(count, bulk) => Some(machine.asyncWait(count, bulk)(machine.advance))
+      case _                                  => None
     }
 
   private def renderBarrier(instruction: Instruction, machine: NvidiaMachineRender): Option[Term.Steps] =

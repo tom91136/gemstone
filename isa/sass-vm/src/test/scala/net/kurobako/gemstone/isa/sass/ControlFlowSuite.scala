@@ -272,6 +272,9 @@ class ControlFlowSuite extends Suite {
 
   private def bmov(sm: Int): Kernel = load(sm, Fixture.listing(s"bmovClearSm$sm"), "divergent_loop")
 
+  /** CUDA 13.3 ptxas for sm_89: the lock loop spins on `ATOMG.E.CAS` after `YIELD` and before `BSYNC B0`. */
+  private def spinLock: Kernel = load(89, Fixture.listing("spinLockSm89"), "spin")
+
   private def has(instruction: DecodedInstruction, mnemonic: String, modifiers: String*): Boolean =
     instruction.mnemonic.raw == mnemonic && instruction.modifiers.map(_.name) == Vec.from(modifiers)
 
@@ -428,6 +431,11 @@ class ControlFlowSuite extends Suite {
         |EXIT""".stripMargin,
       Vec.fill(16)(1) ++ Vec.fill(16)(2)
     )
+  }
+
+  test("YIELD releases the lanes an intra-warp spin lock waits for at its barrier") {
+    val run = spinLock.launch(32)(Arg.zeros(4), Arg.zeros(4))
+    assertEquals(run.words(1), Vec(496L))
   }
 
   test("local subroutine returns use the saved PC and preserve caller registers") {

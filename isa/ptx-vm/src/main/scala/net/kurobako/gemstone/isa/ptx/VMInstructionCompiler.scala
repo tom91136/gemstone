@@ -1492,8 +1492,11 @@ private object VMInstructionCompiler {
             lowered <-
               (scope.address(destination), scope.address(source)).mapN(VMIR.Instruction.AsyncCopy(_, _, size, bytes))
           } yield lowered
-        case Form.CpAsyncCommitGroup() | Form.CpAsyncWaitAll() | Form.CpAsyncWaitGroup(_) =>
-          Right(VMIR.Instruction.NoOp)
+        case Form.CpAsyncCommitGroup()    => Right(VMIR.Instruction.AsyncCommit(bulk = false))
+        case Form.CpAsyncWaitAll()        => Right(VMIR.Instruction.AsyncWait(0L, bulk = false))
+        case Form.CpAsyncWaitGroup(count) =>
+          NumericLiteral.immediate(count).filter(_ >= 0L).map(VMIR.Instruction.AsyncWait(_, bulk = false))
+            .toRight(Error.Invalid(s"cp.async pending group count must be an immediate, found $count"))
         case _ => synchronisation()
       })
     def synchronisation(): Lowered = instruction.form match {

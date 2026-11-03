@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** Integer vector addition over 16 groups of 256 lanes. */
 object PTXVectorAddBenchmark {
-  val benchmark: Case = iterations(100).map(count => () => run(count))
+  val benchmark: Case = iterations(100).map(count => launch => run(count, launch))
 
   private val Lanes: Int > 0  = 256
   private val Groups: Int > 0 = 16
@@ -38,7 +38,7 @@ object PTXVectorAddBenchmark {
       ret;
     }"""
 
-  private def run(iterations: Int > 0): BenchmarkSample = {
+  private def run(iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val size     = Lanes.raw * Groups.raw
     val kernel   = VMCompiler.compile(source).fold(error => throw IllegalArgumentException(error.message), identity)
     val geometry = LaunchGeometry.forLaunch(Dimensions(Lanes, 1, 1), Dimensions(Groups, 1, 1))
@@ -56,7 +56,9 @@ object PTXVectorAddBenchmark {
       ("input_b": NonEmpty[String]) -> Argument.fromLong(memory.base(b).raw),
       ("output": NonEmpty[String])  -> Argument.fromLong(memory.base(output).raw)
     )
-    val sample = Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, geometry, parameters, memory))
+    val sample = Measurement.repeatSucceeding(iterations)(
+      VMInterpreter.execute(kernel, geometry, parameters, memory, launch())
+    )
     (0 until size).foreach { index =>
       if (memory.getInt(output, index * 4) != index * 100 - 4)
         throw IllegalStateException(s"unexpected result at index $index")

@@ -43,7 +43,7 @@ class ConstantSuite extends Suite {
       constants = Vec(".nv.constant3.scoped" -> initial)
     )
     val name    = Cubin.constantSymbol(module.sections.find(_.name == ".nv.constant3.scoped").get.index)
-    val program = LoadedProgram(module, Map.empty, Workgroups.Sequential)
+    val program = LoadedProgram(module, Map.empty, Workgroups.Sequential, Harness.text)
     assert(program.symbols.toOption.get.globals.exists(_.name == name))
     assertEquals(program.global(name).map(_.initial), Right(initial))
   }
@@ -409,7 +409,8 @@ class ConstantSuite extends Suite {
       Right(LoadedProgram(
         image.module,
         image.module.kernels.map(_.name -> image.functions).toMap,
-        Workgroups.Sequential
+        Workgroups.Sequential,
+        Harness.text
       ))
     }
   }

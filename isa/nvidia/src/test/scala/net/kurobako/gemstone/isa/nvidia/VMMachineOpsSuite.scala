@@ -187,11 +187,11 @@ class VMMachineOpsSuite extends Suite {
     val f       = Fixture()
     val address = sharedBase + 8
     val offset  = VMAddressSpace.sharedAddress(address)
-    assertEquals(f.ops.storeCluster(f.workgroup, offset, Array[Byte](9, 8))(f.ops.done), Right(()))
+    assertEquals(f.ops.storeCluster(lane(0), f.workgroup, offset, Array[Byte](9, 8))(f.ops.done), Right(()))
     assertEquals(f.sharedBytes(address, 2L), Right(List[Byte](9, 8)))
-    assert(f.ops.completeTx(f.workgroup, offset, 16L)(f.ops.done).isLeft)
+    assert(f.ops.completeTx(lane(0), f.workgroup, offset, 16L)(f.ops.done).isLeft)
     f.workgroup.mbarriers(offset) = MBarrier.create(1).toOption.get
-    assertEquals(f.ops.completeTx(f.workgroup, offset, 16L)(f.ops.done), Right(()))
+    assertEquals(f.ops.completeTx(lane(0), f.workgroup, offset, 16L)(f.ops.done), Right(()))
   }
 
   test("an mbarrier arrival yields the phase token and a completion counts transaction bytes") {

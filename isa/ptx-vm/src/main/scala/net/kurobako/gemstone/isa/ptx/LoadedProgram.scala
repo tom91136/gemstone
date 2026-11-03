@@ -12,6 +12,7 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.isa.ptx.Instruction as PTXInstruction
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
@@ -23,16 +24,18 @@ object LoadedProgram {
   def load(
       program: Program,
       workgroups: Workgroups = Workgroups.Sequential,
-      release: () => Unit = () => ()
-  ): Either[Fault, LoadedProgram] = Linker.link(program).flatMap(loadLinked(_, workgroups, release))
+      release: () => Unit = () => (),
+      text: PTXInstruction => Option[String]
+  ): Either[Fault, LoadedProgram] = Linker.link(program).flatMap(loadLinked(_, workgroups, release, text))
 
   private def loadLinked(
       program: Program,
       workgroups: Workgroups,
-      release: () => Unit
+      release: () => Unit,
+      text: PTXInstruction => Option[String]
   ): Either[Fault, LoadedProgram] =
     for {
-      module  <- VMCompiler.module(program).leftMap(error => Fault.Unsupported(error.message))
+      module  <- VMCompiler.module(program, text).leftMap(error => Fault.Unsupported(error.message))
       globals <- globalDefinitions(program.statements)
       _       <- globals.values.toVec.flatMap(_.relocations).traverse_ { relocation =>
         Either.cond(

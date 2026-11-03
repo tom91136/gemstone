@@ -290,6 +290,7 @@ private object VMMemoryCompiler {
         true
       case _: Form.Ldgdepbar =>
         requireModifiers(Set.empty)
+        emit(AsyncCommit(bulk = false))
         true
       // The legacy mask-only form waits for these scoreboards.
       case _: Form.Depbar
@@ -312,6 +313,8 @@ private object VMMemoryCompiler {
         ) unsupported("unsupported dependency scoreboard")
         if (operands.size > 2 && !scoreboardMask(operands.drop(2))) unsupported("unsupported dependency wait mask")
         emit(Fence)
+        if (operands.size == 2 && OperandQueries.registerIndex(operands.head) == 0)
+          emit(AsyncWait(number(operands(1)), bulk = false))
         true
       case _ => false
     }
@@ -461,16 +464,16 @@ private object VMMemoryCompiler {
     if (context.modifiers.exists(PartialFunction.cond(_) { case Modifier.POPC | Modifier.ARRIVE => true })) counted()
     else operand()
 
-  /** `POPC.INC` adds one for each lane, as ptxas emits `atomicAdd(p, 1)` on shared memory from sm_80, and `ARRIVE`
-    * arrives once for each lane on an sm_80 to sm_89 mbarrier, whose arrivals and phase live in its high word; both
-    * return the old value. Lanes arrive one after another, so each sees the arrivals of the lanes before it.
-    */
   /** Whether the first operand is a predicate destination. */
   private def predicateFirst(operands: Vec[Operand]): Boolean = operands.headOption.exists {
     case Operand.Predicate(_, _, _) => true
     case _                          => false
   }
 
+  /** `POPC.INC` adds one for each lane, as ptxas emits `atomicAdd(p, 1)` on shared memory from sm_80, and `ARRIVE`
+    * arrives once for each lane on an sm_80 to sm_89 mbarrier, whose arrivals and phase live in its high word; both
+    * return the old value. Lanes arrive one after another, so each sees the arrivals of the lanes before it.
+    */
   private def counted()(using context: VMCompilationContext): Unit = {
     import context.*
     val counting: (AtomicOperation, ScalarBitWidth) =

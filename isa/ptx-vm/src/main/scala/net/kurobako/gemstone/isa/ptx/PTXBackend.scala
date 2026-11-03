@@ -7,6 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.ptx.Instruction as PTXInstruction
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
@@ -18,7 +19,8 @@ object PTXBackend {
 class PTXBackend(
     workgroups: Workgroups = Workgroups.Sequential,
     decode: Vec[Byte] => Either[ISA.DecodeError, Program] = ISA.decode(_),
-    retainReleased: Boolean = true
+    retainReleased: Boolean = true,
+    text: PTXInstruction => Option[String]
 ) extends Backend {
   override val format: ProgramFormat = PTXBackend.format
 
@@ -87,7 +89,7 @@ class PTXBackend(
       cached.program.run()
       val parsed = try cached.program.get()
       catch { case error: ExecutionException => throw error.getCause }
-      parsed.flatMap(LoadedProgram.load(_, workgroups, () => releaseLoaded(cached)))
+      parsed.flatMap(LoadedProgram.load(_, workgroups, () => releaseLoaded(cached), text))
     } catch {
       case error: Throwable =>
         releaseFailed(cached)

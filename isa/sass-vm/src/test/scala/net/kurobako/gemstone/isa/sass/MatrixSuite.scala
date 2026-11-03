@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.ptx.*
+import net.kurobako.gemstone.isa.ptx.asm.Printer
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.testing.Suite
@@ -16,11 +17,13 @@ import net.kurobako.gemstone.vm.*
   */
 class MatrixSuite extends Suite {
   private def fromPtx(probe: MatrixProbes.Probe, input: Vec[Long]): Vec[Long] = {
-    val program = PTXBackend().load(Vec.from(probe.ptx.getBytes(StandardCharsets.UTF_8))).value
-    val memory  = Memory()
-    val out     = memory.allocate(Vec.fill(32 * probe.d * 4)(0.toByte))
-    val in      = memory.allocate(words(input))
-    val task    = KernelTask.validated(
+    val program = PTXBackend(text =
+      instruction => Some(Printer.render(instruction))
+    ).load(Vec.from(probe.ptx.getBytes(StandardCharsets.UTF_8))).value
+    val memory = Memory()
+    val out    = memory.allocate(Vec.fill(32 * probe.d * 4)(0.toByte))
+    val in     = memory.allocate(words(input))
+    val task   = KernelTask.validated(
       probe.name.unsafe[NonEmpty[String]],
       LaunchGeometry.Dimensions(32, 1, 1),
       LaunchGeometry.Dimensions.One,

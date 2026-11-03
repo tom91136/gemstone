@@ -4,26 +4,30 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.isa.ptx.asm.Printer
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 private object execution extends munit.Assertions {
+  val text: net.kurobako.gemstone.isa.ptx.Instruction => Option[String] =
+    instruction => Some(Printer.render(instruction))
+
   def geometry(blocks: Int > 0, threads: Int > 0): LaunchGeometry =
     LaunchGeometry.forLaunch(Dimensions(threads, 1, 1), Dimensions(blocks, 1, 1)).value
 
   def compileKernel(source: String)(using munit.Location): Kernel =
-    VMCompiler.compile(source).value
+    VMCompiler.compile(source, text).value
 
   def compileKernel(source: String, globals: Map[NonEmpty[String], GuestAddress])(using munit.Location): Kernel = {
     val program = Parser.parse(source).value
     val entry   = program.statements.collectFirst { case entry: Program.Statement.Entry => entry.name }.get
-    VMCompiler.module(program).flatMap(VMCompiler.compile(_, entry, globals)).value
+    VMCompiler.module(program, text).flatMap(VMCompiler.compile(_, entry, globals)).value
   }
 
   def compileProgram(program: Program, entry: NonEmpty[String])(using munit.Location): Kernel =
-    VMCompiler.module(program).flatMap(VMCompiler.compile(_, entry, Map.empty)).value
+    VMCompiler.module(program, text).flatMap(VMCompiler.compile(_, entry, Map.empty)).value
 
   /** The `bytes`-wide words entry `name` stores from `%out` on, after one thread runs `body` over `%in` addressing
     * `inputs`.

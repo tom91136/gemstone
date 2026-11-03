@@ -20,7 +20,7 @@ object RPCRoundTripBenchmark {
   }
 
   val benchmark: Case = (choice("transport", "tcp" -> SocketKind.TCP, "uds" -> SocketKind.UDS), iterations(10000))
-    .mapN((transport, iterations) => () => run(transport, iterations))
+    .mapN((transport, iterations) => _ => run(transport, iterations))
 
   private def run(transport: SocketKind, iterations: Int > 0): BenchmarkSample = {
     val directory = Files.createTempDirectory("gemstone-rpc-benchmark-")

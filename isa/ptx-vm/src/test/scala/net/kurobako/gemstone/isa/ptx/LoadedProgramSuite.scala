@@ -24,7 +24,7 @@ class LoadedProgramSuite extends Suite {
     val source =
       ".version 8.0\n.target sm_80\n.address_size 64\n.global .align 4 .u32 metadata_probe[4];\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
     val actual  =
       loaded.global("metadata_probe").value
     assertEquals(actual.size, 16L: Long >= 0)
@@ -36,7 +36,7 @@ class LoadedProgramSuite extends Suite {
       ".version 8.0\n.target sm_80\n.address_size 64\n" +
         ".global .u8 values[4] = {255, 0xffu, 0b100000010, 18446744073709551617};\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
     val global  = loaded.global("values").value
 
     assertEquals(global.initial.map(_.toInt), Vec(-1, -1, 2, 1))
@@ -47,7 +47,7 @@ class LoadedProgramSuite extends Suite {
       ".version 8.0\n.target sm_80\n.address_size 64\n" +
         ".global .f32 values[2] = {0f3f800000, 1.5};\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
     val global  = loaded.global("values").value
 
     assertEquals(global.initial.map(byte => byte & 0xff), Vec(0, 0, 128, 63, 0, 0, 192, 63))
@@ -57,7 +57,7 @@ class LoadedProgramSuite extends Suite {
     test(s"global pointer initialisers bind in either order and are applied once: reverse=$reverse") {
       val source   = ".global .u64 table[3] = {7, generic(values)+4, 9}; .global .u32 values[2] = {31, 42};"
       val program  = Parser.parse(source).value
-      val loaded   = LoadedProgram.load(program).value
+      val loaded   = LoadedProgram.load(program, text = execution.text).value
       val region   = AllocationId(1L)
       val memory   = RegionMemory(region -> 64)
       val bindings = Vec(("table": NonEmpty[String], 0L: Long >= 0), ("values": NonEmpty[String], 32L: Long >= 0))
@@ -97,7 +97,7 @@ class LoadedProgramSuite extends Suite {
         call %pointer, ();
         ret;
       }""").value
-    val loaded   = LoadedProgram.load(program).value
+    val loaded   = LoadedProgram.load(program, text = execution.text).value
     val region   = AllocationId(1L)
     val memory   = RegionMemory(region -> 64)
     val bindings = Vec(("functions": NonEmpty[String], 0L: Long >= 0), ("result": NonEmpty[String], 32L: Long >= 0))
@@ -129,7 +129,7 @@ class LoadedProgramSuite extends Suite {
       )
     ) {
       val program = Parser.parse(source).value
-      assert(LoadedProgram.load(program).isLeft)
+      assert(LoadedProgram.load(program, text = execution.text).isLeft)
     }
   }
 
@@ -139,7 +139,7 @@ class LoadedProgramSuite extends Suite {
         ".visible .entry fine() { ret; }\n" +
         ".visible .entry broken() { .reg .u32 %r<2>; not_an_instruction.u32 %r0; ret; }\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
 
     assertEquals(loaded.build("fine"), Right(()))
     assertEquals(loaded.build("fine"), Right(()))
@@ -158,7 +158,7 @@ class LoadedProgramSuite extends Suite {
       ".version 8.0\n.target sm_80\n.address_size 64\n" +
         ".visible .entry broken() { .reg .u32 %r<2>; not_an_instruction.u32 %r0; ret; }\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
     val task    = KernelTask.validated(
       kernelName = "broken",
       groupSize = LaunchGeometry.Dimensions.One,
@@ -176,7 +176,7 @@ class LoadedProgramSuite extends Suite {
       ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry layout(" +
         ".param .u8 first, .param .align 8 .u32 second, .param .u16 third) { ret; }\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
 
     val actual   = loaded.kernel("layout").value
     val expected =
@@ -212,7 +212,7 @@ class LoadedProgramSuite extends Suite {
       ".version 8.0\n.target sm_80\n.address_size 64\n" +
         ".visible .entry pointer(.param .u64 .ptr .global output, .param .u64 bits) { ret; }\n"
     val program  = Parser.parse(source).fold(error => fail(error.message), value => value)
-    val loaded   = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val loaded   = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
     val metadata = loaded.kernel("pointer").value
     assertEquals(
       metadata.parameters.map(_.kind),

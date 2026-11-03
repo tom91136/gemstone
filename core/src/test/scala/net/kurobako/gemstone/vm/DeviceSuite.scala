@@ -91,8 +91,12 @@ class DeviceSuite extends Suite {
   }
 
   private object NoState extends ArchitecturalState {
-    def unit: MachineUnit = MachineUnit(LaunchGeometry.Coordinates.origin, 0, 0, MachineUnit.State.Running)
-    def issued: Long      = 0L
+    def unit: MachineUnit     = MachineUnit(LaunchGeometry.Coordinates.origin, 0, 0, MachineUnit.State.Running)
+    def issued: Long          = 0L
+    def begins: Boolean       = true
+    def subgroupSize: Int > 0 = 1
+    def eachLane(each: (Int >= 0) => Unit): Unit = each(0)
+    def text: String                             = "echo"
   }
 
   /** Reports one instruction per image byte to an attached observer before echoing. */

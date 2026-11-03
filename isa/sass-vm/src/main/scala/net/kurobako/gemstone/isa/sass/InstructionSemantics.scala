@@ -113,7 +113,7 @@ object InstructionSemantics {
     var complete = true
     var branches = false
     statements.foreach {
-      case VMAssembler.Statement.Source(address)                                    => current = Some(address)
+      case VMAssembler.Statement.Source(address, _)                                 => current = Some(address)
       case VMAssembler.Statement.Execute(instruction, None) if current.contains(at) =>
         if (complete) found.append(instruction)
       case VMAssembler.Statement.Execute(_, Some(_)) if current.contains(at) => complete = false
@@ -271,8 +271,8 @@ object InstructionSemantics {
     )
     SASSLowering(
       placed.statements.takeWhile {
-        case VMAssembler.Statement.Source(_) => false
-        case _                               => true
+        case VMAssembler.Statement.Source(_, _) => false
+        case _                                  => true
       }.collect { case VMAssembler.Statement.Execute(initial, None) => initial },
       steps,
       placed.registerCount,

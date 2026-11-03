@@ -110,12 +110,13 @@ A `Device` loads programs through a `BackendRegistry` and runs them against one 
 ```scala
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
+import net.kurobako.gemstone.isa.ptx.asm.Printer
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 val memory = ArrayMemory()
 val output = memory.allocate(4L)
-val device = Device(BackendRegistry(Vec(PTXBackend())), memory)
+val device = Device(BackendRegistry(Vec(PTXBackend(text = instruction => Some(Printer.render(instruction))))), memory)
 for {
   program <- device.load(ProgramFormat.PTXText, image)
   task    <- KernelTask.validated("answer", Dimensions.One, Dimensions.One, Vec(KernelTask.Argument.Memory(output, 0L)))

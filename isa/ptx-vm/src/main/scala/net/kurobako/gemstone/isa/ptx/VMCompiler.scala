@@ -47,8 +47,10 @@ private object VMCompiler {
       functionTable: FunctionTable,
       shared: Map[NonEmpty[String], Long],
       routineShared: Map[NonEmpty[String], Map[NonEmpty[String], Long]],
+      sharedExtents: Map[Option[NonEmpty[String]], Long],
       initialisedFunctions: Vec[NonEmpty[String]],
-      architecture: Int
+      architecture: Int,
+      text: Instruction => Option[String]
   )
 
   /** The architecture the first `.target` names; some arithmetic differs between architectures. */
@@ -59,7 +61,7 @@ private object VMCompiler {
       }.flatten.headOption
   }.flatten.fold(DefaultArchitecture)(_.raw)
 
-  def module(program: Program): Either[Error, Module] = {
+  def module(program: Program, text: Instruction => Option[String] = _ => None): Either[Error, Module] = {
     val entries = program.statements.collect { case entry: Statement.Entry => entry }
       .groupMapReduce(_.name)(identity)(Linker.preferDefinition(_, _))
     val functions = program.statements.collect { case function: Statement.Function => function }
@@ -73,15 +75,17 @@ private object VMCompiler {
     val initialised = program.statements.collect {
       case value: Statement.Data if value.addressSpace != DataAddressSpace.Shared => value.initialiser
     }.flatten.flatMap(expressionSymbols(_)).filter(table.address(_).nonEmpty).distinct
-    SharedLayout(module, routines).map((shared, routineShared) =>
+    SharedLayout(module, routines).map((shared, routineShared, sharedExtents) =>
       Module(
         entries,
         functions,
         table,
         shared,
         routineShared,
+        sharedExtents,
         initialised,
-        architecture(program)
+        architecture(program),
+        text
       )
     )
   }
@@ -129,7 +133,14 @@ private object VMCompiler {
     def apply(
         module: Vec[Statement.Data],
         routines: Vec[(NonEmpty[String], Vec[Statement.Data])]
-    ): Either[Error, (Map[NonEmpty[String], Long], Map[NonEmpty[String], Map[NonEmpty[String], Long]])] = {
+    ): Either[
+      Error,
+      (
+          Map[NonEmpty[String], Long],
+          Map[NonEmpty[String], Map[NonEmpty[String], Long]],
+          Map[Option[NonEmpty[String]], Long]
+      )
+    ] = {
       val owners       = (None -> module) +: routines.map((name, declarations) => Some(name) -> declarations)
       val (sized, all) =
         (
@@ -138,19 +149,28 @@ private object VMCompiler {
           ),
           owners
         )
-      sized.foldLeft[Either[Error, (Long, Vec[(Option[NonEmpty[String]], NonEmpty[String], Long)])]](
-        Right(VMAddressSpace.SharedBase -> Vec.empty)
+      sized.foldLeft[
+        Either[
+          Error,
+          (Long, Vec[(Option[NonEmpty[String]], NonEmpty[String], Long)], Map[Option[NonEmpty[String]], Long])
+        ]
+      ](
+        Right((VMAddressSpace.SharedBase, Vec.empty, Map.empty))
       ) { case (layout, (owner, declaration)) =>
-        layout.flatMap { (next, placed) =>
+        layout.flatMap { (next, placed, extents) =>
           val address = next.alignUp(alignment(declaration))
           val end     = address + extentBytes(declaration)
           Either.cond(
             end <= VMAddressSpace.ClusterWindowBase,
-            end -> (placed :+ (owner, declaration.name, address)),
+            (
+              end,
+              placed :+ (owner, declaration.name, address),
+              extents.updated(owner, end.max(extents.getOrElse(owner, VMAddressSpace.SharedBase)))
+            ),
             Error.Invalid(s"shared declaration '${declaration.name}' exceeds the shared address aperture")
           )
         }
-      }.flatMap { (next, placed) =>
+      }.flatMap { (next, placed, extents) =>
         val dynamic =
           all.flatMap((owner, values) =>
             values.collect { case value if value.extent == Extent.Unsized => owner -> value }
@@ -159,23 +179,26 @@ private object VMCompiler {
         val base             = next.alignUp(dynamicAlignment)
         Either.cond(
           dynamic.isEmpty || base < VMAddressSpace.ClusterWindowBase,
-          placed ++ dynamic.map((owner, declaration) => (owner, declaration.name, base)),
+          (placed ++ dynamic.map((owner, declaration) => (owner, declaration.name, base))) -> extents,
           Error.Invalid("dynamic shared storage exceeds the shared address aperture")
         )
-      }.map { placements =>
+      }.map { (placements, extents) =>
         val byOwner = placements.groupMap(_._1)(placement => placement._2 -> placement._3).view.mapValues(_.toMap)
-        byOwner.getOrElse(None, Map.empty) ->
-          routines.map((name, _) => name -> byOwner.getOrElse(Some(name), Map.empty)).toMap
+        (
+          byOwner.getOrElse(None, Map.empty),
+          routines.map((name, _) => name -> byOwner.getOrElse(Some(name), Map.empty)).toMap,
+          extents.view.mapValues(_ - VMAddressSpace.SharedBase).toMap
+        )
       }
     }
   }
 
-  def compile(source: String): Either[SourceError, Kernel] =
+  def compile(source: String, text: Instruction => Option[String] = _ => None): Either[SourceError, Kernel] =
     Parser.parse(source).leftMap(SourceError.Syntax(_)).flatMap { program =>
       program.statements.collectFirst { case entry: Statement.Entry if entry.body.nonEmpty => entry.name }
         .toRight(SourceError.MissingEntry)
         .flatMap(entry =>
-          module(program).flatMap(compile(_, entry, Map.empty)).leftMap(SourceError.Compilation(_))
+          module(program, text).flatMap(compile(_, entry, Map.empty)).leftMap(SourceError.Compilation(_))
         )
     }
 
@@ -264,8 +287,19 @@ private object VMCompiler {
       root                 <- lowerEntry(declaration, compilation)
       cluster              <- clusterDirectives(declaration.directives)
       (functions, entries) <- compilation.lowerReachable()
-    } yield Kernel(root, "PTX", functions, entries, module.functionTable, cluster)
+    } yield Kernel(
+      root,
+      "PTX",
+      functions,
+      entries,
+      module.functionTable,
+      cluster,
+      staticSharedBytes = staticShared(module, entry :: functions.keys.toList)
+    )
   }
+
+  private def staticShared(module: Module, routines: List[NonEmpty[String]]): Long >= 0 =
+    (None :: routines.map(Some(_))).flatMap(module.sharedExtents.get).maxOption.getOrElse(0L).unsafe[Long >= 0]
 
   private def lowerEntry(entry: Statement.Entry, compilation: KernelCompilation): Either[Error, Entry] =
     for {
@@ -370,7 +404,7 @@ private object VMCompiler {
     }
 
   /** The labels each `.branchtargets` list names. */
-  private def branchTargets(statements: Vec[Statement]): Map[NonEmpty[String], Vec[NonEmpty[String]]] =
+  def branchTargets(statements: Vec[Statement]): Map[NonEmpty[String], Vec[NonEmpty[String]]] =
     statements.zip(statements.drop(1)).collect {
       case (Statement.Label(name), Statement.Directive(path, arguments, _, _)) if path.raw == Vec("branchtargets") =>
         name -> arguments.collect { case DirectiveArgument(_, Operand.Symbol(label)) => label }
@@ -424,7 +458,7 @@ private object VMCompiler {
         spilled.map(_.name).toSet,
         locals,
         compilation.module.shared ++ compilation.module.routineShared.getOrElse(name, Map.empty),
-        declaredRegisters(flat).toSet,
+        declaredRegisters(flat),
         compilation.module.architecture
       )
       ordinals = {
@@ -439,20 +473,17 @@ private object VMCompiler {
         }
         Vec.from(before)
       }
-      statements <- flat.zip(ordinals).flatTraverse {
-        case (Statement.Label(label), _) => Right(Vec(VMAssembler.Statement.Label(label)))
-        case (Statement.Instruction(Instruction(Form.BrxIdx(index, Operand.Symbol(table)), _, guard)), ordinal) =>
-          indexedBranch(index, table, guard, tables)(using scope).map(branch =>
-            Vec(VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0]), branch)
-          )
-        case (Statement.Instruction(instruction), ordinal) =>
-          lowerInstruction(instruction)(using scope)
-            .map(VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0]) +: _).leftMap {
-              case Error.Invalid(detail)        => Error.Invalid(s"${instruction.qualifiedOpcode}: $detail")
-              case Error.Unsupported(_, detail) => Error.Unsupported(instruction.qualifiedOpcode, detail)
-            }
-        case _ => Right(Vec.empty[VMAssembler.Statement])
+      plan = Reconvergence.plan(flat, tables)
+      lowered <- flat.zip(ordinals).zipWithIndex.traverse { case ((statement, ordinal), index) =>
+        lowerStatement(statement, ordinal, tables, compilation.module.text)(using scope).map(retarget(
+          _,
+          plan.retargets.get(index)
+        ))
       }
+      added <- convergence(plan)(using scope)
+      statements = lowered.zipWithIndex.flatMap((statements, index) =>
+        added.getOrElse(index, Vec.empty[VMAssembler.Statement]) ++ statements
+      ) ++ added.getOrElse(lowered.size, Vec.empty[VMAssembler.Statement])
       spillIn  <- inputs.intersect(spilled).flatTraverse(spillCopy(_, Spill.ToStack)(using scope))
       spillOut <- returns.intersect(spilled).flatTraverse(spillCopy(_, Spill.FromStack)(using scope))
       program  <- VMAssembler.assemble(spillIn.map(VMAssembler.Statement.Execute(_)) ++ statements.flatMap {
@@ -471,9 +502,72 @@ private object VMCompiler {
         predicateCount = scope.predicateCount,
         localBytes = bytes,
         predicateNames = scope.predicateNames,
-        registerNames = scope.registerNames
+        registerNames = scope.registerNames,
+        registerUnits = scope.registerUnits
       ) -> scope
     }
+
+  private def lowerStatement(
+      statement: Statement,
+      ordinal: Long,
+      tables: Map[NonEmpty[String], Vec[NonEmpty[String]]],
+      text: Instruction => Option[String]
+  )(using Scope): Either[Error, Vec[VMAssembler.Statement]] = statement match {
+    case Statement.Label(label) => Right(Vec(VMAssembler.Statement.Label(label)))
+    case Statement.Instruction(instruction @ Instruction(Form.BrxIdx(index, Operand.Symbol(table)), _, guard)) =>
+      indexedBranch(index, table, guard, tables).map(branch =>
+        Vec(VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0], text(instruction)), branch)
+      )
+    case Statement.Instruction(instruction) =>
+      lowerInstruction(instruction).map(
+        VMAssembler.Statement.Source(ordinal.unsafe[Long >= 0], text(instruction)) +: _
+      ).leftMap {
+        case Error.Invalid(detail)        => Error.Invalid(s"${instruction.qualifiedOpcode}: $detail")
+        case Error.Unsupported(_, detail) => Error.Unsupported(instruction.qualifiedOpcode, detail)
+      }
+    case _ => Right(Vec.empty[VMAssembler.Statement])
+  }
+
+  private def retarget(
+      statements: Vec[VMAssembler.Statement],
+      replacements: Option[Map[NonEmpty[String], NonEmpty[String]]]
+  ): Vec[VMAssembler.Statement] = replacements.fold(statements) { replaced =>
+    statements.map {
+      case VMAssembler.Statement.Branch(target, predication) =>
+        VMAssembler.Statement.Branch(replaced.getOrElse(target, target), predication)
+      case VMAssembler.Statement.BranchTable(index, targets, predication) =>
+        VMAssembler.Statement.BranchTable(index, targets.map(target => replaced.getOrElse(target, target)), predication)
+      case other => other
+    }
+  }
+
+  /** The convergence barrier instructions a plan adds, by the index of the statement they precede. They carry no source
+    * instruction, so a profile does not count them as issued by the hardware.
+    */
+  private def convergence(plan: Reconvergence.Plan)(using
+      Scope
+  ): Either[Error, Map[Int, Vec[VMAssembler.Statement]]] =
+    Vec.from(plan.before).traverse { (index, actions) =>
+      actions.traverse {
+        case Reconvergence.Action.Label(name)       => Right(VMAssembler.Statement.Label(name))
+        case Reconvergence.Action.Setup(slot)       => converge(slot, ConvergenceAction.Setup)
+        case Reconvergence.Action.Synchronise(slot) => converge(slot, ConvergenceAction.Synchronise)
+        case Reconvergence.Action.Yield             => Right(VMAssembler.Statement.Execute(VMIR.Instruction.Yield))
+        case Reconvergence.Action.Jump(target)      => Right(VMAssembler.Statement.Branch(target))
+      }.map { statements =>
+        val (labels, instructions) = statements.span {
+          case VMAssembler.Statement.Label(_) => true
+          case _                              => false
+        }
+        index -> (labels ++ (VMAssembler.Statement.Unsourced +: instructions))
+      }
+    }.map(_.toMap)
+
+  private def token(slot: Int)(using scope: Scope): Either[Error, Register] =
+    scope.register(Operand.Register(s"convergence token $slot".unsafe[NonEmpty[String]], None))
+
+  private def converge(slot: Int, action: ConvergenceAction)(using Scope): Either[Error, VMAssembler.Statement] =
+    token(slot).map(token => VMAssembler.Statement.Execute(VMIR.Instruction.Convergence(token, action)))
 
   private def lowerInstruction(instruction: Instruction)(using
       scope: Scope
@@ -510,11 +604,28 @@ private object VMCompiler {
     case _ => Vec.empty[NonEmpty[String]]
   }
 
-  private def declaredRegisters(statements: Vec[Statement]): Vec[NonEmpty[String]] = statements.flatMap {
-    case Statement.Directive(path, arguments, _, _) if path.head.raw == "reg" =>
-      arguments.flatMap(argument => declaredOperandNames(argument.operand).flatMap(expandRange(_)))
-    case _ => Vec.empty[NonEmpty[String]]
+  private val WideType = "([busf])(\\d+)".r
+
+  /** The 32-bit units a register of the declared `.type` takes; a predicate takes none, and a vector or alignment
+    * qualifier is not a type.
+    */
+  private def typeUnits(mnemonic: String): Option[Int] = mnemonic match {
+    case "pred"                              => Some(0)
+    case WideType(_, bits)                   => Some(((bits.toInt + 31) / 32).max(1))
+    case "align" | "attribute"               => None
+    case vector if vector.matches("v[0-9]+") => None
+    case _                                   => Some(1)
   }
+
+  private def declaredRegisters(statements: Vec[Statement]): Map[NonEmpty[String], Int] = statements.flatMap {
+    case Statement.Directive(path, arguments, _, _) if path.head.raw == "reg" =>
+      val units = arguments.view.map(_.operand).collectFirst {
+        case Operand.Qualifier(parts) if parts.size == 1 && typeUnits(parts.head.raw).isDefined =>
+          typeUnits(parts.head.raw).getOrElse(1)
+      }.getOrElse(1)
+      arguments.flatMap(argument => declaredOperandNames(argument.operand).flatMap(expandRange(_))).map(_ -> units)
+    case _ => Vec.empty[(NonEmpty[String], Int)]
+  }.toMap
 
   private def expandRange(name: NonEmpty[String]): Vec[NonEmpty[String]] = name.raw match {
     case s"$base<$count>" if base.nonEmpty && count.toIntOption.exists(_ > 0) =>

@@ -661,7 +661,11 @@ private object InvocationMachine {
                     }
                 writeElement(0L)
               } else memory.write(destination, packed)
-            }.map(_ => values.updateScalar(target, typeId, 0L))
+            }.map { _ =>
+              memory.asynchronous(LaunchObserver.AsyncKind.Transfer, target = -1L, bytes = packedBytes.toLong)
+              memory.asynchronous(LaunchObserver.AsyncKind.Commit, target = -1L, bytes = 0L)
+              values.updateScalar(target, typeId, 0L)
+            }
           } catch {
             case _: ArithmeticException | _: IllegalArgumentException =>
               Left(Fault.InvalidRequest("OpGroupAsyncCopy byte range is too large"))
@@ -710,7 +714,7 @@ private object InvocationMachine {
         Fault.Unsupported(s"OpGroupWaitEvents execution scope $scope is not Workgroup")
       )
       _ <- Either.cond(count >= 0L, (), Fault.InvalidRequest(s"OpGroupWaitEvents has invalid event count $count"))
-    } yield ()) match {
+    } yield execution.memory.asynchronous(LaunchObserver.AsyncKind.WaitGroups, target = -1L, bytes = 0L)) match {
       case Left(error) => Left(error)
       case Right(())   => next
     }

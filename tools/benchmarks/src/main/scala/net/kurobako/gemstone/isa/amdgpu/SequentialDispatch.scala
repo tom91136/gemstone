@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
@@ -25,8 +26,16 @@ object SequentialDispatch {
     )).fold(error => throw IllegalStateException(error.message), identity)
 
   /** Measure `iterations` single-threaded dispatches of `kernel`, each of which must succeed. */
-  def repeat(iterations: Int > 0, kernel: VMIR.Kernel, task: KernelTask, memory: AddressSpace): BenchmarkSample = {
-    val launch = KernelLaunch(task, TaskContext(memory, TaskControl(), _ => Right(())), Workgroups.Sequential)
-    Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, launch, Vec.empty))
-  }
+  def repeat(
+      iterations: Int > 0,
+      kernel: VMIR.Kernel,
+      task: KernelTask,
+      memory: AddressSpace,
+      launch: LaunchControl
+  ): BenchmarkSample =
+    Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(
+      kernel,
+      KernelLaunch(task, TaskContext(memory, launch(), _ => Right(())), Workgroups.Sequential),
+      Vec.empty
+    ))
 }

@@ -19,7 +19,7 @@ class BinaryExecutionSuite extends Suite {
     val kernel  = module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add"))
     val section = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections(kernel.section)
     java.util.Arrays.fill(image, section.offset, section.offset + 16, 0.toByte)
-    Using.resource(ExecutionSession(List(CubinBackend()))) { service =>
+    Using.resource(ExecutionSession(List(CubinBackend(text = Harness.text)))) { service =>
       val memory  = service.registerAllocation(128).value
       val program = service.load(ProgramEncoding.CUDACubin, Vec.from(image)).value
       val task    = KernelTask.validated(
@@ -43,7 +43,7 @@ class BinaryExecutionSuite extends Suite {
       Vec.tabulate(32)(index => if (index % 3 == 0) Int.MaxValue else if (index % 3 == 1) -1 else index * 31)
     def integers(values: Vec[Int]): Vec[Byte] =
       Vec.from(values).flatMap(value => LittleEndian.toVec(value.toLong, 4))
-    Using.resource(ExecutionSession(List(CubinBackend()))) { service =>
+    Using.resource(ExecutionSession(List(CubinBackend(text = Harness.text)))) { service =>
       val input  = service.registerAllocation(128).value
       val output = service.registerAllocation(128).value
       assert(service.write(input, 0L, integers(values)).isRight)
@@ -67,7 +67,7 @@ class BinaryExecutionSuite extends Suite {
     val module  = Cubin.decode(Vec.unsafeWrapArray(image)).value
     val kernel  = module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add"))
     val section = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections(kernel.section)
-    Using.resource(ExecutionSession(List(CubinBackend()))) { service =>
+    Using.resource(ExecutionSession(List(CubinBackend(text = Harness.text)))) { service =>
       val valid = service.load(ProgramEncoding.CUDACubin, Vec.from(Fixture.copyAddCubin)).value
       assertEquals(service.build(valid, "copy_add"), Right(()))
 

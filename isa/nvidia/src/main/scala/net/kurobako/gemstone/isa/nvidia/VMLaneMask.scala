@@ -23,6 +23,15 @@ private object VMLaneMask {
     VMLaneMask(words, laneCount.widen, (laneCount + 63) >>> 6)
   }
 
+  /** The lanes of the warp starting at `base` that `bits` selects. */
+  def ofWarp(base: Int, bits: Long): VMLaneMask =
+    if (bits == 0L) Empty
+    else {
+      val words = Array.ofDim[Long](WordCount)
+      words(base >>> 6) = bits << (base & 32)
+      VMLaneMask(words, java.lang.Long.bitCount(bits).unsafe[Int in 0 ~ 1024], (base >>> 6) + 1)
+    }
+
   /** Collect lane groups without allocating an immutable mask for each arrival. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   class Builder {
@@ -116,6 +125,18 @@ private class VMLaneMask @publicInBinary private (
         function(WorkgroupLane.fromIndex((wordIndex << 6) + bit))
         word &= word - 1L
       }
+      wordIndex += 1
+    }
+  }
+
+  /** Calls `function` with the first lane of each warp that has lanes in the mask and its 32 lane bits. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  inline def foreachWarp(inline function: (Int, Long) => Unit): Unit = {
+    var wordIndex = 0
+    while (wordIndex < limit) {
+      val word = words(wordIndex)
+      if ((word & 0xffffffffL) != 0L) function(wordIndex << 6, word & 0xffffffffL)
+      if ((word >>> 32) != 0L) function((wordIndex << 6) + 32, word >>> 32)
       wordIndex += 1
     }
   }

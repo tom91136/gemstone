@@ -128,6 +128,23 @@ class MachineSemanticsSuite extends Suite {
     )
   }
 
+  test("a copy group commit and wait render their group class and count") {
+    assertEquals(
+      shown(groupCommit()),
+      """def `cp.async.commit_group`()(using memory: Memory): Unit = {
+        |  memory.commitGroups(false)
+        |  ()
+        |}""".stripMargin
+    )
+    assertEquals(
+      shown(groupWait(1L, bulk = true)),
+      """def `cp.async.wait_group`()(using memory: Memory): Unit = {
+        |  memory.waitGroups(1, true)
+        |  ()
+        |}""".stripMargin
+    )
+  }
+
   test("a guarded host fence renders its fence under the guard") {
     assertEquals(
       shown(fence(guarded = true)),
@@ -997,6 +1014,18 @@ class MachineSemanticsSuite extends Suite {
       """def bbreak(p: Bool, token: UInt[64])(using barriers: Barriers): Unit = {
         |  if (p) {
         |    barriers.leave(token)
+        |  }
+        |  ()
+        |}""".stripMargin
+    )
+  }
+
+  test("a yield renders the lanes leaving every live barrier of their warp under the guard") {
+    assertEquals(
+      shown(yieldLanes(guarded = true)),
+      """def byield(p: Bool)(using barriers: Barriers, lanes: Lanes): Unit = {
+        |  if (p) {
+        |    barriers.yieldLane(lanes.index())
         |  }
         |  ()
         |}""".stripMargin

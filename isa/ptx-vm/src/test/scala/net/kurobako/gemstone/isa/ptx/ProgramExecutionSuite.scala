@@ -13,8 +13,8 @@ class ProgramExecutionSuite extends Suite {
     val source  = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
     val program = Parser.parse(source).fold(error => fail(error.message), value => value)
 
-    val first  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
-    val second = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val first  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
+    val second = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
     assert(!(first eq second))
 
     val task = KernelTask.validated(
@@ -43,7 +43,7 @@ class ProgramExecutionSuite extends Suite {
       }
       """
     val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
-      LoadedProgram.load(program).left.map(_.message)
+      LoadedProgram.load(program, text = execution.text).left.map(_.message)
     ).value
     val task = KernelTask.validated(
       "read",
@@ -100,7 +100,7 @@ class ProgramExecutionSuite extends Suite {
       | ret;
       |}""".stripMargin
     val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
-      LoadedProgram.load(program).left.map(_.message)
+      LoadedProgram.load(program, text = execution.text).left.map(_.message)
     ).value
     val task = KernelTask.validated(
       kernelName = "shared_access",
@@ -115,7 +115,7 @@ class ProgramExecutionSuite extends Suite {
   test("module shared allocations cannot escape the shared aperture") {
     val bytes  = VMAddressSpace.SharedLimit - VMAddressSpace.SharedBase + 1L
     val parsed = Parser.parse(s".shared .b8 oversized[$bytes];").value
-    assert(LoadedProgram.load(parsed).left.exists(_.message.contains("shared address aperture")))
+    assert(LoadedProgram.load(parsed, text = execution.text).left.exists(_.message.contains("shared address aperture")))
   }
 
   test("a device function memory failure identifies its function") {
@@ -132,7 +132,7 @@ class ProgramExecutionSuite extends Suite {
       |.visible .entry caller() { call broken; ret; }
       |""".stripMargin
     val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
-      LoadedProgram.load(program).left.map(_.message)
+      LoadedProgram.load(program, text = execution.text).left.map(_.message)
     ).value
     val task = KernelTask.validated(
       "caller",
@@ -161,7 +161,7 @@ class ProgramExecutionSuite extends Suite {
         |}
         |""".stripMargin
       val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
-        LoadedProgram.load(program).left.map(_.message)
+        LoadedProgram.load(program, text = execution.text).left.map(_.message)
       ).value
       val task =
         KernelTask.validated("probe", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty).value
@@ -213,7 +213,7 @@ class ProgramExecutionSuite extends Suite {
         | ret;
         |}""".stripMargin
       val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
-        LoadedProgram.load(program).left.map(_.message)
+        LoadedProgram.load(program, text = execution.text).left.map(_.message)
       ).value
       val task = KernelTask.validated(
         kernelName = "dynamic_access",

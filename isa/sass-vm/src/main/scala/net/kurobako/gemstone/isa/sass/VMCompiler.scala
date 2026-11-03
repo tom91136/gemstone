@@ -64,10 +64,12 @@ private object VMCompiler {
       module: Cubin.Module,
       kernel: Cubin.Kernel,
       functions: Vec[DecodedFunction],
-      globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty
+      globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty,
+      text: SASSInstruction => Option[String] = _ => None
   ): Either[NonEmpty[String], VMIR.Kernel] =
-    lowerKernel(module, kernel, functions, globalSymbols).left.map(_.message).flatMap { (statements, registerCount) =>
-      VMAssembler.assemble(statements).map(_ -> registerCount)
+    lowerKernel(module, kernel, functions, globalSymbols, text).left.map(_.message).flatMap {
+      (statements, registerCount) =>
+        VMAssembler.assemble(statements).map(_ -> registerCount)
     }.map { (program, registerCount) =>
       val constants = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
       val block     = constants.slice(kernel.parameterBase, kernel.parameterBase.raw + kernel.parameterSize)
@@ -86,6 +88,9 @@ private object VMCompiler {
         ),
         "SASS",
         cluster = Option.when(kernel.requiredCluster != LaunchGeometry.Dimensions.One)(kernel.requiredCluster),
+        registersPerLane = Some(kernel.registerCount),
+        staticSharedBytes = module.sections.find(_.name == s".nv.shared.${kernel.name}")
+          .fold(0L.unsafe[Long >= 0])(_.size.widen[Long >= 0]),
         // ptxas's CTA-pair tensor memory allocation hands its address over through an mbarrier in the tcgen05
         // partition of reserved shared memory, at offset 0x48
         pairAllocationBarrier = Option.when(functions.exists(_.instructions.exists(instruction =>
@@ -100,7 +105,8 @@ private object VMCompiler {
       module: Cubin.Module,
       kernel: Cubin.Kernel,
       functions: Vec[DecodedFunction],
-      boundSymbols: Map[NonEmpty[String], GuestAddress]
+      boundSymbols: Map[NonEmpty[String], GuestAddress],
+      text: SASSInstruction => Option[String] = _ => None
   ): Either[Failure, (Vec[VMAssembler.Statement], Int >= 0)] = try {
     val generation = Generation.of(module.sm)
     module.sections.filter(_.isRelocation).foreach { table =>
@@ -240,7 +246,10 @@ private object VMCompiler {
             )
         }
         Right(
-          VMAssembler.Statement.Source(instruction.address.toLong.unsafe[Long >= 0]) +:
+          VMAssembler.Statement.Source(
+            instruction.address.toLong.unsafe[Long >= 0],
+            text(instruction.operation)
+          ) +:
             (statements.take(1) ++ arrivals ++ saves ++ statements.drop(1) ++ restores)
         )
       } catch {

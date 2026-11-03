@@ -31,7 +31,7 @@ object PTXSample {
 
   private def run(program: Program): Either[String, Vec[Long]] =
     Kernel.run(
-      PTXBackend(),
+      PTXBackend(text = instruction => Some(asm.Printer.render(instruction))),
       Vec.from(asm.Printer.render(program).getBytes(StandardCharsets.UTF_8)),
       "add",
       (input, output) => Vec(KernelTask.Argument.Memory(input, 0L), KernelTask.Argument.Memory(output, 0L))

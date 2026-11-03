@@ -191,7 +191,7 @@ private[isa] object MachineSemantics {
               val value = machine.read(lane, sources(register))
               val field =
                 if (part == 0) value else algebra.shiftRightLogical(value, algebra.literal((part * width).toLong))
-              machine.storeShared(target, field, stored)(
+              machine.storeShared(lane, target, field, stored)(
                 if (index + 1 < sources.size * parts) storeFrom(index + 1) else machine.done
               )
             }
@@ -468,7 +468,7 @@ private[isa] object MachineSemantics {
       "cp.async source size"
     )(Fault.Backend(s"cp.async source size $count exceeds copy size $size")) {
       machine.loadBytes(lane, Space.Global, origin, count, "cp.async source") { data =>
-        machine.storeSharedBytes(target, data, algebra.literal(size.toLong))(machine.done)
+        machine.storeSharedBytes(lane, target, data, algebra.literal(size.toLong))(machine.done)
       }
     }
   }(machine.advance)
@@ -547,8 +547,8 @@ private[isa] object MachineSemantics {
                 "bulk copy source"
               ) { data =>
                 machine.eachDestination(lane, owner, copy.multicast) { cta =>
-                  machine.storeCluster(cta, offset, data) {
-                    machine.completeTx(cta, word, bytes)(machine.done)
+                  machine.storeCluster(lane, cta, offset, data) {
+                    machine.completeTx(lane, cta, word, bytes)(machine.done)
                   }
                 }(machine.done)
               }
@@ -589,7 +589,7 @@ private[isa] object MachineSemantics {
           algebra.equal(algebra.and(bytes, algebra.literal(7L)), algebra.literal(0L))
         ),
         "invalid bulk fill size"
-      )(Fault.Backend(s"invalid bulk fill size $bytes"))(machine.clearCluster(owner, start, bytes)(machine.done))
+      )(Fault.Backend(s"invalid bulk fill size $bytes"))(machine.clearCluster(lane, owner, start, bytes)(machine.done))
     }
   }(machine.advance)
 
@@ -612,8 +612,8 @@ private[isa] object MachineSemantics {
             machine.sharedWindow(lane, target, bytes, "bulk reduction destination") { (owner, start) =>
               machine.sharedWindow(lane, machine.read(lane, word), algebra.literal(8L), "bulk reduction mbarrier") {
                 (_, offset) =>
-                  machine.reduceBytes(owner, start, data, copy)(
-                    machine.completeTx(owner, offset, bytes)(machine.done)
+                  machine.reduceBytes(lane, owner, start, data, copy)(
+                    machine.completeTx(lane, owner, offset, bytes)(machine.done)
                   )
               }
             }
@@ -805,13 +805,13 @@ private[isa] object MachineSemantics {
             (signalled, barrier) =>
               machine.eachRun(transfer)(run => machine.loadRun(lane, transfer, run)(machine.done)) {
                 machine.eachDestination(lane, owner, copy.multicast) { cta =>
-                  machine.placeBox(cta, start, transfer) {
+                  machine.placeBox(lane, cta, start, transfer) {
                     if (copy.pair) {
                       val rank = machine.peerRank(cta, signalled)
                       machine.require(machine.hasCta(rank), "cta_group::2 peer")(
                         Fault.Backend(s"cta_group::2 needs CTA $rank of the pair in the cluster")
-                      )(machine.completeTx(machine.ctaAt(rank), barrier, bytes)(machine.done))
-                    } else machine.completeTx(cta, barrier, bytes)(machine.done)
+                      )(machine.completeTx(lane, machine.ctaAt(rank), barrier, bytes)(machine.done))
+                    } else machine.completeTx(lane, cta, barrier, bytes)(machine.done)
                   }
                 }(machine.done)
               }
@@ -830,7 +830,7 @@ private[isa] object MachineSemantics {
       machine.tensorFact(transfer, TensorLayout.Fact.Bytes),
       "tensor copy source"
     ) { (owner, start) =>
-      machine.fetchBox(owner, start, transfer) {
+      machine.fetchBox(lane, owner, start, transfer) {
         operation match {
           case TensorMap.Operation.Reduce(operator) =>
             machine.require(
@@ -866,12 +866,13 @@ private[isa] object MachineSemantics {
               def storeFrom(index: Int): F[Unit] =
                 if (index < sources.size)
                   machine.storeWord(
+                    lane,
                     owner,
                     if (index == 0) start else algebra.add(start, algebra.literal(index * unit)),
                     machine.read(lane, sources(index)),
                     width
                   )(storeFrom(index + 1))
-                else machine.completeTx(owner, offset, bytes)(machine.done)
+                else machine.completeTx(lane, owner, offset, bytes)(machine.done)
               storeFrom(0)
             }
         }
@@ -891,8 +892,8 @@ private[isa] object MachineSemantics {
     machine.everyLane { lane =>
       machine.sharedWindow(lane, machine.read(lane, address), bytes, "asynchronous reduction") { (owner, start) =>
         machine.sharedWindow(lane, machine.read(lane, barrier), word, "asynchronous reduction mbarrier") { (_, offset) =>
-          machine.reduceWord(owner, start, machine.read(lane, source), width, operation)(
-            machine.completeTx(owner, offset, bytes)(machine.done)
+          machine.reduceWord(lane, owner, start, machine.read(lane, source), width, operation)(
+            machine.completeTx(lane, owner, offset, bytes)(machine.done)
           )
         }
       }
@@ -946,8 +947,8 @@ private[isa] object MachineSemantics {
     )(Fault.Misaligned("unaligned cluster cancellation response or barrier")) {
       def cancel(to: V, signalled: V): F[Unit] =
         machine.mbarrierTransaction(lane, signalled, algebra.literal(16L), complete = true) {
-          machine.storeShared(to, algebra.literal(0L), 64) {
-            machine.storeShared(algebra.add(to, algebra.literal(8L)), algebra.literal(0L), 64)(machine.done)
+          machine.storeShared(lane, to, algebra.literal(0L), 64) {
+            machine.storeShared(lane, algebra.add(to, algebra.literal(8L)), algebra.literal(0L), 64)(machine.done)
           }
         }
       if (multicast) machine.eachRank { rank =>
@@ -1132,7 +1133,7 @@ private[isa] object MachineSemantics {
                       s"tcgen05.alloc of $count columns waits forever: granules 0x" +
                         s"${machine.valueText(TensorMemoryLayout.Text.Hexadecimal, machine.tensorMemoryTaken(cta))} are taken"
                     )
-                  )(machine.storeShared(target, start, 32)(machine.done))
+                  )(machine.storeShared(lane, target, start, 32)(machine.done))
                 }
               }
             }
@@ -1471,7 +1472,12 @@ private[isa] object MachineSemantics {
               else algebra.remainder(within, algebra.literal(parts.toLong), signed = false)
             machine.withCta(ctaRankAt(algebra, machine)(copy.pair, algebra.divide(index, chunks, signed = false))) {
               owner =>
-                machine.loadChunk(owner, machine.compute(TensorMemoryLayout.Major, layout, row, part), copy.packing) {
+                machine.loadChunk(
+                  lane,
+                  owner,
+                  machine.compute(TensorMemoryLayout.Major, layout, row, part),
+                  copy.packing
+                ) {
                   data =>
                     def place(replica: Int): F[Unit] =
                       if (replica == replicas) machine.done

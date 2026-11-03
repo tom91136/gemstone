@@ -8,9 +8,10 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-/** A per-lane loop of integer ALU work over 16 groups of 256 lanes, dominated by the integer instruction paths. */
+/** A per-lane loop of integer ALU work over 16 groups of 256 lanes, dominated by the integer instruction paths.
+  */
 object PTXIntegerALUBenchmark {
-  val benchmark: Case = iterations(20).map(count => () => run(count))
+  val benchmark: Case = iterations(20).map(count => launch => run(count, launch))
 
   private val Lanes: Int > 0  = 256
   private val Groups: Int > 0 = 16
@@ -63,7 +64,7 @@ object PTXIntegerALUBenchmark {
     ((high - low) | round) & 0x7fffffff
   }
 
-  private def run(iterations: Int > 0): BenchmarkSample = {
+  private def run(iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val size     = Lanes.raw * Groups.raw
     val kernel   = VMCompiler.compile(source).fold(error => throw IllegalArgumentException(error.message), identity)
     val geometry = LaunchGeometry.forLaunch(Dimensions(Lanes, 1, 1), Dimensions(Groups, 1, 1))
@@ -71,7 +72,9 @@ object PTXIntegerALUBenchmark {
     val memory     = BenchmarkMemory(size * 4)
     val output     = memory.ids(0)
     val parameters = Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw))
-    val sample = Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, geometry, parameters, memory))
+    val sample     = Measurement.repeatSucceeding(iterations)(
+      VMInterpreter.execute(kernel, geometry, parameters, memory, launch())
+    )
     (0 until size).foreach { index =>
       if (memory.getInt(output, index * 4) != expected(index))
         throw IllegalStateException(s"unexpected result at index $index")

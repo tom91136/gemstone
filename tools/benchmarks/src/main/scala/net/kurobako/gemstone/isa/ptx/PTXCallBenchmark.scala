@@ -8,7 +8,9 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-/** Divergent nested device calls exchange per-lane results through shared memory and CTA barriers. */
+/** Divergent nested device calls exchange per-lane results through shared memory and CTA barriers. Profiling records
+  * the first launch only.
+  */
 object PTXCallBenchmark {
   private case class Options(iterations: Int > 0, calls: Int > 0, lanes: Int > 0, groups: Int > 0, workers: Int > 0)
 
@@ -19,7 +21,7 @@ object PTXCallBenchmark {
       .validate("lanes must be even and at most 1024")(value => value <= 1024 && value % 2 == 0),
     positive("groups", "Workgroups per dispatch", 16),
     workers
-  ).mapN(Options(_, _, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _, _)).map(options => launch => run(options, launch))
 
   private def source(lanes: Int > 0): String = s""".version 8.0
     .target sm_80
@@ -97,7 +99,7 @@ object PTXCallBenchmark {
       ret;
     }"""
 
-  private def run(options: Options): BenchmarkSample = {
+  private def run(options: Options, launch: LaunchControl): BenchmarkSample = {
     val kernel =
       VMCompiler.compile(source(options.lanes)).fold(error => throw IllegalArgumentException(error.message), identity)
     val geometry = LaunchGeometry.forLaunch(Dimensions(options.lanes, 1, 1), Dimensions(options.groups, 1, 1))
@@ -107,7 +109,7 @@ object PTXCallBenchmark {
     val output     = memory.ids(0)
     val parameters = PTXParameters.output(memory, output, "count": NonEmpty[String], options.calls.toLong)
     val sample     = Measurement.repeatPooled(options.iterations, options.workers)(pool =>
-      VMInterpreter.execute(kernel, geometry, parameters, memory, workgroups = pool)
+      VMInterpreter.execute(kernel, geometry, parameters, memory, control = launch(), workgroups = pool)
     )
     val oddCalls = options.calls & 1
     (0 until count).foreach { lane =>

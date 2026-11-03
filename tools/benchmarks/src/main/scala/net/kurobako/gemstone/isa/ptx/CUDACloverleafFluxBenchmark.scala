@@ -14,10 +14,10 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 object CUDACloverleafFluxBenchmark {
   val benchmark: Case =
     (positive("cells", "Cells per dispatch", 64), iterations(20)).mapN((cells, iterations) =>
-      () => run(cells, iterations)
+      launch => run(cells, iterations, launch)
     )
 
-  private def run(cells: Int > 0, iterations: Int > 0): BenchmarkSample = {
+  private def run(cells: Int > 0, iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val memory = CloverleafFluxFixture.memory(cells)
     val source = String(BenchmarkResources.bytes("cloverleaf-flux.ptx", "cuda"), StandardCharsets.UTF_8)
     val kernel = VMCompiler.compile(source).fold(error => throw IllegalArgumentException(error.message), identity)
@@ -32,7 +32,9 @@ object CUDACloverleafFluxBenchmark {
     )
     val geometry = LaunchGeometry.forLaunch(Dimensions(32, 1, 1), Dimensions(cells.ceilDiv(32), 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
-    val sample = Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, geometry, parameters, memory))
+    val sample = Measurement.repeatSucceeding(iterations)(
+      VMInterpreter.execute(kernel, geometry, parameters, memory, launch())
+    )
     CloverleafFluxFixture.verify(memory, cells)
     sample
   }

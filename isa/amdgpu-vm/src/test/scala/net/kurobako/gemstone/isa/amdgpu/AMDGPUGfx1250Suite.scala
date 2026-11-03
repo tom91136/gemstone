@@ -288,7 +288,13 @@ class AMDGPUGfx1250Suite extends Suite {
     assertEquals(decoded(gfx1250, 0x02, 0x48, 0x80, 0xbe), Instruction.SSetPc(Scalar(2)))
     assertEquals(decoded(gfx1250, 0x02, 0x49, 0x84, 0xbe), Instruction.SSwapPc(4, Scalar(2)))
     assertEquals(decoded(gfx1250, 0x08, 0x00, 0x04, 0xba), Instruction.CallRelative(4, 8))
-    assertEquals(decoded(gfx1250, 0x00, 0x00, 0xc5, 0xbf), Instruction.Wait)
     assertEquals(decoded(gfx1250, 0x01, 0x00, 0xbe, 0xbf), Instruction.Wait)
+  }
+
+  test("s_wait_xcnt decodes to the GFX12 xcnt counter") {
+    assertEquals(
+      decoded(gfx1250, 0x00, 0x00, 0xc5, 0xbf),
+      Instruction.WaitCounts(Vec(WaitCount(WaitCounter.X, 0, None)))
+    )
   }
 }

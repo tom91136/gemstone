@@ -72,12 +72,14 @@ private object LaneFaults {
         val raw = context.read(lane, address)
         VMMemoryAccess.misalignedAtomic(context, lane, raw, width) match {
           case null =>
+            val shared = VMMemoryAccess.atomicTargetsShared(space, raw, width)
+            VMObservation.atomic(context, lane, raw, width.toScalarByteWidth.toLong, shared)
             context.effects.stage(VMWrite.Atomic(
               lane,
               fetched,
               raw,
               width,
-              VMMemoryAccess.atomicTargetsShared(space, raw, width),
+              shared,
               Combined(context.read(lane, source))
             ))
             Completed

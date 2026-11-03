@@ -182,7 +182,7 @@ private[isa] object Dots {
     val c      = raw & ((1L << addend.width) - 1L)
     val pairs  = Vec((a & mask, b & mask), ((a >>> element.width) & mask, (b >>> element.width) & mask))
     def infinite(x: Long, y: Long): Boolean = element.infinite(x) || element.infinite(y)
-    val infinities = pairs.filter(infinite).map((x, y) => element.negative(x) != element.negative(y)) ++
+    val infinities = pairs.filter(infinite(_, _)).map((x, y) => element.negative(x) != element.negative(y)) ++
       (if (addend.infinite(c)) Vec(addend.negative(c)) else Vec.empty[Boolean])
     if (pairs.exists((x, y) => element.isNaN(x) || element.isNaN(y))) result.nanOperand
     else if (

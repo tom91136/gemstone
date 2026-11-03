@@ -7,10 +7,13 @@ object CubinBackend {
   val format: ProgramFormat = ProgramFormat.CUDACubin
 }
 
-class CubinBackend(workgroups: Workgroups = Workgroups.Sequential) extends Backend {
+class CubinBackend(
+    workgroups: Workgroups = Workgroups.Sequential,
+    text: Instruction => Option[String]
+) extends Backend {
   override val format: ProgramFormat = CubinBackend.format
 
   override def load(image: Vec[Byte]): Either[Fault, Backend.Program] =
     Cubin.decode(image).left.map(Fault.InvalidRequest(_))
-      .map(LoadedProgram(_, Map.empty, workgroups))
+      .map(LoadedProgram(_, Map.empty, workgroups, text))
 }

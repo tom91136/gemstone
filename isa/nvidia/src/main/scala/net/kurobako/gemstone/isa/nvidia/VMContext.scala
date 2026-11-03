@@ -39,6 +39,8 @@ private class VMContext(
   var active: VMLaneMask = VMLaneMask.Empty
   var issued: Long       = 0L
 
+  val observer: LaunchObserver | Null = device.control.observer.orNull
+
   private val sharedWindow =
     if (explicitCluster)
       VMAddressSpace.ClusterWindowBase + (workgroup.clusterRank.toLong << VMAddressSpace.ClusterRankShift)

@@ -151,10 +151,11 @@ private object VMAsyncCompiler {
         })
       case Form.CpAsyncBulkPrefetch(srcAddr = address, size = size) =>
         Some((scope.address(address), scope.value(size)).mapN((_, _) => VMIR.Instruction.NoOp))
-      case Form.CpAsyncBulkCommitGroup()    => Some(Right(VMIR.Instruction.NoOp))
+      case Form.CpAsyncBulkCommitGroup()    => Some(Right(VMIR.Instruction.AsyncCommit(bulk = true)))
       case Form.CpAsyncBulkWaitGroup(count) =>
         Some(
-          NumericLiteral.immediate(count).filter(value => value >= 0 && value <= 63).map(_ => VMIR.Instruction.NoOp)
+          NumericLiteral.immediate(count).filter(value => value >= 0 && value <= 63)
+            .map(VMIR.Instruction.AsyncWait(_, bulk = true))
             .toRight(Error.Invalid("bulk copy pending group count must be an immediate between 0 and 63"))
         )
       case copy: Form.CpAsyncBulkTensorMBarrier =>

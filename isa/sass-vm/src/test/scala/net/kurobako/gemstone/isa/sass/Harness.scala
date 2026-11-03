@@ -7,6 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction as VMInstruction
+import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.memory.*
@@ -18,6 +19,8 @@ import net.kurobako.gemstone.vm.*
   * cubin image or backend. Parameters are laid out from the launch arguments with natural alignment.
   */
 object Harness extends munit.Assertions {
+  val text: SASSInstruction => Option[String] = instruction => Printer.print(instruction).toOption
+
   def operand(text: String)(using munit.Location): Operand       = OperandParser.parse(text).value
   def operands(text: String)(using munit.Location): Vec[Operand] = OperandParser.parseMany(text).value
 
@@ -51,7 +54,7 @@ object Harness extends munit.Assertions {
       functions: Vec[DecodedFunction],
       boundSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty
   ): Either[NonEmpty[String], Vec[VMAssembler.Statement]] =
-    VMCompiler.lowerKernel(module, kernel, functions, boundSymbols).left.map(_.message).map(_._1)
+    VMCompiler.lowerKernel(module, kernel, functions, boundSymbols, text).left.map(_.message).map(_._1)
 
   def parameterBase(sm: Int): Int = if (sm < 70) 0x140 else if (sm < 90) 0x160 else if (sm < 100) 0x210 else 0x380
 
@@ -142,6 +145,7 @@ object Harness extends munit.Assertions {
         entry.parameterBase,
         size,
         parameters,
+        registerCount = entry.registers.unsafe[Int >= 0],
         requiredCluster = LaunchGeometry.Dimensions(entry.cluster, 1, 1)
       )
     }
@@ -191,7 +195,7 @@ object Harness extends munit.Assertions {
 
     def compile(parameters: Int*)(using munit.Location): Either[String, VMIR.Kernel] = {
       val image = module(Vec.from(parameters))
-      VMCompiler.compile(image, image.kernels.head, functions)
+      VMCompiler.compile(image, image.kernels.head, functions, text = text)
     }
 
     def run(
@@ -314,10 +318,10 @@ object Harness extends munit.Assertions {
         readValue(region, index.widen[Long >= 0] * width.widen[Long >= 0], width).value
       )
 
-    def run(program: VMIR.Kernel, task: KernelTask): Either[Fault, Unit] =
+    def run(program: VMIR.Kernel, task: KernelTask, control: TaskControl = TaskControl()): Either[Fault, Unit] =
       VMKernelLaunch.execute(
         program,
-        KernelLaunch(task, TaskContext(this, TaskControl(), _ => Right(())), Workgroups.Sequential)
+        KernelLaunch(task, TaskContext(this, control, _ => Right(())), Workgroups.Sequential)
       )
   }
 }

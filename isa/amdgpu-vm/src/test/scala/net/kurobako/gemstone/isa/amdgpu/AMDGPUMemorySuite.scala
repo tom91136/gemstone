@@ -469,19 +469,23 @@ class AMDGPUMemorySuite extends Suite {
     )
   }
 
-  test("RDNA dependency and scalar-memory waits decode to the synchronous VM wait") {
+  test("RDNA dependency waits decode to the synchronous wait, GFX12 kmcnt to its counter") {
     // Fixed llvm-mc encodings: dependency counter, ALU dependency, scalar-memory counter.
     for (
       (
         target,
         low,
         opcode
-      ) <- Seq((Target("gfx1010"), 0, 0xa3), (Target("gfx1100"), 1, 0x87), (Target("gfx1200"), 0, 0xc7))
+      ) <- Seq((Target("gfx1010"), 0, 0xa3), (Target("gfx1100"), 1, 0x87))
     )
       assertEquals(
         VMCompiler.decodeInstruction(Vec[Byte](low.toByte, 0, opcode.toByte, 0xbf.toByte), target),
         Right(Instruction.Wait)
       )
+    assertEquals(
+      VMCompiler.decodeInstruction(Vec[Byte](0, 0, 0xc7.toByte, 0xbf.toByte), Target("gfx1200")),
+      Right(Instruction.WaitCounts(Vec(WaitCount(WaitCounter.Km, 0, None))))
+    )
   }
 
   test("RDNA scalar loads decode bit-width names with their register count and byte offset") {

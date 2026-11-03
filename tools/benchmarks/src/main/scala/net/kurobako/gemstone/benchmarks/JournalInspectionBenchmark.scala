@@ -25,7 +25,7 @@ object JournalInspectionBenchmark {
     ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes).putInt(ExecutionRPC.ResponseMagic)
       .putInt(0).putInt(0).array()
 
-  val benchmark: Case = Opts.argument[String]("journal").map(Path.of(_)).map(file => () => run(file))
+  val benchmark: Case = Opts.argument[String]("journal").map(Path.of(_)).map(file => _ => run(file))
 
   private def run(file: Path): BenchmarkSample = {
     Using.resource(Journal.Writer(file, Journal.Header(Journal.ExecutionProfile(1000L, 1)))) { writer =>

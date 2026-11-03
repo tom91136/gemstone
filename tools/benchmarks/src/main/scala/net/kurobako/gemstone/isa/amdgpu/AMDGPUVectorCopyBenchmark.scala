@@ -21,7 +21,7 @@ object AMDGPUVectorCopyBenchmark {
     iterations(200),
     positive("groups", "Workgroups per dispatch", 1),
     Opts.option[String]("image", "AMDGPU ELF code object containing vector_copy").map(Path.of(_)).orNone
-  ).mapN((iterations, groups, image) => () => run(iterations, groups, image))
+  ).mapN((iterations, groups, image) => launch => run(iterations, groups, image, launch))
 
   private val Words = Vec[Long](
     0xc0020242L, 0x00000004L, 0xc0020283L, 0x00000018L,
@@ -41,7 +41,7 @@ object AMDGPUVectorCopyBenchmark {
       .fold(error => throw IllegalArgumentException(error.message), identity)
   )
 
-  private def run(iterations: Int > 0, groups: Int > 0, image: Option[Path]): BenchmarkSample = {
+  private def run(iterations: Int > 0, groups: Int > 0, image: Option[Path], launch: LaunchControl): BenchmarkSample = {
     val elements = Math.multiplyExact(groups, 64)
     val prepared =
       VMCompiler().compile(kernel(image)).fold(failure => throw RuntimeException(failure.message), identity)
@@ -59,7 +59,7 @@ object AMDGPUVectorCopyBenchmark {
       memory.ids.map(KernelTask.Argument.Memory(_, 0L)) ++
         hidden.refine[NonEmpty[Vec[Byte]]].toOption.map(KernelTask.Argument.Scalar(_))
     ).fold(message => throw IllegalArgumentException(message), identity)
-    val sample = SequentialDispatch.repeat(iterations, prepared, dispatch, memory)
+    val sample = SequentialDispatch.repeat(iterations, prepared, dispatch, memory, launch)
     (0 until elements).foreach { index =>
       val observed = memory.getInt(output, index * 4)
       if (observed != index * 97 - 11) throw IllegalStateException(s"copy mismatch at $index: $observed")

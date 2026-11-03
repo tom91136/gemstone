@@ -10,6 +10,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
@@ -168,9 +169,53 @@ private object VMMemory {
     var helperInvocation: Boolean                     = false
     var invocation: Arena                             = Arena()
     var workgroup: Array[Byte]                        = Array.emptyByteArray
+    var observer: LaunchObserver | Null               = null
+    var lane: Int >= 0                                = 0
     private val descriptors                           = mutable.HashMap.empty[(Long, Int), Long]
     private def suppressed(pointer: Pointer): Boolean =
       helperInvocation && pointer.storageClass != StorageClass.Output && storage(pointer.address) == null
+
+    def observe(next: LaunchObserver, nextLane: Int >= 0): Unit = {
+      observer = next
+      lane = nextLane
+    }
+
+    def unobserve(): Unit = observer = null
+
+    def asynchronous(kind: LaunchObserver.AsyncKind, target: Long, bytes: Long): Unit =
+      if (observer != null) observer.nn.asynchronous(lane, kind, target, bytes)
+
+    private def reads(kind: LaunchObserver.AccessKind): Boolean = kind == LaunchObserver.AccessKind.Read
+
+    private def space(pointer: Pointer, kind: LaunchObserver.AccessKind): Space = aperture(pointer.address) match {
+      case WorkgroupAperture => Space.Shared
+      case PrivateAperture   => Space.Local
+      case _                 => pointer.storageClass match {
+          case StorageClass.Uniform | StorageClass.PushConstant | StorageClass.UniformConstant if reads(kind) =>
+            Space.Constant
+          case _ => Space.Global
+        }
+    }
+
+    private def watch(pointer: Pointer, size: Int, kind: LaunchObserver.AccessKind): Unit =
+      if (
+        pointer.storageClass != StorageClass.Input && pointer.storageClass != StorageClass.Output &&
+        !outsideBounds(pointer, size.toLong) && (reads(kind) || !suppressed(pointer))
+      ) {
+        val resolved = space(pointer, kind)
+        val address  =
+          if (resolved == Space.Shared || resolved == Space.Local) offsetOf(pointer.address).raw else pointer.address
+        observer.nn.access(lane, resolved, kind, address, size.unsafe[Int >= 0])
+      }
+
+    private def seen[E, A](
+        pointer: Pointer,
+        size: Int,
+        kind: LaunchObserver.AccessKind
+    )(result: Either[E, A]): Either[E, A] = {
+      if (observer != null && result.isRight) watch(pointer, size, kind)
+      result
+    }
 
     private def storage(address: Long): Array[Byte] | Null = aperture(address) match {
       case PrivateAperture   => invocation.bytes
@@ -223,22 +268,25 @@ private object VMMemory {
     }
 
     def read(pointer: Pointer, size: Int >= 0): AddressSpace.ReadResult[Array[Byte]] =
-      if (outsideBounds(pointer, size.raw)) Right(Array.ofDim[Byte](size))
-      else {
-        val bytes = storage(pointer.address)
-        if (bytes != null)
-          start(bytes, pointer.address, size).map(at => java.util.Arrays.copyOfRange(bytes, at, at + size))
-        else
-          guest(pointer.address, size, "read through") match {
-            case Left(fault)                                     => Left(fault)
-            case Right(AddressSpace.Location.Within(id, offset)) => memory.readDeferred(id, offset, size).map(_.toArray)
-            case Right(AddressSpace.Location.Absolute(address))  => memory.readDeferred(address, size).map(_.toArray)
-          }
-      }
+      seen(pointer, size.raw, LaunchObserver.AccessKind.Read)(
+        if (outsideBounds(pointer, size.raw)) Right(Array.ofDim[Byte](size))
+        else {
+          val bytes = storage(pointer.address)
+          if (bytes != null)
+            start(bytes, pointer.address, size).map(at => java.util.Arrays.copyOfRange(bytes, at, at + size))
+          else
+            guest(pointer.address, size, "read through") match {
+              case Left(fault)                                     => Left(fault)
+              case Right(AddressSpace.Location.Within(id, offset)) =>
+                memory.readDeferred(id, offset, size).map(_.toArray)
+              case Right(AddressSpace.Location.Absolute(address)) => memory.readDeferred(address, size).map(_.toArray)
+            }
+        }
+      )
 
     /** Reads a scalar from dispatch-owned storage into `registers(slot)`; false leaves it to [[readScalar]]. */
-    def readLocalScalar(pointer: Pointer, size: Int in 1 ~ 8, registers: Array[Long], slot: Int): Boolean =
-      !outsideBounds(pointer, size.raw) && {
+    def readLocalScalar(pointer: Pointer, size: Int in 1 ~ 8, registers: Array[Long], slot: Int): Boolean = {
+      val read = !outsideBounds(pointer, size.raw) && {
         val bytes = storage(pointer.address)
         bytes != null && {
           val at = offsetIn(bytes, pointer.address, size)
@@ -248,9 +296,14 @@ private object VMMemory {
           }
         }
       }
+      if (read && observer != null) watch(pointer, size.raw, LaunchObserver.AccessKind.Read)
+      read
+    }
 
     def readScalar(pointer: Pointer, size: Int in 1 ~ 8): AddressSpace.ReadResult[Long] =
-      if (outsideBounds(pointer, size.raw)) Right(0L) else load(pointer.address, size)
+      seen(pointer, size.raw, LaunchObserver.AccessKind.Read)(
+        if (outsideBounds(pointer, size.raw)) Right(0L) else load(pointer.address, size)
+      )
 
     private def load(address: Long, size: Int in 1 ~ 8): AddressSpace.ReadResult[Long] = {
       val bytes = storage(address)
@@ -302,20 +355,25 @@ private object VMMemory {
       }
 
     def write(pointer: Pointer, bytes: Array[Byte]): Either[Fault, Unit] =
-      if (suppressed(pointer) || outsideBounds(pointer, bytes.length)) Right(())
-      else {
-        val target = storage(pointer.address)
-        if (target != null)
-          start(target, pointer.address, bytes.length).map(at => Array.copy(bytes, 0, target, at, bytes.length))
-        else if (pointer.address == 0L) Left(nullWrite(pointer))
+      seen(pointer, bytes.length, LaunchObserver.AccessKind.Write)(
+        if (suppressed(pointer) || outsideBounds(pointer, bytes.length)) Right(())
         else {
-          val data = Vec.from(bytes)
-          forgetRelocations(pointer.address, data.nonNegativeSize)
-          memory.write(GuestAddress(pointer.address), data)
+          val target = storage(pointer.address)
+          if (target != null)
+            start(target, pointer.address, bytes.length).map(at => Array.copy(bytes, 0, target, at, bytes.length))
+          else if (pointer.address == 0L) Left(nullWrite(pointer))
+          else {
+            val data = Vec.from(bytes)
+            forgetRelocations(pointer.address, data.nonNegativeSize)
+            memory.write(GuestAddress(pointer.address), data)
+          }
         }
-      }
+      )
 
     def writeScalar(pointer: Pointer, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
+      seen(pointer, size.raw, LaunchObserver.AccessKind.Write)(overwrite(pointer, value, size))
+
+    private def overwrite(pointer: Pointer, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
       if (suppressed(pointer) || outsideBounds(pointer, size.raw)) AddressSpace.Ready
       else {
         val target = storage(pointer.address)
@@ -338,30 +396,34 @@ private object VMMemory {
       * Private storage also keeps the descriptor metadata that the address bits cannot carry.
       */
     def writePointer(target: Pointer, source: Pointer): Either[Fault, Unit] =
-      writeScalar(target, source.address, 8).flatMap { _ =>
-        if (suppressed(target) || outsideBounds(target, 8)) Right(())
-        else if (aperture(target.address) == PrivateAperture) {
-          if (
-            source.bounds.isEmpty && source.descriptors.isEmpty && source.sampler.isEmpty && source.matrixLayout.isEmpty
-          )
-            invocation.pointers -= target.address
-          else invocation.pointers.update(target.address, source)
-          Right(())
-        } else if (storage(target.address) != null) Right(())
-        else
-          guest(target.address, 8, "write through").flatMap {
-            case AddressSpace.Location.Within(destination, offset) if !memory.hasNativePointers(destination) =>
-              val located =
-                if (storage(source.address) != null || source.address == 0L) None
-                else memory.locate(GuestAddress(source.address), 0).toOption
-              located match {
-                case Some(AddressSpace.Location.Within(allocation, targetOffset)) =>
-                  shared.handler(Event.PointerRelocation(destination, offset, allocation, targetOffset))
-                case _ => Right(())
-              }
-            case _ => Right(())
-          }
-      }
+      writeScalar(target, source.address, 8).flatMap(_ => track(target, source))
+
+    private def relocate(target: Pointer, source: Pointer): Either[Fault, Unit] =
+      overwrite(target, source.address, 8).flatMap(_ => track(target, source))
+
+    private def track(target: Pointer, source: Pointer): Either[Fault, Unit] =
+      if (suppressed(target) || outsideBounds(target, 8)) Right(())
+      else if (aperture(target.address) == PrivateAperture) {
+        if (
+          source.bounds.isEmpty && source.descriptors.isEmpty && source.sampler.isEmpty && source.matrixLayout.isEmpty
+        )
+          invocation.pointers -= target.address
+        else invocation.pointers.update(target.address, source)
+        Right(())
+      } else if (storage(target.address) != null) Right(())
+      else
+        guest(target.address, 8, "write through").flatMap {
+          case AddressSpace.Location.Within(destination, offset) if !memory.hasNativePointers(destination) =>
+            val located =
+              if (storage(source.address) != null || source.address == 0L) None
+              else memory.locate(GuestAddress(source.address), 0).toOption
+            located match {
+              case Some(AddressSpace.Location.Within(allocation, targetOffset)) =>
+                shared.handler(Event.PointerRelocation(destination, offset, allocation, targetOffset))
+              case _ => Right(())
+            }
+          case _ => Right(())
+        }
 
     def readPointer(source: Pointer, pointee: Int, storageClass: Int): AddressSpace.ReadResult[Pointer] =
       readScalar(source, 8).map { address =>
@@ -392,14 +454,14 @@ private object VMMemory {
             val described = invocation.pointers.view.filter { case (key, pointer) =>
               key >= origin.address && key - origin.address <= span && load(key, 8).contains(pointer.address)
             }.toVector
-            described.traverse_ { case (key, pointer) => writePointer(moved(key - origin.address), pointer) }
+            described.traverse_ { case (key, pointer) => relocate(moved(key - origin.address), pointer) }
           } else if (storage(origin.address) != null || origin.address == 0L || shared.pointers.isEmpty) Right(())
           else
             memory.locate(GuestAddress(origin.address), size) match {
               case Right(AddressSpace.Location.Within(id, offset)) if !memory.hasNativePointers(id) =>
                 relocations(id, offset, span).traverse_ { case (at, target) =>
                   addressOf(target).flatMap(address =>
-                    writePointer(moved(at), Pointer(address, 0, StorageClass.CrossWorkgroup))
+                    relocate(moved(at), Pointer(address, 0, StorageClass.CrossWorkgroup))
                   )
                 }
               case _ => Right(())
@@ -430,6 +492,9 @@ private object VMMemory {
       }
 
     def atomicReadScalar(pointer: Pointer, size: Int in 1 ~ 8): Either[Fault, Long] =
+      seen(pointer, size.raw, LaunchObserver.AccessKind.Atomic)(atomicRead(pointer, size))
+
+    private def atomicRead(pointer: Pointer, size: Int in 1 ~ 8): Either[Fault, Long] =
       if (outsideBounds(pointer, size.raw)) Right(0L)
       else if (misaligned(pointer, size)) Left(misalignedAtomic(pointer, size))
       else {
@@ -459,6 +524,9 @@ private object VMMemory {
       atomicModifyScalar(pointer, size)(_ => value).map(_ => ())
 
     def atomicModifyScalar(pointer: Pointer, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
+      seen(pointer, size.raw, LaunchObserver.AccessKind.Atomic)(atomicModify(pointer, size)(update))
+
+    private def atomicModify(pointer: Pointer, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
       if (suppressed(pointer) || outsideBounds(pointer, size.raw)) Right(0L)
       else if (misaligned(pointer, size)) Left(misalignedAtomic(pointer, size))
       else {

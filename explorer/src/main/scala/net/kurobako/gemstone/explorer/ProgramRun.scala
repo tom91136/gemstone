@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.isa.spirv.Validation as SPIRVValidation
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -54,23 +55,40 @@ object ProgramRun {
         memory: ArrayMemory,
         allocations: Vec[AllocationId],
         failure: Option[Fault],
-        complete: Boolean
-    ): Run = new Run(trace, memory, allocations, failure, complete)
+        complete: Boolean,
+        stream: ProfileStream,
+        architecture: Architecture
+    ): Run = new Run(trace, memory, allocations, failure, complete, stream, architecture)
   }
 
-  /** One launch: the trace it recorded, the memory its allocation arguments bound, and the fault that ended it. */
+  /** One launch: the trace it recorded, the memory its allocation arguments bound, the fault that ended it, and the
+    * profile of the launch under `architecture`. [[profiled]] measures the same launch under another architecture.
+    */
   class Run(
       val trace: Trace,
       val memory: ArrayMemory,
       val allocations: Vec[AllocationId],
       val failure: Option[Fault],
-      val complete: Boolean
-  )
+      val complete: Boolean,
+      val stream: ProfileStream,
+      val architecture: Architecture
+  ) {
+    lazy val profile: Profile = Profiler.run(stream, architecture)
+
+    def profiled(other: Architecture): Profile =
+      if (other == architecture) profile else Profiler.run(stream, other)
+  }
+
+  /** The architecture whose models profile a launch of `language` unless another is chosen. */
+  def defaultArchitecture(language: Language): Architecture = language match {
+    case Language.AMDGPU                               => Architecture.amdgpuDefault
+    case Language.PTX | Language.SASS | Language.SPIRV => Architecture.nvidiaDefault
+  }
 
   /** The backends that load `language`, in the order to try them. SPIR-V modules validate against one environment. */
   private def backends(language: Language): Vec[Backend] = language match {
-    case Language.PTX    => Vec(PTXBackend())
-    case Language.SASS   => Vec(CubinBackend())
+    case Language.PTX    => Vec(PTXBackend(text = instruction => Some(ptx.asm.Printer.render(instruction))))
+    case Language.SASS   => Vec(CubinBackend(text = instruction => sass.asm.Printer.print(instruction).toOption))
     case Language.AMDGPU => Vec(AMDGPUBackend())
     case Language.SPIRV  =>
       Vec(
@@ -181,16 +199,20 @@ object ProgramRun {
   ): Run = {
     val allocations = arguments.collect { case KernelTask.Argument.Memory(region, _, _) => region }.distinct
     val recording   = Recording()
+    val profiler    = ProfileRecorder()
     val result      = for {
       task   <- KernelTask.validated(kernel, group, count, arguments).left.map(_.raw)
-      events <- Device(BackendRegistry(Vec(loaded.backend)), memory).launch(loaded.program, task, Some(recording))
+      events <- Device(BackendRegistry(Vec(loaded.backend)), memory)
+        .launch(loaded.program, task, Some(LaunchObserver.both(recording, profiler)))
     } yield events
     Run(
       recording.trace,
       memory,
       allocations,
       result.swap.toOption.collect { case fault: Fault => fault },
-      recording.complete
+      recording.complete,
+      profiler.stream,
+      defaultArchitecture(loaded.image.language)
     )
   }
 

@@ -11,6 +11,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchObserver.*
 import scala.collection.mutable
 
 private[isa] object VMMachineOps {
@@ -160,22 +161,18 @@ private[isa] object VMMachineOps {
     LaneFaults.everyLane(context)(VMBuiltins.execute(context, _, builtin, returns, parameters))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def setupConvergence(context: VMContext, token: Register): Unit = {
-    val masks = Array.ofDim[Long]((context.workgroup.laneCount + 31) / 32)
-    context.active.foreachLane { lane =>
-      masks(lane >> 5) |= 1L << (lane & 31)
+  def setupConvergence(context: VMContext, token: Register): Unit =
+    context.active.foreachWarp { (warp, bits) =>
+      val created = context.workgroup.createConvergence(warp.unsafe[WorkgroupLane.WarpBase], bits)
+      var lanes   = bits
+      while (lanes != 0L) {
+        context.lane(WorkgroupLane.fromIndex(warp + java.lang.Long.numberOfTrailingZeros(lanes))).setRegister(
+          token,
+          created
+        )
+        lanes &= lanes - 1L
+      }
     }
-    val tokens = Array.ofDim[Long](masks.length)
-    var warp   = 0
-    while (warp < masks.length) {
-      if (masks(warp) != 0L) tokens(warp) = context.workgroup.createConvergence(
-        (warp << 5).unsafe[WorkgroupLane.WarpBase],
-        masks(warp)
-      )
-      warp += 1
-    }
-    context.active.foreachLane(lane => context.lane(lane).setRegister(token, tokens(lane >> 5)))
-  }
 
   def leaveConvergence(context: VMContext, token: Register): Unit =
     context.active.foreachLane(lane =>
@@ -185,6 +182,8 @@ private[isa] object VMMachineOps {
         (lane & 31).unsafe[WarpLane]
       )
     )
+
+  def yieldLanes(context: VMContext): Unit = context.workgroup.yieldLanes(context.active)
 
   def barrierTarget(rawBarrier: Long, rawExpected: Long, blocking: Boolean)
       : Either[Fault, (BarrierId, BarrierCount)] = {
@@ -464,6 +463,16 @@ private[isa] class VMMachineOps(val context: VMContext)
 
   inline def fenceHost: Flow[Step] = context.device.memory.fenceHostMemory().map(_ => Step.Advance)
 
+  inline def asyncCommit(bulk: Boolean)(inline next: => Flow[Step]): Flow[Step] = {
+    VMObservation.groups(context, AsyncKind.Commit, bulk, 0L)
+    next
+  }
+
+  inline def asyncWait(count: Long, bulk: Boolean)(inline next: => Flow[Step]): Flow[Step] = {
+    VMObservation.groups(context, AsyncKind.WaitGroups, bulk, count)
+    next
+  }
+
   inline def callBuiltin(builtin: Builtin, returns: Vec[Parameter], parameters: Vec[Parameter])(
       inline next: => Flow[Step]
   ): Flow[Step] = VMMachineOps.callBuiltin(context, builtin, returns, parameters) match {
@@ -480,6 +489,11 @@ private[isa] class VMMachineOps(val context: VMContext)
 
   inline def leaveConvergence(token: Register)(inline next: => Flow[Step]): Flow[Step] = {
     VMMachineOps.leaveConvergence(context, token)
+    next
+  }
+
+  inline def yieldLanes(inline next: => Flow[Step]): Flow[Step] = {
+    VMMachineOps.yieldLanes(context)
     next
   }
 
@@ -508,33 +522,56 @@ private[isa] class VMMachineOps(val context: VMContext)
       inline next: Long => Flow[A]
   ): Flow[A] =
     if (space eq Space.Constant) Left(VMMachineOps.constantFault)
-    else
+    else {
+      VMObservation.access(
+        context,
+        lane,
+        AccessKind.Read,
+        VMMachineOps.access(space),
+        address,
+        width.toScalarByteWidth.toLong
+      )
       VMMemoryAccess.loadValue(context, lane, VMMachineOps.access(space), address, width) match {
         case Left(fault) => Left(fault)
         case _           => next(context.scalar.elem)
       }
+    }
 
   inline def store[A](lane: WorkgroupLane, inline space: Space, address: Long, value: Long, width: ScalarBitWidth)(
       inline next: => Flow[A]
   ): Flow[A] =
     if (space eq Space.Constant) Left(VMMachineOps.constantFault)
     else {
+      VMObservation.access(
+        context,
+        lane,
+        AccessKind.Write,
+        VMMachineOps.access(space),
+        address,
+        width.toScalarByteWidth.toLong
+      )
       VMMemoryAccess.stageStore(context, context.effects, lane, VMMachineOps.access(space), address, width, value)
       next
     }
 
   inline def loadBytes[A](lane: WorkgroupLane, inline space: Space, address: Long, length: Long, what: String)(
       inline next: Array[Byte] => Flow[A]
-  ): Flow[A] = VMMachineOps.readBytes(context, lane, space, address, length.toInt, what) match {
-    case Left(fault) => Left(fault)
-    case Right(data) => next(data)
+  ): Flow[A] = {
+    VMObservation.access(context, lane, AccessKind.Read, VMMachineOps.access(space), address, length)
+    VMMachineOps.readBytes(context, lane, space, address, length.toInt, what) match {
+      case Left(fault) => Left(fault)
+      case Right(data) => next(data)
+    }
   }
 
   inline def storeBytes[A](lane: WorkgroupLane, inline space: Space, address: Long, data: Array[Byte], what: String)(
       inline next: => Flow[A]
-  ): Flow[A] = VMMachineOps.writeBytes(context, lane, space, address, data, what) match {
-    case Left(fault) => Left(fault)
-    case _           => next
+  ): Flow[A] = {
+    VMObservation.access(context, lane, AccessKind.Write, VMMachineOps.access(space), address, data.length.toLong)
+    VMMachineOps.writeBytes(context, lane, space, address, data, what) match {
+      case Left(fault) => Left(fault)
+      case _           => next
+    }
   }
 
   inline def compute(primitive: Primitive[Primitive.Unary], first: Long): Long = primitive.function(first)
@@ -660,12 +697,25 @@ private[isa] class VMMachineOps(val context: VMContext)
     result
   }
 
-  inline def storeShared(address: Long, value: Long, width: ScalarBitWidth)(inline next: => Flow[Unit]): Flow[Unit] = {
+  inline def storeShared(
+      lane: WorkgroupLane,
+      address: Long,
+      value: Long,
+      width: ScalarBitWidth
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Write, address, width.toScalarByteWidth.toLong)
     context.effects.stageShared(address, width, value)
     next
   }
 
-  inline def storeSharedBytes(address: Long, data: Array[Byte], size: Long)(inline next: => Flow[Unit]): Flow[Unit] = {
+  inline def storeSharedBytes(
+      lane: WorkgroupLane,
+      address: Long,
+      data: Array[Byte],
+      size: Long
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Write, address, size)
+    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, size)
     var offset = 0L
     while (offset < size) {
       context.effects.stageShared(address + offset, 8, if (offset < data.length) data(offset.toInt).toLong else 0L)
@@ -674,50 +724,76 @@ private[isa] class VMMachineOps(val context: VMContext)
     next
   }
 
-  inline def storeCluster(cta: VMWorkgroup, offset: Long, data: Array[Byte])(inline next: => Flow[Unit]): Flow[Unit] = {
+  inline def storeCluster(
+      lane: WorkgroupLane,
+      cta: VMWorkgroup,
+      offset: Long,
+      data: Array[Byte]
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Write, offset, data.length.toLong)
     cta.writeSharedBytes(offset, data, 0, data.length)
     next
   }
 
-  inline def completeTx(cta: VMWorkgroup, barrier: Long, bytes: Long)(inline next: => Flow[Unit]): Flow[Unit] =
+  inline def completeTx(
+      lane: WorkgroupLane,
+      cta: VMWorkgroup,
+      barrier: Long,
+      bytes: Long
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.transfer(context, lane, cta, barrier, bytes)
     VMAsync.complete(cta, barrier, bytes) match {
       case Left(fault) => Left(fault)
       case _           => next
     }
+  }
 
   inline def sameCta(first: VMWorkgroup, second: VMWorkgroup): Long = if (first eq second) 1L else 0L
 
-  inline def clearCluster(cta: VMWorkgroup, offset: Long, bytes: Long)(inline next: => Flow[Unit]): Flow[Unit] = {
+  inline def clearCluster(
+      lane: WorkgroupLane,
+      cta: VMWorkgroup,
+      offset: Long,
+      bytes: Long
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Write, offset, bytes)
     cta.writeSharedBytes(offset, Array.ofDim(bytes.toInt), 0, bytes.toInt)
     next
   }
 
-  inline def storeWord(cta: VMWorkgroup, offset: Long, value: Long, width: ScalarBitWidth)(
+  inline def storeWord(lane: WorkgroupLane, cta: VMWorkgroup, offset: Long, value: Long, width: ScalarBitWidth)(
       inline next: => Flow[Unit]
   ): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Write, offset, width.toScalarByteWidth.toLong)
     cta.writeShared(offset, width, value)
     next
   }
 
   inline def reduceWord(
+      lane: WorkgroupLane,
       cta: VMWorkgroup,
       offset: Long,
       operand: Long,
       width: ScalarBitWidth,
       operation: AtomicOperation
   )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Atomic, offset, width.toScalarByteWidth.toLong)
     cta.writeShared(offset, width, operation(cta.readShared(offset, width), operand, width))
     next
   }
 
   inline def reduceBytes(
+      lane: WorkgroupLane,
       cta: VMWorkgroup,
       offset: Long,
       data: Array[Byte],
       copy: Instruction.AsyncBulkReduce
-  )(inline next: => Flow[Unit]): Flow[Unit] = VMAsync.reduceShared(cta, offset, data, copy) match {
-    case Left(fault) => Left(fault)
-    case _           => next
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Atomic, offset, data.length.toLong)
+    VMAsync.reduceShared(cta, offset, data, copy) match {
+      case Left(fault) => Left(fault)
+      case _           => next
+    }
   }
 
   inline def reduceGlobal(
@@ -725,16 +801,22 @@ private[isa] class VMMachineOps(val context: VMContext)
       address: Long,
       data: Array[Byte],
       copy: Instruction.AsyncBulkReduce
-  )(inline next: => Flow[Unit]): Flow[Unit] =
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.global(context, lane, AccessKind.Atomic, address, data.length.toLong)
+    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, data.length.toLong)
     VMAsync.reduceGlobal(context, lane, address, data, copy) match {
       case Left(fault) => Left(fault)
       case _           => next
     }
+  }
 
   @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   inline def storeGlobalMasked(lane: WorkgroupLane, destination: Long, source: Long, bytes: Long, mask: Long)(
       inline next: => Flow[Unit]
   ): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Read, source, bytes)
+    VMObservation.global(context, lane, AccessKind.Write, destination, bytes)
+    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, bytes)
     VMAsync.storeMasked(context, lane, destination, source, bytes, mask)
     next
   }
@@ -775,7 +857,8 @@ private[isa] class VMMachineOps(val context: VMContext)
   inline def eachRun(transfer: Array[Byte])(inline each: Long => Flow[Unit])(inline next: => Flow[Unit]): Flow[Unit] =
     eachIndex(TensorLayout.fact(transfer, TensorLayout.Fact.Runs))(each)(next)
 
-  inline def loadRun(lane: WorkgroupLane, transfer: Array[Byte], run: Long)(inline next: => Flow[Unit]): Flow[Unit] =
+  inline def loadRun(lane: WorkgroupLane, transfer: Array[Byte], run: Long)(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.run(context, lane, AccessKind.Read, transfer, run)
     TensorLayout.loadRun(
       context.device.memory,
       transfer,
@@ -784,8 +867,10 @@ private[isa] class VMMachineOps(val context: VMContext)
       case Left(fault) => Left(fault)
       case _           => next
     }
+  }
 
-  inline def storeRun(lane: WorkgroupLane, transfer: Array[Byte], run: Long)(inline next: => Flow[Unit]): Flow[Unit] =
+  inline def storeRun(lane: WorkgroupLane, transfer: Array[Byte], run: Long)(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.run(context, lane, AccessKind.Write, transfer, run)
     TensorLayout.storeRun(
       context.device.memory,
       transfer,
@@ -794,22 +879,38 @@ private[isa] class VMMachineOps(val context: VMContext)
       case Left(fault) => Left(fault)
       case _           => next
     }
+  }
 
   inline def reduceRun(lane: WorkgroupLane, transfer: Array[Byte], run: Long, operator: TensorMap.Reduction)(
       inline next: => Flow[Unit]
-  ): Flow[Unit] =
+  ): Flow[Unit] = {
+    VMObservation.run(context, lane, AccessKind.Atomic, transfer, run)
     TensorLayout.reduceRun(context.device.memory, transfer, run.toInt, operator)
       .leftMap(VMWriteBuffer.located(_, context.pc, lane)) match {
       case Left(fault) => Left(fault)
       case _           => next
     }
+  }
 
-  inline def placeBox(cta: VMWorkgroup, start: Long, transfer: Array[Byte])(inline next: => Flow[Unit]): Flow[Unit] = {
+  inline def placeBox(
+      lane: WorkgroupLane,
+      cta: VMWorkgroup,
+      start: Long,
+      transfer: Array[Byte]
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.box(context, lane, AccessKind.Write, start, transfer)
     TensorLayout.place(transfer, start)((offset, from, count) => cta.writeSharedBytes(offset, transfer, from, count))
     next
   }
 
-  inline def fetchBox(cta: VMWorkgroup, start: Long, transfer: Array[Byte])(inline next: => Flow[Unit]): Flow[Unit] = {
+  inline def fetchBox(
+      lane: WorkgroupLane,
+      cta: VMWorkgroup,
+      start: Long,
+      transfer: Array[Byte]
+  )(inline next: => Flow[Unit]): Flow[Unit] = {
+    VMObservation.box(context, lane, AccessKind.Read, start, transfer)
+    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, TensorLayout.fact(transfer, TensorLayout.Fact.Bytes))
     TensorLayout.place(transfer, start)((offset, from, count) => cta.readSharedBytes(offset, transfer, from, count))
     next
   }
@@ -857,21 +958,28 @@ private[isa] class VMMachineOps(val context: VMContext)
   )(inline next: Long => Flow[Unit]): Flow[Unit] =
     VMAsync.mbarrier(context, barrier).flatMap(_.arrive(count, bytes, drop, complete)) match {
       case Left(fault)  => Left(fault)
-      case Right(token) => next(token)
+      case Right(token) =>
+        VMObservation.barrier(context, lane, AsyncKind.Arrive, barrier, bytes)
+        next(token)
     }
 
   inline def mbarrierTransaction(lane: WorkgroupLane, barrier: Long, bytes: Long, complete: Boolean)(
       inline next: => Flow[Unit]
   ): Flow[Unit] = VMMachineOps.mbarrierTransaction(context, barrier, bytes, complete) match {
     case Left(fault) => Left(fault)
-    case _           => next
+    case _           =>
+      VMObservation.barrier(context, lane, if (complete) AsyncKind.Complete else AsyncKind.Expect, barrier, bytes)
+      next
   }
 
   inline def mbarrierTest(lane: WorkgroupLane, barrier: Long, phase: Long, parity: Boolean)(
       inline next: Long => Flow[Unit]
-  ): Flow[Unit] = VMMachineOps.mbarrierTest(context, barrier, phase, parity) match {
-    case Left(fault)     => Left(fault)
-    case Right(complete) => next(if (complete) 1L else 0L)
+  ): Flow[Unit] = {
+    VMObservation.barrier(context, lane, AsyncKind.Wait, barrier, phase)
+    VMMachineOps.mbarrierTest(context, barrier, phase, parity) match {
+      case Left(fault)     => Left(fault)
+      case Right(complete) => next(if (complete) 1L else 0L)
+    }
   }
 
   inline def writePredicate(lane: WorkgroupLane, target: Predicate, value: Long)(
@@ -1028,7 +1136,10 @@ private[isa] class VMMachineOps(val context: VMContext)
     next(if (held) 1L else 0L)
   }
 
-  inline def loadChunk(cta: VMWorkgroup, offset: Long, packing: Matrix.Packing)(
+  inline def loadChunk(lane: WorkgroupLane, cta: VMWorkgroup, offset: Long, packing: Matrix.Packing)(
       inline next: Array[Byte] => Flow[Unit]
-  ): Flow[Unit] = next(packing.unpack(VMTensorMemory.chunk(cta, offset)))
+  ): Flow[Unit] = {
+    VMObservation.shared(context, lane, AccessKind.Read, offset, 16L)
+    next(packing.unpack(VMTensorMemory.chunk(cta, offset)))
+  }
 }

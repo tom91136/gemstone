@@ -24,7 +24,7 @@ object SessionMemoryBenchmark {
     positive("allocations", "Registered allocations to rotate through", 128),
     positive("workers", "Concurrent memory clients", 4),
     Opts.flag("shared", help = "Contend on the same words instead of independent cache lines").orFalse
-  ).mapN(Options(_, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _)).map(options => _ => run(options))
 
   private def checked[E, A](result: Either[E, A]): A =
     result.fold(error => throw IllegalStateException(error.toString), identity)

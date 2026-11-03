@@ -13,7 +13,7 @@ import net.kurobako.gemstone.isa.amdgpu.*
 object AMDGPUProgramLifecycleBenchmark {
   val benchmark: Case =
     (Opts.option[String]("image", help = "AMDGPU ELF code-object file").map(Path.of(_)), iterations(10))
-      .mapN((image, iterations) => () => run(image, iterations))
+      .mapN((image, iterations) => _ => run(image, iterations))
 
   private def run(path: Path, iterations: Int > 0): BenchmarkSample = {
     val image               = Vec.unsafeWrapArray(Files.readAllBytes(path))

@@ -678,9 +678,10 @@ lazy val benchmarks = module(projectMatrix.in(file("tools/benchmarks")))
     Compile / run / fork      := true,
     generateBenchmarkFixtures := {
       val selected = Def.spaceDelimited("[cuda|hip|hsa|opencl]").parsed.headOption.getOrElse("fixtures")
-      val output   = projectMatrixBaseDirectory.value.toPath / "target/generated-fixtures"
+      val base     = (LocalRootProject / baseDirectory).value.toPath.resolve(projectMatrixBaseDirectory.value.toPath)
+      val output   = base / "target/generated-fixtures"
       val _        = CMake.build(
-        projectMatrixBaseDirectory.value.toPath / "fixtures",
+        base / "fixtures",
         (LocalRootProject / baseDirectory).value.toPath / "target/benchmarks/fixtures",
         Seq(
           s"-DCONTAINER_EXECUTABLE=$containerExecutable",
@@ -698,6 +699,8 @@ lazy val benchmarks = module(projectMatrix.in(file("tools/benchmarks")))
     scalaVersions = Seq(scala3Version),
     axisValues = Seq.empty,
     configure = _.settings(
+      Compile / run / baseDirectory := (LocalRootProject / baseDirectory).value,
+      Test / baseDirectory          := (LocalRootProject / baseDirectory).value,
       Compile / run / javaOptions ++= Seq("-Xms512m", "-Xmx4g", "--sun-misc-unsafe-memory-access=allow")
     )
   )

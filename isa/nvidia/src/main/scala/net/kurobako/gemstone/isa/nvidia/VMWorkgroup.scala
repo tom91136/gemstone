@@ -145,6 +145,22 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
     convergence(key) = convergence.getOrElse(key, 0L) & ~(1L << lane)
   }
 
+  def yieldLane(warp: WorkgroupLane.WarpBase, lane: WarpLane): Unit = yieldLanes(warp, 1L << lane)
+
+  def yieldLanes(warp: WorkgroupLane.WarpBase, lanes: Long): Unit = {
+    val owner = warp.toLong << 32
+    convergence.foreachKey { key =>
+      if ((key & ~0xffffffffL) == owner)
+        convergence(key) = convergence(key) & ~lanes: @SuppressWarnings(Array("bonsai:loop-boxing"))
+    }
+  }
+
+  /** Every lane of `lanes` leaves the convergence barriers of its warp. */
+  def yieldLanes(lanes: VMLaneMask): Unit = convergence.foreachKey { key =>
+    val bits = lanes.warpBits((key >>> 32).toInt)
+    if (bits != 0L) convergence(key) = convergence(key) & ~bits: @SuppressWarnings(Array("bonsai:loop-boxing"))
+  }
+
   def completeConvergence(warp: WorkgroupLane.WarpBase, token: Long): Unit = {
     val _ = convergence.subtractOne(convergenceKey(warp, token))
   }

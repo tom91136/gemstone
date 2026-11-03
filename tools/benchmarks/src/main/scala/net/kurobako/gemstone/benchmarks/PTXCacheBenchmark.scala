@@ -22,7 +22,7 @@ object PTXCacheBenchmark {
     positive("images", "Distinct images shared by clients", 8),
     positive("iterations", "Load/unload rounds per client", 10),
     positive("entries", "Kernel entries per image", 512)
-  ).mapN(Options(_, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _)).map(options => _ => run(options))
 
   private def run(parsed: Options): BenchmarkSample = {
     val body   = (1 to 32).map(index => s"add.u32 %r1, %r0, $index;").mkString("\n")
@@ -34,7 +34,7 @@ object PTXCacheBenchmark {
     val images = Vector.tabulate(parsed.workers)(index =>
       Vec.from(s"$source\n// image ${index % parsed.images}\n".getBytes(StandardCharsets.UTF_8))
     )
-    val backend  = PTXBackend()
+    val backend  = PTXBackend(text = instruction => Some(asm.Printer.render(instruction)))
     val barrier  = CyclicBarrier(parsed.workers)
     val executor = Executors.newFixedThreadPool(parsed.workers)
     try {

@@ -81,7 +81,7 @@ class LinkerSuite extends Suite {
       .visible .entry main() { call implementation, (); ret; }
     """
     val parsed = Parser.parse(source).toOption.get
-    val loaded = LoadedProgram.load(parsed).toOption.get
+    val loaded = LoadedProgram.load(parsed, text = execution.text).toOption.get
     assertEquals(loaded.global("shared").toOption.get.initial, Vec[Byte](42, 0, 0, 0))
     val linked    = Linker.link(parsed).toOption.get
     val functions = linked.statements.collect { case function: Statement.Function => function }
@@ -120,7 +120,7 @@ class LinkerSuite extends Suite {
       """
       val source = (if (strongFirst) strong + weak else weak + strong) + client
       val parsed = Parser.parse(source).toOption.get
-      val loaded = LoadedProgram.load(parsed).toOption.get
+      val loaded = LoadedProgram.load(parsed, text = execution.text).toOption.get
       assertEquals(loaded.global("selected").toOption.get.initial, Vec[Byte](42, 0, 0, 0))
       assertEquals(loaded.kernel("overridden").toOption.get.parameters.size, 1)
       val linked = Linker.link(parsed).toOption.get

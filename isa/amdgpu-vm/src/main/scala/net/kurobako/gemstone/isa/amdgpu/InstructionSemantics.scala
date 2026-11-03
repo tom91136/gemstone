@@ -161,7 +161,8 @@ object InstructionSemantics {
     case Instruction.Barrier                                      => "a workgroup barrier"
     case Instruction.End                                          => "the end of the wave"
     case Instruction.Trap(_)                                      => "a trap, which faults"
-    case Instruction.Wait => "nothing a lane observes: a wait, hint or synchronous cache operation"
+    case Instruction.Wait          => "nothing a lane observes: a wait, hint or synchronous cache operation"
+    case Instruction.WaitCounts(_) => "a wait on outstanding memory counters, which the observer reports per counter"
     case Instruction.CacheInvalidate | Instruction.CacheWritebackInvalidate =>
       "cache maintenance, after which loads read memory again"
     case Instruction.SSetReg | _: (Instruction.SSetMode | Instruction.SGetMode) => "a hardware register access"

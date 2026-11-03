@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.*
 
 /** Linked OpenMP images have hundreds of aliases; most accesses target the external heap or stack. */
 object AMDGPUDispatchMemoryBenchmark {
-  val benchmark: Case = iterations(5000000).map(count => () => run(count))
+  val benchmark: Case = iterations(5000000).map(count => _ => run(count))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def run(iterations: Int > 0): BenchmarkSample = {

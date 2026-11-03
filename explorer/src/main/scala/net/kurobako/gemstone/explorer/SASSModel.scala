@@ -593,7 +593,6 @@ object SASSModel extends Model {
   val assemblyExample: String = "IADD3 R7, R7, 0x1, RZ;\nEXIT;\n"
   val binaryExample: String   = "/* 0x000000000000794d */ /* 0x000fea0003800000 */\n"
 
-  /** The definition an instance of the form lowers to, under the operand table's names in its operand order. */
   /** A field's value as the instance encodes it, or a term over the offset fields, which are parameters. */
   private enum Partial {
     case Known(value: BigInt)
@@ -894,7 +893,6 @@ object SASSModel extends Model {
   override protected def clearOutcomes(): Unit = machined.clear()
 
   private val orderingOnly: OrderingOnly = OrderingOnly(
-    ("LDGDEPBAR", "ldgdepbar_", "loads complete synchronously in the VM, so no dependency barrier is pending."),
     ("PREEXIT", ".*", "dependent launches wait for kernel completion, so there is no early launch to release."),
     ("ENDCOLLECTIVE", ".*", "the VM checks the warp synchronisation it closes at load, so it runs nothing."),
     (

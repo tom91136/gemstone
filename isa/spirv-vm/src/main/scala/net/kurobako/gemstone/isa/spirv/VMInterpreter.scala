@@ -12,6 +12,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.asm.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -530,6 +531,12 @@ private object VMInterpreter {
       else Right(())
     }
 
+    control.observer.foreach(_.launched(KernelResources(
+      workgroupLanes = geometry.groupVolume,
+      subgroupSize = subgroup.unsafe[Int > 0],
+      registersPerLane = None,
+      sharedBytes = workgroupImage.length.toLong.unsafe[Long >= 0]
+    )))
     Dispatch.forEachGroup(geometry, workgroups) { (_, group) =>
       if (parallel) runGroup(group, MemoryState(storage), Reuse(totalLocal))
       else runGroup(group, state, sequential)
@@ -653,7 +660,12 @@ private object VMInterpreter {
           timeline.location(execution.pc, execution.invocation.groupId, execution.ordinal),
           View(execution, issue)
         )
-        .flatMap(_ => op.run(execution, memory))
+        .flatMap { _ =>
+          memory.observe(observer, execution.ordinal)
+          val result = op.run(execution, memory)
+          memory.unobserve()
+          result
+        }
     }
   }
 
@@ -661,10 +673,18 @@ private object VMInterpreter {
     def function: Int             = execution.currentFunction.id
     def unit: MachineUnit         = execution.unit(MachineUnit.State.Running)
     def issued: Long              = issue
+    def begins: Boolean           = true
     override def pc: Int          = execution.pc
     override def label: Int       = execution.currentLabel
     override def predecessor: Int = execution.predecessor
     override def callDepth: Int   = execution.calls.size
+
+    def subgroupSize: Int > 0                    = execution.invocation.subgroupSize.unsafe[Int > 0]
+    def eachLane(each: (Int >= 0) => Unit): Unit = each(execution.ordinal)
+    def text: String                             = {
+      val module = execution.values.program.module
+      Printer.render(module, module.instructions(execution.pc))
+    }
 
     def value(id: Int): Option[InvocationView.Value] = execution.values.get(id).map {
       case VMValue.Bits(_, lanes)      => InvocationView.Value.Bits(Vec.from(lanes))

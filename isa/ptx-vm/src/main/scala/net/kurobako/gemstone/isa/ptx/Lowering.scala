@@ -113,7 +113,7 @@ private object Lowering {
       spilled: Set[NonEmpty[String]],
       locals: Map[NonEmpty[String], Long],
       shared: Map[NonEmpty[String], Long],
-      declaredRegisters: Set[NonEmpty[String]],
+      declaredRegisters: Map[NonEmpty[String], Int],
       val architecture: Int
   ) {
     private val registers                                     = mutable.HashMap.empty[NonEmpty[String], Register]
@@ -126,7 +126,7 @@ private object Lowering {
 
     // A routine may declare a register under a special register's name, which then shadows it.
     private def special(name: NonEmpty[String]): Either[Error, Unit] =
-      if (SpecialRegister.matches(name.raw) && !declaredRegisters(name))
+      if (SpecialRegister.matches(name.raw) && !declaredRegisters.contains(name))
         invalid(s"special register $name is not supported here")
       else Right(())
 
@@ -154,6 +154,13 @@ private object Lowering {
       val names = Array.ofDim[NonEmpty[String]](registers.size)
       registers.foreachEntry((name, slot) => names(slot.raw) = name)
       Vec.unsafeWrapArray(names)
+    }
+
+    /** Each register slot's width in 32-bit units as its declaration gives it, one for a slot declared nowhere. */
+    def registerUnits: Vec[Int] = {
+      val units = Array.fill(registers.size)(1)
+      registers.foreachEntry((name, slot) => units(slot.raw) = declaredRegisters.getOrElse(name, 1))
+      Vec.unsafeWrapArray(units)
     }
 
     def registerCount: Int >= 0  = slot(registers)
@@ -190,7 +197,7 @@ private object Lowering {
 
     def value(operand: Operand): Either[Error, Value] = operand match {
       case Operand.Register(name, None) =>
-        specialRegisters.get(name.raw).filterNot(_ => declaredRegisters(name))
+        specialRegisters.get(name.raw).filterNot(_ => declaredRegisters.contains(name))
           .fold(register(operand).map(Value.Register(_)))(Right(_))
       case Operand.Symbol(name) => predefinedConstants.get(name.raw).fold(symbol(name))(Right(_))
       case literal: (Operand.Immediate | Operand.Negate) =>
@@ -205,7 +212,7 @@ private object Lowering {
       else Right(None)
 
     def predicateValue(operand: Operand): Either[Error, Value] = operand match {
-      case Operand.Register(name, None) if name.raw == "%is_explicit_cluster" && !declaredRegisters(name) =>
+      case Operand.Register(name, None) if name.raw == "%is_explicit_cluster" && !declaredRegisters.contains(name) =>
         Right(Value.ExplicitCluster)
       case Operand.Register(_, None) | Operand.Symbol(_) => predicate(operand).map(Value.Predicate(_))
       case other                                         => value(other)

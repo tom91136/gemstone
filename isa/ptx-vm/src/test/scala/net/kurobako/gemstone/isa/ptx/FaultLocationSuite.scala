@@ -24,18 +24,19 @@ class FaultLocationSuite extends Suite {
                    |""".stripMargin
     val memory = ArrayMemory()
     val output = memory.allocate(2L)
-    Using.resource(PTXBackend().load(Vec.from(source.getBytes(StandardCharsets.UTF_8))).value) { program =>
-      val task =
-        KernelTask.validated(
-          "overrun",
-          Dimensions.One,
-          Dimensions.One,
-          Vec(KernelTask.Argument.Memory(output, 0L))
-        ).value
-      assertEquals(
-        program.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))).left.map(_.location),
-        Left(Some(Fault.Location("overrun", Some("overrun"), Some(2L), Some(Coordinates.origin), Some(0))))
-      )
+    Using.resource(PTXBackend(text = execution.text).load(Vec.from(source.getBytes(StandardCharsets.UTF_8))).value) {
+      program =>
+        val task =
+          KernelTask.validated(
+            "overrun",
+            Dimensions.One,
+            Dimensions.One,
+            Vec(KernelTask.Argument.Memory(output, 0L))
+          ).value
+        assertEquals(
+          program.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))).left.map(_.location),
+          Left(Some(Fault.Location("overrun", Some("overrun"), Some(2L), Some(Coordinates.origin), Some(0))))
+        )
     }
   }
 }

@@ -8,7 +8,8 @@ import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
-/** Sampling rounds over a 2x2 colour and depth image: implicit and explicit LOD, depth-compare and gather lookups. */
+/** Sampling rounds over a 2x2 colour and depth image: implicit and explicit LOD, depth-compare and gather lookups.
+  */
 object SPIRVImageSamplingBenchmark {
   private val Extent          = 2
   private val Texels          = Seq(0f, .25f, .75f, 1f)
@@ -30,7 +31,7 @@ object SPIRVImageSamplingBenchmark {
   ).mapN(Options(_, _)).map(options => prepare(options))
 
   // a fresh program's first execution is several times slower, so load once
-  private def prepare(options: Options): () => BenchmarkSample = {
+  private def prepare(options: Options): LaunchControl => BenchmarkSample = {
     val memory      = BenchmarkMemory(TexelBytes, TexelBytes, DescriptorBytes, OutputBytes)
     val colour      = memory.ids(0)
     val depth       = memory.ids(1)
@@ -70,9 +71,9 @@ object SPIRVImageSamplingBenchmark {
         .flatMap(SPIRVBackend(Validation.Environment.VulkanGraphics).load(_))
         .fold(error => throw IllegalArgumentException(error.message), identity)
     val expected = Seq(2.75f, 1f, .25f, 3f).map(_ * options.rounds.raw)
-    () => {
+    launch => {
       val sample = Measurement.repeatSucceeding(options.iterations)(
-        program.execute(task, TaskContext(memory, TaskControl(), _ => Right(())))
+        program.execute(task, TaskContext(memory, launch(), _ => Right(())))
       )
       verify(memory, output, expected)
       sample

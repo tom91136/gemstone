@@ -257,6 +257,15 @@ private[isa] object TensorLayout {
   private def runWord(transfer: Array[Byte], run: Int, word: Int): Long =
     LittleEndian.decode(transfer, (facts + run * runWords + word) * 8, 8)
 
+  /** Whether the run `run` lies within the tensor. */
+  def runInside(transfer: Array[Byte], run: Int): Boolean = runWord(transfer, run, 3) != 0L
+
+  /** The global address of the run `run`. */
+  def runAddress(transfer: Array[Byte], run: Int): Long = runWord(transfer, run, 1)
+
+  /** The bytes of the run `run` in global memory. */
+  def runBytes(transfer: Array[Byte], run: Int): Long = runWord(transfer, run, 2) * fact(transfer, Fact.Global)
+
   /** The run `run` of box elements read from global memory into the box, or filled where it lies outside the tensor. */
   def loadRun(memory: DeviceHeap, transfer: Array[Byte], run: Int): Either[Fault, Unit] = {
     val offset = boxStart(transfer) + runWord(transfer, run, 0).toInt

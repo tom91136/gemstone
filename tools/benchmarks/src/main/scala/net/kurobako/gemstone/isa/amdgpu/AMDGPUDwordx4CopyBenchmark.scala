@@ -12,14 +12,14 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * snapshots, matching ExecutionSession read ownership.
   */
 object AMDGPUDwordx4CopyBenchmark {
-  val benchmark: Case = iterations(2000).map(count => () => run(count))
+  val benchmark: Case = iterations(2000).map(count => launch => run(count, launch))
 
   private val Words = Vec[Long](
     0xc00a0100L, 0x0L, 0xbf8cc07fL, 0x24000084L, 0xdc5c8000L, 0x1040000L, 0xbf8c0f70L, 0xdc7c8000L, 0x60100L,
     0xbf810000L
   )
 
-  private def run(iterations: Int > 0): BenchmarkSample = {
+  private def run(iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val code   = Words.flatMap(word => LittleEndian.toVec(word, 4))
     val kernel = SequentialDispatch.compile("kernel", Target("gfx900"), kernargSize = 16, code)
     val memory = BenchmarkMemory(1024, 1024)
@@ -32,7 +32,7 @@ object AMDGPUDwordx4CopyBenchmark {
       Dimensions.One,
       Vec(KernelTask.Argument.Memory(input, 0L), KernelTask.Argument.Memory(output, 0L))
     ).fold(error => throw IllegalStateException(error), identity)
-    val sample = SequentialDispatch.repeat(iterations, kernel, dispatch, memory)
+    val sample = SequentialDispatch.repeat(iterations, kernel, dispatch, memory, launch)
     if (!memory.array(input).sameElements(memory.array(output)))
       throw IllegalStateException("dwordx4 copy mismatch")
     sample

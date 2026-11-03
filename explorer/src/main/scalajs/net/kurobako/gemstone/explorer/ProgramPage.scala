@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -28,16 +29,36 @@ object ProgramPage {
     val rows       = Var(Vec.empty[Row])
     val liveness   = Var(Liveness.empty)
     val selected   = Var(Option.empty[Long])
+    val result     = Var(Option.empty[ProgramRun.Run])
+    val heatOn     = Var(false)
+    val metric     = Var(Heat.Metric.Issues)
+    val chosen     = Var(Architecture.sm89)
+
+    val heat = loaded.signal.combineWith(result.signal, chosen.signal).map {
+      case (Some(program), Some(found), architecture) =>
+        val profile = found.profiled(architecture)
+        Some((
+          profile,
+          program.listing.toOption.map(listing => Heat.of(listing, profile)),
+          Heat.topFindings(profile, 5)
+        ))
+      case _ => None
+    }
 
     def target: Option[String] = targets(language.now()).now()
 
-    def load(): Unit = {
+    def clear(): Unit = {
       loaded.now().foreach(_.close())
       loaded.set(None)
       trace.set(Trace.empty)
       rows.set(Vec.empty)
       liveness.set(Liveness.empty)
       selected.set(None)
+      result.set(None)
+    }
+
+    def load(): Unit = {
+      clear()
       image(language.now(), source.now(), target)
         .flatMap(bytes => ProgramRun.load(ProgramListing.Image(language.now(), bytes, target))) match {
         case Left(error)    => status.set(Left(error))
@@ -65,15 +86,16 @@ object ProgramPage {
       request.flatMap((program, name, config) =>
         ProgramRun.run(program, name, config.lanes, config.groups)
       ) match {
-        case Left(error)   => status.set(Left(error))
-        case Right(result) =>
-          trace.set(result.trace)
-          rows.set(Timeline.layout(result.trace))
-          liveness.set(Liveness.of(result.trace))
-          selected.set(result.trace.steps.headOption.map(_.issue))
-          val stopped   = result.failure.fold("")(fault => s", stopped: ${fault.description.raw}")
-          val truncated = if (result.complete) "" else s", recorded the first ${result.trace.steps.size} issues"
-          status.set(Right(s"${result.trace.steps.size} issues over ${rows.now().size} workgroups$stopped$truncated"))
+        case Left(error)  => status.set(Left(error))
+        case Right(found) =>
+          trace.set(found.trace)
+          rows.set(Timeline.layout(found.trace))
+          liveness.set(Liveness.of(found.trace))
+          selected.set(found.trace.steps.headOption.map(_.issue))
+          Var.set(result -> Some(found), chosen -> found.architecture)
+          val stopped   = found.failure.fold("")(fault => s", stopped: ${fault.description.raw}")
+          val truncated = if (found.complete) "" else s", recorded the first ${found.trace.steps.size} issues"
+          status.set(Right(s"${found.trace.steps.size} issues over ${rows.now().size} workgroups$stopped$truncated"))
       }
     }
 
@@ -92,12 +114,7 @@ object ProgramPage {
           button(
             cls <-- language.signal.map(current => if (current == value) "active" else ""),
             onClick --> { _ =>
-              loaded.now().foreach(_.close())
-              loaded.set(None)
-              trace.set(Trace.empty)
-              rows.set(Vec.empty)
-              liveness.set(Liveness.empty)
-              selected.set(None)
+              clear()
               language.set(value)
               source.set(if (value == Language.PTX) Examples.ptx else example(value))
               status.set(Right(""))
@@ -143,24 +160,44 @@ object ProgramPage {
         ),
         div(
           cls := "pane listing",
-          child <-- loaded.signal.combineWith(selected.signal, trace.signal).map {
-            case (Some(program), choice, recorded) =>
+          HeatView.controls(heatOn, metric, chosen),
+          child <-- loaded.signal.combineWith(selected.signal, trace.signal, heat, heatOn.signal, metric.signal).map {
+            case (Some(program), choice, recorded, profiled, shaded, measure) =>
               val current = choice.flatMap(recorded.stepAt)
+              val heats   =
+                profiled.flatMap(_._2).filter(_.size == program.lines.size).getOrElse(Vec.empty[Option[LineHeat]])
+              val maximum = Heat.maximum(heats, measure)
+              val shown   = shaded && heats.nonEmpty
               div(
-                cls := "lines",
-                program.lines.map { line =>
-                  val here = current.exists(step =>
-                    step.location.instruction.map(_.raw).contains(line.address) &&
-                      (step.location.function.isEmpty || step.location.function == line.function)
-                  )
-                  div(
-                    cls := (if (here) "line current" else "line"),
-                    span(cls := "address", SandboxEvidence.address(program.image.language, line.address)),
-                    span(cls := "text", line.text)
-                  )
-                }
+                cls := "listing-body",
+                Option.when(shown)(HeatView.legend(measure, maximum)),
+                div(
+                  cls := "lines",
+                  program.lines.zipWithIndex.map { (line, index) =>
+                    val here = current.exists(step =>
+                      step.location.instruction.map(_.raw).contains(line.address) &&
+                        (step.location.function.isEmpty || step.location.function == line.function)
+                    )
+                    val found = heats.lift(index).flatten
+                    val level = if (shaded) found.fold(0)(value => Heat.level(measure.value(value), maximum)) else 0
+                    div(
+                      cls := Vec(
+                        "line",
+                        if (here) "current" else "",
+                        if (level > 0) s"heat heat-$level" else ""
+                      ).filter(_.nonEmpty).mkString(" "),
+                      title := found.filter(_ => shaded).fold("")(Heat.hover),
+                      span(cls := "address", SandboxEvidence.address(program.image.language, line.address)),
+                      Option.when(shown)(
+                        span(cls := "heat-value", found.fold("")(value => Heat.format(measure.value(value))))
+                      ),
+                      span(cls := "text", line.text)
+                    )
+                  }
+                ),
+                profiled.map((profile, _, top) => HeatView.summary(profile, top, program.listing.toOption))
               )
-            case (None, _, _) => div(cls := "empty", "Load a program to list its instructions.")
+            case (None, _, _, _, _, _) => div(cls := "empty", "Load a program to list its instructions.")
           }
         )
       ),

@@ -159,7 +159,7 @@ object SASSSample {
     code  <- asm.Assembler(target).encode(program).left.map(_.message)
     image <- Cubin.replaceKernel(template, "copy_add", code).left.map(_.raw)
     out   <- Kernel.run(
-      CubinBackend(),
+      CubinBackend(text = instruction => asm.Printer.print(instruction).toOption),
       image,
       "copy_add",
       (input, output) => Vec(KernelTask.Argument.Memory(output, 0L), KernelTask.Argument.Memory(input, 0L))

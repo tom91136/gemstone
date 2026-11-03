@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 object PTXBulkCopyBenchmark {
-  val benchmark: Case = Opts(() => run())
+  val benchmark: Case = Opts(launch => run(launch))
 
   private val Lanes: Int > 0 = 32
   private val Bytes          = 1024
@@ -49,7 +49,7 @@ object PTXBulkCopyBenchmark {
       ret;
     }"""
 
-  private def run(): BenchmarkSample = {
+  private def run(launch: LaunchControl): BenchmarkSample = {
     val kernel   = VMCompiler.compile(source).fold(error => throw IllegalArgumentException(error.message), identity)
     val geometry = LaunchGeometry.forLaunch(Dimensions(Lanes, 1, 1), Dimensions(1, 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
@@ -61,7 +61,7 @@ object PTXBulkCopyBenchmark {
       ("input": NonEmpty[String])  -> Argument.fromLong(memory.base(input).raw),
       ("output": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw)
     )
-    val sample   = Measurement.repeatSucceeding(1)(VMInterpreter.execute(kernel, geometry, parameters, memory))
+    val sample = Measurement.repeatSucceeding(1)(VMInterpreter.execute(kernel, geometry, parameters, memory, launch()))
     val expected = memory.getInt(input, Bytes - 4)
     if (memory.getInt(output, 0) != expected)
       throw IllegalStateException(s"bulk copy delivered ${memory.getInt(output, 0)}, expected $expected")

@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
+import net.kurobako.gemstone.isa.ptx.asm.Printer
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
@@ -33,7 +34,8 @@ class PTXReplaySuite extends Suite {
       |""".stripMargin.getBytes(StandardCharsets.UTF_8)
   )
 
-  private def device(memory: ArrayMemory) = ReplayDevice(BackendRegistry(Vec(PTXBackend())), memory)
+  private def device(memory: ArrayMemory) =
+    ReplayDevice(BackendRegistry(Vec(PTXBackend(text = instruction => Some(Printer.render(instruction))))), memory)
 
   private def task(output: AllocationId): KernelTask =
     KernelTask.validated(

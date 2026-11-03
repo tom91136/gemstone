@@ -192,6 +192,7 @@ private object VMInterpreter {
       4
     )
     LittleEndian.write(kernargAddress, packet, 40, 8)
+    control.observer.foreach(_.launched(resources(kernel, dispatch)))
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress)
     // One shared step result per branch target, so taken and fall-through branches allocate nothing.
     val jumps: Array[Either[Fault, Int]] = Array.tabulate(program.instructions.size + 1)(Right(_))
@@ -200,6 +201,23 @@ private object VMInterpreter {
       Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group) =>
         runGroup(program, jumps, dispatchMemory, dispatch, group, control)
       )
+  }
+
+  /** The descriptor's VGPR field holds the allocation granule count minus one. */
+  private def resources(kernel: CodeObjectKernel, dispatch: KernelTask): KernelResources = {
+    val granule = kernel.target.isa match {
+      case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 => 4
+      case ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4                     => 8
+      case ISA.CDNA5                                             => 16
+      case _ if kernel.waveSize == 32                            => 8
+      case _                                                     => 4
+    }
+    KernelResources(
+      workgroupLanes = dispatch.geometry.groupVolume,
+      subgroupSize = kernel.waveSize.widen[Int > 0],
+      registersPerLane = Some((((kernel.computePgmRsrc1 & 0x3f) + 1) * granule).unsafe[Int >= 0]),
+      sharedBytes = kernel.groupSegmentSize.widen[Long >= 0] + dispatch.groupSegmentBytes.widen[Long >= 0]
+    )
   }
 
   /** Every workgroup of a cooperative dispatch is resident at once: one thread interleaves them, a sweep advancing each
@@ -970,6 +988,7 @@ private object VMInterpreter {
 
     private def loadFrom(load: Instruction.Load, registers: VectorRegisters, lane: Lane, at: Long): Fault | Null = {
       val bytes = load.bytes
+      seen(lane, LaunchObserver.AccessKind.Read, at, Math.min(bytes, inRange))
       if (located == Location.Global && inRange < bytes)
         dispatchMemory.readBytes(at, inRange.unsafe[Int >= 0]) match {
           case Left(fault) => fault
@@ -1046,11 +1065,13 @@ private object VMInterpreter {
             val at = locate(load.address, index.unsafe[Int >= 0], bytes)
             located match {
               case Location.Local =>
+                seen(index.unsafe[Lane], LaunchObserver.AccessKind.Read, at, bytes)
                 val offset = checkedLdsOffset(lds, at, bytes)
                 if (offset == InvalidLdsOffset) keepTransposed(scratch, index, ldsBytes(lds, at, bytes), 0, bytes)
                 else keepTransposed(scratch, index, lds, offset, bytes)
                 read |= 1L << index
               case Location.Global =>
+                seen(index.unsafe[Lane], LaunchObserver.AccessKind.Read, at, bytes)
                 dispatchMemory.readBytes(at, bytes.unsafe[Int >= 0]) match {
                   case Left(failure) => fault = Some(failure)
                   case Right(data)   =>
@@ -1107,6 +1128,7 @@ private object VMInterpreter {
 
     private def storeLane(store: Instruction.Store, registers: VectorRegisters, lane: Lane): Fault | Null = {
       val at = locate(store.address, lane, store.bytes)
+      seen(lane, LaunchObserver.AccessKind.Write, at, Math.min(store.bytes, inRange))
       if (located == Location.Global && inRange < store.bytes)
         dispatchMemory.writeBytes(at, vectorBytes(registers, store.src, lane, inRange.unsafe[Int >= 0]))
           .left.getOrElse(null)
@@ -1149,15 +1171,18 @@ private object VMInterpreter {
       val fault =
         if ((at & (bytes - 1).toLong) != 0L && located != Location.Discarded && !texel(address))
           misalignedAtomic(lane, at, bytes)
-        else if (located == Location.Global) dispatchMemory.atomicModifyValue(at, bytes)(update) match {
-          case Left(fault)     => fault
-          case Right(previous) =>
-            loaded.elem = previous
-            null
-        }
         else {
-          val read = readValue(at, lane, bytes.widen, coherent = false)
-          if (read == null) writeValue(at, lane, update(loaded.elem), bytes.widen) else read
+          seen(lane, LaunchObserver.AccessKind.Atomic, at, bytes)
+          if (located == Location.Global) dispatchMemory.atomicModifyValue(at, bytes)(update) match {
+            case Left(fault)     => fault
+            case Right(previous) =>
+              loaded.elem = previous
+              null
+          }
+          else {
+            val read = readValue(at, lane, bytes.widen, coherent = false)
+            if (read == null) writeValue(at, lane, update(loaded.elem), bytes.widen) else read
+          }
         }
       if (fault == null && returnValue) writeVectorValue(file, dest, lane, loaded.elem, bytes)
       fault
@@ -1227,8 +1252,10 @@ private object VMInterpreter {
         foreachActiveUntilFault { lane =>
           val firstAddress  = Execute.dwordAddress(vector(address)(lane), 0L, firstOffset.toLong)
           val secondAddress = Execute.dwordAddress(vector(address)(lane), 0L, secondOffset.toLong)
-          val low           = checkedLdsOffset(lds, firstAddress, bytes)
-          val high          = checkedLdsOffset(lds, secondAddress, bytes)
+          seenShared(lane, LaunchObserver.AccessKind.Read, firstAddress, bytes)
+          seenShared(lane, LaunchObserver.AccessKind.Read, secondAddress, bytes)
+          val low  = checkedLdsOffset(lds, firstAddress, bytes)
+          val high = checkedLdsOffset(lds, secondAddress, bytes)
           writeLdsBytes(file, dest, lane, lds, low, firstAddress, bytes)
           writeLdsBytes(file, upper, lane, lds, high, secondAddress, bytes)
           null
@@ -1238,6 +1265,8 @@ private object VMInterpreter {
         foreachActiveUntilFault { lane =>
           val firstAddress  = Execute.dwordAddress(vector(address)(lane), 0L, firstOffset.toLong)
           val secondAddress = Execute.dwordAddress(vector(address)(lane), 0L, secondOffset.toLong)
+          seenShared(lane, LaunchObserver.AccessKind.Write, firstAddress, bytes)
+          seenShared(lane, LaunchObserver.AccessKind.Write, secondAddress, bytes)
           writeLDS(lds, firstAddress, vectorBytes(file, srcA, lane, bytes.widen))
           writeLDS(lds, secondAddress, vectorBytes(file, srcB, lane, bytes.widen))
           null
@@ -1286,6 +1315,7 @@ private object VMInterpreter {
       texelHigh = 0L
       if (located == Location.Discarded) null
       else {
+        seen(lane, LaunchObserver.AccessKind.Read, at, bytes)
         val low = readValue(at, lane, Math.min(bytes, 8).unsafe[Int in 1 ~ 8], coherent = false)
         if (low != null) low
         else {
@@ -1303,6 +1333,7 @@ private object VMInterpreter {
     private def writeTexel(at: Long, lane: Lane, bytes: Int, low: Long, high: Long): Fault | Null =
       if (located == Location.Discarded) null
       else {
+        seen(lane, LaunchObserver.AccessKind.Write, at, bytes)
         val first = writeValue(at, lane, low, Math.min(bytes, 8).unsafe[Int in 1 ~ 8])
         if (first != null || bytes <= 8) first
         else writeValue(at + 8, lane, high, (bytes - 8).unsafe[Int in 1 ~ 8])
@@ -1402,12 +1433,14 @@ private object VMInterpreter {
     private def loadLocalLane(load: Instruction.LoadLocal, lane: Lane): Fault | Null = {
       val bytes = load.bytes
       val at    = locate(load.address, lane, bytes)
+      transferred(lane, bytes)
       val fault = readTexel(at, lane, bytes)
       if (fault != null) fault
       else {
         val value =
           Execute.loaded(texelLow, Math.min(bytes * 8, 64).unsafe[Int in 1 ~ 64], load.signed)
         val target = Bits.low32(scalar(m0)).toLong + load.offset + lane.toLong * Math.max(4, bytes)
+        seenShared(lane, LaunchObserver.AccessKind.Write, target, bytes)
         val offset = checkedLdsOffset(lds, target, bytes)
         if (offset == InvalidLdsOffset) {
           val data = Array.ofDim[Byte](bytes)
@@ -1426,10 +1459,13 @@ private object VMInterpreter {
     private def storeLocalLane(store: Instruction.StoreLocal, lane: Lane): Fault | Null = {
       val source = Bits.low32(scalar(m0)).toLong + store.offset + lane.toLong * 4L
       val offset = checkedLdsOffset(lds, source, 4)
-      val value  =
+      seenShared(lane, LaunchObserver.AccessKind.Read, source, 4)
+      val value =
         if (offset == InvalidLdsOffset) LittleEndian.decode(ldsBytes(lds, source, 4), 0, 4)
         else LittleEndian.decode(lds, offset, 4)
-      writeValue(locate(store.address, lane, 4), lane, value, 4)
+      val at = locate(store.address, lane, 4)
+      seen(lane, LaunchObserver.AccessKind.Write, at, 4)
+      writeValue(at, lane, value, 4)
     }
 
     private def scalarBufferLoad(load: Instruction.SBufferLoad): Either[Fault, Int] = {
@@ -1449,6 +1485,7 @@ private object VMInterpreter {
           count = load.count
         )
       )
+      if (kept != 0L) seenScalar(LaunchObserver.AccessKind.Read, base + start, kept * size)
       (if (kept == 0L) Right(Vec.empty[Byte])
        else dispatchMemory.readBytes(base + start, (kept * size).toInt.unsafe[Int >= 0])).map { bytes =>
         (0 until load.count).foreach { register =>
@@ -1684,7 +1721,14 @@ private object VMInterpreter {
         dest: VectorRegisterIndex,
         bank: RegisterBank
     ): Flow[Int] = {
-      val at    = offset.toLong
+      val at = offset.toLong
+      if (active.nonEmpty)
+        seenShared(
+          java.lang.Long.numberOfTrailingZeros(active.bits).unsafe[Lane],
+          LaunchObserver.AccessKind.Atomic,
+          at,
+          4
+        )
       val old   = LittleEndian.decode(ldsBytes(lds, at, 4), 0, 4)
       val count = java.lang.Long.bitCount(active.bits).toLong
       writeLDS(lds, at, LittleEndian.toArray(Bits.low32(if (decrement) old - count else old + count).toLong, 4))
@@ -1759,10 +1803,13 @@ private object VMInterpreter {
 
     // Split the instruction switch into JIT-sized methods. The complete switch is too large for C2 to compile.
     def step(index: Int): Either[Fault, Int] = operations(index) match {
-      case Instruction.End        => ScalarControl.end(this)
-      case Instruction.Trap(code) => ScalarControl.trap(this)(code)
-      case Instruction.Wait       => ScalarControl.fence(this)
-      case Instruction.Sleep      =>
+      case Instruction.End                => ScalarControl.end(this)
+      case Instruction.Trap(code)         => ScalarControl.trap(this)(code)
+      case Instruction.Wait               => ScalarControl.fence(this)
+      case counts: Instruction.WaitCounts =>
+        waited(counts)
+        ScalarControl.fence(this)
+      case Instruction.Sleep =>
         dispatchMemory.memory.flushHostWrites().flatMap(_ => if (resident) YieldStep else NextStep)
       case Instruction.SGprIndexOff                       => NextStep
       case Instruction.Barrier                            => ScalarControl.barrier(this)
@@ -1786,6 +1833,7 @@ private object VMInterpreter {
           }
         )
         val address = if (elementBytes == 4) Execute.scalarDword(unaligned) else unaligned
+        seenScalar(LaunchObserver.AccessKind.Read, address, count.toLong * elementBytes)
         dispatchMemory.readBytes(address, count.widen[Int > 0] * elementBytes.widen[Int > 0]) match {
           case Left(error)  => Left(error)
           case Right(bytes) =>
@@ -3925,8 +3973,10 @@ private object VMInterpreter {
           foreachActiveUntilFault { lane =>
             val address = Bits.low32(vector(instruction.address)(lane)).toLong
             located = Location.Local
+            val second = Execute.source2Address(address, instruction.displacement)
+            seen(lane, LaunchObserver.AccessKind.Read, second, instruction.bytes)
             val read = readValue(
-              Execute.source2Address(address, instruction.displacement),
+              second,
               lane,
               instruction.bytes.widen[Int in 1 ~ 8],
               coherent = false
@@ -4046,7 +4096,8 @@ private object VMInterpreter {
         bytes: Int in (4, 8),
         returnValue: Boolean
     )(update: Long => Long): Either[Fault, Int] = {
-      val at       = scalarLocated(address, bytes, 1)
+      val at = scalarLocated(address, bytes, 1)
+      if (scalarKept != 0) seenScalar(LaunchObserver.AccessKind.Atomic, at, bytes.toLong)
       val previous = if (scalarKept == 0) Right(0L) else dispatchMemory.atomicModifyValue(at, bytes)(update)
       previous.map { old =>
         if (returnValue)
@@ -4057,6 +4108,7 @@ private object VMInterpreter {
 
     private def scalarStore(store: Instruction.SStore): Either[Fault, Int] = {
       val at = scalarLocated(store.address, 4, store.count)
+      if (scalarKept != 0) seenScalar(LaunchObserver.AccessKind.Write, at, scalarKept * 4L)
       (0 until scalarKept).foldLeft(NextStep)((written, index) =>
         written.flatMap(_ =>
           dispatchMemory.writeValue(at + index * 4L, scalarData(store.src, index, 4), 4).map(_ => Step.Next)
@@ -4077,7 +4129,53 @@ private object VMInterpreter {
       def vector(index: Int in 0 ~ 255, lane: Int in 0 ~ 63): Long = WaveRun.this.vector(index)(lane)
       def unit: MachineUnit                                        = machineUnit(MachineUnit.State.Running)
       def issued: Long                                             = currentIssue
+      def begins: Boolean                                          = true
+      def subgroupSize: Int > 0                                    = waveSize.widen[Int > 0]
+      def eachLane(each: (Int >= 0) => Unit): Unit                 = foreachActive(lane => each(workgroupLane(lane)))
+      def text: String                                             = program.assembly(instructionIndex)
     }
+
+    private def workgroupLane(lane: Int): Int >= 0 = (localStart + lane).unsafe[Int >= 0]
+
+    private def emit(lane: Int, space: Space, kind: LaunchObserver.AccessKind, address: Long, bytes: Int): Unit =
+      observer.nn.access(workgroupLane(lane), space, kind, address, bytes.unsafe[Int >= 0])
+
+    /** Reports an access to where `located` resolved it, which a discarded one does not reach. */
+    private def seen(lane: Lane, kind: LaunchObserver.AccessKind, at: Long, bytes: Int): Unit =
+      if (observer != null) located match {
+        case Location.Global    => emit(lane, Space.Global, kind, at, bytes)
+        case Location.Local     => emit(lane, Space.Shared, kind, ldsOffset(at), bytes)
+        case Location.Private   => emit(lane, Space.Local, kind, at, bytes)
+        case Location.Discarded => ()
+      }
+
+    private def seenShared(lane: Lane, kind: LaunchObserver.AccessKind, address: Long, bytes: Int): Unit =
+      if (observer != null) emit(lane, Space.Shared, kind, ldsOffset(address), bytes)
+
+    /** A scalar access has no lane of its own, so it is reported from the wave's first. */
+    private def seenScalar(kind: LaunchObserver.AccessKind, at: Long, bytes: Long): Unit =
+      if (observer != null) emit(0, Space.Global, kind, at, bytes.toInt)
+
+    /** A scalar wait reports each counter it constrains from the wave's first lane, as scalar accesses are. */
+    private def waited(counts: Instruction.WaitCounts): Unit =
+      if (observer != null) {
+        val lane = workgroupLane(0)
+        counts.counts.foreach { wait =>
+          val count = wait.base.fold(wait.count.toLong)(base =>
+            ((source(base, lane) & wait.mask) + (wait.count & wait.mask)) & wait.mask
+          )
+          observer.nn.asynchronous(lane, LaunchObserver.AsyncKind.WaitCounter, wait.counter.ordinal.toLong, count)
+        }
+      }
+
+    private def transferred(lane: Lane, bytes: Int): Unit =
+      if (observer != null)
+        observer.nn.asynchronous(
+          workgroupLane(lane),
+          LaunchObserver.AsyncKind.Transfer,
+          -1L,
+          bytes.toLong.unsafe[Long >= 0]
+        )
 
     private def observe(issue: Long): Fault | Null = {
       currentIssue = issue
@@ -4092,9 +4190,10 @@ private object VMInterpreter {
       MachineUnit(group, waveIndex, lanes.widen[Int >= 0], state)
 
     /** A change in what a unit is doing, which the timeline records between the issues it surrounds. */
-    private def transition(kind: MachineEvent.Kind, at: => Fault.Location): Unit =
+    private inline def transition(inline kind: MachineEvent.Kind, inline at: Fault.Location): Unit =
       if (observer != null) {
-        observer.nn.transition(MachineEvent(machineUnit(kind.state), kind, control.issued(), Some(at)))
+        val changed = kind
+        observer.nn.transition(MachineEvent(machineUnit(changed.state), changed, control.issued(), Some(at)))
       }
 
     /** The wave parks, waiting for `reason`; the machine releases it, and the wave runs again. */

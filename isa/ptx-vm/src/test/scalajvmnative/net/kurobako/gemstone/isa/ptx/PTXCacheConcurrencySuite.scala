@@ -24,13 +24,16 @@ class PTXCacheConcurrencySuite extends Suite {
     val entered   = CountDownLatch(1)
     val release   = CountDownLatch(1)
     val slowImage = Vec.from(s"$source\n// slow".getBytes(StandardCharsets.UTF_8))
-    val backend   = PTXBackend(decode = { bytes =>
-      if (bytes == slowImage) {
-        entered.countDown()
-        if (!release.await(10, TimeUnit.SECONDS)) throw IllegalStateException("parse was not released")
+    val backend   = PTXBackend(
+      text = execution.text,
+      decode = { bytes =>
+        if (bytes == slowImage) {
+          entered.countDown()
+          if (!release.await(10, TimeUnit.SECONDS)) throw IllegalStateException("parse was not released")
+        }
+        ISA.decode(bytes)
       }
-      ISA.decode(bytes)
-    })
+    )
     Using.resource(threads.Pool(2)) { pool =>
       val existing = backend.load(image).value
       val slow     = pool.executor.submit(() => backend.load(slowImage))
@@ -54,6 +57,7 @@ class PTXCacheConcurrencySuite extends Suite {
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
     val backend = PTXBackend(
+      text = execution.text,
       decode = { bytes =>
         val _ = calls.incrementAndGet()
         entered.countDown()
@@ -86,6 +90,7 @@ class PTXCacheConcurrencySuite extends Suite {
     val release = CountDownLatch(1)
     val calls   = AtomicInteger()
     val backend = PTXBackend(
+      text = execution.text,
       decode = { bytes =>
         val _ = calls.incrementAndGet()
         entered.countDown()
@@ -118,7 +123,7 @@ class PTXCacheConcurrencySuite extends Suite {
   }
 
   test("concurrent identical PTX loads keep bindings and runtime lifetime independent") {
-    val backend = PTXBackend()
+    val backend = PTXBackend(text = execution.text)
     Using.Manager { use =>
       val pool          = use(threads.Pool(2))
       val firstSession  = use(ExecutionSession(List(backend)))

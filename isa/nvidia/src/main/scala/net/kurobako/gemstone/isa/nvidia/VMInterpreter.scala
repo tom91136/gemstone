@@ -252,8 +252,17 @@ private[isa] object VMInterpreter {
       dynamicSharedBytes: Int >= 0 = 0,
       cluster: Option[Dimensions] = None
   ): Either[Fault, Unit] =
-    parameterBlock(kernel.entry, arguments).flatMap(block =>
+    parameterBlock(kernel.entry, arguments).flatMap { block =>
+      control.observer.foreach(_.launched(resources(kernel, geometry, dynamicSharedBytes)))
       launch(kernel, geometry, block, VMDevice(DeviceHeap(memory), control, workgroups), dynamicSharedBytes, cluster)
+    }
+
+  private def resources(kernel: Kernel, geometry: LaunchGeometry, dynamicSharedBytes: Int >= 0): KernelResources =
+    KernelResources(
+      workgroupLanes = geometry.groupVolume,
+      subgroupSize = 32,
+      registersPerLane = kernel.registersPerLane,
+      sharedBytes = kernel.staticSharedBytes + dynamicSharedBytes.widen[Long >= 0]
     )
 
   /** The cluster shape a launch runs with: the launch's own, which must agree with any the kernel requires. */
@@ -534,7 +543,7 @@ private[isa] object VMInterpreter {
     private def observe(frame: VMFrame, cohort: Cohort, active: VMLaneMask, issue: Long)(using Run): Unit =
       device.control.observer.foreach { observer =>
         val at = location(frame, cohort.pc, active)
-        observer.instruction(at, View(frame, active, unit(cohort, MachineUnit.State.Running), issue)) match {
+        observer.instruction(at, View(frame, active, unit(cohort, MachineUnit.State.Running), issue, cohort.pc)) match {
           case Left(fault) => fail(fault.at(at))
           case Right(())   => ()
         }
@@ -560,10 +569,22 @@ private[isa] object VMInterpreter {
       advance(value.cohort, value.cohort.lanes)
     }
 
-    private class View(frame: VMFrame, active: VMLaneMask, machine: MachineUnit, issue: Long) extends CohortView {
-      def function: NonEmpty[String]            = frame.routine.name
-      def unit: MachineUnit                     = machine
-      def issued: Long                          = issue
+    private class View(frame: VMFrame, active: VMLaneMask, machine: MachineUnit, issue: Long, pc: Pc)
+        extends CohortView {
+      def function: NonEmpty[String]               = frame.routine.name
+      def unit: MachineUnit                        = machine
+      def issued: Long                             = issue
+      def begins: Boolean                          = frame.routine.program.begins(pc)
+      def subgroupSize: Int > 0                    = 32
+      def eachLane(each: (Int >= 0) => Unit): Unit = active.foreachLane(lane => each(lane.toInt.unsafe[Int >= 0]))
+      def text: String                             = frame.routine.program.sourceText(pc).getOrElse {
+        val issued = frame.routine.program.instructions(pc.toInt)
+        val guard  = issued.predication.fold("") { predication =>
+          val name = frame.routine.predicateNames.lift(predication.predicate.raw)
+          s"@${if (predication.negated) "!" else ""}${name.getOrElse(s"p${predication.predicate.raw}")} "
+        }
+        s"$guard${issued.instruction}"
+      }
       def registerNames: Vec[NonEmpty[String]]  = frame.routine.registerNames
       def predicateNames: Vec[NonEmpty[String]] = frame.routine.predicateNames
       def lanes: Vec[Int >= 0]                  = {
@@ -649,12 +670,33 @@ private[isa] object VMInterpreter {
     private def synchroniseWarpInstruction(memberMask: Value, cohort: Cohort): (VMLaneMask, VMLaneMask) = {
       context.frame = cohort.frame
       context.active = cohort.lanes
-      val runnable = cohort.lanes.filterLanes { lane =>
+      var parkedWarp = -1
+      var parked     = 0L
+      val runnable   = cohort.lanes.filterLanes { lane =>
         val expected = cohort.frame.live.warpBits(lane.raw) & live.warpBits(lane.raw) & context.read(lane, memberMask)
-        (expected & ~cohort.lanes.warpBits(lane.raw)) == 0L
+        val missing  = expected & ~cohort.lanes.warpBits(lane.raw)
+        missing == 0L || {
+          if ((lane.raw & ~31) != parkedWarp) {
+            parkedWarp = lane.raw & ~31
+            parked = converging(cohort.frame, lane.raw)
+          }
+          (missing & ~parked) == 0L
+        }
       }
       runnable -> cohort.lanes.subtract(runnable)
     }
+
+    /** The lanes of `lane`'s warp in `frame` that wait at a convergence barrier, which a warp instruction never
+      * gathers.
+      */
+    private def converging(frame: VMFrame, lane: Int): Long = if (barrierMasks.isEmpty) 0L
+    else
+      barrierMasks.foldLeft(0L) {
+        case (bits, (BarrierKey.Convergence(base, _, owner), arrived))
+            if base.raw == (lane & ~31) && (owner eq frame) =>
+          bits | arrived.warpBits(lane)
+        case (bits, _) => bits
+      }
 
     private def synchroniseWarpgroupInstruction(cohort: Cohort): (VMLaneMask, VMLaneMask) = {
       val runnable = cohort.lanes.filterLanes { lane =>
@@ -662,7 +704,9 @@ private[isa] object VMInterpreter {
         var base  = first
         var ready = true
         while (ready && base < first + Warpgroup.Lanes) {
-          ready = (cohort.frame.live.warpBits(base) & live.warpBits(base) & ~cohort.lanes.warpBits(base)) == 0L
+          ready =
+            (cohort.frame.live.warpBits(base) & live.warpBits(base) & ~cohort.lanes.warpBits(base) &
+              ~converging(cohort.frame, base)) == 0L
           base += 32
         }
         ready
@@ -708,11 +752,12 @@ private[isa] object VMInterpreter {
         }
       }
 
+    private def livePart(base: WorkgroupLane.WarpBase, frame: VMFrame, members: Long): Long =
+      (members & 0xffffffffL) & frame.live.warpBits(base.raw) & live.warpBits(base.raw)
+
     private def expected(key: BarrierKey): VMLaneMask = {
       def warp(base: WorkgroupLane.WarpBase, frame: VMFrame, members: Long): VMLaneMask =
-        frame.live.intersect(live).filterLanes(lane =>
-          (lane.raw & ~31) == base.raw && ((members & 0xffffffffL) & (1L << (lane.raw & 31))) != 0L
-        )
+        VMLaneMask.ofWarp(base.raw, livePart(base, frame, members))
       key match {
         case BarrierKey.Workgroup(_)                    => live
         case BarrierKey.Warp(base, _, frame)            => warp(base, frame, warpMembers.getOrElse(key, -1L))
@@ -855,6 +900,18 @@ private[isa] object VMInterpreter {
       }
     }
 
+    private val convergences = mutable.ArrayBuffer.empty[BarrierKey]
+
+    private def releaseConvergences()(using Run): Unit = if (barrierMasks.nonEmpty) {
+      convergences.clear()
+      barrierMasks.keys.view.foreach {
+        case key: BarrierKey.Convergence if covered(key, barrierMasks(key).warpBits(key.base.raw)) =>
+          convergences += key
+        case _ => ()
+      }
+      convergences.foreach(releaseBarrier(_))
+    }
+
     private def releaseAll()(using Run): Unit =
       if (barrierMasks.nonEmpty) Vec.from(barrierMasks.keys).foreach(releaseBarrier(_))
 
@@ -891,7 +948,7 @@ private[isa] object VMInterpreter {
       }
     }
 
-    private def arriveWarp(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey)(using Run): Unit = {
+    private def parkWarp(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey)(using Run): Unit = {
       park(Waiting(cohort.copy(lanes = lanes), key))
       barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(lanes)
       transition(
@@ -899,16 +956,66 @@ private[isa] object VMInterpreter {
         MachineEvent.Kind.Blocked(MachineUnit.Reason.Barrier(key.describe)),
         location(cohort.frame, cohort.pc, lanes)
       )
+    }
+
+    private def arriveWarp(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey)(using Run): Unit = {
+      parkWarp(cohort, lanes, key)
       releaseBarrier(key)
     }
 
-    private inline def byWarp(lanes: VMLaneMask)(inline key: WorkgroupLane => Long)
-        : Vec[((WorkgroupLane.WarpBase, Long), VMLaneMask)] = {
-      val groups = mutable.Map.empty[(WorkgroupLane.WarpBase, Long), VMLaneMask.Builder]
-      lanes.foreachLane(lane =>
-        groups.getOrElseUpdate((WorkgroupLane.warpBases(lane >>> 5), key(lane)), VMLaneMask.Builder()).add(lane)
-      )
-      Vec.from(groups).map((group, builder) => group -> builder.result()).sortBy((group, _) => (group._1, group._2))
+    /** A cohort arrives at the convergence barriers its lanes' tokens name, a warp's lanes at a time in order of token.
+      */
+    private def synchroniseConvergence(cohort: Cohort, active: VMLaneMask, token: Register)(using Run): Unit = {
+      val frame = cohort.frame
+      active.foreachWarp { (base, bits) =>
+        var remaining = bits
+        while (remaining != 0L) {
+          var value = Long.MaxValue
+          var scan  = remaining
+          while (scan != 0L) {
+            value = Math.min(
+              value,
+              frame.lanes(WorkgroupLane.fromIndex(base + java.lang.Long.numberOfTrailingZeros(scan))).register(token)
+            )
+            scan &= scan - 1L
+          }
+          var group = 0L
+          scan = remaining
+          while (scan != 0L) {
+            val bit = java.lang.Long.numberOfTrailingZeros(scan)
+            if (frame.lanes(WorkgroupLane.fromIndex(base + bit)).register(token) == value) group |= 1L << bit
+            scan &= scan - 1L
+          }
+          remaining &= ~group
+          val lanes = if (group == bits && active.size.raw == java.lang.Long.bitCount(group)) active
+          else VMLaneMask.ofWarp(base, group)
+          arriveConvergence(cohort, lanes, BarrierKey.Convergence(WorkgroupLane.warpBases(base >>> 5), value, frame))
+        }
+      }
+    }
+
+    private def covered(key: BarrierKey.Convergence, arrived: Long): Boolean =
+      (livePart(key.base, key.frame, workgroup.convergenceMask(key.base, key.token)) & ~arrived) == 0L
+
+    /** Lanes arriving at a convergence barrier release it once every lane it still waits for has arrived. The first to
+      * arrive, finding the barrier complete, carry on without parking.
+      */
+    private def arriveConvergence(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey.Convergence)(using Run): Unit = {
+      val arrived  = barrierMasks.getOrElse(key, VMLaneMask.Empty)
+      val complete = covered(key, arrived.warpBits(key.base.raw) | lanes.warpBits(key.base.raw))
+      if (complete && arrived.isEmpty) {
+        workgroup.completeConvergence(key.base, key.token)
+        transition(
+          cohort,
+          MachineEvent.Kind.Blocked(MachineUnit.Reason.Barrier(key.describe)),
+          location(cohort.frame, cohort.pc, lanes)
+        )
+        transition(cohort, MachineEvent.Kind.Resumed, location(cohort.frame, cohort.pc, lanes))
+        advance(cohort, lanes)
+      } else {
+        parkWarp(cohort, lanes, key)
+        if (complete) releaseBarrier(key)
+      }
     }
 
     private def clusterBarrier(cohort: Cohort, active: VMLaneMask, arrival: Boolean)(using Run): Unit = {
@@ -1009,9 +1116,8 @@ private[isa] object VMInterpreter {
         case Right(Step.Advance) =>
           advance(cohort, cohort.lanes)
           instruction.instruction match {
-            case Instruction.Convergence(_, ConvergenceAction.Break) =>
-              Vec.from(barrierMasks.keys.collect { case key: BarrierKey.Convergence => key }).foreach(releaseBarrier(_))
-            case _ => ()
+            case Instruction.Convergence(_, ConvergenceAction.Break) | Instruction.Yield => releaseConvergences()
+            case _                                                                       => ()
           }
         case Right(Step.Jump(target)) =>
           // The lanes that jump and the lanes that fall through are separate units from here on.
@@ -1054,9 +1160,7 @@ private[isa] object VMInterpreter {
           }
         case Right(Step.ConvergenceSync(token)) =>
           advance(cohort, skipped)
-          byWarp(active)(frame.lanes(_).register(token)).foreach { case ((base, value), lanes) =>
-            arriveWarp(cohort, lanes, BarrierKey.Convergence(base, value, frame))
-          }
+          synchroniseConvergence(cohort, active, token)
         case Right(Step.Call(calls, parameters, returnParameters)) =>
           advance(cohort, skipped)
           calls.foreach(enterCall(cohort, _, parameters, returnParameters))

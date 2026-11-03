@@ -7,7 +7,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.vm.*
 
-/** Chained cooperative matrix multiply-accumulates; each product adds 16 to every element of ones. */
+/** Chained cooperative matrix multiply-accumulates; each product adds 16 to every element of ones. Profiling records
+  * the first launch only.
+  */
 object SPIRVCooperativeMatrixBenchmark {
   private val Rows    = 8
   private val Depth   = 16
@@ -18,9 +20,9 @@ object SPIRVCooperativeMatrixBenchmark {
   val benchmark: Case = (
     iterations(2),
     positive("products", "Cooperative matrix multiply-accumulates per invocation", 64)
-  ).mapN(Options(_, _)).map(options => () => run(options))
+  ).mapN(Options(_, _)).map(options => launch => run(options, launch))
 
-  private def run(options: Options): BenchmarkSample = {
+  private def run(options: Options, launch: LaunchControl): BenchmarkSample = {
     val memory = BenchmarkMemory(Rows * Depth * 4, Depth * Columns * 4, Rows * Columns * 4)
     val left   = memory.ids(0)
     val right  = memory.ids(1)
@@ -43,7 +45,7 @@ object SPIRVCooperativeMatrixBenchmark {
         .flatMap(SPIRVBackend(Validation.Environment.OpenCLCompute).load(_))
         .fold(error => throw IllegalArgumentException(error.message), identity)
     val sample = Measurement.repeatSucceeding(options.iterations)(
-      program.execute(task, TaskContext(memory, TaskControl(), _ => Right(())))
+      program.execute(task, TaskContext(memory, launch(), _ => Right(())))
     )
     val expected = java.lang.Float.floatToRawIntBits(16f * options.products.raw.toFloat)
     (0 until Rows * Columns).foreach { index =>

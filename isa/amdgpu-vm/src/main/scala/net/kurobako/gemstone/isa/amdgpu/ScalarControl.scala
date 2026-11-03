@@ -382,6 +382,7 @@ private object ScalarControl {
       case Instruction.SReadWaveId(dest)        => Some(readWaveId(machine)(dest))
       case counter: Instruction.LocalCounter    => Some(localCounter(machine)(counter))
       case Instruction.Wait | Instruction.Sleep => Some(fence(machine))
+      case Instruction.WaitCounts(_)            => Some(fence(machine))
       case _                                    => relativeRender(instruction, machine, wave64)
     }
 

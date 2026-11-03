@@ -81,7 +81,7 @@ import net.kurobako.gemstone.constraint.*
     assertEquals(module.sm, 89: Int >= 35)
     assertEquals(module.kernels.map(_.name), Vec("copy_add"))
     assertEquals(module.kernels.head.parameters.map(p => p.offset -> p.size), Vec[(Int >= 0, Int > 0)]((0, 8), (8, 8)))
-    val program = CubinBackend().load(Vec.from(image)).value
+    val program = CubinBackend(text = Harness.text).load(Vec.from(image)).value
     try {
       val metadata = program.kernel("copy_add").value
       assertEquals(metadata.argumentBlockSize.raw, 16)
@@ -102,7 +102,7 @@ import net.kurobako.gemstone.constraint.*
     val record = sections(info.index.raw).offset.raw
     assertEquals(buffer.getShort(record) & 0xffff, 0x2f04)
     buffer.putInt(record + 8, 14)
-    val program = CubinBackend().load(Vec.from(image)).value
+    val program = CubinBackend(text = Harness.text).load(Vec.from(image)).value
     try assertEquals(program.kernel("copy_add").value.registerCount.map(_.raw), Some(14))
     finally program.close()
     buffer.putInt(record + 8, -1)

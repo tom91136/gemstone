@@ -615,6 +615,44 @@ object ControlFlowFixtures {
         |        /*0128*/         {         IADD R0, R3, R0 ;
         |        /*0130*/                   RET         }
         |.L_x_7:
+        |""".stripMargin,
+    "spinLockSm89" ->
+      """//--------------------- .text.spin                --------------------------
+        |	.section	.text.spin,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=10"
+        |	.align	128
+        |        .global         spin
+        |        .type           spin,@function
+        |        .size           spin,(.L_x_3 - spin)
+        |        .other          spin,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |spin:
+        |.text.spin:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   BSSY B0, `(.L_x_0) ;
+        |        /*0020*/                   IMAD.MOV.U32 R2, RZ, RZ, c[0x0][0x160] ;
+        |        /*0030*/                   MOV R3, c[0x0][0x164] ;
+        |        /*0040*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x1 ;
+        |        /*0050*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |.L_x_1:
+        |        /*0060*/                   MOV R4, RZ ;
+        |        /*0070*/                   YIELD ;
+        |        /*0080*/                   ATOMG.E.CAS.STRONG.GPU PT, R0, [R2], R4, R5 ;
+        |        /*0090*/                   ISETP.NE.AND P0, PT, R0, RZ, PT ;
+        |        /*00a0*/               @P0 BRA `(.L_x_1) ;
+        |        /*00b0*/                   BSYNC B0 ;
+        |.L_x_0:
+        |        /*00c0*/                   IMAD.MOV.U32 R4, RZ, RZ, c[0x0][0x168] ;
+        |        /*00d0*/                   MOV R5, c[0x0][0x16c] ;
+        |        /*00e0*/                   LDG.E R0, [R4.64] ;
+        |        /*00f0*/                   S2R R7, SR_TID.X ;
+        |        /*0100*/                   IADD3 R7, R0, R7, RZ ;
+        |        /*0110*/                   STG.E [R4.64], R7 ;
+        |        /*0120*/                   MEMBAR.SC.GPU ;
+        |        /*0130*/                   ERRBAR;
+        |        /*0140*/                   CCTL.IVALL ;
+        |        /*0150*/                   ATOMG.E.EXCH.STRONG.GPU PT, RZ, [R2.64], RZ ;
+        |        /*0160*/                   EXIT ;
+        |.L_x_3:
         |""".stripMargin
   )
 }

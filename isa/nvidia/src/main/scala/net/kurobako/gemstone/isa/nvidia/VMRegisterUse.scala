@@ -32,25 +32,38 @@ private class VMRegisterUse {
   }
 
   /** What the issue touched, by the names `routine` declares its slots under. Slots the routine does not name read as
-    * `R<n>` or `P<n>`, so a value can still be followed from its definition to its use.
+    * `R<n>` or `P<n>`, so a value can still be followed from its definition to its use. Predicates take no 32-bit
+    * units, and a register takes the width the routine declares for its slot.
     */
-  def result(routine: Routine): RegisterUse = RegisterUse(
-    names(registersRead, routine.registerNames, "R", registerFallbacks) ++
-      names(predicatesRead, routine.predicateNames, "P", predicateFallbacks),
-    names(registersWritten, routine.registerNames, "R", registerFallbacks) ++
-      names(predicatesWritten, routine.predicateNames, "P", predicateFallbacks)
-  )
+  def result(routine: Routine): RegisterUse = {
+    val units                                        = mutable.HashMap.empty[String, Int]
+    def registers(bits: mutable.BitSet): Vec[String] =
+      names(bits, routine.registerNames, "R", registerFallbacks, routine.registerUnits, 1, units)
+    def predicates(bits: mutable.BitSet): Vec[String] =
+      names(bits, routine.predicateNames, "P", predicateFallbacks, Vec.empty, 0, units)
+    RegisterUse(
+      registers(registersRead) ++ predicates(predicatesRead),
+      registers(registersWritten) ++ predicates(predicatesWritten),
+      if (units.isEmpty) Map.empty else units.toMap
+    )
+  }
 
   private def names(
       bits: mutable.BitSet,
       declared: Vec[NonEmpty[String]],
       prefix: String,
-      fallbacks: mutable.HashMap[Int, String]
+      fallbacks: mutable.HashMap[Int, String],
+      widths: Vec[Int],
+      default: Int,
+      units: mutable.HashMap[String, Int]
   ): Vec[String] = {
     val builder = Vec.newBuilder[String]
-    bits.foreach(slot =>
-      builder += declared.lift(slot).fold(fallbacks.getOrElseUpdate(slot, s"$prefix$slot"))(_.raw)
-    )
+    bits.foreach { slot =>
+      val name  = declared.lift(slot).fold(fallbacks.getOrElseUpdate(slot, s"$prefix$slot"))(_.raw)
+      val width = widths.lift(slot).getOrElse(default)
+      if (width != 1) units(name) = width
+      builder += name
+    }
     builder.result()
   }
 }

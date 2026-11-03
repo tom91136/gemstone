@@ -10,6 +10,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchObserver.*
 
 /** Lane loops that feed each active lane's operands to a staged kernel and store its result; lanes that read each
   * other's values stage their writes in the context's `effects`. Each expansion is a method of its own, which keeps the
@@ -584,7 +585,9 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         )
       if (prepared.isLeft) prepared
       else everyLane(context) { lane =>
-        val loaded = VMMemoryAccess.loadValue(context, lane, access, element(context.read(lane, address), 0L), width)
+        val at = element(context.read(lane, address), 0L)
+        VMObservation.access(context, lane, AccessKind.Read, access, at, width.toScalarByteWidth.toLong)
+        val loaded = VMMemoryAccess.loadValue(context, lane, access, at, width)
         if (loaded.isRight) effects.stageRegister(lane, destination, value(context.scalar.elem))
         loaded
       }
@@ -613,6 +616,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       else everyLane(context) { lane =>
         val base  = context.read(lane, address)
         val start = element(base, 0L)
+        VMObservation.access(context, lane, AccessKind.Read, access, start, totalBytes.toLong)
         if (VMMemoryAccess.splitVector(context, access, start, totalBytes)) {
           var result = Completed
           var index  = 0
@@ -700,6 +704,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       val at = element(context.read(lane, address), 0L)
       VMMemoryAccess.misaligned(context, access, lane, at, width.toScalarByteWidth) match {
         case null =>
+          VMObservation.access(context, lane, AccessKind.Write, access, at, width.toScalarByteWidth.toLong)
           VMMemoryAccess.stageStore(context, effects, lane, access, at, width, value(context.read(lane, source)))
           Completed
         case fault: Fault => Left(fault)
@@ -728,6 +733,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         VMMemoryAccess.misaligned(context, access, lane, start, totalBytes) match {
           case fault: Fault => Left(fault)
           case null         =>
+            VMObservation.access(context, lane, AccessKind.Write, access, start, totalBytes.toLong)
             if (VMMemoryAccess.splitVector(context, access, start, totalBytes)) {
               var index = 0
               while (index < sources.size) {
@@ -856,12 +862,14 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       val raw = context.read(lane, address)
       VMMemoryAccess.misalignedAtomic(context, lane, raw, width) match {
         case null =>
+          val shared = VMMemoryAccess.atomicTargetsShared(space, raw, width)
+          VMObservation.atomic(context, lane, raw, width.toScalarByteWidth.toLong, shared)
           effects.stage(VMWrite.Atomic(
             lane,
             Some(destination),
             raw,
             width,
-            VMMemoryAccess.atomicTargetsShared(space, raw, width),
+            shared,
             Exchanged(context.read(lane, comparator), context.read(lane, source))
           ))
           Completed

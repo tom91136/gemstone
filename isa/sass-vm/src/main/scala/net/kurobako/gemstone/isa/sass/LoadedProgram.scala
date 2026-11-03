@@ -9,6 +9,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
+import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
 
@@ -16,7 +17,8 @@ import scala.jdk.CollectionConverters.*
 class LoadedProgram(
     module: Cubin.Module,
     decoded: Map[NonEmpty[String], Vec[DecodedFunction]],
-    workgroups: Workgroups
+    workgroups: Workgroups,
+    text: SASSInstruction => Option[String]
 ) extends Backend.Program {
 
   private val banks    = Cubin.constantSections(module).map(section => Cubin.constantSymbol(section.index) -> section)
@@ -144,7 +146,7 @@ class LoadedProgram(
               _        <- relocateBoundConstants()
               resolved <- Cubin.relocateConstants(module, globalSymbols).left.map(Fault.InvalidProgram(_))
               lowered  <-
-                VMCompiler.compile(resolved, kernel, functions, globalSymbols).left.map(Fault.InvalidProgram(_))
+                VMCompiler.compile(resolved, kernel, functions, globalSymbols, text).left.map(Fault.InvalidProgram(_))
             } yield lowered
           }
       }.map(kernel => Option(compiled.putIfAbsent(name, kernel)).getOrElse(kernel))

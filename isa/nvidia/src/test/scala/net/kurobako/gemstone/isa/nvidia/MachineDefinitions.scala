@@ -302,6 +302,12 @@ private[isa] object MachineDefinitions {
   def fence(guarded: Boolean = false): Either[String, Definition] =
     rendered("membar", guarded)(_.fenceHost)
 
+  def groupCommit(bulk: Boolean = false): Either[String, Definition] =
+    rendered("cp.async.commit_group")(machine => machine.asyncCommit(bulk)(machine.advance))
+
+  def groupWait(count: Long, bulk: Boolean = false): Either[String, Definition] =
+    rendered("cp.async.wait_group")(machine => machine.asyncWait(count, bulk)(machine.advance))
+
   def branchTable(): Either[String, Definition] =
     rendered("brx")(_.branchTable(source, Vec(Pc(7), Pc(9))))
 
@@ -322,6 +328,9 @@ private[isa] object MachineDefinitions {
 
   def leaveConvergence(guarded: Boolean = false): Either[String, Definition] =
     rendered("bbreak", guarded)(MachineSemantics.convergence(_)(Register(8), ConvergenceAction.Break))
+
+  def yieldLanes(guarded: Boolean = false): Either[String, Definition] =
+    rendered("byield", guarded)(machine => machine.yieldLanes(machine.advance))
 
   def barrierSync(id: Value, count: Option[Value] = None): Either[String, Definition] =
     rendered("bar.sync")(MachineSemantics.barrierSync(Render, _)(id, count))

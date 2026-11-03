@@ -15,7 +15,9 @@ import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-/** Equivalent PTX and encoded SASS kernels exercise divergent branches, predicate guards, loops and memory. */
+/** Equivalent PTX and encoded SASS kernels exercise divergent branches, predicate guards, loops and memory. Profiling
+  * records the first launch only.
+  */
 object NVIDIAControlFlowBenchmark {
   private enum ISA derives CanEqual { case PTX, SASS }
 
@@ -37,7 +39,7 @@ object NVIDIAControlFlowBenchmark {
     ),
     positive("groups", "Workgroups per dispatch", 16),
     workers
-  ).mapN(Options(_, _, _, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _, _, _)).map(options => launch => run(options, launch))
 
   // The SM80 launch parameter bank starts at 0x160: pointer, rounds, then lane count.
   private val parameterBase: Int >= 0 = 0x160
@@ -114,7 +116,7 @@ object NVIDIAControlFlowBenchmark {
       .fold(error => throw IllegalArgumentException(error), identity)
   }
 
-  private def run(options: Options): BenchmarkSample = {
+  private def run(options: Options, launch: LaunchControl): BenchmarkSample = {
     val kernel = options.isa match {
       case ISA.PTX  => PTX.PTXControlFlowFixture.compile()
       case ISA.SASS => sassKernel()
@@ -133,7 +135,7 @@ object NVIDIAControlFlowBenchmark {
         )
     }
     val sample = Measurement.repeatPooled(options.iterations, options.workers)(pool =>
-      VMInterpreter.execute(kernel, geometry, parameters, memory, workgroups = pool)
+      VMInterpreter.execute(kernel, geometry, parameters, memory, control = launch(), workgroups = pool)
     )
     (0 until count).foreach { lane =>
       val actual    = memory.getInt(output, (lane + 1) * 4)

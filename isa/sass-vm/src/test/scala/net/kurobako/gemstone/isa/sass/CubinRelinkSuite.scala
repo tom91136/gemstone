@@ -31,7 +31,7 @@ class CubinRelinkSuite extends Suite {
     val source  = memory.allocate(128L)
     val target  = memory.allocate(128L)
     val _       = memory.write(source, 0L, Vec.tabulate(128)(_.toByte))
-    val device  = Device(BackendRegistry(Vec(CubinBackend())), memory)
+    val device  = Device(BackendRegistry(Vec(CubinBackend(text = Harness.text))), memory)
     val program = device.load(ProgramFormat.CUDACubin, cubin).value
     try {
       val task = KernelTask.validated(

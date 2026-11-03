@@ -46,7 +46,7 @@ class Recording extends LaunchObserver {
     if (complete) changed += event
 
   /** Attached to the step the instruction just reported, which is the last one the recording holds. */
-  override def registers(at: Long, use: RegisterUse): Unit =
+  override def registers(at: Long, use: => RegisterUse): Unit =
     if (issued.nonEmpty && issued.last.issue == at) issued(issued.size - 1) = issued.last.copy(use = use)
 
   def trace: Trace = Trace(Vec.from(issued), Vec.from(changed))

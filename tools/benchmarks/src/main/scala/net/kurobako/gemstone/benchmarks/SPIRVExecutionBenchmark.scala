@@ -8,7 +8,9 @@ import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
-/** Arithmetic or call-heavy dispatches representative of the SPIR-V interpreter's instruction loop. */
+/** Arithmetic or call-heavy dispatches representative of the SPIR-V interpreter's instruction loop. Profiling records
+  * the first launch only.
+  */
 object SPIRVExecutionBenchmark {
   private enum Mode derives CanEqual {
     case Arithmetic, Calls
@@ -28,9 +30,9 @@ object SPIRVExecutionBenchmark {
     positive("groups", "Workgroups per dispatch", 256),
     positive("instructions", "Integer additions or function calls per invocation", 64),
     workers
-  ).mapN(Options(_, _, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _, _)).map(options => launch => run(options, launch))
 
-  private def run(options: Options): BenchmarkSample = {
+  private def run(options: Options, launch: LaunchControl): BenchmarkSample = {
     val memory = BenchmarkMemory(Math.multiplyExact(Math.multiplyExact(options.iterations, options.groups), 4))
     val output = memory.ids(0)
     val tasks  = Vec.tabulate(options.iterations) { iteration =>
@@ -48,7 +50,7 @@ object SPIRVExecutionBenchmark {
           .fold(error => throw IllegalArgumentException(error.message), identity)
       val measurement = Measurement {
         tasks.foreach(task =>
-          Measurement.succeeded(program.execute(task, TaskContext(memory, TaskControl(), _ => Right(()))))
+          Measurement.succeeded(program.execute(task, TaskContext(memory, launch(), _ => Right(()))))
         )
       }
       measurement.sample(options.iterations.widen[Long > 0])

@@ -101,6 +101,15 @@ class VMStateSuite extends Suite {
     assertEquals(workgroup.convergenceMask(992, token), 0L)
   }
 
+  test("a yield clears its lane from the live convergence masks of its warp only") {
+    val workgroup = VMWorkgroup(1024)
+    val token     = workgroup.createConvergence(992, 0b11L)
+    val other     = workgroup.createConvergence(0, 0b11L)
+    workgroup.yieldLane(992, 0)
+    assertEquals(workgroup.convergenceMask(992, token), 0b10L)
+    assertEquals(workgroup.convergenceMask(0, other), 0b11L)
+  }
+
   test("sparse shared and per-lane local addresses retain all address bits") {
     val workgroup = VMWorkgroup(2)
     val addresses = Vec(0L, 1L << 32, Long.MinValue)

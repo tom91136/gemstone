@@ -31,11 +31,11 @@ object OpenCLCTSCopyBenchmark {
     positive("stride", "Element stride (1 is contiguous)", 2),
     iterations(3),
     workers
-  ).mapN(Options(_, _, _, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _, _, _)).map(options => launch => run(options, launch))
 
   private val Unwritten = 0x5a.toByte
 
-  private def run(options: Options): BenchmarkSample = {
+  private def run(options: Options, launch: LaunchControl): BenchmarkSample = {
     val copied = Math.multiplyExact(Math.multiplyExact(options.groups, options.localSize), 3)
     val bytes  = Math.multiplyExact(Math.multiplyExact(copied, options.stride), 4)
     val memory = BenchmarkMemory(bytes, bytes)
@@ -66,7 +66,7 @@ object OpenCLCTSCopyBenchmark {
         .fold(error => throw IllegalArgumentException(error.message), identity)
       Measurement.repeatSucceeding(options.iterations)(program.execute(
         task,
-        TaskContext(memory, TaskControl(), _ => Right(()))
+        TaskContext(memory, launch(), _ => Right(()))
       ))
     }
     val source      = memory.array(input)

@@ -1581,6 +1581,14 @@ private[isa] object VMIR {
     case MBarrierTest(destination: Predicate, address: Value, phase: Value, parity: Boolean)
     case MBarrierInvalidate(address: Value)
 
+    /** Commits each active lane's transfers since its last commit to a group of the class `bulk` names, which is
+      * `cp.async` groups unless `bulk` is set, then bulk async-groups.
+      */
+    case AsyncCommit(bulk: Boolean)
+
+    /** Waits until at most `count` of each active lane's committed groups of the class `bulk` names remain. */
+    case AsyncWait(count: Long, bulk: Boolean)
+
     /** Locks a shared word for this thread and loads it into `result` when no other thread holds its lock, and says in
       * `destination` whether it did, as Kepler's `LDSLK` does for shared atomics.
       */
@@ -1642,6 +1650,7 @@ private[isa] object VMIR {
     )
     case Fence
     case Convergence(token: Register, action: ConvergenceAction)
+    case Yield
     case ReturnStackPush(address: Long)
     case ReturnStackPop(destination: Register)
     case ReturnStackSave(source: Register)
@@ -1670,12 +1679,23 @@ private[isa] object VMIR {
   }
 
   /** Lowered instructions and, when the lowering recorded them, the source ISA address each one came from. */
-  case class ExecutableProgram(instructions: Vec[PredicatedInstruction], sources: Vec[Long] = Vec.empty) {
+  case class ExecutableProgram(
+      instructions: Vec[PredicatedInstruction],
+      sources: Vec[Long] = Vec.empty,
+      sourceTexts: Map[Long, String] = Map.empty
+  ) {
     def source(pc: Pc): Option[Long >= 0] = sources.lift(pc.toInt).flatMap(_.refine[Long >= 0].toOption)
+
+    def sourceText(pc: Pc): Option[String] = sources.lift(pc.toInt).flatMap(sourceTexts.get)
+
+    /** Whether the instruction at `pc` is the first its source instruction lowered to; with no sources, each is. */
+    def begins(pc: Pc): Boolean =
+      sources.isEmpty || source(pc).exists(at => pc.toInt == 0 || sources(pc.toInt - 1) != at.raw)
   }
 
   /** Executable code, the register and predicate slots its lanes are sized for up front, its frame-local storage and,
-    * when known, the source names of its predicate and register slots.
+    * when known, the source names of its predicate and register slots and the width of each register slot in 32-bit
+    * units, which is one for a slot not listed.
     */
   case class Routine(
       name: NonEmpty[String],
@@ -1684,7 +1704,8 @@ private[isa] object VMIR {
       predicateCount: Int >= 0,
       localBytes: Int >= 0 = 0,
       predicateNames: Vec[NonEmpty[String]] = Vec.empty,
-      registerNames: Vec[NonEmpty[String]] = Vec.empty
+      registerNames: Vec[NonEmpty[String]] = Vec.empty,
+      registerUnits: Vec[Int] = Vec.empty
   ) {
     def describe(predicate: Predicate): String =
       predicateNames.lift(predicate.raw).fold(s"predicate ${predicate.raw}")(name => s"register $name")
@@ -1728,7 +1749,9 @@ private[isa] object VMIR {
       entries: Map[NonEmpty[String], Entry] = Map.empty,
       functionTable: FunctionTable = FunctionTable(Set.empty),
       cluster: Option[Dimensions] = None,
-      pairAllocationBarrier: Option[Long] = None
+      pairAllocationBarrier: Option[Long] = None,
+      registersPerLane: Option[Int >= 0] = None,
+      staticSharedBytes: Long >= 0 = 0L
   ) {
     def name: NonEmpty[String] = entry.name
   }

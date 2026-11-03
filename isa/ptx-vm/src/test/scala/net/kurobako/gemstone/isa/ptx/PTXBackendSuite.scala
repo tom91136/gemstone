@@ -16,7 +16,7 @@ class PTXBackendSuite extends Suite {
   test("loads and executes PTX through the typed runtime boundary") {
     val source = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
     Using.resource(
-      PTXBackend()
+      PTXBackend(text = execution.text)
         .load(
           Vec.from(source.getBytes(StandardCharsets.UTF_8))
         )
@@ -44,8 +44,9 @@ class PTXBackendSuite extends Suite {
     }
   }
 
-  private def loadModule(version: String, target: String, instruction: String) = PTXBackend().load(Vec.from(
-    s""".version $version
+  private def loadModule(version: String, target: String, instruction: String) =
+    PTXBackend(text = execution.text).load(Vec.from(
+      s""".version $version
        |.target $target
        |.address_size 64
        |.visible .entry newer() {
@@ -55,7 +56,7 @@ class PTXBackendSuite extends Suite {
        |  ret;
        |}
        |""".stripMargin.getBytes(StandardCharsets.UTF_8)
-  ))
+    ))
 
   test("modules using instructions newer than their declared version or target are rejected at load") {
     def load(version: String, target: String) = loadModule(version, target, "clmad.lo.u64 %rd0, %rd1, %rd2, %rd3;")
@@ -117,7 +118,7 @@ class PTXBackendSuite extends Suite {
          |  ret;
          |}
          |""".stripMargin
-    Using.resource(ExecutionSession(List(PTXBackend()))) { service =>
+    Using.resource(ExecutionSession(List(PTXBackend(text = execution.text)))) { service =>
       val allocation = service.registerAllocation(16).value
       val output     = service.registerAllocation(4).value
       val program    =

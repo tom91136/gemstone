@@ -9,8 +9,8 @@ import net.kurobako.gemstone.vm.*
 object Backends {
   def default(workgroups: Workgroups = Workgroups.Sequential): Backends = Backends(
     List(
-      ptx.PTXBackend(workgroups),
-      sass.CubinBackend(workgroups),
+      ptx.PTXBackend(workgroups, text = instruction => Some(ptx.asm.Printer.render(instruction))),
+      sass.CubinBackend(workgroups, text = instruction => sass.asm.Printer.print(instruction).toOption),
       amdgpu.AMDGPUBackend(workgroups),
       SPIRVBackend(Validation.Environment.OpenCLCompute, ProgramFormat.SPIRVOpenCLCompute, workgroups),
       SPIRVBackend(Validation.Environment.VulkanCompute, ProgramFormat.SPIRVVulkanCompute, workgroups),

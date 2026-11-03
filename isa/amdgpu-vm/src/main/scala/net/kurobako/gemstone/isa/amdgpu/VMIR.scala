@@ -243,6 +243,21 @@ private object VMIR {
     case Shader, ShaderCycles, RealTime
   }
 
+  /** The counters a wait names. The declaration order is the observer's target numbering. */
+  enum WaitCounter derives CanEqual {
+    case Vm, Exp, Lgkm, Vs, Km, Sample, Bvh, X, Async
+  }
+
+  /** One counter a wait constrains: the counter is at most `count`, plus the value `base` reads when one is given. The
+    * split S_WAITCNT forms that carry a base add both in their counter's field width without clamping (RDNA3 ISA,
+    * SOPK), so the sum wraps.
+    */
+  case class WaitCount(counter: WaitCounter, count: Int, base: Option[InstructionSource]) {
+
+    /** The field width of the split S_WAITCNT forms: three bits for EXPCNT, six for the others. */
+    val mask: Long = if (counter == WaitCounter.Exp) 0x7L else 0x3fL
+  }
+
   enum ScalarUnaryOperation derives CanEqual {
     case U32FromF32, F32FromU32, TruncateF32, AbsoluteI32, SignExtendI8, SignExtendI16, CountBits32, CountBits64,
       ReverseBits32
@@ -1506,6 +1521,11 @@ private object VMIR {
     case BarrierLeave
     case Wait
 
+    /** S_WAITCNT and its counter forms: waits until each counter in `counts` is at most its count, plus `base` when one
+      * is given. A counter not listed is not waited on.
+      */
+    case WaitCounts(counts: Vec[WaitCount])
+
     /** S_SLEEP: a wait during which the other workgroups of a cooperative dispatch run. */
     case Sleep
     case End
@@ -1559,5 +1579,23 @@ private object VMIR {
     val isa: ISA       = source.target.isa
     val m0: Int        = m0Register(isa)
     val discarded: Int = nullRegister(isa).fold(-1)(_.raw)
+
+    private lazy val textBytes: Array[Byte] = Vec.toArray(source.text)
+    private val assemblies                  = Array.fill(instructions.size)("")
+
+    /** The assembly of instruction `index`, or its lowered form where the text holds no instruction there. */
+    def assembly(index: Int): String = {
+      val cached = assemblies(index)
+      if (cached.nonEmpty) cached
+      else {
+        val text =
+          asm.Binary.decodeStatementAt(textBytes, instructionOffsets(index).unsafe[Int >= 0], source.mode).fold(
+            _ => instructions(index).toString,
+            decoded => asm.Printer.render(asm.Program(Vec(decoded.statement)))
+          )
+        assemblies(index) = text
+        text
+      }
+    }
   }
 }

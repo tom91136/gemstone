@@ -18,7 +18,7 @@ object PTXTensorBenchmark {
     choice("op", "wgmma" -> Op.Wgmma, "tcgen05" -> Op.Tcgen05),
     iterations(5),
     positive("products", "Matrix products per launch", 1)
-  ).mapN((op, iterations, products) => () => run(op, iterations, products))
+  ).mapN((op, iterations, products) => launch => run(op, iterations, products, launch))
 
   private val Lanes: Int > 0 = 128
 
@@ -169,7 +169,7 @@ object PTXTensorBenchmark {
     }"""
   }
 
-  private def run(op: Op, iterations: Int > 0, products: Int > 0): BenchmarkSample = {
+  private def run(op: Op, iterations: Int > 0, products: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val (source, words, expected) = op match {
       case Op.Wgmma   => (wgmma, Lanes.raw * wgmmaRegisters, -16f * products.raw)
       case Op.Tcgen05 => (tcgen05, Lanes.raw * tcgenColumns, 16f * products.raw)
@@ -192,7 +192,9 @@ object PTXTensorBenchmark {
           ("idesc": NonEmpty[String]) -> Argument.fromLong(tcgenInstruction)
         )
     }
-    val sample = Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, geometry, parameters, memory))
+    val sample = Measurement.repeatSucceeding(iterations)(
+      VMInterpreter.execute(kernel, geometry, parameters, memory, launch())
+    )
     (0 until words).foreach { index =>
       if (java.lang.Float.intBitsToFloat(memory.getInt(output, index * 4)) != expected)
         throw IllegalStateException(s"unexpected result at index $index")

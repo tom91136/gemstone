@@ -37,10 +37,10 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
   inline def eachRank(inline each: V => F[Unit]): F[Unit]
 
   /** `value` of `width` written to the shared address `address`, which may name a CTA of the cluster, then `next`. */
-  inline def storeShared(address: V, value: V, width: ScalarBitWidth)(inline next: => F[Unit]): F[Unit]
+  inline def storeShared(lane: L, address: V, value: V, width: ScalarBitWidth)(inline next: => F[Unit]): F[Unit]
 
   /** `data` at the shared address `address`, with zeros past its end up to `size` bytes, then `next`. */
-  inline def storeSharedBytes(address: V, data: D, size: V)(inline next: => F[Unit]): F[Unit]
+  inline def storeSharedBytes(lane: L, address: V, data: D, size: V)(inline next: => F[Unit]): F[Unit]
 
   /** `next` if the shared address `address` lies in shared memory, otherwise a fault naming `what` and the address. */
   inline def requireShared(address: V, what: String)(inline next: => F[Unit]): F[Unit]
@@ -59,23 +59,23 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
   inline def clusterBarrier(arrive: Boolean): F[Step]
 
   /** `data` stored at `offset` in the shared window of `cta`, then `next`. */
-  inline def storeCluster(cta: C, offset: V, data: D)(inline next: => F[Unit]): F[Unit]
+  inline def storeCluster(lane: L, cta: C, offset: V, data: D)(inline next: => F[Unit]): F[Unit]
 
   /** `bytes` of transaction count completed on the mbarrier at `barrier` in the shared window of `cta`, then `next`. */
-  inline def completeTx(cta: C, barrier: V, bytes: V)(inline next: => F[Unit]): F[Unit]
+  inline def completeTx(lane: L, cta: C, barrier: V, bytes: V)(inline next: => F[Unit]): F[Unit]
 
   inline def sameCta(first: C, second: C): V
 
-  inline def clearCluster(cta: C, offset: V, bytes: V)(inline next: => F[Unit]): F[Unit]
+  inline def clearCluster(lane: L, cta: C, offset: V, bytes: V)(inline next: => F[Unit]): F[Unit]
 
-  inline def storeWord(cta: C, offset: V, value: V, width: ScalarBitWidth)(inline next: => F[Unit]): F[Unit]
+  inline def storeWord(lane: L, cta: C, offset: V, value: V, width: ScalarBitWidth)(inline next: => F[Unit]): F[Unit]
 
-  inline def reduceWord(cta: C, offset: V, operand: V, width: ScalarBitWidth, operation: AtomicOperation)(
+  inline def reduceWord(lane: L, cta: C, offset: V, operand: V, width: ScalarBitWidth, operation: AtomicOperation)(
       inline next: => F[Unit]
   ): F[Unit]
 
   /** faults where element has no form of operator */
-  inline def reduceBytes(cta: C, offset: V, data: D, copy: Instruction.AsyncBulkReduce)(
+  inline def reduceBytes(lane: L, cta: C, offset: V, data: D, copy: Instruction.AsyncBulkReduce)(
       inline next: => F[Unit]
   ): F[Unit]
 
@@ -126,10 +126,10 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
   inline def reduceRun(lane: L, transfer: D, run: V, operator: TensorMap.Reduction)(inline next: => F[Unit]): F[Unit]
 
   /** The box of `transfer` stored in the shared window of `cta`, swizzled from the offset `start`, then `next`. */
-  inline def placeBox(cta: C, start: V, transfer: D)(inline next: => F[Unit]): F[Unit]
+  inline def placeBox(lane: L, cta: C, start: V, transfer: D)(inline next: => F[Unit]): F[Unit]
 
   /** The box of `transfer` read from the shared window of `cta`, swizzled from the offset `start`, then `next`. */
-  inline def fetchBox(cta: C, start: V, transfer: D)(inline next: => F[Unit]): F[Unit]
+  inline def fetchBox(lane: L, cta: C, start: V, transfer: D)(inline next: => F[Unit]): F[Unit]
 
   /** The rank of the CTA of the pair of `cta` whose rank has the parity of `signalled`'s. */
   inline def peerRank(cta: C, signalled: C): V
@@ -190,6 +190,15 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
   /** The writes the kernel makes to host-mapped memory become visible to the host. */
   inline def fenceHost: F[Step]
 
+  /** The active lanes commit their transfers since their last commit to a group of the class `bulk` names, then `next`.
+    */
+  inline def asyncCommit(bulk: Boolean)(inline next: => F[Step]): F[Step]
+
+  /** The active lanes wait until at most `count` of their committed groups of the class `bulk` names remain, then
+    * `next`.
+    */
+  inline def asyncWait(count: Long, bulk: Boolean)(inline next: => F[Step]): F[Step]
+
   /** The lanes call the device builtin `builtin`, passing `parameters` and receiving `returns`, then `next`. */
   inline def callBuiltin(builtin: Builtin, returns: Vec[Parameter], parameters: Vec[Parameter])(
       inline next: => F[Step]
@@ -205,6 +214,9 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
 
   /** The active lanes leave the convergence barrier their `token` names, then `next`. */
   inline def leaveConvergence(token: Register)(inline next: => F[Step]): F[Step]
+
+  /** The active lanes stop being waited for at the convergence barriers of their warps, then `next`. */
+  inline def yieldLanes(inline next: => F[Step]): F[Step]
 
   /** The lanes arrive at the workgroup barrier `barrier`, which expects `count` threads, and reduce the predicates of
     * those threads by `reduction` when it completes.
@@ -333,5 +345,5 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
   inline def releaseLock(cta: C, offset: V, holder: V)(inline next: V => F[Unit]): F[Unit]
 
   /** `next` over the 16 bytes at `offset` in the shared window of `cta`, widened as `packing` says. */
-  inline def loadChunk(cta: C, offset: V, packing: Matrix.Packing)(inline next: D => F[Unit]): F[Unit]
+  inline def loadChunk(lane: L, cta: C, offset: V, packing: Matrix.Packing)(inline next: D => F[Unit]): F[Unit]
 }

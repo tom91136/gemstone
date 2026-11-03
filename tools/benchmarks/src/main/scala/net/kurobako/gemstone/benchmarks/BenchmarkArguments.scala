@@ -3,11 +3,18 @@ package net.kurobako.gemstone.benchmarks
 import cats.syntax.all.*
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
 
 object BenchmarkArguments {
 
-  /** Case arguments parse into the measured action, so invalid arguments fail before any measurement. */
-  type Case = Opts[() => BenchmarkSample]
+  /** Makes the control for one launch. A plain run passes `TaskControl()`; an observed run attaches an observer. */
+  type LaunchControl = () => TaskControl
+
+  /** Case arguments parse into the measured action, so invalid arguments fail before any measurement. The action takes
+    * the launch control and calls it once per launch, so a case's setup is shared by every mode; a profile records the
+    * first launch only.
+    */
+  type Case = Opts[LaunchControl => BenchmarkSample]
 
   def positive(name: String, help: String, default: Int): Opts[Int > 0] =
     Opts.option[Int](name, help).withDefault(default)

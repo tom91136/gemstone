@@ -34,6 +34,7 @@ class PTXCacheSuite extends Suite {
     val secondImage = Vec.from(bytes.hex("69176c4aa471a321"))
     val calls       = AtomicInteger()
     val backend     = PTXBackend(
+      text = execution.text,
       decode = { bytes =>
         val _      = calls.incrementAndGet()
         val kernel = if (bytes == firstImage) "first" else "second"
@@ -61,6 +62,7 @@ class PTXCacheSuite extends Suite {
     val calls       = AtomicInteger()
     val interrupted = InterruptedException("decode interrupted")
     val backend     = PTXBackend(
+      text = execution.text,
       decode = { bytes =>
         calls.incrementAndGet() match {
           case 1 => Left(ISA.DecodeError.InvalidUTF8(0))

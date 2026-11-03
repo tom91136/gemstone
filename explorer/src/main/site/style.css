@@ -455,6 +455,103 @@ table {
   outline: 1px solid #e3c46a;
 }
 
+.program .pane .listing-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 6px;
+}
+
+.heat-controls,
+.heat-legend {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: #3a4550;
+  margin-bottom: 4px;
+}
+
+.heat-swatch {
+  min-width: 36px;
+  padding: 1px 4px;
+  text-align: center;
+  color: #1d2329;
+  border: 1px solid #b8c0c8;
+}
+
+.program .lines .heat-value {
+  min-width: 48px;
+  text-align: right;
+  color: #1d2329;
+  user-select: none;
+}
+
+.heat-1 {
+  background: #e6f0fa;
+}
+
+.heat-2 {
+  background: #cbe0f4;
+}
+
+.heat-3 {
+  background: #a9cdec;
+}
+
+.heat-4 {
+  background: #85b7e1;
+}
+
+.heat-5 {
+  background: #6aa5d6;
+}
+
+.program .lines .line.heat-1 {
+  box-shadow: inset 2px 0 0 #24303c;
+}
+
+.program .lines .line.heat-2 {
+  box-shadow: inset 4px 0 0 #24303c;
+}
+
+.program .lines .line.heat-3 {
+  box-shadow: inset 6px 0 0 #24303c;
+}
+
+.program .lines .line.heat-4 {
+  box-shadow: inset 8px 0 0 #24303c;
+}
+
+.program .lines .line.heat-5 {
+  box-shadow: inset 10px 0 0 #24303c;
+}
+
+.heat-summary {
+  flex: 0 0 auto;
+  max-height: 22vh;
+  overflow: auto;
+  border: 1px solid #d5dbe0;
+  background: #fff;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.heat-summary h4,
+.heat-summary p {
+  margin: 2px 0;
+}
+
+.heat-findings {
+  margin: 2px 0;
+  padding-left: 20px;
+}
+
+.heat-cycles {
+  font-weight: 600;
+}
+
 .timeline-pane {
   border: 1px solid #d5dbe0;
   background: #fff;

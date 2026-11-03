@@ -34,7 +34,8 @@ private object VMSemantics {
       executeControl(instruction, context)
     case Instruction.NoOp | Instruction.Return | Instruction.Exit =>
       executeControl(instruction, context)
-    case Instruction.Trap | Instruction.CallBuiltin(_, _, _) | Instruction.Convergence(_, _) | Instruction.Fence =>
+    case Instruction.Trap | Instruction.CallBuiltin(_, _, _) | Instruction.Convergence(_, _) | Instruction.Yield |
+        Instruction.Fence =>
       executeControlMachine(instruction, context)
     case Instruction.WarpReduce(operation = operation) =>
       Left(Fault.Backend(s"unsupported warp reduction operation: $operation"))
@@ -60,7 +61,8 @@ private object VMSemantics {
       executeClusterMachine(instruction, context)
     case _: (Instruction.AsyncCopy | Instruction.AsyncBulkCopy | Instruction.AsyncBulkStore |
           Instruction.AsyncBulkFill | Instruction.AsyncBulkReduce | Instruction.AsyncSharedStore |
-          Instruction.AsyncSharedReduce | Instruction.TensorMapCopy) =>
+          Instruction.AsyncSharedReduce | Instruction.TensorMapCopy | Instruction.AsyncCommit |
+          Instruction.AsyncWait) =>
       executeAsyncMachine(instruction, context)
     case _: (Instruction.AsyncTensor | Instruction.TensorMapReplace) => executeTensorMap(instruction, context)
     case _: (Instruction.StackAllocate | Instruction.StackSave | Instruction.StackRestore) =>
@@ -114,6 +116,7 @@ private object VMSemantics {
       case Instruction.CallBuiltin(builtin, returnParameters, parameters) =>
         machine.callBuiltin(builtin, returnParameters, parameters)(machine.advance)
       case Instruction.Convergence(token, action) => MachineSemantics.convergence(machine)(token, action)
+      case Instruction.Yield                      => machine.yieldLanes(machine.advance)
       case Instruction.Trap                       => machine.trap
       case Instruction.Fence                      => machine.fenceHost
     }
@@ -124,7 +127,9 @@ private object VMSemantics {
     (instruction: @unchecked) match {
       case Instruction.AsyncCopy(destination, source, size, sourceSize) =>
         MachineSemantics.asyncCopy(Execute, machine)(destination, source, size, sourceSize)
-      case copy: Instruction.AsyncBulkCopy => MachineSemantics.bulkCopy(Execute, machine)(copy)
+      case copy: Instruction.AsyncBulkCopy    => MachineSemantics.bulkCopy(Execute, machine)(copy)
+      case Instruction.AsyncCommit(bulk)      => machine.asyncCommit(bulk)(machine.advance)
+      case Instruction.AsyncWait(count, bulk) => machine.asyncWait(count, bulk)(machine.advance)
       case Instruction.AsyncBulkStore(destination, source, size, byteMask) =>
         MachineSemantics.bulkStore(Execute, machine)(destination, source, size, byteMask)
       case Instruction.AsyncBulkFill(address, size) => MachineSemantics.bulkFill(Execute, machine)(address, size)

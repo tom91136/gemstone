@@ -13,7 +13,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 object HIPCloverleafFluxBenchmark {
   val benchmark: Case =
     (positive("cells", "Cells per dispatch", 64), iterations(20)).mapN((cells, iterations) =>
-      () => run(cells, iterations)
+      launch => run(cells, iterations, launch)
     )
 
   private val ExplicitArgumentBytes = 8 * 8 + 4 + 4 + 8
@@ -45,7 +45,7 @@ object HIPCloverleafFluxBenchmark {
     Vec.unsafeWrapArray(hidden)
   }
 
-  private def run(cells: Int > 0, iterations: Int > 0): BenchmarkSample = {
+  private def run(cells: Int > 0, iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val memory   = CloverleafFluxFixture.memory(cells)
     val image    = Vec.unsafeWrapArray(BenchmarkResources.bytes("cloverleaf-flux.hsaco", "hip"))
     val prepared = (for {
@@ -69,7 +69,7 @@ object HIPCloverleafFluxBenchmark {
         KernelTask.Argument.Scalar(hidden.unsafe)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val sample = SequentialDispatch.repeat(iterations, prepared, task, memory)
+    val sample = SequentialDispatch.repeat(iterations, prepared, task, memory, launch)
     CloverleafFluxFixture.verify(memory, cells)
     sample
   }

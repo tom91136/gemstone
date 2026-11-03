@@ -1,5 +1,4 @@
 isa	target	mnemonic	form	class	reason
-PTX	.*	(cp\.async\.bulk\.commit_group|cp\.async\.bulk\.wait_group|cp\.async\.commit_group|cp\.async\.wait_all|cp\.async\.wait_group)	.*	NoOp	asynchronous copies complete when issued, so no group is pending
 PTX	.*	setmaxnreg	.*	NoOp	the VM does not limit the registers of a thread
 PTX	.*	(tcgen05\.wait::ld|tcgen05\.wait::st)	.*	NoOp	tensor memory moves complete when issued, so there is nothing to wait for
 PTX	.*	(wgmma\.commit_group|wgmma\.fence|wgmma\.wait_group)	.*	NoOp	warpgroup matrix products complete when issued, so no group is pending
@@ -7,7 +6,6 @@ PTX	.*	(applypriority|cp\.async\.bulk\.prefetch|discard|nanosleep|pmevent|prefet
 PTX	.*	(fabric\.submit|fabric\.try_get|fabric\.try_pullred|fabric\.try_put|fabric\.try_red|fabric\.wait)	.*	NotModelled	it moves data through CUDA Fabric Transport handles, whose logical endpoints only the driver's logical endpoint API creates, and Gemstone's runtime creates none
 PTX	.*	(istypep|suld|suq|sured|sust|tex|tld4|txq)	.*	NotModelled	it belongs to the graphics pipeline's texture, surface or attribute state
 SASS	.*	ENDCOLLECTIVE	.*	NoOp	the VM checks the warp synchronisation it closes at load, so it runs nothing
-SASS	.*	LDGDEPBAR	.*	NoOp	loads complete synchronously in the VM, so no dependency barrier is pending
 SASS	.*	PREEXIT	.*	NoOp	dependent launches wait for kernel completion, so there is no early launch to release
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	USETMAXREG	(usetmaxreg__Ib_dealloc|usetmaxreg__URb_dealloc)	NoOp	the VM does not bound a warp's registers, so register-count hints have no effect
 SASS	sm_90	USETMAXREG	(usetmaxregAlloc__Ib_dealloc|usetmaxregAlloc__URb_dealloc|usetmaxreg__Ib_dealloc|usetmaxreg__URb_dealloc)	NoOp	the VM does not bound a warp's registers, so register-count hints have no effect
@@ -57,7 +55,7 @@ SASS	(sm_70|sm_72)	CCTL	(cctl__IVALL_WBALL_C_noSrc|cctl__IVALL_WBALL_I_noSrc|cct
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_90)	CCTL	(cctl__IVALL_WBALL_C_noSrc|cctl__IVALL_WBALL_I_noSrc|cctl__sImmOffset|cctl__sUROffset|cctl__uImmOffset|cctl__uUROffset)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 SASS	sm_89	CCTL	(cctl__IVALL_WBALL_C_noSrc|cctl__IVALL_WBALL_I_noSrc|cctl__sImmOffset|cctl__sImmOffset_pf2|cctl__sImmOffset_pf2_q|cctl__sImmOffset_rml2|cctl__sUROffset|cctl__sUROffset_pf2|cctl__sUROffset_pf2_q)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 SASS	sm_89	CCTL	(cctl__sUROffset_rml2|cctl__uImmOffset|cctl__uImmOffset_pf2|cctl__uImmOffset_pf2_q|cctl__uImmOffset_rml2|cctl__uUROffset|cctl__uUROffset_pf2|cctl__uUROffset_pf2_q|cctl__uUROffset_rml2)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
-SASS	.*	(CCTLL|CCTLS|CCTLT|NANOSLEEP|PMTRIG|UBLKPF|YIELD)	.*	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
+SASS	.*	(CCTLL|CCTLS|CCTLT|NANOSLEEP|PMTRIG|UBLKPF)	.*	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 SASS	(sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	CLMAD	(clmad__RCxR_RCxR|clmad__RRCx_RRCx)	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
 SASS	.*	(CSMTEST|VILD)	.*	NotModelled	it belongs to the graphics pipeline's vertex, pixel or coverage state
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	DADD	dadd__RRCx_RCx	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit

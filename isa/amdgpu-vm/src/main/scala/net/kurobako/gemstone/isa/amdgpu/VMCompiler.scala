@@ -1471,7 +1471,8 @@ private object VMCompiler {
     case Instruction.SSetReg | Instruction.SGprIndexOff | Instruction.Barrier | Instruction.BarrierLeave |
         Instruction.Wait | Instruction.Sleep | Instruction.End |
         Instruction.CacheInvalidate | Instruction.CacheWritebackInvalidate => true
-    case _ => false
+    case Instruction.WaitCounts(_) => true
+    case _                         => false
   }
 
   /** GFX9 VGPR indexing mode offsets the operands M0[15:12] names by M0[7:0] from s_set_gpr_idx_on to
@@ -1495,8 +1496,8 @@ private object VMCompiler {
           Right(Instruction.VMoveRelative(dest, source, RelativeField.Low))
         case (Some(bits), Instruction.VMove(dest, source)) if bits == 8 =>
           Right(Instruction.VMoveRelativeDestination(dest, source, None, RelativeField.Low))
-        case (_, Instruction.SGprIndex(index = _) | Instruction.Wait) => Right(instruction)
-        case (Some(bits), other) if bits != 0                         =>
+        case (_, Instruction.SGprIndex(index = _) | Instruction.Wait | Instruction.WaitCounts(_)) => Right(instruction)
+        case (Some(bits), other) if bits != 0                                                     =>
           Left[NonEmpty[String], Instruction](s"$other in VGPR indexing mode $bits is not implemented")
         case _ => Right(instruction)
       }
@@ -1526,7 +1527,7 @@ private object VMCompiler {
   private def hint(machine: InstructionDecoder.Decoded): Option[Instruction] = machine.definition match {
     case STtracedata | STtracedataImm | SIncperflevel | SDecperflevel | SWakeup | SWaitEvent | SWaitIdle | SIcacheInv |
         SCbranchCdbgsys | SCbranchCdbguser | SCbranchCdbgsysOrUser | SCbranchCdbgsysAndUser | SVersion |
-        SWaitcntVmcnt | SWaitcntExpcnt | SDcacheWb | SDcacheWbVol | SDcacheDiscard | SDcacheDiscardX2 | SAtcProbe |
+        SDcacheWb | SDcacheWbVol | SDcacheDiscard | SDcacheDiscardX2 | SAtcProbe |
         SAtcProbeBuffer | SBufferPrefetchData | DsNop | VNop | VClrexcp | VPipeflush | SSleepVar | SPrefetchData |
         SPrefetchInst | SPrefetchDataPcRel | SPrefetchInstPcRel | SSingleuseVdst | SSetValuCoexecMode =>
       Some(Instruction.Wait)
@@ -2000,6 +2001,37 @@ private object VMCompiler {
     OperandEncoding.Catalogue.forKind(target.isa, OperandKind.HWREG)
       .map(_.fields.map(field => field.field.name -> field).toMap)
 
+  /** The counts an S_WAITCNT immediate waits for. A counter at its maximum is not waited on, which is also how an
+    * unnamed counter encodes.
+    */
+  private def waitCounts(immediate: Long, target: Target): Instruction =
+    OperandEncoding.Catalogue.forKind(target.isa, OperandKind.WAITCNT).fold[Instruction](Instruction.Wait) { encoding =>
+      def counter(name: EncodingField, waited: WaitCounter): List[WaitCount] =
+        encoding.fields.find(_.field.name == name).toList.flatMap(named =>
+          waitCount(waited, named.field.get(immediate), named.field.width)
+        )
+      Instruction.WaitCounts(Vec.from(
+        counter(EncodingField.VM, WaitCounter.Vm) ++ counter(EncodingField.EXP, WaitCounter.Exp) ++
+          counter(EncodingField.LGKM, WaitCounter.Lgkm)
+      ))
+    }
+
+  private def waitCount(counter: WaitCounter, value: Long, width: Int): List[WaitCount] =
+    Option.when(value < (1L << width) - 1)(WaitCount(counter, value.toInt, None)).toList
+
+  /** GFX12 combined waits pack the dscnt count at bit 0 and the loadcnt or storecnt count at bit 8. */
+  private def packedWait(immediate: Int, counters: (WaitCounter, Int, Int)*): Instruction =
+    Instruction.WaitCounts(Vec.from(counters.flatMap { (counter, shift, width) =>
+      waitCount(counter, ((immediate >> shift) & ((1 << width) - 1)).toLong, width)
+    }))
+
+  /** The split S_WAITCNT forms, which wait on the counter against the sdst source plus the immediate. */
+  private def splitWait(machine: InstructionDecoder.Decoded, counter: WaitCounter, target: Target)
+      : Either[NonEmpty[String], Instruction] =
+    scalarSource(machine, EncodingField.SDST, None, target).map(base =>
+      Instruction.WaitCounts(Vec(WaitCount(counter, machine(EncodingField.SIMM16).toInt, Some(base))))
+    )
+
   /** MSG_RTN_GET_REALTIME, which LLVM sends for the steady counter on every target from GFX11. */
   private val RealTimeMessage = 0x83L
 
@@ -2050,8 +2082,11 @@ private object VMCompiler {
     val immediate = machine.signed(EncodingField.SIMM16)
     machine.definition match {
       // Memory and LDS operations finish synchronously before the next instruction.
-      case SWaitcntVscnt | SWaitcntLgkmcnt => Right(Instruction.Wait)
-      case SMovkI32                        =>
+      case SWaitcntVmcnt   => splitWait(machine, WaitCounter.Vm, target)
+      case SWaitcntExpcnt  => splitWait(machine, WaitCounter.Exp, target)
+      case SWaitcntLgkmcnt => splitWait(machine, WaitCounter.Lgkm, target)
+      case SWaitcntVscnt   => splitWait(machine, WaitCounter.Vs, target)
+      case SMovkI32        =>
         machine.scalarOperand(EncodingField.SDST).map(Instruction.SMove(_, InstructionSource.Constant(immediate)))
       case SCmovkI32 =>
         machine.scalarOperand(EncodingField.SDST).map(destination =>
@@ -2194,11 +2229,20 @@ private object VMCompiler {
       Right(Instruction.BranchRelative(condition, machine.signed(EncodingField.SIMM16).toInt))
     machine.definition match {
       // Operations complete synchronously; waits only flush staged host writes.
-      case SWaitcnt | SWaitcntVscnt | SWaitcntDepctr | SDelayAlu | SWaitKmcnt | SWaitAlu |
-          SWaitLoadcnt | SWaitStorecnt | SWaitDscnt | SWaitLoadcntDscnt | SWaitStorecntDscnt |
-          SWaitSamplecnt | SWaitBvhcnt | SWaitExpcnt | SWaitXcnt | SWaitAsynccnt =>
-        Right(Instruction.Wait)
-      case SDenormMode =>
+      case SWaitcnt           => Right(waitCounts(machine(EncodingField.SIMM16), target))
+      case SWaitLoadcnt       => Right(packedWait(immediate, (WaitCounter.Vm, 0, 6)))
+      case SWaitStorecnt      => Right(packedWait(immediate, (WaitCounter.Vs, 0, 6)))
+      case SWaitDscnt         => Right(packedWait(immediate, (WaitCounter.Lgkm, 0, 6)))
+      case SWaitLoadcntDscnt  => Right(packedWait(immediate, (WaitCounter.Vm, 8, 6), (WaitCounter.Lgkm, 0, 6)))
+      case SWaitStorecntDscnt => Right(packedWait(immediate, (WaitCounter.Vs, 8, 6), (WaitCounter.Lgkm, 0, 6)))
+      case SWaitKmcnt         => Right(packedWait(immediate, (WaitCounter.Km, 0, 5)))
+      case SWaitSamplecnt     => Right(packedWait(immediate, (WaitCounter.Sample, 0, 6)))
+      case SWaitBvhcnt        => Right(packedWait(immediate, (WaitCounter.Bvh, 0, 3)))
+      case SWaitExpcnt        => Right(packedWait(immediate, (WaitCounter.Exp, 0, 3)))
+      case SWaitXcnt          => Right(packedWait(immediate, (WaitCounter.X, 0, 6)))
+      case SWaitAsynccnt      => Right(packedWait(immediate, (WaitCounter.Async, 0, 6)))
+      case SWaitcntVscnt | SWaitcntDepctr | SDelayAlu | SWaitAlu => Right(Instruction.Wait)
+      case SDenormMode                                           =>
         Right(Instruction.SSetMode(ModeRegister.DenormalShift, 4, InstructionSource.Constant(immediate & 0xf)))
       case SRoundMode => Right(Instruction.SSetMode(0, 4, InstructionSource.Constant(immediate & 0xf)))
       case SSendmsg if immediate == 3 && target.isa.isGFX11OrLaterGraphics =>

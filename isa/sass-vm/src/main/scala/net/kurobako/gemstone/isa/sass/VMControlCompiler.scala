@@ -51,8 +51,12 @@ private object VMControlCompiler {
       // mbarrier.try_wait's suspend hint sleeps until the phase may have completed; copies complete as they issue.
       case _: Form.Nanosleep if modifiers == Vec(Modifier.SYNCS) => true
       // The PTX sleep is an approximate scheduling hint with a legal zero-delay outcome for every u32 duration.
-      case _: Form.Nop | _: Form.Yield | _: Form.Nanosleep =>
+      case _: Form.Nop | _: Form.Nanosleep =>
         requireModifiers(Set.empty)
+        true
+      case _: Form.Yield =>
+        requireModifiers(Set.empty)
+        emit(Yield)
         true
       case _: Form.Bpt if modifiers == Vec(Modifier.TRAP) =>
         emit(Trap)

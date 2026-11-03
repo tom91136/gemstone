@@ -3,6 +3,7 @@ package external
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.*
+import net.kurobako.gemstone.isa.ptx.asm.Printer
 import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
@@ -24,7 +25,8 @@ class PTXDeviceSuite extends Suite {
                    |""".stripMargin
     val memory = ArrayMemory()
     val output = memory.allocate(4L)
-    val device = Device(BackendRegistry(Vec(PTXBackend())), memory)
+    val device =
+      Device(BackendRegistry(Vec(PTXBackend(text = instruction => Some(Printer.render(instruction))))), memory)
     Using.resource(device.load(ProgramFormat.PTXText, Vec.from(source.getBytes(StandardCharsets.UTF_8))).value) {
       program =>
         val task = KernelTask.validated(

@@ -146,22 +146,32 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
       each(Term.Variable("rank"))
     )
 
-  inline def storeShared(address: Term, value: Term, width: ScalarBitWidth)(inline next: => Term.Steps): Term.Steps = {
+  inline def storeShared(
+      lane: Unit,
+      address: Term,
+      value: Term,
+      width: ScalarBitWidth
+  )(inline next: => Term.Steps): Term.Steps = {
     val tpe = Type.unsigned(Type.width(width.raw))
     statement(Cluster, MachineCall("storeShared", Vec(tpe), Vec((address, Some(Word)), (value, Some(tpe))))) ++ next
   }
 
-  inline def storeSharedBytes(address: Term, data: Term, size: Term)(inline next: => Term.Steps): Term.Steps =
+  inline def storeSharedBytes(
+      lane: Unit,
+      address: Term,
+      data: Term,
+      size: Term
+  )(inline next: => Term.Steps): Term.Steps =
     statement(
       Cluster,
       MachineCall("storeSharedBytes", Vec.empty, Vec((address, Some(Word)), (data, None), (size, Some(Word))))
     ) ++
       next
 
-  inline def storeCluster(cta: Term, offset: Term, data: Term)(inline next: => Term.Steps): Term.Steps =
+  inline def storeCluster(lane: Unit, cta: Term, offset: Term, data: Term)(inline next: => Term.Steps): Term.Steps =
     statement(Cluster, MachineCall("store", Vec.empty, Vec((cta, None), (offset, Some(Word)), (data, None)))) ++ next
 
-  inline def completeTx(cta: Term, barrier: Term, bytes: Term)(inline next: => Term.Steps): Term.Steps =
+  inline def completeTx(lane: Unit, cta: Term, barrier: Term, bytes: Term)(inline next: => Term.Steps): Term.Steps =
     statement(
       Cluster,
       MachineCall("completeTx", Vec.empty, Vec((cta, None), (barrier, Some(Word)), (bytes, Some(Word))))
@@ -184,11 +194,11 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
   inline def sameCta(first: Term, second: Term): Term =
     Term.context(Cluster, MachineCall("same", Vec.empty, Vec((first, None), (second, None))), Some(Type.Bool))
 
-  inline def clearCluster(cta: Term, offset: Term, bytes: Term)(inline next: => Term.Steps): Term.Steps =
+  inline def clearCluster(lane: Unit, cta: Term, offset: Term, bytes: Term)(inline next: => Term.Steps): Term.Steps =
     statement(Cluster, MachineCall("clear", Vec.empty, Vec((cta, None), (offset, Some(Word)), (bytes, Some(Word))))) ++
       next
 
-  inline def storeWord(cta: Term, offset: Term, value: Term, width: ScalarBitWidth)(
+  inline def storeWord(lane: Unit, cta: Term, offset: Term, value: Term, width: ScalarBitWidth)(
       inline next: => Term.Steps
   ): Term.Steps = {
     val tpe = Type.unsigned(Type.width(width.raw))
@@ -198,7 +208,14 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
     ) ++ next
   }
 
-  inline def reduceWord(cta: Term, offset: Term, operand: Term, width: ScalarBitWidth, operation: AtomicOperation)(
+  inline def reduceWord(
+      lane: Unit,
+      cta: Term,
+      offset: Term,
+      operand: Term,
+      width: ScalarBitWidth,
+      operation: AtomicOperation
+  )(
       inline next: => Term.Steps
   ): Term.Steps = {
     val tpe = Type.unsigned(Type.width(width.raw))
@@ -212,7 +229,7 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
     ) ++ next
   }
 
-  inline def reduceBytes(cta: Term, offset: Term, data: Term, copy: Instruction.AsyncBulkReduce)(
+  inline def reduceBytes(lane: Unit, cta: Term, offset: Term, data: Term, copy: Instruction.AsyncBulkReduce)(
       inline next: => Term.Steps
   ): Term.Steps = statement(
     Cluster,
@@ -369,10 +386,10 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
     )
   }
 
-  inline def placeBox(cta: Term, start: Term, transfer: Term)(inline next: => Term.Steps): Term.Steps =
+  inline def placeBox(lane: Unit, cta: Term, start: Term, transfer: Term)(inline next: => Term.Steps): Term.Steps =
     moveChunks("placeChunk", cta, start, transfer) ++ next
 
-  inline def fetchBox(cta: Term, start: Term, transfer: Term)(inline next: => Term.Steps): Term.Steps =
+  inline def fetchBox(lane: Unit, cta: Term, start: Term, transfer: Term)(inline next: => Term.Steps): Term.Steps =
     moveChunks("fetchChunk", cta, start, transfer) ++ next
 
   inline def peerRank(cta: Term, signalled: Term): Term =
@@ -498,6 +515,28 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
   inline def fenceHost: Term.Steps =
     guarded(guard, Term.context(Memory, MachineCall("fence", Vec.empty, Vec.empty), None, effect = true))
 
+  inline def asyncCommit(bulk: Boolean)(inline next: => Term.Steps): Term.Steps =
+    guarded(
+      guard,
+      Term.context(
+        Memory,
+        MachineCall("commitGroups", Vec.empty, Vec((Term.Constant(bulk.toString), None))),
+        None,
+        effect = true
+      )
+    ) ++ next
+
+  inline def asyncWait(count: Long, bulk: Boolean)(inline next: => Term.Steps): Term.Steps =
+    guarded(
+      guard,
+      Term.context(
+        Memory,
+        MachineCall("waitGroups", Vec.empty, Vec((Term.Literal(count), None), (Term.Constant(bulk.toString), None))),
+        None,
+        effect = true
+      )
+    ) ++ next
+
   inline def branchTable(index: Value, targets: Vec[Pc]): Term.Steps =
     guarded(
       guard,
@@ -560,6 +599,11 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
   inline def leaveConvergence(token: Register)(inline next: => Term.Steps): Term.Steps =
     everyLane(lane =>
       statement(Barriers, MachineCall("leave", Vec.empty, Vec((read(lane, Value.Register(token)), Some(Word)))))
+    )(next)
+
+  inline def yieldLanes(inline next: => Term.Steps): Term.Steps =
+    everyLane(lane =>
+      statement(Barriers, MachineCall("yieldLane", Vec.empty, Vec((laneIndex(lane), Some(Word)))))
     )(next)
 
   inline def parkReduce(barrier: Term, count: Term, reduction: BarrierReduction): Term.Steps =
@@ -855,7 +899,7 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
     ) ++ next(Term.Variable(held))
   }
 
-  inline def loadChunk(cta: Term, offset: Term, packing: Matrix.Packing)(
+  inline def loadChunk(lane: Unit, cta: Term, offset: Term, packing: Matrix.Packing)(
       inline next: Term => Term.Steps
   ): Term.Steps = {
     val chunk = names.temporary()

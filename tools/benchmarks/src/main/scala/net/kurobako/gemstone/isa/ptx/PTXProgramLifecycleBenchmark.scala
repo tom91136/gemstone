@@ -11,7 +11,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-/** Exercises the PTX program lifecycle that CUDA conformance spends most of its setup time in. */
+/** Exercises the PTX program lifecycle that CUDA conformance spends most of its setup time in. Profiling records the
+  * first launch only.
+  */
 object PTXProgramLifecycleBenchmark {
   private enum Operation derives CanEqual {
     case Decode, Launch
@@ -36,10 +38,10 @@ object PTXProgramLifecycleBenchmark {
     Opts.option[String]("source", help = "Optional PTX source file").map(Path.of(_)).orNone,
     Opts.option[String]("kernel", help = "Parameterless entry used by launch operations").withDefault("benchmark")
       .mapValidated(_.refine[NonEmpty[String]].leftMap(_ => "kernel must be non-empty").toValidatedNel)
-  ).mapN(Options(_, _, _, _, _, _, _)).map(options => () => run(options))
+  ).mapN(Options(_, _, _, _, _, _, _)).map(options => launch => run(options, launch))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def run(options: Options): BenchmarkSample = {
+  private def run(options: Options, launch: LaunchControl): BenchmarkSample = {
     val source = options.source.fold(generatedSource(options.entries, options.instructions))(Files.readString(_))
     val images = Vector.tabulate(options.images)(index => s"$source\n// lifecycle benchmark image $index\n")
     options.operation match {
@@ -72,7 +74,7 @@ object PTXProgramLifecycleBenchmark {
         ).fold(error => throw IllegalArgumentException(error), identity)
         val memory = BenchmarkMemory()
         Measurement.repeat(options.iterations) {
-          program.execute(task, TaskContext(memory, TaskControl(), _ => Right(())))
+          program.execute(task, TaskContext(memory, launch(), _ => Right(())))
             .fold(error => throw IllegalStateException(error.message), _ => ())
         }
     }
@@ -80,7 +82,10 @@ object PTXProgramLifecycleBenchmark {
 
   private def decode(source: String): LoadedProgram = {
     val program = Parser.parse(source).fold(error => throw IllegalArgumentException(error.message), identity)
-    LoadedProgram.load(program).fold(error => throw IllegalArgumentException(error.message), identity)
+    LoadedProgram.load(
+      program,
+      text = instruction => Some(asm.Printer.render(instruction))
+    ).fold(error => throw IllegalArgumentException(error.message), identity)
   }
 
   private def generatedSource(entries: Int > 0, instructions: Int >= 0): String = {

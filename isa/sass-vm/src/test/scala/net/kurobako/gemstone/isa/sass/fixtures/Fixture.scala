@@ -29,6 +29,7 @@ object Fixture {
     MemoryFixtures.listings,
     MemoryFormFixtures.listings,
     MinMaxFixtures.listings,
+    ProfileFixtures.listings,
     SharedMemoryFixtures.listings,
     TensorFixtures.listings,
     AsyncFixtures.listings

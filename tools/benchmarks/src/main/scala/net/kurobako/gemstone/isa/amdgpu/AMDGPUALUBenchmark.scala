@@ -10,7 +10,8 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-/** ALU-only companion to [[AMDGPUVectorCopyBenchmark]], isolating instruction and lane dispatch from guest memory. */
+/** ALU-only companion to [[AMDGPUVectorCopyBenchmark]], isolating instruction and lane dispatch from guest memory.
+  */
 object AMDGPUALUBenchmark {
   private enum Mode derives CanEqual {
     case Move, Binary
@@ -20,9 +21,9 @@ object AMDGPUALUBenchmark {
     iterations(50),
     nonNegative("instructions", "ALU instructions per dispatch", 512),
     choice("mode", "move" -> Mode.Move, "binary" -> Mode.Binary)
-  ).mapN((iterations, instructions, mode) => () => run(iterations, instructions, mode))
+  ).mapN((iterations, instructions, mode) => launch => run(iterations, instructions, mode, launch))
 
-  private def run(iterations: Int > 0, instructions: Int >= 0, mode: Mode): BenchmarkSample = {
+  private def run(iterations: Int > 0, instructions: Int >= 0, mode: Mode, launch: LaunchControl): BenchmarkSample = {
     val instruction = mode match {
       case Mode.Move => 0x7e0002ebL
       // gfx9 VOP2 v_add_f32 v0, v1, v2
@@ -35,6 +36,6 @@ object AMDGPUALUBenchmark {
     val dispatch = KernelTask.validated("alu", Dimensions(64, 1, 1), Dimensions.One, Vec.empty)
       .fold(message => throw IllegalArgumentException(message), identity)
     val memory = BenchmarkMemory()
-    SequentialDispatch.repeat(iterations, prepared, dispatch, memory)
+    SequentialDispatch.repeat(iterations, prepared, dispatch, memory, launch)
   }
 }

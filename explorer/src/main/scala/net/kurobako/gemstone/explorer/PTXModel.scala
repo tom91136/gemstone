@@ -15,11 +15,6 @@ object PTXModel extends Model {
 
   /** The ordering instructions the VM runs with no effect, and why, keyed by the mnemonics they match. */
   private val orderingOnly: OrderingOnly = OrderingOnly(
-    (
-      "cp\\.async(\\.bulk)?\\.(commit_group|wait_group)|cp\\.async\\.wait_all",
-      ".*",
-      "asynchronous copies complete when issued, so no group is pending."
-    ),
     ("setmaxnreg", ".*", "the VM does not limit the registers of a thread."),
     (
       "tcgen05\\.wait::(ld|st)",
@@ -405,6 +400,7 @@ object PTXModel extends Model {
     case ("cp.async", 2)                 => Some("16")
     case ("alloca", 2)                   => Some("8")
     case ("cp.async.bulk.wait_group", 0) => Some("0")
+    case ("cp.async.wait_group", 0)      => Some("0")
     case ("wgmma.wait_group", 0)         => Some("0")
     case ("st.bulk", 2)                  => Some("0")
     case ("tensormap.cp_fenceproxy", 2)  => Some("128")
