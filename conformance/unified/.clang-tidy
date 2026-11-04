@@ -14,4 +14,5 @@ Checks: >
   -readability-container-contains,
   -readability-convert-member-functions-to-static,
   -readability-non-const-parameter,
+  -readability-redundant-typename,
   -readability-static-accessed-through-instance

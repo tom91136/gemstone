@@ -222,11 +222,11 @@ inline void requireAlmostEqual(const std::vector<Number> &actual, const std::vec
 }
 
 template <class C> struct ComplexAbs {
-  UNIFIED_ROCTHRUST_HOST_DEVICE C::value_type operator()(const C &value) const { return thrust::abs(value); }
+  UNIFIED_ROCTHRUST_HOST_DEVICE typename C::value_type operator()(const C &value) const { return thrust::abs(value); }
 };
 
 template <class C> struct ComplexNorm {
-  UNIFIED_ROCTHRUST_HOST_DEVICE C::value_type operator()(const C &value) const { return thrust::norm(value); }
+  UNIFIED_ROCTHRUST_HOST_DEVICE typename C::value_type operator()(const C &value) const { return thrust::norm(value); }
 };
 
 template <class C> struct ComplexConjugate {
@@ -375,7 +375,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/complex-std-interop/f32/n4", "[unified
 namespace {
 template <class Iterator> class StridedRange {
 public:
-  using difference_type = iter_ops::iterator_traits<Iterator>::difference_type;
+  using difference_type = typename iter_ops::iterator_traits<Iterator>::difference_type;
 
   struct StrideFunctor {
     difference_type stride;
@@ -514,7 +514,7 @@ template <class Value> inline void checkTabulateOutputIterator() {
   const auto zipped = thrust::make_zip_iterator(thrust::make_tuple(input.begin(), thrust::make_counting_iterator<size_t>(0)));
   const auto end = thrust::copy_if(zipped, zipped + count, tabulate, SelectEveryNth<thrust::tuple<Value, size_t>>{stride});
   constexpr size_t selected = (count + stride - 1) / stride;
-  using difference_type = iter_ops::iterator_traits<decltype(tabulate)>::difference_type;
+  using difference_type = typename iter_ops::iterator_traits<decltype(tabulate)>::difference_type;
   {
     INFO("tabulate-output-iterator: selected count mismatch");
     REQUIRE(end == tabulate + static_cast<difference_type>(selected));

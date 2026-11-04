@@ -28,7 +28,7 @@ template <class Functor> inline int32_t deviceFunctorResult(Functor functor) {
 }
 
 template <class Engine> struct EngineValidation {
-  Engine::result_type expected;
+  typename Engine::result_type expected;
   UNIFIED_ROCTHRUST_HOST_DEVICE int32_t operator()() {
     Engine engine;
     engine.discard(RandomDraws - 1);
