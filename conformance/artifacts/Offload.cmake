@@ -10,7 +10,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/Toolchains.cmake")
 
 if(MODE STREQUAL "export")
   set(export "conformance-llvm-offload-export")
-  execute_process(COMMAND "${CONTAINER_EXECUTABLE}" create --replace --name "${export}" "${IMAGE}" true
+  execute_process(COMMAND "${CONTAINER_EXECUTABLE}" rm --force "${export}" OUTPUT_QUIET ERROR_QUIET)
+  execute_process(COMMAND "${CONTAINER_EXECUTABLE}" create --name "${export}" "${IMAGE}" true
     COMMAND_ERROR_IS_FATAL ANY)
   get_filename_component(output_directory "${OUTPUT}" DIRECTORY)
   file(MAKE_DIRECTORY "${output_directory}")

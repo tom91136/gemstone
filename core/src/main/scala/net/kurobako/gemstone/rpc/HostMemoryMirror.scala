@@ -3,6 +3,7 @@ package net.kurobako.gemstone.rpc
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -424,7 +425,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def acquire(lock: ReentrantLock): Unit = {
     var spins = 0
-    while (spins < SpinLimit && !lock.tryLock()) { Thread.onSpinWait(); spins += 1 }
+    while (spins < SpinLimit && !lock.tryLock()) { PlatformConcurrency.onSpinWait(); spins += 1 }
     if (spins == SpinLimit) lock.lock()
   }
 

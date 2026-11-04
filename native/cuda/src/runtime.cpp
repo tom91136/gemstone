@@ -174,7 +174,7 @@ std::array<uint8_t, 16> deviceUuid(int device) {
 }
 
 std::string devicePciBusId(int device) {
-  char buffer[16];
+  char buffer[32];
   std::snprintf(buffer, sizeof(buffer), "0000:%02x:00.0", device_limits::PciBusId + device);
   return buffer;
 }

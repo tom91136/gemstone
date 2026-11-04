@@ -1125,7 +1125,7 @@ extern "C" hipError_t hipMemcpyPeerAsync(void *destination, int destinationDevic
 }
 
 static std::string pciBusId(int device) {
-  char text[16];
+  char text[32];
   std::snprintf(text, sizeof(text), "0000:%02x:00.0", static_cast<unsigned>(device));
   return text;
 }

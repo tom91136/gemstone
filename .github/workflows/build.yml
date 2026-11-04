@@ -458,7 +458,9 @@ jobs:
       - *tools-cache
       - *tools
       - *dependencies
-      - run: sbt --server --batch 'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lintBackends
+      - run: |
+          sbt --server --batch "set conformance / conformanceBuildProfile := \"$CONFORMANCE_BUILD_PROFILE\"" \
+            'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lintBackends
 
   semantics:
     needs: build

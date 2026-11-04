@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import CooperativeDispatchSuite.*
 import EncodingConstants.*
 import fixtures.*
-import java.util.concurrent.atomic.AtomicLong
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -10,7 +10,55 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
-import scala.concurrent.duration.Deadline
+
+object CooperativeDispatchSuite {
+
+  val Limits: TaskControl.Limits = TaskControl.Limits(4000000L)
+
+  private val gfx906 = Target("gfx906")
+
+  val spin: String = """s_cmp_eq_u32 s0, 0
+                       |s_cbranch_scc0 set
+                       |spin:
+                       |global_load_dword v2, v0, s[2:3] glc
+                       |s_waitcnt vmcnt(0)
+                       |v_cmp_eq_u32 vcc, 0, v2
+                       |s_cbranch_vccnz spin
+                       |v_mov_b32 v2, 2
+                       |global_store_dword v0, v2, s[2:3] offset:4
+                       |s_endpgm
+                       |set:
+                       |v_mov_b32 v2, 1
+                       |global_store_dword v0, v2, s[2:3]
+                       |s_endpgm
+                       |""".stripMargin
+
+  def launch(
+      text: String,
+      groups: Int,
+      cooperative: Boolean,
+      memory: AddressSpace,
+      limits: TaskControl.Limits = Limits
+  )(using
+      munit.Location
+  ): Either[Fault, Unit] = {
+    val base     = RegionMemory.Base
+    val assembly = f"""s_mov_b32 s2, 0x${base & 0xffffffffL}%x
+                      |s_mov_b32 s3, 0x${base >>> 32}%x
+                      |v_mov_b32 v0, 0
+                      |$text""".stripMargin
+    val code   = asm.Assembler.encode(asm.Parser.parse(assembly).value, TargetMode(gfx906, 64)).value
+    val source = codeKernel(target = gfx906, computePgmRsrc2 = 0x80, code = code)
+    val task   = KernelTask.validated(
+      "kernel",
+      testDimensions(1),
+      testDimensions(groups.unsafe[Int > 0]),
+      Vec.empty,
+      cooperative = cooperative
+    ).value
+    executeKernel(compileKernel(source), task, memory, TaskControl(limits))
+  }
+}
 
 /** Cooperative dispatches keep every workgroup resident, so workgroups can wait on each other through GWS barriers and
   * semaphores or by spinning on memory. Other dispatches run workgroups to completion one after another.
@@ -140,7 +188,6 @@ class CooperativeDispatchSuite extends Suite {
 
   private inline val GroupSize    = 96
   private inline val KernargBytes = 272
-  private val Limits              = TaskControl.Limits(4000000L)
 
   private def scalar(size: Int)(fill: Array[Byte] => Unit): KernelTask.Argument = {
     val value = Array.ofDim[Byte](size)
@@ -213,8 +260,6 @@ class CooperativeDispatchSuite extends Suite {
     }
   }
 
-  private val gfx906 = Target("gfx906")
-
   /** One lane in each of `groups` gfx906 workgroups runs `text` with s0 holding its workgroup ID and s[2:3] the address
     * of a 64-byte buffer; the buffer's dwords afterwards.
     */
@@ -227,32 +272,6 @@ class CooperativeDispatchSuite extends Suite {
     launch(text, groups, cooperative, memory).map(_ =>
       Vec.tabulate(16)(index => memory.getInt(buffer, (index * 4).unsafe[Int >= 0]))
     )
-  }
-
-  private def launch(
-      text: String,
-      groups: Int,
-      cooperative: Boolean,
-      memory: AddressSpace,
-      limits: TaskControl.Limits = Limits
-  )(using
-      munit.Location
-  ): Either[Fault, Unit] = {
-    val base     = RegionMemory.Base
-    val assembly = f"""s_mov_b32 s2, 0x${base & 0xffffffffL}%x
-                      |s_mov_b32 s3, 0x${base >>> 32}%x
-                      |v_mov_b32 v0, 0
-                      |$text""".stripMargin
-    val code   = asm.Assembler.encode(asm.Parser.parse(assembly).value, TargetMode(gfx906, 64)).value
-    val source = codeKernel(target = gfx906, computePgmRsrc2 = 0x80, code = code)
-    val task   = KernelTask.validated(
-      "kernel",
-      testDimensions(1),
-      testDimensions(groups.unsafe[Int > 0]),
-      Vec.empty,
-      cooperative = cooperative
-    ).value
-    executeKernel(compileKernel(source), task, memory, TaskControl(limits))
   }
 
   private val Wait = "s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)"
@@ -371,52 +390,11 @@ class CooperativeDispatchSuite extends Suite {
     assert(result.left.exists(_.message.contains("cooperative")), result)
   }
 
-  private val spin = """s_cmp_eq_u32 s0, 0
-                       |s_cbranch_scc0 set
-                       |spin:
-                       |global_load_dword v2, v0, s[2:3] glc
-                       |s_waitcnt vmcnt(0)
-                       |v_cmp_eq_u32 vcc, 0, v2
-                       |s_cbranch_vccnz spin
-                       |v_mov_b32 v2, 2
-                       |global_store_dword v0, v2, s[2:3] offset:4
-                       |s_endpgm
-                       |set:
-                       |v_mov_b32 v2, 1
-                       |global_store_dword v0, v2, s[2:3]
-                       |s_endpgm
-                       |""".stripMargin
-
   test("a workgroup spinning without s_sleep lets a later workgroup of a cooperative dispatch run") {
     assertEquals(lanes(spin, 2).map(_.take(2)), Right(Vec(1, 2)))
   }
 
   test("a workgroup spinning on a later workgroup outside a cooperative dispatch exhausts its budget") {
     assertEquals(lanes(spin, 2, cooperative = false), Left(Fault.BudgetExceeded(Limits.maxInstructions)))
-  }
-
-  test("a workgroup polling outside a cooperative dispatch backs off between its loads") {
-    val backing = RegionMemory()
-    val buffer  = AllocationId(1L)
-    backing.allocate(buffer, 64)
-    val accesses = AtomicLong()
-    class CountingMemory(delegate: AddressSpace) extends ForwardingMemory(delegate) {
-      override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
-          update: Long => Long
-      ): Either[Fault, Long] = {
-        val _ = accesses.incrementAndGet()
-        super.atomicModifyValue(region, offset, size)(update)
-      }
-    }
-    val memory  = CountingMemory(backing)
-    val release = Thread { () => Thread.sleep(300L); backing.putInt(buffer, 0, 1) }
-    val started = Deadline.now
-    release.start()
-    val result  = launch(spin, 1, cooperative = false, memory, TaskControl.Limits(1000000000L))
-    val elapsed = (Deadline.now - started).toNanos
-    release.join()
-    assertEquals(result, Right(()))
-    assertEquals(backing.getInt(buffer, 4), 2)
-    assert(accesses.get() <= elapsed / 25000L + 100L, s"${accesses.get()} loads in ${elapsed / 1000000L} ms")
   }
 }
