@@ -1018,6 +1018,8 @@ std::optional<CopySide> copySide(CUmemorytype type, const CudaArray *array, size
   // a single row ignores its pitch, as graph memcpy nodes built from 1D copies leave it zero
   if (pitch == 0 && copy.Height == 1 && copy.Depth == 1 && y == 0 && z == 0 && !sizeAdd(x, copy.WidthInBytes, &pitch)) return std::nullopt;
   side.rowPitch = pitch;
+  size_t rows = 0;
+  if (copy.Depth > 1 && height != 0 && (!sizeAdd(y, copy.Height, &rows) || rows > height)) return std::nullopt;
   if (!sizeMul(pitch, height == 0 ? copy.Height : height, &side.slicePitch)
       || !volumeBounds(x, y, z, pitch, side.slicePitch, copy.WidthInBytes, copy.Height, copy.Depth, &side.base))
     return std::nullopt;

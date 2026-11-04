@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cuda/support.cuh"
@@ -14,14 +15,14 @@ namespace {
 
 #define PRINTF_LINES(X)                                                                                                                    \
   X("int %d %i %5d|%-5d|%05d|%+d\n", -42, 7, 42, 42, 42, 42)                                                                               \
-  X("unsigned %u %x %X %o %#x %#o\n", 4000000000u, 255u, 255u, 8u, 255u, 8u)                                                               \
+  X("unsigned %u %x %X %o %#x %#o\n", 4000000000U, 255U, 255U, 8U, 255U, 8U)                                                               \
   X("long %ld %lld %lu %llu %llx %lX\n", -5000000000L, -9000000000000LL, 5000000000UL, 18000000000000000000ULL, 0xdeadbeefcafeULL,         \
     0xabcdefUL)                                                                                                                            \
-  X("float %f %.2f %8.3f|%-8.1f|%+.0f\n", 3.14159f, 2.71828, 1.0, 2.5, 7.5)                                                                \
+  X("float %f %.2f %8.3f|%-8.1f|%+.0f\n", 3.14159F, 2.71828, 1.0, 2.5, 7.5)                                                                \
   X("exponent %e %E %.3e %g %G %g\n", 12345.678, 0.000123, 9.99995, 100000.0, 1e-10, 1234567.0)                                            \
   X("char %c%c%c|%3c|%-3c|\n", 'a', 'b', 'c', 'd', 'e')                                                                                    \
   X("string %s|%10s|%-10s|%.2s|%s\n", "hello", "right", "left", "truncate", "")                                                            \
-  X("mixed %d %lld %d %f %s %c %u\n", 1, 2LL, 3, 4.5, "five", '6', 7u)                                                                     \
+  X("mixed %d %lld %d %f %s %c %u\n", 1, 2LL, 3, 4.5, "five", '6', 7U)                                                                     \
   X("short %hd %hu\n", -2, 65535)                                                                                                          \
   X("percent 100%% %d%%\n", 50)                                                                                                            \
   X("signs %d %d %x\n", -2147483647 - 1, 2147483647, -1)                                                                                   \
@@ -44,12 +45,12 @@ __global__ void sequence(int count) {
 }
 
 __global__ void grid() {
-  const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   printf("block %d thread %d global %u\n", blockIdx.x, threadIdx.x, tid);
 }
 
 __global__ void conditional() {
-  const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (blockIdx.x % 2 == 1 && tid % 5 == 0) printf("selected %u in block %d\n", tid, blockIdx.x);
   if (tid % 7 == 3) printf("%s %u\n", tid % 2 ? "odd" : "even", tid);
 }
@@ -79,7 +80,7 @@ __global__ void returns(int *results) {
 
 template <typename F> std::string capture(F &&body) {
   StreamCapture output;
-  body();
+  std::forward<F>(body)();
   return output.finish();
 }
 
@@ -91,7 +92,7 @@ std::vector<std::string> sorted(std::vector<std::string> values) {
 template <typename F> std::string formatted(F &&write) {
   const int size = write(nullptr, 0);
   std::string text(static_cast<size_t>(size), '\0');
-  write(text.data(), text.size() + 1);
+  std::forward<F>(write)(text.data(), text.size() + 1);
   return text;
 }
 
@@ -148,7 +149,7 @@ TEST_CASE("runtime/cuda/printf/many-blocks", "[unified][runtime][printf]") {
   std::vector<std::string> expected;
   for (unsigned block = 0; block < blocks; ++block)
     for (unsigned thread = 0; thread < threads; ++thread)
-      expected.push_back(RENDER("block %d thread %d global %u", block, thread, block * threads + thread));
+      expected.push_back(RENDER("block %d thread %d global %u", block, thread, (block * threads) + thread));
   REQUIRE(sorted(lines(text)) == sorted(expected));
 }
 
@@ -162,7 +163,7 @@ TEST_CASE("runtime/cuda/printf/conditional", "[unified][runtime][printf]") {
   std::vector<std::string> expected;
   for (unsigned block = 0; block < blocks; ++block)
     for (unsigned thread = 0; thread < threads; ++thread) {
-      const unsigned tid = block * threads + thread;
+      const unsigned tid = (block * threads) + thread;
       if (block % 2 == 1 && tid % 5 == 0) expected.push_back(RENDER("selected %u in block %d", tid, block));
       if (tid % 7 == 3) expected.push_back(RENDER("%s %u", tid % 2 ? "odd" : "even", tid));
     }

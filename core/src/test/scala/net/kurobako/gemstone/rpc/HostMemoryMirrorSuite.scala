@@ -148,6 +148,24 @@ class HostMemoryMirrorSuite extends Suite {
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
   }
 
+  test("a request that was never sent does not make later reads of its bytes unreadable") {
+    val mirror = HostMemoryMirror()
+    assertEquals(mirror.read(at(0x1020), 4, None), None)
+    assertEquals(mirror.requests(), Vec(page(0x1000L)))
+    mirror.write(at(0x1020), Vec.fill(4)(2.toByte))
+    val sent = mirror.requests()
+    assertEquals(sent, Vec(HostMemoryRange(at(0x1000L), 0x20), HostMemoryRange(at(0x1024L), 4096 - 0x24)))
+    assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(at(0x1020), Vec.fill(4)(2.toByte))))
+    mirror.invalidateClean()
+    assertEquals(mirror.read(at(0x1020), 4, None), None)
+    assert(mirror.supply(reply(sent)).isRight)
+    assert(!mirror.isUnreadable(at(0x1020), 4))
+    assert(mirror.hasPending)
+    assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x1020L), 4)))
+    assert(mirror.supply(reply(Vec(HostMemoryRange(at(0x1020L), 4)), 3)).isRight)
+    assertEquals(mirror.read(at(0x1020), 4, None), Some(Vec.fill(4)(3.toByte)))
+  }
+
   test("an empty reply makes everything a read was waiting on unreadable") {
     val mirror = HostMemoryMirror()
     assertEquals(mirror.read(at(0x1010), 4, None), None)

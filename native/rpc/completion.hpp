@@ -38,26 +38,35 @@ bool awaitCompletion(Client &client, CompletionId completion, std::string &error
 bool collectCompletion(Client &client, CompletionId completion, CompletionResult &result, std::string &error,
                        GraphicsStatistics *graphics = nullptr, const std::function<void()> &synchronised = {});
 
-/** Launches and collects on a dedicated connection, so callers' shared clients stay usable while the dispatch
- * services host-memory requests. `launched` runs once the service accepts the launch.
+/** The calling thread's launch connection, kept across launches and apart from callers' shared clients, which stay
+ * usable while a dispatch services host-memory requests. Null when the execution service is not configured.
  */
+Client *launchClient();
+
+/** Drops the calling thread's launch connection after a failure, so the next launch reconnects. */
+void dropLaunchClient();
+
+/** Launches and collects on the calling thread's launch connection. `launched` runs once the service accepts the launch. */
 template <class Launched = decltype([] {})>
 bool launchAndCollect(const Launch &launch, CompletionResult &result, std::string &error, Launched launched = {},
                       const std::function<void()> &synchronised = {}) {
   result.failure = FailureKind::Transport;
-  const auto client = Client::fromEnvironment();
+  auto *client = launchClient();
   if (!client) {
     error = "Gemstone execution RPC client is not configured";
     return false;
   }
   auto completion = client->call(launch);
   if (!completion) {
+    dropLaunchClient();
     error = completion.error().detail;
     result.failure = completion.error().kind;
     return false;
   }
   launched();
-  return collectCompletion(*client, completion.value(), result, error, nullptr, synchronised);
+  if (collectCompletion(*client, completion.value(), result, error, nullptr, synchronised)) return true;
+  dropLaunchClient();
+  return false;
 }
 
 } // namespace gemstone::execution

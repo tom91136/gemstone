@@ -68,7 +68,7 @@ TEST_CASE("runtime/hip/device-properties", "[unified][runtime]") {
   expect(prop.clockRate > 0, "clock rate");
   expect(attribute(hipDeviceAttributeWallClockRate) > 0, "wall clock rate");
   expect(prop.regsPerBlock > 0 && prop.regsPerMultiprocessor >= prop.regsPerBlock, "registers");
-  expect(prop.sharedMemPerBlock >= 32 * 1024 && prop.maxSharedMemoryPerMultiProcessor >= prop.sharedMemPerBlock, "LDS");
+  expect(prop.sharedMemPerBlock >= size_t{32} * 1024 && prop.maxSharedMemoryPerMultiProcessor >= prop.sharedMemPerBlock, "LDS");
   expect(prop.maxGridSize[0] == INT_MAX && prop.maxGridSize[1] == 65536 && prop.maxGridSize[2] == 65536, "grid limits");
   expect(prop.maxThreadsDim[0] == 1024 && prop.maxThreadsDim[1] == 1024 && prop.maxThreadsDim[2] == 1024, "block limits");
   const bool images = !arch.starts_with("gfx94") && !arch.starts_with("gfx95");

@@ -24,10 +24,10 @@ magic_enum::customize::enum_name<unified::rocthrust_support::SetKind>(unified::r
   return invalid_tag;
 }
 
+namespace {
 using namespace aspartame;
 using namespace unified::rocthrust_support;
 
-namespace {
 template <class Value> inline void checkSetByKey(SetKind kind, bool descending) {
   const auto base = descending ? descendingKeys<Value>() : ascendingKeys<Value>();
   auto left = descendingKeyValues(base, 100);
@@ -437,7 +437,9 @@ TEST_CASE("algorithms/roc-thrust-semantic/transform-input-output-iterator/i32/n1
   thrust::copy(first, first + static_cast<ptrdiff_t>(size), io);
   for (size_t index = 0; index < size; ++index) {
     INFO(fmt::format("transform-input-output write mismatch at {}", index));
-    REQUIRE(static_cast<int32_t>(values[index]) == static_cast<int32_t>((index + 1) * (index + 1)));
+    const auto actual = static_cast<int32_t>(values[index]);
+    const auto wanted = static_cast<int32_t>((index + 1) * (index + 1));
+    REQUIRE(actual == wanted);
   }
   thrust::device_vector<int32_t> readback(size);
   thrust::copy(io, io + static_cast<ptrdiff_t>(size), readback.begin());

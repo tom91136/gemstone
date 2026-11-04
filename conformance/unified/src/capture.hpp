@@ -8,39 +8,38 @@
 #include <unistd.h>
 
 class StreamCapture {
-  std::FILE *stream_;
-  int saved_ = -1;
-  std::FILE *file_ = nullptr;
+  std::FILE *stream;
+  int saved = -1;
+  std::FILE *file = nullptr;
 
 public:
-  explicit StreamCapture(std::FILE *stream = stdout) : stream_(stream) {
-    std::fflush(stream_);
-    file_ = std::tmpfile();
-    if (!file_) throw std::runtime_error("tmpfile failed");
-    saved_ = dup(fileno(stream_));
-    dup2(fileno(file_), fileno(stream_));
+  explicit StreamCapture(std::FILE *stream = stdout) : stream(stream), file(std::tmpfile()) {
+    std::fflush(stream);
+    if (!file) throw std::runtime_error("tmpfile failed");
+    saved = dup(fileno(stream));
+    dup2(fileno(file), fileno(stream));
   }
   StreamCapture(const StreamCapture &) = delete;
   StreamCapture &operator=(const StreamCapture &) = delete;
   ~StreamCapture() {
-    if (saved_ >= 0) restore();
-    if (file_) std::fclose(file_);
+    if (saved >= 0) restore();
+    if (file) std::fclose(file);
   }
 
   void restore() {
-    std::fflush(stream_);
-    dup2(saved_, fileno(stream_));
-    close(saved_);
-    saved_ = -1;
+    std::fflush(stream);
+    dup2(saved, fileno(stream));
+    close(saved);
+    saved = -1;
   }
 
   std::string finish() {
     restore();
     std::string text;
-    std::rewind(file_);
+    std::fseek(file, 0, SEEK_SET);
     char chunk[4096];
-    size_t count;
-    while ((count = std::fread(chunk, 1, sizeof(chunk), file_)) > 0)
+    size_t count = 0;
+    while ((count = std::fread(chunk, 1, sizeof(chunk), file)) > 0)
       text.append(chunk, count);
     return text;
   }

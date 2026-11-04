@@ -1,8 +1,13 @@
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <numbers>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,9 +20,18 @@ using namespace hip_support;
 
 namespace {
 
+std::optional<unsigned> numberAfter(const std::string &line, std::string_view prefix) {
+  if (!line.starts_with(prefix)) return std::nullopt;
+  unsigned value = 0;
+  const char *end = line.data() + line.size();
+  const auto [ptr, error] = std::from_chars(line.data() + prefix.size(), end, value);
+  if (error != std::errc{}) return std::nullopt;
+  return value;
+}
+
 template <typename Launch> std::string captured(Launch &&launch, std::FILE *stream = stdout) {
   StreamCapture capture(stream);
-  launch();
+  std::forward<Launch>(launch)();
   finish("printf");
   return capture.finish();
 }
@@ -30,9 +44,9 @@ std::string formatted(const char *format, auto... arguments) {
 
 __global__ void formats() {
   if (threadIdx.x != 0) return;
-  printf("%d %u %ld %lu %lld %llx|%x %c|%s|\n", -42, 4000000000u, -5000000000L, 18000000000UL, -9000000000000LL, 0xdeadbeefcafeULL, 255,
+  printf("%d %u %ld %lu %lld %llx|%x %c|%s|\n", -42, 4000000000U, -5000000000L, 18000000000UL, -9000000000000LL, 0xdeadbeefcafeULL, 255,
          'z', "text");
-  printf("%5.2f|%-8d|%08.3f|%+d|% d|%e|%g|%g|%%\n", 3.14159, 42, -3.14159, 5, 5, 12345.678, 0.0001, 1e20);
+  printf("%5.2f|%-8d|%08.3f|%+d|% d|%e|%g|%g|%%\n", std::numbers::pi, 42, -std::numbers::pi, 5, 5, 12345.678, 0.0001, 1e20);
   printf("%hhd %hd %*d|%-*d|%.*f|%.3s|\n", 300, 70000, 6, 42, 4, 7, 2, 2.5, "abcdef");
   printf("%p|\n", static_cast<void *>(nullptr));
   printf("%10s|\n", "right");
@@ -50,7 +64,7 @@ __global__ void toStderr() {
 __global__ void everyThread() { printf("thread %u %u\n", blockIdx.x, threadIdx.x); }
 
 __global__ void twoLines() {
-  const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   printf("first %u\n", tid);
   printf("second %u\n", tid);
 }
@@ -75,9 +89,9 @@ __global__ void wide() {
 TEST_CASE("runtime/hip/device_printf/formats", "[unified][runtime][printf]") {
   const auto text = captured([] { formats<<<1, 64>>>(); });
   std::string expected;
-  expected += formatted("%d %u %ld %lu %lld %llx|%x %c|%s|\n", -42, 4000000000u, -5000000000L, 18000000000UL, -9000000000000LL,
+  expected += formatted("%d %u %ld %lu %lld %llx|%x %c|%s|\n", -42, 4000000000U, -5000000000L, 18000000000UL, -9000000000000LL,
                         0xdeadbeefcafeULL, 255, 'z', "text");
-  expected += formatted("%5.2f|%-8d|%08.3f|%+d|% d|%e|%g|%g|%%\n", 3.14159, 42, -3.14159, 5, 5, 12345.678, 0.0001, 1e20);
+  expected += formatted("%5.2f|%-8d|%08.3f|%+d|% d|%e|%g|%g|%%\n", std::numbers::pi, 42, -std::numbers::pi, 5, 5, 12345.678, 0.0001, 1e20);
   expected += formatted("%hhd %hd %*d|%-*d|%.*f|%.3s|\n", 300, 70000, 6, 42, 4, 7, 2, 2.5, "abcdef");
   expected += formatted("%p|\n", static_cast<void *>(nullptr));
   expected += formatted("%10s|\n", "right");
@@ -93,7 +107,8 @@ TEST_CASE("runtime/hip/device_printf/stderr", "[unified][runtime][printf]") {
 }
 
 TEST_CASE("runtime/hip/device_printf/every-thread", "[unified][runtime][printf]") {
-  constexpr unsigned blocks = 4, threads = 100;
+  constexpr unsigned blocks = 4;
+  constexpr unsigned threads = 100;
   auto got = lines(captured([] { everyThread<<<blocks, threads>>>(); }));
   std::vector<std::string> expected;
   for (unsigned block = 0; block < blocks; ++block)
@@ -105,18 +120,17 @@ TEST_CASE("runtime/hip/device_printf/every-thread", "[unified][runtime][printf]"
 }
 
 TEST_CASE("runtime/hip/device_printf/per-thread-order", "[unified][runtime][printf]") {
-  constexpr unsigned blocks = 2, threads = 96;
+  constexpr unsigned blocks = 2;
+  constexpr unsigned threads = 96;
   const auto got = lines(captured([] { twoLines<<<blocks, threads>>>(); }));
-  REQUIRE(got.size() == 2u * blocks * threads);
+  REQUIRE(got.size() == size_t{2} * blocks * threads);
   std::map<unsigned, size_t> firsts;
   for (size_t index = 0; index < got.size(); ++index) {
-    unsigned tid = 0;
-    if (std::sscanf(got[index].c_str(), "first %u", &tid) == 1) firsts[tid] = index;
+    if (const auto tid = numberAfter(got[index], "first ")) firsts[*tid] = index;
   }
-  REQUIRE(firsts.size() == blocks * threads);
+  REQUIRE(firsts.size() == size_t{blocks} * threads);
   for (size_t index = 0; index < got.size(); ++index) {
-    unsigned tid = 0;
-    if (std::sscanf(got[index].c_str(), "second %u", &tid) == 1) REQUIRE(firsts.at(tid) < index);
+    if (const auto tid = numberAfter(got[index], "second ")) REQUIRE(firsts.at(*tid) < index);
   }
 }
 
@@ -139,8 +153,10 @@ TEST_CASE("runtime/hip/device_printf/return-value", "[unified][runtime][printf]"
   const auto text = captured([&] { returnValue<<<1, threads>>>(counts.data); });
   REQUIRE(lines(text).size() == threads);
   const auto result = counts.download();
-  for (unsigned tid = 0; tid < threads; ++tid)
-    REQUIRE(result[tid] == static_cast<int>(formatted("value %u\n", tid).size()));
+  for (unsigned tid = 0; tid < threads; ++tid) {
+    const int printed = static_cast<int>(formatted("value %u\n", tid).size());
+    REQUIRE(result[tid] == printed);
+  }
 }
 
 TEST_CASE("runtime/hip/device_printf/messages-spanning-packets", "[unified][runtime][printf]") {

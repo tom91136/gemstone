@@ -862,6 +862,8 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     if (!missingCensus.occupied) Vec.empty[HostMemoryRange]
     else
       locked(EveryShard) {
+        // only the latest request can still be answered, so earlier unsent ones must not count as in flight
+        populated.foreach { shard => shard.issued.pages.clear(); shard.stale.pages.clear() }
         val result = readRanges(Cursor(populated.map(_.missing)))
         result.foreach(range =>
           spans(range.address.raw, range.size)((number, offset, length, _) =>

@@ -16,6 +16,7 @@
 
 #include "rpc_fixture.hpp"
 #include <sys/mman.h>
+#include <sys/wait.h>
 
 using namespace gemstone::execution;
 
@@ -119,6 +120,53 @@ TEST_CASE("Failures carry the kind the service reported", "[rpc]") {
   REQUIRE_FALSE(collectCompletion(*client, completion.value(), result, error));
   CHECK(result.failure == kind);
   CHECK(error == "completion failed");
+  fixture.check();
+}
+
+TEST_CASE("Launches keep one connection per thread and process and replace a broken one", "[rpc]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  auto client = Client::fromEnvironment();
+  REQUIRE(client);
+  auto program = client->call(LoadProgram{.encoding = ProgramEncoding::SPIRVOpenCLCompute, .image = {3, 2, 35, 7}});
+  REQUIRE(program);
+  auto allocation = client->call(RegisterAllocation{{4}});
+  REQUIRE(allocation);
+  const auto launch = [&] {
+    fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+    CompletionResult result;
+    std::string error;
+    return launchAndCollect(
+        Launch{.program = program.value(),
+               .kernelName = {"write"},
+               .groupSize = {.x = {1}, .y = {1}, .z = {1}},
+               .groupCount = {.x = {1}, .y = {1}, .z = {1}},
+               .globalSize = {.x = {1}, .y = {1}, .z = {1}},
+               .workDim = {1},
+               .globalOffset = {.x = {0}, .y = {0}, .z = {0}},
+               .privateSegmentBytes = {0},
+               .groupSegmentBytes = {0},
+               .arguments = {ArgumentMemory{.region = allocation.value(), .offset = {0}}, ArgumentScalar{{{0, 0, 0, 0}}}},
+               .pointerRelocations = {}},
+        result, error);
+  };
+  const unsigned before = fixture.accepted;
+  REQUIRE(launch());
+  REQUIRE(launch());
+  CHECK(fixture.accepted - before == 1);
+
+  fixture.dropNext(operation::Launch);
+  CHECK_FALSE(launch());
+  REQUIRE(launch());
+  CHECK(fixture.accepted - before == 2);
+
+  const auto child = fork();
+  REQUIRE(child >= 0);
+  if (child == 0) _exit(launchClient() && launchClient()->call(Ping{}) ? 0 : 1);
+  int status = 0;
+  REQUIRE(waitpid(child, &status, 0) == child);
+  CHECK((WIFEXITED(status) && WEXITSTATUS(status) == 0));
+  CHECK(fixture.accepted - before == 3);
   fixture.check();
 }
 

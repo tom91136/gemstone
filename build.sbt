@@ -125,6 +125,7 @@ lazy val conformanceJfr         = settingKey[Boolean]("Record the conformance em
 lazy val conformanceLintTargets = settingKey[Seq[String]]("Conformance lint targets; lint is all of them.")
 lazy val lintBackends           =
   taskKey[Unit]("Lint the conformance backends selected by conformanceLintTargets.")
+lazy val conformanceOffload     = taskKey[Unit]("Build the exported llvm-offload archive the CUDA Clang routes load.")
 lazy val conformanceHost         = taskKey[Path]("Built host conformance driver and its tests.")
 lazy val emulate                 = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val nativeArtifact          = taskKey[Path]("Built native runtime directory.")
@@ -916,6 +917,17 @@ lazy val conformance = project.in(file("conformance"))
         offlineMode.value,
         conformanceBuildProfile.value,
         conformanceLintTargets.value,
+        streams.value.log.info
+      )
+    },
+    conformanceOffload := Def.uncached {
+      val _ = conformanceArtifacts(
+        baseDirectory.value.toPath,
+        conformanceDirectory.value,
+        (LocalRootProject / baseDirectory).value.toPath,
+        offlineMode.value,
+        conformanceBuildProfile.value,
+        Seq("llvm-offload"),
         streams.value.log.info
       )
     },

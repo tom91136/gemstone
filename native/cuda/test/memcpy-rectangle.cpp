@@ -224,3 +224,26 @@ TEST_CASE("pitched copies from mirrored memory and out-of-range rows keep the ro
   REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("3D copies with slices shorter than the copy are invalid", "[cuda][memcpy]") {
+  REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  CUcontext context = nullptr;
+  REQUIRE(cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS);
+  const CUdeviceptr device = allocateFilled(256, 0xEE);
+  std::vector<uint8_t> host(256, 0xAA);
+  const auto before = counts();
+
+  const auto upload = volume(CU_MEMORYTYPE_HOST, host.data(), 0, 10, 5, CU_MEMORYTYPE_DEVICE, nullptr, device, 16, Height - 1);
+  CHECK(cuMemcpy3D_v2(&upload) == CUDA_ERROR_INVALID_VALUE);
+  const auto download = volume(CU_MEMORYTYPE_DEVICE, nullptr, device, 16, Height - 1, CU_MEMORYTYPE_HOST, host.data(), 0, 10, 5);
+  CHECK(cuMemcpy3D_v2(&download) == CUDA_ERROR_INVALID_VALUE);
+  auto offset = upload;
+  offset.dstY = 1;
+  offset.dstHeight = Height;
+  CHECK(cuMemcpy3D_v2(&offset) == CUDA_ERROR_INVALID_VALUE);
+
+  CHECK(counts().rectangleWrites == before.rectangleWrites);
+  CHECK(counts().rectangleReads == before.rectangleReads);
+  REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}

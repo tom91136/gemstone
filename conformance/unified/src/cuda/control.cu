@@ -16,7 +16,6 @@
 #include <fmt/format.h>
 
 using namespace aspartame;
-namespace cg = cooperative_groups;
 
 // Divergence and reconvergence, nested loops with break and continue, recursion, indirect calls and switch jump
 // tables: SSY/SYNC, PBK/BRK, CAL/PRET/RET and BRX before Volta, BSSY/BSYNC/BREAK, CALL/RET and BRX after it.
@@ -345,7 +344,7 @@ template <Shape S> __global__ void lookback(const uint32_t *table, uint32_t *out
   if constexpr (S == Shape::HalfLive) {
     if (lane >= 16U) {
       for (uint32_t k = 0; k < 40U; ++k)
-        (void)*static_cast<const volatile uint32_t *>(table + ((k & 7U) * 32U) + lane);
+        (void)*static_cast<const volatile uint32_t *>(table + (static_cast<size_t>(k & 7U) * 32U) + lane);
       return;
     }
   }
@@ -355,7 +354,7 @@ template <Shape S> __global__ void lookback(const uint32_t *table, uint32_t *out
     sum = 0;
     mask = halfWarp(S) ? Half : Full;
     for (uint32_t block = Predecessors; block-- > 0;) {
-      const uint32_t *slot = table + (block * 32U) + lane;
+      const uint32_t *slot = table + (static_cast<size_t>(block) * 32U) + lane;
       uint32_t value = 0;
       do {
         __threadfence_block();
@@ -410,7 +409,7 @@ template <bool Divergent> __host__ __device__ constexpr uint32_t labelOf(uint32_
 std::vector<uint32_t> labeledInput() {
   std::vector<uint32_t> values(32);
   for (uint32_t lane = 0; lane < 32; ++lane)
-    values[lane] = (lane * 37U + 11U) % 101U;
+    values[lane] = ((lane * 37U) + 11U) % 101U;
   return values;
 }
 
@@ -423,13 +422,14 @@ template <bool Divergent> __global__ void labeled(const uint32_t *values, uint32
   uint32_t odd = Sentinel;
   uint32_t peers = Sentinel;
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+  namespace cg = cooperative_groups;
   if (participates<Divergent>(lane)) {
     const uint32_t label = labelOf<Divergent>(lane);
     auto group = cg::labeled_partition(cg::coalesced_threads(), label);
     reduced = cg::reduce(group, value, cg::greater<uint32_t>());
-    next = group.shfl(value, (group.thread_rank() + 1) % group.size());
+    next = group.shfl(value, static_cast<int>((group.thread_rank() + 1) % group.size()));
     peers = __match_any_sync(__activemask(), label);
-    odd = __ballot_sync(peers, value & 1U);
+    odd = __ballot_sync(peers, static_cast<int>(value & 1U));
   }
 #else
   (void)value;

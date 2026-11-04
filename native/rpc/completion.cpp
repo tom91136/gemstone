@@ -10,17 +10,22 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-#ifdef __linux__
-  #include <unistd.h>
+#include <unistd.h>
 
+#ifdef __linux__
   #include <sys/uio.h>
 #endif
 
+#include "gemstone/environment.hpp"
 #include "gemstone_execution_rpc.hpp"
+
+#include <environment_keys.hpp>
 
 namespace gemstone::execution {
 namespace {
@@ -259,6 +264,58 @@ bool collectCompletion(Client &client, CompletionId completion, CompletionResult
   const auto released = client.call(ReleaseCompletion{completion});
   if (!released && error.empty()) error = released.error().detail;
   return succeeded && released;
+}
+
+namespace {
+
+// a forked child must not speak on its parent's session
+struct LaunchConnection {
+  decltype(::getpid()) process = 0;
+  std::string endpoint;
+  std::string id;
+  std::unique_ptr<Client> client;
+  ~LaunchConnection();
+};
+
+std::string_view configured(const char *name) {
+  const char *value = environment::value(name);
+  return value ? value : "";
+}
+
+thread_local bool launchConnectionRetired = false;
+// connections asked for after this thread's storage is torn down, as during process exit, are never closed
+thread_local Client *lateConnection = nullptr;
+thread_local LaunchConnection launchConnection;
+
+LaunchConnection::~LaunchConnection() { launchConnectionRetired = true; }
+
+} // namespace
+
+Client *launchClient() {
+  if (launchConnectionRetired) {
+    if (!lateConnection) lateConnection = Client::fromEnvironment().release();
+    return lateConnection;
+  }
+  const auto process = ::getpid();
+  const auto endpoint = configured(environment::RpcEndpoint);
+  const auto id = configured(environment::RpcClientId);
+  auto &connection = launchConnection;
+  if (!connection.client || connection.process != process || connection.endpoint != endpoint || connection.id != id) {
+    connection.client = Client::fromEnvironment();
+    connection.process = process;
+    connection.endpoint = endpoint;
+    connection.id = id;
+  }
+  return connection.client.get();
+}
+
+void dropLaunchClient() {
+  if (launchConnectionRetired) {
+    delete lateConnection;
+    lateConnection = nullptr;
+  } else {
+    launchConnection.client.reset();
+  }
 }
 
 } // namespace gemstone::execution

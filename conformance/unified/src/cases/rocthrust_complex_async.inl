@@ -22,12 +22,12 @@
   #include <thrust/async/reduce.h>
 #endif
 
-using namespace aspartame;
-using namespace unified::rocthrust_support;
-
 namespace rt = unified::backend::thrust_support;
 
 namespace {
+using namespace aspartame;
+using namespace unified::rocthrust_support;
+
 template <class Value> inline void checkReduceLarge() {
   constexpr size_t size = 4096;
   const auto input =
@@ -100,7 +100,7 @@ template <class Value> inline void checkDereference() {
     const rt::RuntimeStatus launch = rt::deviceSynchronize();
     {
       INFO(where + ": kernel launch failed");
-      REQUIRE(launch == rt::runtimeSuccess);
+      REQUIRE(launch == rt::RuntimeSuccess);
     }
     (void)rt::lastError(); // Clear the previous error before exercising the iterator kernel.
   };
@@ -115,7 +115,7 @@ template <class Value> inline void checkDereference() {
   }
   {
     thrust::fill(output.begin(), output.end(), Value{0});
-    unifiedDereferenceCopy<<<1, 1>>>(&source[0], &source[0] + 5, output.begin());
+    unifiedDereferenceCopy<<<1, 1>>>(source.data(), source.data() + 5, output.begin());
     run("dereference-device-ptr");
     {
       INFO("dereference-device-ptr");
@@ -176,7 +176,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-delete/i32/n11", "[unified][roc
 namespace {
 template <class Value> inline void checkUniversalVector() {
   void *probe = nullptr;
-  if (rt::allocateManaged(&probe, sizeof(Value)) == rt::runtimeSuccess) REQUIRE(rt::release(probe) == rt::runtimeSuccess);
+  if (rt::allocateManaged(&probe, sizeof(Value)) == rt::RuntimeSuccess) REQUIRE(rt::release(probe) == rt::RuntimeSuccess);
   else
     SKIP("universal-memory-vector: managed allocation is unavailable on this "
          "device");
@@ -222,11 +222,11 @@ inline void requireAlmostEqual(const std::vector<Number> &actual, const std::vec
 }
 
 template <class C> struct ComplexAbs {
-  UNIFIED_ROCTHRUST_HOST_DEVICE typename C::value_type operator()(const C &value) const { return thrust::abs(value); }
+  UNIFIED_ROCTHRUST_HOST_DEVICE C::value_type operator()(const C &value) const { return thrust::abs(value); }
 };
 
 template <class C> struct ComplexNorm {
-  UNIFIED_ROCTHRUST_HOST_DEVICE typename C::value_type operator()(const C &value) const { return thrust::norm(value); }
+  UNIFIED_ROCTHRUST_HOST_DEVICE C::value_type operator()(const C &value) const { return thrust::norm(value); }
 };
 
 template <class C> struct ComplexConjugate {
@@ -375,7 +375,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/complex-std-interop/f32/n4", "[unified
 namespace {
 template <class Iterator> class StridedRange {
 public:
-  using difference_type = typename iter_ops::iterator_traits<Iterator>::difference_type;
+  using difference_type = iter_ops::iterator_traits<Iterator>::difference_type;
 
   struct StrideFunctor {
     difference_type stride;
@@ -514,7 +514,7 @@ template <class Value> inline void checkTabulateOutputIterator() {
   const auto zipped = thrust::make_zip_iterator(thrust::make_tuple(input.begin(), thrust::make_counting_iterator<size_t>(0)));
   const auto end = thrust::copy_if(zipped, zipped + count, tabulate, SelectEveryNth<thrust::tuple<Value, size_t>>{stride});
   constexpr size_t selected = (count + stride - 1) / stride;
-  using difference_type = typename iter_ops::iterator_traits<decltype(tabulate)>::difference_type;
+  using difference_type = iter_ops::iterator_traits<decltype(tabulate)>::difference_type;
   {
     INFO("tabulate-output-iterator: selected count mismatch");
     REQUIRE(end == tabulate + static_cast<difference_type>(selected));

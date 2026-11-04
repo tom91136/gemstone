@@ -113,6 +113,7 @@ public:
     uint64_t offset;
     std::optional<uint64_t> range = std::nullopt;
   };
+  std::atomic<unsigned> accepted{0};
   std::atomic<unsigned> launches{0}, reads{0}, rectangleReads{0}, rectangleWrites{0}, programLoads{0}, programUnloads{0}, kernelBuilds{0};
   std::atomic_bool completionEntered{false};
 
@@ -149,6 +150,7 @@ public:
             GEMSTONE_RPC_REQUIRE(stopped.load());
             break;
           }
+          ++accepted;
           const int enabled = 1;
           if (socketPath.empty()) GEMSTONE_RPC_REQUIRE(setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) == 0);
           std::scoped_lock const lock(connectionsMutex);

@@ -106,7 +106,7 @@
   #endif
 #endif
 
-#if defined(UNIFIED_API_ROCTHRUST)
+#ifdef UNIFIED_API_ROCTHRUST
   #include <thrust/advance.h>
   #include <thrust/complex.h>
   #include <thrust/device_ptr.h>
@@ -151,7 +151,7 @@ inline void waitEvent(Stream stream, Event event, const char *where) { check(cud
 #endif
 #ifdef __HIPCC__
 using RuntimeStatus = hipError_t;
-inline constexpr RuntimeStatus runtimeSuccess = hipSuccess;
+inline constexpr RuntimeStatus RuntimeSuccess = hipSuccess;
 inline RuntimeStatus deviceSynchronize() { return hipDeviceSynchronize(); }
 inline RuntimeStatus lastError() { return hipGetLastError(); }
 inline RuntimeStatus allocate(void **ptr, size_t bytes) { return hipMalloc(ptr, bytes); }
@@ -164,7 +164,7 @@ template <class Symbol> RuntimeStatus copyToSymbol(const Symbol &symbol, const v
 }
 #else
 using RuntimeStatus = cudaError_t;
-inline constexpr RuntimeStatus runtimeSuccess = cudaSuccess;
+inline constexpr RuntimeStatus RuntimeSuccess = cudaSuccess;
 inline RuntimeStatus deviceSynchronize() { return cudaDeviceSynchronize(); }
 inline RuntimeStatus lastError() { return cudaGetLastError(); }
 inline RuntimeStatus allocate(void **ptr, size_t bytes) { return cudaMalloc(ptr, bytes); }
@@ -1240,7 +1240,7 @@ template <bool Indirect> void deviceFunction() {
 
 #endif
 
-#if defined(UNIFIED_API_ROCTHRUST)
+#ifdef UNIFIED_API_ROCTHRUST
   #include "rocthrust_support.hpp"
 #endif
 

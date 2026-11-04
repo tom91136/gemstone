@@ -1,6 +1,6 @@
 # Performance Profile Model
 
-Status: future work, not scheduled. Everything this work needs to know about the repository is in this file; "What already exists" summarises the machine semantics it builds on.
+Status: F0, F1 and F2 done, as recorded in `performance-profile-resume.md`. F3 and F4 are not scheduled. Everything this work needs to know about the repository is in this file; "What already exists" summarises the machine semantics it builds on.
 
 ## Goal
 
@@ -59,11 +59,9 @@ Hardware and probes:
 - Workloads: the benchmark cases and the conformance suites under `conformance/` (OpenCL CTS, miniapps, workloads).
 
 Missing:
-- per-architecture cost tables;
-- a memory transaction model (sectors, lines, banks);
-- occupancy calculation;
-- any notion of time: async work completes at issue, so overlap cannot be seen;
-- probe points and a statistics API.
+- per-architecture instruction cost tables (F3);
+- any notion of time: async work completes at issue, so overlap cannot be seen (F4);
+- user-named probe points.
 
 ## Architecture
 

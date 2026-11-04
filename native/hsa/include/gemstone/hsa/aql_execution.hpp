@@ -1,12 +1,10 @@
 #pragma once
 
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -126,7 +124,6 @@ private:
   };
 
   explicit AqlRuntime(std::unique_ptr<Signals> signals);
-  execution::Client *client();
   void fail(std::string message);
   std::optional<Resolved> resolve(uint64_t pointer);
   std::optional<Kernel> kernel(uint64_t kernelObject) const;
@@ -138,8 +135,6 @@ private:
 
   std::unique_ptr<Signals> signals;
   mutable std::mutex lock;
-  // Monitor workers block in completion waits that service host memory, so every thread gets its own connection.
-  std::map<std::thread::id, std::unique_ptr<execution::Client>> clients;
   std::unordered_map<uint64_t, Kernel> installedKernels;
   std::unordered_map<int64_t, uint32_t> programReferences;
   std::unordered_map<uint64_t, Allocation> allocations;

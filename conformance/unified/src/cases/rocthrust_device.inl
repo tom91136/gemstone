@@ -5,11 +5,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-using namespace unified::rocthrust_support;
-
 namespace rt = unified::backend::thrust_support;
 
 namespace {
+using namespace unified::rocthrust_support;
+
 // The device-side random semantics of rocThrust's `testing/random`, decomposed
 // into one case per engine characteristic and one per distribution
 // characteristic so a single regression names the exact instantiation.
@@ -28,7 +28,7 @@ template <class Functor> inline int32_t deviceFunctorResult(Functor functor) {
 }
 
 template <class Engine> struct EngineValidation {
-  typename Engine::result_type expected;
+  Engine::result_type expected;
   UNIFIED_ROCTHRUST_HOST_DEVICE int32_t operator()() {
     Engine engine;
     engine.discard(RandomDraws - 1);
@@ -280,30 +280,30 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-global-symbol-roundtrip/i32/n11
     (void)rt::release(marker);
     throw std::runtime_error(message);
   };
-  if (rt::allocate(reinterpret_cast<void **>(&target), sizeof(int32_t)) != rt::runtimeSuccess
-      || rt::allocate(reinterpret_cast<void **>(&marker), sizeof(int32_t)) != rt::runtimeSuccess)
+  if (rt::allocate(reinterpret_cast<void **>(&target), sizeof(int32_t)) != rt::RuntimeSuccess
+      || rt::allocate(reinterpret_cast<void **>(&marker), sizeof(int32_t)) != rt::RuntimeSuccess)
     fail("device-global-symbol-roundtrip: allocation failed");
   int32_t zero = 0;
-  if (rt::copyToDevice(target, &zero, sizeof(int32_t)) != rt::runtimeSuccess
-      || rt::copyToDevice(marker, &zero, sizeof(int32_t)) != rt::runtimeSuccess)
+  if (rt::copyToDevice(target, &zero, sizeof(int32_t)) != rt::RuntimeSuccess
+      || rt::copyToDevice(marker, &zero, sizeof(int32_t)) != rt::RuntimeSuccess)
     fail("device-global-symbol-roundtrip: destination initialisation failed");
   void *slot = target;
-  if (rt::copyToSymbol(unifiedDeviceGlobalSlot, &slot, sizeof(slot)) != rt::runtimeSuccess)
+  if (rt::copyToSymbol(unifiedDeviceGlobalSlot, &slot, sizeof(slot)) != rt::RuntimeSuccess)
     fail("device-global-symbol-roundtrip: symbol copy failed");
   unifiedPublishThroughDeviceGlobal<<<1, 1>>>(marker);
   const rt::RuntimeStatus launch = rt::deviceSynchronize();
   int32_t published = 0;
   int32_t observedMarker = 0;
-  const bool copied = launch == rt::runtimeSuccess && rt::copyToHost(&published, target, sizeof(int32_t)) == rt::runtimeSuccess
-                      && rt::copyToHost(&observedMarker, marker, sizeof(int32_t)) == rt::runtimeSuccess;
+  const bool copied = launch == rt::RuntimeSuccess && rt::copyToHost(&published, target, sizeof(int32_t)) == rt::RuntimeSuccess
+                      && rt::copyToHost(&observedMarker, marker, sizeof(int32_t)) == rt::RuntimeSuccess;
   void *cleared = nullptr;
   const auto reset = rt::copyToSymbol(unifiedDeviceGlobalSlot, &cleared, sizeof(cleared));
   const auto freedTarget = rt::release(target);
   const auto freedMarker = rt::release(marker);
   if (!copied) throw std::runtime_error("device-global-symbol-roundtrip: kernel launch or read-back failed");
-  REQUIRE(reset == rt::runtimeSuccess);
-  REQUIRE(freedTarget == rt::runtimeSuccess);
-  REQUIRE(freedMarker == rt::runtimeSuccess);
+  REQUIRE(reset == rt::RuntimeSuccess);
+  REQUIRE(freedTarget == rt::RuntimeSuccess);
+  REQUIRE(freedMarker == rt::RuntimeSuccess);
   {
     INFO("device-global-symbol-roundtrip: kernel did not read the initialised "
          "device global");

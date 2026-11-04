@@ -1568,8 +1568,9 @@ hipError_t copyPitched(void *destination, size_t destinationPitch, size_t destin
     return hipSuccess;
   }
   if (!ensureInitialised()) return hipErrorNoDevice;
-  return mapHsa(gemstone_hsa_memory_copy_pitched(destination, destinationPitch, destinationSlicePitch, source, sourcePitch,
-                                                 sourceSlicePitch, width, rows, slices));
+  const auto status = gemstone_hsa_memory_copy_pitched(destination, destinationPitch, destinationSlicePitch, source, sourcePitch,
+                                                       sourceSlicePitch, width, rows, slices);
+  return status == HSA_STATUS_ERROR_INVALID_ALLOCATION ? hipErrorInvalidValue : mapHsa(status);
 }
 
 } // namespace

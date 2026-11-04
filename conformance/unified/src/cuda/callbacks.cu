@@ -19,12 +19,12 @@ struct Probe {
   std::vector<uint32_t> snapshot;
 
   void record(int id) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock lock(mutex);
     order.push_back(id);
   }
 
   void capture(int id) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock lock(mutex);
     order.push_back(id);
     snapshot.assign(staged, staged + count);
   }
@@ -51,7 +51,7 @@ void CUDART_CB recordStream(cudaStream_t, cudaError_t, void *userData) {
 }
 
 __global__ void increment(uint32_t *data, size_t count) {
-  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t i = (static_cast<size_t>(blockIdx.x) * blockDim.x) + threadIdx.x;
   if (i < count) data[i] += 1;
 }
 

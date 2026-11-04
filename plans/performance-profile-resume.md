@@ -1,6 +1,6 @@
 # Performance profile: resume brief
 
-Companion to `performance-profile.md`. State of the working tree as left uncommitted on `main` (nothing is committed or pushed). Scratch, logs and agent reports live in `/tmp/gemstone-profile/` (gone after a reboot; everything needed to continue is restated here).
+Companion to `performance-profile.md`: what F0, F1 and F2 delivered, landed in `8e24c88a`. Paths under `/tmp/gemstone-profile/` refer to scratch that no longer exists.
 
 ## Agreed scope
 

@@ -1377,8 +1377,8 @@ hsa_status_t copyPitched(RuntimeState &runtime, Pitched<unsigned char> to, Pitch
   AllocationRef destination;
   {
     std::scoped_lock const guard(runtime.lock);
-    if (!findAllocation(runtime, from.base, input.size) && !findAllocation(runtime, to.base, output.size)
-        && !runtime.registrations.find(input.base, input.size) && !runtime.registrations.find(output.base, output.size))
+    if (!findAllocation(runtime, from.base) && !findAllocation(runtime, to.base) && !runtime.registrations.find(input.base, input.size)
+        && !runtime.registrations.find(output.base, output.size))
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     const auto deviceSide = [&](const gemstone::MemoryRange &range, AllocationRef &side) {
       for (const auto &[_, allocation] : runtime.allocations) {
@@ -1389,7 +1389,7 @@ hsa_status_t copyPitched(RuntimeState &runtime, Pitched<unsigned char> to, Pitch
       }
       return true;
     };
-    if (!deviceSide(input, source) || !deviceSide(output, destination)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    if (!deviceSide(input, source) || !deviceSide(output, destination)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   const auto rectangleOf = [&](const AllocationRef &allocation, const unsigned char *base, size_t rowPitch, size_t slicePitch) {
     return Rectangle{.offset = reinterpret_cast<uintptr_t>(base) - reinterpret_cast<uintptr_t>(allocation->base),

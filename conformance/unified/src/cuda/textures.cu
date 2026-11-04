@@ -12,10 +12,10 @@ using namespace aspartame;
 
 namespace {
 
-constexpr int addressWidth = 4;
-constexpr float addressBorder = 99.0F;
-const std::vector<float> addressTexels = {10.0F, 20.0F, 30.0F, 40.0F};
-const std::vector<int> addressProbes = {-2, -1, 0, 1, 2, 3, 4, 5};
+constexpr int AddressWidth = 4;
+constexpr float BorderValue = 99.0F;
+const std::vector<float> AddressTexels = {10.0F, 20.0F, 30.0F, 40.0F};
+const std::vector<int> AddressProbes = {-2, -1, 0, 1, 2, 3, 4, 5};
 
 void expectNear(const std::vector<float> &actual, const std::vector<float> &expected, float tolerance, std::string_view name) {
   for (size_t i = 0; i < expected.size(); ++i)
@@ -140,7 +140,7 @@ cudaSurfaceObject_t makeSurface(cudaArray_t array) {
 }
 
 template <typename V, typename C, int N> __global__ void fetchKernel(cudaTextureObject_t texture, C *out, int count) {
-  const int i = threadIdx.x;
+  const int i = static_cast<int>(threadIdx.x);
   if (i >= count) return;
   const V value = tex1Dfetch<V>(texture, i);
   const auto *parts = reinterpret_cast<const C *>(&value);
@@ -150,7 +150,7 @@ template <typename V, typename C, int N> __global__ void fetchKernel(cudaTexture
 
 template <int D, typename V, typename C, int N>
 __global__ void sampleKernel(cudaTextureObject_t texture, const float3 *coords, C *out, int count) {
-  const int i = threadIdx.x;
+  const int i = static_cast<int>(threadIdx.x);
   if (i >= count) return;
   const float3 c = coords[i];
   V value{};
@@ -172,7 +172,7 @@ template <typename V, typename C, int N> __global__ void gatherKernel(cudaTextur
 template <int D, typename T>
 __global__ void surfaceWriteKernel(cudaSurfaceObject_t surface, const int3 *coords, const T *values, cudaSurfaceBoundaryMode mode,
                                    int count) {
-  const int i = threadIdx.x;
+  const int i = static_cast<int>(threadIdx.x);
   if (i >= count) return;
   const int3 c = coords[i];
   if constexpr (D == 1) surf1Dwrite(values[i], surface, c.x, mode);
@@ -182,7 +182,7 @@ __global__ void surfaceWriteKernel(cudaSurfaceObject_t surface, const int3 *coor
 
 template <int D, typename T>
 __global__ void surfaceReadKernel(cudaSurfaceObject_t surface, const int3 *coords, cudaSurfaceBoundaryMode mode, T *out, int count) {
-  const int i = threadIdx.x;
+  const int i = static_cast<int>(threadIdx.x);
   if (i >= count) return;
   const int3 c = coords[i];
   if constexpr (D == 1) out[i] = surf1Dread<T>(surface, c.x, mode);
@@ -239,12 +239,12 @@ std::vector<T> readSurface(cudaSurfaceObject_t surface, const std::vector<int3> 
 }
 
 std::vector<float> sampleAddressMode(cudaTextureAddressMode mode) {
-  cudaArray_t array = createArray<float>(addressWidth, 0, 0);
-  uploadTexels(array, addressTexels, addressWidth, 0, 0);
+  cudaArray_t array = createArray<float>(AddressWidth, 0, 0);
+  uploadTexels(array, AddressTexels, AddressWidth, 0, 0);
   const cudaTextureObject_t texture =
-      makeTexture(arrayResource(array), textureDesc(mode, cudaFilterModePoint, cudaReadModeElementType, true, addressBorder));
+      makeTexture(arrayResource(array), textureDesc(mode, cudaFilterModePoint, cudaReadModeElementType, true, BorderValue));
   const auto coords =
-      addressProbes | map([](int k) { return make_float3((static_cast<float>(k) + 0.5F) / static_cast<float>(addressWidth), 0.0F, 0.0F); })
+      AddressProbes | map([](int k) { return make_float3((static_cast<float>(k) + 0.5F) / static_cast<float>(AddressWidth), 0.0F, 0.0F); })
       | to_vector();
   std::vector<float> values = sampleTexture<1, float, float, 1>(texture, coords);
   check(cudaDestroyTextureObject(texture), "destroy texture");
@@ -252,14 +252,14 @@ std::vector<float> sampleAddressMode(cudaTextureAddressMode mode) {
   return values;
 }
 
-int wrapIndex(int k) { return ((k % addressWidth) + addressWidth) % addressWidth; }
+int wrapIndex(int k) { return ((k % AddressWidth) + AddressWidth) % AddressWidth; }
 
-int clampIndex(int k) { return std::clamp(k, 0, addressWidth - 1); }
+int clampIndex(int k) { return std::clamp(k, 0, AddressWidth - 1); }
 
 int mirrorIndex(int k) {
-  const int period = 2 * addressWidth;
+  const int period = 2 * AddressWidth;
   const int m = ((k % period) + period) % period;
-  return m < addressWidth ? m : period - 1 - m;
+  return m < AddressWidth ? m : period - 1 - m;
 }
 
 } // namespace
@@ -338,23 +338,23 @@ TEST_CASE("resources/cuda/texture-array-3d", "[unified][resources]") {
 }
 
 TEST_CASE("resources/cuda/texture-wrap", "[unified][resources]") {
-  const auto expected = addressProbes | map([](int k) { return addressTexels[static_cast<size_t>(wrapIndex(k))]; }) | to_vector();
+  const auto expected = AddressProbes | map([](int k) { return AddressTexels[static_cast<size_t>(wrapIndex(k))]; }) | to_vector();
   expectNear(sampleAddressMode(cudaAddressModeWrap), expected, 0.0F, "wrap");
 }
 
 TEST_CASE("resources/cuda/texture-clamp", "[unified][resources]") {
-  const auto expected = addressProbes | map([](int k) { return addressTexels[static_cast<size_t>(clampIndex(k))]; }) | to_vector();
+  const auto expected = AddressProbes | map([](int k) { return AddressTexels[static_cast<size_t>(clampIndex(k))]; }) | to_vector();
   expectNear(sampleAddressMode(cudaAddressModeClamp), expected, 0.0F, "clamp");
 }
 
 TEST_CASE("resources/cuda/texture-mirror", "[unified][resources]") {
-  const auto expected = addressProbes | map([](int k) { return addressTexels[static_cast<size_t>(mirrorIndex(k))]; }) | to_vector();
+  const auto expected = AddressProbes | map([](int k) { return AddressTexels[static_cast<size_t>(mirrorIndex(k))]; }) | to_vector();
   expectNear(sampleAddressMode(cudaAddressModeMirror), expected, 0.0F, "mirror");
 }
 
 TEST_CASE("resources/cuda/texture-border", "[unified][resources]") {
-  const auto expected = addressProbes
-                        | map([](int k) { return (k >= 0 && k < addressWidth) ? addressTexels[static_cast<size_t>(k)] : addressBorder; })
+  const auto expected = AddressProbes
+                        | map([](int k) { return (k >= 0 && k < AddressWidth) ? AddressTexels[static_cast<size_t>(k)] : BorderValue; })
                         | to_vector();
   expectNear(sampleAddressMode(cudaAddressModeBorder), expected, 0.0F, "border");
 }

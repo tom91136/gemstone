@@ -28,6 +28,10 @@ env:
   GEMSTONE_CONTAINER_EXE: docker
   CONFORMANCE_BUILD_PROFILE: complete
   CONFORMANCE_WORKLOAD: ${{ inputs.tier || 'xlong' }}
+  # a runner that runs out of memory is shut down without a trace, so long steps sample it into the log as they run
+  MEMORY_SAMPLE: >-
+    echo "::group::memory $(date -u +%T)"; free -m; cat /proc/pressure/memory 2>/dev/null;
+    ps -eo rss=,args= --sort=-rss | head -5 | cut -c1-200; echo "::endgroup::"
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -200,8 +204,40 @@ jobs:
           compression-level: 0
 
   # the artifact builds do not depend on the rest of build, so they run beside it
+  llvm-offload:
+    needs: conformance-package-cache
+    if: ${{ needs.conformance-package-cache.outputs.package-hit != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - *free-disk
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - name: llvm-offload key
+        id: offload
+        run: echo "key=$(cmake -P conformance/artifacts/Offload.cmake)" >> "$GITHUB_OUTPUT"
+      - name: Find llvm-offload
+        id: offload-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/llvm-offload/${{ steps.offload.outputs.key }}
+          key: llvm-offload-${{ steps.offload.outputs.key }}
+          lookup-only: true
+      - name: Build llvm-offload
+        if: ${{ steps.offload-cache.outputs.cache-hit != 'true' }}
+        run: sbt --server --batch conformance/conformanceOffload
+      - name: Save llvm-offload
+        if: ${{ steps.offload-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/llvm-offload/${{ steps.offload.outputs.key }}
+          key: llvm-offload-${{ steps.offload.outputs.key }}
+
   conformance-build:
-    needs: [shards, conformance-package-cache]
+    needs: [shards, conformance-package-cache, llvm-offload]
     if: ${{ needs.conformance-package-cache.outputs.package-hit != 'true' }}
     name: conformance-build (${{ matrix.shard }})
     runs-on: ubuntu-24.04
@@ -245,7 +281,13 @@ jobs:
         run: |
           [ -z "$SPLIT" ] || export "${SPLIT?}"
           mkdir -p target/conformance/artifacts
+          while sleep 20; do eval "$MEMORY_SAMPLE"; done &
+          sampler=$!
+          trap 'kill "$sampler"' EXIT
           sbt --server --batch "conformance/build --profile $CONFORMANCE_BUILD_PROFILE $CONFORMANCE_SHARD_ROUTE_LIST"
+      - name: Kernel OOM records
+        if: ${{ always() && !env.ACT }}
+        run: sudo dmesg | grep -iE 'out of memory|oom-kill|killed process' || echo "no kernel OOM records"
       - name: Disk usage
         if: ${{ always() }}
         run: df -h
@@ -260,19 +302,6 @@ jobs:
         with:
           path: .cache/conformance
           key: ${{ steps.dependencies.outputs.cache-primary-key }}-${{ steps.downloads.outputs.conformance }}
-      # only cuda-0 saves the offload archive, so the shards do not race on one key
-      - name: Check llvm-offload archive
-        id: offload-archive
-        if: ${{ !cancelled() && matrix.shard == 'cuda-0' && steps.offload-cache.outputs.cache-hit != 'true' }}
-        env:
-          ARCHIVE: .cache/llvm-offload/${{ steps.offload.outputs.key }}/llvm-offload.tar.zst
-        run: echo "present=$(test -f "$ARCHIVE" && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - name: Save llvm-offload
-        if: ${{ !cancelled() && steps.offload-archive.outputs.present == 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: .cache/llvm-offload/${{ steps.offload.outputs.key }}
-          key: llvm-offload-${{ steps.offload.outputs.key }}
       # shards share their support closures, so Shards.cmake has one shard pack each
       - name: Pack
         if: ${{ !cancelled() }}
@@ -511,13 +540,11 @@ jobs:
           path: target/ci
           merge-multiple: true
       - *unpack
-      # a runner that runs out of memory is shut down without a trace, so the log samples it as the run goes; the server
-      # takes half the memory and the clients most of the rest, so sbt, which also compiles the emulator, gets a quarter
+      # the server takes half the memory and the clients most of the rest, so sbt, which also compiles the emulator, gets
+      # a quarter
       - name: Emulate
         run: |
-          while sleep 60; do
-            echo "::group::memory $(date -u +%T)"; free -m; ps -eo rss=,args= --sort=-rss | head -5 | cut -c1-200; echo "::endgroup::"
-          done &
+          while sleep 60; do eval "$MEMORY_SAMPLE"; done &
           sampler=$!
           trap 'kill "$sampler"' EXIT
           heap=$(awk '/^MemTotal:/ { printf "%dm", $2 / 1024 / 4 }' /proc/meminfo)

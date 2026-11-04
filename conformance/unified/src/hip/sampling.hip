@@ -20,9 +20,9 @@ using namespace hip_support;
 // normalised read modes, 2D, 3D and layered arrays, pitched memory, gathers and explicit levels.
 namespace {
 
-constexpr int addressWidth = 4;
-const std::vector<float> addressTexels = {10.0F, 20.0F, 30.0F, 40.0F};
-const std::vector<int> addressProbes = {-6, -5, -2, -1, 0, 1, 2, 3, 4, 5, 8, 9};
+constexpr int AddressWidth = 4;
+const std::vector<float> AddressTexels = {10.0F, 20.0F, 30.0F, 40.0F};
+const std::vector<int> AddressProbes = {-6, -5, -2, -1, 0, 1, 2, 3, 4, 5, 8, 9};
 
 bool deviceFlag(hipDeviceAttribute_t attribute, std::string_view operation) {
   int supported = 0;
@@ -162,16 +162,18 @@ std::vector<Coordinate> texelCentres(size_t width, size_t height, size_t depth) 
   for (size_t z = 0; z < std::max<size_t>(depth, 1); ++z)
     for (size_t y = 0; y < std::max<size_t>(height, 1); ++y)
       for (size_t x = 0; x < width; ++x)
-        coords.push_back({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F});
+        coords.push_back({.x = static_cast<float>(x) + 0.5F, .y = static_cast<float>(y) + 0.5F, .z = static_cast<float>(z) + 0.5F});
   return coords;
 }
 
 std::vector<float> sampleAddressMode(hipTextureAddressMode mode) {
-  hipArray_t array = createArray<float>(addressWidth, 0, 0);
-  uploadTexels(array, addressTexels, addressWidth, 0, 0);
-  const hipTextureObject_t texture = makeTexture(arrayResource(array), textureDesc(mode, hipFilterModePoint, hipReadModeElementType, true));
-  const auto coords = addressProbes
-                      | map([](int k) { return Coordinate{(static_cast<float>(k) + 0.5F) / static_cast<float>(addressWidth), 0.0F, 0.0F}; })
+  hipArray_t array = createArray<float>(AddressWidth, 0, 0);
+  uploadTexels(array, AddressTexels, AddressWidth, 0, 0);
+  auto *const texture = makeTexture(arrayResource(array), textureDesc(mode, hipFilterModePoint, hipReadModeElementType, true));
+  const auto coords = AddressProbes
+                      | map([](int k) {
+                          return Coordinate{.x = (static_cast<float>(k) + 0.5F) / static_cast<float>(AddressWidth), .y = 0.0F, .z = 0.0F};
+                        })
                       | to_vector();
   auto values = sampleTexture<1, float, float, 1>(texture, coords);
   check(hipDestroyTextureObject(texture), "destroy texture");
@@ -179,40 +181,40 @@ std::vector<float> sampleAddressMode(hipTextureAddressMode mode) {
   return values;
 }
 
-int wrapIndex(int k) { return ((k % addressWidth) + addressWidth) % addressWidth; }
+int wrapIndex(int k) { return ((k % AddressWidth) + AddressWidth) % AddressWidth; }
 
-int clampIndex(int k) { return std::clamp(k, 0, addressWidth - 1); }
+int clampIndex(int k) { return std::clamp(k, 0, AddressWidth - 1); }
 
 int mirrorIndex(int k) {
-  const int period = 2 * addressWidth;
+  const int period = 2 * AddressWidth;
   const int m = ((k % period) + period) % period;
-  return m < addressWidth ? m : period - 1 - m;
+  return m < AddressWidth ? m : period - 1 - m;
 }
 
 } // namespace
 
 TEST_CASE("resources/hip/texture-wrap", "[unified][resources]") {
   if (!imageSupport()) SKIP("the device has no image instructions");
-  const auto expected = addressProbes | map([](int k) { return addressTexels[static_cast<size_t>(wrapIndex(k))]; }) | to_vector();
+  const auto expected = AddressProbes | map([](int k) { return AddressTexels[static_cast<size_t>(wrapIndex(k))]; }) | to_vector();
   expectNear(sampleAddressMode(hipAddressModeWrap), expected, 0.0F, "wrap");
 }
 
 TEST_CASE("resources/hip/texture-clamp", "[unified][resources]") {
   if (!imageSupport()) SKIP("the device has no image instructions");
-  const auto expected = addressProbes | map([](int k) { return addressTexels[static_cast<size_t>(clampIndex(k))]; }) | to_vector();
+  const auto expected = AddressProbes | map([](int k) { return AddressTexels[static_cast<size_t>(clampIndex(k))]; }) | to_vector();
   expectNear(sampleAddressMode(hipAddressModeClamp), expected, 0.0F, "clamp");
 }
 
 TEST_CASE("resources/hip/texture-mirror", "[unified][resources]") {
   if (!imageSupport()) SKIP("the device has no image instructions");
-  const auto expected = addressProbes | map([](int k) { return addressTexels[static_cast<size_t>(mirrorIndex(k))]; }) | to_vector();
+  const auto expected = AddressProbes | map([](int k) { return AddressTexels[static_cast<size_t>(mirrorIndex(k))]; }) | to_vector();
   expectNear(sampleAddressMode(hipAddressModeMirror), expected, 0.0F, "mirror");
 }
 
 TEST_CASE("resources/hip/texture-border", "[unified][resources]") {
   if (!imageSupport()) SKIP("the device has no image instructions");
   const auto expected =
-      addressProbes | map([](int k) { return (k >= 0 && k < addressWidth) ? addressTexels[static_cast<size_t>(k)] : 0.0F; }) | to_vector();
+      AddressProbes | map([](int k) { return (k >= 0 && k < AddressWidth) ? AddressTexels[static_cast<size_t>(k)] : 0.0F; }) | to_vector();
   expectNear(sampleAddressMode(hipAddressModeBorder), expected, 0.0F, "border");
 }
 
@@ -223,17 +225,21 @@ TEST_CASE("resources/hip/texture-filter", "[unified][resources]") {
   const std::vector<float> texels = {10.0F, 20.0F, 30.0F, 40.0F};
   hipArray_t array = createArray<float>(width, height, 0);
   uploadTexels(array, texels, width, height, 0);
-  const std::vector<Coordinate> coords = {{1.25F, 1.0F, 0.0F}, {0.75F, 0.25F, 0.0F}, {0.5F, 0.5F, 0.0F},
-                                          {1.5F, 1.5F, 0.0F},  {1.2F, 0.5F, 0.0F},   {0.5F + 0.0033F, 0.5F, 0.0F}};
-  const auto point = makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
-  const auto linear =
+  const std::vector<Coordinate> coords = {{.x = 1.25F, .y = 1.0F, .z = 0.0F}, {.x = 0.75F, .y = 0.25F, .z = 0.0F},
+                                          {.x = 0.5F, .y = 0.5F, .z = 0.0F}, {.x = 1.5F, .y = 1.5F, .z = 0.0F},
+                                          {.x = 1.2F, .y = 0.5F, .z = 0.0F}, {.x = 0.5F + 0.0033F, .y = 0.5F, .z = 0.0F}};
+  auto *const point =
+      makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
+  auto *const linear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
   expectNear(sampleTexture<2, float, float, 1>(point, coords), {40.0F, 10.0F, 10.0F, 40.0F, 20.0F, 10.0F}, 0.0F, "point filter");
   expectNear(sampleTexture<2, float, float, 1>(linear, coords), {27.5F, 12.5F, 10.0F, 40.0F, 16.9921875F, 10.0390625F}, 0.0F,
              "linear filter");
-  const auto normalisedLinear =
+  auto *const normalisedLinear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, true));
-  expectNear(sampleTexture<2, float, float, 1>(normalisedLinear, {{0.625F, 0.5F, 0.0F}, {0.5F, 0.5F, 0.0F}, {0.25F, 0.25F, 0.0F}}),
+  expectNear(sampleTexture<2, float, float, 1>(normalisedLinear,
+                                               {{.x = 0.625F, .y = 0.5F, .z = 0.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.0F},
+                                                {.x = 0.25F, .y = 0.25F, .z = 0.0F}}),
              {27.5F, 25.0F, 10.0F}, 0.0F, "normalised linear filter");
   check(hipDestroyTextureObject(point), "destroy texture");
   check(hipDestroyTextureObject(linear), "destroy texture");
@@ -244,15 +250,16 @@ TEST_CASE("resources/hip/texture-filter", "[unified][resources]") {
 TEST_CASE("resources/hip/texture-filter-wrap", "[unified][resources]") {
   if (!imageSupport()) SKIP("the device has no image instructions");
   const std::vector<float> texels = {10.0F, 20.0F, 30.0F, 40.0F};
-  hipArray_t array = createArray<float>(addressWidth, 0, 0);
-  uploadTexels(array, texels, addressWidth, 0, 0);
-  const auto wrapped =
+  hipArray_t array = createArray<float>(AddressWidth, 0, 0);
+  uploadTexels(array, texels, AddressWidth, 0, 0);
+  auto *const wrapped =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeWrap, hipFilterModeLinear, hipReadModeElementType, true));
-  const auto mirrored =
+  auto *const mirrored =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeMirror, hipFilterModeLinear, hipReadModeElementType, true));
-  const auto border =
+  auto *const border =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeBorder, hipFilterModeLinear, hipReadModeElementType, true));
-  const std::vector<Coordinate> coords = {{0.0F, 0.0F, 0.0F}, {0.125F, 0.0F, 0.0F}, {1.0F, 0.0F, 0.0F}, {1.0625F, 0.0F, 0.0F}};
+  const std::vector<Coordinate> coords = {{.x = 0.0F, .y = 0.0F, .z = 0.0F}, {.x = 0.125F, .y = 0.0F, .z = 0.0F},
+                                          {.x = 1.0F, .y = 0.0F, .z = 0.0F}, {.x = 1.0625F, .y = 0.0F, .z = 0.0F}};
   expectNear(sampleTexture<1, float, float, 1>(wrapped, coords), {25.0F, 10.0F, 25.0F, 17.5F}, 0.0F, "wrap linear");
   expectNear(sampleTexture<1, float, float, 1>(mirrored, coords), {10.0F, 10.0F, 40.0F, 40.0F}, 0.0F, "mirror linear");
   expectNear(sampleTexture<1, float, float, 1>(border, coords), {5.0F, 10.0F, 20.0F, 10.0F}, 0.0F, "border linear");
@@ -270,12 +277,14 @@ TEST_CASE("resources/hip/texture-3d", "[unified][resources]") {
   const std::vector<float> texels = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F};
   hipArray_t array = createArray<float>(width, height, depth);
   uploadTexels(array, texels, width, height, depth);
-  const auto point = makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
+  auto *const point =
+      makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   expectNear(sampleTexture<3, float, float, 1>(point, texelCentres(width, height, depth)), texels, 0.0F, "3D point");
-  const auto linear =
+  auto *const linear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
-  expectNear(sampleTexture<3, float, float, 1>(linear, {{1.0F, 1.0F, 1.0F}, {0.5F, 0.5F, 0.5F}, {1.5F, 0.5F, 1.5F}}), {4.5F, 1.0F, 6.0F},
-             0.0F, "3D linear");
+  expectNear(sampleTexture<3, float, float, 1>(linear, {{.x = 1.0F, .y = 1.0F, .z = 1.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.5F},
+                                                        {.x = 1.5F, .y = 0.5F, .z = 1.5F}}),
+             {4.5F, 1.0F, 6.0F}, 0.0F, "3D linear");
   check(hipDestroyTextureObject(point), "destroy texture");
   check(hipDestroyTextureObject(linear), "destroy texture");
   check(hipFreeArray(array), "free array");
@@ -290,21 +299,22 @@ TEST_CASE("resources/hip/texture-layered", "[unified][resources]") {
       iota(size_t{0}, width * height * layers) | map([](size_t i) { return static_cast<float>((i * 3) + 1); }) | to_vector();
   hipArray_t array = createArray<float>(width, height, layers, hipArrayLayered);
   uploadTexels(array, texels, width, height, layers);
-  const auto point = makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
+  auto *const point =
+      makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   std::vector<Coordinate> coords;
   std::vector<float> expected;
   for (size_t layer = 0; layer < layers; ++layer)
     for (size_t y = 0; y < height; ++y)
       for (size_t x = 0; x < width; ++x) {
-        coords.push_back({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(layer)});
+        coords.push_back({.x = static_cast<float>(x) + 0.5F, .y = static_cast<float>(y) + 0.5F, .z = static_cast<float>(layer)});
         expected.push_back(texels[(((layer * height) + y) * width) + x]);
       }
   expectNear(layeredTexture<float, float, 1>(point, coords), expected, 0.0F, "layered point");
-  const auto linear =
+  auto *const linear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
   const auto at = [&](size_t layer, size_t y, size_t x) { return texels[(((layer * height) + y) * width) + x]; };
   expectNear(
-      layeredTexture<float, float, 1>(linear, {{1.0F, 1.0F, 1.0F}, {2.0F, 1.0F, 2.0F}}),
+      layeredTexture<float, float, 1>(linear, {{.x = 1.0F, .y = 1.0F, .z = 1.0F}, {.x = 2.0F, .y = 1.0F, .z = 2.0F}}),
       {(at(1, 0, 0) + at(1, 0, 1) + at(1, 1, 0) + at(1, 1, 1)) / 4.0F, (at(2, 0, 1) + at(2, 0, 2) + at(2, 1, 1) + at(2, 1, 2)) / 4.0F},
       0.0F, "layered linear stays in its layer");
   check(hipDestroyTextureObject(point), "destroy texture");
@@ -317,11 +327,11 @@ TEST_CASE("resources/hip/texture-read-mode", "[unified][resources]") {
   constexpr size_t width = 2;
   const std::vector<uchar4> bytes = {make_uchar4(0, 255, 128, 64), make_uchar4(255, 0, 1, 2)};
   const std::vector<float4> floats = {make_float4(1.5F, -2.0F, 3.25F, 4.0F), make_float4(-0.5F, 8.0F, 0.0F, 16.0F)};
-  const std::vector<Coordinate> coords = {{0.5F, 0.5F, 0.0F}, {1.5F, 0.5F, 0.0F}};
+  const std::vector<Coordinate> coords = {{.x = 0.5F, .y = 0.5F, .z = 0.0F}, {.x = 1.5F, .y = 0.5F, .z = 0.0F}};
 
   hipArray_t byteArray = createArray<uchar4>(width, 1, 0);
   uploadTexels(byteArray, bytes, width, 1, 0);
-  const auto normalisedTexture =
+  auto *const normalisedTexture =
       makeTexture(arrayResource(byteArray), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeNormalizedFloat, false));
   std::vector<float> normalised;
   for (const auto &texel : bytes)
@@ -329,7 +339,7 @@ TEST_CASE("resources/hip/texture-read-mode", "[unified][resources]") {
          {static_cast<float>(texel.x), static_cast<float>(texel.y), static_cast<float>(texel.z), static_cast<float>(texel.w)})
       normalised.push_back(channel / 255.0F);
   expectNear(sampleTexture<2, float4, float, 4>(normalisedTexture, coords), normalised, 1e-6F, "uchar4 normalised");
-  const auto elementTexture =
+  auto *const elementTexture =
       makeTexture(arrayResource(byteArray), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   const auto elements = sampleTexture<2, uchar4, unsigned char, 4>(elementTexture, coords);
   const std::vector<unsigned char> expectedBytes = {0, 255, 128, 64, 255, 0, 1, 2};
@@ -338,13 +348,14 @@ TEST_CASE("resources/hip/texture-read-mode", "[unified][resources]") {
 
   hipArray_t floatArray = createArray<float4>(width, 1, 0);
   uploadTexels(floatArray, floats, width, 1, 0);
-  const auto floatTexture =
+  auto *const floatTexture =
       makeTexture(arrayResource(floatArray), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   expectNear(sampleTexture<2, float4, float, 4>(floatTexture, coords), {1.5F, -2.0F, 3.25F, 4.0F, -0.5F, 8.0F, 0.0F, 16.0F}, 0.0F,
              "float4");
-  const auto floatLinear =
+  auto *const floatLinear =
       makeTexture(arrayResource(floatArray), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
-  expectNear(sampleTexture<2, float4, float, 4>(floatLinear, {{1.0F, 0.5F, 0.0F}}), {0.5F, 3.0F, 1.625F, 10.0F}, 0.0F, "float4 linear");
+  expectNear(sampleTexture<2, float4, float, 4>(floatLinear, {{.x = 1.0F, .y = 0.5F, .z = 0.0F}}), {0.5F, 3.0F, 1.625F, 10.0F}, 0.0F,
+             "float4 linear");
   check(hipDestroyTextureObject(normalisedTexture), "destroy texture");
   check(hipDestroyTextureObject(elementTexture), "destroy texture");
   check(hipDestroyTextureObject(floatTexture), "destroy texture");
@@ -369,11 +380,11 @@ TEST_CASE("resources/hip/texture-pitch2d", "[unified][resources]") {
   resource.res.pitch2D.width = width;
   resource.res.pitch2D.height = height;
   resource.res.pitch2D.pitchInBytes = pitch;
-  const auto point = makeTexture(resource, textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
+  auto *const point = makeTexture(resource, textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   expectNear(sampleTexture<2, float, float, 1>(point, texelCentres(width, height, 0)), texels, 0.0F, "pitch2D point");
-  const auto linear = makeTexture(resource, textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
-  expectNear(sampleTexture<2, float, float, 1>(linear, {{1.0F, 1.0F, 0.0F}}), {(texels[0] + texels[1] + texels[5] + texels[6]) / 4.0F},
-             0.0F, "pitch2D linear");
+  auto *const linear = makeTexture(resource, textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
+  expectNear(sampleTexture<2, float, float, 1>(linear, {{.x = 1.0F, .y = 1.0F, .z = 0.0F}}),
+             {(texels[0] + texels[1] + texels[5] + texels[6]) / 4.0F}, 0.0F, "pitch2D linear");
   check(hipDestroyTextureObject(point), "destroy texture");
   check(hipDestroyTextureObject(linear), "destroy texture");
   check(hipFree(device), "free");
@@ -386,7 +397,7 @@ TEST_CASE("resources/hip/texture-gather", "[unified][resources]") {
                                       make_float4(2.0F, 12.0F, 22.0F, 32.0F), make_float4(3.0F, 13.0F, 23.0F, 33.0F)};
   hipArray_t array = createArray<float4>(2, 2, 0, hipArrayTextureGather);
   uploadTexels(array, texels, 2, 2, 0);
-  const auto texture =
+  auto *const texture =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   // HIP numbers the components 1 to 3 as red, green and blue, and any other as alpha
   for (int comp = 0; comp < 4; ++comp) {
@@ -408,9 +419,9 @@ TEST_CASE("resources/hip/texture-lod", "[unified][resources]") {
   const std::vector<float> texels = {10.0F, 20.0F, 30.0F, 40.0F};
   hipArray_t array = createArray<float>(width, 2, 0);
   uploadTexels(array, texels, width, 2, 0);
-  const auto linear =
+  auto *const linear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
-  const std::vector<Coordinate> coords = {{1.0F, 1.0F, 0.0F}, {0.5F, 0.5F, 0.0F}};
+  const std::vector<Coordinate> coords = {{.x = 1.0F, .y = 1.0F, .z = 0.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.0F}};
   const DeviceBuffer<Coordinate> deviceCoords(coords);
   for (const float level : {0.0F, 3.0F}) {
     DeviceBuffer<float> out(std::vector<float>(coords.size(), 0.0F));

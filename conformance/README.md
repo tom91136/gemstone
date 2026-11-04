@@ -75,16 +75,17 @@ sh cmake/jobserver.sh -- cmake --build build/artifacts --target artifacts
 The budget defaults to `CMAKE_BUILD_PARALLEL_LEVEL` or the core count; do not add inner `-j` flags.
 `CONFORMANCE_ARTIFACT_PARALLELISM` caps concurrent containers (default: cores / 8, at most 4).
 
-CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANCE_SYCL_SHARD_INDEX=<n>` writing
+CI builds the SYCL CTS as shards on separate runners, each with `CONFORMANCE_SYCL_SHARD_INDEX=<n>` writing
 `artifacts/sycl-shard-<n>`; `cmake -DARTIFACTS=<artifact directory> -P artifacts/Merge.cmake` joins them into
-`artifacts/sycl`. Shard membership is in `cts/sycl/CMakeLists.txt`; shard 0 also builds the unified suite and the
+`artifacts/sycl`. Shard membership is in `cts/sycl/Shards.cmake`; shard 0 also builds the unified suite and the
 miniapps.
 
 `cmake -DCONFORMANCE_BUILD_PROFILE=<build profile> -DMODE=build|run -P artifacts/Shards.cmake` prints the CI build or
 emulation shards as a GitHub Actions matrix.
 Its policy groups routes by the first pattern they match, and a route that matches none goes to the first group's
-shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. The run shards
-use the same policy, so they cover exactly the routes the build shards built. A shard names its routes in
+shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. The
+cuda and amd build shards hold at most two architectures each, so their count follows the routes. The run shards use
+the same policy, so they cover exactly the routes the build shards built. A shard names its routes in
 `CONFORMANCE_SHARD_ROUTE_LIST`, so its own first route of each support closure builds that closure; the closures are
 identical, so the shards' artifacts unpack over each other. CI packs each closure once: the lowest build shard holding
 it uploads it as `conformance-<shard>-support`, and SYCL shards past 0 leave out `lib`. CI joins every build artifact

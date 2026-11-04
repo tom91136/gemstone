@@ -7,7 +7,8 @@ cmake_minimum_required(VERSION 3.25)
 #
 # A route belongs to the group of the first pattern it matches; a route that matches none goes to shard 0 of the first
 # group, with a warning, so a new route still builds and runs. A group cuts its architectures, in route order, into
-# equal consecutive slices, one per shard, so a build selector keeps the compilers of its architecture together and
+# equal consecutive slices, one per shard (BUILD and RUN count them; ARCHITECTURES sizes the build shards instead,
+# so the count follows the routes), so a build selector keeps the compilers of its architecture together and
 # neighbouring architectures of a family share a shard. A group with a SPLIT variable builds its routes on every build
 # shard, with the variable set to the shard index. Empty shards are left out.
 #
@@ -26,9 +27,10 @@ endif()
 
 set(shard_groups)
 function(shard_group name)
-  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILD;RUN;CASES;SPLIT;SHARED;PATTERN" "")
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILD;ARCHITECTURES;RUN;CASES;SPLIT;SHARED;PATTERN" "")
   set(shard_groups ${shard_groups} "${name}" PARENT_SCOPE)
   set(shard_${name}_build "${ARG_BUILD}" PARENT_SCOPE)
+  set(shard_${name}_architectures "${ARG_ARCHITECTURES}" PARENT_SCOPE)
   set(shard_${name}_run "${ARG_RUN}" PARENT_SCOPE)
   if(NOT DEFINED ARG_CASES)
     set(ARG_CASES 1)
@@ -39,13 +41,14 @@ function(shard_group name)
   set(shard_${name}_pattern "${ARG_PATTERN}" PARENT_SCOPE)
 endfunction()
 
-# 0 shards leave a group out of CI. The SYCL build count is the SYCL CTS shard count in cts/sycl/CMakeLists.txt; the
+# 0 shards leave a group out of CI. The SYCL build count is the SYCL CTS shard count in cts/sycl/Shards.cmake; the
 # build rejects a shard past it and Merge.cmake rejects a missing one.
-shard_group(cuda BUILD 5 RUN 10 PATTERN "^(cuda-|openacc/)")
-shard_group(amd BUILD 9 RUN 3 PATTERN "^(hip|hsa)/")
+include("${CMAKE_CURRENT_LIST_DIR}/../cts/sycl/Shards.cmake")
+shard_group(cuda ARCHITECTURES 2 RUN 10 PATTERN "^(cuda-|openacc/)")
+shard_group(amd ARCHITECTURES 2 RUN 3 PATTERN "^(hip|hsa)/")
 shard_group(opencl BUILD 1 RUN 1 CASES 4 PATTERN "^opencl$")
 shard_group(levelzero BUILD 1 RUN 1 PATTERN "^levelzero$")
-shard_group(sycl BUILD 4 RUN 1 SPLIT CONFORMANCE_SYCL_SHARD_INDEX SHARED lib PATTERN "^sycl$")
+shard_group(sycl BUILD ${sycl_cts_shard_count} RUN 1 SPLIT CONFORMANCE_SYCL_SHARD_INDEX SHARED lib PATTERN "^sycl$")
 shard_group(vulkan BUILD 1 RUN 1 PATTERN "^vulkan$")
 
 include("${CMAKE_CURRENT_LIST_DIR}/Targets.cmake")
@@ -112,11 +115,14 @@ foreach(group IN LISTS shard_groups)
   if(NOT group IN_LIST matched)
     message(NOTICE "warning: shard pattern ${shard_${group}_pattern} of ${group} matches no route")
   endif()
+  list(LENGTH units_${group} units)
   set(shards "${shard_${group}_${MODE}}")
+  if(MODE STREQUAL "build" AND shard_${group}_architectures)
+    math(EXPR shards "(${units} + ${shard_${group}_architectures} - 1) / ${shard_${group}_architectures}")
+  endif()
   if(shards EQUAL 0)
     continue()
   endif()
-  list(LENGTH units_${group} units)
   set(split "")
   if(MODE STREQUAL "build")
     set(split "${shard_${group}_split}")

@@ -77,13 +77,13 @@ TEST_CASE("resources/cuda/array-copies", "[unified][resources]") {
   check(cudaMallocArray(&array, &desc, width, height), "array");
 
   std::vector<uint32_t> whole(texels.size(), 0);
-#if defined(__GNUC__)
+#ifdef __GNUC__
   #pragma GCC diagnostic push
   #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
   check(cudaMemcpyToArray(array, 0, 0, texels.data(), row * height, cudaMemcpyHostToDevice), "array in");
   check(cudaMemcpyFromArray(whole.data(), array, 0, 0, row * height, cudaMemcpyDeviceToHost), "array out");
-#if defined(__GNUC__)
+#ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif
   expectEqual(whole, texels, "array rows");

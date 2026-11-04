@@ -11,6 +11,8 @@ set(sycl_cts_categories
   stream sub_group sycl_external usm vector_alias vector_api vector_constructors vector_deduction_guides
   vector_load_store vector_operators vector_swizzle_assignment vector_swizzles)
 
+include("${CMAKE_CURRENT_LIST_DIR}/Shards.cmake")
+
 find_program(sycl_compiler NAMES icpx clang++ REQUIRED)
 if(NOT "${CMAKE_CXX_COMPILER}" STREQUAL "${sycl_compiler}")
   message(FATAL_ERROR "SYCL CTS must use the project C++ compiler: ${CMAKE_CXX_COMPILER}")
@@ -108,6 +110,25 @@ string(REGEX REPLACE "^test_" "" conformance_category "${exe_name}")
 set_target_properties(${exe_name} PROPERTIES OUTPUT_NAME "sycl_cts_${conformance_category}")
 set_property(GLOBAL APPEND PROPERTY CONFORMANCE_SYCL_CTS_TARGETS "${exe_name}")]=])
 
+set(group_slices [[
+list(SORT test_cases_list)
+list(LENGTH test_cases_list unit_count)
+foreach(slice RANGE @LAST_SLICE@)
+  set(slice_cases)
+  set(unit ${slice})
+  while(unit LESS unit_count)
+    list(GET test_cases_list ${unit} unit_case)
+    list(APPEND slice_cases "${unit_case}")
+    math(EXPR unit "${unit} + @SLICES@")
+  endwhile()
+  if(slice_cases)
+    add_cts_test_helper(group_functions_${slice} "${slice_cases}")
+  endif()
+endforeach()]])
+string(REPLACE "@LAST_SLICE@" "${sycl_cts_last_slice}" group_slices "${group_slices}")
+string(REPLACE "@SLICES@" "${sycl_cts_group_functions_slices}" group_slices "${group_slices}")
+patch_exact("${staging}/tests/group_functions/CMakeLists.txt" [[add_cts_test(${test_cases_list})]] "${group_slices}")
+
 commit_staged_source("${staging}" "${staged_source}")
 
 # full conformance changes test bodies at compile time, so it is configured from a copy
@@ -164,14 +185,6 @@ target_compile_features(test_full_conformance_atomic_ref_stress PRIVATE cxx_std_
 
 get_property(sycl_cts_targets GLOBAL PROPERTY CONFORMANCE_SYCL_CTS_TARGETS)
 
-# math_builtin_api and vector_swizzles dominate the compile time; a category belongs to the shard after the first
-# pattern it matches, and shard 0 takes the rest
-set(sycl_cts_shards
-  "^math_builtin_api$"
-  "^vector_swizzles$"
-  "^(accessor_.*|address_space|atomic.*|host_accessor|kernel_bundle|multi_ptr|reduction|spec_constants)$")
-list(LENGTH sycl_cts_shards sycl_cts_shard_count)
-math(EXPR sycl_cts_shard_count "${sycl_cts_shard_count} + 1")
 if(NOT SYCL_CTS_SHARD STREQUAL "")
   if(NOT SYCL_CTS_SHARD MATCHES "^[0-9]+$" OR SYCL_CTS_SHARD GREATER_EQUAL sycl_cts_shard_count)
     message(FATAL_ERROR "Invalid SYCL CTS shard ${SYCL_CTS_SHARD}, there are ${sycl_cts_shard_count}")
@@ -179,15 +192,7 @@ if(NOT SYCL_CTS_SHARD STREQUAL "")
   set(selected)
   foreach(target IN LISTS sycl_cts_targets)
     string(REGEX REPLACE "^test_(full_conformance_)?" "" category "${target}")
-    set(owner 0)
-    set(shard 0)
-    foreach(pattern IN LISTS sycl_cts_shards)
-      math(EXPR shard "${shard} + 1")
-      if(category MATCHES "${pattern}")
-        set(owner ${shard})
-        break()
-      endif()
-    endforeach()
+    sycl_cts_shard_of("${category}" owner)
     if(owner EQUAL SYCL_CTS_SHARD)
       list(APPEND selected "${target}")
     endif()
@@ -197,8 +202,19 @@ if(NOT SYCL_CTS_SHARD STREQUAL "")
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/shard.txt" DESTINATION . COMPONENT architecture)
 endif()
 
+# a device compile peaks at 5 to 7 GB, so a runner cannot take many at once; the dedicated shards of small units
+# keep the full build budget
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS sycl_cts_group_functions=1 sycl_cts_device=2)
+
 foreach(target IN LISTS sycl_cts_targets)
   if(TARGET "${target}_objects")
+    string(REGEX REPLACE "^test_(full_conformance_)?" "" category "${target}")
+    sycl_cts_shard_of("${category}" owner)
+    if(category MATCHES "^group_functions_")
+      set_target_properties("${target}_objects" PROPERTIES JOB_POOL_COMPILE sycl_cts_group_functions)
+    elseif(owner EQUAL 0)
+      set_target_properties("${target}_objects" PROPERTIES JOB_POOL_COMPILE sycl_cts_device)
+    endif()
     # The upstream SYCL CTS is vendored third-party code; silence its
     # diagnostics so only project code is checked.
     target_compile_options("${target}_objects" PRIVATE

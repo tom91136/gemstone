@@ -10,10 +10,10 @@
   #include <thrust/detail/tuple_algorithms.h>
 #endif
 
+namespace {
 using namespace aspartame;
 using namespace unified::rocthrust_support;
 
-namespace {
 // rocThrust `testing/zip_function` port: unpacked calls over zip iterators
 // compared against the tuple base case, on both host and device.
 

@@ -8,11 +8,11 @@
 
 namespace {
 
-constexpr unsigned count = 64;
-constexpr size_t bytes = count * sizeof(uint32_t);
+constexpr unsigned Count = 64;
+constexpr size_t Bytes = Count * sizeof(uint32_t);
 
 __global__ void addOne(uint32_t *values, unsigned n) {
-  const unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i < n) values[i] += 1;
 }
 
@@ -20,14 +20,14 @@ void CUDART_CB bumpCounter(void *counter) { static_cast<std::atomic<int> *>(coun
 
 uint32_t *allocate() {
   uint32_t *device = nullptr;
-  check(cudaMalloc(&device, bytes), "allocate");
-  check(cudaMemset(device, 0, bytes), "clear");
+  check(cudaMalloc(&device, Bytes), "allocate");
+  check(cudaMemset(device, 0, Bytes), "clear");
   return device;
 }
 
 std::vector<uint32_t> download(const uint32_t *device) {
-  std::vector<uint32_t> host(count, 0);
-  check(cudaMemcpy(host.data(), device, bytes, cudaMemcpyDeviceToHost), "download");
+  std::vector<uint32_t> host(Count, 0);
+  check(cudaMemcpy(host.data(), device, Bytes, cudaMemcpyDeviceToHost), "download");
   return host;
 }
 
@@ -37,7 +37,7 @@ cudaKernelNodeParams addOneParams(uint32_t *&values, unsigned &n, void **args) {
   cudaKernelNodeParams params{};
   params.func = reinterpret_cast<void *>(addOne);
   params.gridDim = dim3(1, 1, 1);
-  params.blockDim = dim3(count, 1, 1);
+  params.blockDim = dim3(Count, 1, 1);
   params.kernelParams = args;
   return params;
 }
@@ -47,7 +47,7 @@ cudaMemsetParams fillParams(uint32_t *device, unsigned value) {
   params.dst = device;
   params.value = value;
   params.elementSize = sizeof(uint32_t);
-  params.width = count;
+  params.width = Count;
   params.height = 1;
   return params;
 }
@@ -63,19 +63,19 @@ TEST_CASE("runtime/cuda/graphs/capture-replays-recorded-work", "[unified][runtim
   cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
   check(cudaStreamIsCapturing(stream, &status), "is capturing");
   REQUIRE(status == cudaStreamCaptureStatusActive);
-  check(cudaMemsetAsync(buffer, 0x11, bytes, stream), "captured memset");
-  addOne<<<1, count, 0, stream>>>(buffer, count);
+  check(cudaMemsetAsync(buffer, 0x11, Bytes, stream), "captured memset");
+  addOne<<<1, Count, 0, stream>>>(buffer, Count);
   cudaGraph_t graph = nullptr;
   check(cudaStreamEndCapture(stream, &graph), "end capture");
   check(cudaStreamIsCapturing(stream, &status), "is capturing after end");
   REQUIRE(status == cudaStreamCaptureStatusNone);
-  REQUIRE(download(buffer) == std::vector<uint32_t>(count, 0));
+  REQUIRE(download(buffer) == std::vector<uint32_t>(Count, 0));
 
   cudaGraphExec_t exec = nullptr;
   check(cudaGraphInstantiateWithFlags(&exec, graph, 0), "instantiate");
   check(cudaGraphLaunch(exec, stream), "launch");
   check(cudaStreamSynchronize(stream), "synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x11111112u), "captured round trip");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x11111112U), "captured round trip");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(graph), "graph destroy");
@@ -99,11 +99,11 @@ TEST_CASE("runtime/cuda/graphs/capture-fork-join-through-events", "[unified][run
   check(cudaStreamBeginCapture(origin, cudaStreamCaptureModeGlobal), "begin capture");
   check(cudaEventRecord(fork, origin), "fork record");
   check(cudaStreamWaitEvent(branch, fork, 0), "fork wait");
-  check(cudaMemsetAsync(first, 0x10, bytes, origin), "first memset");
-  check(cudaMemsetAsync(second, 0x20, bytes, branch), "second memset");
+  check(cudaMemsetAsync(first, 0x10, Bytes, origin), "first memset");
+  check(cudaMemsetAsync(second, 0x20, Bytes, branch), "second memset");
   check(cudaEventRecord(join, branch), "join record");
   check(cudaStreamWaitEvent(origin, join, 0), "join wait");
-  check(cudaMemcpyAsync(copied, second, bytes, cudaMemcpyDeviceToDevice, origin), "copy after join");
+  check(cudaMemcpyAsync(copied, second, Bytes, cudaMemcpyDeviceToDevice, origin), "copy after join");
   cudaGraph_t graph = nullptr;
   check(cudaStreamEndCapture(origin, &graph), "end capture");
 
@@ -111,8 +111,8 @@ TEST_CASE("runtime/cuda/graphs/capture-fork-join-through-events", "[unified][run
   check(cudaGraphInstantiateWithFlags(&exec, graph, 0), "instantiate");
   check(cudaGraphLaunch(exec, origin), "launch");
   check(cudaStreamSynchronize(origin), "synchronize");
-  expectEqual(download(first), std::vector<uint32_t>(count, 0x10101010u), "origin branch");
-  expectEqual(download(copied), std::vector<uint32_t>(count, 0x20202020u), "joined branch");
+  expectEqual(download(first), std::vector<uint32_t>(Count, 0x10101010U), "origin branch");
+  expectEqual(download(copied), std::vector<uint32_t>(Count, 0x20202020U), "joined branch");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(graph), "graph destroy");
@@ -131,15 +131,15 @@ TEST_CASE("runtime/cuda/graphs/explicit-kernel-dependency-chain", "[unified][run
   cudaGraph_t graph = nullptr;
   check(cudaGraphCreate(&graph, 0), "graph create");
 
-  cudaMemsetParams fill = fillParams(source, 0x22222222u);
+  cudaMemsetParams fill = fillParams(source, 0x22222222U);
   cudaGraphNode_t fillNode = nullptr;
   check(cudaGraphAddMemsetNode(&fillNode, graph, nullptr, 0, &fill), "memset node");
 
   cudaGraphNode_t copyNode = nullptr;
-  check(cudaGraphAddMemcpyNode1D(&copyNode, graph, &fillNode, 1, target, source, bytes, cudaMemcpyDeviceToDevice), "copy node");
+  check(cudaGraphAddMemcpyNode1D(&copyNode, graph, &fillNode, 1, target, source, Bytes, cudaMemcpyDeviceToDevice), "copy node");
 
   uint32_t *kernelTarget = target;
-  unsigned kernelCount = count;
+  unsigned kernelCount = Count;
   void *args[2] = {nullptr, nullptr};
   cudaKernelNodeParams kernel = addOneParams(kernelTarget, kernelCount, args);
   cudaGraphNode_t kernelNode = nullptr;
@@ -155,8 +155,8 @@ TEST_CASE("runtime/cuda/graphs/explicit-kernel-dependency-chain", "[unified][run
   check(cudaStreamCreate(&stream), "stream");
   check(cudaGraphLaunch(exec, stream), "launch");
   check(cudaStreamSynchronize(stream), "synchronize");
-  expectEqual(download(source), std::vector<uint32_t>(count, 0x22222222u), "source fill");
-  expectEqual(download(target), std::vector<uint32_t>(count, 0x22222223u), "target after copy and kernel");
+  expectEqual(download(source), std::vector<uint32_t>(Count, 0x22222222U), "source fill");
+  expectEqual(download(target), std::vector<uint32_t>(Count, 0x22222223U), "target after copy and kernel");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(graph), "graph destroy");
@@ -176,7 +176,7 @@ TEST_CASE("runtime/cuda/graphs/host-node-runs-each-launch", "[unified][runtime][
   host.userData = &calls;
   cudaGraphNode_t hostNode = nullptr;
   check(cudaGraphAddHostNode(&hostNode, graph, nullptr, 0, &host), "host node");
-  cudaMemsetParams fill = fillParams(buffer, 0x33333333u);
+  cudaMemsetParams fill = fillParams(buffer, 0x33333333U);
   cudaGraphNode_t fillNode = nullptr;
   check(cudaGraphAddMemsetNode(&fillNode, graph, &hostNode, 1, &fill), "memset node");
 
@@ -188,7 +188,7 @@ TEST_CASE("runtime/cuda/graphs/host-node-runs-each-launch", "[unified][runtime][
   check(cudaGraphLaunch(exec, stream), "second launch");
   check(cudaStreamSynchronize(stream), "synchronize");
   REQUIRE(calls.load() == 2);
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x33333333u), "memset after host node");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x33333333U), "memset after host node");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(graph), "graph destroy");
@@ -203,10 +203,10 @@ TEST_CASE("runtime/cuda/graphs/empty-node-joins-branches", "[unified][runtime][a
   cudaGraph_t graph = nullptr;
   check(cudaGraphCreate(&graph, 0), "graph create");
 
-  cudaMemsetParams leftFill = fillParams(left, 0x30303030u);
+  cudaMemsetParams leftFill = fillParams(left, 0x30303030U);
   cudaGraphNode_t leftNode = nullptr;
   check(cudaGraphAddMemsetNode(&leftNode, graph, nullptr, 0, &leftFill), "left memset");
-  cudaMemsetParams rightFill = fillParams(right, 0x40404040u);
+  cudaMemsetParams rightFill = fillParams(right, 0x40404040U);
   cudaGraphNode_t rightNode = nullptr;
   check(cudaGraphAddMemsetNode(&rightNode, graph, nullptr, 0, &rightFill), "right memset");
 
@@ -214,7 +214,7 @@ TEST_CASE("runtime/cuda/graphs/empty-node-joins-branches", "[unified][runtime][a
   cudaGraphNode_t join = nullptr;
   check(cudaGraphAddEmptyNode(&join, graph, joins, 2), "join node");
   cudaGraphNode_t copyNode = nullptr;
-  check(cudaGraphAddMemcpyNode1D(&copyNode, graph, &join, 1, copied, left, bytes, cudaMemcpyDeviceToDevice), "copy after join");
+  check(cudaGraphAddMemcpyNode1D(&copyNode, graph, &join, 1, copied, left, Bytes, cudaMemcpyDeviceToDevice), "copy after join");
 
   size_t nodes = 0;
   check(cudaGraphGetNodes(graph, nullptr, &nodes), "node count");
@@ -226,8 +226,8 @@ TEST_CASE("runtime/cuda/graphs/empty-node-joins-branches", "[unified][runtime][a
   check(cudaStreamCreate(&stream), "stream");
   check(cudaGraphLaunch(exec, stream), "launch");
   check(cudaStreamSynchronize(stream), "synchronize");
-  expectEqual(download(copied), std::vector<uint32_t>(count, 0x30303030u), "copy after join");
-  expectEqual(download(right), std::vector<uint32_t>(count, 0x40404040u), "independent branch");
+  expectEqual(download(copied), std::vector<uint32_t>(Count, 0x30303030U), "copy after join");
+  expectEqual(download(right), std::vector<uint32_t>(Count, 0x40404040U), "independent branch");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(graph), "graph destroy");
@@ -248,16 +248,16 @@ TEST_CASE("runtime/cuda/graphs/exec-update-same-topology", "[unified][runtime][a
     return graph;
   };
 
-  cudaGraph_t original = build(0x01010101u);
+  cudaGraph_t original = build(0x01010101U);
   cudaGraphExec_t exec = nullptr;
   check(cudaGraphInstantiateWithFlags(&exec, original, 0), "instantiate");
   cudaStream_t stream = nullptr;
   check(cudaStreamCreate(&stream), "stream");
   check(cudaGraphLaunch(exec, stream), "first launch");
   check(cudaStreamSynchronize(stream), "first synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x01010101u), "original value");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x01010101U), "original value");
 
-  cudaGraph_t changed = build(0x05050505u);
+  cudaGraph_t changed = build(0x05050505U);
 #if CUDART_VERSION >= 12000
   cudaGraphExecUpdateResultInfo info{};
   check(cudaGraphExecUpdate(exec, changed, &info), "update");
@@ -270,7 +270,7 @@ TEST_CASE("runtime/cuda/graphs/exec-update-same-topology", "[unified][runtime][a
 #endif
   check(cudaGraphLaunch(exec, stream), "second launch");
   check(cudaStreamSynchronize(stream), "second synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x05050505u), "updated value");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x05050505U), "updated value");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(original), "original destroy");
@@ -284,7 +284,7 @@ TEST_CASE("runtime/cuda/graphs/instance-relaunches-accumulate", "[unified][runti
   cudaGraph_t graph = nullptr;
   check(cudaGraphCreate(&graph, 0), "graph create");
   uint32_t *target = buffer;
-  unsigned n = count;
+  unsigned n = Count;
   void *args[2] = {nullptr, nullptr};
   cudaKernelNodeParams kernel = addOneParams(target, n, args);
   cudaGraphNode_t kernelNode = nullptr;
@@ -297,7 +297,7 @@ TEST_CASE("runtime/cuda/graphs/instance-relaunches-accumulate", "[unified][runti
   for (int i = 0; i < 3; ++i)
     check(cudaGraphLaunch(exec, stream), "launch");
   check(cudaStreamSynchronize(stream), "synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 3u), "three launches");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 3U), "three launches");
 
   check(cudaGraphExecDestroy(exec), "exec destroy");
   check(cudaGraphDestroy(graph), "graph destroy");

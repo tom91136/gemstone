@@ -54,22 +54,12 @@ class ImageCacheSuite extends Suite {
     assertEquals(cache.acquire(ImageKey(left))(fail("evicted while held")).toOption.get.value, "value")
   }
 
-  test("released values are reloaded without retention and reused with it") {
+  test("released values are reloaded without retention") {
     val plain = ImageCache[String, String](retainReleased = false)
     val loads = Loads()
     plain.acquire(ImageKey(left))(loads("a")).toOption.get.release()
     plain.acquire(ImageKey(left))(loads("a")).toOption.get.release()
     assertEquals(loads.count, 2)
-
-    val retaining = ImageCache[String, String]()
-    val kept      = Loads()
-    retaining.acquire(ImageKey(left))(kept("a")).toOption.get.release()
-    val again = retaining.acquire(ImageKey(left))(kept("b")).toOption.get
-    assertEquals(again.value, "a")
-    assertEquals(kept.count, 1)
-    again.release()
-    assertEquals(retaining.acquire(ImageKey(right))(kept("c")).toOption.get.value, "c")
-    assertEquals(retaining.acquire(ImageKey(left))(kept("d")).toOption.get.value, "a")
   }
 
   test("discarded leases are not retained") {

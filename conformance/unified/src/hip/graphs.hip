@@ -15,11 +15,11 @@ using namespace hip_support;
 
 namespace {
 
-constexpr unsigned count = 64;
-constexpr size_t bytes = count * sizeof(uint32_t);
+constexpr unsigned Count = 64;
+constexpr size_t Bytes = Count * sizeof(uint32_t);
 
 __global__ void addOne(uint32_t *values, unsigned n) {
-  const unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned i = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (i < n) values[i] += 1;
 }
 
@@ -27,14 +27,14 @@ void bumpCounter(void *counter) { static_cast<std::atomic<int> *>(counter)->fetc
 
 uint32_t *allocate() {
   uint32_t *device = nullptr;
-  check(hipMalloc(&device, bytes), "allocate");
-  check(hipMemset(device, 0, bytes), "clear");
+  check(hipMalloc(&device, Bytes), "allocate");
+  check(hipMemset(device, 0, Bytes), "clear");
   return device;
 }
 
 std::vector<uint32_t> download(const uint32_t *device) {
-  std::vector<uint32_t> host(count, 0);
-  check(hipMemcpy(host.data(), device, bytes, hipMemcpyDeviceToHost), "download");
+  std::vector<uint32_t> host(Count, 0);
+  check(hipMemcpy(host.data(), device, Bytes, hipMemcpyDeviceToHost), "download");
   return host;
 }
 
@@ -44,7 +44,7 @@ hipKernelNodeParams addOneParams(uint32_t *&values, unsigned &n, void **args) {
   hipKernelNodeParams params{};
   params.func = reinterpret_cast<void *>(addOne);
   params.gridDim = dim3(1, 1, 1);
-  params.blockDim = dim3(count, 1, 1);
+  params.blockDim = dim3(Count, 1, 1);
   params.kernelParams = args;
   return params;
 }
@@ -54,7 +54,7 @@ hipMemsetParams fillParams(uint32_t *device, unsigned value) {
   params.dst = device;
   params.value = value;
   params.elementSize = sizeof(uint32_t);
-  params.width = count;
+  params.width = Count;
   params.height = 1;
   return params;
 }
@@ -76,19 +76,19 @@ TEST_CASE("runtime/hip/graphs/capture-replays-recorded-work", "[unified][runtime
   hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
   check(hipStreamIsCapturing(stream, &status), "is capturing");
   REQUIRE(status == hipStreamCaptureStatusActive);
-  check(hipMemsetAsync(buffer, 0x11, bytes, stream), "captured memset");
-  addOne<<<1, count, 0, stream>>>(buffer, count);
+  check(hipMemsetAsync(buffer, 0x11, Bytes, stream), "captured memset");
+  addOne<<<1, Count, 0, stream>>>(buffer, Count);
   hipGraph_t graph = nullptr;
   check(hipStreamEndCapture(stream, &graph), "end capture");
   check(hipStreamIsCapturing(stream, &status), "is capturing after end");
   REQUIRE(status == hipStreamCaptureStatusNone);
-  REQUIRE(download(buffer) == std::vector<uint32_t>(count, 0));
+  REQUIRE(download(buffer) == std::vector<uint32_t>(Count, 0));
 
   hipGraphExec_t exec = nullptr;
   check(hipGraphInstantiateWithFlags(&exec, graph, 0), "instantiate");
   check(hipGraphLaunch(exec, stream), "launch");
   check(hipStreamSynchronize(stream), "synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x11111112u), "captured round trip");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x11111112U), "captured round trip");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -112,11 +112,11 @@ TEST_CASE("runtime/hip/graphs/capture-fork-join-through-events", "[unified][runt
   check(hipStreamBeginCapture(origin, hipStreamCaptureModeGlobal), "begin capture");
   check(hipEventRecord(fork, origin), "fork record");
   check(hipStreamWaitEvent(branch, fork, 0), "fork wait");
-  check(hipMemsetAsync(first, 0x10, bytes, origin), "first memset");
-  check(hipMemsetAsync(second, 0x20, bytes, branch), "second memset");
+  check(hipMemsetAsync(first, 0x10, Bytes, origin), "first memset");
+  check(hipMemsetAsync(second, 0x20, Bytes, branch), "second memset");
   check(hipEventRecord(join, branch), "join record");
   check(hipStreamWaitEvent(origin, join, 0), "join wait");
-  check(hipMemcpyAsync(copied, second, bytes, hipMemcpyDeviceToDevice, origin), "copy after join");
+  check(hipMemcpyAsync(copied, second, Bytes, hipMemcpyDeviceToDevice, origin), "copy after join");
   hipGraph_t graph = nullptr;
   check(hipStreamEndCapture(origin, &graph), "end capture");
 
@@ -124,8 +124,8 @@ TEST_CASE("runtime/hip/graphs/capture-fork-join-through-events", "[unified][runt
   check(hipGraphInstantiateWithFlags(&exec, graph, 0), "instantiate");
   check(hipGraphLaunch(exec, origin), "launch");
   check(hipStreamSynchronize(origin), "synchronize");
-  expectEqual(download(first), std::vector<uint32_t>(count, 0x10101010u), "origin branch");
-  expectEqual(download(copied), std::vector<uint32_t>(count, 0x20202020u), "joined branch");
+  expectEqual(download(first), std::vector<uint32_t>(Count, 0x10101010U), "origin branch");
+  expectEqual(download(copied), std::vector<uint32_t>(Count, 0x20202020U), "joined branch");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -157,7 +157,7 @@ TEST_CASE("runtime/hip/graphs/capture-info-reports-active-capture", "[unified][r
   REQUIRE(graph != nullptr);
   REQUIRE(dependencyCount == 0);
 
-  check(hipMemsetAsync(buffer, 0x01, bytes, stream), "captured memset");
+  check(hipMemsetAsync(buffer, 0x01, Bytes, stream), "captured memset");
   check(hipStreamGetCaptureInfo_v2(stream, &status, nullptr, nullptr, &dependencies, &dependencyCount), "info after work");
   REQUIRE(dependencyCount == 1);
   hipGraph_t captured = nullptr;
@@ -177,7 +177,7 @@ TEST_CASE("runtime/hip/graphs/capture-records-host-function", "[unified][runtime
 
   check(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal), "begin capture");
   check(hipLaunchHostFunc(stream, bumpCounter, &calls), "captured host function");
-  check(hipMemsetAsync(buffer, 0x02, bytes, stream), "captured memset");
+  check(hipMemsetAsync(buffer, 0x02, Bytes, stream), "captured memset");
   hipGraph_t graph = nullptr;
   check(hipStreamEndCapture(stream, &graph), "end capture");
   REQUIRE(calls.load() == 0);
@@ -188,7 +188,7 @@ TEST_CASE("runtime/hip/graphs/capture-records-host-function", "[unified][runtime
   check(hipGraphLaunch(exec, stream), "second launch");
   check(hipStreamSynchronize(stream), "synchronize");
   REQUIRE(calls.load() == 2);
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x02020202u), "memset after host function");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x02020202U), "memset after host function");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -202,15 +202,15 @@ TEST_CASE("runtime/hip/graphs/explicit-kernel-dependency-chain", "[unified][runt
   hipGraph_t graph = nullptr;
   check(hipGraphCreate(&graph, 0), "graph create");
 
-  hipMemsetParams fill = fillParams(source, 0x22222222u);
+  hipMemsetParams fill = fillParams(source, 0x22222222U);
   hipGraphNode_t fillNode = nullptr;
   check(hipGraphAddMemsetNode(&fillNode, graph, nullptr, 0, &fill), "memset node");
 
   hipGraphNode_t copyNode = nullptr;
-  check(hipGraphAddMemcpyNode1D(&copyNode, graph, &fillNode, 1, target, source, bytes, hipMemcpyDeviceToDevice), "copy node");
+  check(hipGraphAddMemcpyNode1D(&copyNode, graph, &fillNode, 1, target, source, Bytes, hipMemcpyDeviceToDevice), "copy node");
 
   uint32_t *kernelTarget = target;
-  unsigned kernelCount = count;
+  unsigned kernelCount = Count;
   void *args[2] = {nullptr, nullptr};
   hipKernelNodeParams kernel = addOneParams(kernelTarget, kernelCount, args);
   hipGraphNode_t kernelNode = nullptr;
@@ -226,8 +226,8 @@ TEST_CASE("runtime/hip/graphs/explicit-kernel-dependency-chain", "[unified][runt
   check(hipStreamCreate(&stream), "stream");
   check(hipGraphLaunch(exec, stream), "launch");
   check(hipStreamSynchronize(stream), "synchronize");
-  expectEqual(download(source), std::vector<uint32_t>(count, 0x22222222u), "source fill");
-  expectEqual(download(target), std::vector<uint32_t>(count, 0x22222223u), "target after copy and kernel");
+  expectEqual(download(source), std::vector<uint32_t>(Count, 0x22222222U), "source fill");
+  expectEqual(download(target), std::vector<uint32_t>(Count, 0x22222223U), "target after copy and kernel");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -247,7 +247,7 @@ TEST_CASE("runtime/hip/graphs/host-node-runs-each-launch", "[unified][runtime][a
   host.userData = &calls;
   hipGraphNode_t hostNode = nullptr;
   check(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &host), "host node");
-  hipMemsetParams fill = fillParams(buffer, 0x33333333u);
+  hipMemsetParams fill = fillParams(buffer, 0x33333333U);
   hipGraphNode_t fillNode = nullptr;
   check(hipGraphAddMemsetNode(&fillNode, graph, &hostNode, 1, &fill), "memset node");
 
@@ -259,7 +259,7 @@ TEST_CASE("runtime/hip/graphs/host-node-runs-each-launch", "[unified][runtime][a
   check(hipGraphLaunch(exec, stream), "second launch");
   check(hipStreamSynchronize(stream), "synchronize");
   REQUIRE(calls.load() == 2);
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x33333333u), "memset after host node");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x33333333U), "memset after host node");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -274,10 +274,10 @@ TEST_CASE("runtime/hip/graphs/empty-node-joins-branches", "[unified][runtime][as
   hipGraph_t graph = nullptr;
   check(hipGraphCreate(&graph, 0), "graph create");
 
-  hipMemsetParams leftFill = fillParams(left, 0x30303030u);
+  hipMemsetParams leftFill = fillParams(left, 0x30303030U);
   hipGraphNode_t leftNode = nullptr;
   check(hipGraphAddMemsetNode(&leftNode, graph, nullptr, 0, &leftFill), "left memset");
-  hipMemsetParams rightFill = fillParams(right, 0x40404040u);
+  hipMemsetParams rightFill = fillParams(right, 0x40404040U);
   hipGraphNode_t rightNode = nullptr;
   check(hipGraphAddMemsetNode(&rightNode, graph, nullptr, 0, &rightFill), "right memset");
 
@@ -285,7 +285,7 @@ TEST_CASE("runtime/hip/graphs/empty-node-joins-branches", "[unified][runtime][as
   hipGraphNode_t join = nullptr;
   check(hipGraphAddEmptyNode(&join, graph, joins, 2), "join node");
   hipGraphNode_t copyNode = nullptr;
-  check(hipGraphAddMemcpyNode1D(&copyNode, graph, &join, 1, copied, left, bytes, hipMemcpyDeviceToDevice), "copy after join");
+  check(hipGraphAddMemcpyNode1D(&copyNode, graph, &join, 1, copied, left, Bytes, hipMemcpyDeviceToDevice), "copy after join");
 
   size_t nodes = 0;
   check(hipGraphGetNodes(graph, nullptr, &nodes), "node count");
@@ -297,8 +297,8 @@ TEST_CASE("runtime/hip/graphs/empty-node-joins-branches", "[unified][runtime][as
   check(hipStreamCreate(&stream), "stream");
   check(hipGraphLaunch(exec, stream), "launch");
   check(hipStreamSynchronize(stream), "synchronize");
-  expectEqual(download(copied), std::vector<uint32_t>(count, 0x30303030u), "copy after join");
-  expectEqual(download(right), std::vector<uint32_t>(count, 0x40404040u), "independent branch");
+  expectEqual(download(copied), std::vector<uint32_t>(Count, 0x30303030U), "copy after join");
+  expectEqual(download(right), std::vector<uint32_t>(Count, 0x40404040U), "independent branch");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -313,11 +313,11 @@ TEST_CASE("runtime/hip/graphs/clone-runs-independently", "[unified][runtime][asy
   uint32_t *target = allocate();
   hipGraph_t graph = nullptr;
   check(hipGraphCreate(&graph, 0), "graph create");
-  hipMemsetParams fill = fillParams(source, 0x44444444u);
+  hipMemsetParams fill = fillParams(source, 0x44444444U);
   hipGraphNode_t fillNode = nullptr;
   check(hipGraphAddMemsetNode(&fillNode, graph, nullptr, 0, &fill), "memset node");
   hipGraphNode_t copyNode = nullptr;
-  check(hipGraphAddMemcpyNode1D(&copyNode, graph, &fillNode, 1, target, source, bytes, hipMemcpyDeviceToDevice), "copy node");
+  check(hipGraphAddMemcpyNode1D(&copyNode, graph, &fillNode, 1, target, source, Bytes, hipMemcpyDeviceToDevice), "copy node");
 
   hipGraph_t clone = nullptr;
   check(hipGraphClone(&clone, graph), "clone");
@@ -329,7 +329,7 @@ TEST_CASE("runtime/hip/graphs/clone-runs-independently", "[unified][runtime][asy
   check(hipStreamCreate(&stream), "stream");
   check(hipGraphLaunch(exec, stream), "launch");
   check(hipStreamSynchronize(stream), "synchronize");
-  expectEqual(download(target), std::vector<uint32_t>(count, 0x44444444u), "copied after clone");
+  expectEqual(download(target), std::vector<uint32_t>(Count, 0x44444444U), "copied after clone");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(clone), "clone destroy");
@@ -349,23 +349,23 @@ TEST_CASE("runtime/hip/graphs/exec-update-same-topology", "[unified][runtime][as
     return graph;
   };
 
-  hipGraph_t original = build(0x01010101u);
+  hipGraph_t original = build(0x01010101U);
   hipGraphExec_t exec = nullptr;
   check(hipGraphInstantiateWithFlags(&exec, original, 0), "instantiate");
   hipStream_t stream = nullptr;
   check(hipStreamCreate(&stream), "stream");
   check(hipGraphLaunch(exec, stream), "first launch");
   check(hipStreamSynchronize(stream), "first synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x01010101u), "original value");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x01010101U), "original value");
 
-  hipGraph_t changed = build(0x05050505u);
+  hipGraph_t changed = build(0x05050505U);
   hipGraphNode_t errorNode = nullptr;
   hipGraphExecUpdateResult result{};
   check(hipGraphExecUpdate(exec, changed, &errorNode, &result), "update");
   REQUIRE(result == hipGraphExecUpdateSuccess);
   check(hipGraphLaunch(exec, stream), "second launch");
   check(hipStreamSynchronize(stream), "second synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 0x05050505u), "updated value");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 0x05050505U), "updated value");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(original), "original destroy");
@@ -380,7 +380,7 @@ TEST_CASE("runtime/hip/graphs/exec-kernel-node-set-params", "[unified][runtime][
   hipGraph_t graph = nullptr;
   check(hipGraphCreate(&graph, 0), "graph create");
   uint32_t *target = first;
-  unsigned n = count;
+  unsigned n = Count;
   void *args[2] = {nullptr, nullptr};
   hipKernelNodeParams kernel = addOneParams(target, n, args);
   hipGraphNode_t kernelNode = nullptr;
@@ -399,8 +399,8 @@ TEST_CASE("runtime/hip/graphs/exec-kernel-node-set-params", "[unified][runtime][
   check(hipGraphLaunch(exec, stream), "second launch");
   check(hipGraphLaunch(exec, stream), "third launch");
   check(hipStreamSynchronize(stream), "synchronize");
-  expectEqual(download(first), std::vector<uint32_t>(count, 1u), "original target");
-  expectEqual(download(second), std::vector<uint32_t>(count, 2u), "retargeted launches");
+  expectEqual(download(first), std::vector<uint32_t>(Count, 1U), "original target");
+  expectEqual(download(second), std::vector<uint32_t>(Count, 2U), "retargeted launches");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");
@@ -414,7 +414,7 @@ TEST_CASE("runtime/hip/graphs/instance-relaunches-accumulate", "[unified][runtim
   hipGraph_t graph = nullptr;
   check(hipGraphCreate(&graph, 0), "graph create");
   uint32_t *target = buffer;
-  unsigned n = count;
+  unsigned n = Count;
   void *args[2] = {nullptr, nullptr};
   hipKernelNodeParams kernel = addOneParams(target, n, args);
   hipGraphNode_t kernelNode = nullptr;
@@ -427,7 +427,7 @@ TEST_CASE("runtime/hip/graphs/instance-relaunches-accumulate", "[unified][runtim
   for (int i = 0; i < 3; ++i)
     check(hipGraphLaunch(exec, stream), "launch");
   check(hipStreamSynchronize(stream), "synchronize");
-  expectEqual(download(buffer), std::vector<uint32_t>(count, 3u), "three launches");
+  expectEqual(download(buffer), std::vector<uint32_t>(Count, 3U), "three launches");
 
   check(hipGraphExecDestroy(exec), "exec destroy");
   check(hipGraphDestroy(graph), "graph destroy");

@@ -137,6 +137,20 @@ TEST_CASE("HIP stream callback reports completed work", "[hip]") {
   REQUIRE((hipStreamDestroy(stream) == hipSuccess));
 }
 
+TEST_CASE("HIP pitched copies outside an allocation are invalid values", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  void *device = nullptr;
+  REQUIRE((hipMalloc(&device, 64) == hipSuccess));
+  std::vector<uint8_t> host(256, 0xaa);
+  CHECK((hipMemcpy2D(device, 16384, host.data(), 8, 4, 2, hipMemcpyHostToDevice) == hipErrorInvalidValue));
+  CHECK((hipMemcpy2D(host.data(), 8, device, 16384, 4, 2, hipMemcpyDeviceToHost) == hipErrorInvalidValue));
+  std::vector<uint8_t> other(256);
+  CHECK((hipMemcpy2D(other.data(), 8, host.data(), 8, 4, 3, hipMemcpyDeviceToDevice) == hipErrorInvalidValue));
+  CHECK((hipGetLastError() == hipErrorInvalidValue));
+  REQUIRE((hipFree(device) == hipSuccess));
+}
+
 TEST_CASE("HIP driver-style asynchronous copies use the stream", "[hip]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);

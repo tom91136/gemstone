@@ -1281,6 +1281,26 @@ TEST_CASE("HSA images are linear over their data and read through a descriptor o
   REQUIRE((hsa_memory_free(data) == HSA_STATUS_SUCCESS));
 }
 
+TEST_CASE("HSA pitched copies outside an allocation are rejected", "[hsa][pitched]") {
+  MemoryLockSession const session;
+  const auto gpu = agentOf(HSA_DEVICE_TYPE_GPU);
+  const auto coarse = regionWithFlag(gpu, HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED);
+  void *device = nullptr;
+  REQUIRE((hsa_memory_allocate(coarse, 64, &device) == HSA_STATUS_SUCCESS));
+  constexpr size_t pastTrailingGranules = 16384;
+  std::vector<uint8_t> host(2 * pastTrailingGranules, 0xaa);
+  const std::vector<uint8_t> original = host;
+  CHECK(
+      (gemstone_hsa_memory_copy_pitched(device, pastTrailingGranules, 0, host.data(), 8, 0, 4, 2, 1) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
+  CHECK(
+      (gemstone_hsa_memory_copy_pitched(host.data(), 8, 0, device, pastTrailingGranules, 0, 4, 2, 1) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
+  CHECK((hsa_memory_copy(host.data(), static_cast<uint8_t *>(device) + 32, pastTrailingGranules) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
+  CHECK(host == original);
+  std::vector<uint8_t> other(256);
+  CHECK((gemstone_hsa_memory_copy_pitched(other.data(), 8, 32, host.data(), 8, 32, 4, 3, 1) == HSA_STATUS_ERROR_INVALID_ALLOCATION));
+  REQUIRE((hsa_memory_free(device) == HSA_STATUS_SUCCESS));
+}
+
 TEST_CASE("HSA pitched copies move only the rows between device and host", "[hsa][pitched]") {
   MemoryLockSession const session;
   const auto gpu = agentOf(HSA_DEVICE_TYPE_GPU);

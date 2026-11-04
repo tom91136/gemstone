@@ -457,6 +457,9 @@ endforeach()
 
 add_custom_target(artifacts ALL DEPENDS ${artifact_outputs})
 
+conformance_offload_archive(offload_archive)
+add_custom_target(llvm-offload DEPENDS "${offload_archive}")
+
 # The repository root is mounted so clang-tidy finds the shared .clang-tidy above /source/conformance.
 function(add_lint backend architecture compiler)
   conformance_toolchain("${backend}" "${architecture}" image toolchain_stamp support "${compiler}" LINT)

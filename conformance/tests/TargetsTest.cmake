@@ -85,7 +85,7 @@ foreach(target_set IN LISTS build_profiles)
   endif()
 endforeach()
 
-execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BACKENDS=cuda,hsa
+execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BUILD_PROFILE=complete -DCONFORMANCE_BACKENDS=cuda,hsa
   -DCUDA_ARCHITECTURES=sm_80 -DAMDGPU_ARCHITECTURES=gfx906
   -DCONFORMANCE_COMPILERS=clang,gcc -P "${artifacts}/Targets.cmake"
   OUTPUT_VARIABLE compiler_routes COMMAND_ERROR_IS_FATAL ANY)
@@ -101,7 +101,7 @@ if(status STREQUAL "0")
 endif()
 
 foreach(backend IN ITEMS cuda hsa)
-  execute_process(COMMAND "${CMAKE_COMMAND}"
+  execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BUILD_PROFILE=complete
     "-DCONFORMANCE_BACKENDS=${backend}" -DCONFORMANCE_COMPILERS=gcc
     -DCUDA_ARCHITECTURES=sm_89 -DAMDGPU_ARCHITECTURES=gfx1150 -P "${artifacts}/Targets.cmake"
     OUTPUT_QUIET ERROR_VARIABLE error RESULT_VARIABLE status)
@@ -109,7 +109,7 @@ foreach(backend IN ITEMS cuda hsa)
     message(FATAL_ERROR "Unsupported GCC ${backend} architecture was not rejected: ${error}")
   endif()
 endforeach()
-execute_process(COMMAND "${CMAKE_COMMAND}"
+execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BUILD_PROFILE=complete
   -DCONFORMANCE_BACKENDS=cuda -DCONFORMANCE_COMPILERS=gcc -DCUDA_ARCHITECTURES=sm_80,sm_89
   -P "${artifacts}/Targets.cmake" OUTPUT_VARIABLE mixed_routes OUTPUT_STRIP_TRAILING_WHITESPACE
   COMMAND_ERROR_IS_FATAL ANY)
@@ -123,7 +123,8 @@ if(status STREQUAL "0")
   message(FATAL_ERROR "Unknown build profile was accepted")
 endif()
 foreach(architecture IN ITEMS sm_90b sm_90af sm_a)
-  execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BACKENDS=cuda "-DCUDA_ARCHITECTURES=${architecture}"
+  execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BUILD_PROFILE=complete -DCONFORMANCE_BACKENDS=cuda
+    "-DCUDA_ARCHITECTURES=${architecture}"
     -P "${artifacts}/Targets.cmake" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
   if(status STREQUAL "0")
     message(FATAL_ERROR "Invalid CUDA architecture ${architecture} was accepted")

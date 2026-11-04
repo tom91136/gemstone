@@ -7,7 +7,6 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -107,21 +106,14 @@ AqlRuntime::AqlRuntime(std::unique_ptr<Signals> signals) : signals(std::move(sig
 
 std::unique_ptr<AqlRuntime> AqlRuntime::fromEnvironment(std::unique_ptr<Signals> signals) {
   std::unique_ptr<AqlRuntime> runtime(new AqlRuntime(std::move(signals)));
-  return runtime->client() ? std::move(runtime) : nullptr;
+  return launchClient() ? std::move(runtime) : nullptr;
 }
 
 AqlRuntime::~AqlRuntime() {
-  auto *connection = client();
+  auto *connection = launchClient();
   if (!connection) return;
   for (const auto &[program, _] : programReferences)
     (void)connection->call(UnloadProgram{ProgramId{program}});
-}
-
-Client *AqlRuntime::client() {
-  std::scoped_lock const guard(lock);
-  auto &value = clients[std::this_thread::get_id()];
-  if (!value) value = Client::fromEnvironment();
-  return value.get();
 }
 
 std::string AqlRuntime::lastError() const {
@@ -136,7 +128,7 @@ void AqlRuntime::fail(std::string message) {
 
 bool AqlRuntime::installCodeObject(std::span<const uint8_t> image, std::span<const KernelSymbol> kernels) {
   if (image.empty() || kernels.empty()) return false;
-  auto *connection = client();
+  auto *connection = launchClient();
   if (!connection) return false;
   if (tracePackets()) std::fprintf(stderr, "Gemstone loading HSA code object bytes=%zu\n", image.size());
   const auto program =
@@ -149,7 +141,7 @@ bool AqlRuntime::installCodeObject(std::span<const uint8_t> image, std::span<con
 }
 
 bool AqlRuntime::installLoadedProgram(ProgramId program, std::span<const KernelSymbol> kernels) {
-  auto *connection = client();
+  auto *connection = launchClient();
   if (!connection) return false;
   const auto reject = [&](std::string message) {
     (void)connection->call(UnloadProgram{program});
@@ -209,7 +201,7 @@ bool AqlRuntime::removeKernel(uint64_t kernelObject) {
     if (--references->second != 0) return true;
     programReferences.erase(references);
   }
-  auto *connection = client();
+  auto *connection = launchClient();
   return connection && connection->call(UnloadProgram{program});
 }
 
@@ -220,13 +212,13 @@ bool AqlRuntime::releaseProgram(ProgramId program) {
     if (references == programReferences.end() || references->second != 0) return true;
     programReferences.erase(references);
   }
-  auto *connection = client();
+  auto *connection = launchClient();
   return connection && connection->call(UnloadProgram{program});
 }
 
 bool AqlRuntime::bindGlobal(ProgramId program, const std::string &name, uint64_t allocation, uint64_t offset) {
   if (name.empty() || allocation == 0) return false;
-  auto *connection = client();
+  auto *connection = launchClient();
   if (!connection) return false;
   const auto bound = connection->call(BindProgramGlobal{.program = program,
                                                         .name = {name},
@@ -239,7 +231,7 @@ bool AqlRuntime::bindGlobal(ProgramId program, const std::string &name, uint64_t
 std::optional<Error> AqlRuntime::build(uint64_t kernelObject) {
   const auto found = kernel(kernelObject);
   if (!found) return Error{.detail = "kernel object is not installed", .kind = FailureKind::NotFound};
-  auto *connection = client();
+  auto *connection = launchClient();
   if (!connection) return Error{.detail = "Gemstone execution RPC client is not configured"};
   const auto built = connection->call(BuildKernel{.program = found->program, .kernelName = {found->name}});
   if (built) return std::nullopt;
@@ -397,7 +389,7 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uin
   if (tracePackets())
     std::fprintf(stderr, "Gemstone launching AQL kernel=%s grid=%ux%ux%u group=%ux%ux%u relocations=%zu\n", found->name.c_str(), grid[0],
                  grid[1], grid[2], group[0], group[1], group[2], pointerRelocations.size());
-  auto *connection = client();
+  auto *connection = launchClient();
   if (!connection) return failed("Gemstone execution RPC client is not configured");
   if (environment::enabled(environment::SystemPagingOn)) {
     if (const auto enabled = connection->call(EnableHostMemory{}); !enabled)
@@ -436,7 +428,10 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uin
       .cooperative = cooperative,
       .deviceHeap = heap,
       .device = {static_cast<int32_t>(device)}});
-  if (!launched) return failed(launched.error().detail, packetFailure(launched.error().kind));
+  if (!launched) {
+    dropLaunchClient();
+    return failed(launched.error().detail, packetFailure(launched.error().kind));
+  }
   const auto completion = launched.value();
   std::string awaitError;
   std::string queryError;
@@ -463,6 +458,7 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uin
   if (tracePackets())
     std::fprintf(stderr, "Gemstone completed AQL kernel=%s result=%d release=%d\n", found->name.c_str(), awaited ? 0 : -1,
                  released ? 0 : -1);
+  if (!awaited || !queried || !printError.empty() || !released) dropLaunchClient();
   if (!awaited) return failed(awaitError, packetFailure(awaitKind));
   if (!queried) return failed(queryError);
   if (!printError.empty()) return failed(printError);
