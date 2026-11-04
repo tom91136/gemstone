@@ -17,8 +17,8 @@ object Term {
 
   /** `value` in decimal when it is small, unless it is all ones in at least 8 bits, and in hexadecimal otherwise. */
   private[gemstone] def literal(value: Long): String =
-    if (value >= 0 && value < 4096 && !(value >= 0xff && (value & (value + 1)) == 0L)) value.toString
-    else if (value > -4096 && value < 0) value.toString
+    if (value >= 0 && value < 4096 && !(value >= 0xff && (value & (value + 1)) == 0L) || value > -4096 && value < 0)
+      value.toString
     else if (value < 0) s"-0x${java.lang.Long.toHexString(-value)}"
     else s"0x${java.lang.Long.toHexString(value)}"
 
@@ -39,6 +39,8 @@ object Term {
   /** `body` of `value` bound to `name`, or to a variant of it where `body` or `value` already reads `name`, so the
     * binding never captures an operand.
     */
+  // the search stops at the first unused name, almost always the first candidate
+  @SuppressWarnings(Array("bonsai:linear-in-loop"))
   def let(name: String, value: Term, body: Term => Term): Term = {
     val placeholder = s"$name'"
     val bound       = body(Variable(placeholder))

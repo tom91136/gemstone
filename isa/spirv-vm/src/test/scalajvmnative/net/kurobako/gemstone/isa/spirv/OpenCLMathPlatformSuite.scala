@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.spirv
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 import scala.util.Random
 

@@ -262,12 +262,11 @@ TEST_CASE("resources/hip/scalar-buffer", "[unified][resources]") {
 }
 
 namespace {
-/** Whether the device has image instructions; CDNA3 and CDNA4 have none. */
+/** Whether the device has image instructions, as the runtime reports it; CDNA3 and CDNA4 have none. */
 bool imageSupport() {
-  hipDeviceProp_t properties{};
-  check(hipGetDeviceProperties(&properties, 0), "device properties");
-  const std::string_view name(properties.gcnArchName);
-  return !name.starts_with("gfx94") && !name.starts_with("gfx95");
+  int supported = 0;
+  check(hipDeviceGetAttribute(&supported, hipDeviceAttributeImageSupport, 0), "image support");
+  return supported != 0;
 }
 
 // tex1Dfetch from linear memory: a typed load indexed by element. Image-less targets compile the image kernels

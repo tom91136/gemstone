@@ -28,6 +28,8 @@ object Codegen {
     ))
   )
 
+  // the few bundles named on the command line
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
     case Request(root, Action.Prepare(names)) =>
       names.foreach { name =>
@@ -54,6 +56,7 @@ object Codegen {
     val references                     = root.resolve("target/references")
     GenerateEnvironment.main(Array(s"$root", "--write"))
     ImageFormats.main(Array(path("core/src/generated/main/scala")))
+    TextureDescriptorABI.main(Array(path("core/src/generated/main/scala"), path("native/generated/texture")))
 
     val api      = prepare(root, References.API)
     val manifest = s"${references.resolve("official-api-headers.json")}"

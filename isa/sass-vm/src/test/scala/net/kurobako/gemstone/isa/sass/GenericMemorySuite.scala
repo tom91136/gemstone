@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 /** Maxwell/Pascal generic memory: CUDA 11.8 pairs LEA/LEA.HI.X whose auxiliary predicate is unobservable. */
@@ -393,6 +393,18 @@ class GenericMemorySuite extends Suite {
     )
   }
 
+  for (sm <- Vec(50, 60))
+    test(s"sm_$sm the auxiliary predicate proof returns to the call site that entered the callee") {
+      check(
+        sm,
+        "LDC.64 R2, c[0x0][0x160]; MOV R4, 42; @P1 BRA `(redefine); LEA R8.CC, R2, RZ; LEA.HI.X P3, R9, R2, RZ, R3; " +
+          "ST.E [R8], R4, P3; CAL `(helper); EXIT; " +
+          "redefine: ISETP.NE.AND P3, PT, R6, RZ, PT; CAL `(helper); @P3 BRA `(done); MOV R5, 1; done: EXIT; " +
+          "helper: MOV R7, R4; RET",
+        Vec(42)
+      )
+    }
+
   for (sm <- Vec(50, 60)) test(s"sm_$sm the auxiliary predicate proof follows indirect calls into function entries") {
     check(
       sm,
@@ -650,7 +662,7 @@ class GenericMemorySuite extends Suite {
     }
 
     test(s"sm$sm generic memory accepts uncached scalar and vector widths") {
-      for (suffix <- Vec("U8", "S8", "U16", "S16", "64", "128")) {
+      for (suffix <- Vec("U8", "S8", "U16", "S16", "64", "128", "U.128")) {
         val function = DecodedFunction(
           "generic_width",
           Vec(
@@ -690,6 +702,254 @@ class GenericMemorySuite extends Suite {
           val clobber     = at(24, s"$opcode ${operands.updated(destination, "R8").mkString(", ")}")
           assertRejects(function.copy(instructions = function.instructions.updated(3, clobber)), sm)
         }
+      }
+    }
+
+    test(s"sm$sm uniform wide generic load may overwrite its own address pair") {
+      check(
+        sm,
+        "LDC.64 R2, c[0x0][0x160]; MOV R8, 7; MOV R9, 8; MOV R10, 9; MOV R11, 10; STG.E.128 [R2], R8; " +
+          "LEA R4.CC, R2, RZ; LEA.HI.X P0, R5, R2, RZ, R3; LD.E.U.128 R4, [R4], P0; STG.E.128 [R2+0x10], R4; EXIT",
+        Vec(7, 8, 9, 10, 7, 8, 9, 10),
+        block = Some(1)
+      )
+    }
+
+    test(s"sm$sm generic address proof retains independent shifted IADD3") {
+      for (opcode <- Vec("IADD3.RS", "IADD3.LS")) {
+        def function(destination: String): DecodedFunction = DecodedFunction(
+          "independent_iadd3",
+          Vec(
+            at(0, "LEA R8.CC, R4, RZ"),
+            at(8, "LEA.HI.X P2, R9, R4, RZ, R15"),
+            at(16, s"$opcode $destination, R6, R7, R10"),
+            at(24, "ST.E.CG.64 [R8], R20, P2"),
+            at(32, "EXIT")
+          )
+        )
+        assertRewrites(function("R16"), sm)
+        assertRejects(function("R9"), sm)
+      }
+    }
+
+    test(s"sm$sm cache-hinted generic store and load consume the legacy address predicate") {
+      def store(predicate: String): DecodedFunction = DecodedFunction(
+        "cache_hinted_store",
+        Vec(
+          at(0, "LEA R4.CC, R0, 0x8"),
+          at(8, "LEA.HI.X P2, R5, R0, RZ, R2"),
+          at(16, "MEMBAR.SYS.IVALLD"),
+          at(24, s"ST.E.WT [R4], RZ, $predicate"),
+          at(32, "EXIT")
+        )
+      )
+      assertRewrites(store("P2"), sm)
+      assertRejects(store("P3"), sm)
+      assertRewrites(
+        DecodedFunction(
+          "cache_hinted_load",
+          Vec(
+            at(0, "LEA R2.CC, R3, 0x8"),
+            at(8, "LEA.HI.X P2, R3, R3, RZ, R4"),
+            at(16, "MEMBAR.SYS.IVALLD"),
+            at(24, "LD.E.CV R2, [R2], P2"),
+            at(32, "EXIT")
+          )
+        ),
+        sm
+      )
+    }
+
+    test(s"sm$sm generic address proof retains independent double-precision arithmetic") {
+      for (opcode <- Vec("DADD R12, R14, R16", "DMUL R12, R14, R16", "DFMA R12, R14, R16, R18")) {
+        def function(before: String, after: String): DecodedFunction = DecodedFunction(
+          "independent_doubles",
+          Vec(
+            at(0, "LEA R8.CC, R4, RZ"),
+            at(8, before),
+            at(16, "LEA.HI.X P2, R9, R4, RZ, R15"),
+            at(24, after),
+            at(32, "ST.E.CG.128 [R8], R20, P2"),
+            at(40, "EXIT")
+          )
+        )
+        assertRewrites(function(opcode, opcode), sm)
+        val clobber = opcode.replace("R12", "R7")
+        assertRejects(function(clobber, opcode), sm)
+        assertRejects(function(opcode, clobber.replace("R7", "R8")), sm)
+        assertRejects(function(opcode, clobber.replace("R7", "R9")), sm)
+        assertRejects(function(opcode.replace("R14", "RZ").replace("R12", "RZ"), opcode), sm)
+      }
+    }
+
+    test(s"sm$sm generic address proof retains an independent MUFU result beside the high producer") {
+      def function(destination: String, opcode: String = "MUFU.RCP64H"): DecodedFunction = DecodedFunction(
+        "independent_mufu",
+        Vec(
+          at(0, "LEA R12.CC, R10.reuse, RZ"),
+          at(8, "LEA.HI.X P0, R13, R10, RZ, R11"),
+          at(16, s"$opcode $destination, R9"),
+          at(24, "LD.E.CV.128 R12, [R12], P0"),
+          at(32, "EXIT")
+        )
+      )
+      assertRewrites(function("R11"), sm)
+      assertRewrites(function("R11", "MUFU.RCP"), sm)
+      assertRejects(function("R12"), sm)
+      assertRejects(function("R13"), sm)
+    }
+
+    test(s"sm$sm generic address proof permits a scalar store of the zero register beside the high producer") {
+      def function(store: String, clobber: String = "ISETP.GT.AND P0, PT, R7, 0x1, PT"): DecodedFunction =
+        DecodedFunction(
+          "independent_zero_store",
+          Vec(
+            at(0, "LEA R28.CC, R4, RZ"),
+            at(8, "LEA.HI.X P1, R29, R4, RZ, R29"),
+            at(16, clobber),
+            at(24, store),
+            at(32, "LD.E R25, [R28], P1"),
+            at(40, "EXIT")
+          )
+        )
+      assertRewrites(function("STL [R1], RZ"), sm)
+      assertRejects(function("STL [R1], RZ", "MOV R28, RZ"), sm)
+    }
+
+    test(s"sm$sm generic address proof permits integer comparisons beside the high producer") {
+      def function(compare: String = "@!P0 ISET.LT.X.AND R11, R32, c[0x0][0x194], PT"): DecodedFunction =
+        DecodedFunction(
+          "independent_iset",
+          Vec(
+            at(0, "@!P3 LEA R36.CC, R33, 0x100"),
+            at(8, "@!P3 LEA.HI.X P6, R37, R33, RZ, R31"),
+            at(16, "@!P5 ISET.LT.X.AND R31, R31, c[0x0][0x194], PT"),
+            at(24, compare),
+            at(32, "@!P3 ST.E.CG.64 [R36], R38, P6"),
+            at(40, "EXIT")
+          )
+        )
+      assertRewrites(function(), sm)
+      assertRejects(function("@!P0 ISET.LT.X.AND R36, R32, c[0x0][0x194], PT"), sm)
+    }
+
+    test(s"sm$sm generic address proof permits bit-field inserts beside the high producer") {
+      val function = DecodedFunction(
+        "independent_bfi",
+        Vec(
+          at(0xaa8, "LEA R14.CC, R71, 0x400"),
+          at(0xab0, "LOP3.LUT R64, R64, c[0x2][0x0], R50, 0xf8"),
+          at(0xab8, "SHR.U32 R21, R50, 0x18"),
+          at(0xac8, "LOP3.LUT R67, R65, c[0x2][0x4], R51, 0xf8"),
+          at(0xad0, "BFI R70, R15, 0x810, R70"),
+          at(0xad8, "LOP3.LUT R66, R66, c[0x2][0x4], R61, 0xf8"),
+          at(0xae8, "SHR.U32 R22, R51, 0x18"),
+          at(0xaf0, "LOP3.LUT R65, R64, c[0x2][0x4], R50, 0xf8"),
+          at(0xaf8, "SHR.U32 R23, R61, 0x18"),
+          at(0xb08, "LEA.HI.X P0, R15, R71, RZ, R72"),
+          at(0xb10, "LD.E.64 R64, [R14], P0"),
+          at(0xb18, "EXIT")
+        )
+      )
+      assertRewrites(function, sm)
+    }
+
+    test(s"sm$sm generic address proof permits bit-field inserts and permutes beside the high producer") {
+      val function = DecodedFunction(
+        "independent_bfi_prmt",
+        Vec(
+          at(0x6b0, "LEA R22.CC, R41.reuse, 0x200"),
+          at(0x6b8, "SHR.U32 R20, R24, 0x10"),
+          at(0x6c8, "BFI R39, R21, 0x808, R24"),
+          at(0x6d0, "PRMT R21, R23, 0x7604, R40"),
+          at(0x6d8, "LEA.HI.X P0, R23, R41, RZ, R42"),
+          at(0x6e0, "LD.E.64 R22, [R22], P0"),
+          at(0x6e8, "EXIT")
+        )
+      )
+      assertRewrites(function, sm)
+    }
+
+    test(s"sm$sm generic address proof permits shuffles that write a scratch predicate beside the high producer") {
+      def function(shuffle: String = "SHFL.UP P0, R10, R8, 0x4, RZ"): DecodedFunction = DecodedFunction(
+        "independent_shfl",
+        Vec(
+          at(0x1bd8, "@!P1 LEA R6.CC, R4, 0x100"),
+          at(0x1be8, shuffle),
+          at(0x1bf0, "@P0 IADD R10, R8, R10"),
+          at(0x1bf8, "SHFL.UP P0, R11, R10, 0x8, RZ"),
+          at(0x1c08, "@P0 IADD R11, R10, R11"),
+          at(0x1c10, "SHFL.UP P0, R22, R11, 0x10, RZ"),
+          at(0x1c18, "@P0 IADD R22, R11, R22"),
+          at(0x1c28, "@!P1 LEA.HI.X P0, R7, R4, RZ, R30"),
+          at(0x1c30, "@!P1 LD.E R8, [R6], P0"),
+          at(0x1c38, "EXIT")
+        )
+      )
+      assertRewrites(function(), sm)
+      assertRejects(function("SHFL.UP P1, R10, R8, 0x4, RZ"), sm)
+    }
+
+    test(s"sm$sm generic address proof permits a block scan beside the high producer") {
+      val function = DecodedFunction(
+        "independent_scan",
+        Vec(
+          at(0x2178, "@!P2 LEA R14.CC, R0, 0x100"),
+          at(0x2188, "SHFL.UP P0, R24, R15, 0x10, RZ"),
+          at(0x2190, "@P0 IADD R24, R15, R24"),
+          at(0x2198, "@!P1 STS [R23], R24"),
+          at(0x21a8, "BAR.SYNC 0x0"),
+          at(0x21b0, "MEMBAR.CTA"),
+          at(0x21b8, "LDS.U.128 R4, [RZ]"),
+          at(0x21c8, "IADD R24, -R26, R24"),
+          at(0x21d0, "IADD R25, R4, R5"),
+          at(0x21d8, "@!P2 MOV R5, c[0x0][0x164]"),
+          at(0x21e8, "IADD R6, R25.reuse, R6"),
+          at(0x21f0, "@!P2 LEA.HI.X P1, R15, R0, RZ, R5"),
+          at(0x21f8, "@!P2 LD.E R14, [R14], P1"),
+          at(0x2200, "EXIT")
+        )
+      )
+      assertRewrites(function, sm)
+    }
+
+    test(s"sm$sm generic address proof permits funnel shifts beside the high producer") {
+      val function = DecodedFunction(
+        "independent_shf",
+        Vec(
+          at(0x3f68, "LEA R64.CC, R65, 0x400"),
+          at(0x3f70, "BFE.U32 R51, R9, 0x808"),
+          at(0x3f78, "BFE.U32 R49, R57, 0x808"),
+          at(0x3f88, "LEA.HI.X P2, R65, R65, RZ, R50"),
+          at(0x3f90, "LOP32I.AND R50, R57, 0xff"),
+          at(0x3f98, "PRMT R51, R51, 0x7604, R72"),
+          at(0x3fa8, "SHR R85, R71, 0x1f"),
+          at(0x3fb0, "IADD R86.CC, R71, c[0x0][0x160]"),
+          at(0x3fb8, "SHF.R.U64 R72, R14, 0x18, R15"),
+          at(0x3fc8, "ST.E.CG.128 [R64+0x10], R52, P2"),
+          at(0x3fd0, "PRMT R50, R49, 0x7604, R50"),
+          at(0x3fd8, "EXIT")
+        )
+      )
+      assertRewrites(function, sm)
+    }
+
+    test(s"sm$sm generic address proof retains independent shifted LEA and bit-field extracts") {
+      for ((opcode, destination) <- Vec("LEA R12, R35, 0x65, 0x8" -> "R12", "BFE.U32 R12, R25, 0x800" -> "R12")) {
+        def function(before: String, after: String): DecodedFunction = DecodedFunction(
+          "independent_integers",
+          Vec(
+            at(0, "LEA R8.CC, R4, RZ"),
+            at(8, before),
+            at(16, "LEA.HI.X P2, R9, R4, RZ, R15"),
+            at(24, after),
+            at(32, "ST.E.CG.128 [R8], R20, P2"),
+            at(40, "EXIT")
+          )
+        )
+        assertRewrites(function(opcode, opcode), sm)
+        assertRejects(function(opcode.replace(destination, "R4"), opcode), sm)
+        assertRejects(function(opcode, opcode.replace(destination, "R9")), sm)
       }
     }
 
@@ -741,6 +1001,25 @@ class GenericMemorySuite extends Suite {
     assertRewrites(function("R5"), 60)
     Vec("R6", "R8", "R5.CC").foreach(destination => assertRejects(function(destination), 60))
     assertRejects(function("R5", "IADD3.X"), 60)
+  }
+
+  test("sm60 window test pairs the low LEA across straight-line instructions to the high LEA") {
+    def function(middle: String = "MOV32I R3, 0xff"): DecodedFunction = DecodedFunction(
+      "fake_main_kernel",
+      Vec(
+        at(0xce8, "LEA RZ.CC, R4, RZ"),
+        at(0xcf0, "LD.E.CV R6, [R6], P0"),
+        at(0xcf8, "SHL R0, R9, 0x3"),
+        at(0xd08, "SSY 0xde0"),
+        at(0xd10, middle),
+        at(0xd18, "LEA.HI.X P1, RZ, R4, RZ, R5"),
+        at(0xd78, "@!P1 BRA 0xd98"),
+        at(0xd98, "EXIT")
+      )
+    )
+    assert(rewritten(60, function()).instructions.head.mnemonic.raw == "NOP")
+    Vec("MOV32I R4, 0xff", "IADD R0.CC, R0, 0x1", "@P0 BRA 0xd98")
+      .foreach(middle => assertRejects(function(middle), 60))
   }
 
   test("sm60 generic address proof retains independent extended integer comparisons") {
@@ -976,4 +1255,92 @@ class GenericMemorySuite extends Suite {
         (start: Int, aux: String) => body(start, "NOP.S", kill(aux), "EXIT")
       ).foreach(build => assertRejects(tail(sm)(build), sm))
     }
+
+  /** CUDA 11.8 `coomm_alg3_kernel` (sm_50): a `half` atomic through a generic pointer, branched on by space. */
+  private def coomm(
+      low: String = "LEA R2.CC, R6, RZ",
+      high: String = "LEA.HI.X P2, R3, R6, RZ, R15",
+      read: String = "@!P2 BRA 0x2fc8"
+  ) =
+    DecodedFunction(
+      "coomm_alg3_kernel",
+      Vec(
+        at(0x2f50, low),
+        at(0x2f58, high),
+        at(0x2f68, "LD.E R2, [R2], P2"),
+        at(0x2f70, "LOP.AND.NZ P1, RZ, R14, 0x3"),
+        at(0x2f78, "@!P1 BRA 0x30a8"),
+        at(0x2f88, "LOP32I.AND R3, R2, 0xffff"),
+        at(0x2f90, read),
+        at(0x2f98, "MOV R4, R6"),
+        at(0x2fa8, "MOV R5, R15"),
+        at(0x2fb0, "ATOM.E.CAS R3, [R4], R2, R3"),
+        at(0x2fb8, "BRA 0x2fd8"),
+        at(0x2fc8, "LOP32I.AND R4, R6, 0xffffff"),
+        at(0x2fd0, "ATOMS.CAS R3, [R4], R2, R3"),
+        at(0x2fd8, "EXIT"),
+        at(0x30a8, "LEA RZ.CC, R6, RZ"),
+        at(0x30b0, "LEA.HI.X P2, RZ, R6, RZ, R15"),
+        at(0x30b8, "LOP32I.AND R3, R2, 0xffff0000"),
+        at(0x30c8, "@!P2 BRA 0x30f8"),
+        at(0x30d0, "MOV R4, R6"),
+        at(0x30d8, "MOV R5, R15"),
+        at(0x30e8, "ATOM.E.CAS R3, [R4], R2, R3"),
+        at(0x30f0, "BRA 0x3110"),
+        at(0x30f8, "LOP32I.AND R4, R6, 0xffffff"),
+        at(0x3108, "ATOMS.CAS R3, [R4], R2, R3"),
+        at(0x3110, "ISETP.NE.AND P1, PT, R3, R2, PT"),
+        at(0x3118, "MOV R2, R3"),
+        at(0x3128, "@P1 BRA 0x30b8"),
+        at(0x3130, "EXIT")
+      )
+    )
+
+  test("sm_50 generic address copy keeps its predicate for the branch that selects a global or a shared atomic") {
+    val result = rewritten(50, coomm()).instructions
+    val high   = result.find(isHigh(_)).get
+    assert(PartialFunction.cond(high.operands.head) { case Operand.Predicate(_, _, _) => true })
+    assertEquals(print(high.operands(1)), "R3")
+    assertEquals(result.find(is(_, "LD", "E")).get.operands.size, 2)
+  }
+
+  test("sm_50 generic address copy rejects predicate reads other than a branch on the copied address") {
+    Vec(
+      coomm(low = "LEA R2.CC, R6, 0x8"),
+      coomm(high = "LEA.HI.X P2, R3, R6, R9, R15"),
+      coomm(read = "@P2 MOV R9, RZ"),
+      coomm(read = "SEL R9, R6, R15, P2"),
+      coomm(low = "@!P0 LEA R2.CC, R6, RZ", high = "@!P0 LEA.HI.X P2, R3, R6, RZ, R15")
+    ).foreach(assertRejects(_, 50))
+  }
+
+  /** `load_balancing_kernel` of `ComputeValues<__half>` (sm_50): the same copy with the atomic in its own loop. */
+  test("sm_50 generic address copy keeps its predicate when the loaded register overwrites the copy") {
+    val function = DecodedFunction(
+      "load_balancing_kernel",
+      Vec(
+        at(0x4ed8, "LEA R4.CC, R2, RZ"),
+        at(0x4ee8, "LEA.HI.X P1, R5, R2, RZ, R3"),
+        at(0x4ef0, "LD.E R4, [R4], P1"),
+        at(0x4ef8, "LOP.AND.NZ P0, RZ, R0, 0x3"),
+        at(0x4f08, "@!P0 BRA 0x4ff0"),
+        at(0x4f10, "LOP32I.AND R5, R4, 0xffff"),
+        at(0x4f18, "@!P1 BRA 0x4f38"),
+        at(0x4f28, "ATOM.E.CAS R5, [R2], R4, R5"),
+        at(0x4f30, "BRA 0x4f50"),
+        at(0x4f38, "LOP32I.AND R6, R2, 0xffffff"),
+        at(0x4f48, "ATOMS.CAS R5, [R6], R4, R5"),
+        at(0x4f50, "EXIT"),
+        at(0x4ff0, "LOP32I.AND R5, R4, 0xffff0000"),
+        at(0x4ff8, "@!P1 BRA 0x5018"),
+        at(0x5008, "ATOM.E.CAS R5, [R2], R4, R5"),
+        at(0x5010, "BRA 0x5040"),
+        at(0x5018, "LOP32I.AND R5, R2, 0xffffff"),
+        at(0x5038, "ATOMS.CAS R5, [R5], R6, R7"),
+        at(0x5040, "EXIT")
+      )
+    )
+    val high = rewritten(50, function).instructions.find(isHigh(_)).get
+    assert(PartialFunction.cond(high.operands.head) { case Operand.Predicate(_, _, _) => true })
+  }
 }

@@ -83,9 +83,10 @@ object NativeAPIs {
           Status("cudaError_t", "cudaErrorNotSupported", "gemstone_cuda_unsupported_runtime")
         ),
         names("""
+cuCtxDisablePeerAccess cuCtxEnablePeerAccess cuMemcpyPeer cuMemcpyPeerAsync
 cuArray3DCreate_v2 cuArray3DGetDescriptor_v2 cuArrayCreate_v2 cuArrayDestroy cuArrayGetDescriptor_v2 cuCtxCreate_v4
 cuCtxDestroy_v2 cuCtxDetach cuCtxGetApiVersion cuCtxGetCacheConfig cuCtxGetCurrent cuCtxGetDevice cuCtxGetDevice_v2
-cuCtxGetFlags cuCtxGetLimit cuCtxGetSharedMemConfig cuCtxGetStreamPriorityRange cuCtxPopCurrent_v2
+cuCtxGetFlags cuCtxGetId cuCtxGetLimit cuCtxGetSharedMemConfig cuCtxGetStreamPriorityRange cuCtxPopCurrent_v2
 cuCtxPushCurrent_v2 cuCtxResetPersistingL2Cache cuCtxSetCacheConfig cuCtxSetCurrent cuCtxSetLimit
 cuCtxSetSharedMemConfig cuCtxSynchronize cuCtxSynchronize_v2 cuDeviceCanAccessPeer cuDeviceComputeCapability
 cuDeviceGet cuDeviceGetAttribute cuDeviceGetByPCIBusId cuDeviceGetCount cuDeviceGetDefaultMemPool
@@ -94,9 +95,9 @@ cuDeviceGetP2PAttribute cuDeviceGetPCIBusId cuDeviceGetProperties cuDeviceGetTex
 cuDeviceGetUuid_v2 cuDevicePrimaryCtxGetState cuDevicePrimaryCtxRelease_v2 cuDevicePrimaryCtxReset_v2
 cuDevicePrimaryCtxRetain cuDevicePrimaryCtxSetFlags_v2 cuDeviceSetMemPool cuDeviceTotalMem_v2 cuDriverGetVersion
 cuEventCreate cuEventDestroy_v2 cuEventElapsedTime_v2 cuEventQuery cuEventRecord cuEventRecordWithFlags
-cuEventSynchronize cuFlushGPUDirectRDMAWrites cuFuncGetAttribute cuFuncSetAttribute cuFuncSetCacheConfig
+cuEventSynchronize cuFlushGPUDirectRDMAWrites cuFuncGetAttribute cuFuncGetParamCount cuFuncGetParamInfo cuFuncSetAttribute cuFuncSetCacheConfig
 cuFuncSetSharedMemConfig cuGetErrorName cuGetErrorString cuGetExportTable cuGetProcAddress_v2 cuInit
-cuKernelGetAttribute cuKernelGetFunction cuKernelSetAttribute cuLaunchHostFunc cuLaunchHostFunc_v2 cuLaunchKernel
+cuKernelGetAttribute cuKernelGetFunction cuKernelSetAttribute cuLaunchCooperativeKernel cuLaunchHostFunc cuLaunchHostFunc_v2 cuLaunchKernel
 cuLaunchKernelEx
 cuLibraryGetGlobal cuLibraryGetKernel cuLibraryGetManaged cuLibraryGetModule cuLibraryLoadData cuLibraryUnload
 cuLinkAddData_v2 cuLinkComplete cuLinkCreate_v2 cuLinkDestroy cuMemAllocAsync cuMemAllocFromPoolAsync
@@ -106,34 +107,44 @@ cuMemHostGetDevicePointer_v2 cuMemHostGetFlags cuMemHostRegister_v2 cuMemHostUnr
 cuMemPoolDestroy cuMemPoolGetAttribute cuMemPoolSetAttribute cuMemPoolTrimTo cuMemSetMemPool cuMemcpy
 cuMemcpy2DAsync_v2 cuMemcpy2DUnaligned_v2 cuMemcpy2D_v2 cuMemcpy3DAsync_v2 cuMemcpy3D_v2 cuMemcpyAsync
 cuMemcpyDtoDAsync_v2 cuMemcpyDtoD_v2 cuMemcpyDtoHAsync_v2 cuMemcpyDtoH_v2 cuMemcpyHtoDAsync_v2 cuMemcpyHtoD_v2
-cuMemsetD16Async cuMemsetD16_v2 cuMemsetD32Async cuMemsetD32_v2 cuMemsetD8Async cuMemsetD8_v2 cuModuleGetFunction
+cuMemsetD16Async cuMemsetD16_v2 cuMemsetD2D16Async cuMemsetD2D16_v2 cuMemsetD2D32Async cuMemsetD2D32_v2
+cuMemsetD2D8Async cuMemsetD2D8_v2 cuMemsetD32Async cuMemsetD32_v2 cuMemsetD8Async cuMemsetD8_v2 cuModuleGetFunction
 cuModuleGetGlobal_v2 cuModuleGetLoadingMode cuModuleGetSurfRef
 cuModuleGetTexRef cuModuleLoadData cuModuleLoadDataEx cuModuleLoadFatBinary cuModuleUnload
 cuOccupancyAvailableDynamicSMemPerBlock cuOccupancyMaxActiveBlocksPerMultiprocessor
 cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags cuOccupancyMaxActiveClusters cuPointerGetAttribute
 cuPointerGetAttributes cuStreamAddCallback cuStreamCreate cuStreamCreateWithPriority cuStreamDestroy_v2
-cuStreamGetCaptureInfo_v3 cuStreamGetGreenCtx cuStreamIsCapturing cuStreamQuery cuStreamSynchronize
-cuStreamWaitEvent cuTensorMapEncodeIm2col cuTensorMapEncodeIm2colWide cuTensorMapEncodeTiled cuTensorMapReplaceAddress
-cudaCreateChannelDesc cudaDeviceGetAttribute cudaDeviceSynchronize cudaDriverGetVersion
+cuStreamGetCaptureInfo_v3 cuStreamGetCtx cuStreamGetCtx_v2 cuStreamGetGreenCtx cuStreamIsCapturing cuStreamQuery cuStreamSynchronize
+cuStreamWaitEvent cuSurfObjectCreate cuSurfObjectDestroy cuSurfObjectGetResourceDesc cuTensorMapEncodeIm2col cuTensorMapEncodeIm2colWide cuTensorMapEncodeTiled cuTensorMapReplaceAddress cuTexObjectCreate cuTexObjectDestroy cuTexObjectGetResourceDesc
+cuTexObjectGetResourceViewDesc cuTexObjectGetTextureDesc
+cudaDeviceCanAccessPeer cudaDeviceDisablePeerAccess cudaDeviceEnablePeerAccess cudaMemcpyPeer cudaMemcpyPeerAsync
+cudaCreateChannelDesc cudaCreateSurfaceObject cudaCreateTextureObject cudaDestroySurfaceObject
+cudaDestroyTextureObject cudaGetChannelDesc cudaGetSurfaceObjectResourceDesc cudaGetTextureObjectResourceDesc
+cudaGetTextureObjectTextureDesc cudaDeviceGetAttribute cudaDeviceGetLimit cudaDeviceSetLimit cudaDeviceSynchronize
+cudaDriverGetVersion
 cudaEventCreate cudaEventCreateWithFlags cudaEventDestroy cudaEventElapsedTime cudaEventQuery cudaEventRecord
 cudaEventRecordWithFlags cudaEventSynchronize cudaFree cudaFreeHost cudaFuncGetAttributes cudaGetDevice
 cudaGetDeviceCount cudaGetDeviceProperties cudaGetErrorName cudaGetErrorString cudaGetLastError cudaHostAlloc
-cudaHostGetDevicePointer cudaHostGetFlags cudaHostRegister cudaHostUnregister cudaMalloc cudaMallocHost
+cudaHostGetDevicePointer cudaHostGetFlags cudaHostRegister cudaHostUnregister cudaLaunchCooperativeKernel cudaLaunchKernel cudaLaunchKernelExC cudaMalloc
+cudaMallocHost
 cudaMallocManaged cudaMemcpy cudaMemcpyAsync cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
 cudaPeekAtLastError cudaPointerGetAttributes cudaRuntimeGetVersion cudaSetDevice cudaStreamCreate
 cudaStreamCreateWithFlags cudaStreamCreateWithPriority cudaStreamDestroy cudaStreamGetCaptureInfo
-cudaStreamIsCapturing cudaStreamQuery cudaStreamSynchronize cudaStreamWaitEvent"""),
+cudaStreamIsCapturing cudaStreamQuery cudaStreamSynchronize cudaStreamWaitEvent
+cuGraphAddDependencies_v2 cuGraphAddEmptyNode cuGraphAddHostNode cuGraphAddKernelNode_v2 cuGraphAddMemcpyNode
+cuGraphAddMemsetNode cuGraphClone cuGraphCreate cuGraphDestroy cuGraphExecDestroy cuGraphExecKernelNodeSetParams_v2
+cuGraphExecUpdate_v2 cuGraphGetNodes cuGraphGetRootNodes cuGraphInstantiateWithFlags cuGraphLaunch
+cuStreamAttachMemAsync cuStreamBeginCapture_v2 cuStreamEndCapture
+cudaGraphAddDependencies cudaGraphAddEmptyNode cudaGraphAddHostNode cudaGraphAddKernelNode cudaGraphAddMemcpyNode1D
+cudaGraphAddMemsetNode cudaGraphClone cudaGraphCreate cudaGraphDestroy cudaGraphExecDestroy cudaGraphExecKernelNodeSetParams
+cudaGraphExecUpdate cudaGraphGetNodes cudaGraphGetRootNodes cudaGraphInstantiateWithFlags cudaGraphLaunch
+cudaStreamAttachMemAsync cudaStreamBeginCapture cudaStreamEndCapture"""),
         // vendor libraries still request these older ABI names directly
         legacy = Vector(
-          "cuGraphExecKernelNodeSetParams" -> "decltype(cuGraphExecKernelNodeSetParams_v2)",
-          "cuGraphExecUpdate"              -> "decltype(cuGraphExecUpdate_v2)",
-          "cuGraphInstantiate"             -> "decltype(cuGraphInstantiateWithFlags)",
-          "cuGraphKernelNodeGetParams"     -> "decltype(cuGraphKernelNodeGetParams_v2)",
-          "cuMemPrefetchAsync"             -> "decltype(cuMemPrefetchAsync_v2)",
-          "cuProfilerStop"                 -> "CUresult()",
-          "cuStreamBatchMemOp"             -> "decltype(cuStreamBatchMemOp_v2)",
-          "cuStreamBeginCapture"           -> "decltype(cuStreamBeginCapture_v2)",
-          "cuStreamWaitValue32"            -> "decltype(cuStreamWaitValue32_v2)"
+          "cuGraphKernelNodeGetParams" -> "decltype(cuGraphKernelNodeGetParams_v2)",
+          "cuMemPrefetchAsync"         -> "decltype(cuMemPrefetchAsync_v2)",
+          "cuStreamBatchMemOp"         -> "decltype(cuStreamBatchMemOp_v2)",
+          "cuStreamWaitValue32"        -> "decltype(cuStreamWaitValue32_v2)"
         )
       )
     ),
@@ -150,23 +161,32 @@ cudaStreamIsCapturing cudaStreamQuery cudaStreamSynchronize cudaStreamWaitEvent"
         Vector(Status("hipError_t", "hipErrorNotSupported", "gemstone_hip_unsupported")),
         names("""
 hipArrayGetInfo hipCreateChannelDesc hipCreateSurfaceObject hipCreateTextureObject hipCtxPopCurrent hipCtxPushCurrent
-hipDestroySurfaceObject hipDestroyTextureObject hipDeviceComputeCapability hipDeviceGet hipDeviceGetAttribute
-hipDeviceGetDefaultMemPool hipDeviceGetName hipDevicePrimaryCtxRelease hipDevicePrimaryCtxRetain hipDeviceReset
+hipDestroySurfaceObject hipDestroyTextureObject hipDeviceCanAccessPeer hipDeviceComputeCapability hipDeviceDisablePeerAccess
+hipDeviceEnablePeerAccess hipDeviceGet hipDeviceGetAttribute hipDeviceGetByPCIBusId
+hipDeviceGetDefaultMemPool hipDeviceGetLimit hipDeviceGetName hipDeviceGetP2PAttribute hipDeviceGetPCIBusId hipDeviceGetUuid
+hipDevicePrimaryCtxRelease hipDevicePrimaryCtxRetain
+hipDeviceReset hipDeviceSetLimit
 hipDeviceSynchronize hipDeviceTotalMem hipDriverGetVersion hipEventCreate hipEventCreateWithFlags hipEventDestroy
 hipEventElapsedTime hipEventQuery hipEventRecord hipEventRecordWithFlags hipEventSynchronize hipExtGetLastError
 hipFree hipFreeArray hipFreeAsync hipFreeHost hipFreeMipmappedArray hipFuncGetAttributes hipGetChannelDesc
 hipGetDevice hipGetDeviceCount hipGetDevicePropertiesR0600 hipGetErrorName hipGetErrorString hipGetLastError
-hipGetMipmappedArrayLevel hipGetStreamDeviceId hipGraphDestroy hipGraphExecDestroy hipGraphInstantiate hipGraphLaunch
+hipGetMipmappedArrayLevel hipGetStreamDeviceId hipGetSymbolAddress hipGetSymbolSize
+hipGraphDestroy hipGraphExecDestroy hipGraphInstantiate hipGraphLaunch
+hipGraphAddDependencies hipGraphAddEmptyNode hipGraphAddHostNode hipGraphAddKernelNode hipGraphAddMemcpyNode
+hipGraphAddMemcpyNode1D hipGraphAddMemsetNode hipGraphClone hipGraphCreate hipGraphExecKernelNodeSetParams
+hipGraphExecUpdate hipGraphGetNodes hipGraphGetRootNodes hipGraphInstantiateWithFlags hipLaunchHostFunc
+hipStreamGetCaptureInfo hipStreamGetCaptureInfo_v2
 hipHostFree hipHostGetDevicePointer hipHostGetFlags hipHostMalloc hipHostRegister hipHostUnregister hipInit
 hipLaunchCooperativeKernel hipLaunchKernel hipMalloc hipMalloc3DArray hipMallocArray hipMallocAsync hipMallocHost
 hipMallocManaged hipMallocMipmappedArray hipMemAdvise hipMemGetInfo hipMemPoolTrimTo hipMemcpy hipMemcpy2D
 hipMemcpy2DAsync hipMemcpy2DFromArray hipMemcpy2DFromArrayAsync hipMemcpy2DToArray hipMemcpy2DToArrayAsync hipMemcpy3D
 hipMemcpy3DAsync hipMemcpyAsync hipMemcpyAtoH hipMemcpyDtoD hipMemcpyDtoDAsync hipMemcpyDtoH hipMemcpyDtoHAsync
 hipMemcpyFromArray hipMemcpyFromSymbol hipMemcpyFromSymbolAsync hipMemcpyHtoA hipMemcpyHtoD hipMemcpyHtoDAsync
-hipMemcpyToArray hipMemcpyToSymbol hipMemcpyToSymbolAsync hipMemcpyWithStream hipMemset hipMemsetAsync hipMemsetD32
+hipMemcpyPeer hipMemcpyPeerAsync hipMemcpyToArray hipMemcpyToSymbol hipMemcpyToSymbolAsync hipMemcpyWithStream hipMemset hipMemsetAsync hipMemsetD32
 hipMemsetD8 hipModuleGetFunction hipModuleGetFunctionCount hipModuleLaunchCooperativeKernel hipModuleLaunchKernel
-hipModuleLoadData hipModuleLoadDataEx hipModuleLoadFatBinary hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
+hipModuleLoad hipModuleLoadData hipModuleLoadDataEx hipModuleLoadFatBinary hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
 hipModuleUnload hipOccupancyMaxActiveBlocksPerMultiprocessor hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
+hipOccupancyMaxPotentialBlockSize
 hipPeekAtLastError hipPointerGetAttributes hipRuntimeGetVersion hipSetDevice hipStreamAddCallback
 hipStreamBeginCapture hipStreamCreate hipStreamCreateWithFlags hipStreamCreateWithPriority hipStreamDestroy
 hipStreamEndCapture hipStreamGetDevice hipStreamIsCapturing hipStreamQuery hipStreamSynchronize hipStreamWaitEvent"""),

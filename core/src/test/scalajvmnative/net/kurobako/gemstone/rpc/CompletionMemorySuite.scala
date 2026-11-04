@@ -10,7 +10,9 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+import scala.runtime.LongRef
 import scala.util.Using
 
 class CompletionMemorySuite extends Suite {
@@ -38,14 +40,15 @@ class CompletionMemorySuite extends Suite {
     Using.resource(ExecutionSession(List(backend)))(test(_, backend))
   }
 
-  private def dispatch(session: ExecutionSession, backend: KernelBackend)(body: AddressSpace => Either[Fault, Unit])
-      : Unit = {
+  private def dispatch(session: ExecutionSession, backend: KernelBackend, device: Int = 0)(
+      body: AddressSpace => Either[Fault, Unit]
+  ): Unit = {
     backend.body.set(body)
     val program = checked(session.load(ProgramEncoding.PTXText, Vec.empty))
     val task    = checked(
       KernelTask.validated("kernel", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty)
     )
-    val completion = checked(session.launch(program, task))
+    val completion = checked(session.launch(program, task, device = device))
     assertEquals(session.awaitCompletion(completion), Right(()))
   }
 
@@ -57,6 +60,75 @@ class CompletionMemorySuite extends Suite {
   }
 
   private val Address = GuestAddress(0x100000L)
+
+  test("a dispatch faults on device memory that its device was not granted, at every access form") {
+    withSession { (session, backend) =>
+      val id = checked(session.registerAllocation(64))
+      checked(session.registerAllocationAddress(id, Address, devices = 1 << 1))
+      checked(session.writeValue(AllocationScalar(id, 0L, 8), 7L))
+
+      dispatch(session, backend, device = 1) { memory =>
+        assertEquals(memory.readValue(Address, 8), Right(7L))
+        assertEquals(memory.writeValue(Address, 9L, 8), Right(()))
+        assertEquals(memory.readValue(id, 0L, 8), Right(9L))
+        Right(())
+      }
+
+      dispatch(session, backend, device = 0) { memory =>
+        assert(memory.read(Address, 8).isLeft)
+        assert(memory.readValue(Address, 8).isLeft)
+        assert(memory.writeValue(Address, 1L, 8).isLeft)
+        assert(memory.write(Address, Vec.fill(8)(1.toByte)).isLeft)
+        assert(memory.atomicModifyValue(Address, 8)(_ + 1).isLeft)
+        assert(Option(memory.readCoherentValueInto(Address, 8, LongRef(0L))).nonEmpty)
+        assert(memory.read(id, 0L, 8).isLeft)
+        assert(memory.readValue(id, 0L, 8).isLeft)
+        assert(memory.writeValue(id, 0L, 1L, 8).isLeft)
+        assert(memory.atomicModifyValue(id, 0L, 8)(_ + 1).isLeft)
+        assert(Option(memory.readCoherentValueInto(id, 0L, 8, LongRef(0L))).nonEmpty)
+        memory.read(Address, 8) match {
+          case Left(fault) => assert(fault.description.contains("device 0 cannot access"), fault.description)
+          case Right(_)    => fail("expected a fault")
+        }
+        Right(())
+      }
+      assertEquals(session.read(AllocationRange(id, 0L, 8)).map(_.toList), Right(List[Byte](9, 0, 0, 0, 0, 0, 0, 0)))
+    }
+  }
+
+  test("granting a device makes the allocation reachable and a fault surfaces as an illegal address") {
+    withSession { (session, backend) =>
+      val id = checked(session.registerAllocation(64))
+      checked(session.registerAllocationAddress(id, Address, devices = 1 << 1))
+      checked(session.setAllocationDevices(id, (1 << 1) | (1 << 0)))
+      dispatch(session, backend, device = 0)(memory => memory.writeValue(Address, 5L, 8))
+      assertEquals(
+        session.read(AllocationRange(id, 0L, 8)).map(_.toList),
+        Right(List[Byte](5, 0, 0, 0, 0, 0, 0, 0))
+      )
+      checked(session.setAllocationDevices(id, 1 << 1))
+      backend.body.set(memory => memory.writeValue(Address, 6L, 8))
+      val program = checked(session.load(ProgramEncoding.PTXText, Vec.empty))
+      val task    =
+        checked(KernelTask.validated("kernel", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty))
+      val completion = checked(session.launch(program, task, device = 0))
+      session.awaitCompletion(completion) match {
+        case Left(ExecutionRPC.ExecutionFailure.IllegalAddress(_)) => ()
+        case other => fail(s"expected an illegal address failure, got $other")
+      }
+    }
+  }
+
+  test("allocations registered without a device set stay reachable from every device") {
+    withSession { (session, backend) =>
+      val id = aliased(session, Address.raw, 3L)
+      (0 until 16).foreach(device =>
+        dispatch(session, backend, device)(memory => memory.readValue(Address, 8).map(_ => ()))
+      )
+      checked(session.setAllocationDevices(id, 0))
+      dispatch(session, backend, device = 0)(memory => Right(assert(memory.readValue(Address, 8).isLeft)))
+    }
+  }
 
   test("an allocation freed and reallocated at the same range resolves to the new allocation") {
     withSession { (session, backend) =>
@@ -175,6 +247,98 @@ class CompletionMemorySuite extends Suite {
         val increments = workers / 2 * iterations
         assertEquals(session.readValue(AllocationScalar(id, 40L, 8)), Right(increments.toLong))
         assertEquals(observed.asScala.toVector.sorted, Vector.range(0L, increments.toLong))
+      }
+    }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def coherent(memory: AddressSpace, address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] = {
+    val into = LongRef(0L)
+    memory.readCoherentValueInto(address, size, into) match {
+      case null         => Right(into.elem)
+      case fault: Fault => Left(fault)
+    }
+  }
+
+  test("a coherent load returns what the latest store wrote, at both widths and through a region") {
+    withSession { (session, backend) =>
+      val id = aliased(session, Address.raw, 0L)
+      dispatch(session, backend) { memory =>
+        assertEquals(memory.writeValue(Address, 0x1122334455667788L, 8), Right(()))
+        assertEquals(coherent(memory, Address, 8), Right(0x1122334455667788L))
+        assertEquals(coherent(memory, Address, 4), Right(0x55667788L))
+        assertEquals(coherent(memory, Address.offset(4), 4), Right(0x11223344L))
+        assertEquals(memory.writeValue(Address.offset(4), 9L, 4), Right(()))
+        val into = LongRef(0L)
+        assert(Option(memory.readCoherentValueInto(id, 0L, 8, into)).isEmpty)
+        assertEquals(into.elem, 0x0000000955667788L)
+        assert(coherent(memory, Address.offset(64), 4).isLeft)
+        Right(())
+      }
+    }
+  }
+
+  test("a coherent load observes an atomic update and a store made by another worker") {
+    Using.resource(WorkerPool(2, minGroups = 1L, minWorkItems = 1L)) { pool =>
+      withSession { (session, backend) =>
+        val _      = aliased(session, Address.raw, 0L)
+        val stored = CountDownLatch(1)
+        dispatch(session, backend) { memory =>
+          pool.parallelFor(2L) { worker =>
+            if (worker.raw == 0L)
+              memory.writeValue(Address.offset(8), 5L, 8).flatMap(_ =>
+                memory.atomicModifyValue(Address, 8)(_ + 3L)
+              ).map { _ =>
+                stored.countDown()
+              }
+            else if (!stored.await(10, TimeUnit.SECONDS)) Left(Fault.Cancelled)
+            else
+              coherent(memory, Address, 8).flatMap(first =>
+                coherent(memory, Address.offset(8), 8).flatMap(second =>
+                  if (first == 3L && second == 5L) Right(())
+                  else Left(Fault.Memory(s"coherent loads saw $first and $second"))
+                )
+              )
+          }
+        }
+      }
+    }
+  }
+
+  test("message passing: a coherent load of the flag makes the earlier data store visible") {
+    val slots = 512
+    Using.resource(WorkerPool(2, minGroups = 1L, minWorkItems = 1L)) { pool =>
+      withSession { (session, backend) =>
+        val id = checked(session.registerAllocation(32768))
+        checked(session.registerAllocationAddress(id, Address))
+        dispatch(session, backend) { memory =>
+          pool.parallelFor(2L) { worker =>
+            (0 until slots).foldLeft[Either[Fault, Unit]](Right(())) { (result, slot) =>
+              val data = Address.offset(slot * 64L)
+              val flag = Address.offset(slot * 64L + 32L)
+              result.flatMap { _ =>
+                if (worker.raw == 0L)
+                  memory.writeValue(data, slot + 1L, 8).flatMap(_ => memory.writeValue(flag, 1L, 8))
+                else {
+                  val deadline = 20.seconds.fromNow
+                  @annotation.tailrec
+                  def await(): Either[Fault, Long] = {
+                    val seen = coherent(memory, flag, 8)
+                    if (seen == Right(0L) && deadline.hasTimeLeft()) await() else seen
+                  }
+                  await().flatMap(value =>
+                    if (value != 1L) Left(Fault.Memory(s"slot $slot flag was $value"))
+                    else
+                      memory.readValue(data, 8).flatMap(payload =>
+                        if (payload == slot + 1L) Right(())
+                        else Left(Fault.Memory(s"slot $slot saw flag before data: $payload"))
+                      )
+                  )
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

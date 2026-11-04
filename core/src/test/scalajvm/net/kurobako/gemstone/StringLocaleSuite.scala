@@ -1,7 +1,7 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.string.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class StringLocaleSuite extends Suite {
   test("numeric formatting is independent of the default locale") {

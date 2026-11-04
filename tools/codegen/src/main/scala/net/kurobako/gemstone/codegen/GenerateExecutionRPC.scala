@@ -14,6 +14,8 @@ object GenerateExecutionRPC {
 
   private val Namespace = "gemstone::execution"
 
+  private val AliasBases = Set("Byte", "Short", "Int", "Long", "Float", "Double", "String")
+
   private val command = Command("GenerateExecutionRPC", "Generate the native typed execution RPC client")(
     CodegenCommand.path("output-directory").map(Request(_))
   )
@@ -47,16 +49,14 @@ object GenerateExecutionRPC {
     case Wire.Constraint.OneOf(values)            => s"OneOf${values.map(numberName(_)).mkString("Or")}"
     case Wire.Constraint.MultipleOf(divisor)      => s"MultipleOf${numberName(divisor)}"
     case Wire.Constraint.MinimumLength(min)       => s"MinimumLength$min"
+    case Wire.Constraint.MaximumBytes(max)        => s"MaximumBytes$max"
     case Wire.Constraint.NotContains(value)       =>
       s"NotContains${value.getBytes(StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
     case Wire.Constraint.AnyOf(alternatives) =>
       s"AnyOf${alternatives.map(_.map(constraintName(_)).mkString).mkString("Or")}"
   }
   private def aliasName(name: String, constraints: Vector[Wire.Constraint]): String =
-    if (
-      name == "Byte" || name == "Short" || name == "Int" || name == "Long" || name == "Float" || name == "Double" ||
-      name == "String"
-    )
+    if (AliasBases.contains(name))
       identifier(name + constraints.map(constraintName(_)).mkString)
     else identifier(name)
   private def alternativeName(sum: String, alternative: String): String = s"$sum$alternative"
@@ -231,6 +231,7 @@ object GenerateExecutionRPC {
       case Wire.Constraint.OneOf(values)            =>
         values.map(value => s"value.value == ${integer(value)}").mkString("(", " || ", ")")
       case Wire.Constraint.MultipleOf(divisor) => s"value.value % ${integer(divisor)} == 0"
+      case Wire.Constraint.MaximumBytes(max)   => s"value.value.size() <= ${max}U"
       case Wire.Constraint.MinimumLength(min)  =>
         val size = if (underlying == Shape.Text) "textLength(value.value)" else "value.value.size()"
         s"$size >= ${min}U"
@@ -254,7 +255,12 @@ object GenerateExecutionRPC {
     val definitions  = products.map { named =>
       val check = named.shape match {
         case Shape.Alias(_, underlying, constraints) =>
-          (Vector("valid(value.value)") ++ constraints.map(constraint(_, underlying))).mkString(" && ")
+          val ownsTextBound = underlying == Shape.Text && constraints.exists {
+            case Wire.Constraint.MaximumBytes(_) => true
+            case _                               => false
+          }
+          val base = if (ownsTextBound) Vector.empty else Vector("valid(value.value)")
+          (base ++ constraints.map(constraint(_, underlying))).mkString(" && ")
         case Shape.Product(_, fields) =>
           if (fields.isEmpty) "true"
           else fields.map(field => s"valid(value.${identifier(field.name)})").mkString(" && ")
@@ -336,6 +342,7 @@ object GenerateExecutionRPC {
        |inline constexpr uint32_t MaximumTextBytes = ${ExecutionRPC.MaximumTextBytes}U;
        |inline constexpr uint32_t HelloMagic = ${ExecutionRPC.HelloMagic}U;
        |inline constexpr uint32_t HelloResponseMagic = ${ExecutionRPC.HelloResponseMagic}U;
+       |inline constexpr uint32_t HeartbeatMagic = ${ExecutionRPC.HeartbeatMagic}U;
        |inline constexpr uint32_t MaximumSchemaBytes = ${ExecutionRPC.MaximumSchemaBytes}U;
        |inline constexpr uint32_t MaximumTagBytes = ${ExecutionRPC.MaximumTagBytes}U;
        |inline constexpr uint32_t OpenclMaxWorkGroupSize = ${ExecutionRPC.OpenclMaxWorkGroupSize}U;

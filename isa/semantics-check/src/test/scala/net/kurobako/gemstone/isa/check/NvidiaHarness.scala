@@ -177,8 +177,9 @@ class NvidiaHarness(val seed: Long) {
       if ((high & 1L) != UInt[64](0)) value else throw IllegalArgumentException("the cancellation failed")
 
     // Counters are never staged into a checked definition.
-    def clock(): UInt[64]       = throw UnsupportedOperationException("clock")
-    def globalTimer(): UInt[64] = throw UnsupportedOperationException("globalTimer")
+    def clock(): UInt[64]         = throw UnsupportedOperationException("clock")
+    def globalTimer(): UInt[64]   = throw UnsupportedOperationException("globalTimer")
+    def gridWorkspace(): UInt[64] = UInt[64](0)
   }
 
   private class Bank extends Constants {

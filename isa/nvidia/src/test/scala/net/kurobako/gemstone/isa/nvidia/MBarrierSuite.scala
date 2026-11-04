@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class MBarrierSuite extends Suite {
   import MBarrier.*

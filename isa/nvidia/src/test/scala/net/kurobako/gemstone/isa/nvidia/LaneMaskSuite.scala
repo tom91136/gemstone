@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class LaneMaskSuite extends Suite {
   private def size(mask: VMLaneMask): Int = mask.positiveSize.fold(0)(_.raw)

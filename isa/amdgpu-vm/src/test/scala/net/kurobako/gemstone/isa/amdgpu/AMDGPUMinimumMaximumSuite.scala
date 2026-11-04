@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
 /** The IEEE 754-2019 minimum and maximum, which propagate NaN and order -0 below +0, as hipcc emits them for

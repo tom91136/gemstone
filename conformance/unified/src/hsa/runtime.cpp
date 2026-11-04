@@ -168,6 +168,6 @@ void execute(bool asynchronousCopy) {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/hsa/code-object-dispatch/i32/n64", "[unified][runtime][compact]") { execute(false); }
+TEST_CASE("edge-cases/runtime/hsa/code-object-dispatch/i32/n64", "[unified][runtime]") { execute(false); }
 
-TEST_CASE("edge-cases/runtime/hsa/async-copy-after-dispatch/i32/n64", "[unified][runtime][compact]") { execute(true); }
+TEST_CASE("edge-cases/runtime/hsa/async-copy-after-dispatch/i32/n64", "[unified][runtime]") { execute(true); }

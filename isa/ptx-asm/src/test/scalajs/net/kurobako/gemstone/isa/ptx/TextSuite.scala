@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class TextSuite extends Suite {
   test("PTX text parses, validates and prints stably") {

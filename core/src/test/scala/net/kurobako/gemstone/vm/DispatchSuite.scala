@@ -7,7 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.jdk.CollectionConverters.*
 
 class DispatchSuite extends Suite {
@@ -54,7 +54,7 @@ class DispatchSuite extends Suite {
     val launch  = geometry(12L)
     val visited = ConcurrentLinkedQueue[(Long, LaunchGeometry.Coordinates)]()
     assertEquals(
-      Dispatch.forEachGroup(launch, Workgroups.Sequential) { (index, group) =>
+      Dispatch.forEachGroup(launch, Workgroups.Sequential) { (index, group, _) =>
         visited.add(index.raw -> group)
         Right(())
       },
@@ -64,7 +64,7 @@ class DispatchSuite extends Suite {
     assertEquals(visited.asScala.toList.map(_._2.x.raw), List(0, 1, 2))
     val failure =
       Dispatch.forEachGroup[NonEmpty[String]](launch, Workgroups.Sequential, Fault.Backend(_), _.message) {
-        (index, _) => if (index == 1L) Left("second group") else Right(())
+        (index, _, _) => if (index == 1L) Left("second group") else Right(())
       }
     assertEquals(failure.left.map(_.raw), Left("second group"))
   }

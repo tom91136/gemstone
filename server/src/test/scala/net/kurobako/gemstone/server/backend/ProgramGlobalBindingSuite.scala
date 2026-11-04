@@ -17,10 +17,12 @@ import scala.util.Using
 class ProgramGlobalBindingSuite extends Suite {
   private val Booleans = List(false, true)
 
-  // gfx900: load through linked 0x3000, increment/store through kernarg pointer, reload linked global,
+  // the first program of a session loads in window 1, so the linked global at 0x3000 sits at 0x1040003000
+  private val linkedGlobal = 0x1040003000L
+  // gfx900: load through the loaded global address, increment/store through kernarg pointer, reload the global,
   // write value and pointer-equality flag to output. Assembly recorded in the bring-up report.
   private val code = Vec[Long](
-    0xc00a0100L, 0x00000000L, 0xbf8cc07fL, 0xbe8800ffL, 0x00003000L, 0xbe890080L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
+    0xc00a0100L, 0x00000000L, 0xbf8cc07fL, 0xbe8800ffL, 0x40003000L, 0xbe890090L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
     0x800a810aL, 0x7e000280L, 0x7e02020aL, 0xdc708000L, 0x00040100L, 0xbf8c0f70L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
     0x7e02020aL, 0xdc708000L, 0x00060100L, 0x880a0804L, 0x880b0905L, 0x870a0b0aL, 0xbf06800aL, 0x850a8081L, 0x7e02020aL,
     0x7e000284L, 0xdc708000L, 0x00060100L, 0xbf810000L
@@ -82,7 +84,7 @@ class ProgramGlobalBindingSuite extends Suite {
       assertEquals(read(s, global, 8), 71L)
       assertEquals(read(s, output, 0), 71L)
       assertEquals(s.releaseCompletion(second), Right(()))
-      val third = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(0x3000, 8).unsafe))
+      val third = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(linkedGlobal, 8).unsafe))
       assertEquals(read(s, global, 8), 72L)
       assertEquals(read(s, output, 4), 1L)
       assert(s.completionDirtyRanges(
@@ -124,7 +126,7 @@ class ProgramGlobalBindingSuite extends Suite {
       assertEquals(a.bindGlobal(pa, "device_pointer", output, 0L), Right(()))
       assertEquals(
         read(a, output, 0, 8),
-        0x3000L,
+        linkedGlobal,
         "initialiser must contain relocated ELF global address"
       )
       assertEquals(b.bindGlobal(pb, "device_global", global, 8L), Right(()))

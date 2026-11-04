@@ -597,6 +597,10 @@ private object InstructionCodec {
         ) || operand == Operand.SpecialRegister("vcc_lo")))((Map.empty[EncodingField, BigInt], None))
       case Some(field) =>
         def result(value: BigInt, literal: Option[OperandCodec.Literal] = None) = Some((Map(field -> value), literal))
+        def flagged(inner: Operand, modifier: EncodingField)                    =
+          encodeOperand(inner, info, target, layout, mods, mixed).map { case (values, literal) =>
+            (values + (modifier -> (BigInt(1) << field.index)), literal)
+          }
         def encoded = OperandCodec.encode(operand, info, target).map { case (value, literal) =>
           (Map(field -> BigInt(value)), literal)
         }
@@ -809,18 +813,12 @@ private object InstructionCodec {
               (values ++ field.extensionModifier.map(_ -> BigInt(1)), literal)
             }
           case Operand.Negated(inner) if SourceFields(field) && layout.byName.contains(EncodingField.NEG) =>
-            encodeOperand(inner, info, target, layout, mods, mixed).map { case (values, literal) =>
-              (values + (EncodingField.NEG -> (BigInt(1) << field.index)), literal)
-            }
+            flagged(inner, EncodingField.NEG)
           case Operand.Absolute(inner)
               if mixed && SourceFields(field) && layout.byName.contains(EncodingField.NEG_HI) =>
-            encodeOperand(inner, info, target, layout, mods, mixed).map { case (values, literal) =>
-              (values + (EncodingField.NEG_HI -> (BigInt(1) << field.index)), literal)
-            }
+            flagged(inner, EncodingField.NEG_HI)
           case Operand.Absolute(inner) if SourceFields(field) && layout.byName.contains(EncodingField.ABS) =>
-            encodeOperand(inner, info, target, layout, mods, mixed).map { case (values, literal) =>
-              (values + (EncodingField.ABS -> (BigInt(1) << field.index)), literal)
-            }
+            flagged(inner, EncodingField.ABS)
           case Operand.Register(RegisterFile.VectorRegister, first, last)
               if vectorRegister(info.kind) && first >= 0 && first < 256 &&
                 last - first + 1 ==
@@ -874,8 +872,9 @@ private object InstructionCodec {
           .filter(_.encoded == Vec.unsafeWrapArray(code.bytes.slice(offset, offset + candidate.size)))
           .map(decoded => DecodedInstruction(decoded.instruction, candidate.size)).toVec
       }.distinct
-    val canonical = OpcodeIndex.canonical(candidates, target)(_.instruction.definition).filterNot(value =>
-      value.instruction.opcode.raw.startsWith("v_wmma_ld_scale") && candidates.exists(_.size == 16)
+    val wideCandidates = candidates.exists(_.size == 16)
+    val canonical      = OpcodeIndex.canonical(candidates, target)(_.instruction.definition).filterNot(value =>
+      value.instruction.opcode.raw.startsWith("v_wmma_ld_scale") && wideCandidates
     )
     canonical match {
       case Vec(value) => Right(value)
@@ -993,7 +992,17 @@ private object InstructionCodec {
         case Some(field) =>
           val number = layout.get(word, field).toInt
           val bits   = registerWidth(info, layout, fields)
-          val base   = if (info.kind.isAccumulatorOnly) Some(Operand.Register(
+          def off    =
+            (field == EncodingField.ADDR || field == EncodingField.VADDR) && layout.format.isScratch &&
+              layout.byName.contains(EncodingField.SVE) && layout.get(word, EncodingField.SVE) == 0 ||
+              layout.format == EncodingFormat.FLAT_SCRATCH && layout.isa.isGFX10 &&
+              layout.get(word, EncodingField.SADDR) == 127 &&
+              (field == EncodingField.SADDR || field == EncodingField.ADDR) ||
+              field == EncodingField.SADDR && number == nullRegister(layout) ||
+              field == EncodingField.VADDR && layout.format.isBuffer &&
+              layout.get(word, EncodingField.OFFEN) == 0 && layout.get(word, EncodingField.IDXEN) == 0 &&
+              layout.get(word, EncodingField.ADDR64) == 0
+          val base = if (info.kind.isAccumulatorOnly) Some(Operand.Register(
             RegisterFile.Accumulator,
             if (SourceFields(field)) number - 256 else number,
             (if (SourceFields(field)) number - 256 else number) + (bits + 31) / 32 - 1
@@ -1064,23 +1073,7 @@ private object InstructionCodec {
             field == EncodingField.SOFFSET && info.kind == OperandKind.SMEM_OFFSET && number == nullRegister(layout)
           )
             Some(Operand.IntegerLiteral(smemImmediate(target, layout.get(word, EncodingField.OFFSET)), 10))
-          else if (
-            (field == EncodingField.ADDR || field == EncodingField.VADDR) &&
-            layout.format.isScratch &&
-            layout.byName.contains(EncodingField.SVE) && layout.get(word, EncodingField.SVE) == 0
-          ) Some(Operand.Identifier("off"))
-          else if (
-            layout.format == EncodingFormat.FLAT_SCRATCH && layout.isa.isGFX10 &&
-            layout.get(word, EncodingField.SADDR) == 127 &&
-            (field == EncodingField.SADDR || field == EncodingField.ADDR)
-          ) Some(Operand.Identifier("off"))
-          else if (field == EncodingField.SADDR && number == nullRegister(layout)) Some(Operand.Identifier("off"))
-          else if (
-            field == EncodingField.VADDR &&
-            layout.format.isBuffer &&
-            layout.get(word, EncodingField.OFFEN) == 0 && layout.get(word, EncodingField.IDXEN) == 0 &&
-            layout.get(word, EncodingField.ADDR64) == 0
-          ) Some(Operand.Identifier("off"))
+          else if (off) Some(Operand.Identifier("off"))
           else if (
             info.bits == 16 && !layout.byName.contains(EncodingField.OP_SEL) &&
             (info.kind.isVector || (SourceFields(field) && number >= 256))

@@ -13,6 +13,11 @@ function(minibude_adapt model source)
     string(REPLACE [=[${CMAKE_BINARY_DIR}/generated]=] [=[${CMAKE_CURRENT_BINARY_DIR}/generated]=] content "${content}")
     file(WRITE "${path}" "${content}")
   endforeach()
+  if(CONFORMANCE_BACKEND STREQUAL "cuda" AND CONFORMANCE_CUDA_CODE STREQUAL "ptx" AND NOT CONFORMANCE_COMPILER STREQUAL "clang" AND model STREQUAL "cuda")
+    patch_exact("${source}/src/cuda/model.cmake"
+      [=[        string(REGEX REPLACE "^sm_" "" CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCH}")]=]
+      [=[        set(CMAKE_CUDA_ARCHITECTURES OFF)]=])
+  endif()
   if(CONFORMANCE_BACKEND STREQUAL "opencl" AND model STREQUAL "ocl")
     foreach(axis RANGE 0 2)
       foreach(function IN ITEMS sin cos)
@@ -26,7 +31,7 @@ function(minibude_adapt model source)
 endfunction()
 
 conformance_miniapp(minibude
-  MODELS cuda hip omp-target=omp kokkos ocl sycl acc
+  MODELS cuda hip omp-target=omp kokkos ocl sycl acc std-indices
   MAIN src/main.cpp
   LICENCE_FILE LICENSE.txt miniBUDE.txt
   EXCLUDE data makedeck

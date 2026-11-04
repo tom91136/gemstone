@@ -4,7 +4,7 @@ import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.compiletime.testing.typeChecks
 

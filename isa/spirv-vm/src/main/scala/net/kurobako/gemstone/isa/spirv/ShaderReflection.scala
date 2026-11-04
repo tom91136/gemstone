@@ -27,12 +27,12 @@ private object ShaderReflection {
     def qualifiers(parent: ShaderQualifiers): ShaderQualifiers = {
       require(!values.contains(Decoration.Sample), "sample interpolation is unsupported")
       require(!values.contains(Decoration.Index), "dual source interfaces are unsupported")
-      val component = get(Decoration.Component).map(value =>
+      val component = get(Decoration.Component).fold(parent.component)(value =>
         value.refine[Int in 0 ~ 3].fold(
           _ => throw IllegalArgumentException(s"interface component $value is out of range"),
           identity
         )
-      ).getOrElse(parent.component)
+      )
       ShaderQualifiers(
         parent.flat || values.contains(Decoration.Flat),
         parent.noPerspective || values.contains(Decoration.NoPerspective),
@@ -128,7 +128,7 @@ private object ShaderReflection {
         def located(value: Int, offset: Int >= 0, location: Int >= 0, q: ShaderQualifiers): Int >= 0 =
           program.types(value) match {
             case RuntimeType.Array(element, count) =>
-              val stride: Int >= 0 = program.arrayStrides.get(value).fold(program.typeSize(element))(identity)
+              val stride: Int >= 0 = program.arrayStrides.get(value).fold(program.typeSize(element))(_.widen[Int >= 0])
               Vec.indices(count.toIntExact).foldLeft(location)((next, index) =>
                 located(element, offset + index * stride, next, q)
               )

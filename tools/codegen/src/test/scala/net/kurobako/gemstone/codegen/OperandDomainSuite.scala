@@ -10,7 +10,7 @@ import net.kurobako.gemstone.codegen.OperandDomain.*
 import net.kurobako.gemstone.codegen.OperandDomainLLVM.{read as _, *}
 import net.kurobako.gemstone.codegen.OperandDomainOracle.{read as _, *}
 import net.kurobako.gemstone.isa.catalogue.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import org.w3c.dom.Document
 import org.xml.sax.InputSource
 import scala.collection.immutable.SortedMap

@@ -84,8 +84,15 @@ object protocol {
       check(payload >= 0 && header.toLong + payload == frameSize)
     }
 
+    /** Reads the magic that opens the next response, passing over any heartbeats the server sent while executing. */
+    @annotation.tailrec
+    def responseMagic(input: DataInputStream): Int = {
+      val magic = input.readInt()
+      if (magic == ExecutionRPC.HeartbeatMagic) responseMagic(input) else magic
+    }
+
     def readResponse(input: DataInputStream, maximum: Int): Array[Byte] = {
-      val receivedMagic = input.readInt()
+      val receivedMagic = responseMagic(input)
       if (receivedMagic != ExecutionRPC.ResponseMagic) throw IOException("unexpected RPC response magic")
       val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes).putInt(receivedMagic).array()
       input.readFully(prefix, Integer.BYTES, prefix.length - Integer.BYTES)
@@ -125,11 +132,11 @@ object protocol {
   def readPayload(input: DataInputStream, header: Header): Array[Byte] =
     readExactly(input, header.payloadSize, EOFException(_))
 
-  def writeResponse(output: DataOutputStream, result: Either[ExecutionFailure, Array[Byte]]): Unit = {
+  def writeResponse(output: DataOutputStream, result: Either[ExecutionFailure, msgpack.Encoded]): Unit = {
     val (status, payload) = result match {
-      case Right(bytes) => 0 -> bytes
-      case Left(error)  =>
-        val encoded = summon[Wire.Codec[ExecutionFailure]].encode(error, ExecutionRPC.Limits)
+      case Right(encoded) => 0 -> encoded
+      case Left(error)    =>
+        val encoded = summon[Wire.Codec[ExecutionFailure]].encoded(error, ExecutionRPC.Limits)
           .fold(message => throw IllegalArgumentException(s"cannot encode execution failure: $message"), value => value)
         1 -> encoded
     }
@@ -138,7 +145,7 @@ object protocol {
     output.writeInt(ExecutionRPC.ResponseMagic)
     output.writeInt(status)
     output.writeInt(payload.length)
-    if (payload.nonEmpty) output.write(payload)
+    output.write(payload.bytes, 0, payload.length)
     output.flush()
   }
 

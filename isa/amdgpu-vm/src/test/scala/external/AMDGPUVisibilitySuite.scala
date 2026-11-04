@@ -2,7 +2,7 @@ package external
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.compiletime.testing.typeCheckErrors
 
 class AMDGPUVisibilitySuite extends Suite {

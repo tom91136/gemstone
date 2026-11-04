@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class CountedBarrierSuite extends Suite {
   for ((count, peerMask, barrierId) <- Vec((64, 32, "mov.u32 %id, 0;"), (32, 1, "shr.u32 %id, %lane, 5;")))

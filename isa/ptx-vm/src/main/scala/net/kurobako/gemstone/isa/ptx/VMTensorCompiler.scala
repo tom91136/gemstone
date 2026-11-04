@@ -182,12 +182,10 @@ private object VMTensorCompiler {
     val scaleType = tokens(token => token == Modifier.Ue8m0 || token == Modifier.Ue4m3)
     val sync      = Vec(Modifier.Sync, Modifier.Aligned)
     val ordered   =
-      if (wmma)
-        Vec(
-          bitwise ++ sync ++ laid ++ shaped ++ rounded ++ typed ++ saturate,
-          bitwise ++ sync ++ laid ++ shaped ++ typed ++ rounded
-        )
-      else
+      if (wmma) {
+        val head = bitwise ++ sync ++ laid ++ shaped
+        Vec(head ++ rounded ++ typed ++ saturate, head ++ typed ++ rounded)
+      } else
         Vec(shaped ++ laid, laid ++ shaped).map(prefix =>
           sync ++ prefix ++ scaled ++ saturate ++ typed ++ bitwise ++ scaleType ++ rounded
         )

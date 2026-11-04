@@ -16,7 +16,7 @@ object Backends {
       SPIRVBackend(Validation.Environment.VulkanCompute, ProgramFormat.SPIRVVulkanCompute, workgroups),
       SPIRVBackend(Validation.Environment.VulkanGraphics, ProgramFormat.SPIRVVulkanGraphics, workgroups)
     ),
-    Some(Specialization),
+    Some(SPIRVSpecialization),
     Some(GraphicsRuntime(workgroups))
   )
 }

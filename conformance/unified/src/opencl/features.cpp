@@ -544,33 +544,33 @@ void intelSubgroups(size_t items) {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/1d/n100-l32", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/1d/n100-l32", "[unified][runtime]") {
   geometry(1, {100, 1, 1}, Shape{32, 1, 1}, {0, 0, 0});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/2d/n37x11-l8x4-o3x1", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/2d/n37x11-l8x4-o3x1", "[unified][runtime]") {
   geometry(2, {37, 11, 1}, Shape{8, 4, 1}, {3, 1, 0});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/3d/n13x7x5-l4x2x2", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/3d/n13x7x5-l4x2x2", "[unified][runtime]") {
   geometry(3, {13, 7, 5}, Shape{4, 2, 2}, {0, 0, 0});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/3d/n13x7x5-implicit", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/non-uniform-work-group/3d/n13x7x5-implicit", "[unified][runtime]") {
   geometry(3, {13, 7, 5}, std::nullopt, {0, 0, 0});
 }
 
 #define UNIFIED_OPENCL_COLLECTIVES(TYPE, NAME)                                                                                             \
-  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/1d/n256-l64", "[unified][runtime][compact]") {                      \
+  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/1d/n256-l64", "[unified][runtime]") {                               \
     collectives<TYPE>(1, {256, 1, 1}, {64, 1, 1});                                                                                         \
   }                                                                                                                                        \
-  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/1d/n100-l32", "[unified][runtime][compact]") {                      \
+  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/1d/n100-l32", "[unified][runtime]") {                               \
     collectives<TYPE>(1, {100, 1, 1}, {32, 1, 1});                                                                                         \
   }                                                                                                                                        \
-  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/2d/n13x6-l4x4", "[unified][runtime][compact]") {                    \
+  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/2d/n13x6-l4x4", "[unified][runtime]") {                             \
     collectives<TYPE>(2, {13, 6, 1}, {4, 4, 1});                                                                                           \
   }                                                                                                                                        \
-  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/3d/n6x5x3-l4x2x2", "[unified][runtime][compact]") {                 \
+  TEST_CASE("edge-cases/runtime/opencl/work-group-collectives/" NAME "/3d/n6x5x3-l4x2x2", "[unified][runtime]") {                          \
     collectives<TYPE>(3, {6, 5, 3}, {4, 2, 2});                                                                                            \
   }
 
@@ -581,10 +581,10 @@ UNIFIED_OPENCL_COLLECTIVES(uint64_t, "u64")
 UNIFIED_OPENCL_COLLECTIVES(float, "f32")
 UNIFIED_OPENCL_COLLECTIVES(double, "f64")
 
-TEST_CASE("edge-cases/runtime/opencl/generic-address-space/pointers/n128-l32", "[unified][runtime][compact]") { generic(128, 32); }
+TEST_CASE("edge-cases/runtime/opencl/generic-address-space/pointers/n128-l32", "[unified][runtime]") { generic(128, 32); }
 
-TEST_CASE("edge-cases/runtime/opencl/program-scope-globals/persistence/n64-x3", "[unified][runtime][compact]") { globals(64, 3); }
+TEST_CASE("edge-cases/runtime/opencl/program-scope-globals/persistence/n64-x3", "[unified][runtime]") { globals(64, 3); }
 
-TEST_CASE("edge-cases/runtime/opencl/svm/fine-grain-system/n64-x96", "[unified][runtime][compact]") { systemPointers(96, 64); }
+TEST_CASE("edge-cases/runtime/opencl/svm/fine-grain-system/n64-x96", "[unified][runtime]") { systemPointers(96, 64); }
 
-TEST_CASE("edge-cases/runtime/opencl/intel-subgroups/blocks-and-shuffles/n64", "[unified][runtime][compact]") { intelSubgroups(64); }
+TEST_CASE("edge-cases/runtime/opencl/intel-subgroups/blocks-and-shuffles/n64", "[unified][runtime]") { intelSubgroups(64); }

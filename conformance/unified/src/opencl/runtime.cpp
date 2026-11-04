@@ -102,6 +102,6 @@ void execute(bool binaryRoundtrip) {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/opencl/source-local-barrier/i32/n128", "[unified][runtime][compact]") { execute(false); }
+TEST_CASE("edge-cases/runtime/opencl/source-local-barrier/i32/n128", "[unified][runtime]") { execute(false); }
 
-TEST_CASE("edge-cases/runtime/opencl/binary-roundtrip/i32/n128", "[unified][runtime][compact]") { execute(true); }
+TEST_CASE("edge-cases/runtime/opencl/binary-roundtrip/i32/n128", "[unified][runtime]") { execute(true); }

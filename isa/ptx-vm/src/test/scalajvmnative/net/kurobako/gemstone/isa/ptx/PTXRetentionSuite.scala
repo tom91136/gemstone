@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class PTXRetentionSuite extends Suite {

@@ -123,6 +123,10 @@ double positiveScale(const char *name) {
     thousandths *= 10;
   return static_cast<double>(whole) + (static_cast<double>(thousandths) / 1000.0);
 }
+std::string readFile(const fs::path &path) {
+  std::ifstream stream(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(stream), {}};
+}
 } // namespace
 uint32_t availableThreadCount() {
 #ifdef __linux__
@@ -255,16 +259,34 @@ std::vector<std::string> gtestCaseNames(std::string_view listing, std::string_vi
       if (!unique.insert(name).second) throw std::runtime_error("duplicate Google Test case from " + std::string(program));
       if (!name.contains("DISABLED_")) result.push_back(name);
     } else {
-      if (line.back() != '.') throw std::runtime_error("invalid Google Test suite from " + std::string(program));
+      line = line.substr(0, line.find('#'));
+      line = line.substr(0, line.find_last_not_of(' ') + 1);
+      if (line.empty() || line.back() != '.') throw std::runtime_error("invalid Google Test suite from " + std::string(program));
       suite = line;
     }
   }
   return result;
 }
+bool gtestSkipped(std::string_view report) {
+  static const std::regex testcase(R"re(<testcase [^>]*\sresult="([a-z]+)")re");
+  bool skipped = false;
+  size_t count = 0;
+  for (std::cregex_iterator match(report.data(), report.data() + report.size(), testcase), end; match != end; ++match, ++count) {
+    const auto result = (*match)[1].str();
+    if (result == "skipped") skipped = true;
+    else if (result != "completed") throw std::runtime_error("unexpected Google Test result " + result);
+  }
+  if (count == 0) throw std::runtime_error("missing Google Test result");
+  return skipped;
+}
+bool gtestCaseSelected(std::string_view program, const std::string &name, const std::vector<std::string> &levelzeroCases) {
+  if (!program.starts_with("levelzero_") || levelzeroCases.empty()) return true;
+  return levelzeroCases ^ exists([&](const std::string &pattern) { return globMatches(pattern, name); });
+}
+std::string catchSpec(const std::vector<std::string> &specs) { return specs ^ mk_string("", ",", ""); }
 std::vector<std::string> catchShardArguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count) {
   if (count == 0 || index >= count) throw std::invalid_argument("invalid Catch shard");
-  return concat(std::vector<std::string>{"--order", "lex", "--shard-count", fmt::to_string(count), "--shard-index", fmt::to_string(index)},
-                specs);
+  return {"--order", "lex", "--shard-count", fmt::to_string(count), "--shard-index", fmt::to_string(index), catchSpec(specs)};
 }
 std::vector<std::string> launcherArguments(std::span<char *const> arguments) {
   auto command = std::vector<std::string>(arguments.begin(), arguments.end())
@@ -289,8 +311,16 @@ std::vector<profile::ResolvedTarget> uniqueRoutes(const std::vector<profile::Res
 static bool validArtifactKey(std::string_view value) {
   return !value.empty() && validIdentifier(value) && value.front() != '.' && value.front() != '_' && value.front() != '-';
 }
+static std::string cudaCode(const conformance::profile::ResolvedTarget &target) {
+  const auto mode = target.environment ^ get_maybe(std::string(environment::CudaCodeMode)) ^ get_or_else(std::string{});
+  return mode == "ptx" ? "ptx" : "fatbin";
+}
+static std::string artifactBase(const conformance::profile::ResolvedTarget &target) {
+  if (target.backend != "cuda") return target.backend;
+  return cudaCode(target) == "ptx" ? "cuda-ptx" : "cuda";
+}
 static fs::path artifactDirectory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target) {
-  auto result = configuration.artifacts / target.backend;
+  auto result = configuration.artifacts / artifactBase(target);
   if (target.compiler != "vendor") result /= target.compiler;
   if (target.architecture) result /= *target.architecture;
   return result;
@@ -302,16 +332,32 @@ static ArtifactMetadata validateArtifact(const fs::path &artifact, const conform
   if (const auto error = glz::read_file_toml(metadata, file.string(), buffer); error)
     throw std::runtime_error("cannot read conformance artifact metadata " + file.string() + ":\n" + glz::format_error(error, buffer));
   const auto architecture = target.architecture.value_or("");
-  if (metadata.backend != target.backend || metadata.architecture != architecture || metadata.compiler != target.compiler)
+  const auto code = target.backend == "cuda" ? cudaCode(target) : std::string{};
+  if (metadata.backend != target.backend || metadata.architecture != architecture || metadata.compiler != target.compiler
+      || metadata.code != code)
     throw std::runtime_error("conformance artifact metadata does not match requested " + target.backend + ": " + file.string());
   if (!metadata.support.empty() && !validArtifactKey(metadata.support))
     throw std::runtime_error("conformance artifact has an invalid support key: " + file.string());
+  for (const auto &supplement : metadata.supplements)
+    if (!validArtifactKey(supplement)) throw std::runtime_error("conformance artifact has an invalid supplement key: " + file.string());
   return metadata;
 }
 static fs::path supportDirectory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
                                  const ArtifactMetadata &metadata) {
   if (target.architecture) return configuration.artifacts / target.backend / (metadata.support.empty() ? "support" : metadata.support);
   return artifactDirectory(configuration, target);
+}
+
+static std::vector<fs::path> supplementDirectories(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
+                                                   const ArtifactMetadata &metadata) {
+  return metadata.supplements ^ map([&](const std::string &key) { return configuration.artifacts / target.backend / key; });
+}
+
+static bool jitWarmed(const ArtifactMetadata &metadata, bool isolatedLauncher) { return metadata.code == "ptx" && !isolatedLauncher; }
+std::vector<std::string> jitWarmupPrograms(const ArtifactMetadata &metadata, bool isolatedLauncher,
+                                           const std::vector<ScheduledCase> &tests) {
+  if (!jitWarmed(metadata, isolatedLauncher)) return {};
+  return tests | map([](const ScheduledCase &test) { return test.program; }) | to<std::set>() | to_vector();
 }
 
 static std::vector<std::string> launched(const std::vector<std::string> &launcher, std::vector<std::string> command) {
@@ -342,6 +388,15 @@ Workload loadWorkload(const RunOptions &configuration) {
     replace(workload.vulkanCases, fields.vulkanCases);
     replace(workload.vulkanMustpass, fields.vulkanMustpass);
     replace(workload.excludePrograms, fields.excludePrograms);
+    replace(workload.excludeCases, fields.excludeCases);
+    const auto append = [](auto &destination, auto &source) {
+      if (source) destination.insert(destination.end(), source->begin(), source->end());
+    };
+    append(workload.includePrograms, fields.addIncludePrograms);
+    append(workload.levelzeroCases, fields.addLevelzeroCases);
+    append(workload.vulkanCases, fields.addVulkanCases);
+    append(workload.excludePrograms, fields.addExcludePrograms);
+    append(workload.excludeCases, fields.addExcludeCases);
     active.erase(name);
     return workload;
   };
@@ -382,7 +437,7 @@ static std::vector<TestProgram> testPrograms(const fs::path &artifact, const Wor
   }
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
   std::erase_if(result, [&](const TestProgram &program) {
-    return workload.excludePrograms ^ contains(program.name)
+    return workload.excludePrograms ^ exists([&](const std::string &pattern) { return globMatches(pattern, program.name); })
            || (!workload.includePrograms.empty()
                && workload.includePrograms ^ none_match([&](const std::string &pattern) { return globMatches(pattern, program.name); }));
   });
@@ -487,7 +542,7 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
       command = {program.path.string(), "--deqp-runmode=stdout-caselist", "--deqp-shadercache=disable",
                  "--deqp-caselist-file=" + path.string(), "--deqp-archive-dir=" + archive.string()};
     } else if (!gtest) {
-      command.insert(command.end(), workload.specs.begin(), workload.specs.end());
+      command.push_back(catchSpec(workload.specs));
     }
     // dEQP inventories can exceed hundreds of megabytes. Spool them to disk
     // and parse line by line instead of keeping a capped process capture.
@@ -522,10 +577,11 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
         throw std::runtime_error("Vulkan CTS selector matches no cases: " + *missing);
       std::erase_if(names, [&](const auto &name) { return !selected.contains(name); });
     }
-    if (gtest && !workload.levelzeroCases.empty())
-      std::erase_if(names, [&](const std::string &name) {
-        return workload.levelzeroCases ^ none_match([&](const std::string &pattern) { return globMatches(pattern, name); });
-      });
+    if (gtest)
+      std::erase_if(names, [&](const std::string &name) { return !gtestCaseSelected(program.name, name, workload.levelzeroCases); });
+    std::erase_if(names, [&](const std::string &name) {
+      return workload.excludeCases ^ exists([&](const std::string &pattern) { return globMatches(pattern, name); });
+    });
     if (names.size() > UINT32_MAX) throw std::runtime_error("test inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
     // Physical device throughput does not depend on host cores.
@@ -558,7 +614,12 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
   environment[environment::TargetBackendName] = target.backend;
   environment[environment::TargetArch] = target.architecture.value_or("");
   if (configuration.isolatedLauncher) applySuiteIsolatedEnvironment(environment, target.backend);
-  prepareRuntimeEnvironment(environment, artifact, support, target.backend);
+  const auto supplements = supplementDirectories(configuration, target, metadata);
+  for (const auto &supplement : supplements)
+    if (!fs::is_directory(supplement)) throw std::runtime_error("missing artifact support: " + supplement.string());
+  prepareRuntimeEnvironment(environment, artifact, support, supplements, target.backend);
+  if (jitWarmed(metadata, configuration.isolatedLauncher))
+    applyJitCacheEnvironment(environment, fs::absolute(configuration.output / "jit-cache"));
   const auto reports = runDirectory / target.id;
   fs::create_directories(reports);
   ExecutionConfig exec{.directory = artifact.string(),
@@ -568,13 +629,16 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
                        .launcher = configuration.launcher,
                        .skips = configuration.isolatedLauncher ? std::vector<std::string>{} : target.skips,
                        .specs = workload.specs,
-                       .deviceLock = !configuration.direct && !configuration.isolatedLauncher};
+                       .deviceLock = !configuration.direct && !configuration.isolatedLauncher,
+                       .jitPrograms = {},
+                       .jitFailures = {}};
   applyDeviceProbe(exec, probeDevice(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probeDevice(configuration, artifact, exec.environment, target.id);
   if (verified.device != exec.device) throw std::runtime_error("device selection changed after propagation for " + target.id);
   auto tests = discoverCases(configuration, workload, artifact, exec.environment, target.id, reports);
   if (tests.empty()) return std::nullopt;
+  exec.jitPrograms = jitWarmupPrograms(metadata, configuration.isolatedLauncher, tests);
   std::ofstream record(reports / "environment.txt", std::ios::binary | std::ios::trunc);
   for (const auto &[key, value] : exec.environment)
     record << key << '=' << value << '\n';
@@ -582,28 +646,34 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
   if (!record) throw std::runtime_error("cannot record the environment of " + target.id);
   return TargetExecution{.id = target.id, .config = std::move(exec), .tests = std::move(tests)};
 }
+static bool profileSkipped(const ExecutionConfig &config, const ScheduledCase &test) {
+  return config.skips
+         ^ exists([&](const std::string &pattern) { return globMatches(pattern, test.program) || globMatches(pattern, test.identity); });
+}
 CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test) {
   if (!validName(test.program)) throw std::invalid_argument("invalid test program");
-  if (config.skips
-      ^ exists([&](const std::string &pattern) { return globMatches(pattern, test.program) || globMatches(pattern, test.identity); }))
+  if (profileSkipped(config, test))
     return {.status = SkipReturnCode, .output = "SKIP " + test.identity + ": machine profile\n", .message = {}};
+  if (const auto failure = config.jitFailures ^ get_maybe(test.program)) {
+    auto message = fmt::format("JIT warm-up of {} failed: {}", test.program, *failure);
+    return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message)};
+  }
   const auto environmentValue = [&](const char *key) -> std::string_view {
     const auto entry = config.environment.find(key);
     return entry == config.environment.end() ? std::string_view{} : entry->second;
   };
   const auto backend = environmentValue(environment::TargetBackendName);
   const auto support = environmentValue(environment::SupportDir);
-  if (test.program == "unified" && !support.empty() && (backend == "cuda" || backend == "hip")) {
-    const auto *const libraryName = backend == "cuda" ? "libcublas.so" : "librocblas.so";
+  if (test.program == "unified" && !support.empty() && backend == "hip") {
     // Match the same artifact-first search order as the runtime environment.
-    const auto reason =
-        (std::vector{fs::path(config.directory), fs::path(support)} | map([&](const fs::path &root) { return root / "lib" / libraryName; })
-         | find([](const fs::path &library) { return fs::is_regular_file(library); }))
-        ^ map([&](const fs::path &library) {
-            return suiteBlasSkip(backend, environmentValue(environment::TargetArch), environmentValue(environment::CudaCodeMode),
-                                 fs::canonical(library).filename().string(), test.program, test.identity);
-          })
-        ^ filter([](std::string_view skip) { return !skip.empty(); });
+    const auto reason = (std::vector{fs::path(config.directory), fs::path(support)}
+                         | map([&](const fs::path &root) { return root / "lib" / "librocblas.so"; })
+                         | find([](const fs::path &library) { return fs::is_regular_file(library); }))
+                        ^ map([&](const fs::path &library) {
+                            return suiteBlasSkip(backend, environmentValue(environment::TargetArch),
+                                                 fs::canonical(library).filename().string(), test.program, test.identity);
+                          })
+                        ^ filter([](std::string_view skip) { return !skip.empty(); });
     if (reason) return {.status = SkipReturnCode, .output = fmt::format("SKIP {}: {}\n", test.identity, *reason), .message = {}};
   }
   const auto programs = testPrograms(config.directory, Workload{});
@@ -616,6 +686,8 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   const auto report = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
   fs::create_directories(report);
   auto environment = config.environment;
+  if (const auto devices = suiteCaseDeviceCount(test.program, test.identity); !devices.empty())
+    environment[environment::DeviceCount] = std::string(devices);
   if (deqp) {
     arguments = {program.string(),
                  "--deqp-case=" + test.identity,
@@ -628,7 +700,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     fs::remove(report / "result.qpa");
   } else {
     if (gtest) {
-      arguments = {"--gtest_filter=" + test.identity};
+      arguments = {"--gtest_filter=" + test.identity, "--gtest_output=xml:" + (report / "gtest.xml").string()};
     } else {
       const bool sharded = suiteUsesCatchSharding(test.program);
       arguments = catchShardArguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
@@ -646,11 +718,17 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   auto status = process.status;
   std::string record;
   if (status == 0 && deqp) {
-    std::ifstream qpa(report / "result.qpa", std::ios::binary);
-    const auto result = deqpResult(std::string(std::istreambuf_iterator<char>(qpa), {}), test.identity);
+    const auto result = deqpResult(readFile(report / "result.qpa"), test.identity);
     record = fmt::format("dEQP {}: {}\n", test.identity, result.statusCode);
     output << record;
     status = result.status;
+  }
+  if (status == 0 && gtest) {
+    if (gtestSkipped(readFile(report / "gtest.xml"))) {
+      record = fmt::format("gtest {}: skipped\n", test.identity);
+      output << record;
+      status = SkipReturnCode;
+    }
   }
   output.close();
   auto message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
@@ -704,7 +782,71 @@ void writeJunit(const fs::path &path, const std::vector<CaseReport> &reports) {
   file.close();
   if (!file) throw std::runtime_error("cannot write JUnit report " + path.string());
 }
+std::optional<ScheduledCase> jitWarmupCase(const ExecutionConfig &config, const std::vector<ScheduledCase> &tests, std::string_view program,
+                                           double timeoutScale) {
+  return tests ^ find([&](const ScheduledCase &test) { return test.program == program && !profileSkipped(config, test); })
+         ^ map([&](ScheduledCase test) {
+             test.timeoutSeconds = scaledTimeout(JitWarmupSeconds, timeoutScale, TimeoutReferenceCores);
+             return test;
+           });
+}
 } // namespace
+void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double timeoutScale, const CaseExecutor &execute) {
+  struct Warmup {
+    size_t target;
+    ScheduledCase test;
+  };
+  std::vector<Warmup> pending;
+  for (size_t index = 0; index < targets.size(); ++index)
+    for (const auto &program : targets[index].config.jitPrograms)
+      if (const auto test = jitWarmupCase(targets[index].config, targets[index].tests, program, timeoutScale))
+        pending.push_back({.target = index, .test = *test});
+  if (pending.empty()) return;
+  const Interruption interruption;
+  const auto begin = std::chrono::steady_clock::now();
+  std::cout << "conformance JIT warm-up: " << pending.size() << " programs\n" << std::flush;
+  std::mutex mutex;
+  std::atomic<size_t> next{0};
+  std::vector<std::tuple<size_t, std::string, std::string>> failures;
+  {
+    std::vector<std::jthread> workers;
+    for (size_t worker = 0; worker < std::min<size_t>(jobs, pending.size()); ++worker)
+      workers.emplace_back([&] {
+        while (!Interruption::signal()) {
+          const auto index = next.fetch_add(1);
+          if (index >= pending.size()) break;
+          const auto &warmup = pending[index];
+          const auto &target = targets[warmup.target];
+          auto config = target.config;
+          config.reportDirectory = (fs::path(config.reportDirectory) / "warmup").string();
+          config.environment["CUDA_MODULE_LOADING"] = "EAGER";
+          const auto started = std::chrono::steady_clock::now();
+          CaseResult result;
+          try {
+            result = execute(config, warmup.test);
+          } catch (const std::exception &error) {
+            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}};
+          }
+          const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - started;
+          const bool usable = result.status == 0 || skipped(result);
+          const std::scoped_lock lock(mutex);
+          std::osyncstream message(std::cout);
+          message << fmt::format("conformance JIT warm-up {}/{} ... {} {:.2f} s\n", target.id, warmup.test.program,
+                                 usable ? "Passed" : "***Failed", elapsed.count());
+          if (!usable) {
+            message << result.output;
+            failures.emplace_back(warmup.target, warmup.test.program, failureMessage(result));
+          }
+          message << std::flush;
+        }
+      });
+  }
+  for (const auto &[target, program, reason] : failures)
+    targets[target].config.jitFailures[program] = reason;
+  std::cout << fmt::format("conformance JIT warm-up completed in {:.1f} s\n",
+                           std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count())
+            << std::flush;
+}
 std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute) {
   const Interruption interruption;
   const auto total = targets ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
@@ -721,15 +863,28 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
   size_t cursor = 0;
   size_t started = 0;
   size_t finished = 0;
-  // Interleave targets so every route makes progress from the start.
+  bool exclusiveActive = false;
+  const auto exclusiveHead = [&](size_t index) {
+    const auto &tests = targets[index].tests;
+    return next[index] < tests.size() && suiteExclusiveCase(tests[next[index]].program, tests[next[index]].identity);
+  };
+  // Interleave targets so every route makes progress from the start. A pending exclusive head holds back
+  // other starts, so a stream of ordinary cases cannot starve it.
   const auto claim = [&]() -> std::optional<std::pair<size_t, size_t>> {
+    if (exclusiveActive) return std::nullopt;
+    bool exclusivePending = false;
+    for (size_t index = 0; index < targets.size(); ++index)
+      exclusivePending |= exclusiveHead(index);
     for (size_t step = 0; step < targets.size(); ++step) {
       const auto index = (cursor + step) % targets.size();
       const auto device = resource(targets[index]);
       if (next[index] == targets[index].tests.size() || !available(device)) continue;
+      const bool exclusive = exclusiveHead(index);
+      if (exclusive ? started != finished : exclusivePending) continue;
       if (!device.empty()) busy.insert(device);
       cursor = index + 1;
       ++started;
+      exclusiveActive = exclusive;
       return std::pair{index, next[index]++};
     }
     return std::nullopt;
@@ -762,6 +917,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
           result.elapsed = std::chrono::steady_clock::now() - begin;
           lock.lock();
           if (const auto device = resource(target); !device.empty()) busy.erase(device);
+          exclusiveActive = false;
           std::osyncstream message(std::cout);
           message << fmt::format("[{:>{}}/{}] {}/{}/{} ... {} {:.2f} s\n", ++finished, width, total, target.id, test.program, test.identity,
                                  resultLabel(result), result.elapsed.count());
@@ -871,7 +1027,19 @@ int32_t run(RunOptions configuration) {
   std::cout << "conformance discovery completed in " << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
             << "s\n"
             << std::flush;
+  if (configuration.dryRun) {
+    for (const auto &target : prepared) {
+      std::map<std::string, size_t> counts;
+      for (const auto &test : target.tests)
+        ++counts[test.program];
+      for (const auto &[program, count] : counts)
+        std::cout << fmt::format("conformance cases {} {} {}\n", target.id, program, count);
+      std::cout << fmt::format("conformance cases {} total {}\n", target.id, target.tests.size());
+    }
+    return 0;
+  }
   if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
+  warmUpJit(prepared, static_cast<uint32_t>(jobCount), configuration.timeoutScale, executeCase);
   const auto executed = std::chrono::steady_clock::now();
   const auto results = runCases(prepared, static_cast<uint32_t>(jobCount), executeCase);
   writeJunit(reports / "junit.xml", results);

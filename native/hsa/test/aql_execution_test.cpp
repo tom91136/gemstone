@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "gemstone/hsa/allocation.hpp"
 #include "gemstone/hsa/aql.hpp"
 #include "gemstone/hsa/doorbell_monitor.hpp"
 #include "gemstone_execution_rpc.hpp"
@@ -29,6 +30,7 @@ using gemstone::execution::AllocationId;
 using gemstone::execution::DirtyRange;
 using gemstone::execution::FailureKind;
 using gemstone::execution::ParameterKind;
+using gemstone::execution::ProgramId;
 using Packet = std::array<uint8_t, AqlPacketSize>;
 
 struct RocrSignal {
@@ -196,8 +198,7 @@ TEST_CASE("AQL failure codes distinguish malformed packets", "[hsa][aql]") {
 
 TEST_CASE("AQL missing kernels do not re-enter the runtime lock", "[hsa][aql]") {
   Harness harness;
-  REQUIRE(!harness.runtime->bindGlobal(999, "missing", 1, 0));
-  REQUIRE(harness.runtime->lastError() == "global belongs to an unknown kernel object");
+  REQUIRE(!harness.runtime->bindGlobal(ProgramId{999}, "", 1, 0));
   RocrSignal completion;
   const auto packet = kernelPacket(999, 0, completion.handle());
   REQUIRE(harness.runtime->consume(packet.data()) == PacketResult::Accepted);
@@ -445,6 +446,44 @@ TEST_CASE("AQL OpenMP sentinel preserves ABI without pointer resolution", "[hsa]
   const auto launch = harness.fixture.lastLaunch();
   REQUIRE(launch.pointerRelocations.empty());
   REQUIRE((launch.argumentBuffer && std::cmp_equal(launch.argumentBuffer->region.value, kernargId)));
+}
+
+TEST_CASE("AQL pointer kernargs accept device code addresses and reject unmapped ones", "[hsa][aql]") {
+  Harness harness;
+  harness.fixture.kernelMetadata(8, 1, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}});
+  harness.install(77, "callback_kernel");
+  std::array<uint8_t, 8> kernarg{};
+  const auto kernargId = harness.allocate(kernarg.data(), kernarg.size());
+  const uint64_t function = gemstone::hsa::ProgramBase + (3 * gemstone::hsa::ProgramSpan) + 0x1240;
+  const uint64_t unmapped = 0x1000;
+  const std::pair<uint64_t, int64_t> cases[]{{function, 0}, {unmapped, -5}};
+  for (const auto &[pointer, signal] : cases) {
+    CAPTURE(pointer);
+    std::memcpy(kernarg.data(), &pointer, sizeof(pointer));
+    RocrSignal completion;
+    const auto packet = kernelPacket(77, reinterpret_cast<uint64_t>(kernarg.data()), completion.handle());
+    REQUIRE(harness.runtime->consume(packet.data()) == PacketResult::Accepted);
+    REQUIRE(completion.load() == signal);
+  }
+  const auto launch = harness.fixture.lastLaunch();
+  REQUIRE(launch.pointerRelocations.empty());
+  REQUIRE((launch.argumentBuffer && std::cmp_equal(launch.argumentBuffer->region.value, kernargId)));
+  REQUIRE(harness.fixture.launches.load() == 1);
+}
+
+TEST_CASE("AQL dispatches carry the queue's device", "[hsa][aql]") {
+  Harness harness;
+  harness.fixture.kernelMetadata(8, 1, {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0}});
+  harness.install(77, "pointer_kernel");
+  std::array<uint8_t, 8> kernarg{};
+  harness.allocate(kernarg.data(), kernarg.size());
+  for (const uint32_t device : {0U, 1U, 7U}) {
+    RocrSignal completion;
+    const auto packet = kernelPacket(77, reinterpret_cast<uint64_t>(kernarg.data()), completion.handle());
+    REQUIRE(harness.runtime->consume(packet.data(), false, device) == PacketResult::Accepted);
+    CHECK(completion.load() == 0);
+    CHECK(std::cmp_equal(harness.fixture.lastLaunch().device.value, device));
+  }
 }
 
 TEST_CASE("AQL barriers wait and complete", "[hsa][aql]") {

@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.Matrix.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class MatrixLayoutSuite extends Suite {
   private def tile(shape: TileShape, transpose: Boolean, packing: Packing = Packing.Bytes) =

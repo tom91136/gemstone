@@ -5,7 +5,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** SALU forms outside the common arithmetic: GFX12 signed sub-dword loads, which hipcc emits for a uniform
   * `signed char` (`s_load_i8 s0, s[0:1], s4 offset:0x0` under `--offload-arch=gfx1201`), EXEC writes, relative SGPR

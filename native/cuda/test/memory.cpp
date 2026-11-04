@@ -108,24 +108,27 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
     this->raw = raw;
   }
   void *submittedEvent{}, *submittedOutput{};
-  std::vector<uint8_t> copiedOutput;
+  void *copiedOutput{};
+  size_t copiedBytes{};
   void submit(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count) {
+    copiedBytes = size_t{32} * (mode == 5 ? 4 : 8);
+    check(symbol<int (*)(void **, size_t)>("cuMemAllocHost_v2")(&copiedOutput, copiedBytes));
     enqueue(input, output, indices, mode, count, nullptr);
     check(symbol<int (*)(void **, unsigned)>("cuEventCreate")(&submittedEvent, 2));
     check(symbol<int (*)(void *, void *)>("cuEventRecord")(submittedEvent, nullptr));
     require(symbol<int (*)(void *)>("cuEventQuery")(submittedEvent) == 600, "CUDA pending event reported complete");
     require(symbol<int (*)(void *)>("cuStreamQuery")(nullptr) == 600, "CUDA pending stream reported complete");
     submittedOutput = output;
-    copiedOutput.resize(size_t{32} * (mode == 5 ? 4 : 8));
-    check(symbol<int (*)(void *, uint64_t, size_t, void *)>("cuMemcpyDtoHAsync_v2")(
-        copiedOutput.data(), reinterpret_cast<uintptr_t>(output), copiedOutput.size(), nullptr));
+    check(symbol<int (*)(void *, uint64_t, size_t, void *)>("cuMemcpyDtoHAsync_v2")(copiedOutput, reinterpret_cast<uintptr_t>(output),
+                                                                                    copiedBytes, nullptr));
     check(symbol<int (*)(void *, void *)>("cuEventRecord")(submittedEvent, nullptr));
   }
   void finish() {
     check(symbol<int (*)(void *)>("cuEventSynchronize")(submittedEvent));
     check(symbol<int (*)(void *)>("cuEventQuery")(submittedEvent));
     check(symbol<int (*)(void *)>("cuStreamQuery")(nullptr));
-    require(std::memcmp(copiedOutput.data(), submittedOutput, copiedOutput.size()) == 0, "CUDA async copy preceded kernel writes");
+    require(std::memcmp(copiedOutput, submittedOutput, copiedBytes) == 0, "CUDA async copy preceded kernel writes");
+    check(symbol<int (*)(void *)>("cuMemFreeHost")(copiedOutput));
     check(symbol<int (*)(void *)>("cuEventDestroy_v2")(submittedEvent));
   }
   bool concurrentCapabilities() {

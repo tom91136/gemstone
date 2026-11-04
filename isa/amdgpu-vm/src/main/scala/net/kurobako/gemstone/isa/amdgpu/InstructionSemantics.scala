@@ -134,14 +134,14 @@ object InstructionSemantics {
     */
   private def encoded(code: Vec[Byte], target: Target): Vec[Metadata.Encoding] = {
     val stream = CodeStream(Vec.toArray(code), TargetMode(target))
-    InstructionDecoder.dual(stream, 0).flatMap(_.toOption)
-      .map(dual =>
-        Vec(dual.x, dual.y).flatMap(half =>
-          half.map(_._2).find(_.operands.exists(_.field.contains(EncodingField.LITERAL)) == dual.literal.nonEmpty)
-            .orElse(half.headOption.map(_._2))
-        )
+    InstructionDecoder.dual(stream, 0).flatMap(_.toOption).fold(
+      InstructionDecoder.decode(stream, 0).toOption.map(_.encoding).toVec
+    ) { dual =>
+      Vec(dual.x, dual.y).flatMap(half =>
+        half.map(_._2).find(_.operands.exists(_.field.contains(EncodingField.LITERAL)) == dual.literal.nonEmpty)
+          .orElse(half.headOption.map(_._2))
       )
-      .getOrElse(InstructionDecoder.decode(stream, 0).toOption.map(_.encoding).toVec)
+    }
   }
 
   /** What execution does with an instruction that has no per-lane definition. */
@@ -155,6 +155,7 @@ object InstructionSemantics {
     case Instruction.SetVectorSkip(_, _) =>
       "a MODE write, after which vector instructions are skipped while VSKIP is set"
     case Instruction.Halt(reason)                                 => s"a halt, which faults: $reason"
+    case Instruction.Hostcall                                     => "a hostcall interrupt, which the host services"
     case _: (Instruction.BarrierSignal | Instruction.BarrierWait) => "a workgroup barrier"
     case _: (Instruction.BarrierInit | Instruction.BarrierJoin)   => "a named barrier's set-up"
     case Instruction.BarrierLeave                                 => "a named barrier's set-up"

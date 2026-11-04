@@ -319,6 +319,25 @@ uint32_t levels(ImageType type, size_t width, size_t height, size_t depth) {
   return count;
 }
 
+std::array<uint32_t, 4> sampler(Generation generation, const Sampler &sampler) {
+  const bool wideLod = generation == Generation::GFX11 || generation == Generation::GFX12;
+  const uint32_t lodBits = wideLod ? 13 : 12;
+  const auto fixed = [](float value, uint32_t bits, bool isSigned) {
+    const float limit = static_cast<float>((1U << (isSigned ? bits - 1 : bits)) - 1U) / 256.0F;
+    const float clamped = std::isnan(value) ? 0.0F : std::clamp(value, isSigned ? -limit - (1.0F / 256.0F) : 0.0F, limit);
+    return static_cast<uint32_t>(static_cast<int32_t>(std::lround(clamped * 256.0F))) & ((1U << bits) - 1U);
+  };
+  const uint32_t filter = static_cast<uint32_t>(sampler.filter);
+  const uint32_t zFilter = sampler.filter == Filter::Linear ? 2 : 1;
+  std::array<uint32_t, 4> words{};
+  words[0] = static_cast<uint32_t>(sampler.address[0]) | (static_cast<uint32_t>(sampler.address[1]) << 3)
+             | (static_cast<uint32_t>(sampler.address[2]) << 6) | ((sampler.normalised ? 0U : 1U) << 15);
+  words[1] = fixed(sampler.minLod, lodBits, false) | (fixed(sampler.maxLod, lodBits, false) << lodBits);
+  words[2] =
+      fixed(sampler.lodBias, 14, true) | (filter << 20) | (filter << 22) | (zFilter << 24) | (static_cast<uint32_t>(sampler.mip) << 26);
+  return words;
+}
+
 std::array<uint32_t, 4> buffer(Generation generation, uint64_t base, const Format &format, size_t records) {
   std::array<uint32_t, 4> words{};
   words[0] = static_cast<uint32_t>(base);

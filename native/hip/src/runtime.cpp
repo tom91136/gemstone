@@ -4,16 +4,21 @@
 #include <bit>
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <ios>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
+#include <source_location>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -36,9 +41,13 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
 
+#include "gemstone/devices.hpp"
 #include "gemstone/environment.hpp"
+#include "gemstone/hsa/device_heap.hpp"
+#include "gemstone/hsa/device_model.hpp"
 #include "gemstone/hsa/executable_metadata.hpp"
 #include "gemstone/hsa/global.hpp"
+#include "gemstone/hsa/hostcall.hpp"
 #include "gemstone/hsa/images.hpp"
 #include "gemstone/hsa/memory_copy.hpp"
 #include "gemstone/hsa/target.hpp"
@@ -48,6 +57,7 @@
 #include <gemstone/command_queue.hpp>
 #include <gemstone/elf.hpp>
 #include <gemstone/export.h>
+#include <gemstone/graph.hpp>
 #include <gemstone/memory.hpp>
 #include <gemstone/trace.hpp>
 #include <gemstone/zstd.hpp>
@@ -66,7 +76,23 @@ gemstone::CommandQueue &commands() {
 
 hipError_t waitCommands() { return static_cast<hipError_t>(commands().waitAll()); }
 
+gemstone::graph::Captures<hipStream_t, hipEvent_t> captures;
+
+hipError_t graphResult(gemstone::graph::Outcome outcome) {
+  switch (outcome) {
+    case gemstone::graph::Outcome::Ok: return hipSuccess;
+    case gemstone::graph::Outcome::InvalidValue: return hipErrorInvalidValue;
+    case gemstone::graph::Outcome::InvalidHandle: return hipErrorInvalidHandle;
+    case gemstone::graph::Outcome::Unsupported: return hipErrorStreamCaptureUnsupported;
+    case gemstone::graph::Outcome::Isolation: return hipErrorStreamCaptureIsolation;
+    case gemstone::graph::Outcome::Unmatched: return hipErrorStreamCaptureUnmatched;
+    case gemstone::graph::Outcome::TopologyChanged: return hipErrorGraphExecUpdateFailure;
+  }
+  return hipErrorUnknown;
+}
+
 hipError_t enqueueCommand(hipStream_t stream, std::function<int32_t()> work) {
+  if (gemstone::graph::divert(work) || captures.record(stream, work)) return hipSuccess;
   try {
     commands().submit(stream, std::move(work));
     return hipSuccess;
@@ -79,10 +105,10 @@ constexpr int RuntimeVersion = (HIP_VERSION_MAJOR * 10000000) + (HIP_VERSION_MIN
 constexpr uint32_t MaxBlockThreads = 1024;
 constexpr size_t MultigridRecordBytes = 48;
 constexpr uint32_t MaxGridDimension = std::numeric_limits<int32_t>::max();
-constexpr size_t DeviceTotalMemoryBytes = size_t{1} << 30U;
-constexpr size_t DeviceSharedMemoryPerBlock = size_t{64} * 1024;
-constexpr uint32_t DeviceThreadsPerMultiprocessor = 1024;
-constexpr uint32_t DeviceMultiprocessors = 1;
+constexpr uint32_t MaxGridDimensionYZ = std::numeric_limits<uint16_t>::max() + 1U;
+constexpr int MaxTexture2DGatherDimension = 32768;
+constexpr size_t DeviceTotalMemoryBytes = gemstone::hsa::GlobalMemoryBytes;
+constexpr size_t DeviceSharedMemoryPerBlock = gemstone::hsa::GroupMemoryBytes;
 
 bool traceHip(std::string_view category) { return gemstone::traceEnabled("hip", category); }
 
@@ -142,12 +168,14 @@ bool parseLaunchBuffer(void **extra, LaunchBuffer &buffer) {
   return false;
 }
 
-// Blocks of `threads` work-items with `shared` dynamic LDS bytes each that one multiprocessor holds at once.
+// Blocks of `threads` work-items with `shared` dynamic LDS bytes each that one multiprocessor holds at once: the wave slots
+// of its SIMDs and its LDS bound them, as in ROCclr.
 int residentBlocks(uint64_t threads, size_t shared) {
   if (threads == 0 || threads > MaxBlockThreads || shared > DeviceSharedMemoryPerBlock) return 0;
-  const uint64_t wave = gemstone::hsa::waveSize();
-  uint64_t blocks = DeviceThreadsPerMultiprocessor / ((threads + wave - 1) / wave * wave);
-  if (shared != 0) blocks = std::min<uint64_t>(blocks, DeviceSharedMemoryPerBlock / shared);
+  const auto model = gemstone::hsa::deviceModel();
+  const uint64_t wavesPerBlock = (threads + model.waveSize - 1) / model.waveSize;
+  uint64_t blocks = static_cast<uint64_t>(model.computeUnitsPerProcessor * model.wavesPerComputeUnit()) / wavesPerBlock;
+  if (shared != 0) blocks = std::min<uint64_t>(blocks, model.groupMemoryPerProcessor() / shared);
   return static_cast<int>(blocks);
 }
 
@@ -178,6 +206,22 @@ struct Variable {
   std::shared_ptr<Module> module;
 };
 
+struct ModuleInstance {
+  hsa_code_object_reader_t reader{};
+  hsa_executable_t executable{};
+  bool loaded = false;
+  std::unordered_map<std::string, std::shared_ptr<Kernel>> kernels;
+
+  void reset() {
+    if (executable.handle != 0) hsa_executable_destroy(executable);
+    if (reader.handle != 0) hsa_code_object_reader_destroy(reader);
+    executable = {};
+    reader = {};
+    kernels.clear();
+    loaded = false;
+  }
+};
+
 struct Module {
   std::mutex lock;
   // The address of this member is the opaque value passed back to the HIP
@@ -186,22 +230,18 @@ struct Module {
   const void *fatbin = nullptr;
   const void *image = nullptr;
   size_t imageSize = 0;
-  hsa_code_object_reader_t reader{};
-  hsa_executable_t executable{};
+  std::array<ModuleInstance, gemstone::MaximumDeviceCount> instances;
   bool loaded = false;
   std::string error;
   std::vector<uint8_t> decompressedImage;
+  std::vector<uint8_t> fileImage;
   std::vector<gemstone::hsa::ExecutableKernelMetadata> metadata;
-  std::unordered_map<std::string, std::shared_ptr<Kernel>> kernels;
   std::vector<const void *> variables;
 
   void reset() {
-    if (executable.handle != 0) hsa_executable_destroy(executable);
-    if (reader.handle != 0) hsa_code_object_reader_destroy(reader);
-    executable = {};
-    reader = {};
+    for (auto &instance : instances)
+      instance.reset();
     metadata.clear();
-    kernels.clear();
     loaded = false;
   }
   ~Module() { reset(); }
@@ -210,7 +250,7 @@ struct Module {
 struct FunctionBinding {
   std::shared_ptr<Module> module;
   std::string name;
-  std::shared_ptr<Kernel> kernel;
+  std::array<std::shared_ptr<Kernel>, gemstone::MaximumDeviceCount> kernels;
 };
 
 struct ModuleHandle {
@@ -222,23 +262,34 @@ struct FunctionHandle {
   std::shared_ptr<Kernel> kernel;
 };
 
+struct Gpu {
+  hsa_agent_t agent{};
+  hsa_region_t deviceRegion{};
+};
+
+struct DeviceAllocation {
+  size_t size = 0;
+  int device = 0;
+};
+
 struct State {
   std::mutex lock;
   bool initialised = false;
-  uint32_t primaryContextReferences = 0;
+  std::array<uint32_t, gemstone::MaximumDeviceCount> primaryContextReferences{};
   bool atexitRegistered = false;
-  hsa_agent_t gpu{};
+  std::vector<Gpu> gpus;
   hsa_region_t kernargRegion{};
-  hsa_region_t deviceRegion{};
+  gemstone::PeerAccess peers;
+  std::unordered_map<hipStream_t, int> streamDevices;
   std::unordered_map<void **, std::shared_ptr<Module>> modules;
   std::vector<std::weak_ptr<Module>> driverModules;
   std::unordered_map<const void *, FunctionBinding> kernels;
   std::unordered_map<const void *, Variable> variables;
   gemstone::MemoryRegistrations hostRegistrations;
   std::unordered_map<void *, size_t> managedAllocations;
-  std::unordered_map<void *, size_t> deviceAllocations;
+  std::unordered_map<void *, DeviceAllocation> deviceAllocations;
   // MGSyncInfo records of completed cooperative launches, for the next to reuse
-  std::vector<void *> syncRecords;
+  std::array<std::vector<void *>, gemstone::MaximumDeviceCount> syncRecords;
 };
 
 struct LaunchConfiguration {
@@ -258,10 +309,14 @@ State &state() {
 bool validStream(hipStream_t stream) { return commands().hasStream(stream); }
 
 thread_local hipError_t lastError = hipSuccess;
+thread_local int currentDevice = 0;
 thread_local LaunchConfiguration launchConfiguration;
 
 // Queued work reports through its completion; the synchronising caller records that status as its own error.
-hipError_t remember(hipError_t error) {
+hipError_t remember(hipError_t error, std::source_location where = std::source_location::current()) {
+  static const bool traced = traceHip("errors");
+  if (traced && error != hipSuccess)
+    std::fprintf(stderr, "Gemstone HIP %s returned error %d\n", where.function_name(), static_cast<int>(error));
   if (!commands().onWorker()) lastError = error;
   return error;
 }
@@ -280,19 +335,6 @@ hipError_t mapHsa(hsa_status_t status) {
   }
 }
 
-// The HSA queue error a failed dispatch raises, as the HIP runtime reports it.
-hipError_t mapQueueError(hsa_status_t status) {
-  switch (static_cast<int>(status)) {
-    case HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION:
-    case HSA_STATUS_ERROR_MEMORY_FAULT: return hipErrorIllegalAddress;
-    case HSA_STATUS_ERROR_OUT_OF_RESOURCES: return hipErrorLaunchOutOfResources;
-    case HSA_STATUS_ERROR_INVALID_CODE_OBJECT: return hipErrorInvalidImage;
-    case HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS:
-    case HSA_STATUS_ERROR_INVALID_ARGUMENT: return hipErrorInvalidConfiguration;
-    default: return hipErrorLaunchFailure;
-  }
-}
-
 // The error a launch reports when the service cannot build its kernel.
 hipError_t buildError(gemstone::execution::FailureKind kind) {
   using gemstone::execution::FailureKind;
@@ -305,6 +347,13 @@ hipError_t buildError(gemstone::execution::FailureKind kind) {
     case FailureKind::OutOfResources: return hipErrorLaunchOutOfResources;
     default: return hipErrorLaunchFailure;
   }
+}
+
+hsa_status_t collectGpus(hsa_agent_t agent, void *opaque) {
+  hsa_device_type_t type{};
+  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (type == HSA_DEVICE_TYPE_GPU) static_cast<std::vector<Gpu> *>(opaque)->push_back(Gpu{.agent = agent});
+  return HSA_STATUS_SUCCESS;
 }
 
 template <hsa_device_type_t Type> hsa_status_t findAgent(hsa_agent_t agent, void *opaque) {
@@ -339,22 +388,21 @@ bool ensureInitialised() {
   std::scoped_lock const guard(runtime.lock);
   if (runtime.initialised) return true;
   const hsa_status_t init = hsa_init();
-  const hsa_status_t agents =
-      init == HSA_STATUS_SUCCESS ? hsa_iterate_agents(findAgent<HSA_DEVICE_TYPE_GPU>, &runtime.gpu) : HSA_STATUS_ERROR;
+  const hsa_status_t agents = init == HSA_STATUS_SUCCESS ? hsa_iterate_agents(collectGpus, &runtime.gpus) : HSA_STATUS_ERROR;
   const hsa_status_t kernargs =
-      agents == HSA_STATUS_INFO_BREAK
-          ? hsa_agent_iterate_regions(runtime.gpu, findRegion<HSA_REGION_GLOBAL_FLAG_KERNARG>, &runtime.kernargRegion)
+      agents == HSA_STATUS_SUCCESS && !runtime.gpus.empty()
+          ? hsa_agent_iterate_regions(runtime.gpus.front().agent, findRegion<HSA_REGION_GLOBAL_FLAG_KERNARG>, &runtime.kernargRegion)
           : HSA_STATUS_ERROR;
-  const hsa_status_t device =
-      kernargs == HSA_STATUS_INFO_BREAK
-          ? hsa_agent_iterate_regions(runtime.gpu, findRegion<HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED>, &runtime.deviceRegion)
-          : HSA_STATUS_ERROR;
-  if (init != HSA_STATUS_SUCCESS || agents != HSA_STATUS_INFO_BREAK || runtime.gpu.handle == 0 || kernargs != HSA_STATUS_INFO_BREAK
-      || device != HSA_STATUS_INFO_BREAK || runtime.kernargRegion.handle == 0 || runtime.deviceRegion.handle == 0) {
+  bool devices = kernargs == HSA_STATUS_INFO_BREAK && runtime.kernargRegion.handle != 0;
+  for (auto &gpu : runtime.gpus)
+    devices = devices
+              && hsa_agent_iterate_regions(gpu.agent, findRegion<HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED>, &gpu.deviceRegion)
+                     == HSA_STATUS_INFO_BREAK
+              && gpu.deviceRegion.handle != 0;
+  if (init != HSA_STATUS_SUCCESS || !devices) {
     hsa_shut_down();
-    runtime.gpu = {};
+    runtime.gpus.clear();
     runtime.kernargRegion = {};
-    runtime.deviceRegion = {};
     return false;
   }
   runtime.initialised = true;
@@ -374,6 +422,24 @@ bool ensureInitialised() {
   return true;
 }
 
+bool validDevice(int device) { return device >= 0 && static_cast<uint32_t>(device) < gemstone::deviceCount(); }
+
+int streamDevice(hipStream_t stream) {
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  const auto found = runtime.streamDevices.find(stream);
+  return found == runtime.streamDevices.end() ? currentDevice : found->second;
+}
+
+hsa_agent_t gpuAgent(int device) { return state().gpus[static_cast<size_t>(device)].agent; }
+hsa_region_t gpuRegion(int device) { return state().gpus[static_cast<size_t>(device)].deviceRegion; }
+
+int deviceOfAgent(hsa_agent_t agent) {
+  const auto &gpus = state().gpus;
+  const auto found = std::find_if(gpus.begin(), gpus.end(), [&](const Gpu &gpu) { return gpu.agent.handle == agent.handle; });
+  return found == gpus.end() ? 0 : static_cast<int>(found - gpus.begin());
+}
+
 hipError_t allocateHost(void **pointer, size_t size, unsigned flags = 0) {
   if (!pointer) return remember(hipErrorInvalidValue);
   if (size == 0) {
@@ -381,7 +447,7 @@ hipError_t allocateHost(void **pointer, size_t size, unsigned flags = 0) {
     return remember(hipSuccess);
   }
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  void *memory = std::malloc(size);
+  void *memory = std::calloc(1, size);
   if (!memory) return remember(hipErrorOutOfMemory);
   const hsa_status_t status = hsa_memory_register(memory, size);
   if (status != HSA_STATUS_SUCCESS) {
@@ -519,8 +585,9 @@ std::shared_ptr<Module> findModule(void **token) {
   return found == runtime.modules.end() ? std::shared_ptr<Module>{} : found->second;
 }
 
-bool loadModule(Module &module) {
-  if (module.loaded) return true;
+bool loadModule(Module &module, int device) {
+  auto &instance = module.instances[static_cast<size_t>(device)];
+  if (instance.loaded) return true;
   if (!module.image && module.fatbin) {
     if (!selectBundle(module.fatbin, &module.image, &module.imageSize, &module.decompressedImage)) {
       module.error = std::string("HIP fatbinary has no ") + gemstone::hsa::targetArch() + " bundle";
@@ -531,61 +598,66 @@ bool loadModule(Module &module) {
     module.error = "HIP fatbinary has no AMDGPU code object";
     return false;
   }
-  const hsa_status_t reader = hsa_code_object_reader_create_from_memory(module.image, module.imageSize, &module.reader);
+  const hsa_status_t reader = hsa_code_object_reader_create_from_memory(module.image, module.imageSize, &instance.reader);
   const hsa_status_t executable =
       reader == HSA_STATUS_SUCCESS
-          ? hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr, &module.executable)
+          ? hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr, &instance.executable)
           : HSA_STATUS_ERROR;
-  const hsa_status_t load = executable == HSA_STATUS_SUCCESS
-                                ? hsa_executable_load_agent_code_object(module.executable, state().gpu, module.reader, nullptr, nullptr)
-                                : HSA_STATUS_ERROR;
-  const hsa_status_t readerDestroy = module.reader.handle == 0 ? HSA_STATUS_SUCCESS : hsa_code_object_reader_destroy(module.reader);
-  module.reader = {};
-  const hsa_status_t freeze = load == HSA_STATUS_SUCCESS ? hsa_executable_freeze(module.executable, nullptr) : HSA_STATUS_ERROR;
+  const hsa_status_t load = executable == HSA_STATUS_SUCCESS ? hsa_executable_load_agent_code_object(instance.executable, gpuAgent(device),
+                                                                                                     instance.reader, nullptr, nullptr)
+                                                             : HSA_STATUS_ERROR;
+  const hsa_status_t readerDestroy = instance.reader.handle == 0 ? HSA_STATUS_SUCCESS : hsa_code_object_reader_destroy(instance.reader);
+  instance.reader = {};
+  const hsa_status_t freeze = load == HSA_STATUS_SUCCESS ? hsa_executable_freeze(instance.executable, nullptr) : HSA_STATUS_ERROR;
   if (reader != HSA_STATUS_SUCCESS || executable != HSA_STATUS_SUCCESS || load != HSA_STATUS_SUCCESS || readerDestroy != HSA_STATUS_SUCCESS
       || freeze != HSA_STATUS_SUCCESS) {
     module.error = "public HSA rejected the HIP code object";
-    if (module.executable.handle != 0) hsa_executable_destroy(module.executable);
-    module.executable = {};
+    if (instance.executable.handle != 0) hsa_executable_destroy(instance.executable);
+    instance.executable = {};
     return false;
   }
-  if (!gemstone::hsa::copyExecutableKernelMetadata(module.executable, module.metadata) || module.metadata.empty()) {
+  if (module.metadata.empty() && !gemstone::hsa::copyExecutableKernelMetadata(instance.executable, module.metadata)) {
     module.error = "public HSA returned no AMDGPU kernel metadata";
-    hsa_executable_destroy(module.executable);
-    module.executable = {};
+    hsa_executable_destroy(instance.executable);
+    instance.executable = {};
     return false;
   }
+  instance.loaded = true;
   module.loaded = true;
   return true;
 }
 
-std::shared_ptr<Kernel> resolveModuleKernel(Module &module, const std::string &name) {
+std::shared_ptr<Kernel> resolveModuleKernel(Module &module, const std::string &name, int device) {
   std::scoped_lock const guard(module.lock);
-  if (!module.loaded) return {};
-  if (const auto cached = module.kernels.find(name); cached != module.kernels.end()) return cached->second;
+  if (!loadModule(module, device)) return {};
+  auto &instance = module.instances[static_cast<size_t>(device)];
+  if (const auto cached = instance.kernels.find(name); cached != instance.kernels.end()) return cached->second;
   gemstone::hsa::ExecutableKernelMetadata metadata;
-  if (!gemstone::hsa::copyExecutableKernelMetadata(module.executable, name, metadata)) return {};
+  if (!gemstone::hsa::copyExecutableKernelMetadata(instance.executable, name, metadata)) return {};
   hsa_executable_symbol_t symbol{};
-  if (hsa_executable_get_symbol_by_name(module.executable, metadata.symbol.c_str(), &state().gpu, &symbol) != HSA_STATUS_SUCCESS) return {};
+  if (hsa_executable_get_symbol_by_name(instance.executable, metadata.symbol.c_str(), &state().gpus[static_cast<size_t>(device)].agent,
+                                        &symbol)
+      != HSA_STATUS_SUCCESS)
+    return {};
   uint64_t object = 0;
   if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) != HSA_STATUS_SUCCESS) return {};
   auto kernel = std::make_shared<Kernel>();
   kernel->object = object;
   kernel->layout = metadata.layout;
-  module.kernels.emplace(metadata.name, kernel);
-  module.kernels.emplace(metadata.symbol, kernel);
+  instance.kernels.emplace(metadata.name, kernel);
+  instance.kernels.emplace(metadata.symbol, kernel);
   if (metadata.symbol.size() > 3 && (metadata.symbol ^ ends_with(".kd")))
-    module.kernels.emplace(metadata.symbol ^ strip_suffix(".kd"), kernel);
+    instance.kernels.emplace(metadata.symbol ^ strip_suffix(".kd"), kernel);
   return kernel;
 }
 
-bool ensureModuleLoaded(const std::shared_ptr<Module> &module) {
-  if (!module) return false;
+bool ensureModuleLoaded(const std::shared_ptr<Module> &module, int device) {
+  if (!module || !ensureInitialised()) return false;
   std::scoped_lock const guard(module->lock);
-  return loadModule(*module);
+  return loadModule(*module, device);
 }
 
-std::shared_ptr<Kernel> resolveKernel(const void *functionAddress) {
+std::shared_ptr<Kernel> resolveKernel(const void *functionAddress, int device) {
   auto &runtime = state();
   FunctionBinding binding;
   {
@@ -594,39 +666,40 @@ std::shared_ptr<Kernel> resolveKernel(const void *functionAddress) {
     if (found == runtime.kernels.end()) return {};
     binding = found->second;
   }
-  if (binding.kernel) return binding.kernel;
-  if (!ensureModuleLoaded(binding.module)) {
+  if (const auto &cached = binding.kernels[static_cast<size_t>(device)]) return cached;
+  if (!ensureModuleLoaded(binding.module, device)) {
     if (traceModules())
       std::fprintf(stderr, "Gemstone HIP kernel load failed name=%s error=%s\n", binding.name.c_str(), binding.module->error.c_str());
     return {};
   }
-  auto kernel = resolveModuleKernel(*binding.module, binding.name);
+  auto kernel = resolveModuleKernel(*binding.module, binding.name, device);
   if (!kernel) return {};
   {
     std::scoped_lock const guard(runtime.lock);
     const auto found = runtime.kernels.find(functionAddress);
     if (found != runtime.kernels.end() && found->second.module == binding.module && found->second.name == binding.name)
-      found->second.kernel = kernel;
+      found->second.kernels[static_cast<size_t>(device)] = kernel;
   }
   return kernel;
 }
 
 /** A device record for HIP's MGSyncInfo: one a completed cooperative launch released, or a fresh one. */
-hsa_status_t acquireSyncRecord(void **record) {
+hsa_status_t acquireSyncRecord(void **record, int device) {
   {
     std::scoped_lock const guard(state().lock);
-    if (!state().syncRecords.empty()) {
-      *record = state().syncRecords.back();
-      state().syncRecords.pop_back();
+    auto &released = state().syncRecords[static_cast<size_t>(device)];
+    if (!released.empty()) {
+      *record = released.back();
+      released.pop_back();
       return HSA_STATUS_SUCCESS;
     }
   }
-  return hsa_memory_allocate(state().deviceRegion, MultigridRecordBytes, record);
+  return hsa_memory_allocate(gpuRegion(device), MultigridRecordBytes, record);
 }
 
-void releaseSyncRecord(void *record) {
+void releaseSyncRecord(void *record, int device) {
   std::scoped_lock const guard(state().lock);
-  state().syncRecords.push_back(record);
+  state().syncRecords[static_cast<size_t>(device)].push_back(record);
 }
 
 hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t stream,
@@ -660,6 +733,7 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
     }
     kernel->built.store(true);
   }
+  const int launchDevice = streamDevice(stream);
   void *kernarg = nullptr;
   hsa_status_t status = kernel->layout.kernargSize == 0 ? HSA_STATUS_SUCCESS
                                                         : hsa_memory_allocate(state().kernargRegion, kernel->layout.kernargSize, &kernarg);
@@ -696,6 +770,13 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
     }
     return false;
   };
+  const auto hasHiddenField = [&](uint32_t offset, uint32_t size) {
+    for (size_t index = kernel->layout.explicitArgumentCount; index < kernel->layout.fields.size(); ++index) {
+      const auto &field = kernel->layout.fields[index];
+      if (field.offset == offset && field.size == size) return true;
+    }
+    return false;
+  };
   const auto writeU16 = [&](uint32_t offset, uint32_t value) {
     if (!overlapsExplicit(offset, sizeof(uint16_t)) && offset + sizeof(uint16_t) <= kernel->layout.kernargSize) {
       const auto narrowed = static_cast<uint16_t>(value);
@@ -728,6 +809,16 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
       writeU16(hidden + 20, static_cast<uint32_t>(global.y % block.y));
       writeU16(hidden + 22, static_cast<uint32_t>(global.z % block.z));
       writeU16(hidden + 64, dispatchDimensions(grid, block));
+      // hidden_hostcall_buffer: the device library's printf and assert packets
+      const uint32_t hostcall = hidden + 80;
+      if (hasHiddenField(hostcall, sizeof(uint64_t)) && !overlapsExplicit(hostcall, sizeof(uint64_t))) {
+        const auto buffer = reinterpret_cast<uint64_t>(gemstone::hsa::hostcallBuffer());
+        if (buffer == 0) {
+          hsa_memory_free(kernarg);
+          return remember(hipErrorOutOfMemory);
+        }
+        std::memcpy(static_cast<uint8_t *>(kernarg) + hostcall, &buffer, sizeof(buffer));
+      }
       // hidden_multigrid_sync_arg: grid.sync() on targets without GWS counts workgroup arrivals in HIP's MGSyncInfo
       // {mgs, grid_id, num_grids, prev_sum, all_sum, the grid's two sync words, num_wg}
       const uint32_t multigrid = hidden + 88;
@@ -739,10 +830,10 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
         std::memcpy(record.data() + 12, &grids, sizeof(grids));
         std::memcpy(record.data() + 24, &groups, sizeof(groups));
         std::memcpy(record.data() + 40, &workgroups, sizeof(workgroups));
-        status = acquireSyncRecord(&syncInfo);
+        status = acquireSyncRecord(&syncInfo, launchDevice);
         if (status == HSA_STATUS_SUCCESS) status = hsa_memory_copy(syncInfo, record.data(), record.size());
         if (status != HSA_STATUS_SUCCESS) {
-          if (syncInfo) releaseSyncRecord(syncInfo);
+          if (syncInfo) releaseSyncRecord(syncInfo, launchDevice);
           hsa_memory_free(kernarg);
           return remember(mapHsa(status));
         }
@@ -754,22 +845,18 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
   auto owned = std::shared_ptr<void>(kernarg, [](void *memory) {
     if (memory) (void)hsa_memory_free(memory);
   });
-  auto ownedSyncInfo = std::shared_ptr<void>(syncInfo, [](void *memory) {
-    if (memory) releaseSyncRecord(memory);
+  auto ownedSyncInfo = std::shared_ptr<void>(syncInfo, [launchDevice](void *memory) {
+    if (memory) releaseSyncRecord(memory, launchDevice);
   });
   return remember(enqueueCommand(stream, [=]() mutable -> int32_t {
     hsa_queue_t *dispatchQueue{};
-    std::atomic<hsa_status_t> queueError{HSA_STATUS_SUCCESS};
-    const auto onQueueError = [](hsa_status_t error, hsa_queue_t *, void *data) {
-      static_cast<std::atomic<hsa_status_t> *>(data)->store(error);
-    };
-    if (hsa_queue_create(state().gpu, 64, cooperative ? HSA_QUEUE_TYPE_COOPERATIVE : HSA_QUEUE_TYPE_MULTI, onQueueError, &queueError,
+    if (hsa_queue_create(gpuAgent(launchDevice), 64, cooperative ? HSA_QUEUE_TYPE_COOPERATIVE : HSA_QUEUE_TYPE_MULTI, nullptr, nullptr,
                          UINT32_MAX, UINT32_MAX, &dispatchQueue)
         != HSA_STATUS_SUCCESS)
       return hipErrorOutOfMemory;
     const auto queueOwner = std::shared_ptr<hsa_queue_t>(dispatchQueue, [](hsa_queue_t *queue) { (void)hsa_queue_destroy(queue); });
     hsa_signal_t completion{};
-    hipError_t dispatchError = hipErrorLaunchFailure;
+    hipError_t const dispatchError = hipErrorLaunchFailure;
     hsa_status_t status = hsa_signal_create(1, 0, nullptr, &completion);
     if (status == HSA_STATUS_SUCCESS) {
       const uint64_t index = hsa_queue_add_write_index_relaxed(dispatchQueue, 1);
@@ -793,12 +880,8 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
       const uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
       __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
       hsa_signal_store_screlease(dispatchQueue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
-      while (hsa_signal_load_scacquire(completion) == 1 && queueError.load() == HSA_STATUS_SUCCESS)
+      while (hsa_signal_load_scacquire(completion) == 1)
         std::this_thread::yield();
-      if (queueError.load() != HSA_STATUS_SUCCESS) {
-        status = HSA_STATUS_ERROR;
-        dispatchError = mapQueueError(queueError.load());
-      }
       // The queue read index advances after the HSA worker mirrors pageable
       // writes back to host memory. Wait for that handoff before returning to a
       // caller that may immediately read or free a captured host pointer.
@@ -830,14 +913,14 @@ hipError_t dispatchCooperative(const std::shared_ptr<Kernel> &kernel, dim3 grid,
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   if (!kernel) return remember(hipErrorInvalidDeviceFunction);
   const uint64_t blocks = static_cast<uint64_t>(grid.x) * grid.y * grid.z;
-  const uint64_t resident =
-      static_cast<uint64_t>(residentBlocks(static_cast<uint64_t>(block.x) * block.y * block.z, shared)) * DeviceMultiprocessors;
+  const uint64_t resident = static_cast<uint64_t>(residentBlocks(static_cast<uint64_t>(block.x) * block.y * block.z, shared))
+                            * gemstone::hsa::deviceModel().processors();
   if (blocks != 0 && validBlock(block) && blocks > resident) return remember(hipErrorCooperativeLaunchTooLarge);
   return dispatchKernel(kernel, grid, block, args, shared, stream, {}, nullptr, true);
 }
 
 hipError_t dispatch(const void *functionAddress, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t stream) {
-  const auto kernel = resolveKernel(functionAddress);
+  const auto kernel = resolveKernel(functionAddress, streamDevice(stream));
   if (traceModules())
     std::fprintf(stderr, "Gemstone HIP direct launch host=%p kernel=%p\n", functionAddress, static_cast<const void *>(kernel.get()));
   return dispatchKernel(kernel, grid, block, args, shared, stream);
@@ -852,22 +935,40 @@ bool traceModules() {
   return enabled;
 }
 
-std::shared_ptr<Module> createModule(const void *input) {
-  auto module = std::make_shared<Module>();
+bool selectImage(Module &module, const void *input) {
   if (imageIsElf(input)) {
     const auto size = gemstone::elfImageSize(input);
     if (!size) {
-      module->error = "invalid ELF64 AMDGPU code object";
-      return module;
+      module.error = "invalid ELF64 AMDGPU code object";
+      return false;
     }
-    module->image = input;
-    module->imageSize = *size;
-  } else if (!selectBundle(input, &module->image, &module->imageSize, &module->decompressedImage)) {
-    module->error = std::string("HIP module has no ") + gemstone::hsa::targetArch() + " code object";
-    return module;
+    module.image = input;
+    module.imageSize = *size;
+    return true;
   }
-  loadModule(*module);
+  if (!selectBundle(input, &module.image, &module.imageSize, &module.decompressedImage)) {
+    module.error = std::string("HIP module has no ") + gemstone::hsa::targetArch() + " code object";
+    return false;
+  }
+  return true;
+}
+
+std::shared_ptr<Module> createModule(const void *input) {
+  auto module = std::make_shared<Module>();
+  if (selectImage(*module, input)) loadModule(*module, currentDevice);
   return module;
+}
+
+hipError_t publishModule(std::shared_ptr<Module> loaded, hipModule_t *module) {
+  if (!loaded->loaded) return hipErrorInvalidImage;
+  auto *handle = new (std::nothrow) ModuleHandle{std::move(loaded)};
+  if (!handle) return hipErrorOutOfMemory;
+  {
+    std::scoped_lock const guard(state().lock);
+    state().driverModules.push_back(handle->module);
+  }
+  *module = reinterpret_cast<hipModule_t>(handle);
+  return hipSuccess;
 }
 
 uint32_t workgroupCount(uint32_t global, uint32_t local) { return local == 0 ? 0 : (global / local) + (global % local == 0 ? 0 : 1); }
@@ -889,55 +990,69 @@ extern "C" hipError_t hipRuntimeGetVersion(int *version) { return hipDriverGetVe
 
 extern "C" hipError_t hipGetDeviceCount(int *count) {
   if (!count) return remember(hipErrorInvalidValue);
-  *count = ensureInitialised() ? 1 : 0;
-  return remember(*count == 1 ? hipSuccess : hipErrorNoDevice);
+  *count = ensureInitialised() ? static_cast<int>(state().gpus.size()) : 0;
+  return remember(*count != 0 ? hipSuccess : hipErrorNoDevice);
 }
 
 extern "C" hipError_t hipGetDevice(int *device) {
   if (!device) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  *device = 0;
+  *device = currentDevice;
   return remember(hipSuccess);
 }
 
-extern "C" hipError_t hipSetDevice(int device) { return remember(device == 0 && ensureInitialised() ? hipSuccess : hipErrorInvalidDevice); }
+extern "C" hipError_t hipSetDevice(int device) {
+  if (!validDevice(device) || !ensureInitialised()) return remember(hipErrorInvalidDevice);
+  currentDevice = device;
+  return remember(hipSuccess);
+}
 
 namespace {
-unsigned char primaryContextToken;
+std::array<unsigned char, gemstone::MaximumDeviceCount> primaryContextTokens;
 thread_local hipCtx_t currentContext = nullptr;
 thread_local std::vector<hipCtx_t> contextStack;
 
-hipCtx_t primaryContext() { return reinterpret_cast<hipCtx_t>(&primaryContextToken); }
+hipCtx_t primaryContext(int device) { return reinterpret_cast<hipCtx_t>(&primaryContextTokens[static_cast<size_t>(device)]); }
+
+std::optional<int> contextDevice(hipCtx_t context) {
+  for (int device = 0; validDevice(device); ++device)
+    if (context == primaryContext(device)) return device;
+  return std::nullopt;
+}
 } // namespace
 
 extern "C" hipError_t hipDevicePrimaryCtxRetain(hipCtx_t *context, hipDevice_t device) {
-  if (!context || device != 0) return remember(hipErrorInvalidValue);
+  if (!context || !validDevice(device)) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   auto &runtime = state();
   std::scoped_lock const guard(runtime.lock);
-  if (runtime.primaryContextReferences == UINT32_MAX) return remember(hipErrorOutOfMemory);
-  ++runtime.primaryContextReferences;
-  *context = primaryContext();
+  auto &references = runtime.primaryContextReferences[static_cast<size_t>(device)];
+  if (references == UINT32_MAX) return remember(hipErrorOutOfMemory);
+  ++references;
+  *context = primaryContext(device);
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipDevicePrimaryCtxRelease(hipDevice_t device) {
-  if (device != 0) return remember(hipErrorInvalidDevice);
+  if (!validDevice(device)) return remember(hipErrorInvalidDevice);
   auto &runtime = state();
   std::scoped_lock const guard(runtime.lock);
-  if (runtime.primaryContextReferences == 0) return remember(hipErrorInvalidValue);
-  --runtime.primaryContextReferences;
+  auto &references = runtime.primaryContextReferences[static_cast<size_t>(device)];
+  if (references == 0) return remember(hipErrorInvalidValue);
+  --references;
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipCtxPushCurrent(hipCtx_t context) {
-  if (context != primaryContext()) return remember(hipErrorInvalidContext);
+  const auto device = contextDevice(context);
+  if (!device) return remember(hipErrorInvalidContext);
   try {
     contextStack.push_back(currentContext);
   } catch (...) {
     return remember(hipErrorOutOfMemory);
   }
   currentContext = context;
+  currentDevice = *device;
   return remember(hipSuccess);
 }
 
@@ -946,17 +1061,121 @@ extern "C" hipError_t hipCtxPopCurrent(hipCtx_t *context) {
   *context = currentContext;
   currentContext = contextStack.back();
   contextStack.pop_back();
+  if (const auto device = contextDevice(currentContext)) currentDevice = *device;
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipDeviceGet(hipDevice_t *device, int ordinal) {
   if (!device) return remember(hipErrorInvalidValue);
-  if (ordinal != 0 || !ensureInitialised()) return remember(hipErrorInvalidDevice);
-  *device = 0;
+  if (!validDevice(ordinal) || !ensureInitialised()) return remember(hipErrorInvalidDevice);
+  *device = ordinal;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceCanAccessPeer(int *canAccess, int device, int peer) {
+  if (!canAccess) return remember(hipErrorInvalidValue);
+  if (!validDevice(device) || !validDevice(peer)) return remember(hipErrorInvalidDevice);
+  *canAccess = device != peer ? 1 : 0;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceEnablePeerAccess(int peer, unsigned flags) {
+  if (flags != 0) return remember(hipErrorInvalidValue);
+  if (!validDevice(peer) || peer == currentDevice) return remember(hipErrorInvalidDevice);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  if (!runtime.peers.enable(static_cast<uint32_t>(currentDevice), static_cast<uint32_t>(peer)))
+    return remember(hipErrorPeerAccessAlreadyEnabled);
+  const hsa_agent_t agent = gpuAgent(currentDevice);
+  for (const auto &[pointer, allocation] : runtime.deviceAllocations)
+    if (allocation.device == peer) (void)hsa_amd_agents_allow_access(1, &agent, nullptr, pointer);
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceDisablePeerAccess(int peer) {
+  if (!validDevice(peer) || peer == currentDevice) return remember(hipErrorInvalidDevice);
+  if (!state().peers.disable(static_cast<uint32_t>(currentDevice), static_cast<uint32_t>(peer)))
+    return remember(hipErrorPeerAccessNotEnabled);
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceGetP2PAttribute(int *value, hipDeviceP2PAttr attribute, int source, int destination) {
+  if (!value) return remember(hipErrorInvalidValue);
+  if (!validDevice(source) || !validDevice(destination) || source == destination) return remember(hipErrorInvalidDevice);
+  switch (attribute) {
+    case hipDevP2PAttrPerformanceRank: *value = 0; break;
+    case hipDevP2PAttrAccessSupported:
+    case hipDevP2PAttrNativeAtomicSupported:
+    case hipDevP2PAttrHipArrayAccessSupported: *value = 1; break;
+    default: return remember(hipErrorInvalidValue);
+  }
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipMemcpyPeer(void *destination, int destinationDevice, const void *source, int sourceDevice, size_t size) {
+  if (!validDevice(destinationDevice) || !validDevice(sourceDevice)) return remember(hipErrorInvalidDevice);
+  return hipMemcpy(destination, source, size, hipMemcpyDeviceToDevice);
+}
+
+extern "C" hipError_t hipMemcpyPeerAsync(void *destination, int destinationDevice, const void *source, int sourceDevice, size_t size,
+                                         hipStream_t stream) {
+  if (!validDevice(destinationDevice) || !validDevice(sourceDevice)) return remember(hipErrorInvalidDevice);
+  return hipMemcpyAsync(destination, source, size, hipMemcpyDeviceToDevice, stream);
+}
+
+static std::string pciBusId(int device) {
+  char text[16];
+  std::snprintf(text, sizeof(text), "0000:%02x:00.0", static_cast<unsigned>(device));
+  return text;
+}
+
+extern "C" hipError_t hipDeviceGetPCIBusId(char *busId, int length, int device) {
+  if (!busId || length <= 0 || !validDevice(device)) return remember(hipErrorInvalidValue);
+  const auto text = pciBusId(device);
+  if (text.size() >= static_cast<size_t>(length)) return remember(hipErrorInvalidValue);
+  std::memcpy(busId, text.c_str(), text.size() + 1U);
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceGetByPCIBusId(int *device, const char *busId) {
+  if (!device || !busId) return remember(hipErrorInvalidValue);
+  for (int ordinal = 0; validDevice(ordinal); ++ordinal)
+    if (pciBusId(ordinal) == busId) {
+      *device = ordinal;
+      return remember(hipSuccess);
+    }
+  return remember(hipErrorInvalidValue);
+}
+
+extern "C" hipError_t hipDeviceGetUuid(hipUUID *uuid, hipDevice_t device) {
+  if (!uuid || !validDevice(device)) return remember(hipErrorInvalidValue);
+  std::memset(uuid->bytes, 0, sizeof(uuid->bytes));
+  std::memcpy(uuid->bytes, "GEMSTONE-HIP-", 13);
+  uuid->bytes[13] = '-';
+  uuid->bytes[14] = static_cast<char>('0' + ((device + 1) / 10));
+  uuid->bytes[15] = static_cast<char>('0' + ((device + 1) % 10));
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipDeviceSynchronize() { return remember(ensureInitialised() ? waitCommands() : hipErrorNoDevice); }
+extern "C" hipError_t hipDeviceGetLimit(size_t *value, hipLimit_t limit) {
+  if (!value || limit >= hipLimitRange) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  if (limit != hipLimitMallocHeapSize) return remember(hipErrorUnsupportedLimit);
+  *value = gemstone::hsa::deviceHeapLimit();
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
+  if (limit >= hipLimitRange) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  if (limit != hipLimitMallocHeapSize) return remember(hipErrorUnsupportedLimit);
+  if (value >= DeviceTotalMemoryBytes) return remember(hipErrorInvalidValue);
+  gemstone::hsa::setDeviceHeapLimit(value);
+  return remember(hipSuccess);
+}
+
 extern "C" hipError_t hipDeviceReset() {
   if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   auto &runtime = state();
@@ -966,9 +1185,12 @@ extern "C" hipError_t hipDeviceReset() {
     (void)hsa_memory_free(pointer);
   runtime.deviceAllocations.clear();
   runtime.managedAllocations.clear();
-  for (auto *record : runtime.syncRecords)
-    (void)hsa_memory_free(record);
-  runtime.syncRecords.clear();
+  runtime.peers.clear(static_cast<uint32_t>(currentDevice));
+  for (auto &records : runtime.syncRecords) {
+    for (auto *record : records)
+      (void)hsa_memory_free(record);
+    records.clear();
+  }
   commands().reset();
   for (auto &module : runtime.driverModules)
     if (auto live = module.lock()) live->reset();
@@ -978,7 +1200,7 @@ extern "C" hipError_t hipDeviceReset() {
 }
 
 extern "C" hipError_t hipDeviceComputeCapability(int *major, int *minor, hipDevice_t device) {
-  if (!major || !minor || device != 0) return remember(hipErrorInvalidValue);
+  if (!major || !minor || !validDevice(device)) return remember(hipErrorInvalidValue);
   const auto version = gemstone::hsa::targetVersion();
   *major = static_cast<int>(version.major);
   *minor = static_cast<int>(version.minor);
@@ -986,7 +1208,7 @@ extern "C" hipError_t hipDeviceComputeCapability(int *major, int *minor, hipDevi
 }
 
 extern "C" hipError_t hipDeviceGetName(char *name, int length, hipDevice_t device) {
-  if (!name || length <= 0 || device != 0) return remember(hipErrorInvalidValue);
+  if (!name || length <= 0 || !validDevice(device)) return remember(hipErrorInvalidValue);
   const std::string value = std::string("Gemstone ") + gemstone::hsa::targetArch();
   std::strncpy(name, value.c_str(), static_cast<size_t>(length));
   name[length - 1] = '\0';
@@ -994,7 +1216,7 @@ extern "C" hipError_t hipDeviceGetName(char *name, int length, hipDevice_t devic
 }
 
 extern "C" hipError_t hipDeviceTotalMem(size_t *bytes, hipDevice_t device) {
-  if (!bytes || device != 0) return remember(hipErrorInvalidValue);
+  if (!bytes || !validDevice(device)) return remember(hipErrorInvalidValue);
   *bytes = DeviceTotalMemoryBytes;
   return remember(hipSuccess);
 }
@@ -1002,13 +1224,17 @@ extern "C" hipError_t hipDeviceTotalMem(size_t *bytes, hipDevice_t device) {
 extern "C" hipError_t hipMemGetInfo(size_t *free, size_t *total) {
   if (!free || !total) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  uint64_t available = 0;
+  if (hsa_agent_get_info(gpuAgent(currentDevice), static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL), &available)
+      != HSA_STATUS_SUCCESS)
+    return remember(hipErrorInvalidDevice);
   *total = DeviceTotalMemoryBytes;
-  *free = *total;
+  *free = available;
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t *pool, int device) {
-  if (!pool || device != 0) return remember(hipErrorInvalidValue);
+  if (!pool || !validDevice(device)) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   *pool = reinterpret_cast<hipMemPool_t>(uintptr_t(1));
   return remember(hipSuccess);
@@ -1023,19 +1249,27 @@ extern "C" hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t) { return remem
 
 extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t attribute, int device) {
   if (!environmentAccepted()) return remember(hipErrorNotInitialized);
-  if (!value || device != 0) return remember(hipErrorInvalidValue);
+  if (!value || !validDevice(device)) return remember(hipErrorInvalidValue);
+  const auto model = gemstone::hsa::deviceModel();
   switch (attribute) {
     case hipDeviceAttributeMaxThreadsPerBlock:
     case hipDeviceAttributeMaxBlockDimX:
     case hipDeviceAttributeMaxBlockDimY:
     case hipDeviceAttributeMaxBlockDimZ: *value = MaxBlockThreads; break;
+    case hipDeviceAttributePciBusId: *value = device; break;
     case hipDeviceAttributeWarpSize: *value = static_cast<int>(gemstone::hsa::waveSize()); break;
-    case hipDeviceAttributeMaxGridDimX:
+    case hipDeviceAttributeMaxGridDimX: *value = static_cast<int>(MaxGridDimension); break;
     case hipDeviceAttributeMaxGridDimY:
-    case hipDeviceAttributeMaxGridDimZ: *value = static_cast<int>(MaxGridDimension); break;
-    case hipDeviceAttributeMaxThreadsPerMultiProcessor: *value = static_cast<int>(DeviceThreadsPerMultiprocessor); break;
-    case hipDeviceAttributeMultiprocessorCount: *value = static_cast<int>(DeviceMultiprocessors); break;
-    case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor: *value = static_cast<int>(DeviceSharedMemoryPerBlock); break;
+    case hipDeviceAttributeMaxGridDimZ: *value = static_cast<int>(MaxGridDimensionYZ); break;
+    case hipDeviceAttributeClockRate: *value = static_cast<int>(model.clockMHz * 1000U); break;
+    case hipDeviceAttributeWallClockRate: *value = static_cast<int>(gemstone::hsa::TimestampHz / 1000U); break;
+    case hipDeviceAttributeMaxRegistersPerBlock:
+    case hipDeviceAttributeMaxRegistersPerMultiprocessor: *value = static_cast<int>(model.registersPerProcessor()); break;
+    case hipDeviceAttributeImageSupport: *value = model.imageInstructions ? 1 : 0; break;
+    case hipDeviceAttributeMaxTexture2DGather: *value = model.imageGatherLod ? MaxTexture2DGatherDimension : 0; break;
+    case hipDeviceAttributeMaxThreadsPerMultiProcessor: *value = static_cast<int>(model.threadsPerProcessor()); break;
+    case hipDeviceAttributeMultiprocessorCount: *value = static_cast<int>(model.processors()); break;
+    case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor: *value = static_cast<int>(model.groupMemoryPerProcessor()); break;
     case hipDeviceAttributeTotalGlobalMem: *value = static_cast<int>(DeviceTotalMemoryBytes); break;
     case hipDeviceAttributeUnifiedAddressing:
     case hipDeviceAttributeCanMapHostMemory:
@@ -1053,28 +1287,33 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
 
 extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properties, int device) {
   if (!environmentAccepted()) return remember(hipErrorNotInitialized);
-  if (!properties || device != 0) return remember(hipErrorInvalidValue);
+  if (!properties || !validDevice(device)) return remember(hipErrorInvalidValue);
   std::memset(properties, 0, sizeof(*properties));
+  const auto model = gemstone::hsa::deviceModel();
   const std::string target = gemstone::hsa::targetArch();
   const std::string name = std::string("Gemstone ") + target;
   std::strncpy(properties->name, name.c_str(), sizeof(properties->name) - 1U);
   std::strncpy(properties->gcnArchName, target.c_str(), sizeof(properties->gcnArchName) - 1U);
   properties->totalGlobalMem = DeviceTotalMemoryBytes;
   properties->sharedMemPerBlock = DeviceSharedMemoryPerBlock;
+  properties->regsPerBlock = static_cast<int>(model.registersPerProcessor());
   properties->warpSize = static_cast<int>(gemstone::hsa::waveSize());
   properties->maxThreadsPerBlock = MaxBlockThreads;
-  properties->maxThreadsPerMultiProcessor = static_cast<int>(DeviceThreadsPerMultiprocessor);
-  properties->maxSharedMemoryPerMultiProcessor = DeviceSharedMemoryPerBlock;
+  properties->maxThreadsPerMultiProcessor = static_cast<int>(model.threadsPerProcessor());
+  properties->maxSharedMemoryPerMultiProcessor = model.groupMemoryPerProcessor();
+  properties->regsPerMultiprocessor = static_cast<int>(model.registersPerProcessor());
   properties->maxThreadsDim[0] = MaxBlockThreads;
   properties->maxThreadsDim[1] = MaxBlockThreads;
   properties->maxThreadsDim[2] = MaxBlockThreads;
   properties->maxGridSize[0] = MaxGridDimension;
-  properties->maxGridSize[1] = MaxGridDimension;
-  properties->maxGridSize[2] = MaxGridDimension;
+  properties->maxGridSize[1] = MaxGridDimensionYZ;
+  properties->maxGridSize[2] = MaxGridDimensionYZ;
+  properties->clockRate = static_cast<int>(model.clockMHz * 1000U);
   const auto version = gemstone::hsa::targetVersion(target.c_str());
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
-  properties->multiProcessorCount = static_cast<int>(DeviceMultiprocessors);
+  properties->multiProcessorCount = static_cast<int>(model.processors());
+  properties->pciBusID = device;
   properties->cooperativeLaunch = 1;
   properties->unifiedAddressing = 1;
   properties->canMapHostMemory = 1;
@@ -1122,10 +1361,11 @@ static_assert(PageableMemoryAccess + sizeof(int) <= Size, "legacy layout out of 
 extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *properties, int device) {
   using namespace legacy_properties;
   if (!environmentAccepted()) return remember(hipErrorNotInitialized);
-  if (!properties || device != 0) return remember(hipErrorInvalidValue);
+  if (!properties || !validDevice(device)) return remember(hipErrorInvalidValue);
   if (sizeof(size_t) != 8) return remember(hipErrorNotSupported);
   auto *bytes = static_cast<unsigned char *>(properties);
   std::memset(bytes, 0, Size);
+  const auto model = gemstone::hsa::deviceModel();
   const std::string target = gemstone::hsa::targetArch();
   const std::string name = std::string("Gemstone ") + target;
   std::strncpy(reinterpret_cast<char *>(bytes + Name), name.c_str(), NameSize - 1);
@@ -1137,14 +1377,14 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   write(MaxThreadsPerBlock, int(MaxBlockThreads));
   for (size_t axis = 0; axis < 3; ++axis) {
     write(MaxThreadsDim + (axis * sizeof(int)), int(MaxBlockThreads));
-    write(MaxGridSize + (axis * sizeof(int)), int(MaxGridDimension));
+    write(MaxGridSize + (axis * sizeof(int)), int(axis == 0 ? MaxGridDimension : MaxGridDimensionYZ));
   }
   const auto version = gemstone::hsa::targetVersion(target.c_str());
   write(Major, int(version.major));
   write(Minor, int(version.minor));
-  write(MultiProcessorCount, int(DeviceMultiprocessors));
+  write(MultiProcessorCount, int(model.processors()));
   write(Arch, uint32_t((1U << 5) | (1U << 7))); // global int64 atomics and doubles
-  write(MaxSharedMemoryPerMultiProcessor, DeviceSharedMemoryPerBlock);
+  write(MaxSharedMemoryPerMultiProcessor, model.groupMemoryPerProcessor());
   int gcnArch = 0;
   if (target.size() > 3) (void)std::from_chars(target.data() + 3, target.data() + target.size(), gcnArch);
   write(GcnArch, gcnArch);
@@ -1162,12 +1402,18 @@ extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
     return remember(hipSuccess);
   }
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  const hsa_status_t status = hsa_memory_allocate(state().deviceRegion, size, pointer);
+  const int device = currentDevice;
+  const hsa_status_t status = hsa_memory_allocate(gpuRegion(device), size, pointer);
   if (traceHip("allocations"))
     std::fprintf(stderr, "Gemstone HIP malloc size=%zu status=%d pointer=%p\n", size, int(status), !pointer ? nullptr : *pointer);
   if (status == HSA_STATUS_SUCCESS) {
     std::scoped_lock const guard(state().lock);
-    state().deviceAllocations.emplace(*pointer, size);
+    state().deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = device});
+    for (int peer = 0; validDevice(peer); ++peer)
+      if (peer != device && state().peers.enabled(static_cast<uint32_t>(peer), static_cast<uint32_t>(device))) {
+        const hsa_agent_t agent = gpuAgent(peer);
+        (void)hsa_amd_agents_allow_access(1, &agent, nullptr, *pointer);
+      }
   }
   return remember(mapHsa(status));
 }
@@ -1212,30 +1458,72 @@ static hipError_t copySymbol(const void *symbol, const void *source, size_t size
     module = found->second.module;
     deviceName = found->second.deviceName;
   }
-  if (!ensureModuleLoaded(module)) return remember(hipErrorInvalidImage);
+  if (!ensureModuleLoaded(module, currentDevice)) return remember(hipErrorInvalidImage);
   hsa_executable_t executable{};
   {
     std::scoped_lock const guard(module->lock);
-    executable = module->executable;
+    executable = module->instances[static_cast<size_t>(currentDevice)].executable;
   }
   if (executable.handle == 0) return remember(hipErrorInvalidSymbol);
   const hsa_status_t status = gemstone_hsa_executable_write_global(executable, deviceName.c_str(), source, size, offset);
   return remember(mapHsa(status));
 }
 
-static const void *symbolSource(const void *symbol, size_t size, size_t offset, hipError_t &error) {
-  if (!symbol && size != 0) {
-    error = hipErrorInvalidValue;
-    return nullptr;
+static hipError_t deviceVariable(const void *symbol, void **address, size_t *size) {
+  std::shared_ptr<Module> module;
+  std::string deviceName;
+  {
+    std::scoped_lock const guard(state().lock);
+    const auto found = state().variables.find(symbol);
+    if (found == state().variables.end()) return hipErrorInvalidSymbol;
+    module = found->second.module;
+    deviceName = found->second.deviceName;
+    *size = found->second.size;
   }
+  if (!ensureInitialised()) return hipErrorNoDevice;
+  if (!ensureModuleLoaded(module, currentDevice)) return hipErrorInvalidImage;
+  hsa_executable_t executable{};
+  {
+    std::scoped_lock const guard(module->lock);
+    executable = module->instances[static_cast<size_t>(currentDevice)].executable;
+  }
+  hsa_executable_symbol_t variable{};
+  const hsa_agent_t agent = gpuAgent(currentDevice);
+  if (hsa_executable_get_symbol_by_name(executable, deviceName.c_str(), &agent, &variable) != HSA_STATUS_SUCCESS)
+    return hipErrorInvalidSymbol;
+  uint64_t value = 0;
+  if (hsa_executable_symbol_get_info(variable, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &value) != HSA_STATUS_SUCCESS)
+    return hipErrorInvalidSymbol;
+  *address = reinterpret_cast<void *>(value);
+  return hipSuccess;
+}
+
+static hipError_t symbolSource(const void *symbol, size_t size, size_t offset, const void *&source) {
+  if (!symbol && size != 0) return hipErrorInvalidValue;
+  void *address = nullptr;
+  size_t variableSize = 0;
+  if (const auto error = deviceVariable(symbol, &address, &variableSize); error != hipSuccess) return error;
+  if (offset > variableSize || size > variableSize - offset) return hipErrorInvalidSymbol;
+  source = static_cast<const unsigned char *>(address) + offset;
+  return hipSuccess;
+}
+
+extern "C" hipError_t hipGetSymbolAddress(void **address, const void *symbol) {
+  if (!address || !symbol) return remember(hipErrorInvalidValue);
+  void *device = nullptr;
+  size_t size = 0;
+  if (const auto error = deviceVariable(symbol, &device, &size); error != hipSuccess) return remember(error);
+  *address = device;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipGetSymbolSize(size_t *size, const void *symbol) {
+  if (!size || !symbol) return remember(hipErrorInvalidValue);
   std::scoped_lock const guard(state().lock);
   const auto found = state().variables.find(symbol);
-  if (found == state().variables.end() || offset > found->second.size || size > found->second.size - offset) {
-    error = hipErrorInvalidSymbol;
-    return nullptr;
-  }
-  error = hipSuccess;
-  return static_cast<const unsigned char *>(found->second.host) + offset;
+  if (found == state().variables.end()) return remember(hipErrorInvalidSymbol);
+  *size = found->second.size;
+  return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipMemcpyToSymbol(const void *symbol, const void *source, size_t size, size_t offset, hipMemcpyKind) {
@@ -1249,9 +1537,8 @@ extern "C" hipError_t hipMemcpyToSymbolAsync(const void *symbol, const void *sou
 }
 
 extern "C" hipError_t hipMemcpyFromSymbol(void *destination, const void *symbol, size_t size, size_t offset, hipMemcpyKind kind) {
-  hipError_t error = hipSuccess;
-  const void *source = symbolSource(symbol, size, offset, error);
-  if (error != hipSuccess) return remember(error);
+  const void *source = nullptr;
+  if (const auto error = symbolSource(symbol, size, offset, source); error != hipSuccess) return remember(error);
   return hipMemcpy(destination, source, size, kind);
 }
 
@@ -1333,7 +1620,7 @@ extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int
   if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
   try {
     std::scoped_lock const guard(state().lock);
-    state().deviceAllocations.emplace(*pointer, size);
+    state().deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = currentDevice});
     state().managedAllocations.emplace(*pointer, size);
   } catch (...) {
     (void)hipFree(*pointer);
@@ -1344,7 +1631,7 @@ extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int
 }
 
 extern "C" hipError_t hipMemAdvise(const void *pointer, size_t size, hipMemoryAdvise advice, int device) {
-  if ((!pointer && size != 0) || device != 0) return remember(hipErrorInvalidValue);
+  if ((!pointer && size != 0) || !validDevice(device)) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
 
   // HIP's StdPar allocator obtains ordinary host pages and then marks them
@@ -1425,7 +1712,7 @@ extern "C" hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes,
   if (hsa_agent_get_info(info.agentOwner, HSA_AGENT_INFO_DEVICE, &owner) != HSA_STATUS_SUCCESS) return remember(hipErrorInvalidDevice);
   std::memset(attributes, 0, sizeof(*attributes));
   attributes->type = owner == HSA_DEVICE_TYPE_CPU ? hipMemoryTypeHost : hipMemoryTypeDevice;
-  attributes->device = 0;
+  attributes->device = owner == HSA_DEVICE_TYPE_CPU ? currentDevice : deviceOfAgent(info.agentOwner);
   attributes->devicePointer = gemstone::apiAddress(pointer);
   attributes->hostPointer = owner == HSA_DEVICE_TYPE_CPU ? gemstone::apiAddress(pointer) : nullptr;
   {
@@ -1483,13 +1770,13 @@ extern "C" hipError_t hipLaunchKernel(const void *functionAddress, dim3 grid, di
 extern "C" hipError_t hipLaunchCooperativeKernel(const void *functionAddress, dim3 grid, dim3 block, void **args, unsigned int shared,
                                                  hipStream_t stream) {
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  return dispatchCooperative(resolveKernel(functionAddress), grid, block, args, shared, stream);
+  return dispatchCooperative(resolveKernel(functionAddress, streamDevice(stream)), grid, block, args, shared, stream);
 }
 extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *blocks, const void *functionAddress, int blockSize,
                                                                             size_t shared, unsigned int) {
   if (!blocks || !functionAddress || blockSize <= 0) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  if (!resolveKernel(functionAddress)) return remember(hipErrorInvalidDeviceFunction);
+  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
   *blocks = residentBlocks(static_cast<uint64_t>(blockSize), shared);
   return remember(hipSuccess);
 }
@@ -1497,10 +1784,31 @@ extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, 
   return hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(blocks, functionAddress, blockSize, shared, 0);
 }
 
+extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int *minGridSize, int *blockSize, const void *functionAddress, size_t shared,
+                                                        int blockSizeLimit) {
+  if (!minGridSize || !blockSize || !functionAddress) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
+  const uint32_t limit = blockSizeLimit > 0 ? std::min<uint32_t>(static_cast<uint32_t>(blockSizeLimit), MaxBlockThreads) : MaxBlockThreads;
+  uint64_t bestResident = 0;
+  uint32_t best = 0;
+  for (uint32_t threads = limit; threads >= 1; --threads) {
+    const uint64_t resident = static_cast<uint64_t>(residentBlocks(threads, shared)) * threads;
+    if (resident > bestResident) {
+      bestResident = resident;
+      best = threads;
+    }
+  }
+  if (best == 0) return remember(hipErrorLaunchOutOfResources);
+  *blockSize = static_cast<int>(best);
+  *minGridSize = residentBlocks(best, shared) * static_cast<int>(gemstone::hsa::deviceModel().processors());
+  return remember(hipSuccess);
+}
+
 extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes, const void *functionAddress) {
   if (!attributes || !functionAddress) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  if (!resolveKernel(functionAddress)) return remember(hipErrorInvalidDeviceFunction);
+  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
   std::memset(attributes, 0, sizeof(*attributes));
   attributes->binaryVersion = 900;
   attributes->maxThreadsPerBlock = MaxBlockThreads;
@@ -1526,6 +1834,23 @@ extern "C" const char *hipGetErrorName(hipError_t error) {
     case hipErrorIllegalAddress: return "hipErrorIllegalAddress";
     case hipErrorLaunchOutOfResources: return "hipErrorLaunchOutOfResources";
     case hipErrorCooperativeLaunchTooLarge: return "hipErrorCooperativeLaunchTooLarge";
+    case hipErrorNotInitialized: return "hipErrorNotInitialized";
+    case hipErrorOutOfMemory: return "hipErrorOutOfMemory";
+    case hipErrorInvalidContext: return "hipErrorInvalidContext";
+    case hipErrorInvalidDevice: return "hipErrorInvalidDevice";
+    case hipErrorInvalidDevicePointer: return "hipErrorInvalidDevicePointer";
+    case hipErrorInvalidSymbol: return "hipErrorInvalidSymbol";
+    case hipErrorFileNotFound: return "hipErrorFileNotFound";
+    case hipErrorInvalidHandle: return "hipErrorInvalidHandle";
+    case hipErrorNotFound: return "hipErrorNotFound";
+    case hipErrorNotReady: return "hipErrorNotReady";
+    case hipErrorHostMemoryAlreadyRegistered: return "hipErrorHostMemoryAlreadyRegistered";
+    case hipErrorHostMemoryNotRegistered: return "hipErrorHostMemoryNotRegistered";
+    case hipErrorNotSupported: return "hipErrorNotSupported";
+    case hipErrorStreamCaptureUnsupported: return "hipErrorStreamCaptureUnsupported";
+    case hipErrorStreamCaptureIsolation: return "hipErrorStreamCaptureIsolation";
+    case hipErrorStreamCaptureUnmatched: return "hipErrorStreamCaptureUnmatched";
+    case hipErrorGraphExecUpdateFailure: return "hipErrorGraphExecUpdateFailure";
     default: return "hipErrorUnknown";
   }
 }
@@ -1533,7 +1858,12 @@ extern "C" const char *hipGetErrorString(hipError_t error) { return hipGetErrorN
 
 extern "C" hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags) {
   if (!stream) return remember(hipErrorInvalidValue);
-  *stream = static_cast<hipStream_t>(commands().createStream((flags & hipStreamNonBlocking) != 0));
+  auto *const created = static_cast<hipStream_t>(commands().createStream((flags & hipStreamNonBlocking) != 0));
+  {
+    std::scoped_lock const guard(state().lock);
+    state().streamDevices.emplace(created, currentDevice);
+  }
+  *stream = created;
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipStreamCreate(hipStream_t *stream) { return hipStreamCreateWithFlags(stream, 0); }
@@ -1543,6 +1873,8 @@ extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
     return remember(pending);
   if (stream && !sentinelStream(stream)) {
     if (!commands().destroyStream(stream)) return remember(hipErrorInvalidResourceHandle);
+    std::scoped_lock const guard(state().lock);
+    state().streamDevices.erase(stream);
   }
   return remember(hipSuccess);
 }
@@ -1564,33 +1896,217 @@ extern "C" hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback
 }
 extern "C" hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int) {
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  if (const auto captured = captures.waitEvent(stream, event)) return remember(graphResult(*captured));
   return remember(commands().waitEvent(stream, event) ? hipSuccess : hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t *device) {
   if (!device) return remember(hipErrorInvalidValue);
   if (sentinelStream(stream) || !validStream(stream)) return remember(hipErrorInvalidResourceHandle);
-  *device = 0;
+  *device = streamDevice(stream);
   return remember(hipSuccess);
 }
-extern "C" int hipGetStreamDeviceId(hipStream_t) { return 0; }
+extern "C" int hipGetStreamDeviceId(hipStream_t stream) { return stream && !sentinelStream(stream) ? streamDevice(stream) : currentDevice; }
 
-extern "C" hipError_t hipStreamBeginCapture(hipStream_t, hipStreamCaptureMode) { return remember(hipErrorNotSupported); }
-extern "C" hipError_t hipStreamEndCapture(hipStream_t, hipGraph_t *graph) {
-  if (graph) *graph = nullptr;
-  return remember(hipErrorNotSupported);
+namespace {
+
+using gemstone::graph::Kind;
+using gemstone::graph::Outcome;
+
+gemstone::graph::Graph *graphOf(hipGraph_t graph) { return reinterpret_cast<gemstone::graph::Graph *>(graph); }
+
+gemstone::graph::Exec *execOf(hipGraphExec_t exec) { return reinterpret_cast<gemstone::graph::Exec *>(exec); }
+
+hipError_t addNode(hipGraph_t graph, hipGraphNode_t *node, Kind kind, const hipGraphNode_t *dependencies, size_t count,
+                   gemstone::graph::Work work) {
+  return graphResult(gemstone::graph::add(graphOf(graph), node, kind, dependencies, count, std::move(work)));
 }
-extern "C" hipError_t hipStreamIsCapturing(hipStream_t, hipStreamCaptureStatus *status) {
-  if (!status) return remember(hipErrorInvalidValue);
-  *status = hipStreamCaptureStatusNone;
+
+hipError_t recordKernel(const hipKernelNodeParams &params, gemstone::graph::Work &work) {
+  if (!params.func) return hipErrorInvalidDeviceFunction;
+  LaunchBuffer launchBuffer;
+  if (!parseLaunchBuffer(params.extra, launchBuffer)) return hipErrorInvalidValue;
+  gemstone::graph::Recording const recording(work);
+  return dispatchKernel(resolveKernel(params.func, currentDevice), params.gridDim, params.blockDim, params.kernelParams,
+                        params.sharedMemBytes, nullptr, launchBuffer);
+}
+
+hipError_t memsetRows(void *destination, size_t pitch, unsigned element, unsigned value, size_t width, size_t height) {
+  if (width == 0 || height == 0) return hipSuccess;
+  if (!destination || (height > 1 && pitch < width * element)) return hipErrorInvalidValue;
+  std::vector<unsigned char> row(width * element);
+  for (size_t index = 0; index < width; ++index)
+    std::memcpy(row.data() + (index * element), &value, element);
+  for (size_t y = 0; y < height; ++y)
+    if (const auto status =
+            hipMemcpy(static_cast<unsigned char *>(destination) + (y * pitch), row.data(), row.size(), hipMemcpyHostToDevice);
+        status != hipSuccess)
+      return status;
+  return hipSuccess;
+}
+
+hipError_t captureInfo(hipStream_t stream, hipStreamCaptureStatus *status, unsigned long long *id, hipGraph_t *graph,
+                       const hipGraphNode_t **dependencies, size_t *count) {
+  if (!status) return hipErrorInvalidValue;
+  const auto capture = captures.info(stream);
+  if (!capture) {
+    *status = hipStreamCaptureStatusNone;
+    return hipSuccess;
+  }
+  *status = hipStreamCaptureStatusActive;
+  if (id) *id = capture->id;
+  if (graph) *graph = reinterpret_cast<hipGraph_t>(capture->graph);
+  if (dependencies || count) {
+    thread_local std::vector<hipGraphNode_t> frontier;
+    frontier.clear();
+    for (auto *node : capture->frontier)
+      frontier.push_back(reinterpret_cast<hipGraphNode_t>(node));
+    if (dependencies) *dependencies = frontier.data();
+    if (count) *count = frontier.size();
+  }
+  return hipSuccess;
+}
+
+} // namespace
+
+extern "C" hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
+  if (!stream || sentinelStream(stream)) return remember(hipErrorStreamCaptureUnsupported);
+  if (mode != hipStreamCaptureModeGlobal && mode != hipStreamCaptureModeThreadLocal && mode != hipStreamCaptureModeRelaxed)
+    return remember(hipErrorInvalidValue);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(graphResult(captures.begin(stream)));
+}
+extern "C" hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t *graph) {
+  if (!graph) return remember(hipErrorInvalidValue);
+  std::unique_ptr<gemstone::graph::Graph> captured;
+  if (const auto outcome = captures.end(stream, captured); outcome != Outcome::Ok) return remember(graphResult(outcome));
+  *graph = reinterpret_cast<hipGraph_t>(captured.release());
   return remember(hipSuccess);
 }
-extern "C" hipError_t hipGraphDestroy(hipGraph_t) { return remember(hipErrorNotSupported); }
-extern "C" hipError_t hipGraphExecDestroy(hipGraphExec_t) { return remember(hipErrorNotSupported); }
-extern "C" hipError_t hipGraphInstantiate(hipGraphExec_t *graphExec, hipGraph_t, hipGraphNode_t *, char *, size_t) {
-  if (graphExec) *graphExec = nullptr;
-  return remember(hipErrorNotSupported);
+extern "C" hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus *status) {
+  return remember(captureInfo(stream, status, nullptr, nullptr, nullptr, nullptr));
 }
-extern "C" hipError_t hipGraphLaunch(hipGraphExec_t, hipStream_t) { return remember(hipErrorNotSupported); }
+extern "C" hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus *status, unsigned long long *id) {
+  return remember(captureInfo(stream, status, id, nullptr, nullptr, nullptr));
+}
+extern "C" hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus *status, unsigned long long *id,
+                                                 hipGraph_t *graph, const hipGraphNode_t **dependencies, size_t *count) {
+  return remember(captureInfo(stream, status, id, graph, dependencies, count));
+}
+extern "C" hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void *userData) {
+  if (!fn) return remember(hipErrorInvalidValue);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] {
+    fn(userData);
+    return hipSuccess;
+  }));
+}
+
+extern "C" hipError_t hipGraphCreate(hipGraph_t *graph, unsigned int flags) {
+  if (!graph || flags != 0) return remember(hipErrorInvalidValue);
+  *graph = reinterpret_cast<hipGraph_t>(std::make_unique<gemstone::graph::Graph>().release());
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipGraphDestroy(hipGraph_t graph) {
+  delete graphOf(graph);
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipGraphClone(hipGraph_t *clone, hipGraph_t original) {
+  if (!clone || !original) return remember(hipErrorInvalidValue);
+  *clone = reinterpret_cast<hipGraph_t>(std::make_unique<gemstone::graph::Graph>(graphOf(original)->clone()).release());
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipGraphAddKernelNode(hipGraphNode_t *node, hipGraph_t graph, const hipGraphNode_t *dependencies, size_t count,
+                                            const hipKernelNodeParams *params) {
+  if (!params) return remember(hipErrorInvalidValue);
+  gemstone::graph::Work work;
+  if (const auto status = recordKernel(*params, work); status != hipSuccess) return remember(status);
+  return remember(addNode(graph, node, Kind::Kernel, dependencies, count, std::move(work)));
+}
+extern "C" hipError_t hipGraphAddMemcpyNode(hipGraphNode_t *node, hipGraph_t graph, const hipGraphNode_t *dependencies, size_t count,
+                                            const hipMemcpy3DParms *params) {
+  if (!params) return remember(hipErrorInvalidValue);
+  return remember(addNode(graph, node, Kind::Memcpy, dependencies, count, [copy = *params] { return hipMemcpy3D(&copy); }));
+}
+extern "C" hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t *node, hipGraph_t graph, const hipGraphNode_t *dependencies, size_t count,
+                                              void *destination, const void *source, size_t size, hipMemcpyKind kind) {
+  return remember(addNode(graph, node, Kind::Memcpy, dependencies, count, [=] { return hipMemcpy(destination, source, size, kind); }));
+}
+extern "C" hipError_t hipGraphAddMemsetNode(hipGraphNode_t *node, hipGraph_t graph, const hipGraphNode_t *dependencies, size_t count,
+                                            const hipMemsetParams *params) {
+  if (!params || (params->elementSize != 1 && params->elementSize != 2 && params->elementSize != 4)) return remember(hipErrorInvalidValue);
+  auto *const destination = params->dst;
+  const auto element = params->elementSize;
+  const auto value = params->value;
+  const auto width = params->width;
+  const auto height = params->height;
+  const auto pitch = height == 1 ? width * element : params->pitch;
+  return remember(addNode(graph, node, Kind::Memset, dependencies, count,
+                          [=] { return memsetRows(destination, pitch, element, value, width, height); }));
+}
+extern "C" hipError_t hipGraphAddHostNode(hipGraphNode_t *node, hipGraph_t graph, const hipGraphNode_t *dependencies, size_t count,
+                                          const hipHostNodeParams *params) {
+  if (!params || !params->fn) return remember(hipErrorInvalidValue);
+  return remember(addNode(graph, node, Kind::Host, dependencies, count, [fn = params->fn, userData = params->userData] {
+    fn(userData);
+    return hipSuccess;
+  }));
+}
+extern "C" hipError_t hipGraphAddEmptyNode(hipGraphNode_t *node, hipGraph_t graph, const hipGraphNode_t *dependencies, size_t count) {
+  return remember(addNode(graph, node, Kind::Empty, dependencies, count, [] { return hipSuccess; }));
+}
+extern "C" hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t *from, const hipGraphNode_t *to, size_t count) {
+  return remember(graphResult(gemstone::graph::connect(graphOf(graph), from, to, count)));
+}
+extern "C" hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t *nodes, size_t *count) {
+  if (!graph) return remember(hipErrorInvalidValue);
+  return remember(graphResult(gemstone::graph::list(*graphOf(graph), nodes, count, false)));
+}
+extern "C" hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t *nodes, size_t *count) {
+  if (!graph) return remember(hipErrorInvalidValue);
+  return remember(graphResult(gemstone::graph::list(*graphOf(graph), nodes, count, true)));
+}
+extern "C" hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t *exec, hipGraph_t graph, unsigned long long flags) {
+  if (!exec || !graph) return remember(hipErrorInvalidValue);
+  constexpr unsigned long long inert =
+      hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUpload | hipGraphInstantiateFlagUseNodePriority;
+  if ((flags & ~inert) != 0) return remember(hipErrorNotSupported);
+  *exec = reinterpret_cast<hipGraphExec_t>(
+      std::make_unique<gemstone::graph::Exec>(gemstone::graph::Exec::instantiate(*graphOf(graph))).release());
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipGraphInstantiate(hipGraphExec_t *exec, hipGraph_t graph, hipGraphNode_t *errorNode, char *log, size_t logSize) {
+  const auto status = hipGraphInstantiateWithFlags(exec, graph, 0);
+  if (status != hipSuccess) {
+    if (errorNode) *errorNode = nullptr;
+    if (log && logSize) log[0] = '\0';
+  }
+  return status;
+}
+extern "C" hipError_t hipGraphLaunch(hipGraphExec_t exec, hipStream_t stream) {
+  if (!exec) return remember(hipErrorInvalidValue);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  for (const auto &step : execOf(exec)->steps)
+    if (const auto status = enqueueCommand(stream, step.work); status != hipSuccess) return remember(status);
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipGraphExecDestroy(hipGraphExec_t exec) {
+  delete execOf(exec);
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t exec, hipGraphNode_t node, const hipKernelNodeParams *params) {
+  if (!exec || !params) return remember(hipErrorInvalidValue);
+  gemstone::graph::Work work;
+  if (const auto status = recordKernel(*params, work); status != hipSuccess) return remember(status);
+  return remember(graphResult(execOf(exec)->replaceKernel(reinterpret_cast<gemstone::graph::Node *>(node), std::move(work))));
+}
+extern "C" hipError_t hipGraphExecUpdate(hipGraphExec_t exec, hipGraph_t graph, hipGraphNode_t *errorNode,
+                                         hipGraphExecUpdateResult *result) {
+  if (!exec || !graph) return remember(hipErrorInvalidValue);
+  const auto outcome = execOf(exec)->update(*graphOf(graph));
+  if (errorNode) *errorNode = nullptr;
+  if (result) *result = outcome == Outcome::Ok ? hipGraphExecUpdateSuccess : hipGraphExecUpdateErrorTopologyChanged;
+  return remember(graphResult(outcome));
+}
 
 extern "C" hipError_t hipModuleLoadData(hipModule_t *module, const void *image) {
   if (!module || !image) return remember(hipErrorInvalidValue);
@@ -1598,18 +2114,21 @@ extern "C" hipError_t hipModuleLoadData(hipModule_t *module, const void *image) 
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   auto loaded = createModule(image);
   if (traceModules())
-    std::fprintf(stderr, "Gemstone HIP module load image=%p loaded=%d kernels=%zu error=%s\n", image, loaded->loaded ? 1 : 0,
-                 loaded->kernels.size(), loaded->error.c_str());
-  if (!loaded->loaded) return remember(hipErrorInvalidImage);
-  auto *handle = new (std::nothrow) ModuleHandle{std::move(loaded)};
-  if (!handle) return remember(hipErrorOutOfMemory);
-  {
-    std::scoped_lock const guard(state().lock);
-    state().driverModules.push_back(handle->module);
-  }
-  *module = reinterpret_cast<hipModule_t>(handle);
-  if (traceModules()) std::fprintf(stderr, "Gemstone HIP module handle=%p\n", static_cast<void *>(handle));
-  return remember(hipSuccess);
+    std::fprintf(stderr, "Gemstone HIP module load image=%p loaded=%d error=%s\n", image, loaded->loaded ? 1 : 0, loaded->error.c_str());
+  return remember(publishModule(std::move(loaded), module));
+}
+
+extern "C" hipError_t hipModuleLoad(hipModule_t *module, const char *fname) {
+  if (!module || !fname) return remember(hipErrorInvalidValue);
+  *module = nullptr;
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  std::ifstream file(fname, std::ios::binary);
+  if (!file) return remember(hipErrorFileNotFound);
+  auto loaded = std::make_shared<Module>();
+  loaded->fileImage.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  if (loaded->fileImage.size() < EI_NIDENT) return remember(hipErrorInvalidImage);
+  if (selectImage(*loaded, loaded->fileImage.data())) loadModule(*loaded, currentDevice);
+  return remember(publishModule(std::move(loaded), module));
 }
 
 extern "C" hipError_t hipModuleLoadDataEx(hipModule_t *module, const void *image, unsigned int, hipJitOption *, void **) {
@@ -1631,7 +2150,7 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
   auto *handle = moduleHandle(module);
   if (!handle->module || !handle->module->loaded) return remember(hipErrorInvalidResourceHandle);
   std::shared_ptr<Module> selected = handle->module;
-  auto kernel = resolveModuleKernel(*selected, name);
+  auto kernel = resolveModuleKernel(*selected, name, currentDevice);
   if (!kernel) {
     std::vector<std::weak_ptr<Module>> candidates;
     {
@@ -1643,7 +2162,7 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
       auto module = candidate.lock();
       if (!module) continue;
       live.push_back(candidate);
-      const auto global = resolveModuleKernel(*module, name);
+      const auto global = resolveModuleKernel(*module, name, currentDevice);
       if (global && !kernel) {
         selected = module;
         kernel = global;
@@ -1746,6 +2265,7 @@ extern "C" hipError_t hipEventDestroy(hipEvent_t event) {
 }
 extern "C" hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int) {
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  if (const auto captured = captures.recordEvent(event, stream)) return remember(graphResult(*captured));
   return remember(commands().recordEvent(event, stream) ? hipSuccess : hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) { return hipEventRecordWithFlags(event, stream, 0); }
@@ -1788,7 +2308,7 @@ extern "C" GEMSTONE_PUBLIC_API void __hipRegisterFunction(void **modules, const 
   std::scoped_lock const guard(runtime.lock);
   const auto module = findModule(modules);
   if (!module || !hostFunction || !deviceName) return;
-  runtime.kernels.insert_or_assign(hostFunction, FunctionBinding{.module = module, .name = deviceName, .kernel = nullptr});
+  runtime.kernels.insert_or_assign(hostFunction, FunctionBinding{.module = module, .name = deviceName, .kernels = {}});
 }
 
 extern "C" GEMSTONE_PUBLIC_API void __hipRegisterVar(void **modules, void *var, char *, char *deviceName, int, size_t size, int, int) {
@@ -1936,8 +2456,43 @@ template <size_t N> hipError_t deviceObject(const std::array<uint32_t, N> &words
   return remember(mapHsa(hsa_memory_copy(*object, words.data(), sizeof(words))));
 }
 
-/** An image object: the descriptor, then the channel type, channel order and width the device libraries read back. */
-std::array<uint32_t, HIP_TEXTURE_OBJECT_SIZE_DWORD> arrayObject(const hipArray &array) {
+images::AddressMode addressMode(hipTextureAddressMode mode) {
+  switch (mode) {
+    case hipAddressModeClamp: return images::AddressMode::ClampLastTexel;
+    case hipAddressModeMirror: return images::AddressMode::Mirror;
+    case hipAddressModeBorder: return images::AddressMode::ClampBorder;
+    default: return images::AddressMode::Wrap;
+  }
+}
+
+/** The sampler a texture description asks for over an image of `levels` mip levels; without a description, point sampling clamped. */
+images::Sampler samplerOf(const hipTextureDesc *desc, uint32_t levels) {
+  if (!desc)
+    return images::Sampler{
+        .address = {images::AddressMode::ClampLastTexel, images::AddressMode::ClampLastTexel, images::AddressMode::ClampLastTexel},
+        .filter = images::Filter::Point,
+        .mip = images::MipFilter::None,
+        .normalised = false,
+        .minLod = 0.0F,
+        .maxLod = 0.0F,
+        .lodBias = 0.0F};
+  const auto mip = [&] {
+    if (levels <= 1) return images::MipFilter::None;
+    if (desc->mipmapFilterMode == hipFilterModeLinear) return images::MipFilter::Linear;
+    return images::MipFilter::Point;
+  }();
+  return images::Sampler{
+      .address = {addressMode(desc->addressMode[0]), addressMode(desc->addressMode[1]), addressMode(desc->addressMode[2])},
+      .filter = desc->filterMode == hipFilterModeLinear ? images::Filter::Linear : images::Filter::Point,
+      .mip = mip,
+      .normalised = desc->normalizedCoords != 0,
+      .minLod = desc->minMipmapLevelClamp,
+      .maxLod = desc->maxMipmapLevelClamp,
+      .lodBias = desc->mipmapLevelBias};
+}
+
+/** An image object: the descriptor, then the channel type, channel order and width the device libraries read back, then the sampler. */
+std::array<uint32_t, HIP_TEXTURE_OBJECT_SIZE_DWORD> arrayObject(const hipArray &array, const hipTextureDesc *texture = nullptr) {
   const auto descriptor = images::image(imageGeneration(), reinterpret_cast<uint64_t>(array.data), array.format, array.type, array.width,
                                         array.height, array.depth, array.pitch, array.levels);
   std::array<uint32_t, HIP_TEXTURE_OBJECT_SIZE_DWORD> words{};
@@ -1945,6 +2500,8 @@ std::array<uint32_t, HIP_TEXTURE_OBJECT_SIZE_DWORD> arrayObject(const hipArray &
   words[8] = array.format.channelType;
   words[9] = array.format.channelOrder;
   words[10] = static_cast<uint32_t>(array.width);
+  const auto sampler = images::sampler(imageGeneration(), samplerOf(texture, array.levels));
+  std::copy(sampler.begin(), sampler.end(), words.begin() + HIP_SAMPLER_OBJECT_OFFSET_DWORD);
   return words;
 }
 
@@ -2167,7 +2724,7 @@ extern "C" hipError_t hipCreateTextureObject(hipTextureObject_t *pTexObject, con
       const auto format = imageFormat(array.desc, normalised);
       if (!format) return remember(hipErrorInvalidValue);
       array.format = *format;
-      words = arrayObject(array);
+      words = arrayObject(array, pTexDesc);
       break;
     }
     case hipResourceTypeLinear: {
@@ -2196,7 +2753,7 @@ extern "C" hipError_t hipCreateTextureObject(hipTextureObject_t *pTexObject, con
       array.height = pitched.height;
       array.depth = 1;
       array.pitch = pitched.pitchInBytes;
-      words = arrayObject(array);
+      words = arrayObject(array, pTexDesc);
       break;
     }
     default: return remember(hipErrorNotSupported);

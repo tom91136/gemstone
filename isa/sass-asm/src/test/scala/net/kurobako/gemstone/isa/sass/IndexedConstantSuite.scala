@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 /** Constant banks a uniform register selects, `cx[URa][offset]`: nvdisasm 13.3.73 (`nvdisasm -b SM90` on the raw words)

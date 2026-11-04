@@ -37,7 +37,7 @@ object MachineSemantics {
   private val f32x2: Shape = Shape.Vector(Type.Float(Type.width(32)), 2)
   private val f32x3: Shape = Shape.Vector(Type.Float(Type.width(32)), 3)
   private val f32x4: Shape = Shape.Vector(Type.Float(Type.width(32)), 4)
-  private val pair: Shape  = Shape.Structure(Vec(u32, Shape.Vector(Type.unsigned(Type.width(32)), 2)))
+  private val pair: Shape  = Shape.Structure(Vec(u32, u32x2))
 
   private def form(
       opcode: String,
@@ -1225,5 +1225,5 @@ object MachineSemantics {
     * has no machine semantics.
     */
   def machine(opcode: String): Vec[(instance: String, outcome: Either[Unrendered, Definition])] =
-    forms.filter(_.opcode == opcode).map(found => (found.text, rendered(found)))
+    forms.collect { case found if found.opcode == opcode => (found.text, rendered(found)) }
 }

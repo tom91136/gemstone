@@ -33,14 +33,42 @@ object Backend {
     override def close(): Unit = ()
   }
 
-  /** Optional image transformation configured by the application, independent of program execution. */
+  /** Optional image transformations configured by the application, independent of program execution. */
   trait Specialization {
     def describe(image: Vec[Byte]): Either[Fault, Vec[SpecializationInfo]]
     def specialize(image: Vec[Byte], constants: Vec[SpecializationConstant]): Either[Fault, Vec[Byte]]
+
+    /** Links the inputs into one image, renaming entry points an earlier input already defines. */
+    def link(images: Vec[Vec[Byte]]): Either[Fault, Backend.LinkedImage]
   }
+
+  case class LinkedImage(image: Vec[Byte], kernels: Vec[LinkedKernel])
+
+  case class LinkedKernel(module: Int, name: String, linkageName: String)
 }
 
 trait Backend {
   def format: ProgramFormat
   def load(image: Vec[Byte]): Either[Fault, Backend.Program]
+}
+
+object ProgramDirectory {
+  val Empty: ProgramDirectory = _ => None
+}
+
+/** The programs loaded in one session, which a running program may transfer control into. */
+trait ProgramDirectory {
+  def program(id: ProgramId): Option[Backend.Program]
+}
+
+/** What one task runs against: the memory it reads and writes, the control that cancels and meters it, where its events
+  * go, and the programs of its session.
+  */
+class TaskContext(
+    val memory: AddressSpace,
+    val control: TaskControl,
+    val handler: Event => Either[Fault, Unit],
+    val programs: ProgramDirectory = ProgramDirectory.Empty
+) {
+  def withMemory(memory: AddressSpace): TaskContext = TaskContext(memory, control, handler, programs)
 }

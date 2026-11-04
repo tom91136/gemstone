@@ -26,7 +26,9 @@ private object VMControlCompiler {
   private val VoteModifiers             = Set(Modifier.ANY, Modifier.ALL, Modifier.EQ)
   private val BarrierReductionModifiers =
     Set(Modifier.RED, Modifier.OR, Modifier.AND, Modifier.POPC, Modifier.DEFER_BLOCKING)
-  private val ReturnModifiers = Set(Modifier.ABS, Modifier.REL, Modifier.NODEC)
+  private val ReturnModifiers          = Set(Modifier.ABS, Modifier.REL, Modifier.NODEC)
+  private val ConditionalExitModifiers = Set(Modifier.EQ, Modifier.EQU, Modifier.NE, Modifier.NEU)
+  private val NegatedExitModifiers     = Set(Modifier.NE, Modifier.NEU)
 
   def lower(using context: VMCompilationContext): Boolean = {
     import context.*
@@ -47,6 +49,7 @@ private object VMControlCompiler {
         }
         if (legacy || operands.size != 1 || !duration(operands.head) || instruction.guard.nonEmpty)
           unsupported("unsupported NANOSLEEP.WARP form")
+        emit(Pause)
         true
       // mbarrier.try_wait's suspend hint sleeps until the phase may have completed; copies complete as they issue.
       case _: Form.Nanosleep if modifiers == Vec(Modifier.SYNCS) => true
@@ -108,13 +111,13 @@ private object VMControlCompiler {
         val member = binary(IntegerOperation.BitwiseAnd, mask, Value.LaneMaskEqual)
         val absent = compare(Comparison.Equal, NumericFormat.Unsigned(32), member, Value.Immediate(0L))
         branch(codeAddress(operands(1)), Some(ExecutionPredicate(absent.slot, negated = false)))
-        emit(WarpBarrier(mask))
+        emit(WarpBarrier(mask, exclusive = true))
         true
       case _: Form.Warpsync if modifiers == Vec(Modifier.COLLECTIVE, Modifier.ALL) =>
         emit(WarpBarrier(Value.Immediate(0xffffffffL)))
         true
       case _: Form.Warpsync =>
-        requireModifiers(Set(Modifier.ALL))
+        requireModifiers(Set(Modifier.ALL, Modifier.EXCLUSIVE))
         val mask =
           if (modifiers.contains(Modifier.ALL)) {
             if (operands.nonEmpty) unsupported("WARPSYNC.ALL operands")
@@ -123,7 +126,7 @@ private object VMControlCompiler {
             requireOperands(1, "WARPSYNC requires a member mask")
             source(operands.head)
           }
-        emit(WarpBarrier(mask))
+        emit(WarpBarrier(mask, modifiers.contains(Modifier.EXCLUSIVE)))
         true
       case _: Form.Bar =>
         blockBarrier()
@@ -166,8 +169,22 @@ private object VMControlCompiler {
       case _: Form.Ret =>
         subroutineReturn()
         true
+      case _: Form.Exit
+          if legacy && operands.isEmpty && modifiers.size == 1 &&
+            ConditionalExitModifiers(modifiers.head) =>
+        guarded(
+          Return,
+          readConditionFlag(VMConditionCodes.Flag.Zero),
+          negated = NegatedExitModifiers(modifiers.head)
+        )
+        true
       case _: Form.Exit =>
-        requireModifiers(Set.empty); emit(Return)
+        requireModifiers(Set.empty)
+        // the predicate operand further restricts the guarded lanes, as `@P0 EXIT P2` exits only where both hold
+        operands.headOption.filterNot(OperandQueries.isAlwaysPredicate) match {
+          case Some(predicate) => guarded(Return, predicateSource(predicate))
+          case None            => emit(Return)
+        }
         true
       case _: Form.Bra | _: Form.Jmp
           if legacy && modifiers.size == 2 && modifiers.head == Modifier.CC &&
@@ -190,7 +207,7 @@ private object VMControlCompiler {
       case _: Form.Bra | _: Form.Jmp if modifiers.contains(Modifier.ANY) =>
         requireModifiers(Set(Modifier.U, Modifier.ANY))
         requireOperands(1, "warp branch requires a target")
-        val input = predicateSource(instruction.guard.map(_.predicate).getOrElse(OperandQueries.True))
+        val input = predicateSource(instruction.guard.fold(OperandQueries.True)(_.predicate))
         val taken = predicateTemp()
         emit(VotePredicate(taken.slot, input.slot, Value.ActiveMask, VoteOperation.Any))
         branch(codeAddress(operands.head), Some(ExecutionPredicate(taken.slot, negated = false)))
@@ -368,13 +385,18 @@ private object VMControlCompiler {
     }
   }
 
-  /** BRA.DIV branches unless every live lane of its mask is active; BRA.CONV branches when they all are. */
+  /** BRA.DIV branches unless every live mask lane passes the guard, BRA.CONV branches when all of them do. */
   private def convergenceBranch()(using context: VMCompilationContext): Unit = {
     import context.*
     if (operands.size != 1 && operands.size != 2) unsupported("convergence branch operands")
-    val mask   = if (operands.size == 2) source(operands.head) else Value.Immediate(0xffffffffL)
+    val mask      = if (operands.size == 2) source(operands.head) else Value.Immediate(0xffffffffL)
+    val executing = instruction.guard.fold[Value](Value.ActiveMask) { guard =>
+      val kept = temp()
+      emit(VoteBallot(kept.slot, predicateSource(guard.predicate).slot, Value.ActiveMask))
+      kept
+    }
     val live   = binary(IntegerOperation.BitwiseAnd, mask, Value.LiveMask)
-    val active = binary(IntegerOperation.BitwiseAnd, mask, Value.ActiveMask)
+    val active = binary(IntegerOperation.BitwiseAnd, mask, executing)
     val all    = compare(Comparison.Equal, NumericFormat.Unsigned(32), live, active)
     branch(codeAddress(operands.last), Some(ExecutionPredicate(all.slot, modifiers.head == Modifier.DIV)))
   }
@@ -428,7 +450,7 @@ private object VMControlCompiler {
       driverCall(name, Some(guard))
       if (resume) branch(next.toLong, Some(guard))
     }
-    dispatch(binary(IntegerOperation.Add, target, Value.Immediate(0L)), addresses)
+    dispatch(binary(IntegerOperation.Add, target, Value.Immediate(0L)), callTargets)
   }
 
   /** Code addresses are offsets in the function's section, as relocated return and target addresses resolve. */
@@ -471,9 +493,9 @@ private object VMControlCompiler {
     store(operands.head, Value.Immediate(address), if (legacy) 32 else 64)
   }
 
-  /** A call to the driver's device runtime: `malloc` and `free` on the device heap, `vprintf`, whose output the VM
-    * discards as PTX `vprintf` does, returning 0, and `__assertfail`, which fails the launch as a failed device
-    * assertion does. Arguments and results are in R4 onwards.
+  /** A call to the driver's device runtime: `malloc` and `free` on the device heap, `vprintf`, which prints the format
+    * in R4 with the argument buffer in R6, and `__assertfail`, which fails the launch as a failed device assertion
+    * does. Arguments and results are in R4 onwards.
     */
   private def driverCall(name: String, guard: Option[ExecutionPredicate])(using context: VMCompilationContext): Unit = {
     import context.*
@@ -482,6 +504,7 @@ private object VMControlCompiler {
     )
     val argument                            = Parameter(0)
     val result                              = Parameter(1)
+    val buffer                              = Parameter(2)
     def register(index: Int): VMIR.Register = destination(Operand.Register(RegisterBank.R, index.unsafe)).slot
     name match {
       case "malloc" =>
@@ -492,9 +515,18 @@ private object VMControlCompiler {
       case "free" =>
         step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 64), 64))
         step(CallBuiltin(Builtin.Free, Vec.empty, Vec(argument)))
-      case "vprintf"      => step(Move(register(4), Value.Immediate(0L), 32))
-      case "__assertfail" => step(CallBuiltin(Builtin.AssertFail, Vec.empty, Vec.empty))
-      case _              => step(Trap)
+      case "vprintf" =>
+        step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 64), 64))
+        step(StoreParameter(buffer, 0, source(Operand.Register(RegisterBank.R, 6), 64), 64))
+        step(CallBuiltin(Builtin.Printf, Vec(result), Vec(argument, buffer)))
+        step(LoadParameter(Vec(register(4)), result, 0, 32, signed = false))
+      case "__assertfail" =>
+        step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 64), 64))
+        step(StoreParameter(Parameter(1), 0, source(Operand.Register(RegisterBank.R, 6), 64), 64))
+        step(StoreParameter(buffer, 0, source(Operand.Register(RegisterBank.R, 8), 32), 32))
+        step(StoreParameter(Parameter(3), 0, source(Operand.Register(RegisterBank.R, 10), 64), 64))
+        step(CallBuiltin(Builtin.AssertFail, Vec.empty, Vec(argument, Parameter(1), buffer, Parameter(3))))
+      case _ => step(Trap)
     }
   }
 

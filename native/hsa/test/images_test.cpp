@@ -83,6 +83,38 @@ TEST_CASE("texels pack components as stores convert them", "[images]") {
   REQUIRE((images::texel(halves, {0x3fc00000U, 0, 0, 0}) == std::array<uint8_t, 16>{0x00, 0x3e}));
 }
 
+TEST_CASE("sampler descriptors lay out the clamp modes, filters, level range and bias", "[images]") {
+  using images::AddressMode;
+  const images::Sampler point{.address = {AddressMode::Wrap, AddressMode::Mirror, AddressMode::ClampBorder},
+                              .filter = images::Filter::Point,
+                              .mip = images::MipFilter::None,
+                              .normalised = true,
+                              .minLod = 0.0F,
+                              .maxLod = 0.0F,
+                              .lodBias = 0.0F};
+  REQUIRE((images::sampler(images::Generation::GFX103, point) == std::array<uint32_t, 4>{0x188, 0, 0x1000000, 0}));
+  const images::Sampler linear{.address = {AddressMode::ClampLastTexel, AddressMode::ClampLastTexel, AddressMode::ClampLastTexel},
+                               .filter = images::Filter::Linear,
+                               .mip = images::MipFilter::Linear,
+                               .normalised = false,
+                               .minLod = 0.5F,
+                               .maxLod = 3.0F,
+                               .lodBias = -1.5F};
+  REQUIRE((images::sampler(images::Generation::GFX9, linear) == std::array<uint32_t, 4>{0x8092, 0x300080, 0xa503e80, 0}));
+  REQUIRE((images::sampler(images::Generation::GFX10, linear) == images::sampler(images::Generation::GFX9, linear)));
+  REQUIRE((images::sampler(images::Generation::GFX11, linear) == std::array<uint32_t, 4>{0x8092, 0x600080, 0xa503e80, 0}));
+  REQUIRE((images::sampler(images::Generation::GFX12, linear) == images::sampler(images::Generation::GFX11, linear)));
+  const images::Sampler beyond{.address = {AddressMode::Wrap, AddressMode::Wrap, AddressMode::Wrap},
+                               .filter = images::Filter::Point,
+                               .mip = images::MipFilter::Point,
+                               .normalised = true,
+                               .minLod = -2.0F,
+                               .maxLod = 100.0F,
+                               .lodBias = 100.0F};
+  // levels clamp to the unsigned range and the bias to the signed one
+  REQUIRE((images::sampler(images::Generation::GFX10, beyond) == std::array<uint32_t, 4>{0, 0xfff000, 0x5001fff, 0}));
+}
+
 TEST_CASE("linear texture descriptors index elements", "[images]") {
   const auto floats = supported(images::format(images::Channels{.x = 32, .y = 0, .z = 0, .w = 0, .kind = images::Kind::Float}, false));
   REQUIRE(

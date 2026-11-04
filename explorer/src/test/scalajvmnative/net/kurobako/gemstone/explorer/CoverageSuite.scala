@@ -2,7 +2,8 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
+import scala.collection.mutable
 import scala.concurrent.duration.*
 import scala.io.Codec
 import scala.io.Source
@@ -54,11 +55,14 @@ class CoverageSuite extends Suite {
   }
 
   // same-named forms of an entry are told apart by their order in it, as name#2 from the second on
-  private def named(forms: Vec[View.Form]): Vec[(String, View.Form)] =
-    forms.zipWithIndex.map { (form, index) =>
-      val ordinal = forms.take(index).count(_.name == form.name) + 1
+  private def named(forms: Vec[View.Form]): Vec[(String, View.Form)] = {
+    val seen = mutable.Map.empty[String, Int].withDefaultValue(0)
+    forms.map { form =>
+      seen(form.name) += 1
+      val ordinal = seen(form.name)
       (if (ordinal == 1) form.name else s"${form.name}#$ordinal", form)
     }
+  }
 
   private def classifyTarget(language: Language, target: Option[String]): Vec[Classified] = {
     val model = language.model

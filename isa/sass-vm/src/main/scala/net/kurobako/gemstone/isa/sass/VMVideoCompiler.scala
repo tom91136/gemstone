@@ -77,29 +77,29 @@ private object VMVideoCompiler {
       case other                                    => (false, other)
     }
     // an immediate source is the part itself; its sign negates it
-    OperandQueries.integer(inner).map { value =>
-      val select = format match {
-        case Modifier.U8 | Modifier.S8   => VideoSelect.B0
-        case Modifier.U16 | Modifier.S16 => VideoSelect.H0
-        case _                           => VideoSelect.Word
-      }
-      (Value.Immediate((value.abs & 0xffffffffL).toLong): Value, select, negated != (value < 0))
-    }.getOrElse {
+    OperandQueries.integer(inner).fold {
       // the encoded selector names a byte or a half-word by the format; nvdisasm text spells it as a suffix
-      val index = instruction.machine.flatMap(_.bindings.get(binding)).map(_.toInt).getOrElse(
+      val index = instruction.machine.flatMap(_.bindings.get(binding)).fold(
         OperandQueries.selectors(inner).collectFirst {
           case OperandSelector.B0 | OperandSelector.H0 => 0
           case OperandSelector.B1 | OperandSelector.H1 => 1
           case OperandSelector.B2                      => 2
           case OperandSelector.B3                      => 3
         }.getOrElse(0)
-      )
+      )(_.toInt)
       val select = format match {
         case Modifier.U8 | Modifier.S8   => ByteSelects(index & 3)
         case Modifier.U16 | Modifier.S16 => if ((index & 1) == 0) VideoSelect.H0 else VideoSelect.H1
         case _                           => VideoSelect.Word
       }
       (source(registerBaseOrZero(inner, s"${operation.mnemonic.raw} source")), select, negated)
+    } { value =>
+      val select = format match {
+        case Modifier.U8 | Modifier.S8   => VideoSelect.B0
+        case Modifier.U16 | Modifier.S16 => VideoSelect.H0
+        case _                           => VideoSelect.Word
+      }
+      (Value.Immediate((value.abs & 0xffffffffL).toLong): Value, select, negated != (value < 0))
     }
   }
 

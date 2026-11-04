@@ -8,7 +8,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, *}
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class SharedMemorySuite extends Suite {

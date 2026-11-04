@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** GFX9 VGPR indexing mode, which hipcc emits for a dynamic index into a vector held in registers, e.g.
   * `typedef float f16v __attribute__((ext_vector_type(16))); out[i] = v[k & 15];` under

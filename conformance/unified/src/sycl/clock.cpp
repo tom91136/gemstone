@@ -36,10 +36,10 @@ template <experimental::clock_scope Scope> void clock(sycl::aspect aspect, bool 
 
 } // namespace
 
-TEST_CASE("edge-cases/runtime/sycl/clock/sub-group/n64", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/sycl/clock/sub-group/n64", "[unified][runtime]") {
   clock<experimental::clock_scope::sub_group>(sycl::aspect::ext_oneapi_clock_sub_group, true);
 }
 
-TEST_CASE("edge-cases/runtime/sycl/clock/device/n64", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/sycl/clock/device/n64", "[unified][runtime]") {
   clock<experimental::clock_scope::device>(sycl::aspect::ext_oneapi_clock_device, false);
 }

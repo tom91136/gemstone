@@ -9,14 +9,14 @@ import scala.util.control.NonFatal
 
 /** Maps decoded RPC operations onto an execution session and encodes their replies. */
 object ExecutionHandler {
-  def apply(operation: Operation[?], session: ExecutionSession): Either[ExecutionFailure, Array[Byte]] =
+  def apply(operation: Operation[?], session: ExecutionSession): Either[ExecutionFailure, msgpack.Encoded] =
     try dispatch(operation, session)
     catch { case NonFatal(error) => Left(ExecutionFailure.Failed(throwables.detail(error))) }
 
   private def dispatch(
       operation: Operation[?],
       session: ExecutionSession
-  ): Either[ExecutionFailure, Array[Byte]] = operation match {
+  ): Either[ExecutionFailure, msgpack.Encoded] = operation match {
     case Operation.EnableHostMemory => encode(Operation.EnableHostMemory, session.enableHostMemory())
     case request @ Operation.PollHostMemory(completion)           => encode(request, session.pollHostMemory(completion))
     case request @ Operation.SupplyHostMemory(completion, ranges) =>
@@ -24,8 +24,10 @@ object ExecutionHandler {
     case Operation.Ping                               => encode(Operation.Ping, Right(()))
     case request @ Operation.RegisterAllocation(size) =>
       encode(request, session.registerAllocation(size.toIntExact.widen[Int > 0]))
-    case request @ Operation.RegisterAllocationAddress(allocation, nativeBase, hostBacked) =>
-      encode(request, session.registerAllocationAddress(allocation, nativeBase, hostBacked))
+    case request @ Operation.RegisterAllocationAddress(allocation, nativeBase, hostBacked, devices) =>
+      encode(request, session.registerAllocationAddress(allocation, nativeBase, hostBacked, devices))
+    case request @ Operation.SetAllocationDevices(allocation, devices) =>
+      encode(request, session.setAllocationDevices(allocation, devices))
     case request @ Operation.SupplyHostSync(completion, ticket, observed) =>
       encode(request, session.supplyHostSync(completion, ticket, observed))
     case request @ Operation.ReleaseAllocation(allocation) =>
@@ -74,6 +76,8 @@ object ExecutionHandler {
       encode(request, session.describeSpecialization(image))
     case request @ Operation.SpecializeImage(image, constants) =>
       encode(request, session.specializeImage(image, constants))
+    case request @ Operation.LinkImages(images) =>
+      encode(request, session.linkImages(images))
     case request @ Operation.PrepareShader(image, entry, stage, constants) =>
       encode(request, session.prepareShader(ShaderStage(image, entry, stage, constants)))
     case request @ Operation.SubmitGraphics(submission)         => encode(request, session.submitGraphics(submission))
@@ -111,7 +115,9 @@ object ExecutionHandler {
           descriptorBindings,
           argumentBuffer,
           clusterSize,
-          cooperative
+          cooperative,
+          deviceHeap,
+          device
         ) =>
       val created = KernelTask.validated(
         kernelName = kernelName,
@@ -127,11 +133,12 @@ object ExecutionHandler {
         discoverArgumentRelocations = discoverArgumentRelocations,
         argumentBuffer = argumentBuffer,
         cluster = clusterSize,
-        cooperative = cooperative
+        cooperative = cooperative,
+        deviceHeap = deviceHeap
       ).left.map(ExecutionFailure.InvalidRequest(_))
       val result = created match {
         case Left(error) => Left(error)
-        case Right(task) => session.launch(program, task, descriptorBindings)
+        case Right(task) => session.launch(program, task, descriptorBindings, device)
       }
       encode(request, result)
     case request @ Operation.QueryCompletion(completion) =>
@@ -147,7 +154,9 @@ object ExecutionHandler {
         session.completionPointerRelocations(id = completion, offset = offset, limit = ExecutionRPC.MaximumElements)
       )
     case request @ Operation.CompletionPrints(completion) =>
-      encode(request, session.completionPrints(completion))
+      encode(request, session.completionPrints(completion).map(PrintText(_)))
+    case request @ Operation.CompletionErrorPrints(completion) =>
+      encode(request, session.completionPrints(completion, Event.PrintStream.Stderr).map(PrintText(_)))
     case request @ Operation.ReleaseCompletion(completion) =>
       encode(request, session.releaseCompletion(completion))
   }
@@ -155,9 +164,9 @@ object ExecutionHandler {
   private def encode[A](
       operation: Operation[A],
       result: Either[ExecutionFailure, A]
-  ): Either[ExecutionFailure, Array[Byte]] =
+  ): Either[ExecutionFailure, msgpack.Encoded] =
     result.flatMap(value =>
-      operation.replyCodec.encode(value, ExecutionRPC.Limits)
+      operation.replyCodec.encoded(value, ExecutionRPC.Limits)
         .left.map(message => ExecutionFailure.Failed(s"${operation.productPrefix} reply: $message"))
     )
 

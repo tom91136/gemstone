@@ -131,8 +131,6 @@ class TimelineSuite extends Suite {
       case _                    => false
     }
 
-  /** The change the entry records. */
-
   /** The ordinal of the issue the launch makes after the entry at `index`. */
   private def nextIssue(entries: Vector[Entry], index: Int): Option[Long] =
     entries.drop(index + 1).collectFirst { case Entry.Issued(_, issue) => issue }

@@ -121,10 +121,7 @@ private object IntelBlockSemantics {
       lanes: Int
   ): F[Unit] = machine.numeric(coordinate)(
     levelBinding(algebra, machine)(image, lanes) { (width, height, stride, texel) =>
-      val column = algebra.signExtend(machine.leaf(coordinate, 0), 32)
-      val row    = algebra.signExtend(machine.leaf(coordinate, 1), 32)
-      val size   = algebra.literal(bytes.raw.toLong)
-      val origin = algebra.add(column, algebra.multiply(machine.subgroupLocal, size))
+      val (origin, row, size) = texelOrigin(algebra, machine)(coordinate, bytes)
       levelLoad(algebra, machine)(lanes, bytes)(lane =>
         texelInside(algebra)(origin, algebra.add(row, lane), size, width, height, texel)
       )(lane => texelOffset(algebra)(algebra.add(row, lane), origin, stride, texel))(
@@ -132,6 +129,16 @@ private object IntelBlockSemantics {
       )
     }
   )
+
+  inline def texelOrigin[V, D, F[_]](inline algebra: Algebra[V], inline machine: SPIRVMachine[V, D, F])(
+      coordinate: Int,
+      bytes: Int in 1 ~ 8
+  ): (V, V, V) = {
+    val column = algebra.signExtend(machine.leaf(coordinate, 0), 32)
+    val size   = algebra.literal(bytes.raw.toLong)
+    val origin = algebra.add(column, algebra.multiply(machine.subgroupLocal, size))
+    (origin, algebra.signExtend(machine.leaf(coordinate, 1), 32), size)
+  }
 
   inline def imageWrite[V, D, F[_]](inline algebra: Algebra[V], inline machine: SPIRVMachine[V, D, F])(
       image: Int,
@@ -142,10 +149,7 @@ private object IntelBlockSemantics {
   ): F[Unit] = machine.numeric(coordinate)(
     machine.numeric(data)(
       levelBinding(algebra, machine)(image, 0) { (width, height, stride, texel) =>
-        val column = algebra.signExtend(machine.leaf(coordinate, 0), 32)
-        val row    = algebra.signExtend(machine.leaf(coordinate, 1), 32)
-        val size   = algebra.literal(bytes.raw.toLong)
-        val origin = algebra.add(column, algebra.multiply(machine.subgroupLocal, size))
+        val (origin, row, size) = texelOrigin(algebra, machine)(coordinate, bytes)
         levelStore(algebra, machine)(lanes, bytes, data)(lane =>
           texelInside(algebra)(origin, algebra.add(row, lane), size, width, height, texel)
         )(lane => texelOffset(algebra)(algebra.add(row, lane), origin, stride, texel))(machine.advance)

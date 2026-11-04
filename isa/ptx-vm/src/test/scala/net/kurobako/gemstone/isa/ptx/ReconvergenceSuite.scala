@@ -32,6 +32,10 @@ class ReconvergenceSuite extends Suite {
     def atLabel(label: String): Vec[Action] = before(firstInstructionAfter(label))
 
     def actions: Vec[Action] = Vec.from(schedule.before.toSeq.sortBy(_._1)).flatMap(_._2)
+    def slots: Int           = actions.collect {
+      case Action.Setup(slot)       => slot + 1
+      case Action.Synchronise(slot) => slot + 1
+    }.maxOption.getOrElse(0)
   }
 
   private def analyse(body: String, registers: String = ""): Analysed = {
@@ -323,7 +327,7 @@ class ReconvergenceSuite extends Suite {
       |J2:
       |$store""".stripMargin)
     assertEquals(setupSlots(found), Vec(0, 0, 0))
-    assertEquals(found.schedule.slots, 1)
+    assertEquals(found.slots, 1)
   }
 
   test("nested branches use distinct token slots") {
@@ -337,7 +341,7 @@ class ReconvergenceSuite extends Suite {
       |OUTER:
       |$store""".stripMargin)
     assertEquals(setupSlots(found), Vec(0, 1))
-    assertEquals(found.schedule.slots, 2)
+    assertEquals(found.slots, 2)
   }
 
   test("a loop exit hoisted over an inner branch does not share its slot") {
@@ -356,7 +360,7 @@ class ReconvergenceSuite extends Suite {
       |$store""".stripMargin)
     assertEquals(found.before(found.labelAt("LOOP")), Vec[Action](Action.Setup(0)))
     assertEquals(found.before(found.instructionAt("bra", 1)), Vec[Action](Action.Setup(1)))
-    assertEquals(found.schedule.slots, 2)
+    assertEquals(found.slots, 2)
   }
 
   test("sequential loops share one token slot") {
@@ -372,7 +376,7 @@ class ReconvergenceSuite extends Suite {
       |@%q bra L1;
       |$store""".stripMargin)
     assertEquals(setupSlots(found), Vec(0, 0))
-    assertEquals(found.schedule.slots, 1)
+    assertEquals(found.slots, 1)
   }
 
   test("a join reachable by a lane holding another live token does not share that token's slot") {

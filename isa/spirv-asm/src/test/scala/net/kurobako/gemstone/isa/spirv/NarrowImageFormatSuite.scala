@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.spirv
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class NarrowImageFormatSuite extends Suite {
   test("half image lanes preserve every finite encoding including signed zero and subnormals") {

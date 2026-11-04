@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
@@ -9,6 +10,7 @@
 #include <CL/cl.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
@@ -32,8 +34,14 @@ struct RemoteFailure {
 
 std::optional<RemoteFailure> remoteFailureOf(const std::string &command) {
   using gemstone::execution::FailureKind;
-  if (command == "remote-error") return RemoteFailure{.kind = FailureKind::Failed, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-error" || command == "remote-failed")
+    return RemoteFailure{.kind = FailureKind::Failed, .status = CL_OUT_OF_RESOURCES};
   if (command == "remote-illegal-address") return RemoteFailure{.kind = FailureKind::IllegalAddress, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-misaligned-address") return RemoteFailure{.kind = FailureKind::MisalignedAddress, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-illegal-instruction") return RemoteFailure{.kind = FailureKind::IllegalInstruction, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-trapped") return RemoteFailure{.kind = FailureKind::Trapped, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-assertion-failed") return RemoteFailure{.kind = FailureKind::AssertionFailed, .status = CL_OUT_OF_RESOURCES};
+  if (command == "remote-timed-out") return RemoteFailure{.kind = FailureKind::TimedOut, .status = CL_OUT_OF_RESOURCES};
   if (command == "remote-invalid-program")
     return RemoteFailure{.kind = FailureKind::InvalidProgram, .status = CL_INVALID_PROGRAM_EXECUTABLE};
   if (command == "remote-invalid-configuration")
@@ -309,10 +317,8 @@ OPENCL_DEFERRED_CASE("waited-error")
 OPENCL_DEFERRED_CASE("out-of-order")
 OPENCL_DEFERRED_CASE("transfer")
 OPENCL_DEFERRED_CASE("remote-error")
-OPENCL_DEFERRED_CASE("remote-illegal-address")
 OPENCL_DEFERRED_CASE("remote-invalid-program")
 OPENCL_DEFERRED_CASE("remote-invalid-configuration")
-OPENCL_DEFERRED_CASE("error-no-event")
 OPENCL_DEFERRED_CASE("teardown")
 OPENCL_DEFERRED_CASE("validation")
 OPENCL_DEFERRED_CASE("command-copy")
@@ -345,3 +351,36 @@ OPENCL_DEFERRED_CASE("command-blocking-svm-ooo")
 OPENCL_DEFERRED_CASE("command-map-twice")
 
 #undef OPENCL_DEFERRED_CASE
+
+#define OPENCL_QUEUE_FAULT_COMMANDS(X)                                                                                                     \
+  X("remote-failed")                                                                                                                       \
+  X("remote-illegal-address")                                                                                                              \
+  X("remote-misaligned-address")                                                                                                           \
+  X("remote-illegal-instruction")                                                                                                          \
+  X("remote-trapped")                                                                                                                      \
+  X("remote-assertion-failed")                                                                                                             \
+  X("remote-timed-out")                                                                                                                    \
+  X("error-no-event")
+
+#define OPENCL_QUEUE_FAULT_CHILD(name)                                                                                                     \
+  TEST_CASE("OpenCL queue fault child " name, "[.]") { deferred(name); }
+OPENCL_QUEUE_FAULT_COMMANDS(OPENCL_QUEUE_FAULT_CHILD)
+#undef OPENCL_QUEUE_FAULT_CHILD
+
+#define OPENCL_QUEUE_FAULT_ABORTS(name)                                                                                                    \
+  TEST_CASE("OpenCL queue execution faults abort the process: " name, "[opencl][deferred]") {                                              \
+    const auto outcome = gemstone_test::runChildTest("OpenCL queue fault child " name);                                                    \
+    CHECK((outcome.signal == SIGABRT));                                                                                                    \
+    CHECK(outcome.output.contains("inactivated due to async error"));                                                                      \
+  }
+OPENCL_QUEUE_FAULT_COMMANDS(OPENCL_QUEUE_FAULT_ABORTS)
+#undef OPENCL_QUEUE_FAULT_ABORTS
+
+#undef OPENCL_QUEUE_FAULT_COMMANDS
+
+TEST_CASE("OpenCL queue fault aborts silently when the queue fault message is disabled", "[opencl][deferred]") {
+  const gemstone_test::Environment quiet("HSA_ENABLE_QUEUE_FAULT_MESSAGE", "0");
+  const auto outcome = gemstone_test::runChildTest("OpenCL queue fault child remote-illegal-address");
+  CHECK((outcome.signal == SIGABRT));
+  CHECK(!outcome.output.contains("inactivated due to async error"));
+}

@@ -5,7 +5,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class LLVMOracleSuite extends Suite {
   test("LLVM selection covers every ISA and includes instruction pairs") {

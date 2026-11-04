@@ -24,7 +24,42 @@ object PTXReference extends Reference[NvidiaHarness, Lookup.Registers] {
   ): Either[String, Vec[Long]] = for {
     found <- lowered.getOrElseUpdate(instance, InstructionSemantics.lowering(instance, lookup.declared).toOption)
       .toRight(s"$instance does not lower")
-    values <- NvidiaTensorMemory.product(found.steps).map(multiply =>
+    values <- NvidiaTensorMemory.product(found.steps).fold(
+      NvidiaWarpgroups.product(found.steps).fold(
+        NvidiaMatrices.product(found.steps).fold(single(found, parameters, inputs, results))(multiply =>
+          NvidiaMatrices.run(
+            Vec.empty,
+            found.steps,
+            found.routine.registerCount,
+            found.routine.predicateCount,
+            multiply,
+            parameters,
+            inputs,
+            results,
+            harness.seed,
+            DeviceMemory(0)
+          )
+        )
+      )(warpgroup =>
+        NvidiaWarpgroups.run(
+          Vec.empty,
+          found.steps,
+          found.routine.registerCount,
+          found.routine.predicateCount,
+          warpgroup,
+          name =>
+            found.routine.predicateNames.indexWhere(_.raw == name) match {
+              case -1    => None
+              case index => Some(VMIR.Predicate(index.unsafe[Int >= 0]))
+            },
+          parameters,
+          inputs,
+          results,
+          harness.seed,
+          DeviceMemory(0)
+        )
+      )
+    )(multiply =>
       NvidiaTensorMemory.run(
         found.steps,
         found.routine.registerCount,
@@ -36,40 +71,7 @@ object PTXReference extends Reference[NvidiaHarness, Lookup.Registers] {
         harness.seed,
         DeviceMemory(0)
       )
-    ).getOrElse(NvidiaWarpgroups.product(found.steps).fold(
-      NvidiaMatrices.product(found.steps).fold(single(found, parameters, inputs, results))(multiply =>
-        NvidiaMatrices.run(
-          Vec.empty,
-          found.steps,
-          found.routine.registerCount,
-          found.routine.predicateCount,
-          multiply,
-          parameters,
-          inputs,
-          results,
-          harness.seed,
-          DeviceMemory(0)
-        )
-      )
-    )(warpgroup =>
-      NvidiaWarpgroups.run(
-        Vec.empty,
-        found.steps,
-        found.routine.registerCount,
-        found.routine.predicateCount,
-        warpgroup,
-        name =>
-          found.routine.predicateNames.indexWhere(_.raw == name) match {
-            case -1    => None
-            case index => Some(VMIR.Predicate(index.unsafe[Int >= 0]))
-          },
-        parameters,
-        inputs,
-        results,
-        harness.seed,
-        DeviceMemory(0)
-      )
-    ))
+    )
   } yield values
 
   private def single(

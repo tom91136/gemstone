@@ -57,13 +57,15 @@ private[isa] object TensorMapping {
 
   extension [V](inline algebra: Algebra[V]) {
 
-    /** The elements a box of `box` along a dimension holds when `traversal` thins it. */
-    inline def elements(box: V, traversal: V): V =
+    private inline def ceilDivide(numerator: V, denominator: V): V =
       algebra.divide(
-        algebra.subtract(algebra.add(box, traversal), algebra.literal(1L)),
-        traversal,
+        algebra.subtract(algebra.add(numerator, denominator), algebra.literal(1L)),
+        denominator,
         signed = true
       )
+
+    /** The elements a box of `box` along a dimension holds when `traversal` thins it. */
+    inline def elements(box: V, traversal: V): V = algebra.ceilDivide(box, traversal)
 
     /** `value` counted in units of `values` elements. */
     inline def counted(value: V, values: V): V =
@@ -104,7 +106,7 @@ private[isa] object TensorMapping {
 
     /** The chunks of a box of `bytes`. */
     inline def chunks(bytes: V, chunk: V): V =
-      algebra.divide(algebra.subtract(algebra.add(bytes, chunk), algebra.literal(1L)), chunk, signed = true)
+      algebra.ceilDivide(bytes, chunk)
 
     /** The bytes of the chunk at `at` of a box of `bytes`. */
     inline def length(bytes: V, at: V, chunk: V): V =

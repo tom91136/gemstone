@@ -10,7 +10,6 @@ private object OperandQueries {
   def is[A <: Form](instruction: Instruction)(using test: TypeTest[Form, A]): Boolean =
     test.unapply(instruction.form).isDefined
 
-  /** Vendor extensions can be preserved by the decoder and printer without acquiring execution semantics. */
   /** The `cx` marker of a constant bank chosen by a uniform register, `cx[URa][offset]`. */
   val IndexedBank: Operand = Operand.Symbol("cx")
 

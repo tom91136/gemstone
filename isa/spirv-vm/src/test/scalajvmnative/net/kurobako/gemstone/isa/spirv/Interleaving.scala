@@ -16,6 +16,7 @@ import net.kurobako.gemstone.vm.*
 private class Interleaving(val parallelism: Int > 0 = 4)
     extends Workgroups {
   val calls: AtomicInteger    = AtomicInteger(0)
+  override def concurrency    = parallelism
   private val lock            = ReentrantLock()
   private val changed         = lock.newCondition()
   private val slot            = ThreadLocal.withInitial[Int](() => -1)

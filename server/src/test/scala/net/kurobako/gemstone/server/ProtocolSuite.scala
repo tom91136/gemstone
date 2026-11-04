@@ -15,7 +15,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.protocol.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 class ProtocolSuite extends Suite {
@@ -112,6 +112,17 @@ class ProtocolSuite extends Suite {
     val input = DataInputStream(ByteArrayInputStream(ByteBuffer.allocate(Integer.BYTES).putInt(0).array()))
     val error = intercept[IOException](Frame.readResponse(input, 64))
     assertEquals(error.getMessage, "unexpected RPC response magic")
+  }
+
+  test("response framing passes over heartbeats ahead of the response") {
+    val response = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw + 1)
+      .putInt(ExecutionRPC.ResponseMagic).putInt(0).putInt(1).put(7.toByte).array()
+    val heartbeats = ByteBuffer.allocate(3 * Integer.BYTES)
+      .putInt(
+        ExecutionRPC.HeartbeatMagic
+      ).putInt(ExecutionRPC.HeartbeatMagic).putInt(ExecutionRPC.HeartbeatMagic).array()
+    val input = DataInputStream(ByteArrayInputStream(heartbeats ++ response))
+    assertEquals(Frame.readResponse(input, 64).toSeq, response.toSeq)
   }
 
   test("response framing rejects invalid headers before reading or allocating payloads") {

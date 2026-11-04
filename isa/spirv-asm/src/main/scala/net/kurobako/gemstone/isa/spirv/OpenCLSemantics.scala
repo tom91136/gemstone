@@ -423,18 +423,15 @@ object OpenCLSemantics {
       inline maximum: Boolean
   )(
       ids: OperandIds
-  ): R = width.raw match {
-    case 16 => magnitudeBinary(algebra, sinks, sign = 0x8000L, infinity = 0x7c00L, 16, maximum)(ids)
-    case 32 => magnitudeBinary(algebra, sinks, sign = 0x80000000L, infinity = 0x7f800000L, 32, maximum)(ids)
-    case _  => magnitudeBinary(algebra, sinks, sign = Long.MinValue, infinity = 0x7ff0000000000000L, 64, maximum)(ids)
-  }
+  ): R =
+    magnitudeBinary(algebra, sinks, sign = signMask(width.raw), infinity = infinityBits(width.raw), width, maximum)(ids)
 
   private inline def magnitudeBinary[V, R](
       inline algebra: Algebra[V],
       inline sinks: SPIRVSinks[V, R],
-      inline sign: Long,
-      inline infinity: Long,
-      inline bits: Int,
+      sign: Long,
+      infinity: Long,
+      inline bits: Int in (16, 32, 64),
       inline maximum: Boolean
   )(ids: OperandIds): R =
     sinks.binary(ids)((a, b) => algebra.magnitudeSelectAt(a, b, sign = sign, infinity = infinity, bits, maximum))

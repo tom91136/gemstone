@@ -2,7 +2,7 @@ package net.kurobako.gemstone.codegen
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SASSEncodingSuite extends Suite {
   private def parse(source: String): SASSDescription.Description =

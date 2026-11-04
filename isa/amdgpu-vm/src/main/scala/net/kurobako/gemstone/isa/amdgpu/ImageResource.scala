@@ -110,11 +110,11 @@ private[isa] object ImageResource {
       case _ if customPitch     => ((depthField | (PitchHigh.of(words(4)) << 13)) + 1L) * texelBytes
       case _                    => 0L
     }
-    val depth = if (kind == Volume) depthField + 1L else 1L
     if (!linear) Left(s"tiled image layouts (swizzle mode $tiling) are not implemented")
     else if (!format.valid) Left("the image descriptor names no data format execution implements")
     else if (kind < Line || kind > Array2D) Left(s"image resource type $kind is not implemented")
-    else
+    else {
+      val depth = if (kind == Volume) depthField + 1L else 1L
       Right(ImageResource(
         base,
         format,
@@ -129,6 +129,7 @@ private[isa] object ImageResource {
         if (pitch < width * texelBytes) 0L else pitch,
         selects
       ))
+    }
   }
 
   /** The dimension count an instruction's DIM field implies, for addresses on GFX10 onwards. */
@@ -326,7 +327,7 @@ private[isa] case class ImageResource(
   def texel(level: Int, x: Long, y: Long, slice: Long): Long = {
     val absolute = baseLevel + level
     val layer    = if (layered) baseArray + slice else slice
-    val limit    = if (volume) levelDepth(absolute) else if (layered) lastArray + 1L else 1L
+    val limit    = slices(absolute)
     if (
       level < 0 || absolute > lastLevel || x < 0L || y < 0L || slice < 0L || x >= levelWidth(absolute) ||
       y >= levelHeight(absolute) || layer >= limit

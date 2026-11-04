@@ -17,18 +17,17 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      conformance:
-        description: Conformance scope
+      tier:
+        description: Conformance run tier
         type: choice
-        options: [small, complete]
-        default: complete
+        options: [short, long, xlong, all]
+        default: xlong
 permissions:
   contents: read
 env:
   GEMSTONE_CONTAINER_EXE: docker
-  # small is the soraws-uk hardware (CUDA sm_89, gfx1030, OpenCL, SYCL, Level Zero); complete is every CUDA and GFX target
-  CONFORMANCE_TARGET_SET: ${{ inputs.conformance == 'small' && 'default' || 'complete' }}
-  CONFORMANCE_WORKLOAD: ${{ inputs.conformance == 'small' && 'compact' || 'full' }}
+  CONFORMANCE_BUILD_PROFILE: complete
+  CONFORMANCE_WORKLOAD: ${{ inputs.tier || 'xlong' }}
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -63,7 +62,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential \
-            cmake libgc-dev liblz4-dev libzstd-dev zlib1g-dev python3 spirv-tools unzip xz-utils zstd
+            cmake libgc-dev liblz4-dev libzstd-dev zlib1g-dev python3 unzip xz-utils zstd
           tools=~/.local/tools
           if [ ! -x "$tools/bin/make" ] || [ ! -x "$tools/bin/ninja" ]; then
             curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz | tar -xz -C "$RUNNER_TEMP"
@@ -170,7 +169,7 @@ jobs:
       - id: shards
         run: |
           for mode in build run; do
-            matrix=$(cmake "-DCONFORMANCE_TARGET_SET=$CONFORMANCE_TARGET_SET" "-DMODE=$mode" -P conformance/artifacts/Shards.cmake \
+            matrix=$(cmake "-DCONFORMANCE_BUILD_PROFILE=$CONFORMANCE_BUILD_PROFILE" "-DMODE=$mode" -P conformance/artifacts/Shards.cmake \
               2>"$RUNNER_TEMP/warnings")
             sed 's/^warning: /::warning::/' "$RUNNER_TEMP/warnings"
             echo "$mode=$matrix" | tee -a "$GITHUB_OUTPUT"
@@ -191,7 +190,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: target/ci/conformance.tar.zst
-          key: conformance-package-full-${{ env.CONFORMANCE_TARGET_SET }}-${{ hashFiles('conformance/**', '!conformance/**/*.md', 'tools/conformance/**', 'build.sbt', 'project/**') }}
+          key: conformance-package-${{ env.CONFORMANCE_BUILD_PROFILE }}-${{ hashFiles('conformance/**', '!conformance/**/*.md', 'tools/conformance/**', 'build.sbt', 'project/**') }}
       - name: Upload package
         if: ${{ steps.package.outputs.cache-hit == 'true' && !env.ACT }}
         uses: actions/upload-artifact@v7
@@ -227,6 +226,17 @@ jobs:
           restore-keys: |
             conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
             conformance-artifact-dependencies-
+      - name: llvm-offload key
+        id: offload
+        if: ${{ startsWith(matrix.shard, 'cuda-') }}
+        run: echo "key=$(cmake -P conformance/artifacts/Offload.cmake)" >> "$GITHUB_OUTPUT"
+      - name: Restore llvm-offload
+        id: offload-cache
+        if: ${{ startsWith(matrix.shard, 'cuda-') }}
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/llvm-offload/${{ steps.offload.outputs.key }}
+          key: llvm-offload-${{ steps.offload.outputs.key }}
       - name: Conformance artifacts
         if: ${{ !cancelled() }}
         env:
@@ -235,7 +245,7 @@ jobs:
         run: |
           [ -z "$SPLIT" ] || export "${SPLIT?}"
           mkdir -p target/conformance/artifacts
-          sbt --server --batch "conformance/build --target-set $CONFORMANCE_TARGET_SET $CONFORMANCE_SHARD_ROUTE_LIST"
+          sbt --server --batch "conformance/build --profile $CONFORMANCE_BUILD_PROFILE $CONFORMANCE_SHARD_ROUTE_LIST"
       - name: Disk usage
         if: ${{ always() }}
         run: df -h
@@ -250,6 +260,19 @@ jobs:
         with:
           path: .cache/conformance
           key: ${{ steps.dependencies.outputs.cache-primary-key }}-${{ steps.downloads.outputs.conformance }}
+      # only cuda-0 saves the offload archive, so the shards do not race on one key
+      - name: Check llvm-offload archive
+        id: offload-archive
+        if: ${{ !cancelled() && matrix.shard == 'cuda-0' && steps.offload-cache.outputs.cache-hit != 'true' }}
+        env:
+          ARCHIVE: .cache/llvm-offload/${{ steps.offload.outputs.key }}/llvm-offload.tar.zst
+        run: echo "present=$(test -f "$ARCHIVE" && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Save llvm-offload
+        if: ${{ !cancelled() && steps.offload-archive.outputs.present == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/llvm-offload/${{ steps.offload.outputs.key }}
+          key: llvm-offload-${{ steps.offload.outputs.key }}
       # shards share their support closures, so Shards.cmake has one shard pack each
       - name: Pack
         if: ${{ !cancelled() }}
@@ -305,7 +328,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KEY: ${{ needs.conformance-package-cache.outputs.package-key }}
         run: |
-          gh cache list --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "conformance-package-full-$CONFORMANCE_TARGET_SET-" \
+          gh cache list --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "conformance-package-$CONFORMANCE_BUILD_PROFILE-" \
             --limit 100 --json id,key --jq '.[] | select(.key != env.KEY) | .id' |
             xargs -r -n1 gh cache delete --repo "$GITHUB_REPOSITORY"
       - name: Upload
@@ -363,6 +386,35 @@ jobs:
       - *java
       - *tools-cache
       - *tools
+      - uses: actions/cache@v6
+        with:
+          path: ~/.local/spirv
+          key: llvm-spirv-${{ hashFiles('conformance/artifacts/Toolchains.cmake') }}
+      - name: SPIR-V translator
+        timeout-minutes: 30
+        # the OpenCL shim links SPIR-V binaries and builds device-side enqueue through llvm-spirv, which ships no
+        # binaries; it must read the bitcode of the pinned clang, so it is built against the same LLVM release
+        run: |
+          spirv=~/.local/spirv
+          if [ ! -x "$spirv/bin/llvm-spirv" ]; then
+            release=$(sed -n 's/^set(conformance_clang_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+            sha256=$(sed -n 's/^set(conformance_clang_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+            archive="LLVM-$release-Linux-X64"
+            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm.tar.xz" \
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$release/$archive.tar.xz"
+            echo "$sha256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check --strict
+            mkdir -p "$RUNNER_TEMP/llvm"
+            tar -xJf "$RUNNER_TEMP/llvm.tar.xz" --strip-components=1 -C "$RUNNER_TEMP/llvm" \
+              "$archive/bin" "$archive/include" "$archive/lib"
+            git clone -q --depth 1 --branch "v$release" https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git \
+              "$RUNNER_TEMP/translator"
+            cmake -S "$RUNNER_TEMP/translator" -B "$RUNNER_TEMP/translator/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DLLVM_DIR="$RUNNER_TEMP/llvm/lib/cmake/llvm" -DLLVM_SPIRV_INCLUDE_TESTS=OFF
+            cmake --build "$RUNNER_TEMP/translator/build" --target llvm-spirv
+            install -D "$RUNNER_TEMP/translator/build/tools/llvm-spirv/llvm-spirv" "$spirv/bin/llvm-spirv"
+            rm -rf "$RUNNER_TEMP/llvm.tar.xz" "$RUNNER_TEMP/llvm" "$RUNNER_TEMP/translator"
+          fi
+          echo "$spirv/bin" >> "$GITHUB_PATH"
       - *download-build
       - *unpack
       - run: |
@@ -468,7 +520,7 @@ jobs:
           trap 'kill "$sampler"' EXIT
           heap=$(awk '/^MemTotal:/ { printf "%dm", $2 / 1024 / 4 }' /proc/meminfo)
           sbt --server --batch "-J-Xmx$heap" 'set conformance / conformanceJfr := true' \
-            "conformance/emulate --prebuilt --target-set $CONFORMANCE_TARGET_SET --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
+            "conformance/emulate --prebuilt --profile $CONFORMANCE_BUILD_PROFILE --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
       # the server records one JFR file per run, in a temporary directory; rename it after the shard
       - name: Collect JFR
         if: ${{ !cancelled() && !env.ACT }}

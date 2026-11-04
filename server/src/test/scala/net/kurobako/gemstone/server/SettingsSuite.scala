@@ -3,7 +3,7 @@ package net.kurobako.gemstone.server
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 class SettingsSuite extends Suite {

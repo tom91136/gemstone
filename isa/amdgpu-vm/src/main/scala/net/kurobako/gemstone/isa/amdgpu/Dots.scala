@@ -48,14 +48,15 @@ private[isa] object Dots {
       val terms = Vec(product16(aLow, bLow), product16(aHigh, bHigh), single32(bits(c)))
       val scale = terms.map(_.scale).min
       val exact = terms.map(term => term.signed << (term.scale - scale)).sum
-      // an exact zero is -0 only when every term is
-      val negative = terms.forall(_.negative)
       // 62 bits keep two bits and a sticky bit below a binary32 significand
       val dropped = math.max(exact.bitLength - 62, 0)
       val sticky  = if (dropped > 0 && exact.abs.lowestSetBit < dropped) 1L else 0L
       val sum     = (exact.abs >> dropped).toLong | sticky
-      if (exact.signum == 0) fromRaw[Float32](if (negative) 0x80000000L else 0L)
-      else
+      if (exact.signum == 0) {
+        // an exact zero is -0 only when every term is
+        val negative = terms.forall(_.negative)
+        fromRaw[Float32](if (negative) 0x80000000L else 0L)
+      } else
         fromRaw[Float32](
           IEEE754.encodeSum(
             if (exact.signum < 0) -sum else sum,
@@ -86,10 +87,10 @@ private[isa] object Dots {
       (if (negative) 1L << (width - 1) else 0L) | (exponent << fractionBits)
   }
 
-  private val Half    = Format(5, 10, flushed = false)
-  private val BFloat  = Format(8, 7, flushed = true)
-  private val Single  = Format(8, 23, flushed = false)
-  private val Flushed = Format(8, 23, flushed = true)
+  private val Half    = Format(exponentBits = 5, fractionBits = 10, flushed = false)
+  private val BFloat  = Format(exponentBits = 8, fractionBits = 7, flushed = true)
+  private val Single  = Format(exponentBits = 8, fractionBits = 23, flushed = false)
+  private val Flushed = Format(exponentBits = 8, fractionBits = 23, flushed = true)
 
   /** A finite value, or the exact product of two, as `magnitude * 2^scale`; `top` is the exponent the alignment takes
     * it at, and denormals keep the least normal exponent.
@@ -128,9 +129,9 @@ private[isa] object Dots {
     * `sum * 2^scale`.
     */
   private enum Result(val format: Format, val nanOperand: Long, val invalid: Long) derives CanEqual {
-    case ToSingle   extends Result(Flushed, 0xffc00a3dL, 0xffc00000L)
-    case ToHalf     extends Result(Half, 0xfe3dL, 0xfe00L)
-    case ToBFloat16 extends Result(BFloat, 0xfffdL, 0xffc0L)
+    case ToSingle   extends Result(Flushed, nanOperand = 0xffc00a3dL, invalid = 0xffc00000L)
+    case ToHalf     extends Result(Half, nanOperand = 0xfe3dL, invalid = 0xfe00L)
+    case ToBFloat16 extends Result(BFloat, nanOperand = 0xfffdL, invalid = 0xffc0L)
 
     def round(sum: Long, scale: Int): Long = this match {
       case ToHalf =>
@@ -186,10 +187,9 @@ private[isa] object Dots {
       (if (addend.infinite(c)) Vec(addend.negative(c)) else Vec.empty[Boolean])
     if (pairs.exists((x, y) => element.isNaN(x) || element.isNaN(y))) result.nanOperand
     else if (
-      pairs.exists((x, y) => (element.infinite(x) && element.zero(y)) || (element.zero(x) && element.infinite(y)))
-    )
-      result.invalid
-    else if (infinities.distinct.size > 1) result.invalid
+      pairs.exists((x, y) => (element.infinite(x) && element.zero(y)) || (element.zero(x) && element.infinite(y))) ||
+      infinities.distinct.size > 1
+    ) result.invalid
     else if (addend.isNaN(c)) addend.quiet(c)
     else if (infinities.nonEmpty) addend.infinity(infinities.head)
     else {

@@ -262,9 +262,10 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
   /** Tokens a recursive call saves on the lane's return stack and restores when its callee returns, by call address.
     */
   val saved: Map[Int, Vec[Setup]] = analysis.fold(Map.empty[Int, Vec[Setup]]) { result =>
-    result.calls.filter((site, entry) => recursive(result, site, entry) && live(result, site).nonEmpty)
-      .map(_._1).distinct.map { site =>
-        if (!calls.exists(_._1 == site))
+    val sites = calls.map(_._1).toSet
+    result.calls.collect { case (site, entry) if recursive(result, site, entry) && live(result, site).nonEmpty => site }
+      .distinct.map { site =>
+        if (!sites(site))
           throw IllegalArgumentException("recursive indirect calls inside a convergence region are not supported")
         instructions(site).address.raw -> live(result, site).map(result.setups).distinctBy(_.slot)
       }.toMap

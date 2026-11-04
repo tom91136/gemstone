@@ -117,9 +117,10 @@ ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 ThisBuild / scalafixConfig    := Bonsai.scalafixConfig((LocalRootProject / baseDirectory).value.toPath)
 
-lazy val offlineMode            = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
-lazy val conformanceDirectory   = settingKey[Path]("Conformance build, work, artifact, and report root.")
-lazy val conformanceTargetSet   = settingKey[String]("Conformance artifact matrix used by builds and emulation.")
+lazy val offlineMode             = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
+lazy val conformanceDirectory    = settingKey[Path]("Conformance build, work, artifact, and report root.")
+lazy val conformanceBuildProfile =
+  settingKey[String]("Conformance build profile: complete, or the machine profile to build and emulate.")
 lazy val conformanceJfr         = settingKey[Boolean]("Record the conformance emulation server with JFR.")
 lazy val conformanceLintTargets = settingKey[Seq[String]]("Conformance lint targets; lint is all of them.")
 lazy val lintBackends           =
@@ -803,30 +804,30 @@ lazy val native = project.in(file("native"))
     cleanFiles := Seq((LocalRootProject / baseDirectory).value / "target/native")
   )
 
-def conformanceExecutionRoutes(conformance: Path, targetSet: String): Seq[String] =
+def conformanceExecutionRoutes(conformance: Path, profile: String): Seq[String] =
   scala.util.Try(
     scala.sys.process.Process(
-      Seq("cmake", s"-DCONFORMANCE_TARGET_SET=$targetSet", "-P", s"${conformance / "artifacts/Targets.cmake"}")
+      Seq("cmake", s"-DCONFORMANCE_BUILD_PROFILE=$profile", "-P", s"${conformance / "artifacts/Targets.cmake"}")
     ).!!.linesIterator.map(_.trim).filter(_.nonEmpty).toVector
   ).getOrElse(Vector.empty)
 
-// The PTX and SASS execution variants share one artifact.
-def conformanceArtifactRoutes(conformance: Path, targetSet: String): Seq[String] =
-  conformanceExecutionRoutes(conformance, targetSet).map(_.replaceFirst("^cuda-(ptx|sass)/", "cuda/")).distinct
+def conformanceArtifactRoute(route: String): String = route.replaceFirst("^cuda-sass/", "cuda/")
 
-def conformanceArtifactTarget(route: String): String = route.split('/').toList match {
+def conformanceArtifactTarget(route: String): String = conformanceArtifactRoute(route).split('/').toList match {
   case backend :: architecture :: compiler :: Nil => s"$backend-$compiler-$architecture"
   case backend :: architecture :: Nil             => s"$backend-$architecture"
   case _                                          => route
 }
 
-def conformanceSelect(routes: Seq[String], selector: String): Seq[String] =
-  routes.filter(route => route == selector || route.startsWith(s"$selector/"))
+def conformanceSelect(routes: Seq[String], selector: String): Seq[String] = routes.filter { route =>
+  val shared = route.replaceFirst("^cuda-(ptx|sass)/", "cuda/")
+  Seq(route, shared).exists(name => name == selector || name.startsWith(s"$selector/"))
+}
 
 def conformanceOptions(conformance: Path, names: String*): Map[String, (String, Seq[String])] = Map(
-  "--target-set" -> ("target set", ArgumentParsers.fileNames(conformance / "artifacts/targets", ".cmake")),
-  "--workload"   -> ("workload", ArgumentParsers.fileNames(conformance / "workloads", ".toml")),
-  "--machine"    -> ("machine profile", ArgumentParsers.fileNames(conformance / "profiles", ".toml"))
+  "--profile"  -> ("build profile", "complete" +: ArgumentParsers.fileNames(conformance / "profiles", ".toml")),
+  "--workload" -> ("workload", ArgumentParsers.fileNames(conformance / "workloads", ".toml")),
+  "--machine"  -> ("machine profile", ArgumentParsers.fileNames(conformance / "profiles", ".toml"))
 ).filter((name, _) => names.contains(name))
 
 def conformanceArtifacts(
@@ -834,23 +835,22 @@ def conformanceArtifacts(
     directory: Path,
     root: Path,
     offline: Boolean,
-    targetSet: String,
+    profile: String,
     targets: Seq[String],
-    syclCtsFull: Boolean,
     log: String => Unit
 ): Path = CMake.build(
   source = source / "artifacts",
-  directory = directory / "build" / targetSet,
+  directory = directory / "build" / profile,
   arguments = Seq(
     s"-DCONTAINER_EXECUTABLE=$containerExecutable",
     s"-DROCM_VERSION=$rocmVersion",
-    s"-DCONFORMANCE_TARGET_SET=$targetSet",
+    s"-DCONFORMANCE_BUILD_PROFILE=$profile",
     s"-DCONFORMANCE_ARTIFACT_DIRECTORY=${directory / "artifacts"}",
     s"-DCONFORMANCE_DEPENDENCY_DIRECTORY=${root / ".cache/conformance"}",
     s"-DCONFORMANCE_WORK_DIRECTORY=${directory / "work"}",
     s"-DCONFORMANCE_CCACHE_DIRECTORY=${root / ".cache/ccache"}",
+    s"-DCONFORMANCE_OFFLOAD_DIRECTORY=${root / ".cache/llvm-offload"}",
     s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}",
-    s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${if (syclCtsFull) "ON" else "OFF"}",
     s"-DCONFORMANCE_SYCL_SHARD_INDEX=${BuildEnvironment.syclShardIndex}",
     s"-DCONFORMANCE_SHARD_ROUTE_LIST=${BuildEnvironment.shardRouteList}"
   ),
@@ -866,8 +866,11 @@ lazy val conformance = project.in(file("conformance"))
   .enablePlugins(ExternalProjectPlugin)
   .settings(
     externalCodestyleSettings,
-    name                   := "gemstone-conformance",
-    conformanceTargetSet   := "default",
+    name                    := "gemstone-conformance",
+    conformanceBuildProfile :=
+      sys.env.get(
+        "HOSTNAME"
+      ).filter(_.nonEmpty).getOrElse(java.net.InetAddress.getLocalHost.getHostName).takeWhile(_ != '.'),
     nativeCompileDatabase  := Def.uncached(conformanceHost.value),
     conformanceJfr         := true,
     conformanceLintTargets := Seq("lint"),
@@ -875,33 +878,32 @@ lazy val conformance = project.in(file("conformance"))
     build                  := {
       val arguments = Def.setting {
         val conformance = baseDirectory.value.toPath
-        val default     = conformanceTargetSet.value
+        val default     = conformanceBuildProfile.value
         ArgumentParsers.arguments(
-          conformanceOptions(conformance, "--target-set"),
-          Seq("--sycl-cts-full"),
-          ArgumentParsers.prefixes(conformanceArtifactRoutes(conformance, default))
+          conformanceOptions(conformance, "--profile"),
+          Seq.empty,
+          ArgumentParsers.prefixes(conformanceExecutionRoutes(conformance, default))
         ).flatMap { arguments =>
-          val targetSet = arguments.option("--target-set").getOrElse(default)
-          val routes    = conformanceArtifactRoutes(conformance, targetSet)
+          val profile = arguments.option("--profile").getOrElse(default)
+          val routes  = conformanceExecutionRoutes(conformance, profile)
           arguments.free.find(selector => conformanceSelect(routes, selector).isEmpty) match {
             case Some(selector) => sbt.complete.DefaultParsers.failure(
-                s"$selector names no route in target set $targetSet; expected one of ${routes.mkString(", ")}"
+                s"$selector names no route in build profile $profile; expected one of ${routes.mkString(", ")}"
               )
             case None => sbt.complete.DefaultParsers.success(arguments)
           }
         }
       }.parsed
-      val targetSet = arguments.option("--target-set").getOrElse(conformanceTargetSet.value)
-      val routes    = conformanceArtifactRoutes(baseDirectory.value.toPath, targetSet)
-      val targets   = arguments.free.flatMap(conformanceSelect(routes, _)).map(conformanceArtifactTarget).distinct
-      val _         = conformanceArtifacts(
+      val profile = arguments.option("--profile").getOrElse(conformanceBuildProfile.value)
+      val routes  = conformanceExecutionRoutes(baseDirectory.value.toPath, profile)
+      val targets = arguments.free.flatMap(conformanceSelect(routes, _)).map(conformanceArtifactTarget).distinct
+      val _       = conformanceArtifacts(
         baseDirectory.value.toPath,
         conformanceDirectory.value,
         (LocalRootProject / baseDirectory).value.toPath,
         offlineMode.value,
-        targetSet,
+        profile,
         if (targets.isEmpty) Seq("artifacts") else targets,
-        arguments.flag("--sycl-cts-full"),
         streams.value.log.info
       )
       conformanceDirectory.value / "artifacts"
@@ -912,9 +914,8 @@ lazy val conformance = project.in(file("conformance"))
         conformanceDirectory.value,
         (LocalRootProject / baseDirectory).value.toPath,
         offlineMode.value,
-        conformanceTargetSet.value,
+        conformanceBuildProfile.value,
         conformanceLintTargets.value,
-        false,
         streams.value.log.info
       )
     },
@@ -949,7 +950,7 @@ lazy val conformance = project.in(file("conformance"))
         ArgumentParsers.arguments(
           conformanceOptions(conformance, "--machine", "--workload"),
           Seq.empty,
-          ArgumentParsers.prefixes(conformanceArtifactRoutes(conformance, conformanceTargetSet.value))
+          ArgumentParsers.prefixes(conformanceExecutionRoutes(conformance, conformanceBuildProfile.value))
         )
       }.parsed.tokens(Set.empty)
       RunMain.main(
@@ -975,29 +976,30 @@ lazy val conformance = project.in(file("conformance"))
       val arguments = Def.setting {
         val conformance = baseDirectory.value.toPath
         ArgumentParsers.arguments(
-          conformanceOptions(conformance, "--target-set", "--workload"),
-          Seq("--prebuilt"),
-          "all" +: ArgumentParsers.prefixes(conformanceExecutionRoutes(conformance, conformanceTargetSet.value))
+          conformanceOptions(conformance, "--profile", "--workload"),
+          Seq("--prebuilt", "--dry-run"),
+          "all" +: ArgumentParsers.prefixes(conformanceExecutionRoutes(conformance, conformanceBuildProfile.value))
         )
       }.parsed
-      val targetSet = arguments.option("--target-set").getOrElse(conformanceTargetSet.value)
-      val remaining = arguments.tokens(Set("--target-set", "--prebuilt"))
+      val profile   = arguments.option("--profile").getOrElse(conformanceBuildProfile.value)
+      val remaining = arguments.tokens(Set("--profile", "--prebuilt"))
       val artifacts =
         if (arguments.free.isEmpty || arguments.free.contains("all")) Seq.empty
-        else arguments.free.map(_.replaceFirst("^cuda-(ptx|sass)(?=/|$)", "cuda")).distinct
+        else arguments.free.distinct
       // chosen outside the task, which would otherwise run build regardless of the branch taken
       val resolved =
         if (arguments.flag("--prebuilt")) Def.task {
           val directory = conformanceDirectory.value / "artifacts"
+          val routes    = conformanceExecutionRoutes(baseDirectory.value.toPath, profile)
           val backends  =
-            (if (artifacts.isEmpty) conformanceArtifactRoutes(baseDirectory.value.toPath, targetSet) else artifacts)
-              .map(_.takeWhile(_ != '/')).distinct
+            (if (artifacts.isEmpty) routes else artifacts.flatMap(conformanceSelect(routes, _)))
+              .map(route => conformanceArtifactRoute(route).takeWhile(_ != '/')).distinct
           val missing = backends.filterNot(directory.resolve(_).toFile.isDirectory)
           if (missing.nonEmpty)
             throw sbt.internal.util.MessageOnlyException(s"Missing prebuilt artifacts: ${missing.mkString(", ")}")
           directory
         }
-        else build.toTask((s" --target-set $targetSet" +: artifacts).mkString(" "))
+        else build.toTask((s" --profile $profile" +: artifacts).mkString(" "))
       RunMain.main(
         conformanceTool,
         s"$rootPackage.tools.conformance.CLI",
@@ -1027,8 +1029,8 @@ lazy val conformance = project.in(file("conformance"))
             s"${baseDirectory.value / "workloads"}",
             "--routes",
             s"${baseDirectory.value / "artifacts/Targets.cmake"}",
-            "--target-set",
-            targetSet
+            "--profile",
+            profile
           ) ++ (if (conformanceJfr.value) Seq("--jfr", s"${conformanceDirectory.value / "jfr"}") else Seq.empty) ++
             remaining
         }

@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.string.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class PTXAsmSuite extends Suite {
   test("PTX text bytes round trip whole programs and stabilise canonically") {

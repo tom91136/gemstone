@@ -25,13 +25,19 @@ std::optional<uint32_t> configuredApiVersion() {
   return std::nullopt;
 }
 
-void fillProperties(VkPhysicalDeviceProperties *properties) {
+static void fillDeviceUUID(uint8_t (&uuid)[VK_UUID_SIZE], uint32_t physicalOrdinal) {
+  for (size_t i = 0; i < VK_UUID_SIZE; ++i)
+    uuid[i] = static_cast<uint8_t>(0x47 + i);
+  uuid[VK_UUID_SIZE - 1] = static_cast<uint8_t>(uuid[VK_UUID_SIZE - 1] + physicalOrdinal);
+}
+
+void fillProperties(VkPhysicalDeviceProperties *properties, uint32_t physicalOrdinal) {
   if (!properties) return;
   *properties = {};
   properties->apiVersion = configuredApiVersion().value_or(VK_API_VERSION_1_0);
   properties->driverVersion = VK_MAKE_VERSION(1, 0, 0);
   properties->vendorID = 0;
-  properties->deviceID = 1;
+  properties->deviceID = 1 + physicalOrdinal;
   properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU;
   const char *name = "Gemstone Vulkan Compute Device";
   if (const char *raw = gemstone::environment::value(gemstone::environment::ProfileName)) {
@@ -53,8 +59,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
     }
   }
   std::snprintf(properties->deviceName, sizeof(properties->deviceName), "%s", name);
-  for (size_t i = 0; i < VK_UUID_SIZE; ++i)
-    properties->pipelineCacheUUID[i] = static_cast<uint8_t>(0x47 + i);
+  fillDeviceUUID(properties->pipelineCacheUUID, physicalOrdinal);
   auto &limits = properties->limits;
   limits.subPixelPrecisionBits = 8;
   limits.subTexelPrecisionBits = limits.mipmapPrecisionBits = 8;
@@ -171,7 +176,7 @@ template <typename T> static void resetQueryPayload(VkBaseOutStructure *base) {
   base->pNext = next;
 }
 
-void fillPropertyChain(void *next) {
+void fillPropertyChain(void *next, uint32_t physicalOrdinal) {
   for (auto *base = static_cast<VkBaseOutStructure *>(next); base; base = base->pNext) {
     switch (base->sType) {
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES: {
@@ -225,7 +230,7 @@ void fillPropertyChain(void *next) {
         maintenance.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
         identity.pNext = &subgroup;
         subgroup.pNext = &maintenance;
-        fillPropertyChain(&identity);
+        fillPropertyChain(&identity, physicalOrdinal);
         std::copy_n(identity.deviceUUID, VK_UUID_SIZE, value->deviceUUID);
         std::copy_n(identity.driverUUID, VK_UUID_SIZE, value->driverUUID);
         value->subgroupSize = subgroup.subgroupSize;
@@ -234,7 +239,7 @@ void fillPropertyChain(void *next) {
         value->subgroupQuadOperationsInAllStages = subgroup.quadOperationsInAllStages;
         VkPhysicalDeviceMultiviewProperties multiview{};
         multiview.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES;
-        fillPropertyChain(&multiview);
+        fillPropertyChain(&multiview, physicalOrdinal);
         value->maxMultiviewViewCount = multiview.maxMultiviewViewCount;
         value->maxMultiviewInstanceIndex = multiview.maxMultiviewInstanceIndex;
         value->maxPerSetDescriptors = maintenance.maxPerSetDescriptors;
@@ -244,10 +249,9 @@ void fillPropertyChain(void *next) {
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES: {
         resetQueryPayload<VkPhysicalDeviceIDProperties>(base);
         auto *value = reinterpret_cast<VkPhysicalDeviceIDProperties *>(base);
-        for (size_t i = 0; i < VK_UUID_SIZE; ++i) {
-          value->deviceUUID[i] = static_cast<uint8_t>(0x47 + i);
+        fillDeviceUUID(value->deviceUUID, physicalOrdinal);
+        for (size_t i = 0; i < VK_UUID_SIZE; ++i)
           value->driverUUID[i] = static_cast<uint8_t>(0x67 + i);
-        }
         value->deviceLUIDValid = VK_FALSE;
         break;
       }
@@ -260,7 +264,7 @@ void fillPropertyChain(void *next) {
         value->maxTimelineSemaphoreValueDifference = UINT64_MAX;
         VkPhysicalDeviceDriverProperties driver{};
         driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
-        fillPropertyChain(&driver);
+        fillPropertyChain(&driver, physicalOrdinal);
         value->driverID = driver.driverID;
         value->conformanceVersion = driver.conformanceVersion;
         std::copy_n(driver.driverName, VK_MAX_DRIVER_NAME_SIZE, value->driverName);

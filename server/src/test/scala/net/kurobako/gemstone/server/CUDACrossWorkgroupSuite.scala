@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.server.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.concurrent.duration.*
 import scala.util.Using

@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.string.*
 import scala.collection.mutable
 import scala.reflect.ClassTag
+import scala.util.hashing.MurmurHash3
 import upickle.default.ReadWriter
 
 /** Recovered NVIDIA disassembler descriptions: instruction forms, bit assignments, syntax and legality constraints. */
@@ -43,6 +44,9 @@ object NVDisasm {
         case _ => false
       })
   }
+
+  /** Operand attribute bindings (`Ra@negate`) shared by decoding, refinement and assembly. */
+  val AttributeNames: Set[String] = Set("not", "negate", "absolute", "invert")
 
   /** Exact names take precedence; vocabulary names remain payloads and are never promoted to semantics merely because
     * they happen to contain a familiar word.
@@ -142,6 +146,14 @@ object NVDisasm {
     case Group(open: String, close: String, children: Vec[Syntax])
     case Optional(marker: Option[String], children: Vec[Syntax])
 
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var hash = 0
+
+    override def hashCode: Int = {
+      if (hash == 0) hash = MurmurHash3.caseClassHash(this) | 1
+      hash
+    }
+
     def isGuard: Boolean = this match {
       case Field(binding = "Pg" | "UPg") => true
       case _                             => false
@@ -152,8 +164,46 @@ object NVDisasm {
   case class Condition(expression: ConditionExpression, message: String, requires: Option[String] = None)
 
   case class SymbolValue(name: String, value: BigInt)
-  case class Vocabulary(name: String, values: Vec[SymbolValue], default: Option[BigInt] = None)
-  case class Assignment(name: String, positions: Vec[Int], expression: Expression) derives CanEqual
+  case class Vocabulary(name: String, values: Vec[SymbolValue], default: Option[BigInt] = None) {
+    private val spellings = ConcurrentHashMap[FieldKind, ConcurrentHashMap[BigInt, Option[String]]]()
+
+    lazy val sole: Option[BigInt] = values.map(_.value).distinct match {
+      case Vec(value) => Some(value)
+      case _          => None
+    }
+
+    def spelling(category: FieldKind, value: BigInt): Option[String] =
+      spellings.computeIfAbsent(category, _ => ConcurrentHashMap[BigInt, Option[String]]())
+        .computeIfAbsent(value, _ => preferred(category, value))
+
+    private def preferred(category: FieldKind, value: BigInt): Option[String] = {
+      val valid =
+        values.collect { case entry if entry.value == value && !entry.name.startsWith("INVALID") => entry.name }
+      val name = category match {
+        case FieldKind.SpecialRegister =>
+          // Selector 255 is also spelled SRZ; keep that alias ahead of its generated SR255 name.
+          valid.find(_ == "SRZ").orElse(valid.find(_.startsWith("SR_")))
+            .orElse(valid.find(_.startsWith("SR"))).orElse(valid.lastOption)
+        case category if category.isPredicate => valid.find(_.endsWith("T")).orElse(valid.headOption)
+        case category if category.isRegister  => valid.minByOption(_.length)
+        // legacy condition tests list flag aliases (ZFT, LEG, U) before the comparison names nvdisasm prints
+        case FieldKind.Vocabulary("Test") => valid.lastOption
+        case _                            =>
+          val names = valid.toSet
+          valid.find(name => name.startsWith("U") && names(name.drop(1)))
+            .orElse(valid.filterNot(_.startsWith("_")).minByOption(_.length)).orElse(valid.headOption)
+      }
+      name.map(name =>
+        category match {
+          case FieldKind.ConstantBank | FieldKind.DescriptorRegister => name.toLowerCaseRoot
+          case _                                                     => name
+        }
+      )
+    }
+  }
+  case class Assignment(name: String, positions: Vec[Int], expression: Expression) derives CanEqual {
+    lazy val extractor: BitField.Extractor = BitField.Extractor(positions)
+  }
 
   /** One instruction form. Its FORMAT and binding analysis is computed once, on first use. */
   case class Form(
@@ -168,10 +218,61 @@ object NVDisasm {
       field.positions.foldLeft(mask)(_.setBit(_))
     }
     lazy val declared: Vec[Syntax.Field]       = Syntax.fields(syntax)
+    lazy val relative: Boolean                 = declared.exists(_.category == FieldKind.RelativeImmediate)
     lazy val kindBindings: Map[String, String] = Syntax.kindBindings(declared)
     lazy val encodedNames: Set[String]         = fields.flatMap(_.expression.references(bases = true)).toSet
     lazy val encodedReferences: Set[String]    = fields.flatMap(_.expression.references(bases = false)).toSet
-    lazy val opcodeFields: Vec[Assignment]     = fields.filter(_.expression match {
+    lazy val attributeNames: Vec[String]       = encodedNames.toVec.filter(name =>
+      name.split('@') match {
+        case Array(_, attribute) => AttributeNames(attribute)
+        case _                   => false
+      }
+    ).sorted
+    lazy val attributeBases: Set[String] = (encodedNames ++ encodedReferences).flatMap(name =>
+      name.split('@') match {
+        case Array(base, attribute) if AttributeNames(attribute) => Some(base)
+        case _                                                   => None
+      }
+    )
+
+    /** A second inversion pass cannot change the first: no lookup argument is bound by a later field. */
+    lazy val singlePass: Boolean = {
+      def convertible(expression: Expression): Boolean = expression match {
+        case Expression.FloatConvert(_, _, _, _) => true
+        case Expression.Scale(inner, _)          => convertible(inner)
+        case Expression.Multiply(inner, _)       => convertible(inner)
+        case Expression.Identity(first, second)  => convertible(first) || convertible(second)
+        case Expression.Relaxed(inner)           => convertible(inner)
+        case Expression.FixedFloat(inner, _)     => convertible(inner)
+        case Expression.Lookup(_, arguments)     => arguments.exists(convertible(_))
+        case _                                   => false
+      }
+      def lookups(expression: Expression): Vec[Expression.Lookup] = expression match {
+        case lookup @ Expression.Lookup(_, arguments) => lookup +: arguments.flatMap(lookups(_))
+        case Expression.Scale(inner, _)               => lookups(inner)
+        case Expression.Multiply(inner, _)            => lookups(inner)
+        case Expression.Identity(first, second)       => lookups(first) ++ lookups(second)
+        case Expression.Relaxed(inner)                => lookups(inner)
+        case Expression.FixedFloat(inner, _)          => lookups(inner)
+        case Expression.FloatConvert(value = inner)   => lookups(inner)
+        case _                                        => Vec.empty
+      }
+      val ordered = orderedFields
+      !ordered.exists(field => convertible(field.expression) || lookups(field.expression).size > 1) &&
+      ordered.zipWithIndex.forall { (field, index) =>
+        val bound = lookups(field.expression).flatMap(_.references(bases = false)).toSet
+        bound.isEmpty ||
+        ordered.drop(index + 1).forall(later => later.expression.references(bases = false).forall(!bound(_)))
+      }
+    }
+
+    lazy val pinned: Vec[(Assignment, BigInt)] = fields.flatMap(field =>
+      field.expression match {
+        case Expression.Constant(expected, false) => Some(field -> expected)
+        case _                                    => None
+      }
+    )
+    lazy val opcodeFields: Vec[Assignment] = fields.filter(_.expression match {
       case Expression.Reference("Opcode", None, _) => true
       case _                                       => false
     })
@@ -181,6 +282,18 @@ object NVDisasm {
       case Expression.FloatConvert(_, _, _, _) => 1
       case _                                   => 0
     })
+
+    private lazy val bindings: java.util.IdentityHashMap[Syntax.Field, String] = {
+      val resolved = java.util.IdentityHashMap[Syntax.Field, String]()
+      declared.foreach(field => resolved.put(field, encodedBinding(field)))
+      resolved
+    }
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+    def binding(field: Syntax.Field): String = bindings.get(field) match {
+      case null  => encodedBinding(field)
+      case value => value
+    }
 
     /** The binding a FORMAT field is encoded under: its own, or its kind when conditions refer to the kind. */
     def encodedBinding(field: Syntax.Field): String =
@@ -211,14 +324,19 @@ object NVDisasm {
     lazy val byVocabulary: Map[String, Vocabulary] = symbols.map(vocabulary => vocabulary.name -> vocabulary).toMap
     lazy val byTable: Map[String, LookupTable]     = tables.map(table => table.name -> table).toMap
 
-    lazy val opcodeGroups: Vec[(Vec[Int], Map[BigInt, Vec[Form]])] = forms.flatMap { form =>
+    lazy val opcodeGroups: Vec[(BitField.Extractor, Map[BigInt, Vec[Form]])] = forms.flatMap { form =>
       form.opcodeFields.headOption.map(_.positions -> form)
     }.groupMap(_._1)(_._2).toVec.map { case (positions, group) =>
-      positions -> group.flatMap(form => form.opcodes.map(_.value).distinct.map(_ -> form)).groupMap(_._1)(_._2)
+      BitField.Extractor(positions) ->
+        group.flatMap(form => form.opcodes.map(_.value).distinct.map(_ -> form)).groupMap(_._1)(_._2)
+          .view.mapValues(_.distinct).toMap
     }
 
     def vocabulary(field: Syntax.Field): Vec[SymbolValue] =
       byVocabulary.get(field.kind).fold(Vec.empty[SymbolValue])(_.values)
+
+    def symbol(field: Syntax.Field, value: BigInt): Option[String] =
+      byVocabulary.get(field.kind).flatMap(_.spelling(field.category, value))
 
     private val defaults = ConcurrentHashMap[Syntax.Field, Vec[BigInt]]()
 

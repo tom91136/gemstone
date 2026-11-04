@@ -6,7 +6,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ShiftSuite extends Suite {
   private val shiftOperations = Vec("shl", "shr.s", "shr.u")

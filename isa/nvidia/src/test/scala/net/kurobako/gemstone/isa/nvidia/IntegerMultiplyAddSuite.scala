@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 class IntegerMultiplyAddSuite extends Suite {

@@ -14,6 +14,11 @@ object msgpack {
 
   case class Limits(maximumElements: Int > 0, maximumBytes: Int > 0, maximumTextBytes: Int > 0)
 
+  /** Encoded bytes; only the first `length` entries of `bytes` are meaningful. */
+  class Encoded(val bytes: Array[Byte], val length: Int) {
+    def toArray: Array[Byte] = java.util.Arrays.copyOf(bytes, length)
+  }
+
   /** Accumulates the first failure; later writes are ignored. */
   class Writer(val limits: Limits) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -28,6 +33,8 @@ object msgpack {
       length += 1
     }
 
+    private def grow(capacity: Int): Unit = mutableBytes = java.util.Arrays.copyOf(mutableBytes, capacity)
+
     private def reserve(additional: Int): Boolean =
       if (failure.nonEmpty) false
       else if (additional < 0 || additional > limits.maximumBytes - length) {
@@ -37,7 +44,7 @@ object msgpack {
         val required = length + additional
         if (required > mutableBytes.length) {
           val doubled = math.min(limits.maximumBytes.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
-          mutableBytes = java.util.Arrays.copyOf(mutableBytes, math.max(required, doubled))
+          grow(math.max(required, doubled))
         }
         true
       }
@@ -115,10 +122,10 @@ object msgpack {
       else if (size <= 15) writeRawByte(0x90 | size)
       else writeSized(size, marker16 = 0xdc, marker32 = 0xdd)
 
-    def writeString(value: String): Unit = {
+    def writeString(value: String, maximumBytes: Int > 0 = limits.maximumTextBytes): Unit = {
       val bytes = value.getBytes(StandardCharsets.UTF_8)
-      if (bytes.length > limits.maximumTextBytes)
-        reject(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit")
+      if (bytes.length > maximumBytes)
+        reject(s"UTF-8 value exceeds the $maximumBytes-byte text limit")
       else {
         if (bytes.length <= 31) writeRawByte(0xa0 | bytes.length)
         else writeSized8(bytes.length, marker8 = 0xd9, marker16 = 0xda, marker32 = 0xdb)
@@ -129,12 +136,19 @@ object msgpack {
     def writeBytes(value: Array[Byte]): Unit =
       if (value.length > limits.maximumBytes)
         reject(s"byte collection exceeds the ${limits.maximumBytes}-byte limit")
-      else { writeSized8(value.length, marker8 = 0xc4, marker16 = 0xc5, marker32 = 0xc6); writeRawBytes(value) }
+      else {
+        val presize = math.min(limits.maximumBytes.toLong, length.toLong + value.length + 5L).toInt
+        if (presize > mutableBytes.length) grow(presize)
+        writeSized8(value.length, marker8 = 0xc4, marker16 = 0xc5, marker32 = 0xc6)
+        writeRawBytes(value)
+      }
 
     def reject(message: String): Unit = if (failure.isEmpty) failure = Some(message)
 
-    def result(): Either[String, Array[Byte]] =
-      failure.toLeft(java.util.Arrays.copyOf(mutableBytes, length))
+    /** Hands out the buffer without copying; the writer must not be written to afterwards. */
+    def encoded(): Either[String, Encoded] = failure.toLeft(Encoded(mutableBytes, length))
+
+    def result(): Either[String, Array[Byte]] = encoded().map(_.toArray)
   }
 
   object Reader {
@@ -222,17 +236,18 @@ object msgpack {
       else Right(value.toInt)
     }
 
-    def readString(strict: Boolean = false): Either[String, String] = readRawByte().flatMap {
-      case marker if (marker & 0xe0) == 0xa0 => readStringBody(marker & 0x1f, strict)
-      case 0xd9                              => readRawByte().flatMap(size => readStringBody(size, strict))
-      case 0xda                              => readRawShort().flatMap(size => readStringBody(size, strict))
-      case 0xdb                              => readRawInt().flatMap(size => readStringBody(size, strict))
-      case other                             => Left(f"expected string, found 0x$other%02x")
-    }
+    def readString(strict: Boolean = false, maximumBytes: Int > 0 = limits.maximumTextBytes): Either[String, String] =
+      readRawByte().flatMap {
+        case marker if (marker & 0xe0) == 0xa0 => readStringBody(marker & 0x1f, strict, maximumBytes)
+        case 0xd9  => readRawByte().flatMap(size => readStringBody(size, strict, maximumBytes))
+        case 0xda  => readRawShort().flatMap(size => readStringBody(size, strict, maximumBytes))
+        case 0xdb  => readRawInt().flatMap(size => readStringBody(size, strict, maximumBytes))
+        case other => Left(f"expected string, found 0x$other%02x")
+      }
 
-    private def readStringBody(size: Int, strict: Boolean): Either[String, String] =
-      if (size < 0 || size > limits.maximumTextBytes)
-        Left(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit: $size")
+    private def readStringBody(size: Int, strict: Boolean, maximumBytes: Int > 0): Either[String, String] =
+      if (size < 0 || size > maximumBytes)
+        Left(s"UTF-8 value exceeds the $maximumBytes-byte text limit: $size")
       else take(size).flatMap(offset =>
         if (strict) decodeUtf8(bytes, offset, size).left.map(_ => "MessagePack string is not valid UTF-8")
         else Right(String(bytes, offset, size, StandardCharsets.UTF_8))

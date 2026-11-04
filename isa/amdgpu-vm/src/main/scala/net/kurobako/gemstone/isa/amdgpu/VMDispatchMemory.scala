@@ -42,12 +42,19 @@ private object VMDispatchMemory {
 /** One dispatch's memory routing; global bytes and their locks remain owned by the loaded program. */
 private class VMDispatchMemory(
     kernel: CodeObjectKernel,
-    kernarg: Array[Byte],
-    dispatch: Array[Byte],
+    private val kernarg: Array[Byte],
+    private val dispatch: Array[Byte],
     allocations: Array[GlobalMapping],
     val memory: AddressSpace,
-    val kernargAddress: Long
+    val kernargAddress: Long,
+    val heap: Option[HeapRegion] = None,
+    hostcall: Option[HostcallBuffer] = None
 ) {
+
+  /** The same dispatch seen from another program's code, which brings its own images and global bindings. */
+  def inCode(code: CodeObjectKernel, mappings: Array[GlobalMapping]): VMDispatchMemory =
+    VMDispatchMemory(code, kernarg, dispatch, mappings, memory, kernargAddress, heap, hostcall)
+
   private val readOnlyAddress   = kernel.readOnlyAddress
   private val globalMemory      = kernel.globalMemory
   private val globalMemoryLocks = kernel.globalMemoryLocks
@@ -65,6 +72,21 @@ private class VMDispatchMemory(
   private val globalEnd   = globalMemory.view.map { case (base, bytes) =>
     if (base > Long.MaxValue - bytes.length) Long.MaxValue else base + bytes.length
   }.maxOption.getOrElse(Long.MinValue)
+
+  /** The host answers the hostcall packets waiting in the buffer the kernel's arguments name. */
+  def serviceHostcalls(): Either[Fault, Unit] = hostcall match {
+    case None =>
+      Left(Fault.Unsupported("s_sendmsg MSG_INTERRUPT needs a hostcall buffer, which the kernel's arguments lack"))
+    case Some(HostcallBuffer(offset, listener)) =>
+      for {
+        _     <- memory.fenceHostMemory()
+        bytes <- readBytes(kernargAddress + offset, 8)
+        buffer = LittleEndian.decode(bytes, 0, 8)
+        _ <- Either.cond(buffer != 0L, (), Fault.Unsupported("the dispatch's hostcall buffer is null"))
+        _ <- listener.service(memory, buffer)
+        _ <- memory.flushHostWrites()
+      } yield ()
+  }
 
   def isMutable(address: Long, size: Int >= 0): Boolean = immutableIndex(address, size) < 0
 
@@ -130,6 +152,19 @@ private class VMDispatchMemory(
         Right(())
       }
     }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  def readCoherentValueInto(address: Long, size: Int in (4, 8), into: LongRef): Fault | Null = {
+    val binding = aliasedRegion(address)
+    if (binding != null)
+      memory.readCoherentValueInto(binding.binding.region, binding.offsetOf(address), size, into)
+    else if (globalRegionIndex(address, size) < 0)
+      memory.readCoherentValueInto(GuestAddress(address), size, into) match {
+        case null         => null
+        case fault: Fault => annotated("atomic", address, size, fault)
+      }
+    else AddressSpace.store(into, atomicModifyValue(address, size)(identity))
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))

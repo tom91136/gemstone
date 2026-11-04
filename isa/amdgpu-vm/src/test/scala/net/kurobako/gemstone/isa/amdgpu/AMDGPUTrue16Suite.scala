@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** GFX11 onwards selects a 16-bit operand's high half in the 32-bit VOP1, VOP2 and VOPC encodings by bit 7 of its VGPR
   * number, which upstream LLVM 22 emits for half arithmetic on gfx1100 (`llc -mcpu=gfx1100`: `v_add_f16_e32 v0.l, v0.l,

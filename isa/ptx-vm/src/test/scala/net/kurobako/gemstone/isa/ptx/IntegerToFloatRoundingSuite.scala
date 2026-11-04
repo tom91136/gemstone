@@ -8,7 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class IntegerToFloatRoundingSuite extends Suite {
   private def run(source: String, input: Long, width: ScalarBitWidth): Vec[Long] = {

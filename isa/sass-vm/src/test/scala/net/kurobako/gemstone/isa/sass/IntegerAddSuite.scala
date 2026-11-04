@@ -5,7 +5,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
@@ -216,6 +216,47 @@ class IntegerAddSuite extends Suite {
       execute(sm, "negative_constant_sub", "NegativeConstantSub", negativeInputs, negativeExpected)
       execute(sm, "add_sub", "AddSub", subtractInputs, subtractExpected)
     }
+  }
+
+  private val carryCases = Vec(
+    (
+      "borrow across the low word",
+      Vec(
+        ("MOV R5, R0", (lane: Int) => lane.toLong),
+        ("MOV R6, RZ", (_: Int) => 0L),
+        ("MOV R4, R0", (lane: Int) => lane.toLong)
+      ),
+      Vec(0x3L, 0x9L, 0x7L)
+    ),
+    (
+      "two carries out of the low word",
+      Vec(
+        ("IADD32I R5, R0, 0x7fffffff", (lane: Int) => 0x7fffffffL + lane),
+        ("IADD32I R6, R0, 0xfffffff0", (lane: Int) => (0xfffffff0L + lane) & 0xffffffffL),
+        ("IADD32I R4, R0, 0x80000001", (lane: Int) => 0x80000001L + lane)
+      ),
+      Vec(0xfffffffeL, 0x1L, 0xffffffffL)
+    )
+  )
+
+  for {
+    sm                <- Vec(50, 60)
+    (name, low, high) <- carryCases
+  } test(s"sm$sm IADD3.CC/X with two negated sources subtracts 64-bit operands, $name") {
+    def operand(lo: Long, hi: Long): BigInt = (BigInt(hi) << 32) | BigInt(lo & 0xffffffffL)
+    val results                             = Vec.tabulate(32) { lane =>
+      val inputs = low.map(_._2(lane))
+      (operand(inputs(1), high(1)) - operand(inputs(0), high(0)) - operand(inputs(2), high(2))) & Mask64
+    }
+    check(
+      sm,
+      s"S2R R0, SR_TID.X; ${low.map(_._1).mkString("; ")}; MOV32I R3, 0x${high(0).toHexString}; " +
+        s"MOV32I R8, 0x${high(1).toHexString}; MOV32I R2, 0x${high(2).toHexString}; " +
+        "IADD3 R4.CC, -R5, R6, -R4; IADD3.X R2, -R3, R8, -R2; LDC.64 R40, c[0x0][0x160]; " +
+        "IMAD.WIDE.U32 R40, R0, 4, R40; STG.E [R40.64], R4; STG.E [R40.64+0x80], R2; EXIT",
+      results.map(_.toInt) ++ results.map(value => (value >> 32).toInt),
+      block = Some(32)
+    )
   }
 
   for (enabled <- Vec(None, Some(true), Some(false)))

@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class DoubleToHalfSuite extends Suite {
   private val halfWidth: Int in (16, 32, 64) = 16

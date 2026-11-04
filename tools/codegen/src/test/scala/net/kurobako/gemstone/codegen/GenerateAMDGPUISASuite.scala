@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class GenerateAMDGPUISASuite extends Suite {
   test("processor wave defaults follow explicit and inherited LLVM features") {

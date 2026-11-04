@@ -39,7 +39,7 @@ object Encoder {
       _             <- Legality.check(encoding, Legality.completeBindings(form, values)).left.map(_.message)
       _             <- validatePositions(database, form)
       encodedFields <- form.fields.traverse { field =>
-        val oldField = preserved.map(word => FieldDecoder.extract(word, field.positions))
+        val oldField = preserved.map(word => BitField.extract(word, field.positions))
         val encoded  = field.expression match {
           case Expression.Constant(_, true) if oldField.nonEmpty => Right(oldField.get)
           case _ => evaluate(database, field.expression, values).orElse {

@@ -105,7 +105,7 @@ class VMStateSuite extends Suite {
     val workgroup = VMWorkgroup(1024)
     val token     = workgroup.createConvergence(992, 0b11L)
     val other     = workgroup.createConvergence(0, 0b11L)
-    workgroup.yieldLane(992, 0)
+    workgroup.yieldLanes(VMLaneMask.ofWarp(992, 0b01L))
     assertEquals(workgroup.convergenceMask(992, token), 0b10L)
     assertEquals(workgroup.convergenceMask(0, other), 0b11L)
   }

@@ -122,11 +122,10 @@ object NvidiaMatrices {
     }
     multiply.scaling.foreach { scaling =>
       (0 until scaling.vector).foreach { block =>
-        val a    = 4 * (row % 8) + row / 8
-        val b    = 4 * column
-        val byte = if (scaling.vector == 4) block else block
-        orInto(a, register(scaling.aData), (input(s"sa$block") & 0xffL) << (8 * byte))
-        orInto(b, register(scaling.bData), (input(s"sb$block") & 0xffL) << (8 * byte))
+        val a = 4 * (row % 8) + row / 8
+        val b = 4 * column
+        orInto(a, register(scaling.aData), (input(s"sa$block") & 0xffL) << (8 * block))
+        orInto(b, register(scaling.bData), (input(s"sb$block") & 0xffL) << (8 * block))
       }
     }
     if (conflicts.nonEmpty) Left("the product's fragments share registers")

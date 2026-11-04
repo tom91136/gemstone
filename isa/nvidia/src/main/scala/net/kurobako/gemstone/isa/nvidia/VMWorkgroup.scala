@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
 /** Memory and synchronisation state of one workgroup, shared by every frame executing within it. */
@@ -13,16 +14,17 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
   val mbarriers: mutable.LongMap[MBarrier]        = mutable.LongMap.empty
   val invalidatedMBarriers: mutable.LongMap[Unit] = mutable.LongMap.empty
   // the thread holding each locked shared word, by its shared offset
-  val sharedLocks: mutable.LongMap[Int] = mutable.LongMap.empty
-  val tensorMemory: TensorMemory.State  = TensorMemory.State()
-  private val local                     = Array.fill(laneCount)(VMBytes())
-  private val convergence               = mutable.LongMap.empty[Long]
-  private var nextConvergenceToken      = 0
-  private var stores                    = 0L
-  private val pausedAt                  = Array.fill(laneCount)(-1L)
-  private val quietPauses               = Array.ofDim[Int](laneCount)
-  private val buffers                   = java.util.TreeMap[Long, Array[Byte]]()
-  private var nextBuffer                = VMAddressSpace.ParameterBase
+  val sharedLocks: mutable.LongMap[Int]  = mutable.LongMap.empty
+  val tensorMemory: TensorMemory.State   = TensorMemory.State()
+  val prints: mutable.ArrayBuffer[Event] = mutable.ArrayBuffer.empty
+  private val local                      = Array.fill(laneCount)(VMBytes())
+  private val convergence                = mutable.LongMap.empty[Long]
+  private var nextConvergenceToken       = 0
+  private var stores                     = 0L
+  private val pausedAt                   = Array.fill(laneCount)(-1L)
+  private val quietPauses                = Array.ofDim[Int](laneCount)
+  private val buffers                    = java.util.TreeMap[Long, Array[Byte]]()
+  private var nextBuffer                 = VMAddressSpace.ParameterBase
   // Buffers are only added until a reset, so the last one found stays valid until then.
   private var lastBase   = 0L
   private var lastBuffer = Array.emptyByteArray
@@ -148,16 +150,6 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
     convergence(key) = convergence.getOrElse(key, 0L) & ~(1L << lane)
   }
 
-  def yieldLane(warp: WorkgroupLane.WarpBase, lane: WarpLane): Unit = yieldLanes(warp, 1L << lane)
-
-  def yieldLanes(warp: WorkgroupLane.WarpBase, lanes: Long): Unit = {
-    val owner = warp.toLong << 32
-    convergence.foreachKey { key =>
-      if ((key & ~0xffffffffL) == owner)
-        convergence(key) = convergence(key) & ~lanes: @SuppressWarnings(Array("bonsai:loop-boxing"))
-    }
-  }
-
   def stored(): Unit = stores += 1L
 
   /** Every lane of `lanes` leaves the convergence barriers of its warp. */
@@ -192,6 +184,7 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
     invalidatedMBarriers.clear()
     sharedLocks.clear()
     tensorMemory.reset()
+    prints.clear()
     local.foreach(_.clear())
     convergence.clear()
     nextConvergenceToken = 0

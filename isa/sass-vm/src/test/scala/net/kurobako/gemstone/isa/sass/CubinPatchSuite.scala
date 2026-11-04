@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class CubinPatchSuite extends Suite {

@@ -8,7 +8,7 @@
 #include "test_support.hpp"
 #include <fmt/format.h>
 
-TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][runtime]") {
   constexpr size_t size = 128;
   constexpr size_t local = 32;
   const auto values = unified::test_runtime::input(size);
@@ -37,7 +37,7 @@ TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][
   }
 }
 
-TEST_CASE("edge-cases/runtime/sycl/usm-event-offset/i32/n33", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/sycl/usm-event-offset/i32/n33", "[unified][runtime]") {
   sycl::queue queue(sycl::gpu_selector_v); // No in-order property: dependencies must be explicit.
   unified::test_runtime::Cleanup cleanup;
   auto *memory = sycl_usm::device<int32_t>(queue, cleanup, 35);

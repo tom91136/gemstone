@@ -4,14 +4,39 @@ PTX	.*	(tcgen05\.wait::ld|tcgen05\.wait::st)	.*	NoOp	tensor memory moves complet
 PTX	.*	(wgmma\.commit_group|wgmma\.fence|wgmma\.wait_group)	.*	NoOp	warpgroup matrix products complete when issued, so no group is pending
 PTX	.*	(applypriority|cp\.async\.bulk\.prefetch|discard|nanosleep|pmevent|prefetch|prefetchu)	.*	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 PTX	.*	(fabric\.submit|fabric\.try_get|fabric\.try_pullred|fabric\.try_put|fabric\.try_red|fabric\.wait)	.*	NotModelled	it moves data through CUDA Fabric Transport handles, whose logical endpoints only the driver's logical endpoint API creates, and Gemstone's runtime creates none
-PTX	.*	(istypep|suld|suq|sured|sust|tex|tld4|txq)	.*	NotModelled	it belongs to the graphics pipeline's texture, surface or attribute state
+PTX	.*	istypep	.*	NotModelled	the VM does not model the type of a texture, sampler or surface handle
+PTX	.*	suq	.*	NotModelled	the explorer does not model surface property queries
+PTX	.*	sust	.*	NotModelled	the explorer does not model surface stores
+PTX	.*	tex	(Tex\ 1|Tex\ 2|Tex\ 4|Tex\ 5|Tex\ 6|Tex\ 7|Tex\ 8|Tex\ 10|Tex\ 11|Tex\ 12|Tex\ 13|Tex\ 14|Tex\ 15|Tex\ 16|Tex\ 17|Tex\ 18|Tex\ 19|Tex\ 20|Tex\ 21|Tex\ 22|Tex\ 23|Tex\ 24)	NotModelled	the VM does not lower Tex forms with explicit level, gradient, offset or depth compare operands
+PTX	.*	tld4	(Tld4\ 1|Tld4\ 2|Tld4\ 3|Tld4\ 4|Tld4\ 5)	NotModelled	the VM does not lower gathers with offset or depth compare operands
+PTX	.*	sured	Sured\ 2	NotModelled	the VM does not lower formatted surface reductions
+PTX	.*	txq	(Txq\ 2|Txq\ 3)	NotModelled	the VM answers texture queries only without an explicit LOD
 SASS	.*	ENDCOLLECTIVE	.*	NoOp	the VM checks the warp synchronisation it closes at load, so it runs nothing
 SASS	.*	PREEXIT	.*	NoOp	dependent launches wait for kernel completion, so there is no early launch to release
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	USETMAXREG	(usetmaxreg__Ib_dealloc|usetmaxreg__URb_dealloc)	NoOp	the VM does not bound a warp's registers, so register-count hints have no effect
 SASS	sm_90	USETMAXREG	(usetmaxregAlloc__Ib_dealloc|usetmaxregAlloc__URb_dealloc|usetmaxreg__Ib_dealloc|usetmaxreg__URb_dealloc)	NoOp	the VM does not bound a warp's registers, so register-count hints have no effect
 SASS	.*	UTMACCTL	.*	NoOp	the VM reads tensor maps when used, so there is no tensor-map cache to control
 SASS	sm_90	WARPGROUP	(warpgroup_arrive_|warpgroup_depbar_)	NoOp	warpgroup matrix products complete when issued, so no group is pending
-SASS	.*	(AL2P|ALD|AST|FOOTPRINT|FSWZADD|IPA|ISBERD|ISBEWR|KIL|LDTRAM|OUT|PIXLD|SUATOM|SUBFM|SUCLAMP|SUEAU|SULD|SULDGA|SUQUERY|SURED|SUST|SUSTGA|TEX|TEXS|TLD|TLD4|TLD4S)	.*	NotModelled	it belongs to the graphics pipeline's texture, surface or attribute state
+SASS	.*	(AL2P|ALD|AST|FSWZADD|IPA|LDTRAM|PIXLD)	.*	NotModelled	it belongs to the graphics pipeline's attribute, interpolation or pixel state
+SASS	.*	(ISBERD|ISBEWR)	.*	NotModelled	the VM does not model input shader buffer accesses
+SASS	.*	KIL	.*	NotModelled	it discards pixels of the graphics pipeline
+SASS	.*	OUT	.*	NotModelled	it emits primitives from a geometry shader
+SASS	.*	FOOTPRINT	.*	NotModelled	the VM does not model texture footprint queries
+SASS	.*	SUATOM	.*	NotModelled	the VM does not model surface atomics
+SASS	.*	SUQUERY	.*	NotModelled	the VM does not model surface property queries
+SASS	.*	(TEXS|TLD4S)	.*	NotModelled	the VM does not model the short-form texture sample and gather instructions
+SASS	.*	TEX	(tex_|tex_b_|tex_b_noConst_|tex_b_tid_|tex_b_urc_|tex_scr_|tex_scr_b_|tex_scr_b_noConst_|tex_scr_b_tid_|tex_scr_b_urc_|TEX|TEX_B|TEX\ B|TEX\ B\ legacy\ style|TEX_B_legacy_style|TEX_legacy_style|TEX\ legacy\ style)	NotModelled	the explorer does not model these texture operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	TEX	(tex_urc_|tex_scr_urc_)	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
+SASS	.*	TLD	(tld_|tld_b_|tld_b_noConst_|tld_b_tid_|tld_b_urc_|tld_scr_|tld_scr_b_|tld_scr_b_noConst_|tld_scr_b_tid_|tld_scr_b_urc_|TLD|TLD_B|TLD\ B)	NotModelled	the explorer does not model these texture operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	TLD	(tld_urc_|tld_scr_urc_)	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
+SASS	.*	TLD4	(tld4_|tld4_b_|tld4_b_noConst_|tld4_b_tid_|tld4_b_urc_|tld4_scr_|tld4_scr_b_|tld4_scr_b_noConst_|tld4_scr_b_tid_|tld4_scr_b_urc_|TLD4|TLD4_B|TLD4\ B|TLD4\ B\ Legacy\ Style|TLD4_B_Legacy_Style|TLD4\ Legacy\ Style|TLD4_Legacy_Style)	NotModelled	the explorer does not model these texture operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	TLD4	(tld4_urc_|tld4_scr_urc_)	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
+SASS	.*	SULD	(suld_d_imm_|suld_d_imm_weakonly_|suld_d_reg_|suld_d_reg_weakonly_|suld_d_r_urc_|suld_d_tid_|suld_d_tid_weakonly_|suld_d_urc_weakonly_|suld_p_imm_|suld_p_imm_weakonly_|suld_p_reg_|suld_p_reg_weakonly_|suld_p_r_urc_|suld_p_tid_|suld_p_tid_weakonly_|suld_p_urc_|suld_p_urc_weakonly_|SULD_D_IMM|SULD_D_REG|SULD_P_IMM|SULD_P_REG)	NotModelled	the explorer does not model these surface operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	SULD	suld_d_urc_	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
+SASS	.*	SURED	(sured_imm_|sured_imm_weakonly_|sured_reg_|sured_reg_weakonly_|sured_r_urc_|sured_tid_|sured_tid_weakonly_|sured_urc_weakonly_|SURED_D_IMM|SURED_D_REG|SURED_P_IMM|SURED_P_REG)	NotModelled	the explorer does not model these surface operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	SURED	sured_urc_	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
+SASS	.*	SUST	(sust_d_imm_|sust_d_imm_weakonly_|sust_d_reg_|sust_d_reg_weakonly_|sust_d_r_urc_|sust_d_tid_|sust_d_tid_weakonly_|sust_d_urc_weakonly_|sust_p_imm_|sust_p_imm_weakonly_|sust_p_reg_|sust_p_reg_weakonly_|sust_p_r_urc_|sust_p_tid_|sust_p_tid_weakonly_|sust_p_urc_|sust_p_urc_weakonly_|SUST_D_IMM|SUST_D_REG|SUST_P_IMM|SUST_P_REG)	NotModelled	the explorer does not model these surface operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	SUST	sust_d_urc_	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
 SASS	(sm_35|sm_37)	ATOM	(ATOM\ Rd\ is\ RZ|I\ ATOM\ Rd\ is\ RZ)	NotModelled	the encoding tables reject every instance the form can take: In SM4, ATOM instructions may not have Rd==RZ, since that is reserved for RED encoding
 SASS	(sm_52|sm_53|sm_60|sm_61|sm_62)	ATOM	(ATOM_CAS_RZ_and_Rc|ATOM_CAS_RZ_and_Rc_SPARSE|I_ATOM_CAS_RZ_and_Rc)	NotModelled	the encoding tables reject every instance the form can take: Register Rb cannot be RZ for ATOM.CAS
 SASS	sm_50	ATOM	(ATOM_CAS_RZ_and_Rc|I_ATOM_CAS_RZ_and_Rc)	NotModelled	the encoding tables reject every instance the form can take: Register Rb cannot be RZ for ATOM.CAS
@@ -55,7 +80,8 @@ SASS	(sm_70|sm_72)	CCTL	(cctl__IVALL_WBALL_C_noSrc|cctl__IVALL_WBALL_I_noSrc|cct
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_90)	CCTL	(cctl__IVALL_WBALL_C_noSrc|cctl__IVALL_WBALL_I_noSrc|cctl__sImmOffset|cctl__sUROffset|cctl__uImmOffset|cctl__uUROffset)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 SASS	sm_89	CCTL	(cctl__IVALL_WBALL_C_noSrc|cctl__IVALL_WBALL_I_noSrc|cctl__sImmOffset|cctl__sImmOffset_pf2|cctl__sImmOffset_pf2_q|cctl__sImmOffset_rml2|cctl__sUROffset|cctl__sUROffset_pf2|cctl__sUROffset_pf2_q)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 SASS	sm_89	CCTL	(cctl__sUROffset_rml2|cctl__uImmOffset|cctl__uImmOffset_pf2|cctl__uImmOffset_pf2_q|cctl__uImmOffset_rml2|cctl__uUROffset|cctl__uUROffset_pf2|cctl__uUROffset_pf2_q|cctl__uUROffset_rml2)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
-SASS	.*	(CCTLL|CCTLS|CCTLT|NANOSLEEP|PMTRIG|UBLKPF)	.*	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
+SASS	.*	(CCTLL|CCTLS|CCTLT|PMTRIG|UBLKPF)	.*	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
+SASS	.*	NANOSLEEP	(nanosleep__C|nanosleep__CX|nanosleep__U|nanosleep_clear_)	NotModelled	it only hints at caching, scheduling or profiling, which a kernel cannot observe
 SASS	(sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	CLMAD	(clmad__RCxR_RCxR|clmad__RRCx_RRCx)	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
 SASS	.*	(CSMTEST|VILD)	.*	NotModelled	it belongs to the graphics pipeline's vertex, pixel or coverage state
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	DADD	dadd__RRCx_RCx	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
@@ -126,7 +152,8 @@ SASS	sm_90	IGMMA	(igmma_URa_Rb_Rc_|igmma_sparse_URa_Rb_Rc_)	NotModelled	ptxas 11
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	IMAD	(imad__RCxR_RCxR|imad__RRCx_RRCx|imad_hi__RCxR_RCxR|imad_hi__RRCx_RRCx|imad_hi_pseudo__RCxR_RCxR|imad_hi_pseudo__RRCx_RRCx|imad_hi_x__RCxR_RCxR|imad_hi_x__RRCx_RRCx|imad_hi_x_pseudo__RCxR_RCxR)	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	IMAD	(imad_hi_x_pseudo__RRCx_RRCx|imad_pseudo__RCxR_RCxR|imad_pseudo__RRCx_RRCx|imad_wide__RCxR_RCxR|imad_wide__RRCx_RRCx|imad_wide_pseudo__RCxR_RCxR|imad_wide_pseudo__RRCx_RRCx|imad_wide_x__RCxR_RCxR)	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	IMAD	(imad_wide_x__RRCx_RRCx|imad_wide_x_pseudo__RCxR_RCxR|imad_wide_x_pseudo__RRCx_RRCx|imad_x__RCxR_RCxR|imad_x__RRCx_RRCx|imad_x_pseudo__RCxR_RCxR|imad_x_pseudo__RRCx_RRCx)	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
-SASS	.*	IMADSP	.*	NotModelled	Kepler's IMADSP takes its operand formats from a register at run time; ptxas lowers mul24 and mad24 to IMAD and IMUL instead, so no toolchain emits it
+SASS	(sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	IMADSP	.*	NotModelled	IMADSP takes its operand formats from a register at run time unless modifiers name them; ptxas emits the named forms only for Kepler surface addressing
+SASS	(sm_35|sm_37)	SUSTGA	SUSTGA\.P(\ cimm)?	NotModelled	it converts through a surface format word the Kepler driver keeps private, and ptxas emits only the raw .B form for CUDA surfaces
 SASS	sm_72	IMMA	imma_8816_16_8_	NotModelled	the encoding tables deprecate this form, so no toolchain emits it
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	IMNMX	imnmx__RCxR_RCxR	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
 SASS	(sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90)	IMUL	(imul__RCxR_RCxR|imul_wide__RCxR_RCxR)	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit
@@ -207,7 +234,12 @@ SASS	(sm_50|sm_52|sm_53|sm_60|sm_61|sm_62)	SSY	SSY_c	NotModelled	it reads its co
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121|sm_90)	STAS	(stas_64__RaRZ|stas__Ra32)	NotModelled	ptxas 11.8 and 13.3 lower none of the PTX that reaches this instruction to this form, so nothing defines the effect its encoding names
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	SYNCS	(syncs_flush_|syncs_ld_|syncs_tcnt_|syncs_uniform_cas_|syncs_uniform_ld_)	NotModelled	ptxas 11.8 and 13.3 lower none of the PTX that reaches this instruction to this form, so nothing defines the effect its encoding names
 SASS	sm_90	SYNCS	(syncs_ld_|syncs_tcnt_|syncs_uniform_cas_|syncs_uniform_ld_)	NotModelled	ptxas 11.8 and 13.3 lower none of the PTX that reaches this instruction to this form, so nothing defines the effect its encoding names
-SASS	.*	(TLDS|TMML|TXA|TXD|TXQ|VOTE_VTG)	.*	NotModelled	it belongs to the graphics pipeline's texture, surface or attribute state
+SASS	.*	TLDS	.*	NotModelled	the VM does not model the short-form texel load
+SASS	.*	TMML	.*	NotModelled	the VM does not model texture mip-level queries
+SASS	.*	TXA	.*	NotModelled	the explorer does not model this texture attribute access
+SASS	.*	TXD	.*	NotModelled	the VM does not model texture sampling with explicit gradients
+SASS	.*	TXQ	.*	NotModelled	the VM does not model texture queries
+SASS	.*	VOTE_VTG	.*	NotModelled	the VM does not model this graphics-pipeline vote
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	UBLKCP	(ublkcp_desc_one_|ublkcp_one_)	NotModelled	ptxas 11.8 and 13.3 lower none of the PTX that reaches this instruction to this form, so nothing defines the effect its encoding names
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	UBLKRED	(ublkred_desc_one_|ublkred_one_)	NotModelled	ptxas 11.8 and 13.3 lower none of the PTX that reaches this instruction to this form, so nothing defines the effect its encoding names
 SASS	.*	UCLEA	.*	NotModelled	it reads or addresses a constant bank selected by a uniform register, a bindless constant buffer of the graphics pipeline that compute toolchains do not emit

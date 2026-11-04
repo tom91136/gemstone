@@ -4,14 +4,15 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.isa.ptx.asm.Printer
+import net.kurobako.gemstone.isa.ptx.Instruction as PTXInstruction
+import net.kurobako.gemstone.isa.ptx.asm.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 private object execution extends munit.Assertions {
-  val text: net.kurobako.gemstone.isa.ptx.Instruction => Option[String] =
+  val text: PTXInstruction => Option[String] =
     instruction => Some(Printer.render(instruction))
 
   def geometry(blocks: Int > 0, threads: Int > 0): LaunchGeometry =
@@ -71,11 +72,14 @@ private object execution extends munit.Assertions {
       ),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     Vec.tabulate(outputs)(index =>
       memory.readLittleEndian(memory.start.offset(output + index.toLong * width), size).toOption.get
     )
   }
+
+  def assertSucceeded(result: Either[Fault, Unit])(using munit.Location): Unit =
+    assert(result.isRight, result.left.toOption.fold("")(_.message))
 
   def execute(
       kernel: Kernel,
@@ -86,7 +90,8 @@ private object execution extends munit.Assertions {
       control: TaskControl = TaskControl(),
       workgroups: Workgroups = Workgroups.Sequential,
       dynamicSharedBytes: Int >= 0 = 0,
-      cluster: Option[Dimensions] = None
+      cluster: Option[Dimensions] = None,
+      cooperative: Boolean = false
   ): Either[Fault, Unit] =
     VMInterpreter.execute(
       kernel,
@@ -96,6 +101,7 @@ private object execution extends munit.Assertions {
       control,
       workgroups,
       dynamicSharedBytes,
-      cluster
+      cluster,
+      cooperative
     )
 }

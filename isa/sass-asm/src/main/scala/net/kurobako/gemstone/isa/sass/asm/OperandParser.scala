@@ -116,7 +116,7 @@ object OperandParser {
         else if (cursor.consume('R')) "R"
         else if (cursor.consume('B')) "B"
         else {
-          val value = readWhile(c => c.isLetter || c == '_')
+          val value = readWhile(identifierStart(_))
           if (value.isEmpty || value == "P" || value == "UP" || value.startsWith("SR")) fail("register bank")
           value
         }
@@ -181,9 +181,20 @@ object OperandParser {
       else if (cursor.consume('[')) address()
       else if (cursor.consume('{')) group()
       else if (cursor.consume('|')) absolute()
-      else if (!cursor.atEnd && cursor.char().isDigit) selected(magnitude())
+      else if (!cursor.atEnd && cursor.char().isDigit) dimension().getOrElse(selected(magnitude()))
       else if (!cursor.atEnd && identifierStart(cursor.char())) wordOperand()
       else fail("operand")
+
+    private def dimension(): Option[Operand] =
+      Option.when(
+        cursor.has(1) && "123".contains(cursor.char()) && cursor.char(1) == 'D' &&
+          !(cursor.has(2) && (cursor.char(2).isLetterOrDigit || cursor.char(2) == '_'))
+      ) {
+        val name = s"${cursor.char()}D"
+        val _    = cursor.consume(cursor.char())
+        val _    = cursor.consume('D')
+        Operand.Symbol(name)
+      }
 
     private def selected(value: Operand): Operand = {
       val selectors = dottedSuffixes()

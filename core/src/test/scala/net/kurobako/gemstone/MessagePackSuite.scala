@@ -1,6 +1,6 @@
 package net.kurobako.gemstone
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class MessagePackSuite extends Suite {
   // MessagePack marker bytes are independent fixtures, deliberately not produced by a writer.

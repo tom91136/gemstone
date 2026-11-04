@@ -275,9 +275,9 @@ private object VMResourceDecoder {
         .toRight[NonEmpty[String]](s"$opcode has no image metadata")
       data     <- machine.vector(EncodingField.VDATA)
       resource <- machine.scalar(machine.resourceField)
-      count = dimension.fold(4 + (if (metadata.lodOrClampOrMip) 1 else 0))(dimension =>
-        metadata.addressWords(dimension, a16, packedGradients = false)
-      )
+      count = dimension.fold(
+        4 + (if (metadata.lodOrClampOrMip) 1 else 0) + (if (metadata.sampler) metadata.numExtraArgs + 6 else 0)
+      )(dimension => metadata.addressWords(dimension, a16, packedGradients = false))
       words <- addressWords(machine, count)
       packing =
         if (!machine.isSet(EncodingField.D16)) Packing.Dword
@@ -287,6 +287,10 @@ private object VMResourceDecoder {
       access <-
         if (name.startsWith("atomic_"))
           imageAtomic(opcode, name.stripPrefix("atomic_"), data, address, bytes, machine).map(banked(_, bank))
+        else if (metadata.sampler)
+          sampler(machine).flatMap(sampled(machine, opcode, name, mask, _)).map { case (operation, enabled) =>
+            Instruction.Image(operation, data, address, enabled, packing, bank)
+          }
         else imageOperation(opcode, name).map(Instruction.Image(_, data, address, mask, packing, bank))
       withStatus <- statusIfRequested(machine, access)
     } yield withStatus
@@ -299,6 +303,40 @@ private object VMResourceDecoder {
     case Instruction.AtomicExtended(operation, exchange) =>
       Instruction.AtomicExtended(operation, exchange.copy(bank = bank))
     case other => other
+  }
+
+  private def sampler(machine: InstructionDecoder.Decoded): Result[ScalarRegisterIndex] =
+    machine.scalar(if (machine.contains(EncodingField.SAMP)) EncodingField.SAMP else EncodingField.SSAMP)
+
+  /** A sample or gather, with the channels it writes: a gather returns four texels of one channel, the dmask's. */
+  private def sampled(
+      machine: InstructionDecoder.Decoded,
+      opcode: Opcode,
+      name: String,
+      mask: Int,
+      sampler: ScalarRegisterIndex
+  ): Result[(ImageOperation, Int in 0 ~ 15)] = {
+    val gather = name.startsWith("gather4")
+    if (name == "get_lod" || name == "gather4h" || (gather && mask == 0)) Left(s"$opcode execution is not implemented")
+    else {
+      val modifiers = name.stripPrefix(if (gather) "gather4" else "sample").split('_').toSet
+      val level     =
+        if (modifiers("lz")) SampleLevel.Zero
+        else if (modifiers("l")) SampleLevel.Level
+        else if (modifiers("d") || modifiers("cd")) SampleLevel.Gradients
+        else if (modifiers("b")) SampleLevel.Bias
+        else SampleLevel.Implicit
+      val form = SampleForm(
+        level,
+        compare = modifiers("c"),
+        offset = modifiers("o"),
+        clamp = modifiers("cl"),
+        gather = Option.when(gather)(Integer.numberOfTrailingZeros(mask)),
+        g16 = modifiers("g16"),
+        unnormalised = machine.isSet(EncodingField.UNORM)
+      )
+      Right((ImageOperation.Sample(sampler, form), (if (gather) 15 else mask).unsafe[Int in 0 ~ 15]))
+    }
   }
 
   private def imageOperation(opcode: Opcode, name: String): Result[ImageOperation] = name match {

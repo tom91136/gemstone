@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 class IEEE754PlatformSuite extends Suite {

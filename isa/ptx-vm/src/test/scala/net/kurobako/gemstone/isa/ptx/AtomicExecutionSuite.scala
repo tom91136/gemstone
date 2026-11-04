@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class AtomicExecutionSuite extends Suite {
   private val casTargets = Vec("generic", "global", "acquire.sys.global", "shared", "generic-shared")
@@ -61,6 +61,41 @@ class AtomicExecutionSuite extends Suite {
       if (width == 32) 0xffffffffL else -1L
     )
     assertEquals(memory.readLittleEndian(start.offset(2L * size), byteWidth).toOption.get, 7L)
+  }
+
+  test("shared state space after the operation addresses shared memory") {
+    val source = """.version 8.0
+      .target sm_80
+      .address_size 64
+      .visible .entry add(.param .u64 output) {
+        .shared .align 4 .b8 scratch[4];
+        .reg .u64 %p, %q;
+        .reg .b32 %old, %value;
+        ld.param.u64 %q, [output];
+        mov.u64 %p, scratch;
+        st.shared.b32 [%p], 5;
+        atom.add.shared.u32 %old, [%p], 3;
+        st.global.b32 [%q], %old;
+        ld.shared.b32 %value, [%p];
+        st.global.b32 [%q+4], %value;
+        ret;
+      }"""
+    val kernel = compileKernel(source)
+    val memory = DeviceMemory(8)
+    val start  = memory.start
+    assertEquals(
+      execute(
+        kernel,
+        1,
+        1,
+        Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
+        memory
+      ),
+      Right(())
+    )
+    val byteWidth = 4.unsafe[Int in 1 ~ 8]
+    assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 5L)
+    assertEquals(memory.readLittleEndian(start.offset(4L), byteWidth).toOption.get, 8L)
   }
 
   for (width <- widths) test(s"$width-bit CAS has exactly one winner across lanes") {

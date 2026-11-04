@@ -19,7 +19,9 @@ object SPIRVStaged {
     OperandIds(
       Operand.id(operands(0)),
       Operand.id(operands(1)),
-      operands.drop(from).filter(_.kind.category == OperandKind.Category.Id).map(Operand.id(_))
+      operands.drop(from).collect {
+        case operand if operand.kind.category == OperandKind.Category.Id => Operand.id(operand)
+      }
     )
   }
 

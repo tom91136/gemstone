@@ -4,7 +4,7 @@ import NativeAPIs.*
 import java.nio.file.Files
 import java.nio.file.Path
 import manifest.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.files.*
 
 class GenerateNativeBindingsSuite extends Suite {

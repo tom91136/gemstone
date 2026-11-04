@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SASSInstructionModelSuite extends Suite {
   private def form(name: String, format: String, opcode: String): SASSDescription.InstructionClass = {

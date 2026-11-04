@@ -8,6 +8,11 @@
 #include <stdexcept>
 #include <thread>
 
+#ifdef __linux__
+  #include <linux/prctl.h>
+  #include <sys/prctl.h>
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <gemstone/command_queue.hpp>
@@ -190,3 +195,20 @@ TEST_CASE("Streams and events created by the queue order work and reject unknown
   CHECK_FALSE(queue.destroyStream(nullptr));
   CHECK_FALSE(queue.hasStream(stream));
 }
+
+#ifdef __linux__
+
+TEST_CASE("Timed waits narrow the caller's timer slack only while waiting", "[queue]") {
+  const auto before = prctl(PR_GET_TIMERSLACK, 0UL, 0UL, 0UL, 0UL);
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::unique_lock lock(mutex);
+  int during = 0;
+  CHECK_FALSE(gemstone::waitWithin(changed, lock, 1'000'000, [&] {
+    during = prctl(PR_GET_TIMERSLACK, 0UL, 0UL, 0UL, 0UL);
+    return false;
+  }));
+  CHECK(during == 1);
+  CHECK(prctl(PR_GET_TIMERSLACK, 0UL, 0UL, 0UL, 0UL) == before);
+}
+#endif

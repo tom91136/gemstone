@@ -1,6 +1,6 @@
 package samples
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SamplesSuite extends Suite {
   for ((isa, sample) <- Samples.all)

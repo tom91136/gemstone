@@ -15,12 +15,10 @@ private object Linker {
   private def definitionPriority(value: Statement.Data | Statement.Function | Statement.Entry): Int = {
     val (linkage, defined) = value match {
       case data: Statement.Data =>
-        val linkage = Linkage.values.find(linkage =>
-          linkage != Linkage.Default && data.qualifiers.exists {
-            case DeclarationQualifier.Attribute(name) => name.raw == linkage.mnemonic
-            case _                                    => false
-          }
-        ).getOrElse(Linkage.Default)
+        val attributes = data.qualifiers.collect { case DeclarationQualifier.Attribute(name) => name.raw }.toSet
+        val linkage    =
+          Linkage.values.find(linkage => linkage != Linkage.Default && attributes(linkage.mnemonic))
+            .getOrElse(Linkage.Default)
         (linkage, linkage != Linkage.Extern)
       case function: Statement.Function => (function.linkage, function.body.nonEmpty)
       case entry: Statement.Entry       => (entry.linkage, entry.body.nonEmpty)

@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Floating-point and packed-half forms with the results an RTX 4060 Ti (sm_89) gives for them, or that the PTX ISA 9.0
   * instruction ptxas 13.3 lowers to them specifies. The sm_89 forms were assembled into a `nvcc -arch=sm_89` kernel in

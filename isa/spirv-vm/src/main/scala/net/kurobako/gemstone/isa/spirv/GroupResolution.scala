@@ -108,12 +108,13 @@ private object GroupResolution {
     val bare = operation == 0L && (combine == Combine.FloatingMin || combine == Combine.FloatingMax)
     unit.gather(UnitAlgebra.Slot.First, source) { view =>
       unit.writeEach(Vec(target)) { (lane, _) =>
-        val own = unit.laneIndex(lane)
-        operation match {
-          case 1L => unit.fold(view, algebra.literal(0L), algebra.add(own, algebra.literal(1L)), combine, target, bare)
-          case 2L => unit.fold(view, algebra.literal(0L), own, combine, target, bare)
-          case _  => unit.fold(view, algebra.literal(0L), unit.unitSize, combine, target, bare)
+        val own     = unit.laneIndex(lane)
+        val operand = operation match {
+          case 1L => algebra.add(own, algebra.literal(1L))
+          case 2L => own
+          case _  => unit.unitSize
         }
+        unit.fold(view, algebra.literal(0L), operand, combine, target, bare)
       }(unit.done)
     }
   }

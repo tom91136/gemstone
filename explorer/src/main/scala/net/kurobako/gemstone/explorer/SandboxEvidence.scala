@@ -31,7 +31,8 @@ object SandboxEvidence {
       memory: Vec[Memory]
   )
 
-  def report(run: SandboxRun): Report =
+  def report(run: SandboxRun): Report = {
+    val listing = run.lines.distinctBy(_.address).map(line => line.address -> line.text).toMap
     Report(
       language = run.program.language,
       kernel = run.kernel.raw,
@@ -41,7 +42,7 @@ object SandboxEvidence {
         val step = run.spirvSteps.lift(index)
         Executed(
           pc,
-          run.lines.find(_.address == pc).fold("<no listing at this address>")(_.text),
+          listing.getOrElse(pc, "<no listing at this address>"),
           step.map(_.label),
           step.map(_.predecessor)
         )
@@ -51,6 +52,7 @@ object SandboxEvidence {
         memory(index, run.program.allocations.lift(index).getOrElse(Vec.empty), run.bytes(index))
       )
     )
+  }
 
   /** The typed case name the panel shows, independent of the detail. */
   def failureKind(failure: SandboxFailure): String = failure match {

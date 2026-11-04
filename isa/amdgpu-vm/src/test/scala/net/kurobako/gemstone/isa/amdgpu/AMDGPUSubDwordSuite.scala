@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
 /** SDWA selections, sign extension, source modifiers, clamp and output placement on the VOP1 and VOP2 operations the

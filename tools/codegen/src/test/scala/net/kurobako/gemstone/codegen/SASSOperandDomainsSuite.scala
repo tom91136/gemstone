@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SASSOperandDomainsSuite extends Suite {
   private def mask(offset: Int, bits: Int): String = "." * offset + "X" * bits + "." * (128 - offset - bits)

@@ -162,6 +162,11 @@ class ExecutionSession(
       val entry = state.get().addresses.resolve(address, size)
       entry != null && entry.allocation.hostBacked
     },
+    address =>
+      state.get().addresses.resolve(address, 1) match {
+        case null  => None
+        case entry => Some(HostMemoryRange(entry.base, entry.size))
+      },
     () => state.get().hasHostBackedAllocations
   )
 
@@ -181,7 +186,8 @@ class ExecutionSession(
   def registerAllocationAddress(
       id: AllocationId,
       address: GuestAddress,
-      hostBacked: Boolean = false
+      hostBacked: Boolean = false,
+      devices: Int = StoredAllocation.AllDevices
   ): Either[ExecutionFailure, Unit] = stateLock.withLock {
     open.flatMap { current =>
       current.allocation(id).toRight(notRegistered(id)).flatMap { allocation =>
@@ -197,10 +203,19 @@ class ExecutionSession(
           )
         ) Left(ExecutionFailure.InvalidRequest("allocation address aliases overlap"))
         else {
-          val aliased = allocation.copy(base = address, aliased = true, hostBacked = hostBacked)
+          val aliased = allocation.copy(base = address, aliased = true, hostBacked = hostBacked, devices = devices)
           state.set(current.withAllocation(id, aliased))
           Right(())
         }
+      }
+    }
+  }
+
+  /** Restricts the dispatches that may access an allocation to those of the devices in the bit set. */
+  def setAllocationDevices(id: AllocationId, devices: Int): Either[ExecutionFailure, Unit] = stateLock.withLock {
+    open.flatMap { current =>
+      current.allocation(id).toRight(notRegistered(id)).map { allocation =>
+        state.set(current.withAllocation(id, allocation.copy(devices = devices)))
       }
     }
   }
@@ -270,6 +285,9 @@ class ExecutionSession(
 
   def specializeImage(image: Vec[Byte], constants: Vec[SpecializationConstant]): Either[ExecutionFailure, Vec[Byte]] =
     specializer.flatMap(_.specialize(image, constants).left.map(failure(_)))
+
+  def linkImages(images: Vec[LinkInput]): Either[ExecutionFailure, Backend.LinkedImage] =
+    specializer.flatMap(_.link(images.map(_.image)).left.map(failure(_)))
 
   def unload(id: ProgramId): Either[ExecutionFailure, Unit] = {
     // Reserve unloading before entering the backend. Keep bound allocations retained
@@ -480,11 +498,11 @@ class ExecutionSession(
     )
 
   // Called after validation while holding stateLock; workers start after that lock is released.
-  private def enqueue(current: State, program: Option[ProgramId], references: Set[AllocationId])(
+  private def enqueue(current: State, program: Option[ProgramId], references: Set[AllocationId], device: Int = 0)(
       execute: Completion.Execute
   ): CompletionId = {
     val id         = current.nextCompletion
-    val completion = Completion(id, program, execute, references, TaskControl(taskLimits), maxPrintEvents)
+    val completion = Completion(id, program, execute, references, TaskControl(taskLimits), device, maxPrintEvents)
     state.set(current.copy(completions = current.completions.updated(id, completion), nextCompletion = id.next))
     pendingCompletions.enqueue(completion)
     id
@@ -493,7 +511,8 @@ class ExecutionSession(
   def launch(
       program: ProgramId,
       task: KernelTask,
-      descriptorBindings: Vec[DescriptorBinding] = Vec.empty
+      descriptorBindings: Vec[DescriptorBinding] = Vec.empty,
+      device: Int = 0
   ): Either[ExecutionFailure, CompletionId] = {
     val accepted = stateLock.withLock {
       for {
@@ -528,22 +547,26 @@ class ExecutionSession(
               id => current.allocation(id).map(_.size)
             ).left.map(message => ExecutionFailure.InvalidRequest(s"invalid descriptor bindings: $message"))
           )
-      } yield enqueue(current, Some(program), TaskValidation.referenced(effective) ++ entry.allocations ++ images) {
-        context =>
-          if (descriptorBindings.isEmpty) loaded.execute(effective, context).map(_ => None)
-          else graphics.toRight(Fault.Unsupported("graphics backend is unavailable")).flatMap(
-            _.withDescriptorBindings(descriptorBindings, context.memory, context.control) {
-              (preparedMemory, descriptors, relocations) =>
-                val replacements = descriptorBindings.zip(descriptors).map { (binding, range) =>
-                  binding.argument.raw -> KernelTask.Argument.Memory(range.allocation, range.offset, Some(range.size))
-                }.toMap
-                effective.withArguments(Vec.from(effective.arguments.zipWithIndex.map { (argument, index) =>
-                  replacements.getOrElse(index, argument)
-                })).flatMap(_.withPointerRelocations(relocations)).left.map(Fault.InvalidRequest(_)).flatMap(prepared =>
-                  loaded.execute(prepared, context.withMemory(preparedMemory)).map(_ => None)
-                )
-            }
-          )
+      } yield enqueue(
+        current,
+        Some(program),
+        TaskValidation.referenced(effective) ++ entry.allocations ++ images,
+        device
+      ) { context =>
+        if (descriptorBindings.isEmpty) loaded.execute(effective, context).map(_ => None)
+        else graphics.toRight(Fault.Unsupported("graphics backend is unavailable")).flatMap(
+          _.withDescriptorBindings(descriptorBindings, context.memory, context.control) {
+            (preparedMemory, descriptors, relocations) =>
+              val replacements = descriptorBindings.zip(descriptors).map { (binding, range) =>
+                binding.argument.raw -> KernelTask.Argument.Memory(range.allocation, range.offset, Some(range.size))
+              }.toMap
+              effective.withArguments(Vec.from(effective.arguments.zipWithIndex.map { (argument, index) =>
+                replacements.getOrElse(index, argument)
+              })).flatMap(_.withPointerRelocations(relocations)).left.map(Fault.InvalidRequest(_)).flatMap(prepared =>
+                loaded.execute(prepared, context.withMemory(preparedMemory)).map(_ => None)
+              )
+          }
+        )
       }
     }
     accepted.foreach(_ => startExecutionWorker())
@@ -605,10 +628,16 @@ class ExecutionSession(
           val result =
             try
               programLifecycleLock.readLock().withLock {
-                completion.execute(
-                  TaskContext(CompletionMemory(Storage, host, completion), completion.control, handleEvent(id, _))
+                val executed = completion.execute(
+                  TaskContext(
+                    CompletionMemory(Storage, host, completion),
+                    completion.control,
+                    handleEvent(id, _),
+                    programs
+                  )
                 )
-                  .left.map(failure(_))
+                host.retire(completion)
+                executed.left.map(failure(_))
               }
             catch {
               case NonFatal(error) =>
@@ -747,8 +776,11 @@ class ExecutionSession(
   ): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
     succeededCompletion(id)(_.pointerRelocations(offset, limit))
 
-  def completionPrints(id: CompletionId): Either[ExecutionFailure, String] =
-    succeededCompletion(id)(_.prints).flatMap { prints =>
+  def completionPrints(
+      id: CompletionId,
+      stream: Event.PrintStream = Event.PrintStream.Stdout
+  ): Either[ExecutionFailure, String] =
+    succeededCompletion(id)(_.prints).map(_.filter(_.stream == stream)).flatMap { prints =>
       prints.foldLeft[Either[ExecutionFailure, mutable.StringBuilder]](Right(mutable.StringBuilder())) {
         (accumulated, event) =>
           accumulated.flatMap(builder =>
@@ -923,12 +955,13 @@ class ExecutionSession(
       ExecutionFailure.Unsupported(s"unknown program encoding: $encoding")
     )
 
+  private val programs: ProgramDirectory = id =>
+    stateLock.withLock(state.get().programs.get(id).collect { case p if !p.isUnloading => p.loaded })
+
   private def handleEvent(completion: CompletionId, event: Event): Either[Fault, Unit] = event match {
     case event: Event.Print =>
       stateLock.withLock {
-        state.get().completions.get(completion)
-          .toRight(ExecutionFailure.NotFound(s"completion $completion does not exist"))
-          .flatMap(_.record(event))
+        completionRecord(completion).flatMap(_.record(event))
       }.left.map(error => Fault.EventHandling(s"print capture failed: ${error.message}"))
     case Event.PointerRelocation(source, sourceOffset, target, targetOffset) =>
       stateLock.withLock {

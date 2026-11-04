@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.spirv.graphics
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.isa.spirv.ImageFormats.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class GraphicsCodecSuite extends Suite {
   test("generated format layouts agree with the texel codecs including decoded and aspect views") {

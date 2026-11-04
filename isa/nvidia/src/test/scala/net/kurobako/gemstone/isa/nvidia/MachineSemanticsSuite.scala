@@ -1,8 +1,10 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.texture.*
 
 class MachineSemanticsSuite extends Suite {
   import MachineDefinitions.*
@@ -206,6 +208,41 @@ class MachineSemanticsSuite extends Suite {
         |  machine.require(dst.to[UInt[4]] == UInt[4](0) && src.to[UInt[4]] == UInt[4](0) && size.to[UInt[4]] == UInt[4](0), "invalid bulk store")
         |  machine.require(size.to[SInt[64]] >= 0 && size.to[SInt[64]] <= 0xfffff, "invalid bulk store size")
         |  memory.storeGlobalMasked(dst, src, size, mask)
+        |  ()
+        |}""".stripMargin
+    )
+  }
+
+  test("a texture sample renders its read and result extraction") {
+    assertEquals(
+      shown(texture(Texture.Operation.Sample(
+        destination,
+        Vec(source, size),
+        Texture.Coordinates.Float,
+        Texture.Element.F32,
+        Vec(Some(Register(6)), None, Some(Register(7)), None)
+      ))),
+      """def texture(dst: UInt[64], src: UInt[64], size: UInt[64])(using memory: Memory): (left: UInt[64], right: UInt[64]) = {
+        |  val v0 = memory.textureRead(Texture.Sample(2, Float, F32), dst, src, size)
+        |  (
+        |    left = memory.textureWord(v0, UInt[64](0), UInt[64](4)),
+        |    right = memory.textureWord(v0, UInt[64](2), UInt[64](4))
+        |  )
+        |}""".stripMargin
+    )
+  }
+
+  test("a surface store renders its sources") {
+    assertEquals(
+      shown(texture(Texture.Operation.Store(
+        destination,
+        Vec(source),
+        4,
+        BoundaryMode.Clamp,
+        Vec(size)
+      ))),
+      """def texture(dst: UInt[64], src: UInt[64], size: UInt[64])(using memory: Memory): Unit = {
+        |  memory.surfaceStore(Surface.Store(1, 4, 1, Clamp), dst, src, size)
         |  ()
         |}""".stripMargin
     )

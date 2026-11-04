@@ -21,6 +21,10 @@
 #include "conformance/device.hpp"
 #include "conformance/environment_keys.hpp"
 
+#ifndef CONFORMANCE_CTS_TAGS
+  #define CONFORMANCE_CTS_TAGS ""
+#endif
+
 int conformance_upstream_main(int argc, const char **argv);
 extern int gTestsPassed;
 
@@ -176,7 +180,7 @@ void registerCases() {
   for (auto &name : cases()) {
     const auto identity = "cts/opencl/" CONFORMANCE_CTS_CATEGORY "/" + name;
     Catch::AutoReg(Catch::Detail::make_unique<CaseInvoker>(std::move(name)), CATCH_INTERNAL_LINEINFO, Catch::StringRef(),
-                   Catch::NameAndTags{identity, "[cts][opencl]"});
+                   Catch::NameAndTags{identity, "[cts][opencl]" CONFORMANCE_CTS_TAGS});
   }
 }
 

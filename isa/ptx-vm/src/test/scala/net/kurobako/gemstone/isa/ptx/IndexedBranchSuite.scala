@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 class IndexedBranchSuite extends Suite {

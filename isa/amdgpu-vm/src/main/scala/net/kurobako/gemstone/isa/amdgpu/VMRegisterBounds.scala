@@ -75,10 +75,9 @@ private object VMRegisterBounds {
         i.controls.scales.forall(scales => source(scales.a, 1) && source(scales.b, 1))
       case i: Instruction.VConvert => i.operation match {
           case VectorConvertOperation.F64FromI32 | VectorConvertOperation.F64FromU32 |
-              VectorConvertOperation.F64FromF32 => span(i.dest, 2)
-          case VectorConvertOperation.PairF32FromE4M3 | VectorConvertOperation.PairF32FromE5M2 |
-              VectorConvertOperation.PairF32FromE4M3Fnuz | VectorConvertOperation.PairF32FromE5M2Fnuz =>
-            span(i.dest, 2)
+              VectorConvertOperation.F64FromF32 | VectorConvertOperation.PairF32FromE4M3 |
+              VectorConvertOperation.PairF32FromE5M2 | VectorConvertOperation.PairF32FromE4M3Fnuz |
+              VectorConvertOperation.PairF32FromE5M2Fnuz => span(i.dest, 2)
           case VectorConvertOperation.FrexpExponentF64 | VectorConvertOperation.I32FromF64 |
               VectorConvertOperation.U32FromF64 | VectorConvertOperation.F32FromF64 => source(i.src)
           case VectorConvertOperation.FrexpMantissaF64 | VectorConvertOperation.ReciprocalF64 |
@@ -128,6 +127,10 @@ private object VMRegisterBounds {
       case i: Instruction.SBufferLoad => scalarSpan(i.dest, i.count) && scalarSpan(i.resource, 4)
       case i: Instruction.Image       =>
         scalarSpan(i.address.resource, 8) &&
+        (i.operation match {
+          case ImageOperation.Sample(sampler, _) => scalarSpan(sampler, 4)
+          case _                                 => true
+        }) &&
         span(i.data, VMResourceDecoder.registers(Integer.bitCount(i.mask).max(1), i.packing))
       case i: Instruction.WithStatus      => span(i.status, 1) && validate(i.access, waveSize).isRight
       case i: Instruction.LoadPair        => span(i.dest, 2 * words(i.bytes))

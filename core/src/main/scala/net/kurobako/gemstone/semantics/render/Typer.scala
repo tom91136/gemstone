@@ -245,9 +245,8 @@ private[gemstone] object Typer {
       val signed                                        = operator.endsWith("s")
       val target                                        = Type.Integer(width(64), signed)
       def operand(settled: Typed): (Term, Option[Type]) =
-        if (signed && !settled.signed && settled.bits == 64 && settled.tpe.nonEmpty)
+        if (signed && !settled.signed && settled.bits == 64 && settled.tpe.nonEmpty || !signed && settled.signed)
           (convert(settled.term, target), Some(target))
-        else if (!signed && settled.signed) (convert(settled.term, target), Some(target))
         else (settled.term, settled.tpe)
       val comparison               = operator.dropRight(1)
       val (a, b)                   = (numeric(typed(left, types)).settled, numeric(typed(right, types)).settled)

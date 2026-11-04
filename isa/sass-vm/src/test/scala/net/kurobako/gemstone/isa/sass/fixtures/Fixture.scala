@@ -25,6 +25,7 @@ object Fixture {
     LeaFixtures.listings,
     LogicFixtures.listings,
     MatrixFixtures.listings,
+    WarpFixtures.listings,
     WarpgroupFixtures.listings,
     MemoryFixtures.listings,
     MemoryFormFixtures.listings,
@@ -32,7 +33,8 @@ object Fixture {
     ProfileFixtures.listings,
     SharedMemoryFixtures.listings,
     TensorFixtures.listings,
-    AsyncFixtures.listings
+    AsyncFixtures.listings,
+    TextureListings.listings
   ).reduce(_ ++ _)
 
   def listing(name: String): String = listings.getOrElse(name, throw IllegalArgumentException(s"missing listing $name"))

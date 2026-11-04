@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Instructions as nvcc 13.3 (`nvcc -O3 -arch=sm_XX -ptx`) and clang 22 (`clang++ -x cuda --cuda-gpu-arch=sm_XX -S
   * --cuda-device-only -O3`) emit them for ordinary CUDA C++ or through the CUDA and CCCL headers, each named after its

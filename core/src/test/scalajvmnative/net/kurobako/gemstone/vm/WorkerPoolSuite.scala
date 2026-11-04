@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
+import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 class WorkerPoolSuite extends Suite {
@@ -39,6 +40,24 @@ class WorkerPoolSuite extends Suite {
       caller.join()
       assert(precedingGroups <= 256, s"queued work waited for $precedingGroups groups from one dispatch")
     }
+  }
+
+  test("concurrently running groups are the lowest unfinished indices, so a group can wait on a lower one") {
+    val arrived = AtomicInteger()
+    val gate    = CountDownLatch(4)
+    val first   = java.util.concurrent.ConcurrentLinkedQueue[Long]()
+    Using.resource(WorkerPool(4, minGroups = 1, minWorkItems = 1)) { pool =>
+      val result = pool.parallelFor(200L) { index =>
+        if (arrived.getAndIncrement() < 4) {
+          first.add(index.raw)
+          gate.countDown()
+          assertEquals(gate.await(5L, TimeUnit.SECONDS), true)
+        }
+        Right(())
+      }
+      assertEquals(result, Right(()): Either[Fault, Unit])
+    }
+    assertEquals(first.asScala.toSeq.sorted, Seq(0L, 1L, 2L, 3L))
   }
 
   test("joining workgroups does not enter an unrelated launch that can block the caller") {

@@ -71,6 +71,8 @@ private object Lowering {
     "%globaltimer"       -> Value.GlobalTimer(CounterPart.Whole),
     "%globaltimer_lo"    -> Value.GlobalTimer(CounterPart.Low),
     "%globaltimer_hi"    -> Value.GlobalTimer(CounterPart.High),
+    "%envreg1"           -> Value.GridWorkspace(CounterPart.High),
+    "%envreg2"           -> Value.GridWorkspace(CounterPart.Low),
     "%clusterid.x"       -> Value.ClusterId(Axis.X),
     "%clusterid.y"       -> Value.ClusterId(Axis.Y),
     "%clusterid.z"       -> Value.ClusterId(Axis.Z),

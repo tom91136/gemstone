@@ -186,19 +186,23 @@ matches an instruction once and hands its kernel to a family of sinks:
 ## Conformance
 
 ```console
-sbt 'conformance/build [--target-set <set>] [--sycl-cts-full] [<backend>[/<arch>[/clang|gcc]] ...]'
+sbt 'conformance/build [--profile <complete|machine>] [<backend>[/<arch>[/clang|gcc]] ...]'
 sbt 'conformance/run [--machine <profile>] [--workload <workload>] [<backend>[/<arch>[/clang|gcc]] ...]'
-sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [--prebuilt] [all|<backend>|<backend>/<arch>|cuda-ptx|cuda-sass[/<arch>] ...]'
+sbt 'conformance/emulate [--profile <complete|machine>] [--workload <tier>] [--prebuilt] [--dry-run] [all|<backend>|<backend>/<arch>|cuda-ptx|cuda-sass[/<arch>] ...]'
 ```
 
-- In the sbt shell, `Tab` completes target sets, workloads, profiles and routes, and an unknown name is rejected
+- In the sbt shell, `Tab` completes build profiles, workloads, machine profiles and routes, and an unknown name is rejected
   before anything builds. `build` with routes builds just those artifacts; `cuda/sm_89` covers both of its compilers.
-- Workloads (default `compact`), suites and artifacts are described in [the conformance README](conformance/README.md).
-- Profiles are `conformance/profiles/<profile>.toml`; `--machine` defaults to the local short hostname.
-- `build` and `emulate` default to `conformanceTargetSet` (`default`); `emulate` builds its target set first, unless
-  given `--prebuilt`, which reads `target/conformance/artifacts` as it is and fails if a backend is missing.
-  `complete` adds every CUDA and GFX architecture. `cuda` and `cuda/sm_89` select both code variants; `cuda-ptx` and
-  `cuda-sass` select one.
+- Two axes are independent. The build profile (`--profile`) picks the architectures to build and emulate: `complete`
+  (every CUDA and GFX architecture) or a machine profile, which builds every program for the architectures its targets
+  name. The run tier (`--workload`) picks what runs: `short` (fast iteration), `long` (pre-push), `xlong` (CI) or `all`
+  (release); each extends the previous. See [the conformance README](conformance/README.md) for suites and artifacts.
+- Machine profiles are `conformance/profiles/<profile>.toml`; `--machine` and the default build profile are the local
+  short hostname.
+- `build` and `emulate` default to `conformanceBuildProfile` (the local machine profile); `emulate` builds its profile
+  first, unless given `--prebuilt`, which reads `target/conformance/artifacts` as it is and fails if a backend is
+  missing. `--dry-run` lists the selected cases per route without running them. `cuda` and `cuda/sm_89` select both
+  code variants; `cuda-ptx` and `cuda-sass` select one.
 - Artifacts go to `target/conformance/artifacts`; reports to `target/conformance/{direct,emulated}`.
 - `emulate` runs one Gemstone server on a per-run Unix socket with an isolated client per test, and records JFR in
   `target/conformance/jfr/`, keeping the five newest recordings. Disable recording with

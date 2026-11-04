@@ -4,7 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 /** The Maxwell and Pascal forms ptxas (CUDA 11.8, `ptxas -arch=sm_50`) gives the scalar video instructions, saturating
@@ -74,8 +74,7 @@ class LegacyVideoSuite extends Suite {
     )
   }
 
-  // atomicAdd through a generic pointer: LEA.HI.X tests whether the address is outside the shared window, and the
-  // shared path masks it to an offset for ATOMS
+  // a generic pointer into shared memory needs the window offset for ATOMS
   for (target <- Spaces)
     test(s"sm_50 generic RED and ATOMS paths behind the shared window test reach a $target counter") {
       val low  = if (target == "shared") "c[0x0][0x0]" else "c[0x0][0x160]"
@@ -88,6 +87,25 @@ class LegacyVideoSuite extends Suite {
           "RED.E.ADD [R4], R6; BRA `(done); local: LOP32I.AND R8, R4, 0xffffff; ATOMS.ADD RZ, [R8], R6; " +
           "done: BAR.SYNC 0x0; @P1 EXIT; LDS R10, [RZ]; LDG.E R11, [R2]; IADD R10, R10, R11; STG.E [R2], R10; EXIT",
         Vec(7 * 32),
+        block = Some(32),
+        shared = 4
+      )
+    }
+
+  // cusparse coomm_alg3_kernel branches on the LEA.HI.X predicate of a generic half atomic
+  for (target <- Spaces)
+    test(s"sm_50 generic address copy predicate selects the $target atomic after an unrelated branch") {
+      val low  = if (target == "shared") "c[0x0][0x0]" else "c[0x0][0x160]"
+      val high = if (target == "shared") sharedHigh(50) else "c[0x0][0x164]"
+      check(
+        50,
+        "S2R R0, SR_TID.X; ISETP.NE.AND P1, PT, R0, RZ, PT; @!P1 STS [RZ], RZ; MOV32I R12, 0x7; @!P1 MOV R9, RZ; " +
+          "MOV R10, c[0x0][0x160]; MOV R11, c[0x0][0x164]; @!P1 STG.E [R10], R9; BAR.SYNC 0x0; " +
+          s"MOV R6, $low; MOV R15, $high; LEA R2.CC, R6, RZ; LEA.HI.X P2, R3, R6, RZ, R15; LD.E R8, [R2], P2; " +
+          "ISETP.GE.AND P3, PT, R0, 0x1000, PT; @P3 BRA `(done); @!P2 BRA `(local); MOV R4, R6; MOV R5, R15; " +
+          "RED.E.ADD [R4], R12; BRA `(done); local: LOP32I.AND R13, R6, 0xffffff; ATOMS.ADD RZ, [R13], R12; " +
+          "done: BAR.SYNC 0x0; @P1 EXIT; LDS R14, [RZ]; STG.E [R10+0x4], R14; EXIT",
+        if (target == "shared") Vec(0, 7 * 32) else Vec(7 * 32, 0),
         block = Some(32),
         shared = 4
       )

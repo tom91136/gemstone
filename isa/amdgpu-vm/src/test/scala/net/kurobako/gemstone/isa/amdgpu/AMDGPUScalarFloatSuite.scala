@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
 /** The GFX11.5 and GFX12 SALU floating-point operations hipcc emits for uniform float and half arithmetic. */

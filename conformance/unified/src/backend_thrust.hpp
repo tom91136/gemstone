@@ -71,7 +71,7 @@
   #include <hip/hip_runtime.h>
   #include <thrust/system/hip/execution_policy.h>
 #else
-  #include <cuda_runtime_api.h>
+  #include <cuda_runtime.h>
   #include <thrust/system/cuda/execution_policy.h>
 #endif
 
@@ -106,17 +106,14 @@
   #endif
 #endif
 
-#if defined(__HIPCC__) && defined(UNIFIED_API_ROCTHRUST)
+#if defined(UNIFIED_API_ROCTHRUST)
   #include <thrust/advance.h>
-  #include <thrust/async/for_each.h>
   #include <thrust/complex.h>
-  #include <thrust/detail/tuple_algorithms.h>
   #include <thrust/device_ptr.h>
   #include <thrust/device_reference.h>
   #include <thrust/distance.h>
   #include <thrust/iterator/constant_iterator.h>
   #include <thrust/iterator/reverse_iterator.h>
-  #include <thrust/iterator/tabulate_output_iterator.h>
   #include <thrust/iterator/transform_input_output_iterator.h>
   #include <thrust/iterator/transform_output_iterator.h>
   #include <thrust/memory.h>
@@ -151,6 +148,33 @@ inline auto policy(Stream stream) { return thrust::cuda::par.on(stream); }
 inline void synchronise(Stream stream, const char *where) { check(cudaStreamSynchronize(stream), where); }
 inline void record(Event event, Stream stream, const char *where) { check(cudaEventRecord(event, stream), where); }
 inline void waitEvent(Stream stream, Event event, const char *where) { check(cudaStreamWaitEvent(stream, event, 0), where); }
+#endif
+#ifdef __HIPCC__
+using RuntimeStatus = hipError_t;
+inline constexpr RuntimeStatus runtimeSuccess = hipSuccess;
+inline RuntimeStatus deviceSynchronize() { return hipDeviceSynchronize(); }
+inline RuntimeStatus lastError() { return hipGetLastError(); }
+inline RuntimeStatus allocate(void **ptr, size_t bytes) { return hipMalloc(ptr, bytes); }
+inline RuntimeStatus allocateManaged(void **ptr, size_t bytes) { return hipMallocManaged(ptr, bytes); }
+inline RuntimeStatus release(void *ptr) { return hipFree(ptr); }
+inline RuntimeStatus copyToDevice(void *dst, const void *src, size_t bytes) { return hipMemcpy(dst, src, bytes, hipMemcpyHostToDevice); }
+inline RuntimeStatus copyToHost(void *dst, const void *src, size_t bytes) { return hipMemcpy(dst, src, bytes, hipMemcpyDeviceToHost); }
+template <class Symbol> RuntimeStatus copyToSymbol(const Symbol &symbol, const void *src, size_t bytes) {
+  return hipMemcpyToSymbol(symbol, src, bytes);
+}
+#else
+using RuntimeStatus = cudaError_t;
+inline constexpr RuntimeStatus runtimeSuccess = cudaSuccess;
+inline RuntimeStatus deviceSynchronize() { return cudaDeviceSynchronize(); }
+inline RuntimeStatus lastError() { return cudaGetLastError(); }
+inline RuntimeStatus allocate(void **ptr, size_t bytes) { return cudaMalloc(ptr, bytes); }
+inline RuntimeStatus allocateManaged(void **ptr, size_t bytes) { return cudaMallocManaged(ptr, bytes); }
+inline RuntimeStatus release(void *ptr) { return cudaFree(ptr); }
+inline RuntimeStatus copyToDevice(void *dst, const void *src, size_t bytes) { return cudaMemcpy(dst, src, bytes, cudaMemcpyHostToDevice); }
+inline RuntimeStatus copyToHost(void *dst, const void *src, size_t bytes) { return cudaMemcpy(dst, src, bytes, cudaMemcpyDeviceToHost); }
+template <class Symbol> RuntimeStatus copyToSymbol(const Symbol &symbol, const void *src, size_t bytes) {
+  return cudaMemcpyToSymbol(symbol, src, bytes);
+}
 #endif
 
 class StreamResource {
@@ -1216,7 +1240,7 @@ template <bool Indirect> void deviceFunction() {
 
 #endif
 
-#if defined(__HIPCC__) && defined(UNIFIED_API_ROCTHRUST)
+#if defined(UNIFIED_API_ROCTHRUST)
   #include "rocthrust_support.hpp"
 #endif
 

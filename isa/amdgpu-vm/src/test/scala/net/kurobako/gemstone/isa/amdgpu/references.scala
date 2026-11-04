@@ -446,6 +446,8 @@ private object references {
     (((address + offset) >>> 2) & (waveSize - 1L)).toInt
 
   /** V_DIV_FIXUP_F64 on raw pairs, as [[divisionScaleF64]] decides on biased exponents. */
+  // one branch per special case of the division, as the instruction description lists them
+  @SuppressWarnings(Array("bonsai:identical-branches"))
   def divisionFixupF64(q: Long, d: Long, n: Long): Long = {
     val (quotient, denominator, numerator) =
       (IEEE754.binary64ToDouble(q), IEEE754.binary64ToDouble(d), IEEE754.binary64ToDouble(n))

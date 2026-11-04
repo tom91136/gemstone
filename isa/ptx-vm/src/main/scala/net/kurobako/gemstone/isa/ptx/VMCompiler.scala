@@ -433,9 +433,10 @@ private object VMCompiler {
       inputs: Vec[Parameter],
       returns: Vec[Parameter],
       compilation: KernelCompilation
-  ): Either[Error, (Routine, Scope)] =
+  ): Either[Error, (Routine, Scope)] = {
+    val names = (inputs ++ returns).map(_.name)
     for {
-      scoped <- flattenScoped(body, (kernelParameters.keySet ++ (inputs ++ returns).map(_.name)).toSet)
+      scoped <- flattenScoped(body, kernelParameters.keySet ++ names)
       tables = branchTargets(scoped)
       flat   = scoped.filter {
         case Statement.Directive(path = path) => path.raw != Vec("branchtargets")
@@ -454,7 +455,7 @@ private object VMCompiler {
         compilation.module.functions.filter(_._2.body.nonEmpty).keySet,
         compilation.globals,
         kernelParameters,
-        ((inputs ++ returns).map(_.name) ++ declaredParameters(flat)).toSet,
+        (names ++ declaredParameters(flat)).toSet,
         spilled.map(_.name).toSet,
         locals,
         compilation.module.shared ++ compilation.module.routineShared.getOrElse(name, Map.empty),
@@ -506,6 +507,7 @@ private object VMCompiler {
         registerUnits = scope.registerUnits
       ) -> scope
     }
+  }
 
   private def lowerStatement(
       statement: Statement,

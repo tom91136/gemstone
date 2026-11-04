@@ -2,7 +2,7 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 class AllocationAddressIndexSuite extends Suite {
@@ -90,5 +90,33 @@ class AllocationAddressIndexSuite extends Suite {
       size    <- FineSizes
     } assertEquals(find(incremental, address, size), scan(expected, address, size), s"$address / $size")
     initial.keys.foreach(id => assertEquals(Option(incremental.entry(id)).map(_.allocation), expected.get(id)))
+  }
+
+  test("a run is the span around an address that resolves to one entry and is bounded by allocation edges") {
+    val random  = Random(7L)
+    val aliases = (0 until 16).map(index => stored(0x1000L + index * 96L, 32, aliased = true)) ++ Vector(
+      stored(Long.MaxValue - 15L, 16, aliased = true),
+      stored(-64L, 32, aliased = true)
+    )
+    val synthetic   = (0 until 8).map(index => stored(0x1010L + index * 512L, 64, aliased = false))
+    val allocations = (aliases ++ synthetic).zipWithIndex.map((allocation, index) =>
+      AllocationId((index + 1L).unsafe[Long > 0]) -> allocation
+    ).toMap
+    val index     = indexed(allocations)
+    val edges     = allocations.values.flatMap(a => Vector(a.base.raw, a.base.raw + a.size)).toSet
+    val addresses = probes(allocations) ++ Vector(0L, 1L, Long.MinValue, Long.MaxValue) ++
+      Vector.fill(128)(random.nextLong() >>> random.nextInt(60))
+    def unsigned(a: Long, b: Long): Int = java.lang.Long.compareUnsigned(a, b)
+    for (address <- addresses) {
+      val run = index.run(address)
+      assert(unsigned(run.low, address) <= 0 && unsigned(address, run.high) < 0, s"$address $run")
+      assert(run.low == 0L || edges.contains(run.low), s"$address $run")
+      assert(run.high == -1L || edges.contains(run.high), s"$address $run")
+      assert(!edges.exists(edge => unsigned(edge, run.low) > 0 && unsigned(edge, run.high) < 0), s"$address $run")
+      for (probe <- Vector(run.low, address, run.high - 1L)) {
+        val found = scan(allocations, probe, 1)
+        assertEquals(Option(run.entry).map(entry => entry.id -> entry.offsetOf(GuestAddress(probe))), found, s"$probe")
+      }
+    }
   }
 }

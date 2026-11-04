@@ -7,7 +7,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The matrix descriptor and canonical shared memory layouts of `wgmma.mma_async`, against the exact layouts the PTX
   * ISA gives for them (9.7.16.5.1.2.1.3), and the element arithmetic it adds to `mma`.

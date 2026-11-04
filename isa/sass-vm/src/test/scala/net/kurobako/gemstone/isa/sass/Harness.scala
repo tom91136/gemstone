@@ -14,6 +14,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 /** Lowers decoded SASS with `VMCompiler` and runs it on the NVIDIA interpreter against a local address space, without a
   * cubin image or backend. Parameters are laid out from the launch arguments with natural alignment.
@@ -137,6 +138,8 @@ object Harness extends munit.Assertions {
     }
     val sections = sectionBuilder.result()
     val kernels  = layouts.map { (entry, parameters, size) =>
+      // the sections of one test cubin
+      @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
       val text =
         sections.indexWhere(_.name == s".text.${entry.name}").refine[Int >= 0].fold(error => fail(error.raw), identity)
       Cubin.Kernel(
@@ -201,7 +204,8 @@ object Harness extends munit.Assertions {
     def run(
         block: Int | LaunchGeometry.Dimensions,
         grid: Int | LaunchGeometry.Dimensions = 1,
-        memory: Memory = Memory()
+        memory: Memory = Memory(),
+        cooperative: Boolean = false
     )(
         args: Arg*
     )(using munit.Location): Either[Fault, Run] = {
@@ -218,7 +222,15 @@ object Harness extends munit.Assertions {
       for {
         program <- compile(args.map(_.size)*).left.map(message => Fault.Unsupported(message.unsafe[NonEmpty[String]]))
         task    <-
-          KernelTask.validated(name, dimensions(block), dimensions(grid), arguments).left.map(Fault.InvalidRequest(_))
+          KernelTask.validated(
+            name,
+            dimensions(block),
+            dimensions(grid),
+            arguments,
+            cooperative = cooperative
+          ).left.map(
+            Fault.InvalidRequest(_)
+          )
         _ <- memory.run(program, task)
       } yield Run(memory, regions.map(_.map(_._1)))
     }
@@ -226,10 +238,12 @@ object Harness extends munit.Assertions {
     def launch(
         block: Int | LaunchGeometry.Dimensions,
         grid: Int | LaunchGeometry.Dimensions = 1,
-        memory: Memory = Memory()
+        memory: Memory = Memory(),
+        cooperative: Boolean = false
     )(
         args: Arg*
-    )(using munit.Location): Run = run(block, grid, memory)(args*).fold(error => fail(error.message), identity)
+    )(using munit.Location): Run =
+      run(block, grid, memory, cooperative)(args*).fold(error => fail(error.message), identity)
   }
 
   case class Run(memory: Memory, buffers: Vec[Option[AllocationId]]) {
@@ -291,7 +305,8 @@ object Harness extends munit.Assertions {
       grid: Int | LaunchGeometry.Dimensions = 1,
       block: Option[Int] = None,
       shared: Int >= 0 = 0,
-      rewrite: DecodedInstruction => DecodedInstruction = identity
+      rewrite: DecodedInstruction => DecodedInstruction = identity,
+      limit: Long > 0 = TaskControl.Limits.Default.maxInstructions
   )(using munit.Location): Unit = {
     val kernel = program(sm, text, shared).map(rewrite)
     val memory = Memory()
@@ -308,20 +323,28 @@ object Harness extends munit.Assertions {
       )
     ).value
     val compiled = kernel.compile(8, 8, 4, 4).fold(fail(_), identity)
-    memory.run(compiled, task).fold(error => fail(error.message), identity)
+    memory.run(compiled, task, TaskControl(TaskControl.Limits(limit))).fold(error => fail(error.message), identity)
     assertEquals(memory.readWords(output, expected.nonNegativeSize).map(_.toInt), expected)
   }
 
   class Memory extends RegionMemory() {
+    private val recorded: mutable.ArrayBuffer[Event] = mutable.ArrayBuffer.empty
+    def events: Vec[Event]                           = Vec.from(recorded)
+
     def readWords(region: AllocationId, count: Int >= 0, width: Int in 1 ~ 8 = 4)(using munit.Location): Vec[Long] =
       Vec.indices(count).map(index =>
         readValue(region, index.widen[Long >= 0] * width.widen[Long >= 0], width).value
       )
 
-    def run(program: VMIR.Kernel, task: KernelTask, control: TaskControl = TaskControl()): Either[Fault, Unit] =
+    def run(
+        program: VMIR.Kernel,
+        task: KernelTask,
+        control: TaskControl = TaskControl(),
+        workgroups: Workgroups = Workgroups.Sequential
+    ): Either[Fault, Unit] =
       VMKernelLaunch.execute(
         program,
-        KernelLaunch(task, TaskContext(this, control, _ => Right(())), Workgroups.Sequential)
+        KernelLaunch(task, TaskContext(this, control, event => { recorded += event; Right(()) }), workgroups)
       )
   }
 }

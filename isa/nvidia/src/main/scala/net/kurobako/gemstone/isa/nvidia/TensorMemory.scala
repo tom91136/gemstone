@@ -92,17 +92,19 @@ private[isa] object TensorMemory {
       val start   = MatrixDescriptor.start(bits)
       val leading = MatrixDescriptor.leading(bits)
       val stride  = MatrixDescriptor.stride(bits)
-      val mode    = (bits >>> 61) & 7L
       if (MatrixDescriptor.base(bits) != 0)
         Left("shared memory descriptors with a matrix base offset are not supported")
       else if (Bits.isSet(bits, 52)) Left("absolute leading dimension addresses are not supported")
-      else mode match {
-        case 0L => Right(SharedDescriptor(start, leading, stride, 0, atoms = false))
-        case 1L => Right(SharedDescriptor(start, leading, stride, 128, atoms = true))
-        case 2L => Right(SharedDescriptor(start, leading, stride, 128, atoms = false))
-        case 4L => Right(SharedDescriptor(start, leading, stride, 64, atoms = false))
-        case 6L => Right(SharedDescriptor(start, leading, stride, 32, atoms = false))
-        case _  => Left(s"invalid shared memory descriptor swizzling mode $mode")
+      else {
+        val mode = (bits >>> 61) & 7L
+        mode match {
+          case 0L => Right(SharedDescriptor(start, leading, stride, 0, atoms = false))
+          case 1L => Right(SharedDescriptor(start, leading, stride, 128, atoms = true))
+          case 2L => Right(SharedDescriptor(start, leading, stride, 128, atoms = false))
+          case 4L => Right(SharedDescriptor(start, leading, stride, 64, atoms = false))
+          case 6L => Right(SharedDescriptor(start, leading, stride, 32, atoms = false))
+          case _  => Left(s"invalid shared memory descriptor swizzling mode $mode")
+        }
       }
     }
   }
@@ -159,10 +161,9 @@ private[isa] object TensorMemory {
       else 6
 
     def cta(row: Int): Int = layout match {
-      case 0 => row / 128
-      case 1 => row / 64
-      case 2 => row / 64
-      case _ => 0
+      case 0     => row / 128
+      case 1 | 2 => row / 64
+      case _     => 0
     }
 
     def lane(row: Int, column: Int): Int = layout match {
@@ -316,7 +317,6 @@ private[isa] object TensorMemory {
       else if (kind == Kind.MXF4NVF4 && scaleCode == 0L) Some(ScaleFormat.UE4M3)
       else if ((scaleCode & 1L) == 1L) Some(ScaleFormat.UE8M0)
       else None
-    val vectorSize = if (vector != 0) vector else if (kind == Kind.MXF8F6F4) 1 else 2
     (a, b, d) match {
       case _ if (Fields.Sparse.of(descriptor) == 1L) != sparse =>
         Left("the instruction descriptor's sparsity does not match the instruction")
@@ -339,7 +339,8 @@ private[isa] object TensorMemory {
           result = result,
           rounding = ConversionRounding.RN
         )
-        val zero = Value.Immediate(0L)
+        val vectorSize = if (vector != 0) vector else if (kind == Kind.MXF8F6F4) 1 else 2
+        val zero       = Value.Immediate(0L)
         Right(Product(
           Operation.Multiply(
             a = Fragment(shape, Role.A, left, wmma = false),

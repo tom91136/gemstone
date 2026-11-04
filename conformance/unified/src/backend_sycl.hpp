@@ -746,7 +746,6 @@ public:
   }
 
   template <class T> std::vector<T> primitiveBlockScan(const std::vector<T> &input, size_t blockSize) {
-    if (blockSize != 32) SKIP("SYCL group scan currently requires a block size of 32");
     if (input.empty()) return {};
     sycl_support::Shared<T> source(queue, input);
     sycl_support::Shared<T> output(queue, input.size());

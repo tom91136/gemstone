@@ -1019,7 +1019,9 @@ private[isa] object StagedOps {
           target.locate(values) match {
             case Left(error)     => Left(error)
             case Right(location) =>
-              memory.atomicModifyScalar(location, target.bytes)(previous => kernel(previous, operand)) match {
+              memory.atomicModifyScalar(location, target.bytes, dispatchLocal(values, target.scope))(previous =>
+                kernel(previous, operand)
+              ) match {
                 case Left(error)     => Left(error)
                 case Right(previous) =>
                   values.updateScalar(destination, target.resultType, previous & target.bits)
@@ -1044,7 +1046,7 @@ private[isa] object StagedOps {
           target.locate(values) match {
             case Left(error)     => Left(error)
             case Right(location) =>
-              memory.atomicModifyScalar(location, target.bytes)(kernel(_)) match {
+              memory.atomicModifyScalar(location, target.bytes, dispatchLocal(values, target.scope))(kernel(_)) match {
                 case Left(error)     => Left(error)
                 case Right(previous) =>
                   values.updateScalar(destination, target.resultType, previous & target.bits)
@@ -1079,7 +1081,7 @@ private[isa] object StagedOps {
               memoryControls(values, target.scope, semantics, target.opcode) match {
                 case Left(error) => Left(error)
                 case Right(_)    =>
-                  memory.atomicModifyScalar(location, target.bytes)(previous =>
+                  memory.atomicModifyScalar(location, target.bytes, dispatchLocal(values, target.scope))(previous =>
                     kernel(previous, update, against)
                   ) match {
                     case Left(error)     => Left(error)

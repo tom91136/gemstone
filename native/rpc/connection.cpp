@@ -1,11 +1,16 @@
 #include "connection.hpp"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <map>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,6 +23,7 @@
 
 #include "gemstone/environment.hpp"
 #include "gemstone/file_descriptor.hpp"
+#include "gemstone/trace.hpp"
 #include "gemstone_execution_rpc.hpp"
 
 #include <asm-generic/socket.h>
@@ -29,6 +35,42 @@
 
 namespace gemstone::execution {
 namespace {
+struct OperationTiming {
+  uint64_t calls = 0, requestBytes = 0, responseBytes = 0, nanoseconds = 0;
+};
+
+class TimingReport {
+public:
+  static TimingReport *instance() {
+    static TimingReport *const report = traceEnabled("rpc", "timing") ? new TimingReport : nullptr;
+    return report;
+  }
+
+  void record(std::string_view operation, size_t request, size_t response, std::chrono::nanoseconds elapsed) {
+    const std::scoped_lock lock(mutex);
+    auto &entry = operations[std::string(operation)];
+    entry.calls++;
+    entry.requestBytes += request;
+    entry.responseBytes += response;
+    entry.nanoseconds += static_cast<uint64_t>(elapsed.count());
+  }
+
+private:
+  TimingReport() {
+    std::atexit([] { instance()->print(); });
+  }
+
+  void print() {
+    for (const auto &[name, entry] : operations)
+      std::fprintf(stderr, "Gemstone RPC timing: %s calls=%llu request=%llu response=%llu ms=%.2f\n", name.c_str(),
+                   static_cast<unsigned long long>(entry.calls), static_cast<unsigned long long>(entry.requestBytes),
+                   static_cast<unsigned long long>(entry.responseBytes), static_cast<double>(entry.nanoseconds) / 1e6);
+  }
+
+  std::mutex mutex;
+  std::map<std::string, OperationTiming> operations;
+};
+
 bool ready(int fd, short events, int timeout) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
   for (;;) {
@@ -144,21 +186,28 @@ void appendU64(std::vector<uint8_t> &out, uint64_t value) {
   appendU32(out, static_cast<uint32_t>(value));
 }
 uint32_t readU32(const uint8_t *data) { return (uint32_t{data[0]} << 24) | (uint32_t{data[1]} << 16) | (uint32_t{data[2]} << 8) | data[3]; }
+std::atomic<std::chrono::steady_clock::rep> heartbeatTicks{0};
+void recordHeartbeat() { heartbeatTicks.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed); }
 } // namespace
+
+std::chrono::steady_clock::time_point lastHeartbeat() {
+  return std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(heartbeatTicks.load(std::memory_order_relaxed)));
+}
 
 void Connection::poison() {
   fd = FileDescriptor();
   if (established) poisoned = true;
 }
 bool Connection::connect() {
-  if (fd.get() >= 0) return true;
-  if (poisoned) {
-    error = "execution session was lost; create a fresh client and rebuild its state";
+  const char *configured = environment::value(environment::RpcEndpoint);
+  const std::string endpoint = configured && *configured ? configured : sessionEndpoint;
+  if (endpoint.empty()) {
+    error = std::string(environment::RpcEndpoint) + " is not set";
     return false;
   }
-  const char *endpoint = environment::value(environment::RpcEndpoint);
-  if (!endpoint || !*endpoint) {
-    error = std::string(environment::RpcEndpoint) + " is not set";
+  if (fd.get() >= 0 && sessionEndpoint == endpoint) return true;
+  if (poisoned && sessionEndpoint == endpoint) {
+    error = "execution session was lost; create a fresh client and rebuild its state";
     return false;
   }
   timeoutMillis = socketTimeoutMillis();
@@ -168,6 +217,8 @@ bool Connection::connect() {
     return false;
   }
   established = true;
+  poisoned = false;
+  sessionEndpoint = endpoint;
   std::vector<uint8_t> hello;
   appendU32(hello, HelloMagic);
   appendU32(hello, static_cast<uint32_t>(Schema.size()));
@@ -208,6 +259,13 @@ bool Connection::receive(std::span<uint8_t> bytes) {
   return true;
 }
 bool Connection::exchange(std::string_view operation, std::string_view payload, uint32_t &status, std::vector<uint8_t> &response) {
+  auto *const timing = TimingReport::instance();
+  const auto begin = timing ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  const bool succeeded = exchangeFrames(operation, payload, status, response);
+  if (timing) timing->record(operation, payload.size(), response.size(), std::chrono::steady_clock::now() - begin);
+  return succeeded;
+}
+bool Connection::exchangeFrames(std::string_view operation, std::string_view payload, uint32_t &status, std::vector<uint8_t> &response) {
   error.clear();
   if (operation.empty() || operation.size() > MaximumTagBytes || payload.size() > MaximumPayload) {
     error = "execution request exceeds frame bounds";
@@ -229,7 +287,13 @@ bool Connection::exchange(std::string_view operation, std::string_view payload, 
     return false;
   }
   std::array<uint8_t, ResponseHeaderBytes> bytes{};
-  if (!receive(bytes)) {
+  const std::span<uint8_t> magic(bytes.data(), sizeof(uint32_t));
+  bool received = receive(magic);
+  while (received && readU32(bytes.data()) == HeartbeatMagic) {
+    recordHeartbeat();
+    received = receive(magic);
+  }
+  if (!received || !receive(std::span<uint8_t>(bytes).subspan(sizeof(uint32_t)))) {
     poison();
     error = "execution response transport failed";
     return false;

@@ -26,7 +26,7 @@ object Text {
     case other                                                            => other
   }
 
-  def splitWords(value: String, separators: Set[Char] = Set.empty): Vector[String] =
+  def splitWords(value: String, separators: Set[Char]): Vector[String] =
     nonEmptyWords(value)(character => character.isWhitespace || separators(character))
 
   def identifierWords(value: String): Vector[String] =

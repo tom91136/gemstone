@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** gfx950's lane swaps (CDNA4 ISA, V_PERMLANE16_SWAP_B32), which hipcc emits for `__builtin_amdgcn_permlane16_swap`,
   * GFX12's DS_BPERMUTE_FI_B32 and V_SWAP_B16, and the ADDTID accesses, whose address is the lane's index past a base

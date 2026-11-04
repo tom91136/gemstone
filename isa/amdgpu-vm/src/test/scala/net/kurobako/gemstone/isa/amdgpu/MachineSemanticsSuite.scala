@@ -4,7 +4,7 @@ import MachineDefinitions.*
 import VMIR.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class MachineSemanticsSuite extends Suite {
   private def shown(text: String): String = {

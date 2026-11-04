@@ -2,7 +2,7 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The patch-and-run path must link and run in the browser's Scala.js build, not only on the JVM. */
 class SandboxJSSuite extends Suite {

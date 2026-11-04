@@ -97,6 +97,9 @@ private object Op {
 
   def isWorkgroupOrSubgroup(scope: Long): Boolean = scope == Scope.Workgroup || scope == Scope.Subgroup
 
+  def dispatchLocal(values: InvocationValues, scope: Int): Boolean =
+    scalar(values, scope).exists(memoryScope => isWorkgroupOrSubgroup(memoryScope) || memoryScope == Scope.Invocation)
+
   def scopeFault(opcode: String, scope: Long): Fault =
     Fault.Unsupported(s"$opcode execution scope $scope is not Subgroup or Workgroup")
 

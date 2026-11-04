@@ -177,6 +177,45 @@ class ProgramExecutionSuite extends Suite {
     })
   }
 
+  test("a failed assertion names the expression, location and thread") {
+    val source =
+      """.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.extern .func __assertfail(.param .b64 message, .param .b64 file, .param .b32 line, .param .b64 function, .param .b64 size);
+      |.visible .entry probe() {
+      | .reg .u64 %address;
+      | .shared .b8 text[4];
+      | .param .b64 message;
+      | .param .b64 file;
+      | .param .b32 line;
+      | .param .b64 function;
+      | .param .b64 size;
+      | st.shared.u32 [text], 0x00793d78;
+      | mov.u64 %address, text;
+      | cvta.shared.u64 %address, %address;
+      | st.param.b64 [message], %address;
+      | st.param.b64 [file], %address;
+      | st.param.b32 [line], 36;
+      | st.param.b64 [function], %address;
+      | st.param.b64 [size], 1;
+      | call __assertfail, (message, file, line, function, size);
+      | ret;
+      |}
+      |""".stripMargin
+    val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
+      LoadedProgram.load(program, text = execution.text).left.map(_.message)
+    ).value
+    val task =
+      KernelTask.validated("probe", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty).value
+    val failed = loaded.execute(task, TaskContext(RejectingMemory(), TaskControl(), _ => Right(())))
+    val detail = failed match {
+      case Left(Fault.Assertion(detail)) => detail.raw
+      case other                         => fail(other.toString)
+    }
+    assert(detail.endsWith("x=y:36: x=y: block: [0,0,0], thread: [0,0,0] Assertion `x=y` failed."), detail)
+  }
+
   for (requested <- Vec[Int >= 0](0, 64, 160))
     test(s"dynamic shared size reports the launch request $requested separately from static declarations") {
       val source = s""".version 8.0

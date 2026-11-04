@@ -32,6 +32,16 @@ private[isa] trait Memory {
 
   def storeGlobalMasked(destination: UInt[64], source: UInt[64], bytes: UInt[64], mask: UInt[64]): Unit
 
+  /** The bytes the texture or surface read `shape` of `handle` yields at `coordinates`. */
+  def textureRead(shape: String, handle: UInt[64], coordinates: UInt[64]*): Array[Byte]
+
+  /** The `index`th `bytes`-wide result of `data`. */
+  def textureWord(data: Array[Byte], index: UInt[64], bytes: UInt[64]): UInt[64]
+
+  def surfaceStore(shape: String, handle: UInt[64], arguments: UInt[64]*): Unit
+
+  def surfaceReduce(shape: String, handle: UInt[64], arguments: UInt[64]*): Unit
+
   /** Makes the writes to host-mapped memory visible to the host. */
   def fence(): Unit
 

@@ -312,12 +312,14 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
     def lanes(context: VMContext, destination: Register, source: Value): Unit =
       context.active.foreachLane { lane =>
         if ((lane & 31) == java.lang.Long.numberOfTrailingZeros(context.active.warpBits(lane.raw))) {
-          val value  = kernel(context.read(lane, source))
-          val live   = context.frame.live
-          var target = lane & ~31
-          val end    = math.min(target + 32, context.workgroup.laneCount)
+          val value     = kernel(context.read(lane, source))
+          val live      = context.frame.live
+          val partition = context.partition
+          var target    = lane & ~31
+          val end       = math.min(target + 32, context.workgroup.laneCount)
           while (target < end) {
-            if (live.contains(target)) context.lane(WorkgroupLane.fromIndex(target)).setRegister(destination, value)
+            if (live.contains(target) && (partition.isEmpty || partition.contains(target)))
+              context.lane(WorkgroupLane.fromIndex(target)).setRegister(destination, value)
             target += 1
           }
         }
@@ -364,7 +366,8 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       validity: Option[Predicate],
       operand: Value,
       selector: Value,
-      bounds: Value
+      bounds: Value,
+      memberMask: Value
   )(
       inline source: (Long, Long, Long, Long) => Long,
       inline valid: (Long, Long, Long, Long) => Long,
@@ -377,7 +380,8 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         validity: Option[Predicate],
         operand: Value,
         selector: Value,
-        bounds: Value
+        bounds: Value,
+        memberMask: Value
     ): Unit = {
       val laneCount = context.workgroup.laneCount.raw
       context.active.foreachLane { lane =>
@@ -386,8 +390,10 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         val select   = context.read(lane, selector)
         val bound    = context.read(lane, bounds)
         val size     = (laneCount - warpBase).toLong
-        val from     = WorkgroupLane.fromIndex(warpBase + source(index, select, bound, size).toInt)
-        effects.stageRegister(lane, destination, value(context.read(from, operand)))
+        val target   = source(index, select, bound, size).toInt
+        val from     = WorkgroupLane.fromIndex(warpBase + target)
+        val member   = ((context.read(lane, memberMask) >> target) & 1L) != 0L
+        effects.stageRegister(lane, destination, if (member) value(context.read(from, operand)) else 0L)
       }
       validity.foreach { predicate =>
         context.active.foreachLane { lane =>
@@ -399,7 +405,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
         }
       }
     }
-    lanes(context, effects, destination, validity, operand, selector, bounds)
+    lanes(context, effects, destination, validity, operand, selector, bounds, memberMask)
     Completed
   }
 
@@ -862,14 +868,14 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       val raw = context.read(lane, address)
       VMMemoryAccess.misalignedAtomic(context, lane, raw, width) match {
         case null =>
-          val shared = VMMemoryAccess.atomicTargetsShared(space, raw, width)
-          VMObservation.atomic(context, lane, raw, width.toScalarByteWidth.toLong, shared)
+          val target = VMMemoryAccess.atomicTarget(space, raw, width)
+          VMObservation.atomic(context, lane, raw, width.toScalarByteWidth.toLong, target == AtomicTarget.Shared)
           effects.stage(VMWrite.Atomic(
             lane,
             Some(destination),
             raw,
             width,
-            shared,
+            target,
             Exchanged(context.read(lane, comparator), context.read(lane, source))
           ))
           Completed

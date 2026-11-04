@@ -825,10 +825,10 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
       case _ => Left(Fault.InvalidRequest(s"SPIR-V value %$id is not a global address"))
     }
 
-  private def addressType(id: Int): Int = globals.get(id).map(_.pointerType).getOrElse(constantData.get(id) match {
+  private def addressType(id: Int): Int = globals.get(id).fold(constantData.get(id) match {
     case Some(Constant.GlobalAddress(typeId = typeId)) => typeId
     case _                                             => -1
-  })
+  })(_.pointerType)
 
   private def chainOffset(pointerType: Int, element: Option[Long], indexes: Vec[Long]): Either[Fault, Long] = {
     def stride(typeId: Int, member: Int): Long =
@@ -853,8 +853,8 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
       visitLeaves(typeId, None, 0L)((offset, _) => offsets += offset.toIntExact)
       Right(offsets.result())
     } catch {
-      case error: IllegalArgumentException => Left(Fault.InvalidRequest(throwables.detail(error)))
-      case error: ArithmeticException      => Left(Fault.InvalidRequest(throwables.detail(error)))
+      case error @ (_: IllegalArgumentException | _: ArithmeticException) =>
+        Left(Fault.InvalidRequest(throwables.detail(error)))
     }
 
   /** Literal samplers, which every dispatch places beside its globals. */
@@ -909,8 +909,8 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
           )
         else Right(VMValue.Bits(typeId, lanes))
       } catch {
-        case error: IllegalArgumentException => Left(Fault.InvalidRequest(throwables.detail(error)))
-        case error: ArithmeticException      => Left(Fault.InvalidRequest(throwables.detail(error)))
+        case error @ (_: IllegalArgumentException | _: ArithmeticException) =>
+          Left(Fault.InvalidRequest(throwables.detail(error)))
       }
     }
 
@@ -921,8 +921,8 @@ private abstract class VMProgram(tables: Tables) extends Backend.Program {
         writeLeaves(typeId, lanes, bytes, 0L)
         Right(bytes)
       } catch {
-        case error: IllegalArgumentException => Left(Fault.InvalidRequest(throwables.detail(error)))
-        case error: ArithmeticException      => Left(Fault.InvalidRequest(throwables.detail(error)))
+        case error @ (_: IllegalArgumentException | _: ArithmeticException) =>
+          Left(Fault.InvalidRequest(throwables.detail(error)))
       }
     case VMValue.Address(_, pointer) => Right(LittleEndian.toArray(pointer.address, 8))
   }

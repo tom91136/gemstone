@@ -4,7 +4,7 @@ import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** `alloca`, `stacksave` and `stackrestore` as nvcc 13.3 (`nvcc -O3 -arch=sm_89 -ptx`) emits them for `alloca` in
   * device code and around a `__forceinline__` callee that allocates, and clang 22 emits them for `__builtin_alloca`:

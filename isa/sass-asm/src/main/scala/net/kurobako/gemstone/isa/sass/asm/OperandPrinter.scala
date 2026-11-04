@@ -121,7 +121,9 @@ object OperandPrinter {
       (if (absolute) s"|$text|" else text)
 
   private def identifier(value: String): Boolean =
-    value.headOption.exists(OperandParser.identifierStart(_)) && value.forall(OperandParser.identifierPart(_))
+    value.split('.').forall(segment =>
+      segment.headOption.exists(OperandParser.identifierStart(_)) && segment.forall(OperandParser.identifierPart(_))
+    ) && !value.endsWith(".")
 
   private def suffix(value: String): Boolean = value.nonEmpty && value.forall(OperandParser.identifierPart(_))
 
@@ -149,6 +151,8 @@ object OperandPrinter {
           leftBank == rightBank && roundTrips(leftOffset, rightOffset)
         case (Operand.Qualified(left, leftSelectors), Operand.Qualified(right, rightSelectors)) =>
           leftSelectors == rightSelectors && roundTrips(left, right)
+        case (Operand.Symbol(value), Operand.Qualified(Operand.Symbol(base), selectors)) =>
+          value == (base +: selectors.map(_.spelling)).mkString(".")
         case (
               Operand.Unary(left, leftNegative, leftNot, leftAbsolute),
               Operand.Unary(right, rightNegative, rightNot, rightAbsolute)

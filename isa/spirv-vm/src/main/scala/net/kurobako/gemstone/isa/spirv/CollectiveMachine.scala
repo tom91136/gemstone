@@ -243,7 +243,7 @@ private object CollectiveMachine {
       case (Right(value), Some(sourceValue @ VMValue.Bits(sourceType, _)), Some(VMValue.Bits(localType, lanes)))
           if isWorkgroupOrSubgroup(value) && sourceType == c.ids.resultType &&
             program.integerShape(localType).exists((_, count) => count == lanes.length && count >= 1 && count <= 3) =>
-        val width = program.integerShape(localType).map(_._1).getOrElse(64: Int in 1 ~ 64)
+        val width = program.integerShape(localType).fold(64: Int in 1 ~ 64)(_._1)
         suspend(
           execution,
           CollectiveRequest(

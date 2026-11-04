@@ -7,7 +7,7 @@ import dotty.tools.dotc.reporting.StoreReporter
 import java.nio.file.Files
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class RenderedMachineSuite extends Suite {
   private def errors(definition: Either[String, Definition]): List[String] =

@@ -76,13 +76,15 @@ object Assembly {
 
   private def cubinSection(image: Vec[Byte], target: sass.Target, section: Option[String]): Either[Error, Vec[Byte]] =
     sass.Cubin.decode(image).leftMap(detail => Error.Cubin(s"invalid cubin: $detail")).flatMap { module =>
-      val executable = module.sections.filter(value => (value.flags & 4L) != 0L)
       if (module.sm != target.sm) Left(Error.Cubin(s"cubin sm_${module.sm} differs from requested ${target.name}"))
-      else section.fold(executable)(name => executable.filter(_.name == name)) match {
-        case Vec(value) => Right(value.bytes)
-        case _          => Left(Error.Cubin(
-            s"select one executable cubin section with --section: ${executable.map(_.name).mkString(", ")}"
-          ))
+      else {
+        val executable = module.sections.filter(value => (value.flags & 4L) != 0L)
+        section.fold(executable)(name => executable.filter(_.name == name)) match {
+          case Vec(value) => Right(value.bytes)
+          case _          => Left(Error.Cubin(
+              s"select one executable cubin section with --section: ${executable.map(_.name).mkString(", ")}"
+            ))
+        }
       }
     }
 

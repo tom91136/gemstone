@@ -3,7 +3,7 @@
 #undef UNIFIED_API_THRUST_DEVICE_FUNCTIONS
 #include <catch2/catch_template_test_macros.hpp>
 
-TEMPLATE_TEST_CASE_SIG("runtime/hip/device-function", "[unified][runtime][compact]", ((bool Indirect), Indirect), false, true) {
+TEMPLATE_TEST_CASE_SIG("runtime/hip/device-function", "[unified][runtime]", ((bool Indirect), Indirect), false, true) {
   unified::gpu_calls::deviceFunction<Indirect>();
 }
 

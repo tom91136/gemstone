@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class ConditionCodeSuite extends Suite {
@@ -238,14 +238,59 @@ class ConditionCodeSuite extends Suite {
 
   private def fset(sm: Int, text: String): Kernel = program(sm, text)
 
-  test("only the observed sm35 unordered-greater RZ.CC form supplies a zero flag") {
+  test("sm35 FSET and DSET supply the zero flag for any relation, combiner and source") {
     val supported = fset(35, "FSET.GTU.AND RZ.CC, |R3|, R4, PT")
     assert(supported.lower(8, 8, 4, 4).isRight)
-    val unsupported = supported.map(_.rewrite(modifiers = Vec(Instruction.Modifier("GT"), Instruction.Modifier("AND"))))
-    assert(unsupported.lower(8, 8, 4, 4).left.exists(_.contains("FSET condition-code output is not implemented")))
+    assert(fset(35, "FSET.GE.AND RZ.CC, R3, R4, PT").lower(8, 8, 4, 4).isRight)
+    assert(program(35, "DSET.GE.AND RZ.CC, R2, R4, PT").lower(8, 8, 4, 4).isRight)
+    val params = Vec(8, 8, 4, 4, 4, 4, 4, 4, 4, 4)
+    assert(fset(35, "FSET.LT.OR RZ.CC, R3, c[0x0][0x184], P0").lower(params*).isRight)
+    assert(fset(50, "FSET.NEU.XOR RZ.CC, R3, c[0x0][0x164], !P0").lower(params*).isRight)
+    assert(fset(60, "FSET.BF.EQ.AND RZ.CC, R4, c[0x0][0x170], PT").lower(params*).isRight)
+    assert(program(50, "DSET.EQ.AND RZ.CC, RZ, c[0x0][0x168], PT").lower(params*).isRight)
+    assert(program(50, "DSET.EQ.AND RZ.CC, R4, bits<F64Imm>:64(0x3ff0000000000000), PT").lower(8, 8, 4, 4).isRight)
     assert(supported.copy(sm =
       86
     ).lower(8, 8, 4, 4).left.exists(_.contains("FSET condition-code output is not implemented")))
+  }
+
+  test("sm50 DSET.CC compares a 64-bit immediate and combines it with the predicate") {
+    def run(predicate: String, operation: String, expected: Int): Unit =
+      check(
+        50,
+        s"MOV R2, 0; MOV R3, 0x3ff00000; ISETP.EQ.AND P0, PT, RZ, 1, PT; $operation RZ.CC, R2, " +
+          s"bits<F64Imm>:64(0x3ff0000000000000), $predicate; BRA CC.NEU, `(yes); MOV R6, 0; BRA `(end); " +
+          "yes: MOV R6, 1; end: LDC.64 R4, c[0x0][0x160]; STG.E [R4.64], R6; EXIT",
+        Vec(expected)
+      )
+    run("PT", "DSET.EQ.AND", 1)
+    run("P0", "DSET.EQ.AND", 0)
+    run("P0", "DSET.EQ.OR", 1)
+    run("PT", "DSET.NEU.XOR", 1)
+    run("P0", "DSET.NEU.XOR", 0)
+  }
+
+  // modelled on ISET.CC: the mask lands in the register and the zero flag is set when it is zero
+  test("sm35, sm50 and sm60 FSET and DSET with a register destination keep the mask and set the zero flag") {
+    def run(sm: Int, operation: String, sources: String, predicate: String, mask: Long, taken: Int): Unit =
+      check(
+        sm,
+        "MOV R0, 0x40000000; MOV R1, 0x3f800000; MOV R2, 0; MOV R3, 0x3ff00000; " +
+          s"ISETP.EQ.AND P0, PT, RZ, ${if (predicate == "PT") "RZ" else "1"}, PT; $operation R6.CC, $sources, " +
+          s"$predicate; BRA CC.NEU, `(yes); MOV R7, 0; BRA `(end); yes: MOV R7, 1; end: LDC.64 R4, c[0x0][0x160]; " +
+          "STG.E [R4.64], R6; STG.E [R4.64+0x4], R7; EXIT",
+        Vec(mask.toInt, taken)
+      )
+    for (sm <- Vec(35, 50, 60)) {
+      run(sm, "FSET.GTU.AND", "R0, R1", "PT", 0xffffffffL, 1)
+      run(sm, "FSET.GTU.AND", "R1, R0", "PT", 0L, 0)
+      run(sm, "FSET.GTU.AND", "R0, R1", "P0", 0L, 0)
+      run(sm, "FSET.GTU.OR", "R1, R0", "PT", 0xffffffffL, 1)
+      run(sm, "FSET.GTU.OR", "R1, R0", "P0", 0L, 0)
+      run(sm, "FSET.BF.GTU.AND", "R0, R1", "PT", 0x3f800000L, 1)
+      run(sm, "DSET.EQ.AND", "R2, R2", "PT", 0xffffffffL, 1)
+      run(sm, "DSET.NEU.AND", "R2, R2", "PT", 0L, 0)
+    }
   }
 
   test("sm35 FSET.GTU.CC drives CC.NEU for numeric, unordered, predicate-masked, and overwritten flags") {
@@ -293,6 +338,9 @@ class ConditionCodeSuite extends Suite {
     run("0x7fc00000", "0x3f800000", "PT", 1)
     run("0x3f800000", "0x7fc00000", "PT", 1)
     run("0x40000000", "0x3f800000", "P0", 0)
+    run("0x40000000", "0x3f800000", "P0", 1, operation = "FSET.GTU.OR")
+    run("0x40000000", "0x3f800000", "PT", 0, operation = "FSET.GTU.XOR")
+    run("0x40000000", "0x3f800000", "P0", 1, operation = "FSET.GTU.XOR")
     run("0x40000000", "0x3f800000", "PT", 0, overwrite = true)
   }
 }

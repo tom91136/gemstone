@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class HexSuite extends Suite {
   test("pairs keep memory order and prefixed words are little-endian") {

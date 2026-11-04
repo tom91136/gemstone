@@ -5,7 +5,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 // PTX ISA 13.3 chapter 10, Special Registers.
 class SpecialRegisterSuite extends Suite {
@@ -65,7 +65,7 @@ class SpecialRegisterSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     Vec.tabulate(blocks * threads)(thread =>
       Vec.tabulate(reads.size)(field =>
         memory.readLittleEndian(memory.start.offset((thread * reads.size + field).toLong * 8), 8).toOption.get
@@ -119,7 +119,7 @@ class SpecialRegisterSuite extends Suite {
   for (
     (register, tpe) <- Vec(
       "%gridid"                     -> "u64",
-      "%envreg1"                    -> "b32",
+      "%envreg0"                    -> "b32",
       "%pm0"                        -> "u32",
       "%pm3_64"                     -> "u64",
       "%total_smem_size"            -> "u32",

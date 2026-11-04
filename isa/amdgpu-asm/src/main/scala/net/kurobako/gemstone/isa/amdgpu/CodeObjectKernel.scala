@@ -36,7 +36,9 @@ private case class CodeObjectKernel(
     /** Device globals share these mutable section images across all kernels in one code object. */
     @SuppressWarnings(Array("scalafix:CaseClassEquality"))
     globalMemory: Array[(Long, Array[Byte])] = Array.empty,
-    computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1
+    computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
+    /** Where the image sits in the device address space; the addresses above already include it. */
+    loadBase: Long = 0L
 ) {
   val waveSize: Int in (32, 64) =
     if (
@@ -50,6 +52,9 @@ private case class CodeObjectKernel(
   // Most kernels never execute a device call.
   lazy val emulatedCalls: Map[Long, EmulatedCall] = functionTargets.flatMap { case (address, function) =>
     EmulatedCall.matching(function).headOption.map(address -> _)
+  }
+  lazy val heapCalls: Map[Long, DeviceHeapCall] = functionTargets.flatMap { case (address, function) =>
+    DeviceHeapCall.matching(function).map(address -> _)
   }
   val globalMemoryLocks: Array[ReentrantLock] = Array.fill(globalMemory.length)(ReentrantLock())
 

@@ -35,9 +35,12 @@ private class VMContext(
     val clusterShape: Dimensions = Dimensions.One,
     val explicitCluster: Boolean = false
 ) {
+  var spin: SpinWatch    = SpinWatch.Off
   var pc: Pc             = Pc.Entry
   var active: VMLaneMask = VMLaneMask.Empty
-  var issued: Long       = 0L
+
+  var partition: VMLaneMask = VMLaneMask.Empty
+  var issued: Long          = 0L
 
   val observer: LaunchObserver | Null = device.control.observer.orNull
 
@@ -85,12 +88,13 @@ private class VMContext(
         case Axis.Y => (lane / sizeX) % geometry.groupSize.y
         case Axis.Z => lane / sizeX / geometry.groupSize.y
       }).toLong
-    case Value.BlockId(axis)     => axis.select(group).toLong
-    case Value.BlockDim(axis)    => axis.select(geometry.groupSize).toLong
-    case Value.GridDim(axis)     => axis.select(geometry.groupCount).toLong
-    case Value.Clock(part)       => part.of(issued)
-    case Value.GlobalTimer(part) => part.of(VMContext.globalTimer)
-    case Value.MultiprocessorId  =>
+    case Value.BlockId(axis)       => axis.select(group).toLong
+    case Value.BlockDim(axis)      => axis.select(geometry.groupSize).toLong
+    case Value.GridDim(axis)       => axis.select(geometry.groupCount).toLong
+    case Value.Clock(part)         => part.of(issued)
+    case Value.GlobalTimer(part)   => part.of(VMContext.globalTimer)
+    case Value.GridWorkspace(part) => part.of(device.gridWorkspace)
+    case Value.MultiprocessorId    =>
       val count = geometry.groupCount
       (group.x.toLong + count.x.toLong * (group.y.toLong + count.y.toLong * group.z.toLong)) %
         EmulatedDevice.Multiprocessors

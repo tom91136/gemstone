@@ -124,7 +124,7 @@ object GenerateNativeBindings {
       stale.isEmpty,
       s"${platform.name}: implemented functions absent from the manifest: ${stale.toVector.sorted}"
     )
-    val declared = coverage.legacy.map(_._1).filter(names)
+    val declared = coverage.legacy.collect { case (name, _) if names(name) => name }
     require(declared.isEmpty, s"${platform.name}: legacy names declared by the manifest: $declared")
     val statuses             = coverage.statuses.map(status => status.cType -> status).toMap
     val missing              = functions.filterNot(function => coverage.implemented(function.name.raw))
@@ -137,8 +137,9 @@ object GenerateNativeBindings {
         !function.functionType.contains("..."),
         s"${platform.name}: no default body for variadic ${function.name}"
       )
-      val error =
-        function.parameters.lastOption.flatMap(last => coverage.statuses.find(status => last == s"${status.cType} *"))
+      val error = function.parameters.lastOption.map(_.raw).filter(_.endsWith(" *")).flatMap(last =>
+        statuses.get(last.stripSuffix(" *"))
+      )
       val parameters = function.parameters.zipWithIndex.map { (cType, index) =>
         if (error.isDefined && index == function.parameters.size - 1) s"${cType}error" else cType.raw
       }

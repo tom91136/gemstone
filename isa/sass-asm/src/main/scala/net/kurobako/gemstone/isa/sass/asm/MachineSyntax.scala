@@ -81,7 +81,7 @@ private object MachineSyntax {
             (),
             s"invalid preserved field ${field.name}"
           )
-        } yield FieldDecoder.deposit(word, field.positions, value)
+        } yield BitField.deposit(word, field.positions, value)
       }
       encoded <- Encoder.encode(resolved.encoding, annotation.opcode, annotation.bindings, Some(preserved))
     } yield encoded

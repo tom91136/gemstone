@@ -13,6 +13,18 @@ import scala.annotation.targetName
   */
 object FloatingSemantics {
 
+  def signMask(bits: Int): Long = bits match {
+    case 16 => 0x8000L
+    case 32 => 0x80000000L
+    case _  => Long.MinValue
+  }
+
+  def infinityBits(bits: Int): Long = bits match {
+    case 16 => 0x7c00L
+    case 32 => 0x7f800000L
+    case _  => 0x7ff0000000000000L
+  }
+
   inline def binary[V, R](
       inline algebra: Algebra[V],
       inline sinks: SPIRVSinks[V, R],
@@ -340,19 +352,17 @@ object FloatingSemantics {
       width: Int in (16, 32, 64)
   )(
       ids: OperandIds
-  )(otherwise: => R): R = width.raw match {
-    case 16 => orderedComparisonAt(algebra, sinks, opcode, sign = 0x8000L, infinity = 0x7c00L)(ids)(otherwise)
-    case 32 => orderedComparisonAt(algebra, sinks, opcode, sign = 0x80000000L, infinity = 0x7f800000L)(ids)(otherwise)
-    case _  =>
-      orderedComparisonAt(algebra, sinks, opcode, sign = Long.MinValue, infinity = 0x7ff0000000000000L)(ids)(otherwise)
-  }
+  )(otherwise: => R): R =
+    orderedComparisonAt(algebra, sinks, opcode, sign = signMask(width.raw), infinity = infinityBits(width.raw))(ids)(
+      otherwise
+    )
 
   inline def orderedComparisonAt[V, R](
       inline algebra: Algebra[V],
       inline sinks: SPIRVSinks[V, R],
       opcode: Int,
-      inline sign: Long,
-      inline infinity: Long
+      sign: Long,
+      infinity: Long
   )(ids: OperandIds)(otherwise: => R): R = opcode match {
     case SPIRV.Opcode.FOrdEqual =>
       sinks.binary(ids)((a, b) => algebra.ordered(a, b, sign, infinity)(algebra.equal(_, _)))
@@ -383,24 +393,17 @@ object FloatingSemantics {
       width: Int in (16, 32, 64)
   )(
       ids: OperandIds
-  )(otherwise: => R): R = width.raw match {
-    case 16 => unorderedComparisonAt(algebra, sinks, opcode, sign = 0x8000L, infinity = 0x7c00L)(ids)(otherwise)
-    case 32 => unorderedComparisonAt(algebra, sinks, opcode, sign = 0x80000000L, infinity = 0x7f800000L)(ids)(otherwise)
-    case _  => unorderedComparisonAt(
-        algebra,
-        sinks,
-        opcode,
-        sign = Long.MinValue,
-        infinity = 0x7ff0000000000000L
-      )(ids)(otherwise)
-  }
+  )(otherwise: => R): R =
+    unorderedComparisonAt(algebra, sinks, opcode, sign = signMask(width.raw), infinity = infinityBits(width.raw))(ids)(
+      otherwise
+    )
 
   inline def unorderedComparisonAt[V, R](
       inline algebra: Algebra[V],
       inline sinks: SPIRVSinks[V, R],
       opcode: Int,
-      inline sign: Long,
-      inline infinity: Long
+      sign: Long,
+      infinity: Long
   )(ids: OperandIds)(otherwise: => R): R = opcode match {
     case SPIRV.Opcode.FUnordEqual =>
       sinks.binary(ids)((a, b) => algebra.unorderedOr(a, b, sign, infinity)(algebra.equal(_, _)))
@@ -430,18 +433,15 @@ object FloatingSemantics {
       width: Int in (16, 32, 64)
   )(
       ids: OperandIds
-  )(otherwise: => R): R = width.raw match {
-    case 16 => classifyAt(algebra, sinks, opcode, sign = 0x8000L, infinity = 0x7c00L)(ids)(otherwise)
-    case 32 => classifyAt(algebra, sinks, opcode, sign = 0x80000000L, infinity = 0x7f800000L)(ids)(otherwise)
-    case _  => classifyAt(algebra, sinks, opcode, sign = Long.MinValue, infinity = 0x7ff0000000000000L)(ids)(otherwise)
-  }
+  )(otherwise: => R): R =
+    classifyAt(algebra, sinks, opcode, sign = signMask(width.raw), infinity = infinityBits(width.raw))(ids)(otherwise)
 
   inline def classifyAt[V, R](
       inline algebra: Algebra[V],
       inline sinks: SPIRVSinks[V, R],
       opcode: Int,
-      inline sign: Long,
-      inline infinity: Long
+      sign: Long,
+      infinity: Long
   )(
       ids: OperandIds
   )(otherwise: => R): R = opcode match {

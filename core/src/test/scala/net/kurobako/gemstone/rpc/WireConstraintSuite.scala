@@ -3,7 +3,7 @@ package net.kurobako.gemstone.rpc
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.Wire.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.compiletime.testing.typeCheckErrors
 
 class WireConstraintSuite extends Suite {

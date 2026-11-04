@@ -1,5 +1,5 @@
 conformance_miniapp(tealeaf
-  MODELS cuda hip omp-target=omp kokkos sycl-usm sycl-acc
+  MODELS cuda hip omp-target=omp kokkos sycl-usm sycl-acc std-indices
   MAIN driver/main.cpp
   OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD
   DATA tea.problems

@@ -82,16 +82,17 @@ private[isa] trait NvidiaSinks[V, R] extends Any {
   inline def readFlag(destination: Register, flag: VMConditionCodes.Flag)(inline kernel: V => V): R
   inline def testFlag(destination: Predicate, flag: VMConditionCodes.Flag)(inline kernel: V => V): R
 
-  /** A warp shuffle over the lane's index in its warp, the selector, the bounds operand and the number of lanes from
-    * the warp's first: the lane in the warp to read, whether the exchange is valid, and the value written from the
-    * read.
+  /** A warp shuffle over the lane's index in its warp, the selector, the bounds operand, the member mask and the number
+    * of lanes from the warp's first: the lane in the warp to read, whether the exchange is valid, and the value written
+    * from the read, zero when the lane to read is not in the member mask.
     */
   inline def shuffle(
       destination: Register,
       validity: Option[Predicate],
       operand: Value,
       selector: Value,
-      bounds: Value
+      bounds: Value,
+      memberMask: Value
   )(
       inline source: (V, V, V, V) => V,
       inline valid: (V, V, V, V) => V,

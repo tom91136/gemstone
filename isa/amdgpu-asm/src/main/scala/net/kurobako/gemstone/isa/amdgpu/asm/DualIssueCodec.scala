@@ -107,59 +107,61 @@ private object DualIssueCodec {
         (mod.name != "e96" || mod.value.nonEmpty) && (mod.name != TruthTable || mod.value.isEmpty)
       ) || (instruction.mods.nonEmpty && format != EncodingFormat.VOPD3XY)
     ) None
-    else entries(instruction.definition, target, side, format).view.flatMap { entry =>
-      val schema  = entry.operands.filterNot(_.implicitOperand)
-      val negated = schema.zip(instruction.operands).collect { case (info, Operand.Negated(_)) =>
-        info.field.map(side.sources.indexOf(_)).filter(_ >= 0)
-      }
+    else {
       val table = instruction.mods.find(_.name == TruthTable).map(_.value.flatMap(value =>
         parseBigIntLiteral(value).filter(bits => bits >= 0 && bits < 256)
       ))
-      val signs = Option.when(
-        negated.forall(_.nonEmpty) &&
-          (negated.isEmpty ||
-            (format == EncodingFormat.VOPD3XY &&
-              negatable(instruction.definition))) && table.forall(_.nonEmpty) &&
-          (table.isEmpty || instruction.opcode.raw == "v_dual_bitop2_b32")
-      )(
-        Map(side.negate -> negated.flatten.foldLeft(BigInt(0))((bits, index) => bits.setBit(index))).filter(_ =>
-          format == EncodingFormat.VOPD3XY
-        ) ++ table.flatten.map(side.sources(2) -> _)
-      )
-      Option.when(schema.size == instruction.operands.size && signs.nonEmpty)(
-        schema.zip(instruction.operands.map(plain(_)))
-      ).flatMap(_.traverse {
-        case (info, operand) =>
-          info.field.flatMap { field =>
-            if (field == EncodingField.LITERAL) operand match {
-              case Operand.IntegerLiteral(value, _) if value >= Int.MinValue && value <= BigInt("ffffffff", 16) =>
-                Some((Map.empty[EncodingField, BigInt], Some(OperandCodec.Literal(value.toLong & 0xffffffffL))))
-              case _ => None
-            }
-            // a VOPD3 select's lane mask is one SGPR, as dual issue runs in wave32
-            else if (info.kind.isScalarRegister)
-              source(operand, target, 32).collect {
-                case (value, None) if value < 256 => (Map(field -> BigInt(value)), None)
+      entries(instruction.definition, target, side, format).view.flatMap { entry =>
+        val schema  = entry.operands.filterNot(_.implicitOperand)
+        val negated = schema.zip(instruction.operands).collect { case (info, Operand.Negated(_)) =>
+          info.field.map(side.sources.indexOf(_)).filter(_ >= 0)
+        }
+        val signs = Option.when(
+          negated.forall(_.nonEmpty) &&
+            (negated.isEmpty ||
+              (format == EncodingFormat.VOPD3XY &&
+                negatable(instruction.definition))) && table.forall(_.nonEmpty) &&
+            (table.isEmpty || instruction.opcode.raw == "v_dual_bitop2_b32")
+        )(
+          Map(side.negate -> negated.flatten.foldLeft(BigInt(0))((bits, index) => bits.setBit(index))).filter(_ =>
+            format == EncodingFormat.VOPD3XY
+          ) ++ table.flatten.map(side.sources(2) -> _)
+        )
+        Option.when(schema.size == instruction.operands.size && signs.nonEmpty)(
+          schema.zip(instruction.operands.map(plain(_)))
+        ).flatMap(_.traverse {
+          case (info, operand) =>
+            info.field.flatMap { field =>
+              if (field == EncodingField.LITERAL) operand match {
+                case Operand.IntegerLiteral(value, _) if value >= Int.MinValue && value <= BigInt("ffffffff", 16) =>
+                  Some((Map.empty[EncodingField, BigInt], Some(OperandCodec.Literal(value.toLong & 0xffffffffL))))
+                case _ => None
               }
-            // LLVM's VOPD3 source classes allow inline constants, but no appended literal.
-            else source(operand, target, info.bits).filter { case (_, literal) =>
-              format != EncodingFormat.VOPD3XY || literal.isEmpty
-            }.flatMap { case (value, literal) =>
-              if (field.isVectorDestination || field.isVectorSource)
-                Option.when(value >= 256)((Map(field -> BigInt(value - 256)), literal))
-              else Some((Map(field -> BigInt(value)), literal))
+              // a VOPD3 select's lane mask is one SGPR, as dual issue runs in wave32
+              else if (info.kind.isScalarRegister)
+                source(operand, target, 32).collect {
+                  case (value, None) if value < 256 => (Map(field -> BigInt(value)), None)
+                }
+              // LLVM's VOPD3 source classes allow inline constants, but no appended literal.
+              else source(operand, target, info.bits).filter { case (_, literal) =>
+                format != EncodingFormat.VOPD3XY || literal.isEmpty
+              }.flatMap { case (value, literal) =>
+                if (field.isVectorDestination || field.isVectorSource)
+                  Option.when(value >= 256)((Map(field -> BigInt(value - 256)), literal))
+                else Some((Map(field -> BigInt(value)), literal))
+              }
             }
-          }
-      }).flatMap { values =>
-        val literals = values.flatMap(_._2).distinct
-        Option.when(literals.size <= 1)((
-          values.foldLeft(Map(side.opcode -> BigInt(entry.opcode)) ++ signs.getOrElse(Map.empty))((all, item) =>
-            all ++ item._1
-          ),
-          literals.headOption
-        ))
-      }
-    }.headOption
+        }).flatMap { values =>
+          val literals = values.flatMap(_._2).distinct
+          Option.when(literals.size <= 1)((
+            values.foldLeft(Map(side.opcode -> BigInt(entry.opcode)) ++ signs.getOrElse(Map.empty))((all, item) =>
+              all ++ item._1
+            ),
+            literals.headOption
+          ))
+        }
+      }.headOption
+    }
 
   def decode(code: CodeStream, offset: Int): Option[Either[CodecError, DecodedStatement]] =
     InstructionDecoder.dual(code, offset).map(_.left.map(CodecError.InvalidEncoding(_)).flatMap { dual =>

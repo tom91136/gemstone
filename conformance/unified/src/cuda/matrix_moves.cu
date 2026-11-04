@@ -77,7 +77,7 @@ template <int Count, bool Transpose> void checkLoad(const std::vector<uint16_t> 
 
 } // namespace
 
-TEST_CASE("runtime/cuda/matrix-moves/ldmatrix", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/matrix-moves/ldmatrix", "[unified][runtime][tensor]") {
   if (capability() < 75) SKIP("ldmatrix requires compute capability 7.5");
   const auto tile =
       iota(size_t{0}, size_t{Rows} * 8) | map([](size_t i) { return static_cast<uint16_t>(0x1000 + (i * 37)); }) | to_vector();
@@ -103,7 +103,7 @@ __global__ void transpose([[maybe_unused]] const uint32_t *source, [[maybe_unuse
 
 } // namespace
 
-TEST_CASE("runtime/cuda/matrix-moves/movmatrix", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/matrix-moves/movmatrix", "[unified][runtime][tensor]") {
   if (capability() < 75) SKIP("movmatrix requires compute capability 7.5");
   // lane l holds row l / 4, columns l % 4 * 2 and the next; the transpose holds column l / 4, rows l % 4 * 2 and the next
   auto element = [](int row, int column) { return static_cast<uint32_t>((0x100 * row) + column + 0x4000); };
@@ -168,7 +168,7 @@ template <int Count, bool Transpose> void checkStore() {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/matrix-moves/stmatrix", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/matrix-moves/stmatrix", "[unified][runtime][tensor]") {
   if (capability() < 90) SKIP("stmatrix requires compute capability 9.0");
   checkStore<1, false>();
   checkStore<2, true>();
@@ -220,7 +220,7 @@ __global__ void gemm([[maybe_unused]] const __nv_bfloat16 *a, [[maybe_unused]] c
 
 } // namespace
 
-TEST_CASE("runtime/cuda/matrix-moves/ldmatrix-mma-gemm", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/matrix-moves/ldmatrix-mma-gemm", "[unified][runtime][tensor]") {
   if (capability() < 80) SKIP("bf16 mma requires compute capability 8.0");
   constexpr int m = 64;
   constexpr int n = 32;

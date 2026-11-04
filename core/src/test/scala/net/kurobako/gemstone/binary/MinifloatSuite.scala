@@ -2,7 +2,7 @@ package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.binary.IEEE754.*
 import net.kurobako.gemstone.binary.Minifloat.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 class MinifloatSuite extends Suite {

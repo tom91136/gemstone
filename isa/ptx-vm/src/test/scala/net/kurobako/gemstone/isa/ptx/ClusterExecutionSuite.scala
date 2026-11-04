@@ -5,7 +5,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ClusterExecutionSuite extends Suite {
   test("bulk stores repeat the byte mask in each 16-byte chunk and preserve other bytes") {

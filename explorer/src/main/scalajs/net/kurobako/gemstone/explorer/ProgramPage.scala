@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.profile.Architecture
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 

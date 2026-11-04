@@ -409,6 +409,8 @@ private object VMMemoryCompiler {
     if (loading && operands.size == 3)
       zeroFilled(memory, if (OperandQueries.isZero(data)) Vec.empty else results, operands(2))
     else { if (operands.size != 2) unsupported("unsupported memory operands"); emit(memory) }
+    // a volatile load is how legacy code polls for another warp, which the scheduler has to let run ahead
+    if (loading && legacy && modifiers.contains(Modifier.CV)) emit(Yield)
   }
 
   /** A 256-bit global access, as `ld.global.v8.b32` and `st.global.v8.b32` from sm_100: words 0 to 3 in the group a
@@ -580,9 +582,9 @@ private object VMMemoryCompiler {
     val geometry = fields.getOrElse("ParamA", BigInt(-1)).toInt
     val count    = if (size == 5) 2 else if (size == 6) 4 else 1
     if (
-      size < 0 || size > 6 || !Set(0, 2)(geometry) || fields.get("LOD") != Some(BigInt(1)) ||
-      fields.get("Rb") != Some(BigInt(255)) || fields.get("wmsk") != Some(BigInt((1 << count) - 1)) ||
-      ignoredTextureFields.exists(name => fields.get(name) != Some(BigInt(0)))
+      size < 0 || size > 6 || !Set(0, 2)(geometry) || !fields.get("LOD").contains(BigInt(1)) ||
+      !fields.get("Rb").contains(BigInt(255)) || !fields.get("wmsk").contains(BigInt((1 << count) - 1)) ||
+      ignoredTextureFields.exists(name => !fields.get(name).contains(BigInt(0)))
     ) unsupported("texture operation is not a Kepler read-only global load")
     val width: ScalarBitWidth = if (size < 2) 8 else if (size < 4) 16 else 32
     emit(loadOf(

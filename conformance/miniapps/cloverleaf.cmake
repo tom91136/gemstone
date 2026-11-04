@@ -14,7 +14,7 @@ function(cloverleaf_adapt model source)
 endfunction()
 
 conformance_miniapp(cloverleaf
-  MODELS cuda hip omp-target kokkos sycl-usm sycl-acc acc
+  MODELS cuda hip omp-target kokkos sycl-usm sycl-acc acc std-indices
   MAIN driver/clover_leaf.cpp
   LICENCE_FILE LICENCE.txt CloverLeaf.txt
   OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD

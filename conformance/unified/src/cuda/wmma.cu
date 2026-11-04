@@ -183,7 +183,7 @@ bool floating(const char *name, const std::function<Memory(double)> &encode, con
 
 } // namespace
 
-TEST_CASE("runtime/cuda/wmma/half", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wmma/half", "[unified][runtime][tensor]") {
   bool ran = false;
   const auto encode = [](double v) { return __float2half(static_cast<float>(v)); };
   const auto single = [](double v) { return static_cast<float>(v); };
@@ -197,7 +197,7 @@ TEST_CASE("runtime/cuda/wmma/half", "[unified][runtime][tensor][compact]") {
   if (!ran) SKIP("the device runs none of these forms");
 }
 
-TEST_CASE("runtime/cuda/wmma/bfloat16-tf32-double", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wmma/bfloat16-tf32-double", "[unified][runtime][tensor]") {
   bool ran = false;
   const auto single = [](double v) { return static_cast<float>(v); };
   const auto fromSingle = [](float v) { return static_cast<double>(v); };
@@ -232,7 +232,7 @@ bool bytes(const char *name, int low, int high) {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/wmma/integer", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wmma/integer", "[unified][runtime][tensor]") {
   bool ran = false;
   ran |= bytes<75, Kind::SignedByte, signed char, 16, 16, 16, false, true, false>("s8 m16n16k16", -128, 127);
   ran |= bytes<75, Kind::UnsignedByte, unsigned char, 32, 8, 16, true, false, true>("u8 m32n8k16 shared", 0, 255);
@@ -282,7 +282,7 @@ template <int Arch, Kind Element, Bits Operation> bool packed(const char *name, 
 
 } // namespace
 
-TEST_CASE("runtime/cuda/wmma/sub-byte", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wmma/sub-byte", "[unified][runtime][tensor]") {
   bool ran = false;
   ran |= packed<75, Kind::SignedNibble, Bits::None>("s4 m8n8k32", 4, true);
   ran |= packed<75, Kind::UnsignedNibble, Bits::None>("u4 m8n8k32", 4, false);

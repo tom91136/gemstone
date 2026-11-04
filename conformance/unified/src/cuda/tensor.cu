@@ -35,7 +35,7 @@ __global__ void tensorGemm([[maybe_unused]] const half *a, [[maybe_unused]] cons
 
 } // namespace
 
-TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor]") {
   cudaDeviceProp properties{};
   checkTensor(cudaGetDeviceProperties(&properties, 0));
   if (properties.major < 7) SKIP("WMMA requires compute capability 7.0");

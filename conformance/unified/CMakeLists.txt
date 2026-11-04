@@ -74,6 +74,10 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
     src/cuda/algorithms_i64.cu
     src/cuda/algorithms_f32.cu
     src/cuda/algorithms_f64.cu
+    src/cuda/rocthrust_algorithms.cu
+    src/cuda/rocthrust_device.cu
+    src/cuda/rocthrust_iterators.cu
+    src/cuda/rocthrust_complex_async.cu
     src/cuda/blas.cu
     src/cuda/tensor.cu
     src/cuda/mma884.cu
@@ -95,7 +99,14 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
     src/cuda/control.cu
     src/cuda/video.cu
     src/cuda/floating.cu
-    src/cuda/struct_alignment.cu)
+    src/cuda/struct_alignment.cu
+    src/cuda/arrays.cu
+    src/cuda/textures.cu
+    src/cuda/stream_memory.cu
+    src/cuda/graphs.cu
+    src/cuda/device_malloc.cu
+    src/cuda/printf.cu
+    src/cuda/callbacks.cu)
   # Bulk asynchronous copies use the CUDA 12 tensor-map and cuda::ptx interfaces.
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12)
     target_sources(unified PRIVATE src/cuda/async_bulk.cu)
@@ -112,7 +123,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
   endif()
   set_source_files_properties(src/cuda/stack.cu src/cuda/control.cu PROPERTIES COMPILE_OPTIONS "${stack_size_option}")
   target_link_libraries(unified PRIVATE CUDA::cudart_static CUDA::cublas)
-  if(CONFORMANCE_COMPILER STREQUAL "clang" AND NOT CONFORMANCE_CUDA_CUBIN_ONLY)
+  if(CONFORMANCE_COMPILER STREQUAL "clang" AND CONFORMANCE_CUDA_CODE STREQUAL "fatbin")
     target_compile_options(unified PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:--cuda-include-ptx=sm_${conformance_cuda_architecture}>")
   endif()
   string(REPLACE ";" "," cuda_device_targets "${conformance_cuda_architecture}")
@@ -164,6 +175,9 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     src/hip/edge_stress_f32.hip
     src/hip/edge_stress_f64.hip
     src/hip/async.hip
+    src/hip/graphs.hip
+    src/hip/device_malloc.hip
+    src/hip/device_printf.hip
     src/hip/intrinsics.hip
     src/hip/narrow_floats.hip
     src/hip/dot_products.hip
@@ -173,7 +187,9 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     src/hip/matrix_wave64.hip
     src/hip/regressions.hip
     src/hip/resources.hip
+    src/hip/properties.hip
     src/hip/arrays.hip
+    src/hip/sampling.hip
     src/hip/struct_alignment.hip
     src/hip/struct_alignment_bytewise.hip)
   target_compile_definitions(unified PRIVATE __HIP_PLATFORM_AMD__=1)
@@ -231,6 +247,21 @@ elseif(CONFORMANCE_BACKEND STREQUAL "sycl")
   target_compile_options(unified PRIVATE -fsycl -fsycl-device-code-split=per_kernel)
   target_link_options(unified PRIVATE -fsycl -fsycl-device-code-split=per_kernel)
 
+elseif(CONFORMANCE_BACKEND STREQUAL "openacc")
+  find_package(OpenACC REQUIRED)
+  target_compile_definitions(unified PRIVATE UNIFIED_API_OPENACC=1)
+  target_sources(unified PRIVATE
+    src/openacc/data.cpp
+    src/openacc/constructs.cpp
+    src/openacc/reductions.cpp
+    src/openacc/atomics.cpp
+    src/openacc/routines.cpp
+    src/openacc/async.cpp
+    src/openacc/runtime.cpp)
+  target_compile_options(unified PRIVATE "-gpu=cc${conformance_cuda_architecture}")
+  target_link_options(unified PRIVATE "-gpu=cc${conformance_cuda_architecture}")
+  target_link_libraries(unified PRIVATE OpenACC::OpenACC_CXX)
+
 elseif(CONFORMANCE_BACKEND STREQUAL "levelzero")
   target_compile_definitions(unified PRIVATE UNIFIED_API_LEVELZERO=1)
   target_sources(unified PRIVATE src/levelzero/memory.cpp)
@@ -240,8 +271,8 @@ else()
   message(FATAL_ERROR "Unsupported unified backend: ${CONFORMANCE_BACKEND}")
 endif()
 
-# SYCL embeds its lambda kernels through the normal compiler pipeline.
-if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
+# SYCL and OpenACC embed their kernels through the normal compiler pipeline.
+if(NOT CONFORMANCE_BACKEND MATCHES "^(sycl|openacc)$")
   set(memory_source "${CMAKE_CURRENT_SOURCE_DIR}/src")
   set(memory_output "${CMAKE_CURRENT_BINARY_DIR}/memory")
   file(MAKE_DIRECTORY "${memory_output}")

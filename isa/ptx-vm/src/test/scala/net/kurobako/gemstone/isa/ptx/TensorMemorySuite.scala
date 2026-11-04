@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 // The kernels and expectations are TensorMemoryCases', shared with the SASS suite that runs ptxas's output for them.

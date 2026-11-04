@@ -35,6 +35,11 @@ private object AllocationAddressIndex {
     low
   }
 
+  /** The unsigned span `[low, high)` around an address in which no allocation starts or ends, and the entry (or null)
+    * that holds all of it.
+    */
+  case class Run(low: Long, high: Long, entry: Entry | Null)
+
   private def bases(entries: Array[Entry]): Array[Long] = entries.map(_.base.raw)
 
   private def inserted(entries: Array[Entry], entry: Entry): Array[Entry] = {
@@ -120,6 +125,28 @@ private class AllocationAddressIndex private (
   def findAlias(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] = {
     val entry = search(aliases, aliasBases, address.raw, size)
     if (entry == null) None else Some(entry.id -> entry.offsetOf(address))
+  }
+
+  /** The span around `address` over which every lookup resolves to the same entry. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def run(address: Long): Run = {
+    var low                                                     = 0L
+    var high                                                    = -1L
+    def narrow(entries: Array[Entry], bases: Array[Long]): Unit = {
+      val above = upperBound(bases, address)
+      if (above > 0) {
+        val start = bases(above - 1)
+        val end   = start + entries(above - 1).size
+        if (java.lang.Long.compareUnsigned(start, low) > 0) low = start
+        if (java.lang.Long.compareUnsigned(end, address) <= 0) {
+          if (java.lang.Long.compareUnsigned(end, low) > 0) low = end
+        } else if (java.lang.Long.compareUnsigned(end, high) < 0) high = end
+      }
+      if (above < bases.length && java.lang.Long.compareUnsigned(bases(above), high) < 0) high = bases(above)
+    }
+    narrow(aliases, aliasBases)
+    narrow(synthetic, syntheticBases)
+    Run(low, high, resolve(GuestAddress(address), 1))
   }
 
   /** Allocation boundaries strictly between `begin` and `end`, unsorted and possibly repeated. */

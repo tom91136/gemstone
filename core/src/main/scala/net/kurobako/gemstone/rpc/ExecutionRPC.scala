@@ -13,17 +13,23 @@ import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
 object ExecutionRPC {
-  val Name: NonEmpty[String]      = "gemstone.execution"
-  val RequestMagic: Int           = 0x474d4533
-  val ResponseMagic: Int          = 0x474d4633
-  val HelloMagic: Int             = 0x474d4833
-  val HelloResponseMagic: Int     = 0x474d4933
-  val MaximumSchemaBytes: Int > 0 = 1048576
-  val MaximumTagBytes: Int > 0    = 256
-  val MaximumPayload: Int > 0     = 134217728
-  val MaximumElements: Int > 0    = 16384
-  val MaximumTextBytes: Int > 0   = 8192
-  val Limits: msgpack.Limits      = msgpack.Limits(MaximumElements, MaximumPayload, MaximumTextBytes)
+  val Name: NonEmpty[String]         = "gemstone.execution"
+  val RequestMagic: Int              = 0x474d4533
+  val ResponseMagic: Int             = 0x474d4633
+  val HelloMagic: Int                = 0x474d4833
+  val HelloResponseMagic: Int        = 0x474d4933
+  val HeartbeatMagic: Int            = 0x474d4a33
+  val MaximumSchemaBytes: Int > 0    = 1048576
+  val MaximumTagBytes: Int > 0       = 256
+  val MaximumPayload: Int > 0        = 134217728
+  val MaximumElements: Int > 0       = 16384
+  val MaximumTextBytes: Int > 0      = 8192
+  val MaximumPrintTextBytes: Int > 0 = 1048576
+  val Limits: msgpack.Limits         = msgpack.Limits(MaximumElements, MaximumPayload, MaximumTextBytes)
+
+  // A bare four-byte frame the server writes ahead of a response while a request executes. Consecutive frames are at
+  // most 1.5 times this apart, so any liveness window of a second or more spans several.
+  val HeartbeatMillis: Int > 0 = 200
 
   // The emulator executes any work-group size but only at interpreter throughput, and the OpenCL CTS scales its total
   // work with the advertised bound. Larger sizes make whole conformance tests exceed their per-test budget.
@@ -53,6 +59,14 @@ object ExecutionRPC {
         .filterOrElse(!_.contains('\u0000'), "native symbol name must not contain a NUL character"),
     identity
   )
+
+  case class PrintText(value: String)
+
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
+  given printText: Codec[PrintText] =
+    Codec.boundedText("PrintText", MaximumPrintTextBytes)(value => Right(PrintText(value)), _.value)
+
+  case class LinkInput(image: Vec[Byte]) derives Codec
 
   case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
   case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0)
@@ -181,6 +195,12 @@ object ExecutionRPC {
   given Codec[ProgramSymbols] = Codec.derived
 
   @SuppressWarnings(Array("scalafix:GivenPlacement"))
+  given Codec[Backend.LinkedKernel] = Codec.derived
+
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
+  given Codec[Backend.LinkedImage] = Codec.derived
+
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[ProgramGlobalAlias] = Codec.derived
 
   @SuppressWarnings(Array("scalafix:GivenPlacement"))
@@ -199,8 +219,14 @@ object ExecutionRPC {
     case SupplyHostMemory(completion: CompletionId, ranges: Vec[HostMemoryBytes]) extends Operation[Unit]
     case RegisterAllocation(size: Long in 1L ~ 2147483647L)                       extends Operation[AllocationId]
     case SupplyHostSync(completion: CompletionId, ticket: Long, observed: Long)   extends Operation[Unit]
-    case RegisterAllocationAddress(allocation: AllocationId, nativeBase: GuestAddress, hostBacked: Boolean = false)
-        extends Operation[Unit]
+    case RegisterAllocationAddress(
+        allocation: AllocationId,
+        nativeBase: GuestAddress,
+        hostBacked: Boolean = false,
+        devices: Int = -1
+    ) extends Operation[Unit]
+    // Bit set of the device ordinals whose dispatches may access the allocation.
+    case SetAllocationDevices(allocation: AllocationId, devices: Int) extends Operation[Unit]
     case ReleaseAllocation(allocation: AllocationId)
         extends Operation[Unit]
     case WriteAllocation(allocation: AllocationId, offset: Long >= 0, bytes: Vec[Byte])
@@ -232,6 +258,8 @@ object ExecutionRPC {
         extends Operation[Vec[SpecializationInfo]]
     case SpecializeImage(image: Vec[Byte], constants: Vec[SpecializationConstant])
         extends Operation[Vec[Byte]]
+    case LinkImages(images: Vec[LinkInput])
+        extends Operation[Backend.LinkedImage]
     case PrepareShader(
         image: Vec[Byte],
         entry: NonEmpty[String],
@@ -277,7 +305,9 @@ object ExecutionRPC {
         descriptorBindings: Vec[DescriptorBinding] = Vec.empty,
         argumentBuffer: Option[KernelTask.ArgumentBuffer] = None,
         clusterSize: Option[LaunchGeometry.Dimensions] = None,
-        cooperative: Boolean = false
+        cooperative: Boolean = false,
+        deviceHeap: Option[KernelTask.DeviceHeap] = None,
+        device: Int in 0 ~ 15 = 0
     ) extends Operation[CompletionId]
     case QueryCompletion(completion: CompletionId)
         extends Operation[CompletionStatus]
@@ -287,7 +317,9 @@ object ExecutionRPC {
     case CompletionPointerRelocations(completion: CompletionId, offset: Int >= 0)
         extends Operation[Vec[KernelTask.PointerRelocation]]
     case CompletionPrints(completion: CompletionId)
-        extends Operation[String]
+        extends Operation[PrintText]
+    case CompletionErrorPrints(completion: CompletionId)
+        extends Operation[PrintText]
     case ReleaseCompletion(completion: CompletionId)
         extends Operation[Unit]
   }

@@ -37,6 +37,7 @@ private[isa] class Names(naming: SlotNaming) extends Scope[Slot](naming) {
     case Value.Predicate(_)   => Type.Bool
     case Value.Immediate(_) | Value.Address(_, _) | Value.LocalBase | Value.SharedWindow => Type.unsigned(64)
     case Value.Clock(CounterPart.Whole) | Value.GlobalTimer(CounterPart.Whole)           => Type.unsigned(64)
+    case Value.GridWorkspace(CounterPart.Whole)                                          => Type.unsigned(64)
     case _                                                                               => Type.unsigned(32)
   }
 
@@ -65,6 +66,7 @@ private[isa] class Names(naming: SlotNaming) extends Scope[Slot](naming) {
     case Value.GridDim(axis)         => Machine.gridDim(axis)
     case Value.Clock(part)           => Machine.counter(Machine.clock, part)
     case Value.GlobalTimer(part)     => Machine.counter(Machine.globalTimer, part)
+    case Value.GridWorkspace(part)   => Machine.counter(Machine.gridWorkspace, part)
     case Value.MultiprocessorId      => Machine.multiprocessorId
     case Value.WarpId                => Machine.warpId
     case Value.ClusterCtaRank        => Machine.clusterCtaRank

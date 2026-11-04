@@ -78,8 +78,9 @@ private object VMArithmetic {
     else if (IEEE754.isNaN(denominator, width)) (denominator & (signBit | magnitude)) | IEEE754.quietBit(width)
     else if ((d == 0L && n == 0L) || (d == infinity && n == infinity)) defaultNaN(width)
     else if (d == 0L || n == infinity) sign | infinity
-    else if (d == infinity || n == 0L) sign
-    else if (biasedExponent(numerator, width) - biasedExponent(denominator, width) < -underflow) sign
+    else if (
+      d == infinity || n == 0L || biasedExponent(numerator, width) - biasedExponent(denominator, width) < -underflow
+    ) sign
     else if (IEEE754.isNaN(quotient, width)) sign | infinity
     else sign | (quotient & magnitude)
   }

@@ -6,7 +6,7 @@ import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 // ptxas 13.3 output for the kernels of TensorCopyCases, decoded from its machine code as Gemstone loads a cubin:

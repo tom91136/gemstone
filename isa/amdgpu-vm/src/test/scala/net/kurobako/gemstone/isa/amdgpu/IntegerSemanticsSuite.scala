@@ -7,7 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import references.*
 import scala.util.Random
 
@@ -358,6 +358,8 @@ class IntegerSemanticsSuite extends Suite {
     * zero numerator or exponents 25 apart the denominator's way, signed by both; otherwise the quotient's magnitude
     * with that sign.
     */
+  // one branch per special case of the division, as the instruction description lists them
+  @SuppressWarnings(Array("bonsai:identical-branches"))
   private def divisionFixupF16(quotient: Long, denominator: Long, numerator: Long): Long = {
     val (q, d, n) =
       (IEEE754.toDouble(quotient, 16), IEEE754.toDouble(denominator, 16), IEEE754.toDouble(numerator, 16))

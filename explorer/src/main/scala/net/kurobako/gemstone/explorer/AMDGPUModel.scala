@@ -188,15 +188,21 @@ object AMDGPUModel extends Model {
       val isa       = target.isa
       val selectors = EncodingCatalogue.sourceSelectors(isa).toVec.sortBy((spelling, value) => (value, spelling))
       def file(prefix: String, title: String, description: String): Option[View.RegisterFile] = {
-        val registers = selectors.filter((spelling, _) => numbered(prefix, spelling).nonEmpty)
-          .map((spelling, value) => View.Register(spelling, Some(value)))
+        val registers = selectors.collect {
+          case (spelling, value) if numbered(prefix, spelling).nonEmpty =>
+            View.Register(spelling, Some(value))
+        }
         Option.when(registers.nonEmpty)(View.RegisterFile(title, description, registers))
       }
-      val special = selectors.filter((spelling, _) =>
-        spelling.headOption.exists(_.isLetter) && !NumberedPrefixes.exists(numbered(_, spelling).nonEmpty)
-      ).map((spelling, value) => View.Register(spelling, Some(value)))
-      val constants = selectors.filterNot((spelling, _) => spelling.headOption.exists(_.isLetter))
-        .map((spelling, value) => View.Register(spelling, Some(value)))
+      val special = selectors.collect {
+        case (spelling, value)
+            if spelling.headOption.exists(_.isLetter) && !NumberedPrefixes.exists(numbered(_, spelling).nonEmpty) =>
+          View.Register(spelling, Some(value))
+      }
+      val constants = selectors.collect {
+        case (spelling, value) if !spelling.headOption.exists(_.isLetter) =>
+          View.Register(spelling, Some(value))
+      }
       Vec(
         file("s", "SGPR", s"Scalar registers shared by the wave ($isa source selector values)."),
         file("v", "VGPR", "Vector registers, one 32-bit lane value per work-item; sources encode them from 256."),
@@ -406,11 +412,13 @@ object AMDGPUModel extends Model {
           .orElse(AMDGPUInstances.unsupported(entry.mnemonic, value).map(NotImplemented(_)))
           .orElse(AMDGPUInstances.unwritable(entry.mnemonic, value).map(NotModelled(_)))
           .getOrElse {
-            val found    = computed
-            val failures = found.flatMap(_.outcome.left.toOption)
+            val found = computed
             if (found.isEmpty) NotInstantiated("No instance of the form can be written.")
-            else failures.collectFirst { case Unrendered.Rejected(reason) => NotImplemented(reason) }
-              .getOrElse(Unavailable.of(failures))
+            else {
+              val failures = found.flatMap(_.outcome.left.toOption)
+              failures.collectFirst { case Unrendered.Rejected(reason) => NotImplemented(reason) }
+                .getOrElse(Unavailable.of(failures))
+            }
           }
     }
   }

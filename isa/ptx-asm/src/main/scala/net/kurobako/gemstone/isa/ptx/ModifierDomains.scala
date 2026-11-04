@@ -65,14 +65,15 @@ object ModifierDomains {
   private def attempt(form: ModifierForm, actual: Vec[Modifier]): Attempt = {
     val ordered                         = canonical(form, actual)
     val known                           = (form.required ++ form.optional).flatMap(_.values).toSet
+    val optionals                       = form.optional.flatMap(_.values).toSet
     val start                           = (Set(0), 0, Option.empty[ModifierViolation])
     val (positions, reached, violation) = ordered.foldLeft(start) { case ((positions, reached, violation), modifier) =>
       if (violation.nonEmpty) (positions, reached, violation)
       else {
-        val next = positions.flatMap { position =>
+        val optional = optionals(modifier)
+        val next     = positions.flatMap { position =>
           val required = form.required.lift(position).exists(_.values.contains(modifier))
-          Option.when(required)(position + 1).toSet ++
-            Option.when(form.optional.exists(_.values.contains(modifier)))(position).toSet
+          Option.when(required)(position + 1).toSet ++ Option.when(optional)(position).toSet
         }
         if (next.nonEmpty) (next, reached + 1, None)
         else {

@@ -43,7 +43,7 @@ class InterpreterSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     cases.zipWithIndex.foreach { case ((_, _, _, expected), index) =>
       assertEquals(
         memory.readLittleEndian(
@@ -249,7 +249,7 @@ class InterpreterSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(memory.readInt32(memory.start).toOption.get, 255)
   }
 
@@ -281,7 +281,7 @@ class InterpreterSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(2)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(0, 0x3f800000)
@@ -331,7 +331,7 @@ class InterpreterSuite extends Suite {
       memory
     )
 
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(16)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec.from(0.until(16))
@@ -361,7 +361,7 @@ class InterpreterSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec(memory.readInt32(memory.start).toOption.get, memory.readInt32(memory.start.offset(4L)).toOption.get),
       Vec(32, 16)

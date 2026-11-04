@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.isa.amdgpu.domain.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class DomainSuite extends Suite {
   private def target(isa: ISA): Target = Target.all.find(_.isa == isa).get

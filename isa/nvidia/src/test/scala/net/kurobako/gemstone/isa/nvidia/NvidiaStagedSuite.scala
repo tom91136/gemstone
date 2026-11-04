@@ -7,7 +7,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Random
 
@@ -275,14 +275,17 @@ class NvidiaStagedSuite extends Suite {
     )
     assertEquals(
       show(Instruction.Shuffle(ShuffleMode.Down, register, Some(predicate), ra, rb, rc, re, 32)),
-      """def op(a: UInt[32], b: UInt[32], c: UInt[32])(using warp: Warp): (p: Bool, d: UInt[32]) = {
-        |  val v0 = warp.laneId().to[UInt[64]]
-        |  val v1 = v0 + b.to[UInt[5]].to[UInt[32]].to[UInt[64]]
-        |  val v2 = v1.to[SInt[64]]
-        |  val v3 = v2 <= min(c.to[SInt[64]], SInt[64](31)) && v2 < warp.lanes().to[SInt[64]]
+      """def op(a: UInt[32], b: UInt[32], c: UInt[32], e: UInt[32])(using warp: Warp): (p: Bool, d: UInt[32]) = {
+        |  val v0 = warp.laneId()
+        |  val v1 = v0.to[UInt[64]]
+        |  val v2 = v1 + b.to[UInt[5]].to[UInt[32]].to[UInt[64]]
+        |  val v3 = v2.to[SInt[64]]
+        |  val v4 = (c >> 8).to[UInt[5]]
+        |  val v5 = v3 <= ((v0 & v4.to[UInt[32]]) | (c.to[UInt[5]] & ~v4).to[UInt[32]]).to[SInt[64]] && v3 < warp.lanes().to[SInt[64]]
+        |  val v6 = if (v5) v2 else v1
         |  (
-        |    p = v3,
-        |    d = warp.shuffle[UInt[32]](a, if (v3) v1.to[UInt[32]] else v0.to[UInt[32]])
+        |    p = v5,
+        |    d = if ((e >> v6).to[UInt[1]] == UInt[1](0)) UInt[32](0) else warp.shuffle[UInt[32]](a, v6.to[UInt[32]])
         |  )
         |}""".stripMargin
     )

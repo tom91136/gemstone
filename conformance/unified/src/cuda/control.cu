@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
+
+#include <cooperative_groups.h>
 
 #include "cuda/support.cuh"
 #include <aspartame/all.hpp>
@@ -9,9 +12,11 @@
 #include <cuda_runtime_api.h>
 
 #include "test_support.hpp"
+#include <cooperative_groups/reduce.h>
 #include <fmt/format.h>
 
 using namespace aspartame;
+namespace cg = cooperative_groups;
 
 // Divergence and reconvergence, nested loops with break and continue, recursion, indirect calls and switch jump
 // tables: SSY/SYNC, PBK/BRK, CAL/PRET/RET and BRX before Volta, BSSY/BSYNC/BREAK, CALL/RET and BRX after it.
@@ -309,3 +314,178 @@ TEST_CASE("control/cuda/early-exit", "[unified][control]") {
   }
   compare(output.download(), expected, "early exit");
 }
+
+namespace {
+constexpr uint32_t Half = 0x0000ffffU;
+constexpr uint32_t Predecessors = 8;
+constexpr uint32_t Sentinel = 0x0000deadU;
+constexpr uint32_t GlobalFlag = 0x40000000U;
+constexpr uint32_t ValueMask = 0x3fffffffU;
+
+enum class Shape { Full, HalfReturned, HalfLive, Diverged, Repeated };
+
+__host__ __device__ constexpr bool halfWarp(Shape shape) { return shape == Shape::HalfReturned || shape == Shape::HalfLive; }
+
+// Lane t flags predecessor t % 9, so lanes 8, 17 and 26 never see a flag and walk every predecessor.
+std::vector<uint32_t> lookbackInput() {
+  std::vector<uint32_t> values(static_cast<size_t>(Predecessors) * 32);
+  for (uint32_t block = 0; block < Predecessors; ++block)
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      values[(block * 32) + lane] = (block == lane % 9U ? GlobalFlag : 0U) | (lane + block + 1);
+  return values;
+}
+
+// Decoupled look-back over the predecessors of one warp, with the ballot shape of CUB onesweep. Each round
+// starts from the full warp or the lower half, and the mask carries only lanes that have not seen a flag.
+template <Shape S> __global__ void lookback(const uint32_t *table, uint32_t *out) {
+  const uint32_t lane = threadIdx.x;
+  if constexpr (S == Shape::HalfReturned) {
+    if (lane >= 16U) return;
+  }
+  if constexpr (S == Shape::HalfLive) {
+    if (lane >= 16U) {
+      for (uint32_t k = 0; k < 40U; ++k)
+        (void)*static_cast<const volatile uint32_t *>(table + ((k & 7U) * 32U) + lane);
+      return;
+    }
+  }
+  uint32_t sum = 0;
+  uint32_t mask = 0;
+  for (uint32_t round = 0; round < (S == Shape::Repeated ? 2U : 1U); ++round) {
+    sum = 0;
+    mask = halfWarp(S) ? Half : Full;
+    for (uint32_t block = Predecessors; block-- > 0;) {
+      const uint32_t *slot = table + (block * 32U) + lane;
+      uint32_t value = 0;
+      do {
+        __threadfence_block();
+        value = *static_cast<const volatile uint32_t *>(slot);
+      } while (value == 0U);
+      sum += value & ValueMask;
+      if constexpr (S == Shape::Diverged) {
+        for (uint32_t k = 0; k < lane % 5U; ++k)
+          asm volatile("" ::: "memory");
+      }
+      mask = __ballot_sync(mask, (value & GlobalFlag) == 0U);
+      if (value & GlobalFlag) break;
+    }
+  }
+  out[lane] = sum;
+  out[32 + lane] = mask;
+}
+
+std::vector<uint32_t> lookbackExpected(Shape shape) {
+  const uint32_t active = halfWarp(shape) ? Half : Full;
+  std::vector<uint32_t> expected(64, Sentinel);
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    if (!(active >> lane & 1U)) continue;
+    const uint32_t stop = lane % 9U < Predecessors ? lane % 9U : 0U;
+    uint32_t sum = 0;
+    for (uint32_t block = Predecessors; block-- > stop;)
+      sum += lane + block + 1;
+    expected[lane] = sum;
+    expected[32 + lane] = iota(0U, 32U) | fold_left(0U, [&](uint32_t mask, uint32_t other) {
+                            const uint32_t flag = other % 9U;
+                            return mask | (static_cast<uint32_t>((flag < stop || flag == Predecessors) && (active >> other & 1U)) << other);
+                          });
+  }
+  return expected;
+}
+
+template <Shape S> void runLookback(std::string_view name) {
+  const auto table = lookbackInput();
+  DeviceBuffer<uint32_t> input(table);
+  DeviceBuffer<uint32_t> output(std::vector<uint32_t>(64, Sentinel));
+  lookback<S><<<1, 32>>>(input.data, output.data);
+  finish(name);
+  compare(output.download(), lookbackExpected(S), name);
+}
+
+template <bool Divergent> __host__ __device__ constexpr bool participates(uint32_t lane) { return !Divergent || lane % 3U != 2U; }
+
+template <bool Divergent> __host__ __device__ constexpr uint32_t labelOf(uint32_t lane) {
+  return Divergent ? (lane / 4U) % 3U : (lane * 7U) % 5U;
+}
+
+std::vector<uint32_t> labeledInput() {
+  std::vector<uint32_t> values(32);
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    values[lane] = (lane * 37U + 11U) % 101U;
+  return values;
+}
+
+// Divergent participants leave every third lane out, so the partition sees a sparse active mask.
+template <bool Divergent> __global__ void labeled(const uint32_t *values, uint32_t *out) {
+  const uint32_t lane = threadIdx.x;
+  const uint32_t value = values[lane];
+  uint32_t reduced = Sentinel;
+  uint32_t next = Sentinel;
+  uint32_t odd = Sentinel;
+  uint32_t peers = Sentinel;
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+  if (participates<Divergent>(lane)) {
+    const uint32_t label = labelOf<Divergent>(lane);
+    auto group = cg::labeled_partition(cg::coalesced_threads(), label);
+    reduced = cg::reduce(group, value, cg::greater<uint32_t>());
+    next = group.shfl(value, (group.thread_rank() + 1) % group.size());
+    peers = __match_any_sync(__activemask(), label);
+    odd = __ballot_sync(peers, value & 1U);
+  }
+#else
+  (void)value;
+#endif
+  out[lane] = reduced;
+  out[32 + lane] = next;
+  out[64 + lane] = odd;
+  out[96 + lane] = peers;
+}
+
+template <bool Divergent> std::vector<uint32_t> labeledExpected(const std::vector<uint32_t> &values) {
+  std::vector<uint32_t> expected(128, Sentinel);
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    if (!participates<Divergent>(lane)) continue;
+    std::vector<uint32_t> members;
+    for (uint32_t other = 0; other < 32; ++other)
+      if (participates<Divergent>(other) && labelOf<Divergent>(other) == labelOf<Divergent>(lane)) members.push_back(other);
+    const size_t rank = std::find(members.begin(), members.end(), lane) - members.begin();
+    uint32_t reduced = 0;
+    uint32_t odd = 0;
+    uint32_t peers = 0;
+    for (uint32_t member : members) {
+      reduced = std::max(reduced, values[member]);
+      if (values[member] & 1U) odd |= 1U << member;
+      peers |= 1U << member;
+    }
+    expected[lane] = reduced;
+    expected[32 + lane] = values[members[(rank + 1) % members.size()]];
+    expected[64 + lane] = odd;
+    expected[96 + lane] = peers;
+  }
+  return expected;
+}
+
+template <bool Divergent> void runLabeled(std::string_view name) {
+  if (capability() < 70) SKIP("labeled_partition requires compute capability 7.0");
+  const auto values = labeledInput();
+  DeviceBuffer<uint32_t> input(values);
+  DeviceBuffer<uint32_t> output(std::vector<uint32_t>(128, Sentinel));
+  labeled<Divergent><<<1, 32>>>(input.data, output.data);
+  finish(name);
+  compare(output.download(), labeledExpected<Divergent>(values), name);
+}
+
+} // namespace
+
+TEST_CASE("control/cuda/lookback-full", "[unified][control]") { runLookback<Shape::Full>("lookback full"); }
+
+TEST_CASE("control/cuda/lookback-half-returned", "[unified][control]") { runLookback<Shape::HalfReturned>("lookback half returned"); }
+
+TEST_CASE("control/cuda/lookback-half-live", "[unified][control]") { runLookback<Shape::HalfLive>("lookback half live"); }
+
+TEST_CASE("control/cuda/lookback-diverged", "[unified][control]") { runLookback<Shape::Diverged>("lookback diverged"); }
+
+TEST_CASE("control/cuda/lookback-repeated", "[unified][control]") { runLookback<Shape::Repeated>("lookback repeated"); }
+
+TEST_CASE("control/cuda/labeled-partition-full", "[unified][control]") { runLabeled<false>("labeled partition full"); }
+
+TEST_CASE("control/cuda/labeled-partition-divergent", "[unified][control]") { runLabeled<true>("labeled partition divergent"); }

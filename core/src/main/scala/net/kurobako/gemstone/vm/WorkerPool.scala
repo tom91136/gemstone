@@ -5,7 +5,6 @@ import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
@@ -18,9 +17,10 @@ object WorkerPool {
   case class Measurement(taskCount: Long >= 0, workers: Int, elapsedNanos: Long)
 }
 
-/** One fixed CPU pool. Jobs rotate after each chunk; nested callers execute only their awaited job. A launch only stays
-  * on the calling thread when it is too small to amortise queue traffic; claiming a range per dequeue keeps that
-  * threshold low.
+/** One fixed CPU pool. Jobs rotate after each task; nested callers execute only their awaited job. A launch only stays
+  * on the calling thread when it is too small to amortise queue traffic. Tasks are claimed one at a time in index
+  * order, so every running task has all lower indices claimed and running or done; a task may wait on a lower index
+  * (decoupled look-back) without waiting on one that no worker has started.
   */
 class WorkerPool(
     val parallelism: Int > 0,
@@ -33,7 +33,6 @@ class WorkerPool(
 ) extends Workgroups with ExecutionContext with AutoCloseable {
   private class Job(
       val count: Long >= 0,
-      val grain: Int in 1 ~ 128,
       val task: Long >= 0 => Either[Fault, Unit],
       val rejected: Option[Throwable => Unit]
   ) {
@@ -63,54 +62,40 @@ class WorkerPool(
     thread
   }
 
-  /** Bound each claim so a large dispatch cannot monopolise workers while another client waits. */
-  private def grainFor(count: Long >= 0): Int in 1 ~ 128 = {
-    val perWorker = parallelism.toLong * 4L
-    val grain     = if (count <= perWorker) 1L else (count.raw - 1L) / perWorker + 1L
-    math.max(1L, math.min(count, math.min(grain, 128L))).toInt.unsafe[Int in 1 ~ 128]
-  }
-
   private def enqueue(
       count: Long >= 0,
       task: Long >= 0 => Either[Fault, Unit],
       rejected: Option[Throwable => Unit] = None
   ): Job = lock.withLock {
     if (closed) throw RejectedExecutionException("execution pool is closed", failure.orNull)
-    val job = Job(count, grainFor(count), task, rejected)
+    val job = Job(count, task, rejected)
     if (count > 0L) { queue.append(job); workReady.signalAll() }
     job
   }
 
-  private def take(until: Option[Job]): Option[(Job, Long >= 0, Int >= 0)] = lock.withLock {
+  private def take(until: Option[Job]): Option[(Job, Long >= 0)] = lock.withLock {
     // Helping another job can trap this caller in a long group even after its own
     // dispatch completes. Idle workers still share the full queue.
     def eligible: Int = queue.indexWhere(job => until.forall(_ eq job))
     while (!closed && eligible < 0 && until.forall(!_.finished)) workReady.await()
     if (closed || until.exists(_.finished)) None
     else {
-      val job    = queue.remove(eligible)
-      val start  = job.next
-      val length = (job.count - start).min(job.grain)
-      val end    = start + length
-      job.next = end
+      val job   = queue.remove(eligible)
+      val index = job.next
+      job.next = index + 1L
       job.active += 1
       job.observed.foreach(_ += Thread.currentThread().getName)
       if (job.next < job.count) { queue.append(job); workReady.signal() }
-      Some((job, start, length.toIntExact))
+      Some((job, index))
     }
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def execute(work: (Job, Long >= 0, Int >= 0)): Unit = {
-    val (job, start, length)         = work
+  private def execute(work: (Job, Long >= 0)): Unit = {
+    val (job, index)                 = work
     var outcome: Either[Fault, Unit] = Right(())
-    try {
-      var offset: Int >= 0 = 0
-      while (offset < length && outcome.isRight) {
-        outcome = job.task(start + offset.widen[Long >= 0])
-        offset += 1
-      }
-    } catch {
+    try outcome = job.task(index)
+    catch {
       case NonFatal(error) =>
         val detail = throwables.detail(error)
         outcome = Left(Fault.Backend(detail))
@@ -200,6 +185,9 @@ class WorkerPool(
   }
 
   override def reportFailure(cause: Throwable): Unit = reporter(cause)
+
+  // A worker awaiting a nested job runs only that job's tasks, so one job never runs on more than the workers.
+  override def concurrency: Int > 0 = parallelism
 
   override def shouldParallel(taskCount: Long >= 0, workItemsPerTask: Long >= 0): Boolean =
     parallelism > 1 && taskCount > 1L &&

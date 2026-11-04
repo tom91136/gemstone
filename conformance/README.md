@@ -6,7 +6,7 @@ Commands below run from this directory. Workloads select tests at run time; they
 
 ## Artifacts
 
-`artifacts/` is an outer CMake project that expands a target set into container builds:
+`artifacts/` is an outer CMake project that expands a build profile into container builds:
 
 ```console
 cmake -S artifacts -B build/artifacts -G Ninja
@@ -18,6 +18,7 @@ Artifacts are written to `build/artifacts/output`:
 
 ```text
 cuda/support-11.8/   cuda/support-13.3/   cuda/support-gcc/
+cuda/support-offload/
 cuda/sm_89/          cuda/clang/sm_89/    cuda/gcc/sm_80/
 hip/support/         hip/gfx1030/
 hsa/support/         hsa/support-gcc/     hsa/gfx1030/   hsa/gcc/gfx906/
@@ -25,23 +26,26 @@ opencl/  sycl/  levelzero/  vulkan/
 ```
 
 Support directories hold the shared `lib/`, `data/`, and `licences/` payloads; compiler variants share their
-backend's support unless their runtime closure differs, as GCC's offload plugins do. Architecture directories hold
-`artifact.toml`, `conformance-device`, `test-programs.txt`, and the test executables.
+backend's support unless their runtime closure differs, as GCC's offload plugins do. Clang routes also load
+`support-offload`, which holds the OpenMP offload runtime and is named by `supplements` in `artifact.toml`.
+Architecture directories hold `artifact.toml`, `conformance-device`, `test-programs.txt`, and the test executables.
 
-| Target set | Matrix |
+| Build profile | Matrix |
 | --- | --- |
-| `default` | CUDA `sm_89`, HIP/HSA `gfx1030`, OpenCL, SYCL, Level Zero, Vulkan |
+| machine profile | The backends and architectures named by the targets of `profiles/<name>.toml`, for example `sora-framework16` builds CUDA `sm_120`, HIP/HSA `gfx1150`, OpenCL, and Vulkan |
 | `complete` | CUDA `sm_35`-`sm_120` (11.8 up to `sm_70`, 13.3 after), the architecture-specific `sm_90a`, `sm_100a`, `sm_103a`, and `sm_120a`, the family-specific `sm_100f`, `sm_103f`, and `sm_120f`, AMD `gfx803`-`gfx1201`, OpenCL, SYCL, Level Zero, Vulkan, and OpenACC `sm_50`-`sm_120` (NVHPC 25.7 up to `sm_70`, 26.5 after, base targets only) |
-| `legacy-gfx803` | HIP and HSA `gfx803`, without rocBLAS |
 
-Select a set with `-DCONFORMANCE_TARGET_SET=<name>`, or override parts of it with `-DCONFORMANCE_BACKENDS`,
-`-DCUDA_ARCHITECTURES`, `-DAMDGPU_ARCHITECTURES`, and `-DCONFORMANCE_COMPILERS` (comma-separated).
-`cmake -DCONFORMANCE_TARGET_SET=complete -P artifacts/Targets.cmake` prints the execution routes.
+Whatever the profile, every program is built for the selected architectures; the run tier alone decides what runs.
+Select a profile with `-DCONFORMANCE_BUILD_PROFILE=<name>` (empty names the profile of the local short hostname), or
+override parts of it with `-DCONFORMANCE_BACKENDS`, `-DCUDA_ARCHITECTURES`, `-DAMDGPU_ARCHITECTURES`, and
+`-DCONFORMANCE_COMPILERS` (comma-separated). `cmake -DCONFORMANCE_BUILD_PROFILE=complete -P artifacts/Targets.cmake`
+prints the execution routes. A rocBLAS gap on one architecture, such as `gfx803`, disables rocBLAS for that architecture's
+route only.
 
 | Compiler | Backends | Coverage |
 | --- | --- | --- |
 | `vendor` | All | Every suite |
-| `clang` | CUDA | Clang 22 CUDA frontend; unified tests and CUDA miniapps |
+| `clang` | CUDA | Clang 22 CUDA frontend and OpenMP offload; unified tests, CUDA miniapps, and OpenMP target miniapps |
 | `gcc` | CUDA, HSA | GCC 14 OpenMP target miniapps; CUDA routes are PTX only |
 
 CUDA architectures are `sm_<capability>` with an optional `a` or `f` suffix. An `a` route compiles
@@ -76,7 +80,7 @@ CI builds the SYCL CTS as four shards on separate runners, each with `CONFORMANC
 `artifacts/sycl`. Shard membership is in `cts/sycl/CMakeLists.txt`; shard 0 also builds the unified suite and the
 miniapps.
 
-`cmake -DCONFORMANCE_TARGET_SET=<target set> -DMODE=build|run -P artifacts/Shards.cmake` prints the CI build or
+`cmake -DCONFORMANCE_BUILD_PROFILE=<build profile> -DMODE=build|run -P artifacts/Shards.cmake` prints the CI build or
 emulation shards as a GitHub Actions matrix.
 Its policy groups routes by the first pattern they match, and a route that matches none goes to the first group's
 shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. The run shards
@@ -100,7 +104,7 @@ cmake -S . -B build/executable -G Ninja -DCONFORMANCE_BUILD_UNIFIED=OFF -DCONFOR
   -DCONFORMANCE_BUILD_MINIAPPS=OFF
 cmake --build build/executable --target conformance
 build/executable/bin/conformance run --profiles profiles --artifacts build/artifacts/output \
-  --machine soraws-uk --workload full --output build/reports/direct
+  --machine soraws-uk --workload xlong --output build/reports/direct
 ```
 
 `conformance run` resolves artifacts, probes devices, discovers cases, and runs them in parallel. Each case applies
@@ -123,20 +127,31 @@ Timeouts suit a 32-thread host. Isolated launchers stretch them up to fourfold o
 set. Integer settings take positive whole numbers and `_ON` settings take `1 true on y yes` or `0 false off n no` in
 any case; an empty value counts as unset, and any other value fails before the run starts.
 
-CUDA routes are `cuda-ptx` and `cuda-sass`; `cuda/sm_*` expands to both. They share one artifact; a route sets only
-`CONFORMANCE_CUDA_CODE_MODE`, from which the runner derives NVIDIA's `CUDA_FORCE_PTX_JIT`/`CUDA_DISABLE_PTX_JIT` and the
-`sbt` launcher derives `GEMSTONE_CUDA_CODE_MODE`. PTX mode rejects cubin-only images and SASS mode never falls back to PTX.
-Explicit memory fixtures are assembled to cubins by the pinned `ptxas`. BLAS kernels absent from the pinned vendor
-package are reported as unsupported. `-DCONFORMANCE_CUDA_CUBIN_ONLY=ON` builds fatbinaries without PTX in a separate
-output directory. Large GEMM cases can exceed Gemstone's default instruction budget; raise
+CUDA routes are `cuda-ptx` and `cuda-sass`; `cuda/sm_*` expands to both. Each has its own artifact: `cuda-ptx/<arch>`
+holds PTX only, so the driver JITs the program's own kernels while vendor libraries keep their SASS, and `cuda/<arch>`
+is the fatbin with SASS and PTX for `cuda-sass`. Clang cannot emit a PTX-only image, so its PTX-only artifacts compile
+each translation unit through `cmake/clang-cuda-ptx.sh`, which emits PTX, wraps it with `fatbinary`, and embeds the
+fatbinary in the host object. The route sets only `CONFORMANCE_CUDA_CODE_MODE`, from which the
+artifact directory and the expected artifact `code` follow, and the `sbt` launcher derives `GEMSTONE_CUDA_CODE_MODE`.
+SASS mode sets `CUDA_DISABLE_PTX_JIT` and never falls back to PTX.
+Clang PTX modules can take minutes each to JIT, so on a PTX-only artifact without an isolated launcher the driver first runs
+one unskipped case of every program with `CUDA_MODULE_LOADING=EAGER`. That loads, and so caches, all of the program's modules,
+and the cases then run with their normal timeouts. The warm-up has a two-hour bound (scaled by `CONFORMANCE_TIMEOUT_SCALE`),
+prints its time per program, writes its log under `warmup/` in the target's report directory, and fails the program's cases
+when it fails. The driver pins `CUDA_CACHE_PATH` to `jit-cache` in the output directory and `CUDA_CACHE_MAXSIZE` to the
+driver maximum of 4 GiB, because the default 1 GiB cache in `~/.nv` evicts the modules; later runs reuse the cache.
+Explicit memory fixtures are assembled to cubins by the pinned `ptxas`. rocBLAS kernels absent from the pinned
+vendor package are reported as unsupported. Large GEMM cases can exceed Gemstone's default instruction budget; raise
 `GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT` for them.
 
 ## Workloads
 
 | `--workload` | Selection |
 | --- | --- |
-| `compact` | Compact unified matrices, CTS samples, and all miniapps |
-| `full` | Unified tests and miniapps plus the three bounded CTS selections |
+| `short` | Compact unified matrices, CTS samples, and all miniapps, without vendor suites, rocThrust-semantic cases, or release-only programs; for fast local iteration |
+| `long` | Local pre-push assurance: everything `xlong` runs except the vendor suites, the rocThrust-semantic cases, and the heavy Level Zero CTS families |
+| `xlong` | What CI runs: `long` plus the vendor suites, the rocThrust-semantic cases, and the heavy Level Zero CTS families |
+| `all` | Release run: every compiled case, including the exhaustive CTS sweeps, the full OpenCL CTS categories, and the slow vendor samples |
 | `cts-bounded` | The bounded OpenCL, SYCL, and Vulkan CTS selections |
 | `opencl-cts` / `sycl-cts` | Every compiled case from that CTS |
 | `vulkan-cts` | The pinned Vulkan mustpass manifest |
@@ -146,9 +161,17 @@ output directory. Large GEMM cases can exceed Gemstone's default instruction bud
 | `sycl-cts-bounded` | SYCL CTS without the full-type `range_api` launch |
 | `miniapps` | Miniapps across the selected compiler routes |
 
-The TOML files in [workloads](workloads) define them: `extends` inherits a workload, supplied fields replace inherited
-ones, `include_programs` takes globs, exact `exclude_programs` win, `specs` filters Catch2 names, and
-`levelzero_cases` filters Google Test names. Targets without matching tests are omitted; an empty selection fails.
+The tiers nest: `short` < `long` < `xlong` < `all`, and each extends the previous. The TOML files in
+[workloads](workloads) define them: `extends` inherits a workload, supplied fields replace inherited ones, and an
+`add_` prefix (`add_levelzero_cases`, `add_exclude_programs`, ...) appends to the inherited list instead.
+`include_programs` and `exclude_programs` take program-name globs and exclusions win, `exclude_cases` takes case-identity
+globs dropped after discovery, `specs` filters Catch2 names, and `levelzero_cases` filters Google Test names. Targets
+without matching tests are omitted; an empty selection fails. `conformance run --dry-run` and
+`sbt conformance/emulate --dry-run` print the selected case count per route and program without running anything.
+
+Programs named `vendor_*` are the vendor suites (CUDA samples, libraries and CCCL; ROCm examples, rocPRIM, hipCUB, and
+rocThrust tests); name new ones the same way and only `xlong` and `all` select them. Cases tagged `[release]` are
+selected only by `all`.
 
 | Environment variable | Effect |
 | --- | --- |
@@ -162,14 +185,17 @@ Unless the profile or the invoking environment sets them, isolated launchers use
 mode; `sbt conformance/emulate` passes smaller defaults. `vulkan-cts` and `vulkan-info` expand glob selectors against
 the pinned mustpass manifest.
 
-`-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=ON` builds the full SYCL type and operation matrices; keep it in a separate
-build directory.
+Every program is always built, including the release-only ones: the OpenCL CTS allocation, bruteforce, conversion and
+select categories and the slow CUDA samples, libraries and CCCL examples, all tagged `[release]`. Only the `all` workload
+selects them. The SYCL CTS also builds each category with `SYCL_CTS_ENABLE_FULL_CONFORMANCE` as a separate program
+named `sycl_cts_full_conformance_<category>`, because that mode changes test bodies at compile time and cannot be
+selected at run time. These programs are excluded by every workload except `all`.
 
 ## Suites
 
 The unified suite registers `memory/<allocation>/<scenario>` for CUDA, HIP, HSA, Level Zero, OpenCL, and SYCL:
 contiguous, strided, gather, and linked access, queue ordering, publication, fences, RMW, and compare-exchange.
-Compact uses each backend's default allocation and 32-bit words; full adds further allocation kinds and 64-bit
+Short uses each backend's default allocation and 32-bit words; long and above add further allocation kinds and 64-bit
 operations. Missing optional capabilities skip explicitly.
 
 Vulkan builds VK-GL-CTS `vulkan-cts-1.4.6.2` headlessly. dEQP runs one case per process with shader caching

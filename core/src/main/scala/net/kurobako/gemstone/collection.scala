@@ -1,14 +1,10 @@
 package net.kurobako.gemstone
 
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.locks.ReentrantLock
-import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 import scala.compiletime.constValue
-import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 
 object collection {
@@ -112,52 +108,4 @@ object collection {
     * collection experiments local to this namespace. Array ownership transfer is explicit through `unsafeWrapArray`.
     */
   type Vec[+A] = ArraySeq[A]
-
-  object LRUCache {
-    def apply[K, V](capacity: Int > 0): LRUCache[K, V] = new LRUCache(capacity)
-  }
-
-  /** Bounded LRU reuse of immutable results. Different keys compute concurrently; identical keys share in-flight work.
-    */
-  class LRUCache[K, V] private (capacity: Int > 0) {
-    private val lock = ReentrantLock()
-
-    private case class Key(value: K) {
-      private val hash             = value.##
-      override def hashCode(): Int = hash
-    }
-
-    // Java's LinkedHashMap supplies access ordering; Scala's mutable LinkedHashMap is insertion ordered.
-    private val mutableEntries  = java.util.LinkedHashMap[Key, PlatformConcurrency.Once[V]](capacity, 0.75f, true)
-    private val mutableInFlight = mutable.HashMap.empty[Key, PlatformConcurrency.Once[V]]
-
-    def get(key: K)(compute: => V): V = {
-      // Large immutable byte keys must be hashed once, before taking the shared lock. Publication,
-      // in-flight lookup and eviction all reuse that hash instead of rescanning the module bytes.
-      val lookup         = Key(key)
-      val (entry, owner) = lock.withLock {
-        Option(mutableEntries.get(lookup)) match {
-          case Some(entry) => entry -> false
-          case None        => mutableInFlight.get(lookup) match {
-              case Some(entry) => entry -> false
-              case None        =>
-                val entry = PlatformConcurrency.once[V](() => compute)
-                val _     = mutableInFlight.put(lookup, entry)
-                entry -> true
-            }
-        }
-      }
-      if (owner) {
-        entry.run()
-        lock.withLock {
-          val _ = mutableInFlight.remove(lookup)
-          val _ = mutableEntries.put(lookup, entry)
-          while (mutableEntries.size() > capacity)
-            mutableEntries.keySet().asScala.headOption.foreach(oldest => mutableEntries.remove(oldest))
-        }
-      }
-      try entry.get()
-      catch { case error: ExecutionException => throw error.getCause }
-    }
-  }
 }

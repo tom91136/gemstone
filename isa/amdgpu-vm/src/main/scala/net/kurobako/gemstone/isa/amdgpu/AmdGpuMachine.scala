@@ -53,6 +53,7 @@ private trait AmdGpuMachine[V, L, D, F[_]]
 
   /** The writes the kernel makes to host-mapped memory become visible to the host. */
   inline def fenceHost: F[Int]
+  inline def hostcall: F[Int]
 
   /** The wave arrives at its workgroup's barrier and waits for the other waves of the workgroup. */
   inline def barrier: F[Int]

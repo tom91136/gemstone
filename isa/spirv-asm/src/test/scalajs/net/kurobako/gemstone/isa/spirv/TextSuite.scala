@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.isa.spirv.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class TextSuite extends Suite {
   test("SPIR-V text assembles to a binary that disassembles to the same text") {

@@ -3,6 +3,7 @@ package net.kurobako.gemstone
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLongArray
 import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
 
@@ -49,6 +50,10 @@ private object PlatformConcurrency {
     }
   }
 
+  class InitialThreadLocal[A](initial: () => A) extends ThreadLocal[A] {
+    override protected def initialValue(): A = initial()
+  }
+
   def once[A](compute: () => A): Once[A] = Once(compute)
 
   def readWriteLock(): ReadWriteLock = ReadWriteLock()
@@ -63,5 +68,17 @@ private object PlatformConcurrency {
 
   inline def setRelease(value: AtomicInteger, next: Int): Unit = value.set(next)
 
+  inline def getAcquire(values: AtomicLongArray, index: Int): Long = values.get(index)
+
+  inline def setRelease(values: AtomicLongArray, index: Int, next: Long): Unit = values.set(index, next)
+
+  def threadLocal[A](initial: () => A): ThreadLocal[A] = InitialThreadLocal(initial)
+
   inline def threadId(): Long = 0L
+
+  inline def parkNanos(nanos: Long): Unit = { val _ = nanos }
+
+  inline def yieldThread(): Unit = ()
+
+  inline def onSpinWait(): Unit = ()
 }

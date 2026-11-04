@@ -3,7 +3,6 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Tcgen05.*
@@ -67,59 +66,51 @@ private object VMTensorMemoryCompiler {
     }
   }
 
-  private def named(name: String)(using context: VMCompilationContext): Boolean =
-    context.modifiers.exists(_.name == name)
-
   /** The width a uniform store or reduction moves, from its size modifier. */
-  private def width(using VMCompilationContext): ScalarBitWidth =
-    if (named("U8") || named("S8")) 8
-    else if (named("U16") || named("S16")) 16
-    else if (named("64") || named("U64") || named("S64")) 64
+  private def width(using context: VMCompilationContext): ScalarBitWidth =
+    if (context.named("U8") || context.named("S8")) 8
+    else if (context.named("U16") || context.named("S16")) 16
+    else if (context.named("64") || context.named("U64") || context.named("S64")) 64
     else 32
 
-  private def access(using VMCompilationContext): MemoryAccess =
-    MemoryAccess.Global(named("SYS") || named("MMIO"))
-
-  /** Runs `instruction` for one elected lane of each warp, as a uniform-datapath instruction issues. */
-  private def once(instruction: VMIR.Instruction)(using context: VMCompilationContext): Unit = {
-    val elected = context.predicateTemp()
-    context.emit(Elect(None, elected.slot, Value.ActiveMask))
-    context.guarded(instruction, elected)
-  }
+  private def access(using context: VMCompilationContext): MemoryAccess =
+    MemoryAccess.Global(context.named("SYS") || context.named("MMIO"))
 
   /** A `tmem[URa+offset]` tensor memory address. */
   private def tensor(operand: Operand)(using context: VMCompilationContext): Value =
     context.address(OperandQueries.base(operand), global = false)
 
   /** The register a `[URa]` operand, or a plain one, names. */
-  private def named(operand: Operand): Operand = OperandQueries.base(operand) match {
+  private def registerOf(operand: Operand): Operand = OperandQueries.base(operand) match {
     case Operand.Address(base = Some(register)) => register
     case other                                  => other
   }
 
   /** The 64-bit value of the uniform register pair a `gdesc[URa]` or `URa` operand names. */
   private def wide(operand: Operand)(using context: VMCompilationContext): Value =
-    if (OperandQueries.isZero(named(operand))) Value.Immediate(0L) else context.pair(named(operand))
+    if (OperandQueries.isZero(registerOf(operand))) Value.Immediate(0L) else context.pair(registerOf(operand))
 
   private def word(operand: Operand, add: Int = 0)(using context: VMCompilationContext): Value =
-    context.register(named(operand), add)
+    context.register(registerOf(operand), add)
 
   private val counts = (0 to 7).map(power => s"x${1 << power}" -> (1 << power)).toMap
 
   private def movement(registers: Int => Int)(using context: VMCompilationContext): Movement = {
     val shape =
-      if (named("16dp64bit")) DataShape.Lanes16Bits64
-      else if (named("16dp128bit")) DataShape.Lanes16Bits128
-      else if (named("16dp256bit")) DataShape.Lanes16Bits256
-      else if (named("16dp32bit_t0_t15") || named("16dp32bit_t16_t31")) DataShape.Lanes16Bits32x2
+      if (context.named("16dp64bit")) DataShape.Lanes16Bits64
+      else if (context.named("16dp128bit")) DataShape.Lanes16Bits128
+      else if (context.named("16dp256bit")) DataShape.Lanes16Bits256
+      else if (context.named("16dp32bit_t0_t15") || context.named("16dp32bit_t16_t31")) DataShape.Lanes16Bits32x2
       else DataShape.Lanes32Bits32
     val count = context.modifiers.collectFirst(Function.unlift(modifier => counts.get(modifier.name))).getOrElse(1)
     Movement(
       shape,
       registers(count * shape.registers),
       0,
-      named("PACK16BIT") || named("EXPAND16BIT"),
-      if (named("16dp32bit_t0_t15")) Threads.Low else if (named("16dp32bit_t16_t31")) Threads.High else Threads.All
+      context.named("PACK16BIT") || context.named("EXPAND16BIT"),
+      if (context.named("16dp32bit_t0_t15")) Threads.Low
+      else if (context.named("16dp32bit_t16_t31")) Threads.High
+      else Threads.All
     )
   }
 
@@ -212,7 +203,7 @@ private object VMTensorMemoryCompiler {
       case _: Form.Utcomma => Kind.MXF4NVF4
     }
     val lanes =
-      if (scaled || ws || OperandQueries.isZero(named(extra))) Vec.empty[Value]
+      if (scaled || ws || OperandQueries.isZero(registerOf(extra))) Vec.empty[Value]
       else Vec.tabulate(if (pair) 8 else 4)(word(extra, _))
     once(TensorMemoryMultiply(Multiply(
       kind = kind,
@@ -231,7 +222,7 @@ private object VMTensorMemoryCompiler {
       disabled = lanes,
       scales = Option.when(scaled)((a = word(extra), b = word(extra, 1))),
       metadata = Some(word(operands(3))),
-      zeroColumns = Option.when(ws && !OperandQueries.isZero(named(extra)))(wide(extra)),
+      zeroColumns = Option.when(ws && !OperandQueries.isZero(registerOf(extra)))(wide(extra)),
       sparseByDescriptor = true
     )))
   }

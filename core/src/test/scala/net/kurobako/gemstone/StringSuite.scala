@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class StringSuite extends Suite {
   test("primitive integer literals retain signed bounds and Java radix prefixes") {

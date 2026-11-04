@@ -235,7 +235,7 @@ Domain bits(bool exclusive) {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/mma/half", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma/half", "[unified][runtime][tensor]") {
   bool ran = false;
   const auto toHalf = floating(half, half, 4, 1);
   const auto toSingle = floating(half, [](double value) { return floatBits(value); }, 4, 1);
@@ -246,7 +246,7 @@ TEST_CASE("runtime/cuda/mma/half", "[unified][runtime][tensor][compact]") {
   if (!ran) SKIP("the device runs none of these forms");
 }
 
-TEST_CASE("runtime/cuda/mma/bfloat16-tf32", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma/bfloat16-tf32", "[unified][runtime][tensor]") {
   bool ran = false;
   const auto single = [](double value) { return floatBits(value); };
   ran |= run<F32BF16K8>("m16n8k8 f32.bf16", floating(bfloat, single, 8, 0.5), 3);
@@ -256,7 +256,7 @@ TEST_CASE("runtime/cuda/mma/bfloat16-tf32", "[unified][runtime][tensor][compact]
   if (!ran) SKIP("the device runs none of these forms");
 }
 
-TEST_CASE("runtime/cuda/mma/integer", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma/integer", "[unified][runtime][tensor]") {
   bool ran = false;
   ran |= run<S8K16M8>("m8n8k16 s8.u8", integer(-128, 127, 0, 255, 8, false, 16, INT32_MIN, INT32_MAX), 3);
   ran |= run<S8K16M8Sat>("m8n8k16 satfinite s8", integer(-128, 127, -128, 127, 8, true, 16, INT32_MAX - 300000, INT32_MAX), 2);
@@ -271,7 +271,7 @@ TEST_CASE("runtime/cuda/mma/integer", "[unified][runtime][tensor][compact]") {
   if (!ran) SKIP("the device runs none of these forms");
 }
 
-TEST_CASE("runtime/cuda/mma/single-bit", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma/single-bit", "[unified][runtime][tensor]") {
   bool ran = false;
   ran |= run<XorK128M8>("m8n8k128 xor", bits(true), 2);
   ran |= run<AndK128M8>("m8n8k128 and", bits(false), 2);
@@ -280,7 +280,7 @@ TEST_CASE("runtime/cuda/mma/single-bit", "[unified][runtime][tensor][compact]") 
   if (!ran) SKIP("the device runs none of these forms");
 }
 
-TEST_CASE("runtime/cuda/mma/fp8", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma/fp8", "[unified][runtime][tensor]") {
   bool ran = false;
   const auto single = [](double value) { return floatBits(value); };
   ran |= run<F32E4M3K32>("m16n8k32 f32.e4m3", floating(e4m3, single, 8, 0.5), 3);
@@ -326,7 +326,7 @@ __global__ void doubleTile([[maybe_unused]] const double *a, [[maybe_unused]] co
 
 } // namespace
 
-TEST_CASE("runtime/cuda/mma/double", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma/double", "[unified][runtime][tensor]") {
   if (capability() < 80) SKIP("binary64 mma requires compute capability 8.0");
   std::mt19937 random(0x64626cU);
   constexpr int steps = 5;

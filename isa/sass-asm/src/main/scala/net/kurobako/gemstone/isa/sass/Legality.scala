@@ -16,10 +16,13 @@ object Legality {
     form.declared.foldLeft(bindings) { (current, field) =>
       val byKind = form.kindBindings.get(field.kind).contains(field.binding)
       current.get(field.binding).orElse(Option.when(byKind)(current.get(field.kind)).flatten).fold(current) { raw =>
-        val withBinding = current.updated(field.binding, raw)
-        if (byKind) withBinding.updated(field.kind, raw) else withBinding
+        val withBinding = put(current, field.binding, raw)
+        if (byKind) put(withBinding, field.kind, raw) else withBinding
       }
     }
+
+  private def put(bindings: Map[String, BigInt], key: String, value: BigInt): Map[String, BigInt] =
+    if (bindings.get(key).contains(value)) bindings else bindings.updated(key, value)
 
   def check(
       encoding: NVDisasm.Encoding,

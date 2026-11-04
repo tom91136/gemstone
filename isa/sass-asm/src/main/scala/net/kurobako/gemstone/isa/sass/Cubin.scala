@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.elf.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 import scala.reflect.ClassTag
 
 /** Bounds-checked CUDA ELF metadata. Instruction decoding is deliberately separate from module loading. */
@@ -39,14 +40,22 @@ object Cubin {
       name: NonEmpty[String],
       bytes: Vec[Byte],
       constantSection: Option[Int >= 0] = None,
-      offset: Int >= 0 = 0
-  )
+      offset: Int >= 0 = 0,
+      section: Int >= 0 = 0,
+      declared: Option[NonEmpty[String]] = None
+  ) {
+    def symbol: NonEmpty[String] = declared.getOrElse(name)
+  }
   case class Module(sm: Int >= 35, sections: Vec[Section], kernels: Vec[Kernel], globals: Vec[Global])
 
   case class ConstantRelocation(section: Int >= 0, offset: Int >= 0, target: NonEmpty[String], addend: Long)
 
+  /** A data pointer stored in an initialised global, resolved to the address of `target` once both are bound. */
+  case class GlobalRelocation(destination: NonEmpty[String], offset: Int >= 0, target: NonEmpty[String], addend: Long)
+
   private object RelocationKind {
     val Address64             = 2L
+    val GenericAddress64      = 4L
     val KeplerImmediateLow32  = 0x0dL
     val KeplerImmediateHigh32 = 0x0eL
     val VoltaImmediateLow32   = 0x38L
@@ -100,8 +109,10 @@ object Cubin {
           ),
         s"unsupported cubin relocation target '$name'"
       )
-      global <- module.globals.find(global => global.name == name && global.offset.toLong == symbol.value)
-        .toRight[NonEmpty[String]](s"unsupported cubin relocation target '$name'")
+      global <- module.globals.find(global =>
+        global.symbol == name && global.offset.toLong == symbol.value &&
+          (global.section.raw == 0 || global.section.raw == symbol.section.raw)
+      ).toRight[NonEmpty[String]](s"unsupported cubin relocation target '$name'")
     } yield global
 
   private def resolvedRelocations[A: ClassTag](module: Module, table: Section)(
@@ -140,7 +151,8 @@ object Cubin {
       case None          => Right(order)
       case Some(section) =>
         referencedFunctions(module, section).flatMap { found =>
-          val fresh = found.distinct.filterNot(order.contains)
+          val seen  = order.toSet
+          val fresh = found.distinct.filterNot(seen)
           visit(order ++ fresh, pending.tail ++ fresh)
         }
     }
@@ -321,6 +333,33 @@ object Cubin {
         },
         "overlapping constant relocations"
       ).map(_ => result)
+    }
+
+  private def initialisedGlobalTable(module: Module, table: Section): Boolean =
+    table.isRelocation && table.size != 0 && module.sections.lift(table.info).exists(_.name.startsWith(".nv.global"))
+
+  /** Data pointers in initialised globals, which resolve once the globals they name are bound. */
+  def globalRelocations(module: Module): Either[NonEmpty[String], Vec[GlobalRelocation]] =
+    module.sections.filter(initialisedGlobalTable(module, _)).flatTraverse { table =>
+      resolvedRelocations(module, table) { (entry, globals) =>
+        for {
+          _ <- check(
+            entry.kind.raw == RelocationKind.Address64 || entry.kind.raw == RelocationKind.GenericAddress64,
+            "unsupported global relocation kind"
+          )
+          offset <-
+            entry.offset.toInt.refine[Int >= 0].left.map(_ => "invalid global relocation offset": NonEmpty[String])
+          destination <- module.globals.find(global =>
+            global.section.raw == table.info && global.offset.raw <= offset.raw &&
+              offset.raw + 8L <= global.offset.raw.toLong + global.bytes.size
+          ).toRight[NonEmpty[String]]("global relocation lies outside every global")
+          target <- globals(entry.symbol)
+          within = (offset.raw - destination.offset.raw).unsafe[Int >= 0]
+          base   = entry.addend.getOrElse(LittleEndian.decodeInt64(destination.bytes, within))
+        } yield target.constantSection.fold(GlobalRelocation(destination.name, within, target.name, base))(section =>
+          GlobalRelocation(destination.name, within, constantSymbol(section), base + target.offset.raw)
+        )
+      }
     }
 
   def relocateConstants(
@@ -580,14 +619,15 @@ object Cubin {
       }.sequence)
     }.map(_.toMap)
     callees = deviceFunctions(parsed, sections)
+    names   = sections.map(_.name).toSet
     kernels <- sections.filter(section =>
       section.name.startsWith(".text.") && !callees(section.name.stripPrefix(".text.")) &&
-        sections.exists(_.name == s".nv.info.${section.name.stripPrefix(".text.")}")
+        names(s".nv.info.${section.name.stripPrefix(".text.")}")
     ).traverse(section => kernel(section, sections, registerCounts))
     globals <- sections.filter(_.kind == SectionType.SymbolTable)
       .flatMap(table => parsed.symbolTables.getOrElse(table.index, Vec.empty[elf.Symbol]))
       .traverse(global(_, sections))
-      .map(_.flatten)
+      .map(found => uniqueNames(found.flatten))
   } yield Module(sm.widen[Int >= 35], sections, kernels, globals)
 
   private val EntryPoint = 0x10
@@ -599,6 +639,20 @@ object Cubin {
         symbol.kind.raw == SymbolKind.Function && symbol.section > 0 && (symbol.other & EntryPoint) == 0
       ).flatMap(_.name.map(_.raw))
     }.toSet
+
+  private def uniqueNames(globals: Vec[Global]): Vec[Global] = {
+    val seen   = mutable.Set.empty[NonEmpty[String]]
+    val result = Vec.newBuilder[Global]
+    globals.foreach { global =>
+      if (seen.add(global.name)) result += global
+      else {
+        val unique = s"${global.name}.${global.section}.${global.offset}".unsafe[NonEmpty[String]]
+        seen.add(unique)
+        result += global.copy(name = unique, declared = Some(global.name))
+      }
+    }
+    result.result()
+  }
 
   private def global(symbol: elf.Symbol, sections: Vec[Section]): Either[NonEmpty[String], Option[Global]] = {
     val target = symbol.section
@@ -621,7 +675,8 @@ object Cubin {
         if (sections(target).kind == SectionType.NoBits) Vec.fill(size)(0.toByte)
         else sections(target).bytes.slice(offset.raw, offset.raw + size),
         Option.when(isConstantSection(sections(target).name))(symbol.section.widen[Int >= 0]),
-        offset
+        offset,
+        target.widen[Int >= 0]
       ))
     } else Right(None)
   }
@@ -635,7 +690,7 @@ object Cubin {
     def record(value: Vec[Byte], size: Int, detail: NonEmpty[String]) = check(value.size == size, detail)
     for {
       _          <- check(validName(name), "invalid cubin kernel name")
-      attrs      <- attributes(sections.find(_.name == s".nv.info.$name").map(_.bytes).getOrElse(Vec.empty[Byte]))
+      attrs      <- attributes(sections.find(_.name == s".nv.info.$name").fold(Vec.empty[Byte])(_.bytes))
       parameters <- attrs.collect { case (0x17, value) =>
         for {
           _    <- record(value, 12, "invalid cubin kernel parameter record")

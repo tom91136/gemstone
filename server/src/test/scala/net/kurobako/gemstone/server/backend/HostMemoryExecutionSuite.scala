@@ -2,6 +2,7 @@ package net.kurobako.gemstone.server.backend
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.LongMap
@@ -117,15 +118,24 @@ class HostMemoryExecutionSuite extends Suite {
         done = batch.completed
         if (batch.reads.nonEmpty) {
           batches += 1
-          val replies = batch.reads.map { range =>
+          val replies = batch.reads.flatMap { range =>
             native ++= beforeRead(range, native)
-            HostMemoryBytes(
-              range.address,
-              Vec.from((0 until range.size).map { index =>
-                val address = range.address.raw + index
-                native.getOrElse(address, fail(s"speculative host read at 0x${address.toHexString}"))
-              })
-            )
+            val knownPages = native.keys.view.map(_ >>> 12).toSet
+            val mapped     = (0 until range.size).map(index => knownPages.contains((range.address.raw + index) >>> 12))
+            val runs       = Vector.unfold(0) { from =>
+              val start = mapped.indexOf(true, from)
+              if (start < 0) None
+              else {
+                val end: Int = mapped.indexOf(false, start) match { case -1 => range.size.raw; case stop => stop }
+                Some(((start, end), end))
+              }
+            }
+            runs.map { case (start, end) =>
+              HostMemoryBytes(
+                GuestAddress(range.address.raw + start),
+                Vec.from((start until end).map(index => native.getOrElse(range.address.raw + index, 0.toByte)))
+              )
+            }
           }
           assertEquals(service.supplyHostMemory(completion, replies), Right(()))
         }
@@ -144,7 +154,7 @@ class HostMemoryExecutionSuite extends Suite {
 
   private val header = ".version 8.0\n.target sm_80\n.address_size 64\n"
 
-  for (stride <- List(1, 3)) test(s"PTX batches exact active-lane reads with stride $stride") {
+  for (stride <- List(1, 3)) test(s"PTX batches active-lane reads into one page fetch with stride $stride") {
     val source                   = header + """
       .visible .entry probe(.param .u64 input, .param .u64 output, .param .u32 stride) {
         .reg .u64 %p, %q, %offset; .reg .u32 %i, %s, %v;
@@ -156,12 +166,11 @@ class HostMemoryExecutionSuite extends Suite {
     val host                     = (0 until 32).flatMap(i => bytes(0x1000L + i * stride * 4, i, 4)).toMap
     val (reads, writes, batches) = run(source, 32, Vec(scalar(0x1000), scalar(0x8000), scalar(stride, 4)), host)
     assertEquals(batches, 1)
-    assertEquals(reads.size, if (stride == 1) 1 else 32)
-    assertEquals(reads.map(_.size.raw).sum, 128)
+    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x1000L), 4096)))
     assertEquals(writes, (0 until 32).flatMap(i => bytes(0x8000L + i * stride * 4, i + 1, 4)).toMap)
   }
 
-  test("PTX gather fetches indices then distinct targets without reading gaps") {
+  test("PTX gather fetches the index page then the target page") {
     val source  = header + """
       .visible .entry probe(.param .u64 indices, .param .u64 input, .param .u64 output) {
         .reg .u64 %p, %q, %r, %offset; .reg .u32 %i, %v;
@@ -176,11 +185,12 @@ class HostMemoryExecutionSuite extends Suite {
       indices.distinct.flatMap(i => bytes(0x4000L + i * 4, i + 9, 4)).toMap
     val (reads, writes, batches) = run(source, 32, Vec(scalar(0x1000), scalar(0x4000), scalar(0x8000)), host)
     assertEquals(batches, 2)
-    assertEquals(reads.map(_.size.raw).sum, 128 + 7 * 4)
+    assertEquals(reads.map(_.address.raw).sorted, Vector(0x1000L, 0x4000L))
+    assertEquals(reads.map(_.size.raw).sum, 2 * 4096)
     assertEquals(writes, indices.zipWithIndex.flatMap((value, i) => bytes(0x8000L + i * 4, value + 9, 4)).toMap)
   }
 
-  test("PTX linked traversal discovers 4096 irregular nodes incrementally") {
+  test("PTX linked traversal discovers 4096 irregular nodes a page at a time") {
     val source = header + """
       .visible .entry probe(.param .u64 root, .param .u64 output) {
         .reg .u64 %p, %q; .reg .u32 %sum, %v; .reg .pred %done;
@@ -197,8 +207,8 @@ class HostMemoryExecutionSuite extends Suite {
       bytes(address, nodes.lift(i + 1).getOrElse(0L), 8) ++ bytes(address + 8, i + 1, 4)
     }.toMap
     val (reads, writes, batches) = run(source, 1, Vec(scalar(nodes.head), scalar(0x8000)), host)
-    assertEquals(reads.map(_.size.raw).sum, 4096 * 12)
-    assertEquals(batches, 4096 * 2)
+    assert(reads.map(_.size.raw).sum >= 64 * 4096)
+    assert(batches < 64, s"$batches")
     assertEquals(writes, bytes(0x8000, 4096L * 4097 / 2, 4))
   }
   test("PTX load crossing registered fragments uses device bytes without fetching stale host bytes") {
@@ -364,7 +374,7 @@ class HostMemoryExecutionSuite extends Suite {
       bytes(0x1000, 7, width.toFloatByteWidth) ++ bytes(0x3000, 0, 4),
       List(0x2000L -> encoded(1, width.toFloatByteWidth)),
       beforeRead = (range, native) =>
-        if (range.address.raw == 0x3000) {
+        if (range.address.raw <= 0x3000 && 0x3000 < range.address.raw + range.size.raw) {
           if (release) {
             assertEquals(
               (0 until width.toFloatByteWidth).map(i => native(0x1000L + i)),
@@ -380,7 +390,7 @@ class HostMemoryExecutionSuite extends Suite {
     )
   }
 
-  test("registered host memory fetches exact bytes, without reading poisoned allocation holes") {
+  test("registered host memory fetches the allocation bytes of the page it reads") {
     val source             = header + """
       .visible .entry probe(.param .u64 input, .param .u64 output) {
         .reg .u64 %p, %q; .reg .u32 %v;
@@ -396,7 +406,7 @@ class HostMemoryExecutionSuite extends Suite {
       List(0x1000L -> Vec.fill(64)(0.toByte), 0x8000L -> Vec.fill(64)(0.toByte)),
       hostBacked = true
     )
-    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100cL), 4)))
+    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x1000L), 64)))
     assertEquals(writes, bytes(address = 0x8004, value = 73, 4))
   }
 
@@ -448,18 +458,45 @@ class HostMemoryExecutionSuite extends Suite {
       Vec.empty,
       bytes(0x1000, 1, 4) ++ bytes(0x8000, 0, 8),
       beforeRead = (range, _) =>
-        if (range.address.raw == 0x1000L) { reads += range; bytes(address = 0x1000, value = 11, 4) }
-        else Map.empty,
-      beforeSync = (sync, _) => {
-        syncs += sync
-        assertEquals(sync.atomic.map(_.operation), Some(HostMemoryAtomicOperation.Load))
-        assertEquals(sync.relaxed, true)
-        bytes(address = 0x1000, value = 23, 4)
-      }
+        if (range.address.raw == 0x1000L) {
+          reads += range; bytes(address = 0x1000, value = if (reads.size == 1) 11 else 23, 4)
+        } else Map.empty,
+      beforeSync = (sync, _) => { syncs += sync; Map.empty }
     )
-    assertEquals(reads.toVector, Vector(HostMemoryRange(GuestAddress(0x1000L), 4)))
-    assertEquals(syncs.size, 1)
+    assertEquals(
+      reads.toVector,
+      Vector(HostMemoryRange(GuestAddress(0x1000L), 4096), HostMemoryRange(GuestAddress(0x1000L), 4))
+    )
+    assertEquals(syncs.flatMap(_.atomic).toVector, Vector.empty)
     assertEquals(writes, bytes(address = 0x8000, value = 11, 4) ++ bytes(address = 0x8004, value = 23, 4))
+  }
+
+  test("a warp of relaxed.sys loads is served by one read exchange without per-lane atomics") {
+    val source         = header + """
+      .visible .entry probe() {
+        .reg .u64 %offset, %address; .reg .u32 %lane, %value;
+        mov.u32 %lane, %tid.x; cvt.u64.u32 %offset, %lane; shl.b64 %offset, %offset, 2;
+        add.u64 %address, %offset, 4096;
+        ld.relaxed.sys.global.u32 %value, [%address];
+        add.u64 %address, %offset, 32768;
+        st.global.u32 [%address], %value; ret;
+      }"""
+    val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
+    val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
+    val (_, writes, _) = runImage(
+      ProgramEncoding.PTXText,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      32,
+      Vec.empty,
+      (0 until 32).map(lane => bytes(0x1000L + lane * 4L, lane + 100L, 4)).reduce(_ ++ _) ++ (0 until 32).map(lane =>
+        bytes(0x8000L + lane * 4L, 0, 4)
+      ).reduce(_ ++ _),
+      beforeRead = (range, _) => { reads += range; Map.empty },
+      beforeSync = (sync, _) => { syncs += sync; Map.empty }
+    )
+    assertEquals(syncs.flatMap(_.atomic).toVector, Vector.empty)
+    assertEquals(reads.map(_.size.raw).sum, 4096)
+    assertEquals(writes, (0 until 32).map(lane => bytes(0x8000L + lane * 4L, lane + 100L, 4)).reduce(_ ++ _))
   }
 
   test("generic relaxed.sys accesses classify host-backed addresses and publish the exact store") {
@@ -479,18 +516,13 @@ class HostMemoryExecutionSuite extends Suite {
       beforeRead = (range, _) => { reads += range; Map.empty },
       beforeSync = (sync, _) => {
         assertEquals(sync.relaxed, true)
-        sync.atomic match {
-          case Some(request) if request.operation == HostMemoryAtomicOperation.Load =>
-            assertEquals(sync.publish, Vec(HostMemoryRange(GuestAddress(0x100001000L), 4)))
-          case None =>
-            assertEquals(sync.publish, Vec(HostMemoryRange(GuestAddress(0x100002000L), 4)))
-            assertEquals(sync.atomicStores.map(_.desired), Vec(41L))
-          case other => fail(s"unexpected relaxed.sys sync: $other")
-        }
+        assertEquals(sync.atomic, None)
+        assertEquals(sync.publish, Vec(HostMemoryRange(GuestAddress(0x100002000L), 4)))
+        assertEquals(sync.atomicStores.map(_.desired), Vec(41L))
         Map.empty
       }
     )
-    assertEquals(reads.toVector, Vector.empty)
+    assertEquals(reads.toVector, Vector(HostMemoryRange(GuestAddress(0x100001000L), 4096)))
     assertEquals(writes, bytes(address = 0x100002000L, value = 41, 4))
   }
 
@@ -511,8 +543,8 @@ class HostMemoryExecutionSuite extends Suite {
       bytes(0x100001000L, 0x66554433L, 4) ++ bytes(0x100002000L, 0, 4),
       beforeSync = (sync, _) => { syncs += sync; Map.empty }
     )
-    assertEquals(reads, Vector.empty)
-    assertEquals(syncs.flatMap(_.atomic.map(_.size)).toVector, Vector[Int in (1, 2, 4, 8)](1, 2))
+    assertEquals(reads.map(_.size.raw), Vector(4096, 2))
+    assertEquals(syncs.flatMap(_.atomic.map(_.size)).toVector, Vector.empty)
     assertEquals(syncs.flatMap(_.atomicStores.map(_.size)).toVector, Vector[Int in (1, 2, 4, 8)](1, 2))
     assert(syncs.forall(_.relaxed))
     assertEquals(
@@ -641,6 +673,40 @@ class HostMemoryExecutionSuite extends Suite {
       """)
       checkFence(ProgramEncoding.SPIRVOpenCLCompute, image, writeBefore)
     }
+
+  for ((name, scope) <- List("workgroup" -> 2, "device" -> 1)) test(s"SPIR-V $name-scope atomics on host memory") {
+    val image = spirvAssembly.image(s"""
+      ${spirvAssembly.openCL}
+      OpEntryPoint Kernel %main "probe"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %uint_ptr
+      %scope = OpConstant %uint $scope
+      %relaxed = OpConstant %uint 0
+      %one = OpConstant %uint 1
+      %main = OpFunction %void None %fn
+      %counter = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      %old = OpAtomicIAdd %uint %counter %scope %relaxed %one
+      OpReturn
+      OpFunctionEnd
+    """)
+    val syncs          = AtomicInteger()
+    val (_, writes, _) = runImage(
+      ProgramEncoding.SPIRVOpenCLCompute,
+      image,
+      8,
+      Vec(scalar(0x1000)),
+      bytes(0x1000, 5, 4),
+      beforeSync = (sync, _) => {
+        if (sync.atomic.nonEmpty) syncs.incrementAndGet()
+        Map.empty
+      }
+    )
+    assertEquals(writes, bytes(address = 0x1000, value = 13, size = 4))
+    if (scope == 2) assertEquals(syncs.get, 0) else assert(syncs.get >= 8, s"${syncs.get}")
+  }
 
   for {
     reload    <- Booleans
@@ -776,8 +842,8 @@ class HostMemoryExecutionSuite extends Suite {
       List(0x1000L -> Vec.fill(24)(0.toByte)),
       hostBacked = true
     )
-    assertEquals(reads.map(_.address.raw), Vector(0x1000 + offset))
-    assertEquals(reads.map(_.size.raw), Vector(8))
+    assertEquals(reads.map(_.address.raw), Vector(0x1000L))
+    assertEquals(reads.map(_.size.raw), Vector(24))
     assertEquals(writes, bytes(address = 0x8000, value = 97, 4))
   }
 
@@ -813,8 +879,7 @@ class HostMemoryExecutionSuite extends Suite {
     val (reads, writes, batches) =
       runImage(ProgramEncoding.SPIRVOpenCLCompute, image, 32, Vec(scalar(0x1000), scalar(0x8000)), host)
     assertEquals(batches, 1)
-    assertEquals(reads.size, if (stride == 1) 1 else 32)
-    assertEquals(reads.map(_.size.raw).sum, 128)
+    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x1000L), 4096)))
     assertEquals(writes, (0 until 32).flatMap(i => bytes(0x8000L + i * stride * 4, i + 17, 4)).toMap)
   }
 }

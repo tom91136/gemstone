@@ -454,7 +454,7 @@ private class SPIRVMachineRender(scope: Scope[Int])
     val Vec(first, second, third, fourth) = leaves(source): @unchecked
     val own                               = laneIndex(())
     val tested                            =
-      bit.fold(own)(operand => Term.Variable(scope.operand(operand).fold(s"%$operand")(_.name)))
+      bit.fold(own)(operand => Term.Variable(name(operand)))
     val words = Vec(first, second, third, fourth)
     binding(
       name(dest),

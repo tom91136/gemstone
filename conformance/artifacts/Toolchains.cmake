@@ -29,11 +29,13 @@ endfunction()
 # Compiler variants retain the runtime API backend and have independent artifacts.
 set(conformance_clang_release 22.1.8)
 set(conformance_clang_release_sha256 df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384)
+set(conformance_clang_source_sha256 922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888)
 string(REGEX MATCH "^[0-9]+" conformance_clang_version "${conformance_clang_release}")
 set(conformance_clang_build_arguments
   --build-arg "LLVM_VERSION=${conformance_clang_version}"
   --build-arg "LLVM_RELEASE=${conformance_clang_release}"
-  --build-arg "LLVM_RELEASE_SHA256=${conformance_clang_release_sha256}")
+  --build-arg "LLVM_RELEASE_SHA256=${conformance_clang_release_sha256}"
+  --build-arg "LLVM_SOURCE_SHA256=${conformance_clang_source_sha256}")
 set(conformance_gcc_version 14)
 set(conformance_gcc_runtime_version 14.2.0)
 set(conformance_gcc_runtime_sha256 a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9)
@@ -87,6 +89,60 @@ function(conformance_support_key backend architecture compiler output)
     set(support "support-${version}")
   endif()
   set(${output} "${support}" PARENT_SCOPE)
+endfunction()
+
+# The OpenMP offload runtime ships only with the Clang image, so its closure is a key of its own that Clang routes load
+# beside their primary one.
+function(conformance_support_supplement backend architecture compiler output)
+  set(supplement "")
+  if(compiler STREQUAL "clang")
+    set(supplement "support-offload")
+  endif()
+  set(${output} "${supplement}" PARENT_SCOPE)
+endfunction()
+
+# The llvm-offload stage builds from the stages above it, so their text belongs to the key.
+function(conformance_offload_key output)
+  file(READ "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile" containerfile)
+  string(FIND "${containerfile}" "FROM ubuntu-build-base AS llvm-offload\n" start)
+  if(start EQUAL -1)
+    message(FATAL_ERROR "The llvm-offload stage is missing from the Containerfile")
+  endif()
+  string(SUBSTRING "${containerfile}" ${start} -1 rest)
+  string(FIND "${rest}" "\nFROM " next)
+  math(EXPR end "${start} + ${next}")
+  string(SUBSTRING "${containerfile}" 0 ${end} prefix)
+  string(SHA256 digest "${conformance_clang_release};${conformance_clang_source_sha256};${prefix}")
+  string(SUBSTRING "${digest}" 0 16 digest)
+  set(${output} "${conformance_clang_release}-${digest}" PARENT_SCOPE)
+endfunction()
+
+function(conformance_offload_archive output)
+  conformance_offload_key(key)
+  set(archive "${CONFORMANCE_OFFLOAD_DIRECTORY}/${key}/llvm-offload.tar.zst")
+  if(NOT EXISTS "${archive}")
+    container_image(tag stamp
+      EXECUTABLE "${CONTAINER_EXECUTABLE}"
+      REPOSITORY "localhost/conformance-llvm-offload"
+      FILE "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
+      CONTEXT "${CONFORMANCE_SOURCE_DIRECTORY}"
+      STAGE llvm-offload
+      BUILD_ARGUMENTS ${conformance_clang_build_arguments}
+      INPUTS "${CONFORMANCE_SOURCE_DIRECTORY}/.dockerignore"
+      JOB_POOL container_build)
+    get_property(archives GLOBAL PROPERTY CONFORMANCE_OFFLOAD_ARCHIVES)
+    if(NOT archive IN_LIST archives)
+      add_custom_command(
+        OUTPUT "${archive}"
+        COMMAND "${CMAKE_COMMAND}" -DMODE=export "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DIMAGE=${tag}"
+          "-DOUTPUT=${archive}" -P "${CONFORMANCE_SOURCE_DIRECTORY}/artifacts/Offload.cmake"
+        DEPENDS "${stamp}"
+        COMMENT "Exporting ${archive}"
+        VERBATIM)
+      set_property(GLOBAL APPEND PROPERTY CONFORMANCE_OFFLOAD_ARCHIVES "${archive}")
+    endif()
+  endif()
+  set(${output} "${archive}" PARENT_SCOPE)
 endfunction()
 
 function(conformance_toolchain backend architecture image_output dependency_output support_output)
@@ -159,6 +215,12 @@ function(conformance_toolchain backend architecture image_output dependency_outp
   if(lint)
     string(APPEND key "-lint")
   endif()
+  set(prebuilt)
+  if(compiler STREQUAL "clang" AND backend STREQUAL "cuda" AND NOT lint)
+    conformance_offload_archive(archive)
+    get_filename_component(archive_directory "${archive}" DIRECTORY)
+    set(prebuilt BUILD_CONTEXTS "llvm-offload-archive=${archive_directory}" DEPENDS "${archive}")
+  endif()
   container_image(tag stamp
     EXECUTABLE "${CONTAINER_EXECUTABLE}"
     REPOSITORY "localhost/conformance-${key}"
@@ -167,6 +229,7 @@ function(conformance_toolchain backend architecture image_output dependency_outp
     STAGE "${stage}"
     BUILD_ARGUMENTS ${build_arguments}
     INPUTS ${inputs}
+    ${prebuilt}
     JOB_POOL container_build)
   set(${image_output} "${tag}" PARENT_SCOPE)
   set(${dependency_output} "${stamp}" PARENT_SCOPE)

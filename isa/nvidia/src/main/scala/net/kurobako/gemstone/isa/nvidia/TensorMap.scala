@@ -126,8 +126,7 @@ private[isa] object TensorMap {
     def nan(bits: Int): Boolean = (bits & 0x7f80) == 0x7f80 && (bits & 0x7f) != 0
     def key(bits: Int): Int     = if ((bits & 0x8000) != 0) -(bits & 0x7fff) - 1 else bits
     if (nan(a)) b.toLong
-    else if (nan(b)) a.toLong
-    else if (keepsOld(key(a), key(b))) a.toLong
+    else if (nan(b) || keepsOld(key(a), key(b))) a.toLong
     else b.toLong
   }
 

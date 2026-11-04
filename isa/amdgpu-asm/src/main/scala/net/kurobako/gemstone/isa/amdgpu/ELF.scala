@@ -28,6 +28,11 @@ private object ELF {
       pointerOffsets: Vec[Int >= 0]
   )
 
+  /** A dynamic relocation of a section word: `value` is the link-time address, which moves with the load base when the
+    * word points into the image.
+    */
+  private case class GlobalRelocation(address: Long, value: Long, pointsIntoImage: Boolean)
+
   private case class KernelRecord(
       name: NonEmpty[String],
       symbol: elf.Symbol,
@@ -57,15 +62,35 @@ private object ELF {
       private val readOnlySection: Option[elf.Section],
       private val globalSections: Map[Int, elf.Section],
       private val globalSymbols: Map[NonEmpty[String], elf.Symbol],
-      private val globalRelocations: Vec[(Long, Long)],
-      val globals: Vec[CodeObjectGlobal]
+      private val globalRelocations: Vec[GlobalRelocation],
+      private val linkedGlobals: Vec[CodeObjectGlobal],
+      val loadBase: Long = 0L
   ) {
+    private def at(address: Long): Long = address + loadBase
+
+    /** Globals at their loaded addresses. */
+    val globals: Vec[CodeObjectGlobal] =
+      if (loadBase == 0L) linkedGlobals
+      else linkedGlobals.map(global => global.copy(address = GuestAddress(at(global.address.raw))))
+
+    /** The size of the address range the loaded image spans, from the link-time origin. */
+    val extent: Long = (globalSections.values.view ++ Some(textSection)).map(section =>
+      section.address + section.size
+    ).max
+
+    private lazy val loadedFunctionSizes: Map[Long, Int] = functionSizes.map { case (address, size) =>
+      at(address) -> size
+    }
+    private lazy val loadedFunctionTargets: Map[Long, String] = functionTargets.map { case (address, name) =>
+      at(address) -> name
+    }
+
     lazy val notes: Vec[Vec[Byte]] = image.sections.filter(_.sectionType == SectionType.Note).map(image.contents)
 
     private val materialised    = ConcurrentHashMap[String, CodeObjectKernel]()
     private val globalImageLock = ReentrantLock()
     private lazy val readOnly   = readOnlySection.fold(0L -> Array.emptyByteArray) { section =>
-      section.address -> globalImages.getOrElse(section.index, Array.emptyByteArray)
+      at(section.address) -> globalImages.getOrElse(section.index, Array.emptyByteArray)
     }
     private lazy val globalImages: Map[Int, Array[Byte]] = {
       val images = globalSections.view.map { case (index, section) =>
@@ -73,17 +98,22 @@ private object ELF {
           (if (section.sectionType == SectionType.NoBits) Array.ofDim[Byte](section.size)
            else Vec.toArray(image.contents(section)))
       }.toMap
-      globalRelocations.foreach { case (address, value) =>
+      globalRelocations.foreach { case GlobalRelocation(address, value, pointsIntoImage) =>
         globalSections.view.collectFirst {
           case (index, section)
               if address >= section.address && address - section.address <= section.size.toLong - 8L =>
-            LittleEndian.write(value, images(index), (address - section.address).toInt, 8)
+            LittleEndian.write(
+              if (pointsIntoImage) at(value) else value,
+              images(index),
+              (address - section.address).toInt,
+              8
+            )
         }
       }
       images
     }
     private lazy val globalRegions: Array[(Long, Array[Byte])] =
-      globalSections.keys.view.toArray.sorted.map(index => globalSections(index).address -> globalImages(index))
+      globalSections.keys.view.toArray.sorted.map(index => at(globalSections(index).address) -> globalImages(index))
 
     private def kernelCodeSize(record: KernelRecord): Int =
       if (record.inferredSize) unpaddedCodeSize(text, record.textOffset, record.symbol.size)
@@ -113,23 +143,51 @@ private object ELF {
         kernelCodeProperties = record.kernelCodeProperties,
         text = text,
         entrySize = math.min(codeSize, functionSizes.getOrElse(record.symbol.value, codeSize)).unsafe[Int >= 0],
-        textAddress = textSection.address,
-        entry = record.symbol.value,
-        functionSizes = functionSizes,
-        functionTargets = functionTargets,
+        textAddress = at(textSection.address),
+        entry = at(record.symbol.value),
+        functionSizes = loadedFunctionSizes,
+        functionTargets = loadedFunctionTargets,
         readOnlyAddress = readOnlyAddress,
         readOnly = readOnlyBytes,
         globalMemory = globalRegions,
-        computePgmRsrc1 = record.computePgmRsrc1
+        computePgmRsrc1 = record.computePgmRsrc1,
+        loadBase = loadBase
+      )
+    }
+
+    /** The whole linked text as one callable unit, for calls that enter this image from another program's kernel. The
+      * wave size selects the instruction decoding the calling wave needs.
+      */
+    def library(waveSize: Int in (32, 64)): CodeObjectKernel = {
+      val (readOnlyAddress, readOnlyBytes) = readOnly
+      CodeObjectKernel(
+        name = "library",
+        target = target,
+        kernargSize = 0,
+        groupSegmentSize = 0,
+        privateSegmentSize = 0,
+        computePgmRsrc2 = 0,
+        kernelCodeProperties = if (waveSize == 32) KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32 else 0,
+        text = text,
+        entrySize = text.size.unsafe[Int >= 0],
+        textAddress = at(textSection.address),
+        entry = at(textSection.address),
+        functionSizes = loadedFunctionSizes,
+        functionTargets = loadedFunctionTargets,
+        readOnlyAddress = readOnlyAddress,
+        readOnly = readOnlyBytes,
+        globalMemory = globalRegions,
+        loadBase = loadBase
       )
     }
 
     val kernelNames: Set[NonEmpty[String]] = records.values.map(_.name).toSet
 
-    /** Make a session-local view over the immutable parsed index. Mutable global images and lazy kernel materialisation
-      * intentionally remain private to the view; the code-object bytes and parsed tables are safe to share.
+    /** Make a session-local view over the immutable parsed index, with the image loaded at `loadBase`. Mutable global
+      * images and lazy kernel materialisation intentionally remain private to the view; the code-object bytes and
+      * parsed tables are safe to share.
       */
-    def fork(): Index =
+    def fork(loadBase: Long = 0L): Index =
       Index(
         target,
         image,
@@ -142,7 +200,8 @@ private object ELF {
         globalSections,
         globalSymbols,
         globalRelocations,
-        globals
+        linkedGlobals,
+        loadBase
       )
 
     private def storage(name: NonEmpty[String]): Either[CodeObjectError, (elf.Symbol, elf.Section, Long)] =
@@ -161,14 +220,14 @@ private object ELF {
 
     /** Returns the device address and size of a mutable HIP/HSA-visible global. */
     def global(name: NonEmpty[String]): Option[(GuestAddress, Int >= 0)] =
-      storage(name).toOption.map { case (symbol, _, _) => GuestAddress(symbol.value) -> symbol.size }
+      storage(name).toOption.map { case (symbol, _, _) => GuestAddress(at(symbol.value)) -> symbol.size }
 
     /** Snapshot from this session's relocated section image, before external storage is bound. */
     def globalData(name: NonEmpty[String]): Either[CodeObjectError, (GuestAddress, Vec[Byte])] =
       globalImageLock.withLock {
         storage(name).map { case (symbol, section, relative) =>
           val start = relative.toInt
-          GuestAddress(symbol.value) ->
+          GuestAddress(at(symbol.value)) ->
             Vec.unsafeWrapArray(
               java.util.Arrays.copyOfRange(globalImages(section.index), start, start + symbol.size)
             )
@@ -198,9 +257,9 @@ private object ELF {
 
   private def describeGlobals(
       globalSymbols: Map[NonEmpty[String], elf.Symbol],
-      globalRelocations: Vec[(Long, Long)]
+      globalRelocations: Vec[GlobalRelocation]
   ): Vec[CodeObjectGlobal] = {
-    val addresses = globalRelocations.map(_._1).distinct.sorted.toArray
+    val addresses = globalRelocations.map(_.address).distinct.sorted.toArray
     Vec.from(
       globalSymbols.view.map { case (name, symbol) =>
         val pointerOffsets = Vec.from(
@@ -278,7 +337,6 @@ private object ELF {
         case (symbol @ elf.Symbol(Some(name), _, _, _, _, _), inferred) if descriptors.contains(s"$name.kd") =>
           kernelRecord(image, descriptors(s"$name.kd"), name, symbol, inferred).map((name: String) -> _)
       }.sequence.map(_.toMap)
-      _ <- Either.cond(records.nonEmpty, (), CodeObjectError.Invalid("AMDGPU code object has no kernel symbols"))
       globalSections = image.sections.collect {
         case section
             if PartialFunction.cond(section.name) { case ".rodata" | ".data" | ".bss" | ".got" => true } ||
@@ -453,16 +511,22 @@ private object ELF {
     * through a GOT slot (internal-linkage statics, for example) by storing the symbol address in `.got` at load time,
     * so the slot has to be filled before the first kernel reads it.
     */
-  private def readGlobalRelocations(image: elf.Image): Either[CodeObjectError, Vec[(Long, Long)]] =
+  private def readGlobalRelocations(image: elf.Image): Either[CodeObjectError, Vec[GlobalRelocation]] =
     image.sections.filter(_.sectionType == SectionType.RelocationWithAddend).flatTraverse { table =>
       image.relocations(table).leftMap(CodeObjectError.Invalid(_)).flatMap(_.flatTraverse { relocation =>
         val addend = relocation.addend.getOrElse(0L)
         relocation.kind.raw.toInt match {
-          case R_AMDGPU_RELATIVE64 => Right(Vec(relocation.offset -> addend))
+          case R_AMDGPU_RELATIVE64 => Right(Vec(GlobalRelocation(relocation.offset, addend, pointsIntoImage = true)))
           case R_AMDGPU_ABS64      =>
             image.symbolTables.get(table.link)
               .flatMap(_.lift(relocation.symbol.toInt).filter(_ => relocation.symbol <= Int.MaxValue))
-              .map(symbol => Vec(relocation.offset -> (symbol.value + addend)))
+              .map(symbol =>
+                Vec(GlobalRelocation(
+                  relocation.offset,
+                  symbol.value + addend,
+                  symbol.section.raw != SectionIndex.Undefined && symbol.section.raw != SectionIndex.Absolute
+                ))
+              )
               .toRight(CodeObjectError.Invalid(s"unresolved AMDGPU relocation symbol ${relocation.symbol}"))
           case _ => Right(Vec.empty)
         }

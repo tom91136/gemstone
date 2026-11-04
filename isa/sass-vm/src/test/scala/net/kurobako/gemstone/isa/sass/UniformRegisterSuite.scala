@@ -4,7 +4,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class UniformRegisterSuite extends Suite {
   test("general, uniform and predicate banks remain distinct while lowering uses temporaries") {
@@ -47,6 +47,21 @@ class UniformRegisterSuite extends Suite {
         Vec(20, 20, 20, 20)
       )
     }
+
+  test("R2UR.FILL restores a uniform register as a plain move") {
+    check(
+      120,
+      """MOV R4, 42
+        |R2UR.FILL UR4, R4
+        |MOV R6, UR4
+        |S2R R0, SR_TID.X
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2], R6
+        |EXIT""".stripMargin,
+      Vec(42, 42, 42, 42)
+    )
+  }
 
   // measured on sm_89: the elected value goes to the uniform register as for R2UR, and each lane that executes ORs
   // whether its value differs into the predicate where R2UR assigns it; other lanes keep their predicate

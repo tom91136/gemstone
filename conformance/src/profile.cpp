@@ -67,7 +67,7 @@ void validateCompiler(std::string_view backend, std::string_view compiler) {
   throw std::invalid_argument(fmt::format("unsupported compiler {} for backend {}", compiler, backend));
 }
 
-// CONFORMANCE_CUDA_CODE_MODE is the single CUDA code-mode setting; the driver JIT policy follows from it.
+// sass execution disables PTX JIT so the fatbin's SASS is the only code path.
 void applyCudaCode(ResolvedTarget &target) {
   if (target.backend != "cuda") return;
   const auto code = [&] { return target.environment ^ get_maybe(std::string(environment::CudaCodeMode)); };
@@ -78,9 +78,7 @@ void applyCudaCode(ResolvedTarget &target) {
   }
   code() ^ for_each([&](const std::string &mode) {
     if (mode != "ptx" && mode != "sass") throw std::invalid_argument("CONFORMANCE_CUDA_CODE_MODE must be ptx or sass");
-    const bool ptx = mode == "ptx";
-    target.environment["CUDA_FORCE_PTX_JIT"] = ptx ? "1" : "0";
-    target.environment["CUDA_DISABLE_PTX_JIT"] = ptx ? "0" : "1";
+    if (mode == "sass") target.environment["CUDA_DISABLE_PTX_JIT"] = "1";
   });
 }
 

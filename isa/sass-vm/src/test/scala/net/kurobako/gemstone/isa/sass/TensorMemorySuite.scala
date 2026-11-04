@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 // ptxas 13.3 output for the kernels of TensorMemoryCases, decoded from its machine code as Gemstone loads a cubin:
 // LDTM/STTM, UTCATOMSWS and UVIRTCOUNT, UTCCP, UTCSHIFT, UTCBAR and UTCHMMA/UTCIMMA/UTCQMMA/UTCOMMA, USTGR/UREDGR and

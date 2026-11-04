@@ -266,13 +266,18 @@ private[isa] object TensorLayout {
   /** The bytes of the run `run` in global memory. */
   def runBytes(transfer: Array[Byte], run: Int): Long = runWord(transfer, run, 2) * fact(transfer, Fact.Global)
 
+  private def runLayout(transfer: Array[Byte], run: Int): (Int, Int, Int, Int) =
+    (
+      boxStart(transfer) + runWord(transfer, run, 0).toInt,
+      runWord(transfer, run, 2).toInt,
+      fact(transfer, Fact.Global).toInt,
+      fact(transfer, Fact.Local).toInt
+    )
+
   /** The run `run` of box elements read from global memory into the box, or filled where it lies outside the tensor. */
   def loadRun(memory: DeviceHeap, transfer: Array[Byte], run: Int): Either[Fault, Unit] = {
-    val offset = boxStart(transfer) + runWord(transfer, run, 0).toInt
-    val count  = runWord(transfer, run, 2).toInt
-    val global = fact(transfer, Fact.Global).toInt
-    val local  = fact(transfer, Fact.Local).toInt
-    val fill   = fact(transfer, Fact.Fill)
+    val (offset, count, global, local) = runLayout(transfer, run)
+    val fill                           = fact(transfer, Fact.Fill)
     if (runWord(transfer, run, 3) != 0L)
       memory.read(GuestAddress(runWord(transfer, run, 1)), (count * global).unsafe[Int >= 0]).map { value =>
         if (global == local) {
@@ -296,11 +301,8 @@ private[isa] object TensorLayout {
   def storeRun(memory: DeviceHeap, transfer: Array[Byte], run: Int): Either[Fault, Unit] =
     if (runWord(transfer, run, 3) == 0L) Right(())
     else {
-      val offset = boxStart(transfer) + runWord(transfer, run, 0).toInt
-      val count  = runWord(transfer, run, 2).toInt
-      val global = fact(transfer, Fact.Global).toInt
-      val local  = fact(transfer, Fact.Local).toInt
-      val bytes  =
+      val (offset, count, global, local) = runLayout(transfer, run)
+      val bytes                          =
         if (global == local) transfer.slice(offset, offset + count * global)
         else Array.concat((0 until count).map(unit => packSixBits(transfer, offset + unit * local))*)
       memory.write(GuestAddress(runWord(transfer, run, 1)), Vec.unsafeWrapArray(bytes))

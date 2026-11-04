@@ -2,7 +2,11 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMDispatchMemory.*
 import cats.syntax.all.*
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
@@ -17,19 +21,26 @@ object LoadedProgram {
   def load(program: CodeObject, workgroups: Workgroups = Workgroups.Sequential): LoadedProgram =
     LoadedProgram(program, workgroups)
 
+  // Compilation reads neither the relocated globals nor the launch configuration, so decoded kernels are shared by every
+  // program of the image; the kernels hold sourceless code that each program rebinds to its own forked index.
   private case class Indexed(
       index: ELF.Index,
       aliases: Map[String, String],
       metadata: Map[String, KernelMetadata],
       layouts: Map[String, KernargLayout],
-      symbols: ProgramSymbols
+      kernelSymbols: Vec[KernelSymbol],
+      compiler: VMCompiler,
+      kernels: Memo[String, Either[Fault, VMIR.Kernel]]
   )
 
   // Only immutable load data is cached; every program forks the index for its own relocated globals and kernels.
-  private val cache = LRUCache[CodeObjectKey, Either[Fault, Indexed]](capacity = 4)
+  private val images = ImageCache[Fault, Indexed]()
 
-  private def index(program: CodeObject): Either[Fault, Indexed] =
-    cache.get(CodeObjectKey(program.image))(indexUncached(program)).map(value => value.copy(index = value.index.fork()))
+  private def index(program: CodeObject): Either[Fault, ImageCache.Lease[Indexed]] =
+    images.acquire(ImageKey(program.image))(indexUncached(program))
+
+  private def unbound(kernel: CodeObjectKernel): CodeObjectKernel =
+    kernel.copy(readOnly = Array.emptyByteArray, globalMemory = Array.empty)
 
   private def indexUncached(program: CodeObject): Either[Fault, Indexed] =
     for {
@@ -68,24 +79,81 @@ object LoadedProgram {
       kernelSymbols =
         if (manifests.nonEmpty) manifests.map(manifest => KernelSymbol(manifest.name, manifest.symbol)).distinct
         else Vec.from(indexed.kernelNames.toSeq.sortBy[String](identity).map(name => KernelSymbol(name, name)))
-      kernelLinkage = kernelSymbols.view.map(_.linkageName: String).toSet
-      globals <- indexed.globals.filterNot(global => kernelLinkage.contains(global.name)).traverse { global =>
-        GlobalSymbol.validated(
-          global.name,
-          Some(global.address),
-          global.size.widen[Long >= 0],
-          global.pointerOffsets
-        )
-          .leftMap(detail => Fault.InvalidRequest(detail))
-      }
-    } yield Indexed(indexed, aliases, metadata, layouts, ProgramSymbols(kernelSymbols, globals))
+      _ <- globalSymbols(indexed, kernelSymbols)
+    } yield Indexed(
+      indexed,
+      aliases,
+      metadata,
+      layouts,
+      kernelSymbols,
+      VMCompiler(),
+      Memo()
+    )
+
+  def globalSymbols(index: ELF.Index, kernels: Vec[KernelSymbol]): Either[Fault, Vec[GlobalSymbol]] = {
+    val kernelLinkage = kernels.view.map(_.linkageName: String).toSet
+    index.globals.filterNot(global => kernelLinkage.contains(global.name)).traverse { global =>
+      GlobalSymbol.validated(
+        global.name,
+        Some(global.address),
+        global.size.widen[Long >= 0],
+        global.pointerOffsets
+      )
+        .leftMap(detail => Fault.InvalidRequest(detail))
+    }
+  }
 }
 
 class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extends Backend.Program {
-  private val compiler = VMCompiler()
   private val compiled = java.util.concurrent.ConcurrentHashMap[String, Either[Fault, VMIR.Kernel]]()
+  private val leased   = AtomicReference(Option.empty[ImageCache.Lease[LoadedProgram.Indexed]])
 
-  private lazy val initialised = LoadedProgram.index(program)
+  private val loadBase = AtomicLong(0L)
+  private val forked   = AtomicBoolean(false)
+
+  private lazy val shared: Either[Fault, LoadedProgram.Indexed] = LoadedProgram.index(program).map { lease =>
+    leased.set(Some(lease))
+    lease.value
+  }
+
+  private lazy val initialised: Either[Fault, LoadedProgram.Indexed] = shared.map { indexed =>
+    forked.set(true)
+    indexed.copy(index = indexed.index.fork(loadBase.get()))
+  }
+
+  // A malformed image reports at its first launch, as it does without a window.
+  override def bindFunctionPointerNamespace(id: ProgramId): Either[Fault, Unit] =
+    shared.fold(
+      _ => Right(()),
+      indexed =>
+        for {
+          base <- CodeWindows.loadBase(id, indexed.index.extent)
+          _    <- Either.cond(
+            loadBase.get() == base || !forked.get(),
+            (),
+            Fault.InvalidRequest("function pointer namespace must be bound before the program is used")
+          )
+        } yield loadBase.set(base)
+    )
+
+  private val libraries = java.util.concurrent.ConcurrentHashMap[Int, Either[Fault, VMIR.Kernel]]()
+
+  // Another program's wave can enter any function of the text; the library decodes all of it for the caller's wave size.
+  private def library(caller: CodeObjectKernel): Either[Fault, PeerCode.Program] =
+    initialised.flatMap { program =>
+      libraries.computeIfAbsent(
+        caller.waveSize.raw,
+        _ =>
+          if (program.index.target.isa != caller.target.isa)
+            Left(Fault.Unsupported(s"AMDGPU code for ${program.index.target.name} cannot run on ${caller.target.name}"))
+          else {
+            val code = program.index.library(caller.waveSize)
+            if (code.waveSize != caller.waveSize)
+              Left(Fault.Unsupported(s"AMDGPU code for ${code.target.name} cannot run in wave${caller.waveSize.raw}"))
+            else program.compiler.compileLinked(code)
+          }
+      ).map(PeerCode.Program(_, Vec.toArray(bindings)))
+    }
 
   private case class Bound(value: GlobalMapping, memory: AddressSpace) derives CanEqual
   private val bindingLock = ReentrantLock()
@@ -99,7 +167,10 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
         .toRight(Fault.NotFound(s"AMDGPU kernel metadata for '$name' is not present"))
     }
 
-  override def symbols: Either[Fault, ProgramSymbols] = initialised.map(_.symbols)
+  override def symbols: Either[Fault, ProgramSymbols] =
+    initialised.flatMap(program =>
+      LoadedProgram.globalSymbols(program.index, program.kernelSymbols).map(ProgramSymbols(program.kernelSymbols, _))
+    )
 
   override def global(name: NonEmpty[String]): Either[Fault, ProgramGlobal] =
     for {
@@ -201,8 +272,23 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
       program  <- initialised
       alias    <- program.aliases.get(name).toRight(Fault.NotFound(s"AMDGPU kernel '$name' is not present"))
       kernel   <- program.index.kernel(alias).leftMap(error => Fault.InvalidRequest(error.message))
-      prepared <- compiled.computeIfAbsent(kernel.name, _ => compiler.compile(kernel))
+      prepared <- compiled.computeIfAbsent(
+        kernel.name,
+        _ =>
+          program.kernels.get(kernel.name)(
+            program.compiler.compile(kernel).map(_.withSource(LoadedProgram.unbound(kernel)))
+          )
+            .map(_.withSource(kernel))
+      )
     } yield (program, alias, prepared)
+
+  private def peers(context: TaskContext): PeerCode = (id, caller) =>
+    context.programs.program(id) match {
+      case Some(other: LoadedProgram) => other.library(caller).map(Some(_))
+      case _                          => Right(None)
+    }
+
+  override def close(): Unit = leased.getAndSet(None).foreach(_.release())
 
   override def build(name: NonEmpty[String]): Either[Fault, Unit] = compile(name).map(_ => ())
 
@@ -210,6 +296,6 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
     for {
       (program, alias, prepared) <- compile(task.kernelName)
       layout = program.layouts.get(alias).orElse(program.layouts.get(task.kernelName))
-      _ <- VMInterpreter.execute(prepared, KernelLaunch(task, context, workgroups), bindings, layout)
+      _ <- VMInterpreter.execute(prepared, KernelLaunch(task, context, workgroups), bindings, layout, peers(context))
     } yield ()
 }

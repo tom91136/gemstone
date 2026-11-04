@@ -2,7 +2,7 @@ package net.kurobako.gemstone.codegen
 
 import generator.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.files.*
 
 class GenerateExecutionRPCSuite extends Suite {

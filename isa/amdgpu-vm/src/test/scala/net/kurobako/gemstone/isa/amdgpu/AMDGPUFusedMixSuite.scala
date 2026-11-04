@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** CDNA's VOP3P opcode 32, which AMD's documents name V_MAD_MIX_F32, fuses: LLVM spells it `v_fma_mix_f32` from gfx908
   * on and hipcc emits it for `(float)h * (float)h + f` on gfx942 (`v_fma_mix_f32 v1, v2, v3, v4 op_sel_hi:[1,1,0]`).

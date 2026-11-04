@@ -4,7 +4,7 @@ import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 /** NVIDIA GPUs fault a load, store or atomic whose address is not a multiple of its size, in every state space, with

@@ -40,7 +40,7 @@ pinned_dependency(sycl_cts_opencl_headers SOURCE_ONLY
 pinned_dependency(levelzero_cts SOURCE_ONLY
   URL https://codeload.github.com/oneapi-src/level-zero-tests/tar.gz/de9791d7cc678a34d5eeba9f2af1036ad4290c03
   URL_HASH SHA256=04d836acd5518a5c91710f835f44738f8067eaf1887fc9e5765006be852ebb42)
-pinned_dependency(levelzero_gtest SOURCE_ONLY
+pinned_dependency(googletest SOURCE_ONLY
   URL https://codeload.github.com/google/googletest/tar.gz/15460959cbbfa20e66ef0b5ab497367e47fc0a04
   URL_HASH SHA256=258f33ab1a8ee17adf48ec65e821d0ea9eafcbedeff6110f9eaed78472e73dde)
 pinned_dependency(levelzero_headers SOURCE_ONLY
@@ -59,8 +59,8 @@ pinned_dependency(tealeaf SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/883b811fbd17888c5071e951776ede1ab8783542
   URL_HASH SHA256=2df6600eebda0d880fbb65b1e79f92414f2defb32c704c55064233e3b62f3500)
 pinned_dependency(kokkos SOURCE_ONLY
-  URL https://codeload.github.com/kokkos/kokkos/tar.gz/62d2b6c879b74b6ae7bd06eb3e5e80139c4708e6
-  URL_HASH SHA256=2738406dba3a8edd57c9da845009807d9c5f6ce64d6c098d479470a39bbb3ff9)
+  URL https://codeload.github.com/kokkos/kokkos/tar.gz/18a8c050ab3f71afa0376087238b04cc69333f1f
+  URL_HASH SHA256=e5521a81b0853231e49a0d9117d5a149d7b58d2450e0608e828e1ba1c29bb81e)
 pinned_dependency(vulkan_cts SOURCE_ONLY
   URL https://codeload.github.com/KhronosGroup/VK-GL-CTS/tar.gz/f6a29701220f34dd1407513bfe80d74ca7b392ce
   URL_HASH SHA256=d8741d45c2663193cc43b17d8f4e6fa230fa238f943bb4db3fa538ecb07503f3)
@@ -82,3 +82,36 @@ pinned_dependency(vulkan_amber SOURCE_ONLY
 pinned_dependency(vulkan_jsoncpp SOURCE_ONLY
   URL https://codeload.github.com/open-source-parsers/jsoncpp/tar.gz/9059f5cad030ba11d37818847443a53918c327b1
   URL_HASH SHA256=e7a12f50c2125abc9e4b2a38f399393503b6eebd5b4ab75ebb7df1664e768ce7)
+pinned_dependency(rocm_examples SOURCE_ONLY
+  URL https://codeload.github.com/ROCm/rocm-examples/tar.gz/refs/tags/rocm-7.1.1
+  URL_HASH SHA256=7475c4eaca103395ecae93cc5fa51b77884d06ebe990e71383c53a91bc1b089f)
+pinned_dependency(rocprim SOURCE_ONLY
+  URL https://codeload.github.com/ROCm/rocPRIM/tar.gz/refs/tags/rocm-7.1.1
+  URL_HASH SHA256=a96a1e7113f8bdd82475d7d44e1827264850865920884521f20081fecdf1972c)
+pinned_dependency(hipcub SOURCE_ONLY
+  URL https://codeload.github.com/ROCm/hipCUB/tar.gz/refs/tags/rocm-7.1.1
+  URL_HASH SHA256=2a7dc48ba7feb0f21d62844df7e1ef075249e9d2a491b76c8eb8f60335eb24b1)
+pinned_dependency(rocthrust SOURCE_ONLY
+  URL https://codeload.github.com/ROCm/rocThrust/tar.gz/refs/tags/rocm-7.1.1
+  URL_HASH SHA256=995f9498402f207d04aac1edeb845abea295f6f132151ae1e04a6f0d0dc5edf5)
+pinned_dependency(cuda_samples_11_8 SOURCE_ONLY
+  URL https://github.com/NVIDIA/cuda-samples/archive/refs/tags/v11.8.tar.gz
+  URL_HASH SHA256=1bc02c0ca42a323f3c7a05b5682eae703681a91e95b135bfe81f848b2d6a2c51)
+pinned_dependency(cuda_samples_13_3 SOURCE_ONLY
+  URL https://github.com/NVIDIA/cuda-samples/archive/refs/tags/v13.3.tar.gz
+  URL_HASH SHA256=fab59f405d6c0b87395ce6fc1d46d3f559c380c9a2704ab14d6dc0d3ce1cff16)
+pinned_dependency(cuda_library_samples SOURCE_ONLY
+  URL https://codeload.github.com/NVIDIA/CUDALibrarySamples/tar.gz/72f16ae329435bc8cafae2e80a3c655d3153de63
+  URL_HASH SHA256=7879a3d0b748515cc3c27823b7ce122662003bb705704bdd340008985bb9eb7b)
+pinned_dependency(cccl_2_8 SOURCE_ONLY
+  URL https://github.com/NVIDIA/cccl/archive/refs/tags/v2.8.2.tar.gz
+  URL_HASH SHA256=141801ddddf5b911f64f97be66a7c75f98374bebca60f275bedec75b8eeab345)
+pinned_dependency(cccl_3_4 SOURCE_ONLY
+  URL https://github.com/NVIDIA/cccl/archive/refs/tags/v3.4.3.tar.gz
+  URL_HASH SHA256=2b3eee7b044f528408b45ab85535ce6c7430b063d5bc939599a4e038da7cf6fb)
+pinned_dependency(oneapi_samples SOURCE_ONLY
+  URL https://codeload.github.com/oneapi-src/oneAPI-samples/tar.gz/refs/tags/2025.3.0
+  URL_HASH SHA256=5f87cb9a37f618b07a93514a1461ead15a2d32eaf114e18d44999b5ddf75c135)
+pinned_dependency(onedpl SOURCE_ONLY
+  URL https://codeload.github.com/uxlfoundation/oneDPL/tar.gz/refs/tags/oneDPL-release-2022.13.0
+  URL_HASH SHA256=d0524a3c896616335aef42d244cb331b31fec14cf7389cdd0e89c2e5b28ecf77)

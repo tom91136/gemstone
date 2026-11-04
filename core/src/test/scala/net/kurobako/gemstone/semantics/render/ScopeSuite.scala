@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.semantics.render
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ScopeSuite extends Suite {
   private val u32 = Type.unsigned(32)

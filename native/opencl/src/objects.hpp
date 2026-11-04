@@ -46,7 +46,7 @@ struct _cl_context {
   static constexpr Kind ObjectKind = Kind::Context;
   Header header;
   uint64_t identity = 0;
-  _cl_device_id *device = nullptr;
+  std::vector<_cl_device_id *> devices;
   std::vector<cl_context_properties> properties;
   std::vector<std::pair<void(CL_CALLBACK *)(cl_context, void *), void *>> destructorCallbacks;
   _cl_command_queue *defaultDeviceQueue = nullptr;
@@ -90,6 +90,7 @@ struct Allocation {
   bool runtimeOwnsBase = false;
   uint64_t svmContextIdentity = 0;
   cl_unified_shared_memory_type_intel usmType = CL_MEM_TYPE_UNKNOWN_INTEL;
+  _cl_device_id *device = nullptr;
   // Host-visible buffers can be copied by the SYCL runtime without updating
   // their host mirror.  Preserve pointer identities discovered by the
   // relocation scan so copied aggregate arguments remain relocatable.
@@ -176,18 +177,11 @@ struct _cl_sampler {
   std::shared_ptr<Allocation> record;
 };
 
-struct _cl_program {
-  const cl_icd_dispatch *dispatch = nullptr;
-  static constexpr Kind ObjectKind = Kind::Program;
-  Header header;
-  _cl_context *context = nullptr;
-  std::string source;
+struct ProgramBuild {
+  _cl_device_id *device = nullptr;
+  bool createdWithIL = false;
   std::vector<uint8_t> il;
   std::vector<uint8_t> originalIL;
-  std::map<cl_uint, std::vector<uint8_t>> specializationConstants;
-  std::map<cl_uint, size_t> specializationSizes;
-  bool specializationSizesLoaded = false;
-  bool createdWithIL = false;
   std::vector<uint8_t> bitcode;
   uint64_t remoteId = 0;
   std::vector<std::shared_ptr<Allocation>> globals;
@@ -198,6 +192,18 @@ struct _cl_program {
   std::string kernelNames;
   std::string buildOptions;
   std::string buildLog;
+};
+
+struct _cl_program {
+  const cl_icd_dispatch *dispatch = nullptr;
+  static constexpr Kind ObjectKind = Kind::Program;
+  Header header;
+  _cl_context *context = nullptr;
+  std::string source;
+  std::map<cl_uint, std::vector<uint8_t>> specializationConstants;
+  std::map<cl_uint, size_t> specializationSizes;
+  bool specializationSizesLoaded = false;
+  std::vector<ProgramBuild> builds;
 };
 
 struct KernelArgument {

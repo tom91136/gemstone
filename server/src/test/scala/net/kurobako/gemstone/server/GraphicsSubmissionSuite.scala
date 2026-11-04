@@ -10,7 +10,7 @@ import net.kurobako.gemstone.isa.spirv.graphics.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext

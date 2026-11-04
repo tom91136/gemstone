@@ -9,7 +9,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class AMDGPUArithmeticSuite extends Suite {
 

@@ -1,10 +1,11 @@
 package external
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.msgpack.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.compiletime.testing.typeCheckErrors
 
 /** Exercise visibility as a caller outside the Gemstone package hierarchy. */
@@ -27,9 +28,9 @@ class CoreVisibilitySuite extends Suite {
     // Deliberately mutate the source to verify the ownership obligation of this API.
     source(0) = 3
     assertEquals(wrapped.toVector, Vector(3, 2))
-    val cache = LRUCache[String, Int](2)
-    assertEquals(cache.get("key")(1), 1)
-    assertEquals(cache.get("key")(2), 1)
+    val memo = Memo[String, Int]()
+    assertEquals(memo.get("key")(1), 1)
+    assertEquals(memo.get("key")(2), 1)
   }
 
   test("codec storage access remains internal") {

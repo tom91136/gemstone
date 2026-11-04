@@ -63,9 +63,10 @@ private object VMFloatingCompiler {
   )
   private val mufuModifiers = mufuFunctions ++
     Set(Modifier.FTZ, Modifier.F16, Modifier.BF16, Modifier.F16x2, Modifier.BF16x2)
-  private val setRelations = comparisons ++ Set(Modifier.NUM, Modifier.NAN)
-  private val setCombiners = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
-  private val setModifiers = setRelations ++ setCombiners ++
+  private val setRelations           = comparisons ++ Set(Modifier.NUM, Modifier.NAN)
+  private val setCombiners           = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
+  private val legacyConditionCodeSms = Set(35, 50, 60, 61)
+  private val setModifiers           = setRelations ++ setCombiners ++
     Set(Modifier.F, Modifier.T, Modifier.BF, Modifier.BM, Modifier.FTZ)
   private val floatFormats        = Set(Modifier.F16, Modifier.BF16, Modifier.E8M7, Modifier.F32, Modifier.F64)
   private val packHalvesModifiers = Set(
@@ -253,22 +254,24 @@ private object VMFloatingCompiler {
     store(operands.head, if (flush) flushFloat(result) else result)
   }
 
-  /** The legacy FSET.CC form whose observed consumer reads only the zero flag. */
-  def zeroFlagFset(using context: VMCompilationContext): Boolean = {
+  // FTZ and BF leave the legacy condition-code form as it is, which no other check of Modifier needs
+  @SuppressWarnings(Array("bonsai:inline-set-membership"))
+  private def legacyConditionCodeSet(using context: VMCompilationContext): Boolean = {
     import context.*
-    def input(value: Operand): Boolean = value match {
-      case Operand.Unary(inner, false, false, true) => OperandQueries.isRegister(inner, allowZero = true)
-      case Operand.ConstantBank(bank, offset)       => bank == 2 && OperandQueries.integer(offset).exists(_ >= 0)
-      case Operand.FloatingBits(_, width, _) if width == 32 => true
-      case other                                            => OperandQueries.isRegister(other, allowZero = true)
-    }
-    Set(35, 50, 60, 61)(sm) && OperandQueries.is[Form.Fset](operation) &&
-    (modifiers.filterNot(_ == Modifier.FTZ) match {
-      case Vec(Modifier.GTU | Modifier.NEU | Modifier.EQ, Modifier.AND) => true
-      case _                                                            => false
-    }) && operands.size == 4 && operands.head == Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC)) &&
-    input(operands(1)) && input(operands(2)) && OperandQueries.isPredicateAllowingNegated(operands(3))
+    legacyConditionCodeSms(sm) &&
+    (OperandQueries.is[Form.Fset](operation) || OperandQueries.is[Form.Dset](operation)) &&
+    (modifiers.filterNot(Set(Modifier.FTZ, Modifier.BF)) match {
+      case Vec(relation, combiner) => setRelations.contains(relation) && setCombiners.contains(combiner)
+      case _                       => false
+    }) && operands.size == 4 && OperandQueries.has(operands.head, OperandSelector.CC) &&
+    OperandQueries.isPredicateAllowingNegated(operands(3))
   }
+
+  /** The legacy FSET.CC and DSET.CC forms that drive only the zero flag, which is clear when the masked comparison
+    * holds.
+    */
+  def zeroFlagFset(using context: VMCompilationContext): Boolean =
+    legacyConditionCodeSet && context.operands.head == Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC))
 
   private def minMax()(using context: VMCompilationContext): Unit = {
     import context.*
@@ -622,8 +625,10 @@ private object VMFloatingCompiler {
   private def set()(using context: VMCompilationContext): Unit = {
     import context.*
     val double   = OperandQueries.is[Form.Dset](operation)
-    val zeroFlag = !double && zeroFlagFset(using context)
-    if (OperandQueries.has(operands.head, OperandSelector.CC) && !zeroFlag)
+    val zeroFlag = zeroFlagFset(using context)
+    // a general-register destination keeps the mask and, as ISET.CC does, sets the zero flag when that mask is zero
+    val registerFlag = !zeroFlag && legacyConditionCodeSet(using context)
+    if (OperandQueries.has(operands.head, OperandSelector.CC) && !zeroFlag && !registerFlag)
       unsupported(s"${operation.mnemonic.raw} condition-code output is not implemented")
     if (double && modifiers.contains(Modifier.FTZ)) unsupported("DSET does not support FTZ")
     requireModifiers(setModifiers)
@@ -650,7 +655,9 @@ private object VMFloatingCompiler {
     if (zeroFlag) emit(PredicateUnary(VMRegisters.Predicate.Zero.slot, result.slot))
     else {
       val truth = if (modifiers.contains(Modifier.BF)) 0x3f800000L else 0xffffffffL
-      store(operands.head, select(Value.Immediate(truth), Value.Immediate(0L), result))
+      val mask  = select(Value.Immediate(truth), Value.Immediate(0L), result)
+      store(operands.head, mask)
+      if (registerFlag) setZeroFlag(mask)
     }
   }
 

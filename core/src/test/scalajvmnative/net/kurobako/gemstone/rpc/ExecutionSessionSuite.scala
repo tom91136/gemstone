@@ -12,8 +12,10 @@ import net.kurobako.gemstone.constraint.auto.given
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
+import scala.runtime.LongRef
 import scala.util.Try
 import scala.util.Using
 
@@ -70,6 +72,24 @@ class ExecutionSessionSuite extends Suite {
   private def pooled(workers: WorkerPool, backend: Backend): ExecutionSession =
     ExecutionSession(List(backend), executionContext = workers, parallelism = workers.parallelism)
 
+  test("printf keeps standard output and standard error apart") {
+    val backend = TestBackend((_, _, handler) =>
+      for {
+        _ <- handler(Event.Print("out", Vec.empty))
+        _ <- handler(Event.Print("err", Vec.empty, Event.PrintStream.Stderr))
+        _ <- handler(Event.Print("out", Vec.empty))
+      } yield ()
+    )
+    Using.resource(ExecutionSession(backends = List(backend))) { service =>
+      val allocation = service.registerAllocation(8).toOption.get
+      val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+      val completion = service.launch(program, task("print", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
+      assertEquals(service.awaitCompletion(completion), Right(()))
+      assertEquals(service.completionPrints(completion), Right("outout"))
+      assertEquals(service.completionPrints(completion, Event.PrintStream.Stderr), Right("err"))
+    }
+  }
+
   test("printf retention accepts its limit and fails on the next event") {
     for (events <- List(2, 3)) {
       val backend = TestBackend((_, _, handler) =>
@@ -90,6 +110,31 @@ class ExecutionSessionSuite extends Suite {
           assertEquals(service.completion(completion), Right(CompletionStatus.Failed(failure)))
         }
       }
+    }
+  }
+
+  test("a running program finds the other loaded programs of its session until they unload") {
+    val loaded = mutable.ArrayBuffer.empty[Backend.Program]
+    val seen   = AtomicReference(Vec.empty[Option[Backend.Program]])
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var ids = Vec.empty[ProgramId]
+    class Probing extends Program(AtomicBoolean()) {
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
+        seen.set(ids.map(context.programs.program))
+        Right(())
+      }
+    }
+    val backend = ProgramBackend { val program = Probing(); loaded += program; program }
+    Using.resource(ExecutionSession(List(backend))) { service =>
+      ids = Vec(service.load(encoding, Vec[Byte](1)).toOption.get, service.load(encoding, Vec[Byte](2)).toOption.get)
+      def launch() = {
+        val completion = service.launch(ids(1), task("probe")).toOption.get
+        assertEquals(service.awaitCompletion(completion), Right(()))
+        seen.get()
+      }
+      assertEquals(launch(), Vec(Some(loaded(0)), Some(loaded(1))))
+      assertEquals(service.unload(ids(0)), Right(()))
+      assertEquals(launch(), Vec(None, Some(loaded(1))))
     }
   }
 
@@ -207,6 +252,7 @@ class ExecutionSessionSuite extends Suite {
     Using.resource(ExecutionSession(List.empty)) { service =>
       assertEquals(service.describeSpecialization(Vec.empty), unavailable)
       assertEquals(service.specializeImage(Vec.empty, Vec.empty), unavailable)
+      assertEquals(service.linkImages(Vec.empty), unavailable)
     }
     val image     = Vec[Byte](1, 2, 3)
     val constants = Vec(SpecializationConstant(Binary32(7L), Vec[Byte](9)))
@@ -219,8 +265,14 @@ class ExecutionSessionSuite extends Suite {
           input ++ supplied.head.value,
           Fault.InvalidRequest("image")
         )
+      override def link(inputs: Vec[Vec[Byte]]): Either[Fault, Backend.LinkedImage] =
+        Right(Backend.LinkedImage(inputs.flatten, Vec.empty))
     }
     Using.resource(ExecutionSession(List.empty, specialization = Some(Specializer))) { service =>
+      assertEquals(
+        service.linkImages(Vec(LinkInput(image), LinkInput(Vec[Byte](4)))),
+        Right(Backend.LinkedImage(Vec[Byte](1, 2, 3, 4), Vec.empty))
+      )
       assertEquals(service.describeSpecialization(image), Right(Vec(SpecializationInfo(Binary32(7L), 1))))
       assertEquals(service.specializeImage(image, constants), Right(Vec[Byte](1, 2, 3, 9)))
       assertEquals(service.describeSpecialization(Vec.empty), Left(ExecutionFailure.InvalidRequest("image")))
@@ -733,6 +785,121 @@ class ExecutionSessionSuite extends Suite {
     }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def coherentLoad(memory: AddressSpace, address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] = {
+    val into = LongRef(0L)
+    memory.readCoherentValueInto(address, size, into) match {
+      case null         => Right(into.elem)
+      case fault: Fault => Left(fault)
+    }
+  }
+
+  test("a coherent load of host memory observes the host value through a native atomic") {
+    val backend = TestBackend { (_, memory, handler) =>
+      coherentLoad(memory, GuestAddress(0x1000L), 4).flatMap(value => handler(Event.Print(value.toString, Vec.empty)))
+    }
+    Using.resource(WorkerPool(1)) { workers =>
+      Using.resource(pooled(workers, backend)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val completion = service.launch(program, task("coherent-host")).toOption.get
+        @annotation.tailrec
+        def poll(): Unit = {
+          val batch = service.pollHostMemory(completion).fold(error => fail(error.message), identity)
+          batch.sync.foreach { sync =>
+            assert(sync.atomic.exists(atom => atom.address == GuestAddress(0x1000L) && atom.size == 4))
+            assertEquals(service.supplyHostSync(completion, sync.ticket, 7L), Right(()))
+          }
+          if (!batch.completed) poll()
+        }
+        poll()
+        assertEquals(service.awaitCompletion(completion), Right(()))
+        assertEquals(service.completionPrints(completion), Right("7"))
+      }
+    }
+  }
+
+  test("a coherent load of device memory acquires, so host bytes cached before it are requested again") {
+    val backend = TestBackend { (task, memory, handler) =>
+      task.arguments.headOption match {
+        case Some(KernelTask.Argument.Memory(region, offset, _)) =>
+          val host = GuestAddress(0x1000L)
+          for {
+            first  <- memory.awaitRead(memory.readDeferred(host, 1))
+            cached <- memory.read(host, 1)
+            _      <- coherentLoad(memory, memory.address(region, offset).toOption.get, 4)
+            second <- memory.awaitRead(memory.readDeferred(host, 1))
+            _      <- handler(Event.Print(s"${first.head} ${cached.head} ${second.head}", Vec.empty))
+          } yield ()
+        case _ => Left(Fault.InvalidRequest("memory argument is required"))
+      }
+    }
+    Using.resource(WorkerPool(1)) { workers =>
+      Using.resource(pooled(workers, backend)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val allocation = service.registerAllocation(8).toOption.get
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val completion = service.launch(program, task("coherent-acquire", KernelTask.Argument.Memory(allocation, 0L)))
+          .toOption.get
+        @annotation.tailrec
+        def poll(next: Int): Unit = {
+          val batch = service.pollHostMemory(completion).fold(error => fail(error.message), identity)
+          batch.sync.foreach(sync => assertEquals(service.supplyHostSync(completion, sync.ticket, 0L), Right(())))
+          if (batch.reads.nonEmpty)
+            assertEquals(
+              service.supplyHostMemory(
+                completion,
+                batch.reads.map(range => HostMemoryBytes(range.address, Vec.fill(range.size)(next.toByte)))
+              ),
+              Right(())
+            )
+          if (!batch.completed) poll(if (batch.reads.nonEmpty) next + 11 else next)
+        }
+        poll(11)
+        assertEquals(service.awaitCompletion(completion), Right(()))
+        assertEquals(service.completionPrints(completion), Right("11 11 22"))
+      }
+    }
+  }
+
+  test("a store to bytes another worker is waiting to read wakes that worker") {
+    Using.resource(WorkerPool(2)) { workers =>
+      val staged  = CountDownLatch(1)
+      val backend = TestBackend { (_, memory, _) =>
+        workers.parallelFor(2L) { lane =>
+          if (lane == 0) {
+            assertEquals(memory.readDeferred(GuestAddress(0x1000L), 1), Left(AddressSpace.Pending))
+            staged.countDown()
+            memory.flushHostReads()
+          } else if (!staged.await(5, TimeUnit.SECONDS)) Left(Fault.Cancelled)
+          else { Thread.sleep(200); memory.write(GuestAddress(0x1000L), Vec[Byte](5)) }
+        }
+      }
+      Using.resource(pooled(workers, backend)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val completion = service.launch(program, task("store-wakes-reader")).toOption.get
+        val pump       = FutureTask[Unit] { () =>
+          @annotation.tailrec
+          def poll(): Unit = {
+            val batch = service.pollHostMemory(completion).fold(error => fail(error.message), identity)
+            batch.sync.foreach(sync => assertEquals(service.supplyHostSync(completion, sync.ticket, 0L), Right(())))
+            if (!batch.completed) poll()
+          }
+          poll()
+        }
+        val thread = Thread(pump, "store-wakes-reader-pump")
+        thread.setDaemon(true)
+        thread.start()
+        try pump.get(15, TimeUnit.SECONDS)
+        finally {
+          service.close()
+          thread.join(TimeUnit.SECONDS.toMillis(15))
+        }
+      }
+    }
+  }
+
   test("pointer-bearing scalar arguments are relocated from client aliases, including one past the end") {
     val captured = AtomicReference(Vec.empty[KernelTask.PointerRelocation])
     class PointerProgram
@@ -991,8 +1158,8 @@ class ExecutionSessionSuite extends Suite {
     Using.resource(ExecutionSession(Nil)) { service =>
       val allocation = filled(service, 64)
       val request    = Operation.ReadAllocationRectangle(allocation, 3L, 2, 3, 2, 5, 20)
-      val reply      = ExecutionHandler(request, service).map(bytes =>
-        request.replyCodec.decode(bytes, ExecutionRPC.Limits).fold(error => fail(error), identity)
+      val reply      = ExecutionHandler(request, service).map(encoded =>
+        request.replyCodec.decode(encoded.toArray, ExecutionRPC.Limits).fold(error => fail(error), identity)
       )
       assertEquals(reply.map(_.toList), Right(List[Byte](3, 4, 8, 9, 13, 14, 23, 24, 28, 29, 33, 34)))
     }

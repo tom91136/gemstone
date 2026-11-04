@@ -12,7 +12,7 @@ import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
@@ -29,6 +29,41 @@ class ConstantSuite extends Suite {
         "STG.E.64 [R2.64+0x10], R8; EXIT"
     ).launch(LaunchGeometry.Dimensions(4, 2, 3), LaunchGeometry.Dimensions(5, 6, 7))(Arg.zeros(24))
     assertEquals(run.words(0), Vec(4L, 2L, 3L, 5L, 6L, 7L))
+  }
+
+  // cooperative_groups reads the grid workspace the driver writes to c0: its high word, then its low word
+  for {
+    (sm, high, low) <- Vec(
+      (70, 0x8c, 0x90),
+      (75, 0x8c, 0x90),
+      (86, 0x8c, 0x90),
+      (89, 0x8c, 0x90),
+      (90, 0x44, 0x48),
+      (100, 0x254, 0x258),
+      (120, 0x254, 0x258)
+    )
+    cooperative <- Flags
+  }
+    test(
+      s"sm_$sm c[0x0][0x${high.toHexString}] and c[0x0][0x${low.toHexString}] hold the workspace of a cooperative launch ($cooperative)"
+    ) {
+      val run = program(
+        sm,
+        f"LDC R4, c[0x0][0x$high%x]; LDC R5, c[0x0][0x$low%x]; LDC.64 R2, c[0x0][0x160]; STG.E [R2.64], R4; " +
+          "STG.E [R2.64+0x4], R5; EXIT"
+      ).launch(1, cooperative = cooperative)(Arg.zeros(8))
+      assertEquals(run.words(0), if (cooperative) Vec(0x7000L, 0L) else Vec(0L, 0L))
+    }
+
+  test("sm_120 reads the grid workspace through the cluster table index") {
+    val run = program(
+      120,
+      "CS2R.32 R11, SR_CgaSize; IMAD R11, R11, -0xa0, RZ; R2UR UR9, R11; LDCU UR8, c[0x0][UR9+0x258]; " +
+        "LDCU UR9, c[0x0][UR9+0x254]; MOV R4, UR8; MOV R5, UR9; LDC.64 R2, c[0x0][0x380]; STG.E [R2.64], R4; " +
+        "STG.E [R2.64+0x4], R5; EXIT",
+      base = 0x380
+    ).launch(1, cooperative = true)(Arg.zeros(8))
+    assertEquals(run.words(0), Vec(0L, 0x7000L))
   }
 
   test("kernel-scoped constant banks are constant sections for both decoding and binding") {
@@ -232,12 +267,14 @@ class ConstantSuite extends Suite {
           .fold(e => fail(e.message), identity)
       val storage = service.registerAllocation(8).toOption.get
       val output  = service.registerAllocation(4).toOption.get
+      val heap    = service.registerAllocation(4096).toOption.get
       assert(service.bindGlobal(program, s"__sass_const${bank.index}", storage, 0L).isRight)
       val task = KernelTask.validated(
         "driver_call": NonEmpty[String],
         LaunchGeometry.Dimensions.One,
         LaunchGeometry.Dimensions.One,
-        Vec(KernelTask.Argument.Memory(output, 0L))
+        Vec(KernelTask.Argument.Memory(output, 0L)),
+        deviceHeap = Some(KernelTask.DeviceHeap(heap, 0L, 4096L))
       ).toOption.get
       val completion = service.launch(program, task).fold(e => fail(e.message), identity)
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
@@ -391,6 +428,67 @@ class ConstantSuite extends Suite {
     val relocated = module.copy(sections = module.sections :+ relocation)
     assert(lowerStatements(relocated, relocated.kernels.head, saxpy.functions).left.exists(_.contains("relocations")))
   }
+
+  for (destinationFirst <- Flags)
+    test(s"data pointers in initialised globals follow the bound target order=$destinationFirst") {
+      val holder  = Vec.fill(8)(0.toByte)
+      val target  = LittleEndian.toVec(17L, 8)
+      val base    = Harness.module(80, Vec(Entry("k", 0x160, Vec(8), registers = 8)))
+      val strings = Cubin.Section(
+        base.sections.nonNegativeSize,
+        ".strtab",
+        3,
+        0,
+        15,
+        0,
+        0,
+        Vec.from("\u0000holder\u0000target\u0000".getBytes(StandardCharsets.UTF_8))
+      )
+      val global      = Cubin.Section(strings.index + 1, ".nv.global.init", 1, 0, 16, 0, 0, holder ++ target)
+      val symbolBytes = ByteBuffer.allocate(72).order(ByteOrder.LITTLE_ENDIAN)
+      symbolBytes.putInt(24, 1).put(28, 1.toByte).putShort(30, global.index.toShort).putLong(32, 0L).putLong(40, 8L)
+      symbolBytes.putInt(48, 8).put(52, 1.toByte).putShort(54, global.index.toShort).putLong(56, 8L).putLong(64, 8L)
+      val symbols =
+        Cubin.Section(global.index + 1, ".symtab", 2, 0, 72, strings.index, 0, Vec.from(symbolBytes.array()))
+      val relocation = Cubin.Section(
+        symbols.index + 1,
+        ".rela.nv.global.init",
+        4,
+        0,
+        24,
+        symbols.index,
+        global.index,
+        LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((2L << 32) | 4L, 8) ++ LittleEndian.toVec(4L, 8)
+      )
+      val module = base.copy(
+        sections = base.sections ++ Vec(strings, global, symbols, relocation),
+        globals = Vec(
+          Cubin.Global("holder", holder, offset = 0, section = global.index),
+          Cubin.Global("target", target, offset = 8, section = global.index)
+        )
+      )
+      assertEquals(
+        Cubin.globalRelocations(module),
+        Right(Vec(Cubin.GlobalRelocation("holder", 0, "target", 4L)))
+      )
+      val functions                              = Vec(Listing.program("EXIT", "k").value)
+      def pointer(targetOffset: Long >= 0): Long = session { (service, fixtures) =>
+        val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(Image(module, functions)))
+          .fold(e => fail(e.message), identity)
+        val storage  = service.registerAllocation(128).toOption.get
+        val bindings = Vec[(NonEmpty[String], Long >= 0)](("holder", 0L), ("target", targetOffset))
+        (if (destinationFirst) bindings else bindings.reverse).foreach { case (name, offset) =>
+          assert(service.bindGlobal(program, name, storage, offset).isRight)
+        }
+        LittleEndian.decodeInt64(service.read(AllocationRange(storage, 0L, 8)).toOption.get, 0)
+      }
+      assertEquals(pointer(80L) - pointer(16L), 64L)
+      val dangling = relocation.copy(bytes =
+        LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((2L << 32) | 7L, 8) ++ LittleEndian.toVec(4L, 8)
+      )
+      assert(Cubin.globalRelocations(module.copy(sections = module.sections.updated(relocation.index, dangling)))
+        .left.exists(_.contains("unsupported global relocation kind")))
+    }
 
   private case class Image(module: Cubin.Module, functions: Vec[DecodedFunction])
 

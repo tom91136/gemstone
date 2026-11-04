@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class Bfloat16FmaSuite extends Suite {
   test("fma.rn.bf16 rounds the exact sum once, as an RTX 4060 Ti does") {

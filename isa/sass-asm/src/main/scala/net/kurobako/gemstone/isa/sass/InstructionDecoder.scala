@@ -1,19 +1,29 @@
 package net.kurobako.gemstone.isa.sass
 
-import cats.syntax.all.*
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
-import net.kurobako.gemstone.string.*
 import scala.collection.mutable
 
 /** Decodes instruction words through their recovered FORMAT trees directly to structural operands. */
 object InstructionDecoder {
   private lazy val RegisterBanks = SassDomains.banks
+  private val AttributeNames     = NVDisasm.AttributeNames.toArray.sorted
+  private val NoAttributes       = Array.fill[BigInt](AttributeNames.length)(BigInt(0))
+  private val Not                = AttributeNames.indexOf("not")
+  private val Negate             = AttributeNames.indexOf("negate")
+  private val Absolute           = AttributeNames.indexOf("absolute")
+  private val Invert             = AttributeNames.indexOf("invert")
   private val ModifierSeparators = Array(';', ',', '*', '.', '/', ' ', '\t', '\r', '\n', '\f', '\u000b')
+
+  private val tokens = ConcurrentHashMap[String, Array[String]]()
+
+  private def separated(text: String): Array[String] =
+    tokens.computeIfAbsent(text, _.split(ModifierSeparators).filter(_.nonEmpty))
 
   private enum FormatPiece {
     case Text(value: String)
@@ -21,25 +31,69 @@ object InstructionDecoder {
     case Group(open: String, close: String, children: Vec[FormatPiece])
   }
 
-  def decode(address: Int >= 0, bytes: Array[Byte], target: Target): Either[String, DecodedInstruction] = {
+  private class CacheKey(val sm: Int, val bytes: Array[Byte]) {
+    private val hash                        = 31 * sm + java.util.Arrays.hashCode(bytes)
+    override def hashCode: Int              = hash
+    override def equals(that: Any): Boolean = that match {
+      case other: CacheKey => sm == other.sm && java.util.Arrays.equals(bytes, other.bytes)
+      case _               => false
+    }
+  }
+
+  private val CacheCapacity = 4096
+  private val cache         = ConcurrentHashMap[CacheKey, Either[String, DecodedInstruction]]()
+
+  /** Words repeat across kernels; only relative targets read the address, and those results are not shared. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  def decode(address: Int >= 0, bytes: Array[Byte], target: Target): Either[String, DecodedInstruction] =
+    cache.get(CacheKey(target.sm, bytes)) match {
+      case null =>
+        val (result, relative) = decodeWord(address, bytes, target)
+        if (!relative) {
+          if (cache.size >= CacheCapacity) cache.clear()
+          val _ = cache.put(CacheKey(target.sm, bytes.clone()), result)
+        }
+        result
+      case cached => cached.map(value => if (value.address == address) value else value.copy(address = address))
+    }
+
+  private def decodeWord(
+      address: Int >= 0,
+      bytes: Array[Byte],
+      target: Target
+  ): (Either[String, DecodedInstruction], Boolean) = {
     val database = target.database
-    for {
-      candidates <- FieldDecoder.candidates(database, bytes).left.map(error => s"${target.name} $error")
-      rendered = candidates.filterNot(_.alternate).map(Candidate(database, target, address, _, bytes).decode)
-      errors   = rendered.flatMap(_.left.toOption).filterNot(_.category == NVDisasm.FailureCategory.IllegalCandidate)
-      _ <- Either.cond(errors.isEmpty, (), errors.map(_.message).distinct.mkString("; "))
-      decoded = rendered.flatMap(_.toOption).distinctBy(value =>
-        (value.mnemonic, value.modifiers, value.operands, value.guard)
-      )
-      result <- decoded match {
-        case Vec(single) => Right(single)
-        case Vec()       => Left(rendered.flatMap(_.left.toOption).map(_.message).distinct.mkString("; "))
-        case _           => Left(s"ambiguous ${target.name} instruction: ${decoded.map { value =>
-              val origin = value.machine.fold("")(machine => s" ${machine.form}")
-              s"${value.mnemonic.raw}${value.modifiers.map(_.name).mkString(".")} ${value.operands.mkString(", ")}$origin"
-            }.mkString("; ")}")
-      }
-    } yield result
+    FieldDecoder.primary(database, bytes).left.map(error => s"${target.name} $error") match {
+      case Left(error)       => (Left(error), false)
+      case Right(candidates) =>
+        def render(candidate: FieldDecoder.Candidate) = Candidate(database, target, address, candidate, bytes).decode
+        val rendered                                  = candidates.flatMap { candidate =>
+          render(candidate) match {
+            case Left(failure)
+                if failure.category == NVDisasm.FailureCategory.IllegalCandidate &&
+                  candidate.alternatives.nonEmpty => candidate.alternatives.map(render(_))
+            case other => Vec(other)
+          }
+        }
+        val failures = rendered.flatMap(_.left.toOption)
+        val errors   = failures.filterNot(_.category == NVDisasm.FailureCategory.IllegalCandidate)
+        val result   =
+          if (errors.nonEmpty) Left(errors.map(_.message).distinct.mkString("; "))
+          else {
+            val decoded = rendered.flatMap(_.toOption).distinctBy(value =>
+              (value.mnemonic, value.modifiers, value.operands, value.guard)
+            )
+            decoded match {
+              case Vec(single) => Right(single)
+              case Vec()       => Left(failures.map(_.message).distinct.mkString("; "))
+              case _           => Left(s"ambiguous ${target.name} instruction: ${decoded.map { value =>
+                    val origin = value.machine.fold("")(machine => s" ${machine.form}")
+                    s"${value.mnemonic.raw}${value.modifiers.map(_.name).mkString(".")} ${value.operands.mkString(", ")}$origin"
+                  }.mkString("; ")}")
+            }
+          }
+        (result, candidates.exists(_.form.relative))
+    }
   }
 
   private def unsupported(message: String): NVDisasm.CandidateFailure =
@@ -57,8 +111,12 @@ object InstructionDecoder {
   private def fieldWidth(field: NVDisasm.Syntax.Field): Option[Int] =
     field.arguments.flatMap(_.takeWhile(_ != '/').toIntOption)
 
+  private val registers = ConcurrentHashMap[String, Option[Operand.Register]]()
+
+  private def register(name: String): Option[Operand.Register] = registers.computeIfAbsent(name, parseRegister(_))
+
   /** Vocabulary register spellings: `R7`, `RZ`, `UR3`, `URZ`, `B1`, `SB2`. */
-  private def register(name: String): Option[Operand.Register] = {
+  private def parseRegister(name: String): Option[Operand.Register] = {
     val bank = RegisterBanks.find(name.startsWith(_))
     bank.flatMap { prefix =>
       val suffix = name.drop(prefix.length)
@@ -101,18 +159,37 @@ object InstructionDecoder {
     private val candidate = FieldDecoder.refine(database, original)
     private val encoding  = NVDisasm.Encoding(database, form)
 
-    private def attribute(field: Field, name: String): BigInt = candidate.bindings.get(s"${field.binding}@$name")
-      .orElse(candidate.bindings.get(s"${form.encodedBinding(field)}@$name")).getOrElse(BigInt(0))
+    private class Info(field: Field) {
+      private val encoded       = form.binding(field)
+      val defaults: Vec[BigInt] = database.defaultValues(field)
+      val raw: Option[BigInt]   = candidate.bindings.get(field.binding).orElse(candidate.bindings.get(encoded))
+        .orElse(database.byVocabulary.get(field.kind).flatMap(_.sole))
+        .orElse(Option.when(!form.encodedNames(encoded))(defaults.headOption).flatten)
+      val attributes: Array[BigInt] =
+        if (!form.attributeBases(field.binding) && !form.attributeBases(encoded)) NoAttributes
+        else AttributeNames.map(name =>
+          candidate.bindings.get(s"${field.binding}@$name").orElse(candidate.bindings.get(s"$encoded@$name"))
+            .getOrElse(BigInt(0))
+        )
+      val unmarked: Boolean = attributes.forall(_ == 0)
+    }
 
-    private def raw(field: Field): Option[BigInt] = candidate.bindings.get(field.binding)
-      .orElse(candidate.bindings.get(form.encodedBinding(field)))
-      .orElse(database.vocabulary(field).map(_.value).distinct match {
-        case Vec(value) => Some(value)
-        case _          => None
-      })
-      .orElse(Option.when(
-        !form.encodedNames(form.encodedBinding(field))
-      )(database.defaultValues(field).headOption).flatten)
+    private val infos = java.util.IdentityHashMap[Field, Info]()
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+    private def info(field: Field): Info = {
+      val found = infos.get(field)
+      if (found != null) found
+      else {
+        val made = Info(field)
+        infos.put(field, made)
+        made
+      }
+    }
+
+    private def attribute(field: Field, index: Int): BigInt = info(field).attributes(index)
+
+    private def raw(field: Field): Option[BigInt] = info(field).raw
 
     /** The bits a form stores for `field`, counting those its scale drops. */
     private def storedWidth(field: Field): Option[Int] = {
@@ -134,14 +211,14 @@ object InstructionDecoder {
     private def registerDisplacement(children: Vec[FormatPiece], base: Operand.Register, value: BigInt): BigInt =
       children.collectFirst {
         case FormatPiece.Field(field, Some(_)) if field.category == NVDisasm.FieldKind.SignedImmediate => field
-      }.flatMap(field => fieldWidth(field).zip(storedWidth(field)).headOption).fold(value) { (declared, stored) =>
+      }.flatMap(field => fieldWidth(field).zip(storedWidth(field))).fold(value) { (declared, stored) =>
         if (!OperandQueries.isZero(base) && value >= 0 && stored < declared) signed(value, stored) else value
       }
 
-    private def isDefault(field: Field, value: BigInt): Boolean = database.defaultValues(field).contains(value) &&
-      FieldDecoder.Attribute.names.forall(name => attribute(field, name) == 0)
+    private def isDefault(field: Field, value: BigInt): Boolean =
+      info(field).defaults.contains(value) && info(field).unmarked
 
-    private def changed(field: Field): Option[BigInt] = raw(field).filterNot(database.defaultValues(field).contains)
+    private def changed(field: Field): Option[BigInt] = raw(field).filterNot(info(field).defaults.contains)
 
     private def laterPredicate(field: Field): Boolean = {
       val index = form.declared.indexWhere(value => value.binding == field.binding && value.kind == field.kind)
@@ -149,28 +226,19 @@ object InstructionDecoder {
         .exists(changed(_).nonEmpty)
     }
 
-    private def symbol(field: Field, value: BigInt): Option[String] = {
-      val valid     = database.vocabulary(field).filter(_.value == value).map(_.name).filterNot(_.startsWith("INVALID"))
-      val preferred = field.category match {
-        case NVDisasm.FieldKind.SpecialRegister =>
-          // Selector 255 is also spelled SRZ; keep that alias ahead of its generated SR255 name.
-          valid.find(_ == "SRZ").orElse(valid.find(_.startsWith("SR_")))
-            .orElse(valid.find(_.startsWith("SR"))).orElse(valid.lastOption)
-        case category if category.isPredicate => valid.find(_.endsWith("T")).orElse(valid.headOption)
-        case category if category.isRegister  => valid.minByOption(_.length)
-        // legacy condition tests list flag aliases (ZFT, LEG, U) before the comparison names nvdisasm prints
-        case NVDisasm.FieldKind.Vocabulary("Test") => valid.lastOption
-        case _                                     =>
-          val names = valid.toSet
-          valid.find(name => name.startsWith("U") && names(name.drop(1)))
-            .orElse(valid.filterNot(_.startsWith("_")).minByOption(_.length)).orElse(valid.headOption)
-      }
-      preferred.map(name =>
-        field.category match {
-          case NVDisasm.FieldKind.ConstantBank | NVDisasm.FieldKind.DescriptorRegister => name.toLowerCaseRoot
-          case _                                                                       => name
+    private def symbol(field: Field, value: BigInt): Option[String] = database.symbol(field, value)
+
+    /** A vocabulary field without an omissible default, alone in its operand, such as a texture dimension or query
+      * mode.
+      */
+    private def isSymbolOperand(chunk: Vec[FormatPiece], field: Field): Boolean = field.category match {
+      case NVDisasm.FieldKind.Vocabulary(_) =>
+        field.default.forall(_ == "PRINT") && !field.isGuard && chunk.forall {
+          case FormatPiece.Text(raw)      => !raw.contains('/') && !raw.contains('.')
+          case FormatPiece.Field(f, _)    => f eq field
+          case FormatPiece.Group(_, _, _) => false
         }
-      )
+      case _ => false
     }
 
     private def isOperandValue(field: Field, allowCC: Boolean): Boolean =
@@ -231,10 +299,10 @@ object InstructionDecoder {
             if (depth == 0 || qualifier) && !field.category.isRegister && isDefault(field, value) &&
               !laterPredicate(field) => Right(None)
         case Some(value) =>
-          val not      = attribute(field, "not") == 1
-          val negative = attribute(field, "negate") == 1
-          val absolute = attribute(field, "absolute") == 1
-          val inverted = attribute(field, "invert") == 1
+          val not      = attribute(field, Not) == 1
+          val negative = attribute(field, Negate) == 1
+          val absolute = attribute(field, Absolute) == 1
+          val inverted = attribute(field, Invert) == 1
           converted(field, value).flatMap {
             case Operand.Predicate(index, uniform, negated) if not || negative || inverted =>
               Right(Some(Operand.Predicate(index, uniform, negated ^ not ^ negative ^ inverted)))
@@ -245,38 +313,50 @@ object InstructionDecoder {
           }
       }
 
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private def pieces(
         nodes: Vec[NVDisasm.Syntax],
         depth: Int = 0
-    ): Either[NVDisasm.CandidateFailure, Vec[FormatPiece]] =
-      nodes.zipWithIndex.traverse {
-        case (node, index) =>
-          val qualifier = nodes.lift(index - 1).exists {
-            case Text(raw) => raw.trim.endsWith("/")
-            case _         => false
-          }
-          val next: Either[NVDisasm.CandidateFailure, Vec[FormatPiece]] = node match {
-            case Text(raw)    => Right(Vec(FormatPiece.Text(raw)))
-            case Literal(raw) => Right(Vec(FormatPiece.Text(raw)))
-            case field: Field =>
-              fieldOperand(field, depth, qualifier).map(value => Vec(FormatPiece.Field(field, value)))
-            case Optional(None, children)     => pieces(children, depth)
-            case Optional(Some("&" | "?"), _) => Right(Vec.empty)
-            case Optional(_, _)               => Left(unsupported(s"unsupported optional syntax in ${candidate.name}"))
-            case Group("{", "}", children)
-                if NVDisasm.Syntax.fields(children).forall(_.binding.startsWith("reuse_")) =>
-              Right(Vec.empty)
-            case group: Group if NVDisasm.Syntax.operatorGroup(group) => Right(Vec.empty)
-            case Group(open, close, children)                         =>
-              pieces(children, depth + 1).map(value => Vec(FormatPiece.Group(open, close, value)))
-          }
-          next
-      }.map(_.flatten)
+    ): Either[NVDisasm.CandidateFailure, Vec[FormatPiece]] = {
+      val found                                      = Vec.newBuilder[FormatPiece]
+      var failure: Option[NVDisasm.CandidateFailure] = None
+      var index                                      = 0
+      while (failure.isEmpty && index < nodes.size) {
+        piece(nodes, index, depth).fold(error => failure = Some(error), _.foreach(found += _))
+        index += 1
+      }
+      failure.toLeft(found.result())
+    }
+
+    private def piece(
+        nodes: Vec[NVDisasm.Syntax],
+        index: Int,
+        depth: Int
+    ): Either[NVDisasm.CandidateFailure, Vec[FormatPiece]] = {
+      val qualifier = nodes.lift(index - 1).exists {
+        case Text(raw) => raw.trim.endsWith("/")
+        case _         => false
+      }
+      nodes(index) match {
+        case Text(raw)    => Right(Vec(FormatPiece.Text(raw)))
+        case Literal(raw) => Right(Vec(FormatPiece.Text(raw)))
+        case field: Field =>
+          fieldOperand(field, depth, qualifier).map(value => Vec(FormatPiece.Field(field, value)))
+        case Optional(None, children)     => pieces(children, depth)
+        case Optional(Some("&" | "?"), _) => Right(Vec.empty)
+        case Optional(_, _)               => Left(unsupported(s"unsupported optional syntax in ${candidate.name}"))
+        case Group("{", "}", children) if NVDisasm.Syntax.fields(children).forall(_.binding.startsWith("reuse_")) =>
+          Right(Vec.empty)
+        case group: Group if NVDisasm.Syntax.operatorGroup(group) => Right(Vec.empty)
+        case Group(open, close, children)                         =>
+          pieces(children, depth + 1).map(value => Vec(FormatPiece.Group(open, close, value)))
+      }
+    }
 
     private def guard: Option[SASSInstruction.Guard] = form.declared.find(_.isGuard)
       .flatMap(field =>
         raw(field).flatMap(symbol(field, _)).flatMap(Operand.predicate).map { decoded =>
-          decoded.copy(negated = decoded.negated ^ (attribute(field, "not") == 1))
+          decoded.copy(negated = decoded.negated ^ (attribute(field, Not) == 1))
         }
       )
       .filterNot(value => value.index.isEmpty && !value.negated)
@@ -296,8 +376,7 @@ object InstructionDecoder {
       def modifiers(pieces: Vec[FormatPiece], preserveDefaults: Boolean): Vec[SASSInstruction.Modifier] =
         pieces.flatMap {
           case FormatPiece.Text(raw) =>
-            raw.split(ModifierSeparators).view.filter(_.nonEmpty)
-              .map(SASSInstruction.Modifier(_))
+            separated(raw).view.map(SASSInstruction.Modifier(_))
           case FormatPiece.Group("{", "}", children) if !children.exists {
                 case FormatPiece.Field(field, _) => field.category.isOperand
                 case _                           => false
@@ -393,15 +472,17 @@ object InstructionDecoder {
 
     private def operandValues(chunk: Vec[FormatPiece], allowCC: Boolean): Vec[Operand] = {
       val hasDescriptor = candidate.bindings.get("e_desc").orElse(candidate.bindings.get("EXP_DESC"))
-        .map(_ != BigInt(0)).getOrElse(form.declared.exists(field =>
+        .fold(form.declared.exists(field =>
           field.category == NVDisasm.FieldKind.DescriptorRegister && raw(field).nonEmpty
-        ))
-      val values = chunk.flatMap {
-        case FormatPiece.Field(field, Some(value)) if isOperandValue(field, allowCC) => Vec(value)
-        case FormatPiece.Field(field, None) if allowCC && field.category == NVDisasm.FieldKind.ConditionCode =>
+        ))(_ != BigInt(0))
+      val values = chunk.zipWithIndex.flatMap {
+        case (FormatPiece.Field(field, Some(value)), _) if isOperandValue(field, allowCC) => Vec(value)
+        case (FormatPiece.Field(field, None), _) if allowCC && field.category == NVDisasm.FieldKind.ConditionCode =>
           raw(field).flatMap(symbol(field, _)).map(Operand.Symbol.apply).toVec
-        case group: FormatPiece.Group => operandValue(group)
-        case _                        => Vec.empty[Operand]
+        case (FormatPiece.Field(field, None), _) if allowCC && isSymbolOperand(chunk, field) =>
+          raw(field).flatMap(symbol(field, _)).map(Operand.Symbol.apply).toVec
+        case (group: FormatPiece.Group, _) => operandValue(group)
+        case _                             => Vec.empty[Operand]
       }
       val indexed = chunk.exists {
         case FormatPiece.Field(field, _) => field.kind == "CX"
@@ -469,10 +550,7 @@ object InstructionDecoder {
         NVDisasm.CandidateFailure(NVDisasm.FailureCategory.MissingMetadata, s"missing FORMAT tree ${candidate.name}")
       )
       invalidAttribute = form.declared.find(field =>
-        FieldDecoder.Attribute.names.exists { name =>
-          val value = attribute(field, name)
-          value != 0 && value != 1
-        }
+        info(field).attributes.exists(value => value != 0 && value != 1)
       )
       _ <- invalidAttribute.map(field => unsupported(s"invalid attributes on ${field.binding}")).toLeft(())
       rawBindings = form.declared.foldLeft(candidate.bindings) { (bindings, field) =>

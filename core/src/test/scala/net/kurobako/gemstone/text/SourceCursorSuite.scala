@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.text
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SourceCursorSuite extends Suite {
   test("lookahead and failed consumption preserve the cursor") {

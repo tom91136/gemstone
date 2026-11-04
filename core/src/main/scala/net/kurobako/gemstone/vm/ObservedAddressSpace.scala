@@ -68,6 +68,12 @@ private class ObservedAddressSpace(backing: AddressSpace, observer: LaunchObserv
     backing.atomicModifyValue(region, offset, size)(update)
   }
 
+  override def readCoherentValueInto(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, into: LongRef)
+      : Fault | Null = {
+    within(AccessKind.Atomic, region, offset, size.widen[Int >= 0])
+    backing.readCoherentValueInto(region, offset, size, into)
+  }
+
   override def prepareReads(ranges: ReadRanges): Either[Fault, Unit]       = backing.prepareReads(ranges)
   override def prepareSystemReads(ranges: ReadRanges): Either[Fault, Unit] = backing.prepareSystemReads(ranges)
   override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
@@ -124,11 +130,24 @@ private class ObservedAddressSpace(backing: AddressSpace, observer: LaunchObserv
     backing.writeSystemBatch(writes)
   }
 
+  override def readCoherentValueInto(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef): Fault | Null = {
+    absolute(AccessKind.Atomic, address, size.widen[Int >= 0])
+    backing.readCoherentValueInto(address, size, into)
+  }
+
   override def atomicModifyValue(
       address: GuestAddress,
       size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] = {
     absolute(AccessKind.Atomic, address, size.widen[Int >= 0])
     backing.atomicModifyValue(address, size)(update)
+  }
+
+  override def atomicModifyLocalValue(
+      address: GuestAddress,
+      size: Int in 1 ~ 8
+  )(update: Long => Long): Either[Fault, Long] = {
+    absolute(AccessKind.Atomic, address, size.widen[Int >= 0])
+    backing.atomicModifyLocalValue(address, size)(update)
   }
 }

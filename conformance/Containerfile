@@ -97,11 +97,47 @@ FROM llvm-tidy AS llvm
 ARG LLVM_VERSION
 ARG LLVM_RELEASE
 RUN tar -xJf /tmp/llvm.tar.xz --strip-components=1 -C "/llvm/usr/lib/llvm-${LLVM_VERSION}" \
-       $(for tool in clang clang++ "clang-${LLVM_VERSION}" clang-scan-deps clang-offload-bundler clang-offload-packager \
+       $(for tool in clang clang++ "clang-${LLVM_VERSION}" clang-scan-deps clang-offload-bundler clang-offload-packager llvm-offload-binary \
            clang-linker-wrapper clang-nvlink-wrapper; do echo "LLVM-${LLVM_RELEASE}-Linux-X64/bin/${tool}"; done) \
     && for tool in clang clang++; do \
          ln -s "../lib/llvm-${LLVM_VERSION}/bin/${tool}" "/llvm/usr/bin/${tool}-${LLVM_VERSION}"; \
        done
+
+# The release archive carries libomp but no offload runtime. Build libomptarget, its CUDA plugin and the NVPTX device
+# runtime from the matching source release; only LLVM's support libraries are built besides them.
+FROM ubuntu-build-base AS llvm-offload
+ARG LLVM_VERSION
+ARG LLVM_RELEASE
+ARG LLVM_SOURCE_SHA256
+RUN apt-get update && apt-get install --no-install-recommends --yes xz-utils curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=llvm /llvm/ /
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+# The runtimes sub-builds take their compilers from the environment rather than from the cache
+ENV CC=/usr/lib/llvm-${LLVM_VERSION}/bin/clang CXX=/usr/lib/llvm-${LLVM_VERSION}/bin/clang++
+RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE}/llvm-project-${LLVM_RELEASE}.src.tar.xz" \
+       -o /tmp/llvm-src.tar.xz \
+    && echo "${LLVM_SOURCE_SHA256}  /tmp/llvm-src.tar.xz" | sha256sum --check --strict \
+    && mkdir /tmp/llvm-src \
+    && tar -xJf /tmp/llvm-src.tar.xz --strip-components=1 -C /tmp/llvm-src \
+    && rm /tmp/llvm-src.tar.xz
+RUN cmake -S /tmp/llvm-src/llvm -B /tmp/llvm-offload-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+       -DLLVM_ENABLE_PROJECTS= -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
+       -DLLVM_ENABLE_RUNTIMES="openmp;offload" -DLLVM_RUNTIME_TARGETS="default;nvptx64-nvidia-cuda" \
+       -DRUNTIMES_nvptx64-nvidia-cuda_LLVM_ENABLE_RUNTIMES=openmp -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
+       -DLIBOMPTARGET_PLUGINS_TO_BUILD=cuda \
+       -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_DOCS=OFF \
+       -DCMAKE_INSTALL_PREFIX=/llvm-offload/usr/lib/llvm-${LLVM_VERSION} \
+    && ninja -C /tmp/llvm-offload-build runtimes install-runtimes \
+    && rm -rf /tmp/llvm-src /tmp/llvm-offload-build
+
+# Takes the llvm-offload tree from a previous export when the llvm-offload-archive build context is supplied.
+FROM ubuntu-build-base AS llvm-offload-prebuilt
+RUN apt-get update && apt-get install --no-install-recommends --yes zstd \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=llvm-offload-archive llvm-offload.tar.zst /tmp/
+RUN zstd -dc --long=30 /tmp/llvm-offload.tar.zst | tar -xf - -C / \
+    && rm /tmp/llvm-offload.tar.zst
 
 FROM jobserver-ninja AS cccl
 ARG CCCL_VERSION
@@ -214,6 +250,9 @@ RUN apt-get update \
     && apt-get install --no-install-recommends --yes rocm-device-libs \
     && rm -rf /usr/include/hip \
     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes hipcub-dev rocrand-dev hiprand-dev rocfft-dev rocsparse-dev rocsolver-dev libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
     CC=/opt/rocm/llvm/bin/amdclang \
     CXX=/opt/rocm/llvm/bin/amdclang++ \
@@ -274,9 +313,14 @@ RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates curl ninja-build patchelf xz-utils \
        cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-nvdisasm-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
-       cuda-cccl-${CUDA_PACKAGE_VERSION} \
-       libcublas-dev-${CUDA_PACKAGE_VERSION} \
+       cuda-cccl-${CUDA_PACKAGE_VERSION} cuda-profiler-api-${CUDA_PACKAGE_VERSION} cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} \
+       libcublas-dev-${CUDA_PACKAGE_VERSION} libcufft-dev-${CUDA_PACKAGE_VERSION} libcurand-dev-${CUDA_PACKAGE_VERSION} \
+       libcusparse-dev-${CUDA_PACKAGE_VERSION} libcusolver-dev-${CUDA_PACKAGE_VERSION} \
     && rm -rf /var/lib/apt/lists/*
+# cuSPARSE and cuSOLVER link nvJitLink from CUDA 12 onwards
+RUN case "${CUDA_PACKAGE_VERSION}" in 11-*) ;; *) apt-get update \
+    && apt-get install --no-install-recommends --yes libnvjitlink-dev-${CUDA_PACKAGE_VERSION} \
+    && rm -rf /var/lib/apt/lists/* ;; esac
 # The conformance host harness needs C++23, while nvcc 11.8 needs GCC <= 11.
 # Keep the pinned SDK and use separate compilers for host and device sources.
 FROM ubuntu-build-base AS toolchain-cuda
@@ -319,6 +363,7 @@ FROM toolchain-cuda AS toolchain-clang-cuda
 COPY --from=clang-cuda-headers /clang-cuda-headers/ /opt/cuda-clang-headers/
 ARG LLVM_VERSION
 COPY --from=llvm /llvm/ /
+COPY --from=llvm-offload-prebuilt /llvm-offload/ /
 COPY --from=cccl /opt/cccl /opt/cccl
 RUN ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
     && ln -s /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++

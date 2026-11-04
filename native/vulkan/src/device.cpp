@@ -7,12 +7,15 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include <aspartame/array.hpp>
 
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_vulkan_adapter.hpp"
 #include "gemstone_vulkan_graphics.hpp"
+#include <gemstone/devices.hpp>
 
 #include "resources.hpp"
 #include "state.hpp"
@@ -74,30 +77,57 @@ VkResult implVkCreateInstance(const VkInstanceCreateInfo *info, const VkAllocati
     if (std::strcmp(info->ppEnabledExtensionNames[i], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) != 0)
       return VK_ERROR_EXTENSION_NOT_PRESENT;
   *instance = makeHandle<VkInstance>();
+  const auto count = gemstone::deviceCount();
+  std::vector<VkPhysicalDevice> physical;
+  physical.reserve(count);
+  for (uint32_t index = 0; index < count; ++index)
+    physical.push_back(makeHandle<VkPhysicalDevice>());
   std::scoped_lock const lock(stateMutex);
   instanceProperties2[*instance] = info->enabledExtensionCount != 0;
+  instancePhysicalDevices[*instance] = std::move(physical);
   return VK_SUCCESS;
 }
 
 void implVkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *) {
+  std::vector<VkPhysicalDevice> physical;
   {
     std::scoped_lock const lock(stateMutex);
     instanceProperties2.erase(instance);
+    const auto found = instancePhysicalDevices.find(instance);
+    if (found != instancePhysicalDevices.end()) {
+      physical = std::move(found->second);
+      instancePhysicalDevices.erase(found);
+    }
   }
+  for (auto *const physicalDevice : physical)
+    deleteHandle(physicalDevice);
   deleteHandle(instance);
 }
 
 VkResult implVkEnumeratePhysicalDevices(VkInstance instance, uint32_t *count, VkPhysicalDevice *devices) {
-  if (!instance) return VK_ERROR_INITIALIZATION_FAILED;
-  return enumerateOne(count, devices, physicalDeviceHandle(instance));
+  if (!instance || !count) return VK_ERROR_INITIALIZATION_FAILED;
+  const auto handles = physicalDevicesOf(instance);
+  const auto available = static_cast<uint32_t>(handles.size());
+  if (available == 0) return VK_ERROR_INITIALIZATION_FAILED;
+  if (!devices) {
+    *count = available;
+    return VK_SUCCESS;
+  }
+  const auto copied = std::min(*count, available);
+  std::copy_n(handles.begin(), copied, devices);
+  *count = copied;
+  return copied == available ? VK_SUCCESS : VK_INCOMPLETE;
 }
 
-void implVkGetPhysicalDeviceProperties(VkPhysicalDevice, VkPhysicalDeviceProperties *properties) { fillProperties(properties); }
+void implVkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties *properties) {
+  fillProperties(properties, physicalDeviceOrdinal(physicalDevice));
+}
 
-void implVkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2 *properties) {
+void implVkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *properties) {
   if (!properties) return;
-  fillProperties(&properties->properties);
-  fillPropertyChain(properties->pNext);
+  const auto ordinal = physicalDeviceOrdinal(physicalDevice);
+  fillProperties(&properties->properties, ordinal);
+  fillPropertyChain(properties->pNext, ordinal);
 }
 
 void implVkGetPhysicalDeviceFeatures(VkPhysicalDevice, VkPhysicalDeviceFeatures *features) { fillFeatures(features); }
@@ -178,10 +208,12 @@ VkResult implVkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreat
   if (info->queueCreateInfoCount != 1 || info->pQueueCreateInfos[0].queueFamilyIndex != 0 || info->pQueueCreateInfos[0].queueCount == 0
       || info->pQueueCreateInfos[0].queueCount > 2 || info->pQueueCreateInfos[0].flags)
     return VK_ERROR_INITIALIZATION_FAILED;
+  const auto ordinal = physicalDeviceOrdinal(physicalDevice);
   const auto result = createQueues(info->pQueueCreateInfos[0].queueCount, device);
   if (result == VK_SUCCESS) {
     std::scoped_lock const lock(stateMutex);
     devices.at(*device)->hostQueryResetExtension = hostQueryResetExtension;
+    devices.at(*device)->physicalOrdinal = ordinal;
   }
   return result;
 }
@@ -312,15 +344,20 @@ void implVkDestroySampler(VkDevice, VkSampler sampler, const VkAllocationCallbac
 
 VkResult implVkEnumeratePhysicalDeviceGroups(VkInstance instance, uint32_t *count, VkPhysicalDeviceGroupProperties *groups) {
   if (!instance || !count) return VK_ERROR_INITIALIZATION_FAILED;
+  const auto handles = physicalDevicesOf(instance);
+  const auto available = static_cast<uint32_t>(handles.size());
+  if (available == 0) return VK_ERROR_INITIALIZATION_FAILED;
   if (!groups) {
-    *count = 1;
+    *count = available;
     return VK_SUCCESS;
   }
-  if (!*count) return VK_INCOMPLETE;
-  groups[0].physicalDeviceCount = 1;
-  groups[0].physicalDevices[0] = physicalDeviceHandle(instance);
-  groups[0].subsetAllocation = VK_FALSE;
-  *count = 1;
-  return VK_SUCCESS;
+  const auto copied = std::min(*count, available);
+  for (uint32_t index = 0; index < copied; ++index) {
+    groups[index].physicalDeviceCount = 1;
+    groups[index].physicalDevices[0] = handles[index];
+    groups[index].subsetAllocation = VK_FALSE;
+  }
+  *count = copied;
+  return copied == available ? VK_SUCCESS : VK_INCOMPLETE;
 }
 } // namespace gemstone::vulkan

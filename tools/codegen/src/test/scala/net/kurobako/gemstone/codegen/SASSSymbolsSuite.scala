@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 
 class SASSSymbolsSuite extends Suite {

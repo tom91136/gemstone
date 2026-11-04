@@ -4,7 +4,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.string.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class InstructionSuite extends Suite {
   test("every opcode accepts exactly its operand counts") {

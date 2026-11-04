@@ -2,6 +2,7 @@ package net.kurobako.gemstone.toolchain
 
 import java.lang.ref.WeakReference
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import scala.scalanative.posix.unistd
 
@@ -36,15 +37,15 @@ object ToolchainCheck {
     */
   private def referenceHandler(): Unit = {
     val progress = AtomicLong()
-    val retained = new Array[Array[Byte]](64)
+    val retained = Array.ofDim[Array[Byte]](64)
     daemon { () =>
       while (true) {
         val i = progress.getAndIncrement()
-        retained((i % retained.length).toInt) = new Array[Byte](1024 + (i % 4096).toInt)
-        if (i % 64 == 0) { val _ = WeakReference(new Array[Byte](64)) }
+        retained((i % retained.length).toInt) = Array.ofDim[Byte](1024 + (i % 4096).toInt)
+        if (i % 64 == 0) { val _ = WeakReference(Array.ofDim[Byte](64)) }
       }
     }
-    daemon(() => while (true) { System.gc(); Thread.sleep(1) })
+    daemon(() => while (true) { sys.runtime.gc(); Thread.sleep(1) })
     val (last, _) = (1 to 10).foldLeft((-1L, 0)) { case ((previous, still), _) =>
       Thread.sleep(1000)
       val now  = progress.get()
@@ -59,15 +60,15 @@ object ToolchainCheck {
     * from finalizers on whichever thread allocates, including one that is inside `unpark`, which deadlocks.
     */
   private def referenceBurst(): Unit = {
-    val references = Array.fill(100000)(WeakReference(new Array[Byte](32)))
+    val references = Array.fill(100000)(WeakReference(Array.ofDim[Byte](32)))
     val starters   = 64
     val done       = CountDownLatch(starters)
-    System.gc()
+    sys.runtime.gc()
     for (_ <- 0 until starters) daemon { () =>
-      for (_ <- 0 until 1000) { val _ = new Array[Byte](64) }
+      for (_ <- 0 until 1000) { val _ = Array.ofDim[Byte](64) }
       done.countDown()
     }
-    done.await()
+    if (!done.await(15, TimeUnit.SECONDS)) finish(s"stalled with ${done.getCount} starters pending", 1)
     finish(s"passed with ${references.count(reference => Option(reference.get()).isEmpty)} references cleared", 0)
   }
 
@@ -78,7 +79,7 @@ object ToolchainCheck {
   private def heapGrowth(): Unit = {
     val progress = AtomicLong()
     for (id <- 0 until 8) daemon { () =>
-      val live = new Array[Array[String]](512)
+      val live = Array.ofDim[Array[String]](512)
       while (true) {
         val i = progress.getAndIncrement()
         live((i % live.length).toInt) = Array.tabulate(64)(j => s"$id-$i-$j")

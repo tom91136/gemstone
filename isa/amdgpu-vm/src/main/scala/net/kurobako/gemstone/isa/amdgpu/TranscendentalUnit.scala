@@ -121,17 +121,22 @@ private[isa] object TranscendentalUnit {
     val truncated   = if (shift > 0) magnitude >> shift else magnitude << (24 - length)
     val significand = if (value < 0L && (magnitude & ((1L << shift) - 1L)) != 0L) truncated + 1L else truncated
     val carry       = (significand >> 24).toInt
-    val sign        = if (value < 0L) 0x80000000L else 0L
     if (magnitude == 0L) 0L
-    else sign | ((length - 39 + 127 + carry).toLong << 23) | ((significand >> carry) & 0x7fffffL)
+    else {
+      val sign = if (value < 0L) 0x80000000L else 0L
+      sign | ((length - 39 + 127 + carry).toLong << 23) | ((significand >> carry) & 0x7fffffL)
+    }
   }
 
   /** The binary32 bits of the magnitude of `value * 2^-40`, truncated. */
   private inline def truncated(value: Long): Long = {
     val magnitude = math.abs(value)
     val length    = bitLength(magnitude)
-    val m         = if (length > 24) magnitude >> (length - 24) else magnitude << (24 - length)
-    if (magnitude == 0L) 0L else ((length - 41 + 127).toLong << 23) | (m & 0x7fffffL)
+    if (magnitude == 0L) 0L
+    else {
+      val m = if (length > 24) magnitude >> (length - 24) else magnitude << (24 - length)
+      ((length - 41 + 127).toLong << 23) | (m & 0x7fffffL)
+    }
   }
 
   private inline def cubic(table: Array[Double], row: Int, offset: Long, full: Long): Long = {

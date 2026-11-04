@@ -15,18 +15,26 @@ private object LegacyAddressRewrite {
     Instruction.Modifier.`GT`,
     Instruction.Modifier.`GE`
   )
-  private val GenericMemoryModifiers = (for {
-    cache <- Vec(Vec.empty[Instruction.Modifier], Vec(Instruction.Modifier.CG), Vec(Instruction.Modifier.LU))
-    width <- Vec(
-      Vec.empty[Instruction.Modifier],
-      Vec(Instruction.Modifier.U8),
-      Vec(Instruction.Modifier.S8),
-      Vec(Instruction.Modifier.U16),
-      Vec(Instruction.Modifier.S16),
-      Vec(Instruction.Modifier.`64`),
-      Vec(Instruction.Modifier.`128`)
-    )
-  } yield Vec(Instruction.Modifier.E) ++ cache ++ width).toSet
+  private val GenericMemoryModifiers =
+    (for {
+      cache <- Vec(
+        Vec.empty[Instruction.Modifier],
+        Vec(Instruction.Modifier.CG),
+        Vec(Instruction.Modifier.LU),
+        Vec(Instruction.Modifier.CV),
+        Vec(Instruction.Modifier.WT)
+      )
+      width <- Vec(
+        Vec.empty[Instruction.Modifier],
+        Vec(Instruction.Modifier.U8),
+        Vec(Instruction.Modifier.S8),
+        Vec(Instruction.Modifier.U16),
+        Vec(Instruction.Modifier.S16),
+        Vec(Instruction.Modifier.`64`),
+        Vec(Instruction.Modifier.`128`)
+      )
+    } yield Vec(Instruction.Modifier.E) ++ cache ++ width).toSet +
+      Vec(Instruction.Modifier.E, Instruction.Modifier.U, Instruction.Modifier.`128`)
 
   private def hasModifier(instruction: DecodedInstruction, modifier: Instruction.Modifier): Boolean =
     instruction.modifiers.contains(modifier)
@@ -85,6 +93,7 @@ private object LegacyAddressRewrite {
     case _                              => false
   }
   private def isControlFlow(instruction: DecodedInstruction): Boolean = ControlFlow.transfers(instruction.operation)
+  private def isBranch(instruction: DecodedInstruction): Boolean = OperandQueries.is[Form.Bra](instruction.operation)
 
   private def predicate(operand: Operand): Option[Int] = operand match {
     case Operand.Predicate(Some(index), false, _) => Some(index)
@@ -195,7 +204,7 @@ private object LegacyAddressRewrite {
       (instruction.operands.head match {
         case Operand.Address(_, _, _, _, _, _) => true
         case _                                 => false
-      }) && isGeneralRegister(instruction.operands(1)) &&
+      }) && isGeneralRegisterOrZero(instruction.operands(1)) &&
       !isCarryWriter(instruction)
 
   private def isSchedulingBarrier(instruction: DecodedInstruction): Boolean =
@@ -218,6 +227,22 @@ private object LegacyAddressRewrite {
     )
   }
 
+  /** The register pair a plain double-precision arithmetic instruction writes and nothing else. */
+  private def doubleDestination(instruction: DecodedInstruction): Option[Set[Int]] = {
+    val args  = instruction.operands
+    val arity = instruction.operation.form match {
+      case _: Form.Dadd | _: Form.Dmul => 3
+      case _: Form.Dfma                => 4
+      case _                           => 0
+    }
+    Option.when(arity != 0 && instruction.modifiers.isEmpty && args.size == arity && !isCarryWriter(instruction))(
+      args.head
+    ).filter(isGeneralRegister(_)).flatMap(registerIndex(_)).map(first => Set(first.raw, first.raw + 1))
+  }
+
+  private def destinations(instruction: DecodedInstruction): Option[Set[Int]] =
+    scalarDestination(instruction).map(index => Set(index.raw)).orElse(doubleDestination(instruction))
+
   /** Retained scalar instructions with one register result; predicate effects are tracked separately. */
   private def scalarDestination(instruction: DecodedInstruction): Option[Int in 0 ~ 255] = {
     val args       = instruction.operands
@@ -238,14 +263,20 @@ private object LegacyAddressRewrite {
           case Instruction.Modifier.AND | Instruction.Modifier.OR | Instruction.Modifier.XOR |
               Instruction.Modifier.PASS_B | Instruction.Modifier.Z | Instruction.Modifier.NZ => true
         })
-      case _: Form.Lop3 => args.size == 5 && mods == Vec(Instruction.Modifier.LUT)
-      case _: Form.Shfl => args.size == 5 &&
-        args.head == Operand.Predicate(None, uniform = false, negated = false)
-      case _: Form.Iadd3               => mods.forall(_ == Instruction.Modifier.X) && args.size == 4
-      case _: Form.Iscadd              => mods.isEmpty && args.size == 4
+      case _: Form.Lop3  => args.size == 5 && mods == Vec(Instruction.Modifier.LUT)
+      case _: Form.Shfl  => args.size == 5 && isPredicateOperand(args.head)
+      case _: Form.Iadd3 => args.size == 4 && mods.forall(PartialFunction.cond(_) {
+          case Instruction.Modifier.X | Instruction.Modifier.RS | Instruction.Modifier.LS => true
+        })
+      case _: Form.Iscadd | _: Form.Lea => mods.isEmpty && args.size == 4
+      case _: Form.Bfe                  => args.size == 3 && mods.forall(PartialFunction.cond(_) {
+          case Instruction.Modifier.`U32` | Instruction.Modifier.`S32` => true
+        })
+      case _: Form.Bfi | _: Form.Prmt  => mods.isEmpty && args.size == 4
       case _: Form.Xmad                => args.size == 4 && !isCarryWriter(instruction)
       case _: Form.Fadd | _: Form.Fmul => mods.isEmpty && args.size == 3
       case _: Form.Ffma                => mods.isEmpty && args.size == 4
+      case _: Form.Mufu                => args.size == 2 && mods.size == 1
       case _: Form.Pset                => args.size == 4 && mods.forall(PartialFunction.cond(_) {
           case Instruction.Modifier.AND | Instruction.Modifier.OR | Instruction.Modifier.XOR |
               Instruction.Modifier.BF => true
@@ -253,11 +284,20 @@ private object LegacyAddressRewrite {
       case _: Form.Shr | _: Form.Shl =>
         mods.forall(PartialFunction.cond(_) { case Instruction.Modifier.`U32` | Instruction.Modifier.`W` => true }) &&
         args.size == 3
+      case _: Form.Shf => args.size == 4 && mods.forall(PartialFunction.cond(_) {
+          case Instruction.Modifier.L | Instruction.Modifier.R | Instruction.Modifier.U32 | Instruction.Modifier.S32 |
+              Instruction.Modifier.U64 | Instruction.Modifier.S64 | Instruction.Modifier.HI | Instruction.Modifier.W =>
+            true
+        })
       case _: Form.Sel   => mods.isEmpty && args.size == 4 && isPredicateOperand(args.last)
       case _: Form.Imnmx => mods.forall(_ == Instruction.Modifier.U32) && args.size == 4 &&
         isPredicateOperand(args.last)
       case _: Form.Icmp =>
         mods.forall(Comparisons + Instruction.Modifier.`U32`) && mods.count(Comparisons) == 1 && args.size == 4
+      case _: Form.Iset =>
+        mods.forall(Comparisons + Instruction.Modifier.`U32` + Instruction.Modifier.X + Instruction.Modifier.AND +
+          Instruction.Modifier.OR + Instruction.Modifier.XOR) && mods.count(Comparisons) == 1 &&
+        (args.size == 3 || (args.size == 4 && isPredicateOperand(args.last)))
       case _ => false
     }
     val predicateOutput = instruction.operation.form match {
@@ -266,8 +306,8 @@ private object LegacyAddressRewrite {
       case _            => false
     }
     val predicateSelector = instruction.operation.form match {
-      case _: Form.Sel | _: Form.Imnmx => true
-      case _                           => false
+      case _: Form.Sel | _: Form.Imnmx | _: Form.Iset => true
+      case _                                          => false
     }
     val destination = if (predicateOutput) args.lift(1) else args.headOption
     val dataSources = if (predicateOutput) args.drop(2)
@@ -283,50 +323,14 @@ private object LegacyAddressRewrite {
     ).flatMap(registerIndex(_))
   }
 
-  private class ControlFlow(instructions: Vec[DecodedInstruction]) {
-    val indices: Map[Int, Int] = instructions.zipWithIndex.map { case (instruction, index) =>
-      instruction.address.raw -> index
-    }.toMap
-    def targets(instruction: DecodedInstruction): Option[Vec[Int]] = {
-      val addresses = codeTargets(instruction).toVec
-      Option.when(addresses.size == 1 && addresses.forall(indices.contains(_)))(addresses.map(indices(_)))
-    }
-    private val legacy  = LegacyControlFlow(instructions)
-    private val entries = LegacyControlFlow.functionEntries(instructions)
-    // a return may resume after any call or at any pushed return address
-    private val returns: Vec[Int] = instructions.indices.toVec.flatMap { index =>
-      instructions(index).operation.form match {
-        case _: Form.Cal  => Vec(index + 1).filter(_ < instructions.size)
-        case _: Form.Pret => targets(instructions(index)).getOrElse(Vec.empty)
-        case _            => Vec.empty
-      }
-    }
-    def successors(index: Int): Option[Vec[Int]] = {
-      val instruction = instructions(index)
-      val next        = Vec(index + 1)
-      val fallthrough = if (LegacyControlFlow.terminates(instruction)) Vec.empty[Int] else next
-      if (LegacyControlFlow.never(instruction)) Some(next)
-      else if (hasModifier(instruction, Instruction.Modifier.`S`)) None
-      else instruction.operation.form match {
-        case _: Form.Bra                              => targets(instruction).map(_ ++ fallthrough)
-        case _: Form.Ssy | _: Form.Pbk | _: Form.Pret => targets(instruction).map(_ => next)
-        case _: Form.Cal                              => targets(instruction)
-        case _: Form.Brx if LegacyControlFlow.isIndirectCall(instructions, index) => Some(entries)
-        case _: Form.Ret if instruction.operands.isEmpty                          => Some(returns ++ fallthrough)
-        case _: Form.Brk | _: Form.Sync                                           =>
-          legacy.transfer(instruction).map(setup =>
-            Vec(indices(setup.target)) ++ (if (instruction.guard.nonEmpty) next else Vec.empty[Int])
-          )
-        case _: Form.Exit                                                           => Some(fallthrough)
-        case _: Form.Bpt if instruction.modifiers == Vec(Instruction.Modifier.TRAP) => Some(fallthrough)
-        case _ if isControlFlow(instruction)                                        => None
-        case _                                                                      => Some(next)
-      }
-    }
-  }
-
   private enum PredicateOrigin derives CanEqual { case Original, Conditional, Replaced }
-  private case class ProofState(index: Int, origin: PredicateOrigin, addressValid: Boolean, guardStable: Boolean)
+  private case class ProofState(
+      index: Int,
+      origin: PredicateOrigin,
+      addressValid: Boolean,
+      guardStable: Boolean,
+      frames: List[Int]
+  )
 
   private def genericMemoryIndependent(instruction: DecodedInstruction, registers: Set[Int]): Boolean =
     (isLoad(instruction) || isStore(instruction)) && GenericMemoryModifiers(instruction.modifiers) &&
@@ -340,7 +344,7 @@ private object LegacyAddressRewrite {
     else instruction.operands.headOption.flatMap(registerIndex(_))
     isControlFlow(instruction) || isPredicateSetter(instruction) || isNop(instruction) || isIdentityMove(instruction) ||
     isMemBar(instruction) || isSchedulingBarrier(instruction) || isExplicitStore(instruction) ||
-    scalarDestination(instruction).exists(index => !registers(index)) ||
+    destinations(instruction).exists(_.forall(index => !registers(index))) ||
     addressDestination.exists(index => !registers(index)) ||
     explicitLoadIndependent(instruction, registers) || genericMemoryIndependent(instruction, registers)
   }
@@ -350,10 +354,11 @@ private object LegacyAddressRewrite {
       instructions: Vec[DecodedInstruction],
       highIndex: Int,
       target: Int,
-      lowAddress: Int in 0 ~ 255
-  ): Vec[(Int, DecodedInstruction)] = {
+      lowAddress: Int in 0 ~ 255,
+      addressCopy: Boolean
+  ): (consumers: Vec[(Int, DecodedInstruction)], valueReads: Boolean) = {
     val high         = instructions(highIndex)
-    val flow         = ControlFlow(instructions)
+    val flow         = LegacyFlowGraph(instructions)
     val registers    = Set(lowAddress.raw, lowAddress.raw + 1)
     val entryTargets = controlFlowTargets(instructions)
 
@@ -379,10 +384,11 @@ private object LegacyAddressRewrite {
       }
     }
     val pending = mutable.ArrayDeque(
-      ProofState(0, PredicateOrigin.Replaced, addressValid = false, guardStable = false),
-      ProofState(highIndex + 1, PredicateOrigin.Original, true, true)
+      ProofState(0, PredicateOrigin.Replaced, addressValid = false, guardStable = false, Nil),
+      ProofState(highIndex + 1, PredicateOrigin.Original, true, true, Nil)
     )
     val consumers  = mutable.Set.empty[Int]
+    val valueReads = mutable.Set.empty[Int]
     val otherReads = mutable.Set.empty[Int]
     @annotation.tailrec
     def visit(seen: Set[ProofState]): Unit =
@@ -404,6 +410,10 @@ private object LegacyAddressRewrite {
               !predicateGuardReads(instruction, target) && isGenericMemory(instruction, target, lowAddress) &&
               (high.guard.isEmpty || instruction.guard == high.guard)
             ) consumers += state.index
+            else if (
+              addressCopy && state.origin == PredicateOrigin.Original && isBranch(instruction) &&
+              predicateGuardReads(instruction, target)
+            ) valueReads += state.index
             else unsupported()
           }
           val origin = if (state.origin == PredicateOrigin.Replaced) PredicateOrigin.Replaced
@@ -417,18 +427,19 @@ private object LegacyAddressRewrite {
             !high.guard.flatMap(guard => predicate(guard.predicate)).exists { condition =>
               instruction.operands.exists(operand => predicate(operand).contains(condition))
             }
-          val next = flow.successors(state.index).getOrElse(unsupported())
-          pending.prependAll(next.map(index =>
-            if (origin == PredicateOrigin.Replaced) ProofState(index, origin, addressValid = false, guardStable = false)
-            else ProofState(index, origin, addressValid, guardStable)
-          ))
+          val next = flow.framed(state.index, state.frames).getOrElse(unsupported())
+          pending.prependAll(next.map { case (index, frames) =>
+            if (origin == PredicateOrigin.Replaced)
+              ProofState(index, origin, addressValid = false, guardStable = false, frames)
+            else ProofState(index, origin, addressValid, guardStable, frames)
+          })
           visit(seen + state)
         }
       }
     visit(Set.empty)
-    if (consumers.isEmpty || consumers.exists(otherReads))
+    if ((consumers.isEmpty && valueReads.isEmpty) || (consumers ++ valueReads).exists(otherReads))
       throw IllegalArgumentException(s"auxiliary P$target has consumers without one preserved address producer")
-    consumers.toVec.sorted.map(index => index -> instructions(index))
+    (consumers.toVec.sorted.map(index => index -> instructions(index)), valueReads.nonEmpty)
   }
 
   private def isAuxiliaryHigh(instruction: DecodedInstruction): Boolean =
@@ -497,11 +508,13 @@ private object LegacyAddressRewrite {
           instruction.operands.exists(operand => predicate(operand).contains(condition))
         )
 
-    val protectedRegisters = (Set(lowAddress) ++ lowSource.toSet).map(_.raw)
+    val protectedRegisters                                        = (Set(lowAddress) ++ lowSource.toSet).map(_.raw)
+    def writesHighGuard(instruction: DecodedInstruction): Boolean =
+      high.guard.flatMap(guard => predicate(guard.predicate)).exists(isPredicateDefinition(instruction, _))
     if (
       instructions.slice(previousCarryWriter + 1, highIndex).exists { instruction =>
-        val scalarBridge = !isCarryWriter(instruction) &&
-          scalarDestination(instruction).exists(destination => !protectedRegisters(destination))
+        val scalarBridge = !isCarryWriter(instruction) && !writesHighGuard(instruction) &&
+          destinations(instruction).exists(_.forall(destination => !protectedRegisters(destination)))
         !isExplicitStore(instruction) && !isNop(instruction) && !isIdentityMove(instruction) && !scalarBridge &&
         !independentPredicate(instruction) &&
         !explicitLoadIndependent(instruction, protectedRegisters) && !isSchedulingBarrier(instruction) &&
@@ -520,7 +533,8 @@ private object LegacyAddressRewrite {
         s"generic address pair requires adjacent registers R$lowAddress/R$expectedHigh"
       )
 
-    val memoryReads = memoryConsumers(instructions, highIndex, target, lowAddress)
+    val addressCopy = high.guard.isEmpty && OperandQueries.isZero(args(3)) && OperandQueries.isZero(lowArgs(2))
+    val (memoryReads, valueReads) = memoryConsumers(instructions, highIndex, target, lowAddress, addressCopy)
 
     val rewrittenLow = low.operation match {
       case Instruction(Form.LeaRegRegImm(dst, srcA, source), mods, pred) =>
@@ -532,7 +546,8 @@ private object LegacyAddressRewrite {
           s"unsupported typed LEA.CC producer at 0x${low.address.raw.toHexString}"
         )
     }
-    val rewrittenHigh = high.operation match {
+    val rewrittenHigh = if (valueReads) high
+    else high.operation match {
       case Instruction(Form.LeaPredRegRegRegReg(_, dst, srcA, srcB, srcC), mods, pred) =>
         high.rewrite(Instruction(Form.LeaRegRegRegRegImm(dst, srcA, srcB, srcC, PaddingImmediate), mods, pred))
       case Instruction(Form.LeaPredRegRegConstReg(_, dst, srcA, srcConst, srcC), mods, pred) =>
@@ -593,6 +608,9 @@ private object LegacyAddressRewrite {
 
   private def windowTests(instructions: Vec[DecodedInstruction]): Vec[DecodedInstruction] = {
     val zeroCarry = Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC))
+    val targets   = controlFlowTargets(instructions)
+    def leavesPath(instruction: DecodedInstruction): Boolean =
+      isControlFlow(instruction) && !OperandQueries.is[Form.Ssy](instruction.operation)
     def low(instruction: DecodedInstruction): Option[Int in 0 ~ 255] =
       Option.when(
         isLea(instruction) && instruction.modifiers.isEmpty && instruction.guard.isEmpty &&
@@ -602,9 +620,15 @@ private object LegacyAddressRewrite {
     instructions.indices.foldLeft(instructions) { (current, index) =>
       if (isNotWindowTest(current(index))) current
       else {
-        val base = registerIndex(current(index).operands(2))
-        val pair = (index - 4 until index).filter(_ >= 0).findLast(earlier =>
-          base.nonEmpty && low(current(earlier)) == base
+        val base  = registerIndex(current(index).operands(2))
+        val start = (index to 1 by -1).find(i =>
+          targets(current(i).address.raw) || leavesPath(current(i - 1))
+        ).getOrElse(0)
+        val pair = (start until index).findLast(earlier =>
+          base.nonEmpty && low(current(earlier)) == base && (earlier + 1 until index).forall(between =>
+            !isCarryWriter(current(between)) &&
+              base.exists(register => preservesAddress(current(between), Set(register.raw)))
+          )
         ).getOrElse(throw IllegalArgumentException(
           s"unverified generic LEA.HI.X window test at 0x${current(index).address.raw.toHexString}"
         ))

@@ -62,6 +62,15 @@ if(BUILD_TESTING)
   gemstone_opencl_test(gemstone_opencl_deferred test/deferred.cpp)
   gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8)
 
+  gemstone_opencl_test(gemstone_opencl_multi_device test/multi_device.cpp)
+  gemstone_discover_tests(gemstone_opencl_multi_device TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+
+  add_executable(gemstone_opencl_concurrent_atomics test/concurrent_atomics.cpp)
+  target_include_directories(gemstone_opencl_concurrent_atomics SYSTEM PRIVATE "${OPENCL_INCLUDE_DIR}")
+  target_compile_definitions(gemstone_opencl_concurrent_atomics PRIVATE CL_TARGET_OPENCL_VERSION=300)
+  gemstone_test_target(gemstone_opencl_concurrent_atomics)
+  target_link_libraries(gemstone_opencl_concurrent_atomics PRIVATE gemstone_opencl)
+
   add_executable(gemstone_opencl_process_exit test/process_exit.cpp)
   gemstone_project_target(gemstone_opencl_process_exit)
   target_include_directories(gemstone_opencl_process_exit SYSTEM PRIVATE "${OPENCL_INCLUDE_DIR}")

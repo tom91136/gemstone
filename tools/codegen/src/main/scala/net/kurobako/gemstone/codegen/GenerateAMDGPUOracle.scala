@@ -336,12 +336,15 @@ object GenerateAMDGPUOracle {
           val rawTarget = targetMatch.group(1).toLowerCaseRoot
           familyForTargetOption(rawTarget).toVector.flatMap { _ =>
             val target = rawTarget.unsafe[NonEmpty[String]]
-            CheckPrefixes.findFirstMatchIn(invocation).map(_.group(1).split(',').toVector).getOrElse(Vector("CHECK"))
+            CheckPrefixes.findFirstMatchIn(invocation).fold(Vector("CHECK"))(_.group(1).split(',').toVector)
               .map { prefix =>
                 val waveSize: Int in (32, 64) =
                   if (invocation.contains("+wavefrontsize64") || invocation.contains("-wavefrontsize32")) 64
-                  else if (invocation.contains("+wavefrontsize32") || invocation.contains("-wavefrontsize64")) 32
-                  else if (familyForTarget(target).startsWith("gfx1")) 32 else 64
+                  else if (
+                    invocation.contains("+wavefrontsize32") || invocation.contains("-wavefrontsize64") ||
+                    familyForTarget(target).startsWith("gfx1")
+                  ) 32
+                  else 64
                 normalisePrefix(prefix) -> (target -> waveSize)
               }
           }
@@ -375,7 +378,7 @@ object GenerateAMDGPUOracle {
 
   private def referencedLine(check: String, checkIndex: Int): Option[Int] =
     LineReference.findFirstMatchIn(check).map { reference =>
-      val distance = Option(reference.group(2)).map(_.toInt).getOrElse(0)
+      val distance = Option(reference.group(2)).fold(0)(_.toInt)
       val offset   = Option(reference.group(1)) match {
         case Some("-") => -distance
         case Some("+") => distance

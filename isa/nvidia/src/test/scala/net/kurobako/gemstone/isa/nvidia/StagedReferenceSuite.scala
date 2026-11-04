@@ -9,7 +9,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Random
 
@@ -266,29 +266,25 @@ class StagedReferenceSuite extends Suite {
       selector: Long,
       bounds: Long
   ): (Int, Boolean) = {
-    def shuffleClamp(value: Long): Int = Math.min(value & 0xffffffffL, 31L).toInt
-    val laneInWarp                     = lane - warpBase
+    val laneInWarp  = lane - warpBase
+    val segmentMask = ((bounds >>> 8) & 31L).toInt
+    val limit       = (laneInWarp & segmentMask) | ((bounds & 31L).toInt & ~segmentMask)
     mode match {
       case ShuffleMode.Down =>
         val distance = (selector & 31L).toInt
-        val valid    = laneInWarp + distance <= shuffleClamp(bounds) && lane + distance < laneCount
+        val valid    = laneInWarp + distance <= limit && lane + distance < laneCount
         (if (valid) lane + distance else lane) -> valid
       case ShuffleMode.Up =>
         val distance = (selector & 31L).toInt
-        val valid    = laneInWarp >= distance && laneInWarp - distance >= shuffleClamp(bounds)
+        val valid    = laneInWarp >= distance && laneInWarp - distance >= limit
         (if (valid) lane - distance else lane) -> valid
       case ShuffleMode.Index =>
-        val segmentMask  = ((bounds >>> 8) & 31L).toInt
-        val segmentBase  = laneInWarp & segmentMask
-        val targetInWarp = segmentBase | ((selector & 31L).toInt & ~segmentMask)
-        val maximum      = segmentBase | ((bounds & 31L).toInt & ~segmentMask)
-        val valid        = targetInWarp <= maximum && warpBase + targetInWarp < laneCount
+        val targetInWarp = (laneInWarp & segmentMask) | ((selector & 31L).toInt & ~segmentMask)
+        val valid        = targetInWarp <= limit && warpBase + targetInWarp < laneCount
         (if (valid) warpBase + targetInWarp else lane) -> valid
       case ShuffleMode.Butterfly =>
-        val segmentMask  = ((bounds >>> 8) & 31L).toInt
         val targetInWarp = laneInWarp ^ (selector & 31L).toInt
-        val maximum      = (laneInWarp & segmentMask) | ((bounds & 31L).toInt & ~segmentMask)
-        val valid        = targetInWarp <= maximum
+        val valid        = targetInWarp <= limit
         (if (valid && warpBase + targetInWarp < laneCount) warpBase + targetInWarp else lane) -> valid
     }
   }
@@ -528,7 +524,8 @@ class StagedReferenceSuite extends Suite {
         validity = Some(predicate),
         operand = operand,
         selector = operand,
-        bounds = operand
+        bounds = operand,
+        memberMask = operand
       )
       assertEquals(
         (warpBase + outputs.head.toInt, outputs(1) != 0L),
@@ -554,10 +551,12 @@ class StagedReferenceSuite extends Suite {
           cast.foldLeft(0L) { case (bits, (lane, set)) => if (set) bits | (1L << lane) else bits }
         )
         val uniform = cast.map(_._2).distinct.size <= 1
+        val every   = cast.forall(_._2)
+        val some    = cast.exists(_._2)
         VoteOperation.values.foreach { operation =>
           val expected = operation match {
-            case VoteOperation.All     => cast.nonEmpty && cast.forall(_._2)
-            case VoteOperation.Any     => cast.exists(_._2)
+            case VoteOperation.All     => cast.nonEmpty && every
+            case VoteOperation.Any     => some
             case VoteOperation.Uniform => uniform
           }
           assertEquals(

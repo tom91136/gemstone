@@ -196,16 +196,18 @@ private object InvocationMachine {
     }
   }
 
-  def callIndirect(execution: InvocationState, call: Indirect): Flow[Unit] =
+  def callIndirect(execution: InvocationState, call: Indirect): Flow[Unit] = {
+    val invalid = Left(Fault.InvalidRequest("OpFunctionPointerCallINTEL has an invalid function pointer"))
     execution.values.get(call.pointer) match {
-      case Some(VMValue.Bits(_, Array(token)))
-          if execution.values.program.ownsFunctionPointer(token) && (token & 0xffffffffL) > 0 &&
-            (token & 0xffffffffL) <= Int.MaxValue &&
-            execution.values.program.functions.contains((token & 0xffffffffL).toInt) =>
-        call.callee((token & 0xffffffffL).toInt).run(execution, execution.memory)
-      case Some(_) => Left(Fault.InvalidRequest("OpFunctionPointerCallINTEL has an invalid function pointer"))
+      case Some(VMValue.Bits(_, Array(token))) if execution.values.program.ownsFunctionPointer(token) =>
+        val index = token & 0xffffffffL
+        if (index > 0 && index <= Int.MaxValue && execution.values.program.functions.contains(index.toInt))
+          call.callee(index.toInt).run(execution, execution.memory)
+        else invalid
+      case Some(_) => invalid
       case None    => Left(undefined(call.pointer))
     }
+  }
 
   private def finishFragmentReturn(execution: InvocationState): Unit = {
     execution.reconvergedReturn = false
@@ -662,8 +664,8 @@ private object InvocationMachine {
                 writeElement(0L)
               } else memory.write(destination, packed)
             }.map { _ =>
-              memory.asynchronous(LaunchObserver.AsyncKind.Transfer, target = -1L, bytes = packedBytes.toLong)
-              memory.asynchronous(LaunchObserver.AsyncKind.Commit, target = -1L, bytes = 0L)
+              memory.asynchronous(LaunchObserver.AsyncKind.Transfer, bytes = packedBytes.toLong)
+              memory.asynchronous(LaunchObserver.AsyncKind.Commit, bytes = 0L)
               values.updateScalar(target, typeId, 0L)
             }
           } catch {
@@ -714,7 +716,7 @@ private object InvocationMachine {
         Fault.Unsupported(s"OpGroupWaitEvents execution scope $scope is not Workgroup")
       )
       _ <- Either.cond(count >= 0L, (), Fault.InvalidRequest(s"OpGroupWaitEvents has invalid event count $count"))
-    } yield execution.memory.asynchronous(LaunchObserver.AsyncKind.WaitGroups, target = -1L, bytes = 0L)) match {
+    } yield execution.memory.asynchronous(LaunchObserver.AsyncKind.WaitGroups, bytes = 0L)) match {
       case Left(error) => Left(error)
       case Right(())   => next
     }
@@ -777,10 +779,10 @@ private object InvocationMachine {
     val program = execution.values.program
     val pointee = program.pointerPointee(typeId)
     val size    = program.typeSize(pointee).raw
-    val bounded = program.vulkan && (storageClass == StorageClass.Private || storageClass == StorageClass.Function)
     execution.storage.allocate(size, program.typeAlignment(pointee)) match {
       case Left(error)    => Left(error)
       case Right(address) =>
+        val bounded = program.vulkan && (storageClass == StorageClass.Private || storageClass == StorageClass.Function)
         val pointer =
           Pointer(address, pointee, storageClass, bounds = Option.when(bounded)(address -> (address + size)))
         val stored: Either[Fault, Unit] = initialiser.flatMap(execution.values.get) match {
@@ -983,23 +985,13 @@ private object InvocationMachine {
     else execution.values.leaf(source, lane * columns + index)
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def eachLeaf(execution: InvocationState, sources: Array[Int], count: Int, target: Int, typeId: Int)(
       inline body: Int => Long
   )(inline next: => Flow[Unit]): Flow[Unit] = {
     val values = execution.values
     val absent = values.absent(sources)
     if (absent >= 0) Left(undefined(absent))
-    else {
-      val result = Array.ofDim[Long](count)
-      var index  = 0
-      while (index < count) {
-        result(index) = body(index)
-        index += 1
-      }
-      values.update(target, VMValue.Bits(typeId, result))
-      next
-    }
+    else { values.update(target, VMValue.Bits(typeId, GroupResolver.column(count)(body))); next }
   }
 
   def strideBytes(program: VMProgram, pointer: Int, width: Int in 1 ~ 8): Long = {

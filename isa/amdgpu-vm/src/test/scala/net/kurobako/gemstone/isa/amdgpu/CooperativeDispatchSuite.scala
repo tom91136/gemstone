@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import EncodingConstants.*
 import fixtures.*
+import java.util.concurrent.atomic.AtomicLong
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -9,6 +10,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.concurrent.duration.Deadline
 
 /** Cooperative dispatches keep every workgroup resident, so workgroups can wait on each other through GWS barriers and
   * semaphores or by spinning on memory. Other dispatches run workgroups to completion one after another.
@@ -222,6 +224,20 @@ class CooperativeDispatchSuite extends Suite {
     val memory = RegionMemory()
     val buffer = AllocationId(1L)
     memory.allocate(buffer, 64)
+    launch(text, groups, cooperative, memory).map(_ =>
+      Vec.tabulate(16)(index => memory.getInt(buffer, (index * 4).unsafe[Int >= 0]))
+    )
+  }
+
+  private def launch(
+      text: String,
+      groups: Int,
+      cooperative: Boolean,
+      memory: AddressSpace,
+      limits: TaskControl.Limits = Limits
+  )(using
+      munit.Location
+  ): Either[Fault, Unit] = {
     val base     = RegionMemory.Base
     val assembly = f"""s_mov_b32 s2, 0x${base & 0xffffffffL}%x
                       |s_mov_b32 s3, 0x${base >>> 32}%x
@@ -236,9 +252,7 @@ class CooperativeDispatchSuite extends Suite {
       Vec.empty,
       cooperative = cooperative
     ).value
-    executeKernel(compileKernel(source), task, memory, TaskControl(Limits)).map(_ =>
-      Vec.tabulate(16)(index => memory.getInt(buffer, (index * 4).unsafe[Int >= 0]))
-    )
+    executeKernel(compileKernel(source), task, memory, TaskControl(limits))
   }
 
   private val Wait = "s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)"
@@ -379,5 +393,30 @@ class CooperativeDispatchSuite extends Suite {
 
   test("a workgroup spinning on a later workgroup outside a cooperative dispatch exhausts its budget") {
     assertEquals(lanes(spin, 2, cooperative = false), Left(Fault.BudgetExceeded(Limits.maxInstructions)))
+  }
+
+  test("a workgroup polling outside a cooperative dispatch backs off between its loads") {
+    val backing = RegionMemory()
+    val buffer  = AllocationId(1L)
+    backing.allocate(buffer, 64)
+    val accesses = AtomicLong()
+    class CountingMemory(delegate: AddressSpace) extends ForwardingMemory(delegate) {
+      override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
+          update: Long => Long
+      ): Either[Fault, Long] = {
+        val _ = accesses.incrementAndGet()
+        super.atomicModifyValue(region, offset, size)(update)
+      }
+    }
+    val memory  = CountingMemory(backing)
+    val release = Thread { () => Thread.sleep(300L); backing.putInt(buffer, 0, 1) }
+    val started = Deadline.now
+    release.start()
+    val result  = launch(spin, 1, cooperative = false, memory, TaskControl.Limits(1000000000L))
+    val elapsed = (Deadline.now - started).toNanos
+    release.join()
+    assertEquals(result, Right(()))
+    assertEquals(backing.getInt(buffer, 4), 2)
+    assert(accesses.get() <= elapsed / 25000L + 100L, s"${accesses.get()} loads in ${elapsed / 1000000L} ms")
   }
 }

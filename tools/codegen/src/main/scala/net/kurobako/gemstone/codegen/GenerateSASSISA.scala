@@ -30,9 +30,12 @@ object GenerateSASSISA {
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
     case (references, sourceRoot, resourceRoot) =>
-      val bundle   = read(references)
-      val sources  = sourceRoot.resolve(PackageRoot)
-      val shapes   = SASSInstructionModel.shapes(bundle.tables.flatMap(_.description.classes))
+      val bundle  = read(references)
+      val sources = sourceRoot.resolve(PackageRoot)
+      val shapes  = SASSInstructionModel.shapes(
+        bundle.tables.flatMap(_.description.classes),
+        bundle.tables.flatMap(table => SASSSymbols.compile(table.description).map(_.name)).toSet
+      )
       val rendered = SASSInstructionRenderer.render(shapes, modifiers(bundle.tables)).map { (name, content) =>
         sources.resolve(name) -> content
       }

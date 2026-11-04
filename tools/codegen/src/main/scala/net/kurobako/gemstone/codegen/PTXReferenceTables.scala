@@ -51,7 +51,7 @@ object PTXReferenceTables {
   private def table(document: Document, caption: String): Vector[Vector[String]] =
     document.select("table").asScala.toVector.find { element =>
       Option(element.selectFirst("caption .caption-text")).exists(_.text().contains(caption))
-    }.map(grid(_)).getOrElse(Vector.empty)
+    }.fold(Vector.empty[Vector[String]])(grid(_))
 
   /** Cells of `table` with row and column spans repeated into every position they cover. */
   private def grid(table: Element): Vector[Vector[String]] = {
@@ -104,7 +104,7 @@ object PTXReferenceTables {
 
   private def specialRegisters(document: Document): Vector[SpecialRegister] =
     document.select("section[id^=special-registers-]").asScala.toVector.flatMap { section =>
-      val listing = Option(section.selectFirst("pre")).map(_.wholeText()).getOrElse("")
+      val listing = Option(section.selectFirst("pre")).fold("")(_.wholeText())
       SpecialDeclaration.findAllMatchIn(listing).toVector.flatMap { found =>
         val names = found.group(3).split(',').toVector.flatMap(name =>
           Option(name.trim).filter(_.nonEmpty).toVector.flatMap(expand(_))

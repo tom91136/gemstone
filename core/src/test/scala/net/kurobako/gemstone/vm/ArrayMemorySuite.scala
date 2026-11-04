@@ -2,7 +2,7 @@ package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ArrayMemorySuite extends Suite {
   test("restoring a snapshot brings back its contents and drops allocations made since") {

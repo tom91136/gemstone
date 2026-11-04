@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
-# Prints the CI shards of a target set as the include list of a GitHub Actions matrix, for the artifact build or the
+# Prints the CI shards of a build profile as the include list of a GitHub Actions matrix, for the artifact build or the
 # emulated run.
 #
-#   cmake -DCONFORMANCE_TARGET_SET=<target set> -DMODE=build|run -P Shards.cmake
+#   cmake -DCONFORMANCE_BUILD_PROFILE=<build profile> -DMODE=build|run -P Shards.cmake
 #
 # A route belongs to the group of the first pattern it matches; a route that matches none goes to shard 0 of the first
 # group, with a warning, so a new route still builds and runs. A group cuts its architectures, in route order, into
@@ -21,7 +21,7 @@ cmake_minimum_required(VERSION 3.25)
 # CONFORMANCE_CASE_SHARD, for routes too long for one runner that slicing cannot cut.
 
 if(NOT MODE MATCHES "^(build|run)$")
-  message(FATAL_ERROR "usage: cmake -DCONFORMANCE_TARGET_SET=<target set> -DMODE=build|run -P Shards.cmake")
+  message(FATAL_ERROR "usage: cmake -DCONFORMANCE_BUILD_PROFILE=<build profile> -DMODE=build|run -P Shards.cmake")
 endif()
 
 set(shard_groups)
@@ -99,8 +99,11 @@ foreach(route IN LISTS conformance_execution_routes)
       list(GET parts 2 compiler)
     endif()
     conformance_support_key("${backend}" "${architecture}" "${compiler}" support)
-    list(APPEND support_keys_${group} "${backend}/${support}")
-    list(APPEND support_slots_${group} "${slot}")
+    conformance_support_supplement("${backend}" "${architecture}" "${compiler}" supplement)
+    foreach(key IN ITEMS ${support} ${supplement})
+      list(APPEND support_keys_${group} "${backend}/${key}")
+      list(APPEND support_slots_${group} "${slot}")
+    endforeach()
   endif()
 endforeach()
 

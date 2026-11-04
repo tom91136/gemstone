@@ -5,21 +5,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.scalanative.meta.LinktimeInfo
 import scala.scalanative.unsafe.*
 
-@extern private object collector {
-  @name("scalanative_GC_set_weak_references_collected_callback")
-  def setWeakReferencesCollectedCallback(callback: CFuncPtr0[Unit]): Unit = extern
-
-  // the callback WeakReferenceRegistry registers: it starts the handler thread on first use, then wakes it
-  @name("_SM46java.lang.ref.WeakReferenceRegistry$$$Lambda$1G17$extern$forwarder")
-  def wakeReferenceHandler(): Unit = extern
-}
-
 /** Scala Native 0.5.12 wakes its weak reference handler from whichever thread collected, or under Boehm from whichever
   * thread runs finalizers. `park` and `unpark` allocate while holding the handler's lock, so a thread inside either can
   * re-enter `unpark` and deadlock on that lock; under Boehm the wake-up can also run on a thread that is still starting
   * and abort. Installing this replaces the wake-up with a flag, and a relay thread makes the wake-up instead.
   */
-private[toolchain] object ReferenceHandlerRelay {
+private object ReferenceHandlerRelay {
+  @extern private object collector {
+    @name("scalanative_GC_set_weak_references_collected_callback")
+    def setWeakReferencesCollectedCallback(callback: CFuncPtr0[Unit]): Unit = extern
+
+    // the callback WeakReferenceRegistry registers: it starts the handler thread on first use, then wakes it
+    @name("_SM46java.lang.ref.WeakReferenceRegistry$$$Lambda$1G17$extern$forwarder")
+    def wakeReferenceHandler(): Unit = extern
+  }
+
   private val pending = AtomicBoolean()
 
   private lazy val installed: Unit =

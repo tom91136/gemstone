@@ -3,7 +3,7 @@ package net.kurobako.gemstone
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.compiletime.testing.typeCheckErrors
 
 /** Compile-time literal checks, string proofs and domain satisfiability. */

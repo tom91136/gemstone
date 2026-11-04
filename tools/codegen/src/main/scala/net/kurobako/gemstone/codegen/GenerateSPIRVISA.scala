@@ -110,7 +110,7 @@ object GenerateSPIRVISA {
         }
       syncRoot(
         sourceRoot,
-        (Map(
+        Map(
           base.resolve("SPIRV.scala")                   -> renderConstants(grammar),
           base.resolve("OperandKind.scala")             -> renderOperandKinds(grammar),
           base.resolve("NarrowEncoding.scala")          -> ImageFormats.narrowEncodingSource,
@@ -121,7 +121,7 @@ object GenerateSPIRVISA {
           base.resolve("InstructionRequirements.scala") -> renderRequirements(grammar),
           base.resolve("OperandConstraintTable.scala")  -> renderOperandConstraints(grammar),
           base.resolve("Instruction.scala")             -> renderInstructions(grammar)
-        ) ++ enumerants).toMap
+        ) ++ enumerants
       )
       val _ = GeneratedFiles.write(nativeRoot.resolve("gemstone_image_formats.hpp"), ImageFormats.nativeSource)
       val nativeOutput = nativeRoot.resolve("gemstone_spirv_constants.hpp")
@@ -464,7 +464,7 @@ object GenerateSPIRVISA {
       case word if word.equalsIgnoreCase("instructions") => "insts"
       case word                                          => word
     }
-    val raw = abbreviated.headOption.map(word => s"${word.head.toLower}${word.tail}").getOrElse("operand") +
+    val raw = abbreviated.headOption.fold("operand")(word => s"${word.head.toLower}${word.tail}") +
       abbreviated.drop(1).map(word => s"${word.head.toUpper}${word.tail}").mkString
     val prefixed = if (raw.headOption.exists(_.isDigit)) s"operand$raw" else raw
     prefixed match {
@@ -541,10 +541,6 @@ object GenerateSPIRVISA {
     case ujson.Str(text)                          => java.lang.Long.parseLong(text)
     case ujson.Num(number) if number.isWhole && number >= Long.MinValue && number <= Long.MaxValue => number.toLong
     case _ => throw IllegalArgumentException("enumerant value is not an integer")
-  }
-
-  private def write(path: Path, content: String): Unit = {
-    val _ = GeneratedFiles.write(path, GeneratedScalaFormatter(path, content))
   }
 
   private def readExtendedInstructions(directory: Path): Vector[ExtendedInstructionSet] =
@@ -701,12 +697,13 @@ object GenerateSPIRVISA {
       }
 
   private def renderConstants(grammar: Grammar): String = {
-    val groups = constantGroups(grammar).filter(_._1 == "Opcode").map { case (kind, values) =>
-      val fields = values.map { case (name, value) =>
-        val safe = if (ScalaKeywords(name)) s"`$name`" else name
-        s"    final val $safe: Int = ${value.toInt}"
-      }.mkString("\n")
-      s"  object $kind {\n$fields\n  }"
+    val groups = constantGroups(grammar).collect {
+      case (kind, values) if kind == "Opcode" =>
+        val fields = values.map { case (name, value) =>
+          val safe = if (ScalaKeywords(name)) s"`$name`" else name
+          s"    final val $safe: Int = ${value.toInt}"
+        }.mkString("\n")
+        s"  object $kind {\n$fields\n  }"
     }.mkString("\n\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
       s"""|package net.kurobako.gemstone.isa.spirv
@@ -811,7 +808,7 @@ object GenerateSPIRVISA {
   }
 
   private def syncRoot(root: Path, outputs: Map[Path, String]): Unit = {
-    outputs.foreach { case (path, content) => write(path, content) }
+    outputs.foreach { case (path, content) => GeneratedFiles.writeScala(path, content) }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
     GeneratedFiles.removeUnexpected(root, outputs.keySet, include)
   }

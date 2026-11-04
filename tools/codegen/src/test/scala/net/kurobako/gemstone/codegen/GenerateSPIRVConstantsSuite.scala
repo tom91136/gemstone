@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 import java.nio.file.Files
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class GenerateSPIRVConstantsSuite extends Suite {
   test("grammar constants preserve wire bits and regenerate both languages deterministically") {

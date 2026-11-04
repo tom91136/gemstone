@@ -573,7 +573,38 @@ template <class Backend> int reviewCases(Backend &backend) {
   return 0;
 }
 
+constexpr unsigned SliceWords = 32;
+
+// Concurrent kernels from independent lists add into disjoint slices that share pages.
+template <class Backend> int slices(Backend &backend) {
+  constexpr unsigned lists = 3;
+  constexpr unsigned launches = 100;
+  AllocationScope allocations(backend);
+  auto *buffer = static_cast<uint32_t *>(allocations.allocate(static_cast<size_t>(lists) * SliceWords * sizeof(uint32_t)));
+  auto *addends = static_cast<uint32_t *>(allocations.allocate(static_cast<size_t>(lists) * launches * sizeof(uint32_t)));
+  std::fill_n(buffer, lists * SliceWords, 0U);
+  uint32_t expected[lists]{};
+  for (unsigned list = 0; list < lists; ++list) {
+    backend.sliceOpen(list);
+    for (unsigned launch = 0; launch < launches; ++launch) {
+      auto &addend = addends[(list * launches) + launch];
+      addend = 1 + ((((list + 1) * 7919) + (launch * 104729)) % 65535);
+      expected[list] += addend;
+      backend.sliceAppend(list, buffer + (static_cast<size_t>(list) * SliceWords), &addend);
+    }
+  }
+  backend.sliceFinish();
+  for (unsigned list = 0; list < lists; ++list)
+    for (unsigned word = 0; word < SliceWords; ++word)
+      require(buffer[(list * SliceWords) + word] == expected[list], "concurrent kernels lost an update to their slice");
+  std::cout << "verified disjoint slices lists=" << lists << " launches=" << launches << '\n';
+  return 0;
+}
+
 template <class Backend> int run(Backend &backend) {
+  if constexpr (requires { backend.sliceOpen(0U); }) {
+    if (probeEnabled("slices")) return slices(backend);
+  }
   if (probeEnabled("review")) return reviewCases(backend);
   if (probeEnabled("compare")) {
     require(backend.concurrentCapabilities(), "compare-exchange integration check requires concurrent host storage");

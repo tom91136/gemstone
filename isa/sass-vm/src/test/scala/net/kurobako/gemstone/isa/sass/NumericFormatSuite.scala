@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, *}
 import net.kurobako.gemstone.isa.sass.Harness.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class NumericFormatSuite extends Suite {
   test("integer and floating set instructions lower to typed comparison formats") {

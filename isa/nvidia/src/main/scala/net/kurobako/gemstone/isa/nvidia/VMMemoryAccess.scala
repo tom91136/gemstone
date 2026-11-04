@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
 /** One lane's memory accesses, routed to the storage their address space selects. */
 private object VMMemoryAccess {
@@ -59,7 +60,9 @@ private object VMMemoryAccess {
       },
       (if (access.systemScoped) context.device.memory.readSystemValueInto(GuestAddress(address), size, context.scalar)
        else context.device.memory.readValueInto(GuestAddress(address), size, context.scalar)) match {
-        case null         => Completed
+        case null =>
+          if (context.spin.recording) context.spin.record(lane, address, context.scalar.elem)
+          Completed
         case fault: Fault => Left(VMWriteBuffer.located(fault, context.pc, lane))
       }
     )
@@ -90,6 +93,25 @@ private object VMMemoryAccess {
       local => Right(context.workgroup.writeLocal(lane, local, width, value)),
       context.device.memory.writeValue(GuestAddress(address), value, width.toScalarByteWidth)
     )
+
+  /** The NUL-terminated string at a generic address, cut at `limit` characters and ending in `?` where unreadable. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def readString(context: VMContext, lane: WorkgroupLane, address: Long, limit: Int = 512): String = {
+    val builder = mutable.StringBuilder()
+    var cursor  = address
+    var done    = false
+    while (!done && builder.length < limit)
+      loadValue(context, lane, MemoryAccess.Generic(false), cursor, 8) match {
+        case Right(_) =>
+          val character = (context.scalar.elem & 0xffL).toInt
+          if (character == 0) done = true
+          else { builder.append(character.toChar); cursor += 1 }
+        case Left(_) =>
+          builder.append('?')
+          done = true
+      }
+    builder.result()
+  }
 
   /** Faults the first active lane whose access of `size` bytes is [[misaligned]], then publishes the device ranges the
     * lanes will read.
@@ -183,7 +205,10 @@ private object VMMemoryAccess {
     access != MemoryAccess.Shared && access != MemoryAccess.Local &&
       context.workgroup.withBuffer(address, size.unsafe[Int >= 0])((_, _) => true)(false)
 
-  def atomicTargetsShared(space: MemorySpace, address: Long, width: ScalarBitWidth): Boolean =
-    space == MemorySpace.Shared ||
-      (space == MemorySpace.Generic && VMAddressSpace.isShared(address, width.toScalarByteWidth))
+  def atomicTarget(space: MemorySpace, address: Long, width: ScalarBitWidth): AtomicTarget =
+    if (space == MemorySpace.Shared) AtomicTarget.Shared
+    else if (space != MemorySpace.Generic) AtomicTarget.Device
+    else if (VMAddressSpace.isShared(address, width.toScalarByteWidth)) AtomicTarget.Shared
+    else if (VMAddressSpace.isLocal(address)) AtomicTarget.Local
+    else AtomicTarget.Device
 }

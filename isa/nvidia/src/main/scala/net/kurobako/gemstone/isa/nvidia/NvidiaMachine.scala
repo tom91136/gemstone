@@ -84,6 +84,26 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
       inline next: => F[Unit]
   ): F[Unit]
 
+  /** `next` over the bytes the read `read` of the texture or surface `handle` names yields at `coordinates`, packed as
+    * [[textureWord]] takes them; faults on an invalid handle or an access that falls outside the object.
+    */
+  inline def textureRead(lane: L, read: Texture.Operation, handle: V, coordinates: Vec[V])(
+      inline next: D => F[Unit]
+  ): F[Unit]
+
+  /** The `bytes` bytes of `data` that result `index` occupies, zero-extended. */
+  def textureWord(data: D, index: Int, bytes: Int): V
+
+  /** The `sources` stored to the surface `handle` names, then `next`. */
+  inline def surfaceStore(lane: L, store: Texture.Operation.Store, handle: V, coordinates: Vec[V], sources: Vec[V])(
+      inline next: => F[Unit]
+  ): F[Unit]
+
+  /** The atomic update of the surface `handle` names at `coordinates` by `operand`, then `next`. */
+  inline def surfaceReduce(lane: L, reduce: Texture.Operation.Reduce, handle: V, coordinates: Vec[V], operand: V)(
+      inline next: => F[Unit]
+  ): F[Unit]
+
   /** byte i is selected by bit i & 15 of mask */
   inline def storeGlobalMasked(lane: L, destination: V, source: V, bytes: V, mask: V)(inline next: => F[Unit]): F[Unit]
 
@@ -241,6 +261,11 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
 
   /** Each warp of the active lanes synchronises on `memberMask`, which its active lanes must agree on. */
   inline def warpSync(memberMask: Value): F[Step]
+
+  /** As `warpSync`, then the active lanes that name different member masks run as separate partitions, each seeing only
+    * its own members as active, until a convergence barrier that spans the groups releases them.
+    */
+  inline def warpPartition(memberMask: Value): F[Step]
 
   /** The frame-local address of the lane's stack pointer. */
   inline def stackPointer(lane: L): V

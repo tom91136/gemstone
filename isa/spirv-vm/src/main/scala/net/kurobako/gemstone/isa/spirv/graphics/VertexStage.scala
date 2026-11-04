@@ -83,8 +83,10 @@ private object VertexStage {
       else indices += (raw + (if (draw.index.nonEmpty) draw.call.vertexOffset else 0))
     }
     segments += begin -> indices.size
-    val count   = indices.size.unsafe[Int >= 0] * draw.call.instances
-    val records = allocate(draw.vertex, count)
+    val count      = indices.size.unsafe[Int >= 0] * draw.call.instances
+    val records    = allocate(draw.vertex, count)
+    val attributes = draw.attributes.distinctBy(_.location).map(attribute => attribute.location -> attribute).toMap
+    val buffers    = draw.vertexBuffers.distinctBy(_.binding).map(buffer => buffer.binding -> buffer).toMap
     fields(draw.vertex, ShaderDirection.Input).foreach { (variable, field) =>
       for (invocation <- 0 until count) {
         val instance = draw.call.firstInstance + invocation / indices.size
@@ -102,12 +104,10 @@ private object VertexStage {
             }
             put(records(variable), offset, value)
           case None => field.location.foreach { location =>
-              val attribute = draw.attributes.find(
-                _.location == location
-              ).getOrElse(throw IllegalArgumentException("missing vertex attribute"))
-              val binding = draw.vertexBuffers.find(
-                _.binding == attribute.binding
-              ).getOrElse(throw IllegalArgumentException("missing vertex binding"))
+              val attribute =
+                attributes.getOrElse(location, throw IllegalArgumentException("missing vertex attribute"))
+              val binding =
+                buffers.getOrElse(attribute.binding, throw IllegalArgumentException("missing vertex binding"))
               val index   = if (binding.instanceRate) instance else vertex
               val address = (index.toLong & 0xffffffffL) * binding.stride + attribute.offset
               val data    =

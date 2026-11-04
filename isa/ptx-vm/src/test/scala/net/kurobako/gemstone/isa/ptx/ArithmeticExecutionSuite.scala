@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ArithmeticExecutionSuite extends Suite {
   private val convertedOffsets = Vec(0L, 4L, 8L)
@@ -709,7 +709,7 @@ ret;
       ),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(memory.readLittleEndian(memory.start, 8).toOption.get, -7L)
     assertEquals(
       memory.readLittleEndian(memory.start.offset(8L), 8).toOption.get,
@@ -760,7 +760,7 @@ ret;
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(0xabcdef31, 0x31234567, 0x12345679, 0x9abcdef3)
@@ -793,7 +793,7 @@ ret;
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(memory.readInt32(memory.start).toOption, Some(-6))
   }
 }

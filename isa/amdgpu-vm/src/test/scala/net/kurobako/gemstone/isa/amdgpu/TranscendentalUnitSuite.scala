@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The transcendental unit's operations against the hardware's own results. */
 class TranscendentalUnitSuite extends Suite {

@@ -14,6 +14,9 @@
 #include <vector>
 
 #include <stdint.h>
+#ifdef __linux__
+  #include <sys/prctl.h>
+#endif
 
 #include <aspartame/vector.hpp>
 
@@ -25,6 +28,35 @@ inline std::chrono::steady_clock::time_point deadlineAfter(uint64_t nanoseconds)
   const auto room = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::time_point::max() - now).count();
   return std::cmp_greater_equal(nanoseconds, room) ? std::chrono::steady_clock::time_point::max()
                                                    : now + std::chrono::nanoseconds(nanoseconds);
+}
+
+/** Narrows the calling thread's timer slack for its lifetime; the 50 us default wakes timed waits well past their deadline. */
+class TightTimerSlack {
+public:
+  TightTimerSlack() {
+#ifdef __linux__
+    if (previous > 1) prctl(PR_SET_TIMERSLACK, 1UL, 0UL, 0UL, 0UL);
+#endif
+  }
+  ~TightTimerSlack() {
+#ifdef __linux__
+    if (previous > 1) prctl(PR_SET_TIMERSLACK, static_cast<unsigned long>(previous), 0UL, 0UL, 0UL);
+#endif
+  }
+  TightTimerSlack(const TightTimerSlack &) = delete;
+  TightTimerSlack &operator=(const TightTimerSlack &) = delete;
+
+private:
+#ifdef __linux__
+  int previous = prctl(PR_GET_TIMERSLACK, 0UL, 0UL, 0UL, 0UL);
+#endif
+};
+
+/** Waits for `ready` at most `nanoseconds`; false when the deadline passed first. */
+template <class Ready>
+bool waitWithin(std::condition_variable &changed, std::unique_lock<std::mutex> &lock, uint64_t nanoseconds, Ready &&ready) {
+  const TightTimerSlack slack;
+  return changed.wait_until(lock, deadlineAfter(nanoseconds), std::forward<Ready>(ready));
 }
 
 // A bounded pool executes independent streams. Completion handles retain event
@@ -54,19 +86,17 @@ public:
       std::scoped_lock const lock(mutex);
       stopping = true;
     }
-    changed.notify_all();
-    for (;;) {
-      std::thread worker;
-      {
-        std::scoped_lock const lock(mutex);
-        if (workers.empty()) break;
-        worker = std::move(workers.back());
-        workers.pop_back();
-      }
-      worker.join();
-    }
+    join();
     std::unique_lock lock(mutex);
     drainStopped(lock);
+  }
+  /** Joins the workers once no work is eligible; the next submission or completion starts them again. */
+  void park() {
+    {
+      std::scoped_lock const lock(mutex);
+      parking = true;
+    }
+    join();
   }
   CommandQueue(const CommandQueue &) = delete;
   CommandQueue &operator=(const CommandQueue &) = delete;
@@ -129,7 +159,7 @@ public:
   std::optional<int32_t> waitFor(const Ticket &ticket, uint64_t nanoseconds) {
     if (onWorker() || nanoseconds == UINT64_MAX) return wait(ticket);
     std::unique_lock lock(mutex);
-    if (!changed.wait_until(lock, deadlineAfter(nanoseconds), [&] { return readyLocked(ticket); })) return std::nullopt;
+    if (!waitWithin(changed, lock, nanoseconds, [&] { return readyLocked(ticket); })) return std::nullopt;
     return statusLocked(ticket, true);
   }
   int32_t waitAll() { return onWorker() ? 0 : wait(snapshotAll()); }
@@ -142,6 +172,7 @@ public:
       std::unique_lock lock(mutex);
       ticket->status = status;
       ticket->done = true;
+      if (!stopping && workers.empty() && eligibleLocked() != jobs.end()) startWorkers();
       drainStopped(lock);
     }
     changed.notify_all();
@@ -152,7 +183,7 @@ public:
     if (!onWorker()) return std::forward<Wait>(wait)();
     {
       std::scoped_lock const lock(mutex);
-      if (!stopping && workers.size() - blocked <= Concurrency) workers.emplace_back([this] { run(); });
+      if (!stopping && workers.size() - blocked <= Concurrency) workers.emplace_back(&CommandQueue::run, this);
       ++blocked;
     }
     struct Unblock {
@@ -282,9 +313,7 @@ private:
     }
     auto ticket = std::make_shared<Completion>();
     ticket->dependencies = std::move(dependencies);
-    if (!stopping && workers.empty())
-      for (unsigned i = 0; i < Concurrency; ++i)
-        workers.emplace_back([this] { run(); });
+    if (!stopping && workers.empty()) startWorkers();
     jobs.push_back({.ticket = ticket, .work = std::move(work)});
     if (order == Order::Ordered) {
       target.tail = ticket;
@@ -354,12 +383,33 @@ private:
     abandoned.clear();
     lock.lock();
   }
+  void startWorkers() {
+    for (unsigned i = 0; i < Concurrency; ++i)
+      workers.emplace_back(&CommandQueue::run, this);
+  }
+  // Clears parking under the lock that finds no workers left, so no unjoined worker can outlive it.
+  void join() {
+    changed.notify_all();
+    for (;;) {
+      std::thread worker;
+      {
+        std::scoped_lock const lock(mutex);
+        if (workers.empty()) {
+          parking = false;
+          return;
+        }
+        worker = std::move(workers.back());
+        workers.pop_back();
+      }
+      worker.join();
+    }
+  }
   void run() {
     activeQueue = this;
     std::unique_lock lock(mutex);
     for (;;) {
       // Stopping abandons work that waits on host completions which never arrive.
-      changed.wait(lock, [&] { return stopping || eligibleLocked() != jobs.end(); });
+      changed.wait(lock, [&] { return stopping || parking || eligibleLocked() != jobs.end(); });
       const auto next = eligibleLocked();
       if (next == jobs.end()) return;
       Job job = std::move(*next);
@@ -377,6 +427,7 @@ private:
   uint64_t nextHandle = 0x400000000;
   unsigned blocked = 0;
   bool stopping = false;
+  bool parking = false;
   std::vector<std::thread> workers;
 };
 

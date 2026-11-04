@@ -87,6 +87,6 @@ void saturate(size_t items, const std::string &options) {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/opencl/saturating-conversions/integers/n256", "[unified][runtime][compact]") { saturate(256, ""); }
+TEST_CASE("edge-cases/runtime/opencl/saturating-conversions/integers/n256", "[unified][runtime]") { saturate(256, ""); }
 
-TEST_CASE("edge-cases/runtime/opencl/debug-information/saturating-conversions/n256", "[unified][runtime][compact]") { saturate(256, "-g"); }
+TEST_CASE("edge-cases/runtime/opencl/debug-information/saturating-conversions/n256", "[unified][runtime]") { saturate(256, "-g"); }

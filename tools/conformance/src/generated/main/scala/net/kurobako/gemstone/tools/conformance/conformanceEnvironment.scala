@@ -4,6 +4,7 @@ package net.kurobako.gemstone.tools.conformance
 object conformanceEnvironment {
   val CaseShard: String = "CONFORMANCE_CASE_SHARD"
   val CudaCodeMode: String = "CONFORMANCE_CUDA_CODE_MODE"
+  val DeviceCount: String = "CONFORMANCE_DEVICE_COUNT"
   val DevicePattern: String = "CONFORMANCE_DEVICE_PATTERN"
   val JobCount: String = "CONFORMANCE_JOB_COUNT"
   val OpenclCtsAtomicIterationCount: String = "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATION_COUNT"

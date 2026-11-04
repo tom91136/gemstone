@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.Event.*
 
 class PrintRendererSuite extends Suite {

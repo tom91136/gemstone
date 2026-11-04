@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.collection.mutable
 

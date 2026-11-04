@@ -24,6 +24,7 @@ private trait VMCompilationContext {
   def instruction: DecodedInstruction
   def modifiers: Vec[Modifier]
   def addresses: Vec[Int]
+  def callTargets: Vec[Int]
   def returnBases: Vec[Int]
   def boundSymbols: Map[NonEmpty[String], GuestAddress]
   def reducedRadians: Option[Value.Register]
@@ -65,9 +66,20 @@ private trait VMCompilationContext {
   final def operation: Instruction               = instruction.operation
   final def unsupported(detail: String): Nothing = throw IllegalArgumentException(detail)
 
+  /** Runs `issued` for one elected lane of each warp, as a uniform-datapath instruction issues. */
+  final def once(issued: VMInstruction): Unit = {
+    val elected = predicateTemp()
+    emit(Elect(None, elected.slot, Value.ActiveMask))
+    guarded(issued, elected)
+  }
+
   final def requireModifiers(allowed: Set[Modifier]): Unit =
     if (!modifiers.forall(allowed))
-      unsupported(s"unsupported modifiers ${modifiers.filterNot(allowed).map(_.name).mkString(".")}")
+      unsupported(
+        s"unsupported modifiers ${modifiers.collect { case modifier if !allowed(modifier) => modifier.name }.mkString(".")}"
+      )
+
+  final def named(name: String): Boolean = modifiers.exists(_.name == name)
 
   final def requireOperands(count: Int, description: String): Unit =
     if (operands.size != count) unsupported(description)

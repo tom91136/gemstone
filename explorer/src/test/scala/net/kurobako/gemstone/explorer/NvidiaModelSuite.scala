@@ -2,7 +2,7 @@ package net.kurobako.gemstone.explorer
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 
 class NvidiaModelSuite extends Suite {
@@ -233,6 +233,22 @@ class NvidiaModelSuite extends Suite {
     })
     val (registers, release) = form(SASSModel, Some("sm_90"), "USETMAXREG", "usetmaxregAlloc__Ib_dealloc")
     assertEquals(SASSModel.unavailable(registers, release), Unavailable.Mechanics("Lowers to NoOp."))
+  }
+
+  test("SASS exclusive WARPSYNC defines the warp partition of its member groups") {
+    val found   = entry(SASSModel, Some("sm_90"), "WARPSYNC")
+    val machine = found.forms.flatMap(form =>
+      SASSModel.semanticsOf(found, form) match {
+        case Semantics.Machine(definitions) => definitions
+        case Semantics.Both(_, definitions) => definitions
+        case _                              => Vec.empty[Described]
+      }
+    )
+    val partitions = machine.filter(_.instance.contains("EXCLUSIVE"))
+    assert(partitions.nonEmpty)
+    partitions.foreach(partition =>
+      assert(ScalaBackend.show(partition.definition).contains("warpPartition"), partition.instance)
+    )
   }
 
   test("SASS instances take the immediates, register pairs and optional modifiers their encodings require") {

@@ -4,7 +4,7 @@ import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class PRMTSignExtensionSuite extends Suite {
   test("PRMT sign-extension selectors replicate the selected byte sign bit") {

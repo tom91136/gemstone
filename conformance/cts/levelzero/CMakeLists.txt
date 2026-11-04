@@ -2,15 +2,15 @@
 # whose short cases cover driver objects, memory, command submission and SPIR-V.
 set(levelzero_cts_programs
   test_driver test_device test_context test_cmdqueue test_event test_fence
-  test_memory test_module test_copy)
+  test_memory test_module test_copy test_barrier test_usm test_cmdlist test_multithread)
 
-FetchContent_MakeAvailable(levelzero_cts levelzero_gtest)
+FetchContent_MakeAvailable(levelzero_cts googletest)
 
 set(staged_source "${CMAKE_CURRENT_BINARY_DIR}/source")
 set(staging "${staged_source}.staging")
 stage_source("${levelzero_cts_SOURCE_DIR}" "${staging}")
 file(MAKE_DIRECTORY "${staging}/third_party/googletest")
-file(COPY "${levelzero_gtest_SOURCE_DIR}/" DESTINATION "${staging}/third_party/googletest")
+file(COPY "${googletest_SOURCE_DIR}/" DESTINATION "${staging}/third_party/googletest")
 
 # This upstream revision requires static Boost 1.92, while supported toolchains
 # ship a shared Boost 1.90. Neither choice affects the Level Zero API coverage.

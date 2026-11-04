@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 // NaN results as an RTX 4060 Ti computes them
 class FusedMultiplyAddNaNSuite extends Suite {

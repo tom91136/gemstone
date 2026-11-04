@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 import scala.util.Using
 

@@ -337,7 +337,7 @@ private object CooperativeSemantics {
   ): Term.Steps = {
     val same    = Vec.tabulate(operands.size)(at => machine.leafCount(operands(at)) == rows * columns)
     val fixed   = Array.tabulate(3 + operands.size)(at => if (at < 3 || same(at - 3)) -1 else operands(at - 3))
-    val sources = source +: operands.indices.filter(same(_)).map(operands(_))
+    val sources = source +: operands.indices.collect { case at if same(at) => operands(at) }
     perElement(Render, machine)(
       Sweep(named(function), resultType, fixed, rows * columns),
       rows,

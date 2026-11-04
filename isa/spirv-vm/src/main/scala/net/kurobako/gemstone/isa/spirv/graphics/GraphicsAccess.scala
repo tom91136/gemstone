@@ -22,9 +22,9 @@ private object GraphicsAccess {
     val access = GraphicsAccess(memory, control)
     try execute(access)
     catch {
-      case Failure(fault)                  => Left(fault)
-      case error: IllegalArgumentException => Left(Fault.InvalidRequest(throwables.detail(error)))
-      case error: ArithmeticException      => Left(Fault.InvalidRequest(throwables.detail(error)))
+      case Failure(fault)                                                 => Left(fault)
+      case error @ (_: IllegalArgumentException | _: ArithmeticException) =>
+        Left(Fault.InvalidRequest(throwables.detail(error)))
     } finally access.releaseScratch()
   }
 

@@ -2,7 +2,7 @@ package net.kurobako.gemstone.testing
 
 import scala.scalajs.js
 
-private[testing] object host {
+private object host {
   def variable(name: String): Option[String] =
     if (js.typeOf(js.Dynamic.global.process) == "undefined") None
     else (js.Dynamic.global.process.env.selectDynamic(name): Any) match {

@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** S_FMAAK_F32 and S_FMAMK_F32 carry one literal dword, which fills K and a literal source alike; bytes from ROCm 7.1.1
   * `llvm-mc -triple=amdgcn -mcpu=gfx1201 -show-encoding` for `s_fmaak_f32 s0, 0x40490fdb, s1, 0x40490fdb` and

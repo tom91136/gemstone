@@ -5,7 +5,7 @@ import dotty.tools.dotc.reporting.StoreReporter
 import java.nio.file.Files
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 
 class RenderedMachineSuite extends Suite {

@@ -3,6 +3,8 @@ package net.kurobako.gemstone.isa.amdgpu
 import EncodingConstants.DPP.*
 
 private object DppControl {
+  private val GcnOnly = Set(WAVE_SHL1, WAVE_ROL1, WAVE_SHR1, WAVE_ROR1, BCAST15, BCAST31)
+
   def within(control: Int, first: Int, last: Int): Boolean = control >= first && control <= last
 
   /** GCN keeps wave shifts and row broadcasts, which RDNA replaces with row share and XOR mask; CDNA2 onwards adds
@@ -13,8 +15,7 @@ private object DppControl {
       within(control, ROW_SHL_FIRST, ROW_SHL_LAST) ||
       within(control, ROW_SHR_FIRST, ROW_SHR_LAST) || within(control, ROW_ROR_FIRST, ROW_ROR_LAST) ||
       control == ROW_MIRROR || control == ROW_HALF_MIRROR
-    val gcn = common || control == WAVE_SHL1 || control == WAVE_ROL1 || control == WAVE_SHR1 ||
-      control == WAVE_ROR1 || control == BCAST15 || control == BCAST31
+    val gcn = common || GcnOnly.contains(control)
     isa match {
       case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 | ISA.GFX11_7 | ISA.CDNA5 =>
         common || within(control, ROW_SHARE_FIRST, ROW_SHARE_LAST) ||

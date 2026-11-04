@@ -55,7 +55,6 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
     exclusive(regions.update(id, Region(regions(id).bytes, base.raw)))
 
   /** Live backing bytes; mutate only while no dispatch runs. */
-  @SuppressWarnings(Array("scalafix:MutableExposure"))
   def array(id: AllocationId): Array[Byte] = exclusive(regions(id).bytes)
 
   def bytes(id: AllocationId): Vec[Byte] = exclusive(Vec.unsafeWrapArray(regions(id).bytes.clone()))

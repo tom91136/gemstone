@@ -74,20 +74,32 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
     zeModuleDestroy(module);
     zeContextDestroy(context);
   }
-  ze_command_list_handle_t overlapLists[2]{};
-  void overlapSubmit(unsigned i, void *input, uint32_t *output, unsigned mode) {
+  void openAsync(ze_command_list_handle_t &list) const {
     ze_command_queue_desc_t desc{};
     desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
     desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
-    check(zeCommandListCreateImmediate(context, device, &desc, &overlapLists[i]));
-    enqueue(input, output, reinterpret_cast<uint32_t *>(input), mode, 1, overlapLists[i], nullptr, 0, nullptr);
+    check(zeCommandListCreateImmediate(context, device, &desc, &list));
   }
-  void overlapFinish() {
-    for (auto *list : overlapLists) {
+  template <size_t N> void finishAsync(ze_command_list_handle_t const (&lists)[N]) const {
+    for (auto *list : lists) {
       check(zeCommandListHostSynchronize(list, 30000000000ULL));
       check(zeCommandListDestroy(list));
     }
   }
+
+  ze_command_list_handle_t overlapLists[2]{};
+  void overlapSubmit(unsigned i, void *input, uint32_t *output, unsigned mode) {
+    openAsync(overlapLists[i]);
+    enqueue(input, output, reinterpret_cast<uint32_t *>(input), mode, 1, overlapLists[i], nullptr, 0, nullptr);
+  }
+  void overlapFinish() const { finishAsync(overlapLists); }
+
+  ze_command_list_handle_t sliceLists[3]{};
+  void sliceOpen(unsigned i) { openAsync(sliceLists[i]); }
+  void sliceAppend(unsigned i, uint32_t *slice, uint32_t *addend) const {
+    enqueue(slice, slice, addend, 23, SliceWords, sliceLists[i], nullptr, 0, nullptr);
+  }
+  void sliceFinish() const { finishAsync(sliceLists); }
 
   [[nodiscard]] void *allocateDevice(size_t size) const {
     ze_device_mem_alloc_desc_t desc{};

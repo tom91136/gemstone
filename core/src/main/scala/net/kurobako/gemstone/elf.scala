@@ -5,6 +5,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import scala.collection.immutable.ArraySeq
 
 /** Little-endian ELF64 images. Section contents stay in the source image and are sliced on request. */
 object elf {
@@ -302,10 +303,18 @@ object elf {
     value.refine[Long in 0L ~ 2147483647L].map[Int >= 0](_.toIntExact)
       .left.map[NonEmpty[String]](_ => s"$label exceeds supported range")
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def stringAt(bytes: Vec[Byte], offset: Int): Either[NonEmpty[String], String] =
     if (offset < 0 || offset >= bytes.size) Left("invalid ELF string offset")
     else {
-      val end = bytes.indexOf(0.toByte, offset)
+      val end = bytes match {
+        case raw: ArraySeq.ofByte =>
+          val array = raw.unsafeArray
+          var index = offset
+          while (index < array.length && array(index) != 0) index += 1
+          if (index < array.length) index else -1
+        case _ => bytes.indexOf(0.toByte, offset)
+      }
       if (end < offset) Left("unterminated ELF string")
       else string.UTF8.decode(bytes.slice(offset, end)).left.map(_.message)
     }

@@ -24,6 +24,7 @@ class AtomicSuite extends Suite {
     %uint = OpTypeInt 32 0
     %ulong = OpTypeInt 64 0
     %float = OpTypeFloat 32
+    %half = OpTypeFloat 16
     %ptr = OpTypePointer CrossWorkgroup $element
     %fn = OpTypeFunction %void %ptr
     %scope = OpConstant %uint ${Scope.Workgroup}
@@ -198,6 +199,93 @@ class AtomicSuite extends Suite {
     assertEquals(
       runKernel(module, Vec.empty, 12L),
       Vec(single(5f), single(3f), single(1f)).flatMap(LittleEndian.toVec(_, 4))
+    )
+  }
+
+  test("half atomic add returns prior values and leaves neighbours untouched") {
+    val module = kernel(
+      "%half",
+      "%addend = OpConstant %half 2.5",
+      s"""%old = OpAtomicFAddEXT %half %target %scope %semantics %addend
+         |${store("two", "old")}""".stripMargin
+    )
+    assertEquals(
+      runKernel(module, Vec(half(1.5f), half(7f), half(0f)).flatMap(LittleEndian.toVec(_, 2)), 6L),
+      Vec(half(4f), half(7f), half(1.5f)).flatMap(LittleEndian.toVec(_, 2))
+    )
+  }
+
+  test("half atomic minimum and maximum return prior values") {
+    val module = kernel(
+      "%half",
+      """%minimum = OpConstant %half 1.0
+        |%maximum = OpConstant %half 5.0""".stripMargin,
+      s"""%old_minimum = OpAtomicFMinEXT %half %target %scope %semantics %minimum
+         |%old_maximum = OpAtomicFMaxEXT %half %target %scope %semantics %maximum
+         |${store("one", "old_minimum")}
+         |${store("two", "old_maximum")}""".stripMargin
+    )
+    assertEquals(
+      runKernel(module, Vec(half(3f), half(0f), half(0f)).flatMap(LittleEndian.toVec(_, 2)), 6L),
+      Vec(half(5f), half(3f), half(1f)).flatMap(LittleEndian.toVec(_, 2))
+    )
+  }
+
+  test("half atomic load, store and exchange treat values as typed raw bits") {
+    val module = kernel(
+      "%half",
+      """%first = OpConstant %half 1.5
+        |%second = OpConstant %half 2.5""".stripMargin,
+      s"""OpAtomicStore %target %scope %semantics %first
+         |%loaded = OpAtomicLoad %half %target %scope %semantics
+         |%exchanged = OpAtomicExchange %half %target %scope %semantics %second
+         |${store("one", "loaded")}
+         |${store("two", "exchanged")}""".stripMargin
+    )
+    assertEquals(
+      runKernel(module, Vec(half(0f), half(7f), half(0f)).flatMap(LittleEndian.toVec(_, 2)), 6L),
+      Vec(half(2.5f), half(1.5f), half(1.5f)).flatMap(LittleEndian.toVec(_, 2))
+    )
+  }
+
+  test("half atomic add on workgroup memory returns prior values") {
+    val module = kernel(
+      "%half",
+      """%wg_ptr = OpTypePointer Workgroup %half
+        |%local = OpVariable %wg_ptr Workgroup
+        |%initial = OpConstant %half 1.5
+        |%addend = OpConstant %half 2.5""".stripMargin,
+      s"""OpStore %local %initial
+         |%old = OpAtomicFAddEXT %half %local %scope %semantics %addend
+         |%final = OpLoad %half %local
+         |${store("one", "old")}
+         |${store("two", "final")}""".stripMargin
+    )
+    assertEquals(
+      runKernel(module, Vec.empty, 6L),
+      Vec(half(0f), half(1.5f), half(4f)).flatMap(LittleEndian.toVec(_, 2))
+    )
+  }
+
+  test("half atomic minimum and maximum on workgroup memory return prior values") {
+    val module = kernel(
+      "%half",
+      """%wg_ptr = OpTypePointer Workgroup %half
+        |%local = OpVariable %wg_ptr Workgroup
+        |%initial = OpConstant %half 3.0
+        |%minimum = OpConstant %half 1.0
+        |%maximum = OpConstant %half 5.0""".stripMargin,
+      s"""OpStore %local %initial
+         |%old_minimum = OpAtomicFMinEXT %half %local %scope %semantics %minimum
+         |%old_maximum = OpAtomicFMaxEXT %half %local %scope %semantics %maximum
+         |%final = OpLoad %half %local
+         |${store("zero", "final")}
+         |${store("one", "old_minimum")}
+         |${store("two", "old_maximum")}""".stripMargin
+    )
+    assertEquals(
+      runKernel(module, Vec.empty, 6L),
+      Vec(half(5f), half(3f), half(1f)).flatMap(LittleEndian.toVec(_, 2))
     )
   }
 

@@ -29,7 +29,7 @@ private object VMExecution {
 
     /** Each arm's lanes continue at its target, in order, and `fallThrough` at the next instruction. */
     case Branches(arms: Vec[Arm], fallThrough: VMLaneMask)
-    case WarpSync(memberMask: Value)
+    case WarpSync(memberMask: Value, exclusive: Boolean)
     case ConvergenceSync(token: Register)
     case ClusterBarrier(arrive: Boolean)
     case WorkgroupBarrier(arrivals: Vec[WorkgroupArrival], blocking: Boolean, reduction: Option[BarrierReduction])

@@ -156,6 +156,12 @@ trait AddressSpace derives CanEqual {
   )(@unused update: Long => Long): Either[Fault, Long] =
     Left(Fault.Unsupported("memory does not support atomic modification"))
 
+  /** Scalar load that observes the latest value in the location's coherence order and acquires, as an atomic load does.
+    * Memories whose reads are not coherent by construction fall back to an identity update.
+    */
+  def readCoherentValueInto(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
+    AddressSpace.store(into, atomicModifyValue(region, offset, size)(identity))
+
   def prepareReads(@unused ranges: ReadRanges): Either[Fault, Unit] = Ready
 
   def prepareSystemReads(ranges: ReadRanges): Either[Fault, Unit] = prepareReads(ranges)
@@ -228,10 +234,21 @@ trait AddressSpace derives CanEqual {
     case (result, (address, value, size)) => result.flatMap(_ => writeSystemValue(address, value, size))
   }
 
+  def readCoherentValueInto(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
+    AddressSpace.store(into, atomicModifyValue(address, size)(identity))
+
   /** Resolve and perform one indivisible scalar update. */
   def atomicModifyValue(
       address: GuestAddress,
       size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
     resolve(address, size.widen[Int >= 0])(atomicModifyValue(_, _, size)(update))
+
+  /** [[atomicModifyValue]] for an atomic whose memory scope is a workgroup or narrower, which neither the host nor
+    * another dispatch takes part in. Memories that cannot tell the difference perform the full atomic update.
+    */
+  def atomicModifyLocalValue(
+      address: GuestAddress,
+      size: Int in 1 ~ 8
+  )(update: Long => Long): Either[Fault, Long] = atomicModifyValue(address, size)(update)
 }

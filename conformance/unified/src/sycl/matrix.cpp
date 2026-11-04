@@ -103,6 +103,6 @@ void bfloat16Conversions() {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/sycl/joint-matrix/bf16/m8n8k16", "[unified][runtime][compact]") { multiply(); }
+TEST_CASE("edge-cases/runtime/sycl/joint-matrix/bf16/m8n8k16", "[unified][runtime]") { multiply(); }
 
-TEST_CASE("edge-cases/runtime/sycl/bfloat16/conversions/n64", "[unified][runtime][compact]") { bfloat16Conversions(); }
+TEST_CASE("edge-cases/runtime/sycl/bfloat16/conversions/n64", "[unified][runtime]") { bfloat16Conversions(); }

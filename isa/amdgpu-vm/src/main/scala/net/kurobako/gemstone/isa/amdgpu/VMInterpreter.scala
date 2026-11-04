@@ -18,6 +18,7 @@ import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.runtime.LongRef
 
@@ -41,6 +42,15 @@ private object VMInterpreter {
   // the conditional branch stack pointer, CSP, in MODE's bits 31 to 29
   private inline val StackPointerShift = 29
 
+  private inline val PollWindow    = 4
+  private inline val PollThreshold = 32
+
+  // a polling wave outside a resident dispatch parks this long per load and is charged the issues it forgoes, so its
+  // predecessors keep the host threads and the shared locks while a wait that never ends still exhausts the budget;
+  // a paced launch instead holds the wave within a few steps of its slowest peer, so parking would only stall them
+  private inline val PollBackoffNanos  = 50000L
+  private inline val PollBackoffCharge = 1000
+
   // a resident wave yields after this many backward branches, so a spin on another workgroup lets that one run
   private inline val BackwardBranchesPerSlice = 64
 
@@ -61,7 +71,8 @@ private object VMInterpreter {
       prepared: Kernel,
       launch: KernelLaunch,
       globalBindings: Vec[GlobalMapping],
-      layout: Option[KernargLayout] = None
+      layout: Option[KernargLayout] = None,
+      peers: PeerCode = PeerCode.Alone
   ): Either[Fault, Unit] = {
     val KernelLaunch(dispatch, context, _) = launch
     for {
@@ -85,12 +96,16 @@ private object VMInterpreter {
             .flatMap(size => packArguments(dispatch, size, context.memory, globalBindings))
             .map(bytes => (bytes, KernargAddress))
       }
-      _ <- runDispatch(
+      heap <- dispatch.deviceHeap.traverse(HeapRegion.of(_, context.memory))
+      _    <- runDispatch(
         prepared,
         kernarg._1,
         kernarg._2,
         Vec.toArray(globalBindings),
-        launch
+        launch,
+        heap,
+        layout.flatMap(_.hidden.find(_.valueKind == "hidden_hostcall_buffer")).map(_.offset),
+        peers
       )
     } yield ()
   }
@@ -167,7 +182,10 @@ private object VMInterpreter {
       kernarg: Array[Byte],
       kernargAddress: Long,
       allocations: Array[GlobalMapping],
-      launch: KernelLaunch
+      launch: KernelLaunch,
+      heap: Option[HeapRegion],
+      hostcallOffset: Option[Int],
+      peers: PeerCode
   ): Either[Fault, Unit] = {
     val KernelLaunch(dispatch, context, workgroups) = launch
     val memory                                      = context.memory
@@ -193,13 +211,13 @@ private object VMInterpreter {
     )
     LittleEndian.write(kernargAddress, packet, 40, 8)
     control.observer.foreach(_.launched(resources(kernel, dispatch)))
-    val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress)
-    // One shared step result per branch target, so taken and fall-through branches allocate nothing.
-    val jumps: Array[Either[Fault, Int]] = Array.tabulate(program.instructions.size + 1)(Right(_))
-    if (dispatch.cooperative) runResident(program, jumps, dispatchMemory, dispatch, control)
+    val hostcall       = hostcallOffset.map(offset => HostcallBuffer(offset, HostcallListener(context.handler)))
+    val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress, heap, hostcall)
+    val slices         = CodeSlices(CodeSlice(program, program.jumpTable, dispatchMemory), peers, allocations)
+    if (dispatch.cooperative) runResident(slices, dispatch, control)
     else
-      Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group) =>
-        runGroup(program, jumps, dispatchMemory, dispatch, group, control)
+      Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group, pace) =>
+        runGroup(slices, dispatch, group, control, pace)
       )
   }
 
@@ -225,9 +243,7 @@ private object VMInterpreter {
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def runResident(
-      program: Kernel,
-      jumps: Array[Either[Fault, Int]],
-      dispatchMemory: VMDispatchMemory,
+      slices: CodeSlices,
       dispatch: KernelTask,
       control: TaskControl
   ): Either[Fault, Unit] =
@@ -241,9 +257,7 @@ private object VMInterpreter {
         gws.initialise(0, total - 1L)
         val groups = Array.tabulate[ResidentGroup | Null](total)(index =>
           ResidentGroup(
-            program,
-            jumps,
-            dispatchMemory,
+            slices,
             dispatch,
             dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]),
             control,
@@ -277,14 +291,13 @@ private object VMInterpreter {
   /** A resident workgroup's waves; a wave at a barrier waits there until every live wave has arrived or ended. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private class ResidentGroup(
-      program: Kernel,
-      jumps: Array[Either[Fault, Int]],
-      dispatchMemory: VMDispatchMemory,
+      slices: CodeSlices,
       dispatch: KernelTask,
       group: Coordinates,
       control: TaskControl,
       gws: GlobalWaveSyncResources
   ) {
+    private val program    = slices.origin.program
     private val kernel     = program.source
     private val localCount = dispatch.geometry.groupVolume.raw
     private val lds        =
@@ -296,9 +309,7 @@ private object VMInterpreter {
       val start = waveIndex * waveSize
       val lanes = math.min(waveSize, localCount - start).unsafe[Int where Between[1, 64]]
       WaveRun(
-        program,
-        jumps,
-        dispatchMemory,
+        slices,
         dispatch.geometry,
         group,
         start,
@@ -306,7 +317,8 @@ private object VMInterpreter {
         lds,
         barriers,
         control,
-        gws
+        gws,
+        Pace.Free
       )
     }
     private val finished = Array.fill(waveCount)(false)
@@ -349,13 +361,13 @@ private object VMInterpreter {
   // Wave rendezvous is a measured mutable state machine; null marks an unstarted or finished wave.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def runGroup(
-      program: Kernel,
-      jumps: Array[Either[Fault, Int]],
-      dispatchMemory: VMDispatchMemory,
+      slices: CodeSlices,
       dispatch: KernelTask,
       group: Coordinates,
-      control: TaskControl
+      control: TaskControl,
+      pace: Pace
   ): Either[Fault, Unit] = {
+    val program    = slices.origin.program
     val kernel     = program.source
     val localCount = dispatch.geometry.groupVolume.raw
     val lds        = Array.ofDim[Byte](effectiveGroupSegmentSize(kernel.groupSegmentSize, dispatch.groupSegmentBytes))
@@ -381,9 +393,7 @@ private object VMInterpreter {
               // The enclosing wave loop guarantees start < localCount; waveSize is 32 or 64.
               val lanes = math.min(waveSize, localCount - start).unsafe[Int where Between[1, 64]]
               WaveRun(
-                program,
-                jumps,
-                dispatchMemory,
+                slices,
                 dispatch.geometry,
                 group,
                 start,
@@ -391,7 +401,8 @@ private object VMInterpreter {
                 lds,
                 barriers,
                 control,
-                null
+                null,
+                pace
               )
             case started => started
           }
@@ -427,9 +438,7 @@ private object VMInterpreter {
     "scalafix:DisableSyntax.null"
   ))
   private class WaveRun(
-      program: Kernel,
-      jumps: Array[Either[Fault, Int]],
-      dispatchMemory: VMDispatchMemory,
+      slices: CodeSlices,
       geometry: LaunchGeometry,
       group: Coordinates,
       localStart: Int,
@@ -438,13 +447,19 @@ private object VMInterpreter {
       barriers: WorkgroupBarriers,
       control: TaskControl,
       // the GWS resources of a cooperative dispatch, whose waves also yield on sleeps and spins; null otherwise
-      gws: GlobalWaveSyncResources | Null
+      gws: GlobalWaveSyncResources | Null,
+      pace: Pace
   ) extends AMDGPUSinks[Long, Either[Fault, Int]] with PendingMachineOps {
-    private val kernel             = program.source
-    private val operations         = program.instructions
-    private val skippedOperations  = program.skipped
-    private val instructionIndices = program.instructionIndices
-    private val instructionOffsets = program.instructionOffsets
+    private val program = slices.origin.program
+    private val kernel  = program.source
+    // the code the wave runs now: the dispatched program's, or that of another program it has called into
+    private var slice              = slices.origin
+    private var operations         = program.instructions
+    private var skippedOperations  = program.skipped
+    private var instructionIndices = program.instructionIndices
+    private var instructionOffsets = program.instructionOffsets
+    private var jumps              = slice.jumps
+    private var dispatchMemory     = slice.memory
     private val waveSize           = kernel.waveSize
     // Loads share their staged host reads only within this wave; workgroups run concurrently.
     private val reads = AddressSpace.ReadRangeBuffer(waveSize.widen[Int > 0])
@@ -468,7 +483,7 @@ private object VMInterpreter {
     // The 4096-byte floor proves the per-lane allocation is positive.
     private val scratch          = ScratchMemory(lanes, math.max(4096, kernel.privateSegmentSize).unsafe[Int > 0])
     private var conditionMask    = 0L
-    private val codeBase         = kernel.textAddress
+    private var codeBase         = slice.base
     private var instructionIndex = program.entryInstruction
     private var located          = Location.Global
     private val generation       = ResourceGeneration.of(program.isa)
@@ -740,6 +755,31 @@ private object VMInterpreter {
       else instructionIndices.get(relative.toInt)
     }
 
+    // The wave carries its registers, EXEC and stack into the code it enters, as a call does on hardware.
+    private def enter(next: CodeSlice): Unit = {
+      slice = next
+      operations = next.program.instructions
+      skippedOperations = next.program.skipped
+      instructionIndices = next.program.instructionIndices
+      instructionOffsets = next.program.instructionOffsets
+      jumps = next.jumps
+      dispatchMemory = next.memory
+      codeBase = next.base
+    }
+
+    /** The instruction `address` names in another program of the session, which the wave then runs. */
+    private def crossed(address: Long, missing: => NonEmpty[String]): Either[Fault, Int] =
+      if (slice.contains(address)) Left(Fault.Backend(missing))
+      else slices.at(address) match {
+        case Left(fault)       => Left(fault)
+        case Right(None)       => Left(Fault.Backend(missing))
+        case Right(Some(next)) =>
+          next.indexOf(address) match {
+            case Some(index) => enter(next); Right(index)
+            case None        => Left(Fault.Backend(missing))
+          }
+      }
+
     private def baseAddress(
         register: VectorRegisterIndex,
         base: Option[ScalarRegisterIndex],
@@ -921,6 +961,149 @@ private object VMInterpreter {
       else if (image.a16) Bits.low16(vector(image.words(index / 2))(lane) >>> (16 * (index % 2))).toLong
       else Bits.low32(vector(image.words(index))(lane)).toLong
 
+    private val samplerWords                           = Array.ofDim[Long](4)
+    private var samplerDecoded: SamplerResource | Null = null
+    private val sampleRequest                          = SampleRequest()
+    private var sampledLane                            = 0
+    private class DeviceTexels extends TexelReader {
+      def read(address: Long, bytes: Int): Fault | Null = {
+        located = Location.Global
+        readTexel(address, sampledLane.unsafe[Lane], bytes)
+      }
+      def low: Long  = texelLow
+      def high: Long = texelHigh
+    }
+    private val texelSource: TexelReader = DeviceTexels()
+    private val imageSampling            = ImageSampling(texelSource)
+
+    java.util.Arrays.fill(samplerWords, -1L)
+
+    private def decodedSampler(first: Int): SamplerResource = {
+      var changed = samplerDecoded == null
+      var index   = 0
+      while (index < 4) {
+        val word = Bits.low32(scalar(first + index)).toLong
+        if (word != samplerWords(index)) { samplerWords(index) = word; changed = true }
+        index += 1
+      }
+      if (changed) samplerDecoded = SamplerResource.decode(generation, samplerWords)
+      samplerDecoded.nn
+    }
+
+    /** The sample address word `index` of `lane`, a dword, zero past the words. */
+    private def sampleWord(image: ImageAddress, lane: Int, index: Int): Long =
+      if (index >= image.words.size) 0L else Bits.low32(vector(image.words(index))(lane.unsafe[Lane])).toLong
+
+    private def sampleFloat(image: ImageAddress, lane: Int, index: Int): Double =
+      java.lang.Float.intBitsToFloat(sampleWord(image, lane, index).toInt).toDouble
+
+    private def sampleHalf(image: ImageAddress, lane: Int, word: Int, high: Boolean): Double =
+      IEEE754.binary16ToFloat(Bits.low16(sampleWord(image, lane, word) >>> (if (high) 16 else 0))).toDouble
+
+    private def signedOffset(word: Long, shift: Int): Int = Bits.signExtend((word >>> shift) & 0x3fL, 6).toInt
+
+    /** Coordinate `index` of the sample at `cursor`, from `lane`: a half of two to a word under a16. */
+    private def sampleCoordinate(image: ImageAddress, lane: Int, cursor: Int, index: Int): Double =
+      if (image.a16) sampleHalf(image, lane, cursor + index / 2, index % 2 == 1)
+      else sampleFloat(image, lane, cursor + index)
+
+    private val quadCoordinates = Array.ofDim[Double](waveSize * 3)
+
+    private def derivesLevel(level: SampleLevel): Boolean = level == SampleLevel.Implicit || level == SampleLevel.Bias
+
+    /** Every lane's coordinates, read before any lane writes a result that may overwrite them. */
+    private def snapshotCoordinates(image: Instruction.Image, sample: ImageOperation.Sample, resource: ImageResource)
+        : Unit = {
+      val address = image.address
+      val axes    = imageSampling.axes(resource.kind)
+      val cursor  = (if (sample.form.offset) 1 else 0) + (if (sample.form.level == SampleLevel.Bias) 1 else 0) +
+        (if (sample.form.compare) 1 else 0)
+      var lane = 0
+      while (lane < waveSize) {
+        var axis = 0
+        while (axis < 3) {
+          quadCoordinates(lane * 3 + axis) = if (axis < axes) sampleCoordinate(address, lane, cursor, axis) else 0.0
+          axis += 1
+        }
+        lane += 1
+      }
+    }
+
+    /** The request for `lane` that `sample` describes of the address `image`, as `resource` lays the image out. */
+    private def sampleRequestOf(
+        image: ImageAddress,
+        sample: ImageOperation.Sample,
+        resource: ImageResource,
+        lane: Int
+    ): SampleRequest = {
+      val form    = sample.form
+      val request = sampleRequest
+      val axes    = imageSampling.axes(resource.kind)
+      val layered = resource.layered
+      val count   = image.dimension.fold(resource.coordinates)(ImageResource.coordinates(_))
+      var cursor  = 0
+      request.level = form.level
+      request.compare = form.compare
+      request.gather = form.gather.getOrElse(-1)
+      request.unnormalised = form.unnormalised
+      java.util.Arrays.fill(request.offsets, 0)
+      if (form.offset) {
+        val packed = sampleWord(image, lane, cursor)
+        request.offsets(0) = signedOffset(packed, 0)
+        request.offsets(1) = signedOffset(packed, 8)
+        request.offsets(2) = signedOffset(packed, 16)
+        cursor += 1
+      }
+      request.bias = 0.0
+      if (form.level == SampleLevel.Bias) { request.bias = sampleFloat(image, lane, cursor); cursor += 1 }
+      if (form.compare) { request.reference = sampleFloat(image, lane, cursor); cursor += 1 }
+      val gradients = form.level == SampleLevel.Gradients
+      if (gradients) {
+        var axis = 0
+        while (axis < 3) {
+          request.gradients(axis) = 0.0
+          request.gradients(3 + axis) = 0.0
+          axis += 1
+        }
+        if (form.g16) {
+          val perDirection = (axes + 1) / 2
+          axis = 0
+          while (axis < axes) {
+            request.gradients(axis) = sampleHalf(image, lane, cursor + axis / 2, axis % 2 == 1)
+            request.gradients(3 + axis) = sampleHalf(image, lane, cursor + perDirection + axis / 2, axis % 2 == 1)
+            axis += 1
+          }
+          cursor += 2 * perDirection
+        } else {
+          axis = 0
+          while (axis < axes) {
+            request.gradients(axis) = sampleFloat(image, lane, cursor + axis)
+            request.gradients(3 + axis) = sampleFloat(image, lane, cursor + axes + axis)
+            axis += 1
+          }
+          cursor += 2 * axes
+        }
+      }
+      var axis = 0
+      while (axis < 3) {
+        request.coordinates(axis) = if (axis < axes) sampleCoordinate(image, lane, cursor, axis) else 0.0
+        axis += 1
+      }
+      request.layer = if (layered) sampleCoordinate(image, lane, cursor, axes) else 0.0
+      if (form.level == SampleLevel.Level) request.lod = sampleCoordinate(image, lane, cursor, count)
+      request.minimumLod = if (form.clamp) sampleCoordinate(image, lane, cursor, count) else Double.NaN
+      if (derivesLevel(form.level)) {
+        axis = 0
+        while (axis < axes) {
+          request.gradients(axis) = quadCoordinates((lane | 1) * 3 + axis) - quadCoordinates((lane & ~1) * 3 + axis)
+          request.gradients(3 + axis) = quadCoordinates((lane | 2) * 3 + axis) - quadCoordinates((lane & ~2) * 3 + axis)
+          axis += 1
+        }
+        while (axis < 3) { request.gradients(axis) = 0.0; request.gradients(3 + axis) = 0.0; axis += 1 }
+      }
+      request
+    }
+
     /** Scalar register `index` as a dword. */
     private def dword(index: Int): UInt[32] = fromRaw[UInt[32]](Bits.low32(scalar(index)).toLong)
 
@@ -940,13 +1123,47 @@ private object VMInterpreter {
     // Per-lane accesses report a fault or null so local and private lanes allocate nothing.
     private val loaded = LongRef(0L)
 
+    // Instruction-level digest of the coherent loads, so a wave that keeps reading the same values backs off.
+    private val recentPolls = Array.ofDim[Long](PollWindow)
+    private var pollDigest  = 0L
+    private var pollNext    = 0
+    private var pollScore   = 0
+
+    private def trackPolls(): Unit = {
+      var repeated = false
+      var index    = 0
+      while (index < PollWindow) {
+        if (recentPolls(index) == pollDigest) repeated = true
+        index += 1
+      }
+      if (repeated) {
+        pace.engage()
+        if (pollScore < 2 * PollThreshold) pollScore += 2
+      } else {
+        if (pollScore > 0) pollScore -= 1
+        recentPolls(pollNext) = pollDigest
+        pollNext = (pollNext + 1) % PollWindow
+      }
+    }
+
+    private def backOff(next: Either[Fault, Int]): Either[Fault, Int] = {
+      PlatformConcurrency.parkNanos(PollBackoffNanos)
+      control.checkpoint(PollBackoffCharge).flatMap(_ => next)
+    }
+
     /** Reads at most eight bytes from a located access into `loaded`. */
     private def readValue(at: Long, lane: Lane, bytes: Int in 1 ~ 8, coherent: Boolean): Fault | Null =
       located match {
         case Location.Global =>
-          if (coherent && (bytes == 4 || bytes == 8) && dispatchMemory.isMutable(at, bytes))
-            AddressSpace.store(loaded, dispatchMemory.atomicModifyValue(at, if (bytes == 4) 4 else 8)(identity))
-          else dispatchMemory.readValueInto(at, bytes, loaded)
+          if (coherent && (bytes == 4 || bytes == 8) && dispatchMemory.isMutable(at, bytes)) {
+            // a resident wave keeps the pace of an atomic so that waiting does not spend the instruction budget
+            val fault =
+              if (resident && pollScore >= PollThreshold)
+                AddressSpace.store(loaded, dispatchMemory.atomicModifyValue(at, if (bytes == 4) 4 else 8)(identity))
+              else dispatchMemory.readCoherentValueInto(at, if (bytes == 4) 4 else 8, loaded)
+            if (fault == null) pollDigest = (pollDigest + at) * -7046029254386353131L + loaded.elem
+            fault
+          } else dispatchMemory.readValueInto(at, bytes, loaded)
         case Location.Private =>
           val storage = scratch(lane)
           if (!ByteRange.contains(storage.length, at, bytes.toLong)) privateFault(at, bytes)
@@ -1237,8 +1454,12 @@ private object VMInterpreter {
     def stepMemory(instruction: Instruction): Either[Fault, Int] = instruction match {
       case load: Instruction.Load =>
         val registers = if (load.bank == RegisterBank.Accumulator) accumulator else vector
-        if (load.coherent) foreachActiveUntilFault(loadLane(load, registers, _))
-        else
+        if (load.coherent) {
+          pollDigest = 0L
+          val result = foreachActiveUntilFault(loadLane(load, registers, _))
+          trackPolls()
+          if (!resident && !pace.engaged && pollScore >= PollThreshold && result.isRight) backOff(result) else result
+        } else
           prepareReads(load) match {
             case Left(fault) => Left(fault)
             case _           => foreachActiveUntilFault(loadPlacedLane(load, registers, _))
@@ -1291,7 +1512,13 @@ private object VMInterpreter {
       case image: Instruction.Image      =>
         decodedImage(image.address.resource.raw) match {
           case Left(message)   => Left(Fault.Unsupported(s"AMDGPU image access: $message"))
-          case Right(resource) => foreachActiveUntilFault(imageLane(image, resource, _))
+          case Right(resource) =>
+            image.operation match {
+              case sample: ImageOperation.Sample if derivesLevel(sample.form.level) =>
+                snapshotCoordinates(image, sample, resource)
+              case _ => ()
+            }
+            foreachActiveUntilFault(imageLane(image, resource, _))
         }
       case Instruction.WithStatus(access, status) =>
         val result = access match {
@@ -1522,6 +1749,31 @@ private object VMInterpreter {
             component += 1
           }
           null
+        case sample: ImageOperation.Sample =>
+          sampledLane = lane
+          val request = sampleRequestOf(address, sample, resource, lane)
+          val fault   = imageSampling.sample(resource, decodedSampler(sample.sampler.raw), request)
+          if (fault == null) {
+            val half      = image.packing != Packing.Dword
+            var written   = 0
+            var component = 0
+            while (component < 4) {
+              if ((image.mask & (1 << component)) != 0) {
+                val value = request.result(component)
+                writeComponent(
+                  registerFile(image.bank),
+                  image.data,
+                  lane,
+                  written,
+                  if (half) TexelFormat.narrow(resource.format.number, value) else value,
+                  image.packing
+                )
+                written += 1
+              }
+              component += 1
+            }
+          }
+          fault
         case operation =>
           val at    = imageTexel(resource, address, lane)
           val bytes = resource.texelBytes
@@ -1592,7 +1844,7 @@ private object VMInterpreter {
     inline def jumpTo(target: Long): Flow[Int] = programIndex(target) match {
       case Some(index) => jumps(index)
       case None        =>
-        Left(Fault.Backend(f"AMDGPU setpc at 0x$pc%X targets non-instruction 0x$target%X"))
+        crossed(target, f"AMDGPU setpc at 0x$pc%X targets non-instruction 0x$target%X").flatMap(jumps(_))
     }
 
     inline def branch(condition: Long, taken: Int): Flow[Int] = if (condition != 0L) jumps(taken) else NextStep
@@ -1639,6 +1891,8 @@ private object VMInterpreter {
     inline def trap(code: Int): Flow[Int] = Left(Fault.Trap(f"AMDGPU s_trap $code%d at pc 0x$pc%x"))
 
     inline def halt(reason: String): Flow[Int] = Left(Fault.Backend(f"AMDGPU $reason at pc 0x$pc%x"))
+
+    inline def hostcall: Flow[Int] = dispatchMemory.serviceHostcalls().flatMap(_ => NextStep)
 
     inline def fenceHost: Flow[Int] = dispatchMemory.memory.flushHostWrites().flatMap(_ => NextStep)
 
@@ -1768,7 +2022,40 @@ private object VMInterpreter {
 
     // calls and returns share this primitive: the saved return address in the scalar pair is the frame
     private def called(link: ScalarRegisterIndex, returnAddress: Long, target: Long): Flow[Int] =
-      kernel.emulatedCalls.get(target) match {
+      slice.program.source.heapCalls.get(target) match {
+        case Some(call) => heapCalled(call).flatMap(_ => NextStep)
+        case None       => calledFunction(link, returnAddress, target)
+      }
+
+    // Each active lane's operand and result are the pair v0-v1, as the device library's entry points take them
+    private def heapCalled(call: DeviceHeapCall): Either[Fault, Unit] =
+      dispatchMemory.heap match {
+        case None =>
+          Left(Fault.Unsupported(s"${call.symbol} needs the context's device heap, which the launch lacks"))
+        case Some(region) =>
+          @tailrec def serve(remaining: Long): Either[Fault, Unit] =
+            if (remaining == 0L) Right(())
+            else {
+              val lane    = java.lang.Long.numberOfTrailingZeros(remaining).unsafe[Lane]
+              val operand = pair(vector, 0, lane)
+              val served  = call match {
+                case DeviceHeapCall.Allocate =>
+                  ContextHeap.allocate(dispatchMemory.memory, region, operand).map { address =>
+                    vector(0)(lane) = Bits.low32(address).toLong
+                    vector(1)(lane) = Bits.high32(address).toLong
+                  }
+                case DeviceHeapCall.Free => ContextHeap.free(dispatchMemory.memory, region, operand)
+              }
+              served match {
+                case Left(fault) => Left(fault)
+                case Right(_)    => serve(remaining & (remaining - 1L))
+              }
+            }
+          serve(active.bits)
+      }
+
+    private def calledFunction(link: ScalarRegisterIndex, returnAddress: Long, target: Long): Flow[Int] =
+      slice.program.source.emulatedCalls.get(target) match {
         case Some(call) =>
           foreachActive { lane =>
             def component(doubleRegister: VectorRegisterIndex, singleRegister: VectorRegisterIndex): Double =
@@ -1794,9 +2081,13 @@ private object VMInterpreter {
               writeScalar64(link, returnAddress)
               Right(targetIndex)
             case None =>
-              kernel.functionTargets.get(target) match {
+              slice.program.source.functionTargets.get(target) match {
                 case Some(name) => Left(Fault.Unsupported(s"AMDGPU call to $name is not implemented"))
-                case None => Left(Fault.Backend(f"AMDGPU call target 0x$target%X is not present in the code object"))
+                case None       =>
+                  crossed(target, f"AMDGPU call target 0x$target%X is not present in the code object").map { index =>
+                    writeScalar64(link, returnAddress)
+                    index
+                  }
               }
           }
       }
@@ -1847,7 +2138,8 @@ private object VMInterpreter {
             NextStep
         }
       case state @ (Instruction.SSetReg | _: Instruction.SSetMode | _: Instruction.SGetMode | _: Instruction.SGetPc |
-          _: Instruction.SReadWaveId | _: Instruction.SReadClock | _: Instruction.Halt | Instruction.CacheInvalidate) =>
+          _: Instruction.SReadWaveId | _: Instruction.SReadClock | _: Instruction.Halt | Instruction.Hostcall |
+          Instruction.CacheInvalidate) =>
         stepState(state)
       case Instruction.SSetPc(src)               => ScalarControl.setPc(this)(src)
       case Instruction.SSwapPc(dest, src)        => ScalarControl.swapPc(Execute, this)(dest, src)
@@ -1879,6 +2171,7 @@ private object VMInterpreter {
       case Instruction.SReadWaveId(dest)            => ScalarControl.readWaveId(this)(dest)
       case Instruction.SReadClock(dest, clock)      => ScalarControl.readClock(Execute, this)(dest, clock)
       case Instruction.Halt(reason)                 => ScalarControl.halt(this)(reason)
+      case Instruction.Hostcall                     => ScalarControl.hostcall(this)
       case Instruction.CacheInvalidate              => ScalarControl.invalidate(this)
       case other                                    =>
         Left(Fault.IllegalInstruction(s"unhandled AMDGPU instruction $other"))
@@ -2042,16 +2335,22 @@ private object VMInterpreter {
       write(dest, a, b)
     }
 
+    inline def scalarFlagged(left: Long, right: Long)(
+        inline result: (Long, Long, Long) => Long,
+        inline flag: (Long, Long, Long, Long) => Long
+    ): Long = {
+      val carry = scalarCarryBit
+      val value = result(left, right, carry)
+      scalarCarry = flag(left, right, carry, value) != 0L
+      value
+    }
+
     inline def scalarDwordFlagged(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource)(
         inline result: (Long, Long, Long) => Long,
         inline flag: (Long, Long, Long, Long) => Long
     ): Either[Fault, Int] = {
       def write(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource): Either[Fault, Int] = {
-        val left  = Bits.low32(source(a, 0)).toLong
-        val right = Bits.low32(source(b, 0)).toLong
-        val carry = scalarCarryBit
-        val value = result(left, right, carry)
-        scalarCarry = flag(left, right, carry, value) != 0L
+        val value = scalarFlagged(Bits.low32(source(a, 0)).toLong, Bits.low32(source(b, 0)).toLong)(result, flag)
         writeScalar32(dest, value)
         NextStep
       }
@@ -2073,11 +2372,7 @@ private object VMInterpreter {
         inline flag: (Long, Long, Long, Long) => Long
     ): Either[Fault, Int] = {
       def write(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource): Either[Fault, Int] = {
-        val left  = sourceScalar64(a)
-        val right = sourceScalar64(b)
-        val carry = scalarCarryBit
-        val value = result(left, right, carry)
-        scalarCarry = flag(left, right, carry, value) != 0L
+        val value = scalarFlagged(sourceScalar64(a), sourceScalar64(b))(result, flag)
         writeScalar64(dest, value)
         NextStep
       }
@@ -2089,11 +2384,7 @@ private object VMInterpreter {
         inline flag: (Long, Long, Long, Long) => Long
     ): Either[Fault, Int] = {
       def write(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource): Either[Fault, Int] = {
-        val left  = sourceScalar64(a)
-        val right = Bits.low32(source(b, 0)).toLong
-        val carry = scalarCarryBit
-        val value = result(left, right, carry)
-        scalarCarry = flag(left, right, carry, value) != 0L
+        val value = scalarFlagged(sourceScalar64(a), Bits.low32(source(b, 0)).toLong)(result, flag)
         writeScalar64(dest, value)
         NextStep
       }
@@ -3607,8 +3898,7 @@ private object VMInterpreter {
       lanes(instruction)
     }
 
-    // Scatter: EXEC gates source lanes, so a source may write an inactive destination lane; lanes receiving nothing
-    // keep their value. Operands are snapshotted because the destination may alias them.
+    // operands are snapshotted as dest may alias them
     inline def permute(
         dest: VectorRegisterIndex,
         address: VectorRegisterIndex,
@@ -3625,9 +3915,11 @@ private object VMInterpreter {
         val addresses = vector(address).clone()
         val sources   = file(src).clone()
         val result    = file(dest).clone()
+        foreachActive(lane => result(lane) = 0L)
         foreachActive { lane =>
           val target = destination(addresses(lane), lane.toLong, waveSize.toLong)
-          if (target < WaveRun.this.lanes.toLong) result(target.toInt) = kernel(sources(lane))
+          if (target < WaveRun.this.lanes.toLong && (active.bits & (1L << target)) != 0L)
+            result(target.toInt) = kernel(sources(lane))
         }
         val registers = file(dest)
         foreachLane(lane => registers(lane) = result(lane))
@@ -4240,6 +4532,7 @@ private object VMInterpreter {
           case Left(fault) => failure = fault.at(location)
           case _           =>
             steps += 1
+            pace.step()
             // The launch's issue ordinal is its timeline's time axis; only an observed launch needs one.
             val issue   = if (observer == null) 0L else control.nextIssue()
             val stopped = if (observer == null) null else observe(issue)

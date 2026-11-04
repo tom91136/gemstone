@@ -45,7 +45,8 @@ private object connections {
       output.write(requestFrame(client.raw, process, incarnation, operationTag, payload))
       output.flush()
 
-      if (input.readInt() != ExecutionRPC.ResponseMagic) throw IOException("unexpected execution response magic")
+      if (Frame.responseMagic(input) != ExecutionRPC.ResponseMagic)
+        throw IOException("unexpected execution response magic")
       val status = input.readInt()
       val body   = input.readNBytes(input.readInt())
       status match {

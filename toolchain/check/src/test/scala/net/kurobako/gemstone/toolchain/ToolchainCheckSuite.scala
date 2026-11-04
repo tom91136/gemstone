@@ -1,8 +1,7 @@
 package net.kurobako.gemstone.toolchain
 
 import java.nio.file.Path
-import net.kurobako.gemstone.testing.Suite
-import net.kurobako.gemstone.testing.process
+import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 
 /** Every collector must pass every check once the workarounds are installed. Each defect must still show without them;

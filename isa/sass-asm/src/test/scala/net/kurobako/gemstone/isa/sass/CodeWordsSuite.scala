@@ -4,7 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class CodeWordsSuite extends Suite {
   private def bytes(words: Long*): Array[Byte] = words.toArray.flatMap(LittleEndian.toArray(_, 8))

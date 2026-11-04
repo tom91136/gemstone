@@ -6,6 +6,8 @@
 namespace gemstone::environment {
 inline constexpr char ContainerExe[] = "GEMSTONE_CONTAINER_EXE";
 inline constexpr char CudaCodeMode[] = "GEMSTONE_CUDA_CODE_MODE";
+inline constexpr char DeviceCount[] = "GEMSTONE_DEVICE_COUNT";
+inline constexpr uint64_t DeviceCountDefault = 1;
 inline constexpr char ExecutionMaxInstructionCount[] = "GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT";
 inline constexpr char ExecutionThreadCount[] = "GEMSTONE_EXECUTION_THREAD_COUNT";
 inline constexpr char FixtureCuda11889Dir[] = "GEMSTONE_FIXTURE_CUDA_11_8_89_DIR";
@@ -18,7 +20,6 @@ inline constexpr char FixtureNvdisasm11886Exe[] = "GEMSTONE_FIXTURE_NVDISASM_11_
 inline constexpr char FixtureNvdisasm13278Exe[] = "GEMSTONE_FIXTURE_NVDISASM_13_2_78_EXE";
 inline constexpr char FixtureNvdisasm13373Exe[] = "GEMSTONE_FIXTURE_NVDISASM_13_3_73_EXE";
 inline constexpr char FixtureVerifyOn[] = "GEMSTONE_FIXTURE_VERIFY_ON";
-inline constexpr char HsaPagingTimeoutSeconds[] = "GEMSTONE_HSA_PAGING_TIMEOUT_SECONDS";
 inline constexpr char HsaRejectedCodeObjectFile[] = "GEMSTONE_HSA_REJECTED_CODE_OBJECT_FILE";
 inline constexpr char NativeDir[] = "GEMSTONE_NATIVE_DIR";
 inline constexpr char OfflineOn[] = "GEMSTONE_OFFLINE_ON";
@@ -31,7 +32,7 @@ inline constexpr char RecordFile[] = "GEMSTONE_RECORD_FILE";
 inline constexpr char RpcClientId[] = "GEMSTONE_RPC_CLIENT_ID";
 inline constexpr char RpcEndpoint[] = "GEMSTONE_RPC_ENDPOINT";
 inline constexpr char RpcTimeoutSeconds[] = "GEMSTONE_RPC_TIMEOUT_SECONDS";
-inline constexpr uint64_t RpcTimeoutSecondsDefault = 300;
+inline constexpr uint64_t RpcTimeoutSecondsDefault = 30;
 inline constexpr char SystemPagingOn[] = "GEMSTONE_SYSTEM_PAGING_ON";
 inline constexpr char TargetArch[] = "GEMSTONE_TARGET_ARCH";
 inline constexpr char TestCudaLibraryFile[] = "GEMSTONE_TEST_CUDA_LIBRARY_FILE";

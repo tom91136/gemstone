@@ -72,7 +72,8 @@ object PTXModel extends Model {
       val slots       = form.requiredModifierGroups.map(group =>
         typed.flatMap(_.required.find(_.values == group.raw)).map(PTXDomains.name(_))
       )
-      val syntax = Vec[View.Token](View.Token.Text(opcode)) ++
+      val operandSlots = names.zip(form.operands).zipWithIndex
+      val syntax       = Vec[View.Token](View.Token.Text(opcode)) ++
         required.zip(slots).map((values, slot) =>
           View.Token.Slot(values.mkString(".{", "|", "}"), slot.fold("required modifier")(name => s"modifier $name"))
         ) ++
@@ -80,13 +81,13 @@ object PTXModel extends Model {
           optional.mkString("[.", "|.", "]"),
           "optional modifiers"
         )).toVec ++
-        names.zip(form.operands).zipWithIndex.flatMap { case ((name, constraint), position) =>
+        operandSlots.flatMap { case ((name, constraint), position) =>
           Vec(View.Token.Text(if (position == 0) " " else ", "), View.Token.Slot(name, kind(constraint)))
         } :+ View.Token.Text(";")
       View.Form(
         s"$definition ${index + 1}",
         syntax,
-        names.zip(form.operands).zipWithIndex.map { case ((name, constraint), position) =>
+        operandSlots.map { case ((name, constraint), position) =>
           View.OperandSlot(
             name,
             kind(constraint),
@@ -202,28 +203,27 @@ object PTXModel extends Model {
     )
     // a video operation with a third source and no second operation merges into a part of its destination
     val merge = Video(mnemonic) && names.size == 4 && !modifiers.exists(Set("add", "min", "max"))
-    val found = names.zip(constraints).zip(types).zipWithIndex.toVec.filterNot { case (((name, _), _), _) =>
-      unused(name)
-    }.map { case (((name, constraint), tpe), index) =>
-      immediate(mnemonic, modifiers, index).map(value =>
-        (text = value, registers = Vec.empty[(name: String, declared: String)])
-      )
-        .orElse(Option.when(pairs && index == 0)(
-          (s"$name|${name}_predicate", Vec(name -> declaration(tpe), s"${name}_predicate" -> "pred"))
-        )).orElse(Option.when(merge && index == 0)((s"$name.h0", Vec(name -> declaration(tpe)))))
-        .orElse(constraint match {
-          case _ if fragments.lift(index).flatten.nonEmpty =>
-            Some(vector(name, if (tpe.startsWith("f") && tpe != "f64") "b32" else tpe, fragments(index).getOrElse(1)))
-          case Metadata.OperandConstraint.Address       => Some((s"[$name]", Vec(name -> "b64")))
-          case Metadata.OperandConstraint.VectorOperand => Some(vector(name, tpe, lanes.getOrElse(4)))
-          case _ if opcode == "bra"                     => Some((name, Vec(name -> "label")))
-          case _ if mnemonic == "brx.idx" && index == 1 => Some((name, Vec(name -> "branchtargets")))
-          case Metadata.OperandConstraint.Symbol | Metadata.OperandConstraint.Unknown => None
-          case _ if packed(index) => Some(vector(name, tpe, lanes.getOrElse(1)))
-          // a 128-bit register is a pair of 64-bit ones
-          case _ if tpe == "b128" => Some(vector(name, "b64", 2))
-          case _                  => Some((name, Vec(name -> declaration(tpe))))
-        })
+    val found = names.zip(constraints).zip(types).zipWithIndex.toVec.collect {
+      case (((name, constraint), tpe), index) if !unused(name) =>
+        immediate(mnemonic, modifiers, index).map(value =>
+          (text = value, registers = Vec.empty[(name: String, declared: String)])
+        )
+          .orElse(Option.when(pairs && index == 0)(
+            (s"$name|${name}_predicate", Vec(name -> declaration(tpe), s"${name}_predicate" -> "pred"))
+          )).orElse(Option.when(merge && index == 0)((s"$name.h0", Vec(name -> declaration(tpe)))))
+          .orElse(constraint match {
+            case _ if fragments.lift(index).flatten.nonEmpty =>
+              Some(vector(name, if (tpe.startsWith("f") && tpe != "f64") "b32" else tpe, fragments(index).getOrElse(1)))
+            case Metadata.OperandConstraint.Address       => Some((s"[$name]", Vec(name -> "b64")))
+            case Metadata.OperandConstraint.VectorOperand => Some(vector(name, tpe, lanes.getOrElse(4)))
+            case _ if opcode == "bra"                     => Some((name, Vec(name -> "label")))
+            case _ if mnemonic == "brx.idx" && index == 1 => Some((name, Vec(name -> "branchtargets")))
+            case Metadata.OperandConstraint.Symbol | Metadata.OperandConstraint.Unknown => None
+            case _ if packed(index) => Some(vector(name, tpe, lanes.getOrElse(1)))
+            // a 128-bit register is a pair of 64-bit ones
+            case _ if tpe == "b128" => Some(vector(name, "b64", 2))
+            case _                  => Some((name, Vec(name -> declaration(tpe))))
+          })
     }
     Option.when(found.forall(_.nonEmpty))(found.flatten)
   }
@@ -433,11 +433,12 @@ object PTXModel extends Model {
             (required.zipWithIndex.flatMap((values, group) =>
               values.drop(1).map(value => base.updated(group, Some(value)).flatten)
             ) ++ optional.map(_ +: base.flatten))
-          def instance(modifiers: Vec[String], fragments: Vec[Option[Int]]) =
-            bulkOperands(mnemonic, opcode.drop(1) ++ modifiers)
-              .orElse(tensorMemoryOperands(mnemonic, opcode.drop(1) ++ modifiers, form.operands))
+          def instance(modifiers: Vec[String], fragments: Vec[Option[Int]]) = {
+            val suffix = opcode.drop(1) ++ modifiers
+            bulkOperands(mnemonic, suffix)
+              .orElse(tensorMemoryOperands(mnemonic, suffix, form.operands))
               .orElse(Option.when(mnemonic == "call")(callOperands(names.size)).flatten).orElse(
-                operands(mnemonic, opcode.head, opcode.drop(1) ++ modifiers, names, form.operands, fragments)
+                operands(mnemonic, opcode.head, suffix, names, form.operands, fragments)
               ).map(found =>
                 (
                   s"${(opcode ++ modifiers).mkString(".")}${
@@ -446,6 +447,7 @@ object PTXModel extends Model {
                   found.flatMap(_.registers)
                 )
               )
+          }
           variants.distinct.take(Variants * 2).zipWithIndex.flatMap((modifiers, index) =>
             if (mnemonic.startsWith("wgmma.mma_async"))
               warpgroup(mnemonic, opcode ++ modifiers, form.operands.size, alternate = index % 2 == 1)

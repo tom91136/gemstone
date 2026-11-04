@@ -54,6 +54,8 @@ private object VMSequenceCompiler {
       case Form.Cvt(destination, Operand.VectorLiteral(Vec(a, b, e, f)), Some(bits), None)
           if has(Modifier.Rs) =>
         Some(stochasticQuad(instruction, modifiers, destination, Vec(a, b, e, f), bits))
+      case Form.St(address, source, None) if !has(Modifier.L2CacheHint) =>
+        VMMemoryCompiler.storeParameterElements(address, source, modifiers)
       case Form.Atom(destination, address, value, policy) if lanes(modifiers).nonEmpty =>
         Some(vectorAtomic(instruction, Some(destination), Access(address, value, modifiers), policy))
       case Form.Red(address, value, policy) if lanes(modifiers).nonEmpty =>
@@ -642,17 +644,17 @@ private object VMSequenceCompiler {
       modifiers: Vec[Modifier]
   )(using scope: Scope): Lowered = {
     val propagate = modifiers.contains(Modifier.NaN)
-    val operation =
-      if (kind == Extremum.Maximum) if (propagate) FloatOperation.Maximum else FloatOperation.MaximumNumber
-      else if (propagate) FloatOperation.Minimum
-      else FloatOperation.MinimumNumber
-    val control = FloatControl(
+    val control   = FloatControl(
       flushSubnormal = modifiers.contains(Modifier.Ftz),
       propagateNaN = propagate,
       absolute = modifiers.contains(Modifier.Abs)
     )
     if (modifiers.contains(Modifier.Relu)) Left(Error.Invalid("relu does not apply to binary32 min and max"))
-    else
+    else {
+      val operation =
+        if (kind == Extremum.Maximum) if (propagate) FloatOperation.Maximum else FloatOperation.MaximumNumber
+        else if (propagate) FloatOperation.Minimum
+        else FloatOperation.MinimumNumber
       for {
         pair   <- temporary("extremum pair")
         target <- scope.register(destination)
@@ -663,6 +665,7 @@ private object VMSequenceCompiler {
         VMIR.Instruction.FloatBinary(operation, pair, a, b, 32, control),
         VMIR.Instruction.FloatBinary(operation, target, Value.Register(pair), c, 32, control)
       )
+    }
   }
 
   private def szext(destination: Operand, source: Operand, width: Operand, clamp: Boolean, signed: Boolean)(using

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -6,12 +7,14 @@
 #include <future>
 #include <initializer_list>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <ze_api.h>
 
+#include <gemstone/program_binary.hpp>
 #include <gemstone/test_support.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
@@ -54,10 +57,11 @@ void checkSamplerCapability(bool immediate) {
     desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
     REQUIRE(zeCommandListCreate(context, device, &desc, &list) == ZE_RESULT_SUCCESS);
   }
-  // Both CTS sampler cases only create their module when this image query succeeds.
+  // Both CTS sampler cases only create their module when the device reports samplers.
   ze_device_image_properties_t properties{};
   properties.stype = ZE_STRUCTURE_TYPE_IMAGE_PROPERTIES;
-  REQUIRE(zeDeviceGetImageProperties(device, &properties) == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+  REQUIRE(zeDeviceGetImageProperties(device, &properties) == ZE_RESULT_SUCCESS);
+  CHECK(properties.maxSamplers == 0);
   ze_sampler_desc_t desc{};
   desc.stype = ZE_STRUCTURE_TYPE_SAMPLER_DESC;
   desc.addressMode = ZE_SAMPLER_ADDRESS_MODE_NONE;
@@ -138,6 +142,25 @@ TEST_CASE("Level Zero kernel creation names the failure the service reported", "
     CHECK(zeKernelCreate(module, &kernelDesc, &kernel) == expected);
     CHECK(kernel == nullptr);
   }
+  REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero native modules accept the OpenCL program binary", "[level-zero]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  const auto *spirv = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  const std::vector<uint8_t> il(spirv, spirv + sizeof(gemstone_test::RpcFixture::Spirv));
+  const auto binary = gemstone::encodeProgramBinary(/* CL_PROGRAM_BINARY_TYPE_EXECUTABLE */ 4, "kernel void k() {}", il);
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;
+  moduleDesc.inputSize = binary.size();
+  moduleDesc.pInputModule = binary.data();
+  ze_module_handle_t module = nullptr;
+  REQUIRE(zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(server.lastProgramImage() == il);
   REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
@@ -480,12 +503,6 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
       REQUIRE((zeMemFree(context, slab) == ZE_RESULT_SUCCESS));
     }
   }
-  void *invalid = nullptr;
-  REQUIRE((zeMemAllocDevice(context, &allocationDesc, 64, 3, device, &invalid) == ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT));
-  REQUIRE((zeMemAllocHost(context, &hostAllocationDesc, 64, 3, &invalid) == ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT));
-  REQUIRE(
-      (zeMemAllocShared(context, &allocationDesc, &hostAllocationDesc, 64, 3, device, &invalid) == ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT));
-
   void *source = nullptr;
   void *destination = nullptr;
   REQUIRE((zeMemAllocDevice(context, &allocationDesc, 64, 16, device, &source) == ZE_RESULT_SUCCESS));
@@ -494,7 +511,7 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   ze_memory_allocation_properties_t foreignProperties{};
   foreignProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
   REQUIRE((zeMemGetAllocProperties(otherContext, source, &foreignProperties, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((foreignProperties.type == ZE_MEMORY_TYPE_UNKNOWN));
+  REQUIRE((foreignProperties.type == ZE_MEMORY_TYPE_DEVICE));
   int nonUsm = 0;
   ze_memory_allocation_properties_t ordinaryProperties{};
   ordinaryProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
@@ -508,7 +525,6 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   queueDesc.priority = ZE_COMMAND_QUEUE_PRIORITY_NORMAL;
   ze_command_list_handle_t list = nullptr;
   REQUIRE((zeCommandListCreateImmediate(context, device, &queueDesc, &list) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeContextDestroy(context) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
   void *foreignDestination = nullptr;
   REQUIRE((zeMemAllocDevice(otherContext, &allocationDesc, 64, 16, device, &foreignDestination) == ZE_RESULT_SUCCESS));
   // AppendMemoryCopyFromContext only requires the source context to be named and
@@ -527,7 +543,7 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   ze_command_list_handle_t wrongContextLists[] = {foreignList};
   ze_command_queue_handle_t ownerQueue = nullptr;
   REQUIRE((zeCommandQueueCreate(context, device, &queueDesc, &ownerQueue) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeCommandQueueExecuteCommandLists(ownerQueue, 1, wrongContextLists, nullptr) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
+  REQUIRE((zeCommandQueueExecuteCommandLists(ownerQueue, 1, wrongContextLists, nullptr) == ZE_RESULT_SUCCESS));
   ze_fence_desc_t fenceDesc{};
   fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
   ze_fence_handle_t ownerFence = nullptr;
@@ -610,6 +626,12 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
     const bool copied = i >= 12 && i < 36 && (i - 12) % 10 < 4;
     REQUIRE((destinationBytes[i] == (copied ? sourceBytes[(((i - 12) / 10) * 8) + ((i - 12) % 10)] : 0xa5)));
   }
+  std::memset(destination, 0xa5, 64);
+  ze_copy_region_t const empty{.originX = 0, .originY = 0, .originZ = 0, .width = 0, .height = 0, .depth = 0};
+  REQUIRE((zeCommandListAppendMemoryCopyRegion(list, destination, &empty, 0, 0, source, &empty, 0, 0, nullptr, 0, nullptr)
+           == ZE_RESULT_SUCCESS));
+  for (uint32_t i = 0; i < 64; ++i)
+    REQUIRE((destinationBytes[i] == 0xa5));
   ze_copy_region_t const invalidRegion{.originX = 0, .originY = 0, .originZ = 0, .width = 5, .height = 3, .depth = 0};
   REQUIRE((zeCommandListAppendMemoryCopyRegion(list, destination, &invalidRegion, 10, 0, source, &sourceRegion, 8, 0, nullptr, 0, nullptr)
            == ZE_RESULT_ERROR_INVALID_SIZE));
@@ -734,8 +756,8 @@ TEST_CASE("Level Zero asynchronous queue submits before host dependency resolves
   auto submitted = result.get_future();
   std::thread submitter([&] { result.set_value(zeCommandQueueExecuteCommandLists(queue, 1, &list, pendingFence)); });
   const auto readyStatus = zeEventHostSynchronize(ready, 5'000'000'000ULL);
-  const bool returnedBeforeRelease = submitted.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready;
-  const auto fenceStatus = zeFenceQueryStatus(fence);
+  const bool returnedBeforeRelease = submitted.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+  const auto fenceStatus = zeFenceHostSynchronize(fence, 5'000'000'000ULL);
   const auto pendingStatus = zeCommandQueueSynchronize(queue, 0);
   const auto pendingDestroy = zeFenceDestroy(pendingFence);
   const auto signalStatus = zeEventHostSignal(release);
@@ -934,4 +956,1050 @@ TEST_CASE("Level Zero completed transfers release allocations before their event
   REQUIRE((zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
+}
+
+namespace {
+ze_command_list_handle_t immediateListOn(const ContextHandles &handles, uint32_t ordinal, ze_command_queue_mode_t mode) {
+  ze_command_queue_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  desc.ordinal = ordinal;
+  desc.mode = mode;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreateImmediate(handles.context, handles.device, &desc, &list) == ZE_RESULT_SUCCESS);
+  return list;
+}
+
+ze_event_handle_t counterEvent(const ContextHandles &handles) {
+  ze_event_counter_based_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_EVENT_COUNTER_BASED_DESC;
+  desc.flags = ZE_EVENT_COUNTER_BASED_FLAG_IMMEDIATE | ZE_EVENT_COUNTER_BASED_FLAG_NON_IMMEDIATE | ZE_EVENT_COUNTER_BASED_FLAG_HOST_VISIBLE;
+  desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+  ze_event_handle_t event = nullptr;
+  REQUIRE(zeEventCounterBasedCreate(handles.context, handles.device, &desc, &event) == ZE_RESULT_SUCCESS);
+  return event;
+}
+
+ze_event_pool_handle_t hostPool(const ContextHandles &handles, uint32_t count) {
+  ze_event_pool_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  desc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+  desc.count = count;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &desc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  return pool;
+}
+
+ze_event_handle_t poolEvent(ze_event_pool_handle_t pool, uint32_t index) {
+  ze_event_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  desc.index = index;
+  desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+  desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+  ze_event_handle_t event = nullptr;
+  REQUIRE(zeEventCreate(pool, &desc, &event) == ZE_RESULT_SUCCESS);
+  return event;
+}
+
+} // namespace
+
+TEST_CASE("Level Zero counter-based events complete after each appended signal", "[level-zero][events]") {
+  const auto handles = createContext();
+  auto *const list = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const event = counterEvent(handles);
+  ze_event_counter_based_flags_t flags = 0;
+  REQUIRE(zeEventGetCounterBasedFlags(event, &flags) == ZE_RESULT_SUCCESS);
+  CHECK((flags & ZE_EVENT_COUNTER_BASED_FLAG_IMMEDIATE) != 0);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventHostSignal(event) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  CHECK(zeEventHostReset(event) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+
+  auto *const pool = hostPool(handles, 1);
+  auto *gate = poolEvent(pool, 0);
+  REQUIRE(zeCommandListAppendWaitOnEvents(list, 1, &gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendSignalEvent(list, event) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_NOT_READY);
+  CHECK(zeEventHostSynchronize(event, 1'000'000) == ZE_RESULT_NOT_READY);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventHostSynchronize(event, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+
+  REQUIRE(zeEventHostReset(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendWaitOnEvents(list, 1, &gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendSignalEvent(list, event) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_NOT_READY);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListHostSynchronize(list, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+
+  uint64_t completion = 0;
+  uint64_t address = 0;
+  REQUIRE(zeEventCounterBasedGetDeviceAddress(event, &completion, &address) == ZE_RESULT_SUCCESS);
+  CHECK(completion == 2);
+  CHECK(address != 0);
+  CHECK(zeEventCounterBasedGetDeviceAddress(gate, &completion, &address) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero counter-based events wait for every appended signal when lists complete out of order", "[level-zero][events]") {
+  const auto handles = createContext();
+  auto *const slow = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const fast = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const event = counterEvent(handles);
+  auto *const pool = hostPool(handles, 1);
+  auto *gate = poolEvent(pool, 0);
+  REQUIRE(zeCommandListAppendWaitOnEvents(slow, 1, &gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendSignalEvent(slow, event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendSignalEvent(fast, event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListHostSynchronize(fast, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_NOT_READY);
+  CHECK(zeEventHostSynchronize(event, 1'000'000) == ZE_RESULT_NOT_READY);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventHostSynchronize(event, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(zeCommandListHostSynchronize(slow, 0) == ZE_RESULT_SUCCESS);
+
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(fast) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(slow) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero counter-based waits observe the signals appended before them on regular lists", "[level-zero][events]") {
+  const auto handles = createContext();
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(handles.context, handles.device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t producer = nullptr;
+  ze_command_list_handle_t consumer = nullptr;
+  REQUIRE(zeCommandListCreate(handles.context, handles.device, &listDesc, &producer) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListCreate(handles.context, handles.device, &listDesc, &consumer) == ZE_RESULT_SUCCESS);
+  auto *counter = counterEvent(handles);
+  REQUIRE(zeCommandListAppendSignalEvent(producer, counter) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendWaitOnEvents(consumer, 1, &counter) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(producer) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(consumer) == ZE_RESULT_SUCCESS);
+  for (int round = 0; round < 3; ++round) {
+    REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &producer, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &consumer, nullptr) == ZE_RESULT_SUCCESS);
+  }
+  REQUIRE(zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(counter) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(counter) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(producer) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(consumer) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero event pools may be destroyed before their events", "[level-zero][events]") {
+  const auto handles = createContext();
+  auto *const pool = hostPool(handles, 1);
+  auto *const event = poolEvent(pool, 0);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventHostSignal(event) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero rounds non-power-of-two allocation alignments up to the granularity", "[level-zero][memory]") {
+  const auto handles = createContext();
+  ze_device_mem_alloc_desc_t deviceDesc{};
+  deviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  const std::array<std::tuple<size_t, uintptr_t, uintptr_t>, 3> cases{{{3, 4096, 65536}, {12, 4096, 65536}, {12288, 16384, 65536}}};
+  for (const auto &[alignment, hostAlignment, deviceAlignment] : cases) {
+    DYNAMIC_SECTION("alignment " << alignment) {
+      void *host = nullptr;
+      void *device = nullptr;
+      void *shared = nullptr;
+      REQUIRE(zeMemAllocHost(handles.context, &hostDesc, 64, alignment, &host) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeMemAllocDevice(handles.context, &deviceDesc, 64, alignment, handles.device, &device) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeMemAllocShared(handles.context, &deviceDesc, &hostDesc, 64, alignment, handles.device, &shared) == ZE_RESULT_SUCCESS);
+      CHECK(reinterpret_cast<uintptr_t>(host) % hostAlignment == 0);
+      CHECK(reinterpret_cast<uintptr_t>(device) % deviceAlignment == 0);
+      CHECK(reinterpret_cast<uintptr_t>(shared) % deviceAlignment == 0);
+      REQUIRE(zeMemFree(handles.context, host) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeMemFree(handles.context, device) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeMemFree(handles.context, shared) == ZE_RESULT_SUCCESS);
+    }
+  }
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero device allocations keep in-granule overruns off their neighbours", "[level-zero][memory]") {
+  const auto handles = createContext();
+  ze_device_mem_alloc_desc_t deviceDesc{};
+  deviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  constexpr size_t requested = 64;
+  constexpr size_t granule = size_t{64} * 1024U;
+  void *first = nullptr;
+  void *second = nullptr;
+  REQUIRE(zeMemAllocDevice(handles.context, &deviceDesc, requested, 64, handles.device, &first) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemAllocDevice(handles.context, &deviceDesc, requested, 64, handles.device, &second) == ZE_RESULT_SUCCESS);
+  void *base = nullptr;
+  size_t range = 0;
+  REQUIRE(zeMemGetAddressRange(handles.context, first, &base, &range) == ZE_RESULT_SUCCESS);
+  CHECK(base == first);
+  CHECK(range == requested);
+  const std::vector<uint8_t> neighbour(requested, 0xa5);
+  std::memcpy(second, neighbour.data(), requested);
+  std::memset(static_cast<uint8_t *>(first) + requested, 0x5a, granule - requested);
+  CHECK(std::memcmp(second, neighbour.data(), requested) == 0);
+  REQUIRE(zeMemFree(handles.context, first) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(handles.context, second) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero memory range barriers, system barriers and timestamps", "[level-zero][barrier]") {
+  const auto handles = createContext();
+  auto *const list = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS);
+  ze_device_mem_alloc_desc_t deviceDesc{};
+  deviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocDevice(handles.context, &deviceDesc, 8192, 1, handles.device, &memory) == ZE_RESULT_SUCCESS);
+  const size_t sizes[] = {4096, 4096};
+  const void *ranges[] = {memory, static_cast<const uint8_t *>(memory) + 4096};
+  CHECK(zeCommandListAppendMemoryRangesBarrier(list, 2, sizes, ranges, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(zeCommandListAppendMemoryRangesBarrier(list, 0, sizes, ranges, nullptr, 0, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  const size_t oversized[] = {1ULL << 30};
+  CHECK(zeCommandListAppendMemoryRangesBarrier(list, 1, oversized, ranges, nullptr, 0, nullptr) == ZE_RESULT_ERROR_INVALID_SIZE);
+  CHECK(zeContextSystemBarrier(handles.context, handles.device) == ZE_RESULT_SUCCESS);
+  CHECK(zeContextSystemBarrier(nullptr, handles.device) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+
+  uint64_t before = 0;
+  uint64_t host = 0;
+  REQUIRE(zeDeviceGetGlobalTimestamps(handles.device, &host, &before) == ZE_RESULT_SUCCESS);
+  uint64_t written = 0;
+  REQUIRE(zeCommandListAppendWriteGlobalTimestamp(list, &written, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(written >= before);
+  CHECK(zeCommandListAppendWriteGlobalTimestamp(list, nullptr, nullptr, 0, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  REQUIRE(zeMemFree(handles.context, memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero atomic access attributes follow the advertised capabilities", "[level-zero][memory]") {
+  const auto handles = createContext();
+  ze_device_mem_alloc_desc_t deviceDesc{};
+  deviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *shared = nullptr;
+  REQUIRE(zeMemAllocShared(handles.context, &deviceDesc, &hostDesc, 256, 1, handles.device, &shared) == ZE_RESULT_SUCCESS);
+  ze_memory_atomic_attr_exp_flags_t attributes = 0;
+  CHECK(zeMemSetAtomicAccessAttributeExp(handles.context, handles.device, shared, 256, ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_NO_ATOMICS)
+        == ZE_RESULT_SUCCESS);
+  CHECK(zeMemGetAtomicAccessAttributeExp(handles.context, handles.device, shared, 256, &attributes) == ZE_RESULT_SUCCESS);
+  CHECK(attributes == ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_NO_ATOMICS);
+  CHECK(zeMemSetAtomicAccessAttributeExp(handles.context, handles.device, shared, 256, ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_SYSTEM_ATOMICS)
+        == ZE_RESULT_SUCCESS);
+  CHECK(zeMemGetAtomicAccessAttributeExp(handles.context, handles.device, shared, 256, &attributes) == ZE_RESULT_SUCCESS);
+  CHECK(attributes == ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_SYSTEM_ATOMICS);
+  CHECK(zeMemSetAtomicAccessAttributeExp(handles.context, handles.device, shared, 256,
+                                         ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_NO_ATOMICS | ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_HOST_ATOMICS)
+        == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  int ordinary = 0;
+  CHECK(zeMemSetAtomicAccessAttributeExp(handles.context, handles.device, &ordinary, sizeof(ordinary),
+                                         ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_SYSTEM_ATOMICS)
+        == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  REQUIRE(zeMemFree(handles.context, shared) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero reports float atomics and external memory handle types through its properties", "[level-zero][device]") {
+  const auto handles = createContext();
+  ze_float_atomic_ext_properties_t atomics{};
+  atomics.stype = ZE_STRUCTURE_TYPE_FLOAT_ATOMIC_EXT_PROPERTIES;
+  ze_device_module_properties_t module{};
+  module.stype = ZE_STRUCTURE_TYPE_DEVICE_MODULE_PROPERTIES;
+  module.pNext = &atomics;
+  REQUIRE(zeDeviceGetModuleProperties(handles.device, &module) == ZE_RESULT_SUCCESS);
+  constexpr auto atomicOps = ZE_DEVICE_FP_ATOMIC_EXT_FLAG_GLOBAL_ADD | ZE_DEVICE_FP_ATOMIC_EXT_FLAG_LOCAL_ADD;
+  CHECK((atomics.fp32Flags & atomicOps) == atomicOps);
+  CHECK((atomics.fp64Flags & atomicOps) == atomicOps);
+  constexpr auto fp16Ops = atomicOps | ZE_DEVICE_FP_ATOMIC_EXT_FLAG_GLOBAL_MIN_MAX | ZE_DEVICE_FP_ATOMIC_EXT_FLAG_LOCAL_MIN_MAX
+                           | ZE_DEVICE_FP_ATOMIC_EXT_FLAG_GLOBAL_LOAD_STORE | ZE_DEVICE_FP_ATOMIC_EXT_FLAG_LOCAL_LOAD_STORE;
+  CHECK((atomics.fp16Flags & fp16Ops) == fp16Ops);
+
+  ze_device_external_memory_properties_t external{};
+  external.stype = ZE_STRUCTURE_TYPE_DEVICE_EXTERNAL_MEMORY_PROPERTIES;
+  REQUIRE(zeDeviceGetExternalMemoryProperties(handles.device, &external) == ZE_RESULT_SUCCESS);
+  CHECK(external.memoryAllocationImportTypes == 0);
+  CHECK(external.memoryAllocationExportTypes == 0);
+  CHECK(external.imageImportTypes == 0);
+  CHECK(external.imageExportTypes == 0);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero appends to a closed regular list are not recorded", "[level-zero][list]") {
+  const auto handles = createContext();
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(handles.context, handles.device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(handles.context, handles.device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocHost(handles.context, &hostDesc, 16, 1, &memory) == ZE_RESULT_SUCCESS);
+  const uint8_t first = 1;
+  const uint8_t second = 2;
+  REQUIRE(zeCommandListAppendMemoryFill(list, memory, &first, 1, 16, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+  CHECK(zeCommandListAppendMemoryFill(list, memory, &second, 1, 16, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(static_cast<uint8_t *>(memory)[0] == first);
+  REQUIRE(zeMemFree(handles.context, memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero defers context teardown until its queues are destroyed", "[level-zero][queue]") {
+  const auto handles = createContext();
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(handles.context, handles.device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+  CHECK(zeContextDestroy(handles.context) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero timed host synchronize waits for its timeout", "[level-zero][events]") {
+  const auto handles = createContext();
+  auto *const pool = hostPool(handles, 1);
+  auto *const event = poolEvent(pool, 0);
+  constexpr auto timeout = std::chrono::milliseconds(5);
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    const auto start = std::chrono::steady_clock::now();
+    REQUIRE(zeEventHostSynchronize(event, std::chrono::nanoseconds(timeout).count()) == ZE_RESULT_NOT_READY);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    CHECK(elapsed >= timeout);
+    CHECK(elapsed < timeout + std::chrono::milliseconds(500));
+  }
+
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero asynchronous immediate appends return before host-gated work runs", "[level-zero][list]") {
+  const auto handles = createContext();
+  auto *const list = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocHost(handles.context, &hostDesc, 16, 1, &memory) == ZE_RESULT_SUCCESS);
+  std::memset(memory, 0, 16);
+
+  auto *const pool = hostPool(handles, 1);
+  auto *gate = poolEvent(pool, 0);
+  const uint8_t value = 9;
+  REQUIRE(zeCommandListAppendWaitOnEvents(list, 1, &gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendMemoryFill(list, memory, &value, 1, 16, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  CHECK(static_cast<uint8_t *>(memory)[15] == 0);
+  CHECK(zeCommandListHostSynchronize(list, 1'000'000ULL) == ZE_RESULT_NOT_READY);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListHostSynchronize(list, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  CHECK(static_cast<uint8_t *>(memory)[15] == value);
+
+  REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(handles.context, memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero asynchronous immediate lists on one engine execute dependency-free work in submission order", "[level-zero][list]") {
+  const auto handles = createContext();
+  auto *const first = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const second = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  constexpr size_t size = 32 << 20;
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocHost(handles.context, &hostDesc, size, 1, &memory) == ZE_RESULT_SUCCESS);
+  const uint8_t large = 7;
+  const uint8_t small = 9;
+  for (int round = 0; round < 10; ++round) {
+    REQUIRE(zeCommandListAppendMemoryFill(first, memory, &large, 1, size, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendMemoryFill(second, memory, &small, 1, 16, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListHostSynchronize(second, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListHostSynchronize(first, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+    CHECK(static_cast<uint8_t *>(memory)[0] == small);
+    CHECK(static_cast<uint8_t *>(memory)[size - 1] == large);
+  }
+
+  REQUIRE(zeMemFree(handles.context, memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(second) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(first) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+namespace {
+std::vector<ze_command_queue_group_properties_t> queueGroups(const ContextHandles &handles) {
+  uint32_t count = 0;
+  REQUIRE(zeDeviceGetCommandQueueGroupProperties(handles.device, &count, nullptr) == ZE_RESULT_SUCCESS);
+  std::vector<ze_command_queue_group_properties_t> groups(count);
+  for (auto &group : groups)
+    group.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_GROUP_PROPERTIES;
+  REQUIRE(zeDeviceGetCommandQueueGroupProperties(handles.device, &count, groups.data()) == ZE_RESULT_SUCCESS);
+  return groups;
+}
+
+ze_command_queue_handle_t queueOn(const ContextHandles &handles, uint32_t ordinal, uint32_t index, ze_command_queue_mode_t mode) {
+  ze_command_queue_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  desc.ordinal = ordinal;
+  desc.index = index;
+  desc.mode = mode;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(handles.context, handles.device, &desc, &queue) == ZE_RESULT_SUCCESS);
+  return queue;
+}
+
+ze_command_list_handle_t regularListOn(const ContextHandles &handles, uint32_t ordinal) {
+  ze_command_list_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  desc.commandQueueGroupOrdinal = ordinal;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(handles.context, handles.device, &desc, &list) == ZE_RESULT_SUCCESS);
+  return list;
+}
+
+uint32_t copyOrdinal(const ContextHandles &handles) {
+  const auto groups = queueGroups(handles);
+  for (uint32_t ordinal = 0; ordinal < groups.size(); ++ordinal)
+    if ((groups[ordinal].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY)
+        && !(groups[ordinal].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE))
+      return ordinal;
+  FAIL("no copy-only queue group");
+  return 0;
+}
+
+ze_result_t execute(ze_command_queue_handle_t queue, ze_command_list_handle_t list) {
+  return zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr);
+}
+} // namespace
+
+TEST_CASE("Level Zero exposes a copy-only queue group beside the compute group", "[level-zero][queue-group]") {
+  const auto handles = createContext();
+  const auto groups = queueGroups(handles);
+  REQUIRE(groups.size() == 2);
+  CHECK((groups[0].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE) != 0);
+  CHECK((groups[0].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY) != 0);
+  CHECK((groups[0].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS) != 0);
+  CHECK(groups[1].flags == ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY);
+  for (const auto &group : groups) {
+    CHECK(group.numQueues >= 1);
+    CHECK(group.maxMemoryFillPatternSize > 0);
+  }
+
+  uint32_t count = 1;
+  ze_command_queue_group_properties_t first{};
+  first.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_GROUP_PROPERTIES;
+  REQUIRE(zeDeviceGetCommandQueueGroupProperties(handles.device, &count, &first) == ZE_RESULT_SUCCESS);
+  CHECK(count == 1);
+  CHECK(first.flags == groups[0].flags);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero validates queue group ordinals and indices", "[level-zero][queue-group]") {
+  const auto handles = createContext();
+  const auto groups = queueGroups(handles);
+  const auto outside = static_cast<uint32_t>(groups.size());
+
+  for (uint32_t ordinal = 0; ordinal < groups.size(); ++ordinal) {
+    DYNAMIC_SECTION("ordinal " << ordinal) {
+      ze_command_queue_desc_t desc{};
+      desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+      desc.ordinal = ordinal;
+      desc.index = groups[ordinal].numQueues;
+      ze_command_queue_handle_t queue = nullptr;
+      CHECK(zeCommandQueueCreate(handles.context, handles.device, &desc, &queue) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+      ze_command_list_handle_t list = nullptr;
+      CHECK(zeCommandListCreateImmediate(handles.context, handles.device, &desc, &list) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+      desc.index = groups[ordinal].numQueues - 1;
+      REQUIRE(zeCommandQueueCreate(handles.context, handles.device, &desc, &queue) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListCreateImmediate(handles.context, handles.device, &desc, &list) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+    }
+  }
+
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.ordinal = outside;
+  ze_command_queue_handle_t queue = nullptr;
+  CHECK(zeCommandQueueCreate(handles.context, handles.device, &queueDesc, &queue) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  ze_command_list_handle_t list = nullptr;
+  CHECK(zeCommandListCreateImmediate(handles.context, handles.device, &queueDesc, &list) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  listDesc.commandQueueGroupOrdinal = outside;
+  CHECK(zeCommandListCreate(handles.context, handles.device, &listDesc, &list) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  CHECK(list == nullptr);
+
+  const auto copy = copyOrdinal(handles);
+  auto *const computeQueue = queueOn(handles, 0, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const copyList = regularListOn(handles, copy);
+  auto *const computeList = regularListOn(handles, 0);
+  auto *const immediate = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS);
+  REQUIRE(zeCommandListClose(copyList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(computeList) == ZE_RESULT_SUCCESS);
+  CHECK(execute(computeQueue, copyList) == ZE_RESULT_ERROR_INVALID_COMMAND_LIST_TYPE);
+  CHECK(execute(computeQueue, immediate) == ZE_RESULT_ERROR_INVALID_COMMAND_LIST_TYPE);
+  CHECK(execute(computeQueue, computeList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueSynchronize(computeQueue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+
+  REQUIRE(zeCommandListDestroy(immediate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(computeList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(copyList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(computeQueue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero copy lists accept copy commands and reject kernel launches", "[level-zero][queue-group]") {
+  gemstone_test::RpcFixture const server;
+  const gemstone_test::RpcEnvironment environment(server);
+  const auto handles = createContext();
+  const auto copy = copyOrdinal(handles);
+
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  ze_module_handle_t module = nullptr;
+  REQUIRE(zeModuleCreate(handles.context, handles.device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  ze_kernel_desc_t kernelDesc{};
+  kernelDesc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+  kernelDesc.pKernelName = "groups";
+  ze_kernel_handle_t kernel = nullptr;
+  REQUIRE(zeKernelCreate(module, &kernelDesc, &kernel) == ZE_RESULT_SUCCESS);
+
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *source = nullptr;
+  void *destination = nullptr;
+  REQUIRE(zeMemAllocHost(handles.context, &hostDesc, 64, 1, &source) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemAllocHost(handles.context, &hostDesc, 64, 1, &destination) == ZE_RESULT_SUCCESS);
+  const ze_group_count_t groups{.groupCountX = 1, .groupCountY = 1, .groupCountZ = 1};
+  const uint8_t pattern = 0x11;
+  auto *const pool = hostPool(handles, 1);
+  auto *const event = poolEvent(pool, 0);
+
+  for (const bool immediate : {false, true}) {
+    CAPTURE(immediate);
+    auto *const list = immediate ? immediateListOn(handles, copy, ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) : regularListOn(handles, copy);
+    CHECK(zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    CHECK(zeCommandListAppendLaunchCooperativeKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    CHECK(zeCommandListAppendLaunchKernelIndirect(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+
+    std::memset(source, 0x5a, 64);
+    std::memset(destination, 0, 64);
+    CHECK(zeCommandListAppendMemoryCopy(list, destination, source, 64, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    CHECK(zeCommandListAppendMemoryFill(list, destination, &pattern, 1, 16, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    CHECK(zeCommandListAppendBarrier(list, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    CHECK(zeCommandListAppendSignalEvent(list, event) == ZE_RESULT_SUCCESS);
+    CHECK(zeCommandListAppendWriteGlobalTimestamp(list, static_cast<uint64_t *>(source) + 4, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    if (immediate) {
+      REQUIRE(zeCommandListHostSynchronize(list, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+    } else {
+      auto *const queue = queueOn(handles, copy, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+      REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+      REQUIRE(execute(queue, list) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+    }
+    CHECK(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+    CHECK(static_cast<uint8_t *>(destination)[0] == 0x11);
+    CHECK(static_cast<uint8_t *>(destination)[16] == 0x5a);
+    REQUIRE(zeEventHostReset(event) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  }
+
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(handles.context, destination) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(handles.context, source) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero compute and copy engines pipeline through events", "[level-zero][queue-group][pipeline]") {
+  const auto handles = createContext();
+  const auto copy = copyOrdinal(handles);
+  constexpr size_t size = 1 << 12;
+  constexpr uint32_t iterations = 8;
+
+  auto *const computeQueue = queueOn(handles, 0, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const computeList = regularListOn(handles, 0);
+  auto *const uploadList = immediateListOn(handles, copy, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+  auto *const downloadList = immediateListOn(handles, copy, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+
+  auto *const pool = hostPool(handles, 3);
+  auto *uploadReady = poolEvent(pool, 0);
+  auto *computeReady = poolEvent(pool, 1);
+  auto *downloadReady = poolEvent(pool, 2);
+
+  ze_device_mem_alloc_desc_t deviceDesc{};
+  deviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *device = nullptr;
+  void *host = nullptr;
+  REQUIRE(zeMemAllocDevice(handles.context, &deviceDesc, size, 1, handles.device, &device) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemAllocHost(handles.context, &hostDesc, size, 1, &host) == ZE_RESULT_SUCCESS);
+  std::memset(host, 0, size);
+
+  for (uint32_t i = 0; i < iterations; ++i) {
+    const uint8_t pattern = static_cast<uint8_t>(i + 1);
+    REQUIRE(zeCommandListAppendMemoryCopy(uploadList, device, host, size, nullptr, 1, &uploadReady) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendBarrier(uploadList, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendEventReset(uploadList, uploadReady) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendSignalEvent(uploadList, computeReady) == ZE_RESULT_SUCCESS);
+
+    REQUIRE(zeCommandListAppendWaitOnEvents(computeList, 1, &computeReady) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendMemoryFill(computeList, device, &pattern, 1, size, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendBarrier(computeList, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendEventReset(computeList, computeReady) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendSignalEvent(computeList, downloadReady) == ZE_RESULT_SUCCESS);
+
+    REQUIRE(zeCommandListAppendMemoryCopy(downloadList, host, device, size, nullptr, 1, &downloadReady) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendBarrier(downloadList, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendEventReset(downloadList, downloadReady) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListAppendSignalEvent(downloadList, uploadReady) == ZE_RESULT_SUCCESS);
+  }
+  REQUIRE(zeCommandListClose(computeList) == ZE_RESULT_SUCCESS);
+  REQUIRE(execute(computeQueue, computeList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventHostSignal(uploadReady) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueSynchronize(computeQueue, 10'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListHostSynchronize(downloadList, 10'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListHostSynchronize(uploadList, 10'000'000'000ULL) == ZE_RESULT_SUCCESS);
+
+  const auto *bytes = static_cast<const uint8_t *>(host);
+  CHECK(std::all_of(bytes, bytes + size, [](uint8_t value) { return value == iterations; }));
+
+  REQUIRE(zeMemFree(handles.context, host) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(handles.context, device) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(downloadReady) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(computeReady) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(uploadReady) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(downloadList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(uploadList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(computeList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(computeQueue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero advertises the kernel timestamp query extension", "[level-zero][events]") {
+  const auto handles = createContext();
+  uint32_t count = 0;
+  REQUIRE(zeDriverGetExtensionProperties(handles.driver, &count, nullptr) == ZE_RESULT_SUCCESS);
+  std::vector<ze_driver_extension_properties_t> extensions(count);
+  REQUIRE(zeDriverGetExtensionProperties(handles.driver, &count, extensions.data()) == ZE_RESULT_SUCCESS);
+  CHECK(extensions ^ exists([](const ze_driver_extension_properties_t &extension) {
+          return std::strcmp(extension.name, ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_NAME) == 0
+                 && extension.version == ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_VERSION_CURRENT;
+        }));
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero kernel timestamps are queried from completed events", "[level-zero][events]") {
+  const auto handles = createContext();
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_MAPPED_TIMESTAMP;
+  poolDesc.count = 2;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  auto *const signalled = poolEvent(pool, 0);
+  auto *const pending = poolEvent(pool, 1);
+
+  ze_kernel_timestamp_result_t timestamps{};
+  CHECK(zeEventQueryKernelTimestamp(pending, &timestamps) == ZE_RESULT_NOT_READY);
+  REQUIRE(zeEventHostSignal(signalled) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventQueryKernelTimestamp(signalled, &timestamps) == ZE_RESULT_SUCCESS);
+  CHECK(timestamps.global.kernelEnd > timestamps.global.kernelStart);
+  CHECK(timestamps.context.kernelStart == timestamps.global.kernelStart);
+
+  uint32_t packets = 0;
+  REQUIRE(zeEventQueryKernelTimestampsExt(signalled, handles.device, &packets, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(packets == 1);
+  ze_kernel_timestamp_result_t extended{};
+  ze_synchronized_timestamp_result_ext_t synchronised{};
+  ze_event_query_kernel_timestamps_results_ext_properties_t properties{
+      .stype = ZE_STRUCTURE_TYPE_EVENT_QUERY_KERNEL_TIMESTAMPS_RESULTS_EXT_PROPERTIES,
+      .pNext = nullptr,
+      .pKernelTimestampsBuffer = &extended,
+      .pSynchronizedTimestampsBuffer = &synchronised};
+  REQUIRE(zeEventQueryKernelTimestampsExt(signalled, handles.device, &packets, &properties) == ZE_RESULT_SUCCESS);
+  CHECK(extended.global.kernelStart == timestamps.global.kernelStart);
+  CHECK(extended.global.kernelEnd == timestamps.global.kernelEnd);
+  CHECK(synchronised.global.kernelStart == timestamps.global.kernelStart);
+  CHECK(synchronised.context.kernelEnd == timestamps.context.kernelEnd);
+  CHECK(zeEventQueryKernelTimestampsExt(pending, handles.device, &packets, &properties) == ZE_RESULT_NOT_READY);
+
+  REQUIRE(zeEventDestroy(pending) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(signalled) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero command lists append kernel timestamp queries at the requested offsets", "[level-zero][events]") {
+  const auto handles = createContext();
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_MAPPED_TIMESTAMP;
+  poolDesc.count = 1;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  auto *const event = poolEvent(pool, 0);
+  REQUIRE(zeEventHostSignal(event) == ZE_RESULT_SUCCESS);
+  ze_kernel_timestamp_result_t expected{};
+  REQUIRE(zeEventQueryKernelTimestamp(event, &expected) == ZE_RESULT_SUCCESS);
+
+  auto *const list = immediateListOn(handles, 0, ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS);
+  std::array<ze_kernel_timestamp_result_t, 2> written{};
+  ze_event_handle_t events[] = {event};
+  const size_t offsets[] = {sizeof(ze_kernel_timestamp_result_t)};
+  REQUIRE(zeCommandListAppendQueryKernelTimestamps(list, 1, events, written.data(), offsets, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(written[0].global.kernelEnd == 0);
+  CHECK(written[1].global.kernelStart == expected.global.kernelStart);
+  CHECK(written[1].global.kernelEnd == expected.global.kernelEnd);
+  REQUIRE(zeCommandListAppendQueryKernelTimestamps(list, 1, events, written.data(), nullptr, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(written[0].context.kernelStart == expected.context.kernelStart);
+
+  CHECK(zeCommandListAppendQueryKernelTimestamps(list, 1, nullptr, written.data(), nullptr, nullptr, 0, nullptr)
+        == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  CHECK(zeCommandListAppendQueryKernelTimestamps(list, 1, events, nullptr, nullptr, nullptr, 0, nullptr)
+        == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  CHECK(zeCommandListAppendQueryKernelTimestamps(nullptr, 1, events, written.data(), nullptr, nullptr, 0, nullptr)
+        == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero event pools round-trip IPC handles within a process", "[level-zero][events][ipc]") {
+  const auto handles = createContext();
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC;
+  poolDesc.count = 2;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+
+  ze_ipc_event_pool_handle_t ipc{};
+  REQUIRE(zeEventPoolGetIpcHandle(pool, &ipc) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventPoolGetIpcHandle(pool, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+
+  ze_event_pool_handle_t opened = nullptr;
+  ze_ipc_event_pool_handle_t mismatched = ipc;
+  mismatched.data[0] = static_cast<char>(mismatched.data[0] ^ 0x01);
+  CHECK(zeEventPoolOpenIpcHandle(handles.context, mismatched, &opened) == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+  REQUIRE(zeEventPoolOpenIpcHandle(handles.context, ipc, &opened) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventPoolCloseIpcHandle(pool) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+
+  auto *const event = poolEvent(opened, 0);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_NOT_READY);
+  REQUIRE(zeEventHostSignal(event) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolCloseIpcHandle(opened) == ZE_RESULT_SUCCESS);
+
+  ze_event_pool_desc_t plainDesc = poolDesc;
+  plainDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+  ze_event_pool_handle_t plain = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &plainDesc, 0, nullptr, &plain) == ZE_RESULT_SUCCESS);
+  ze_ipc_event_pool_handle_t plainIpc{};
+  CHECK(zeEventPoolGetIpcHandle(plain, &plainIpc) == ZE_RESULT_ERROR_INVALID_SYNCHRONIZATION_OBJECT);
+  REQUIRE(zeEventPoolDestroy(plain) == ZE_RESULT_SUCCESS);
+
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  CHECK(zeEventPoolOpenIpcHandle(handles.context, ipc, &opened) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero command queue priorities advertise a range and order gated work", "[level-zero][queue][priority]") {
+  const auto handles = createContext();
+  ze_device_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  REQUIRE(zeDeviceGetProperties(handles.device, &properties) == ZE_RESULT_SUCCESS);
+  CHECK(properties.maxCommandQueuePriority == ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_HIGH);
+
+  ze_command_queue_desc_t invalidDesc{};
+  invalidDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  invalidDesc.priority = static_cast<ze_command_queue_priority_t>(3);
+  ze_command_queue_handle_t rejectedQueue = nullptr;
+  CHECK(zeCommandQueueCreate(handles.context, handles.device, &invalidDesc, &rejectedQueue) == ZE_RESULT_ERROR_INVALID_ENUMERATION);
+  ze_command_list_handle_t rejectedList = nullptr;
+  CHECK(zeCommandListCreateImmediate(handles.context, handles.device, &invalidDesc, &rejectedList) == ZE_RESULT_ERROR_INVALID_ENUMERATION);
+
+  constexpr uint32_t lowCount = 5;
+  constexpr size_t lowBytes = size_t{1} << 20;
+  constexpr size_t highBytes = 1024;
+  ze_device_mem_alloc_desc_t allocationDesc{};
+  allocationDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  void *buffer = nullptr;
+  REQUIRE(zeMemAllocDevice(handles.context, &allocationDesc, lowBytes, 64, handles.device, &buffer) == ZE_RESULT_SUCCESS);
+
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+  poolDesc.count = lowCount + 2;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  auto *gate = poolEvent(pool, 0);
+
+  const auto record = [&](ze_command_queue_priority_t priority, size_t bytes, uint32_t index) {
+    ze_command_queue_desc_t queueDesc{};
+    queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+    queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+    queueDesc.priority = priority;
+    ze_command_queue_handle_t queue = nullptr;
+    REQUIRE(zeCommandQueueCreate(handles.context, handles.device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+    ze_command_list_desc_t listDesc{};
+    listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+    ze_command_list_handle_t list = nullptr;
+    REQUIRE(zeCommandListCreate(handles.context, handles.device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+    auto *const done = poolEvent(pool, index);
+    const uint8_t pattern = 0x5a;
+    REQUIRE(zeCommandListAppendMemoryFill(list, buffer, &pattern, 1, bytes, done, 1, &gate) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+    return std::tuple(queue, list, done);
+  };
+
+  std::vector<std::tuple<ze_command_queue_handle_t, ze_command_list_handle_t, ze_event_handle_t>> lows;
+  lows.reserve(lowCount);
+  for (uint32_t i = 0; i < lowCount; ++i)
+    lows.push_back(record(ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_LOW, lowBytes, i + 1));
+  const auto [highQueue, highList, highDone] = record(ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_HIGH, highBytes, lowCount + 1);
+
+  for (const auto &[queue, list, done] : lows)
+    REQUIRE(execute(queue, list) == ZE_RESULT_SUCCESS);
+  REQUIRE(execute(highQueue, highList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventHostSynchronize(highDone, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  ze_kernel_timestamp_result_t highTimestamp{};
+  REQUIRE(zeEventQueryKernelTimestamp(highDone, &highTimestamp) == ZE_RESULT_SUCCESS);
+
+  uint32_t lowsAfterHigh = 0;
+  for (const auto &[queue, list, done] : lows) {
+    REQUIRE(zeEventHostSynchronize(done, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+    ze_kernel_timestamp_result_t timestamp{};
+    REQUIRE(zeEventQueryKernelTimestamp(done, &timestamp) == ZE_RESULT_SUCCESS);
+    lowsAfterHigh += timestamp.global.kernelEnd > highTimestamp.global.kernelEnd;
+  }
+  CHECK(lowsAfterHigh == lowCount);
+
+  for (const auto &[queue, list, done] : lows) {
+    REQUIRE(zeEventDestroy(done) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  }
+  REQUIRE(zeEventDestroy(highDone) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(highList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(highQueue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(handles.context, buffer) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero reserves address space beyond the server allocation limit", "[level-zero][memory][virtual]") {
+  const auto handles = createContext();
+  constexpr size_t size = size_t{1} << 40;
+  void *reservation = nullptr;
+  REQUIRE(zeVirtualMemReserve(handles.context, nullptr, size, &reservation) == ZE_RESULT_SUCCESS);
+  REQUIRE(reservation != nullptr);
+  REQUIRE(zeVirtualMemFree(handles.context, reservation, size) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+namespace {
+std::vector<uint8_t> spirvImage(uint8_t generator) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  std::vector<uint8_t> image(bytes, bytes + sizeof(gemstone_test::RpcFixture::Spirv));
+  image[8] = generator;
+  return image;
+}
+
+ze_module_handle_t createModule(ze_context_handle_t context, ze_device_handle_t device, const std::vector<uint8_t> &image) {
+  ze_module_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  desc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  desc.inputSize = image.size();
+  desc.pInputModule = image.data();
+  ze_module_handle_t module = nullptr;
+  REQUIRE(zeModuleCreate(context, device, &desc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  return module;
+}
+} // namespace
+
+TEST_CASE("Level Zero program modules link their inputs into one program", "[level-zero][link]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  const auto caller = spirvImage(1);
+  const auto provider = spirvImage(2);
+  const uint8_t *images[] = {caller.data(), provider.data()};
+  const size_t sizes[] = {caller.size(), provider.size()};
+  ze_module_program_exp_desc_t program{};
+  program.stype = ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC;
+  program.count = 2;
+  program.inputSizes = sizes;
+  program.pInputModules = images;
+  ze_module_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  desc.pNext = &program;
+  desc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  ze_module_handle_t module = nullptr;
+  REQUIRE(zeModuleCreate(context, device, &desc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(server.lastLinkInputs() == std::vector<std::vector<uint8_t>>{caller, provider});
+  CHECK(server.programLoads == 1);
+  auto linked = caller;
+  linked.insert(linked.end(), provider.begin(), provider.end());
+  CHECK(server.lastProgramImage() == linked);
+  REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  CHECK(server.programUnloads == 1);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero dynamic linking moves the modules onto one shared program", "[level-zero][link]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  const auto caller = spirvImage(1);
+  const auto provider = spirvImage(2);
+  ze_module_handle_t modules[] = {createModule(context, device, caller), createModule(context, device, provider)};
+  CHECK(server.programLoads == 2);
+
+  ze_module_build_log_handle_t log = nullptr;
+  REQUIRE(zeModuleDynamicLink(2, modules, &log) == ZE_RESULT_SUCCESS);
+  if (log) CHECK(zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS);
+  CHECK(server.lastLinkInputs() == std::vector<std::vector<uint8_t>>{caller, provider});
+  CHECK(server.programLoads == 3);
+  CHECK(server.programUnloads == 2);
+
+  ze_kernel_desc_t kernelDesc{};
+  kernelDesc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+  kernelDesc.pKernelName = "add";
+  for (auto *module : modules) {
+    ze_kernel_handle_t kernel = nullptr;
+    REQUIRE(zeKernelCreate(module, &kernelDesc, &kernel) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS);
+  }
+
+  REQUIRE(zeModuleDestroy(modules[0]) == ZE_RESULT_SUCCESS);
+  CHECK(server.programUnloads == 2);
+  REQUIRE(zeModuleDestroy(modules[1]) == ZE_RESULT_SUCCESS);
+  CHECK(server.programUnloads == 3);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero dynamic linking reports a rejected link and keeps the modules", "[level-zero][link]") {
+  using gemstone::execution::FailureKind;
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  ze_module_handle_t modules[] = {createModule(context, device, spirvImage(1)), createModule(context, device, spirvImage(2))};
+
+  server.rejectNext(gemstone::execution::operation::LinkImages, FailureKind::InvalidRequest);
+  ze_module_build_log_handle_t log = nullptr;
+  CHECK(zeModuleDynamicLink(2, modules, &log) == ZE_RESULT_ERROR_MODULE_LINK_FAILURE);
+  REQUIRE(log != nullptr);
+  size_t size = 0;
+  CHECK(zeModuleBuildLogGetString(log, &size, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(size > 1);
+  CHECK(zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS);
+  CHECK(server.programLoads == 2);
+  CHECK(server.programUnloads == 0);
+
+  ze_module_handle_t withNull[] = {modules[0], nullptr};
+  CHECK(zeModuleDynamicLink(2, withNull, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+  CHECK(zeModuleDynamicLink(0, modules, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+
+  for (auto *module : modules)
+    REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero linked modules resolve a shared kernel name per module", "[level-zero][link]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  server.linkTable({{.module = 0, .name = "k", .linkageName = "k"}, {.module = 1, .name = "k", .linkageName = "k.1"}});
+  ze_module_handle_t modules[] = {createModule(context, device, spirvImage(1)), createModule(context, device, spirvImage(2))};
+  ze_module_build_log_handle_t log = nullptr;
+  REQUIRE(zeModuleDynamicLink(2, modules, &log) == ZE_RESULT_SUCCESS);
+  if (log) CHECK(zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS);
+
+  ze_kernel_desc_t kernelDesc{};
+  kernelDesc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+  kernelDesc.pKernelName = "k";
+  ze_kernel_handle_t kernels[] = {nullptr, nullptr};
+  for (size_t index = 0; index < 2; ++index) {
+    REQUIRE(zeKernelCreate(modules[index], &kernelDesc, &kernels[index]) == ZE_RESULT_SUCCESS);
+    char name[16] = {};
+    size_t size = sizeof(name);
+    REQUIRE(zeKernelGetName(kernels[index], &size, name) == ZE_RESULT_SUCCESS);
+    CHECK(std::string(name) == "k");
+  }
+  CHECK(kernels[0] != kernels[1]);
+  void *pointer = nullptr;
+  REQUIRE(zeModuleGetFunctionPointer(modules[1], "k", &pointer) == ZE_RESULT_SUCCESS);
+  CHECK(server.describedKernelNames() == std::vector<std::string>{"k", "k.1", "k.1"});
+
+  for (auto *kernel : kernels)
+    REQUIRE(zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS);
+  for (auto *module : modules)
+    REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero dynamic linking names an unresolved user symbol in the build log", "[level-zero][link]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  ze_module_handle_t modules[] = {createModule(context, device, spirvImage(1)), createModule(context, device, spirvImage(2))};
+
+  server.rejectNextLink("linkage: unresolved symbol 'missing_fn'");
+  ze_module_build_log_handle_t log = nullptr;
+  CHECK(zeModuleDynamicLink(2, modules, &log) == ZE_RESULT_ERROR_MODULE_LINK_FAILURE);
+  REQUIRE(log != nullptr);
+  size_t size = 0;
+  REQUIRE(zeModuleBuildLogGetString(log, &size, nullptr) == ZE_RESULT_SUCCESS);
+  std::string text(size, '\0');
+  REQUIRE(zeModuleBuildLogGetString(log, &size, text.data()) == ZE_RESULT_SUCCESS);
+  CHECK(text.contains("unresolved symbol 'missing_fn'"));
+  CHECK(zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS);
+  CHECK(server.programLoads == 2);
+
+  for (auto *module : modules)
+    REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }

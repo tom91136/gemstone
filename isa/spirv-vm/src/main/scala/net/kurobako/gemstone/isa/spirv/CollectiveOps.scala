@@ -751,8 +751,8 @@ private object CollectiveOps {
       case CollectivePayload.Barrier(memoryScope, semantics) =>
         // Broader scopes publish to and refresh host memory. Fence once at the rendezvous, before lanes resume.
         val fence =
-          if (semantics == 0L) Right(())
-          else if (memoryScope == Scope.Workgroup || memoryScope == Scope.Subgroup || memoryScope == 4) Right(())
+          if (semantics == 0L || memoryScope == Scope.Workgroup || memoryScope == Scope.Subgroup || memoryScope == 4)
+            Right(())
           else memory.fence()
         fence.map(_ => Vec.fill(participants.size)(None))
       case CollectivePayload.Shuffle(resultType = resultType)   => resolveShuffle(participants, expected, resultType)

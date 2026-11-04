@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.spirv
 
 import assembly.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ValidationSuite extends Suite {
   test("OpenCL compute environment is accepted") {

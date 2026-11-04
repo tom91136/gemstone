@@ -349,8 +349,9 @@ object ImageFormats {
             Emission.collection("Vector", shifts.map(_.toString))
         )
     }
-    val groups = LayoutFamilies.map { family =>
-      val selected = rows.filter(row => layout(row)._1 == family)
+    val families = rows.groupBy(layout(_)._1)
+    val groups   = LayoutFamilies.map { family =>
+      val selected = families.getOrElse(family, Vector.empty)
       val values   = selected.zipWithIndex.map { (row, index) =>
         s"  private val ${family.toLowerCaseRoot}$index = Some(${family}ImageFormat.Layout(${layout(row)._2}))"
       }.mkString("\n")
@@ -401,7 +402,9 @@ object ImageFormats {
     )
     val words    = Vector("SFLOAT" -> "Float", "UINT" -> "Uint", "SINT" -> "Sint")
     val channels = Vector("R", "G", "B", "A")
-    val plain    = for {
+    // the four channels of one format
+    @SuppressWarnings(Array("bonsai:linear-in-loop"))
+    val plain = for {
       bits       <- Vector(8, 16, 32)
       components <- 1 to 4
       prefix = channels.take(components).map(_ + bits).mkString

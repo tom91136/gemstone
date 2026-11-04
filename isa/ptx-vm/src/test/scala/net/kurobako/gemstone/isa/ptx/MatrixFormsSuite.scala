@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 /** Matrix forms of the architectures after sm_89, against layouts and values the PTX ISA documents. */

@@ -95,9 +95,9 @@ object InstructionSemantics {
     val special       = Set("branchtargets", "param")
     val (lists, rest) = unique.filterNot(entry => entry.declared.endsWith(")")).partition(_.declared == "branchtargets")
     val (labels, declared) = rest.partition(_.declared == "label")
-    val declarations       = declared.filterNot(entry => special(entry.declared))
-      .map((name, declared) => s"  .reg .$declared $name;\n").mkString +
-      declared.filter(_.declared == "param").map(param => s"  .param .b32 ${param.name};\n").mkString +
+    val declarations       = declared.collect {
+      case (name, kind) if !special(kind) => s"  .reg .$kind $name;\n"
+    }.mkString + declared.collect { case (name, "param") => s"  .param .b32 $name;\n" }.mkString +
       lists.map(list => s"  ${list.name}: .branchtargets ${list.name}_0;\n").mkString + prototypes
     val targets = (labels.map(_.name) ++ lists.map(list => s"${list.name}_0")).map(label => s"$label:\n").mkString
     VMCompiler.compile(

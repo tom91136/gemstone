@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 // The release forms of st.async and red.async, their multimem twins and the multimem bulk copies of
 // TensorMemoryCases.releasePtx, which ptxas lowers to USTGR, UREDGR, STAS.128, UBLKCP and UBLKRED. One device's multimem

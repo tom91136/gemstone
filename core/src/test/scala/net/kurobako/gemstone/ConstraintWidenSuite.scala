@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.compiletime.testing.typeCheckErrors
 import scala.util.Try
 

@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.binary.{IntegerArithmetic as _, *}
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 /** The 8-bit float conversions over the core minifloat codecs give what the format-specific rounding they replace gave,

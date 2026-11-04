@@ -198,8 +198,9 @@ private[isa] object TensorMemoryRender {
       )
     }
     val codes   = variants.map(_.codes)
+    val grouped = rendered.groupBy(kind(_))
     val classes = rendered.map(kind(_)).distinct.map { key =>
-      val members = rendered.filter(kind(_) == key)
+      val members = grouped(key)
       val merged  = members.head._2.all.indices.map { at =>
         val arms = members.map(entry => Arm(entry._1.codes, entry._2.all(at).value))
         Term.Step(members.head._2.all(at).name, choice(arms, active))

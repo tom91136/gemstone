@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class InstructionSemanticsSuite extends Suite {
   private def show(instruction: String, operands: (String, String)*): Either[String, String] =

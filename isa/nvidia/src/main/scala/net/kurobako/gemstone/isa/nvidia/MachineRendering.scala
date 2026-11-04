@@ -16,6 +16,7 @@ private[isa] object MachineRendering {
       .orElse(renderBarrier(instruction, machine))
       .orElse(renderCluster(instruction, machine))
       .orElse(renderTensor(instruction, machine))
+      .orElse(renderTexture(instruction, machine))
       .orElse(renderTensorMemory(instruction, machine))
       .orElse(renderTensorMemoryClaim(instruction, machine))
       .orElse(renderTensorMemoryMultiply(instruction, machine))
@@ -68,7 +69,8 @@ private[isa] object MachineRendering {
       case Instruction.BarrierArrive(id, count) => Some(barrierArrive(Render, machine)(id, count))
       case Instruction.BarrierReduce(result, id, predicate, count, negated) =>
         Some(barrierReduce(Render, machine)(result, id, predicate, count, negated))
-      case Instruction.WarpBarrier(memberMask)      => Some(machine.warpSync(memberMask))
+      case Instruction.WarpBarrier(memberMask, exclusive) =>
+        Some(if (exclusive) machine.warpPartition(memberMask) else machine.warpSync(memberMask))
       case Instruction.MBarrierLoad(address)        => Some(mbarrierLoad(machine)(address))
       case Instruction.MBarrierInit(address, count) => Some(mbarrierInit(machine)(address, count))
       case Instruction.MBarrierInvalidate(address)  => Some(mbarrierInvalidate(machine)(address))
@@ -80,6 +82,12 @@ private[isa] object MachineRendering {
         Some(mbarrierTest(machine)(destination, address, phase, parity))
       case Instruction.MBarrierPending(destination, token) => Some(mbarrierPending(Render, machine)(destination, token))
       case _                                               => None
+    }
+
+  private def renderTexture(instruction: Instruction, machine: NvidiaMachineRender): Option[Term.Steps] =
+    instruction match {
+      case Instruction.Texture(operation) => Some(texture(machine)(operation))
+      case _                              => None
     }
 
   private def renderCluster(instruction: Instruction, machine: NvidiaMachineRender): Option[Term.Steps] =

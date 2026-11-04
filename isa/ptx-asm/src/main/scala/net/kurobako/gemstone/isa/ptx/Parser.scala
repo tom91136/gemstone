@@ -136,8 +136,10 @@ object Parser {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   private class Cursor(source: String, tokens: Array[Token], comments: Array[Token], end: Token) {
-    private var index        = 0
-    private var commentIndex = 0
+    private var index         = 0
+    private var commentIndex  = 0
+    private var sectionHeader = false
+    private var sectionBody   = false
     // a module names a few thousand registers, constants and modifier lists millions of times, so they share one
     // instance each
     private val atoms     = mutable.HashMap.empty[String, Operand]
@@ -201,6 +203,9 @@ object Parser {
     private def isLabel: Boolean = index + 1 < tokens.length && !tokens(index).quoted && tokens(index + 1).text == ":"
 
     private def block(): Statement = {
+      val enclosing = sectionBody
+      sectionBody = sectionHeader
+      sectionHeader = false
       expect("{")
       val body = mutable.ArrayBuffer.empty[Statement]
       while (!at("}")) {
@@ -209,6 +214,7 @@ object Parser {
       }
       appendComments(body)
       expect("}")
+      sectionBody = enclosing
       Statement.Block(Vec.from(body))
     }
 
@@ -218,8 +224,11 @@ object Parser {
       val first = word()
       index = mark
       if (looksLikeFunctionDeclaration()) Vec(function())
-      else if (Set("version", "target", "address_size", "file", "loc").contains(first)) Vec(lineDirective())
-      else if (looksLikeDataDeclaration()) {
+      else if (Set("version", "target", "address_size", "file", "loc", "section").contains(first)) {
+        val header = lineDirective()
+        sectionHeader = first == "section" && at("{")
+        Vec(header)
+      } else if (looksLikeDataDeclaration()) {
         val dataMark = index
         try dataDeclarations()
         catch {
@@ -259,13 +268,17 @@ object Parser {
       address && dataType
     }
 
+    private def lineEndOffset(): Int = {
+      val newline = source.indexOf('\n', current.offset)
+      if (newline < 0) source.length else newline
+    }
+
     private def lineDirective(): Statement = {
-      val newline   = source.indexOf('\n', current.offset)
-      val lineEnd   = if (newline < 0) source.length else newline
+      val lineEnd   = lineEndOffset()
       val path      = dottedPath()
       val arguments = mutable.ArrayBuffer.empty[DirectiveArgument]
       var separator = DirectiveSeparator.Space
-      while (!eof && !at(";") && !at("}") && current.offset < lineEnd)
+      while (!eof && !at(";") && !at("{") && !at("}") && current.offset < lineEnd)
         if (accept(",")) separator = DirectiveSeparator.Comma
         else { arguments += DirectiveArgument(separator, operand()); separator = DirectiveSeparator.Space }
       val _ = accept(";")
@@ -273,10 +286,12 @@ object Parser {
     }
 
     private def directive(): Statement = {
+      // section data directives such as `.b8 1` end at the line instead of a semicolon
+      val lineEnd   = if (sectionBody) lineEndOffset() else Int.MaxValue
       val path      = dottedPath()
       val arguments = mutable.ArrayBuffer.empty[DirectiveArgument]
       var separator = DirectiveSeparator.Space
-      while (!eof && !at(";") && !at("="))
+      while (!eof && !at(";") && !at("=") && current.offset < lineEnd)
         if (accept(",")) separator = DirectiveSeparator.Comma
         else { arguments += DirectiveArgument(separator, operand()); separator = DirectiveSeparator.Space }
       val initialiser = if (accept("=")) {
@@ -284,8 +299,9 @@ object Parser {
         if (values.isEmpty) fail("initialiser")
         values
       } else Vec.empty[Operand]
-      expect(";")
-      Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Semicolon, initialiser)
+      if (initialiser.isEmpty && !eof && !at(";") && current.offset >= lineEnd)
+        Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Line)
+      else { expect(";"); Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Semicolon, initialiser) }
     }
 
     private def dottedPath(): NonEmpty[Vec[NonEmpty[String]]] = {

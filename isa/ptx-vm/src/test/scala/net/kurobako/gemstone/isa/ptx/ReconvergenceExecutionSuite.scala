@@ -9,6 +9,21 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 class ReconvergenceExecutionSuite extends Suite {
+  private class IssueLanes(stream: ProfileStream) extends ProfileStream.Visitor {
+    private val found = Vector.newBuilder[(String, Int)]
+
+    def result: Vector[(String, Int)] = found.result()
+
+    override def issue(issue: ProfileStream.Issue): Unit =
+      found += stream.instructions(issue.instruction).text -> issue.lanes.toSeq.size
+  }
+
+  private def issueLanes(stream: ProfileStream): Vector[(String, Int)] = {
+    val lanes = IssueLanes(stream)
+    stream.foreach(lanes)
+    lanes.result
+  }
+
   private def run(
       body: String,
       threads: Int,
@@ -208,13 +223,8 @@ class ReconvergenceExecutionSuite extends Suite {
       recorder = Some(recorder)
     )
     assertEquals(seen, Vec.tabulate(32)(lane => (lane & 3) * 35))
-    val stream = recorder.stream
-    val issues = Vector.newBuilder[(String, Int)]
-    stream.foreach(new ProfileStream.Visitor {
-      override def issue(issue: ProfileStream.Issue): Unit =
-        issues += stream.instructions(issue.instruction).text -> issue.lanes.toSeq.size
-    })
-    val after = issues.result().filter(_._1.startsWith("mul.lo.u32"))
+    val issues = issueLanes(recorder.stream)
+    val after  = issues.filter(_._1.startsWith("mul.lo.u32"))
     assertEquals(after.map(_._2), Vector(32))
   }
 
@@ -285,16 +295,10 @@ class ReconvergenceExecutionSuite extends Suite {
       def bit(mask: Int, add: Int) = if ((lane & mask) != 0) add else 0
       bit(1, 1) + 100 + bit(2, 2) + 200 + (if ((lane & 4) != 0) bit(8, 4) + 300 else 0) + 400
     }
-    assertEquals(seen, Vec.tabulate(32)(expected))
-    val stream = recorder.stream
-    val issues = Vector.newBuilder[(String, Int)]
-    stream.foreach(new ProfileStream.Visitor {
-      override def issue(issue: ProfileStream.Issue): Unit =
-        issues += stream.instructions(issue.instruction).text -> issue.lanes.toSeq.size
-    })
-    val after = issues.result().filter(_._1.contains(", 100;")).map(_._2) ++
-      issues.result().filter(_._1.contains(", 200;")).map(_._2) ++
-      issues.result().filter(_._1.contains(", 400;")).map(_._2)
+    assertEquals(seen, Vec.tabulate(32)(expected(_)))
+    val issues = issueLanes(recorder.stream)
+    val after  = issues.filter(_._1.contains(", 100;")).map(_._2) ++ issues.filter(_._1.contains(", 200;")).map(_._2) ++
+      issues.filter(_._1.contains(", 400;")).map(_._2)
     assertEquals(after, Vector(32, 32, 32))
   }
 }

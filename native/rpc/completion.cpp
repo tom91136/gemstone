@@ -1,14 +1,24 @@
 #include "completion.hpp"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifdef __linux__
+  #include <unistd.h>
+
+  #include <sys/uio.h>
+#endif
 
 #include "gemstone_execution_rpc.hpp"
 
@@ -81,20 +91,85 @@ FailureKind atomicFailure(uintptr_t address, int32_t width) {
 
 } // namespace
 
-bool awaitCompletion(Client &client, CompletionId completion, std::string &error, FailureKind *kind) {
+static size_t pageSizeBytes() {
+#ifdef __linux__
+  static const auto page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  return page;
+#else
+  return 4096;
+#endif
+}
+
+size_t readableExtent(uintptr_t address, size_t size) {
+#ifdef __linux__
+  const auto page = static_cast<uintptr_t>(pageSizeBytes());
+  constexpr size_t batch = 256;
+  size_t extent = 0;
+  while (extent < size) {
+    const auto at = address + extent;
+    const auto first = at - (at % page);
+    const auto pages = std::min(batch, (size - extent + (at % page) + page - 1) / page);
+    std::array<iovec, batch> remote{};
+    std::array<uint8_t, batch> sink{};
+    for (size_t index = 0; index < pages; ++index)
+      remote[index] = {.iov_base = reinterpret_cast<void *>(index == 0 ? at : first + (index * page)), .iov_len = 1};
+    const iovec local{.iov_base = sink.data(), .iov_len = pages};
+    const auto copied = process_vm_readv(getpid(), &local, 1, remote.data(), pages, 0);
+    if (copied < 0 && errno != EFAULT) return size;
+    const auto readable = copied < 0 ? size_t{0} : static_cast<size_t>(copied);
+    if (readable < pages) return std::min(size, readable == 0 ? extent : first + (readable * page) - address);
+    extent = std::min(size, first + (pages * page) - address);
+  }
+  return size;
+#else
+  (void)address;
+  return size;
+#endif
+}
+
+std::vector<uint8_t> copyHostBytes(uintptr_t address, size_t size) {
+  std::vector<uint8_t> bytes(size);
+  size_t offset = 0;
+  while (offset < size) {
+    const auto at = address + offset;
+    size_t width = 8;
+    while (width > 1 && (at % width != 0 || width > size - offset))
+      width /= 2;
+    visitAtomicWidth(width, [&]<typename T>() {
+      const auto value = std::atomic_ref<T>(*reinterpret_cast<T *>(at)).load(std::memory_order_relaxed);
+      std::memcpy(bytes.data() + offset, &value, sizeof(T));
+      return 0;
+    });
+    offset += width;
+  }
+  return bytes;
+}
+
+bool awaitCompletion(Client &client, CompletionId completion, std::string &error, FailureKind *kind,
+                     const std::function<void()> &synchronised) {
   for (;;) {
     const auto polled = client.call(PollHostMemory{completion});
     if (!polled) return reject(polled.error(), error, kind);
     const auto &batch = polled.value();
-    // Only exact interpreter-requested ranges are touched. Never round to pages.
+    // Only the ranges the server requests are touched, and only as far as they are readable; the server forgets the rest.
     std::vector<HostMemoryBytes> replies;
     for (const auto &range : batch.reads) {
       const auto address = static_cast<uintptr_t>(range.address.value);
       const auto size = static_cast<size_t>(range.size.value);
       if (!address || size > UINTPTR_MAX - address) return reject("invalid host read range", FailureKind::IllegalAddress, error, kind);
-      const auto *begin = reinterpret_cast<const uint8_t *>(address);
-      replies.push_back({.address = range.address, .bytes = std::vector<uint8_t>(begin, begin + size)});
+      const auto page = pageSizeBytes();
+      size_t offset = 0;
+      while (offset < size) {
+        const auto readable = readableExtent(address + offset, size - offset);
+        if (readable > 0)
+          replies.push_back(
+              {.address = {range.address.value + static_cast<int64_t>(offset)}, .bytes = copyHostBytes(address + offset, readable)});
+        offset += readable;
+        if (offset < size) offset += std::min(size - offset, page - ((address + offset) % page));
+      }
     }
+    // an empty reply lets the server make progress when no requested byte is readable
+    if (!batch.reads.empty() && replies.empty()) replies.push_back({.address = batch.reads.front().address, .bytes = {}});
     for (const auto &range : batch.writes) {
       const auto address = static_cast<uintptr_t>(range.address.value);
       if (!address || range.bytes.size() > UINTPTR_MAX - address)
@@ -115,6 +190,7 @@ bool awaitCompletion(Client &client, CompletionId completion, std::string &error
       }
     }
     if (batch.sync) {
+      if (synchronised) synchronised();
       const auto &sync = *batch.sync;
       uint64_t observed = 0;
       if (sync.atomic) {
@@ -152,15 +228,15 @@ bool completionDirtyRanges(Client &client, CompletionId completion, std::vector<
   return collectPages<CompletionDirtyRanges>(client, completion, ranges, error);
 }
 
-bool collectCompletion(Client &client, CompletionId completion, CompletionResult &result, std::string &error,
-                       GraphicsStatistics *graphics) {
+bool collectCompletion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, GraphicsStatistics *graphics,
+                       const std::function<void()> &synchronised) {
   if (graphics) *graphics = {};
   result.dirtyRanges.clear();
   result.pointerRelocations.clear();
   error.clear();
 
   result.failure = FailureKind::Transport;
-  bool succeeded = awaitCompletion(client, completion, error, &result.failure);
+  bool succeeded = awaitCompletion(client, completion, error, &result.failure, synchronised);
   if (succeeded && graphics) {
     const auto statistics = client.call(ReadGraphicsStatistics{completion});
     succeeded = static_cast<bool>(statistics);
@@ -173,7 +249,8 @@ bool collectCompletion(Client &client, CompletionId completion, CompletionResult
     auto prints = client.call(CompletionPrints{completion});
     succeeded = static_cast<bool>(prints);
     if (succeeded) {
-      if (!prints.value().empty()) std::fwrite(prints.value().data(), 1, prints.value().size(), stdout);
+      const auto &text = prints.value().value;
+      if (!text.empty()) std::fwrite(text.data(), 1, text.size(), stdout);
     } else {
       error = prints.error().detail;
     }

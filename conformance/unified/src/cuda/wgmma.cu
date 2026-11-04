@@ -297,7 +297,7 @@ bool available() {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/wgmma/floating", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wgmma/floating", "[unified][runtime][tensor]") {
   if (!available()) SKIP("wgmma requires sm_90a code");
   // name, n, k, depth, bits, swizzle, transposed, registersA, sparse, halfAccumulator, negateB
   run(Form{"wgmma f16 128B K-major", 32, 16, 64, 16, 128, false, false, false, false, true}, Kind::F16, true);
@@ -307,12 +307,12 @@ TEST_CASE("runtime/cuda/wgmma/floating", "[unified][runtime][tensor][compact]") 
   run(Form{"wgmma f16 into f16 64B K-major", 64, 16, 32, 16, 64, false, false, false, true, false}, Kind::F16Half, true);
 }
 
-TEST_CASE("runtime/cuda/wgmma/integer", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wgmma/integer", "[unified][runtime][tensor]") {
   if (!available()) SKIP("wgmma requires sm_90a code");
   run(Form{"wgmma s8 A in registers 128B K-major B", 32, 32, 64, 8, 128, false, true, false, false, false}, Kind::S8, true);
 }
 
-TEST_CASE("runtime/cuda/wgmma/sparse", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/wgmma/sparse", "[unified][runtime][tensor]") {
   if (!available()) SKIP("wgmma requires sm_90a code");
   run(Form{"wgmma.sp f16 128B K-major", 32, 32, 32, 16, 128, false, false, true, false, false}, Kind::Sparse, true);
 }

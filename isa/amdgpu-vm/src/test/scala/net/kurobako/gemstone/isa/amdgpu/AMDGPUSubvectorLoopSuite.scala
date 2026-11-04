@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** GFX10's S_SUBVECTOR_LOOP_BEGIN and S_SUBVECTOR_LOOP_END, which run a wave64's loop body once for each half of its
   * lanes, and S_GET_WAVEID_IN_WORKGROUP. The loop expectations match a gfx1036 (RDNA2) in wave64, running probe kernels

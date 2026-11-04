@@ -6,7 +6,7 @@ import VMMemory.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.rpc.ExecutionRPC
+import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.vm.*
 
 /** OpenCL device-side enqueue: queues, ND-ranges, events and block kernel queries. */

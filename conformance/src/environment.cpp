@@ -30,8 +30,14 @@ std::map<std::string, std::string> baseEnvironment() {
   result["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin";
   return result;
 }
+void applyJitCacheEnvironment(std::map<std::string, std::string> &environment, const std::filesystem::path &cache) {
+  environment["CUDA_CACHE_PATH"] = cache.string();
+  environment["CUDA_CACHE_MAXSIZE"] = std::to_string(JitCacheMaximumBytes);
+  environment.erase("CUDA_CACHE_DISABLE");
+}
 void prepareRuntimeEnvironment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
-                               const std::filesystem::path &support, std::string_view backend) {
+                               const std::filesystem::path &support, const std::vector<std::filesystem::path> &supplements,
+                               std::string_view backend) {
   environment[environment::SupportDir] = support.string();
   // This map is used with env::empty, so absent variables really are absent.
   environment = environment ^ filter_keys([](const std::string &key) {
@@ -39,6 +45,8 @@ void prepareRuntimeEnvironment(std::map<std::string, std::string> &environment, 
                 });
   environment["OMP_TARGET_OFFLOAD"] = "MANDATORY";
   environment["LD_LIBRARY_PATH"] = (artifact / "lib").string() + ":" + (support / "lib").string();
+  for (const auto &supplement : supplements)
+    environment["LD_LIBRARY_PATH"] += ":" + (supplement / "lib").string();
   if (std::filesystem::is_regular_file(support / "data/libdrm/amdgpu.ids"))
     environment["AMDGPU_ASIC_ID_TABLE_PATHS"] = (support / "data/libdrm").string();
   if (std::filesystem::is_directory(support / "lib/rocblas/library"))

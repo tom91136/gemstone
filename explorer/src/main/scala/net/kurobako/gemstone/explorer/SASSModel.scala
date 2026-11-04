@@ -250,6 +250,8 @@ object SASSModel extends Model {
   /** The immediate operand a failed condition sets, and the value it requires, where the condition equates one with a
     * number, as `.16864 with 8-bit data requires id2 == 0` does.
     */
+  // the syntax fields of one instruction form
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   private def forced(form: NVDisasm.Form, fields: Vec[NVDisasm.Syntax.Field], failure: String)
       : Option[(NVDisasm.Syntax.Field, String)] = {
     import ConditionExpression.*
@@ -309,11 +311,10 @@ object SASSModel extends Model {
         }
         def text(opcode: String, chosen: Map[NVDisasm.Syntax.Field, String]): Option[(String, Written)] =
           written.getOrElseUpdate((opcode, chosen), render(opcode, chosen, operands))
-        val product = LazyList.from(opcodes).flatMap(opcode =>
-          required.foldLeft(LazyList(Map.empty[NVDisasm.Syntax.Field, String]))((partial, choice) =>
-            partial.flatMap(chosen => choice.values.map(value => chosen.updated(choice.field, value)))
-          ).map(opcode -> _)
+        val combinations = required.foldLeft(LazyList(Map.empty[NVDisasm.Syntax.Field, String]))((partial, choice) =>
+          partial.flatMap(chosen => choice.values.map(value => chosen.updated(choice.field, value)))
         )
+        val product = LazyList.from(opcodes).flatMap(opcode => combinations.map(opcode -> _))
         // where no combination of the required modifiers is legal alone, each takes one optional modifier as well
         val optional = choices.filterNot(_.required)
         val combined = product.take(SASSModifiers.Attempts)
@@ -769,6 +770,8 @@ object SASSModel extends Model {
     * hold. Conditions on the fixed fields alone hold for the instance, such as each register's range. An instance the
     * encoding tables do not parse reads its constants at fixed offsets.
     */
+  // the conditions and domains of one instruction form
+  @SuppressWarnings(Array("bonsai:linear-in-loop"))
   private def encoding(
       database: NVDisasm.Database,
       form: NVDisasm.Form,

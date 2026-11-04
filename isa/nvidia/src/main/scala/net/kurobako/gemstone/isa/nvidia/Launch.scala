@@ -48,4 +48,7 @@ private[isa] trait Launch {
 
   /** A nanosecond timer every multiprocessor shares. */
   def globalTimer(): UInt[64]
+
+  /** The address of the driver workspace of a cooperative launch, otherwise 0. */
+  def gridWorkspace(): UInt[64]
 }

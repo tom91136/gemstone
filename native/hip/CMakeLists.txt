@@ -36,11 +36,37 @@ if(BUILD_TESTING)
   gemstone_set_tests_properties(hip/fatbinary-exit-lifetime PROPERTIES TIMEOUT 10)
   add_executable(gemstone_hip_runtime_test test/hip_runtime_test.cpp)
   target_include_directories(gemstone_hip_runtime_test SYSTEM PRIVATE ${HIP_INCLUDE_DIR})
+  target_include_directories(gemstone_hip_runtime_test PRIVATE ../hsa/include ../generated ../generated/amdgpu)
   target_compile_definitions(gemstone_hip_runtime_test PRIVATE __HIP_PLATFORM_AMD__=1)
   target_link_libraries(gemstone_hip_runtime_test PRIVATE gemstone_hip_runtime)
   gemstone_test_target(gemstone_hip_runtime_test)
   target_compile_options(gemstone_hip_runtime_test PRIVATE -Wno-deprecated-declarations)
   gemstone_discover_tests(gemstone_hip_runtime_test
+    TEST_PREFIX "hip/"
+    PROPERTIES TIMEOUT 60)
+  add_executable(gemstone_hip_device_limits_test test/device-limits.cpp)
+  target_include_directories(gemstone_hip_device_limits_test SYSTEM PRIVATE ${HIP_INCLUDE_DIR})
+  target_compile_definitions(gemstone_hip_device_limits_test PRIVATE __HIP_PLATFORM_AMD__=1)
+  target_link_libraries(gemstone_hip_device_limits_test PRIVATE gemstone_hip_runtime)
+  gemstone_test_target(gemstone_hip_device_limits_test)
+  gemstone_discover_tests(gemstone_hip_device_limits_test
+    TEST_PREFIX "hip/"
+    PROPERTIES TIMEOUT 60)
+  add_executable(gemstone_hip_multi_device_test test/multi-device.cpp)
+  target_include_directories(gemstone_hip_multi_device_test SYSTEM PRIVATE ${HIP_INCLUDE_DIR})
+  target_include_directories(gemstone_hip_multi_device_test PRIVATE ../hsa/include ../generated ../generated/amdgpu)
+  target_compile_definitions(gemstone_hip_multi_device_test PRIVATE __HIP_PLATFORM_AMD__=1)
+  target_link_libraries(gemstone_hip_multi_device_test PRIVATE gemstone_hip_runtime)
+  gemstone_test_target(gemstone_hip_multi_device_test)
+  gemstone_discover_tests(gemstone_hip_multi_device_test
+    TEST_PREFIX "hip/"
+    PROPERTIES TIMEOUT 60)
+  add_executable(gemstone_hip_graphs_test test/graphs.cpp)
+  target_include_directories(gemstone_hip_graphs_test SYSTEM PRIVATE ${HIP_INCLUDE_DIR})
+  target_compile_definitions(gemstone_hip_graphs_test PRIVATE __HIP_PLATFORM_AMD__=1)
+  target_link_libraries(gemstone_hip_graphs_test PRIVATE gemstone_hip_runtime)
+  gemstone_test_target(gemstone_hip_graphs_test)
+  gemstone_discover_tests(gemstone_hip_graphs_test
     TEST_PREFIX "hip/"
     PROPERTIES TIMEOUT 60)
 endif()

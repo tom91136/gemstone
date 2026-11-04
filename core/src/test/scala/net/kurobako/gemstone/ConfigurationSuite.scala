@@ -1,7 +1,7 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ConfigurationSuite extends Suite {
   test("positive decimal configuration rejects signs, whitespace and overflow") {

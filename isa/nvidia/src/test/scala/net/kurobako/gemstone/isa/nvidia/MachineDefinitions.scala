@@ -211,6 +211,10 @@ private[isa] object MachineDefinitions {
     MachineSemantics.bulkStore(Render, machine)(destination, source, size, mask)
   }
 
+  def texture(operation: Texture.Operation): Either[String, Definition] = rendered("texture") { machine =>
+    MachineSemantics.texture(machine)(operation)
+  }
+
   def tensorMapCopy(guarded: Boolean = false): Either[String, Definition] =
     rendered("tensormap.cp_fenceproxy", guarded) { machine =>
       MachineSemantics.tensorMapCopy(Render, machine)(destination, source)

@@ -25,7 +25,7 @@ class VMMachineOpsSuite extends Suite {
       LaunchGeometry.forLaunch(Dimensions(lanes, 1, 1), Dimensions.One).toOption.get,
       Coordinates(0, 0, 0),
       workgroup,
-      VMDevice(DeviceHeap(memory), TaskControl(), Workgroups.Sequential),
+      VMDevice(DeviceHeap(memory), TaskControl(), Workgroups.Sequential, handler = _ => Right(())),
       0,
       VMWriteBuffer(16),
       VMFrame(emptyRoutine, programs.frame(lanes), 0L, None, VMLaneMask.all(lanes)),

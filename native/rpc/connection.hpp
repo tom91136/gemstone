@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -23,6 +24,7 @@ public:
   std::string error;
 
 private:
+  bool exchangeFrames(std::string_view operation, std::string_view payload, uint32_t &status, std::vector<uint8_t> &response);
   bool connect();
   bool send(std::span<const uint8_t> bytes);
   bool receive(std::span<uint8_t> bytes);
@@ -30,7 +32,11 @@ private:
   int timeoutMillis = 300000;
   bool established = false;
   bool poisoned = false;
+  std::string sessionEndpoint;
   uint64_t client, sessionHigh, sessionLow;
 };
+
+/** Steady-clock time of the latest server heartbeat read by any session. */
+std::chrono::steady_clock::time_point lastHeartbeat();
 
 } // namespace gemstone::execution

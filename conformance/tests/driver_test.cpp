@@ -23,6 +23,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -112,6 +113,7 @@ TEST_CASE("workload program globs select discovery without changing native case 
   manifest.close();
   RunOptions const options;
   Workload workload;
+  workload.specs.clear();
   REQUIRE(!glz::read_toml(workload, std::string(R"(specs = ['[fixture]']
 include_programs = ['alpha_cts_*']
 )")));
@@ -135,7 +137,10 @@ include_programs = ['alpha_cts_*']
     workload.excludePrograms = {"alpha_cts_two"};
     expectedPrograms = {"alpha_cts_one"};
   }
-  SECTION("exclusions retain their existing exact-name semantics") { workload.excludePrograms = {"alpha_cts_*"}; }
+  SECTION("exclusions match program globs") {
+    workload.excludePrograms = {"alpha_cts_t*"};
+    expectedPrograms = {"alpha_cts_one"};
+  }
   SECTION("an unmatched inclusion reports an empty selection") {
     workload.includePrograms = {"absent_*"};
     CHECK(discoverCases(options, workload, directory.path, baseEnvironment(), "fixture", directory.path / "reports").empty());
@@ -176,7 +181,6 @@ backend = "sycl"
   }
   std::string inclusion;
   bool empty = false;
-  SECTION("compact and full style workloads select all backends") {}
   SECTION("direct execution needs no profiles or hostname and schedules every explicit route") {
     fs::remove_all(options.profiles);
     options.profiles.clear();
@@ -200,10 +204,10 @@ backend = "sycl"
     empty = true;
   }
   SECTION("no cases match anywhere is an error") { empty = true; }
-  std::ofstream(directory.path / "workloads/compact.toml")
+  std::ofstream(directory.path / "workloads/short.toml")
       << inclusion << (empty && inclusion.empty() ? "specs = ['[absent]']\n" : "specs = ['[pass]']\n");
   if (empty) {
-    CHECK_THROWS_WITH(run(options), "conformance workload selected no tests: compact");
+    CHECK_THROWS_WITH(run(options), "conformance workload selected no tests: short");
   } else {
     CHECK(run(options) == 0);
     for (const auto &report : fs::directory_iterator(options.output / (options.direct ? "direct" : "fixture"))) {
@@ -233,7 +237,7 @@ TEST_CASE("case results report passes, failures and skips by full name", "[drive
   std::ofstream(artifact / "test-programs.txt", std::ios::app) << longProgram << "\t10\tcatch2\n";
   std::ofstream(artifact / "artifact.toml") << "backend = 'opencl'\n";
   fs::create_directories(workloads);
-  std::ofstream(workloads / "compact.toml") << "specs = ['[fixture],[failure]']\n";
+  std::ofstream(workloads / "short.toml") << "specs = ['[fixture],[failure]']\n";
   auto environment = baseEnvironment();
   environment[conformance::environment::JobCount] = "2";
   const auto result = runProcess({Driver.string(), "run", "--direct", "--artifacts", artifact.parent_path().string(), "--output",
@@ -256,7 +260,7 @@ TEST_CASE("case results report passes, failures and skips by full name", "[drive
     CHECK(selected);
     CHECK(junit.contains("quote&quot; unicode"));
     CHECK(junit.contains("<skipped/>"));
-    CHECK(!read(report.path() / "compact.toml").contains("extends"));
+    CHECK(!read(report.path() / "short.toml").contains("extends"));
     RunOptions resolved;
     resolved.workloads = report.path();
     const auto workload = loadWorkload(resolved);
@@ -271,7 +275,7 @@ TEST_CASE("parallel discovery reports progress before probes finish and preserve
   const auto workloads = directory.path / "workloads";
   const auto reports = directory.path / "reports";
   fs::create_directories(workloads);
-  std::ofstream(workloads / "compact.toml") << "specs = ['[pass]']\n";
+  std::ofstream(workloads / "short.toml") << "specs = ['[pass]']\n";
   for (const auto *backend : {"opencl", "sycl"}) {
     const auto artifact = fixtureArtifact(artifacts / backend);
     fs::copy_file(Fixture, artifact / ("conformance-device" + Fixture.extension().string()));
@@ -339,7 +343,7 @@ TEST_CASE("parallel discovery reports progress before probes finish and preserve
 }
 
 TEST_CASE("bounded workloads exclude CUDA regressions that walk billions of indices", "[driver][workload-budget]") {
-  for (const auto &name : {"compact", "full"}) {
+  for (const auto &name : {"short", "long", "xlong"}) {
     DYNAMIC_SECTION(name) {
       RunOptions options;
       options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
@@ -361,10 +365,10 @@ TEST_CASE("bounded workloads exclude CUDA regressions that walk billions of indi
   }
 }
 
-TEST_CASE("full includes the same bounded CTS selections as standalone workloads", "[driver][workload-budget]") {
+TEST_CASE("xlong includes the same bounded CTS selections as standalone workloads", "[driver][workload-budget]") {
   RunOptions options;
   options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
-  options.workload = "full";
+  options.workload = "xlong";
   const auto full = loadWorkload(options);
   REQUIRE(full.specs.size() == 1);
   for (const auto *name : {"opencl-cts-bounded", "sycl-cts-bounded", "vulkan-cts-bounded"}) {
@@ -375,14 +379,14 @@ TEST_CASE("full includes the same bounded CTS selections as standalone workloads
     CHECK(full.excludePrograms == bounded.excludePrograms);
     CHECK(full.vulkanCases == bounded.vulkanCases);
   }
-  options.workload = "compact";
+  options.workload = "short";
   const auto compact = loadWorkload(options);
   for (const auto &name : compact.vulkanCases)
     CHECK(full.vulkanCases ^ contains(name));
 }
 
 TEST_CASE("iteration workloads retain every miniapp", "[driver][workload-budget]") {
-  for (const auto *name : {"compact", "full", "miniapps"}) {
+  for (const auto *name : {"short", "long", "xlong", "miniapps"}) {
     DYNAMIC_SECTION(name) {
       RunOptions options;
       options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
@@ -427,6 +431,36 @@ TEST_CASE("Google Test inventories retain parameterised cases and reject duplica
   CHECK_THROWS(gtestCaseNames("Driver.\n  Duplicate\n  Duplicate\n", "levelzero"));
 }
 
+TEST_CASE("Google Test XML results classify skipped cases and reject unknown results", "[driver]") {
+  const auto xml = [](const std::string &result) {
+    return "<testsuites tests=\"1\"><testsuite name=\"Driver\" tests=\"1\">"
+           "<testcase name=\"Opens\" status=\"run\" result=\""
+           + result + "\" time=\"0\" classname=\"Driver\"/></testsuite></testsuites>\n";
+  };
+  CHECK(gtestSkipped(xml("skipped")));
+  CHECK_FALSE(gtestSkipped(xml("completed")));
+  CHECK_THROWS(gtestSkipped(xml("suppressed")));
+  CHECK_THROWS(gtestSkipped("<testsuites tests=\"0\"/>"));
+}
+
+TEST_CASE("Google Test typed suites carry TypeParam comments on the suite line", "[driver]") {
+  const auto names =
+      gtestCaseNames("RocprimTests/0.  # TypeParam = params<unsigned char, common::custom_type<int, int> >\n  Shuffle\n  Scan\n"
+                     "RocprimTests/1.  # TypeParam = params<int>\n  Shuffle\nPlain.\n  Case\n",
+                     "vendor_hip_rocprim_tests");
+  CHECK(names == std::vector<std::string>{"RocprimTests/0.Shuffle", "RocprimTests/0.Scan", "RocprimTests/1.Shuffle", "Plain.Case"});
+  CHECK_THROWS(gtestCaseNames("  # TypeParam = int\n  Case\n", "vendor_hip_rocprim_tests"));
+  CHECK_THROWS(gtestCaseNames("NoSuffix  # TypeParam = int\n  Case\n", "vendor_hip_rocprim_tests"));
+}
+
+TEST_CASE("levelzero case patterns restrict only Level Zero Google Test programs", "[driver]") {
+  const std::vector<std::string> patterns{"zeDriver*"};
+  CHECK(gtestCaseSelected("levelzero_cts_driver", "zeDriverTests.Get", patterns));
+  CHECK_FALSE(gtestCaseSelected("levelzero_cts_driver", "zeDeviceTests.Get", patterns));
+  CHECK(gtestCaseSelected("vendor_hip_rocprim_tests", "RocprimIntrinsicsTests/0.ShuffleXor", patterns));
+  CHECK(gtestCaseSelected("levelzero_cts_driver", "zeDeviceTests.Get", {}));
+}
+
 TEST_CASE("native shards select exact names including Catch metacharacters", "[driver]") {
   const auto names = listFixture();
   REQUIRE(names.size() == 2);
@@ -438,6 +472,13 @@ TEST_CASE("native shards select exact names including Catch metacharacters", "[d
   }
   CHECK_THROWS(catchShardArguments({}, 1, 1));
   CHECK_THROWS(catchShardArguments({}, 0, 0));
+}
+
+TEST_CASE("several workload specs select the union of their cases", "[driver]") {
+  auto arguments = catchShardArguments({"[pass]", "[skip]"}, 0, 1);
+  arguments.insert(arguments.begin(), Fixture.string());
+  const auto result = runProcess(arguments, Fixture.parent_path(), baseEnvironment(), 10s, {}, true);
+  CHECK(result.status == 0);
 }
 
 TEST_CASE("case shards interleave the cases of every target and keep their Catch shards", "[driver]") {
@@ -523,6 +564,49 @@ TEST_CASE("cases on one physical device run one at a time while other devices ru
   CHECK(reports[19].result.output.contains("executor failure"));
 }
 
+TEST_CASE("exclusive cases run with no other case running", "[driver]") {
+  const auto target = [](std::string id, const std::string &program, std::string prefix, std::string device, uint32_t count) {
+    TargetExecution result{.id = std::move(id), .config = {}, .tests = {}};
+    result.config.device = std::move(device);
+    for (uint32_t index = 0; index < count; ++index)
+      result.tests.push_back(
+          {.identity = fmt::format("{}case{}", prefix, index), .program = program, .timeoutSeconds = 10, .index = index, .count = count});
+    return result;
+  };
+  const std::vector<TargetExecution> targets{target("event", "levelzero_cts_test_event", "SyncTimeoutParams/", "", 3),
+                                             target("queue", "levelzero_cts_test_cmdqueue", "SyncTimeoutParams/", "pci-a", 2),
+                                             target("plain", "fixture", "", "", 8)};
+  std::mutex mutex;
+  int32_t running = 0;
+  int32_t peak = 0;
+  int32_t exclusiveCases = 0;
+  bool exclusiveRunning = false;
+  bool overlap = false;
+  const auto reports = runCases(targets, 8, [&](const ExecutionConfig &, const ScheduledCase &test) {
+    const bool exclusive = test.program.starts_with("levelzero_");
+    {
+      const std::scoped_lock lock(mutex);
+      if (exclusive ? running > 0 : exclusiveRunning) overlap = true;
+      peak = std::max(peak, ++running);
+      exclusiveRunning = exclusiveRunning || exclusive;
+      exclusiveCases += exclusive;
+    }
+    std::this_thread::sleep_for(20ms);
+    {
+      const std::scoped_lock lock(mutex);
+      --running;
+      if (exclusive) exclusiveRunning = false;
+    }
+    return CaseResult{.status = 0, .output = {}, .message = {}};
+  });
+  CHECK_FALSE(overlap);
+  CHECK(exclusiveCases == 5);
+  CHECK(peak >= 2);
+  REQUIRE(reports.size() == 13);
+  for (const auto &report : reports)
+    CHECK(report.result.status == 0);
+}
+
 TEST_CASE("a hung case is killed with its process tree on timeout or interruption", "[driver][process]") {
   TemporaryDirectory directory;
   const auto artifact = directory.path / "artifacts/opencl";
@@ -532,7 +616,7 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
   std::ofstream(artifact / "artifact.toml") << "backend = 'opencl'\n";
   const auto workloads = directory.path / "workloads";
   fs::create_directories(workloads);
-  std::ofstream(workloads / "compact.toml") << "specs = ['[hang],[pass]']\n";
+  std::ofstream(workloads / "short.toml") << "specs = ['[hang],[pass]']\n";
   const auto reports = directory.path / "reports";
   const auto pids = [&]() -> std::optional<std::array<int32_t, 3>> {
     if (!fs::exists(reports)) return std::nullopt;
@@ -642,7 +726,9 @@ TEST_CASE("failed tests retain both streams in full and report only the output p
                                .launcher = {},
                                .skips = {},
                                .specs = {"[noisy]"},
-                               .deviceLock = false};
+                               .deviceLock = false,
+                               .jitPrograms = {},
+                               .jitFailures = {}};
   const auto result =
       executeCase(config, {.identity = "noisy failure", .program = Fixture.stem().string(), .timeoutSeconds = 10, .index = 0, .count = 1});
   INFO(result.output);
@@ -668,7 +754,9 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
                          .launcher = {},
                          .skips = {},
                          .specs = {"[fixture]"},
-                         .deviceLock = false};
+                         .deviceLock = false,
+                         .jitPrograms = {},
+                         .jitFailures = {}};
   config.environment["EXPECTED_ENVIRONMENT"] = "value with spaces";
   config.environment["PROPAGATED_ENVIRONMENT"] = "value with spaces";
   config.environment[conformance::environment::TargetArch] = "";
@@ -691,10 +779,10 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
   env["CUDA_HOME"] = "/host/sdk";
   env["ROCBLAS_TENSILE_LIBPATH"] = "stale";
   env["OMP_TARGET_OFFLOAD"] = "DISABLED";
-  prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", "opencl");
+  prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", {}, "opencl");
   CHECK(env.at("OMP_TARGET_OFFLOAD") == "MANDATORY");
   env[conformance::environment::VulkanCtsTimeoutSeconds] = "7200";
-  prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", "vulkan");
+  prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", {}, "vulkan");
   applySuiteIsolatedEnvironment(env, "vulkan");
   CHECK(env.at(conformance::environment::VulkanCtsTimeoutSeconds) == "7200");
   CHECK_FALSE(env.contains(conformance::environment::DevicePattern));
@@ -714,6 +802,95 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
   CHECK(config.environment.at("CL_DEVICE_INDEX") == "2");
   CHECK(config.environment.at(conformance::environment::PhysicalDeviceName) == config.device);
   CHECK_THROWS(applyDeviceProbe(config, {config.device, {{"LD_PRELOAD", "unexpected"}}}));
+}
+
+TEST_CASE("device count is a validated suite setting kept for runtime programs", "[driver]") {
+  const conformance_test::Environment device(conformance::environment::DeviceCount, "2");
+  TemporaryDirectory const directory;
+  auto env = baseEnvironment();
+  CHECK(env.at(conformance::environment::DeviceCount) == "2");
+  prepareRuntimeEnvironment(env, directory.path / "artifact", directory.path / "support", {}, "hip");
+  CHECK(env.at(conformance::environment::DeviceCount) == "2");
+  CHECK_FALSE(conformance::invalidSuiteSetting(conformance::environment::DeviceCount, "2").has_value());
+  CHECK(conformance::invalidSuiteSetting(conformance::environment::DeviceCount, "0").has_value());
+  CHECK(conformance::invalidSuiteSetting(conformance::environment::DeviceCount, "abc").has_value());
+}
+
+TEST_CASE("PTX-only artifacts warm every program's JIT cache unless an isolated launcher runs them", "[driver][jit]") {
+  const std::vector<ScheduledCase> tests{{.identity = "a", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 3},
+                                         {.identity = "b", .program = "minibude", .timeoutSeconds = 10, .index = 1, .count = 3},
+                                         {.identity = "c", .program = "unified", .timeoutSeconds = 10, .index = 2, .count = 3}};
+  const auto metadata = [](std::string_view code) {
+    return ArtifactMetadata{.backend = "cuda", .architecture = "sm_80", .support = {}, .code = std::string(code), .supplements = {}};
+  };
+  CHECK(jitWarmupPrograms(metadata("ptx"), false, tests) == std::vector<std::string>{"minibude", "unified"});
+  CHECK(jitWarmupPrograms(metadata("ptx"), true, tests).empty());
+  CHECK(jitWarmupPrograms(metadata("fatbin"), false, tests).empty());
+  CHECK(jitWarmupPrograms(metadata(""), false, tests).empty());
+}
+
+TEST_CASE("the JIT cache is pinned to a run-owned directory sized to hold the modules", "[driver][jit]") {
+  auto env = baseEnvironment();
+  env["CUDA_CACHE_DISABLE"] = "1";
+  env["CUDA_CACHE_PATH"] = "/home/user/.nv";
+  applyJitCacheEnvironment(env, "/work/jit-cache");
+  CHECK(env.at("CUDA_CACHE_PATH") == "/work/jit-cache");
+  CHECK(env.at("CUDA_CACHE_MAXSIZE") == fmt::to_string(JitCacheMaximumBytes));
+  CHECK_FALSE(env.contains("CUDA_CACHE_DISABLE"));
+  for (const auto *key : {"CUDA_CACHE_PATH", "CUDA_CACHE_MAXSIZE", "CUDA_CACHE_DISABLE"})
+    CHECK(conformance::reservedEnvironmentKey(key));
+}
+
+TEST_CASE("JIT warm-up runs one unskipped case per program eagerly and fails that program's cases when it fails", "[driver][jit]") {
+  TemporaryDirectory const directory;
+  const auto artifact = fixtureArtifact(directory.path / "artifact");
+  const auto program = Fixture.stem().string();
+  const auto names = listFixture();
+  std::vector<TargetExecution> targets;
+  for (const auto *id : {"first", "second"}) {
+    TargetExecution target{.id = id, .config = {}, .tests = {}};
+    target.config.directory = artifact.string();
+    target.config.reportDirectory = (directory.path / "reports" / id).string();
+    target.config.specs = {"[fixture]"};
+    target.config.skips = {names[0]};
+    target.config.environment = baseEnvironment();
+    target.config.jitPrograms = {program};
+    target.tests = {{.identity = names[0], .program = program, .timeoutSeconds = 10, .index = 0, .count = 2},
+                    {.identity = names[1], .program = program, .timeoutSeconds = 10, .index = 1, .count = 2}};
+    targets.push_back(std::move(target));
+  }
+  std::mutex mutex;
+  std::vector<std::tuple<std::string, std::string, std::string, uint32_t>> seen;
+  warmUpJit(targets, 2, 2.0, [&](const ExecutionConfig &config, const ScheduledCase &test) {
+    const std::scoped_lock lock(mutex);
+    seen.emplace_back(config.reportDirectory, config.environment.at("CUDA_MODULE_LOADING"), test.identity, test.timeoutSeconds);
+    return CaseResult{.status = config.reportDirectory.contains("second") ? 1 : 0, .output = "boom\n", .message = "exit status 1"};
+  });
+  REQUIRE(seen.size() == 2);
+  for (const auto &[report, loading, identity, timeout] : seen) {
+    CHECK(report.ends_with("/warmup"));
+    CHECK(loading == "EAGER");
+    CHECK(identity == names[1]);
+    CHECK(timeout == JitWarmupSeconds * 2);
+  }
+  CHECK_FALSE(targets[0].config.environment.contains("CUDA_MODULE_LOADING"));
+  CHECK(targets[0].config.jitFailures.empty());
+  REQUIRE(targets[1].config.jitFailures.contains(program));
+  const auto failed = executeCase(targets[1].config, targets[1].tests[1]);
+  CHECK(failed.status == 1);
+  CHECK(failed.message.contains("JIT warm-up"));
+  CHECK(failed.message.contains("exit status 1"));
+  CHECK(executeCase(targets[0].config, targets[0].tests[1]).status == SkipReturnCode);
+}
+
+TEST_CASE("JIT warm-up skips programs with every case profile-skipped", "[driver][jit]") {
+  TargetExecution target{
+      .id = "t", .config = {}, .tests = {{.identity = "a", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 1}}};
+  target.config.jitPrograms = {"unified", "absent"};
+  target.config.skips = {"unified"};
+  std::vector<TargetExecution> targets{std::move(target)};
+  warmUpJit(targets, 1, 1.0, [](const ExecutionConfig &, const ScheduledCase &) -> CaseResult { FAIL("no case should run"); });
+  CHECK(targets[0].config.jitFailures.empty());
 }
 
 TEST_CASE("Fire CLI validates options and preserves raw launcher arguments", "[driver]") {
@@ -898,7 +1075,9 @@ TEST_CASE("dEQP statuses go to the case log and failure record instead of the co
                                .launcher = {},
                                .skips = {},
                                .specs = {"*"},
-                               .deviceLock = false};
+                               .deviceLock = false,
+                               .jitPrograms = {},
+                               .jitFailures = {}};
   std::ostringstream const console;
   auto *const standard = std::cout.rdbuf(console.rdbuf());
   const auto passed =
@@ -982,30 +1161,32 @@ TEST_CASE("large discovery logs preserve late cases and capped captures fail exp
 }
 
 TEST_CASE("vendor BLAS payload policy preserves available operations and unknown packages", "[driver]") {
-  const auto cuda = [](std::string_view architecture, std::string_view operation, std::string_view code = "ptx",
-                       std::string_view library = "libcublas.so.13.6.0.2") {
-    return suiteBlasSkip("cuda", architecture, code, library, "unified", operation);
-  };
-  CHECK_FALSE(cuda("sm_89", "blas/f32/compact/gemm").empty());
-  CHECK(cuda("sm_89", "blas/f32/compact/gemm", "sass").empty());
-  CHECK(cuda("sm_89", "blas/f32/compact/gemm", "ptx", "libcublas.so.13.7.0.0").empty());
-  CHECK(cuda("sm_89", "blas/f32/full/gemm").empty());
-  CHECK(cuda("sm_89", "blas/f64/compact/gemm").empty());
-  CHECK(cuda("sm_89", "blas/f32/compact/axpy").empty());
-  CHECK(cuda("sm_89", "blas/f32/compact/gemm_strided_batched").empty());
-  CHECK(cuda("sm_100", "blas/f32/compact/gemm_nt").empty());
-  CHECK_FALSE(cuda("sm_100", "blas/f32/compact/gemm_tn").empty());
-  CHECK_FALSE(cuda("sm_90a", "blas/f32/compact/gemm").empty());
-  CHECK_FALSE(cuda("sm_103f", "blas/f32/compact/gemm_tn").empty());
-  CHECK(cuda("sm_120a", "blas/f32/compact/gemm", "sass").empty());
-  CHECK(cuda("sm_70", "blas/f32/compact/gemm", "ptx", "libcublas.so.11.11.3.6").empty());
-  CHECK(cuda("sm_50", "blas/f32/compact/gemm_strided_batched", "ptx", "libcublas.so.11.11.3.6").empty());
-  CHECK_FALSE(cuda("sm_35", "blas/f32/compact/gemm_strided_batched", "ptx", "libcublas.so.11.11.3.6").empty());
-  CHECK_FALSE(suiteBlasSkip("hip", "gfx906", "", "librocblas.so.5.1.70101", "unified", "blas/f32/compact/axpy").empty());
-  CHECK(suiteBlasSkip("hip", "gfx906", "", "librocblas.so.5.1.70101", "unified", "blas/f32/compact/gemm").empty());
-  CHECK(suiteBlasSkip("hip", "gfx908", "", "librocblas.so.5.1.70101", "unified", "blas/f32/compact/axpy").empty());
-  CHECK(suiteBlasSkip("hip", "gfx906", "", "librocblas.so.6", "unified", "blas/f32/compact/axpy").empty());
-  CHECK(suiteBlasSkip("cuda", "sm_89", "ptx", "libcublas.so.13.6.0.2", "another-program", "blas/f32/compact/gemm").empty());
+  const auto hip = [](std::string_view architecture, std::string_view operation, std::string_view library = "librocblas.so.5.1.70101",
+                      std::string_view program = "unified") { return suiteBlasSkip("hip", architecture, library, program, operation); };
+  CHECK_FALSE(hip("gfx906", "blas/f32/compact/axpy").empty());
+  CHECK(hip("gfx906", "blas/f32/compact/gemm").empty());
+  CHECK(hip("gfx908", "blas/f32/compact/axpy").empty());
+  CHECK(hip("gfx906", "blas/f32/compact/axpy", "librocblas.so.6").empty());
+  CHECK(hip("gfx906", "blas/f32/compact/axpy", "librocblas.so.5.1.70101", "another-program").empty());
+  CHECK(suiteBlasSkip("cuda", "sm_89", "libcublas.so.13.6.0.2", "unified", "blas/f32/compact/gemm").empty());
+}
+
+TEST_CASE("multi-device cases receive two devices only under their own identities", "[driver]") {
+  CHECK(suiteCaseDeviceCount("levelzero_cts_test_device",
+                             "TestAffinity.GivenSpecificAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturned")
+        == "2");
+  CHECK(suiteCaseDeviceCount("levelzero_cts_test_copy",
+                             "zeP2PContextCopyTests.GivenMultipleDevicesInDifferentContextsWhenAttemptingToUseMemoryThenMemoryIsAccessible")
+        == "2");
+  CHECK(suiteCaseDeviceCount("levelzero_cts_test_device",
+                             "zeDeviceGetTests.GivenValidCountWhenRetrievingDevicesThenNotNullDevicesAreReturned")
+            .empty());
+  CHECK(suiteCaseDeviceCount("opencl_cts_basic",
+                             "TestAffinity.GivenSpecificAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturned")
+            .empty());
+  CHECK(suiteCaseDeviceCount("vendor_hip_examples", "vendor/hip/rocm-examples/Libraries/rocFFT/multi_gpu") == "2");
+  CHECK(suiteCaseDeviceCount("vendor_hip_examples", "vendor/hip/rocm-examples/Libraries/rocFFT/complex_complex").empty());
+  CHECK(suiteCaseDeviceCount("unified", "vendor/hip/rocm-examples/Libraries/rocFFT/multi_gpu").empty());
 }
 
 TEST_CASE("vendor BLAS skips require the actual staged library and apply with or without a launcher", "[driver]") {
@@ -1014,32 +1195,31 @@ TEST_CASE("vendor BLAS skips require the actual staged library and apply with or
   const auto artifact = directory.path / "artifact";
   fs::create_directories(support / "lib");
   fs::create_directories(artifact / "lib");
-  const auto version = support / "lib/libcublas.so.13.6.0.2";
+  const auto version = support / "lib/librocblas.so.5.1.70101";
   std::ofstream(version) << "fixture";
-  fs::create_symlink(version.filename(), support / "lib/libcublas.so");
+  fs::create_symlink(version.filename(), support / "lib/librocblas.so");
   ExecutionConfig config;
   config.directory = artifact.string();
   config.device = conformance::physicalDeviceKey(conformance::makePciDevice(1, 0, 0, 0));
-  config.environment = {{conformance::environment::TargetBackendName, "cuda"},
-                        {conformance::environment::TargetArch, "sm_89"},
-                        {conformance::environment::CudaCodeMode, "ptx"},
+  config.environment = {{conformance::environment::TargetBackendName, "hip"},
+                        {conformance::environment::TargetArch, "gfx906"},
                         {conformance::environment::SupportDir, support.string()}};
-  const ScheduledCase test{.identity = "blas/f32/compact/gemm", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 1};
+  const ScheduledCase test{.identity = "blas/f32/compact/axpy", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 1};
   const auto execute = [&] { return executeCase(config, test).status; };
   CHECK(execute() == SkipReturnCode);
   config.launcher = {"must-not-be-launched"};
   CHECK(execute() == SkipReturnCode);
   SECTION("a missing library remains an error") { fs::remove(version); }
   SECTION("an unknown package remains an error") {
-    fs::remove(support / "lib/libcublas.so");
-    const auto unknown = support / "lib/libcublas.so.99";
+    fs::remove(support / "lib/librocblas.so");
+    const auto unknown = support / "lib/librocblas.so.99";
     std::ofstream(unknown) << "fixture";
-    fs::create_symlink(unknown.filename(), support / "lib/libcublas.so");
+    fs::create_symlink(unknown.filename(), support / "lib/librocblas.so");
   }
   SECTION("an artifact-local library takes precedence over shared support") {
-    std::ofstream(artifact / "lib/libcublas.so") << "different package";
+    std::ofstream(artifact / "lib/librocblas.so") << "different package";
   }
-  SECTION("SASS keeps executing") { config.environment[conformance::environment::CudaCodeMode] = "sass"; }
+  SECTION("a supported architecture keeps executing") { config.environment[conformance::environment::TargetArch] = "gfx908"; }
   CHECK_THROWS(execute());
 }
 
@@ -1052,14 +1232,19 @@ TEST_CASE("compiler artifacts require matching metadata and backend support", "[
   options.workloads = directory.path / "workloads";
   options.selectors = {"cuda-ptx/sm_80/gcc"};
   fs::create_directories(options.workloads);
-  std::ofstream(options.workloads / "compact.toml") << "specs = ['[skip]']\n";
-  const auto root = options.artifacts / "cuda/gcc";
+  std::ofstream(options.workloads / "short.toml") << "specs = ['[skip]']\n";
+  const auto root = options.artifacts / "cuda-ptx/gcc";
   const auto artifact = fixtureArtifact(root / "sm_80");
   fs::copy_file(Fixture, artifact / ("conformance-device" + Fixture.extension().string()));
   std::string support = "support";
   std::string compiler = "compiler = 'gcc'\n";
+  std::string code = "ptx";
   bool mismatch = false;
   SECTION("matching compiler selects its support directory") {}
+  SECTION("fatbin artifact cannot satisfy PTX route") {
+    code = "fatbin";
+    mismatch = true;
+  }
   SECTION("SDK-specific support is shared at the backend root") { support = "support-11.8"; }
   SECTION("absent compiler means vendor and cannot satisfy GCC") {
     compiler.clear();
@@ -1074,7 +1259,9 @@ TEST_CASE("compiler artifacts require matching metadata and backend support", "[
     mismatch = true;
   }
   fs::create_directories(options.artifacts / "cuda" / support / "lib");
-  std::ofstream(artifact / "artifact.toml") << "backend = 'cuda'\narchitecture = 'sm_80'\nsupport = '" << support << "'\n" << compiler;
+  std::ofstream(artifact / "artifact.toml") << "backend = 'cuda'\narchitecture = 'sm_80'\ncode = '" << code << "'\nsupport = '" << support
+                                            << "'\n"
+                                            << compiler;
   if (mismatch) {
     CHECK_THROWS_WITH(run(options),
                       "conformance artifact metadata does not match requested cuda: " + (artifact / "artifact.toml").string());
@@ -1085,6 +1272,127 @@ TEST_CASE("compiler artifacts require matching metadata and backend support", "[
       const auto config = read(entry.path() / "cuda-ptx-sm_80-gcc/environment.txt");
       CHECK(config.contains((options.artifacts / "cuda" / support / "lib").string()));
       CHECK(config.contains("MANDATORY"));
+      CHECK(config.contains("CUDA_CACHE_PATH=" + fs::absolute(options.output / "jit-cache").string() + "\n"));
+      CHECK(config.contains("CUDA_CACHE_MAXSIZE=" + fmt::to_string(JitCacheMaximumBytes) + "\n"));
+      CHECK(fs::is_directory(entry.path() / "cuda-ptx-sm_80-gcc/warmup" / Fixture.stem()));
     }
+  }
+}
+
+TEST_CASE("workload extension replaces fields, appends add_ fields and rejects cycles", "[driver][workload-extends]") {
+  TemporaryDirectory const directory;
+  const auto write = [&](const char *name, std::string_view text) {
+    std::ofstream(directory.path / (std::string(name) + ".toml")) << text;
+  };
+  write("parent", "specs = ['[a]']\nlevelzero_cases = ['x', 'y']\nexclude_programs = ['p_*']\nexclude_cases = ['c']\n");
+  write("child", "extends = 'parent'\nlevelzero_cases = ['z']\nadd_exclude_programs = ['q']\nadd_exclude_cases = ['d']\n");
+  write("grandchild", "extends = 'child'\nadd_levelzero_cases = ['w']\nexclude_cases = []\n");
+  write("left", "extends = 'right'\n");
+  write("right", "extends = 'left'\n");
+  RunOptions options;
+  options.workloads = directory.path;
+  const auto load = [&](const char *name) {
+    options.workload = name;
+    return loadWorkload(options);
+  };
+  const auto child = load("child");
+  CHECK(child.specs == std::vector<std::string>{"[a]"});
+  CHECK(child.levelzeroCases == std::vector<std::string>{"z"});
+  CHECK(child.excludePrograms == std::vector<std::string>{"p_*", "q"});
+  CHECK(child.excludeCases == std::vector<std::string>{"c", "d"});
+  const auto grandchild = load("grandchild");
+  CHECK(grandchild.levelzeroCases == std::vector<std::string>{"z", "w"});
+  CHECK(grandchild.excludePrograms == child.excludePrograms);
+  CHECK(grandchild.excludeCases.empty());
+  CHECK_THROWS_WITH(load("left"), "cyclic workload inheritance: left");
+}
+
+TEST_CASE("case exclusions drop matching identities after discovery", "[driver][workload-extends]") {
+  TemporaryDirectory const directory;
+  fs::copy_file(Fixture, directory.path / ("alpha" + Fixture.extension().string()));
+  std::ofstream(directory.path / "test-programs.txt") << "alpha\t10\tcatch2\n";
+  RunOptions const options;
+  Workload workload;
+  workload.specs.clear();
+  REQUIRE(!glz::read_toml(workload, std::string("specs = ['[fixture]']\nexclude_cases = ['z skip*']\n")));
+  const auto tests = discoverCases(options, workload, directory.path, baseEnvironment(), "fixture", directory.path / "reports");
+  const auto names = listFixture();
+  REQUIRE(tests.size() + 1 == names.size());
+  for (size_t index = 0; index < tests.size(); ++index) {
+    CHECK(tests[index].identity != "z skipped");
+    CHECK(tests[index].index == index);
+    CHECK(tests[index].count == tests.size());
+  }
+}
+
+namespace {
+bool selected(const Workload &workload, std::string_view program, std::string_view identity, std::string_view tags) {
+  if (workload.excludePrograms ^ exists([&](const auto &pattern) { return conformance::globMatches(pattern, program); })) return false;
+  if (!workload.includePrograms.empty()
+      && workload.includePrograms ^ none_match([&](const auto &pattern) { return conformance::globMatches(pattern, program); }))
+    return false;
+  if (workload.excludeCases ^ exists([&](const auto &pattern) { return conformance::globMatches(pattern, identity); })) return false;
+  Catch::TestSpecParser parser(Catch::getRegistryHub().getTagAliasRegistry());
+  parser.parse(catchSpec(workload.specs));
+  const Catch::TestCaseInfo info("", {std::string(identity), std::string(tags)}, {__FILE__, __LINE__});
+  return parser.testSpec().matches(info);
+}
+Workload tier(const char *name) {
+  RunOptions options;
+  options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
+  options.workload = name;
+  return loadWorkload(options);
+}
+} // namespace
+
+TEST_CASE("tiers nest and the release programs are selected only by all", "[driver][workload-tiers]") {
+  const auto shortTier = tier("short");
+  const auto longTier = tier("long");
+  const auto xlong = tier("xlong");
+  const auto all = tier("all");
+  const auto subset = [](const std::vector<std::string> &small, const std::vector<std::string> &large) {
+    return small ^ forall([&](const auto &entry) { return large ^ contains(entry); });
+  };
+
+  SECTION("vendor suites need xlong") {
+    for (const auto *program : {"vendor_cuda_sample_vectorAdd", "vendor_cuda_cusparse", "vendor_cuda_cccl_thrust_sum",
+                                "vendor_hip_rocprim_tests", "vendor_hip_examples"}) {
+      CAPTURE(program);
+      CHECK_FALSE(selected(shortTier, program, "vendor/x", "[vendor]"));
+      CHECK_FALSE(selected(longTier, program, "vendor/x", "[vendor]"));
+      CHECK(selected(xlong, program, "vendor/x", "[vendor]"));
+      CHECK(selected(all, program, "vendor/x", "[vendor]"));
+    }
+  }
+  SECTION("rocThrust-semantic cases need xlong") {
+    const auto *const identity = "algorithms/roc-thrust-semantic/zip-iterator/i32/n11";
+    CHECK_FALSE(selected(shortTier, "unified", identity, "[unified][rocthrust]"));
+    CHECK_FALSE(selected(longTier, "unified", identity, "[unified][rocthrust]"));
+    CHECK(selected(xlong, "unified", identity, "[unified][rocthrust]"));
+    CHECK(selected(all, "unified", identity, "[unified][rocthrust]"));
+  }
+  SECTION("release-tagged cases and the exhaustive OpenCL sweeps need all") {
+    for (const auto *tags : {"[cts][opencl][release]", "[vendor][cuda-samples][release]"}) {
+      CAPTURE(tags);
+      CHECK_FALSE(selected(shortTier, "opencl_cts_allocations", "cts/opencl/allocations/x", tags));
+      CHECK_FALSE(selected(longTier, "opencl_cts_allocations", "cts/opencl/allocations/x", tags));
+      CHECK_FALSE(selected(xlong, "opencl_cts_allocations", "cts/opencl/allocations/x", tags));
+      CHECK(selected(all, "opencl_cts_allocations", "cts/opencl/allocations/x", tags));
+    }
+    CHECK_FALSE(selected(xlong, "opencl_cts_thread_dimensions", "cts/opencl/thread_dimensions/x", "[cts][opencl]"));
+    CHECK(selected(all, "opencl_cts_thread_dimensions", "cts/opencl/thread_dimensions/x", "[cts][opencl]"));
+  }
+  SECTION("case lists grow with the tier") {
+    CHECK(subset(shortTier.levelzeroCases, longTier.levelzeroCases));
+    CHECK(subset(longTier.levelzeroCases, xlong.levelzeroCases));
+    CHECK(xlong.levelzeroCases.size() > longTier.levelzeroCases.size());
+    CHECK(longTier.levelzeroCases.size() > shortTier.levelzeroCases.size());
+    CHECK(subset(shortTier.vulkanCases, longTier.vulkanCases));
+    CHECK(longTier.vulkanCases == xlong.vulkanCases);
+    CHECK(all.levelzeroCases.empty());
+    CHECK(all.vulkanCases.empty());
+    CHECK(all.vulkanMustpass == "mustpass/vk-default.txt");
+    CHECK(all.excludePrograms.empty());
+    CHECK(all.excludeCases.empty());
   }
 }

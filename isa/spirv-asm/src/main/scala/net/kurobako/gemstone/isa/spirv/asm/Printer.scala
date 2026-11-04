@@ -29,9 +29,7 @@ object Printer {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def render(instruction: Instruction, imports: Map[Int, String]): String = {
     val result =
-      instruction.operands.find(_.kind == OperandKind.IdResult).map(value =>
-        s"%${value.words.head.toUnsigned} = "
-      ).getOrElse("")
+      instruction.operands.find(_.kind == OperandKind.IdResult).fold("")(value => s"%${value.words.head.toUnsigned} = ")
     val operands = instruction.operands.filterNot(_.kind == OperandKind.IdResult)
     var rawTail  = false
     val text     = Vec.newBuilder[String]
@@ -40,10 +38,9 @@ object Printer {
       val rendered =
         if (
           instruction.definition == Instruction.Definition.Switch &&
-          operand.kind.category == OperandKind.Category.Composite
+          operand.kind.category == OperandKind.Category.Composite ||
+          instruction.definition == Instruction.Definition.SpecConstantOp && index >= 2
         )
-          operand.words.map(raw(_))
-        else if (instruction.definition == Instruction.Definition.SpecConstantOp && index >= 2)
           operand.words.map(raw(_))
         else if (operand.kind == OperandKind.LiteralExtInstInteger) {
           val names = instruction.operands.lift(2).flatMap(value => imports.get(value.words.head.raw))
@@ -74,14 +71,11 @@ object Printer {
     else if (kind == OperandKind.LiteralSpecConstantOpInteger) {
       val name =
         value.toInt.refine[SPIRVOpcodeNumber].toOption.flatMap(number => Instruction.definitionsFor(number).headOption)
-          .map(_.opcode.stripPrefix("Op")).getOrElse(raw(words(offset)))
+          .fold(raw(words(offset)))(_.opcode.stripPrefix("Op"))
       (Vec(name), offset + 1)
     } else Instruction.operandKinds.get(kind) match {
       case Some(info) =>
-        val selected = ExtensionEnumerants.of(info).filter(enumerant =>
-          if (info.kind.category == OperandKind.Category.ValueEnum || enumerant.value == 0) enumerant.value == value
-          else (value & enumerant.value) == enumerant.value
-        )
+        val selected          = ExtensionEnumerants.selected(info, value)
         val (parameters, end) = renderParameters(selected.flatMap(_.parameterKinds), words, offset + 1)
         (Vec(if (selected.isEmpty) raw(words(offset)) else selected.map(_.name).mkString("|")) ++ parameters, end)
       case None => (Vec(value.toString), offset + 1)

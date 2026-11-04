@@ -568,9 +568,9 @@ private[isa] object IntegerArithmetic {
   def findNthSet(mask: UInt[32], base: UInt[32], offset: UInt[32]): UInt[32] = {
     val bits  = mask.raw
     val steps = offset.raw.toInt.toLong
-    val step  = if (steps >= 0L) 1 else -1
     if (steps == 0L) UInt[32](if (((bits >>> (base.raw & 31L)) & 1L) != 0L) base.raw else 0xffffffffL)
     else {
+      val step     = if (steps >= 0L) 1 else -1
       var position = base.raw.toInt
       var count    = math.abs(steps) - 1L
       var found    = 0xffffffffL

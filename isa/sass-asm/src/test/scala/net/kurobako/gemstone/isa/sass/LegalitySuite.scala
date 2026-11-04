@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.catalogue.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class LegalitySuite extends Suite {
   import ConditionExpression.*

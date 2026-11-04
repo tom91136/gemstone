@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.rpc
 
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.LongAdder
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
@@ -12,9 +13,15 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 
-/** Host-owned bytes exchanged with the native client while a dispatch runs. Exchanges wait on the session state lock
-  * and its condition; host atomics also serialise on their own lock and linearise in the native process.
+/** Host-owned bytes exchanged with the native client while a dispatch runs. Reads and writes of the mirrored bytes take
+  * only the mirror's shard locks. Exchanges wait on the session state lock and its condition; host atomics also
+  * serialise on their own lock and linearise in the native process.
+  *
+  * A dispatch keeps its workgroup-scope atomics in its own mirror only while it is the sole dispatch using atomics on
+  * host memory. When a second one starts, the first publishes its mirror and both perform every atomic natively until a
+  * later dispatch finds the others finished.
   */
 private class HostCoherence(
     lock: ReentrantLock,
@@ -22,6 +29,7 @@ private class HostCoherence(
     completions: CompletionId => Option[Completion],
     closed: () => Boolean,
     hostBackedAt: (GuestAddress, Int >= 0) => Boolean,
+    allocationAt: GuestAddress => Option[HostMemoryRange],
     hostBackedAllocations: () => Boolean
 ) {
   private enum Strictness derives CanEqual {
@@ -33,6 +41,11 @@ private class HostCoherence(
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var lastAtomic = Option.empty[HostMemoryAtomic]
   private val nextTicket = AtomicLong()
+  private val engagement = ReentrantLock()
+  private val engaged    = mutable.ArrayBuffer.empty[Completion]
+  private val mirroring  = LongAdder()
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @volatile private var shared = false
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var everything = false
 
@@ -106,69 +119,93 @@ private class HostCoherence(
 
   // All host atomics linearise in the native process with CPU atomics. CAS also
   // supports arbitrary interpreter RMW functions without serialising Scala closures.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def atomic(
       completion: Completion,
       address: GuestAddress,
       size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
-    if ((size != 4 && size != 8) || address.raw % size != 0)
-      Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
-    else if (unavailable(address, size.widen[Int >= 0]))
-      Left(Fault.Memory("host atomic address is unavailable or overflows"))
-    else syncLock.withLock {
-      val atomicSize: Int in (1, 2, 4, 8) = if (size == 4) 4 else 8
-      val mask                            = if (size == 4) 0xffffffffL else -1L
-      var expected                        =
-        lastAtomic.filter(request => request.address == address && request.size == size).fold(0L)(_.desired) &
-          mask
-      var result: Option[Either[Fault, Long]] = None
-      while (result.isEmpty) {
-        val request  = HostMemoryAtomic(address, atomicSize, expected, update(expected) & mask)
-        val observed = synchronise(completion, Some(request)).map(_ & mask)
-        observed match {
-          case Left(error)                       => result = Some(Left(error))
-          case Right(value) if value == expected =>
-            lastAtomic = Some(request)
-            result = Some(Right(value))
-          case Right(value) => expected = value
-        }
-      }
-      result.get
-    }
+    if ((size != 1 && size != 2 && size != 4 && size != 8) || address.raw % size != 0)
+      Left(Fault.Memory("host atomics require aligned 8-, 16-, 32- or 64-bit storage"))
+    else if (size < 4) subword(completion, address, size)(update)
+    else exchange(completion, address, size)(update)
 
-  def atomicLoad(completion: Completion, address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
-    size.refine[Int in (1, 2, 4, 8)].toOption.filter(width => address.raw % width == 0)
-      .toRight(Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage"))
-      .flatMap { atomicSize =>
-        if (unavailable(address, size.widen[Int >= 0]))
-          Left(Fault.Memory("host atomic address is unavailable or overflows"))
-        else syncLock.withLock {
-          val request =
-            HostMemoryAtomic(address, atomicSize, expected = 0L, desired = 0L, HostMemoryAtomicOperation.Load)
-          synchronise(
-            completion,
-            Some(request),
-            Vec(HostMemoryRange(address, size)),
-            strictness = Strictness.Relaxed
-          ).map { observed =>
-            val value = observed & (if (size == 8) -1L else (1L << (size * 8)) - 1L)
-            lock.withLock(completion.hostMemory.observeAtomic(
-              address,
-              LittleEndian.toVec(value, size.widen[Int in 0 ~ 8])
-            ))
-            value
+  // 8- and 16-bit atomics compare-exchange the aligned 32-bit word containing them, keeping the neighbouring bytes
+  private def subword(completion: Completion, address: GuestAddress, size: Int in 1 ~ 8)(
+      update: Long => Long
+  ): Either[Fault, Long] = {
+    val word  = GuestAddress(address.raw & ~3L)
+    val shift = ((address.raw - word.raw) * 8).toInt
+    val mask  = ((1L << (size * 8)) - 1) << shift
+    if (
+      allocationAt(address).exists(range =>
+        word.raw < range.address.raw || word.raw + 4 > range.address.raw + range.size.raw
+      )
+    )
+      Left(Fault.Memory("host atomic storage shares its 32-bit word with bytes outside the allocation"))
+    else
+      exchange(completion, word, 4)(old => (old & ~mask) | ((update((old & mask) >>> shift) << shift) & mask))
+        .map(old => (old & mask) >>> shift)
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def exchange(
+      completion: Completion,
+      address: GuestAddress,
+      size: Int in 1 ~ 8
+  )(update: Long => Long): Either[Fault, Long] =
+    if (unavailable(address, size.widen[Int >= 0]))
+      Left(Fault.Memory("host atomic address is unavailable or overflows"))
+    else {
+      engage(completion)
+      syncLock.withLock {
+        val atomicSize: Int in (1, 2, 4, 8) = if (size == 4) 4 else 8
+        val mask                            = if (size == 4) 0xffffffffL else -1L
+        var expected                        =
+          lastAtomic.filter(request => request.address == address && request.size == size).fold(0L)(_.desired) &
+            mask
+        var result: Option[Either[Fault, Long]] = None
+        while (result.isEmpty) {
+          val request  = HostMemoryAtomic(address, atomicSize, expected, update(expected) & mask)
+          val observed = synchronise(completion, Some(request)).map(_ & mask)
+          observed match {
+            case Left(error)                       => result = Some(Left(error))
+            case Right(value) if value == expected =>
+              lastAtomic = Some(request)
+              result = Some(Right(value))
+            case Right(value) => expected = value
           }
         }
+        result.get
       }
+    }
+
+  /** Publishes the mirror of a finishing dispatch that used atomics, so that no later dispatch's atomic can be
+    * overwritten by it.
+    */
+  def retire(completion: Completion): Unit = if (completion.engaged) { val _ = flushWrites(completion) }
+
+  private def engage(completion: Completion): Unit =
+    if (!completion.engaged) engagement.withLock {
+      if (!completion.engaged) {
+        val others = lock.withLock {
+          engaged.filterInPlace(_.isPending)
+          engaged.toVector
+        }
+        shared = others.nonEmpty
+        if (shared) { while (mirroring.sum() != 0L) PlatformConcurrency.yieldThread(); others.foreach(flushWrites(_)) }
+        engaged += completion
+        completion.engage()
+      }
+    }
 
   /** Publish `ranges` and perform `stores` natively, then record the stored values as observed. */
   def store(completion: Completion, ranges: Vec[HostMemoryRange], stores: Vec[HostMemoryAtomic]): Either[Fault, Unit] =
     syncLock.withLock {
+      val since = lock.withLock(completion.hostMemory.generation)
       synchronise(completion, None, ranges, stores, Strictness.Relaxed).map { _ =>
-        lock.withLock(stores.foreach(atom =>
-          completion.hostMemory.observeAtomic(atom.address, LittleEndian.toVec(atom.desired, atom.size))
-        ))
+        lock.withLock(draining(completion)(stores.foreach(atom =>
+          completion.hostMemory.observeAtomic(atom.address, LittleEndian.toVec(atom.desired, atom.size), since)
+        )))
       }
     }
 
@@ -186,7 +223,7 @@ private class HostCoherence(
       Completion.HostSync(HostMemorySync(nextTicket.incrementAndGet(), atomic, publish, atomicStores, relaxed))
     completion.beginHostSync(exchange)
     changed.signalAll()
-    while (!closed() && exchange.observed.isEmpty) changed.await()
+    while (!closed() && completion.isPending && exchange.observed.isEmpty) changed.await()
     completion.endHostSync()
     if (publish.isEmpty && !relaxed) completion.hostMemory.invalidateClean()
     // A poller can consume the acknowledgement wakeup before this worker does.
@@ -195,9 +232,19 @@ private class HostCoherence(
     if (closed()) Left(Fault.Cancelled) else exchange.observed.toRight(Fault.Cancelled)
   }
 
-  def flushWrites(completion: Completion): Either[Fault, Unit] = syncLock.withLock {
-    if (lock.withLock(completion.hostMemory.hasDirty)) synchronise(completion, None).map(_ => ()) else Right(())
+  // a store satisfies pending reads of the bytes it covers, which wakes the workers waiting on them
+  private inline def draining(completion: Completion)(inline mutation: Unit): Unit = {
+    val drains = completion.hostMemory.drains
+    mutation
+    if (completion.hostMemory.drains != drains) lock.withLock(changed.signalAll())
   }
+
+  // with nothing dirty and no exchange in flight every earlier write is already published
+  def flushWrites(completion: Completion): Either[Fault, Unit] =
+    if (!completion.hostMemory.hasDirty && completion.hostSync.isEmpty) Right(())
+    else syncLock.withLock {
+      if (completion.hostMemory.hasDirty) synchronise(completion, None).map(_ => ()) else Right(())
+    }
 
   def flushReads(completion: Completion): Either[Fault, Unit] = lock.withLock {
     completion.beginReadWait()
@@ -207,23 +254,74 @@ private class HostCoherence(
     if (closed()) Left(Fault.Cancelled) else Right(())
   }
 
-  def invalidate(completion: Completion): Unit = lock.withLock(completion.hostMemory.invalidateClean())
+  def invalidate(completion: Completion): Unit = completion.hostMemory.invalidateClean()
+
+  def invalidate(completion: Completion, ranges: Vec[HostMemoryRange]): Unit =
+    completion.hostMemory.invalidateClean(ranges)
+
+  private def unreadable(completion: Completion, address: GuestAddress, size: Int >= 0, kind: String): Option[Fault] =
+    if (unavailable(address, size))
+      Some(Fault.Memory(s"host memory $kind at ${address.show} ($size bytes) is unavailable or overflows"))
+    else if (completion.hostMemory.isUnreadable(address, size))
+      Some(Fault.Memory(s"host memory $kind at ${address.show} ($size bytes) is not readable in the client"))
+    else None
 
   def read(completion: Completion, address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-    lock.withLock {
-      if (unavailable(address, size))
-        Left(Fault.Memory(s"host memory read at ${address.show} ($size bytes) is unavailable or overflows"))
-      else completion.hostMemory.read(address, size).toRight(AddressSpace.Pending)
+    unreadable(completion, address, size, "read") match {
+      case Some(fault) => Left(fault)
+      case None        => completion.hostMemory.read(address, size, allocationAt(address)).toRight(AddressSpace.Pending)
     }
 
-  def write(completion: Completion, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] = lock.withLock {
+  /** Demands the host bytes of `count` reads, returning whether any still has to arrive. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def stage(completion: Completion, addresses: Array[Long], sizes: Array[Int], count: Int): Either[Fault, Boolean] = {
+    var fault = Option.empty[Fault]
+    var at    = 0
+    while (at < count && fault.isEmpty) {
+      val address = GuestAddress(addresses(at))
+      val size    = sizes(at).unsafe[Int >= 0]
+      fault = unreadable(completion, address, size, "read")
+      at += 1
+    }
+    fault.toLeft(()).map(_ => completion.hostMemory.stage(addresses, sizes, count, allocationAtRaw))
+  }
+
+  private val allocationAtRaw: Long => Option[HostMemoryRange] = raw => allocationAt(GuestAddress(raw))
+
+  /** An atomic update that only this dispatch's lanes can observe until the bytes are published, for scopes that do not
+    * include the host or other dispatches. It is a host atomic while another dispatch uses atomics on host memory.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def modify(completion: Completion, address: GuestAddress, size: Int in (1, 2, 4, 8))(
+      update: Long => Long
+  ): AddressSpace.ReadResult[Long] =
+    if (address.raw % size != 0) Left(Fault.Memory("atomics require aligned storage"))
+    else unreadable(completion, address, size.widen[Int >= 0], "atomic") match {
+      case Some(fault) => Left(fault)
+      case None        =>
+        engage(completion)
+        mirroring.increment()
+        if (shared) {
+          mirroring.decrement()
+          atomic(completion, address, size.widen[Int in 1 ~ 8])(update)
+        } else {
+          var previous = Option.empty[Long]
+          try
+            draining(completion) {
+              previous = completion.hostMemory.modify(address, size, allocationAt(address))(update)
+            }
+          finally mirroring.decrement()
+          previous.toRight(AddressSpace.Pending)
+        }
+    }
+
+  def write(completion: Completion, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     if (unavailable(address, bytes.nonNegativeSize))
       Left(Fault.Memory(s"host memory write at ${address.show} (${bytes.size} bytes) is unavailable or overflows"))
     else {
       val atomicWidth: Int in (0, 1, 2, 4, 8) = bytes.size.refine[Int in (1, 2, 4, 8)].toOption
         .filter(width => address.raw % width == 0).fold[Int in (0, 1, 2, 4, 8)](0)(identity)
-      completion.hostMemory.write(address, bytes, atomicWidth)
+      draining(completion)(completion.hostMemory.write(address, bytes, atomicWidth))
       Right(())
     }
-  }
 }

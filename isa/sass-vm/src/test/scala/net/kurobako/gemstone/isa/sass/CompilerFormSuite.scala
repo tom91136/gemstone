@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Forms ptxas 13.3 emits for the conversions, saturating arithmetic and half-precision atomics of the unified CUDA
   * cases (conformance/unified/src/cuda), each run on one lane over a few inputs.

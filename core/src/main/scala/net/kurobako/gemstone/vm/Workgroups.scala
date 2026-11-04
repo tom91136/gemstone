@@ -5,6 +5,8 @@ import scala.annotation.tailrec
 
 object Workgroups {
   object Sequential extends Workgroups {
+    override def concurrency: Int > 0 = 1
+
     override def shouldParallel(
         taskCount: Long >= 0,
         workItemsPerTask: Long >= 0
@@ -18,6 +20,10 @@ object Workgroups {
 }
 
 trait Workgroups {
+
+  /** The most tasks of one [[parallelFor]] that run at once. */
+  def concurrency: Int > 0
+
   def shouldParallel(taskCount: Long >= 0, workItemsPerTask: Long >= 0): Boolean
   def parallelFor(
       taskCount: Long >= 0

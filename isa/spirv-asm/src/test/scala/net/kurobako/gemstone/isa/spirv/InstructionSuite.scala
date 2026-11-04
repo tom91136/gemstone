@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class InstructionSuite extends Suite {
   private def minimum(shapes: Vec[OperandShape]): Vec[Word] =

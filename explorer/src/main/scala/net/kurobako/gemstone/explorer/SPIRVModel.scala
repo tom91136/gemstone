@@ -361,11 +361,11 @@ object SPIRVModel extends Model {
           family(definition).fold(
             fault =>
               unmodelled(requirements(definition).fold(Vec.empty[String])(_.capabilities)).getOrElse(
-                loadTime(definition).map(Unavailable.Mechanics(_)).getOrElse(
+                loadTime(definition).fold[Unavailable](
                   if (declarations(grammarClass(definition)))
                     Unavailable.NotImplemented(s"${definition.opcode} is not read when the module loads")
                   else Unavailable.NotImplemented(fault.message.raw)
-                )
+                )(Unavailable.Mechanics(_))
               ),
             reason(instances, _)
           )

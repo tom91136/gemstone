@@ -5,7 +5,7 @@ import java.util.regex.Pattern
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Valid PTX that nvcc and clang do not emit for ordinary source but inline assembly and hand-written PTX use, with the
   * results the PTX ISA 13.3 pseudocode gives. Where ptxas lowers an instruction differently from the pseudocode from

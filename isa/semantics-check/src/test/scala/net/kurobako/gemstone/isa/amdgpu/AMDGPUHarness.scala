@@ -155,12 +155,12 @@ private[isa] object AMDGPUHarness {
       vectors.getOrElse(at, background(at, Lane))
     }
 
-    def lane(): UInt[32]                                 = fromRaw[UInt[32]](Lane.toLong)
-    def exec(): UInt[64]                                 = fromRaw[UInt[64]](1L << Lane)
-    def ballot(predicate: Bool): UInt[64]                = fromRaw[UInt[64]](if (predicate) 1L << Lane else 0L)
-    def read(value: UInt[32], index: UInt[32]): UInt[32] = fromRaw[UInt[32]](held(value.raw, index.raw.toInt))
-    def permute(value: UInt[32], destination: UInt[32], existing: UInt[32]): UInt[32] =
-      if (destination.raw == Lane.toLong) value else existing
+    def lane(): UInt[32]                                          = fromRaw[UInt[32]](Lane.toLong)
+    def exec(): UInt[64]                                          = fromRaw[UInt[64]](1L << Lane)
+    def ballot(predicate: Bool): UInt[64]                         = fromRaw[UInt[64]](if (predicate) 1L << Lane else 0L)
+    def read(value: UInt[32], index: UInt[32]): UInt[32]          = fromRaw[UInt[32]](held(value.raw, index.raw.toInt))
+    def permute(value: UInt[32], destination: UInt[32]): UInt[32] =
+      if (destination.raw == Lane.toLong) value else fromRaw[UInt[32]](0L)
     def vgpr(index: UInt[32]): UInt[32]                   = fromRaw[UInt[32]](current(index))
     def vgprAt(index: UInt[32], lane: UInt[32]): UInt[32] =
       if (lane.raw == Lane.toLong) vgpr(index)

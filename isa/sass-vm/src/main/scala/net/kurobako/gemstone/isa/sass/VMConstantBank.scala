@@ -57,7 +57,16 @@ private object VMConstantBank {
       })
       .orElse(axis(table + (if (sm >= 100) 0x20 else 0x18)).map(Value.ClusterCount(_)))
       .orElse(Option.when(offset == count)(Value.ClusterCtaCount))
+      .orElse(gridWorkspace(offset))
   }
+
+  private def gridWorkspaceBase(sm: Int): Int = if (sm >= 100) 0x254 else if (sm >= 90) 0x44 else 0x8c
+
+  private def gridWorkspace(offset: Int)(using context: VMCompilationContext): Option[Value] =
+    Option.when(context.sm >= 70)(offset - gridWorkspaceBase(context.sm)).collect {
+      case 0 => Value.GridWorkspace(CounterPart.High)
+      case 4 => Value.GridWorkspace(CounterPart.Low)
+    }
 
   private def clusterOffset(offset: Int): Boolean =
     offset >= 0x144 && offset < 0x168 || offset == 0x188
@@ -187,6 +196,10 @@ private object VMConstantBank {
       emit(Move(result.slot, Value.ExplicitCluster, 32))
       result
     } else if (c0 && sm >= 90 && sm < 100 && bits == 32 && clusterOffset(offset)) clusterField(offset).get
+    else if (bits == 32 && gridWorkspace(offset).isDefined && c0) {
+      emit(Move(result.slot, gridWorkspace(offset).get, 32))
+      result
+    }
     // ptxas reads %nsmid from this driver field.
     else if (c0 && sm >= 70 && bits == 32 && offset == (if (sm >= 100) 0x2d0 else 0x10c))
       constant(EmulatedDevice.Multiprocessors.toLong)

@@ -537,7 +537,7 @@ private object VMInterpreter {
       registersPerLane = None,
       sharedBytes = workgroupImage.length.toLong.unsafe[Long >= 0]
     )))
-    Dispatch.forEachGroup(geometry, workgroups) { (_, group) =>
+    Dispatch.forEachGroup(geometry, workgroups) { (_, group, _) =>
       if (parallel) runGroup(group, MemoryState(storage), Reuse(totalLocal))
       else runGroup(group, state, sequential)
     }

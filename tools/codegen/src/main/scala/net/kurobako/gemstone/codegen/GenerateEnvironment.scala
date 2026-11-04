@@ -44,6 +44,7 @@ object GenerateEnvironment {
     Vector(
       "GEMSTONE_CONTAINER_EXE"                   -> "",
       "GEMSTONE_CUDA_CODE_MODE"                  -> "",
+      "GEMSTONE_DEVICE_COUNT"                    -> "1",
       "GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT" -> "",
       "GEMSTONE_EXECUTION_THREAD_COUNT"          -> "",
       "GEMSTONE_FIXTURE_CUDA_11_8_89_DIR"        -> "",
@@ -56,7 +57,6 @@ object GenerateEnvironment {
       "GEMSTONE_FIXTURE_NVDISASM_13_2_78_EXE"    -> "",
       "GEMSTONE_FIXTURE_NVDISASM_13_3_73_EXE"    -> "",
       "GEMSTONE_FIXTURE_VERIFY_ON"               -> "",
-      "GEMSTONE_HSA_PAGING_TIMEOUT_SECONDS"      -> "",
       "GEMSTONE_HSA_REJECTED_CODE_OBJECT_FILE"   -> "",
       "GEMSTONE_NATIVE_DIR"                      -> "",
       "GEMSTONE_OFFLINE_ON"                      -> "",
@@ -68,7 +68,7 @@ object GenerateEnvironment {
       "GEMSTONE_RECORD_FILE"                     -> "",
       "GEMSTONE_RPC_CLIENT_ID"                   -> "",
       "GEMSTONE_RPC_ENDPOINT"                    -> "",
-      "GEMSTONE_RPC_TIMEOUT_SECONDS"             -> "300",
+      "GEMSTONE_RPC_TIMEOUT_SECONDS"             -> "30",
       "GEMSTONE_SYSTEM_PAGING_ON"                -> "",
       "GEMSTONE_TARGET_ARCH"                     -> "",
       "GEMSTONE_TEST_CUDA_LIBRARY_FILE"          -> "",
@@ -155,7 +155,7 @@ object GenerateEnvironment {
       scalaObject(
         root.resolve("test-support/src/generated/main/scala/net/kurobako/gemstone/testing/environmentKeys.scala"),
         "net.kurobako.gemstone.testing",
-        "private[testing] object environmentKeys",
+        "private object environmentKeys",
         gemstone,
         Defaults.Plain
       ),
@@ -182,7 +182,7 @@ object GenerateEnvironment {
     else files.foreach(GeneratedFiles.write(_, _))
   }
 
-  private val ExcludedDirectories = Set("target", ".git", ".sbt", "generated", "intellij_report2")
+  private val ExcludedDirectories = Set("target", ".git", ".sbt", ".cache", "generated", "intellij_report2")
   private val SourceExtensions    = Set("scala", "sbt", "cpp", "hpp", "h", "cmake", "toml", "txt")
 
   private case class Audit(names: String, known: Set[String]) {

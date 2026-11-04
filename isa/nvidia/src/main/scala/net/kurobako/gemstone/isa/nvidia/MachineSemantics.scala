@@ -1426,6 +1426,53 @@ private[isa] object MachineSemantics {
       }
     }
 
+  /** A texture sample, gather or query, or a surface access, on every active lane. */
+  inline def texture[V, L, D, C, F[_]](inline machine: NvidiaMachine[V, L, D, C, F])(
+      operation: Texture.Operation
+  ): F[Step] = machine.everyLane { lane =>
+    def operands(values: Vec[Value]): Vec[V]                                       = values.map(machine.read(lane, _))
+    def results(destinations: Vec[Option[Register]], bytes: Int)(data: D): F[Unit] = {
+      def writeFrom(index: Int): F[Unit] =
+        if (index == destinations.size) machine.done
+        else destinations(index) match {
+          case Some(register) =>
+            machine.write(lane, register, machine.textureWord(data, index, bytes))(writeFrom(index + 1))
+          case None => writeFrom(index + 1)
+        }
+      writeFrom(0)
+    }
+    operation match {
+      case Texture.Operation.Sample(handle, coordinates, _, _, destinations) =>
+        machine.textureRead(lane, operation, machine.read(lane, handle), operands(coordinates))(
+          results(destinations, 4)
+        )
+      case Texture.Operation.Gather(handle, coordinates, _, _, destinations) =>
+        machine.textureRead(lane, operation, machine.read(lane, handle), operands(coordinates))(
+          results(destinations, 4)
+        )
+      case Texture.Operation.Query(handle, _, _, destination) =>
+        machine.textureRead(lane, operation, machine.read(lane, handle), operands(Vec.empty[Value]))(
+          results(Vec(Some(destination)), 4)
+        )
+      case Texture.Operation.Load(handle, coordinates, bytes, _, destinations) =>
+        machine.textureRead(lane, operation, machine.read(lane, handle), operands(coordinates))(
+          results(destinations, bytes.raw)
+        )
+      case store @ Texture.Operation.Store(handle, coordinates, _, _, sources) =>
+        machine.surfaceStore(lane, store, machine.read(lane, handle), operands(coordinates), operands(sources))(
+          machine.done
+        )
+      case reduce @ Texture.Operation.Reduce(handle = handle, coordinates = coordinates, operand = operand) =>
+        machine.surfaceReduce(
+          lane,
+          reduce,
+          machine.read(lane, handle),
+          operands(coordinates),
+          machine.read(lane, operand)
+        )(machine.done)
+    }
+  }(machine.advance)
+
   /** `tcgen05.cp`: the rows of a matrix in shared memory that the descriptor `descriptor` names, copied to the tensor
     * memory at `address` of the issuing CTA and, for a pair, of its peer, each row replicated as the copy says.
     */

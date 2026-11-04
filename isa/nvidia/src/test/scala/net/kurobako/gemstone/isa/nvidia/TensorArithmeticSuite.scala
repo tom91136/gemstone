@@ -5,7 +5,7 @@ import VMIR.Matrix.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The per-element arithmetic of `mma` against results measured on an RTX 4060 Ti (sm_89, ptxas 13.3): each vector
   * fills row 0 of A, column 0 of B and C[0][0] of one `mma.sync.aligned` and reads back D[0][0], all as raw bits.

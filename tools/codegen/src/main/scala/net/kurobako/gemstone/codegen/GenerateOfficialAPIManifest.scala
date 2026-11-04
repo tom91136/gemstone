@@ -108,9 +108,9 @@ object GenerateOfficialAPIManifest {
           }
         )
     }
-    val conflicts = functions.groupBy(_.name).collect {
-      case (name, entries) if entries.map(_.functionType).distinct.size > 1 =>
-        s"$name: ${entries.map(_.functionType).distinct.mkString(" versus ")}"
+    val conflicts = functions.groupBy(_.name).flatMap { case (name, entries) =>
+      val types = entries.map(_.functionType).distinct
+      Option.when(types.size > 1)(s"$name: ${types.mkString(" versus ")}")
     }.toVector
     if (conflicts.nonEmpty)
       throw IllegalStateException(s"${surface.name}: conflicting declarations: ${conflicts.mkString("; ")}")

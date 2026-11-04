@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.catalogue.*
+import net.kurobako.gemstone.isa.sass.BitField.*
 import scala.annotation.tailrec
 
 /** Binary structural decoding, independent of NVIDIA tools and handwritten execution semantics. Candidates retain
@@ -16,23 +17,12 @@ object FieldDecoder {
       bindings: Map[String, BigInt],
       encodingValues: Map[String, BigInt],
       issues: Vec[NVDisasm.MetadataIssue],
-      floatFormats: Map[String, FloatEncoding] = Map.empty
+      floatFormats: Map[String, FloatEncoding] = Map.empty,
+      alternatives: Vec[Candidate] = Vec.empty
   ) {
     def name: String       = form.name
     def alternate: Boolean = form.alternate
   }
-
-  /** Physical positions are ordered from the least significant logical bit to the most significant. */
-  def extract(word: BigInt, positions: Vec[Int]): BigInt =
-    positions.zipWithIndex.foldLeft(BigInt(0)) { case (value, (physical, logical)) =>
-      if (word.testBit(physical)) value.setBit(logical) else value
-    }
-
-  /** The inverse of `extract` for positions that are clear in `word`. */
-  def deposit(word: BigInt, positions: Vec[Int], value: BigInt): BigInt =
-    positions.zipWithIndex.foldLeft(word) { case (bits, (physical, logical)) =>
-      if (value.testBit(logical)) bits.setBit(physical) else bits
-    }
 
   def candidates(database: NVDisasm.Database, bytes: Array[Byte]): Either[String, Vec[Candidate]] =
     if (bytes.length * 8 != database.width.raw)
@@ -42,12 +32,28 @@ object FieldDecoder {
   def candidates(database: NVDisasm.Database, word: BigInt): Either[String, Vec[Candidate]] =
     if (word < 0 || word.bitLength > database.width) Left(s"instruction exceeds ${database.width} bits")
     else {
-      val forms = database.opcodeGroups.flatMap { case (positions, group) =>
-        group.getOrElse(extract(word, positions), Vec.empty[NVDisasm.Form])
-      }.distinct
-      val matches = forms.flatMap(form => decode(database, form, word))
+      val matches = matching(database, Word(word))
       Either.cond(matches.nonEmpty, matches, s"unrecognised instruction 0x${word.toString(16)}")
     }
+
+  /** The non-alternate `candidates`; alternates resolve only to tell an unrecognised word apart. */
+  def primary(database: NVDisasm.Database, bytes: Array[Byte]): Either[String, Vec[Candidate]] =
+    if (bytes.length * 8 != database.width.raw)
+      Left(s"instruction requires ${database.width / 8} bytes, found ${bytes.length}")
+    else {
+      val word = BigInt(1, bytes.reverse)
+      if (word.bitLength > database.width) Left(s"instruction exceeds ${database.width} bits")
+      else {
+        val split   = Word(word)
+        val matches = matching(database, split, alternate = false)
+        if (matches.nonEmpty || matching(database, split).nonEmpty) Right(matches)
+        else Left(s"unrecognised instruction 0x${word.toString(16)}")
+      }
+    }
+
+  private def matching(database: NVDisasm.Database, word: Word, alternate: Boolean = true): Vec[Candidate] =
+    database.opcodeGroups.flatMap((extractor, group) => group.getOrElse(extractor(word), Vec.empty[NVDisasm.Form]))
+      .filter(alternate || !_.alternate).flatMap(form => decode(database, form, word))
 
   /** Selects an assembler spelling only when the requested bindings are consistent with the encoded relations. */
   def withBindings(
@@ -70,7 +76,7 @@ object FieldDecoder {
     def bind(candidate: Candidate, name: String, value: BigInt): Option[Candidate] =
       withBindings(database, candidate, candidate.bindings.updated(name, value)).toOption
     val inferredDefaults = form.declared.flatMap { field =>
-      val binding = form.encodedBinding(field)
+      val binding = form.binding(field)
       Option.when(form.encodedNames(binding) && !original.bindings.contains(binding))(
         database.defaultValues(field).headOption.map(binding -> _)
       ).flatten
@@ -78,17 +84,11 @@ object FieldDecoder {
     val withDefaults = inferredDefaults.reverse.foldLeft(original) { case (candidate, (name, value)) =>
       if (candidate.bindings.contains(name)) candidate else bind(candidate, name, value).getOrElse(candidate)
     }
-    val attributes = form.encodedNames.toVec.filter(name =>
-      name.split('@').toVec match {
-        case Vec(_, attribute) => Attribute.names(attribute)
-        case _                 => false
-      }
-    ).sorted
-    val withAttributes = attributes.foldLeft(withDefaults) { (candidate, name) =>
+    val withAttributes = form.attributeNames.foldLeft(withDefaults) { (candidate, name) =>
       if (candidate.bindings.contains(name)) candidate else bind(candidate, name, BigInt(0)).getOrElse(candidate)
     }
     form.declared.foldLeft(withAttributes) { (candidate, field) =>
-      val binding = form.encodedBinding(field)
+      val binding = form.binding(field)
       if (candidate.bindings.contains(binding) || !form.encodedNames(binding) || field.category.isRegister) candidate
       else {
         val choices = database.defaultValues(field) ++ database.vocabulary(field).map(_.value).distinct.sorted.reverse
@@ -111,15 +111,11 @@ object FieldDecoder {
       case _                                            => true
     })
 
-  /** Operand attribute bindings (`Ra@negate`) shared by decoding, refinement and assembly. */
-  object Attribute {
-    val names: Set[String] = Set("not", "negate", "absolute", "invert")
-  }
-
   private case class Bindings(
       values: Map[String, BigInt],
       issues: Vec[NVDisasm.MetadataIssue],
-      floats: Map[String, FloatEncoding] = Map.empty
+      floats: Map[String, FloatEncoding] = Map.empty,
+      alternatives: Vec[Bindings] = Vec.empty
   ) derives CanEqual
 
   private def resolve(
@@ -128,24 +124,43 @@ object FieldDecoder {
       raw: Map[String, BigInt],
       seed: Map[String, BigInt]
   ): Option[Bindings] = {
-    @tailrec def loop(previous: Bindings): Option[Bindings] =
+    def pass(previous: Bindings): Option[Bindings] =
       form.orderedFields.foldLeft(Option(Bindings(previous.values, Vec.empty))) { (state, field) =>
         for {
           current <- state
           value   <- raw.get(field.name)
           result  <- invert(database, field.expression, value, current)
         } yield result
-      } match {
-        case Some(current) if current != previous => loop(current)
-        case next                                 => next
       }
-    loop(Bindings(seed, Vec.empty))
+    @tailrec def loop(previous: Bindings): Option[Bindings] = pass(previous) match {
+      case Some(current) if current != previous => loop(current)
+      case next                                 => next
+    }
+    if (form.singlePass) pass(Bindings(seed, Vec.empty)) else loop(Bindings(seed, Vec.empty))
   }
+
+  /** One state per consistent solution of an ambiguous lookup, for when legality rejects the common bindings alone. */
+  private def expand(
+      database: NVDisasm.Database,
+      form: NVDisasm.Form,
+      raw: Map[String, BigInt],
+      state: Bindings,
+      depth: Int
+  ): Vec[Bindings] =
+    if (state.alternatives.isEmpty) Vec(state)
+    else {
+      val solutions =
+        if (depth == 0) Vec.empty[Bindings]
+        else state.alternatives.flatMap(alternative =>
+          resolve(database, form, raw, alternative.values).toVec.flatMap(expand(database, form, raw, _, depth - 1))
+        )
+      if (solutions.isEmpty) Vec(state) else solutions
+    }
 
   private def merge(state: Bindings, name: String, value: BigInt): Option[Bindings] =
     state.values.get(name) match {
-      case Some(previous) if previous != value => None
-      case _                                   => Some(state.copy(values = state.values.updated(name, value)))
+      case Some(previous) => Option.when(previous == value)(state)
+      case None           => Some(state.copy(values = state.values.updated(name, value)))
     }
 
   private def invertFloat(
@@ -184,33 +199,51 @@ object FieldDecoder {
       }
     case Expression.Lookup(name, arguments) =>
       database.byTable.get(name).flatMap { table =>
-        val rows      = table.byOutput.getOrElse(value, Vec.empty[NVDisasm.Row]).filter(_.inputs.size == arguments.size)
-        val solutions = rows.flatMap { row =>
+        val rows  = table.byOutput.getOrElse(value, Vec.empty[NVDisasm.Row]).filter(_.inputs.size == arguments.size)
+        val found = rows.flatMap { row =>
           arguments.zip(row.inputs).foldLeft(Option(state)) { case (current, (argument, input)) =>
             current.flatMap(invert(database, argument, input, _))
           }
-        }.distinct
+        }
+        val solutions = if (found.size > 1) found.distinct else found
         if (solutions.size <= 1) solutions.headOption
         else {
           val common = solutions.head.values.filter { case (key, entry) =>
             solutions.forall(_.values.get(key).contains(entry))
           }
+          val issue = NVDisasm.MetadataIssue.AmbiguousInverse(name, value)
           Some(state.copy(
             values = common,
-            issues = (state.issues :+ NVDisasm.MetadataIssue.AmbiguousInverse(name, value)).distinct
+            issues = (state.issues :+ issue).distinct,
+            alternatives = if (issue.structural || state.alternatives.nonEmpty) state.alternatives else solutions
           ))
         }
       }
   }
 
-  private def decode(database: NVDisasm.Database, form: NVDisasm.Form, word: BigInt): Vec[Candidate] = {
-    val raw          = form.fields.map(field => field.name -> extract(word, field.positions)).toMap
+  private def decode(database: NVDisasm.Database, form: NVDisasm.Form, word: Word): Vec[Candidate] =
+    if (form.pinned.exists((field, expected) => field.extractor(word) != expected)) Vec.empty
+    else resolved(database, form, word)
+
+  private def resolved(database: NVDisasm.Database, form: NVDisasm.Form, word: Word): Vec[Candidate] = {
+    val builder = Map.newBuilder[String, BigInt]
+    form.fields.foreach(field => builder += field.name -> field.extractor(word))
+    val raw          = builder.result()
     val opcodeValues = form.opcodeFields.map(field => raw(field.name)).distinct
-    form.opcodes.filter(opcode => opcodeValues.size == 1 && opcodeValues.head == opcode.value)
-      .flatMap(opcode =>
-        resolve(database, form, raw, Map.empty).toVec.map { state =>
-          Candidate(form, opcode.name, state.values, raw, state.issues.distinct, state.floats)
-        }
+    val matching     = form.opcodes.filter(opcode => opcodeValues.size == 1 && opcodeValues.head == opcode.value)
+    if (matching.isEmpty) Vec.empty
+    else {
+      def candidate(opcode: NVDisasm.SymbolValue, state: Bindings): Candidate =
+        Candidate(form, opcode.name, state.values, raw, state.issues.distinct, state.floats)
+      val resolved = resolve(database, form, raw, Map.empty).toVec
+      matching.flatMap(opcode =>
+        resolved.map(state =>
+          candidate(opcode, state).copy(alternatives =
+            if (state.alternatives.isEmpty) Vec.empty
+            else expand(database, form, raw, state, 4).map(candidate(opcode, _))
+          )
+        )
       )
+    }
   }
 }

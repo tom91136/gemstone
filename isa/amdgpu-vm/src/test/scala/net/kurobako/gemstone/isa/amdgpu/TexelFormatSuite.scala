@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class TexelFormatSuite extends Suite {
   private def store(number: TexelNumber, width: Int in 1 ~ 32, value: Float): Long =

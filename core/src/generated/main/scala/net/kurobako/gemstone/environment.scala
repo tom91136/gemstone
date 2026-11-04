@@ -6,6 +6,8 @@ import net.kurobako.gemstone.constraint.*
 object environment {
   val ContainerExe: String = "GEMSTONE_CONTAINER_EXE"
   val CudaCodeMode: String = "GEMSTONE_CUDA_CODE_MODE"
+  val DeviceCount: String = "GEMSTONE_DEVICE_COUNT"
+  val DeviceCountDefault: Long > 0 = 1L
   val ExecutionMaxInstructionCount: String = "GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT"
   val ExecutionThreadCount: String = "GEMSTONE_EXECUTION_THREAD_COUNT"
   val FixtureCuda11889Dir: String = "GEMSTONE_FIXTURE_CUDA_11_8_89_DIR"
@@ -18,7 +20,6 @@ object environment {
   val FixtureNvdisasm13278Exe: String = "GEMSTONE_FIXTURE_NVDISASM_13_2_78_EXE"
   val FixtureNvdisasm13373Exe: String = "GEMSTONE_FIXTURE_NVDISASM_13_3_73_EXE"
   val FixtureVerifyOn: String = "GEMSTONE_FIXTURE_VERIFY_ON"
-  val HsaPagingTimeoutSeconds: String = "GEMSTONE_HSA_PAGING_TIMEOUT_SECONDS"
   val HsaRejectedCodeObjectFile: String = "GEMSTONE_HSA_REJECTED_CODE_OBJECT_FILE"
   val NativeDir: String = "GEMSTONE_NATIVE_DIR"
   val OfflineOn: String = "GEMSTONE_OFFLINE_ON"
@@ -31,7 +32,7 @@ object environment {
   val RpcClientId: String = "GEMSTONE_RPC_CLIENT_ID"
   val RpcEndpoint: String = "GEMSTONE_RPC_ENDPOINT"
   val RpcTimeoutSeconds: String = "GEMSTONE_RPC_TIMEOUT_SECONDS"
-  val RpcTimeoutSecondsDefault: Long > 0 = 300L
+  val RpcTimeoutSecondsDefault: Long > 0 = 30L
   val SystemPagingOn: String = "GEMSTONE_SYSTEM_PAGING_ON"
   val TargetArch: String = "GEMSTONE_TARGET_ARCH"
   val TestCudaLibraryFile: String = "GEMSTONE_TEST_CUDA_LIBRARY_FILE"

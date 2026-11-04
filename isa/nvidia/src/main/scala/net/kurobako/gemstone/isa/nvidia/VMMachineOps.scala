@@ -274,23 +274,9 @@ private[isa] object VMMachineOps {
     )
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def warpSync(context: VMContext, memberMask: Value): Either[Fault, Step] = {
-    val masks   = context.values((context.workgroup.laneCount + 31) >>> 5)
-    var seen    = 0L
-    var differs = false
-    context.active.foreachLane { lane =>
-      val warp = lane >>> 5
-      val mask = context.read(lane, memberMask)
-      if ((seen & (1L << warp)) == 0L) {
-        seen |= 1L << warp
-        masks(warp) = mask
-      } else if (masks(warp) != mask) differs = true
-    }
-    if (seen == 0L) Left(Fault.Backend("bar.warp.sync has no active lanes"))
-    else if (differs) Left(Fault.Backend("bar.warp.sync member mask differs across active lanes"))
-    else Right(Step.WarpSync(memberMask))
-  }
+  def warpSync(context: VMContext, memberMask: Value, exclusive: Boolean): Either[Fault, Step] =
+    if (context.active.isEmpty) Left(Fault.Backend("bar.warp.sync has no active lanes"))
+    else Right(Step.WarpSync(memberMask, exclusive))
 
   /** The CTA whose shared memory holds an mbarrier and the mbarrier's address within that CTA's own window. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -452,7 +438,9 @@ private[isa] class VMMachineOps(val context: VMContext)
     VMMachineOps.divergentBarrier(context, barriers, counts, blocking, reduction)
   }
 
-  inline def warpSync(memberMask: Value): Flow[Step] = VMMachineOps.warpSync(context, memberMask)
+  inline def warpSync(memberMask: Value): Flow[Step] = VMMachineOps.warpSync(context, memberMask, exclusive = false)
+
+  inline def warpPartition(memberMask: Value): Flow[Step] = VMMachineOps.warpSync(context, memberMask, exclusive = true)
 
   inline def clusterBarrier(arrive: Boolean): Flow[Step] = Right(Step.ClusterBarrier(arrive))
 
@@ -723,7 +711,7 @@ private[isa] class VMMachineOps(val context: VMContext)
       size: Long
   )(inline next: => Flow[Unit]): Flow[Unit] = {
     VMObservation.shared(context, lane, AccessKind.Write, address, size)
-    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, size)
+    VMObservation.asynchronous(context, lane, size)
     var offset = 0L
     while (offset < size) {
       context.effects.stageShared(address + offset, 8, if (offset < data.length) data(offset.toInt).toLong else 0L)
@@ -811,7 +799,7 @@ private[isa] class VMMachineOps(val context: VMContext)
       copy: Instruction.AsyncBulkReduce
   )(inline next: => Flow[Unit]): Flow[Unit] = {
     VMObservation.global(context, lane, AccessKind.Atomic, address, data.length.toLong)
-    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, data.length.toLong)
+    VMObservation.asynchronous(context, lane, data.length.toLong)
     VMAsync.reduceGlobal(context, lane, address, data, copy) match {
       case Left(fault) => Left(fault)
       case _           => next
@@ -824,10 +812,35 @@ private[isa] class VMMachineOps(val context: VMContext)
   ): Flow[Unit] = {
     VMObservation.shared(context, lane, AccessKind.Read, source, bytes)
     VMObservation.global(context, lane, AccessKind.Write, destination, bytes)
-    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, bytes)
+    VMObservation.asynchronous(context, lane, bytes)
     VMAsync.storeMasked(context, lane, destination, source, bytes, mask)
     next
   }
+
+  inline def textureRead(lane: WorkgroupLane, read: Texture.Operation, handle: Long, coordinates: Vec[Long])(
+      inline next: Array[Byte] => Flow[Unit]
+  ): Flow[Unit] = VMTexture.read(context, lane, read, handle, coordinates).flatMap(next)
+
+  def textureWord(data: Array[Byte], index: Int, bytes: Int): Long =
+    LittleEndian.decode(data, index * bytes, bytes.unsafe[Int in 0 ~ 8])
+
+  inline def surfaceStore(
+      lane: WorkgroupLane,
+      store: Texture.Operation.Store,
+      handle: Long,
+      coordinates: Vec[Long],
+      sources: Vec[Long]
+  )(inline next: => Flow[Unit]): Flow[Unit] =
+    VMTexture.store(context, lane, store, handle, coordinates, sources).flatMap(_ => next)
+
+  inline def surfaceReduce(
+      lane: WorkgroupLane,
+      reduce: Texture.Operation.Reduce,
+      handle: Long,
+      coordinates: Vec[Long],
+      operand: Long
+  )(inline next: => Flow[Unit]): Flow[Unit] =
+    VMTexture.reduce(context, lane, reduce, handle, coordinates, operand).flatMap(_ => next)
 
   inline def tensorTransfer(
       map: Array[Byte],
@@ -918,7 +931,7 @@ private[isa] class VMMachineOps(val context: VMContext)
       transfer: Array[Byte]
   )(inline next: => Flow[Unit]): Flow[Unit] = {
     VMObservation.box(context, lane, AccessKind.Read, start, transfer)
-    VMObservation.asynchronous(context, lane, AsyncKind.Transfer, TensorLayout.fact(transfer, TensorLayout.Fact.Bytes))
+    VMObservation.asynchronous(context, lane, TensorLayout.fact(transfer, TensorLayout.Fact.Bytes))
     TensorLayout.place(transfer, start)((offset, from, count) => cta.readSharedBytes(offset, transfer, from, count))
     next
   }

@@ -3,8 +3,14 @@ get_filename_component(artifacts "${CMAKE_CURRENT_LIST_DIR}/../artifacts" ABSOLU
 execute_process(COMMAND mktemp -d /tmp/conformance-targets-test-XXXXXX
   OUTPUT_VARIABLE directory OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
 
-foreach(target_set IN ITEMS default complete legacy-gfx803)
-  execute_process(COMMAND "${CMAKE_COMMAND}" "-DCONFORMANCE_TARGET_SET=${target_set}" -P "${artifacts}/Targets.cmake"
+file(GLOB profile_files "${CMAKE_CURRENT_LIST_DIR}/../profiles/*.toml")
+set(build_profiles complete)
+foreach(file IN LISTS profile_files)
+  get_filename_component(name "${file}" NAME_WLE)
+  list(APPEND build_profiles "${name}")
+endforeach()
+foreach(target_set IN LISTS build_profiles)
+  execute_process(COMMAND "${CMAKE_COMMAND}" "-DCONFORMANCE_BUILD_PROFILE=${target_set}" -P "${artifacts}/Targets.cmake"
     OUTPUT_VARIABLE routes OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
   string(REPLACE "\n" ";" routes "${routes}")
   set(unique_routes ${routes})
@@ -16,15 +22,15 @@ foreach(target_set IN ITEMS default complete legacy-gfx803)
   # Configuration only: no container builds, downloads or GPU required.
   set(build "${directory}/${target_set}")
   execute_process(COMMAND "${CMAKE_COMMAND}" -S "${artifacts}" -B "${build}" -G Ninja
-    "-DCONFORMANCE_TARGET_SET=${target_set}" -DROCM_VERSION=7.1.1
+    "-DCONFORMANCE_BUILD_PROFILE=${target_set}" -DROCM_VERSION=7.1.1
     OUTPUT_VARIABLE output ERROR_VARIABLE error RESULT_VARIABLE status)
   if(NOT status STREQUAL "0")
     message(FATAL_ERROR "Matrix configuration failed: ${output}\n${error}")
   endif()
   file(READ "${build}/build.ninja" graph)
   foreach(route IN LISTS routes)
-    # CUDA code modes share one artifact containing both PTX and SASS.
-    string(REGEX REPLACE "^cuda-(ptx|sass)/" "cuda/" artifact_route "${route}")
+    # SASS execution loads the fatbin artifact; PTX execution has its own PTX-only artifact.
+    string(REGEX REPLACE "^cuda-sass/" "cuda/" artifact_route "${route}")
     # Compiler variants have independent artifact and runtime directories.
     string(REGEX REPLACE "^([^/]+)/([^/]+)/(clang|gcc)$" "\\1/\\3/\\2" artifact_route "${artifact_route}")
     string(FIND "${graph}" "build output/${artifact_route}/artifact.toml " rule)
@@ -32,6 +38,18 @@ foreach(target_set IN ITEMS default complete legacy-gfx803)
       message(FATAL_ERROR "Exported route ${route} has no matching artifact output")
     endif()
   endforeach()
+  if(target_set STREQUAL "sora-framework16")
+    foreach(route IN ITEMS cuda-ptx/sm_120 cuda-sass/sm_120/clang hip/gfx1150 openacc/sm_120 opencl vulkan)
+      if(NOT route IN_LIST routes)
+        message(FATAL_ERROR "Machine profile ${target_set} is missing ${route}")
+      endif()
+    endforeach()
+    foreach(route IN LISTS routes)
+      if(route MATCHES "sm_(35|80|89)" OR route MATCHES "gfx(803|1030)")
+        message(FATAL_ERROR "Machine profile ${target_set} exports an architecture it has no target for: ${route}")
+      endif()
+    endforeach()
+  endif()
   if(target_set STREQUAL "complete")
     foreach(route IN ITEMS cuda-ptx/sm_35 cuda-sass/sm_35 cuda-ptx/sm_120 cuda-sass/sm_120
         cuda-ptx/sm_90a cuda-sass/sm_90a cuda-sass/sm_100a cuda-sass/sm_100f cuda-sass/sm_103a cuda-sass/sm_103f
@@ -75,7 +93,7 @@ if(NOT compiler_routes MATCHES "cuda-ptx/sm_80/clang" OR NOT compiler_routes MAT
     OR compiler_routes MATCHES "cuda-ptx/sm_80\\n")
   message(FATAL_ERROR "Comma-separated compiler selection was not preserved: ${compiler_routes}")
 endif()
-execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_TARGET_SET=default
+execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BUILD_PROFILE=complete
   -DCONFORMANCE_BACKENDS=vulkan -DCONFORMANCE_COMPILERS=gcc -P "${artifacts}/Targets.cmake"
   OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
 if(status STREQUAL "0")
@@ -99,10 +117,10 @@ if(NOT mixed_routes STREQUAL "cuda-ptx/sm_80/gcc")
   message(FATAL_ERROR "GCC architecture intersection or PTX-only selection is incorrect: ${mixed_routes}")
 endif()
 
-execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_TARGET_SET=missing -P "${artifacts}/Targets.cmake"
+execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BUILD_PROFILE=missing -P "${artifacts}/Targets.cmake"
   OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
 if(status STREQUAL "0")
-  message(FATAL_ERROR "Unknown target set was accepted")
+  message(FATAL_ERROR "Unknown build profile was accepted")
 endif()
 foreach(architecture IN ITEMS sm_90b sm_90af sm_a)
   execute_process(COMMAND "${CMAKE_COMMAND}" -DCONFORMANCE_BACKENDS=cuda "-DCUDA_ARCHITECTURES=${architecture}"

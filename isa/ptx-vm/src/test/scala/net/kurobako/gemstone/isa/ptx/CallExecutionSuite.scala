@@ -66,6 +66,45 @@ class CallExecutionSuite extends Suite {
         assertEquals(memory.readInt32(memory.start.offset((lane * 4).toLong)), Right(42))
     }
 
+  test("a vector store to an aggregate call parameter reaches the callee's vector load") {
+    val source = """.version 6.0
+      .target sm_80
+      .address_size 64
+      .func (.param .b64 %result_out) combine(.param .align 16 .b8 %pair[16]) {
+        .reg .b64 %first, %second, %sum;
+        ld.param.v2.b64 {%first, %second}, [%pair];
+        add.u64 %sum, %first, %second;
+        st.param.b64 [%result_out], %sum;
+        ret;
+      }
+      .visible .entry main(.param .u64 output) {
+        .reg .u64 %out, %value, %result;
+        ld.param.u64 %out, [output];
+        mov.u64 %value, 40;
+        {
+          .param .align 16 .b8 %pair[16];
+          .param .b64 %result_in;
+          st.param.v2.b64 [%pair], {2, %value};
+          call.uni (%result_in), combine, (%pair);
+          ld.param.b64 %result, [%result_in];
+        }
+        st.global.u64 [%out], %result;
+        ret;
+      }"""
+    val memory = DeviceMemory(8)
+    assertEquals(
+      execute(
+        compileKernel(source),
+        1,
+        1,
+        Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
+        memory
+      ),
+      Right(())
+    )
+    assertEquals(memory.readInt32(memory.start), Right(42))
+  }
+
   test("missing kernel arguments are not initialised as local parameters") {
     val kernel = compileKernel(""".version 6.0
       .target sm_80

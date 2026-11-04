@@ -18,7 +18,7 @@ private enum VMWrite {
       destination: Option[VMIR.Register],
       address: Long,
       width: ScalarBitWidth,
-      shared: Boolean,
+      target: AtomicTarget,
       update: AtomicUpdate
   )
 }

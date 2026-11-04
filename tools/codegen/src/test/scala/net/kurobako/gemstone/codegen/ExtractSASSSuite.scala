@@ -7,7 +7,7 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 class ExtractSASSSuite extends Suite {

@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.WarpgroupProducts.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** `wgmma.mma_async` on one warpgroup against a CPU product. The kernels are hand-written PTX that ptxas 13.3 assembles
   * for sm_90a.

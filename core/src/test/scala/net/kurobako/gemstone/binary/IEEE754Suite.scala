@@ -3,7 +3,7 @@ package net.kurobako.gemstone.binary
 import java.math.BigDecimal
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 class IEEE754Suite extends Suite {
@@ -38,7 +38,7 @@ class IEEE754Suite extends Suite {
         val lower = value.subtract(decoded(below)).abs
         val upper = decoded(above).subtract(value).abs
         val order = lower.compareTo(upper)
-        if (order < 0) below else if (order > 0) above else if (value.signum() >= 0) above else below
+        if (order < 0) below else if (order > 0 || value.signum() >= 0) above else below
     }
   }
 

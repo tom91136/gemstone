@@ -110,11 +110,12 @@ object PTXOperandDomains {
         Some("the packed table decides, as it gives the element type and the declaration")
       )
     }
-    val declared = (scalars ++ packed ++ extra).map(_.name).toSet
+    val known    = scalars ++ packed ++ extra
+    val declared = known.map(_.name).toSet
     val elements = tables.packed.map(_.element).distinct.filterNot(declared).map { name =>
       DataType(name, "alt", elementBits(name), 1, None, Vector.empty, "Packed Floating Point Data Types")
     }
-    (scalars ++ packed ++ extra ++ elements, twice)
+    (known ++ elements, twice)
   }
 
   private val Exponent = "e([0-9])m([0-9])".r
@@ -209,7 +210,9 @@ object PTXOperandDomains {
         rules.resolution("slot-type", value)
       )
     )
-    val undefined = typed.filter((_, slot) => slot.values == Vector(slot.name)).map(_._1).distinct.sorted.map(opcode =>
+    val undefined = typed.collect {
+      case (opcode, slot) if slot.values == Vector(slot.name) => opcode
+    }.distinct.sorted.map(opcode =>
       DomainFinding(
         "slot-undefined",
         s"$opcode .type",

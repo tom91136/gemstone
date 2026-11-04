@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The 8-bit float conversions (MI300 ISA, 7.2), which hipcc emits for `__builtin_amdgcn_cvt_f32_fp8`,
   * `cvt_pk_f32_bf8`, `cvt_pk_fp8_f32` and `cvt_sr_fp8_f32` (`-O3 --offload-arch=gfx942`: `v_cvt_f32_fp8_sdwa v2, v1

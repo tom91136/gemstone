@@ -63,14 +63,9 @@ private object VMObservation {
   ): Unit =
     if (context.observer != null) in(context, lane, Space.Global, kind, address, bytes)
 
-  /** A step of asynchronous work that names no barrier. */
-  inline def asynchronous(
-      context: VMContext,
-      inline lane: WorkgroupLane,
-      inline kind: AsyncKind,
-      inline bytes: Long
-  ): Unit =
-    if (context.observer != null) step(context, lane, kind, -1L, bytes)
+  /** An asynchronous transfer that names no barrier. */
+  inline def asynchronous(context: VMContext, inline lane: WorkgroupLane, inline bytes: Long): Unit =
+    if (context.observer != null) step(context, lane, AsyncKind.Transfer, -1L, bytes)
 
   /** A transfer that completes on the mbarrier at the shared `barrier` of the CTA `cta`. */
   inline def transfer(

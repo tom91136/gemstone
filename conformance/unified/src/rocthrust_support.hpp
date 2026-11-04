@@ -3,13 +3,26 @@
 // rocThrust overload and iterator forms, kept apart from the portable algorithm
 // cases because they are not another spelling of the same C++ algorithm semantics.
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__CUDACC__) || defined(__CUDA__) || defined(__HIPCC__)
   #define UNIFIED_ROCTHRUST_HOST_DEVICE __host__ __device__
 #else
   #define UNIFIED_ROCTHRUST_HOST_DEVICE
 #endif
 
 namespace unified::rocthrust_support {
+#if !defined(__HIPCC__) && THRUST_VERSION >= 300000
+namespace iter_ops = ::cuda::std;
+namespace cuda_ops = ::cuda;
+#else
+namespace iter_ops = thrust;
+namespace cuda_ops = thrust;
+#endif
+
+template <class T> thrust::device_vector<T> deviceVector(std::initializer_list<T> values) {
+  const std::vector<T> host(values);
+  return thrust::device_vector<T>(host.begin(), host.end());
+}
+
 template <class T> using Pair = thrust::pair<T, int32_t>;
 
 template <class T> struct PairLess {
@@ -131,32 +144,20 @@ template <class T> inline KeyValues<T> thrustSetByKey(const KeyValues<T> &left, 
   thrust::device_vector<T> outputKeys(left.keys.size() + right.keys.size());
   thrust::device_vector<int32_t> outputValues(left.values.size() + right.values.size());
 
-  thrust::pair<typename thrust::device_vector<T>::iterator, thrust::device_vector<int32_t>::iterator> ends;
-  if (kind == SetKind::UnionSet) {
-    ends = descending ? thrust::set_union_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
-                                                 rightValues.begin(), outputKeys.begin(), outputValues.begin(), algorithms::Greater<T>{})
-                      : thrust::set_union_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
-                                                 rightValues.begin(), outputKeys.begin(), outputValues.begin());
-  } else if (kind == SetKind::Intersection) {
-    ends = descending
-               ? thrust::set_intersection_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
-                                                 outputKeys.begin(), outputValues.begin(), algorithms::Greater<T>{})
-               : thrust::set_intersection_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
-                                                 outputKeys.begin(), outputValues.begin());
-  } else if (kind == SetKind::Difference) {
-    ends = descending
-               ? thrust::set_difference_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
-                                               rightValues.begin(), outputKeys.begin(), outputValues.begin(), algorithms::Greater<T>{})
-               : thrust::set_difference_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
-                                               rightValues.begin(), outputKeys.begin(), outputValues.begin());
-  } else {
-    ends = descending
-               ? thrust::set_symmetric_difference_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(),
-                                                         leftValues.begin(), rightValues.begin(), outputKeys.begin(), outputValues.begin(),
-                                                         algorithms::Greater<T>{})
-               : thrust::set_symmetric_difference_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(),
-                                                         leftValues.begin(), rightValues.begin(), outputKeys.begin(), outputValues.begin());
-  }
+  const auto byKind = [&](auto compare) {
+    if (kind == SetKind::UnionSet)
+      return thrust::set_union_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
+                                      rightValues.begin(), outputKeys.begin(), outputValues.begin(), compare);
+    if (kind == SetKind::Intersection)
+      return thrust::set_intersection_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
+                                             outputKeys.begin(), outputValues.begin(), compare);
+    if (kind == SetKind::Difference)
+      return thrust::set_difference_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
+                                           rightValues.begin(), outputKeys.begin(), outputValues.begin(), compare);
+    return thrust::set_symmetric_difference_by_key(leftKeys.begin(), leftKeys.end(), rightKeys.begin(), rightKeys.end(), leftValues.begin(),
+                                                   rightValues.begin(), outputKeys.begin(), outputValues.begin(), compare);
+  };
+  const auto ends = descending ? byKind(algorithms::Greater<T>{}) : byKind(algorithms::Less<T>{});
   outputKeys.resize(static_cast<size_t>(ends.first - outputKeys.begin()));
   outputValues.resize(static_cast<size_t>(ends.second - outputValues.begin()));
   return {std::vector<T>(outputKeys.begin(), outputKeys.end()), std::vector<int32_t>(outputValues.begin(), outputValues.end())};

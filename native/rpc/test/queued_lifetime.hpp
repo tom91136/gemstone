@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <future>
+#include <memory>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,12 +11,14 @@
 
 namespace gemstone_test {
 
-// The queued read must finish before a synchronous free retires its storage.
+// The queued read must finish before a synchronous free retires its storage. It lands in pinned memory, as a read into
+// pageable memory completes before the copy call returns.
 // A bounded callback gate makes the lifetime assertion independent of kernel speed.
-template <class Allocate, class Copy, class Callback, class Free>
-void queuedLifetime(Allocate allocate, Copy copy, Callback callback, Free free) {
+template <class Allocate, class Pinned, class Copy, class Callback, class Free>
+void queuedLifetime(Allocate allocate, Pinned pinned, Copy copy, Callback callback, Free free) {
   std::array<uint32_t, 32> source{};
-  std::array<uint32_t, 32> observed{};
+  const std::shared_ptr<void> pinnedObserved = pinned(sizeof(source));
+  auto &observed = *static_cast<std::array<uint32_t, 32> *>(pinnedObserved.get());
   for (unsigned i = 0; i < source.size(); ++i)
     source[i] = 71 + i;
   auto memory = allocate(sizeof(source));

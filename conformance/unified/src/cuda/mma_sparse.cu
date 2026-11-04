@@ -225,7 +225,7 @@ Domain integer(int low, int high, int bits, bool saturate, int32_t lowC, int32_t
 
 } // namespace
 
-TEST_CASE("runtime/cuda/mma-sparse/floating", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma-sparse/floating", "[unified][runtime][tensor]") {
   bool ran = false;
   const auto single = [](double value) { return floatBits(value); };
   ran |= run<F32F16K16>("sparse m16n8k16 f32.f16", floating(half, single, 4, 1));
@@ -239,7 +239,7 @@ TEST_CASE("runtime/cuda/mma-sparse/floating", "[unified][runtime][tensor][compac
   if (!ran) SKIP("the device runs none of these forms");
 }
 
-TEST_CASE("runtime/cuda/mma-sparse/integer", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma-sparse/integer", "[unified][runtime][tensor]") {
   bool ran = false;
   ran |= run<S8K32Sat>("sparse m16n8k32 satfinite s8", integer(-128, 127, 8, true, INT32_MAX - 100000, INT32_MAX));
   auto mixed = integer(-128, 127, 8, false, INT32_MIN, INT32_MAX);

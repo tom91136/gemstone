@@ -171,4 +171,31 @@ class PTXCacheConcurrencySuite extends Suite {
       )
     }.get
   }
+
+  test("a kernel built before any binding does not leak into a bound load of the same image") {
+    val backend = PTXBackend(text = execution.text)
+    Using.Manager { use =>
+      val unboundSession = use(ExecutionSession(List(backend)))
+      val boundSession   = use(ExecutionSession(List(backend)))
+      val unbound        = unboundSession.load(ProgramEncoding.PTXText, image).value
+      val bound          = boundSession.load(ProgramEncoding.PTXText, image).value
+      val unboundBuild   = unboundSession.build(unbound, "read_global")
+      val unboundAgain   = unboundSession.build(unbound, "read_global")
+      assertEquals(unboundAgain.isRight, unboundBuild.isRight)
+
+      val global = boundSession.registerAllocation(4).value
+      val output = boundSession.registerAllocation(4).value
+      assertEquals(boundSession.write(global, 0L, LittleEndian.toVec(29, 4)), Right(()))
+      assertEquals(boundSession.bindGlobal(bound, "shared_value", global, 0L), Right(()))
+      val task = KernelTask.validated(
+        "read_global",
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec(KernelTask.Argument.Memory(output, 0L))
+      ).value
+      val completion = boundSession.launch(bound, task).value
+      assertEquals(boundSession.completion(completion), Right(CompletionStatus.Succeeded))
+      assertEquals(boundSession.read(AllocationRange(output, 0L, 4)).map(LittleEndian.decode(_, 0, 4)), Right(29L))
+    }.get
+  }
 }

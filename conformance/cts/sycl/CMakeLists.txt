@@ -110,6 +110,29 @@ set_property(GLOBAL APPEND PROPERTY CONFORMANCE_SYCL_CTS_TARGETS "${exe_name}")]
 
 commit_staged_source("${staging}" "${staged_source}")
 
+# full conformance changes test bodies at compile time, so it is configured from a copy
+set(full_staging "${CMAKE_CURRENT_BINARY_DIR}/full_source.staging")
+set(full_source "${CMAKE_CURRENT_BINARY_DIR}/full_source")
+stage_source("${staged_source}" "${full_staging}")
+patch_exact("${full_staging}/CMakeLists.txt"
+  "include(AddOpenCLProxy)
+include(AddSYCLExecutable)
+"
+  "")
+patch_exact("${full_staging}/CMakeLists.txt"
+  "add_subdirectory(util)
+add_subdirectory(tests)
+add_subdirectory(oclmath)"
+  "add_subdirectory(tests)")
+patch_exact("${full_staging}/tests/CMakeLists.txt" [[add_subdirectory("common")]] "")
+patch_exact("${full_staging}/tests/CMakeLists.txt" [[generate_test_sources]] [[generate_full_test_sources]])
+patch_exact("${full_staging}/tests/CMakeLists.txt" [[${GEN_TEST_FILE_NAME}_gen]] [[${GEN_TEST_FILE_NAME}_full_gen]])
+patch_exact("${full_staging}/tests/CMakeLists.txt" [[${GEN_TEST_FILE_PREFIX}_gen]] [[${GEN_TEST_FILE_PREFIX}_full_gen]])
+patch_exact("${full_staging}/tests/CMakeLists.txt" [[test_conformance]] [[test_full_conformance]])
+patch_exact("${full_staging}/tests/CMakeLists.txt"
+  [[set(test_exe_name test_${ARGV0})]] [[set(test_exe_name test_full_conformance_${ARGV0})]])
+commit_staged_source("${full_staging}" "${full_source}")
+
 file(GLOB children RELATIVE "${sycl_cts_SOURCE_DIR}/tests" "${sycl_cts_SOURCE_DIR}/tests/*")
 set(excluded)
 foreach(child IN LISTS children)
@@ -124,17 +147,20 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/excluded.txt" "${excluded_text}\n")
 set(SYCL_IMPLEMENTATION DPCPP CACHE STRING "" FORCE)
 set(DPCPP_COMPILER "${sycl_compiler}" CACHE FILEPATH "" FORCE)
 set(DPCPP_TARGET_TRIPLES spir64 CACHE STRING "" FORCE)
-set(SYCL_CTS_ENABLE_FULL_CONFORMANCE OFF CACHE BOOL
-  "Enable the complete upstream SYCL CTS type and operation matrices")
+set(SYCL_CTS_ENABLE_FULL_CONFORMANCE OFF CACHE BOOL "" FORCE)
 set(SYCL_CTS_ENABLE_OPENCL_INTEROP_TESTS OFF CACHE BOOL "" FORCE)
 set(SYCL_CTS_EXCLUDE_TEST_CATEGORIES "${CMAKE_CURRENT_BINARY_DIR}/excluded.txt" CACHE FILEPATH "" FORCE)
 set(SYCL_CTS_SHARD "" CACHE STRING "Build only this zero-based shard of the SYCL CTS")
 set_property(GLOBAL PROPERTY CONFORMANCE_SYCL_CTS_TARGETS "")
 add_subdirectory("${staged_source}" build EXCLUDE_FROM_ALL)
+set(SYCL_CTS_ENABLE_FULL_CONFORMANCE ON)
+add_subdirectory("${full_source}" full EXCLUDE_FROM_ALL)
+unset(SYCL_CTS_ENABLE_FULL_CONFORMANCE)
 
 # Host/device atomic stress requires std::atomic_ref. The upstream DPCPP
 # adapter forwards executable compile features to its object library.
 target_compile_features(test_atomic_ref_stress PRIVATE cxx_std_20)
+target_compile_features(test_full_conformance_atomic_ref_stress PRIVATE cxx_std_20)
 
 get_property(sycl_cts_targets GLOBAL PROPERTY CONFORMANCE_SYCL_CTS_TARGETS)
 
@@ -152,7 +178,7 @@ if(NOT SYCL_CTS_SHARD STREQUAL "")
   endif()
   set(selected)
   foreach(target IN LISTS sycl_cts_targets)
-    string(REGEX REPLACE "^test_" "" category "${target}")
+    string(REGEX REPLACE "^test_(full_conformance_)?" "" category "${target}")
     set(owner 0)
     set(shard 0)
     foreach(pattern IN LISTS sycl_cts_shards)
@@ -189,11 +215,10 @@ foreach(target IN LISTS sycl_cts_targets)
       "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-implicit-const-int-float-conversion>")
   endif()
   set(timeout ${CONFORMANCE_TIMEOUT_CTS})
-  if(SYCL_CTS_ENABLE_FULL_CONFORMANCE)
+  if(target STREQUAL "test_full_conformance_handler")
+    set(timeout ${CONFORMANCE_TIMEOUT_SYCL_FULL_HANDLER})
+  elseif(target MATCHES "^test_full_conformance_")
     set(timeout ${CONFORMANCE_TIMEOUT_SYCL_FULL})
-    if(target STREQUAL "test_handler")
-      set(timeout ${CONFORMANCE_TIMEOUT_SYCL_FULL_HANDLER})
-    endif()
   endif()
   conformance_register_test_program("${target}" ${timeout})
 endforeach()

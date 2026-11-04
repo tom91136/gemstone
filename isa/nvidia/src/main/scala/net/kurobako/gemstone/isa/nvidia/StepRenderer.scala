@@ -308,19 +308,27 @@ private[isa] class StepRenderer(names: Names) extends NvidiaSinks[Term, Option[T
       validity: Option[Predicate],
       operand: Value,
       selector: Value,
-      bounds: Value
+      bounds: Value,
+      memberMask: Value
   )(
       inline source: (Term, Term, Term, Term) => Term,
       inline valid: (Term, Term, Term, Term) => Term,
       inline value: Term => Term
   ): Option[Term.Steps] = lifted {
+    val mask   = names.value(memberMask)
     val select = names.value(selector)
     val bound  = names.value(bounds)
     val from   = assign(names, names.temporary(), source(Machine.lane, select, bound, Machine.warpLanes))
+    val target = Term.Variable(from.last.name)
     val checks = Term.Steps.concat(validity.toVec.map(slot =>
       assign(names, names.predicate(slot), valid(Machine.lane, select, bound, Machine.warpLanes))
     ))
-    val read = value(Machine.shuffle(names.value(operand), names.tpe(operand), Term.Variable(from.last.name)))
+    val bit  = Term.Binary("&", Term.Binary(">>u", mask, target), Term.Literal(1L))
+    val read = Term.Select(
+      Term.Binary("==", bit, Term.Literal(0L)),
+      Term.Literal(0L),
+      value(Machine.shuffle(names.value(operand), names.tpe(operand), target))
+    )
     from ++ checks ++ assign(names, names.register(destination), read)
   }
 

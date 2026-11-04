@@ -91,7 +91,7 @@ __global__ void movement([[maybe_unused]] uint32_t *out) {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/blackwell/tcgen05-load-store-shapes", "[unified][runtime][blackwell][compact]") {
+TEST_CASE("runtime/cuda/blackwell/tcgen05-load-store-shapes", "[unified][runtime][blackwell]") {
   if (!available()) SKIP("tcgen05 requires sm_100a code on a compute capability 10.0 device");
   Buffer<uint32_t> out(std::vector<uint32_t>(size_t{128} * 5, 0xffffffffU));
   movement<<<1, 128>>>(out.device);
@@ -183,7 +183,7 @@ using unified::support::bfloat16Bits;
 
 } // namespace
 
-TEST_CASE("runtime/cuda/blackwell/tcgen05-mma-bf16", "[unified][runtime][blackwell][compact]") {
+TEST_CASE("runtime/cuda/blackwell/tcgen05-mma-bf16", "[unified][runtime][blackwell]") {
   if (!available()) SKIP("tcgen05 requires sm_100a code on a compute capability 10.0 device");
   const auto a = [](int row, int k) { return static_cast<float>((((row * 3) + (k * 5)) % 7) - 3); };
   const auto b = [](int k, int column) { return static_cast<float>((((k * 2) + (column * 7)) % 5) - 2) / 2; };
@@ -277,7 +277,7 @@ __global__ void gather([[maybe_unused]] const __grid_constant__ CUtensorMap load
 
 } // namespace
 
-TEST_CASE("runtime/cuda/blackwell/tensor-gather4-scatter4", "[unified][runtime][blackwell][compact]") {
+TEST_CASE("runtime/cuda/blackwell/tensor-gather4-scatter4", "[unified][runtime][blackwell]") {
   if (!available()) SKIP("tile::gather4 requires sm_100a code on a compute capability 10.0 device");
   const auto tensor = iota(0U, 16U * 8U) | map([](uint32_t index) { return (100 * (index / 8)) + (index % 8); }) | to_vector();
   Buffer<uint32_t> source(tensor);

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 class AMDGPUMemorySuite extends Suite {
@@ -145,6 +145,20 @@ class AMDGPUMemorySuite extends Suite {
     assertEquals(destination(4L * 29L, 0L), 29L)
     assertEquals(destination(address = 0L, offset = 124L), 31L)
     assertEquals(destination(4L * 37L, 124L), 4L)
+  }
+
+  test("DS_PERMUTE_B32 zeroes active lanes that receive no source and leaves inactive lanes alone") {
+    val target = Target("gfx1036")
+    val code   = Vec(0x00, 0x00, 0xc8, 0xda, 0x02, 0x03, 0x00, 0x05)
+    val inputs = Vec.tabulate(32)(lane =>
+      if (lane < 8) Vec(4L * (lane + 8), 1000L + lane, 0L, 0xdeadL)
+      else if (lane == 8) Vec(80L, 1008L, 0L, 0xdeadL)
+      else Vec(0L, 0L, 0L, 0xdeadL)
+    )
+    assertEquals(
+      laneResults(target, inputs, program(target, octets(code*)), 5, exec = 0xffffL).take(32),
+      Vec.tabulate(32)(lane => if (lane < 8) 0L else if (lane < 16) 1000L + lane - 8 else 0xdeadL)
+    )
   }
 
   test("DS addresses are 32-bit byte offsets into the LDS") {

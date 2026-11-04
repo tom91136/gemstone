@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import laneRuns.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
 /** DPP on register pairs, which CDNA2 onwards allows with row_newbcast: `__builtin_amdgcn_update_dpp` on a double with

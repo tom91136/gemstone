@@ -24,5 +24,5 @@ object Hex {
   }
 
   def render(bytes: Vec[Byte]): String =
-    bytes.grouped(16).map(_.map(value => f"${value & 0xff}%02x").mkString(" ")).mkString("\n")
+    bytes.grouped(16).map(row => SandboxEvidence.hex(row).mkString(" ")).mkString("\n")
 }

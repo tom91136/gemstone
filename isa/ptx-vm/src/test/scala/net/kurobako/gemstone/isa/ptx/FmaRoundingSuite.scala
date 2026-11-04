@@ -6,7 +6,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class FmaRoundingSuite extends Suite {
   for (width <- Vec(32, 64)) test(s"fma.f$width rounds once in every directed mode") {

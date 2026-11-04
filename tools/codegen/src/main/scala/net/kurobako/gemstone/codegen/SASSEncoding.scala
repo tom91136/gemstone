@@ -151,7 +151,7 @@ object SASSEncoding {
           )
         }
         if (dynamicSelectors.isEmpty) {
-          val selected = alternatives.find(_._1.exists(_.constant.contains(true))).map(_._2).getOrElse(fallback)
+          val selected = alternatives.find(_._1.exists(_.constant.contains(true))).fold(fallback)(_._2)
           Some(Expression.FixedFloat(
             Expression.Reference("$value", None, relaxed = false),
             FloatEncoding.fromSpelling(selected)
@@ -305,8 +305,9 @@ object SASSEncoding {
 
   private def parseUnitMasks(source: String, width: Int in (64, 88, 128)): Map[String, Vector[Int]] = {
     val definitions   = source.split("\n", -1).toVector.flatMap(line => unitHeader.parseAll(line).toOption)
-    val invalidWidths = definitions.filter(_._2.length != width.raw).map { case (name, mask) =>
-      s"$name has mask width ${mask.length}, expected $width"
+    val invalidWidths = definitions.collect {
+      case (name, mask) if mask.length != width.raw =>
+        s"$name has mask width ${mask.length}, expected $width"
     }
     require(invalidWidths.isEmpty, invalidWidths.mkString("invalid FUNIT masks: ", "; ", ""))
     val duplicates = definitions.groupBy(_._1).collect { case (name, entries) if entries.size > 1 => name }.toVector

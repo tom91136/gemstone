@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.explorer
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The SPIR-V describe pipeline loads each instance in the VM, which must run as it does on the JVM. */
 class SPIRVPipelineSuite extends Suite {

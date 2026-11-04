@@ -25,6 +25,7 @@
 #include "gemstone/hsa/doorbell_monitor.hpp"
 #include "gemstone/hsa/target.hpp"
 #include "gemstone_execution_rpc.hpp"
+#include <gemstone/devices.hpp>
 #include <gemstone/environment.hpp>
 #include <gemstone/trace.hpp>
 
@@ -50,11 +51,19 @@ using gemstone::hsa::PacketResult;
 using gemstone::hsa::PacketType;
 
 constexpr uint32_t CpuNode = 0;
-constexpr uint32_t GpuNode = 1;
+constexpr uint32_t FirstGpuNode = 1;
 
-constexpr uint32_t memoryBanks(uint32_t node) {
+uint32_t systemNodeCount() { return FirstGpuNode + gemstone::deviceCount(); }
+
+bool isGpuNode(uint32_t node) { return node >= FirstGpuNode && node < systemNodeCount(); }
+
+bool isNode(uint32_t node) { return node < systemNodeCount(); }
+
+bool allGpuNodes(HSAuint64 count, const HSAuint32 *nodes) { return count != 0 && nodes && std::all_of(nodes, nodes + count, isGpuNode); }
+
+uint32_t memoryBanks(uint32_t node) {
   if (node == CpuNode) return 1;
-  if (node == GpuNode) return 3;
+  if (isGpuNode(node)) return 3;
   return 0;
 }
 // Keep the advertised virtual aperture below ROCr's eager scratch-reservation threshold.
@@ -76,6 +85,7 @@ struct Allocation {
   uint32_t node = CpuNode;
   void *userData = nullptr;
   bool owned = false;
+  uint32_t devices = gemstone::execution::AllDevices;
   uint32_t mapCount = 0;
   std::mutex memoryLock;
   std::vector<unsigned char> uploadSnapshot;
@@ -97,6 +107,7 @@ struct Queue {
   std::unique_ptr<AqlQueue> aql;
   void *ring = nullptr;
   uint64_t ringSize = 0;
+  uint32_t device = 0;
   alignas(8) int64_t errorReason = 0;
 };
 
@@ -246,8 +257,12 @@ PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *pack
   std::vector<AllocationRef> accessible;
   AqlRuntime *aql = nullptr;
   Client *client = nullptr;
+  uint32_t device = 0;
   {
     std::scoped_lock const guard(runtime.lock);
+    const auto queue = runtime.queues.find(queueId);
+    if (queue == runtime.queues.end()) return PacketResult::Retry;
+    device = queue->second->device;
     aql = runtime.runtime.get();
     client = runtime.client.get();
     if (decode == gemstone::hsa::DecodeStatus::Success && decoded.type == PacketType::KernelDispatch) {
@@ -269,7 +284,7 @@ PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *pack
     }
   }
   if (decode != gemstone::hsa::DecodeStatus::Success) {
-    const auto result = aql->consume(packet);
+    const auto result = aql->consume(packet, false, device);
     if (tracing)
       std::fprintf(stderr, "Gemstone rejected AQL decode queue=%lu packet=%lu decode=%s error=%s\n", queueId, packetId,
                    gemstone::hsa::describe(decode), aql->lastError().c_str());
@@ -280,7 +295,7 @@ PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *pack
   if (tracing) std::fprintf(stderr, "Gemstone uploaded AQL queue=%lu packet=%lu allocations=%zu\n", queueId, packetId, accessible.size());
   const uint64_t completion = decoded.completionSignal;
   if (completion == 0) {
-    const auto result = aql->consume(packet);
+    const auto result = aql->consume(packet, false, device);
     if (tracing && result != PacketResult::Accepted)
       std::fprintf(stderr, "Gemstone rejected completion-less AQL queue=%lu packet=%lu kernel_object=0x%lx error=%s\n", queueId, packetId,
                    decoded.dispatch.kernelObject, aql->lastError().c_str());
@@ -297,7 +312,7 @@ PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *pack
   std::memcpy(deferredPacket.data(), packet, deferredPacket.size());
   const uint64_t deferredHandle = reinterpret_cast<uint64_t>(&deferred);
   std::memcpy(deferredPacket.data() + 56, &deferredHandle, sizeof(deferredHandle));
-  const auto result = aql->consume(deferredPacket.data());
+  const auto result = aql->consume(deferredPacket.data(), false, device);
   if (tracing) std::fprintf(stderr, "Gemstone executed AQL queue=%lu packet=%lu result=%d\n", queueId, packetId, static_cast<int>(result));
   if (result != PacketResult::Accepted) return result;
   const int64_t outcome = __atomic_load_n(&deferred.value, __ATOMIC_ACQUIRE);
@@ -354,14 +369,17 @@ HSAKMT_STATUS registerAllocation(void *base, uint64_t size, HsaMemFlags flags, H
                           });
     if (overlaps) return HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED;
   }
-  const auto id = gemstone::execution::registerAllocation(*runtime.client, size, base);
+  const uint32_t devices = node == CpuNode ? gemstone::execution::AllDevices : uint32_t{1} << (node - FirstGpuNode);
+  const auto id = gemstone::execution::registerAllocation(*runtime.client, size, base, false, devices);
   if (!id) return HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR;
   if (!runtime.runtime->registerAllocation(address, size, static_cast<uint64_t>(id->value))) {
     (void)runtime.client->call(ReleaseAllocation{*id});
     return HSAKMT_STATUS_ERROR;
   }
   std::scoped_lock const guard(runtime.lock);
-  runtime.allocations.emplace(base, std::make_shared<Allocation>(base, size, static_cast<uint64_t>(id->value), flags, type, node, owned));
+  const auto allocation = std::make_shared<Allocation>(base, size, static_cast<uint64_t>(id->value), flags, type, node, owned);
+  allocation->devices = devices;
+  runtime.allocations.emplace(base, allocation);
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -541,14 +559,14 @@ extern "C" HSAKMT_STATUS hsaKmtAcquireSystemProperties(HsaSystemProperties *prop
   if (!properties) return HSAKMT_STATUS_INVALID_PARAMETER;
   if (requireOpen(state()) != HSAKMT_STATUS_SUCCESS) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
   *properties = {};
-  properties->NumNodes = 2;
+  properties->NumNodes = systemNodeCount();
   return HSAKMT_STATUS_SUCCESS;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtReleaseSystemProperties() { return requireOpen(state()); }
 
 extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperties *properties) {
-  if ((node != CpuNode && node != GpuNode) || !properties) return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (!isNode(node) || !properties) return HSAKMT_STATUS_INVALID_PARAMETER;
   if (requireOpen(state()) != HSAKMT_STATUS_SUCCESS) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
   *properties = {};
   if (node == CpuNode) {
@@ -558,7 +576,7 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
     return HSAKMT_STATUS_SUCCESS;
   }
   properties->NumFComputeCores = 16;
-  properties->NumMemoryBanks = memoryBanks(GpuNode);
+  properties->NumMemoryBanks = memoryBanks(node);
   properties->MaxWavesPerSIMD = 10;
   properties->LDSSizeInKB = 64;
   properties->WaveFrontSize = gemstone::hsa::waveSize();
@@ -579,7 +597,9 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->Integrated = 0;
   properties->NumCpQueues = 128;
   properties->NumXcc = 1;
-  properties->KFDGpuID = 1;
+  properties->KFDGpuID = node;
+  properties->LocationId = (node - FirstGpuNode) << 8;
+  properties->UniqueID = node;
   properties->Capability.ui32.HSAMMUPresent = 1;
   properties->Capability.ui32.QueueSizePowerOfTwo = 1;
   properties->Capability.ui32.DoorbellType = 2;
@@ -602,7 +622,7 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeMemoryProperties(HSAuint32 node, HSAuint32
   properties[0].SizeInBytes = AvailableMemory;
   properties[0].Width = 256;
   properties[0].MemoryClockMax = 1000;
-  if (node == GpuNode) {
+  if (isGpuNode(node)) {
     properties[1].HeapType = HSA_HEAPTYPE_GPU_LDS;
     properties[1].SizeInBytes = uint64_t{64} * 1024;
     properties[1].VirtualBaseAddress = uint64_t{0x100000000000};
@@ -614,11 +634,11 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeMemoryProperties(HSAuint32 node, HSAuint32
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetNodeCacheProperties(HSAuint32 node, HSAuint32, HSAuint32 count, HsaCacheProperties *) {
-  return (node == CpuNode || node == GpuNode) && count == 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_PARAMETER;
+  return isNode(node) && count == 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_PARAMETER;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetNodeIoLinkProperties(HSAuint32 node, HSAuint32 count, HsaIoLinkProperties *) {
-  return (node == CpuNode || node == GpuNode) && count == 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_PARAMETER;
+  return isNode(node) && count == 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_PARAMETER;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtSetXNACKMode(HSAint32) { return HSAKMT_STATUS_NOT_SUPPORTED; }
@@ -636,7 +656,7 @@ extern "C" HSAKMT_STATUS hsaKmtModelEnabled(bool *enabled) {
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetClockCounters(HSAuint32 node, HsaClockCounters *counters) {
-  if (node != GpuNode || !counters) return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (!isGpuNode(node) || !counters) return HSAKMT_STATUS_INVALID_PARAMETER;
   const auto now = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
   counters->GPUClockCounter = now;
@@ -647,24 +667,23 @@ extern "C" HSAKMT_STATUS hsaKmtGetClockCounters(HSAuint32 node, HsaClockCounters
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetAMDGPUDeviceHandle(HSAuint32 node, HsaAMDGPUDeviceHandle *handle) {
-  if (node != GpuNode || !handle) return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (!isGpuNode(node) || !handle) return HSAKMT_STATUS_INVALID_PARAMETER;
   *handle = nullptr;
   return HSAKMT_STATUS_SUCCESS;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtSetMemoryPolicy(HSAuint32 node, HSAuint32, HSAuint32, void *, HSAuint64) {
-  return node == GpuNode ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_NODE_UNIT;
+  return isGpuNode(node) ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_NODE_UNIT;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtAvailableMemory(HSAuint32 node, HSAuint64 *available) {
-  if (node != GpuNode || !available) return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (!isGpuNode(node) || !available) return HSAKMT_STATUS_INVALID_PARAMETER;
   *available = AvailableMemory;
   return HSAKMT_STATUS_SUCCESS;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtAllocMemoryAlign(HSAuint32 node, HSAuint64 size, HSAuint64 alignment, HsaMemFlags flags, void **address) {
-  if ((node != CpuNode && node != GpuNode) || size == 0 || !address || flags.ui32.FixedAddress || flags.ui32.OnlyAddress)
-    return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (!isNode(node) || size == 0 || !address || flags.ui32.FixedAddress || flags.ui32.OnlyAddress) return HSAKMT_STATUS_INVALID_PARAMETER;
   const uint64_t requestedAlignment = alignment == 0 ? PageSize : alignment;
   if (requestedAlignment < PageSize || (requestedAlignment & (requestedAlignment - 1)) != 0 || size > std::numeric_limits<size_t>::max())
     return HSAKMT_STATUS_MEMORY_ALIGNMENT;
@@ -695,7 +714,7 @@ extern "C" HSAKMT_STATUS hsaKmtRegisterMemory(void *address, HSAuint64 size) {
 }
 
 extern "C" HSAKMT_STATUS hsaKmtRegisterMemoryToNodes(void *address, HSAuint64 size, HSAuint64 nodeCount, HSAuint32 *nodes) {
-  if (nodeCount != 1 || !nodes || nodes[0] != GpuNode) return HSAKMT_STATUS_INVALID_NODE_UNIT;
+  if (!allGpuNodes(nodeCount, nodes)) return HSAKMT_STATUS_INVALID_NODE_UNIT;
   return hsaKmtRegisterMemory(address, size);
 }
 
@@ -751,8 +770,17 @@ extern "C" HSAKMT_STATUS hsaKmtMapMemoryToGPU(void *address, HSAuint64 size, HSA
 
 extern "C" HSAKMT_STATUS hsaKmtMapMemoryToGPUNodes(void *address, HSAuint64 size, HSAuint64 *alternate, HsaMemMapFlags, HSAuint64 nodeCount,
                                                    HSAuint32 *nodes) {
-  if (nodeCount != 1 || !nodes || nodes[0] != GpuNode) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-  return hsaKmtMapMemoryToGPU(address, size, alternate);
+  if (!allGpuNodes(nodeCount, nodes)) return HSAKMT_STATUS_INVALID_NODE_UNIT;
+  const auto status = hsaKmtMapMemoryToGPU(address, size, alternate);
+  if (status != HSAKMT_STATUS_SUCCESS) return status;
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  auto *allocation = findAllocation(runtime, address);
+  for (HSAuint64 index = 0; index < nodeCount; ++index)
+    allocation->devices |= uint32_t{1} << (nodes[index] - FirstGpuNode);
+  return gemstone::execution::setAllocationDevices(*runtime.client, AllocationId{static_cast<int64_t>(allocation->id)}, allocation->devices)
+             ? HSAKMT_STATUS_SUCCESS
+             : HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtUnmapMemoryToGPU(void *address) {
@@ -877,11 +905,12 @@ extern "C" HSAKMT_STATUS hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *events[], HSAu
 
 extern "C" HSAKMT_STATUS hsaKmtCreateQueueExt(HSAuint32 node, HSA_QUEUE_TYPE type, HSAuint32, HSA_QUEUE_PRIORITY, HSAuint32, void *ring,
                                               HSAuint64 size, HsaEvent *, HsaQueueResource *resource) {
-  if (node != GpuNode || type != HSA_QUEUE_COMPUTE_AQL || !ring || size < AqlPacketSize || size % AqlPacketSize != 0 || !resource)
+  if (!isGpuNode(node) || type != HSA_QUEUE_COMPUTE_AQL || !ring || size < AqlPacketSize || size % AqlPacketSize != 0 || !resource)
     return HSAKMT_STATUS_NOT_SUPPORTED;
   auto record = std::make_unique<Queue>();
   record->ring = ring;
   record->ringSize = size;
+  record->device = node - FirstGpuNode;
   // ROCr supplies pointers embedded in its public queue before entering the
   // thunk.  Monitoring private replacement counters would never observe
   // hsa_queue_add_write_index_* and therefore cannot implement stock AQL.
@@ -957,11 +986,11 @@ extern "C" HSAKMT_STATUS hsaKmtGetQueueInfo(HSA_QUEUEID id, HsaQueueInfo *info) 
 }
 
 extern "C" HSAKMT_STATUS hsaKmtSetTrapHandler(HSAuint32 node, void *, HSAuint64, void *, HSAuint64) {
-  return node == GpuNode ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_NODE_UNIT;
+  return isGpuNode(node) ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_INVALID_NODE_UNIT;
 }
 
 extern "C" HSAKMT_STATUS hsaKmtGetTileConfig(HSAuint32 node, HsaGpuTileConfig *config) {
-  if (node != GpuNode || !config) return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (!isGpuNode(node) || !config) return HSAKMT_STATUS_INVALID_PARAMETER;
   config->NumTileConfigs = 0;
   config->NumMacroTileConfigs = 0;
   config->GbAddrConfig = 0;

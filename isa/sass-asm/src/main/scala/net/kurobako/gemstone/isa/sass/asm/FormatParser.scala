@@ -30,6 +30,8 @@ object FormatParser {
       typed: Vec[(String, NVDisasm.Syntax.Field, FieldDomain)]
   )
 
+  private val predicateBindings = Set("Pg", "UPg")
+
   // forms and databases are large and never copied, so the caches compare them by identity
   private val layouts =
     java.util.Collections.synchronizedMap(java.util.IdentityHashMap[NVDisasm.Form, Either[String, Vec[Piece]]]())
@@ -299,7 +301,7 @@ object FormatParser {
       case (field: Field) +: tail =>
         val omittedPredicate = afterComma(tail).filter(_ =>
           field.default.nonEmpty && field.category.isPredicate &&
-            !Set("Pg", "UPg")(field.binding)
+            !predicateBindings(field.binding)
         )
         omittedPredicate match {
           case Some(afterPredicate) => loop(afterPredicate, depth, None).map { rest =>

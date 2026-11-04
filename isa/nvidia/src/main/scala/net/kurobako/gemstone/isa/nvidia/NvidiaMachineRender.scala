@@ -650,12 +650,16 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
     )
   )
 
-  inline def warpSync(memberMask: Value): Term.Steps =
+  inline def warpSync(memberMask: Value): Term.Steps = warpBarrier("warpSync", memberMask)
+
+  inline def warpPartition(memberMask: Value): Term.Steps = warpBarrier("warpPartition", memberMask)
+
+  private def warpBarrier(call: String, memberMask: Value): Term.Steps =
     guarded(
       guard,
       Term.context(
         Barriers,
-        MachineCall("warpSync", Vec.empty, Vec((names.value(memberMask), Some(Word)))),
+        MachineCall(call, Vec.empty, Vec((names.value(memberMask), Some(Word)))),
         None,
         effect = true
       )
@@ -903,6 +907,78 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
       )
     ) ++ next(Term.Variable(held))
   }
+
+  private def textureShape(operation: Texture.Operation): Term = Term.Constant(operation match {
+    case Texture.Operation.Sample(_, coordinates, kind, element, _) =>
+      s"Texture.Sample(${coordinates.size}, $kind, $element)"
+    case Texture.Operation.Gather(component = component, element = element) =>
+      s"Texture.Gather(${component.raw}, $element)"
+    case Texture.Operation.Query(_, surface, property, _)                      => s"Texture.Query($surface, $property)"
+    case Texture.Operation.Load(_, coordinates, bytes, boundary, destinations) =>
+      s"Surface.Load(${coordinates.size}, ${bytes.raw}, ${destinations.size}, $boundary)"
+    case Texture.Operation.Store(_, coordinates, bytes, boundary, sources) =>
+      s"Surface.Store(${coordinates.size}, ${bytes.raw}, ${sources.size}, $boundary)"
+    case Texture.Operation.Reduce(
+          coordinates = coordinates,
+          bytes = bytes,
+          operation = reduction,
+          boundary = boundary
+        ) =>
+      s"Surface.Reduce(${coordinates.size}, ${bytes.raw}, $reduction, $boundary)"
+  })
+
+  private def textureArguments(operation: Texture.Operation, handle: Term, coordinates: Vec[Term])
+      : Vec[(Term, Option[Type])] =
+    Vec((textureShape(operation), None), (handle, Some(Word))) ++ coordinates.map((_, Some(Word)))
+
+  inline def textureRead(lane: Unit, read: Texture.Operation, handle: Term, coordinates: Vec[Term])(
+      inline next: Term => Term.Steps
+  ): Term.Steps = {
+    val data = names.temporary()
+    binding(
+      data,
+      Term.context(Memory, MachineCall("textureRead", Vec.empty, textureArguments(read, handle, coordinates)), None)
+    ) ++ next(Term.Variable(data))
+  }
+
+  def textureWord(data: Term, index: Int, bytes: Int): Term =
+    Term.context(
+      Memory,
+      MachineCall(
+        "textureWord",
+        Vec.empty,
+        Vec((data, None), (Term.Literal(index.toLong), Some(Word)), (Term.Literal(bytes.toLong), Some(Word)))
+      ),
+      Some(Word)
+    )
+
+  inline def surfaceStore(
+      lane: Unit,
+      store: Texture.Operation.Store,
+      handle: Term,
+      coordinates: Vec[Term],
+      sources: Vec[Term]
+  )(inline next: => Term.Steps): Term.Steps = statement(
+    Memory,
+    MachineCall("surfaceStore", Vec.empty, textureArguments(store, handle, coordinates) ++ sources.map((_, Some(Word))))
+  ) ++ next
+
+  inline def surfaceReduce(
+      lane: Unit,
+      reduce: Texture.Operation.Reduce,
+      handle: Term,
+      coordinates: Vec[Term],
+      operand: Term
+  )(
+      inline next: => Term.Steps
+  ): Term.Steps = statement(
+    Memory,
+    MachineCall(
+      "surfaceReduce",
+      Vec.empty,
+      textureArguments(reduce, handle, coordinates) :+ ((operand, Some(Word)))
+    )
+  ) ++ next
 
   inline def loadChunk(lane: Unit, cta: Term, offset: Term, packing: Matrix.Packing)(
       inline next: Term => Term.Steps

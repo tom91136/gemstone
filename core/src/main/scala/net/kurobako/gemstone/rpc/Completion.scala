@@ -66,6 +66,7 @@ private class Completion(
     val execute: Completion.Execute,
     val allocations: Set[AllocationId],
     val control: TaskControl,
+    val device: Int,
     maxPrintEvents: Int > 0
 ) {
   private var currentGraphicsStatistics: Option[GraphicsStatistics] = None
@@ -103,11 +104,14 @@ private class Completion(
   val hostMemory: HostMemoryMirror = HostMemoryMirror()
   // Each worker owns its intervals; merge only after all workgroups complete.
   private val dirtyWrites = java.util.concurrent.ConcurrentHashMap[Thread, Completion.DirtyWrites]()
-  private var exchange: Option[Completion.HostSync]   = None
-  private var readWaiters                             = 0
-  def hostSync: Option[Completion.HostSync]           = exchange
-  def hasReadWaiters: Boolean                         = readWaiters > 0
-  def beginHostSync(value: Completion.HostSync): Unit = {
+  @volatile private var exchange: Option[Completion.HostSync] = None
+  @volatile private var engagedHost                           = false
+  private var readWaiters                                     = 0
+  def hostSync: Option[Completion.HostSync]                   = exchange
+  def engaged: Boolean                                        = engagedHost
+  def engage(): Unit                                          = engagedHost = true
+  def hasReadWaiters: Boolean                                 = readWaiters > 0
+  def beginHostSync(value: Completion.HostSync): Unit         = {
     require(exchange.isEmpty, "host synchronisation is already pending")
     exchange = Some(value)
   }

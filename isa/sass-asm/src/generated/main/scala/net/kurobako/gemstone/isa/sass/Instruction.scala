@@ -2763,7 +2763,7 @@ object Instruction {
     val BmovAddressImm: Definition = Definition("BmovAddressImm", "BMOV", Vec("bmov_dst64__CX"))
     val BmovConst: Definition = Definition("BmovConst", "BMOV", Vec("bmov_dst64__C"))
     val BmovImm: Definition = Definition("BmovImm", "BMOV", Vec("bmov_dst64__I"))
-    val BmovReg: Definition = Definition("BmovReg", "BMOV", Vec("bmov_clear_bd__Bd", "bmov_dst64__R", "bmov_dst64__UR"))
+    val BmovReg: Definition = Definition("BmovReg", "BMOV", Vec("bmov_dst64__R", "bmov_dst64__UR"))
     val BmovRegAddressImm: Definition = Definition("BmovRegAddressImm", "BMOV", Vec("bmov_pquad__RCXR"))
     val BmovRegConst: Definition = Definition("BmovRegConst", "BMOV", Vec("bmov_pquad__RCR"))
     val BmovRegImm: Definition = Definition("BmovRegImm", "BMOV", Vec("bmov_pquad__RIR"))
@@ -2772,7 +2772,7 @@ object Instruction {
       "BMOV",
       Vec("bmov_clear__Rd", "bmov_clear_barrier_", "bmov_pquad__RRR", "bmov_pquad__RUR", "bmov_pquad_bar__RBR")
     )
-    val BmovRegSymbol: Definition = Definition("BmovRegSymbol", "BMOV", Vec("bmov_clear__Rd"))
+    val BmovRegSymbol: Definition = Definition("BmovRegSymbol", "BMOV", Vec("bmov_clear__Rd", "bmov_clear_bd__Bd"))
     val BmovSymbolAddressImm: Definition = Definition("BmovSymbolAddressImm", "BMOV", Vec("bmov_pquad__RCXR"))
     val BmovSymbolConst: Definition = Definition("BmovSymbolConst", "BMOV", Vec("bmov_pquad__RCR"))
     val BmovSymbolImm: Definition = Definition("BmovSymbolImm", "BMOV", Vec("bmov_pquad__RIR"))
@@ -3819,38 +3819,47 @@ object Instruction {
     val Fmul2RegRegImm: Definition = Definition("Fmul2RegRegImm", "FMUL2", Vec("fmul2_imm__RIR"))
     val Fmul2RegRegReg: Definition = Definition("Fmul2RegRegReg", "FMUL2", Vec("fmul2_rb__RRR", "fmul2_urb__RUR"))
     val Fmul32iRegRegImm: Definition = Definition("Fmul32iRegRegImm", "FMUL32I", Vec("FMUL32I", "fmul32i_"))
-    val FootprintPredRegRegRegReg: Definition =
-      Definition("FootprintPredRegRegRegReg", "FOOTPRINT", Vec("footprint_b_noConst_", "footprint_scr_b_noConst_"))
-    val FootprintPredRegRegRegRegImmImm: Definition = Definition(
-      "FootprintPredRegRegRegRegImmImm",
+    val FootprintPredRegRegRegRegImmImmImmSymbol: Definition = Definition(
+      "FootprintPredRegRegRegRegImmImmImmSymbol",
+      "FOOTPRINT",
+      Vec("footprint_b_tid_", "footprint_scr_b_tid_")
+    )
+    val FootprintPredRegRegRegRegImmImmSymbol: Definition = Definition(
+      "FootprintPredRegRegRegRegImmImmSymbol",
       "FOOTPRINT",
       Vec("footprint_", "footprint_b_", "footprint_scr_", "footprint_scr_b_")
     )
-    val FootprintPredRegRegRegRegImmImmImm: Definition =
-      Definition("FootprintPredRegRegRegRegImmImmImm", "FOOTPRINT", Vec("footprint_b_tid_", "footprint_scr_b_tid_"))
-    val FootprintPredRegRegRegRegReg: Definition = Definition(
-      "FootprintPredRegRegRegRegReg",
+    val FootprintPredRegRegRegRegRegImmSymbol: Definition = Definition(
+      "FootprintPredRegRegRegRegRegImmSymbol",
+      "FOOTPRINT",
+      Vec("footprint_scr_uniform_", "footprint_uniform_")
+    )
+    val FootprintPredRegRegRegRegRegSymbol: Definition = Definition(
+      "FootprintPredRegRegRegRegRegSymbol",
       "FOOTPRINT",
       Vec("footprint_b_urc_", "footprint_scr_b_urc_", "footprint_scr_uniform_", "footprint_uniform_")
     )
-    val FootprintPredRegRegRegRegRegImm: Definition =
-      Definition("FootprintPredRegRegRegRegRegImm", "FOOTPRINT", Vec("footprint_scr_uniform_", "footprint_uniform_"))
-    val FootprintRegRegRegReg: Definition =
-      Definition("FootprintRegRegRegReg", "FOOTPRINT", Vec("footprint_b_noConst_", "footprint_scr_b_noConst_"))
-    val FootprintRegRegRegRegImmImm: Definition = Definition(
-      "FootprintRegRegRegRegImmImm",
+    val FootprintPredRegRegRegRegSymbol: Definition = Definition(
+      "FootprintPredRegRegRegRegSymbol",
+      "FOOTPRINT",
+      Vec("footprint_b_noConst_", "footprint_scr_b_noConst_")
+    )
+    val FootprintRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("FootprintRegRegRegRegImmImmImmSymbol", "FOOTPRINT", Vec("footprint_b_tid_", "footprint_scr_b_tid_"))
+    val FootprintRegRegRegRegImmImmSymbol: Definition = Definition(
+      "FootprintRegRegRegRegImmImmSymbol",
       "FOOTPRINT",
       Vec("footprint_", "footprint_b_", "footprint_scr_", "footprint_scr_b_")
     )
-    val FootprintRegRegRegRegImmImmImm: Definition =
-      Definition("FootprintRegRegRegRegImmImmImm", "FOOTPRINT", Vec("footprint_b_tid_", "footprint_scr_b_tid_"))
-    val FootprintRegRegRegRegReg: Definition = Definition(
-      "FootprintRegRegRegRegReg",
+    val FootprintRegRegRegRegRegImmSymbol: Definition =
+      Definition("FootprintRegRegRegRegRegImmSymbol", "FOOTPRINT", Vec("footprint_scr_uniform_", "footprint_uniform_"))
+    val FootprintRegRegRegRegRegSymbol: Definition = Definition(
+      "FootprintRegRegRegRegRegSymbol",
       "FOOTPRINT",
       Vec("footprint_b_urc_", "footprint_scr_b_urc_", "footprint_scr_uniform_", "footprint_uniform_")
     )
-    val FootprintRegRegRegRegRegImm: Definition =
-      Definition("FootprintRegRegRegRegRegImm", "FOOTPRINT", Vec("footprint_scr_uniform_", "footprint_uniform_"))
+    val FootprintRegRegRegRegSymbol: Definition =
+      Definition("FootprintRegRegRegRegSymbol", "FOOTPRINT", Vec("footprint_b_noConst_", "footprint_scr_b_noConst_"))
     val FrndRegAddressImm: Definition = Definition(
       "FrndRegAddressImm",
       "FRND",
@@ -3964,8 +3973,8 @@ object Instruction {
       "FSETP",
       Vec("NoBop FSETP", "NoBop_FSETP", "fsetp_simple__RRR_RR", "fsetp_simple__RRR_RRR", "fsetp_simple__RUR_RUR")
     )
-    val FswzRegRegReg: Definition = Definition("FswzRegRegReg", "FSWZ", Vec("FSWZ"))
-    val FswzaddRegRegReg: Definition = Definition("FswzaddRegRegReg", "FSWZADD", Vec("FSWZADD", "fswzadd_"))
+    val FswzRegRegRegSymbol: Definition = Definition("FswzRegRegRegSymbol", "FSWZ", Vec("FSWZ"))
+    val FswzaddRegRegRegSymbol: Definition = Definition("FswzaddRegRegRegSymbol", "FSWZADD", Vec("FSWZADD", "fswzadd_"))
     val GatherRegRegRegRegImm: Definition = Definition("GatherRegRegRegRegImm", "GATHER", Vec("gather_"))
     val GatherRegRegRegRegImmImm: Definition = Definition("GatherRegRegRegRegImmImm", "GATHER", Vec("gather_"))
     val GatherRegRegRegRegImmImmImm: Definition = Definition("GatherRegRegRegRegImmImmImm", "GATHER", Vec("gather_"))
@@ -4611,16 +4620,16 @@ object Instruction {
       Fmul2RegRegImm,
       Fmul2RegRegReg,
       Fmul32iRegRegImm,
-      FootprintPredRegRegRegReg,
-      FootprintPredRegRegRegRegImmImm,
-      FootprintPredRegRegRegRegImmImmImm,
-      FootprintPredRegRegRegRegReg,
-      FootprintPredRegRegRegRegRegImm,
-      FootprintRegRegRegReg,
-      FootprintRegRegRegRegImmImm,
-      FootprintRegRegRegRegImmImmImm,
-      FootprintRegRegRegRegReg,
-      FootprintRegRegRegRegRegImm,
+      FootprintPredRegRegRegRegImmImmImmSymbol,
+      FootprintPredRegRegRegRegImmImmSymbol,
+      FootprintPredRegRegRegRegRegImmSymbol,
+      FootprintPredRegRegRegRegRegSymbol,
+      FootprintPredRegRegRegRegSymbol,
+      FootprintRegRegRegRegImmImmImmSymbol,
+      FootprintRegRegRegRegImmImmSymbol,
+      FootprintRegRegRegRegRegImmSymbol,
+      FootprintRegRegRegRegRegSymbol,
+      FootprintRegRegRegRegSymbol,
       FrndRegAddressImm,
       FrndRegConst,
       FrndRegImm,
@@ -4645,8 +4654,8 @@ object Instruction {
       FsetpPredRegConst,
       FsetpPredRegImm,
       FsetpPredRegReg,
-      FswzRegRegReg,
-      FswzaddRegRegReg,
+      FswzRegRegRegSymbol,
+      FswzaddRegRegRegSymbol,
       GatherRegRegRegRegImm,
       GatherRegRegRegRegImmImm,
       GatherRegRegRegRegImmImmImm,
@@ -6667,11 +6676,9 @@ object Instruction {
     val RpcmovConst: Definition =
       Definition("RpcmovConst", "RPCMOV", Vec("rpcmov_dstPc64__Const", "rpcmov_dstPc_const_"))
     val RpcmovImm: Definition = Definition("RpcmovImm", "RPCMOV", Vec("rpcmov_dstPc64__Imm", "rpcmov_dstPc_imm_"))
-    val RpcmovReg: Definition = Definition(
-      "RpcmovReg",
-      "RPCMOV",
-      Vec("rpcmov_dstPc64__URb", "rpcmov_dstPc_", "rpcmov_dstPc_URb_", "rpcmov_srcPc_")
-    )
+    val RpcmovReg: Definition =
+      Definition("RpcmovReg", "RPCMOV", Vec("rpcmov_dstPc64__URb", "rpcmov_dstPc_", "rpcmov_dstPc_URb_"))
+    val RpcmovRegSymbol: Definition = Definition("RpcmovRegSymbol", "RPCMOV", Vec("rpcmov_srcPc_"))
     val RroRegConst: Definition = Definition("RroRegConst", "RRO", Vec("Const RRO", "Const_RRO"))
     val RroRegImm: Definition = Definition("RroRegImm", "RRO", Vec("Imm RRO", "Imm_RRO"))
     val RroRegReg: Definition = Definition("RroRegReg", "RRO", Vec("RRO"))
@@ -6686,8 +6693,6 @@ object Instruction {
       Definition("SelRegRegConstPred", "SEL", Vec("Const SEL", "Const_SEL", "sel__RCR_RCR"))
     val SelRegRegImmPred: Definition =
       Definition("SelRegRegImmPred", "SEL", Vec("Imm SEL", "Imm_SEL", "sel_64__RIR", "sel__RuIR_RIR"))
-    val SelRegRegRegPred: Definition =
-      Definition("SelRegRegRegPred", "SEL", Vec("SEL", "sel_64__RRR", "sel_64__RUR", "sel__RRR_RRR", "sel__RUR_RUR"))
     val definitions: Vec[Definition] = Vec(
       LeaRegRegRegImm,
       LeaRegRegRegImmImm,
@@ -6933,6 +6938,7 @@ object Instruction {
       RpcmovConst,
       RpcmovImm,
       RpcmovReg,
+      RpcmovRegSymbol,
       RroRegConst,
       RroRegImm,
       RroRegReg,
@@ -6943,11 +6949,12 @@ object Instruction {
       ScatterRegRegRegRegImmImm,
       SelRegRegAddressImmPred,
       SelRegRegConstPred,
-      SelRegRegImmPred,
-      SelRegRegRegPred
+      SelRegRegImmPred
     )
   }
   object Definitions4 {
+    val SelRegRegRegPred: Definition =
+      Definition("SelRegRegRegPred", "SEL", Vec("SEL", "sel_64__RRR", "sel_64__RUR", "sel__RRR_RRR", "sel__RUR_RUR"))
     val SetcrsptrReg: Definition = Definition("SetcrsptrReg", "SETCRSPTR", Vec("SETCRSPTR"))
     val SetctaidReg: Definition = Definition("SetctaidReg", "SETCTAID", Vec("setctaid_"))
     val SetlmembaseReg: Definition = Definition("SetlmembaseReg", "SETLMEMBASE", Vec("SETLMEMBASE", "setlmembase_"))
@@ -7318,301 +7325,319 @@ object Instruction {
     val SyncsRegAddressReg: Definition =
       Definition("SyncsRegAddressReg", "SYNCS", Vec("syncs_arrive_", "syncs_uniform_exch_"))
     val SyncsRegAddressRegReg: Definition = Definition("SyncsRegAddressRegReg", "SYNCS", Vec("syncs_uniform_cas_"))
-    val TexPredRegRegRegImm: Definition = Definition("TexPredRegRegRegImm", "TEX", Vec("TEX", "TEX_B"))
-    val TexPredRegRegRegImmImm: Definition =
-      Definition("TexPredRegRegRegImmImm", "TEX", Vec("TEX", "TEX_B", "TEX_B_legacy_style", "TEX_legacy_style"))
-    val TexPredRegRegRegImmImmImm: Definition =
-      Definition("TexPredRegRegRegImmImmImm", "TEX", Vec("TEX_B_legacy_style", "TEX_legacy_style"))
-    val TexPredRegRegRegReg: Definition =
-      Definition("TexPredRegRegRegReg", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
-    val TexPredRegRegRegRegImm: Definition =
-      Definition("TexPredRegRegRegRegImm", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
-    val TexPredRegRegRegRegImmImm: Definition =
-      Definition("TexPredRegRegRegRegImmImm", "TEX", Vec("tex_", "tex_b_", "tex_scr_", "tex_scr_b_"))
-    val TexPredRegRegRegRegImmImmImm: Definition = Definition(
-      "TexPredRegRegRegRegImmImmImm",
+    val TexPredRegRegRegImmImmSymbol: Definition =
+      Definition("TexPredRegRegRegImmImmSymbol", "TEX", Vec("TEX_B_legacy_style", "TEX_legacy_style"))
+    val TexPredRegRegRegImmImmSymbolImm: Definition =
+      Definition("TexPredRegRegRegImmImmSymbolImm", "TEX", Vec("TEX_B_legacy_style", "TEX_legacy_style"))
+    val TexPredRegRegRegImmSymbol: Definition = Definition("TexPredRegRegRegImmSymbol", "TEX", Vec("TEX", "TEX_B"))
+    val TexPredRegRegRegImmSymbolImm: Definition =
+      Definition("TexPredRegRegRegImmSymbolImm", "TEX", Vec("TEX", "TEX_B"))
+    val TexPredRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TexPredRegRegRegRegImmImmImmSymbol", "TEX", Vec("tex_b_tid_", "tex_scr_b_tid_"))
+    val TexPredRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TexPredRegRegRegRegImmImmImmSymbolImm", "TEX", Vec("tex_b_tid_", "tex_scr_b_tid_"))
+    val TexPredRegRegRegRegImmImmSymbol: Definition =
+      Definition("TexPredRegRegRegRegImmImmSymbol", "TEX", Vec("tex_", "tex_b_", "tex_scr_", "tex_scr_b_"))
+    val TexPredRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TexPredRegRegRegRegImmImmSymbolImm", "TEX", Vec("tex_", "tex_b_", "tex_scr_", "tex_scr_b_"))
+    val TexPredRegRegRegRegRegImmSymbol: Definition =
+      Definition("TexPredRegRegRegRegRegImmSymbol", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexPredRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TexPredRegRegRegRegRegImmSymbolImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexPredRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("TexPredRegRegRegRegRegRegImmSymbol", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexPredRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TexPredRegRegRegRegRegRegImmSymbolImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexPredRegRegRegRegRegRegSymbol: Definition = Definition(
+      "TexPredRegRegRegRegRegRegSymbol",
       "TEX",
-      Vec("tex_", "tex_b_", "tex_b_tid_", "tex_scr_", "tex_scr_b_", "tex_scr_b_tid_")
+      Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_")
     )
-    val TexPredRegRegRegRegImmImmImmImm: Definition =
-      Definition("TexPredRegRegRegRegImmImmImmImm", "TEX", Vec("tex_b_tid_", "tex_scr_b_tid_"))
-    val TexPredRegRegRegRegReg: Definition = Definition(
-      "TexPredRegRegRegRegReg",
+    val TexPredRegRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TexPredRegRegRegRegRegRegSymbolImm",
+      "TEX",
+      Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_")
+    )
+    val TexPredRegRegRegRegRegSymbol: Definition = Definition(
+      "TexPredRegRegRegRegRegSymbol",
       "TEX",
       Vec("tex_b_noConst_", "tex_scr_b_noConst_", "tex_scr_urc_", "tex_urc_")
     )
-    val TexPredRegRegRegRegRegImm: Definition = Definition(
-      "TexPredRegRegRegRegRegImm",
+    val TexPredRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TexPredRegRegRegRegRegSymbolImm",
       "TEX",
       Vec("tex_b_noConst_", "tex_scr_b_noConst_", "tex_scr_urc_", "tex_urc_")
     )
-    val TexPredRegRegRegRegRegImmImm: Definition =
-      Definition("TexPredRegRegRegRegRegImmImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
-    val TexPredRegRegRegRegRegReg: Definition =
-      Definition("TexPredRegRegRegRegRegReg", "TEX", Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_"))
-    val TexPredRegRegRegRegRegRegImm: Definition =
-      Definition("TexPredRegRegRegRegRegRegImm", "TEX", Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_"))
-    val TexPredRegRegRegRegRegRegImmImm: Definition =
-      Definition("TexPredRegRegRegRegRegRegImmImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
-    val TexRegRegRegImm: Definition = Definition("TexRegRegRegImm", "TEX", Vec("TEX", "TEX_B"))
-    val TexRegRegRegImmImm: Definition =
-      Definition("TexRegRegRegImmImm", "TEX", Vec("TEX", "TEX B", "TEX_B", "TEX_B_legacy_style", "TEX_legacy_style"))
-    val TexRegRegRegImmImmImm: Definition = Definition(
-      "TexRegRegRegImmImmImm",
+    val TexPredRegRegRegRegSymbol: Definition =
+      Definition("TexPredRegRegRegRegSymbol", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
+    val TexPredRegRegRegRegSymbolImm: Definition =
+      Definition("TexPredRegRegRegRegSymbolImm", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
+    val TexRegRegRegImmImmSymbol: Definition =
+      Definition("TexRegRegRegImmImmSymbol", "TEX", Vec("TEX_B_legacy_style", "TEX_legacy_style"))
+    val TexRegRegRegImmImmSymbolImm: Definition = Definition(
+      "TexRegRegRegImmImmSymbolImm",
       "TEX",
       Vec("TEX B legacy style", "TEX legacy style", "TEX_B_legacy_style", "TEX_legacy_style")
     )
-    val TexRegRegRegReg: Definition = Definition("TexRegRegRegReg", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
-    val TexRegRegRegRegImm: Definition =
-      Definition("TexRegRegRegRegImm", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
-    val TexRegRegRegRegImmImm: Definition =
-      Definition("TexRegRegRegRegImmImm", "TEX", Vec("tex_", "tex_b_", "tex_scr_", "tex_scr_b_"))
-    val TexRegRegRegRegImmImmImm: Definition = Definition(
-      "TexRegRegRegRegImmImmImm",
+    val TexRegRegRegImmSymbol: Definition = Definition("TexRegRegRegImmSymbol", "TEX", Vec("TEX", "TEX_B"))
+    val TexRegRegRegImmSymbolImm: Definition =
+      Definition("TexRegRegRegImmSymbolImm", "TEX", Vec("TEX", "TEX B", "TEX_B"))
+    val TexRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TexRegRegRegRegImmImmImmSymbol", "TEX", Vec("tex_b_tid_", "tex_scr_b_tid_"))
+    val TexRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TexRegRegRegRegImmImmImmSymbolImm", "TEX", Vec("tex_b_tid_", "tex_scr_b_tid_"))
+    val TexRegRegRegRegImmImmSymbol: Definition =
+      Definition("TexRegRegRegRegImmImmSymbol", "TEX", Vec("tex_", "tex_b_", "tex_scr_", "tex_scr_b_"))
+    val TexRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TexRegRegRegRegImmImmSymbolImm", "TEX", Vec("tex_", "tex_b_", "tex_scr_", "tex_scr_b_"))
+    val TexRegRegRegRegRegImmSymbol: Definition =
+      Definition("TexRegRegRegRegRegImmSymbol", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TexRegRegRegRegRegImmSymbolImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("TexRegRegRegRegRegRegImmSymbol", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TexRegRegRegRegRegRegImmSymbolImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexRegRegRegRegRegRegSymbol: Definition =
+      Definition("TexRegRegRegRegRegRegSymbol", "TEX", Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_"))
+    val TexRegRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TexRegRegRegRegRegRegSymbolImm",
       "TEX",
-      Vec("tex_", "tex_b_", "tex_b_tid_", "tex_scr_", "tex_scr_b_", "tex_scr_b_tid_")
+      Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_")
     )
-    val TexRegRegRegRegImmImmImmImm: Definition =
-      Definition("TexRegRegRegRegImmImmImmImm", "TEX", Vec("tex_b_tid_", "tex_scr_b_tid_"))
-    val TexRegRegRegRegReg: Definition =
-      Definition("TexRegRegRegRegReg", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_", "tex_scr_urc_", "tex_urc_"))
-    val TexRegRegRegRegRegImm: Definition = Definition(
-      "TexRegRegRegRegRegImm",
+    val TexRegRegRegRegRegSymbol: Definition = Definition(
+      "TexRegRegRegRegRegSymbol",
       "TEX",
       Vec("tex_b_noConst_", "tex_scr_b_noConst_", "tex_scr_urc_", "tex_urc_")
     )
-    val TexRegRegRegRegRegImmImm: Definition =
-      Definition("TexRegRegRegRegRegImmImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
-    val TexRegRegRegRegRegReg: Definition =
-      Definition("TexRegRegRegRegRegReg", "TEX", Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_"))
-    val TexRegRegRegRegRegRegImm: Definition =
-      Definition("TexRegRegRegRegRegRegImm", "TEX", Vec("tex_b_urc_", "tex_scr_b_urc_", "tex_scr_urc_", "tex_urc_"))
-    val TexRegRegRegRegRegRegImmImm: Definition =
-      Definition("TexRegRegRegRegRegRegImmImm", "TEX", Vec("tex_scr_urc_", "tex_urc_"))
+    val TexRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TexRegRegRegRegRegSymbolImm",
+      "TEX",
+      Vec("tex_b_noConst_", "tex_scr_b_noConst_", "tex_scr_urc_", "tex_urc_")
+    )
+    val TexRegRegRegRegSymbol: Definition =
+      Definition("TexRegRegRegRegSymbol", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
+    val TexRegRegRegRegSymbolImm: Definition =
+      Definition("TexRegRegRegRegSymbolImm", "TEX", Vec("tex_b_noConst_", "tex_scr_b_noConst_"))
     val TexdepbarImm: Definition = Definition("TexdepbarImm", "TEXDEPBAR", Vec("TEXDEPBAR"))
-    val TexsRegRegRegRegImm: Definition =
-      Definition("TexsRegRegRegRegImm", "TEXS", Vec("TEXS", "TEXS_F16", "TEXS_F16_RZ", "TEXS_RZ"))
-    val TldPredRegRegRegImm: Definition = Definition("TldPredRegRegRegImm", "TLD", Vec("TLD", "TLD_B"))
-    val TldPredRegRegRegImmImm: Definition = Definition("TldPredRegRegRegImmImm", "TLD", Vec("TLD", "TLD_B"))
-    val TldPredRegRegRegReg: Definition =
-      Definition("TldPredRegRegRegReg", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
-    val TldPredRegRegRegRegImm: Definition =
-      Definition("TldPredRegRegRegRegImm", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
-    val TldPredRegRegRegRegImmImm: Definition =
-      Definition("TldPredRegRegRegRegImmImm", "TLD", Vec("tld_", "tld_b_", "tld_scr_", "tld_scr_b_"))
-    val TldPredRegRegRegRegImmImmImm: Definition = Definition(
-      "TldPredRegRegRegRegImmImmImm",
+    val TexsRegRegRegRegImmSymbolSymbol: Definition =
+      Definition("TexsRegRegRegRegImmSymbolSymbol", "TEXS", Vec("TEXS", "TEXS_F16", "TEXS_F16_RZ", "TEXS_RZ"))
+    val TldPredRegRegRegImmSymbol: Definition = Definition("TldPredRegRegRegImmSymbol", "TLD", Vec("TLD", "TLD_B"))
+    val TldPredRegRegRegImmSymbolImm: Definition =
+      Definition("TldPredRegRegRegImmSymbolImm", "TLD", Vec("TLD", "TLD_B"))
+    val TldPredRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TldPredRegRegRegRegImmImmImmSymbol", "TLD", Vec("tld_b_tid_", "tld_scr_b_tid_"))
+    val TldPredRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TldPredRegRegRegRegImmImmImmSymbolImm", "TLD", Vec("tld_b_tid_", "tld_scr_b_tid_"))
+    val TldPredRegRegRegRegImmImmSymbol: Definition =
+      Definition("TldPredRegRegRegRegImmImmSymbol", "TLD", Vec("tld_", "tld_b_", "tld_scr_", "tld_scr_b_"))
+    val TldPredRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TldPredRegRegRegRegImmImmSymbolImm", "TLD", Vec("tld_", "tld_b_", "tld_scr_", "tld_scr_b_"))
+    val TldPredRegRegRegRegRegImmSymbol: Definition =
+      Definition("TldPredRegRegRegRegRegImmSymbol", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldPredRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TldPredRegRegRegRegRegImmSymbolImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldPredRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("TldPredRegRegRegRegRegRegImmSymbol", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldPredRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TldPredRegRegRegRegRegRegImmSymbolImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldPredRegRegRegRegRegRegSymbol: Definition = Definition(
+      "TldPredRegRegRegRegRegRegSymbol",
       "TLD",
-      Vec("tld_", "tld_b_", "tld_b_tid_", "tld_scr_", "tld_scr_b_", "tld_scr_b_tid_")
+      Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_")
     )
-    val TldPredRegRegRegRegImmImmImmImm: Definition =
-      Definition("TldPredRegRegRegRegImmImmImmImm", "TLD", Vec("tld_b_tid_", "tld_scr_b_tid_"))
-    val TldPredRegRegRegRegReg: Definition = Definition(
-      "TldPredRegRegRegRegReg",
+    val TldPredRegRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TldPredRegRegRegRegRegRegSymbolImm",
       "TLD",
-      Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_")
+      Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_")
     )
-    val TldPredRegRegRegRegRegImm: Definition = Definition(
-      "TldPredRegRegRegRegRegImm",
-      "TLD",
-      Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_")
-    )
-    val TldPredRegRegRegRegRegImmImm: Definition =
-      Definition("TldPredRegRegRegRegRegImmImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
-    val TldPredRegRegRegRegRegReg: Definition =
-      Definition("TldPredRegRegRegRegRegReg", "TLD", Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_"))
-    val TldPredRegRegRegRegRegRegImm: Definition =
-      Definition("TldPredRegRegRegRegRegRegImm", "TLD", Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_"))
-    val TldPredRegRegRegRegRegRegImmImm: Definition =
-      Definition("TldPredRegRegRegRegRegRegImmImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
-    val TldRegRegRegImm: Definition = Definition("TldRegRegRegImm", "TLD", Vec("TLD", "TLD_B"))
-    val TldRegRegRegImmImm: Definition = Definition("TldRegRegRegImmImm", "TLD", Vec("TLD", "TLD B", "TLD_B"))
-    val TldRegRegRegReg: Definition = Definition("TldRegRegRegReg", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
-    val TldRegRegRegRegImm: Definition =
-      Definition("TldRegRegRegRegImm", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
-    val TldRegRegRegRegImmImm: Definition =
-      Definition("TldRegRegRegRegImmImm", "TLD", Vec("tld_", "tld_b_", "tld_scr_", "tld_scr_b_"))
-    val TldRegRegRegRegImmImmImm: Definition = Definition(
-      "TldRegRegRegRegImmImmImm",
-      "TLD",
-      Vec("tld_", "tld_b_", "tld_b_tid_", "tld_scr_", "tld_scr_b_", "tld_scr_b_tid_")
-    )
-    val TldRegRegRegRegImmImmImmImm: Definition =
-      Definition("TldRegRegRegRegImmImmImmImm", "TLD", Vec("tld_b_tid_", "tld_scr_b_tid_"))
-    val TldRegRegRegRegReg: Definition =
-      Definition("TldRegRegRegRegReg", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_"))
-    val TldRegRegRegRegRegImm: Definition = Definition(
-      "TldRegRegRegRegRegImm",
+    val TldPredRegRegRegRegRegSymbol: Definition = Definition(
+      "TldPredRegRegRegRegRegSymbol",
       "TLD",
       Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_")
     )
-    val TldRegRegRegRegRegImmImm: Definition =
-      Definition("TldRegRegRegRegRegImmImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
-    val TldRegRegRegRegRegReg: Definition =
-      Definition("TldRegRegRegRegRegReg", "TLD", Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_"))
-    val TldRegRegRegRegRegRegImm: Definition =
-      Definition("TldRegRegRegRegRegRegImm", "TLD", Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_"))
-    val TldRegRegRegRegRegRegImmImm: Definition =
-      Definition("TldRegRegRegRegRegRegImmImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
-    val Tld4PredRegRegRegImm: Definition = Definition("Tld4PredRegRegRegImm", "TLD4", Vec("TLD4", "TLD4_B"))
-    val Tld4PredRegRegRegImmImm: Definition =
-      Definition("Tld4PredRegRegRegImmImm", "TLD4", Vec("TLD4", "TLD4_B", "TLD4_B_Legacy_Style", "TLD4_Legacy_Style"))
-    val Tld4PredRegRegRegImmImmImm: Definition =
-      Definition("Tld4PredRegRegRegImmImmImm", "TLD4", Vec("TLD4_B_Legacy_Style", "TLD4_Legacy_Style"))
-    val Tld4PredRegRegRegReg: Definition =
-      Definition("Tld4PredRegRegRegReg", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
-    val Tld4PredRegRegRegRegImm: Definition =
-      Definition("Tld4PredRegRegRegRegImm", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
-    val Tld4PredRegRegRegRegImmImm: Definition =
-      Definition("Tld4PredRegRegRegRegImmImm", "TLD4", Vec("tld4_", "tld4_b_", "tld4_scr_", "tld4_scr_b_"))
-    val Tld4PredRegRegRegRegImmImmImm: Definition = Definition(
-      "Tld4PredRegRegRegRegImmImmImm",
-      "TLD4",
-      Vec("tld4_", "tld4_b_", "tld4_b_tid_", "tld4_scr_", "tld4_scr_b_", "tld4_scr_b_tid_")
+    val TldPredRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TldPredRegRegRegRegRegSymbolImm",
+      "TLD",
+      Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_")
     )
-    val Tld4PredRegRegRegRegImmImmImmImm: Definition =
-      Definition("Tld4PredRegRegRegRegImmImmImmImm", "TLD4", Vec("tld4_b_tid_", "tld4_scr_b_tid_"))
-    val Tld4PredRegRegRegRegReg: Definition = Definition(
-      "Tld4PredRegRegRegRegReg",
-      "TLD4",
-      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
+    val TldPredRegRegRegRegSymbol: Definition =
+      Definition("TldPredRegRegRegRegSymbol", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
+    val TldPredRegRegRegRegSymbolImm: Definition =
+      Definition("TldPredRegRegRegRegSymbolImm", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
+    val TldRegRegRegImmSymbol: Definition = Definition("TldRegRegRegImmSymbol", "TLD", Vec("TLD", "TLD_B"))
+    val TldRegRegRegImmSymbolImm: Definition =
+      Definition("TldRegRegRegImmSymbolImm", "TLD", Vec("TLD", "TLD B", "TLD_B"))
+    val TldRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TldRegRegRegRegImmImmImmSymbol", "TLD", Vec("tld_b_tid_", "tld_scr_b_tid_"))
+    val TldRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TldRegRegRegRegImmImmImmSymbolImm", "TLD", Vec("tld_b_tid_", "tld_scr_b_tid_"))
+    val TldRegRegRegRegImmImmSymbol: Definition =
+      Definition("TldRegRegRegRegImmImmSymbol", "TLD", Vec("tld_", "tld_b_", "tld_scr_", "tld_scr_b_"))
+    val TldRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TldRegRegRegRegImmImmSymbolImm", "TLD", Vec("tld_", "tld_b_", "tld_scr_", "tld_scr_b_"))
+    val TldRegRegRegRegRegImmSymbol: Definition =
+      Definition("TldRegRegRegRegRegImmSymbol", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TldRegRegRegRegRegImmSymbolImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("TldRegRegRegRegRegRegImmSymbol", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TldRegRegRegRegRegRegImmSymbolImm", "TLD", Vec("tld_scr_urc_", "tld_urc_"))
+    val TldRegRegRegRegRegRegSymbol: Definition =
+      Definition("TldRegRegRegRegRegRegSymbol", "TLD", Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_"))
+    val TldRegRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TldRegRegRegRegRegRegSymbolImm",
+      "TLD",
+      Vec("tld_b_urc_", "tld_scr_b_urc_", "tld_scr_urc_", "tld_urc_")
     )
-    val Tld4PredRegRegRegRegRegImm: Definition = Definition(
-      "Tld4PredRegRegRegRegRegImm",
-      "TLD4",
-      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
+    val TldRegRegRegRegRegSymbol: Definition = Definition(
+      "TldRegRegRegRegRegSymbol",
+      "TLD",
+      Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_")
     )
-    val Tld4PredRegRegRegRegRegImmImm: Definition =
-      Definition("Tld4PredRegRegRegRegRegImmImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
-    val Tld4PredRegRegRegRegRegReg: Definition = Definition(
-      "Tld4PredRegRegRegRegRegReg",
+    val TldRegRegRegRegRegSymbolImm: Definition = Definition(
+      "TldRegRegRegRegRegSymbolImm",
+      "TLD",
+      Vec("tld_b_noConst_", "tld_scr_b_noConst_", "tld_scr_urc_", "tld_urc_")
+    )
+    val TldRegRegRegRegSymbol: Definition =
+      Definition("TldRegRegRegRegSymbol", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
+    val TldRegRegRegRegSymbolImm: Definition =
+      Definition("TldRegRegRegRegSymbolImm", "TLD", Vec("tld_b_noConst_", "tld_scr_b_noConst_"))
+    val Tld4PredRegRegRegImmImmSymbol: Definition =
+      Definition("Tld4PredRegRegRegImmImmSymbol", "TLD4", Vec("TLD4_B_Legacy_Style", "TLD4_Legacy_Style"))
+    val Tld4PredRegRegRegImmImmSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegImmImmSymbolImm", "TLD4", Vec("TLD4_B_Legacy_Style", "TLD4_Legacy_Style"))
+    val Tld4PredRegRegRegImmSymbol: Definition = Definition("Tld4PredRegRegRegImmSymbol", "TLD4", Vec("TLD4", "TLD4_B"))
+    val Tld4PredRegRegRegImmSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegImmSymbolImm", "TLD4", Vec("TLD4", "TLD4_B"))
+    val Tld4PredRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("Tld4PredRegRegRegRegImmImmImmSymbol", "TLD4", Vec("tld4_b_tid_", "tld4_scr_b_tid_"))
+    val Tld4PredRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegRegImmImmImmSymbolImm", "TLD4", Vec("tld4_b_tid_", "tld4_scr_b_tid_"))
+    val Tld4PredRegRegRegRegImmImmSymbol: Definition =
+      Definition("Tld4PredRegRegRegRegImmImmSymbol", "TLD4", Vec("tld4_", "tld4_b_", "tld4_scr_", "tld4_scr_b_"))
+    val Tld4PredRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegRegImmImmSymbolImm", "TLD4", Vec("tld4_", "tld4_b_", "tld4_scr_", "tld4_scr_b_"))
+    val Tld4PredRegRegRegRegRegImmSymbol: Definition =
+      Definition("Tld4PredRegRegRegRegRegImmSymbol", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4PredRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegRegRegImmSymbolImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4PredRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("Tld4PredRegRegRegRegRegRegImmSymbol", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4PredRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegRegRegRegImmSymbolImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4PredRegRegRegRegRegRegSymbol: Definition = Definition(
+      "Tld4PredRegRegRegRegRegRegSymbol",
       "TLD4",
       Vec("tld4_b_urc_", "tld4_scr_b_urc_", "tld4_scr_urc_", "tld4_urc_")
     )
-    val Tld4PredRegRegRegRegRegRegImm: Definition = Definition(
-      "Tld4PredRegRegRegRegRegRegImm",
+    val Tld4PredRegRegRegRegRegRegSymbolImm: Definition = Definition(
+      "Tld4PredRegRegRegRegRegRegSymbolImm",
       "TLD4",
       Vec("tld4_b_urc_", "tld4_scr_b_urc_", "tld4_scr_urc_", "tld4_urc_")
     )
-    val Tld4PredRegRegRegRegRegRegImmImm: Definition =
-      Definition("Tld4PredRegRegRegRegRegRegImmImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
-    val Tld4RegRegRegImm: Definition = Definition("Tld4RegRegRegImm", "TLD4", Vec("TLD4", "TLD4_B"))
-    val Tld4RegRegRegImmImm: Definition = Definition(
-      "Tld4RegRegRegImmImm",
+    val Tld4PredRegRegRegRegRegSymbol: Definition = Definition(
+      "Tld4PredRegRegRegRegRegSymbol",
       "TLD4",
-      Vec("TLD4", "TLD4 B", "TLD4_B", "TLD4_B_Legacy_Style", "TLD4_Legacy_Style")
+      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
     )
-    val Tld4RegRegRegImmImmImm: Definition = Definition(
-      "Tld4RegRegRegImmImmImm",
+    val Tld4PredRegRegRegRegRegSymbolImm: Definition = Definition(
+      "Tld4PredRegRegRegRegRegSymbolImm",
+      "TLD4",
+      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
+    )
+    val Tld4PredRegRegRegRegSymbol: Definition =
+      Definition("Tld4PredRegRegRegRegSymbol", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
+    val Tld4PredRegRegRegRegSymbolImm: Definition =
+      Definition("Tld4PredRegRegRegRegSymbolImm", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
+    val Tld4RegRegRegImmImmSymbol: Definition =
+      Definition("Tld4RegRegRegImmImmSymbol", "TLD4", Vec("TLD4_B_Legacy_Style", "TLD4_Legacy_Style"))
+    val Tld4RegRegRegImmImmSymbolImm: Definition = Definition(
+      "Tld4RegRegRegImmImmSymbolImm",
       "TLD4",
       Vec("TLD4 B Legacy Style", "TLD4 Legacy Style", "TLD4_B_Legacy_Style", "TLD4_Legacy_Style")
     )
-    val Tld4RegRegRegReg: Definition =
-      Definition("Tld4RegRegRegReg", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
-    val Tld4RegRegRegRegImm: Definition =
-      Definition("Tld4RegRegRegRegImm", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
-    val Tld4RegRegRegRegImmImm: Definition =
-      Definition("Tld4RegRegRegRegImmImm", "TLD4", Vec("tld4_", "tld4_b_", "tld4_scr_", "tld4_scr_b_"))
-    val Tld4RegRegRegRegImmImmImm: Definition = Definition(
-      "Tld4RegRegRegRegImmImmImm",
-      "TLD4",
-      Vec("tld4_", "tld4_b_", "tld4_b_tid_", "tld4_scr_", "tld4_scr_b_", "tld4_scr_b_tid_")
-    )
-    val Tld4RegRegRegRegImmImmImmImm: Definition =
-      Definition("Tld4RegRegRegRegImmImmImmImm", "TLD4", Vec("tld4_b_tid_", "tld4_scr_b_tid_"))
-    val Tld4RegRegRegRegReg: Definition = Definition(
-      "Tld4RegRegRegRegReg",
-      "TLD4",
-      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
-    )
-    val Tld4RegRegRegRegRegImm: Definition = Definition(
-      "Tld4RegRegRegRegRegImm",
-      "TLD4",
-      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
-    )
-    val Tld4RegRegRegRegRegImmImm: Definition =
-      Definition("Tld4RegRegRegRegRegImmImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
-    val Tld4RegRegRegRegRegReg: Definition =
-      Definition("Tld4RegRegRegRegRegReg", "TLD4", Vec("tld4_b_urc_", "tld4_scr_b_urc_", "tld4_scr_urc_", "tld4_urc_"))
-    val Tld4RegRegRegRegRegRegImm: Definition = Definition(
-      "Tld4RegRegRegRegRegRegImm",
+    val Tld4RegRegRegImmSymbol: Definition = Definition("Tld4RegRegRegImmSymbol", "TLD4", Vec("TLD4", "TLD4_B"))
+    val Tld4RegRegRegImmSymbolImm: Definition =
+      Definition("Tld4RegRegRegImmSymbolImm", "TLD4", Vec("TLD4", "TLD4 B", "TLD4_B"))
+    val Tld4RegRegRegRegImmImmImmSymbol: Definition =
+      Definition("Tld4RegRegRegRegImmImmImmSymbol", "TLD4", Vec("tld4_b_tid_", "tld4_scr_b_tid_"))
+    val Tld4RegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("Tld4RegRegRegRegImmImmImmSymbolImm", "TLD4", Vec("tld4_b_tid_", "tld4_scr_b_tid_"))
+    val Tld4RegRegRegRegImmImmSymbol: Definition =
+      Definition("Tld4RegRegRegRegImmImmSymbol", "TLD4", Vec("tld4_", "tld4_b_", "tld4_scr_", "tld4_scr_b_"))
+    val Tld4RegRegRegRegImmImmSymbolImm: Definition =
+      Definition("Tld4RegRegRegRegImmImmSymbolImm", "TLD4", Vec("tld4_", "tld4_b_", "tld4_scr_", "tld4_scr_b_"))
+    val Tld4RegRegRegRegRegImmSymbol: Definition =
+      Definition("Tld4RegRegRegRegRegImmSymbol", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4RegRegRegRegRegImmSymbolImm: Definition =
+      Definition("Tld4RegRegRegRegRegImmSymbolImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4RegRegRegRegRegRegImmSymbol: Definition =
+      Definition("Tld4RegRegRegRegRegRegImmSymbol", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4RegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("Tld4RegRegRegRegRegRegImmSymbolImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
+    val Tld4RegRegRegRegRegRegSymbol: Definition = Definition(
+      "Tld4RegRegRegRegRegRegSymbol",
       "TLD4",
       Vec("tld4_b_urc_", "tld4_scr_b_urc_", "tld4_scr_urc_", "tld4_urc_")
     )
-    val Tld4RegRegRegRegRegRegImmImm: Definition =
-      Definition("Tld4RegRegRegRegRegRegImmImm", "TLD4", Vec("tld4_scr_urc_", "tld4_urc_"))
-    val Tld4sRegRegRegRegImm: Definition = Definition("Tld4sRegRegRegRegImm", "TLD4S", Vec("TLD4S", "TLD4S_F16"))
-    val TldsRegRegRegRegImm: Definition =
-      Definition("TldsRegRegRegRegImm", "TLDS", Vec("TLDS", "TLDS_F16", "TLDS_F16_RZ", "TLDS_RZ"))
-    val TmmlRegRegImm: Definition = Definition("TmmlRegRegImm", "TMML", Vec("TMML"))
-    val TmmlRegRegImmImm: Definition = Definition("TmmlRegRegImmImm", "TMML", Vec("TMML", "TMML_Legacy_Style"))
-    val TmmlRegRegImmImmImm: Definition =
-      Definition("TmmlRegRegImmImmImm", "TMML", Vec("TMML Legacy Style", "TMML_Legacy_Style"))
-    val TmmlRegRegRegImm: Definition = Definition("TmmlRegRegRegImm", "TMML", Vec("TMML", "TMML_B"))
-    val TmmlRegRegRegImmImm: Definition = Definition(
-      "TmmlRegRegRegImmImm",
-      "TMML",
-      Vec("TMML", "TMML.B", "TMML_B", "TMML_B_Legacy_Style", "TMML_Legacy_Style")
+    val Tld4RegRegRegRegRegRegSymbolImm: Definition = Definition(
+      "Tld4RegRegRegRegRegRegSymbolImm",
+      "TLD4",
+      Vec("tld4_b_urc_", "tld4_scr_b_urc_", "tld4_scr_urc_", "tld4_urc_")
     )
-    val TmmlRegRegRegImmImmImm: Definition = Definition(
-      "TmmlRegRegRegImmImmImm",
+    val Tld4RegRegRegRegRegSymbol: Definition = Definition(
+      "Tld4RegRegRegRegRegSymbol",
+      "TLD4",
+      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
+    )
+    val Tld4RegRegRegRegRegSymbolImm: Definition = Definition(
+      "Tld4RegRegRegRegRegSymbolImm",
+      "TLD4",
+      Vec("tld4_b_noConst_", "tld4_scr_b_noConst_", "tld4_scr_urc_", "tld4_urc_")
+    )
+    val Tld4RegRegRegRegSymbol: Definition =
+      Definition("Tld4RegRegRegRegSymbol", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
+    val Tld4RegRegRegRegSymbolImm: Definition =
+      Definition("Tld4RegRegRegRegSymbolImm", "TLD4", Vec("tld4_b_noConst_", "tld4_scr_b_noConst_"))
+    val Tld4sRegRegRegRegImm: Definition = Definition("Tld4sRegRegRegRegImm", "TLD4S", Vec("TLD4S", "TLD4S_F16"))
+    val TldsRegRegRegRegImmSymbolSymbol: Definition =
+      Definition("TldsRegRegRegRegImmSymbolSymbol", "TLDS", Vec("TLDS", "TLDS_F16", "TLDS_F16_RZ", "TLDS_RZ"))
+    val TmmlRegRegImmImmSymbol: Definition = Definition("TmmlRegRegImmImmSymbol", "TMML", Vec("TMML_Legacy_Style"))
+    val TmmlRegRegImmImmSymbolImm: Definition =
+      Definition("TmmlRegRegImmImmSymbolImm", "TMML", Vec("TMML Legacy Style", "TMML_Legacy_Style"))
+    val TmmlRegRegImmSymbol: Definition = Definition("TmmlRegRegImmSymbol", "TMML", Vec("TMML"))
+    val TmmlRegRegImmSymbolImm: Definition = Definition("TmmlRegRegImmSymbolImm", "TMML", Vec("TMML"))
+    val TmmlRegRegRegImmImmSymbol: Definition =
+      Definition("TmmlRegRegRegImmImmSymbol", "TMML", Vec("TMML_B_Legacy_Style", "TMML_Legacy_Style"))
+    val TmmlRegRegRegImmImmSymbolImm: Definition = Definition(
+      "TmmlRegRegRegImmImmSymbolImm",
       "TMML",
       Vec("TMML Legacy Style", "TMML.B Legacy Style", "TMML_B_Legacy_Style", "TMML_Legacy_Style")
     )
-    val TmmlRegRegRegReg: Definition = Definition("TmmlRegRegRegReg", "TMML", Vec("tmml_b_noConst_"))
-    val TmmlRegRegRegRegImm: Definition = Definition("TmmlRegRegRegRegImm", "TMML", Vec("tmml_b_noConst_"))
-    val TmmlRegRegRegRegImmImm: Definition = Definition("TmmlRegRegRegRegImmImm", "TMML", Vec("tmml_", "tmml_b_"))
-    val TmmlRegRegRegRegImmImmImm: Definition =
-      Definition("TmmlRegRegRegRegImmImmImm", "TMML", Vec("tmml_", "tmml_b_", "tmml_b_tid_"))
-    val TmmlRegRegRegRegImmImmImmImm: Definition =
-      Definition("TmmlRegRegRegRegImmImmImmImm", "TMML", Vec("tmml_b_tid_"))
-    val TmmlRegRegRegRegReg: Definition = Definition("TmmlRegRegRegRegReg", "TMML", Vec("tmml_b_urc_", "tmml_urc_"))
-    val TmmlRegRegRegRegRegImm: Definition =
-      Definition("TmmlRegRegRegRegRegImm", "TMML", Vec("tmml_b_urc_", "tmml_urc_"))
-    val TmmlRegRegRegRegRegImmImm: Definition = Definition("TmmlRegRegRegRegRegImmImm", "TMML", Vec("tmml_urc_"))
-    val TxaRegRegImm: Definition = Definition("TxaRegRegImm", "TXA", Vec("TXA"))
-    val TxaRegRegImmImm: Definition = Definition("TxaRegRegImmImm", "TXA", Vec("TXA"))
-    val TxaRegRegImmImmImm: Definition =
-      Definition("TxaRegRegImmImmImm", "TXA", Vec("TXA Legacy Style", "TXA_Legacy_Style"))
-    val TxdPredRegRegRegImm: Definition = Definition("TxdPredRegRegRegImm", "TXD", Vec("TXD", "TXD.B"))
-    val TxdPredRegRegRegImmImm: Definition =
-      Definition("TxdPredRegRegRegImmImm", "TXD", Vec("TXD", "TXD.B", "TXD_B_Legacy_Style", "TXD_Legacy_Style"))
-    val TxdPredRegRegRegImmImmImm: Definition =
-      Definition("TxdPredRegRegRegImmImmImm", "TXD", Vec("TXD_B_Legacy_Style", "TXD_Legacy_Style"))
-    val TxdPredRegRegRegReg: Definition = Definition("TxdPredRegRegRegReg", "TXD", Vec("txd_b_noConst_"))
-    val TxdPredRegRegRegRegImm: Definition = Definition("TxdPredRegRegRegRegImm", "TXD", Vec("txd_b_noConst_"))
-    val TxdPredRegRegRegRegImmImm: Definition = Definition("TxdPredRegRegRegRegImmImm", "TXD", Vec("txd_", "txd_b_"))
-    val TxdPredRegRegRegRegImmImmImm: Definition =
-      Definition("TxdPredRegRegRegRegImmImmImm", "TXD", Vec("txd_", "txd_b_", "txd_b_tid_"))
-    val TxdPredRegRegRegRegImmImmImmImm: Definition =
-      Definition("TxdPredRegRegRegRegImmImmImmImm", "TXD", Vec("txd_b_tid_"))
-    val TxdPredRegRegRegRegReg: Definition =
-      Definition("TxdPredRegRegRegRegReg", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
-    val TxdPredRegRegRegRegRegImm: Definition =
-      Definition("TxdPredRegRegRegRegRegImm", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
-    val TxdPredRegRegRegRegRegImmImm: Definition = Definition("TxdPredRegRegRegRegRegImmImm", "TXD", Vec("txd_urc_"))
-    val TxdPredRegRegRegRegRegReg: Definition =
-      Definition("TxdPredRegRegRegRegRegReg", "TXD", Vec("txd_b_urc_", "txd_urc_"))
-    val TxdPredRegRegRegRegRegRegImm: Definition =
-      Definition("TxdPredRegRegRegRegRegRegImm", "TXD", Vec("txd_b_urc_", "txd_urc_"))
-    val TxdPredRegRegRegRegRegRegImmImm: Definition =
-      Definition("TxdPredRegRegRegRegRegRegImmImm", "TXD", Vec("txd_urc_"))
-    val TxdRegRegRegImm: Definition = Definition("TxdRegRegRegImm", "TXD", Vec("TXD", "TXD.B"))
-    val TxdRegRegRegImmImm: Definition =
-      Definition("TxdRegRegRegImmImm", "TXD", Vec("TXD", "TXD.B", "TXD_B_Legacy_Style", "TXD_Legacy_Style"))
-    val TxdRegRegRegImmImmImm: Definition = Definition(
-      "TxdRegRegRegImmImmImm",
-      "TXD",
-      Vec("TXD Legacy Style", "TXD.B Legacy Style", "TXD_B_Legacy_Style", "TXD_Legacy_Style")
-    )
-    val TxdRegRegRegReg: Definition = Definition("TxdRegRegRegReg", "TXD", Vec("txd_b_noConst_"))
-    val TxdRegRegRegRegImm: Definition = Definition("TxdRegRegRegRegImm", "TXD", Vec("txd_b_noConst_"))
-    val TxdRegRegRegRegImmImm: Definition = Definition("TxdRegRegRegRegImmImm", "TXD", Vec("txd_", "txd_b_"))
-    val TxdRegRegRegRegImmImmImm: Definition =
-      Definition("TxdRegRegRegRegImmImmImm", "TXD", Vec("txd_", "txd_b_", "txd_b_tid_"))
-    val TxdRegRegRegRegImmImmImmImm: Definition = Definition("TxdRegRegRegRegImmImmImmImm", "TXD", Vec("txd_b_tid_"))
-    val TxdRegRegRegRegReg: Definition = Definition("TxdRegRegRegRegReg", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
+    val TmmlRegRegRegImmSymbol: Definition = Definition("TmmlRegRegRegImmSymbol", "TMML", Vec("TMML", "TMML_B"))
+    val TmmlRegRegRegImmSymbolImm: Definition =
+      Definition("TmmlRegRegRegImmSymbolImm", "TMML", Vec("TMML", "TMML.B", "TMML_B"))
+    val TmmlRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TmmlRegRegRegRegImmImmImmSymbol", "TMML", Vec("tmml_b_tid_"))
+    val TmmlRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TmmlRegRegRegRegImmImmImmSymbolImm", "TMML", Vec("tmml_b_tid_"))
+    val TmmlRegRegRegRegImmImmSymbol: Definition =
+      Definition("TmmlRegRegRegRegImmImmSymbol", "TMML", Vec("tmml_", "tmml_b_"))
+    val TmmlRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TmmlRegRegRegRegImmImmSymbolImm", "TMML", Vec("tmml_", "tmml_b_"))
+    val TmmlRegRegRegRegRegImmSymbol: Definition = Definition("TmmlRegRegRegRegRegImmSymbol", "TMML", Vec("tmml_urc_"))
+    val TmmlRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TmmlRegRegRegRegRegImmSymbolImm", "TMML", Vec("tmml_urc_"))
+    val TmmlRegRegRegRegRegSymbol: Definition =
+      Definition("TmmlRegRegRegRegRegSymbol", "TMML", Vec("tmml_b_urc_", "tmml_urc_"))
+    val TmmlRegRegRegRegRegSymbolImm: Definition =
+      Definition("TmmlRegRegRegRegRegSymbolImm", "TMML", Vec("tmml_b_urc_", "tmml_urc_"))
+    val TmmlRegRegRegRegSymbol: Definition = Definition("TmmlRegRegRegRegSymbol", "TMML", Vec("tmml_b_noConst_"))
     val definitions: Vec[Definition] = Vec(
+      SelRegRegRegPred,
       SetcrsptrReg,
       SetctaidReg,
       SetlmembaseReg,
@@ -7743,169 +7768,229 @@ object Instruction {
       SyncsRegAddress,
       SyncsRegAddressReg,
       SyncsRegAddressRegReg,
-      TexPredRegRegRegImm,
-      TexPredRegRegRegImmImm,
-      TexPredRegRegRegImmImmImm,
-      TexPredRegRegRegReg,
-      TexPredRegRegRegRegImm,
-      TexPredRegRegRegRegImmImm,
-      TexPredRegRegRegRegImmImmImm,
-      TexPredRegRegRegRegImmImmImmImm,
-      TexPredRegRegRegRegReg,
-      TexPredRegRegRegRegRegImm,
-      TexPredRegRegRegRegRegImmImm,
-      TexPredRegRegRegRegRegReg,
-      TexPredRegRegRegRegRegRegImm,
-      TexPredRegRegRegRegRegRegImmImm,
-      TexRegRegRegImm,
-      TexRegRegRegImmImm,
-      TexRegRegRegImmImmImm,
-      TexRegRegRegReg,
-      TexRegRegRegRegImm,
-      TexRegRegRegRegImmImm,
-      TexRegRegRegRegImmImmImm,
-      TexRegRegRegRegImmImmImmImm,
-      TexRegRegRegRegReg,
-      TexRegRegRegRegRegImm,
-      TexRegRegRegRegRegImmImm,
-      TexRegRegRegRegRegReg,
-      TexRegRegRegRegRegRegImm,
-      TexRegRegRegRegRegRegImmImm,
+      TexPredRegRegRegImmImmSymbol,
+      TexPredRegRegRegImmImmSymbolImm,
+      TexPredRegRegRegImmSymbol,
+      TexPredRegRegRegImmSymbolImm,
+      TexPredRegRegRegRegImmImmImmSymbol,
+      TexPredRegRegRegRegImmImmImmSymbolImm,
+      TexPredRegRegRegRegImmImmSymbol,
+      TexPredRegRegRegRegImmImmSymbolImm,
+      TexPredRegRegRegRegRegImmSymbol,
+      TexPredRegRegRegRegRegImmSymbolImm,
+      TexPredRegRegRegRegRegRegImmSymbol,
+      TexPredRegRegRegRegRegRegImmSymbolImm,
+      TexPredRegRegRegRegRegRegSymbol,
+      TexPredRegRegRegRegRegRegSymbolImm,
+      TexPredRegRegRegRegRegSymbol,
+      TexPredRegRegRegRegRegSymbolImm,
+      TexPredRegRegRegRegSymbol,
+      TexPredRegRegRegRegSymbolImm,
+      TexRegRegRegImmImmSymbol,
+      TexRegRegRegImmImmSymbolImm,
+      TexRegRegRegImmSymbol,
+      TexRegRegRegImmSymbolImm,
+      TexRegRegRegRegImmImmImmSymbol,
+      TexRegRegRegRegImmImmImmSymbolImm,
+      TexRegRegRegRegImmImmSymbol,
+      TexRegRegRegRegImmImmSymbolImm,
+      TexRegRegRegRegRegImmSymbol,
+      TexRegRegRegRegRegImmSymbolImm,
+      TexRegRegRegRegRegRegImmSymbol,
+      TexRegRegRegRegRegRegImmSymbolImm,
+      TexRegRegRegRegRegRegSymbol,
+      TexRegRegRegRegRegRegSymbolImm,
+      TexRegRegRegRegRegSymbol,
+      TexRegRegRegRegRegSymbolImm,
+      TexRegRegRegRegSymbol,
+      TexRegRegRegRegSymbolImm,
       TexdepbarImm,
-      TexsRegRegRegRegImm,
-      TldPredRegRegRegImm,
-      TldPredRegRegRegImmImm,
-      TldPredRegRegRegReg,
-      TldPredRegRegRegRegImm,
-      TldPredRegRegRegRegImmImm,
-      TldPredRegRegRegRegImmImmImm,
-      TldPredRegRegRegRegImmImmImmImm,
-      TldPredRegRegRegRegReg,
-      TldPredRegRegRegRegRegImm,
-      TldPredRegRegRegRegRegImmImm,
-      TldPredRegRegRegRegRegReg,
-      TldPredRegRegRegRegRegRegImm,
-      TldPredRegRegRegRegRegRegImmImm,
-      TldRegRegRegImm,
-      TldRegRegRegImmImm,
-      TldRegRegRegReg,
-      TldRegRegRegRegImm,
-      TldRegRegRegRegImmImm,
-      TldRegRegRegRegImmImmImm,
-      TldRegRegRegRegImmImmImmImm,
-      TldRegRegRegRegReg,
-      TldRegRegRegRegRegImm,
-      TldRegRegRegRegRegImmImm,
-      TldRegRegRegRegRegReg,
-      TldRegRegRegRegRegRegImm,
-      TldRegRegRegRegRegRegImmImm,
-      Tld4PredRegRegRegImm,
-      Tld4PredRegRegRegImmImm,
-      Tld4PredRegRegRegImmImmImm,
-      Tld4PredRegRegRegReg,
-      Tld4PredRegRegRegRegImm,
-      Tld4PredRegRegRegRegImmImm,
-      Tld4PredRegRegRegRegImmImmImm,
-      Tld4PredRegRegRegRegImmImmImmImm,
-      Tld4PredRegRegRegRegReg,
-      Tld4PredRegRegRegRegRegImm,
-      Tld4PredRegRegRegRegRegImmImm,
-      Tld4PredRegRegRegRegRegReg,
-      Tld4PredRegRegRegRegRegRegImm,
-      Tld4PredRegRegRegRegRegRegImmImm,
-      Tld4RegRegRegImm,
-      Tld4RegRegRegImmImm,
-      Tld4RegRegRegImmImmImm,
-      Tld4RegRegRegReg,
-      Tld4RegRegRegRegImm,
-      Tld4RegRegRegRegImmImm,
-      Tld4RegRegRegRegImmImmImm,
-      Tld4RegRegRegRegImmImmImmImm,
-      Tld4RegRegRegRegReg,
-      Tld4RegRegRegRegRegImm,
-      Tld4RegRegRegRegRegImmImm,
-      Tld4RegRegRegRegRegReg,
-      Tld4RegRegRegRegRegRegImm,
-      Tld4RegRegRegRegRegRegImmImm,
+      TexsRegRegRegRegImmSymbolSymbol,
+      TldPredRegRegRegImmSymbol,
+      TldPredRegRegRegImmSymbolImm,
+      TldPredRegRegRegRegImmImmImmSymbol,
+      TldPredRegRegRegRegImmImmImmSymbolImm,
+      TldPredRegRegRegRegImmImmSymbol,
+      TldPredRegRegRegRegImmImmSymbolImm,
+      TldPredRegRegRegRegRegImmSymbol,
+      TldPredRegRegRegRegRegImmSymbolImm,
+      TldPredRegRegRegRegRegRegImmSymbol,
+      TldPredRegRegRegRegRegRegImmSymbolImm,
+      TldPredRegRegRegRegRegRegSymbol,
+      TldPredRegRegRegRegRegRegSymbolImm,
+      TldPredRegRegRegRegRegSymbol,
+      TldPredRegRegRegRegRegSymbolImm,
+      TldPredRegRegRegRegSymbol,
+      TldPredRegRegRegRegSymbolImm,
+      TldRegRegRegImmSymbol,
+      TldRegRegRegImmSymbolImm,
+      TldRegRegRegRegImmImmImmSymbol,
+      TldRegRegRegRegImmImmImmSymbolImm,
+      TldRegRegRegRegImmImmSymbol,
+      TldRegRegRegRegImmImmSymbolImm,
+      TldRegRegRegRegRegImmSymbol,
+      TldRegRegRegRegRegImmSymbolImm,
+      TldRegRegRegRegRegRegImmSymbol,
+      TldRegRegRegRegRegRegImmSymbolImm,
+      TldRegRegRegRegRegRegSymbol,
+      TldRegRegRegRegRegRegSymbolImm,
+      TldRegRegRegRegRegSymbol,
+      TldRegRegRegRegRegSymbolImm,
+      TldRegRegRegRegSymbol,
+      TldRegRegRegRegSymbolImm,
+      Tld4PredRegRegRegImmImmSymbol,
+      Tld4PredRegRegRegImmImmSymbolImm,
+      Tld4PredRegRegRegImmSymbol,
+      Tld4PredRegRegRegImmSymbolImm,
+      Tld4PredRegRegRegRegImmImmImmSymbol,
+      Tld4PredRegRegRegRegImmImmImmSymbolImm,
+      Tld4PredRegRegRegRegImmImmSymbol,
+      Tld4PredRegRegRegRegImmImmSymbolImm,
+      Tld4PredRegRegRegRegRegImmSymbol,
+      Tld4PredRegRegRegRegRegImmSymbolImm,
+      Tld4PredRegRegRegRegRegRegImmSymbol,
+      Tld4PredRegRegRegRegRegRegImmSymbolImm,
+      Tld4PredRegRegRegRegRegRegSymbol,
+      Tld4PredRegRegRegRegRegRegSymbolImm,
+      Tld4PredRegRegRegRegRegSymbol,
+      Tld4PredRegRegRegRegRegSymbolImm,
+      Tld4PredRegRegRegRegSymbol,
+      Tld4PredRegRegRegRegSymbolImm,
+      Tld4RegRegRegImmImmSymbol,
+      Tld4RegRegRegImmImmSymbolImm,
+      Tld4RegRegRegImmSymbol,
+      Tld4RegRegRegImmSymbolImm,
+      Tld4RegRegRegRegImmImmImmSymbol,
+      Tld4RegRegRegRegImmImmImmSymbolImm,
+      Tld4RegRegRegRegImmImmSymbol,
+      Tld4RegRegRegRegImmImmSymbolImm,
+      Tld4RegRegRegRegRegImmSymbol,
+      Tld4RegRegRegRegRegImmSymbolImm,
+      Tld4RegRegRegRegRegRegImmSymbol,
+      Tld4RegRegRegRegRegRegImmSymbolImm,
+      Tld4RegRegRegRegRegRegSymbol,
+      Tld4RegRegRegRegRegRegSymbolImm,
+      Tld4RegRegRegRegRegSymbol,
+      Tld4RegRegRegRegRegSymbolImm,
+      Tld4RegRegRegRegSymbol,
+      Tld4RegRegRegRegSymbolImm,
       Tld4sRegRegRegRegImm,
-      TldsRegRegRegRegImm,
-      TmmlRegRegImm,
-      TmmlRegRegImmImm,
-      TmmlRegRegImmImmImm,
-      TmmlRegRegRegImm,
-      TmmlRegRegRegImmImm,
-      TmmlRegRegRegImmImmImm,
-      TmmlRegRegRegReg,
-      TmmlRegRegRegRegImm,
-      TmmlRegRegRegRegImmImm,
-      TmmlRegRegRegRegImmImmImm,
-      TmmlRegRegRegRegImmImmImmImm,
-      TmmlRegRegRegRegReg,
-      TmmlRegRegRegRegRegImm,
-      TmmlRegRegRegRegRegImmImm,
-      TxaRegRegImm,
-      TxaRegRegImmImm,
-      TxaRegRegImmImmImm,
-      TxdPredRegRegRegImm,
-      TxdPredRegRegRegImmImm,
-      TxdPredRegRegRegImmImmImm,
-      TxdPredRegRegRegReg,
-      TxdPredRegRegRegRegImm,
-      TxdPredRegRegRegRegImmImm,
-      TxdPredRegRegRegRegImmImmImm,
-      TxdPredRegRegRegRegImmImmImmImm,
-      TxdPredRegRegRegRegReg,
-      TxdPredRegRegRegRegRegImm,
-      TxdPredRegRegRegRegRegImmImm,
-      TxdPredRegRegRegRegRegReg,
-      TxdPredRegRegRegRegRegRegImm,
-      TxdPredRegRegRegRegRegRegImmImm,
-      TxdRegRegRegImm,
-      TxdRegRegRegImmImm,
-      TxdRegRegRegImmImmImm,
-      TxdRegRegRegReg,
-      TxdRegRegRegRegImm,
-      TxdRegRegRegRegImmImm,
-      TxdRegRegRegRegImmImmImm,
-      TxdRegRegRegRegImmImmImmImm,
-      TxdRegRegRegRegReg
+      TldsRegRegRegRegImmSymbolSymbol,
+      TmmlRegRegImmImmSymbol,
+      TmmlRegRegImmImmSymbolImm,
+      TmmlRegRegImmSymbol,
+      TmmlRegRegImmSymbolImm,
+      TmmlRegRegRegImmImmSymbol,
+      TmmlRegRegRegImmImmSymbolImm,
+      TmmlRegRegRegImmSymbol,
+      TmmlRegRegRegImmSymbolImm,
+      TmmlRegRegRegRegImmImmImmSymbol,
+      TmmlRegRegRegRegImmImmImmSymbolImm,
+      TmmlRegRegRegRegImmImmSymbol,
+      TmmlRegRegRegRegImmImmSymbolImm,
+      TmmlRegRegRegRegRegImmSymbol,
+      TmmlRegRegRegRegRegImmSymbolImm,
+      TmmlRegRegRegRegRegSymbol,
+      TmmlRegRegRegRegRegSymbolImm,
+      TmmlRegRegRegRegSymbol
     )
   }
   object Definitions5 {
-    val TxdRegRegRegRegRegImm: Definition =
-      Definition("TxdRegRegRegRegRegImm", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
-    val TxdRegRegRegRegRegImmImm: Definition = Definition("TxdRegRegRegRegRegImmImm", "TXD", Vec("txd_urc_"))
-    val TxdRegRegRegRegRegReg: Definition = Definition("TxdRegRegRegRegRegReg", "TXD", Vec("txd_b_urc_", "txd_urc_"))
-    val TxdRegRegRegRegRegRegImm: Definition =
-      Definition("TxdRegRegRegRegRegRegImm", "TXD", Vec("txd_b_urc_", "txd_urc_"))
-    val TxdRegRegRegRegRegRegImmImm: Definition = Definition("TxdRegRegRegRegRegRegImmImm", "TXD", Vec("txd_urc_"))
-    val TxqRegRegImm: Definition = Definition("TxqRegRegImm", "TXQ", Vec("TXQ", "TXQ_B"))
-    val TxqRegRegImmImm: Definition =
-      Definition("TxqRegRegImmImm", "TXQ", Vec("TXQ", "TXQ.B", "TXQ_B", "TXQ_B_Imm", "TXQ_Imm"))
-    val TxqRegRegImmImmImm: Definition = Definition(
-      "TxqRegRegImmImmImm",
-      "TXQ",
-      Vec(
-        "TXQ Imm",
-        "TXQ Legacy Style",
-        "TXQ.B Imm",
-        "TXQ.B Legacy Style",
-        "TXQ_B_Imm",
-        "TXQ_B_Legacy_Style",
-        "TXQ_Imm",
-        "TXQ_Legacy_Style"
-      )
+    val TmmlRegRegRegRegSymbolImm: Definition = Definition("TmmlRegRegRegRegSymbolImm", "TMML", Vec("tmml_b_noConst_"))
+    val TxaRegRegImm: Definition = Definition("TxaRegRegImm", "TXA", Vec("TXA"))
+    val TxaRegRegImmImm: Definition = Definition("TxaRegRegImmImm", "TXA", Vec("TXA"))
+    val TxaRegRegImmImmImm: Definition =
+      Definition("TxaRegRegImmImmImm", "TXA", Vec("TXA Legacy Style", "TXA_Legacy_Style"))
+    val TxdPredRegRegRegImmImmSymbol: Definition =
+      Definition("TxdPredRegRegRegImmImmSymbol", "TXD", Vec("TXD_B_Legacy_Style", "TXD_Legacy_Style"))
+    val TxdPredRegRegRegImmImmSymbolImm: Definition =
+      Definition("TxdPredRegRegRegImmImmSymbolImm", "TXD", Vec("TXD_B_Legacy_Style", "TXD_Legacy_Style"))
+    val TxdPredRegRegRegImmSymbol: Definition = Definition("TxdPredRegRegRegImmSymbol", "TXD", Vec("TXD", "TXD.B"))
+    val TxdPredRegRegRegImmSymbolImm: Definition =
+      Definition("TxdPredRegRegRegImmSymbolImm", "TXD", Vec("TXD", "TXD.B"))
+    val TxdPredRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TxdPredRegRegRegRegImmImmImmSymbol", "TXD", Vec("txd_b_tid_"))
+    val TxdPredRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegImmImmImmSymbolImm", "TXD", Vec("txd_b_tid_"))
+    val TxdPredRegRegRegRegImmImmSymbol: Definition =
+      Definition("TxdPredRegRegRegRegImmImmSymbol", "TXD", Vec("txd_", "txd_b_"))
+    val TxdPredRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegImmImmSymbolImm", "TXD", Vec("txd_", "txd_b_"))
+    val TxdPredRegRegRegRegRegImmSymbol: Definition =
+      Definition("TxdPredRegRegRegRegRegImmSymbol", "TXD", Vec("txd_urc_"))
+    val TxdPredRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegRegImmSymbolImm", "TXD", Vec("txd_urc_"))
+    val TxdPredRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("TxdPredRegRegRegRegRegRegImmSymbol", "TXD", Vec("txd_urc_"))
+    val TxdPredRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegRegRegImmSymbolImm", "TXD", Vec("txd_urc_"))
+    val TxdPredRegRegRegRegRegRegSymbol: Definition =
+      Definition("TxdPredRegRegRegRegRegRegSymbol", "TXD", Vec("txd_b_urc_", "txd_urc_"))
+    val TxdPredRegRegRegRegRegRegSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegRegRegSymbolImm", "TXD", Vec("txd_b_urc_", "txd_urc_"))
+    val TxdPredRegRegRegRegRegSymbol: Definition =
+      Definition("TxdPredRegRegRegRegRegSymbol", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
+    val TxdPredRegRegRegRegRegSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegRegSymbolImm", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
+    val TxdPredRegRegRegRegSymbol: Definition = Definition("TxdPredRegRegRegRegSymbol", "TXD", Vec("txd_b_noConst_"))
+    val TxdPredRegRegRegRegSymbolImm: Definition =
+      Definition("TxdPredRegRegRegRegSymbolImm", "TXD", Vec("txd_b_noConst_"))
+    val TxdRegRegRegImmImmSymbol: Definition =
+      Definition("TxdRegRegRegImmImmSymbol", "TXD", Vec("TXD_B_Legacy_Style", "TXD_Legacy_Style"))
+    val TxdRegRegRegImmImmSymbolImm: Definition = Definition(
+      "TxdRegRegRegImmImmSymbolImm",
+      "TXD",
+      Vec("TXD Legacy Style", "TXD.B Legacy Style", "TXD_B_Legacy_Style", "TXD_Legacy_Style")
     )
+    val TxdRegRegRegImmSymbol: Definition = Definition("TxdRegRegRegImmSymbol", "TXD", Vec("TXD", "TXD.B"))
+    val TxdRegRegRegImmSymbolImm: Definition = Definition("TxdRegRegRegImmSymbolImm", "TXD", Vec("TXD", "TXD.B"))
+    val TxdRegRegRegRegImmImmImmSymbol: Definition =
+      Definition("TxdRegRegRegRegImmImmImmSymbol", "TXD", Vec("txd_b_tid_"))
+    val TxdRegRegRegRegImmImmImmSymbolImm: Definition =
+      Definition("TxdRegRegRegRegImmImmImmSymbolImm", "TXD", Vec("txd_b_tid_"))
+    val TxdRegRegRegRegImmImmSymbol: Definition =
+      Definition("TxdRegRegRegRegImmImmSymbol", "TXD", Vec("txd_", "txd_b_"))
+    val TxdRegRegRegRegImmImmSymbolImm: Definition =
+      Definition("TxdRegRegRegRegImmImmSymbolImm", "TXD", Vec("txd_", "txd_b_"))
+    val TxdRegRegRegRegRegImmSymbol: Definition = Definition("TxdRegRegRegRegRegImmSymbol", "TXD", Vec("txd_urc_"))
+    val TxdRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TxdRegRegRegRegRegImmSymbolImm", "TXD", Vec("txd_urc_"))
+    val TxdRegRegRegRegRegRegImmSymbol: Definition =
+      Definition("TxdRegRegRegRegRegRegImmSymbol", "TXD", Vec("txd_urc_"))
+    val TxdRegRegRegRegRegRegImmSymbolImm: Definition =
+      Definition("TxdRegRegRegRegRegRegImmSymbolImm", "TXD", Vec("txd_urc_"))
+    val TxdRegRegRegRegRegRegSymbol: Definition =
+      Definition("TxdRegRegRegRegRegRegSymbol", "TXD", Vec("txd_b_urc_", "txd_urc_"))
+    val TxdRegRegRegRegRegRegSymbolImm: Definition =
+      Definition("TxdRegRegRegRegRegRegSymbolImm", "TXD", Vec("txd_b_urc_", "txd_urc_"))
+    val TxdRegRegRegRegRegSymbol: Definition =
+      Definition("TxdRegRegRegRegRegSymbol", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
+    val TxdRegRegRegRegRegSymbolImm: Definition =
+      Definition("TxdRegRegRegRegRegSymbolImm", "TXD", Vec("txd_b_noConst_", "txd_urc_"))
+    val TxdRegRegRegRegSymbol: Definition = Definition("TxdRegRegRegRegSymbol", "TXD", Vec("txd_b_noConst_"))
+    val TxdRegRegRegRegSymbolImm: Definition = Definition("TxdRegRegRegRegSymbolImm", "TXD", Vec("txd_b_noConst_"))
+    val TxqRegRegImmImm: Definition = Definition("TxqRegRegImmImm", "TXQ", Vec("TXQ_B_Imm", "TXQ_Imm"))
+    val TxqRegRegImmImmImm: Definition =
+      Definition("TxqRegRegImmImmImm", "TXQ", Vec("TXQ Imm", "TXQ.B Imm", "TXQ_B_Imm", "TXQ_Imm"))
     val TxqRegRegImmImmImmImm: Definition = Definition(
       "TxqRegRegImmImmImmImm",
       "TXQ",
       Vec("TXQ Imm Legacy Style", "TXQ.B Imm Legacy Style", "TXQ_B_Imm_Legacy_Style", "TXQ_Imm_Legacy_Style")
     )
-    val TxqRegRegRegImm: Definition = Definition("TxqRegRegRegImm", "TXQ", Vec("txq_b_noConst_"))
-    val TxqRegRegRegImmImmImm: Definition = Definition("TxqRegRegRegImmImmImm", "TXQ", Vec("txq_", "txq_b_"))
-    val TxqRegRegRegImmImmImmImm: Definition = Definition("TxqRegRegRegImmImmImmImm", "TXQ", Vec("txq_b_tid_"))
-    val TxqRegRegRegRegImm: Definition = Definition("TxqRegRegRegRegImm", "TXQ", Vec("txq_b_urc_"))
-    val TxqRegRegRegRegImmImm: Definition = Definition("TxqRegRegRegRegImmImm", "TXQ", Vec("txq_urc_"))
+    val TxqRegRegRegSymbolImm: Definition = Definition("TxqRegRegRegSymbolImm", "TXQ", Vec("txq_b_noConst_"))
+    val TxqRegRegRegSymbolImmImmImm: Definition =
+      Definition("TxqRegRegRegSymbolImmImmImm", "TXQ", Vec("txq_", "txq_b_"))
+    val TxqRegRegRegSymbolImmImmImmImm: Definition =
+      Definition("TxqRegRegRegSymbolImmImmImmImm", "TXQ", Vec("txq_b_tid_"))
+    val TxqRegRegRegSymbolRegImm: Definition = Definition("TxqRegRegRegSymbolRegImm", "TXQ", Vec("txq_b_urc_"))
+    val TxqRegRegRegSymbolRegImmImm: Definition = Definition("TxqRegRegRegSymbolRegImmImm", "TXQ", Vec("txq_urc_"))
+    val TxqRegRegSymbolImm: Definition = Definition("TxqRegRegSymbolImm", "TXQ", Vec("TXQ", "TXQ_B"))
+    val TxqRegRegSymbolImmImm: Definition = Definition("TxqRegRegSymbolImmImm", "TXQ", Vec("TXQ", "TXQ.B", "TXQ_B"))
+    val TxqRegRegSymbolImmImmImm: Definition = Definition(
+      "TxqRegRegSymbolImmImmImm",
+      "TXQ",
+      Vec("TXQ Legacy Style", "TXQ.B Legacy Style", "TXQ_B_Legacy_Style", "TXQ_Legacy_Style")
+    )
     val UblkcpAddressAddressReg: Definition =
       Definition("UblkcpAddressAddressReg", "UBLKCP", Vec("ublkcp_", "ublkcp_one_"))
     val UblkcpAddressAddressRegAddress: Definition =
@@ -8352,168 +8437,58 @@ object Instruction {
     val UsetshmszReg: Definition = Definition("UsetshmszReg", "USETSHMSZ", Vec("usetshmsz__URb"))
     val UsgxtRegRegImm: Definition = Definition("UsgxtRegRegImm", "USGXT", Vec("usgxt__URuIUR_URIR"))
     val UsgxtRegRegReg: Definition = Definition("UsgxtRegRegReg", "USGXT", Vec("usgxt__URURUR_UUU"))
-    val UshfRegRegImmReg: Definition = Definition("UshfRegRegImmReg", "USHF", Vec("ushf__URuIUR_URIR"))
-    val UshfRegRegRegImm: Definition = Definition("UshfRegRegRegImm", "USHF", Vec("ushf__URURuI_URRI"))
-    val UshfRegRegRegReg: Definition = Definition("UshfRegRegRegReg", "USHF", Vec("ushf__URURUR_URURUR"))
-    val UshlRegImmReg: Definition = Definition("UshlRegImmReg", "USHL", Vec("ushl_imm_"))
-    val UshlRegRegImm: Definition = Definition("UshlRegRegImm", "USHL", Vec("ushl__URuIUR_URIR"))
-    val UshlRegRegReg: Definition = Definition("UshlRegRegReg", "USHL", Vec("ushl__URURUR_URURUR"))
-    val UshrRegRegImm: Definition = Definition("UshrRegRegImm", "USHR", Vec("ushr__URIR_URIR"))
-    val UshrRegRegReg: Definition = Definition("UshrRegRegReg", "USHR", Vec("ushr__URURUR_URURUR"))
-    val UstgrAddressReg: Definition = Definition("UstgrAddressReg", "USTGR", Vec("ustgr_", "ustgr_one_"))
-    val UtcatomswsPredRegReg: Definition =
-      Definition("UtcatomswsPredRegReg", "UTCATOMSWS", Vec("utcatomsws_fas_", "utcatomsws_fas_one_"))
-    val UtcatomswsPredRegRegReg: Definition =
-      Definition("UtcatomswsPredRegRegReg", "UTCATOMSWS", Vec("utcatomsws_cas_", "utcatomsws_cas_one_"))
-    val UtcatomswsRegReg: Definition =
-      Definition("UtcatomswsRegReg", "UTCATOMSWS", Vec("utcatomsws_op_", "utcatomsws_op_one_"))
-    val UtcbarNoOperands: Definition =
-      Definition("UtcbarNoOperands", "UTCBAR", Vec("utcbar_flush_", "utcbar_flush_one_"))
-    val UtcbarAddressRegReg: Definition = Definition(
-      "UtcbarAddressRegReg",
-      "UTCBAR",
-      Vec("utcbar__1CTA", "utcbar__2CTA", "utcbar_one__1CTA", "utcbar_one__2CTA")
-    )
-    val UtccpAddressAddress: Definition = Definition(
-      "UtccpAddressAddress",
-      "UTCCP",
-      Vec("utccp__1CTA", "utccp__2CTA", "utccp_one__1CTA", "utccp_one__2CTA")
-    )
-    val UtchmmaAddressAddressAddressAddressAddressRegPred: Definition = Definition(
-      "UtchmmaAddressAddressAddressAddressAddressRegPred",
-      "UTCHMMA",
-      Vec(
-        "utchmma_1cta__A_gdesc",
-        "utchmma_1cta__A_tmem",
-        "utchmma_1cta_one__A_gdesc",
-        "utchmma_1cta_one__A_tmem",
-        "utchmma_2cta__A_gdesc",
-        "utchmma_2cta__A_tmem",
-        "utchmma_2cta_one__A_gdesc",
-        "utchmma_2cta_one__A_tmem"
-      )
-    )
-    val UtchmmaAddressAddressAddressAddressAddressRegPredImm: Definition = Definition(
-      "UtchmmaAddressAddressAddressAddressAddressRegPredImm",
-      "UTCHMMA",
-      Vec(
-        "utchmma_1cta__A_gdesc",
-        "utchmma_1cta__A_tmem",
-        "utchmma_1cta_one__A_gdesc",
-        "utchmma_1cta_one__A_tmem",
-        "utchmma_2cta__A_gdesc",
-        "utchmma_2cta__A_tmem",
-        "utchmma_2cta_one__A_gdesc",
-        "utchmma_2cta_one__A_tmem"
-      )
-    )
-    val UtcimmaAddressAddressAddressAddressAddressRegPred: Definition = Definition(
-      "UtcimmaAddressAddressAddressAddressAddressRegPred",
-      "UTCIMMA",
-      Vec(
-        "utcimma_1cta__A_gdesc",
-        "utcimma_1cta__A_tmem",
-        "utcimma_1cta_one__A_gdesc",
-        "utcimma_1cta_one__A_tmem",
-        "utcimma_2cta__A_gdesc",
-        "utcimma_2cta__A_tmem",
-        "utcimma_2cta_one__A_gdesc",
-        "utcimma_2cta_one__A_tmem"
-      )
-    )
-    val UtcommaAddressAddressAddressAddressAddressAddressPred: Definition = Definition(
-      "UtcommaAddressAddressAddressAddressAddressAddressPred",
-      "UTCOMMA",
-      Vec(
-        "utcomma_1cta__A_gdesc",
-        "utcomma_1cta__A_tmem",
-        "utcomma_1cta_one__A_gdesc",
-        "utcomma_1cta_one__A_tmem",
-        "utcomma_2cta__A_gdesc",
-        "utcomma_2cta__A_tmem",
-        "utcomma_2cta_one__A_gdesc",
-        "utcomma_2cta_one__A_tmem"
-      )
-    )
-    val UtcqmmaAddressAddressAddressAddressAddressAddressPred: Definition = Definition(
-      "UtcqmmaAddressAddressAddressAddressAddressAddressPred",
-      "UTCQMMA",
-      Vec(
-        "utcqmma_1cta_scale__A_gdesc",
-        "utcqmma_1cta_scale__A_tmem",
-        "utcqmma_1cta_scale_one__A_gdesc",
-        "utcqmma_1cta_scale_one__A_tmem",
-        "utcqmma_2cta_scale__A_gdesc",
-        "utcqmma_2cta_scale__A_tmem",
-        "utcqmma_2cta_scale_one__A_gdesc",
-        "utcqmma_2cta_scale_one__A_tmem"
-      )
-    )
-    val UtcqmmaAddressAddressAddressAddressAddressRegPred: Definition = Definition(
-      "UtcqmmaAddressAddressAddressAddressAddressRegPred",
-      "UTCQMMA",
-      Vec(
-        "utcqmma_1cta__A_gdesc",
-        "utcqmma_1cta__A_tmem",
-        "utcqmma_1cta_one__A_gdesc",
-        "utcqmma_1cta_one__A_tmem",
-        "utcqmma_2cta__A_gdesc",
-        "utcqmma_2cta__A_tmem",
-        "utcqmma_2cta_one__A_gdesc",
-        "utcqmma_2cta_one__A_tmem"
-      )
-    )
-    val UtcshiftAddress: Definition = Definition(
-      "UtcshiftAddress",
-      "UTCSHIFT",
-      Vec("utcshift__1CTA", "utcshift__2CTA", "utcshift_one__1CTA", "utcshift_one__2CTA")
-    )
-    val UtmacctlNoOperands: Definition = Definition("UtmacctlNoOperands", "UTMACCTL", Vec("utmacctl_", "utmacctl_one_"))
-    val UtmacctlAddress: Definition =
-      Definition("UtmacctlAddress", "UTMACCTL", Vec("utmacctl_URa_", "utmacctl_URa_one_"))
-    val UtmacmdflushNoOperands: Definition = Definition("UtmacmdflushNoOperands", "UTMACMDFLUSH", Vec("utmacmdflush_"))
-    val UtmaldgAddressAddress: Definition =
-      Definition("UtmaldgAddressAddress", "UTMALDG", Vec("utmaldg__UUU", "utmaldg_one__UUU"))
-    val UtmaldgAddressAddressAddress: Definition =
-      Definition("UtmaldgAddressAddressAddress", "UTMALDG", Vec("utmaldg__UUU_desc", "utmaldg_one__UUU_desc"))
-    val UtmaldgAddressAddressReg: Definition =
-      Definition("UtmaldgAddressAddressReg", "UTMALDG", Vec("utmaldg_URc__UUU", "utmaldg_URc_one__UUU"))
-    val UtmaldgAddressAddressRegAddress: Definition = Definition(
-      "UtmaldgAddressAddressRegAddress",
-      "UTMALDG",
-      Vec("utmaldg_URc__UUU_desc", "utmaldg_URc_one__UUU_desc")
-    )
-    val UtmapfAddressAddress: Definition =
-      Definition("UtmapfAddressAddress", "UTMAPF", Vec("utmapf__UUU", "utmapf_one__UUU"))
-    val UtmapfAddressAddressAddress: Definition =
-      Definition("UtmapfAddressAddressAddress", "UTMAPF", Vec("utmapf__UUU_desc", "utmapf_one__UUU_desc"))
-    val UtmapfAddressAddressReg: Definition =
-      Definition("UtmapfAddressAddressReg", "UTMAPF", Vec("utmapf_URc__UUU", "utmapf_URc_one__UUU"))
-    val UtmapfAddressAddressRegAddress: Definition =
-      Definition("UtmapfAddressAddressRegAddress", "UTMAPF", Vec("utmapf_URc__UUU_desc", "utmapf_URc_one__UUU_desc"))
-    val UtmaredgAddressAddress: Definition =
-      Definition("UtmaredgAddressAddress", "UTMAREDG", Vec("utmaredg__UUU", "utmaredg_one__UUU"))
-    val UtmaredgAddressAddressAddress: Definition =
-      Definition("UtmaredgAddressAddressAddress", "UTMAREDG", Vec("utmaredg__UUU_desc", "utmaredg_one__UUU_desc"))
-    val UtmastgAddressAddress: Definition =
-      Definition("UtmastgAddressAddress", "UTMASTG", Vec("utmastg__UUU", "utmastg_one__UUU"))
-    val UtmastgAddressAddressAddress: Definition =
-      Definition("UtmastgAddressAddressAddress", "UTMASTG", Vec("utmastg__UUU_desc", "utmastg_one__UUU_desc"))
     val definitions: Vec[Definition] = Vec(
-      TxdRegRegRegRegRegImm,
-      TxdRegRegRegRegRegImmImm,
-      TxdRegRegRegRegRegReg,
-      TxdRegRegRegRegRegRegImm,
-      TxdRegRegRegRegRegRegImmImm,
-      TxqRegRegImm,
+      TmmlRegRegRegRegSymbolImm,
+      TxaRegRegImm,
+      TxaRegRegImmImm,
+      TxaRegRegImmImmImm,
+      TxdPredRegRegRegImmImmSymbol,
+      TxdPredRegRegRegImmImmSymbolImm,
+      TxdPredRegRegRegImmSymbol,
+      TxdPredRegRegRegImmSymbolImm,
+      TxdPredRegRegRegRegImmImmImmSymbol,
+      TxdPredRegRegRegRegImmImmImmSymbolImm,
+      TxdPredRegRegRegRegImmImmSymbol,
+      TxdPredRegRegRegRegImmImmSymbolImm,
+      TxdPredRegRegRegRegRegImmSymbol,
+      TxdPredRegRegRegRegRegImmSymbolImm,
+      TxdPredRegRegRegRegRegRegImmSymbol,
+      TxdPredRegRegRegRegRegRegImmSymbolImm,
+      TxdPredRegRegRegRegRegRegSymbol,
+      TxdPredRegRegRegRegRegRegSymbolImm,
+      TxdPredRegRegRegRegRegSymbol,
+      TxdPredRegRegRegRegRegSymbolImm,
+      TxdPredRegRegRegRegSymbol,
+      TxdPredRegRegRegRegSymbolImm,
+      TxdRegRegRegImmImmSymbol,
+      TxdRegRegRegImmImmSymbolImm,
+      TxdRegRegRegImmSymbol,
+      TxdRegRegRegImmSymbolImm,
+      TxdRegRegRegRegImmImmImmSymbol,
+      TxdRegRegRegRegImmImmImmSymbolImm,
+      TxdRegRegRegRegImmImmSymbol,
+      TxdRegRegRegRegImmImmSymbolImm,
+      TxdRegRegRegRegRegImmSymbol,
+      TxdRegRegRegRegRegImmSymbolImm,
+      TxdRegRegRegRegRegRegImmSymbol,
+      TxdRegRegRegRegRegRegImmSymbolImm,
+      TxdRegRegRegRegRegRegSymbol,
+      TxdRegRegRegRegRegRegSymbolImm,
+      TxdRegRegRegRegRegSymbol,
+      TxdRegRegRegRegRegSymbolImm,
+      TxdRegRegRegRegSymbol,
+      TxdRegRegRegRegSymbolImm,
       TxqRegRegImmImm,
       TxqRegRegImmImmImm,
       TxqRegRegImmImmImmImm,
-      TxqRegRegRegImm,
-      TxqRegRegRegImmImmImm,
-      TxqRegRegRegImmImmImmImm,
-      TxqRegRegRegRegImm,
-      TxqRegRegRegRegImmImm,
+      TxqRegRegRegSymbolImm,
+      TxqRegRegRegSymbolImmImmImm,
+      TxqRegRegRegSymbolImmImmImmImm,
+      TxqRegRegRegSymbolRegImm,
+      TxqRegRegRegSymbolRegImmImm,
+      TxqRegRegSymbolImm,
+      TxqRegRegSymbolImmImm,
+      TxqRegRegSymbolImmImmImm,
       UblkcpAddressAddressReg,
       UblkcpAddressAddressRegAddress,
       UblkpfAddressReg,
@@ -8718,47 +8693,157 @@ object Instruction {
       UsetshmszImm,
       UsetshmszReg,
       UsgxtRegRegImm,
-      UsgxtRegRegReg,
-      UshfRegRegImmReg,
-      UshfRegRegRegImm,
-      UshfRegRegRegReg,
-      UshlRegImmReg,
-      UshlRegRegImm,
-      UshlRegRegReg,
-      UshrRegRegImm,
-      UshrRegRegReg,
-      UstgrAddressReg,
-      UtcatomswsPredRegReg,
-      UtcatomswsPredRegRegReg,
-      UtcatomswsRegReg,
-      UtcbarNoOperands,
-      UtcbarAddressRegReg,
-      UtccpAddressAddress,
-      UtchmmaAddressAddressAddressAddressAddressRegPred,
-      UtchmmaAddressAddressAddressAddressAddressRegPredImm,
-      UtcimmaAddressAddressAddressAddressAddressRegPred,
-      UtcommaAddressAddressAddressAddressAddressAddressPred,
-      UtcqmmaAddressAddressAddressAddressAddressAddressPred,
-      UtcqmmaAddressAddressAddressAddressAddressRegPred,
-      UtcshiftAddress,
-      UtmacctlNoOperands,
-      UtmacctlAddress,
-      UtmacmdflushNoOperands,
-      UtmaldgAddressAddress,
-      UtmaldgAddressAddressAddress,
-      UtmaldgAddressAddressReg,
-      UtmaldgAddressAddressRegAddress,
-      UtmapfAddressAddress,
-      UtmapfAddressAddressAddress,
-      UtmapfAddressAddressReg,
-      UtmapfAddressAddressRegAddress,
-      UtmaredgAddressAddress,
-      UtmaredgAddressAddressAddress,
-      UtmastgAddressAddress,
-      UtmastgAddressAddressAddress
+      UsgxtRegRegReg
     )
   }
   object Definitions6 {
+    val UshfRegRegImmReg: Definition = Definition("UshfRegRegImmReg", "USHF", Vec("ushf__URuIUR_URIR"))
+    val UshfRegRegRegImm: Definition = Definition("UshfRegRegRegImm", "USHF", Vec("ushf__URURuI_URRI"))
+    val UshfRegRegRegReg: Definition = Definition("UshfRegRegRegReg", "USHF", Vec("ushf__URURUR_URURUR"))
+    val UshlRegImmReg: Definition = Definition("UshlRegImmReg", "USHL", Vec("ushl_imm_"))
+    val UshlRegRegImm: Definition = Definition("UshlRegRegImm", "USHL", Vec("ushl__URuIUR_URIR"))
+    val UshlRegRegReg: Definition = Definition("UshlRegRegReg", "USHL", Vec("ushl__URURUR_URURUR"))
+    val UshrRegRegImm: Definition = Definition("UshrRegRegImm", "USHR", Vec("ushr__URIR_URIR"))
+    val UshrRegRegReg: Definition = Definition("UshrRegRegReg", "USHR", Vec("ushr__URURUR_URURUR"))
+    val UstgrAddressReg: Definition = Definition("UstgrAddressReg", "USTGR", Vec("ustgr_", "ustgr_one_"))
+    val UtcatomswsPredRegReg: Definition =
+      Definition("UtcatomswsPredRegReg", "UTCATOMSWS", Vec("utcatomsws_fas_", "utcatomsws_fas_one_"))
+    val UtcatomswsPredRegRegReg: Definition =
+      Definition("UtcatomswsPredRegRegReg", "UTCATOMSWS", Vec("utcatomsws_cas_", "utcatomsws_cas_one_"))
+    val UtcatomswsRegReg: Definition =
+      Definition("UtcatomswsRegReg", "UTCATOMSWS", Vec("utcatomsws_op_", "utcatomsws_op_one_"))
+    val UtcbarNoOperands: Definition =
+      Definition("UtcbarNoOperands", "UTCBAR", Vec("utcbar_flush_", "utcbar_flush_one_"))
+    val UtcbarAddressRegReg: Definition = Definition(
+      "UtcbarAddressRegReg",
+      "UTCBAR",
+      Vec("utcbar__1CTA", "utcbar__2CTA", "utcbar_one__1CTA", "utcbar_one__2CTA")
+    )
+    val UtccpAddressAddress: Definition = Definition(
+      "UtccpAddressAddress",
+      "UTCCP",
+      Vec("utccp__1CTA", "utccp__2CTA", "utccp_one__1CTA", "utccp_one__2CTA")
+    )
+    val UtchmmaAddressAddressAddressAddressAddressRegPred: Definition = Definition(
+      "UtchmmaAddressAddressAddressAddressAddressRegPred",
+      "UTCHMMA",
+      Vec(
+        "utchmma_1cta__A_gdesc",
+        "utchmma_1cta__A_tmem",
+        "utchmma_1cta_one__A_gdesc",
+        "utchmma_1cta_one__A_tmem",
+        "utchmma_2cta__A_gdesc",
+        "utchmma_2cta__A_tmem",
+        "utchmma_2cta_one__A_gdesc",
+        "utchmma_2cta_one__A_tmem"
+      )
+    )
+    val UtchmmaAddressAddressAddressAddressAddressRegPredImm: Definition = Definition(
+      "UtchmmaAddressAddressAddressAddressAddressRegPredImm",
+      "UTCHMMA",
+      Vec(
+        "utchmma_1cta__A_gdesc",
+        "utchmma_1cta__A_tmem",
+        "utchmma_1cta_one__A_gdesc",
+        "utchmma_1cta_one__A_tmem",
+        "utchmma_2cta__A_gdesc",
+        "utchmma_2cta__A_tmem",
+        "utchmma_2cta_one__A_gdesc",
+        "utchmma_2cta_one__A_tmem"
+      )
+    )
+    val UtcimmaAddressAddressAddressAddressAddressRegPred: Definition = Definition(
+      "UtcimmaAddressAddressAddressAddressAddressRegPred",
+      "UTCIMMA",
+      Vec(
+        "utcimma_1cta__A_gdesc",
+        "utcimma_1cta__A_tmem",
+        "utcimma_1cta_one__A_gdesc",
+        "utcimma_1cta_one__A_tmem",
+        "utcimma_2cta__A_gdesc",
+        "utcimma_2cta__A_tmem",
+        "utcimma_2cta_one__A_gdesc",
+        "utcimma_2cta_one__A_tmem"
+      )
+    )
+    val UtcommaAddressAddressAddressAddressAddressAddressPred: Definition = Definition(
+      "UtcommaAddressAddressAddressAddressAddressAddressPred",
+      "UTCOMMA",
+      Vec(
+        "utcomma_1cta__A_gdesc",
+        "utcomma_1cta__A_tmem",
+        "utcomma_1cta_one__A_gdesc",
+        "utcomma_1cta_one__A_tmem",
+        "utcomma_2cta__A_gdesc",
+        "utcomma_2cta__A_tmem",
+        "utcomma_2cta_one__A_gdesc",
+        "utcomma_2cta_one__A_tmem"
+      )
+    )
+    val UtcqmmaAddressAddressAddressAddressAddressAddressPred: Definition = Definition(
+      "UtcqmmaAddressAddressAddressAddressAddressAddressPred",
+      "UTCQMMA",
+      Vec(
+        "utcqmma_1cta_scale__A_gdesc",
+        "utcqmma_1cta_scale__A_tmem",
+        "utcqmma_1cta_scale_one__A_gdesc",
+        "utcqmma_1cta_scale_one__A_tmem",
+        "utcqmma_2cta_scale__A_gdesc",
+        "utcqmma_2cta_scale__A_tmem",
+        "utcqmma_2cta_scale_one__A_gdesc",
+        "utcqmma_2cta_scale_one__A_tmem"
+      )
+    )
+    val UtcqmmaAddressAddressAddressAddressAddressRegPred: Definition = Definition(
+      "UtcqmmaAddressAddressAddressAddressAddressRegPred",
+      "UTCQMMA",
+      Vec(
+        "utcqmma_1cta__A_gdesc",
+        "utcqmma_1cta__A_tmem",
+        "utcqmma_1cta_one__A_gdesc",
+        "utcqmma_1cta_one__A_tmem",
+        "utcqmma_2cta__A_gdesc",
+        "utcqmma_2cta__A_tmem",
+        "utcqmma_2cta_one__A_gdesc",
+        "utcqmma_2cta_one__A_tmem"
+      )
+    )
+    val UtcshiftAddress: Definition = Definition(
+      "UtcshiftAddress",
+      "UTCSHIFT",
+      Vec("utcshift__1CTA", "utcshift__2CTA", "utcshift_one__1CTA", "utcshift_one__2CTA")
+    )
+    val UtmacctlNoOperands: Definition = Definition("UtmacctlNoOperands", "UTMACCTL", Vec("utmacctl_", "utmacctl_one_"))
+    val UtmacctlAddress: Definition =
+      Definition("UtmacctlAddress", "UTMACCTL", Vec("utmacctl_URa_", "utmacctl_URa_one_"))
+    val UtmacmdflushNoOperands: Definition = Definition("UtmacmdflushNoOperands", "UTMACMDFLUSH", Vec("utmacmdflush_"))
+    val UtmaldgAddressAddress: Definition =
+      Definition("UtmaldgAddressAddress", "UTMALDG", Vec("utmaldg__UUU", "utmaldg_one__UUU"))
+    val UtmaldgAddressAddressAddress: Definition =
+      Definition("UtmaldgAddressAddressAddress", "UTMALDG", Vec("utmaldg__UUU_desc", "utmaldg_one__UUU_desc"))
+    val UtmaldgAddressAddressReg: Definition =
+      Definition("UtmaldgAddressAddressReg", "UTMALDG", Vec("utmaldg_URc__UUU", "utmaldg_URc_one__UUU"))
+    val UtmaldgAddressAddressRegAddress: Definition = Definition(
+      "UtmaldgAddressAddressRegAddress",
+      "UTMALDG",
+      Vec("utmaldg_URc__UUU_desc", "utmaldg_URc_one__UUU_desc")
+    )
+    val UtmapfAddressAddress: Definition =
+      Definition("UtmapfAddressAddress", "UTMAPF", Vec("utmapf__UUU", "utmapf_one__UUU"))
+    val UtmapfAddressAddressAddress: Definition =
+      Definition("UtmapfAddressAddressAddress", "UTMAPF", Vec("utmapf__UUU_desc", "utmapf_one__UUU_desc"))
+    val UtmapfAddressAddressReg: Definition =
+      Definition("UtmapfAddressAddressReg", "UTMAPF", Vec("utmapf_URc__UUU", "utmapf_URc_one__UUU"))
+    val UtmapfAddressAddressRegAddress: Definition =
+      Definition("UtmapfAddressAddressRegAddress", "UTMAPF", Vec("utmapf_URc__UUU_desc", "utmapf_URc_one__UUU_desc"))
+    val UtmaredgAddressAddress: Definition =
+      Definition("UtmaredgAddressAddress", "UTMAREDG", Vec("utmaredg__UUU", "utmaredg_one__UUU"))
+    val UtmaredgAddressAddressAddress: Definition =
+      Definition("UtmaredgAddressAddressAddress", "UTMAREDG", Vec("utmaredg__UUU_desc", "utmaredg_one__UUU_desc"))
+    val UtmastgAddressAddress: Definition =
+      Definition("UtmastgAddressAddress", "UTMASTG", Vec("utmastg__UUU", "utmastg_one__UUU"))
+    val UtmastgAddressAddressAddress: Definition =
+      Definition("UtmastgAddressAddressAddress", "UTMASTG", Vec("utmastg__UUU_desc", "utmastg_one__UUU_desc"))
     val UviaddRegRegImm: Definition = Definition("UviaddRegRegImm", "UVIADD", Vec("uviadd__URuIUR_URIR"))
     val UviaddRegRegReg: Definition = Definition("UviaddRegRegReg", "UVIADD", Vec("uviadd__URURUR_UUU"))
     val UvimnmxRegRegImmPred: Definition = Definition("UvimnmxRegRegImmPred", "UVIMNMX", Vec("uvimnmx__URIR_URsIUR"))
@@ -9333,6 +9418,43 @@ object Instruction {
     val Hir0x1f2Reg: Definition = Definition("Hir0x1f2Reg", "__HIR0X1F2", Vec("ucgabar_get_"))
     val Hir0x1f3Reg: Definition = Definition("Hir0x1f3Reg", "__HIR0X1F3", Vec("ucgabar_set_"))
     val definitions: Vec[Definition] = Vec(
+      UshfRegRegImmReg,
+      UshfRegRegRegImm,
+      UshfRegRegRegReg,
+      UshlRegImmReg,
+      UshlRegRegImm,
+      UshlRegRegReg,
+      UshrRegRegImm,
+      UshrRegRegReg,
+      UstgrAddressReg,
+      UtcatomswsPredRegReg,
+      UtcatomswsPredRegRegReg,
+      UtcatomswsRegReg,
+      UtcbarNoOperands,
+      UtcbarAddressRegReg,
+      UtccpAddressAddress,
+      UtchmmaAddressAddressAddressAddressAddressRegPred,
+      UtchmmaAddressAddressAddressAddressAddressRegPredImm,
+      UtcimmaAddressAddressAddressAddressAddressRegPred,
+      UtcommaAddressAddressAddressAddressAddressAddressPred,
+      UtcqmmaAddressAddressAddressAddressAddressAddressPred,
+      UtcqmmaAddressAddressAddressAddressAddressRegPred,
+      UtcshiftAddress,
+      UtmacctlNoOperands,
+      UtmacctlAddress,
+      UtmacmdflushNoOperands,
+      UtmaldgAddressAddress,
+      UtmaldgAddressAddressAddress,
+      UtmaldgAddressAddressReg,
+      UtmaldgAddressAddressRegAddress,
+      UtmapfAddressAddress,
+      UtmapfAddressAddressAddress,
+      UtmapfAddressAddressReg,
+      UtmapfAddressAddressRegAddress,
+      UtmaredgAddressAddress,
+      UtmaredgAddressAddressAddress,
+      UtmastgAddressAddress,
+      UtmastgAddressAddressAddress,
       UviaddRegRegImm,
       UviaddRegRegReg,
       UvimnmxRegRegImmPred,

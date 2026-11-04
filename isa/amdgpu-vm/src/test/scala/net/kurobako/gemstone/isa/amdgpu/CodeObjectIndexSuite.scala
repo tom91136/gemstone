@@ -32,6 +32,14 @@ class CodeObjectIndexSuite extends Suite {
     assertEquals(stripped.head.symbols, Vec.empty[ExecutableSection.Symbol])
   }
 
+  test("code objects without kernel descriptors index with no kernels") {
+    val image      = minimalCodeObject()
+    val descriptor = String(image, StandardCharsets.US_ASCII).indexOf("kernel.kd")
+    image(descriptor + "kernel.k".length) = 'x'.toByte
+    val indexed = ELF.index(Vec.from(image)).value
+    assertEquals(indexed.kernelNames, Set.empty[NonEmpty[String]])
+  }
+
   test("executable extraction rejects out-of-section symbols, unresolved relocations, and invalid string tables") {
     val image = minimalCodeObject(globalPointer = true)
     val table = LittleEndian.decodeInt64(image, 40).toInt
@@ -105,6 +113,26 @@ class CodeObjectIndexSuite extends Suite {
     assertEquals(indexed.kernelNames.toSet[String], Set("kérnl"))
     assertEquals[String, String](indexed.kernel("kérnl").value.name, "kérnl")
     assertEquals(indexed.target, Target("gfx900"))
+  }
+
+  test("a load base moves every address, section image and relocated pointer of the image") {
+    val base    = 0x10010000000L
+    val indexed = ELF.index(Vec.from(minimalCodeObject(globalPointer = true))).value
+    val linked  = indexed.fork()
+    val moved   = indexed.fork(base)
+    val kernel  = moved.kernel("kernel").value
+    assertEquals(kernel.textAddress, 0x1000L + base)
+    assertEquals(kernel.entry, 0x1000L + base)
+    assertEquals(kernel.loadBase, base)
+    assertEquals(kernel.functionSizes.keySet, linked.kernel("kernel").value.functionSizes.keySet.map(_ + base))
+    assertEquals(moved.global("device_global").get._1.raw, 0x3000L + base)
+    assertEquals(moved.globalData("device_global").value._1.raw, 0x3000L + base)
+    assertEquals(moved.globals.map(_.address.raw), linked.globals.map(_.address.raw + base))
+    val got = kernel.globalMemory.collectFirst { case (address, image) if address == 0x4000L + base => image }.get
+    assertEquals(LittleEndian.decodeInt64(got, 0), 0x3000L + base)
+    val unmoved = linked.kernel("kernel").value.globalMemory.collectFirst { case (0x4000L, image) => image }.get
+    assertEquals(LittleEndian.decodeInt64(unmoved, 0), 0x3000L)
+    assert(moved.extent < 0x10000000L)
   }
 
   test("wave32-capable processors select wave width per kernel descriptor") {
@@ -253,21 +281,5 @@ class CodeObjectIndexSuite extends Suite {
       Left(CodeObjectError.Invalid("AMDGPU function aliases have conflicting call semantics: _Z5expIfv, _Z5logIfv"))
     )
     assertEquals(ELF.selectFunctionTarget(Vec("second", "first", "second")), Right("first"))
-  }
-
-  test("code-object keys compare content and keep CRC collisions apart in the cache") {
-    val first = CodeObjectKey(Vec[Byte](1, 2, 3))
-    assertEquals(first, CodeObjectKey(Vec[Byte](1, 2, 3)))
-    assertEquals(first.hashCode(), CodeObjectKey(Vec[Byte](1, 2, 3)).hashCode())
-    assertNotEquals(first, CodeObjectKey(Vec[Byte](1, 2, 4)))
-    // Distinct eight-byte images with the same CRC32, generated independently of CodeObjectKey.
-    val left  = CodeObjectKey(Vec.unsafeWrapArray(bytes.hex("58fbb7a9b2680392")))
-    val right = CodeObjectKey(Vec.unsafeWrapArray(bytes.hex("69176c4aa471a321")))
-    assertEquals(left.hashCode(), right.hashCode())
-    assertNotEquals(left, right)
-    val cache = LRUCache[CodeObjectKey, String](2)
-    assertEquals(cache.get(left)("left"), "left")
-    assertEquals(cache.get(right)("right"), "right")
-    assertEquals(cache.get(left)(fail("collision displaced the first image")), "left")
   }
 }

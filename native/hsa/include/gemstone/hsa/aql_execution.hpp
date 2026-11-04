@@ -86,25 +86,29 @@ public:
 
   /** Loads one code object and binds every listed kernel object to the shared program. */
   bool installCodeObject(std::span<const uint8_t> image, std::span<const KernelSymbol> kernels);
-  /** Takes ownership of `program`: it is unloaded on failure and once its last installed kernel is removed. */
+  /** Takes ownership of `program`: unloaded on failure, or once its last kernel is removed or it is released. */
   bool installLoadedProgram(execution::ProgramId program, std::span<const KernelSymbol> kernels);
   std::optional<KernelLayout> layout(uint64_t kernelObject) const;
   bool removeKernel(uint64_t kernelObject);
-  /** Binds a named global of the program owning `kernelObject`. */
-  bool bindGlobal(uint64_t kernelObject, const std::string &name, uint64_t allocation, uint64_t offset);
+  /** Unloads a program that has no installed kernels. A program still holding kernels is left for removeKernel. */
+  bool releaseProgram(execution::ProgramId program);
+  bool bindGlobal(execution::ProgramId program, const std::string &name, uint64_t allocation, uint64_t offset);
   /** Compiles the kernel behind `kernelObject` ahead of its dispatches; what the service reported when it could not. */
   std::optional<execution::Error> build(uint64_t kernelObject);
 
   bool registerAllocation(uint64_t base, uint64_t size, uint64_t allocation);
   bool unregisterAllocation(uint64_t base);
 
+  /** Names the registered allocation that every dispatch passes as the device's malloc heap. */
+  void setDeviceHeap(uint64_t pointer, uint64_t size);
+
   /** Drains the exact service-written ranges of completed dispatches in completion order. */
   std::vector<execution::DirtyRange> takeDirtyRanges();
 
-  /** Executes one `AqlPacketSize`-byte packet, publishing its completion signal through `Signals`. Dispatches from a
-   * cooperative queue keep all their workgroups resident.
+  /** Executes one `AqlPacketSize`-byte packet from a queue of `device`, publishing its completion signal through
+   * `Signals`. Dispatches from a cooperative queue keep all their workgroups resident.
    */
-  PacketResult consume(const void *packet, bool cooperative = false);
+  PacketResult consume(const void *packet, bool cooperative = false, uint32_t device = 0);
 
 private:
   struct Kernel {
@@ -130,7 +134,7 @@ private:
                    std::vector<execution::PointerRelocation> &relocations);
   PacketResult failPacket(uint64_t completionSignal, PacketFailure failure, std::string message);
   PacketResult barrier(const AqlPacket &packet);
-  PacketResult dispatch(const AqlPacket &packet, bool cooperative);
+  PacketResult dispatch(const AqlPacket &packet, bool cooperative, uint32_t device);
 
   std::unique_ptr<Signals> signals;
   mutable std::mutex lock;
@@ -141,6 +145,8 @@ private:
   std::unordered_map<uint64_t, Allocation> allocations;
   std::vector<execution::DirtyRange> dirtyRanges;
   std::string failure;
+  uint64_t deviceHeapPointer = 0;
+  uint64_t deviceHeapSize = 0;
 };
 
 } // namespace gemstone::hsa

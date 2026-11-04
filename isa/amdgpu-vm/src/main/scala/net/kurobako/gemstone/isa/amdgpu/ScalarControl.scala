@@ -65,6 +65,8 @@ private object ScalarControl {
   inline def halt[V, L, D, F[_]](inline machine: AmdGpuMachine[V, L, D, F])(reason: String): F[Int] =
     machine.halt(reason)
 
+  inline def hostcall[V, L, D, F[_]](inline machine: AmdGpuMachine[V, L, D, F]): F[Int] = machine.hostcall
+
   inline def fence[V, L, D, F[_]](inline machine: AmdGpuMachine[V, L, D, F]): F[Int] = machine.fenceHost
 
   inline def invalidate[V, L, D, F[_]](inline machine: AmdGpuMachine[V, L, D, F]): F[Int] = machine.invalidateHostReads
@@ -372,6 +374,7 @@ private object ScalarControl {
       case Instruction.BarrierWait(id)                         => Some(awaitBarrier(Render, machine)(id))
       case sync: Instruction.GlobalWaveSync                    => Some(globalWaveSync(machine)(sync))
       case Instruction.Halt(reason)                            => Some(halt(machine)(reason))
+      case Instruction.Hostcall                                => Some(hostcall(machine))
       case Instruction.CacheInvalidate                         => Some(invalidate(machine))
       case Instruction.CacheWritebackInvalidate                => Some(writebackInvalidate(machine))
       case Instruction.SGetMode(dest, offset, size)            => Some(getMode(Render, machine)(dest, offset, size))

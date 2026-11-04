@@ -4,7 +4,7 @@ import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ValidationSuite extends Suite {
   private def instruction(source: String): Instruction =

@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class TextSuite extends Suite {
   test("text helpers tokenise fixed generator formats without regex") {

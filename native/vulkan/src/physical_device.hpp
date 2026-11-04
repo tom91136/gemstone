@@ -13,10 +13,10 @@ constexpr VkDeviceSize MaxImageResourceSize = VkDeviceSize{1} << 31;
 
 bool environmentAccepted();
 std::optional<uint32_t> configuredApiVersion();
-void fillProperties(VkPhysicalDeviceProperties *properties);
+void fillProperties(VkPhysicalDeviceProperties *properties, uint32_t physicalOrdinal);
 void fillFeatures(VkPhysicalDeviceFeatures *features);
 void fillMemoryProperties(VkPhysicalDeviceMemoryProperties *properties);
-void fillPropertyChain(void *next);
+void fillPropertyChain(void *next, uint32_t physicalOrdinal);
 void fillFeatureChain(void *next);
 bool featureChainSupported(const void *next);
 } // namespace gemstone::vulkan

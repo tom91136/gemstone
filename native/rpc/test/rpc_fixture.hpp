@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -14,12 +15,14 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <stdint.h>
 #include <unistd.h>
 
 #include <aspartame/map.hpp>
+
 #include <gemstone/test_support.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
@@ -190,6 +193,11 @@ public:
       encoded += ch == ' ' ? "%20" : std::string(1, ch);
     return encoded;
   }
+  /** Holds the next `operation` for `duration`, sending a heartbeat every 50 ms for the first `heartbeatsFor`. */
+  void stallNext(std::string_view operation, std::chrono::milliseconds duration, std::chrono::milliseconds heartbeatsFor, bool respond) {
+    std::scoped_lock const lock(stateMutex);
+    stall = Stall{.operation = std::string(operation), .duration = duration, .heartbeatsFor = heartbeatsFor, .respond = respond};
+  }
   bool hostMemory() {
     std::scoped_lock const lock(stateMutex);
     return hostMemoryEnabled;
@@ -270,9 +278,8 @@ public:
     using namespace aspartame;
     std::scoped_lock const lock(stateMutex);
     const auto address = reinterpret_cast<uint64_t>(pointer);
-    const auto found = allocationAddresses ^ exists([&](uint64_t id, uint64_t base) {
-      return address >= base && address - base < allocations.at(id).size();
-    });
+    const auto found = allocationAddresses
+                       ^ exists([&](uint64_t id, uint64_t base) { return address >= base && address - base < allocations.at(id).size(); });
     GEMSTONE_RPC_REQUIRE(found == present);
   }
   void checkHostBacked(const void *pointer) {
@@ -319,13 +326,27 @@ public:
     rejectedOperation = operation;
     rejectedKind = kind;
   }
+  void rejectNextLink(std::string detail) {
+    std::scoped_lock const lock(stateMutex);
+    linkRejection = std::move(detail);
+  }
+  void linkTable(std::vector<LinkedKernel> kernels) {
+    std::scoped_lock const lock(stateMutex);
+    linkKernels = std::move(kernels);
+  }
   // The next request with this operation tag closes its connection without a response.
   void dropNext(std::string_view operation) {
     std::scoped_lock const lock(stateMutex);
     droppedOperation = operation;
   }
+  /** Allocation grants received through SetAllocationDevices. */
+  uint32_t grants() {
+    std::scoped_lock const lock(stateMutex);
+    return deviceGrants;
+  }
   void failNextCompletion(FailureKind kind = FailureKind::Failed) {
     completionKind = kind;
+    completionDetail = "completion failed";
     failCompletion = true;
   }
   void pauseNextCompletion() {
@@ -342,9 +363,21 @@ public:
     std::scoped_lock const lock(stateMutex);
     return recordedLaunch;
   }
+  std::vector<uint8_t> programImageOf(ProgramId program) {
+    std::scoped_lock const lock(stateMutex);
+    return programImages.at(program.value);
+  }
   std::vector<uint8_t> lastProgramImage() {
     std::scoped_lock const lock(stateMutex);
     return programImage;
+  }
+  std::vector<std::string> describedKernelNames() {
+    std::scoped_lock const lock(stateMutex);
+    return describedKernels;
+  }
+  std::vector<std::vector<uint8_t>> lastLinkInputs() {
+    std::scoped_lock const lock(stateMutex);
+    return linkInputs;
   }
 
   static constexpr uint32_t Spirv[] = {0x07230203,
@@ -426,6 +459,7 @@ private:
       entry.containsPointers = parameter.containsPointers != 0;
       metadata.parameters.push_back(entry);
     }
+    metadata.entryPointId = IntPositive0{0};
     if (requiredWorkGroupSize)
       metadata.requiredWorkGroupSize = Dimensions{.x = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[0])},
                                                   .y = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[1])},
@@ -476,10 +510,11 @@ private:
       GEMSTONE_RPC_REQUIRE(size <= MaximumPayload);
       std::vector<uint8_t> payload(size);
       if (size && !receive(socket, payload.data(), size)) break;
+      if (!stallIfRequested(socket, operationTag)) return;
       std::scoped_lock const lock(stateMutex);
       std::vector<uint8_t> result;
       bool failed = false;
-      std::string failure = "completion failed";
+      std::string failure = completionDetail;
       auto failureKind = completionKind;
       if (operationTag == droppedOperation) {
         droppedOperation.clear();
@@ -507,6 +542,7 @@ private:
         GEMSTONE_RPC_REQUIRE(allocations.erase(id) == 1);
         allocationAddresses.erase(id);
         hostBacked.erase(id);
+        allocationDevices.erase(id);
         encodePayload(result, Unit{});
       } else if (operationTag == operation::RegisterAllocationAddress) {
         const auto request = decodePayload<RegisterAllocationAddress>(payload);
@@ -515,6 +551,14 @@ private:
         GEMSTONE_RPC_REQUIRE(allocations.count(id) == 1 && base != 0);
         GEMSTONE_RPC_REQUIRE(allocationAddresses.emplace(id, base).second);
         hostBacked[id] = request.hostBacked;
+        allocationDevices[id] = static_cast<uint32_t>(request.devices);
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::SetAllocationDevices) {
+        const auto request = decodePayload<SetAllocationDevices>(payload);
+        const auto id = static_cast<uint64_t>(request.allocation.value);
+        GEMSTONE_RPC_REQUIRE(allocations.count(id) == 1);
+        allocationDevices[id] = static_cast<uint32_t>(request.devices);
+        ++deviceGrants;
         encodePayload(result, Unit{});
       } else if (operationTag == operation::WriteAllocation) {
         const auto request = decodePayload<WriteAllocation>(payload);
@@ -568,6 +612,7 @@ private:
         const auto request = decodePayload<LoadProgram>(payload);
         programImage = request.image;
         const auto program = 91 + static_cast<int64_t>(programLoads++);
+        programImages[program] = request.image;
         livePrograms.insert(program);
         encodePayload(result, ProgramId{program});
       } else if (operationTag == operation::DescribeSpecialization) {
@@ -586,6 +631,21 @@ private:
           constants.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
         specialization = std::move(constants);
         encodePayload(result, request.image);
+      } else if (operationTag == operation::LinkImages) {
+        const auto request = decodePayload<LinkImages>(payload);
+        std::vector<uint8_t> linked;
+        linkInputs.clear();
+        for (const auto &input : request.images) {
+          linkInputs.push_back(input.image);
+          linked.insert(linked.end(), input.image.begin(), input.image.end());
+        }
+        if (!linkRejection.empty()) {
+          failed = true;
+          failure = std::exchange(linkRejection, {});
+          failureKind = FailureKind::InvalidRequest;
+        } else {
+          encodePayload(result, LinkedImage{.image = std::move(linked), .kernels = linkKernels});
+        }
       } else if (operationTag == operation::PrepareShader) {
         const auto request = decodePayload<PrepareShader>(payload);
         GEMSTONE_RPC_REQUIRE(preparedDescriptors.has_value());
@@ -610,6 +670,7 @@ private:
       } else if (operationTag == operation::DescribeKernel) {
         const auto request = decodePayload<DescribeKernel>(payload);
         GEMSTONE_RPC_REQUIRE(livePrograms.contains(request.program.value) && !request.name.value.empty());
+        describedKernels.push_back(request.name.value);
         appendKernelMetadata(result);
       } else if (operationTag == operation::DescribeImage) {
         const auto request = decodePayload<DescribeImage>(payload);
@@ -668,7 +729,7 @@ private:
         } else {
           completed = true;
           if (failCompletion.exchange(false))
-            encodePayload(result, CompletionStatus{CompletionStatusFailed{executionFailure(completionKind, "completion failed")}});
+            encodePayload(result, CompletionStatus{CompletionStatusFailed{executionFailure(completionKind, completionDetail)}});
           else encodePayload(result, CompletionStatus{CompletionStatusSucceeded{}});
         }
       } else if (operationTag == operation::PollHostMemory) {
@@ -740,7 +801,11 @@ private:
       } else if (operationTag == operation::CompletionPrints) {
         decodePayload<CompletionPrints>(payload);
         GEMSTONE_RPC_REQUIRE(completed);
-        encodePayload(result, std::string{});
+        encodePayload(result, PrintText{});
+      } else if (operationTag == operation::CompletionErrorPrints) {
+        decodePayload<CompletionErrorPrints>(payload);
+        GEMSTONE_RPC_REQUIRE(completed);
+        encodePayload(result, PrintText{});
       } else {
         GEMSTONE_RPC_REQUIRE(false);
       }
@@ -757,7 +822,39 @@ private:
     }
   }
 
+  bool stallIfRequested(int socket, const std::string &operationTag) {
+    std::optional<Stall> pending;
+    {
+      std::scoped_lock const lock(stateMutex);
+      if (stall && stall->operation == operationTag) pending = std::exchange(stall, std::nullopt);
+    }
+    if (!pending) return true;
+    const auto begin = std::chrono::steady_clock::now();
+    while (!stopped.load()) {
+      const auto elapsed = std::chrono::steady_clock::now() - begin;
+      if (elapsed >= pending->duration) break;
+      if (elapsed < pending->heartbeatsFor) {
+        std::vector<uint8_t> beat;
+        wire::appendBigEndian<uint32_t>(beat, HeartbeatMagic);
+        send(socket, beat);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return pending->respond && !stopped.load();
+  }
+
+  bool mayAccess(uint64_t id) const {
+    const auto found = allocationDevices.find(id);
+    return found == allocationDevices.end() || ((found->second >> launchDevice) & 1U) != 0;
+  }
+  void failAccess() { accessDenied = true; }
+
   void startCompletion() {
+    if (accessDenied) {
+      completionKind = FailureKind::IllegalAddress;
+      completionDetail = "device " + std::to_string(launchDevice) + " cannot access an allocation";
+      failCompletion = true;
+    }
     ++completionId;
     ++launches;
     polls = 0;
@@ -769,6 +866,8 @@ private:
     GEMSTONE_RPC_REQUIRE(!active);
     const auto request = decodePayload<Launch>(payload);
     recordedLaunch = request;
+    launchDevice = static_cast<uint32_t>(request.device.value);
+    accessDenied = false;
     if (opaqueDirty) {
       outputId = 0;
       ranges.clear();
@@ -776,15 +875,16 @@ private:
       return;
     }
     if (indirectInput) {
+      const auto indirect = *indirectInput;
       uint64_t child = 0;
-      const auto table = allocationAt(reinterpret_cast<const void *>(indirectInput->table));
+      const auto table = allocationAt(reinterpret_cast<const void *>(indirect.table));
       GEMSTONE_RPC_REQUIRE(table != allocationAddresses.end());
+      if (!mayAccess(table->first)) failAccess();
       {
         const auto &bytes = allocations.at(table->first);
-        const auto lead = indirectInput->table - table->second;
+        const auto lead = indirect.table - table->second;
         GEMSTONE_RPC_REQUIRE(bytes.size() - lead >= sizeof(child));
-        std::memcpy(&child, hostBacked[table->first] ? reinterpret_cast<const void *>(indirectInput->table) : bytes.data() + lead,
-                    sizeof(child));
+        std::memcpy(&child, hostBacked[table->first] ? reinterpret_cast<const void *>(indirect.table) : bytes.data() + lead, sizeof(child));
       }
       bool foundChild = false;
       for (const auto &[id, address] : allocationAddresses) {
@@ -792,9 +892,14 @@ private:
         if (child < address || child - address > bytes.size() || bytes.size() - (child - address) < 4) continue;
         uint32_t value = 0;
         std::memcpy(&value, hostBacked[id] ? reinterpret_cast<const void *>(child) : bytes.data() + child - address, sizeof(value));
-        GEMSTONE_RPC_REQUIRE(value == indirectInput->value);
-        if (indirectInput->deviceWrite) {
-          std::memcpy(bytes.data() + child - address, &*indirectInput->deviceWrite, 4);
+        if (!mayAccess(id)) {
+          failAccess();
+          foundChild = true;
+          break;
+        }
+        GEMSTONE_RPC_REQUIRE(value == indirect.value);
+        if (indirect.deviceWrite) {
+          std::memcpy(bytes.data() + child - address, &*indirect.deviceWrite, 4);
           indirectWrite = std::make_pair(id, child - address);
         }
         foundChild = true;
@@ -876,6 +981,7 @@ private:
     uint64_t base = 0;
     if (const auto *memory = std::get_if<ArgumentMemory>(arguments.data())) {
       outputId = static_cast<uint64_t>(memory->region.value);
+      if (!mayAccess(outputId)) failAccess();
       base = static_cast<uint64_t>(memory->offset.value);
       GEMSTONE_RPC_REQUIRE(!memory->range);
     } else {
@@ -931,6 +1037,12 @@ private:
     startCompletion();
   }
 
+  struct Stall {
+    std::string operation;
+    std::chrono::milliseconds duration, heartbeatsFor;
+    bool respond;
+  };
+  std::optional<Stall> stall;
   std::string socketPath, socketDirectory;
   int listener = -1;
   uint16_t port = 0;
@@ -969,17 +1081,26 @@ private:
   std::map<uint64_t, uint64_t> allocationWrites;
   std::map<uint64_t, std::vector<uint8_t>> allocations;
   std::vector<uint8_t> programImage;
+  std::map<int64_t, std::vector<uint8_t>> programImages;
+  std::vector<std::vector<uint8_t>> linkInputs;
+  std::vector<LinkedKernel> linkKernels;
+  std::vector<std::string> describedKernels;
   std::map<uint32_t, uint32_t> specializationSizes;
   std::vector<std::pair<uint32_t, std::vector<uint8_t>>> specialization;
   std::map<uint64_t, uint64_t> allocationAddresses;
   std::map<uint64_t, bool> hostBacked;
+  std::map<uint64_t, uint32_t> allocationDevices;
+  uint32_t launchDevice = 0;
+  uint32_t deviceGrants = 0;
+  bool accessDenied = false;
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals;
   std::vector<std::pair<uint64_t, uint32_t>> ranges;
   std::atomic_bool failGraphicsStatistics{false};
-  std::string rejectedOperation, droppedOperation;
+  std::string rejectedOperation, droppedOperation, linkRejection;
   std::map<std::string, uint64_t> describedGlobals;
   FailureKind rejectedKind = FailureKind::Failed;
   FailureKind completionKind = FailureKind::Failed;
+  std::string completionDetail = "completion failed";
   std::atomic_bool failCompletion{false};
   std::atomic_bool pauseCompletion{false};
   bool hostMemoryEnabled = false;

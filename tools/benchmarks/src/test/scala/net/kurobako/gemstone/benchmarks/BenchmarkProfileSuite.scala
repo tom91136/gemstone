@@ -4,11 +4,9 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import net.kurobako.gemstone.benchmarks.BenchmarkArguments.LaunchControl
-import net.kurobako.gemstone.profile.Architecture
-import net.kurobako.gemstone.profile.ProfileStream
-import net.kurobako.gemstone.profile.Profiler
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
+import net.kurobako.gemstone.profile.*
+import net.kurobako.gemstone.testing.*
 
 class BenchmarkProfileSuite extends Suite {
   private def benchmark(name: String, arguments: Vector[String]): LaunchControl => BenchmarkSample =

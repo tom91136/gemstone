@@ -4,7 +4,7 @@ import javax.annotation.processing.Generated
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.ptx.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Regenerate with: sbt codegen
 @Generated(Array("sbt codegen"))

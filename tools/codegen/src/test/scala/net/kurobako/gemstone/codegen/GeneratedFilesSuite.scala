@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 import java.nio.file.Files
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 class GeneratedFilesSuite extends Suite {

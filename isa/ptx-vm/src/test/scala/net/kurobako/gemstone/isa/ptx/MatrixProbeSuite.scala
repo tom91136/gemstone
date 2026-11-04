@@ -4,7 +4,7 @@ import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The sm_89 matrix probes, run from their PTX, against the words an RTX 4060 Ti stores. */
 class MatrixProbeSuite extends Suite {

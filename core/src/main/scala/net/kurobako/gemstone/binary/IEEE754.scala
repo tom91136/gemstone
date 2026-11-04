@@ -182,19 +182,20 @@ object IEEE754 {
     )
   }
 
-  private def roundInteger(value: Long, unsigned: Boolean, format: Format, rounding: Rounding): Long = {
-    val negative = !unsigned && value < 0L
+  private def roundInteger(value: Long, unsigned: Boolean, format: Format, rounding: Rounding): Long =
     if (value == 0L) 0L
-    else encode(
-      format,
-      negative,
-      if (negative) -value else value,
-      0,
-      rounding,
-      format.fractionBits,
-      overflowMode = rounding
-    )
-  }
+    else {
+      val negative = !unsigned && value < 0L
+      encode(
+        format,
+        negative,
+        if (negative) -value else value,
+        0,
+        rounding,
+        format.fractionBits,
+        overflowMode = rounding
+      )
+    }
 
   /** Convert a signed or unsigned 64-bit register without rounding through Double first. */
   def integerToBinary(

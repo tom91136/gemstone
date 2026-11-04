@@ -227,7 +227,32 @@ private object VMIR {
 
     /** The width, height, depth or layer count and level count of the mip level the address names. */
     case Dimensions
+
+    /** The texel filtered at the coordinates of the address, through the sampler descriptor at the SGPR quad `sampler`.
+      */
+    case Sample(sampler: ScalarRegisterIndex, form: SampleForm)
   }
+
+  /** How a sample picks its mip level: from the coordinates' quad derivatives, those plus a bias, level zero, an
+    * explicit level, or explicit gradients.
+    */
+  enum SampleLevel derives CanEqual {
+    case Implicit, Bias, Zero, Level, Gradients
+  }
+
+  /** The address words a sample takes, in order: the offsets, bias and depth reference if any, the gradients, the
+    * coordinates, then the level or lower level clamp. `unnormalised` takes the coordinates as texels. `gather` is the
+    * channel a gather returns of the four texels around the coordinates, instead of filtering them.
+    */
+  case class SampleForm(
+      level: SampleLevel,
+      compare: Boolean,
+      offset: Boolean,
+      clamp: Boolean,
+      gather: Option[Int],
+      g16: Boolean,
+      unnormalised: Boolean
+  )
 
   enum PackedF32Operation derives CanEqual {
     case Add, Multiply, Fma
@@ -1500,6 +1525,7 @@ private object VMIR {
 
     /** Stops the wave, as S_SETHALT and a host interrupt do; nothing resumes it, so execution faults with `reason`. */
     case Halt(reason: String)
+    case Hostcall
     case Branch(condition: ScalarBranchCondition, target: Int)
     case Barrier
 
@@ -1597,5 +1623,10 @@ private object VMIR {
         text
       }
     }
+    // one shared step result per branch target, so taken and fall-through branches allocate nothing
+    lazy val jumpTable: Array[Either[Fault, Int]] = Array.tabulate(instructions.size + 1)(Right(_))
+
+    def withSource(replacement: CodeObjectKernel): Kernel =
+      Kernel(replacement, instructions, instructionIndices, instructionOffsets, entryInstruction, skipped)
   }
 }

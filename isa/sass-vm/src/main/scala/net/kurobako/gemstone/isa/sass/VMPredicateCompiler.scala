@@ -159,12 +159,12 @@ private object VMPredicateCompiler {
     def overflow                           = flag(VMConditionCodes.Flag.Overflow)
     def less                               = combine(PredicateOperation.Xor, sign, overflow)
     test match {
-      case Modifier.F | Modifier.FALSE                     => Value.Predicate(VMRegisters.Predicate.False.slot)
-      case Modifier.T | Modifier.TRUE                      => Value.Predicate(VMRegisters.Predicate.True.slot)
-      case Modifier.ZFT | Modifier.ZF1 | Modifier.EQ       => zero
-      case Modifier.ZFF | Modifier.ZF0 | Modifier.NE       => invert(zero)
-      case Modifier.SFT | Modifier.SF1 | Modifier.SIGN     => sign
-      case Modifier.SFF | Modifier.SF0 | Modifier.NOT_SIGN => invert(sign)
+      case Modifier.F | Modifier.FALSE                              => Value.Predicate(VMRegisters.Predicate.False.slot)
+      case Modifier.T | Modifier.TRUE                               => Value.Predicate(VMRegisters.Predicate.True.slot)
+      case Modifier.ZFT | Modifier.ZF1 | Modifier.EQ                => zero
+      case Modifier.ZFF | Modifier.ZF0 | Modifier.NE | Modifier.NEU => invert(zero)
+      case Modifier.SFT | Modifier.SF1 | Modifier.SIGN              => sign
+      case Modifier.SFF | Modifier.SF0 | Modifier.NOT_SIGN          => invert(sign)
       case Modifier.CFT | Modifier.CF1 | Modifier.CARRY | Modifier.HS => carry
       case Modifier.CFF | Modifier.NOT_CARRY | Modifier.LO            => invert(carry)
       case Modifier.OFT | Modifier.OF1 | Modifier.OVERFLOW            => overflow

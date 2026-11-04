@@ -36,13 +36,11 @@ private[isa] class VMConditionCodes {
     if (value) values |= bit else values &= ~bit
   }
 
-  def write(flag: Flag, value: Option[Boolean]): Unit = {
-    val bit = 1 << flag.ordinal
+  def write(flag: Flag, value: Option[Boolean]): Unit =
     value match {
-      case None        => defined &= ~bit
+      case None        => defined &= ~(1 << flag.ordinal)
       case Some(state) => set(flag, state)
     }
-  }
 
   def writeThreeInputCarry(value: Option[Int in 0 ~ 2]): Unit = value match {
     case Some(count) => setThreeInputCarry(count)

@@ -115,10 +115,10 @@ void structPackets() {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/opencl/pipes/write-read/n64", "[unified][runtime][compact]") { producerConsumer("produce", "consume"); }
+TEST_CASE("edge-cases/runtime/opencl/pipes/write-read/n64", "[unified][runtime]") { producerConsumer("produce", "consume"); }
 
-TEST_CASE("edge-cases/runtime/opencl/pipes/reservations/n64", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/pipes/reservations/n64", "[unified][runtime]") {
   producerConsumer("produce_group", "consume_reserved");
 }
 
-TEST_CASE("edge-cases/runtime/opencl/pipes/struct-packets/n32", "[unified][runtime][compact]") { structPackets(); }
+TEST_CASE("edge-cases/runtime/opencl/pipes/struct-packets/n32", "[unified][runtime]") { structPackets(); }

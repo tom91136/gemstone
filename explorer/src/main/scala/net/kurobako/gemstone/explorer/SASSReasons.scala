@@ -90,14 +90,16 @@ private object SASSReasons {
       ))
     else if (entry.mnemonic == "IMADSP")
       Some(Unavailable.NotModelled(
-        "Kepler's IMADSP takes its operand formats from a register at run time; ptxas lowers mul24 and mad24 to IMAD " +
-          "and IMUL instead, so no toolchain emits it."
+        "IMADSP takes its operand formats from a register at run time unless modifiers name them; ptxas emits the " +
+          "named forms only for Kepler surface addressing."
       ))
     else None
 
   /** Why no instance of a form is legal, where the condition its instances fail reads only what no instance can vary:
     * required modifiers whose every combination was tried, qualifiers the form fixes and operands it fixes to RZ.
     */
+  // the syntax fields of one instruction form
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   private def impossible(formName: String, database: Option[NVDisasm.Database], failure: String)
       : Option[Unavailable] = for {
     tables <- database

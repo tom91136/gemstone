@@ -4,6 +4,8 @@ import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
+import java.util.concurrent.atomic.AtomicLongArray
+import java.util.concurrent.locks.LockSupport
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
@@ -29,5 +31,17 @@ private object PlatformConcurrency {
 
   inline def setRelease(value: AtomicInteger, next: Int): Unit = value.setRelease(next)
 
+  inline def getAcquire(values: AtomicLongArray, index: Int): Long = values.getAcquire(index)
+
+  inline def setRelease(values: AtomicLongArray, index: Int, next: Long): Unit = values.setRelease(index, next)
+
+  def threadLocal[A](initial: () => A): ThreadLocal[A] = ThreadLocal.withInitial(() => initial())
+
   inline def threadId(): Long = Thread.currentThread().threadId()
+
+  inline def parkNanos(nanos: Long): Unit = LockSupport.parkNanos(nanos)
+
+  inline def yieldThread(): Unit = Thread.`yield`()
+
+  inline def onSpinWait(): Unit = Thread.onSpinWait()
 }

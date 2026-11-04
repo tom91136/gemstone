@@ -22,11 +22,11 @@ object timeouts {
   lazy val hostFactor: Double = factor(
     scale = setting(
       environmentKeys.TimeoutScale,
-      scale,
+      scale(_),
       "a positive number with at most three decimals",
       environmentKeys.TimeoutScaleDefault.toDouble
     ),
-    threads = setting(environmentKeys.ThreadCount, threads, "a positive integer", host.availableThreads)
+    threads = setting(environmentKeys.ThreadCount, threads(_), "a positive integer", host.availableThreads)
   )
 
   /** Only for waits expected to succeed; a window that must elapse keeps its length. */

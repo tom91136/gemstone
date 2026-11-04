@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.testing
 
-import net.kurobako.gemstone.toolchain.workarounds
+import net.kurobako.gemstone.toolchain.*
 import scala.concurrent.duration.*
 
 abstract class Suite extends munit.FunSuite {

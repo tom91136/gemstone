@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.VMIR as NvidiaIR
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class WarpReductionSuite extends Suite {
   private val reductionMasks = Vec(0xffffffffL, 0x55555555L, 1L)
@@ -181,6 +181,39 @@ ret;
       Map.empty,
       DeviceMemory(4)
     ).left.exists(_.toString.contains("member mask")))
+  }
+
+  test("warp barrier lanes with differing member masks each synchronise with their own group") {
+    val kernel = compileKernel(""".version 8.0
+.target sm_80
+.address_size 64
+.visible .entry split_masks(.param .u64 output) {
+ .reg .pred %p;
+ .reg .b32 %tid, %mask, %value;
+ .reg .b64 %out, %address, %offset;
+ ld.param.u64 %out, [output];
+ mov.u32 %tid, %tid.x;
+ setp.lt.u32 %p, %tid, 16;
+ selp.b32 %mask, 0xffff, 0xffff0000, %p;
+ bar.warp.sync %mask;
+ mov.b32 %value, 1;
+ mul.wide.u32 %offset, %tid, 4;
+ add.u64 %address, %out, %offset;
+ st.global.b32 [%address], %value;
+ ret;
+}""")
+    val memory = DeviceMemory(128)
+    assertEquals(
+      execute(
+        kernel,
+        1,
+        32,
+        Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
+        memory
+      ),
+      Right(())
+    )
+    (0 until 32).foreach(lane => assertEquals(memory.readInt32(memory.start.offset(lane * 4L)), Right(1)))
   }
 
 }

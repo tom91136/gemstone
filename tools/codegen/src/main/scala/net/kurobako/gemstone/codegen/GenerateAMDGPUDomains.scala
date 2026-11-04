@@ -90,8 +90,9 @@ object GenerateAMDGPUDomains {
     val parsed   = xml.map((isa, definitions) => isa -> entriesOf(isa, definitions))
     val bases    = ISAs.map(isa => isa -> combine(documents(isa).map(parsed))).toMap
     val universe = bases.values.flatMap(_.flatMap(_.domain.codes.map(_._1))).toSet ++ llvm.registers.map(_.asmName)
+    val byISA    = encodings.groupBy(_.isa)
     ISAs.map { isa =>
-      val local  = encodings.filter(_.isa == isa)
+      val local  = byISA.getOrElse(isa, Vector.empty)
       val used   = local.flatMap(_.operands.collect { case o if !o.implicitOperand => o.kind }).toSet
       val merged = merge(isa, bases(isa), Overrides, Evidence(llvm, oracle, universe, used))
       val typed  = merged.copy(entries = immediates(isa, merged.entries, ImmediateRules))

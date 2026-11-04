@@ -30,6 +30,7 @@ object Connection {
         val buffered       = BufferedInputStream(channel.input)
         val bufferedOutput = BufferedOutputStream(channel.output)
         val recording      = journal.map(writer => use(Recording(writer, buffered, bufferedOutput)))
+        val heartbeat      = use(Heartbeat(bufferedOutput))
         // The channel owns the streams. Frames flush explicitly; closing a buffered
         // wrapper after a failed write would retry an already-partial response.
         val input  = DataInputStream(recording.fold[InputStream](buffered)(_.input))
@@ -70,9 +71,10 @@ object Connection {
             val header = readHeader(input)
             Right(header -> readPayload(input, header))
           } catch {
-            case error: IllegalArgumentException => Left(ExecutionFailure.InvalidRequest(throwables.detail(error)))
-            case error: EOFException             => Left(ExecutionFailure.InvalidRequest(throwables.detail(error)))
+            case error @ (_: IllegalArgumentException | _: EOFException) =>
+              Left(ExecutionFailure.InvalidRequest(throwables.detail(error)))
           }
+          heartbeat.begin()
           val result = request.flatMap { (header, payload) =>
             session(header).flatMap { service =>
               Wire.Protocol[ExecutionRPC.Operation].decodePayload(header.operation, payload, ExecutionRPC.Limits)
@@ -80,8 +82,10 @@ object Connection {
                 .flatMap(decoded => ExecutionHandler(decoded.value, service))
             }
           }
-          writeResponse(output, result)
-          recording.foreach(_.response())
+          heartbeat.respond {
+            writeResponse(output, result)
+            recording.foreach(_.response())
+          }
           request.isRight
         }
 

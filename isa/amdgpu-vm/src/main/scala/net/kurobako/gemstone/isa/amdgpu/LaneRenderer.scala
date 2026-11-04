@@ -1240,8 +1240,7 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
             Vec.empty,
             Vec(
               (kernel(bank(registers, src)), Some(dword)),
-              (destination(naming.vector(address), Lane, lanes), Some(dword)),
-              (target, Some(dword))
+              (destination(naming.vector(address), Lane, lanes), Some(dword))
             )
           ),
           Some(dword)
@@ -1496,16 +1495,17 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
           )
       )
     case Instruction.LoadLocal(address, bytes, _, offset) =>
-      located(address).filter(_._1 != Space.Local).map { (space, from) =>
-        val target = Render.ldsOffset(Render.add(
-          Render.add(naming.m0, Literal(offset.toLong)),
-          Render.multiply(Lane, Literal(math.max(4, bytes).toLong))
-        ))
-        if (bytes > 8)
-          Term.Steps(Vec.tabulate(bytes / 4)(index =>
-            Term.Step("_", store(Space.Local, at(target, index * 4), load(space, at(from, index * 4), 4), 4))
+      located(address).collect {
+        case (space, from) if space != Space.Local =>
+          val target = Render.ldsOffset(Render.add(
+            Render.add(naming.m0, Literal(offset.toLong)),
+            Render.multiply(Lane, Literal(math.max(4, bytes).toLong))
           ))
-        else Term.Steps(Term.Step("_", store(Space.Local, target, load(space, from, bytes), bytes)))
+          if (bytes > 8)
+            Term.Steps(Vec.tabulate(bytes / 4)(index =>
+              Term.Step("_", store(Space.Local, at(target, index * 4), load(space, at(from, index * 4), 4), 4))
+            ))
+          else Term.Steps(Term.Step("_", store(Space.Local, target, load(space, from, bytes), bytes)))
       }
     case Instruction.LoadTranspose(dest, address, layout) =>
       val dwords = (layout.bits * layout.elements + 31) / 32
@@ -1697,10 +1697,10 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
         fields(bit + length, found :+ (if (target == 0) field else Render.shiftLeft(field, Literal(target.toLong))))
       }
     val terms = fields(0, Vec.empty)
-    val union = moved.foldLeft(0)(_ | _)
     if (terms.isEmpty) Literal(base.toLong)
     else {
       val lanes = terms.reduce(Render.add(_, _))
+      val union = moved.foldLeft(0)(_ | _)
       if (base == 0) lanes
       else if ((base & union) == 0) Render.add(lanes, Literal(base.toLong))
       else Render.xor(lanes, Literal(base.toLong))

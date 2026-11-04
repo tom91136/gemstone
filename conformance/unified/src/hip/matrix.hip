@@ -943,7 +943,7 @@ unsigned family(const std::string &architecture) {
   #define UNIFIED_MATRIX_CASE "runtime/hip/matrix-builtins"
 #endif
 
-TEST_CASE(UNIFIED_MATRIX_CASE, "[unified][runtime][tensor][compact]") {
+TEST_CASE(UNIFIED_MATRIX_CASE, "[unified][runtime][tensor]") {
   using namespace aspartame;
   using namespace unified_matrix;
   (void)conformance::deviceSelection();

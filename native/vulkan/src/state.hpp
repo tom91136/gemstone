@@ -83,6 +83,7 @@ struct Submission {
 struct DeviceState {
   bool stopping = false, lost = false;
   bool hostQueryResetExtension = false;
+  uint32_t physicalOrdinal = 0;
   [[nodiscard]] bool failed() const { return lost || stopping; }
   std::vector<std::shared_ptr<QueueState>> queues;
 };
@@ -121,7 +122,10 @@ extern std::map<VkEvent, bool> events;
 extern std::condition_variable stateChanged;
 extern std::map<VkSampler, gx::GraphicsSampler> samplers;
 extern std::map<VkInstance, bool> instanceProperties2;
-inline VkPhysicalDevice physicalDeviceHandle(VkInstance instance) { return reinterpret_cast<VkPhysicalDevice>(instance); }
+extern std::map<VkInstance, std::vector<VkPhysicalDevice>> instancePhysicalDevices;
+std::vector<VkPhysicalDevice> physicalDevicesOf(VkInstance instance);
+uint32_t physicalDeviceOrdinal(VkPhysicalDevice physicalDevice);
+uint32_t deviceOrdinal(VkDevice device);
 
 extern std::map<VkImage, Image> images;
 

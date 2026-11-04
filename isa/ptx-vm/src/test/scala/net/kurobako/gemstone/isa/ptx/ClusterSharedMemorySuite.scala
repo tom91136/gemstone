@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 // Clusters as nvcc 13.3 lowers cooperative_groups::this_cluster() and cuda::ptx for sm_90: mapa, ld/atom on
 // shared::cluster, barrier.cluster, getctarank and the %cluster* special registers.

@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import java.util.regex.Pattern
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Integer, predicate and uniform-datapath forms the NVIDIA disassembler tables list besides the ones ptxas favours:
   * the named LOP3 and PLOP3 operations, comparisons without a Boolean operation or with the constant `.F`/`.T` tests,
@@ -97,6 +97,35 @@ class IntegerFormsSuite extends Suite {
     one(50, s"$flags; CSETP.LO.AND P0, PT, CC, PT; ${holds("P0")}", 0L)
     one(50, s"$flags; CSETP.HI P0, CC; ${holds("P0")}", 0L)
   }
+
+  // the loop test ptxas emits behind ISET RZ.CC: NEU holds where the comparison produced a non-zero result
+  for (sm <- Vec(35, 50)) test(s"sm_$sm CSETP.NEU tests the result an ISET RZ.CC produced") {
+    def neu(value: String, p: String = "P0") =
+      s"MOV32I R5, $value; ISET.GT.AND RZ.CC, R5, -0x1, PT; CSETP.NEU.AND $p, PT, CC, PT; ${holds(p)}"
+    one(sm, neu("0x0"), 1L)
+    one(sm, neu("0x7fffffff"), 1L)
+    one(sm, neu("0xffffffff"), 0L)
+    one(sm, neu("0x80000000"), 0L)
+    one(sm, s"${neu("0x0", "P2")}; @!P2 MOV R4, 0x5", 1L)
+  }
+
+  // the first warp-wide exit ptxas emits after a reduction: EXIT tests the flags of the preceding ISET RZ.CC
+  for (
+    (
+      sm,
+      relation,
+      expected
+    ) <- Vec((35, "NEU", Vec(1, 2)), (50, "NEU", Vec(1, 2)), (35, "EQU", Vec(2, 1)), (50, "EQU", Vec(2, 1)))
+  )
+    test(s"sm_$sm EXIT.$relation follows the flags of ISET RZ.CC") {
+      check(
+        sm,
+        "S2R R0, SR_TID.X; SHL R6, R0, 0x2; LDC.64 R2, c[0x0][0x160]; IADD R2.CC, R2, R6; IADD.X R3, R3, RZ; " +
+          "MOV32I R4, 0x1; ST.E [R2], R4; ISET.EQ.AND RZ.CC, R0, RZ, PT; " +
+          s"EXIT.$relation; MOV32I R4, 0x2; ST.E [R2], R4; EXIT",
+        expected
+      )
+    }
 
   test("sm_75 P2R and R2P with dynamic masks and byte positions") {
     val inputs = "MOV R5, 0x3; ISETP.NE.AND P0, PT, R5, RZ, PT; ISETP.EQ.AND P1, PT, R5, RZ, PT"

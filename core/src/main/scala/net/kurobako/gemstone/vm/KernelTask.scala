@@ -20,6 +20,9 @@ object KernelTask {
 
   case class ArgumentBuffer(region: AllocationId, offset: Long >= 0) derives Codec
 
+  /** The memory a launch's device-side `malloc` allocates from, which the context owns and so outlives the launch. */
+  case class DeviceHeap(region: AllocationId, offset: Long >= 0, size: Long > 0) derives Codec
+
   enum RelocationSource derives Codec, CanEqual {
     case Memory(region: AllocationId)
     case Argument(index: Int >= 0)
@@ -46,7 +49,8 @@ object KernelTask {
       discoverArgumentRelocations: Boolean = false,
       argumentBuffer: Option[ArgumentBuffer] = None,
       cluster: Option[LaunchGeometry.Dimensions] = None,
-      cooperative: Boolean = false
+      cooperative: Boolean = false,
+      deviceHeap: Option[DeviceHeap] = None
   ): Either[NonEmpty[String], KernelTask] =
     for {
       geometry <- LaunchGeometry.forLaunch(groupSize, groupCount, globalSize, workDim, globalOffset)
@@ -66,7 +70,8 @@ object KernelTask {
       discoverArgumentRelocations,
       argumentBuffer,
       cluster,
-      cooperative
+      cooperative,
+      deviceHeap
     )
   private def validateRelocations(
       pointerRelocations: Vec[PointerRelocation],
@@ -95,7 +100,8 @@ case class KernelTask private (
     // The thread-block cluster shape a launch names; workgroups of one cluster run together.
     cluster: Option[LaunchGeometry.Dimensions],
     // Every workgroup of a cooperative launch is resident at once, so workgroups can wait on each other.
-    cooperative: Boolean
+    cooperative: Boolean,
+    deviceHeap: Option[KernelTask.DeviceHeap]
 ) {
   def withArguments(arguments: Vec[KernelTask.Argument]): Either[NonEmpty[String], KernelTask] =
     Either.cond(arguments.size == this.arguments.size, copy(arguments = arguments), "argument count cannot change")

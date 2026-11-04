@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 
 class SPIRVBackend(

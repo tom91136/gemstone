@@ -105,10 +105,10 @@ object SASSDescription {
             }
         }
       val error      = if (depth != 0) Some(ParseError("unterminated ##IF", source.length)) else directiveError
-      val firstClass = headers.headOption.map(_.start).getOrElse(source.length)
+      val firstClass = headers.headOption.fold(source.length)(_.start)
       val preamble   = source.substring(0, firstClass)
       val classes    = headers.zipWithIndex.map { case (header, i) =>
-        val end = headers.lift(i + 1).map(_.start).getOrElse(source.length)
+        val end = headers.lift(i + 1).fold(source.length)(_.start)
         val raw = source.substring(header.start, end)
         InstructionClass(
           header.name,
@@ -181,7 +181,7 @@ object SASSDescription {
 
   private def buildSections(raw: String, starts: Vector[(Int, Int, String)]): Vector[Section] =
     starts.zipWithIndex.map { case ((_, bodyStart, name), i) =>
-      val end  = starts.lift(i + 1).map(_._1).getOrElse(raw.length)
+      val end  = starts.lift(i + 1).fold(raw.length)(_._1)
       val body = raw.substring(bodyStart, end)
       Section(name, body, parseEntries(body))
     }

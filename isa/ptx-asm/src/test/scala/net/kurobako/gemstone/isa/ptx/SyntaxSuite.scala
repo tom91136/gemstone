@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SyntaxSuite extends Suite {
   test("empty line comments are valid trivia") {
@@ -18,6 +18,15 @@ class SyntaxSuite extends Suite {
 
   test("external function declarations parse without a body") {
     assert(Parser.parse(".extern .func __assertfail(.param .b64 message);\n").isRight)
+  }
+
+  test("section blocks accept labels and data directives") {
+    val source = ".section\t.debug_str\n{\n$L__info_string0:\n.b8 99\n.b8 0;\n}\n"
+    assert(Parser.parse(source).isRight, Parser.parse(source).left.toString)
+  }
+
+  test("directives outside section blocks may span lines") {
+    assert(Parser.parse(".entry kernel() {\n.maxntid 256,\n1, 1;\nret;\n}\n").isRight)
   }
 
   test("weak entry declarations parse") {

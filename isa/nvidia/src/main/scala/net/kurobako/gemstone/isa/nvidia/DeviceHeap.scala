@@ -18,8 +18,8 @@ private[gemstone] object DeviceHeap {
   val Base: Long = 0x700000000000L
 }
 
-/** Storage for device-side `malloc`/`free`, private to one dispatch and layered over its address space. Accesses wholly
-  * outside heap blocks reach the backing address space; an access straddling a block boundary faults.
+/** Scratch storage private to one dispatch and layered over its address space, such as a cooperative grid's workspace.
+  * Accesses wholly outside heap blocks reach the backing address space; an access straddling a block boundary faults.
   */
 private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = GuestAddress(DeviceHeap.Base))
     extends AddressSpace {

@@ -308,3 +308,106 @@ TEST_CASE("KFD GPU wave size follows the selected processor", "[hsa][kmt]") {
   }
   REQUIRE((hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS));
 }
+
+TEST_CASE("KFD reports one GPU node per emulated device", "[hsa][kmt][multi-device]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const gemstone_test::Environment devices(gemstone::environment::DeviceCount, "2");
+  REQUIRE((hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS));
+  HsaSystemProperties system{};
+  REQUIRE((hsaKmtAcquireSystemProperties(&system) == HSAKMT_STATUS_SUCCESS));
+  CHECK((system.NumNodes == 3));
+
+  HsaNodeProperties cpu{};
+  std::array<HsaNodeProperties, 2> gpus{};
+  REQUIRE((hsaKmtGetNodeProperties(0, &cpu) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtGetNodeProperties(1, gpus.data()) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtGetNodeProperties(2, &gpus[1]) == HSAKMT_STATUS_SUCCESS));
+  CHECK((cpu.NumCPUCores != 0 && cpu.NumFComputeCores == 0));
+  for (const auto &gpu : gpus)
+    CHECK((gpu.NumFComputeCores != 0 && gpu.NumMemoryBanks == 3));
+  CHECK((gpus[0].KFDGpuID != gpus[1].KFDGpuID));
+  CHECK((gpus[0].LocationId != gpus[1].LocationId));
+  HsaNodeProperties missing{};
+  CHECK((hsaKmtGetNodeProperties(3, &missing) == HSAKMT_STATUS_INVALID_PARAMETER));
+
+  std::array<HsaMemoryProperties, 3> banks{};
+  CHECK((hsaKmtGetNodeMemoryProperties(2, 3, banks.data()) == HSAKMT_STATUS_SUCCESS));
+  CHECK((hsaKmtGetNodeMemoryProperties(3, 3, banks.data()) == HSAKMT_STATUS_INVALID_PARAMETER));
+  HsaClockCounters counters{};
+  CHECK((hsaKmtGetClockCounters(2, &counters) == HSAKMT_STATUS_SUCCESS));
+  CHECK((hsaKmtGetClockCounters(3, &counters) == HSAKMT_STATUS_INVALID_PARAMETER));
+
+  HsaMemFlags flags{};
+  flags.ui32.HostAccess = 1;
+  void *remote = nullptr;
+  REQUIRE((hsaKmtAllocMemory(2, 4096, flags, &remote) == HSAKMT_STATUS_SUCCESS));
+  HsaPointerInfo pointer{};
+  REQUIRE((hsaKmtQueryPointerInfo(remote, &pointer) == HSAKMT_STATUS_SUCCESS));
+  CHECK((pointer.Node == 2));
+  HSAuint32 nodes[]{2};
+  CHECK((hsaKmtMapMemoryToGPUNodes(remote, 4096, nullptr, HsaMemMapFlags{}, 1, nodes) == HSAKMT_STATUS_SUCCESS));
+  nodes[0] = 3;
+  CHECK((hsaKmtMapMemoryToGPUNodes(remote, 4096, nullptr, HsaMemMapFlags{}, 1, nodes) == HSAKMT_STATUS_INVALID_NODE_UNIT));
+  REQUIRE((hsaKmtUnmapMemoryToGPU(remote) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtFreeMemory(remote, 4096) == HSAKMT_STATUS_SUCCESS));
+  void *absent = nullptr;
+  CHECK((hsaKmtAllocMemory(3, 4096, flags, &absent) == HSAKMT_STATUS_INVALID_PARAMETER));
+
+  REQUIRE((hsaKmtReleaseSystemProperties() == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS));
+}
+
+TEST_CASE("KFD dispatches reach another node's memory only once it is mapped there", "[hsa][kmt][multi-device]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const gemstone_test::Environment devices(gemstone::environment::DeviceCount, "2");
+  REQUIRE((hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS));
+  const auto codeObject = gemstone::hsa::test::codeObjectFixture();
+  const std::array<gemstone::hsakmt::LoadedKernel, 1> loaded{{{.object = 0x123400, .name = "add", .kernargSize = 12}}};
+  REQUIRE((gemstone::hsakmt::installCodeObject(codeObject, loaded)));
+
+  HsaMemFlags flags{};
+  flags.ui32.HostAccess = 1;
+  void *kernarg = nullptr;
+  void *peer = nullptr;
+  REQUIRE((hsaKmtAllocMemory(0, 4096, flags, &kernarg) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtAllocMemory(1, 4096, flags, &peer) == HSAKMT_STATUS_SUCCESS));
+  HSAuint32 owner[]{1};
+  REQUIRE((hsaKmtMapMemoryToGPUNodes(peer, 4096, nullptr, HsaMemMapFlags{}, 1, owner) == HSAKMT_STATUS_SUCCESS));
+
+  std::array<Packet, 8> ring{};
+  for (auto &packet : ring)
+    gemstone::writeNative<uint16_t>(packet.data(), 0, static_cast<uint16_t>(gemstone::hsa::PacketType::Invalid));
+  HsaQueueResource queue{};
+  REQUIRE((hsaKmtCreateQueueExt(2, HSA_QUEUE_COMPUTE_AQL, 100, HSA_QUEUE_PRIORITY_NORMAL, 0, ring.data(), sizeof(ring), nullptr, &queue)
+           == HSAKMT_STATUS_SUCCESS));
+  uint64_t packetIndex = 0;
+  const auto dispatch = [&](int32_t seed) {
+    const uint64_t outputPointer = reinterpret_cast<uint64_t>(peer);
+    std::memcpy(kernarg, &outputPointer, sizeof(outputPointer));
+    std::memcpy(static_cast<uint8_t *>(kernarg) + 8, &seed, sizeof(seed));
+    fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = static_cast<uint32_t>(seed)});
+    SignalStorage completion;
+    ring[packetIndex % ring.size()] = kernelPacket(0x123400, reinterpret_cast<uint64_t>(kernarg), completion);
+    __atomic_store_n(queue.Queue_write_ptr_aql, packetIndex + 1, __ATOMIC_RELEASE);
+    *queue.Queue_DoorBell_aql = packetIndex;
+    ++packetIndex;
+    REQUIRE((gemstone_test::waitUntil([&] { return __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == packetIndex; },
+                                      std::chrono::seconds(10))));
+    return completion.load();
+  };
+
+  CHECK((dispatch(5) == -5));
+  HSAuint32 granted[]{2};
+  REQUIRE((hsaKmtMapMemoryToGPUNodes(peer, 4096, nullptr, HsaMemMapFlags{}, 1, granted) == HSAKMT_STATUS_SUCCESS));
+  CHECK((dispatch(6) == 0));
+  CHECK((word(static_cast<uint8_t *>(peer), 0) == 6));
+
+  REQUIRE((hsaKmtDestroyQueue(queue.QueueId) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtUnmapMemoryToGPU(peer) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtUnmapMemoryToGPU(peer) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtFreeMemory(peer, 4096) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtFreeMemory(kernarg, 4096) == HSAKMT_STATUS_SUCCESS));
+  REQUIRE((hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS));
+}

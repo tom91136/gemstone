@@ -11,14 +11,15 @@ private[isa] object NvidiaWarpStaged {
       otherwise: => R,
       inline next: Instruction => R
   ): R = instruction match {
-    case Instruction.Shuffle(mode, destination, validity, source, lane, clamp, _, width) =>
+    case Instruction.Shuffle(mode, destination, validity, source, lane, clamp, memberMask, width) =>
       WarpSemantics.shuffle(algebra, mode, bits(width))(
         sinks = sinks,
         destination = destination,
         validity = validity,
         operand = source,
         selector = lane,
-        bounds = clamp
+        bounds = clamp,
+        memberMask = memberMask
       )
     case Instruction.VoteBallot(destination, voter, memberMask, negated) =>
       WarpSemantics.ballot(algebra, negated)(sinks, destination, voter, memberMask)

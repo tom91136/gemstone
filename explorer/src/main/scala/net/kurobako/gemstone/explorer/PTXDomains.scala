@@ -100,7 +100,7 @@ private object PTXDomains {
         Option.when(uniform && types.nonEmpty)(s"register of the instruction type (${types.take(4).map("." +
             _.name).mkString(" ")}${if (types.size > 4) " ..." else ""})")
       )
-      val limits = values.filter(_._1.startsWith("immediate")).map(_._2)
+      val limits = values.collect { case (key, limit) if key.startsWith("immediate") => limit }
       (register.toVec ++ limits.headOption.map(limit => s"immediate $limit")).mkString(", ")
   }
 }

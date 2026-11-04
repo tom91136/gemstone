@@ -174,7 +174,7 @@ object GeneratePTXISA {
           renderDomains(sections).map { case (name, source) => s"$name.scala" -> source }
     val written = sources.map { case (name, source) =>
       val path = outputRoot.resolve(name)
-      write(path, source)
+      GeneratedFiles.writeScala(path, source)
       path
     }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
@@ -344,13 +344,11 @@ object GeneratePTXISA {
       .find(_.tagName() == "section")
 
   private def extractSection(section: Element): Option[Section] = {
-    val heading = cleanHeading(section.select("h3,h4,h5,h6").asScala.headOption.map(_.text()).getOrElse(""))
+    val heading = cleanHeading(section.select("h3,h4,h5,h6").asScala.headOption.fold("")(_.text()))
     val rest    = heading match {
       case HeadingNumber(_, value) => value
       case _                       => heading
     }
-    val separator                          = rest.indexOf(": ")
-    val title                              = if (separator > 0) rest.drop(separator + 2) else rest
     val (_, syntax, examples, targetNotes) = section.children().asScala.foldLeft(
       ("", Vector.empty[String], Vector.empty[Vector[String]], Vector.empty[String])
     ) { case ((current, syntax, examples, targetNotes), child) =>
@@ -372,6 +370,8 @@ object GeneratePTXISA {
     }
     if (syntax.isEmpty) None
     else {
+      val separator                                  = rest.indexOf(": ")
+      val title                                      = if (separator > 0) rest.drop(separator + 2) else rest
       val text                                       = section.text()
       val versions: Vector[(major: Int, minor: Int)] = VersionNote.findAllMatchIn(text)
         .map(value => (major = value.group(1).toInt, minor = value.group(2).toInt))
@@ -448,17 +448,26 @@ object GeneratePTXISA {
     examples.result()
   }
 
+  private val ExactNoise = Set(
+    "}",
+    "neg.s8x4 p, q, r;",
+    "isspacep.shared::cluster ishrdany sptr;",
+    "multimem.cp.reduce.async.bulk.relaxed.cta.global.bulk_group.add.u64 [dstMem], [srcMem], size, [mbar];",
+    "mbarrier.init [bar];",
+    "@!p bra try_wait loop;"
+  )
+
   private def isKnownNoise(line: String): Boolean = {
     val normalised         = Text.normaliseWhitespace(line)
     val collectorDirective = normalised.split(' ').exists {
       case s"collector::$name:$action" => name.nonEmpty && (action == "fill" || action == "use")
       case _                           => false
     }
+    ExactNoise.contains(normalised) ||
     normalised.contains("mask mask") ||
     normalised.contains("%reg1. %reg2") ||
     normalised.contains("}. [a]") ||
     normalised.startsWith(".function ") ||
-    normalised == "}" ||
     normalised.contains(".func (.reg .u32 rv) foo") ||
     normalised.contains(".callprototype") ||
     normalised.endsWith("[shmem], ;") ||
@@ -466,16 +475,10 @@ object GeneratePTXISA {
     normalised.startsWith(".. ") ||
     normalised.contains("zdim, ignr}") ||
     normalised.contains("is_canceled pred.b128") ||
-    normalised == "neg.s8x4 p, q, r;" ||
-    normalised == "isspacep.shared::cluster ishrdany sptr;" ||
     normalised.contains("cache_hint}") ||
-    normalised ==
-      "multimem.cp.reduce.async.bulk.relaxed.cta.global.bulk_group.add.u64 [dstMem], [srcMem], size, [mbar];" ||
-      normalised == "mbarrier.init [bar];" ||
-      normalised == "@!p bra try_wait loop;" ||
-      normalised.contains("a-desc") ||
-      normalised.contains(".cta_group.kind ") ||
-      collectorDirective
+    normalised.contains("a-desc") ||
+    normalised.contains(".cta_group.kind ") ||
+    collectorDirective
   }
 
   // The pinned specification spells the double precision mma shape `.m8n84`
@@ -735,7 +738,6 @@ object GeneratePTXISA {
           } else (segments, fixed :+ field.name)
       }
       val allSegments = flush(segments, fixed)
-      val defaultBody = if (allSegments.isEmpty) "Vec.empty" else allSegments.mkString(" ++ ")
       shape.caseName match {
         case "CpAsyncBulkMBarrier" =>
           "Vec(destAddr, srcAddr, size) ++ ignoredBytesLeft.toVec ++ ignoredBytesRight.toVec ++ Vec(barrierAddr) ++ ctaMask.toVec ++ cachePolicy.toVec"
@@ -753,7 +755,7 @@ object GeneratePTXISA {
           "Vec(destAddr, srcA, srcBDesc, instDesc) ++ scaleAAddr.toVec ++ scaleBAddr.toVec ++ disabledOutputLanes.toVec ++ Vec(enableInputD) ++ scaleInputD.toVec"
         case "Tcgen05MmaSp" =>
           "Vec(destAddr, srcA, srcBDesc, sparseMetadataAddr, instDesc) ++ scaleAAddr.toVec ++ scaleBAddr.toVec ++ disabledOutputLanes.toVec ++ Vec(enableInputD) ++ scaleInputD.toVec"
-        case _ => defaultBody
+        case _ => if (allSegments.isEmpty) "Vec.empty" else allSegments.mkString(" ++ ")
       }
     }
     val cases = shapes.map { shape =>
@@ -1282,8 +1284,8 @@ object GeneratePTXISA {
     ).orElse(FieldOverrides.get(opcode.takeWhile(_ != '.'))).flatMap(_.lift(position)).getOrElse {
       val candidates = sourceNames.map(sourceFieldName(_)).filter(_.nonEmpty)
       val selected   = candidates.groupBy(value => value).toVector
-        .minByOption { case (name, values) => (-values.size, fieldNamePenalty(name), name) }.map(_._1)
-        .getOrElse(s"operand${position + 1}")
+        .minByOption { case (name, values) => (-values.size, fieldNamePenalty(name), name) }
+        .fold(s"operand${position + 1}")(_._1)
       val identifier = if (selected.headOption.exists(_.isDigit)) s"operand$selected" else selected
       val safe       = if (ScalaKeywords(identifier)) identifier + "Value" else identifier
       if (safe == "operand" || safe == "value") s"$safe${position + 1}" else safe
@@ -1380,7 +1382,7 @@ object GeneratePTXISA {
         |
         |import net.kurobako.gemstone.collection.*
         |import net.kurobako.gemstone.isa.ptx.asm.*
-        |import net.kurobako.gemstone.testing.Suite
+        |import net.kurobako.gemstone.testing.*
         |
         |${GeneratedHeader.scala(
          s"from examples in the pinned NVIDIA PTX ISA ${version.source} specification"
@@ -1465,9 +1467,5 @@ object GeneratePTXISA {
         identity
       ))
     case _ => throw IllegalArgumentException(s"invalid PTX version: $value")
-  }
-
-  private def write(output: Path, content: String): Unit = {
-    val _ = GeneratedFiles.write(output, GeneratedScalaFormatter(output, content))
   }
 }

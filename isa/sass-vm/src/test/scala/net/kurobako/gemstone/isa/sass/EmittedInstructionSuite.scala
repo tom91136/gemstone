@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Instructions as ptxas 13.3 (`ptxas -O3 -arch=sm_XX` on nvcc 13.3 and clang 22 PTX, disassembled by `nvdisasm -c`)
   * emits them for ordinary CUDA C++ or through the CUDA and CCCL headers, each named after its source, with the results
@@ -69,6 +69,19 @@ class EmittedInstructionSuite extends Suite {
   )
     test(s"sm_89 $spelling") {
       same(89, f"MOV R5, 0x$a%08x\nMOV R6, 0x$b%08x\n$spelling", expected)
+    }
+
+  // __shfl_up_sync and __shfl_down_sync with width 8 pass the segment mask in bits 8-12 of the bounds operand.
+  for (
+    (sm, shuffle, source) <- Vec(
+      (75, "SHFL.UP PT, R4, R5, 0x1, 0x1800", (lane: Int) => if (lane % 8 >= 1) lane - 1 else lane),
+      (89, "SHFL.UP PT, R4, R5, 0x1, 0x1800", (lane: Int) => if (lane % 8 >= 1) lane - 1 else lane),
+      (89, "SHFL.DOWN PT, R4, R5, 0x1, 0x181f", (lane: Int) => if (lane % 8 <= 6) lane + 1 else lane),
+      (120, "SHFL.DOWN PT, R4, R5, 0x3, 0x181f", (lane: Int) => if (lane % 8 <= 4) lane + 3 else lane)
+    )
+  )
+    test(s"sm_$sm $shuffle stays within its 8 lane segment") {
+      lanes(sm, s"IADD3 R5, R0, 0x64, RZ\n$shuffle", Vec.tabulate(32)(lane => 100 + source(lane)))
     }
 
   // %nsmid reads a driver constant, and from sm_90 %nwarpid reads bits 8-15 of SR_VIRTCFG.

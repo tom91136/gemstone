@@ -4,6 +4,7 @@ import Program.*
 import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
@@ -21,19 +22,30 @@ object LoadedProgram {
   case class Relocation(offset: Int >= 0, width: Int where Between[1, 8], symbol: NonEmpty[String], addend: Long)
   case class GlobalDefinition(size: Int > 0, initial: NonEmpty[Vec[Byte]], relocations: Vec[Relocation])
 
+  /** The immutable product of linking a program. Kernels compiled before any global is bound do not depend on the
+    * loading session, so every load of the same image shares them.
+    */
+  class Prepared(
+      val module: VMCompiler.Module,
+      val globals: Map[NonEmpty[String], GlobalDefinition]
+  ) {
+    val kernels: Memo[NonEmpty[String], Either[Fault, Kernel]] = Memo()
+  }
+
   def load(
       program: Program,
       workgroups: Workgroups = Workgroups.Sequential,
       release: () => Unit = () => (),
       text: PTXInstruction => Option[String]
-  ): Either[Fault, LoadedProgram] = Linker.link(program).flatMap(loadLinked(_, workgroups, release, text))
+  ): Either[Fault, LoadedProgram] = prepare(program, text).map(from(_, workgroups, release))
 
-  private def loadLinked(
-      program: Program,
-      workgroups: Workgroups,
-      release: () => Unit,
-      text: PTXInstruction => Option[String]
-  ): Either[Fault, LoadedProgram] =
+  def from(prepared: Prepared, workgroups: Workgroups, release: () => Unit): LoadedProgram =
+    LoadedProgram(prepared, workgroups, release)
+
+  def prepare(program: Program, text: PTXInstruction => Option[String]): Either[Fault, Prepared] =
+    Linker.link(program).flatMap(prepareLinked(_, text))
+
+  private def prepareLinked(program: Program, text: PTXInstruction => Option[String]): Either[Fault, Prepared] =
     for {
       module  <- VMCompiler.module(program, text).leftMap(error => Fault.Unsupported(error.message))
       globals <- globalDefinitions(program.statements)
@@ -44,7 +56,7 @@ object LoadedProgram {
           Fault.InvalidRequest(s"PTX initialiser references unknown symbol '${relocation.symbol}'")
         )
       }
-    } yield LoadedProgram(module, globals, workgroups, release)
+    } yield Prepared(module, globals)
 
   private def globalDefinitions(
       statements: Vec[Statement]
@@ -143,12 +155,11 @@ object LoadedProgram {
     NumericLiteral.initialiser(raw, elementType.kind, elementType.widthBits)
 }
 
-class LoadedProgram private (
-    module: VMCompiler.Module,
-    globals: Map[NonEmpty[String], LoadedProgram.GlobalDefinition],
-    workgroups: Workgroups,
-    release: () => Unit
-) extends Backend.Program {
+class LoadedProgram private (prepared: LoadedProgram.Prepared, workgroups: Workgroups, release: () => Unit)
+    extends Backend.Program {
+  private val module  = prepared.module
+  private val globals = prepared.globals
+
   private case class CompilationState(
       globalAddresses: Map[NonEmpty[String], GuestAddress],
       kernels: Map[NonEmpty[String], Either[Fault, Kernel]]
@@ -251,8 +262,11 @@ class LoadedProgram private (
     state.kernels.get(name) match {
       case Some(kernel) => kernel
       case None         =>
+        def lower(addresses: Map[NonEmpty[String], GuestAddress]) =
+          VMCompiler.compile(module, name, addresses).leftMap(error => Fault.InvalidProgram(error.message))
         val kernel = module.entries.get(name).toRight(Fault.NotFound(s"PTX kernel '$name' is not present")).flatMap(_ =>
-          VMCompiler.compile(module, name, state.globalAddresses).leftMap(error => Fault.InvalidProgram(error.message))
+          if (state.globalAddresses.isEmpty) prepared.kernels.get(name)(lower(Map.empty))
+          else lower(state.globalAddresses)
         )
         val updated = state.copy(kernels = state.kernels.updated(name, kernel))
         if (compilationState.compareAndSet(state, updated)) kernel else compiled(name)

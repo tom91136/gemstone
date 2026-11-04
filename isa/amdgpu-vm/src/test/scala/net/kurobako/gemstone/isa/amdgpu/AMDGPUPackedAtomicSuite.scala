@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.bits.*
 
 /** Packed binary16 and bfloat16 atomic adds, which hipcc emits for `unsafeAtomicAdd(__half2*, __half2)` and

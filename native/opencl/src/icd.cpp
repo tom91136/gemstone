@@ -41,7 +41,9 @@
 #include "gemstone_pipe_layout.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/copy_out.hpp>
+#include <gemstone/devices.hpp>
 #include <gemstone/live_handles.hpp>
+#include <gemstone/program_binary.hpp>
 #include <gemstone/trace.hpp>
 
 #include "client.hpp"
@@ -107,7 +109,8 @@ std::map<uintptr_t, std::shared_ptr<BufferMapping>> svmMappings;
 std::once_flag dispatchInitialised;
 cl_icd_dispatch dispatch{};
 _cl_platform_id platform;
-_cl_device_id device;
+std::array<_cl_device_id, gemstone::MaximumDeviceCount> rootDevices;
+uint32_t rootDeviceCount = 0;
 
 template <class T> void destroyObject(T *object) {
   liveObjects.erase(object);
@@ -632,7 +635,17 @@ cl_int outputString(size_t capacity, void *output, size_t *written, const std::s
 }
 
 bool validPlatform(cl_platform_id value) { return checked(value) == &platform; }
-bool validDevice(cl_device_id value) { return checked(value) == &device; }
+bool validDevice(cl_device_id value) { return checked(value) != nullptr; }
+
+uint32_t deviceOrdinal(cl_device_id value) { return static_cast<uint32_t>(value - rootDevices.data()); }
+
+bool contextHasDevice(const _cl_context *context, cl_device_id value) {
+  return std::find(context->devices.begin(), context->devices.end(), value) != context->devices.end();
+}
+
+bool contextHasDevices(const _cl_context *context, cl_uint count, const cl_device_id *devices) {
+  return std::all_of(devices, devices + count, [&](cl_device_id value) { return contextHasDevice(context, value); });
+}
 
 void initialiseDispatch();
 
@@ -647,14 +660,52 @@ bool containsKernelName(const std::string &names, const std::string &name) {
   return parts ^ contains(name);
 }
 
+template <class P> auto *findBuild(P *program, cl_device_id value) {
+  const auto found = std::find_if(program->builds.begin(), program->builds.end(), [&](const auto &build) { return build.device == value; });
+  return found == program->builds.end() ? nullptr : &*found;
+}
+
+bool programHasDevices(const _cl_program *program, cl_uint count, const cl_device_id *devices) {
+  return std::all_of(devices, devices + count, [&](cl_device_id value) { return findBuild(program, value) != nullptr; });
+}
+
+std::vector<ProgramBuild *> buildTargets(_cl_program *program, cl_uint count, const cl_device_id *devices) {
+  std::vector<ProgramBuild *> targets;
+  for (auto &build : program->builds)
+    if (count == 0 || std::find(devices, devices + count, build.device) != devices + count) targets.push_back(&build);
+  return targets;
+}
+
+std::vector<ProgramBuild> newBuilds(const std::vector<_cl_device_id *> &devices) {
+  std::vector<ProgramBuild> builds(devices.size());
+  for (size_t index = 0; index < devices.size(); ++index)
+    builds[index].device = devices[index];
+  return builds;
+}
+
+std::vector<const ProgramBuild *> executables(const _cl_program *program) {
+  std::vector<const ProgramBuild *> built;
+  for (const auto &build : program->builds)
+    if (build.buildStatus == CL_BUILD_SUCCESS) built.push_back(&build);
+  return built;
+}
+
+std::string kernelNamesOf(const _cl_program *program) {
+  std::string names;
+  for (const auto *build : executables(program))
+    for (const auto &name : build->kernelNames ^ split(';'))
+      if (!name.empty() && !containsKernelName(names, name)) names += (names.empty() ? "" : ";") + name;
+  return names;
+}
+
 bool hasBuildOption(const char *options, std::string_view option) {
   return options && (std::string_view(options) ^ contains_slice(option));
 }
 
-bool uniformWorkGroups(const _cl_program &program) {
-  const auto &options = program.buildOptions;
+bool uniformWorkGroups(const ProgramBuild &build) {
+  const auto &options = build.buildOptions;
   if (options ^ contains_slice("-cl-uniform-work-group-size")) return true;
-  if (program.createdWithIL) return false;
+  if (build.createdWithIL) return false;
   const auto standard = options.rfind("-cl-std=CL");
   return standard == std::string::npos || options.compare(standard + 10, 2, "1.") == 0;
 }
@@ -665,50 +716,30 @@ size_t largestDivisor(size_t value, size_t limit) {
   return 1;
 }
 
-constexpr uint64_t ProgramBinaryMagic = uint64_t{0x47454d4f434c4231};
-constexpr size_t ProgramBinaryHeaderSize = 32;
-
-std::vector<uint8_t> programBinary(const _cl_program *program) {
-  const auto &payload = program->binaryType == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT ? program->bitcode : program->il;
+std::vector<uint8_t> programBinary(const _cl_program *program, const ProgramBuild &build) {
+  const auto &payload = build.binaryType == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT ? build.bitcode : build.il;
   if (payload.empty()) return {};
-  if (program->binaryType == CL_PROGRAM_BINARY_TYPE_NONE) return payload;
-
-  const std::string &source = program->buildSource.empty() ? program->source : program->buildSource;
-  if (source.size() > std::numeric_limits<uint64_t>::max() - ProgramBinaryHeaderSize
-      || payload.size() > std::numeric_limits<uint64_t>::max() - ProgramBinaryHeaderSize - source.size())
-    return {};
-  const size_t size = ProgramBinaryHeaderSize + source.size() + payload.size();
-  std::vector<uint8_t> result(size);
-  uint32_t type = static_cast<uint32_t>(program->binaryType);
-  uint64_t sourceSize = source.size();
-  uint64_t ilSize = payload.size();
-  std::memcpy(result.data(), &ProgramBinaryMagic, sizeof(ProgramBinaryMagic));
-  std::memcpy(result.data() + 8, &type, sizeof(type));
-  std::memcpy(result.data() + 16, &sourceSize, sizeof(sourceSize));
-  std::memcpy(result.data() + 24, &ilSize, sizeof(ilSize));
-  if (!source.empty()) std::memcpy(result.data() + ProgramBinaryHeaderSize, source.data(), source.size());
-  std::memcpy(result.data() + ProgramBinaryHeaderSize + source.size(), payload.data(), payload.size());
-  return result;
+  if (build.binaryType == CL_PROGRAM_BINARY_TYPE_NONE) return payload;
+  return gemstone::encodeProgramBinary(static_cast<uint32_t>(build.binaryType),
+                                       build.buildSource.empty() ? program->source : build.buildSource, payload);
 }
 
-bool decodeProgramBinary(const unsigned char *bytes, size_t size, cl_program_binary_type *type, std::string *source,
-                         std::vector<uint8_t> *il) {
-  if (!bytes || size < ProgramBinaryHeaderSize) return false;
-  const auto magic = gemstone::readNative<uint64_t>(bytes);
-  if (magic != ProgramBinaryMagic) return false;
-  const auto encodedType = gemstone::readNative<uint32_t>(bytes, 8);
-  const auto sourceSize = gemstone::readNative<uint64_t>(bytes, 16);
-  const auto ilSize = gemstone::readNative<uint64_t>(bytes, 24);
-  if (encodedType != CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT && encodedType != CL_PROGRAM_BINARY_TYPE_LIBRARY
-      && encodedType != CL_PROGRAM_BINARY_TYPE_EXECUTABLE)
-    return false;
-  if (sourceSize > size - ProgramBinaryHeaderSize || ilSize > size - ProgramBinaryHeaderSize - sourceSize
-      || ProgramBinaryHeaderSize + sourceSize + ilSize != size)
-    return false;
-  *type = static_cast<cl_program_binary_type>(encodedType);
-  source->assign(reinterpret_cast<const char *>(bytes + ProgramBinaryHeaderSize), static_cast<size_t>(sourceSize));
-  il->assign(bytes + ProgramBinaryHeaderSize + sourceSize, bytes + ProgramBinaryHeaderSize + sourceSize + ilSize);
-  return !il->empty();
+struct ProgramImage {
+  cl_program_binary_type type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
+  std::string source;
+  std::vector<uint8_t> payload;
+};
+
+// Bytes that are not a gemstone program binary are treated as raw SPIR-V.
+ProgramImage readProgramImage(const unsigned char *bytes, size_t size) {
+  auto decoded = gemstone::decodeProgramBinary(bytes, size);
+  if (!decoded || decoded->payload.empty()
+      || (decoded->type != CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT && decoded->type != CL_PROGRAM_BINARY_TYPE_LIBRARY
+          && decoded->type != CL_PROGRAM_BINARY_TYPE_EXECUTABLE))
+    return {.type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE, .source = {}, .payload = {bytes, bytes + size}};
+  return {.type = static_cast<cl_program_binary_type>(decoded->type),
+          .source = std::move(decoded->source),
+          .payload = std::move(decoded->payload)};
 }
 
 bool expandHeaders(const std::string &source, cl_uint count, const cl_program *headers, const char **names, std::string *expanded,
@@ -1003,10 +1034,10 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
 }
 
 // The work-group size a launch without an explicit local size uses in one dimension.
-size_t implicitGroup(const _cl_kernel &kernel, size_t index, size_t global) {
+size_t implicitGroup(const _cl_kernel &kernel, const ProgramBuild &build, size_t index, size_t global) {
   if (kernel.requiredWorkGroupSize != std::array<size_t, 3>{0, 0, 0}) return kernel.requiredWorkGroupSize[index];
   if (index != 0) return 1;
-  return uniformWorkGroups(*kernel.program) ? largestDivisor(global, 32) : 32;
+  return uniformWorkGroups(build) ? largestDivisor(global, 32) : 32;
 }
 
 // Device faults surface as CL_OUT_OF_RESOURCES, as the vendor runtimes report them.
@@ -1022,13 +1053,39 @@ cl_int launchStatus(gemstone::execution::FailureKind kind) {
   }
 }
 
-cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offset, const size_t *global, const size_t *local) {
+bool isExecutionFault(gemstone::execution::FailureKind kind) {
+  using gemstone::execution::FailureKind;
+  switch (kind) {
+    case FailureKind::IllegalAddress:
+    case FailureKind::MisalignedAddress:
+    case FailureKind::IllegalInstruction:
+    case FailureKind::Trapped:
+    case FailureKind::AssertionFailed:
+    case FailureKind::TimedOut:
+    case FailureKind::Failed: return true;
+    default: return false;
+  }
+}
+
+// A faulting dispatch leaves the device unusable, so the process cannot continue.
+[[noreturn]] void abortOnQueueFault(cl_command_queue queue, const std::string &message) {
+  const char *enabled = std::getenv("HSA_ENABLE_QUEUE_FAULT_MESSAGE");
+  if (!enabled || std::strcmp(enabled, "0") != 0) {
+    std::fprintf(stderr, "Queue at %p inactivated due to async error:\n\t%s\n", static_cast<void *>(queue), message.c_str());
+    std::fflush(stderr);
+  }
+  std::abort();
+}
+
+cl_int finishRemote(cl_command_queue queue, _cl_kernel *kernel, size_t workDimension, const size_t *offset, const size_t *global,
+                    const size_t *local) {
   std::unique_lock submissionLock(kernelSubmissionMutex);
   const uint64_t started = nowNanos();
   uint64_t scannedBytes = 0;
   uint64_t downloadedBytes = 0;
   auto &state = remote;
-  if (!state.ready() || kernel->program->remoteId == 0) return CL_OUT_OF_RESOURCES;
+  const auto *target = findBuild(kernel->program, queue->device);
+  if (!state.ready() || !target || target->remoteId == 0) return CL_OUT_OF_RESOURCES;
   if (workDimension == 0 || workDimension > 3 || !global) return CL_INVALID_WORK_DIMENSION;
   size_t group[3] = {1, 1, 1};
   size_t count[3] = {1, 1, 1};
@@ -1040,7 +1097,7 @@ cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offs
     if (offset && offset[index] > static_cast<size_t>(std::numeric_limits<int32_t>::max())) return CL_INVALID_GLOBAL_OFFSET;
     exact[index] = global[index];
     if (offset) origin[index] = offset[index];
-    group[index] = local ? local[index] : implicitGroup(*kernel, index, global[index]);
+    group[index] = local ? local[index] : implicitGroup(*kernel, *target, index, global[index]);
     if (group[index] == 0 || group[index] > static_cast<size_t>(std::numeric_limits<int32_t>::max())) return CL_INVALID_WORK_GROUP_SIZE;
     count[index] = (global[index] + group[index] - 1) / group[index];
     if (count[index] > static_cast<size_t>(std::numeric_limits<int32_t>::max())) return CL_INVALID_GLOBAL_WORK_SIZE;
@@ -1098,7 +1155,7 @@ cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offs
     hostMemoryEnabled = true;
   }
   gemstone::execution::CompletionResult result;
-  bool launched = gemstone::execution::launchAndCollect(Launch{.program = ProgramId{static_cast<int64_t>(kernel->program->remoteId)},
+  bool launched = gemstone::execution::launchAndCollect(Launch{.program = ProgramId{static_cast<int64_t>(target->remoteId)},
                                                                .kernelName = {kernel->name},
                                                                .groupSize = groupSize,
                                                                .groupCount = groupCount,
@@ -1143,7 +1200,9 @@ cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offs
         failureMessage);
   lock.unlock();
   if (!launched) {
-    std::fprintf(stderr, "Gemstone OpenCL launch failed: %s\n", (failureMessage.empty() ? remote.error() : failureMessage).c_str());
+    const auto message = failureMessage.empty() ? remote.error() : failureMessage;
+    if (isExecutionFault(result.failure)) abortOnQueueFault(queue, message);
+    std::fprintf(stderr, "Gemstone OpenCL launch failed: %s\n", message.c_str());
     return launchStatus(result.failure);
   }
   if (gemstone::traceEnabled("perf"))
@@ -1207,17 +1266,18 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id value, cl_device_t
   if (type != CL_DEVICE_TYPE_GPU && type != CL_DEVICE_TYPE_DEFAULT && type != CL_DEVICE_TYPE_ALL && (type & CL_DEVICE_TYPE_GPU) == 0)
     return CL_DEVICE_NOT_FOUND;
   if (entries == 0 && devices) return CL_INVALID_VALUE;
-  if (devices) devices[0] = reinterpret_cast<cl_device_id>(&device);
+  if (devices) {
+    const uint32_t written = std::min(entries, rootDeviceCount);
+    for (uint32_t i = 0; i < written; ++i)
+      devices[i] = &rootDevices[i];
+  }
   if (!devices && !count) return CL_INVALID_VALUE;
-  if (count) *count = 1;
+  if (count) *count = rootDeviceCount;
   return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainDevice(cl_device_id value) {
-  // Gemstone exposes one root device. It is owned by the ICD for the
-  // lifetime of the process, so retaining it is a successful no-op rather
-  // than a reference-count transition that could invalidate the static
-  // device object.
+  // Root devices live for the process, so retaining one is a no-op.
   return validDevice(value) ? CL_SUCCESS : CL_INVALID_DEVICE;
 }
 
@@ -1338,7 +1398,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_EXTENSIONS_WITH_VERSION:
       return outputBytes(size, output, written, DeviceExtensionVersions, sizeof(DeviceExtensionVersions));
     case CL_DEVICE_PCI_BUS_INFO_KHR: {
-      const cl_device_pci_bus_info_khr v{.pci_domain = 0, .pci_bus = 0, .pci_device = 1, .pci_function = 0};
+      const cl_device_pci_bus_info_khr v{.pci_domain = 0, .pci_bus = deviceOrdinal(value), .pci_device = 1, .pci_function = 0};
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_ILS_WITH_VERSION: return outputBytes(size, output, written, DeviceILVersions, sizeof(DeviceILVersions));
@@ -1445,12 +1505,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       const cl_device_integer_dot_product_acceleration_properties_khr v{};
       return outputScalar(size, output, written, v);
     }
-    // The Vulkan facade reports the same identity for this device.
+    // The Vulkan facade derives deviceUUID with the same ordinal convention.
     case CL_DEVICE_UUID_KHR:
     case CL_DRIVER_UUID_KHR: {
       std::array<cl_uchar, CL_UUID_SIZE_KHR> v{};
       for (size_t index = 0; index < v.size(); ++index)
         v[index] = static_cast<cl_uchar>((name == CL_DEVICE_UUID_KHR ? 0x47 : 0x67) + index);
+      if (name == CL_DEVICE_UUID_KHR) v.back() = static_cast<cl_uchar>(v.back() + deviceOrdinal(value));
       return outputBytes(size, output, written, v.data(), v.size());
     }
     case CL_DEVICE_LUID_VALID_KHR: return outputScalar(size, output, written, cl_bool{CL_FALSE});
@@ -1525,23 +1586,24 @@ CL_API_ENTRY cl_context CL_API_CALL clCreateContext(const cl_context_properties 
     }
   }
   if (count == 0 || !devices) return fail(error, CL_INVALID_VALUE);
-  if (count != 1 || !validDevice(devices[0])) return fail(error, CL_INVALID_DEVICE);
+  for (cl_uint index = 0; index < count; ++index)
+    if (!validDevice(devices[index])) return fail(error, CL_INVALID_DEVICE);
   if (!notify && user) return fail(error, CL_INVALID_VALUE);
   auto *result = newObject<_cl_context>();
   if (!result) return fail(error, CL_OUT_OF_HOST_MEMORY);
   result->identity = nextContextIdentity.fetch_add(1, std::memory_order_relaxed);
-  result->device = &device;
-  if (properties) {
-    try {
+  try {
+    result->devices.assign(devices, devices + count);
+    if (properties) {
       for (size_t index = 0; properties[index] != 0; index += 2) {
         result->properties.push_back(properties[index]);
         result->properties.push_back(properties[index + 1]);
       }
       result->properties.push_back(0);
-    } catch (const std::exception &) {
-      destroyObject(result);
-      return fail(error, CL_OUT_OF_HOST_MEMORY);
     }
+  } catch (const std::exception &) {
+    destroyObject(result);
+    return fail(error, CL_OUT_OF_HOST_MEMORY);
   }
   return succeed(error, result);
 }
@@ -1549,10 +1611,13 @@ CL_API_ENTRY cl_context CL_API_CALL clCreateContext(const cl_context_properties 
 CL_API_ENTRY cl_context CL_API_CALL clCreateContextFromType(const cl_context_properties *properties, cl_device_type type,
                                                             void(CL_CALLBACK *notify)(const char *, const void *, size_t, void *),
                                                             void *user, cl_int *error) {
-  cl_device_id selected = nullptr;
-  cl_int const result = clGetDeviceIDs(reinterpret_cast<cl_platform_id>(&platform), type, 1, &selected, nullptr);
+  std::array<cl_device_id, gemstone::MaximumDeviceCount> selected{};
+  cl_uint count = 0;
+  cl_int result = clGetDeviceIDs(reinterpret_cast<cl_platform_id>(&platform), type, 0, nullptr, &count);
   if (result != CL_SUCCESS) return fail(error, result);
-  return clCreateContext(properties, 1, &selected, notify, user, error);
+  result = clGetDeviceIDs(reinterpret_cast<cl_platform_id>(&platform), type, count, selected.data(), nullptr);
+  if (result != CL_SUCCESS) return fail(error, result);
+  return clCreateContext(properties, count, selected.data(), notify, user, error);
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainContext(cl_context value) { return retainObject(checked(value), CL_INVALID_CONTEXT); }
@@ -1586,8 +1651,9 @@ CL_API_ENTRY cl_int CL_API_CALL clGetContextInfo(cl_context value, cl_context_in
   if (!context) return CL_INVALID_CONTEXT;
   switch (name) {
     case CL_CONTEXT_REFERENCE_COUNT: return outputScalar(size, output, written, cl_uint{context->header.references.load()});
-    case CL_CONTEXT_NUM_DEVICES: return outputScalar(size, output, written, cl_uint{1});
-    case CL_CONTEXT_DEVICES: return outputScalar(size, output, written, reinterpret_cast<cl_device_id>(&device));
+    case CL_CONTEXT_NUM_DEVICES: return outputScalar(size, output, written, static_cast<cl_uint>(context->devices.size()));
+    case CL_CONTEXT_DEVICES:
+      return outputBytes(size, output, written, context->devices.data(), context->devices.size() * sizeof(cl_device_id));
     case CL_CONTEXT_PROPERTIES:
       return outputBytes(size, output, written, context->properties.data(), context->properties.size() * sizeof(cl_context_properties));
     default: return CL_INVALID_VALUE;
@@ -1598,13 +1664,13 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context value,
                                                                cl_command_queue_properties properties, cl_int *error) {
   auto *context = checked(value);
   if (!context) return fail(error, CL_INVALID_CONTEXT);
-  if (!validDevice(selected) || context->device != &device) return fail(error, CL_INVALID_DEVICE);
+  if (!validDevice(selected) || !contextHasDevice(context, selected)) return fail(error, CL_INVALID_DEVICE);
   constexpr cl_command_queue_properties knownProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
   if ((properties & ~knownProperties) != 0) return fail(error, CL_INVALID_VALUE);
   auto *queue = newObject<_cl_command_queue>();
   if (!queue) return fail(error, CL_OUT_OF_HOST_MEMORY);
   queue->context = context;
-  queue->device = &device;
+  queue->device = selected;
   queue->properties = properties;
   try {
     queue->stream = scheduler().createStream(true);
@@ -1616,7 +1682,8 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context value,
   return succeed(error, queue);
 }
 
-cl_command_queue createDeviceQueue(_cl_context *context, cl_command_queue_properties properties, cl_uint size, cl_int *error) {
+cl_command_queue createDeviceQueue(_cl_context *context, cl_device_id device, cl_command_queue_properties properties, cl_uint size,
+                                   cl_int *error) {
   if ((properties & CL_QUEUE_ON_DEVICE_DEFAULT) && context->defaultDeviceQueue) {
     retain(context->defaultDeviceQueue);
     return succeed(error, context->defaultDeviceQueue);
@@ -1624,7 +1691,7 @@ cl_command_queue createDeviceQueue(_cl_context *context, cl_command_queue_proper
   auto *queue = newObject<_cl_command_queue>();
   if (!queue) return fail(error, CL_OUT_OF_HOST_MEMORY);
   queue->context = context;
-  queue->device = &device;
+  queue->device = device;
   queue->properties = properties;
   queue->deviceSize = size ? size : DeviceQueuePreferredSize;
   if (properties & CL_QUEUE_ON_DEVICE_DEFAULT) context->defaultDeviceQueue = queue;
@@ -1636,7 +1703,7 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
                                                                              const cl_queue_properties *properties, cl_int *error) {
   auto *context = checked(value);
   if (!context) return fail(error, CL_INVALID_CONTEXT);
-  if (!validDevice(deviceValue) || context->device != &device) return fail(error, CL_INVALID_DEVICE);
+  if (!validDevice(deviceValue) || !contextHasDevice(context, deviceValue)) return fail(error, CL_INVALID_DEVICE);
   cl_command_queue_properties queueProperties = 0;
   std::optional<cl_queue_properties> size;
   if (properties)
@@ -1654,7 +1721,7 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
   if ((!onDevice && (size || (queueProperties & CL_QUEUE_ON_DEVICE_DEFAULT)))
       || (onDevice && !(queueProperties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) || (size && *size > DeviceQueueMaxSize))
     return fail(error, CL_INVALID_VALUE);
-  auto *result = onDevice ? createDeviceQueue(context, queueProperties, static_cast<cl_uint>(size.value_or(0)), error)
+  auto *result = onDevice ? createDeviceQueue(context, deviceValue, queueProperties, static_cast<cl_uint>(size.value_or(0)), error)
                           : clCreateCommandQueue(value, deviceValue, queueProperties, error);
   auto *queue = reinterpret_cast<_cl_command_queue *>(result);
   if (queue && properties && queue->propertiesArray.empty()) {
@@ -1675,7 +1742,7 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
 CL_API_ENTRY cl_int CL_API_CALL clSetDefaultDeviceCommandQueue(cl_context value, cl_device_id selected, cl_command_queue queueValue) {
   auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
-  if (!validDevice(selected) || context->device != &device) return CL_INVALID_DEVICE;
+  if (!validDevice(selected) || !contextHasDevice(context, selected)) return CL_INVALID_DEVICE;
   auto *queue = anyQueue(queueValue);
   if (!queue || queue->deviceSize == 0 || queue->context != context) return CL_INVALID_COMMAND_QUEUE;
   context->defaultDeviceQueue = queue;
@@ -1708,7 +1775,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue value, cl
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   switch (name) {
     case CL_QUEUE_CONTEXT: return outputScalar(size, output, written, reinterpret_cast<cl_context>(queue->context));
-    case CL_QUEUE_DEVICE: return outputScalar(size, output, written, reinterpret_cast<cl_device_id>(&device));
+    case CL_QUEUE_DEVICE: return outputScalar(size, output, written, queue->device);
     case CL_QUEUE_REFERENCE_COUNT: return outputScalar(size, output, written, cl_uint{queue->header.references.load()});
     case CL_QUEUE_PROPERTIES: return outputScalar(size, output, written, queue->properties);
     case CL_QUEUE_PROPERTIES_ARRAY:
@@ -2399,80 +2466,292 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info nam
 
 namespace {
 
-void unloadProgram(_cl_program *program) {
-  if (program->remoteId != 0) {
+void unloadBuild(ProgramBuild &build) {
+  if (build.remoteId != 0) {
     auto &state = remote;
     if (state.ready()) {
       std::scoped_lock const lock(remoteMutex);
-      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(build.remoteId)}});
     }
-    program->remoteId = 0;
+    build.remoteId = 0;
   }
-  for (const auto &global : program->globals)
+  for (const auto &global : build.globals)
     (void)releaseAllocation(global);
-  program->globals.clear();
-  program->globalBytes = 0;
+  build.globals.clear();
+  build.globalBytes = 0;
+}
+
+void unloadProgram(_cl_program *program) {
+  for (auto &build : program->builds)
+    unloadBuild(build);
 }
 
 // Program-scope globals live as long as the program, so every one is bound before any launch.
-cl_int bindProgramGlobals(_cl_program *program, const std::vector<GlobalSymbol> &symbols) {
+cl_int bindProgramGlobals(ProgramBuild &build, const std::vector<GlobalSymbol> &symbols) {
   for (const auto &symbol : symbols) {
     const auto bytes = static_cast<size_t>(symbol.size.value);
     if (bytes > MaxGlobalVariableSize) {
-      program->buildLog = "program-scope global " + symbol.name.value + " has " + std::to_string(bytes)
-                          + " bytes, above CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE";
+      build.buildLog = "program-scope global " + symbol.name.value + " has " + std::to_string(bytes)
+                       + " bytes, above CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE";
       return CL_INVALID_BINARY;
     }
     if (bytes == 0) continue;
     cl_int error = CL_SUCCESS;
     auto allocation = allocate(bytes, &error);
     if (!allocation) return error;
-    program->globals.push_back(allocation);
-    program->globalBytes += bytes;
+    build.globals.push_back(allocation);
+    build.globalBytes += bytes;
     std::scoped_lock const lock(remoteMutex);
-    if (!remote.client()->call(BindProgramGlobal{.program = ProgramId{static_cast<int64_t>(program->remoteId)},
+    if (!remote.client()->call(BindProgramGlobal{.program = ProgramId{static_cast<int64_t>(build.remoteId)},
                                                  .name = {symbol.name.value},
                                                  .allocation = AllocationId{static_cast<int64_t>(allocation->id)},
                                                  .offset = LongPositive0{0}})) {
-      program->buildLog = remote.error();
+      build.buildLog = remote.error();
       return CL_INVALID_BINARY;
     }
   }
   return CL_SUCCESS;
 }
 
-cl_int loadProgramIL(_cl_program *program) {
-  if (program->remoteId != 0) return CL_SUCCESS;
-  if (program->il.empty() || program->il.size() > std::numeric_limits<uint32_t>::max()) return CL_INVALID_BINARY;
+cl_int loadProgramIL(ProgramBuild &build) {
+  if (build.remoteId != 0) return CL_SUCCESS;
+  if (build.il.empty() || build.il.size() > std::numeric_limits<uint32_t>::max()) return CL_INVALID_BINARY;
   auto &state = remote;
   if (!state.ready()) {
-    program->buildLog = remote.error();
+    build.buildLog = remote.error();
     return CL_OUT_OF_RESOURCES;
   }
   std::vector<GlobalSymbol> globals;
   {
     std::scoped_lock const lock(remoteMutex);
-    auto loaded = state.client()->call(LoadProgram{.encoding = ProgramEncoding::SPIRVOpenCLCompute, .image = program->il});
+    auto loaded = state.client()->call(LoadProgram{.encoding = ProgramEncoding::SPIRVOpenCLCompute, .image = build.il});
     if (!loaded) {
-      program->buildLog = remote.error();
+      build.buildLog = remote.error();
       return CL_INVALID_BINARY;
     }
-    program->remoteId = static_cast<uint64_t>(loaded.value().value);
-    auto catalogue = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+    build.remoteId = static_cast<uint64_t>(loaded.value().value);
+    auto catalogue = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(build.remoteId)}});
     if (!catalogue) {
-      program->buildLog = remote.error();
-      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-      program->remoteId = 0;
+      build.buildLog = remote.error();
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(build.remoteId)}});
+      build.remoteId = 0;
       return CL_INVALID_BINARY;
     }
-    program->kernelNames = catalogue.value().kernels | map([](const auto &kernel) { return kernel.name.value; }) | mk_string(";");
+    build.kernelNames = catalogue.value().kernels | map([](const auto &kernel) { return kernel.name.value; }) | mk_string(";");
     globals = std::move(catalogue.value().globals);
   }
-  if (const auto status = bindProgramGlobals(program, globals); status != CL_SUCCESS) {
-    unloadProgram(program);
+  if (const auto status = bindProgramGlobals(build, globals); status != CL_SUCCESS) {
+    unloadBuild(build);
     return status;
   }
   return CL_SUCCESS;
+}
+
+cl_int compileOne(const _cl_program &program, ProgramBuild &build, const std::string &options, cl_uint inputHeaderCount,
+                  const cl_program *inputHeaders, const char **headerNames) {
+  if (inputHeaderCount != 0) {
+    std::string expanded;
+    if (!expandHeaders(program.source, inputHeaderCount, inputHeaders, headerNames, &expanded, &build.buildLog)) {
+      build.buildStatus = CL_BUILD_ERROR;
+      return CL_INVALID_PROGRAM;
+    }
+    build.buildSource = std::move(expanded);
+  }
+  {
+    std::string expanded;
+    if (!expandFilesystemIncludes(build.buildSource.empty() ? program.source : build.buildSource, options, expanded, build.buildLog)) {
+      build.buildStatus = CL_BUILD_ERROR;
+      return CL_BUILD_PROGRAM_FAILURE;
+    }
+    build.buildSource = std::move(expanded);
+  }
+  build.buildOptions = options;
+  const std::string source = build.buildSource.empty() ? program.source : build.buildSource;
+  const bool compilesIL = source.empty() && !build.il.empty();
+  unloadBuild(build);
+  build.bitcode.clear();
+  build.kernelNames.clear();
+  if (compilesIL) {
+    build.buildStatus = CL_BUILD_SUCCESS;
+    build.binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
+    return CL_SUCCESS;
+  }
+  build.il.clear();
+  if (!compileSourceToBitcode(source, build.buildOptions, build.bitcode, build.buildLog)) {
+    build.buildStatus = CL_BUILD_ERROR;
+    build.binaryType = CL_PROGRAM_BINARY_TYPE_NONE;
+    return CL_BUILD_PROGRAM_FAILURE;
+  }
+  build.buildStatus = CL_BUILD_SUCCESS;
+  build.binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
+  return CL_SUCCESS;
+}
+
+cl_int buildOne(const _cl_program &program, ProgramBuild &build, const std::string &options, const ProgramBuild *donor) {
+  build.buildOptions = options;
+  const auto buildFailed = [&] {
+    build.buildStatus = CL_BUILD_ERROR;
+    return CL_BUILD_PROGRAM_FAILURE;
+  };
+  if (build.createdWithIL) {
+    unloadBuild(build);
+    std::vector<SpecializationConstant> constants;
+    constants.reserve(program.specializationConstants.size());
+    for (const auto &[id, bytes] : program.specializationConstants)
+      constants.push_back(SpecializationConstant{.specId = Binary32{static_cast<int64_t>(id)}, .value = bytes});
+    if (constants.empty()) {
+      build.il = build.originalIL;
+    } else {
+      auto &state = remote;
+      if (!state.ready()) {
+        build.buildLog = remote.error();
+        return buildFailed();
+      }
+      std::scoped_lock const lock(remoteMutex);
+      auto specialized = state.client()->call(SpecializeImage{.image = build.originalIL, .constants = constants});
+      if (!specialized) {
+        build.buildLog = remote.error();
+        return buildFailed();
+      }
+      build.il = std::move(specialized.value());
+    }
+  }
+  const std::string source = build.buildSource.empty() ? program.source : build.buildSource;
+  if (!source.empty() && build.remoteId != 0) {
+    unloadBuild(build);
+    build.il.clear();
+    build.bitcode.clear();
+  }
+  if (!source.empty() && build.remoteId == 0) {
+    if (donor && donor->buildOptions == options && donor->buildSource == source && !donor->il.empty()) {
+      build.il = donor->il;
+      build.bitcode = donor->bitcode;
+      build.buildLog = donor->buildLog;
+    } else {
+      std::vector<uint8_t> compiled;
+      std::vector<uint8_t> compiledBitcode;
+      if (!compileSource(source, build.buildOptions, compiled, build.buildLog, &compiledBitcode)) return buildFailed();
+      build.il = std::move(compiled);
+      build.bitcode = std::move(compiledBitcode);
+    }
+    build.buildSource = source;
+    if (loadProgramIL(build) != CL_SUCCESS) return buildFailed();
+  }
+  if (source.empty() && !build.il.empty() && build.remoteId == 0 && loadProgramIL(build) != CL_SUCCESS) return buildFailed();
+  build.buildStatus = build.remoteId == 0 ? CL_BUILD_ERROR : CL_BUILD_SUCCESS;
+  if (build.buildStatus != CL_BUILD_SUCCESS) {
+    if (build.buildLog.empty()) build.buildLog = remote.error();
+    return CL_BUILD_PROGRAM_FAILURE;
+  }
+  build.binaryType = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
+  return CL_SUCCESS;
+}
+
+struct LinkOperand {
+  const _cl_program *program;
+  const ProgramBuild *build;
+};
+
+cl_int linkModules(ProgramBuild &out, std::string &linkedSource, const std::vector<std::vector<uint8_t>> &modules, std::string linkLog,
+                   std::string source, std::string buildOptions, cl_program_binary_type linkedType) {
+  std::vector<uint8_t> linkedIL;
+  std::vector<uint8_t> linkedBitcode;
+  if (!linkBitcode(modules, linkedIL, linkedBitcode, linkLog)) return CL_BUILD_PROGRAM_FAILURE;
+  linkedSource = std::move(source);
+  out.createdWithIL = true;
+  out.originalIL = linkedIL;
+  out.il = std::move(linkedIL);
+  out.bitcode = std::move(linkedBitcode);
+  out.buildSource = linkedSource;
+  out.buildStatus = CL_BUILD_SUCCESS;
+  out.binaryType = linkedType;
+  out.buildOptions = std::move(buildOptions);
+  out.buildLog = std::move(linkLog);
+  if (out.binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE && loadProgramIL(out) != CL_SUCCESS) return CL_BUILD_PROGRAM_FAILURE;
+  return CL_SUCCESS;
+}
+
+cl_int linkOne(const _cl_program &linked, ProgramBuild &out, std::string &linkedSource, const std::vector<LinkOperand> &inputs,
+               const char *options, cl_program_binary_type linkedType) {
+  std::string source;
+  std::string buildOptions;
+  std::vector<std::vector<uint8_t>> bitcodeModules;
+  bool allSourceBitcode = true;
+  std::vector<LinkOperand> binaryInputs;
+  for (const auto &input : inputs) {
+    if (input.build->buildStatus != CL_BUILD_SUCCESS) return CL_INVALID_PROGRAM;
+    if (input.program->source.empty()) {
+      if (input.build->il.empty() || !source.empty() || !bitcodeModules.empty()) return CL_INVALID_PROGRAM;
+      binaryInputs.push_back(input);
+      continue;
+    }
+    if (!source.empty()) source.push_back('\n');
+    source += input.build->buildSource.empty() ? input.program->source : input.build->buildSource;
+    if (input.build->bitcode.empty()) allSourceBitcode = false;
+    else bitcodeModules.push_back(input.build->bitcode);
+    if (!input.build->buildOptions.empty()) {
+      if (!buildOptions.empty()) buildOptions.push_back(' ');
+      buildOptions += input.build->buildOptions;
+    }
+  }
+  if (binaryInputs.size() > 1) {
+    std::vector<std::vector<uint8_t>> binaryBitcode;
+    binaryBitcode.reserve(binaryInputs.size());
+    std::string linkLog;
+    for (const auto &input : binaryInputs) {
+      std::vector<uint8_t> bitcode;
+      if (!reverseSpirv(input.build->il, bitcode, linkLog)) return CL_BUILD_PROGRAM_FAILURE;
+      binaryBitcode.push_back(std::move(bitcode));
+    }
+    return linkModules(out, linkedSource, binaryBitcode, std::move(linkLog), {}, std::move(buildOptions), linkedType);
+  }
+  if (binaryInputs.empty() && allSourceBitcode)
+    return linkModules(out, linkedSource, bitcodeModules, {}, std::move(source), std::move(buildOptions), linkedType);
+  if (binaryInputs.size() == 1) {
+    const auto &binary = binaryInputs.front();
+    linkedSource = binary.program->source;
+    out.buildSource = binary.build->buildSource;
+    out.il = binary.build->il;
+    out.buildStatus = CL_BUILD_SUCCESS;
+    out.binaryType = linkedType;
+    if (out.binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE) return loadProgramIL(out);
+    return CL_SUCCESS;
+  }
+  if (options && options[0] != '\0') {
+    if (!buildOptions.empty()) buildOptions.push_back(' ');
+    buildOptions += withoutLibraryOption(options);
+  }
+  linkedSource = source;
+  out.buildSource = source;
+  const auto status = buildOne(linked, out, buildOptions, nullptr);
+  if (status == CL_SUCCESS) out.binaryType = linkedType;
+  return status;
+}
+
+const ProgramBuild *kernelBuild(const _cl_kernel &kernel, cl_device_id device) {
+  if (device) {
+    const auto *build = findBuild(kernel.program, device);
+    return build && build->buildStatus == CL_BUILD_SUCCESS ? build : nullptr;
+  }
+  const auto built = executables(kernel.program);
+  return built.size() == 1 ? built.front() : nullptr;
+}
+
+std::array<size_t, 3> requiredSize(const KernelMetadata &metadata) {
+  return metadata.requiredWorkGroupSize ? std::array<size_t, 3>{static_cast<size_t>(metadata.requiredWorkGroupSize->x.value),
+                                                                static_cast<size_t>(metadata.requiredWorkGroupSize->y.value),
+                                                                static_cast<size_t>(metadata.requiredWorkGroupSize->z.value)}
+                                        : std::array<size_t, 3>{0, 0, 0};
+}
+
+bool sameDefinition(const KernelMetadata &left, const KernelMetadata &right) {
+  if (left.parameters.size() != right.parameters.size() || requiredSize(left) != requiredSize(right)) return false;
+  for (size_t index = 0; index < left.parameters.size(); ++index) {
+    const auto &a = left.parameters[index];
+    const auto &b = right.parameters[index];
+    if (a.width.value != b.width.value || a.kind != b.kind || a.containsPointers != b.containsPointers) return false;
+  }
+  return true;
 }
 
 } // namespace
@@ -2486,9 +2765,12 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithIL(cl_context value, cons
   auto *program = newObject<_cl_program>();
   if (!program) return fail(error, CL_OUT_OF_HOST_MEMORY);
   program->context = context;
-  program->il.assign(static_cast<const uint8_t *>(il), static_cast<const uint8_t *>(il) + length);
-  program->originalIL = program->il;
-  program->createdWithIL = true;
+  program->builds = newBuilds(context->devices);
+  for (auto &build : program->builds) {
+    build.il.assign(static_cast<const uint8_t *>(il), static_cast<const uint8_t *>(il) + length);
+    build.originalIL = build.il;
+    build.createdWithIL = true;
+  }
   retain(context);
   return succeed(error, program);
 }
@@ -2498,52 +2780,42 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context
                                                               cl_int *error) {
   auto *contextValue = checked(context);
   if (!contextValue) return fail(error, CL_INVALID_CONTEXT);
-  if (count != 1 || !devices || !validDevice(devices[0]) || !lengths || !binaries || binaries[0] == nullptr || lengths[0] == 0)
-    return fail(error, CL_INVALID_VALUE);
-  if (binaryStatus) binaryStatus[0] = CL_INVALID_BINARY;
-  cl_program_binary_type binaryType = CL_PROGRAM_BINARY_TYPE_NONE;
-  std::string source;
-  std::vector<uint8_t> il;
-  if (!decodeProgramBinary(binaries[0], lengths[0], &binaryType, &source, &il)) {
-    auto *result = clCreateProgramWithIL(context, binaries[0], lengths[0], error);
-    if (result) {
-      auto *program = reinterpret_cast<_cl_program *>(result);
-      program->createdWithIL = false;
-      const auto loaded = loadProgramIL(program);
-      if (loaded == CL_SUCCESS) {
-        program->buildStatus = CL_BUILD_SUCCESS;
-        program->binaryType = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
-        if (binaryStatus) binaryStatus[0] = CL_SUCCESS;
-      } else {
-        clReleaseProgram(result);
-        result = nullptr;
-        if (error) *error = loaded;
-      }
-    }
-    return result;
-  }
+  if (count == 0 || !devices || !lengths || !binaries) return fail(error, CL_INVALID_VALUE);
+  for (cl_uint index = 0; index < count; ++index)
+    if (binaries[index] == nullptr || lengths[index] == 0) return fail(error, CL_INVALID_VALUE);
+  if (!contextHasDevices(contextValue, count, devices)) return fail(error, CL_INVALID_DEVICE);
+  for (cl_uint index = 1; index < count; ++index)
+    if (std::find(devices, devices + index, devices[index]) != devices + index) return fail(error, CL_INVALID_DEVICE);
 
   auto *program = newObject<_cl_program>();
   if (!program) return fail(error, CL_OUT_OF_HOST_MEMORY);
   program->context = contextValue;
-  program->source = std::move(source);
-  program->buildSource = program->source;
-  program->binaryType = binaryType;
-  program->buildStatus = CL_BUILD_SUCCESS;
+  program->builds = newBuilds(std::vector<_cl_device_id *>(devices, devices + count));
   retain(contextValue);
-  if (binaryType == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT) {
-    program->bitcode = std::move(il);
-    if (binaryStatus) binaryStatus[0] = CL_SUCCESS;
-    return succeed(error, program);
+  cl_int result = CL_SUCCESS;
+  for (cl_uint index = 0; index < count; ++index) {
+    auto &build = program->builds[index];
+    auto image = readProgramImage(binaries[index], lengths[index]);
+    build.buildSource = std::move(image.source);
+    build.binaryType = image.type;
+    build.buildStatus = CL_BUILD_SUCCESS;
+    cl_int status = CL_SUCCESS;
+    if (image.type == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT) {
+      build.bitcode = std::move(image.payload);
+    } else {
+      build.il = std::move(image.payload);
+      status = loadProgramIL(build);
+    }
+    if (binaryStatus) binaryStatus[index] = status == CL_SUCCESS ? CL_SUCCESS : CL_INVALID_BINARY;
+    if (status != CL_SUCCESS && result == CL_SUCCESS) result = status;
   }
-  program->il = std::move(il);
-  const auto loaded = loadProgramIL(program);
-  if (loaded != CL_SUCCESS) {
+  if (result != CL_SUCCESS) {
+    unloadProgram(program);
     destroyObject(program);
     clReleaseContext(context);
-    return fail(error, loaded);
+    return fail(error, result);
   }
-  if (binaryStatus) binaryStatus[0] = CL_SUCCESS;
+  program->source = program->builds.front().buildSource;
   return succeed(error, program);
 }
 
@@ -2563,6 +2835,7 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithSource(cl_context value, 
   if (!program) return fail(error, CL_OUT_OF_HOST_MEMORY);
   program->context = context;
   program->source = std::move(source);
+  program->builds = newBuilds(context->devices);
   retain(context);
   return succeed(error, program);
 }
@@ -2581,12 +2854,12 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseProgram(cl_program value) {
 CL_API_ENTRY cl_int CL_API_CALL clSetProgramSpecializationConstant(cl_program value, cl_uint specId, size_t specSize,
                                                                    const void *specValue) {
   auto *program = checked(value);
-  if (!program || !program->createdWithIL) return CL_INVALID_PROGRAM;
+  if (!program || !program->builds.front().createdWithIL) return CL_INVALID_PROGRAM;
   auto &state = remote;
   if (!state.ready()) return CL_OUT_OF_RESOURCES;
   if (!program->specializationSizesLoaded) {
     std::scoped_lock const lock(remoteMutex);
-    auto described = state.client()->call(DescribeSpecialization{program->originalIL});
+    auto described = state.client()->call(DescribeSpecialization{program->builds.front().originalIL});
     if (!described) return CL_INVALID_PROGRAM;
     for (const auto &info : described.value())
       program->specializationSizes.emplace(static_cast<cl_uint>(info.specId.value), static_cast<size_t>(info.byteSize.value));
@@ -2604,61 +2877,17 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (count != 0 && !devices) return CL_INVALID_VALUE;
-  if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
-  program->buildOptions = !options ? "" : options;
-  const auto buildFailed = [&] {
-    program->buildStatus = CL_BUILD_ERROR;
-    if (notify) notify(value, user);
-    return CL_BUILD_PROGRAM_FAILURE;
-  };
-  if (program->createdWithIL) {
-    unloadProgram(program);
-    std::vector<SpecializationConstant> constants;
-    constants.reserve(program->specializationConstants.size());
-    for (const auto &[id, bytes] : program->specializationConstants)
-      constants.push_back(SpecializationConstant{.specId = Binary32{static_cast<int64_t>(id)}, .value = bytes});
-    if (constants.empty()) {
-      program->il = program->originalIL;
-    } else {
-      auto &state = remote;
-      if (!state.ready()) {
-        program->buildLog = remote.error();
-        return buildFailed();
-      }
-      std::scoped_lock const lock(remoteMutex);
-      auto specialized = state.client()->call(SpecializeImage{.image = program->originalIL, .constants = constants});
-      if (!specialized) {
-        program->buildLog = remote.error();
-        return buildFailed();
-      }
-      program->il = std::move(specialized.value());
-    }
+  if (!programHasDevices(program, count, devices)) return CL_INVALID_DEVICE;
+  const std::string buildOptions = !options ? "" : options;
+  cl_int result = CL_SUCCESS;
+  const ProgramBuild *donor = nullptr;
+  for (auto *target : buildTargets(program, count, devices)) {
+    const auto status = buildOne(*program, *target, buildOptions, donor);
+    if (status == CL_SUCCESS && !donor) donor = target;
+    if (status != CL_SUCCESS && result == CL_SUCCESS) result = status;
   }
-  const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
-  if (!source.empty() && program->remoteId != 0) {
-    unloadProgram(program);
-    program->il.clear();
-    program->bitcode.clear();
-  }
-  if (!source.empty() && program->remoteId == 0) {
-    std::vector<uint8_t> compiled;
-    std::vector<uint8_t> compiledBitcode;
-    if (!compileSource(source, program->buildOptions, compiled, program->buildLog, &compiledBitcode)) return buildFailed();
-    program->il = std::move(compiled);
-    program->bitcode = std::move(compiledBitcode);
-    program->buildSource = source;
-    if (loadProgramIL(program) != CL_SUCCESS) return buildFailed();
-  }
-  if (source.empty() && !program->il.empty() && program->remoteId == 0 && loadProgramIL(program) != CL_SUCCESS) return buildFailed();
-  program->buildStatus = program->remoteId == 0 ? CL_BUILD_ERROR : CL_BUILD_SUCCESS;
-  if (program->buildStatus != CL_BUILD_SUCCESS) {
-    if (program->buildLog.empty()) program->buildLog = remote.error();
-    if (notify) notify(value, user);
-    return CL_BUILD_PROGRAM_FAILURE;
-  }
-  program->binaryType = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
   if (notify) notify(value, user);
-  return CL_SUCCESS;
+  return result;
 }
 CL_API_ENTRY cl_int CL_API_CALL clUnloadCompiler() { return CL_SUCCESS; }
 CL_API_ENTRY cl_int CL_API_CALL clUnloadPlatformCompiler(cl_platform_id value) {
@@ -2670,50 +2899,16 @@ CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count
   auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (count != 0 && !devices) return CL_INVALID_VALUE;
-  if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
+  if (!programHasDevices(program, count, devices)) return CL_INVALID_DEVICE;
   if (inputHeaderCount != 0 && (!inputHeaders || !headerNames)) return CL_INVALID_VALUE;
-  if (inputHeaderCount != 0) {
-    std::string expanded;
-    if (!expandHeaders(program->source, inputHeaderCount, inputHeaders, headerNames, &expanded, &program->buildLog)) {
-      program->buildStatus = CL_BUILD_ERROR;
-      if (notify) notify(value, user);
-      return CL_INVALID_PROGRAM;
-    }
-    program->buildSource = std::move(expanded);
+  const std::string compileOptions = !options ? "" : options;
+  cl_int result = CL_SUCCESS;
+  for (auto *target : buildTargets(program, count, devices)) {
+    const auto status = compileOne(*program, *target, compileOptions, inputHeaderCount, inputHeaders, headerNames);
+    if (status != CL_SUCCESS && result == CL_SUCCESS) result = status;
   }
-  {
-    const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
-    std::string expanded;
-    if (!expandFilesystemIncludes(source, !options ? "" : options, expanded, program->buildLog)) {
-      program->buildStatus = CL_BUILD_ERROR;
-      if (notify) notify(value, user);
-      return CL_BUILD_PROGRAM_FAILURE;
-    }
-    program->buildSource = std::move(expanded);
-  }
-  program->buildOptions = !options ? "" : options;
-  const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
-  const bool compilesIL = source.empty() && !program->il.empty();
-  unloadProgram(program);
-  program->bitcode.clear();
-  program->kernelNames.clear();
-  if (compilesIL) {
-    program->buildStatus = CL_BUILD_SUCCESS;
-    program->binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
-    if (notify) notify(value, user);
-    return CL_SUCCESS;
-  }
-  program->il.clear();
-  if (!compileSourceToBitcode(source, program->buildOptions, program->bitcode, program->buildLog)) {
-    program->buildStatus = CL_BUILD_ERROR;
-    program->binaryType = CL_PROGRAM_BINARY_TYPE_NONE;
-    if (notify) notify(value, user);
-    return CL_BUILD_PROGRAM_FAILURE;
-  }
-  program->buildStatus = CL_BUILD_SUCCESS;
-  program->binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
   if (notify) notify(value, user);
-  return CL_SUCCESS;
+  return result;
 }
 CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_uint count, const cl_device_id *devices, const char *options,
                                                   cl_uint inputCount, const cl_program *inputs,
@@ -2721,105 +2916,44 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
   auto *context = checked(contextValue);
   if (!context) return fail(error, CL_INVALID_CONTEXT);
   if (count != 0 && !devices) return fail(error, CL_INVALID_VALUE);
-  if (count > 1 || (count == 1 && !validDevice(devices[0]))) return fail(error, CL_INVALID_DEVICE);
+  if (!contextHasDevices(context, count, devices)) return fail(error, CL_INVALID_DEVICE);
   if (inputCount == 0 || !inputs) return fail(error, CL_INVALID_VALUE);
-  std::string source;
-  std::string buildOptions;
-  std::vector<std::vector<uint8_t>> bitcodeModules;
-  bool allSourceBitcode = true;
-  _cl_program *binaryInput = nullptr;
-  std::vector<_cl_program *> binaryInputs;
+  std::vector<const _cl_program *> programs;
   for (cl_uint index = 0; index < inputCount; ++index) {
-    auto *program = checked(inputs[index]);
-    if (!program) return fail(error, CL_INVALID_PROGRAM);
-    if (program->context != context || program->buildStatus != CL_BUILD_SUCCESS) return fail(error, CL_INVALID_PROGRAM);
-    if (program->source.empty()) {
-      if (program->il.empty() || !source.empty() || !bitcodeModules.empty()) return fail(error, CL_INVALID_PROGRAM);
-      binaryInputs.push_back(program);
-      continue;
-    }
-    if (!source.empty()) source.push_back('\n');
-    source += program->buildSource.empty() ? program->source : program->buildSource;
-    if (program->bitcode.empty()) allSourceBitcode = false;
-    else bitcodeModules.push_back(program->bitcode);
-    if (!program->buildOptions.empty()) {
-      if (!buildOptions.empty()) buildOptions.push_back(' ');
-      buildOptions += program->buildOptions;
-    }
+    const auto *program = checked(inputs[index]);
+    if (!program || program->context != context) return fail(error, CL_INVALID_PROGRAM);
+    programs.push_back(program);
   }
-  if (binaryInputs.size() == 1) binaryInput = binaryInputs.front();
+  std::vector<_cl_device_id *> targets;
+  for (auto *device : count == 0 ? context->devices : std::vector<_cl_device_id *>(devices, devices + count)) {
+    if (std::find(targets.begin(), targets.end(), device) != targets.end()) continue;
+    if (programs ^ forall([&](const auto *program) { return findBuild(program, device) != nullptr; })) targets.push_back(device);
+    else if (count != 0) return fail(error, CL_INVALID_DEVICE);
+  }
+  if (targets.empty()) return fail(error, CL_INVALID_OPERATION);
+
   const cl_program_binary_type linkedType =
       hasBuildOption(options, "-create-library") ? CL_PROGRAM_BINARY_TYPE_LIBRARY : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
-  const auto linkModules = [&](const std::vector<std::vector<uint8_t>> &modules, std::string linkLog,
-                               std::string linkedSource) -> cl_program {
-    std::vector<uint8_t> linkedIL;
-    std::vector<uint8_t> linkedBitcode;
-    if (!linkBitcode(modules, linkedIL, linkedBitcode, linkLog)) return fail(error, CL_BUILD_PROGRAM_FAILURE);
-    cl_int linkError = CL_SUCCESS;
-    auto *linked = reinterpret_cast<_cl_program *>(clCreateProgramWithIL(contextValue, linkedIL.data(), linkedIL.size(), &linkError));
-    if (!linked) return fail(error, linkError == CL_SUCCESS ? CL_BUILD_PROGRAM_FAILURE : linkError);
-    linked->source = std::move(linkedSource);
-    linked->buildSource = linked->source;
-    linked->bitcode = std::move(linkedBitcode);
-    linked->buildStatus = CL_BUILD_SUCCESS;
-    linked->binaryType = linkedType;
-    linked->buildOptions = std::move(buildOptions);
-    linked->buildLog = std::move(linkLog);
-    if (linked->binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE && loadProgramIL(linked) != CL_SUCCESS) {
+  auto *linked = newObject<_cl_program>();
+  if (!linked) return fail(error, CL_OUT_OF_HOST_MEMORY);
+  linked->context = context;
+  linked->builds = newBuilds(targets);
+  retain(context);
+  for (auto &build : linked->builds) {
+    std::vector<LinkOperand> operands;
+    operands.reserve(programs.size());
+    for (const auto *program : programs)
+      operands.push_back({.program = program, .build = findBuild(program, build.device)});
+    std::string linkedSource;
+    const auto status = linkOne(*linked, build, linkedSource, operands, options, linkedType);
+    if (status != CL_SUCCESS) {
       clReleaseProgram(reinterpret_cast<cl_program>(linked));
-      return fail(error, CL_BUILD_PROGRAM_FAILURE);
+      return fail(error, status);
     }
-    if (notify) notify(reinterpret_cast<cl_program>(linked), user);
-    return succeed(error, linked);
-  };
-  if (binaryInputs.size() > 1) {
-    std::vector<std::vector<uint8_t>> binaryBitcode;
-    binaryBitcode.reserve(binaryInputs.size());
-    std::string linkLog;
-    for (const auto *program : binaryInputs) {
-      std::vector<uint8_t> bitcode;
-      if (!reverseSpirv(program->il, bitcode, linkLog)) return fail(error, CL_BUILD_PROGRAM_FAILURE);
-      binaryBitcode.push_back(std::move(bitcode));
-    }
-    return linkModules(binaryBitcode, std::move(linkLog), {});
+    if (&build == &linked->builds.front()) linked->source = std::move(linkedSource);
   }
-  if (!binaryInput && allSourceBitcode) return linkModules(bitcodeModules, {}, std::move(source));
-  if (binaryInput) {
-    auto *linked = newObject<_cl_program>();
-    if (!linked) return fail(error, CL_OUT_OF_HOST_MEMORY);
-    linked->context = context;
-    linked->source = binaryInput->source;
-    linked->buildSource = binaryInput->buildSource;
-    linked->il = binaryInput->il;
-    linked->buildStatus = CL_BUILD_SUCCESS;
-    linked->binaryType = linkedType;
-    retain(context);
-    const auto loaded = linked->binaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE ? loadProgramIL(linked) : CL_SUCCESS;
-    if (loaded != CL_SUCCESS) {
-      destroyObject(linked);
-      clReleaseContext(context);
-      return fail(error, loaded);
-    }
-    if (notify) notify(reinterpret_cast<cl_program>(linked), user);
-    return succeed(error, linked);
-  }
-  if (options && options[0] != '\0') {
-    if (!buildOptions.empty()) buildOptions.push_back(' ');
-    buildOptions += withoutLibraryOption(options);
-  }
-  const char *sourcePointer = source.c_str();
-  cl_program result = clCreateProgramWithSource(contextValue, 1, &sourcePointer, nullptr, error);
-  if (!result) return nullptr;
-  const cl_int build = clBuildProgram(result, count, devices, buildOptions.c_str(), nullptr, nullptr);
-  if (build != CL_SUCCESS) {
-    clReleaseProgram(result);
-    return fail(error, build);
-  }
-  auto *linked = reinterpret_cast<_cl_program *>(result);
-  linked->binaryType = linkedType;
-  if (notify) notify(result, user);
-  if (error) *error = CL_SUCCESS;
-  return result;
+  if (notify) notify(reinterpret_cast<cl_program>(linked), user);
+  return succeed(error, linked);
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetSupportedImageFormats(cl_context value, cl_mem_flags flags, cl_mem_object_type type,
@@ -2844,36 +2978,43 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramInfo(cl_program value, cl_program_in
   switch (name) {
     case CL_PROGRAM_REFERENCE_COUNT: return outputScalar(size, output, written, cl_uint{program->header.references.load()});
     case CL_PROGRAM_CONTEXT: return outputScalar(size, output, written, reinterpret_cast<cl_context>(program->context));
-    case CL_PROGRAM_NUM_DEVICES: return outputScalar(size, output, written, cl_uint{1});
-    case CL_PROGRAM_DEVICES: return outputScalar(size, output, written, reinterpret_cast<cl_device_id>(&device));
+    case CL_PROGRAM_NUM_DEVICES: return outputScalar(size, output, written, static_cast<cl_uint>(program->builds.size()));
+    case CL_PROGRAM_DEVICES: {
+      const auto devices = program->builds | map([](const auto &build) { return build.device; }) | to_vector();
+      return outputBytes(size, output, written, devices.data(), devices.size() * sizeof(cl_device_id));
+    }
     case CL_PROGRAM_SOURCE: return outputBytes(size, output, written, program->source.c_str(), program->source.size() + 1);
     case CL_PROGRAM_NUM_KERNELS: {
-      if (program->buildStatus != CL_BUILD_SUCCESS) return CL_INVALID_PROGRAM_EXECUTABLE;
-      const size_t v = kernelCount(program->kernelNames);
+      if (executables(program).empty()) return CL_INVALID_PROGRAM_EXECUTABLE;
+      const size_t v = kernelCount(kernelNamesOf(program));
       return outputScalar(size, output, written, v);
     }
     case CL_PROGRAM_KERNEL_NAMES:
-      if (program->buildStatus != CL_BUILD_SUCCESS) return CL_INVALID_PROGRAM_EXECUTABLE;
-      return outputString(size, output, written, program->kernelNames);
+      if (executables(program).empty()) return CL_INVALID_PROGRAM_EXECUTABLE;
+      return outputString(size, output, written, kernelNamesOf(program));
     case CL_PROGRAM_IL: {
-      const auto &il = program->createdWithIL ? program->originalIL : program->il;
+      const auto &front = program->builds.front();
+      const auto &il = front.createdWithIL ? front.originalIL : front.il;
       return outputBytes(size, output, written, il.data(), il.size());
     }
     case CL_PROGRAM_BINARY_SIZES: {
-      const auto binary = programBinary(program);
-      return outputScalar(size, output, written, binary.size());
+      const auto sizes = program->builds | map([&](const auto &build) { return programBinary(program, build).size(); }) | to_vector();
+      return outputBytes(size, output, written, sizes.data(), sizes.size() * sizeof(size_t));
     }
-    case CL_PROGRAM_BINARIES:
-      if (written) *written = sizeof(unsigned char *);
+    case CL_PROGRAM_BINARIES: {
+      const auto deviceCount = program->builds.size();
+      const auto required = deviceCount * sizeof(unsigned char *);
+      if (written) *written = required;
       if (!output) return CL_SUCCESS;
-      if (size < sizeof(unsigned char *)) return CL_INVALID_VALUE;
-      {
-        const auto binary = programBinary(program);
-        auto *destination = *static_cast<unsigned char **>(output);
-        if (!destination && !binary.empty()) return CL_INVALID_VALUE;
-        if (!binary.empty()) std::memcpy(destination, binary.data(), binary.size());
+      if (size < required) return CL_INVALID_VALUE;
+      auto *destinations = static_cast<unsigned char **>(output);
+      for (size_t index = 0; index < deviceCount; ++index) {
+        const auto binary = programBinary(program, program->builds[index]);
+        if (!destinations[index] && !binary.empty()) return CL_INVALID_VALUE;
+        if (!binary.empty()) std::memcpy(destinations[index], binary.data(), binary.size());
       }
       return CL_SUCCESS;
+    }
     case CL_PROGRAM_SCOPE_GLOBAL_CTORS_PRESENT:
     case CL_PROGRAM_SCOPE_GLOBAL_DTORS_PRESENT: return outputScalar(size, output, written, cl_bool{CL_FALSE});
     default: return CL_INVALID_VALUE;
@@ -2882,13 +3023,15 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramInfo(cl_program value, cl_program_in
 CL_API_ENTRY cl_int CL_API_CALL clGetProgramBuildInfo(cl_program value, cl_device_id selected, cl_program_build_info name, size_t size,
                                                       void *output, size_t *written) {
   auto *program = checked(value);
-  if (!program || !validDevice(selected)) return CL_INVALID_PROGRAM;
+  if (!program) return CL_INVALID_PROGRAM;
+  const auto *build = findBuild(program, selected);
+  if (!build) return CL_INVALID_DEVICE;
   switch (name) {
-    case CL_PROGRAM_BUILD_STATUS: return outputScalar(size, output, written, program->buildStatus);
-    case CL_PROGRAM_BUILD_OPTIONS: return outputString(size, output, written, program->buildOptions);
-    case CL_PROGRAM_BUILD_LOG: return outputString(size, output, written, program->buildLog);
-    case CL_PROGRAM_BINARY_TYPE: return outputScalar(size, output, written, program->binaryType);
-    case CL_PROGRAM_BUILD_GLOBAL_VARIABLE_TOTAL_SIZE: return outputScalar(size, output, written, program->globalBytes);
+    case CL_PROGRAM_BUILD_STATUS: return outputScalar(size, output, written, build->buildStatus);
+    case CL_PROGRAM_BUILD_OPTIONS: return outputString(size, output, written, build->buildOptions);
+    case CL_PROGRAM_BUILD_LOG: return outputString(size, output, written, build->buildLog);
+    case CL_PROGRAM_BINARY_TYPE: return outputScalar(size, output, written, build->binaryType);
+    case CL_PROGRAM_BUILD_GLOBAL_VARIABLE_TOTAL_SIZE: return outputScalar(size, output, written, build->globalBytes);
     default: return CL_INVALID_VALUE;
   }
 }
@@ -2899,30 +3042,28 @@ CL_API_ENTRY cl_int CL_API_CALL clSetProgramReleaseCallback(cl_program value, vo
 CL_API_ENTRY cl_kernel CL_API_CALL clCreateKernel(cl_program value, const char *name, cl_int *error) {
   auto *program = checked(value);
   if (!program || !name || name[0] == '\0') return fail(error, program ? CL_INVALID_KERNEL_NAME : CL_INVALID_PROGRAM);
-  if (program->buildStatus != CL_BUILD_SUCCESS) return fail(error, CL_INVALID_PROGRAM_EXECUTABLE);
-  if (!containsKernelName(program->kernelNames, name)) return fail(error, CL_INVALID_KERNEL_NAME);
+  const auto built = executables(program);
+  if (built.empty()) return fail(error, CL_INVALID_PROGRAM_EXECUTABLE);
+  if (!containsKernelName(kernelNamesOf(program), name)) return fail(error, CL_INVALID_KERNEL_NAME);
+  auto &state = remote;
+  if (!state.ready()) return fail(error, CL_INVALID_KERNEL_DEFINITION);
+  std::optional<KernelMetadata> metadata;
+  for (const auto *build : built) {
+    if (!containsKernelName(build->kernelNames, name)) return fail(error, CL_INVALID_KERNEL_DEFINITION);
+    auto described = state.client()->call(DescribeKernel{.program = ProgramId{static_cast<int64_t>(build->remoteId)}, .name = {name}});
+    if (!described) return fail(error, CL_INVALID_KERNEL_DEFINITION);
+    if (metadata && !sameDefinition(*metadata, described.value())) return fail(error, CL_INVALID_KERNEL_DEFINITION);
+    if (!metadata) metadata = std::move(described.value());
+  }
+  if (!metadata) return fail(error, CL_INVALID_KERNEL_DEFINITION);
   auto *kernel = newObject<_cl_kernel>();
   if (!kernel) return fail(error, CL_OUT_OF_HOST_MEMORY);
   kernel->program = program;
   kernel->name = name;
   const auto kernelSource = sourceKernelText(program->source, kernel->name);
-  auto &state = remote;
-  if (!state.ready()) {
-    destroyObject(kernel);
-    return fail(error, CL_INVALID_KERNEL_DEFINITION);
-  }
-  auto described = state.client()->call(DescribeKernel{.program = ProgramId{static_cast<int64_t>(program->remoteId)}, .name = {name}});
-  if (!described) {
-    destroyObject(kernel);
-    return fail(error, CL_INVALID_KERNEL_DEFINITION);
-  }
-  const auto &remoteMetadata = described.value();
+  const auto &remoteMetadata = *metadata;
   kernel->expectedArguments = static_cast<cl_uint>(remoteMetadata.parameters.size());
-  kernel->requiredWorkGroupSize = remoteMetadata.requiredWorkGroupSize
-                                      ? std::array<size_t, 3>{static_cast<size_t>(remoteMetadata.requiredWorkGroupSize->x.value),
-                                                              static_cast<size_t>(remoteMetadata.requiredWorkGroupSize->y.value),
-                                                              static_cast<size_t>(remoteMetadata.requiredWorkGroupSize->z.value)}
-                                      : std::array<size_t, 3>{0, 0, 0};
+  kernel->requiredWorkGroupSize = requiredSize(remoteMetadata);
   kernel->staticLocalMemory = sourceStaticLocalMemory(kernelSource);
   kernel->attributes = sourceKernelAttributes(kernelSource);
   kernel->expectedArgumentSizes.reserve(remoteMetadata.parameters.size());
@@ -2944,16 +3085,17 @@ CL_API_ENTRY cl_int CL_API_CALL clCreateKernelsInProgram(cl_program value, cl_ui
                                                          cl_uint *kernelCountOutput) {
   auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
-  if (program->buildStatus != CL_BUILD_SUCCESS) return CL_INVALID_PROGRAM_EXECUTABLE;
-  const size_t total = kernelCount(program->kernelNames);
+  if (executables(program).empty()) return CL_INVALID_PROGRAM_EXECUTABLE;
+  const std::string kernelNames = kernelNamesOf(program);
+  const size_t total = kernelCount(kernelNames);
   if (kernelCountOutput) *kernelCountOutput = static_cast<cl_uint>(total);
   if (kernelCapacity == 0 && !kernels) return CL_SUCCESS;
   if (total != 0 && (!kernels || kernelCapacity < total)) return CL_INVALID_VALUE;
   if (!kernels && kernelCapacity != 0) return CL_INVALID_VALUE;
   size_t start = 0;
   for (size_t index = 0; index < total; ++index) {
-    const size_t end = program->kernelNames.find(';', start);
-    const std::string name = program->kernelNames.substr(start, end == std::string::npos ? end : end - start);
+    const size_t end = kernelNames.find(';', start);
+    const std::string name = kernelNames.substr(start, end == std::string::npos ? end : end - start);
     cl_int error = CL_SUCCESS;
     kernels[index] = clCreateKernel(value, name.c_str(), &error);
     if (kernels[index] == nullptr || error != CL_SUCCESS) {
@@ -3225,7 +3367,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel value, cl_dev
   auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   // OpenCL permits a null device when the kernel's program has one device.
-  if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
+  if (!kernelBuild(*kernel, selected)) return CL_INVALID_DEVICE;
   switch (name) {
     case CL_KERNEL_WORK_GROUP_SIZE: return outputScalar(size, output, written, MaxWorkGroupSize);
     case CL_KERNEL_COMPILE_WORK_GROUP_SIZE:
@@ -4129,6 +4271,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
   auto *queue = checked(queueValue);
   auto *kernel = checked(kernelValue);
   if (!queue || !kernel) return !queue ? CL_INVALID_COMMAND_QUEUE : CL_INVALID_KERNEL;
+  const auto *build = kernelBuild(*kernel, queue->device);
+  if (!build) return CL_INVALID_PROGRAM_EXECUTABLE;
   if (workDimension == 0 || workDimension > 3) return CL_INVALID_WORK_DIMENSION;
   if (kernel->arguments.size() != kernel->expectedArguments || (kernel->argumentsSet ^ contains(false))) return CL_INVALID_KERNEL_ARGS;
   if (!global || std::any_of(global, global + workDimension, [](size_t value) { return value == 0; })) {
@@ -4156,7 +4300,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
     if (total > MaxWorkGroupSize) return CL_INVALID_WORK_GROUP_SIZE;
   }
   if (local) {
-    const bool uniform = uniformWorkGroups(*kernel->program);
+    const bool uniform = uniformWorkGroups(*build);
     for (cl_uint index = 0; index < workDimension; ++index)
       if (local[index] == 0 || (uniform && global[index] % local[index] != 0)) return CL_INVALID_WORK_GROUP_SIZE;
   }
@@ -4231,8 +4375,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
     }
     return enqueuePending(
         queue, CL_COMMAND_NDRANGE_KERNEL, std::move(dependencies),
-        [snapshot, workDimension, hasOffset, hasLocal, deferredOffset, deferredGlobal, deferredLocal] {
-          return finishRemote(snapshot.get(), workDimension, hasOffset ? deferredOffset.data() : nullptr, deferredGlobal.data(),
+        [queueValue, snapshot, workDimension, hasOffset, hasLocal, deferredOffset, deferredGlobal, deferredLocal] {
+          return finishRemote(queueValue, snapshot.get(), workDimension, hasOffset ? deferredOffset.data() : nullptr, deferredGlobal.data(),
                               hasLocal ? deferredLocal.data() : nullptr);
         },
         event, Sync::None, {}, allocationUses(std::move(used)));
@@ -4491,13 +4635,14 @@ void *allocateUSM(cl_context contextValue, cl_device_id deviceValue, cl_unified_
                   cl_uint alignment, cl_int *error) {
   auto *context = checked(contextValue);
   if (!context) return fail(error, CL_INVALID_CONTEXT);
-  if (type != CL_MEM_TYPE_HOST_INTEL && (deviceValue || type == CL_MEM_TYPE_DEVICE_INTEL) && !validDevice(deviceValue))
+  if (type != CL_MEM_TYPE_HOST_INTEL && (deviceValue || type == CL_MEM_TYPE_DEVICE_INTEL) && !contextHasDevice(context, deviceValue))
     return fail(error, CL_INVALID_DEVICE);
   auto allocation = allocate(size, error, alignment, type != CL_MEM_TYPE_DEVICE_INTEL);
   if (allocation) {
     allocation->runtimeOwnsBase = true;
     allocation->svmContextIdentity = context->identity;
     allocation->usmType = type;
+    allocation->device = deviceValue;
   }
   return !allocation ? nullptr : allocation->data();
 }
@@ -4555,7 +4700,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemAllocInfoINTEL(cl_context contextValue, 
     case CL_MEM_ALLOC_BASE_PTR_INTEL: return outputScalar(size, output, written, allocation->data());
     case CL_MEM_ALLOC_SIZE_INTEL: return outputScalar(size, output, written, allocation->size);
     case CL_MEM_ALLOC_DEVICE_INTEL: {
-      cl_device_id v = allocation->usmType == CL_MEM_TYPE_HOST_INTEL ? nullptr : reinterpret_cast<cl_device_id>(&device);
+      cl_device_id v = allocation->usmType == CL_MEM_TYPE_HOST_INTEL ? nullptr : allocation->device;
       return outputScalar(size, output, written, v);
     }
     default: return CL_INVALID_VALUE;
@@ -4612,9 +4757,10 @@ CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platf
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_device_id selected, cl_kernel_sub_group_info name,
                                                         size_t inputSize, const void *input, size_t size, void *output, size_t *written) {
-  if (!checked(value)) return CL_INVALID_KERNEL;
+  auto *kernel = checked(value);
+  if (!kernel) return CL_INVALID_KERNEL;
   // OpenCL permits a null device when the kernel's program has one device.
-  if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
+  if (!kernelBuild(*kernel, selected)) return CL_INVALID_DEVICE;
   constexpr size_t subgroupSize = MaxSubgroupSize;
   if (name == CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE) return outputScalar(size, output, written, subgroupSize);
   if (name == CL_KERNEL_MAX_NUM_SUB_GROUPS) return outputScalar(size, output, written, MaxWorkGroupSize / subgroupSize);
@@ -4655,6 +4801,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSuggestedLocalWorkSizeKHR(cl_command_
   auto *kernel = checked(kernelValue);
   if (!kernel) return CL_INVALID_KERNEL;
   if (kernel->program->context != queue->context) return CL_INVALID_CONTEXT;
+  const auto *build = kernelBuild(*kernel, queue->device);
+  if (!build) return CL_INVALID_PROGRAM_EXECUTABLE;
   if (workDimension == 0 || workDimension > 3) return CL_INVALID_WORK_DIMENSION;
   if (!global || std::any_of(global, global + workDimension, [](size_t size) { return size == 0; })) return CL_INVALID_GLOBAL_WORK_SIZE;
   if (offset && std::any_of(offset, offset + workDimension, [](size_t value) { return value > std::numeric_limits<int32_t>::max(); }))
@@ -4662,7 +4810,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSuggestedLocalWorkSizeKHR(cl_command_
   if (!suggested) return CL_INVALID_VALUE;
   if (kernel->argumentsSet ^ contains(false)) return CL_INVALID_KERNEL_ARGS;
   for (cl_uint index = 0; index < workDimension; ++index)
-    suggested[index] = implicitGroup(*kernel, index, global[index]);
+    suggested[index] = implicitGroup(*kernel, *build, index, global[index]);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithPropertiesKHR(cl_context context, cl_device_id device,
@@ -4682,10 +4830,14 @@ namespace {
 void initialiseDispatch() {
   std::call_once(dispatchInitialised, [] {
     registerLiveObject(&platform);
-    registerLiveObject(&device);
     platform.dispatch = &dispatch;
-    device.dispatch = &dispatch;
-    device.platform = &platform;
+    rootDeviceCount = gemstone::deviceCount();
+    for (uint32_t index = 0; index < rootDeviceCount; ++index) {
+      auto &root = rootDevices[index];
+      registerLiveObject(&root);
+      root.dispatch = &dispatch;
+      root.platform = &platform;
+    }
     gemstone::opencl::populateDispatch(dispatch);
   });
 }

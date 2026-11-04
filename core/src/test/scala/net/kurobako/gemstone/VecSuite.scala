@@ -1,7 +1,7 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.collection.mutable
 import scala.reflect.ClassTag
 

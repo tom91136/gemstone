@@ -4,7 +4,7 @@ import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** M0 and the null register, which RDNA3 onwards encodes as s125 and s124 and RDNA1 and RDNA2 as s124 and s125; each
   * with its LLVM bytes from `llvm-mc -show-encoding`: `s_mov_b32 m0, 17`, `s_mov_b64 null, s[0:1]`,

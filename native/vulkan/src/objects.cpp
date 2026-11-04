@@ -247,13 +247,13 @@ VkResult implVkCreatePipelineCache(VkDevice, const VkPipelineCacheCreateInfo *, 
   return VK_SUCCESS;
 }
 void implVkDestroyPipelineCache(VkDevice, VkPipelineCache cache, const VkAllocationCallbacks *) { deleteHandle(cache); }
-VkResult implVkGetPipelineCacheData(VkDevice, VkPipelineCache, size_t *size, void *data) {
+VkResult implVkGetPipelineCacheData(VkDevice device, VkPipelineCache, size_t *size, void *data) {
   if (!size) return VK_ERROR_INITIALIZATION_FAILED;
   // There is no serialised compiled payload yet. Even an empty cache carries
   // the standard little-endian header so applications can validate compatibility.
   std::array<uint8_t, 16 + VK_UUID_SIZE> header{};
   VkPhysicalDeviceProperties properties{};
-  fillProperties(&properties);
+  fillProperties(&properties, deviceOrdinal(device));
   const std::array<uint32_t, 4> words{static_cast<uint32_t>(header.size()), VK_PIPELINE_CACHE_HEADER_VERSION_ONE, properties.vendorID,
                                       properties.deviceID};
   for (size_t word = 0; word < words.size(); ++word)

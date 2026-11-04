@@ -91,12 +91,13 @@ object AMDGPUOperandDomains {
   def merge(isa: String, base: Vector[Entry], overrides: Vector[Override], evidence: Evidence): Result = {
     val rows       = overrides.filter(_.isa == isa)
     val before     = findings(isa, base, evidence)
+    val subjects   = before.map(_.subject).toSet
     val merged     = base.map(entry => rows.foldLeft(entry)(apply(_, _)))
     val after      = findings(isa, merged, evidence)
     val applied    = rows.filter(row => base.exists(entry => apply(entry, row) != entry))
     val appliedSet = applied.toSet
     val stale      =
-      rows.filterNot(row => appliedSet(row) || row.resolves.exists(sub => before.exists(_.subject == sub)))
+      rows.filterNot(row => appliedSet(row) || row.resolves.exists(subjects(_)))
     require(stale.isEmpty, s"overrides change and resolve nothing on $isa: ${stale.map(_.reason).mkString("; ")}")
     val tagged = before.map { finding =>
       val row = rows.find(row => row.resolves(finding.subject))
@@ -140,6 +141,8 @@ object AMDGPUOperandDomains {
       )
     }
 
+  // the oracle is searched once, for the one sgpr group
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   private def registerFindings(isa: String, entries: Vector[Entry], evidence: Evidence): Vector[Finding] = {
     val llvm = evidence.llvm
     val uses = entries.flatMap(entry => flatten(entry.domain).collect { case r: Registers => entry.name -> r })
@@ -235,10 +238,11 @@ object AMDGPUOperandDomains {
       detail.map(Finding(isa, "export-target", name, _, Vector("TGT"), None))
     })
 
-  private def classFindings(isa: String, entries: Vector[Entry], llvm: Model): Vector[Finding] =
+  private def classFindings(isa: String, entries: Vector[Entry], llvm: Model): Vector[Finding] = {
+    val byName = entries.map(entry => entry.name -> entry).toMap
     ClassPairs.flatMap { pair =>
       for {
-        entry <- entries.find(_.name == pair.xmlType)
+        entry <- byName.get(pair.xmlType)
         cls   <- llvm.operandClasses.get(pair.llvmClass)
         if entry.domain.isLiteral != cls.literal
       } yield Finding(
@@ -250,6 +254,7 @@ object AMDGPUOperandDomains {
         None
       )
     }
+  }
 
   private def subtypeFindings(isa: String, entries: Vector[Entry]): Vector[Finding] = {
     val byName = entries.map(entry => entry.name -> entry).toMap
@@ -262,9 +267,11 @@ object AMDGPUOperandDomains {
           case None        => finding("subtype has no operand type", Vector(parent.name))
           case Some(entry) =>
             val missing = entry.domain.codes.filterNot(codes)
-            val sample  = missing.take(3).map(_._1).mkString(",")
             if (missing.isEmpty) None
-            else finding(s"${missing.size} codes outside the parent, e.g. $sample", Vector(parent.name, child))
+            else {
+              val sample = missing.take(3).map(_._1).mkString(",")
+              finding(s"${missing.size} codes outside the parent, e.g. $sample", Vector(parent.name, child))
+            }
         }
       }
     }
@@ -295,17 +302,19 @@ object AMDGPUOperandDomains {
     val accepted  = local.filter(_.accepted)
     val top       = entries.flatMap(entry => flatten(entry.domain).collect { case r: Registers => r.file -> r.last })
       .groupMapReduce(_._1)(_._2)(_ max _)
+    val files    = RegisterFiles.map((file, prefix) => prefix -> file)
     val rejected = local.filterNot(_.accepted).flatMap { observation =>
       observation.message match {
         case Range(prefix, _, last) =>
-          val file = RegisterFiles.collectFirst { case (file, p) if p == prefix => file }.getOrElse(prefix)
+          val file = files.getOrElse(prefix, prefix)
           Option.when(top.get(file).exists(_ >= last.toInt))(observation -> observation.message)
         case name => Option.when(available(name))(observation -> name)
       }
     }
+    lazy val accepters = accepted.flatMap(o => o.tokens.map(_ -> o.target)).groupMap(_._1)(_._2)
     val contradictions = rejected.groupBy(_._2).toVector.sortBy(_._1).map { (name, group) =>
       val rejecting = group.map(_._1.target).distinct.sorted
-      val accepting = accepted.collect { case o if o.tokens(name) => o.target }.distinct.sorted
+      val accepting = accepters.getOrElse(name, Vector.empty).distinct.sorted
       val others    = if (accepting.isEmpty) "none" else accepting.mkString(",")
       val note      = "processor-dependent: the family domain is the union over its processors"
       Finding(

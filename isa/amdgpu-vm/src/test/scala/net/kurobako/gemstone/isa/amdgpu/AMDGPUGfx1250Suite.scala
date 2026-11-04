@@ -5,7 +5,7 @@ import fixtures.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 /** GFX12.5 vector instructions that extend GFX12 ones. The encodings are LLVM 22 `llvm-mc -triple=amdgcn -mcpu=gfx1250

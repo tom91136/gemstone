@@ -15,6 +15,10 @@ function(babelstream_adapt model source)
   const auto kernel_wgsize = cl::Kernel(program, "stream_dot")
                                  .getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
   dot_wgsize = std::min(dot_wgsize, kernel_wgsize);]=])
+  elseif(model STREQUAL "kokkos")
+    # The pinned Kokkos 4 series needs C++17 only, and nvcc 11.8 predates its C++20 support
+    patch_exact("${source}/src/kokkos/model.cmake"
+      "set(CMAKE_CXX_STANDARD 20) # Kokkos 5+ requires CXX >= 20" "set(CMAKE_CXX_STANDARD 17)")
   elseif(model STREQUAL "cuda-tuned")
     patch_exact("${source}/src/cuda-tuned/model.cmake"
       "    register_link_library(\"nvidia-ml\")" "")
@@ -45,7 +49,7 @@ function(babelstream_adapt model source)
 endfunction()
 
 conformance_miniapp(babelstream
-  MODELS cuda cuda-tuned hip omp-target=omp kokkos ocl sycl2020-acc sycl2020-usm acc
+  MODELS cuda cuda-tuned hip omp-target=omp kokkos ocl sycl2020-acc sycl2020-usm acc std-indices
   MAIN src/main.cpp
   LICENCE_FILE LICENSE BabelStream.txt
   OPENMP_DEFINITIONS OMP_TARGET_GPU

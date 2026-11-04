@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class OperandRulesSuite extends Suite {
   private def validate(source: String): ValidationOutcome[Validation.Issue] =

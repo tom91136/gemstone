@@ -529,6 +529,7 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
           )
         }
         steps.result
+      case Instruction.Image(operation = _: ImageOperation.Sample)          => None
       case Instruction.Image(operation, data, address, mask, packing, bank) =>
         image(steps, operation, data, address, mask, packing, bank)
         steps.result
@@ -550,7 +551,6 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
     val words   = descriptor(address.resource, 8)
     val enabled = Vec.from((0 until 4).filter(component => (mask & (1 << component)) != 0))
     val fixed   = generation
-    val half    = packing != Packing.Dword
     def bytes   =
       steps.bind("bytes", Render.primitive(words(1))((word1: UInt[32]) => ImageResource.texelBytes(fixed, word1)))
     operation match {
@@ -573,7 +573,9 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
           packing,
           bank
         )
+      case ImageOperation.Sample(_, _)            => ()
       case ImageOperation.Load(converted, signed) =>
+        val half        = packing != Packing.Dword
         val located     = texel(address, steps)
         val (low, high) = located.texel(steps, bytes, located.valid(0))
         steps ++= components(

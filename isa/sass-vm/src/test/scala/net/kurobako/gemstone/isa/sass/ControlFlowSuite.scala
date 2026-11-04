@@ -4,7 +4,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
@@ -299,6 +299,16 @@ class ControlFlowSuite extends Suite {
     )
   }
 
+  for (sm <- Vec(75, 120))
+    test(s"sm_$sm EXIT exits only the guarded lanes whose predicate operand holds") {
+      val kernel = load(sm, Fixture.listing(s"exitPredicateSm$sm"), "exit_unless_end")
+      val last   = 5
+      assertEquals(
+        kernel.launch(32)(Arg.zeros(128), Arg.u32(last.toLong)).words(0).map(_.toInt),
+        Vec.tabulate(32)(lane => if (lane == 0 || lane == last) lane + 1 else 0)
+      )
+    }
+
   test("compiler BMOV clears B0 before first BSSY and after BSYNC before reuse") {
     checkClears(bmov(75))
     checkLoops(bmov(75))
@@ -382,6 +392,28 @@ class ControlFlowSuite extends Suite {
         shared = 128
       )
     }
+
+  test("BSYNC may reach a BSSY target through an unconditional branch") {
+    check(
+      86,
+      """S2R R0, SR_TID.X
+        |BSSY B0, 0xb0
+        |ISETP.LT.U32.AND P0, PT, R0, 16, PT
+        |@P0 BRA 0x70
+        |MOV R4, 2
+        |BRA 0x90
+        |NOP
+        |MOV R4, 1
+        |NOP
+        |BSYNC B0
+        |BRA 0xb0
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R4
+        |EXIT""".stripMargin,
+      Vec.fill(16)(1) ++ Vec.fill(16)(2)
+    )
+  }
 
   test("barrier tokens survive register clearing, local spills and restoration into another slot") {
     check(
@@ -526,14 +558,91 @@ class ControlFlowSuite extends Suite {
     )
   }
 
-  test("driver vprintf returns 0 and a failed __assertfail fails the launch") {
+  test("WARPSYNC.EXCLUSIVE synchronises each warp on its member mask") {
     check(
       89,
-      "MOV R4, 5; MOV R2, 0x10; MOV R3, 0xffffff00; CALL.ABS.NOINC R2; LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R4; EXIT",
-      Vec(0)
+      """S2R R0, SR_TID.X
+        |ISETP.GE.U32.AND P0, PT, R0, 48, PT
+        |@P0 EXIT
+        |ISETP.LT.U32.AND P1, PT, R0, 32, PT
+        |MOV R9, 0xffff
+        |@P1 MOV R9, 0xffffffff
+        |WARPSYNC.EXCLUSIVE R9
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R9
+        |EXIT""".stripMargin,
+      Vec.tabulate(64)(lane => if (lane < 32) -1 else if (lane < 48) 0xffff else 0)
     )
+  }
+
+  test("WARPSYNC.EXCLUSIVE synchronises each member group of a warp on its own mask") {
+    check(
+      89,
+      """S2R R0, SR_TID.X
+        |ISETP.LT.U32.AND P1, PT, R0, 16, PT
+        |MOV R9, 0xffff0000
+        |@P1 MOV R9, 0xffff
+        |WARPSYNC.EXCLUSIVE R9
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R9
+        |EXIT""".stripMargin,
+      Vec.tabulate(32)(lane => if (lane < 16) 0xffff else 0xffff0000)
+    )
+  }
+
+  test("a diverged path runs ahead, so another path cannot rewrite a uniform register it is about to read") {
+    check(
+      89,
+      """S2R R0, SR_TID.X
+        |ISETP.GE.U32.AND P0, PT, R0, 16, PT
+        |@P0 BRA 0x80
+        |UMOV UR4, 0x1
+        |NOP
+        |NOP
+        |MOV R5, UR4
+        |BRA 0xc0
+        |UMOV UR4, 0x2
+        |NOP
+        |NOP
+        |MOV R5, UR4
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R5
+        |EXIT""".stripMargin,
+      Vec.tabulate(32)(lane => if (lane < 16) 1 else 2)
+    )
+  }
+
+  test("a failed __assertfail fails the launch") {
     val failed = program(89, "MOV R2, 0x40; MOV R3, 0xffffff00; CALL.ABS.NOINC R2; EXIT").run(1)(Arg.zeros(4))
     assert(failed.left.exists { case Fault.Assertion(_) => true; case _ => false }, failed)
+  }
+
+  test("a register call lowers to as many statements in a large kernel as in a small one") {
+    def statements(calls: Int, filler: Int): Int =
+      program(
+        89,
+        (("MOV R11, RZ" +: Vec.fill(calls)("CALL.ABS.NOINC R2")) ++ Vec.fill(filler)("NOP") :+ "EXIT").mkString("; ")
+      )
+        .lower().value.size
+    val perCall = statements(calls = 4, filler = 0) - statements(calls = 0, filler = 0)
+    assertEquals(statements(calls = 4, filler = 64) - statements(calls = 0, filler = 64), perCall)
+  }
+
+  test("a failed __assertfail names the expression, location and thread") {
+    val failed = program(
+      89,
+      "MOV R20, 0x00793d78; STS [RZ], R20; MOV R4, c[0x0][0x18]; MOV R5, c[0x0][0x1c]; MOV R6, R4; MOV R7, R5; " +
+        "MOV R8, 0x24; MOV R10, R4; MOV R11, R5; MOV R2, 0x40; MOV R3, 0xffffff00; CALL.ABS.NOINC R2; EXIT",
+      shared = 16
+    ).run(1)(Arg.zeros(4))
+    val detail = failed match {
+      case Left(Fault.Assertion(detail)) => detail.raw
+      case other                         => fail(other.toString)
+    }
+    assert(detail.endsWith("x=y:36: x=y: block: [0,0,0], thread: [0,0,0] Assertion `x=y` failed."), detail)
   }
 
   test("LEPC and ULEPC write the instruction's 64-bit address") {
@@ -691,6 +800,34 @@ class ControlFlowSuite extends Suite {
         |STG.E [R2.64], R4
         |EXIT""".stripMargin,
       Vec.fill(16)(1) ++ Vec.fill(16)(2)
+    )
+  }
+
+  test("a diverged path runs on until it yields, so a plain read-modify-write on shared memory stays whole") {
+    check(
+      70,
+      """S2R R0, SR_TID.X
+        |ISETP.NE.AND P0, PT, R0, RZ, PT
+        |BSSY B0, 0xd0
+        |@P0 BRA 0x80
+        |LDS R4, [RZ]
+        |IADD3 R4, R4, 1, RZ
+        |STS [RZ], R4
+        |BRA 0xc0
+        |LDS R4, [RZ]
+        |IADD3 R4, R4, 1, RZ
+        |STS [RZ], R4
+        |NOP
+        |BSYNC B0
+        |YIELD
+        |BAR.SYNC 0
+        |LDS R5, [RZ]
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R5
+        |EXIT""".stripMargin,
+      Vec(2, 2),
+      shared = 4
     )
   }
 }

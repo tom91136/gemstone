@@ -2,7 +2,7 @@ package net.kurobako.gemstone.text
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class DelimitedSuite extends Suite {
   private def split(text: String, separator: Char = ',') =

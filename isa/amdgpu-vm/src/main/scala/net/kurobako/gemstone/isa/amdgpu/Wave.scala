@@ -19,9 +19,9 @@ private[isa] trait Wave {
   def read(value: UInt[32], index: UInt[32]): UInt[32]
 
   /** What this lane receives when each active lane sends its `value` to lane `destination`, the highest sending lane
-    * winning, or `existing` when none sends here.
+    * winning, or zero when none sends here.
     */
-  def permute(value: UInt[32], destination: UInt[32], existing: UInt[32]): UInt[32]
+  def permute(value: UInt[32], destination: UInt[32]): UInt[32]
 
   /** VGPR `index` of this lane, or VGPR 0 where `index` is beyond the last. */
   def vgpr(index: UInt[32]): UInt[32]

@@ -11,7 +11,8 @@ import net.kurobako.gemstone.semantics.prelude.*
 private[isa] object WarpSemantics {
 
   /** `shfl.sync`: the lane each lane reads in its warp, itself when the exchange is invalid. The bounds operand holds
-    * the clamp in its low five bits and, for the index and butterfly modes, the segment mask in bits 8 to 12.
+    * the clamp in its low five bits and, for the index and butterfly modes, the segment mask in bits 8 to 12. A source
+    * outside the member mask supplies zero.
     */
   inline def shuffle[V, R](inline algebra: Algebra[V], mode: ShuffleMode, width: Int in 1 ~ 64)(
       inline sinks: NvidiaSinks[V, R],
@@ -19,18 +20,19 @@ private[isa] object WarpSemantics {
       validity: Option[Predicate],
       operand: Value,
       selector: Value,
-      bounds: Value
+      bounds: Value,
+      memberMask: Value
   ): R = mode match {
-    case ShuffleMode.Down => sinks.shuffle(destination, validity, operand, selector, bounds)(
+    case ShuffleMode.Down => sinks.shuffle(destination, validity, operand, selector, bounds, memberMask)(
         (lane, select, bound, size) =>
           algebra.let("t", algebra.add(lane, algebra.distance(select)))(target =>
-            algebra.select(algebra.downValid(target, bound, size), target, lane)
+            algebra.select(algebra.downValid(lane, target, bound, size), target, lane)
           ),
         (lane, select, bound, size) =>
-          algebra.let("t", algebra.add(lane, algebra.distance(select)))(algebra.downValid(_, bound, size)),
+          algebra.let("t", algebra.add(lane, algebra.distance(select)))(algebra.downValid(lane, _, bound, size)),
         value => algebra.truncate(value, width)
       )
-    case ShuffleMode.Up => sinks.shuffle(destination, validity, operand, selector, bounds)(
+    case ShuffleMode.Up => sinks.shuffle(destination, validity, operand, selector, bounds, memberMask)(
         (lane, select, bound, _) =>
           algebra.let("offset", algebra.distance(select))(offset =>
             algebra.let("t", algebra.subtract(lane, offset))(target =>
@@ -43,7 +45,7 @@ private[isa] object WarpSemantics {
           ),
         value => algebra.truncate(value, width)
       )
-    case ShuffleMode.Index => sinks.shuffle(destination, validity, operand, selector, bounds)(
+    case ShuffleMode.Index => sinks.shuffle(destination, validity, operand, selector, bounds, memberMask)(
         (lane, select, bound, size) =>
           algebra.segmented(lane, bound)((base, other) =>
             algebra.let("t", algebra.or(base, algebra.and(algebra.distance(select), other)))(target =>
@@ -58,7 +60,7 @@ private[isa] object WarpSemantics {
           ),
         value => algebra.truncate(value, width)
       )
-    case ShuffleMode.Butterfly => sinks.shuffle(destination, validity, operand, selector, bounds)(
+    case ShuffleMode.Butterfly => sinks.shuffle(destination, validity, operand, selector, bounds, memberMask)(
         (lane, select, bound, size) =>
           algebra.segmented(lane, bound)((base, other) =>
             algebra.let("t", algebra.xor(lane, algebra.distance(select)))(target =>
@@ -87,21 +89,22 @@ private[isa] object WarpSemantics {
   extension [V](inline algebra: Algebra[V]) {
     inline def distance(selector: V): V = algebra.and(selector, algebra.literal(31L))
 
-    /** The clamp of an up or down shuffle: the bounds operand's low word, at most 31. */
-    inline def clamp(bounds: V): V =
-      algebra.minimum(algebra.and(bounds, algebra.literal(0xffffffffL)), algebra.literal(31L), signed = true)
-
-    inline def downValid(target: V, bounds: V, size: V): V =
+    inline def downValid(lane: V, target: V, bounds: V, size: V): V =
       algebra.and(
-        algebra.lessOrEqual(target, algebra.clamp(bounds), signed = true),
+        algebra.lessOrEqual(target, algebra.laneBound(lane, bounds), signed = true),
         algebra.lessThan(target, size, signed = true)
       )
 
     inline def upValid(lane: V, offset: V, target: V, bounds: V): V =
       algebra.and(
         algebra.lessOrEqual(offset, lane, signed = true),
-        algebra.lessOrEqual(algebra.clamp(bounds), target, signed = true)
+        algebra.lessOrEqual(algebra.laneBound(lane, bounds), target, signed = true)
       )
+
+    /** The furthest lane an up or down shuffle of `lane` may reach: the segment base joined with the clamp bits the
+      * segment mask leaves free.
+      */
+    inline def laneBound(lane: V, bounds: V): V = algebra.segmented(lane, bounds)(algebra.segmentMaximum(_, _, bounds))
 
     /** The lane's segment base and the mask of the bits a lane may choose within its segment. */
     inline def segmented(lane: V, bounds: V)(inline body: (V, V) => V): V =

@@ -98,8 +98,9 @@ private object OperandCodec {
     val count = math.max(bits, 32) / 32
     if (code < 128)
       table.name(code, bits).map(Operand.SpecialRegister(_)).orElse(
-        table.registersAt(code, bits).filter((file, _) => scalar(file))
-          .map((file, first) => Operand.Register(file, first, first + count - 1))
+        table.registersAt(code, bits).collect {
+          case (file, first) if scalar(file) => Operand.Register(file, first, first + count - 1)
+        }
       )
     else if (!isSource) None
     else table.decode(code).flatMap {

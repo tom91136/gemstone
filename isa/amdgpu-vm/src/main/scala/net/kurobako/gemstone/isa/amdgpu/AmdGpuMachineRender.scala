@@ -74,6 +74,7 @@ private class AmdGpuMachineRender(naming: RenderContext.Names, immediate: => Ter
   inline def halt(reason: String): Term.Steps = control("halt", Vec((Term.Constant(s"\"$reason\""), None)))
 
   inline def fenceHost: Term.Steps = control("fenceHost", Vec.empty)
+  inline def hostcall: Term.Steps  = control("hostcall", Vec.empty)
 
   private def valued(method: String, arguments: Vec[(Term, Option[Type])])(next: Term => Term.Steps): Term.Steps = {
     val name = naming.temporary()

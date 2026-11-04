@@ -79,6 +79,34 @@ Level level(const Format &format, ImageType type, size_t width, size_t height, s
 /** The most mip levels an image of these dimensions has: down to a texel in each dimension. */
 uint32_t levels(ImageType type, size_t width, size_t height, size_t depth);
 
+/** How a coordinate beyond an image is addressed, as the sampler descriptor's clamp modes number them. */
+enum class AddressMode : uint32_t {
+  Wrap = 0,
+  Mirror = 1,
+  ClampLastTexel = 2,
+  MirrorOnceLastTexel = 3,
+  ClampHalfBorder = 4,
+  MirrorOnceHalfBorder = 5,
+  ClampBorder = 6,
+  MirrorOnceBorder = 7
+};
+
+enum class Filter : uint32_t { Point = 0, Linear = 1 };
+
+enum class MipFilter : uint32_t { None = 0, Point = 1, Linear = 2 };
+
+/** A sampler: address modes and filters in the order the sampler descriptor names them, and its level range in mip levels. */
+struct Sampler {
+  std::array<AddressMode, 3> address;
+  Filter filter;
+  MipFilter mip;
+  bool normalised;
+  float minLod, maxLod, lodBias;
+};
+
+/** The four-dword sampler descriptor of `sampler`: transparent black border, one filter for magnification and minification. */
+std::array<uint32_t, 4> sampler(Generation generation, const Sampler &sampler);
+
 /** The four-dword descriptor of `records` elements of `format` at `base`, indexed by element. */
 std::array<uint32_t, 4> buffer(Generation generation, uint64_t base, const Format &format, size_t records);
 

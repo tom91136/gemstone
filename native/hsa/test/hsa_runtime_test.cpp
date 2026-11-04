@@ -2,7 +2,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -17,8 +19,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "gemstone/hsa/device_model.hpp"
 #include "gemstone/hsa/global.hpp"
 #include "gemstone/hsa/memory_copy.hpp"
+#include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
@@ -107,15 +111,16 @@ void publish(hsa_queue_t *queue, hsa_kernel_dispatch_packet_t *packet, uint64_t 
   hsa_signal_store_screlease(queue->doorbell_signal, static_cast<hsa_signal_value_t>(count - 1));
 }
 
-void placeBarrier(hsa_queue_t *queue, uint64_t index, hsa_signal_t completion) {
+void placeBarrier(hsa_queue_t *queue, uint64_t index, hsa_signal_t completion, hsa_signal_t dependency = hsa_signal_t{}) {
   auto *barrier = static_cast<hsa_barrier_and_packet_t *>(queue->base_address) + index;
   *barrier = {};
+  barrier->dep_signal[0] = dependency;
   barrier->completion_signal = completion;
   __atomic_store_n(&barrier->header, static_cast<uint16_t>(HSA_PACKET_TYPE_BARRIER_AND), __ATOMIC_RELEASE);
 }
 
-void publishBarrier(hsa_queue_t *queue, uint64_t index, hsa_signal_t completion) {
-  placeBarrier(queue, index, completion);
+void publishBarrier(hsa_queue_t *queue, uint64_t index, hsa_signal_t completion, hsa_signal_t dependency = hsa_signal_t{}) {
+  placeBarrier(queue, index, completion, dependency);
   hsa_queue_store_write_index_screlease(queue, index + 1);
   hsa_signal_store_screlease(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
 }
@@ -353,23 +358,26 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   for (auto byte : cooperative.guard)
     REQUIRE((byte == 0xa5));
   // RDNA applications size WGP dispatches from half the advertised CU count.
-  for (const auto *target : {"gfx906", "gfx1030", "gfx1100"}) {
+  for (const auto *target : {"gfx906", "gfx90a", "gfx1030", "gfx1100", "gfx1201"}) {
     const gemstone_test::Environment selected(gemstone::environment::TargetArch, target);
-    uint32_t computeUnits = 0;
-    uint32_t cooperativeUnits = 0;
-    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &computeUnits)
-             == HSA_STATUS_SUCCESS));
-    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT), &cooperativeUnits)
-             == HSA_STATUS_SUCCESS));
-    REQUIRE((std::cmp_equal(computeUnits, (std::strcmp(target, "gfx906") == 0 ? 1 : 2))));
-    REQUIRE((cooperativeUnits == computeUnits));
+    INFO(target);
+    const auto model = gemstone::hsa::deviceModel(target);
+    auto query = [&](int attribute) {
+      uint32_t value = UINT32_MAX;
+      REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(attribute), &value) == HSA_STATUS_SUCCESS));
+      return value;
+    };
+    REQUIRE((query(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT) == model.computeUnits));
+    REQUIRE((query(HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT) == model.computeUnits));
+    REQUIRE((query(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU) == model.simdsPerComputeUnit));
+    REQUIRE((query(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU) == model.wavesPerComputeUnit()));
+    REQUIRE((query(HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY) == model.clockMHz));
   }
   hsa_amd_hdp_flush_t hdp{};
   REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HDP_FLUSH), &hdp) == HSA_STATUS_SUCCESS));
   REQUIRE((!hdp.HDP_MEM_FLUSH_CNTL && !hdp.HDP_REG_FLUSH_CNTL));
-  for (auto attribute :
-       {HSA_AMD_AGENT_INFO_CHIP_ID, HSA_AMD_AGENT_INFO_BDFID, HSA_AMD_AGENT_INFO_DOMAIN, HSA_AMD_AGENT_INFO_MEMORY_WIDTH,
-        HSA_AMD_AGENT_INFO_ASIC_REVISION, HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY, HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY}) {
+  for (auto attribute : {HSA_AMD_AGENT_INFO_CHIP_ID, HSA_AMD_AGENT_INFO_BDFID, HSA_AMD_AGENT_INFO_DOMAIN, HSA_AMD_AGENT_INFO_MEMORY_WIDTH,
+                         HSA_AMD_AGENT_INFO_ASIC_REVISION, HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY}) {
     struct WordGuard {
       uint32_t value;
       uint32_t guard;
@@ -547,6 +555,29 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     REQUIRE((copied[index] == 73 + index));
   REQUIRE((hsa_signal_destroy(copySignal) == HSA_STATUS_SUCCESS));
   fixture.check();
+  {
+    // A launch heartbeating for longer than the RPC window keeps the drain alive.
+    const gemstone_test::Environment window(gemstone::environment::RpcTimeoutSeconds, "1");
+    fixture.stallNext(gemstone::execution::operation::Launch, std::chrono::milliseconds(2500), std::chrono::milliseconds(2500), true);
+    *arguments = Arguments{.output = output, .seed = 91};
+    fixture.expect({.local = 4, .groups = 3, .global = 12, .offset = 0, .seed = arguments->seed});
+    packet = dispatchPacket(queue, 2, object, hsa_signal_t{});
+    packet->workgroup_size_x = 4;
+    packet->grid_size_x = 12;
+    packet->kernarg_address = arguments;
+    publish(queue, packet, 3);
+    std::array<uint32_t, 12> stalled{};
+    hsa_signal_t stalledCopy{};
+    REQUIRE((hsa_signal_create(1, 0, nullptr, &stalledCopy) == HSA_STATUS_SUCCESS));
+    const auto started = std::chrono::steady_clock::now();
+    REQUIRE((hsa_amd_memory_async_copy(stalled.data(), agents.front(), output, gpu, sizeof(stalled), 0, nullptr, stalledCopy)
+             == HSA_STATUS_SUCCESS));
+    CHECK((std::chrono::steady_clock::now() - started >= std::chrono::seconds(2)));
+    for (uint32_t index = 0; index < stalled.size(); ++index)
+      REQUIRE((stalled[index] == 91 + index));
+    REQUIRE((hsa_signal_destroy(stalledCopy) == HSA_STATUS_SUCCESS));
+    fixture.check();
+  }
   {
     const gemstone_test::Environment paging(gemstone::environment::SystemPagingOn, "1");
     for (uint32_t seed = 1; seed <= 16; ++seed) {
@@ -864,7 +895,7 @@ TEST_CASE("HSA malformed packets report the matching queue status", "[hsa][queue
   }
 }
 
-TEST_CASE("HSA rejected launch reports an exception and leaves the completion signal", "[hsa][queue-error]") {
+TEST_CASE("HSA execution fault child", "[.]") {
   gemstone_test::RpcFixture fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
@@ -886,26 +917,26 @@ TEST_CASE("HSA rejected launch reports an exception and leaves the completion si
   REQUIRE((hsa_memory_allocate(kernarg, 16, &arguments) == HSA_STATUS_SUCCESS));
   std::memset(arguments, 0, 16);
 
-  QueueErrors errors;
-  auto *queue = createQueue(gpu, &errors);
+  hsa_queue_t *queue = nullptr;
+  REQUIRE((hsa_queue_create(
+               gpu, 64, HSA_QUEUE_TYPE_MULTI, [](hsa_status_t, hsa_queue_t *, void *) { std::fputs("queue callback ran\n", stderr); },
+               nullptr, UINT32_MAX, UINT32_MAX, &queue)
+           == HSA_STATUS_SUCCESS));
   const auto completion = createSignal();
-  const auto following = createSignal();
   fixture.rejectNext(gemstone::execution::operation::Launch);
   auto *packet = dispatchPacket(queue, 0, object, completion);
   packet->kernarg_address = arguments;
-  placeBarrier(queue, 1, following);
-  publish(queue, packet, 2);
-  REQUIRE(errors.await());
-  CHECK((errors.status.load() == HSA_STATUS_ERROR_EXCEPTION));
-  CHECK(settles(completion, 1));
-  CHECK(settles(following, 1));
-  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_signal_destroy(following) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_free(arguments) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_executable_destroy(executable) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_code_object_reader_destroy(reader) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
+  publish(queue, packet, 1);
+  std::this_thread::sleep_for(gemstone_test::scaled(std::chrono::seconds(30)));
+}
+
+TEST_CASE("HSA execution faults abort the process after the queue callback", "[hsa][queue-error]") {
+  const auto outcome = gemstone_test::runChildTest("HSA execution fault child");
+  CHECK((outcome.signal == SIGABRT));
+  const auto callback = outcome.output.find("queue callback ran");
+  const auto message = outcome.output.find("inactivated due to async error");
+  CHECK((callback != std::string::npos && message != std::string::npos && callback < message));
+  CHECK(outcome.output.contains("hardware exception"));
 }
 
 TEST_CASE("HSA executable loading reports a rejected code object synchronously", "[hsa]") {
@@ -930,24 +961,26 @@ TEST_CASE("HSA executable loading reports a rejected code object synchronously",
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
 }
 
-TEST_CASE("HSA queue without an error callback stops quietly when queue fault messages are disabled", "[hsa][queue-error]") {
+TEST_CASE("HSA queue without an error callback child", "[.]") {
   MemoryLockSession const session;
-  const gemstone_test::Environment quiet("HSA_ENABLE_QUEUE_FAULT_MESSAGE", "0");
   const auto gpu = gpuAgent();
   auto *queue = createQueue(gpu, nullptr);
   const auto failing = createSignal();
-  const auto following = createSignal();
   publish(queue, dispatchPacket(queue, 0, 0xbad, failing), 1);
-  CHECK(settles(failing, 1));
-  publishBarrier(queue, 1, following);
-  CHECK(settles(following, 1));
-  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_signal_destroy(failing) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_signal_destroy(following) == HSA_STATUS_SUCCESS));
+  std::this_thread::sleep_for(gemstone_test::scaled(std::chrono::seconds(30)));
+}
+
+TEST_CASE("HSA queue without an error callback aborts, reporting unless queue fault messages are disabled", "[hsa][queue-error]") {
+  for (const bool silenced : {false, true}) {
+    CAPTURE(silenced);
+    const gemstone_test::Environment message("HSA_ENABLE_QUEUE_FAULT_MESSAGE", silenced ? "0" : "1");
+    const auto outcome = gemstone_test::runChildTest("HSA queue without an error callback child");
+    CHECK((outcome.signal == SIGABRT));
+    CHECK((outcome.output.contains("inactivated due to async error") == !silenced));
+  }
 }
 
 TEST_CASE("HSA halted queue does not stall device-to-host copies", "[hsa][queue-error]") {
-  const gemstone_test::Environment timeout(gemstone::environment::HsaPagingTimeoutSeconds, "1");
   MemoryLockSession const session;
   const auto gpu = gpuAgent();
   QueueErrors errors;
@@ -970,6 +1003,36 @@ TEST_CASE("HSA halted queue does not stall device-to-host copies", "[hsa][queue-
   REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_memory_free(device) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_signal_destroy(failing) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(copied) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA silent barrier fails a device-to-host copy once the RPC window passes", "[hsa][queue-error]") {
+  MemoryLockSession const session;
+  const gemstone_test::Environment window(gemstone::environment::RpcTimeoutSeconds, "1");
+  const auto gpu = gpuAgent();
+  QueueErrors errors;
+  auto *queue = createQueue(gpu, &errors);
+  const auto dependency = createSignal(1);
+  const auto completion = createSignal();
+  publishBarrier(queue, 0, completion, dependency);
+
+  const auto coarse = regionWithFlag(gpu, HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED);
+  void *device = nullptr;
+  REQUIRE((hsa_memory_allocate(coarse, 16, &device) == HSA_STATUS_SUCCESS));
+  std::array<uint32_t, 4> observed{};
+  const auto copied = createSignal();
+  const auto started = std::chrono::steady_clock::now();
+  CHECK((hsa_amd_memory_async_copy(observed.data(), agentOf(HSA_DEVICE_TYPE_CPU), device, gpu, sizeof(observed), 0, nullptr, copied)
+         == HSA_STATUS_ERROR));
+  CHECK((std::chrono::steady_clock::now() - started < std::chrono::seconds(5)));
+
+  hsa_signal_store_screlease(dependency, 0);
+  REQUIRE(awaitReadIndex(queue, 1));
+  CHECK((hsa_signal_load_scacquire(completion) == 0));
+  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(device) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(dependency) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_signal_destroy(copied) == HSA_STATUS_SUCCESS));
 }
 

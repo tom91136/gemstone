@@ -26,21 +26,26 @@ namespace conformance::driver {
 inline constexpr int32_t SkipReturnCode = 4;
 /// Upper bound accepted for a test program timeout, in seconds.
 inline constexpr uint64_t MaximumTimeoutSeconds = uint64_t{24} * 60 * 60;
+/// Bound for the JIT warm-up of one test program, in seconds before scaling.
+inline constexpr uint32_t JitWarmupSeconds = 2 * 60 * 60;
+/// Largest driver JIT cache the CUDA driver accepts.
+inline constexpr uint64_t JitCacheMaximumBytes = uint64_t{4} << 30;
 
 uint32_t availableThreadCount();
 struct RunOptions {
-  std::string workload = "compact";
+  std::string workload = "short";
   std::filesystem::path artifacts, output, profiles, workloads;
   std::optional<std::string> machine;
   std::vector<std::string> selectors, launcher;
   bool isolatedLauncher = false;
   bool direct = false;
+  bool dryRun = false;
   uint32_t threads = availableThreadCount();
   double timeoutScale = 1.0;
 };
 struct Workload {
   std::vector<std::string> specs{"*"};
-  // Discovery-time program-name globs. Empty selects all; exact exclusions win.
+  // Discovery-time program-name globs. Empty selects all; exclusions win.
   std::vector<std::string> includePrograms;
   // Full Google Test names or globs for the Level Zero CTS. Empty selects all.
   std::vector<std::string> levelzeroCases;
@@ -53,10 +58,13 @@ struct Workload {
   // apply under --isolated-launcher too. Machine-specific profile skips are
   // execution-time and are intentionally disabled there.
   std::vector<std::string> excludePrograms;
+  // Case-identity globs dropped after discovery, in every program.
+  std::vector<std::string> excludeCases;
 };
 struct ArtifactMetadata {
-  std::string backend, architecture, support;
+  std::string backend, architecture, support, code;
   std::string compiler = "vendor";
+  std::vector<std::string> supplements;
 };
 struct CatchCase {
   std::string name;
@@ -70,7 +78,9 @@ struct CatchReport {
 };
 struct WorkloadFields {
   std::string extends;
-  std::optional<std::vector<std::string>> specs, includePrograms, levelzeroCases, vulkanCases, excludePrograms;
+  std::optional<std::vector<std::string>> specs, includePrograms, levelzeroCases, vulkanCases, excludePrograms, excludeCases;
+  // Appended to the inherited or replaced list of the same name.
+  std::optional<std::vector<std::string>> addIncludePrograms, addLevelzeroCases, addVulkanCases, addExcludePrograms, addExcludeCases;
   std::optional<std::string> vulkanMustpass;
 };
 struct ExecutionConfig {
@@ -78,6 +88,9 @@ struct ExecutionConfig {
   std::map<std::string, std::string> environment;
   std::vector<std::string> launcher, skips, specs;
   bool deviceLock = true;
+  std::vector<std::string> jitPrograms;
+  // Programs whose warm-up failed, with the reason; their cases fail without running.
+  std::map<std::string, std::string> jitFailures;
 };
 struct ScheduledCase {
   std::string identity, program;
@@ -134,15 +147,23 @@ std::vector<std::string> deqpCaseNames(std::istream &input);
 Workload loadWorkload(const RunOptions &configuration);
 DeqpResult deqpResult(std::string_view qpa, std::string_view identity);
 std::vector<std::string> gtestCaseNames(std::string_view listing, std::string_view program);
+bool gtestSkipped(std::string_view report);
+bool gtestCaseSelected(std::string_view program, const std::string &name, const std::vector<std::string> &levelzeroCases);
+std::string catchSpec(const std::vector<std::string> &specs);
 std::vector<std::string> catchShardArguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count);
 std::vector<std::string> launcherArguments(std::span<char *const> arguments);
 std::vector<profile::ResolvedTarget> uniqueRoutes(const std::vector<profile::ResolvedTarget> &targets, bool isolated);
 std::map<std::string, std::string> baseEnvironment();
 void prepareRuntimeEnvironment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
-                               const std::filesystem::path &support, std::string_view backend);
+                               const std::filesystem::path &support, const std::vector<std::filesystem::path> &supplements,
+                               std::string_view backend);
+void applyJitCacheEnvironment(std::map<std::string, std::string> &environment, const std::filesystem::path &cache);
+std::vector<std::string> jitWarmupPrograms(const ArtifactMetadata &metadata, bool isolatedLauncher,
+                                           const std::vector<ScheduledCase> &tests);
 void applyDeviceProbe(ExecutionConfig &configuration, const conformance::DeviceProbeResult &probe);
 std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, const Workload &workload,
                                              const profile::ResolvedTarget &target, const std::filesystem::path &runDirectory);
+void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double timeoutScale, const CaseExecutor &execute);
 std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute);
 ProcessResult runProcess(const std::vector<std::string> &command, const std::filesystem::path &directory,
                          const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,

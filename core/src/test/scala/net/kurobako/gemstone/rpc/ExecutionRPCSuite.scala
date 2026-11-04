@@ -11,7 +11,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.{*, given}
 import net.kurobako.gemstone.rpc.Wire.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
 class ExecutionRPCSuite extends Suite {
@@ -114,6 +114,8 @@ class ExecutionRPCSuite extends Suite {
     Operation.RegisterAllocation(64L),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L)),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), hostBacked = true),
+    Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), devices = 0x6),
+    Operation.SetAllocationDevices(allocation, 0x3),
     Operation.ReleaseAllocation(allocation),
     Operation.WriteAllocation(allocation, 4L, Vec[Byte](1, 2, 3)),
     Operation.ReadAllocation(allocation, 4L, 3),
@@ -125,6 +127,7 @@ class ExecutionRPCSuite extends Suite {
       Vec[Byte](3, 2, 35, 7),
       Vec(SpecializationConstant(Binary32(0xffffffffL), Vec[Byte](1, 2, 3, 4)))
     ),
+    Operation.LinkImages(Vec(LinkInput(Vec[Byte](3, 2, 35, 7)), LinkInput(Vec[Byte](3, 2, 35, 7)))),
     Operation.PrepareShader(
       Vec[Byte](3, 2, 35, 7),
       "main",
@@ -162,11 +165,26 @@ class ExecutionRPCSuite extends Suite {
         targetOffset = 8L
       ))
     ),
+    Operation.Launch(
+      program = program,
+      kernelName = "kernel",
+      groupSize = LaunchGeometry.Dimensions.One,
+      groupCount = LaunchGeometry.Dimensions.One,
+      globalSize = LaunchGeometry.Dimensions.One.toGlobalDimensions,
+      workDim = 3,
+      globalOffset = LaunchGeometry.Coordinates(0, 0, 0),
+      privateSegmentBytes = 0,
+      groupSegmentBytes = 0,
+      arguments = Vec.empty,
+      pointerRelocations = Vec.empty,
+      device = 15
+    ),
     Operation.QueryCompletion(completion),
     Operation.CompletionDirtyRanges(completion, 0),
     Operation.CompletionPointerRelocations(completion, 0),
     Operation.CompletionPointerRelocations(completion, 16384),
     Operation.CompletionPrints(completion),
+    Operation.CompletionErrorPrints(completion),
     Operation.ReleaseCompletion(completion)
   )
 
@@ -178,6 +196,13 @@ class ExecutionRPCSuite extends Suite {
         .fold(message => fail(message), value => value)
       assertEquals(decoded.value, operation)
     }
+  }
+
+  test("linked image replies carry the kernel name table") {
+    val linked = Backend.LinkedImage(Vec[Byte](1, 2), Vec(Backend.LinkedKernel(1, "k", "k.1")))
+    val reply  = Operation.LinkImages(Vec.empty).replyCodec
+    val bytes  = reply.encode(linked, ExecutionRPC.Limits).fold(message => fail(message), identity)
+    assertEquals(reply.decode(bytes, ExecutionRPC.Limits), Right(linked))
   }
 
   test("physical kernel register counts survive metadata transport") {
@@ -501,5 +526,25 @@ class ExecutionRPCSuite extends Suite {
       assertEquals(decoded.map(_.productPrefix), Right(make("x").productPrefix))
       assertEquals(decoded.map(_.message.raw.length), Right(ExecutionRPC.MaximumTextBytes.raw))
     }
+  }
+
+  test("ordinary text is bounded by the RPC text limit") {
+    val oversized = "x" * (9 * 1024)
+    assert(Codec[String].encode(oversized, ExecutionRPC.Limits).isLeft)
+    val bounded = "x" * ExecutionRPC.MaximumTextBytes.raw
+    assertEquals(
+      Codec[String].encode(bounded, ExecutionRPC.Limits).flatMap(Codec[String].decode(_, ExecutionRPC.Limits)),
+      Right(bounded)
+    )
+  }
+
+  test("printf text carries its own bound") {
+    val text = PrintText("p" * (100 * 1024))
+    assertEquals(
+      Codec[PrintText].encode(text, ExecutionRPC.Limits).flatMap(Codec[PrintText].decode(_, ExecutionRPC.Limits)),
+      Right(text)
+    )
+    val oversized = PrintText("p" * (ExecutionRPC.MaximumPrintTextBytes.raw + 1))
+    assert(Codec[PrintText].encode(oversized, ExecutionRPC.Limits).isLeft)
   }
 }

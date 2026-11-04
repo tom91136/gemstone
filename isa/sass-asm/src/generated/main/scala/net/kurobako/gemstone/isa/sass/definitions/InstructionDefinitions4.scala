@@ -9,6 +9,7 @@ import InstructionOperand.*
 @Generated(Array("sbt codegen"))
 object InstructionDefinitions4 {
   val decoders: Vec[FormDecoder] = Vec(
+    FormDecoder(Definitions4.SelRegRegRegPred, Register, Register, Register, Predicate)(Form.SelRegRegRegPred.apply),
     FormDecoder(Definitions4.SetcrsptrReg, Register)(Form.SetcrsptrReg.apply),
     FormDecoder(Definitions4.SetctaidReg, Register)(Form.SetctaidReg.apply),
     FormDecoder(Definitions4.SetlmembaseReg, Register)(Form.SetlmembaseReg.apply),
@@ -719,72 +720,47 @@ object InstructionDefinitions4 {
       Register
     )(Form.SyncsRegAddressRegReg.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TexPredRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TexPredRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegImmImmImm,
+      Definitions4.TexPredRegRegRegImmImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
       Immediate,
       Immediate,
-      Immediate
-    )(Form.TexPredRegRegRegImmImmImm.apply),
+      Symbol
+    )(Form.TexPredRegRegRegImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegReg,
+      Definitions4.TexPredRegRegRegImmImmSymbolImm,
       Predicate,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TexPredRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TexPredRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TexPredRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegRegImmImmImm,
-      Predicate,
-      Register,
       Register,
       Register,
       Register,
       Immediate,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.TexPredRegRegRegRegImmImmImm.apply),
+    )(Form.TexPredRegRegRegImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegRegImmImmImmImm,
+      Definitions4.TexPredRegRegRegImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.TexPredRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TexPredRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegRegImmImmImmSymbol,
       Predicate,
       Register,
       Register,
@@ -793,119 +769,204 @@ object InstructionDefinitions4 {
       Immediate,
       Immediate,
       Immediate,
-      Immediate
-    )(Form.TexPredRegRegRegRegImmImmImmImm.apply),
+      Symbol
+    )(Form.TexPredRegRegRegRegImmImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegRegReg,
+      Definitions4.TexPredRegRegRegRegImmImmImmSymbolImm,
       Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TexPredRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TexPredRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegRegRegImmImm,
-      Predicate,
-      Register,
       Register,
       Register,
       Register,
       Register,
       Immediate,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TexPredRegRegRegRegRegImmImm.apply),
+    )(Form.TexPredRegRegRegRegImmImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegRegRegReg,
+      Definitions4.TexPredRegRegRegRegImmImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
       Register,
-      Register,
-      Register
-    )(Form.TexPredRegRegRegRegRegReg.apply),
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TexPredRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegRegRegRegImm,
+      Definitions4.TexPredRegRegRegRegImmImmSymbolImm,
       Predicate,
       Register,
       Register,
       Register,
       Register,
-      Register,
-      Register,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TexPredRegRegRegRegRegRegImm.apply),
+    )(Form.TexPredRegRegRegRegImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexPredRegRegRegRegRegRegImmImm,
+      Definitions4.TexPredRegRegRegRegRegImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
       Register,
       Register,
+      Immediate,
+      Symbol
+    )(Form.TexPredRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
       Register,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.TexPredRegRegRegRegRegRegImmImm.apply),
-    FormDecoder(Definitions4.TexRegRegRegImm, Register, Register, Register, Immediate)(Form.TexRegRegRegImm.apply),
+    )(Form.TexPredRegRegRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegImmImm,
+      Definitions4.TexPredRegRegRegRegRegRegImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
       Register,
       Register,
       Register,
       Immediate,
+      Symbol
+    )(Form.TexPredRegRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegImmImm.apply),
+    )(Form.TexPredRegRegRegRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegImmImmImm,
+      Definitions4.TexPredRegRegRegRegRegRegSymbol,
+      Predicate,
       Register,
       Register,
       Register,
-      Immediate,
-      Immediate,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TexPredRegRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegImmImmImm.apply),
-    FormDecoder(Definitions4.TexRegRegRegReg, Register, Register, Register, Register)(Form.TexRegRegRegReg.apply),
+    )(Form.TexPredRegRegRegRegRegRegSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegImm,
+      Definitions4.TexPredRegRegRegRegRegSymbol,
+      Predicate,
       Register,
       Register,
       Register,
       Register,
+      Register,
+      Symbol
+    )(Form.TexPredRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegRegImm.apply),
+    )(Form.TexPredRegRegRegRegRegSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegImmImm,
+      Definitions4.TexPredRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TexPredRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TexPredRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TexPredRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegImmImmSymbol,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TexRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TexRegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.TexRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TexRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegImmImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
       Immediate,
-      Immediate
-    )(Form.TexRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TexRegRegRegRegImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
       Immediate,
       Immediate,
-      Immediate
-    )(Form.TexRegRegRegRegImmImmImm.apply),
+      Symbol
+    )(Form.TexRegRegRegRegImmImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegImmImmImmImm,
+      Definitions4.TexRegRegRegRegImmImmImmSymbolImm,
       Register,
       Register,
       Register,
@@ -913,56 +974,53 @@ object InstructionDefinitions4 {
       Immediate,
       Immediate,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegRegImmImmImmImm.apply),
+    )(Form.TexRegRegRegRegImmImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegReg,
+      Definitions4.TexRegRegRegRegImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
-      Register
-    )(Form.TexRegRegRegRegReg.apply),
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TexRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegRegImm,
+      Definitions4.TexRegRegRegRegImmImmSymbolImm,
       Register,
       Register,
       Register,
       Register,
-      Register,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegRegRegImm.apply),
+    )(Form.TexRegRegRegRegImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegRegImmImm,
+      Definitions4.TexRegRegRegRegRegImmSymbol,
       Register,
       Register,
       Register,
       Register,
       Register,
       Immediate,
+      Symbol
+    )(Form.TexRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegRegRegImmImm.apply),
+    )(Form.TexRegRegRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TexRegRegRegRegRegReg,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TexRegRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TexRegRegRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TexRegRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TexRegRegRegRegRegRegImmImm,
+      Definitions4.TexRegRegRegRegRegRegImmSymbol,
       Register,
       Register,
       Register,
@@ -970,74 +1028,109 @@ object InstructionDefinitions4 {
       Register,
       Register,
       Immediate,
+      Symbol
+    )(Form.TexRegRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TexRegRegRegRegRegRegImmImm.apply),
+    )(Form.TexRegRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TexRegRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TexRegRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TexRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TexRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TexRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TexRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TexRegRegRegRegSymbolImm.apply),
     FormDecoder(Definitions4.TexdepbarImm, Immediate)(Form.TexdepbarImm.apply),
     FormDecoder(
-      Definitions4.TexsRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TexsRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldPredRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldPredRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TldPredRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldPredRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegImmImm,
-      Predicate,
+      Definitions4.TexsRegRegRegRegImmSymbolSymbol,
       Register,
       Register,
       Register,
       Register,
       Immediate,
-      Immediate
-    )(Form.TldPredRegRegRegRegImmImm.apply),
+      Symbol,
+      Symbol
+    )(Form.TexsRegRegRegRegImmSymbolSymbol.apply),
     FormDecoder(
-      Definitions4.TldPredRegRegRegRegImmImmImm,
+      Definitions4.TldPredRegRegRegImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
+      Immediate,
+      Symbol
+    )(Form.TldPredRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
       Register,
       Immediate,
-      Immediate,
+      Symbol,
       Immediate
-    )(Form.TldPredRegRegRegRegImmImmImm.apply),
+    )(Form.TldPredRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TldPredRegRegRegRegImmImmImmImm,
+      Definitions4.TldPredRegRegRegRegImmImmImmSymbol,
       Predicate,
       Register,
       Register,
@@ -1046,243 +1139,10 @@ object InstructionDefinitions4 {
       Immediate,
       Immediate,
       Immediate,
-      Immediate
-    )(Form.TldPredRegRegRegRegImmImmImmImm.apply),
+      Symbol
+    )(Form.TldPredRegRegRegRegImmImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.TldPredRegRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TldPredRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldPredRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldPredRegRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TldPredRegRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldPredRegRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldPredRegRegRegRegRegRegImmImm.apply),
-    FormDecoder(Definitions4.TldRegRegRegImm, Register, Register, Register, Immediate)(Form.TldRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldRegRegRegImmImm.apply),
-    FormDecoder(Definitions4.TldRegRegRegReg, Register, Register, Register, Register)(Form.TldRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TldRegRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegImmImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TldRegRegRegRegImmImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegReg,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TldRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldRegRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegRegReg,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TldRegRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TldRegRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TldRegRegRegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TldRegRegRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.Tld4PredRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.Tld4PredRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegImmImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.Tld4PredRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.Tld4PredRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.Tld4PredRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.Tld4PredRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegImmImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.Tld4PredRegRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegImmImmImmImm,
+      Definitions4.TldPredRegRegRegRegImmImmImmSymbolImm,
       Predicate,
       Register,
       Register,
@@ -1291,50 +1151,57 @@ object InstructionDefinitions4 {
       Immediate,
       Immediate,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.Tld4PredRegRegRegRegImmImmImmImm.apply),
+    )(Form.TldPredRegRegRegRegImmImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegReg,
+      Definitions4.TldPredRegRegRegRegImmImmSymbol,
       Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.Tld4PredRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.Tld4PredRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegRegImmImm,
-      Predicate,
-      Register,
       Register,
       Register,
       Register,
       Register,
       Immediate,
-      Immediate
-    )(Form.Tld4PredRegRegRegRegRegImmImm.apply),
+      Immediate,
+      Symbol
+    )(Form.TldPredRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegRegReg,
+      Definitions4.TldPredRegRegRegRegImmImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TldPredRegRegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegRegImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
       Register,
       Register,
-      Register
-    )(Form.Tld4PredRegRegRegRegRegReg.apply),
+      Immediate,
+      Symbol
+    )(Form.TldPredRegRegRegRegRegImmSymbol.apply),
     FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegRegRegImm,
+      Definitions4.TldPredRegRegRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TldPredRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegRegRegImmSymbol,
       Predicate,
       Register,
       Register,
@@ -1342,10 +1209,11 @@ object InstructionDefinitions4 {
       Register,
       Register,
       Register,
-      Immediate
-    )(Form.Tld4PredRegRegRegRegRegRegImm.apply),
+      Immediate,
+      Symbol
+    )(Form.TldPredRegRegRegRegRegRegImmSymbol.apply),
     FormDecoder(
-      Definitions4.Tld4PredRegRegRegRegRegRegImmImm,
+      Definitions4.TldPredRegRegRegRegRegRegImmSymbolImm,
       Predicate,
       Register,
       Register,
@@ -1354,122 +1222,614 @@ object InstructionDefinitions4 {
       Register,
       Register,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.Tld4PredRegRegRegRegRegRegImmImm.apply),
-    FormDecoder(Definitions4.Tld4RegRegRegImm, Register, Register, Register, Immediate)(Form.Tld4RegRegRegImm.apply),
+    )(Form.TldPredRegRegRegRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.Tld4RegRegRegImmImm,
+      Definitions4.TldPredRegRegRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TldPredRegRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TldPredRegRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TldPredRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TldPredRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TldPredRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TldPredRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TldPredRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegImmSymbol,
       Register,
       Register,
       Register,
       Immediate,
-      Immediate
-    )(Form.Tld4RegRegRegImmImm.apply),
+      Symbol
+    )(Form.TldRegRegRegImmSymbol.apply),
     FormDecoder(
-      Definitions4.Tld4RegRegRegImmImmImm,
+      Definitions4.TldRegRegRegImmSymbolImm,
       Register,
       Register,
       Register,
       Immediate,
-      Immediate,
+      Symbol,
       Immediate
-    )(Form.Tld4RegRegRegImmImmImm.apply),
-    FormDecoder(Definitions4.Tld4RegRegRegReg, Register, Register, Register, Register)(Form.Tld4RegRegRegReg.apply),
+    )(Form.TldRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.Tld4RegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.Tld4RegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.Tld4RegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.Tld4RegRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegImmImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.Tld4RegRegRegRegImmImmImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegReg,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.Tld4RegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.Tld4RegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.Tld4RegRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegRegReg,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.Tld4RegRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.Tld4RegRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegRegRegRegImmImm,
-      Register,
-      Register,
+      Definitions4.TldRegRegRegRegImmImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
       Immediate,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TldRegRegRegRegImmImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegImmImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.Tld4RegRegRegRegRegRegImmImm.apply),
+    )(Form.TldRegRegRegRegImmImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegImmImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TldRegRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TldRegRegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.TldRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TldRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.TldRegRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.TldRegRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TldRegRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TldRegRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TldRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TldRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.TldRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TldRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.TldRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegImmImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.Tld4PredRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegImmImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.Tld4PredRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegImmImmImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegImmImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegImmImmImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegImmImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegImmImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegImmImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegRegImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegRegImmSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.Tld4PredRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4PredRegRegRegRegSymbolImm,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.Tld4PredRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegImmImmSymbol,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.Tld4RegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.Tld4RegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegImmImmImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.Tld4RegRegRegRegImmImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegImmImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegImmImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegImmImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.Tld4RegRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegImmImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.Tld4RegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )(Form.Tld4RegRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegRegRegImmSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.Tld4RegRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.Tld4RegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegRegSymbolImm.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.Tld4RegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.Tld4RegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
+      Immediate
+    )(Form.Tld4RegRegRegRegSymbolImm.apply),
     FormDecoder(
       Definitions4.Tld4sRegRegRegRegImm,
       Register,
@@ -1479,321 +1839,174 @@ object InstructionDefinitions4 {
       Immediate
     )(Form.Tld4sRegRegRegRegImm.apply),
     FormDecoder(
-      Definitions4.TldsRegRegRegRegImm,
+      Definitions4.TldsRegRegRegRegImmSymbolSymbol,
       Register,
       Register,
       Register,
       Register,
+      Immediate,
+      Symbol,
+      Symbol
+    )(Form.TldsRegRegRegRegImmSymbolSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegImmImmSymbol,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TmmlRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TldsRegRegRegRegImm.apply),
-    FormDecoder(Definitions4.TmmlRegRegImm, Register, Register, Immediate)(Form.TmmlRegRegImm.apply),
-    FormDecoder(Definitions4.TmmlRegRegImmImm, Register, Register, Immediate, Immediate)(Form.TmmlRegRegImmImm.apply),
+    )(Form.TmmlRegRegImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegImmImmImm,
+      Definitions4.TmmlRegRegImmSymbol,
       Register,
       Register,
       Immediate,
+      Symbol
+    )(Form.TmmlRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegImmSymbolImm,
+      Register,
+      Register,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegImmImmImm.apply),
-    FormDecoder(Definitions4.TmmlRegRegRegImm, Register, Register, Register, Immediate)(Form.TmmlRegRegRegImm.apply),
+    )(Form.TmmlRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegImmImm,
+      Definitions4.TmmlRegRegRegImmImmSymbol,
       Register,
       Register,
       Register,
       Immediate,
+      Immediate,
+      Symbol
+    )(Form.TmmlRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegRegImmImm.apply),
+    )(Form.TmmlRegRegRegImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegImmImmImm,
+      Definitions4.TmmlRegRegRegImmSymbol,
       Register,
       Register,
       Register,
       Immediate,
+      Symbol
+    )(Form.TmmlRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegRegImmImmImm.apply),
-    FormDecoder(Definitions4.TmmlRegRegRegReg, Register, Register, Register, Register)(Form.TmmlRegRegRegReg.apply),
+    )(Form.TmmlRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegRegImm,
+      Definitions4.TmmlRegRegRegRegImmImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.TmmlRegRegRegRegImmImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegRegRegImmImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegRegRegImm.apply),
+    )(Form.TmmlRegRegRegRegImmImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegRegImmImm,
+      Definitions4.TmmlRegRegRegRegImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
       Immediate,
+      Immediate,
+      Symbol
+    )(Form.TmmlRegRegRegRegImmImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegRegRegImmImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegRegRegImmImm.apply),
+    )(Form.TmmlRegRegRegRegImmImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegRegImmImmImm,
+      Definitions4.TmmlRegRegRegRegRegImmSymbol,
+      Register,
       Register,
       Register,
       Register,
       Register,
       Immediate,
+      Symbol
+    )(Form.TmmlRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegRegRegRegImmSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
       Immediate,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegRegRegImmImmImm.apply),
+    )(Form.TmmlRegRegRegRegRegImmSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegRegImmImmImmImm,
+      Definitions4.TmmlRegRegRegRegRegSymbol,
       Register,
       Register,
       Register,
       Register,
-      Immediate,
-      Immediate,
-      Immediate,
+      Register,
+      Symbol
+    )(Form.TmmlRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions4.TmmlRegRegRegRegRegSymbolImm,
+      Register,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol,
       Immediate
-    )(Form.TmmlRegRegRegRegImmImmImmImm.apply),
+    )(Form.TmmlRegRegRegRegRegSymbolImm.apply),
     FormDecoder(
-      Definitions4.TmmlRegRegRegRegReg,
+      Definitions4.TmmlRegRegRegRegSymbol,
       Register,
       Register,
       Register,
       Register,
-      Register
-    )(Form.TmmlRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TmmlRegRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TmmlRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TmmlRegRegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TmmlRegRegRegRegRegImmImm.apply),
-    FormDecoder(Definitions4.TxaRegRegImm, Register, Register, Immediate)(Form.TxaRegRegImm.apply),
-    FormDecoder(Definitions4.TxaRegRegImmImm, Register, Register, Immediate, Immediate)(Form.TxaRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TxaRegRegImmImmImm,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxaRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TxdPredRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegImmImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TxdPredRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TxdPredRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegImmImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegImmImmImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegRegImmImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TxdPredRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TxdPredRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TxdPredRegRegRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegRegRegImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TxdPredRegRegRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TxdPredRegRegRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TxdPredRegRegRegRegRegRegImmImm.apply),
-    FormDecoder(Definitions4.TxdRegRegRegImm, Register, Register, Register, Immediate)(Form.TxdRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TxdRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegImmImmImm,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxdRegRegRegImmImmImm.apply),
-    FormDecoder(Definitions4.TxdRegRegRegReg, Register, Register, Register, Register)(Form.TxdRegRegRegReg.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegRegImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate
-    )(Form.TxdRegRegRegRegImm.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegRegImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.TxdRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegRegImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxdRegRegRegRegImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegRegImmImmImmImm,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Immediate,
-      Immediate
-    )(Form.TxdRegRegRegRegImmImmImmImm.apply),
-    FormDecoder(
-      Definitions4.TxdRegRegRegRegReg,
-      Register,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.TxdRegRegRegRegReg.apply)
+      Symbol
+    )(Form.TmmlRegRegRegRegSymbol.apply)
   )
 }

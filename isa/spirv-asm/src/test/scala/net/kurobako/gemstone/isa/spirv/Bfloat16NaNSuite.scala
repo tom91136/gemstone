@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class Bfloat16NaNSuite extends Suite {
   test("OpConvertFToBF16INTEL keeps NaN sign and leading payload, quieted") {

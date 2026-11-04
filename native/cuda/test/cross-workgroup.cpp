@@ -894,6 +894,12 @@ TEST_CASE("CUDA free waits for queued memory uses", "[cuda][integration]") {
         check(library.load<decltype(&cuMemAlloc_v2)>("cuMemAlloc_v2")(&p, size));
         return reinterpret_cast<void *>(p);
       },
+      [&](size_t size) {
+        void *p{};
+        check(library.load<decltype(&cuMemAllocHost_v2)>("cuMemAllocHost_v2")(&p, size));
+        return std::shared_ptr<void>(
+            p, [freeHost = library.load<decltype(&cuMemFreeHost)>("cuMemFreeHost")](void *q) { CHECK(freeHost(q) == CUDA_SUCCESS); });
+      },
       [&](void *dst, const void *src, size_t size, bool upload) {
         if (upload) check(library.load<decltype(&cuMemcpyHtoDAsync_v2)>("cuMemcpyHtoDAsync_v2")(devicePointer(dst), src, size, nullptr));
         else check(library.load<decltype(&cuMemcpyDtoHAsync_v2)>("cuMemcpyDtoHAsync_v2")(dst, devicePointer(src), size, nullptr));
@@ -915,12 +921,11 @@ TEST_CASE("CUDA driver lookup exposes known unsupported APIs and ordinary stream
   const auto lookup = library.load<CUresult (*)(const char *, void **, int, uint64_t, int *)>("cuGetProcAddress_v2");
   void *function = nullptr;
   int status = -1;
-  check(lookup("cuGraphInstantiate", &function, 10000, 0, &status));
+  check(lookup("cuGraphInstantiateWithParams", &function, 12000, 0, &status));
   REQUIRE(function != nullptr);
   REQUIRE(status == 0);
   void *canary = reinterpret_cast<void *>(uintptr_t{0x1234});
-  REQUIRE(reinterpret_cast<CUresult (*)(void **, void *, void *, char *, size_t)>(function)(&canary, nullptr, nullptr, nullptr, 0)
-          == CUDA_ERROR_NOT_SUPPORTED);
+  REQUIRE(reinterpret_cast<CUresult (*)(void **, void *, void *)>(function)(&canary, nullptr, nullptr) == CUDA_ERROR_NOT_SUPPORTED);
   REQUIRE(canary == reinterpret_cast<void *>(uintptr_t{0x1234}));
   check(lookup("cuGemstoneUnknownSymbol", &function, 13030, 0, &status));
   REQUIRE(status == 1);

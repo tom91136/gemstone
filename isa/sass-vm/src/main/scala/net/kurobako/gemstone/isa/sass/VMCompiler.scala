@@ -114,9 +114,8 @@ private object VMCompiler {
       val target = module.sections.lift(table.info)
       if (table.size != 0 && target.exists(_.name == s".nv.constant0.${kernel.name}"))
         fail("relocations in launch parameter constants are not implemented")
-      if (table.size != 0 && target.exists(_.name.startsWith(".nv.global")))
-        fail("relocations in kernel code, constants or globals are not implemented")
     }
+    Cubin.globalRelocations(module).left.foreach(error => fail(error.raw))
     val image       = functions.find(_.name == kernel.name).getOrElse(fail(s"missing SASS for ${kernel.name}"))
     val relocations = Cubin.TextRelocation.resolve(module, kernel, image, boundSymbols.keySet)
       .fold(error => fail(error.raw), identity)
@@ -133,7 +132,8 @@ private object VMCompiler {
     val reductions   = LegacyRangeReduction.inputs(module.sm, function, layout)
     def is[A <: Form](instruction: DecodedInstruction)(using TypeTest[Form, A]) =
       OperandQueries.is[A](instruction.operation)
-    def at(address: Int): Option[DecodedInstruction] = instructions.find(_.address.raw == address)
+    val byAddress                                    = instructions.map(i => i.address.raw -> i).toMap
+    def at(address: Int): Option[DecodedInstruction] = byAddress.get(address)
     val collectiveEnds                               = instructions.filter(i =>
       is[Form.Warpsync](i) &&
         (i.modifiers == CollectiveModifiers || i.modifiers == CollectiveAllModifiers)
@@ -152,20 +152,36 @@ private object VMCompiler {
     instructions.filter(is[Form.Endcollective]).foreach { end =>
       if (!collectiveEnds(end.address)) fail("ENDCOLLECTIVE has no matching warp synchronisation")
     }
-    // BSYNC falls through to the setup target; BMOV may restore the token into a different B register.
+    // BMOV may restore the token into another barrier register, so the BSYNC need not sit next to the target
+    val synchronisations = instructions.collect { case i if is[Form.Bsync](i) => i.address.raw }.toSet
+    val branchSources    = instructions.collect {
+      case i if i.guard.isEmpty && is[Form.Bra](i) && i.operands.nonEmpty =>
+        OperandQueries.integer(i.operands.last).map(_ -> i.address.raw)
+    }.flatten.groupMap(_._1)(_._2)
     instructions.filter(is[Form.Bssy]).foreach { setup =>
       val target = setup.operands match {
         case Vec(token, end) if VMRegisters.isBarrier(token) => codeTarget(end)
         case _                                               => fail("invalid convergence barrier setup")
       }
-      if (target <= setup.address || !at(target - 16).exists(is[Form.Bsync]))
-        fail("convergence barrier target must be forward and immediately after its BSYNC")
+      if (
+        target <= setup.address ||
+        !(synchronisations(target - 16) ||
+          branchSources.get(BigInt(target)).exists(_.exists(source => synchronisations(source - 16))))
+      ) fail("convergence barrier target must be forward and reached from its BSYNC")
     }
-    val legacyControl                   = Option.when(generation != Generation.Modern)(LegacyControlFlow(instructions))
+    val legacyControl   = Option.when(generation != Generation.Modern)(LegacyControlFlow(instructions))
+    val pollingBranches =
+      if (generation != Generation.Modern) LegacyFlowGraph.pollingBranches(instructions) else Set.empty[Int]
     val legacyTokens                    = legacyControl.fold(Vec.empty[LegacyControlFlow.Setup])(_.setups)
     val addresses                       = instructions.map(_.address.raw).sorted
-    def next(address: Int): Option[Int] = addresses.find(_ > address)
-    val returnBases                     = instructions.filter(is[Form.Lepc]).map(_.address.raw) ++
+    val addressSet                      = addresses.toSet
+    val following                       = addresses.zip(addresses.drop(1)).toMap
+    def next(address: Int): Option[Int] = following.get(address)
+    val callTargets                     = Vec.from(textRelocations.values.collect {
+      case relocation if relocation.symbol == kernel.name && !relocation.call && !relocation.high =>
+        relocation.addend.toInt
+    }).distinct.filter(addressSet.contains)
+    val returnBases = instructions.collect { case i if is[Form.Lepc](i) => i.address.raw } ++
       instructions.filter(is[Form.Call]).map(_.address.raw + generation.instructionBytes.raw) ++
       instructions.filter(i => is[Form.Cal](i) || is[Form.Jcal](i)).map(i =>
         next(i.address).getOrElse(fail("call has no return instruction"))
@@ -222,11 +238,14 @@ private object VMCompiler {
               normalised,
               returns,
               targets,
+              callTargets,
               boundSymbols,
               reductions.inputs.get(instruction.address),
               textRelocations.get(instruction.address),
               layout
             ).compile() ++ branch
+        val polling =
+          if (pollingBranches(instruction.address.raw)) Vec(Execute(Yield)) else Vec.empty[VMAssembler.Statement]
         val arrivals = legacyTokens.filter(_.target == instruction.address).reverse.map(token =>
           Execute(Convergence(layout.barrier(token.slot), ConvergenceAction.Synchronise))
         )
@@ -250,7 +269,7 @@ private object VMCompiler {
             instruction.address.toLong.unsafe[Long >= 0],
             text(instruction.operation)
           ) +:
-            (statements.take(1) ++ arrivals ++ saves ++ statements.drop(1) ++ restores)
+            (statements.take(1) ++ arrivals ++ saves ++ polling ++ statements.drop(1) ++ restores)
         )
       } catch {
         case NonFatal(error) =>
@@ -303,6 +322,7 @@ private object VMCompiler {
       val instruction: DecodedInstruction,
       val returnBases: Vec[Int],
       val addresses: Vec[Int],
+      val callTargets: Vec[Int],
       val boundSymbols: Map[NonEmpty[String], GuestAddress],
       val reducedRadians: Option[Value.Register],
       val textRelocation: Option[Cubin.TextRelocation],
@@ -464,16 +484,16 @@ private object VMCompiler {
           else if (operand.base.exists(OperandQueries.isZero)) operand.index.filter(_.bank == RegisterBank.UR)
           else None
         def add(offset: Value): Unit = emit(IntegerBinary(IntegerOperation.Add, result.slot, result, offset, 64))
-        // Global and generic addresses are 64-bit under .E or a .64 base, else 32-bit; uniform-only bases are pairs.
-        val wide = global &&
-          (modifiers.contains(Modifier.E) || mode.contains(AddressMode.`64`) ||
-            (operand.index.isEmpty && uniformBase.nonEmpty))
         if (mode.contains(AddressMode.U32) && uniformBase.nonEmpty) {
           val base = uniformBase.get
           if (!global || sm < 75 || base.index >= 255 || operand.displacement != 0 || operand.scale != 1)
             unsupported("unsupported uniform-only .U32 global address")
           emit(MoveCombine(result.slot, Vec(register(base), register(base, 1)), 32))
         } else {
+          // Global and generic addresses are 64-bit under .E or a .64 base, else 32-bit; uniform-only bases are pairs.
+          val wide = global &&
+            (modifiers.contains(Modifier.E) || mode.contains(AddressMode.`64`) ||
+              (operand.index.isEmpty && uniformBase.nonEmpty))
           operand.base match {
             case Some(base) if wide && !OperandQueries.isZero(base) && !mode.contains(AddressMode.U32) =>
               emit(MoveCombine(result.slot, Vec(register(base), register(base, 1)), 32))
@@ -580,7 +600,8 @@ private object VMCompiler {
         VMPredicateCompiler.lower(using this) || VMTensorCompiler.lower(using this) ||
         VMWarpgroupCompiler.lower(using this) ||
         VMAsyncCompiler.lower(using this) || VMTensorMemoryCompiler.lower(using this) ||
-        VMMemoryCompiler.lower(using this) || VMControlCompiler.lower(using this)
+        VMTextureCompiler.lower(using this) || VMMemoryCompiler.lower(using this) ||
+        VMControlCompiler.lower(using this)
 
     def compile(): Vec[VMAssembler.Statement] = {
       // the tcgen05 MMAs mark their instruction descriptor operand IDESC, which the pinned domains do not name
@@ -606,9 +627,11 @@ private object VMCompiler {
       if (!lowered) unsupported("SASS instruction is not implemented")
       if (operands.headOption.exists(OperandQueries.has(_, OperandSelector.`CC`)))
         VMConditionCodeForms.finish(writtenFlags.toSet)(using this)
-      val collective = OperandQueries.is[Form.Bra](operation) && modifiers.contains(Modifier.ANY)
-      val guard      = instruction.guard.map(_.predicate).filterNot(_ => collective)
-      val setup      = guard.toVec.map { predicate =>
+      val warpBranch = OperandQueries.is[Form.Bra](operation) &&
+        (modifiers.contains(Modifier.ANY) ||
+          (!legacy && (modifiers == Vec(Modifier.DIV) || modifiers == Vec(Modifier.CONV))))
+      val guard = instruction.guard.map(_.predicate).filterNot(_ => warpBranch)
+      val setup = guard.toVec.map { predicate =>
         val value = this.predicate(predicate.copy(negated = false))
         Execute(
           if (predicate.negated) PredicateUnary(VMRegisters.Predicate.Guard.slot, value.slot)

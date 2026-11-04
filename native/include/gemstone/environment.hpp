@@ -72,7 +72,8 @@ inline std::optional<uint64_t> positiveThousandths(std::string_view raw) {
   const auto dot = raw.find('.');
   const auto whole = raw.substr(0, dot);
   const auto fraction = dot == std::string_view::npos ? std::string_view{} : raw.substr(dot + 1);
-  if (whole.empty() || whole.size() > 9 || (dot != std::string_view::npos && (fraction.empty() || fraction.size() > 3))) return std::nullopt;
+  if (whole.empty() || whole.size() > 9 || (dot != std::string_view::npos && (fraction.empty() || fraction.size() > 3)))
+    return std::nullopt;
   std::string digits(whole);
   digits.append(fraction).append(3 - fraction.size(), '0');
   return positiveInteger(digits);
@@ -88,12 +89,12 @@ inline uint64_t unsignedValue(const char *name, uint64_t fallback, uint64_t maxi
 // Timeouts become signed 32-bit millisecond counts.
 inline constexpr uint64_t TimeoutSecondsMaximum = std::numeric_limits<int>::max() / 1000;
 
+inline constexpr uint64_t DeviceCountMaximum = 16;
+
+// Longest silence tolerated on the execution transport. The server heartbeats while it executes a request, so a
+// request may run for any length of time as long as the server stays alive.
 inline int rpcTimeoutSeconds() {
   return static_cast<int>(unsignedValue(RpcTimeoutSeconds, RpcTimeoutSecondsDefault, TimeoutSecondsMaximum));
-}
-
-inline int hsaPagingTimeoutSeconds() {
-  return static_cast<int>(unsignedValue(HsaPagingTimeoutSeconds, rpcTimeoutSeconds(), TimeoutSecondsMaximum));
 }
 
 inline std::string rejected(const char *name, const char *raw, std::string_view expected) {
@@ -113,7 +114,7 @@ inline std::optional<std::string> invalid() {
     if (const char *raw = value(name); raw && !boolean(raw)) return rejected(name, raw, "one of 1 true on y yes 0 false off n no");
   const std::pair<const char *, uint64_t> integers[] = {{RpcClientId, std::numeric_limits<int64_t>::max()},
                                                         {RpcTimeoutSeconds, TimeoutSecondsMaximum},
-                                                        {HsaPagingTimeoutSeconds, TimeoutSecondsMaximum},
+                                                        {DeviceCount, DeviceCountMaximum},
                                                         {ThreadCount, std::numeric_limits<uint32_t>::max()}};
   for (const auto &[name, maximum] : integers)
     if (const char *raw = value(name)) {

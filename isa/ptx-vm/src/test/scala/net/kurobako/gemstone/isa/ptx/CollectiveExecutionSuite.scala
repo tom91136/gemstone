@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class CollectiveExecutionSuite extends Suite {
   private val inactiveLane         = (999, 999)
@@ -81,6 +81,41 @@ class CollectiveExecutionSuite extends Suite {
       }
       assertEquals(result, expected)
     }
+
+  for ((operation, bounds) <- Vec("up" -> 0x1800, "down" -> 0x181f))
+    test(s"$operation shuffle confines each lane to its 8 lane segment") {
+      val result   = execute(s"shfl.sync.$operation.b32 %result|%p, %value, 3, $bounds, -1; selp.u32 %valid, 1, 0, %p;")
+      val expected = Vec.tabulate(64) { lane =>
+        val local  = lane % 8
+        val source = if (operation == "up") local - 3 else local + 3
+        val valid  = source >= 0 && source < 8
+        (100 + (if (valid) lane - local + source else lane), if (valid) 1 else 0)
+      }
+      assertEquals(result, expected)
+    }
+
+  test("a shuffle scan over a partially active warp matches the prefix sums") {
+    val steps = Vec(1, 2, 4).map(distance => s"""@%active shfl.sync.up.b32 %valid|%p, %result, $distance, 0x1800, 0xff;
+      |setp.ge.u32 %selected, %lane, $distance;
+      |and.pred %selected, %selected, %active;
+      |@%selected add.u32 %result, %result, %valid;""".stripMargin)
+    val result = execute(s"""setp.lt.u32 %active, %lane, 8;
+      |mov.u32 %result, %value;
+      |${steps.mkString("\n")}""".stripMargin)
+    assertEquals(result.map(_._1).take(8), Vec.tabulate(8)(lane => 100 * (lane + 1) + lane * (lane + 1) / 2))
+  }
+
+  test("a down shuffle reads zero from source lanes outside the member mask") {
+    val result = execute(
+      """setp.lt.u32 %active, %lane, 8;
+        |mov.u32 %result, %value;
+        |@%active shfl.sync.down.b32 %result|%p, %value, 3, 31, 0xff;""".stripMargin
+    )
+    val expected = Vec.tabulate(64) { lane =>
+      if (lane >= 8) 100 + lane else if (lane + 3 < 8) 100 + lane + 3 else 0
+    }
+    assertEquals(result.map(_._1), expected)
+  }
 
   for (
     (operation, threshold, expected) <- Vec(
@@ -211,7 +246,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(7, 7, 9, 9)
@@ -260,7 +295,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       memory.readLittleEndian(memory.start, 8).toOption.get,
       0x3ff0000000000000L
@@ -307,7 +342,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(7, 7, 7, 7)
@@ -344,7 +379,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(7, 7, 7, 7)
@@ -379,7 +414,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(32)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       (0 until 32).map(_ & ~7)
@@ -410,7 +445,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       memory.readLittleEndian(memory.start, 8).toOption,
       Some(0x1122334455667788L)
@@ -448,7 +483,7 @@ class CollectiveExecutionSuite extends Suite {
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory
     )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertSucceeded(result)
     assertEquals(
       Vec.tabulate(2)(index => memory.readInt32(memory.start.offset(index.toLong * 4L)).toOption.get),
       Vec(7, 7)

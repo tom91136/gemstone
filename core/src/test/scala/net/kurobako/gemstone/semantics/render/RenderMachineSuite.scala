@@ -3,7 +3,7 @@ package net.kurobako.gemstone.semantics.render
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 

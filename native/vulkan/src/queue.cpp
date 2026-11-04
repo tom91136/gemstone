@@ -109,6 +109,11 @@ void stopQueues(const std::shared_ptr<DeviceState> &device) {
   host::Scope const scope(nullptr);
   for (const auto &queue : device->queues)
     commandQueue().forget(queue->handle);
+  {
+    std::scoped_lock const lock(stateMutex);
+    if (!devices.empty()) return;
+  }
+  commandQueue().park();
 }
 VkResult createQueues(uint32_t count, VkDevice *handle) {
   auto device = std::make_shared<DeviceState>();
@@ -210,7 +215,7 @@ VkResult implVkWaitForFences(VkDevice, uint32_t count, const VkFence *values, Vk
            || (all ? waiting ^ forall([](const auto &fence) { return fence->signalled; })
                    : waiting ^ exists([](const auto &fence) { return fence->signalled; }));
   };
-  if (!stateChanged.wait_until(lock, deadlineAfter(timeout), ready)) return VK_TIMEOUT;
+  if (!waitWithin(stateChanged, lock, timeout, ready)) return VK_TIMEOUT;
   return failed() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
 VkResult implVkQueueSubmit(VkQueue handle, uint32_t count, const VkSubmitInfo *infos, VkFence fence) {
@@ -335,7 +340,7 @@ VkResult implVkWaitSemaphores(VkDevice, const VkSemaphoreWaitInfo *info, uint64_
   const auto ready = [&] {
     return failed() || ((info->flags & VK_SEMAPHORE_WAIT_ANY_BIT) ? waiting ^ exists(signalled) : waiting ^ forall(signalled));
   };
-  if (!stateChanged.wait_until(lock, deadlineAfter(timeout), ready)) return VK_TIMEOUT;
+  if (!waitWithin(stateChanged, lock, timeout, ready)) return VK_TIMEOUT;
   return failed() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
 } // namespace gemstone::vulkan

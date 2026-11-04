@@ -38,8 +38,7 @@ object Parser {
     } else if (text.startsWith(".")) {
       val end  = text.indexWhere(_.isWhitespace)
       val name = if (end < 0) text else text.take(end)
-      val args = if (end < 0) "" else text.drop(end).trim
-      if (isDirective(name)) Right(Some(Statement.Directive(name, args)))
+      if (isDirective(name)) Right(Some(Statement.Directive(name, if (end < 0) "" else text.drop(end).trim)))
       else Left(error(line, start, s"invalid directive '$name'"))
     } else {
       text match {

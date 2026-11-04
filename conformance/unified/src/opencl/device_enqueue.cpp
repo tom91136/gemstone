@@ -257,18 +257,18 @@ void profiled() {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/ndrange/n64-and-8x4", "[unified][runtime][compact]") { ndrange(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/ndrange/n64-and-8x4", "[unified][runtime]") { ndrange(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/per-work-item/n64-l16", "[unified][runtime][compact]") { each(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/per-work-item/n64-l16", "[unified][runtime]") { each(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/events/markers-and-user-events", "[unified][runtime][compact]") { ordered(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/events/markers-and-user-events", "[unified][runtime]") { ordered(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/local-arguments/n32-l16", "[unified][runtime][compact]") { local(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/local-arguments/n32-l16", "[unified][runtime]") { local(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/nested/depth8", "[unified][runtime][compact]") { nested(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/nested/depth8", "[unified][runtime]") { nested(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/queue-argument/n4", "[unified][runtime][compact]") { argument(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/queue-argument/n4", "[unified][runtime]") { argument(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/work-group-size/queries", "[unified][runtime][compact]") { sized(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/work-group-size/queries", "[unified][runtime]") { sized(); }
 
-TEST_CASE("edge-cases/runtime/opencl/device-enqueue/profiling/capture", "[unified][runtime][compact]") { profiled(); }
+TEST_CASE("edge-cases/runtime/opencl/device-enqueue/profiling/capture", "[unified][runtime]") { profiled(); }

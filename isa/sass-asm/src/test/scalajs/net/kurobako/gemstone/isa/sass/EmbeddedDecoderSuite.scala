@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class EmbeddedDecoderSuite extends Suite {
   private val target = Target.parse("sm_89").fold(fail(_), identity)

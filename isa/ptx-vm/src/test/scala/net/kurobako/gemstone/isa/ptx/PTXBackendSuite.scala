@@ -44,6 +44,29 @@ class PTXBackendSuite extends Suite {
     }
   }
 
+  test("debug string sections with unterminated data directives load and build") {
+    val source =
+      """|.version 9.2
+         |.target sm_120
+         |.address_size 64
+         |.section .debug_str
+         |{
+         |$L__info_string0:
+         |.b8 99
+         |.b8 0
+         |}
+         |.visible .entry debugged() { ret; }
+         |""".stripMargin
+    Using.resource(
+      PTXBackend(text = execution.text)
+        .load(Vec.from(source.getBytes(StandardCharsets.UTF_8)))
+        .fold(error => fail(error.message), value => value)
+    ) { program =>
+      assert(program.kernel("debugged").isRight)
+      assert(program.build("debugged").isRight)
+    }
+  }
+
   private def loadModule(version: String, target: String, instruction: String) =
     PTXBackend(text = execution.text).load(Vec.from(
       s""".version $version

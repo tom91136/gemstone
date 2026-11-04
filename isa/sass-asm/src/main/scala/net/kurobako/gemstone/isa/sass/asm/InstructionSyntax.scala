@@ -74,13 +74,11 @@ private object InstructionSyntax {
     (text, found.toVec.sortBy(_._1).map(_._2))
   }
 
-  /** RPCMOV's `Rpc.HI` or `Rpc.LO` operand as the modifiers its encodings record: `Rpc` and the half where it is the
-    * destination, the half alone where it is the source.
-    */
   private def returnAddress(operands: Vec[Operand]): (Vec[String], Vec[Operand]) = operands match {
     case Vec(Operand.Qualified(Operand.Symbol("Rpc"), Vec(half)), source) => (Vec("Rpc", half.spelling), Vec(source))
-    case Vec(destination, Operand.Qualified(Operand.Symbol("Rpc"), Vec(half))) => (Vec(half.spelling), Vec(destination))
-    case _                                                                     => (Vec.empty, operands)
+    case Vec(destination, Operand.Qualified(Operand.Symbol("Rpc"), Vec(half))) =>
+      (Vec.empty, Vec(destination, Operand.Symbol(s"Rpc.${half.spelling}")))
+    case _ => (Vec.empty, operands)
   }
 
   /** The operands nvdisasm leaves out of a tcgen05 instruction where they are zero: the disabled-lane or zero-column
@@ -106,7 +104,9 @@ private object InstructionSyntax {
     )
     guard <- instruction.guard.traverse(value => OperandPrinter.print(value.predicate))
   } yield {
-    val opcode = (instruction.mnemonic.raw +: instruction.modifiers.map(_.name)).mkString(".")
+    val (qualifiers, returned) = instruction.modifiers.map(_.name).span(_ != "Rpc")
+    val leading                = if (returned.size == 2) Vec(s"Rpc.${returned(1)}") else Vec.empty[String]
+    val opcode                 = (instruction.mnemonic.raw +: qualifiers).mkString(".")
     // `cx[URa]` and the offset after it print as one operand, the offset bracketed
     val joined = mutable.ArrayBuffer.empty[String]
     instruction.operands.indices.foreach { index =>
@@ -115,8 +115,8 @@ private object InstructionSyntax {
           joined.last + (if (operands(index).startsWith("[")) operands(index) else s"[${operands(index)}]")
       else joined.append(operands(index))
     }
-    guard.fold("")(value => s"@$value ") + opcode +
-      (if (joined.isEmpty) "" else " " + joined.mkString(", ")) + ";"
+    val printed = leading ++ joined
+    guard.fold("")(value => s"@$value ") + opcode + (if (printed.isEmpty) "" else " " + printed.mkString(", ")) + ";"
   }
 
 }

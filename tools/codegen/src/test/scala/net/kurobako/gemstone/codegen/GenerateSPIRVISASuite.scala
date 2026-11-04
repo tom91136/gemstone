@@ -2,7 +2,7 @@ package net.kurobako.gemstone.codegen
 
 import java.nio.file.Files
 import java.nio.file.Path
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class GenerateSPIRVISASuite extends Suite {
   private val grammar  = """{

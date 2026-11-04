@@ -122,8 +122,8 @@ private:
 };
 }} // namespace unified::test
 
-UNIFIED_BLAS_CASES("reference/blas/f32/", "[unit][unified][blas][f32][compact]", F32,
-                   unified::test::ReferenceBlas<unified::ScalarType::F32>, unified::full::BlasSizes, unified::full::MatrixShapes)
+UNIFIED_BLAS_CASES("reference/blas/f32/", "[unit][unified][blas][f32]", F32, unified::test::ReferenceBlas<unified::ScalarType::F32>,
+                   unified::full::BlasSizes, unified::full::MatrixShapes)
 UNIFIED_BLAS_CASES("reference/blas/f64/", "[unit][unified][blas][f64]", F64, unified::test::ReferenceBlas<unified::ScalarType::F64>,
                    unified::full::BlasSizes, unified::full::MatrixShapes)
 UNIFIED_BLAS_CASES("reference/blas/f16/", "[unit][unified][blas][f16]", F16, unified::test::ReferenceBlas<unified::ScalarType::F16>,

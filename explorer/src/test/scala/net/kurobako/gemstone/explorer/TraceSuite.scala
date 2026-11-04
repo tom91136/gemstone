@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
@@ -78,8 +78,10 @@ class TraceSuite extends Suite {
     perUnit.foreach { (unit, events) =>
       val ordered = events.sortBy(_.issued)
       val blocked = ordered.indexWhere(parked(_))
-      val resumed = ordered.indexWhere(_.kind == MachineEvent.Kind.Resumed)
-      if (blocked >= 0) assert(resumed > blocked, s"the unit $unit was not released after parking")
+      if (blocked >= 0) {
+        val resumed = ordered.indexWhere(_.kind == MachineEvent.Kind.Resumed)
+        assert(resumed > blocked, s"the unit $unit was not released after parking")
+      }
       assert(ordered.exists(_.kind == MachineEvent.Kind.Retired), s"the unit $unit never retired")
     }
   }

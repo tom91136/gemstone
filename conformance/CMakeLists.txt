@@ -48,7 +48,7 @@ set(CONFORMANCE_TIMEOUT_OPENCL_MULTIPLES 600)
 set(CONFORMANCE_TIMEOUT_OPENCL_THREAD_DIMENSIONS 1800)
 set(CONFORMANCE_TIMEOUT_OPENCL_ISOLATED 900)
 # The handler copy matrix passes alone in ~42s but exceeds 120s when sharing
-# emulator workers with the other compact workloads.
+# emulator workers with the other short workloads.
 set(CONFORMANCE_TIMEOUT_SYCL_HANDLER_ISOLATED 300)
 
 # Keep compiler output independent of the checkout and build directory, including
@@ -130,6 +130,7 @@ endif()
 option(CONFORMANCE_BUILD_UNIFIED "Build the project-owned unified suite" ${conformance_unified_default})
 option(CONFORMANCE_BUILD_CTS "Build the CTS appropriate for the selected backend" ON)
 option(CONFORMANCE_BUILD_MINIAPPS "Build the selected miniapp matrix" ON)
+option(CONFORMANCE_BUILD_VENDOR "Build the vendor library tests and samples for the selected backend" ON)
 option(CONFORMANCE_HIP_ENABLE_ROCBLAS "Build rocBLAS-backed HIP cases" ON)
 if((CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR CONFORMANCE_BUILD_MINIAPPS)
     AND NOT CONFORMANCE_BACKEND)
@@ -140,15 +141,23 @@ if(CONFORMANCE_COMPILER STREQUAL "gcc" AND CONFORMANCE_BUILD_UNIFIED)
   message(FATAL_ERROR "GCC OpenMP currently provides miniapps; there is no unified OpenMP backend")
 endif()
 set(CMAKE_CUDA_ARCHITECTURES "75" CACHE STRING "CUDA architectures for unified and miniapps")
-option(CONFORMANCE_CUDA_CUBIN_ONLY "Compile CUDA kernels without an embedded PTX fallback" OFF)
+set(CONFORMANCE_CUDA_CODE "fatbin" CACHE STRING "CUDA device code: fatbin (SASS and PTX) or ptx (PTX only)")
+set_property(CACHE CONFORMANCE_CUDA_CODE PROPERTY STRINGS fatbin ptx)
+if(NOT CONFORMANCE_CUDA_CODE MATCHES "^(fatbin|ptx)$")
+  message(FATAL_ERROR "CONFORMANCE_CUDA_CODE must be fatbin or ptx, got '${CONFORMANCE_CUDA_CODE}'")
+endif()
 set(conformance_cuda_architecture "${CMAKE_CUDA_ARCHITECTURES}")
 # Architecture-specific (a) and family-specific (f) targets compare by their compute capability.
 string(REGEX REPLACE "[af]$" "" conformance_cuda_capability "${conformance_cuda_architecture}")
-if(CONFORMANCE_CUDA_CUBIN_ONLY AND CONFORMANCE_BACKEND STREQUAL "cuda")
+if(CONFORMANCE_CUDA_CODE STREQUAL "ptx" AND CONFORMANCE_BACKEND STREQUAL "cuda")
   if(NOT CMAKE_CUDA_ARCHITECTURES MATCHES "^[0-9]+[af]?$")
-    message(FATAL_ERROR "Cubin-only builds require one numeric CUDA architecture")
+    message(FATAL_ERROR "PTX-only CUDA builds require one numeric CUDA architecture")
   endif()
-  set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}-real")
+  if(CONFORMANCE_COMPILER STREQUAL "clang")
+    include(cmake/ClangCudaPtx.cmake)
+  else()
+    set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}-virtual")
+  endif()
 endif()
 set(CMAKE_HIP_ARCHITECTURES "gfx908" CACHE STRING "AMDGPU architectures for unified, HSA, and miniapps")
 set(CONFORMANCE_MINIAPP_MODELS "" CACHE STRING
@@ -223,7 +232,7 @@ if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
 endif()
 
 if(BUILD_TESTING OR CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR
-    CONFORMANCE_BUILD_MINIAPPS)
+    CONFORMANCE_BUILD_MINIAPPS OR CONFORMANCE_BUILD_VENDOR)
   FetchContent_MakeAvailable(Catch2)
   add_subdirectory("${catch2_SOURCE_DIR}" "${catch2_BINARY_DIR}" EXCLUDE_FROM_ALL)
   mark_system_includes(Catch2)
@@ -251,7 +260,8 @@ if(BUILD_TESTING)
   add_executable(conformance_unit_tests
     tests/cuda_image_test.cpp
     tests/driver_test.cpp
-    tests/profile_test.cpp)
+    tests/profile_test.cpp
+    tests/reference_test.cpp)
   conformance_project_target(conformance_unit_tests)
   target_include_directories(conformance_unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -430,7 +440,11 @@ elseif(CONFORMANCE_BACKEND STREQUAL "sycl")
     /opt/intel/oneapi/mkl/*/lib/libmkl_core.so*
     /opt/intel/oneapi/mkl/*/lib/libmkl_intel_lp64.so*
     /opt/intel/oneapi/mkl/*/lib/libmkl_intel_thread.so*
-    /opt/intel/oneapi/mkl/*/lib/libmkl_sycl_blas.so*
+    /opt/intel/oneapi/mkl/*/lib/libmkl_sycl_*.so*
+    /opt/intel/oneapi/mkl/*/lib/libmkl_def.so*
+    /opt/intel/oneapi/mkl/*/lib/libmkl_avx*.so*
+    /opt/intel/oneapi/mkl/*/lib/libmkl_mc3.so*
+    /opt/intel/oneapi/mkl/*/lib/libmkl_vml_*.so*
     /opt/intel/oneapi/tbb/*/lib/libtbb.so*
     /opt/intel/oneapi/umf/*/lib/libumf.so*)
   conformance_runtime_prefer(libOpenCL.so.1 "^/opt/intel/oneapi/compiler/")
@@ -440,6 +454,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "openacc")
   set(conformance_nvhpc_runtime_directory "$ENV{NVHPC_ROOT}/compilers/lib")
   conformance_runtime_search_directory("${conformance_nvhpc_runtime_directory}")
   conformance_runtime_plugins("${conformance_nvhpc_runtime_directory}/libacc*.so*"
+    "${conformance_nvhpc_runtime_directory}/libcudanvhpc.so*"
     "${conformance_nvhpc_runtime_directory}/libnv*.so*" "${conformance_nvhpc_runtime_directory}/libpg*.so*")
 endif()
 
@@ -472,8 +487,7 @@ function(conformance_register_test_program target timeout)
   set_property(GLOBAL APPEND PROPERTY CONFORMANCE_TEST_PROGRAMS
     "${output_name}\t${timeout}\t${format}")
 endfunction()
-if((CONFORMANCE_BUILD_UNIFIED AND NOT CONFORMANCE_BACKEND STREQUAL "openacc") OR
-    TARGET conformance_unit_tests)
+if(CONFORMANCE_BUILD_UNIFIED OR TARGET conformance_unit_tests)
   add_subdirectory(unified)
   if(TARGET unified)
     list(APPEND conformance_artifact_targets unified)
@@ -488,6 +502,11 @@ if(CONFORMANCE_BUILD_MINIAPPS AND
     (CONFORMANCE_BACKEND MATCHES "^(cuda|hip|opencl|sycl|vulkan|openacc)$" OR CONFORMANCE_COMPILER STREQUAL "gcc"))
   add_subdirectory(miniapps)
   list(APPEND conformance_artifact_targets conformance_miniapps_artifact)
+endif()
+if(CONFORMANCE_BUILD_VENDOR AND CONFORMANCE_COMPILER STREQUAL "vendor"
+    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/${CONFORMANCE_BACKEND}.cmake")
+  add_subdirectory(vendor)
+  list(APPEND conformance_artifact_targets conformance_vendor_artifact)
 endif()
 
 get_property(conformance_test_programs GLOBAL PROPERTY CONFORMANCE_TEST_PROGRAMS)
@@ -524,6 +543,24 @@ if(CONFORMANCE_COMPILER STREQUAL "gcc")
   endif()
 endif()
 
+set(conformance_offload_libraries)
+set(conformance_offload_excludes)
+if(CONFORMANCE_COMPILER STREQUAL "clang" AND CONFORMANCE_BUILD_MINIAPPS)
+  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=libomp.so
+    OUTPUT_VARIABLE libomp OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  get_filename_component(libomp "${libomp}" REALPATH)
+  get_filename_component(libomp_directory "${libomp}" DIRECTORY)
+  file(GLOB conformance_offload_libraries
+    "${libomp_directory}/libomp.so*" "${libomp_directory}/libomptarget*.so*" "${libomp_directory}/libLLVMOffload.so*")
+  list(FILTER conformance_offload_libraries INCLUDE REGEX "\\.so(\\.[0-9]+)*$")
+  foreach(library IN LISTS conformance_offload_libraries)
+    get_filename_component(library "${library}" NAME)
+    string(REGEX REPLACE "\\.so.*$" "" library "${library}")
+    list(APPEND conformance_offload_excludes "^${library}\\.so.*")
+  endforeach()
+  list(REMOVE_DUPLICATES conformance_offload_excludes)
+endif()
+
 get_property(conformance_runtime_search_directories GLOBAL
   PROPERTY CONFORMANCE_RUNTIME_SEARCH_DIRECTORIES)
 list(REMOVE_DUPLICATES conformance_runtime_search_directories)
@@ -531,7 +568,7 @@ get_property(conformance_runtime_plugins GLOBAL PROPERTY CONFORMANCE_RUNTIME_PLU
 get_property(conformance_runtime_preferences GLOBAL PROPERTY CONFORMANCE_RUNTIME_PREFERENCES)
 list(REMOVE_DUPLICATES conformance_runtime_plugins)
 list(REMOVE_DUPLICATES conformance_runtime_preferences)
-set(conformance_runtime_excludes "libcuda\\.so.*" "libnvidia-.*" "libze_intel_gpu\\.so.*")
+set(conformance_runtime_excludes "libcuda\\.so.*" "libnvidia-.*" "libze_intel_gpu\\.so.*" ${conformance_offload_excludes})
 
 function(conformance_install_arguments variable output)
   set(arguments)
@@ -572,6 +609,19 @@ string(CONCAT runtime_install_code
   "  PREFERENCES${runtime_preference_arguments}\n"
   "  EXCLUDE_REGEXES${runtime_exclude_arguments})\n")
 install(CODE "${runtime_install_code}" COMPONENT support)
+
+if(conformance_offload_libraries)
+  conformance_install_arguments(conformance_offload_libraries offload_library_arguments)
+  conformance_install_arguments(libomp_directory offload_search_arguments)
+  string(CONCAT offload_install_code
+    "include([==[${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.cmake]==])\n"
+    "bundle_runtime_dependencies(\n"
+    "  DESTINATION \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib\"\n"
+    "  SEARCH_DIRECTORIES${offload_search_arguments}\n"
+    "  PLUGINS${offload_library_arguments}\n"
+    "  EXCLUDE_REGEXES${runtime_exclude_arguments})\n")
+  install(CODE "${offload_install_code}" COMPONENT supplement)
+endif()
 
 add_custom_target(conformance-artifact ALL)
 if(conformance_artifact_targets)

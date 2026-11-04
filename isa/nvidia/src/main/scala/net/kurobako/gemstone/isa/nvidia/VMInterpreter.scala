@@ -17,7 +17,14 @@ import scala.util.boundary.break
 private[isa] object VMInterpreter {
 
   // The unit a cohort runs as: its identity follows it as it splits, parks and finishes, so a timeline can draw it.
-  private case class Cohort(id: Int >= 0, pc: Pc, lanes: VMLaneMask, frame: VMFrame)
+  // A cohort in a partition runs apart from the other partitions of its warp until a convergence barrier spans them.
+  private case class Cohort(
+      id: Int >= 0,
+      pc: Pc,
+      lanes: VMLaneMask,
+      frame: VMFrame,
+      partition: VMLaneMask = VMLaneMask.Empty
+  )
   private case class ClusterWaiting(cohort: Cohort, phase: Long, arrival: Boolean)
 
   /** Cluster barrier phases shared by the workgroups of one cluster, which a phase completes for once every live lane
@@ -36,12 +43,12 @@ private[isa] object VMInterpreter {
   // Frames compare by identity, so warp-scoped keys never match across activations.
   private enum BarrierKey derives CanEqual {
     case Workgroup(id: BarrierId)
-    case Warp(base: WorkgroupLane.WarpBase, pc: Pc, frame: VMFrame)
+    case Warp(base: WorkgroupLane.WarpBase, pc: Pc, frame: VMFrame, members: Long)
     case Convergence(base: WorkgroupLane.WarpBase, token: Long, frame: VMFrame)
 
     def describe: String = this match {
       case Workgroup(id)                   => s"barrier $id"
-      case Warp(base, pc, frame)           => s"warp $base synchronisation at ${frame.routine.name} pc $pc"
+      case Warp(base, pc, frame, _)        => s"warp $base synchronisation at ${frame.routine.name} pc $pc"
       case Convergence(base, token, frame) => s"warp $base convergence $token in ${frame.routine.name}"
     }
   }
@@ -63,6 +70,7 @@ private[isa] object VMInterpreter {
   private class ReadyQueue {
     private class Slot {
       var cohort: Cohort | Null = null
+      var indexed               = true
     }
 
     private val order  = mutable.ArrayDeque.empty[Slot]
@@ -72,6 +80,7 @@ private[isa] object VMInterpreter {
 
     // a key is never zero because frame handles start at one, so zero marks a free entry
     private var keys  = Array.ofDim[Long](8)
+    private var tags  = Array.ofDim[Int](8)
     private var slots = Array.ofDim[Slot | Null](8)
     private var shift = 61
 
@@ -84,38 +93,44 @@ private[isa] object VMInterpreter {
       (frame.readyId.toLong << 32) | (pc.toInt.toLong & 0xffffffffL)
     }
 
+    // cohorts of different partitions at one pc stay apart, so a partition's tag is its first lane plus one
+    private def tag(partition: VMLaneMask): Int = partition.headOption.fold(0)(_.raw + 1)
+
     private def home(at: Long): Int = ((at * 0x9e3779b97f4a7c15L) >>> shift).toInt
 
-    /** The table position of the key, or -1 when it is absent. */
-    private def find(at: Long): Int = {
+    /** The table position of the key and partition tag, or -1 when it is absent. */
+    private def find(at: Long, tag: Int): Int = {
       val mask = keys.length - 1
       var i    = home(at)
-      while (keys(i) != 0L && keys(i) != at) i = (i + 1) & mask
-      if (keys(i) == at) i else -1
+      while (keys(i) != 0L && (keys(i) != at || tags(i) != tag)) i = (i + 1) & mask
+      if (keys(i) != 0L) i else -1
     }
 
-    private def place(at: Long, slot: Slot): Unit = {
+    private def place(at: Long, tag: Int, slot: Slot): Unit = {
       val mask = keys.length - 1
       var i    = home(at)
       while (keys(i) != 0L) i = (i + 1) & mask
       keys(i) = at
+      tags(i) = tag
       slots(i) = slot
     }
 
-    private def put(at: Long, slot: Slot): Unit = {
+    private def put(at: Long, tag: Int, slot: Slot): Unit = {
       if ((count + 1) * 2 > keys.length) {
         val oldKeys  = keys
+        val oldTags  = tags
         val oldSlots = slots
         keys = Array.ofDim[Long](oldKeys.length * 2)
+        tags = Array.ofDim[Int](oldKeys.length * 2)
         slots = Array.ofDim[Slot | Null](oldKeys.length * 2)
         shift -= 1
         var i = 0
         while (i < oldKeys.length) {
-          if (oldKeys(i) != 0L) place(oldKeys(i), oldSlots(i).nn)
+          if (oldKeys(i) != 0L) place(oldKeys(i), oldTags(i), oldSlots(i).nn)
           i += 1
         }
       }
-      place(at, slot)
+      place(at, tag, slot)
     }
 
     /** Frees the table position, moving back the entries after it that probe through it. */
@@ -126,6 +141,7 @@ private[isa] object VMInterpreter {
       while (keys(next) != 0L) {
         if (((next - home(keys(next))) & mask) >= ((next - hole) & mask)) {
           keys(hole) = keys(next)
+          tags(hole) = tags(next)
           slots(hole) = slots(next)
           hole = next
         }
@@ -135,15 +151,32 @@ private[isa] object VMInterpreter {
       slots(hole) = null
     }
 
-    /** Queues the cohort, or adds its lanes to the cohort already queued at its pc in its frame. */
-    def add(cohort: Cohort): Unit = {
-      val at       = key(cohort.pc, cohort.frame)
-      val position = find(at)
+    private def fresh(cohort: Cohort, indexed: Boolean): Slot = {
+      val slot = if (spare.isEmpty) Slot() else spare.remove(spare.length - 1)
+      slot.cohort = cohort
+      slot.indexed = indexed
+      slot
+    }
+
+    /** Queues the cohort, at the head when `first`, or adds its lanes to the cohort already queued at its pc in its
+      * frame. A cohort that is `apart` does not join one already queued: that one issues first and this one follows.
+      */
+    def add(cohort: Cohort, first: Boolean = false, apart: Boolean = false): Unit = {
+      val at        = key(cohort.pc, cohort.frame)
+      val partition = tag(cohort.partition)
+      val position  = find(at, partition)
       if (position < 0) {
-        val slot = if (spare.isEmpty) Slot() else spare.remove(spare.length - 1)
-        slot.cohort = cohort
-        order += slot
-        put(at, slot)
+        val queued = fresh(cohort, indexed = true)
+        if (first) order.prepend(queued) else order += queued
+        put(at, partition, queued)
+        count += 1
+      } else if (apart) {
+        val queued = slots(position).nn
+        val head   = fresh(queued.cohort.nn, indexed = true)
+        queued.cohort = null
+        slots(position) = head
+        order.prepend(head)
+        order.insert(1, fresh(cohort, indexed = false))
         count += 1
       } else {
         val queued   = slots(position).nn
@@ -159,16 +192,16 @@ private[isa] object VMInterpreter {
         slot = order.removeHead()
       }
       val cohort = slot.cohort.nn
-      erase(find(key(cohort.pc, cohort.frame)))
+      if (slot.indexed) erase(find(key(cohort.pc, cohort.frame), tag(cohort.partition)))
       slot.cohort = null
       spare += slot
       count -= 1
       cohort
     }
 
-    /** Removes the cohort queued at the pc in the frame, or returns null when there is none. */
-    def take(pc: Pc, frame: VMFrame): Cohort | Null = {
-      val position = find(key(pc, frame))
+    /** Removes the cohort of the partition queued at the pc in the frame, or returns null when there is none. */
+    def take(pc: Pc, frame: VMFrame, partition: VMLaneMask): Cohort | Null = {
+      val position = find(key(pc, frame), tag(partition))
       if (position < 0) null
       else {
         val queued = slots(position).nn
@@ -250,11 +283,22 @@ private[isa] object VMInterpreter {
       control: TaskControl = TaskControl(),
       workgroups: Workgroups = Workgroups.Sequential,
       dynamicSharedBytes: Int >= 0 = 0,
-      cluster: Option[Dimensions] = None
+      cluster: Option[Dimensions] = None,
+      cooperative: Boolean = false,
+      heap: Option[HeapRegion] = None,
+      handler: Event => Either[Fault, Unit] = _ => Right(())
   ): Either[Fault, Unit] =
     parameterBlock(kernel.entry, arguments).flatMap { block =>
       control.observer.foreach(_.launched(resources(kernel, geometry, dynamicSharedBytes)))
-      launch(kernel, geometry, block, VMDevice(DeviceHeap(memory), control, workgroups), dynamicSharedBytes, cluster)
+      launch(
+        kernel,
+        geometry,
+        block,
+        VMDevice(DeviceHeap(memory), control, workgroups, handler = handler, heap = heap),
+        dynamicSharedBytes,
+        cluster,
+        cooperative
+      )
     }
 
   private def resources(kernel: Kernel, geometry: LaunchGeometry, dynamicSharedBytes: Int >= 0): KernelResources =
@@ -293,7 +337,8 @@ private[isa] object VMInterpreter {
       parameterBlock: Array[Byte],
       device: VMDevice,
       dynamicSharedBytes: Int >= 0,
-      cluster: Option[Dimensions] = None
+      cluster: Option[Dimensions] = None,
+      cooperative: Boolean = false
   ): Either[Fault, Unit] =
     for {
       laneCount <- geometry.groupVolume.refine[Int in 1 ~ 1024]
@@ -302,14 +347,17 @@ private[isa] object VMInterpreter {
         )
       shape <- clusterShape(kernel, geometry, cluster)
       allLanes = VMLaneMask.all(laneCount)
+      log      = PrintLog()
       _ <- shape match {
         case Some(dimensions) if dimensions != Dimensions.One =>
-          clusters(kernel, geometry, dimensions, parameterBlock, device, dynamicSharedBytes)
-        case _ =>
-          Dispatch.forEachGroup(geometry, device.workgroups) { (_, group) =>
+          if (cooperative) Left(Fault.Unsupported("a cooperative launch cannot also name a cluster shape"))
+          else clusters(kernel, geometry, dimensions, parameterBlock, device, dynamicSharedBytes, log)
+        case _ if cooperative => resident(kernel, geometry, parameterBlock, device, dynamicSharedBytes, log)
+        case _                =>
+          Dispatch.forEachGroup(geometry, device.workgroups) { (index, group, pace) =>
             val block = borrow(laneCount)
-            try
-              Execution(
+            try {
+              val result = Execution(
                 kernel,
                 geometry,
                 group,
@@ -318,25 +366,29 @@ private[isa] object VMInterpreter {
                 device,
                 dynamicSharedBytes,
                 block,
-                shape
+                shape,
+                pace = pace
               ).run().left.map(_.at(Fault.Location(kernel.name, None, None, Some(group), None)))
-            finally release(block)
+              log.add(index, block.workgroup.prints)
+              result
+            } finally release(block)
           }
       }
+      _ <- log.flush(device.handler)
     } yield ()
 
   // Steps each member between checks for cluster barrier phases that others completed.
   private val ClusterSlice = 64
 
   /** Runs each cluster's workgroups together on one thread, sharing their shared memory and cluster barrier. */
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def clusters(
       kernel: Kernel,
       geometry: LaunchGeometry,
       shape: Dimensions,
       parameterBlock: Array[Byte],
       device: VMDevice,
-      dynamicSharedBytes: Int >= 0
+      dynamicSharedBytes: Int >= 0,
+      log: PrintLog
   ): Either[Fault, Unit] = {
     val laneCount = geometry.groupVolume.unsafe[Int in 1 ~ 1024]
     val allLanes  = VMLaneMask.all(laneCount)
@@ -347,7 +399,7 @@ private[isa] object VMInterpreter {
     )
     val size = shape.x.raw * shape.y.raw * shape.z.raw
     LaunchGeometry.forLaunch(geometry.groupSize, count).left.map(Fault.InvalidRequest(_)).flatMap { grid =>
-      Dispatch.forEachGroup(grid, device.workgroups) { (_, origin) =>
+      Dispatch.forEachGroup(grid, device.workgroups) { (index, origin, pace) =>
         val blocks = borrow(laneCount, size)
         try {
           val sync   = ClusterSync()
@@ -382,34 +434,80 @@ private[isa] object VMInterpreter {
               dynamicSharedBytes,
               block,
               Some(shape),
-              sync
+              sync,
+              pace
             )
           )
           sync.members = members
-          members.foreach(_.begin())
-          var failure: Option[Fault] = None
-          var pending                = true
-          while (failure.isEmpty && pending) {
-            var progressed = false
-            members.foreach { member =>
-              if (failure.isEmpty && !member.finished) {
-                val runnable = member.runnable
-                member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
-                progressed ||= runnable || member.runnable
-              }
-            }
-            pending = members.exists(!_.finished)
-            if (pending && !progressed && failure.isEmpty) {
-              val waits = members.flatMap(_.describeWaits).distinct.sorted
-              failure = Some(Fault.Hang(s"execution deadlocked: ${kernel.name}: ${
-                  if (waits.nonEmpty) waits.mkString(", ") else "cluster members wait on one another"
-                }"))
-            }
-          }
-          failure.toLeft(())
+          val result = interleave(kernel, members, "cluster members wait on one another")
+          log.add(index, blocks.flatMap(_.workgroup.prints))
+          result
         } finally release(blocks)
       }
     }
+  }
+
+  // Bytes of the workspace the driver hands a cooperative grid, whose second word is the grid barrier.
+  private val GridWorkspaceBytes: Int > 0 = 256
+
+  /** Runs every workgroup of a cooperative launch resident at once on one thread, so each can wait on the others. */
+  private def resident(
+      kernel: Kernel,
+      geometry: LaunchGeometry,
+      parameterBlock: Array[Byte],
+      device: VMDevice,
+      dynamicSharedBytes: Int >= 0,
+      log: PrintLog
+  ): Either[Fault, Unit] = {
+    val laneCount = geometry.groupVolume.unsafe[Int in 1 ~ 1024]
+    val allLanes  = VMLaneMask.all(laneCount)
+    device.memory.allocate(GridWorkspaceBytes).flatMap { workspace =>
+      val cooperative = device.copy(gridWorkspace = workspace.raw)
+      val groups      =
+        Vec.tabulate(geometry.groupTotal.toInt)(index => geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]))
+      val blocks  = groups.map(_ => Block(laneCount))
+      val members = groups.zip(blocks).map((group, block) =>
+        Execution(
+          kernel,
+          geometry,
+          group,
+          liveLanes(geometry, group, allLanes),
+          parameterBlock,
+          cooperative,
+          dynamicSharedBytes,
+          block
+        )
+      )
+      val result = interleave(kernel, members, "resident workgroups wait on one another")
+      blocks.zipWithIndex.foreach((block, index) => log.add(index.toLong, block.workgroup.prints))
+      result
+    }
+  }
+
+  /** Steps each of `members` in turn until all finish, failing when a full sweep advances none. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def interleave(kernel: Kernel, members: Vec[Execution], stuck: String): Either[Fault, Unit] = {
+    members.foreach(_.begin())
+    var failure: Option[Fault] = None
+    var pending                = true
+    while (failure.isEmpty && pending) {
+      var progressed = false
+      members.foreach { member =>
+        if (failure.isEmpty && !member.finished) {
+          val runnable = member.runnable
+          member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
+          progressed ||= runnable || member.runnable
+        }
+      }
+      pending = members.exists(!_.finished)
+      if (pending && !progressed && failure.isEmpty) {
+        val waits = members.flatMap(_.describeWaits).distinct.sorted
+        failure = Some(Fault.Hang(s"execution deadlocked: ${kernel.name}: ${
+            if (waits.nonEmpty) waits.mkString(", ") else stuck
+          }"))
+      }
+    }
+    failure.toLeft(())
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -471,7 +569,8 @@ private[isa] object VMInterpreter {
       dynamicSharedBytes: Int >= 0,
       block: Block,
       cluster: Option[Dimensions] = None,
-      sync: ClusterSync = ClusterSync()
+      sync: ClusterSync = ClusterSync(),
+      pace: Pace = Pace.Free
   ) {
     private val workgroup = block.workgroup
     private val effects   = block.effects
@@ -496,13 +595,15 @@ private[isa] object VMInterpreter {
       cluster.getOrElse(Dimensions.One),
       cluster.nonEmpty
     )
+    context.spin = SpinWatch((workgroup.laneCount + 31) >> 5, pace)
     private var live         = initialLive
     private val ready        = ReadyQueue()
+    private var runningAhead = false
+    private var runAhead     = 0
     private var stalled      = 0
     private val barrierMasks = mutable.Map.empty[BarrierKey, VMLaneMask]
     private val operations   = mutable.Map.empty[BarrierKey, Option[Option[PredicateOperation]]]
     private val counts       = mutable.Map.empty[BarrierKey, Int]
-    private val warpMembers  = mutable.Map.empty[BarrierKey, Long]
     private var units        = 0
 
     // Waiting cohorts by barrier key, in arrival order within a key. Emptied lists are kept for the next key, and the
@@ -511,9 +612,6 @@ private[isa] object VMInterpreter {
     private val spareWaiting = mutable.ArrayBuffer.empty[mutable.ArrayBuffer[Waiting]]
     private val resumed      = mutable.ArrayBuffer.empty[Waiting]
     private val released     = mutable.ArrayBuffer.empty[Waiting]
-
-    private val warpArrivals       = Array.ofDim[VMLaneMask.Builder | Null]((workgroup.laneCount + 31) >>> 5)
-    private val warpArrivalMembers = Array.ofDim[Long](warpArrivals.length)
 
     private lazy val clusterWaiting     = mutable.ArrayBuffer.empty[ClusterWaiting]
     private lazy val clusterLanePhase   = Array.fill(workgroup.laneCount)(-1L)
@@ -615,9 +713,20 @@ private[isa] object VMInterpreter {
     private def enqueue(cohort: Cohort): Unit = {
       val lanes = cohort.lanes.intersect(live)
       if (lanes.nonEmpty) {
-        ready.add(if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes))
+        ready.add(
+          if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes),
+          runningAhead,
+          runningAhead && joins(cohort)
+        )
       }
     }
+
+    // each path to a convergence barrier issues its own synchronise, which the last to arrive releases
+    private def joins(cohort: Cohort): Boolean =
+      cohort.frame.routine.program.instructions.lift(cohort.pc.toInt).exists(_.instruction match {
+        case Instruction.Convergence(_, ConvergenceAction.Synchronise) => true
+        case _                                                         => false
+      })
 
     private def advance(cohort: Cohort, lanes: VMLaneMask)(using Run): Unit =
       if (cohort.pc.toInt == Int.MaxValue) fail(Fault.Backend("program counter overflow"))
@@ -664,7 +773,7 @@ private[isa] object VMInterpreter {
         Some(VMFrame.Continuation(caller, cohort.pc, returnParameters, function.returnParameters)),
         call.lanes
       )
-      enqueue(Cohort(mintUnit(), Pc.Entry, call.lanes, frame))
+      enqueue(Cohort(mintUnit(), Pc.Entry, call.lanes, frame, cohort.partition))
     }
 
     private def synchroniseWarpInstruction(memberMask: Value, cohort: Cohort): (VMLaneMask, VMLaneMask) = {
@@ -759,10 +868,8 @@ private[isa] object VMInterpreter {
       def warp(base: WorkgroupLane.WarpBase, frame: VMFrame, members: Long): VMLaneMask =
         VMLaneMask.ofWarp(base.raw, livePart(base, frame, members))
       key match {
-        case BarrierKey.Workgroup(_)         => live
-        case BarrierKey.Warp(base, _, frame) =>
-          val members = warpMembers.getOrElse(key, -1L) & ~converging(frame, base.raw)
-          warp(base, frame, members)
+        case BarrierKey.Workgroup(_)                    => live
+        case BarrierKey.Warp(base, _, frame, members)   => warp(base, frame, members & ~converging(frame, base.raw))
         case BarrierKey.Convergence(base, token, frame) =>
           warp(base, frame, workgroup.convergenceMask(base, token))
       }
@@ -869,6 +976,17 @@ private[isa] object VMInterpreter {
       parked.dropRightInPlace(parked.length - kept)
     }
 
+    /** A partition ends where a convergence barrier releases lanes beyond it. */
+    private def rejoinPartitions(released: mutable.ArrayBuffer[Waiting], participants: VMLaneMask): Unit = {
+      var index = 0
+      while (index < released.length) {
+        val waiter = released(index)
+        if (waiter.cohort.partition.nonEmpty && participants.subtract(waiter.cohort.partition).nonEmpty)
+          released(index) = waiter.copy(cohort = waiter.cohort.copy(partition = VMLaneMask.Empty))
+        index += 1
+      }
+    }
+
     private def releaseBarrier(key: BarrierKey)(using Run): Unit = {
       val arrived = barrierMasks.getOrElse(key, VMLaneMask.Empty)
       val parked  = waiting.getOrElse(key, null)
@@ -885,13 +1003,16 @@ private[isa] object VMInterpreter {
           val _ = counts.remove(key)
           val _ = operations.remove(key)
         }
-        val _ = warpMembers.remove(key)
         // A completed convergence token is no longer live. A legacy target can be reached along a path that skipped
         // the next SSY using this slot; it must not wait for the previous token's members.
         key match {
           case BarrierKey.Convergence(base, token, _) =>
             workgroup.completeConvergence(base, token)
           case _ => ()
+        }
+        key match {
+          case BarrierKey.Convergence(_, _, _) => rejoinPartitions(released, participants)
+          case _                               => ()
         }
         reduce(released)
         released.foreach(resume(_))
@@ -948,6 +1069,18 @@ private[isa] object VMInterpreter {
           )
           releaseBarrier(key)
       }
+    }
+
+    /** The live lanes of the warp that `members` names, which a WARPSYNC.EXCLUSIVE partitions the warp into. */
+    private def memberLanes(base: WorkgroupLane.WarpBase, members: Long, frame: VMFrame): VMLaneMask = {
+      val builder = VMLaneMask.Builder()
+      var lane    = 0
+      while (lane < 32 && base + lane < workgroup.laneCount) {
+        if (((members >>> lane) & 1L) != 0L && frame.live.contains(base + lane))
+          builder.add(WorkgroupLane.fromIndex(base + lane))
+        lane += 1
+      }
+      builder.result()
     }
 
     private def parkWarp(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey)(using Run): Unit = {
@@ -1027,6 +1160,14 @@ private[isa] object VMInterpreter {
           barrierMasks.keys.collect { case key: BarrierKey.Warp if key.base == base && (key.frame eq frame) => key }
         keys.toVector.foreach(releaseBarrier(_))
       }
+    private inline def byWarp(lanes: VMLaneMask)(inline key: WorkgroupLane => Long)
+        : Vec[((WorkgroupLane.WarpBase, Long), VMLaneMask)] = {
+      val groups = mutable.Map.empty[(WorkgroupLane.WarpBase, Long), VMLaneMask.Builder]
+      lanes.foreachLane(lane =>
+        groups.getOrElseUpdate((WorkgroupLane.warpBases(lane >>> 5), key(lane)), VMLaneMask.Builder()).add(lane)
+      )
+      Vec.from(groups).map((group, builder) => group -> builder.result()).sortBy((group, _) => (group._1, group._2))
+    }
 
     private def clusterBarrier(cohort: Cohort, active: VMLaneMask, arrival: Boolean)(using Run): Unit = {
       var invalid = false
@@ -1074,7 +1215,7 @@ private[isa] object VMInterpreter {
           // A lane is in exactly one cohort, running, ready or waiting, and leaves a frame's live set only by returning
           // or exiting from it. Once none are live, no cohort or waiter can run in or read this frame again.
           if (frame.live.isEmpty) block.frames.release(frame.lanes)
-          advance(Cohort(mintUnit(), continuation.pc, mask, continuation.caller), mask)
+          advance(Cohort(mintUnit(), continuation.pc, mask, continuation.caller, cohort.partition), mask)
       }
     }
 
@@ -1102,6 +1243,7 @@ private[isa] object VMInterpreter {
       context.frame = frame
       context.pc = cohort.pc
       context.active = active
+      context.partition = cohort.partition
       // The launch's issue ordinal is its timeline's time axis; only an observed launch needs one.
       val issue = if (observing) device.control.nextIssue() else 0L
       if (observing) observe(frame, cohort, active, issue)
@@ -1147,27 +1289,11 @@ private[isa] object VMInterpreter {
         case Right(Step.WorkgroupBarrier(arrivals, blocking, reduction)) =>
           advance(cohort, skipped)
           arrivals.foreach(arriveWorkgroup(cohort, _, reduction, !blocking))
-        case Right(Step.WarpSync(memberMask)) =>
+        case Right(Step.WarpSync(memberMask, exclusive)) =>
           advance(cohort, skipped)
-          active.foreachLane { lane =>
-            val warp = lane >>> 5
-            if (warpArrivals(warp) == null) {
-              warpArrivals(warp) = VMLaneMask.Builder()
-              warpArrivalMembers(warp) = context.read(lane, memberMask)
-            }
-            warpArrivals(warp).nn.add(lane)
-          }
-          var warp = 0
-          while (warp < warpArrivals.length) {
-            if (warpArrivals(warp) != null) {
-              val key = BarrierKey.Warp(WorkgroupLane.warpBases(warp), cohort.pc, frame)
-              // One box per warp arrival, alongside the key allocated for it.
-              warpMembers(key) = warpArrivalMembers(warp): @SuppressWarnings(Array("bonsai:loop-boxing"))
-              val lanes = warpArrivals(warp).nn.result()
-              warpArrivals(warp) = null
-              arriveWarp(cohort, lanes, key)
-            }
-            warp += 1
+          byWarp(active)(context.read(_, memberMask)).foreach { case ((base, members), lanes) =>
+            val arrival = if (exclusive) cohort.copy(partition = memberLanes(base, members, frame)) else cohort
+            arriveWarp(arrival, lanes, BarrierKey.Warp(base, cohort.pc, frame, members))
           }
         case Right(Step.ConvergenceSync(token)) =>
           advance(cohort, skipped)
@@ -1218,6 +1344,7 @@ private[isa] object VMInterpreter {
     }
 
     private def next()(using Run): Unit = {
+      pace.step()
       var cohort = ready.removeHead()
       val frame  = cohort.frame
       frame.live = frame.live.intersect(live)
@@ -1229,7 +1356,7 @@ private[isa] object VMInterpreter {
       val instruction = instructions(cohort.pc.toInt)
       warpMemberMask(instruction.instruction) match {
         case Some(memberMask) =>
-          val queued = ready.take(cohort.pc, frame)
+          val queued = ready.take(cohort.pc, frame, cohort.partition)
           if (queued ne null) cohort = cohort.copy(lanes = cohort.lanes.union(queued.lanes))
           val (runnable, delayed) =
             if (warpgroupWide(instruction.instruction)) synchroniseWarpgroupInstruction(cohort)
@@ -1239,8 +1366,23 @@ private[isa] object VMInterpreter {
         case None => ()
       }
       if (cohort.lanes.isEmpty) stalled += 1
-      else { stalled = 0; step(cohort, instruction) }
+      else {
+        stalled = 0
+        val yielding = instruction.instruction match {
+          case Instruction.Yield | Instruction.Pause => true; case _ => false
+        }
+        if (yielding && context.spin.recording) cohort.lanes.headOption.foreach(context.spin.yielded)
+        runningAhead = frame.routine.program.runsAhead && !yielding && runAhead < RunAheadLimit
+        runAhead = if (runningAhead) runAhead + 1 else 0
+        step(cohort, instruction)
+        runningAhead = false
+      }
     }
+
+    /** A path that has not yielded within this many steps hands over regardless, as a path spinning without a yield
+      * would otherwise starve the others.
+      */
+    private inline val RunAheadLimit = 1 << 16
 
     /** Every ready cohort has waited in turn for lanes that have not moved since. */
     private def stuck: Boolean = stalled > ready.size

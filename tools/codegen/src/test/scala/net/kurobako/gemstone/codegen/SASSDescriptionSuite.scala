@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SASSDescriptionSuite extends Suite {
   test("classes with duplicate names inside an ##IF block parse, and an unterminated ##IF is rejected") {

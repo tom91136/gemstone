@@ -9,10 +9,11 @@ private[isa] object Combine {
 
   /** `kind` over values of the type `resultType` names, with the value that leaves another unchanged. */
   class Operator(program: VMProgram, resultType: Int, val kind: Combine) {
-    private val integerWidth: Int in 1 ~ 64        = program.integerShape(resultType).map(_._1).getOrElse(64)
-    private val floatingWidth: Int in (16, 32, 64) = program.floatingShape(resultType).map(_._1).getOrElse(64)
-    private val logical                            = program.booleanLanes(resultType).nonEmpty
-    private val resultMask                         =
+    private val integerWidth: Int in 1 ~ 64        = program.integerShape(resultType).fold(64: Int in 1 ~ 64)(_._1)
+    private val floatingWidth: Int in (16, 32, 64) =
+      program.floatingShape(resultType).fold(64: Int in (16, 32, 64))(_._1)
+    private val logical    = program.booleanLanes(resultType).nonEmpty
+    private val resultMask =
       if (logical) 1L else program.integerShape(resultType).fold(-1L)(shape => mask(shape._1))
 
     val identity: Long = kind match {

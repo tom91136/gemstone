@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.semantics
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class AlgebraSuite extends Suite {
   private val values =

@@ -118,8 +118,10 @@ object Listing {
     else parsed.traverse(resolve(_, labels))
   }
 
+  private val Whitespace = Set(' ', '\t', '\r', '\n', '\f', '\u000b')
+
   private def whitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\u000b'
+    Whitespace.contains(c)
 
   private def hexWord(line: String): Option[BigInt] = line.trim match {
     case s"/*$contents*/" =>
@@ -172,7 +174,11 @@ object Listing {
             operandsEnd(if (c == '{') open + 1 else if (c == '}') open - 1 else open)
           }
         operandsEnd(0)
-        val operands = cursor.slice(operandsStart).trim
+        val raw      = cursor.slice(operandsStart).trim
+        val operands = raw.indexOf("(*") match {
+          case -1         => raw
+          case annotation => raw.take(annotation).trim
+        }
         if (!cursor.consume(';') && !cursor.consume('}')) malformed()
         cursor.skipWhile(whitespace(_))
         val _ = cursor.consume('}')

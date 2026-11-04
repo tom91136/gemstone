@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class IntegerMultiplySuite extends Suite {
@@ -75,16 +75,17 @@ class IntegerMultiplySuite extends Suite {
       val correction = BigInt(65536) * ((if (sah < 0 && bl != 0) 1 else 0) + (if (sbh < 0 && al != 0) 1 else 0))
       ((sah * sbh - correction) & 0xffffffffL).toLong
     }
+    val product = u32((ah * bh << 16) + c + (b << 16))
     Vec(
       u32(al * bl + c),
       u32((ah * bl << 16) + c),
       u32((ah * 0x1100L << 16) + (c & 0xffffL)),
-      u32((ah * bh << 16) + c + (b << 16)),
+      product,
       u32(ah * 0xabL + (c >>> 16)),
       u32((u32(ah * bh + c) & 0xffffL) | (b << 16)),
       u32(signed16(ah) * bl + c),
       u32(al * signed16(bh) + c),
-      u32((ah * bh << 16) + c + (b << 16)),
+      product,
       u32((c & 0xffffL) | (1L << 16)),
       csfu,
       0L,

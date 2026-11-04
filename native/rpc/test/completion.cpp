@@ -1,7 +1,13 @@
 #include "completion.hpp"
 
+#include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <thread>
+#include <vector>
+
+#include <unistd.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -9,6 +15,7 @@
 #include "gemstone_execution_rpc.hpp"
 
 #include "rpc_fixture.hpp"
+#include <sys/mman.h>
 
 using namespace gemstone::execution;
 
@@ -123,4 +130,59 @@ TEST_CASE("Failures that never reach the service are transport failures", "[rpc]
   const auto invalid = client->call(RegisterAllocation{{0}});
   REQUIRE_FALSE(invalid);
   CHECK(invalid.error().kind == FailureKind::Transport);
+}
+
+TEST_CASE("Host byte copies cover unaligned ranges exactly", "[completion][host-memory]") {
+  alignas(8) uint8_t storage[32];
+  for (size_t index = 0; index < sizeof(storage); ++index)
+    storage[index] = static_cast<uint8_t>((index * 7) + 1);
+  for (size_t begin = 0; begin < 9; ++begin) {
+    for (size_t size = 0; size + begin <= sizeof(storage); ++size) {
+      const auto copied = copyHostBytes(reinterpret_cast<uintptr_t>(storage + begin), size);
+      REQUIRE(copied == std::vector<uint8_t>(storage + begin, storage + begin + size));
+    }
+  }
+}
+
+TEST_CASE("Host byte copies never tear an aligned word", "[completion][host-memory]") {
+  alignas(8) std::atomic<uint64_t> word{0};
+  std::atomic<bool> stop{false};
+  std::thread writer([&] {
+    for (uint64_t flip = 0; !stop.load(std::memory_order_relaxed); ++flip)
+      word.store(flip % 2 ? ~0ULL : 0ULL, std::memory_order_relaxed);
+  });
+  bool torn = false;
+  for (int round = 0; round < 200000 && !torn; ++round) {
+    const auto copied = copyHostBytes(reinterpret_cast<uintptr_t>(&word), sizeof(uint64_t));
+    uint64_t value = 0;
+    std::memcpy(&value, copied.data(), sizeof(value));
+    torn = value != 0 && value != ~0ULL;
+  }
+  stop.store(true);
+  writer.join();
+  CHECK_FALSE(torn);
+}
+
+TEST_CASE("Readable extents stop at the first page the process cannot read", "[completion][host-memory]") {
+  const auto page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  constexpr size_t pages = 6;
+  auto *region = static_cast<uint8_t *>(mmap(nullptr, pages * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  REQUIRE(region != MAP_FAILED);
+  REQUIRE(munmap(region + (2 * page), page) == 0);
+  REQUIRE(mprotect(region + (4 * page), page, PROT_NONE) == 0);
+  const auto address = reinterpret_cast<uintptr_t>(region);
+  CHECK(readableExtent(address, 2 * page) == 2 * page);
+  CHECK(readableExtent(address + 16, page) == page);
+  CHECK(readableExtent(address, 3 * page) == 2 * page);
+  CHECK(readableExtent(address + page + 100, 4 * page) == page - 100);
+  CHECK(readableExtent(address + (2 * page), page) == 0);
+  CHECK(readableExtent(address + (2 * page) + 8, 8) == 0);
+  CHECK(readableExtent(address + (3 * page), 3 * page) == page);
+  CHECK(readableExtent(address + (4 * page), page) == 0);
+  CHECK(readableExtent(address + (5 * page) - 4, 4) == 0);
+  CHECK(readableExtent(address + (6 * page) - 4, 4) == 4);
+  CHECK(readableExtent(address + page - 8, 0) == 0);
+  CHECK(copyHostBytes(address, readableExtent(address, 3 * page)).size() == 2 * page);
+  munmap(region, 2 * page);
+  munmap(region + (3 * page), 3 * page);
 }

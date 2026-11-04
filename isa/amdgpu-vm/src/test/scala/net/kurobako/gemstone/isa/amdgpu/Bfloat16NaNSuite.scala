@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class Bfloat16NaNSuite extends Suite {
   private def single(bits: Long): Float32 = fromRaw[Float32](bits)

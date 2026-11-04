@@ -129,13 +129,6 @@ private object VMAsyncCompiler {
     binary(IntegerOperation.BitwiseOr, low, Value.Immediate(VMAddressSpace.SharedWindowBase), 64)
   }
 
-  /** Runs `instruction` for one elected lane of each warp, as a uniform-datapath instruction issues. */
-  private def once(issued: VMIR.Instruction)(using context: VMCompilationContext): Unit = {
-    val elected = context.predicateTemp()
-    context.emit(Elect(None, elected.slot, Value.ActiveMask))
-    context.guarded(issued, elected)
-  }
-
   private def barrier()(using context: VMCompilationContext): Unit = {
     import context.*
     val has = modifiers.toSet
@@ -310,15 +303,16 @@ private object VMAsyncCompiler {
       case Modifier.`4D` => 4
       case Modifier.`5D` => 5
     }.getOrElse(unsupported("tensor copy without a dimensionality"))
-    def named(name: String) = modifiers.exists(_.name == name)
-    val wide                = named("W") || named("W128")
-    val im2col              = modifiers.contains(Modifier.IM2COL) || wide
-    val gather              = named("GATHER4") || named("SCATTER4")
-    val pair                = named("2CTA")
-    val multicast           = modifiers.contains(Modifier.MULTICAST)
-    val group               = base(operands.head)
-    val map                 = address(operands(1), global = true)
-    val extra               = operands.lift(2).filter(OperandQueries.isRegister(_, RegisterBank.UR)).map(source(_))
+    val wide      = named("W") || named("W128")
+    val im2col    = modifiers.contains(Modifier.IM2COL) || wide
+    val gather    = named("GATHER4") || named("SCATTER4")
+    val pair      = named("2CTA")
+    val multicast = modifiers.contains(Modifier.MULTICAST)
+    val group     = base(operands.head)
+    val map       = address(operands(1), global = true)
+    val extra     = operands.lift(2).collect {
+      case operand if OperandQueries.isRegister(operand, RegisterBank.UR) => source(operand)
+    }
     def field(packed: Value, from: Int, bits: Int): Value =
       binary(
         IntegerOperation.BitwiseAnd,
@@ -426,7 +420,7 @@ private object VMAsyncCompiler {
   private def returnAddress()(using context: VMCompilationContext): Unit = {
     import context.*
     val rpc  = registerLayout.returnAddress
-    val high = modifiers.contains(Modifier.HI) ||
+    val high = modifiers.contains(Modifier.HI) || operands.lastOption.contains(Operand.Symbol("Rpc.HI")) ||
       instruction.machine.exists(_.bindings.get("RpcN").contains(BigInt(1)))
     val names = modifiers.map(_.name)
     if (names.contains("64")) {
@@ -448,7 +442,10 @@ private object VMAsyncCompiler {
         binary(IntegerOperation.ShiftLeft, widen(source(operands.head)), Value.Immediate(if (high) 32L else 0L), 64)
       emit(IntegerBinary(IntegerOperation.BitwiseOr, rpc, kept, placed, 64))
     } else {
-      requireOperands(1, "RPCMOV.32 operands")
+      requireOperands(
+        if (operands.lastOption.exists { case Operand.Symbol(_) => true; case _ => false }) 2 else 1,
+        "RPCMOV.32 operands"
+      )
       store(
         operands.head,
         binary(IntegerOperation.ShiftRightLogical, Value.Register(rpc), Value.Immediate(if (high) 32L else 0L), 64)

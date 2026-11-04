@@ -34,8 +34,9 @@ object CLI {
       server: Server,
       workloads: Path,
       routes: Path,
-      targetSet: String,
+      profile: String,
       workload: String,
+      dryRun: Boolean,
       selectors: Vector[String]
   )
 
@@ -67,10 +68,11 @@ object CLI {
     server,
     path("workloads", "Conformance workload directory"),
     path("routes", "Targets.cmake route script"),
-    Opts.option[String]("target-set", "Conformance target set"),
-    Opts.option[String]("workload", "Conformance workload").withDefault("compact"),
+    Opts.option[String]("profile", "Conformance build profile: complete, or a machine profile"),
+    Opts.option[String]("workload", "Conformance workload").withDefault("short"),
+    Opts.flag("dry-run", "List the selected cases per route without running them").orFalse,
     Opts.arguments[String]("selector").orEmpty.map(_.toVector)
-  ).mapN(Emulation(_, _, _, _, _, _, _))
+  ).mapN(Emulation(_, _, _, _, _, _, _, _))
 
   private val command = Command("conformance", "Run the GPU conformance suite") {
     Opts.subcommand("run", "Run artifacts directly on host devices") {
@@ -114,12 +116,12 @@ object CLI {
 
   private def routes(emulation: Emulation): Vector[String] = {
     val inventory =
-      Process(Vector("cmake", s"-DCONFORMANCE_TARGET_SET=${emulation.targetSet}", "-P", s"${emulation.routes}"))
+      Process(Vector("cmake", s"-DCONFORMANCE_BUILD_PROFILE=${emulation.profile}", "-P", s"${emulation.routes}"))
         .!!.linesIterator.filter(_.nonEmpty).toVector
-    require(inventory.nonEmpty, s"conformance target set ${emulation.targetSet} has no routes")
+    require(inventory.nonEmpty, s"conformance build profile ${emulation.profile} has no routes")
     def matches(route: String, selector: String): Boolean = {
-      val artifact = route.replaceFirst("^cuda-(ptx|sass)/", "cuda/")
-      Vector(route, route.takeWhile(_ != '/'), artifact, artifact.takeWhile(_ != '/')).contains(selector)
+      val shared = route.replaceFirst("^cuda-(ptx|sass)/", "cuda/")
+      Vector(route, shared).exists(name => name == selector || name.startsWith(s"$selector/"))
     }
     val selectors = emulation.selectors.filterNot(_ == "all")
     require(
@@ -142,6 +144,9 @@ object CLI {
     val exports   = (inherited ++ variables).toVector.sortBy(_._1).map((key, value) => s"export $key=${quoted(value)}")
     val routing   =
       s"""unset ${conformanceEnvironment.DevicePattern}
+         |if [ -n "$$${conformanceEnvironment.DeviceCount}" ]; then
+         |  export ${environment.DeviceCount}="$$${conformanceEnvironment.DeviceCount}"
+         |fi
          |case "$$${conformanceEnvironment.TargetBackendName}" in
          |  cuda|hip|hsa|openacc)
          |    if [ -z "$$${environment.TargetArch}" ] && [ -n "$$${conformanceEnvironment.TargetArch}" ]; then
@@ -239,6 +244,7 @@ object CLI {
       "-Xmx256m",
       UnsafeAccess,
       "-XX:+UseSerialGC",
+      "-XX:TieredStopAtLevel=1",
       "-XX:ActiveProcessorCount=1",
       "-XX:-UsePerfData",
       "-Xlog:all=warning:stderr"
@@ -268,7 +274,8 @@ object CLI {
         run(
           emulation.suite,
           Vector("--direct", "--workloads", s"${emulation.workloads}", "--workload", emulation.workload) ++
-            routes(emulation) ++ Vector("--isolated-launcher", "--launcher", "--", "/bin/sh", s"$script"),
+            (if (emulation.dryRun) Vector("--dry-run") else Vector.empty) ++ routes(emulation) ++
+            Vector("--isolated-launcher", "--launcher", "--", "/bin/sh", s"$script"),
           settings
         )
       finally {

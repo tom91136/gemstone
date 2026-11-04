@@ -116,7 +116,8 @@ private class Probe(inputs: Long*) extends NvidiaSinks[Long, Vector[Long]] {
       validity: Option[Predicate],
       operand: Value,
       selector: Value,
-      bounds: Value
+      bounds: Value,
+      memberMask: Value
   )(
       inline source: (Long, Long, Long, Long) => Long,
       inline valid: (Long, Long, Long, Long) => Long,

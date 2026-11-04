@@ -2,7 +2,7 @@ package net.kurobako.gemstone
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.pickler.given
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Try
 import upickle.default.ReadWriter
 import upickle.default.read

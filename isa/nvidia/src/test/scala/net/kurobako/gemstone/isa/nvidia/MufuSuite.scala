@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.isa.nvidia.VMIR.MufuFlavour.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The special-function unit's approximations, against the hardware's own results.
   *

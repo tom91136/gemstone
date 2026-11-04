@@ -67,6 +67,8 @@ object AMDGPUOperandFields {
     )
   }.toVector
 
+  // KindAliases and FieldRemaps are hand-written tables of a few rows
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   private def remapped(isa: String, encoding: Encoding): Encoding =
     encoding.copy(operands = encoding.operands.map { operand =>
       val aliased = KindAliases.find(alias => alias.isas(isa) && alias.from == operand.kind)
@@ -107,6 +109,8 @@ object AMDGPUOperandFields {
             }
           }
       }
+    // the format fields and operands of one encoding
+    @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
     def signature(encoding: Encoding): Signature = {
       val layout   = formats.get(encoding.format)
       val operands = encoding.operands.filter(operand => !operand.implicitOperand && operand.field.nonEmpty)

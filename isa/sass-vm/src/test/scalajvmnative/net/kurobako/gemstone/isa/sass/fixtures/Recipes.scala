@@ -22,6 +22,7 @@ import net.kurobako.gemstone.isa.sass.fixtures.MemoryFormFixtures.*
 import net.kurobako.gemstone.isa.sass.fixtures.MinMaxFixtures.*
 import net.kurobako.gemstone.isa.sass.fixtures.SharedMemoryFixtures.*
 import net.kurobako.gemstone.isa.sass.fixtures.TensorFixtures.*
+import net.kurobako.gemstone.isa.sass.fixtures.WarpFixtures.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.testing.*
 import scala.collection.mutable
@@ -125,6 +126,8 @@ class Recipes extends NvidiaFixtureSuite {
   recipe("copyAddSm89", ptx(copyAddPtx), 89, hex = true)
   recipe("divideSm89", cuda(divideCuda), 89)
   recipe("dmmaSm80", ptx(dmmaPtx), 80)
+  recipe("exitPredicateSm75", cuda(exitPredicateCuda), 75)
+  recipe("exitPredicateSm120", cuda(exitPredicateCuda), 120)
   probes.foreach { probe =>
     val target = probe.ptx.linesIterator.collectFirst { case s".target $name" => name }.getOrElse(s"sm_${probe.sm}")
     patched(probe.name, probe.sm, Vec("kernel.ptx" -> probe.ptx), "output.sass")(
@@ -133,7 +136,9 @@ class Recipes extends NvidiaFixtureSuite {
     )
   }
   WarpgroupFixtures.products.foreach { (listing, product) =>
-    val ptx = WarpgroupProducts.cases.find(_.name == product).map(WarpgroupProducts.kernel(_)).getOrElse("")
+    // the few warpgroup product cases
+    @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
+    val ptx = WarpgroupProducts.cases.find(_.name == product).fold("")(WarpgroupProducts.kernel(_))
     patched(listing, 90, Vec("kernel.ptx" -> ptx), "output.sass")(
       "ptxas -arch=sm_90a kernel.ptx -o kernel.cubin",
       "nvdisasm -c -ndf -hex kernel.cubin > output.sass"
@@ -147,6 +152,7 @@ class Recipes extends NvidiaFixtureSuite {
   recipe("localOffsetsSm120", cuda(localOffsetsCuda), 120, "local_offsets")
   recipe("wideSm100", cuda(wideCuda), 100)
   recipe("keplerSharedAtomicsSm35", cuda(keplerSharedAtomicsCuda), 35)
+  recipe("labeledPartitionSm120", cuda(labeledPartitionCuda), 120)
   recipe("extremaSm89", ptx(extremaPtx), 89)
   recipe("f2fF16F32Sm50", cuda(f2fF16F32Cuda), 50, hex = true)
   recipe("f2fF32F16Sm50", cuda(f2fF32F16Cuda), 50, hex = true)

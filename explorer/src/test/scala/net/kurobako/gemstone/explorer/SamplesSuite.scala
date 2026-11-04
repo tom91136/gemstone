@@ -3,7 +3,7 @@ package net.kurobako.gemstone.explorer
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 

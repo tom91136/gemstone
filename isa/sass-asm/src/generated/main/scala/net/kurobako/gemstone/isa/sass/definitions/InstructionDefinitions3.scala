@@ -1069,6 +1069,7 @@ object InstructionDefinitions3 {
     FormDecoder(Definitions3.RpcmovConst, ConstantBank)(Form.RpcmovConst.apply),
     FormDecoder(Definitions3.RpcmovImm, Immediate)(Form.RpcmovImm.apply),
     FormDecoder(Definitions3.RpcmovReg, Register)(Form.RpcmovReg.apply),
+    FormDecoder(Definitions3.RpcmovRegSymbol, Register, Symbol)(Form.RpcmovRegSymbol.apply),
     FormDecoder(Definitions3.RroRegConst, Register, ConstantBank)(Form.RroRegConst.apply),
     FormDecoder(Definitions3.RroRegImm, Register, Immediate)(Form.RroRegImm.apply),
     FormDecoder(Definitions3.RroRegReg, Register, Register)(Form.RroRegReg.apply),
@@ -1100,7 +1101,6 @@ object InstructionDefinitions3 {
       ConstantBank,
       Predicate
     )(Form.SelRegRegConstPred.apply),
-    FormDecoder(Definitions3.SelRegRegImmPred, Register, Register, Immediate, Predicate)(Form.SelRegRegImmPred.apply),
-    FormDecoder(Definitions3.SelRegRegRegPred, Register, Register, Register, Predicate)(Form.SelRegRegRegPred.apply)
+    FormDecoder(Definitions3.SelRegRegImmPred, Register, Register, Immediate, Predicate)(Form.SelRegRegImmPred.apply)
   )
 }

@@ -49,6 +49,23 @@ object SASSInstructionModel {
       fields.collect { case field if field.kind == "CCPR" => field.kind }
   }.toSet
 
+  private val formRegister  = "[a-z0-9_]+__(v[0-9]+_)?R[a-d]".r
+  private val reservedKinds = Set("CC", "optCC", "Partsel", "PR", "CCPR", "STEP0", "STRIDE", "Opcode")
+
+  /** A vocabulary-valued field between the operands, such as a texture dimension or query mode, prints as a symbol. */
+  private def isSymbolOperand(field: SASSFormat.Field, vocabularies: Set[String]): Boolean =
+    field.default.forall(_ == "PRINT") && vocabularies(field.kind) && !isOperandField(field) &&
+      !reservedKinds(field.kind) && !attrs(field.kind) &&
+      !field.kind.startsWith("ONLY") && !field.kind.endsWith("ONLY") && !field.kind.startsWith("ISWZ") &&
+      !field.kind.contains("_iswz_") && !formRegister.matches(field.kind)
+
+  private def standalone(chunk: Vector[SASSFormat.Node], field: SASSFormat.Field): Boolean = chunk.forall {
+    case SASSFormat.Text(raw)         => !raw.contains('/') && !raw.contains('.')
+    case SASSFormat.Literal(_, value) => !value.contains('/') && !value.contains('.')
+    case other: SASSFormat.Field      => other eq field
+    case _                            => false
+  }
+
   private def fieldKind(field: SASSFormat.Field): String = {
     val kind = field.kind
     if (kind == "C") "Symbol"
@@ -70,12 +87,17 @@ object SASSInstructionModel {
     Slot(field.binding, fieldKind(field), optionalContext && field.default.nonEmpty && !nonOmittable)
   }
 
-  private def groupSlot(open: Char, children: Vector[SASSFormat.Node], allowCC: Boolean): Vector[Slot] = {
+  private def groupSlot(
+      open: Char,
+      children: Vector[SASSFormat.Node],
+      allowCC: Boolean,
+      vocabularies: Set[String]
+  ): Vector[Slot] = {
     val fields = allFields(children).filter(field => isOperandField(field) || field.kind == "CC").filterNot(field =>
       PartialFunction.cond(field.binding) { case "Pg" | "UPg" => true }
     )
     if (fields.isEmpty) Vector.empty
-    else if (open == '(') slotsInNodes(children, depth = 1, allowCC = allowCC)
+    else if (open == '(') slotsInNodes(children, depth = 1, allowCC = allowCC, vocabularies)
     else if (open == '[') {
       val hasConstantSelector = fields.exists(_.kind == "C")
       val register            = fields.find(field =>
@@ -83,13 +105,14 @@ object SASSInstructionModel {
           PartialFunction.cond(field.kind) { case "B" | "BD" | "CBU_STATE" | "CBU_STATE_DIST" | "Scoreboard" => true }
       )
       if (hasConstantSelector && fields.count(_.kind != "C") >= 2)
-        fields.find(_.kind == "C").map(field => Vector(Slot(field.binding, "ConstantBank", optional = false)))
-          .getOrElse(Vector.empty)
+        fields.find(_.kind == "C").fold(Vector.empty[Slot])(field =>
+          Vector(Slot(field.binding, "ConstantBank", optional = false))
+        )
       else register match {
         case Some(field) if PartialFunction.cond(field.kind) { case "CBU_STATE" | "CBU_STATE_DIST" => true } =>
           Vector(Slot(field.binding, "Address|Symbol", optional = false))
         case Some(field) => Vector(Slot(field.binding, "Address", optional = false))
-        case None        => slotsInNodes(children, depth = 1, allowCC = allowCC)
+        case None        => slotsInNodes(children, depth = 1, allowCC = allowCC, vocabularies)
       }
     } else {
       val operandFields = fields.filterNot(field => attrs(field.kind) || field.kind == "Pg" || field.kind == "UPg")
@@ -139,7 +162,12 @@ object SASSInstructionModel {
     }
   }
 
-  private def slotsInNodes(chunk: Vector[SASSFormat.Node], depth: Int, allowCC: Boolean): Vector[Slot] = {
+  private def slotsInNodes(
+      chunk: Vector[SASSFormat.Node],
+      depth: Int,
+      allowCC: Boolean,
+      vocabularies: Set[String]
+  ): Vector[Slot] = {
     val state =
       chunk.zipWithIndex.foldLeft((Vector.empty[Slot], false)) { case ((found, previousOperand), (node, index)) =>
         val next = node match {
@@ -156,12 +184,15 @@ object SASSInstructionModel {
             if (!selector) {
               (found :+ fieldSlot(field, optionalContext = depth == 0), true)
             } else (found, previousOperand)
+          case field: SASSFormat.Field
+              if allowCC && depth == 0 && isSymbolOperand(field, vocabularies) && standalone(chunk, field) =>
+            (found :+ Slot(field.binding, "Symbol", optional = false), true)
           case SASSFormat.Optional(None, children) =>
-            val slots = slotsInNodes(children, depth, allowCC)
+            val slots = slotsInNodes(children, depth, allowCC, vocabularies)
             (found ++ slots, previousOperand || slots.nonEmpty)
           case SASSFormat.Optional(Some(_), _)     => (found, previousOperand)
           case SASSFormat.Group(open, _, children) =>
-            val slots = groupSlot(open, children, allowCC)
+            val slots = groupSlot(open, children, allowCC, vocabularies)
             (found ++ slots, previousOperand || slots.nonEmpty)
           case _ => (found, previousOperand)
         }
@@ -182,7 +213,7 @@ object SASSInstructionModel {
   }
 
   /** Each FORMAT row keeps its own layout; repeated layouts across targets are deduplicated. */
-  def formShape(form: SASSDescription.InstructionClass): Vector[FormShape] = {
+  def formShape(form: SASSDescription.InstructionClass, vocabularies: Set[String] = Set.empty): Vector[FormShape] = {
     val section = form.section("FORMAT").getOrElse(throw IllegalArgumentException(s"${form.name}: missing FORMAT"))
     val syntax  = SASSFormat.parse(section.body).fold(
       error => throw IllegalArgumentException(s"${form.name}: ${error.message} at ${error.offset}"),
@@ -193,7 +224,7 @@ object SASSInstructionModel {
       case _                                       => true
     }
     val projected = splitComma(operandSyntax).zipWithIndex.flatMap { (chunk, index) =>
-      slotsInNodes(chunk, depth = 0, allowCC = index > 0)
+      slotsInNodes(chunk, depth = 0, allowCC = index > 0, vocabularies)
     }
     val slots =
       if (
@@ -208,11 +239,15 @@ object SASSInstructionModel {
   }
 
   /** Deduplicates equal opcode layouts while preserving the forms that provide each layout. */
-  def shapes(forms: Iterable[SASSDescription.InstructionClass]): Vector[Shape] =
-    forms.toVector.flatMap(formShape(_)).groupBy(_.opcode).toVector.sortBy(_._1).flatMap { case (opcode, rows) =>
-      rows.groupBy(
-        _.slots
-      ).toVector.sortBy(_._1.map(slot => s"${slot.name}:${slot.kind}:${slot.optional}").mkString("\u0000"))
-        .map { case (slots, same) => Shape(opcode, slots, same.distinct.sortBy(_.form)) }
+  def shapes(
+      forms: Iterable[SASSDescription.InstructionClass],
+      vocabularies: Set[String] = Set.empty
+  ): Vector[Shape] =
+    forms.toVector.flatMap(formShape(_, vocabularies)).groupBy(_.opcode).toVector.sortBy(_._1).flatMap {
+      case (opcode, rows) =>
+        rows.groupBy(
+          _.slots
+        ).toVector.sortBy(_._1.map(slot => s"${slot.name}:${slot.kind}:${slot.optional}").mkString("\u0000"))
+          .map { case (slots, same) => Shape(opcode, slots, same.distinct.sortBy(_.form)) }
     }
 }

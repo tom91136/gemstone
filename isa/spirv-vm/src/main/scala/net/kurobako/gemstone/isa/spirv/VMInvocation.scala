@@ -258,7 +258,7 @@ private object VMInvocation {
 
     /** The memory the invocation waited for has arrived, so it runs on. */
     def memoryReady(): Unit =
-      if (memoryPending) { status = Status.Running; transition(MachineEvent.Kind.Resumed) }
+      if (memoryPending) resume()
 
     /** The invocation waits at a collective rendezvous until the lanes that meet there arrive. */
     def suspend(request: CollectiveRequest): Unit = {

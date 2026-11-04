@@ -115,7 +115,7 @@ TEST_CASE("regressions/miniapp/cloverleaf/cuda-shared-reduction", "[unified][reg
     throw std::runtime_error(fmt::format("Clover-style reduction mismatch: expected {}, got {}", expected, actual));
 }
 
-TEMPLATE_TEST_CASE_SIG("runtime/cuda/device-function", "[unified][runtime][compact]", ((bool Indirect), Indirect), false, true) {
+TEMPLATE_TEST_CASE_SIG("runtime/cuda/device-function", "[unified][runtime]", ((bool Indirect), Indirect), false, true) {
   unified::gpu_calls::deviceFunction<Indirect>();
 }
 

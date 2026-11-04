@@ -67,6 +67,14 @@ object ControlFlowFixtures {
       |}
       |""".stripMargin
 
+  val exitPredicateCuda: String =
+    """extern "C" __global__ void exit_unless_end(unsigned *out, unsigned last) {
+      |  unsigned lane = threadIdx.x;
+      |  if (lane != 0 && lane != last) return;
+      |  out[lane] = lane + 1;
+      |}
+      |""".stripMargin
+
   val listings: Map[String, String] = Map(
     "virtualIdSm50" ->
       """//--------------------- .text.probe               --------------------------
@@ -653,6 +661,59 @@ object ControlFlowFixtures {
         |        /*0150*/                   ATOMG.E.EXCH.STRONG.GPU PT, RZ, [R2.64], RZ ;
         |        /*0160*/                   EXIT ;
         |.L_x_3:
+        |""".stripMargin,
+    "exitPredicateSm75" ->
+      """//--------------------- .text.exit_unless_end     --------------------------
+        |	.section	.text.exit_unless_end,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	128
+        |        .global         exit_unless_end
+        |        .type           exit_unless_end,@function
+        |        .size           exit_unless_end,(.L_x_1 - exit_unless_end)
+        |        .other          exit_unless_end,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |exit_unless_end:
+        |.text.exit_unless_end:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   S2R R2, SR_TID.X ;
+        |        /*0020*/                   ISETP.NE.AND P0, PT, R2.reuse, c[0x0][0x168], PT ;
+        |        /*0030*/                   ISETP.NE.AND P1, PT, R2, RZ, PT ;
+        |        /*0040*/               @P0 EXIT P1 ;
+        |        /*0050*/                   IMAD.MOV.U32 R3, RZ, RZ, 0x4 ;
+        |        /*0060*/                   IADD3 R5, R2, 0x1, RZ ;
+        |        /*0070*/                   IMAD.WIDE.U32 R2, R2, R3, c[0x0][0x160] ;
+        |        /*0080*/                   STG.E.SYS [R2], R5 ;
+        |        /*0090*/                   EXIT ;
+        |.L_x_1:
+        |""".stripMargin,
+    "exitPredicateSm120" ->
+      """//--------------------- .text.exit_unless_end     --------------------------
+        |	.section	.text.exit_unless_end,"ax",@progbits
+        |	.align	128
+        |        .global         exit_unless_end
+        |        .type           exit_unless_end,@function
+        |        .size           exit_unless_end,(.L_x_1 - exit_unless_end)
+        |        .other          exit_unless_end,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |exit_unless_end:
+        |.text.exit_unless_end:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   S2R R7, SR_TID.X ;
+        |        /*0020*/                   LDCU UR4, c[0x0][0x388] ;
+        |        /*0030*/                   ISETP.NE.U32.AND P0, PT, R7.reuse, UR4, PT ;
+        |        /*0040*/                   ISETP.NE.U32.AND P1, PT, R7, RZ, PT ;
+        |        /*0050*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*0060*/               @P0 EXIT P1 ;
+        |        /*0070*/                   LDC.64 R2, c[0x0][0x380] ;
+        |        /*0080*/                   IADD R5, R7.reuse, 0x1 ;
+        |        /*0090*/                   IMAD.WIDE.U32 R2, R7, 0x4, R2 ;
+        |        /*00a0*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00b0*/                   EXIT ;
+        |.L_x_1:
+        |
+        |
+        |//--------------------- SYMBOLS --------------------------
+        |
+        |	.type		.nv.reservedSmem.offset0,@object
+        |	.size		.nv.reservedSmem.offset0,0x4
         |""".stripMargin
   )
 }

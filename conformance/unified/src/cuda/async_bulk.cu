@@ -61,7 +61,7 @@ __global__ void barrierCopy([[maybe_unused]] const int4 *input, [[maybe_unused]]
 
 } // namespace
 
-TEST_CASE("runtime/cuda/async/memcpy-async-barrier", "[unified][runtime][async][compact]") {
+TEST_CASE("runtime/cuda/async/memcpy-async-barrier", "[unified][runtime][async]") {
   if (computeCapability() < 7) SKIP("cuda::barrier requires compute capability 7.0");
   constexpr int blocks = 3;
   const auto input = iota(size_t{0}, static_cast<size_t>(blocks) * BlockInts)
@@ -127,7 +127,7 @@ __global__ void bulkCopies([[maybe_unused]] const int *input, [[maybe_unused]] i
 
 } // namespace
 
-TEST_CASE("runtime/cuda/async/bulk-copy-store-reduce", "[unified][runtime][async][compact]") {
+TEST_CASE("runtime/cuda/async/bulk-copy-store-reduce", "[unified][runtime][async]") {
   if (computeCapability() < 9) SKIP("bulk asynchronous copies require compute capability 9.0");
   constexpr int blocks = 2;
   const auto input = iota(size_t{0}, static_cast<size_t>(blocks) * 256)
@@ -227,7 +227,7 @@ size_t swizzle(int mode, size_t offset) {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/async/tensor-tile-swizzle-oob", "[unified][runtime][async][compact]") {
+TEST_CASE("runtime/cuda/async/tensor-tile-swizzle-oob", "[unified][runtime][async]") {
   if (computeCapability() < 9) SKIP("tensor memory access requires compute capability 9.0");
   const auto mode = GENERATE(0, 1, 2, 3);
   const auto nanFill = GENERATE(false, true);
@@ -354,7 +354,7 @@ __global__ void clusterExchange([[maybe_unused]] int *output) {
 
 } // namespace
 
-TEST_CASE("runtime/cuda/async/cluster-distributed-shared-memory", "[unified][runtime][async][compact]") {
+TEST_CASE("runtime/cuda/async/cluster-distributed-shared-memory", "[unified][runtime][async]") {
   if (computeCapability() < 9) SKIP("thread block clusters require compute capability 9.0");
   const unsigned clusterSize = GENERATE(2U, 4U);
   constexpr unsigned blocks = 8;

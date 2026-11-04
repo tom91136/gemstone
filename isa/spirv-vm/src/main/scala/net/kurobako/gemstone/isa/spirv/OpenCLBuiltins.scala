@@ -48,7 +48,43 @@ private object OpenCLBuiltins {
     "_Z18get_num_sub_groupsv"     -> (_.numSubgroups)
   )
 
-  def lower(site: Site, name: String, ids: ResultIds, arguments: Vec[Int]): Option[Op] = {
+  private enum Builtin derives CanEqual {
+    case Dimensioned(label: String, select: (Invocation, Int) => Long)
+    case Subgroup(label: String, select: Invocation => Long)
+    case Minimum
+    case TrailingZeros
+    case Shuffle(label: String)
+    case ConvertToBf16
+    case ConvertFromBf16
+    case ToGlobal
+    case IsNaN
+    case Barrier
+    case Scan(scope: Int, label: String)
+    case Broadcast(scope: Int)
+  }
+
+  private def builtin(name: String): Option[Builtin] =
+    dimensioned.get(name).map((label, select) => Builtin.Dimensioned(label, select))
+      .orElse(subgroup.get(name).map(Builtin.Subgroup(name, _)))
+      .orElse(name match {
+        case "_Z3minmm"                                                      => Some(Builtin.Minimum)
+        case "_Z3ctzi"                                                       => Some(Builtin.TrailingZeros)
+        case shuffle if shuffle.startsWith("_Z26intel_sub_group_shuffle_up") => Some(Builtin.Shuffle(shuffle))
+        case "__devicelib_ConvertFToBF16INTEL"                               => Some(Builtin.ConvertToBf16)
+        case "__devicelib_ConvertBF16ToFINTEL"                               => Some(Builtin.ConvertFromBf16)
+        case "__to_global"                                                   => Some(Builtin.ToGlobal)
+        case "_Z5isnanf"                                                     => Some(Builtin.IsNaN)
+        case "_Z7barrierj"                                                   => Some(Builtin.Barrier)
+        case "_Z29work_group_scan_exclusive_addi"                            =>
+          Some(Builtin.Scan(Scope.Workgroup, "work_group_scan_exclusive_add"))
+        case "_Z29work_group_scan_exclusive_addl" => Some(Builtin.Scan(Scope.Workgroup, "scan"))
+        case "_Z28sub_group_scan_exclusive_addi"  => Some(Builtin.Scan(Scope.Subgroup, "scan"))
+        case broadcast                            => broadcastScope(broadcast).map(Builtin.Broadcast(_))
+      })
+
+  def supplies(name: String): Boolean = builtin(name).isDefined
+
+  def lower(site: Site, name: String, ids: ResultIds, arguments: Vec[Int]): Option[Op] = builtin(name).map { kind =>
     val program                              = site.program
     val resultType                           = ids.resultType
     val dest                                 = ids.dest
@@ -94,25 +130,26 @@ private object OpenCLBuiltins {
         case None    => Left(undefined(arguments.head))
       }
     }
-    dimensioned.get(name).map { case (label, select) =>
-      integerScalar match {
-        case None => Fail(Fault.InvalidRequest(s"OpenCL $label result type %$resultType is not an integer scalar"))
-        case Some(width) =>
-          step { (execution, _) =>
-            scalar(execution.values, arguments.head).flatMap { dimension =>
-              if (dimension < 0L || dimension >= 3L)
-                Left(Fault.InvalidRequest(s"OpenCL $label dimension $dimension is invalid"))
-              else
-                Right(execution.values.updateScalar(
-                  dest,
-                  resultType,
-                  select(execution.invocation, dimension.toInt) & mask(width)
-                ))
+    kind match {
+      case Builtin.Dimensioned(label, select) =>
+        integerScalar match {
+          case None => Fail(Fault.InvalidRequest(s"OpenCL $label result type %$resultType is not an integer scalar"))
+          case Some(width) =>
+            step { (execution, _) =>
+              scalar(execution.values, arguments.head).flatMap { dimension =>
+                if (dimension < 0L || dimension >= 3L)
+                  Left(Fault.InvalidRequest(s"OpenCL $label dimension $dimension is invalid"))
+                else
+                  Right(execution.values.updateScalar(
+                    dest,
+                    resultType,
+                    select(execution.invocation, dimension.toInt) & mask(width)
+                  ))
+              }
             }
-          }
-      }
-    }.orElse(subgroup.get(name).map(scalarResult(name))).orElse(name match {
-      case "_Z3minmm" => Some(step { (execution, _) =>
+        }
+      case Builtin.Subgroup(label, select) => scalarResult(label)(select)
+      case Builtin.Minimum                 => step { (execution, _) =>
           for {
             left  <- scalar(execution.values, arguments(0))
             right <- scalar(execution.values, arguments(1))
@@ -123,10 +160,10 @@ private object OpenCLBuiltins {
             resultType,
             Execute.minimum(left, right, signed = false) & mask(width)
           )
-        })
-      case "_Z3ctzi" =>
+        }
+      case Builtin.TrailingZeros =>
         val sourceWidth = program.integerShape(program.valueType(arguments.head)).collect { case (width, 1) => width }
-        Some(step { (execution, _) =>
+        step { (execution, _) =>
           scalar(execution.values, arguments.head).flatMap { value =>
             (sourceWidth.filter(_ => program.scalarSlot(arguments.head)), integerScalar) match {
               case (Some(source), Some(width)) =>
@@ -138,24 +175,24 @@ private object OpenCLBuiltins {
               case _ => Left(Fault.InvalidRequest("OpenCL ctz requires integer scalar arguments and result"))
             }
           }
-        })
-      case shuffle if shuffle.startsWith("_Z26intel_sub_group_shuffle_up") =>
-        Some(
-          if (arguments.size != 3)
-            Fail(Fault.InvalidRequest(s"OpenCL $shuffle expects current, next, and delta arguments"))
-          else CollectiveOps.intelShift(
-            ids,
-            arguments(0),
-            arguments(1),
-            arguments(2),
-            Collective.ShuffleDirection.Up,
-            "OpenCL subgroup shuffle-up"
-          )
+        }
+      case Builtin.Shuffle(label) =>
+        if (arguments.size != 3) Fail(Fault.InvalidRequest(s"OpenCL $label expects current, next, and delta arguments"))
+        else CollectiveOps.intelShift(
+          ids,
+          arguments(0),
+          arguments(1),
+          arguments(2),
+          Collective.ShuffleDirection.Up,
+          "OpenCL subgroup shuffle-up"
         )
-      case "__devicelib_ConvertFToBF16INTEL" =>
-        Some(pointerArgument(name, 4)(raw => IEEE754.binary32ToBfloat16(Binary32.low(raw)).toLong))
-      case "__devicelib_ConvertBF16ToFINTEL" => Some(pointerArgument(name, 2)(raw => (raw & 0xffffL) << 16))
-      case "__to_global"                     => Some(step { (execution, _) =>
+      case Builtin.ConvertToBf16 =>
+        pointerArgument("__devicelib_ConvertFToBF16INTEL", 4)(raw =>
+          IEEE754.binary32ToBfloat16(Binary32.low(raw)).toLong
+        )
+      case Builtin.ConvertFromBf16 =>
+        pointerArgument("__devicelib_ConvertBF16ToFINTEL", 2)(raw => (raw & 0xffffL) << 16)
+      case Builtin.ToGlobal => step { (execution, _) =>
           (execution.values.get(arguments.head), program.runtimeType(resultType)) match {
             case (Some(VMValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
               Right(execution.values.update(
@@ -167,8 +204,8 @@ private object OpenCLBuiltins {
             case (Some(_), _) => Left(Fault.InvalidRequest("OpenCL __to_global source is not a pointer"))
             case (None, _)    => Left(undefined(arguments.head))
           }
-        })
-      case "_Z5isnanf" => Some(step { (execution, _) =>
+        }
+      case Builtin.IsNaN => step { (execution, _) =>
           execution.values.get(arguments.head) match {
             case Some(VMValue.Bits(sourceType, Array(raw))) =>
               (program.floatingShape(sourceType), program.integerShape(resultType)) match {
@@ -182,8 +219,8 @@ private object OpenCLBuiltins {
             case Some(_) => Left(Fault.InvalidRequest("OpenCL isnan source is not numeric"))
             case None    => Left(undefined(arguments.head))
           }
-        })
-      case "_Z7barrierj" => Some(Dynamic { (execution, _) =>
+        }
+      case Builtin.Barrier => Dynamic { (execution, _) =>
           scalar(execution.values, arguments.head).flatMap { flags =>
             suspend(
               execution,
@@ -196,13 +233,9 @@ private object OpenCLBuiltins {
               )
             )
           }
-        })
-      case "_Z29work_group_scan_exclusive_addi" => Some(scan(Scope.Workgroup, "work_group_scan_exclusive_add"))
-      case "_Z29work_group_scan_exclusive_addl" => Some(scan(Scope.Workgroup, "scan"))
-      case "_Z28sub_group_scan_exclusive_addi"  => Some(scan(Scope.Subgroup, "scan"))
-      case broadcast if broadcastScope(broadcast).isDefined =>
-        val scope = broadcastScope(broadcast).getOrElse(Scope.Workgroup)
-        Some(Dynamic { (execution, _) =>
+        }
+      case Builtin.Scan(scope, label) => scan(scope, label)
+      case Builtin.Broadcast(scope)   => Dynamic { (execution, _) =>
           val values = execution.values
           (values.get(arguments(0)), scalar(values, arguments(1)), program.integerShape(resultType)) match {
             case (Some(value @ VMValue.Bits(sourceType, lanes)), Right(localId), Some((width, count)))
@@ -223,8 +256,7 @@ private object OpenCLBuiltins {
             case _                   =>
               Left(Fault.InvalidRequest("OpenCL broadcast requires matching integer scalar arguments and result"))
           }
-        })
-      case _ => None
-    })
+        }
+    }
   }
 }

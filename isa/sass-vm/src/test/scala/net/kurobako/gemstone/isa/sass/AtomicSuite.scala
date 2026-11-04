@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Atomics as ptxas 13.3 emits them for atomicAdd on __half2 and __nv_bfloat162, atomicMin and atomicCAS through
   * generic pointers, and the compare-and-store loops of the bfloat16 and shared fallbacks
@@ -67,6 +67,21 @@ class AtomicSuite extends Suite {
       Vec(0, 0, 0, 0x40380000),
       block = Some(32),
       shared = 16
+    )
+  }
+
+  // 64-bit system-scope atomic on a generic pointer to the thread's own stack (sm_70 listing of
+  // cuda/atomics/atomic.local.pass.cpp): the window the generic address names is the thread-local one.
+  test("sm_70 generic ATOM.64 reaches thread-local memory") {
+    check(
+      70,
+      "S2R R0, SR_TID.X; MOV R1, c[0x0][0x28]; IADD3 R1, R1, -0x8, RZ; MOV R2, 0xfffffffe; MOV R3, 0x5; " +
+        "STL.64 [R1], R2; MOV R4, 0x3; MOV R5, RZ; IADD3 R22, P0, R1, c[0x0][0x20], RZ; " +
+        "IMAD.X R23, RZ, RZ, c[0x0][0x24], P0; ATOM.E.ADD.64.STRONG.SYS P2, R16, [R22.64], R4; " +
+        "LDL.64 R6, [R1]; ISETP.NE.AND P1, PT, R0, RZ, PT; @P1 EXIT; LDC.64 R8, c[0x0][0x160]; " +
+        "STG.E [R8.64], R16; STG.E [R8.64+0x4], R17; STG.E [R8.64+0x8], R6; STG.E [R8.64+0xc], R7; EXIT",
+      Vec(0xfffffffe, 5, 1, 6),
+      block = Some(32)
     )
   }
 }

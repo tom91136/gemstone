@@ -7,7 +7,6 @@
 #include <string>
 #include <string_view>
 
-#include "cuda_architecture.hpp"
 #include <aspartame/all.hpp>
 
 #include <conformance/environment_keys.hpp>
@@ -16,28 +15,12 @@ namespace conformance::driver {
 
 // Audited payload gaps in the pinned vendor packages. New versions and untested
 // shapes run normally: a failed launch must never become a capability skip.
-inline std::string_view suiteBlasSkip(std::string_view backend, std::string_view architecture, std::string_view code,
-                                      std::string_view library, std::string_view program, std::string_view identity) {
+inline std::string_view suiteBlasSkip(std::string_view backend, std::string_view architecture, std::string_view library,
+                                      std::string_view program, std::string_view identity) {
   if (program != "unified") return {};
   const auto operation =
       identity.starts_with("blas/f32/compact/") ? identity.substr(std::string_view("blas/f32/compact/").size()) : std::string_view{};
-  const bool gemm = operation == "gemm" || operation == "gemm_nt" || operation == "gemm_tn" || operation == "gemm_tt"
-                    || identity == "edge/blas/f32/compact/beta_zero_gemm" || identity == "edge/blas/f32/compact/padded_gemm";
   const bool gemv = operation == "gemv" || operation == "gemv_transpose";
-  if (backend == "cuda" && code == "ptx") {
-    // cuBLAS selects kernels by the device's compute capability, which suffixed routes share with their base.
-    const auto cuda = CudaArchitecture::parse(architecture);
-    const int sm = cuda ? cuda->capability : 0;
-    if (library == "libcublas.so.11.11.3.6" && (sm == 35 || sm == 50 || sm == 60)
-        && (gemm || (sm == 35 && operation == "gemm_strided_batched")))
-      return "cuBLAS 11.11.3.6: selected kernel has no PTX payload; SASS remains supported";
-    if (library == "libcublas.so.13.6.0.2") {
-      const bool allGemm = sm == 80 || sm == 86 || sm == 87 || sm == 89 || sm == 90 || sm == 120;
-      const bool transposedGemm = sm == 100 || sm == 103;
-      if ((allGemm && (gemm || gemv)) || (transposedGemm && (operation == "gemm_tn" || operation == "gemm_tt" || gemv)))
-        return "cuBLAS 13.6.0.2: selected kernel has no PTX payload; SASS remains supported";
-    }
-  }
   if (backend == "hip" && library == "librocblas.so.5.1.70101"
       && (architecture == "gfx900" || architecture == "gfx906" || architecture == "gfx90c" || architecture == "gfx1010"
           || architecture == "gfx1011" || architecture == "gfx1012" || architecture == "gfx1013")
@@ -71,13 +54,53 @@ inline void applySuiteIsolatedEnvironment(std::map<std::string, std::string> &en
 }
 
 // Suite knobs a machine profile or the invoking environment may set.
-inline constexpr auto SuiteEnvironmentKeys = std::to_array<std::string_view>(
-    {environment::VulkanCtsTimeoutSeconds, environment::OpenclCtsElementCount, environment::OpenclCtsTimeoutSeconds,
-     environment::OpenclCtsWimpyOn, environment::OpenclCtsAtomicIterationCount, environment::OpenclCtsAtomicThreadCount});
+inline constexpr auto SuiteEnvironmentKeys =
+    std::to_array<std::string_view>({environment::DeviceCount, environment::VulkanCtsTimeoutSeconds, environment::OpenclCtsElementCount,
+                                     environment::OpenclCtsTimeoutSeconds, environment::OpenclCtsWimpyOn,
+                                     environment::OpenclCtsAtomicIterationCount, environment::OpenclCtsAtomicThreadCount});
 
 inline bool suiteEnvironmentKey(std::string_view key) {
   using namespace aspartame;
   return SuiteEnvironmentKeys ^ contains(key);
+}
+
+inline constexpr auto LevelzeroMultiDeviceCases = std::to_array<std::string_view>({
+    "TestAffinity.GivenAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturnedInAllCases",
+    "TestAffinity.GivenSpecificAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturned",
+    "TestAffinity.GivenAffinityMaskSetWhenGettingSubDevicesThenCorrectNumberOfSubDevicesReturned",
+    "TestDeviceHierarchy.GivenDeviceHierarchyFlatThenGivenAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturnedInAllCases",
+    "TestDeviceHierarchy."
+    "GivenDeviceHierarchyCombinedThenGivenAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturnedInAllCases",
+    "TestDeviceHierarchy."
+    "GivenDeviceHierarchyCompositeThenGivenAffinityMaskSetWhenGettingDevicesThenCorrectNumberOfDevicesReturnedInAllCases",
+    "TestDeviceHierarchy.GivenDeviceHierarchyFlatThenWhenGettingDevicesThenCorrectNumberOfDevicesReturnedFromRootAndSubDevices",
+    "TestDeviceHierarchy.GivenDeviceHierarchyCombinedThenWhenGettingDevicesThenCorrectNumberOfDevicesReturnedFromRootAndSubDevices",
+    "TestDeviceHierarchy.GivenDeviceHierarchyCompositeThenWhenGettingDevicesThenCorrectNumberOfDevicesReturnedFromRootAndSubDevices",
+    "zeP2PContextCopyTests.GivenMultipleDevicesInDifferentContextsWhenAttemptingToUseMemoryThenMemoryIsAccessible",
+});
+
+inline constexpr auto VendorHipMultiDeviceCases = std::to_array<std::string_view>({
+    "vendor/hip/rocm-examples/HIP-Basic/multi_gpu_data_transfer",
+    "vendor/hip/rocm-examples/Libraries/rocFFT/multi_gpu",
+});
+
+// Device count for one case, empty when the case runs with the suite count.
+inline std::string_view suiteCaseDeviceCount(std::string_view program, std::string_view identity) {
+  using namespace aspartame;
+  if (program.starts_with("levelzero_") && LevelzeroMultiDeviceCases ^ contains(identity)) return "2";
+  if (program == "vendor_hip_examples" && VendorHipMultiDeviceCases ^ contains(identity)) return "2";
+  return {};
+}
+
+// Timing-bound cases. They run with no other case on the machine.
+inline constexpr auto LevelzeroExclusivePrograms =
+    std::to_array<std::string_view>({"levelzero_cts_test_cmdqueue", "levelzero_cts_test_cmdlist", "levelzero_cts_test_event"});
+inline constexpr auto LevelzeroExclusiveCases = std::to_array<std::string_view>({"SyncTimeoutParams/*"});
+
+inline bool suiteExclusiveCase(std::string_view program, std::string_view identity) {
+  using namespace aspartame;
+  return LevelzeroExclusivePrograms ^ contains(program)
+         && (LevelzeroExclusiveCases ^ exists([&](std::string_view pattern) { return identity ^ glob_matches(pattern); }));
 }
 
 } // namespace conformance::driver

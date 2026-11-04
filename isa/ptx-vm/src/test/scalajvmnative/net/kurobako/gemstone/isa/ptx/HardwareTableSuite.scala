@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.ptx
 
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 /** Every straight-line op_kernel op of the hardware probes, from `hardware/sm_<n>.txt`: the op entry's PTX between its

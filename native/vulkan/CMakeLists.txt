@@ -55,6 +55,11 @@ if(BUILD_TESTING)
   target_link_libraries(gemstone_vulkan_process_exit PRIVATE gemstone_vulkan)
   add_test(NAME vulkan/process-exit COMMAND gemstone_vulkan_process_exit)
   gemstone_set_tests_properties(vulkan/process-exit PROPERTIES TIMEOUT 10)
+  add_executable(gemstone_vulkan_multi_device test/multi_device.cpp)
+  target_include_directories(gemstone_vulkan_multi_device SYSTEM PRIVATE "${VULKAN_INCLUDE_DIR}")
+  gemstone_test_target(gemstone_vulkan_multi_device)
+  target_link_libraries(gemstone_vulkan_multi_device PRIVATE gemstone_vulkan gemstone_execution_client)
+  gemstone_discover_tests(gemstone_vulkan_multi_device TEST_PREFIX "vulkan/" PROPERTIES TIMEOUT 60)
 endif()
 
 target_compile_options(gemstone_vulkan PRIVATE

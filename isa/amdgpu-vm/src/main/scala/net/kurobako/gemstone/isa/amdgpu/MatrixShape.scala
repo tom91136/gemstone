@@ -23,7 +23,6 @@ private[isa] object MatrixShape {
       case _                                             => None
     }
     val ocp                                     = isa == ISA.CDNA4 || isa == ISA.RDNA4
-    val rdna3                                   = isa == ISA.RDNA3 || isa == ISA.RDNA3_5
     def scaled(code: Int): Option[MatrixFormat] = code match {
       case 0 => Some(MatrixFormat.FP8)
       case 1 => Some(MatrixFormat.BF8)
@@ -50,18 +49,15 @@ private[isa] object MatrixShape {
     }
     // gfx908 names fold the block count into the operand: a register of f32, two of f16, one of i8 or of pre-1k bf16
     def legacyItems(name: String): Option[Int] = name match {
-      case "f32"     => Some(1)
-      case "bf16"    => Some(2)
-      case "f16"     => Some(4)
-      case "i8"      => Some(4)
-      case "bf16_1k" => Some(4)
-      case "f64"     => Some(1)
-      case _         => None
+      case "f32"                    => Some(1)
+      case "bf16"                   => Some(2)
+      case "f16" | "i8" | "bf16_1k" => Some(4)
+      case "f64"                    => Some(1)
+      case _                        => None
     }
     (mnemonic, layout) match {
       case (Named(prefix, output, m, n, k, explicit, input), Some(selected)) =>
         val (rows, columns, depth) = (m.toInt, n.toInt, k.toInt)
-        val sparse                 = prefix == "s"
         val operands               = input.split('_').toVector
         val legacy                 = Option(explicit).isEmpty && !mnemonic.contains(s"x${k}_")
         val formats                = if (input == "f8f6f4") (scaled(formatA), scaled(formatB))
@@ -82,7 +78,9 @@ private[isa] object MatrixShape {
         }
         (formats, blocks, accumulator) match {
           case ((Some(a), Some(b)), Some(count), Some(c)) if count >= 1 =>
-            val shape = MatrixShape(
+            val rdna3  = isa == ISA.RDNA3 || isa == ISA.RDNA3_5
+            val sparse = prefix == "s"
+            val shape  = MatrixShape(
               selected,
               rows,
               columns,

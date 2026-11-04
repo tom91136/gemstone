@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class VMConditionCodesSuite extends Suite {
   import ConditionCodeReads.*

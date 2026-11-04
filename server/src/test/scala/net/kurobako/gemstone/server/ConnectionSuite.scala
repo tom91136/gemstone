@@ -69,6 +69,32 @@ class ConnectionSuite extends Suite {
       }
     }
 
+  private def serveWithSlowFactory(delayMillis: Long): DataInputStream = {
+    val output = ByteArrayOutputStream()
+    Using.resource(Clients { () =>
+      Thread.sleep(delayMillis)
+      ExecutionSession(Nil)
+    }) { clients =>
+      Connection.serve(StreamsChannel(ByteArrayInputStream(frame), output), clients, 1000, None, () => ())
+    }
+    val input = DataInputStream(ByteArrayInputStream(output.toByteArray))
+    assertEquals(input.readInt(), ExecutionRPC.HelloResponseMagic)
+    assertEquals(input.readInt(), 0)
+    input
+  }
+
+  test("a request executing past the heartbeat interval is preceded by heartbeats") {
+    val input      = serveWithSlowFactory(ExecutionRPC.HeartbeatMillis.raw * 4L)
+    val heartbeats = Iterator.continually(input.readInt()).takeWhile(_ == ExecutionRPC.HeartbeatMagic).size
+    assert(heartbeats >= 2, s"heartbeats=$heartbeats")
+  }
+
+  test("a request answered within the heartbeat interval is not preceded by heartbeats") {
+    val input = serveWithSlowFactory(0L)
+    assertEquals(input.readInt(), ExecutionRPC.ResponseMagic)
+    assertEquals(input.readInt(), 0)
+  }
+
   test("a session factory failure is an execution failure, not malformed input") {
     val output = ByteArrayOutputStream()
     Using.resource(Clients(() => throw IllegalStateException("factory failed"))) { clients =>

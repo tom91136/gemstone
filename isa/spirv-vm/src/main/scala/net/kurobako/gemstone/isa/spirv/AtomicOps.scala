@@ -75,16 +75,22 @@ private object AtomicOps {
       case _ => Left(Fault.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar type"))
     }
 
+  private def memoryWidth(program: VMProgram, typeId: Int, opcode: String): Either[Fault, Int in (16, 32, 64)] =
+    program.floatingShape(typeId) match {
+      case Some((width, 1)) if width == 16 => Right(width)
+      case _                               => width(program, typeId, opcode).map(_.widen[Int in (16, 32, 64)])
+    }
+
   private def store(pointer: Int, scope: Int, semantics: Int, value: Int)(using site: Site): Op = {
     val valueType = if (site.program.scalarSlot(value)) site.program.valueType(value) else -1
-    width(site.program, valueType, "OpAtomicStore") match {
+    memoryWidth(site.program, valueType, "OpAtomicStore") match {
       case Left(error)  => Fail(error)
       case Right(width) => AtomicStoreOp(pointer, value, width.toMemoryValueByteWidth, scope, semantics)
     }
   }
 
   private def load(ids: ResultIds, pointer: Int, scope: Int, semantics: Int)(using site: Site): Op =
-    width(site.program, ids.resultType, "OpAtomicLoad") match {
+    memoryWidth(site.program, ids.resultType, "OpAtomicLoad") match {
       case Left(error)  => Fail(error)
       case Right(width) =>
         AtomicLoadOp(pointer, width.toMemoryValueByteWidth, ids.dest, ids.resultType, scope, semantics)
@@ -95,7 +101,7 @@ private object AtomicOps {
 
   private def exchange(instruction: Instruction, resultType: Operand, value: Operand)(using site: Site): Op = {
     val opcode = instruction.opcode.raw
-    width(site.program, id(resultType), opcode) match {
+    memoryWidth(site.program, id(resultType), opcode) match {
       case Left(error)                                       => Fail(error)
       case Right(_) if mismatched(id(value), id(resultType)) =>
         Fail(Fault.InvalidRequest(s"$opcode requires matching result and value types"))

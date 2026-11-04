@@ -77,7 +77,9 @@ object SASSInstructionRenderer {
         val family = families(opcode)
         val chosen = rows.map(_._2).minBy(_.map(_.name).mkString("/"))
         val names  = chosen.map(slot => fieldName(slot.name))
-        val slots  = chosen.zipWithIndex.map { (slot, index) =>
+        // the slots of one instruction
+        @SuppressWarnings(Array("bonsai:linear-in-loop"))
+        val slots = chosen.zipWithIndex.map { (slot, index) =>
           val base = names(index)
           val name = if (names.count(_ == base) > 1) s"$base${names.take(index).count(_ == base) + 1}" else base
           slot.copy(name = name)
@@ -107,7 +109,7 @@ object SASSInstructionRenderer {
     }
   }
 
-  def renderInstructions(model: Vector[Case], modifiers: Vector[String] = Vector.empty): String = {
+  def renderInstructions(model: Vector[Case], modifiers: Vector[String]): String = {
     require(modifiers.forall(value => !value.contains('`') && !value.contains('\n')), "invalid modifier identifier")
     val modifierCases =
       modifiers.map(value => s"case `$value` extends Modifier(${ujson.Str(value).render()})").mkString("\n")

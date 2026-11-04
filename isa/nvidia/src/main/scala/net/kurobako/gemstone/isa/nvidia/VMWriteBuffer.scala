@@ -143,7 +143,7 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
       validate(memory, address.raw, width.toScalarByteWidth).left.map(located(_, pc, lane))
     case VMWrite.MemoryBytes(lane, address, bytes) =>
       validate(memory, address.raw, bytes.nonNegativeSize).left.map(located(_, pc, lane))
-    case VMWrite.Atomic(lane, _, address, width, false, _) =>
+    case VMWrite.Atomic(lane, _, address, width, AtomicTarget.Device, _) =>
       validate(memory, address, width.toScalarByteWidth).left.map(located(_, pc, lane))
     case _ => Completed
   }
@@ -156,7 +156,7 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
       case VMWrite.MemoryBytes(_, address, bytes) =>
         memory.stored()
         memory.write(address, bytes)
-      case VMWrite.Atomic(lane, destination, address, width, false, change) =>
+      case VMWrite.Atomic(lane, destination, address, width, AtomicTarget.Device, change) =>
         memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth) { previous =>
           val updated = change(previous)
           if (updated != previous) memory.stored()
@@ -180,13 +180,18 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
       workgroup.withBuffer(address, width.toScalarByteWidth.widen)((bytes, offset) =>
         LittleEndian.write(value, bytes, offset, width.toScalarByteWidth)
       )(())
-    case VMWrite.Atomic(lane, destination, address, width, true, change) =>
+    case VMWrite.Atomic(lane, destination, address, width, AtomicTarget.Shared, change) =>
       val previous = Bits.truncate(workgroup.readShared(address, width), width)
       val updated  = change(previous)
       if (updated != previous) workgroup.stored()
       workgroup.writeShared(address, width, updated)
       destination.foreach(frame(lane).setRegister(_, previous))
-    case VMWrite.Memory(_, _, _, _, _) | VMWrite.MemoryBytes(_, _, _) | VMWrite.Atomic(shared = false) => ()
+    case VMWrite.Atomic(lane, destination, address, width, AtomicTarget.Local, change) =>
+      val previous = Bits.truncate(workgroup.readLocal(lane, address, width), width)
+      workgroup.writeLocal(lane, address, width, change(previous))
+      destination.foreach(frame(lane).setRegister(_, previous))
+    case VMWrite.Memory(_, _, _, _, _) | VMWrite.MemoryBytes(_, _, _) |
+        VMWrite.Atomic(target = AtomicTarget.Device) => ()
   }
 
   /** Validates every memory destination before applying anything, so a faulting instruction has no effect. */

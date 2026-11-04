@@ -81,7 +81,7 @@ object Server {
   )
 
   /** Explicit settings keep startup independent of the process environment. */
-  def start(settings: Settings = Settings(), backends: Workgroups => Backends = Backends.default(_)): Server = {
+  def start(settings: Settings, backends: Workgroups => Backends = Backends.default(_)): Server = {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var rollback                                = List.empty[() => Unit]
     def own[A <: AutoCloseable](resource: A): A = {

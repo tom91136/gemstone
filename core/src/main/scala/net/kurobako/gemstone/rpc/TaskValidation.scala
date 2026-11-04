@@ -45,6 +45,11 @@ private object TaskValidation {
         ExecutionFailure.NotFound(s"argument buffer refers to unregistered allocation ${buffer.region}")
       case buffer if buffer.offset >= size(buffer.region) =>
         ExecutionFailure.InvalidRequest("argument buffer offset is outside its allocation")
+    }).orElse(task.deviceHeap.collect {
+      case heap if absent(heap.region) =>
+        ExecutionFailure.NotFound(s"device heap refers to unregistered allocation ${heap.region}")
+      case heap if heap.offset > size(heap.region) || heap.size > size(heap.region) - heap.offset =>
+        ExecutionFailure.InvalidRequest("device heap exceeds its allocation")
     }).orElse(task.pointerRelocations.collectFirst {
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), _, _, _)
           if absent(source) =>
@@ -84,6 +89,7 @@ private object TaskValidation {
   def referenced(task: KernelTask): Set[AllocationId] =
     task.arguments.collect { case KernelTask.Argument.Memory(region, _, _) => region }.toSet ++
       task.argumentBuffer.map(_.region) ++
+      task.deviceHeap.map(_.region) ++
       task.pointerRelocations.flatMap { relocation =>
         relocation.source match {
           case KernelTask.RelocationSource.Memory(region) => Vector(relocation.target, region)

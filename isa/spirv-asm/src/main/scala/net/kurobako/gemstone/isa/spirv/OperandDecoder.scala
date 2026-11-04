@@ -119,13 +119,10 @@ private object OperandDecoder {
 
     private def decodeBitEnum(info: OperandKindInfo, offset: Int): Either[InstructionDecodeError, (Operand, Int)] = {
       val value       = words(offset).toUnsigned.toLong
-      val enumerants  = ExtensionEnumerants.of(info)
-      val allowedMask = enumerants.foldLeft(0L)(_ | _.value)
+      val allowedMask = ExtensionEnumerants.of(info).foldLeft(0L)(_ | _.value)
       if ((value & ~allowedMask) != 0L) Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
       else {
-        val parameterKinds = enumerants.filter { enumerant =>
-          if (enumerant.value == 0L) value == 0L else (value & enumerant.value) == enumerant.value
-        }.flatMap(_.parameterKinds)
+        val parameterKinds = ExtensionEnumerants.selected(info, value).flatMap(_.parameterKinds)
         decodeSpan(info.kind, offset, offset + 1, parameterKinds)
       }
     }

@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.spirv
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class BinarySuite extends Suite {
   // Fixed bytes and boundary values below are independent expectations for the wire/bit representation.

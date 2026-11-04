@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class EmbeddedCatalogueSuite extends Suite {
   private val target = "gfx1030".refine[Target].fold(error => fail(error.raw), identity)

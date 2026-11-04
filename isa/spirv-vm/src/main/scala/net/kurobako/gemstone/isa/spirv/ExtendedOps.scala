@@ -368,13 +368,13 @@ private object ExtendedOps {
   )(using Instruction): Op = {
     val program     = site.program
     val pointerForm = opcode == Glsl.Modf || opcode == Glsl.Frexp
-    val modf        = opcode == Glsl.Modf || opcode == Glsl.ModfStruct
     if (sources.size != (if (pointerForm) 2 else 1))
       Fail(Fault.InvalidRequest("GLSL decomposition has an incorrect operand count"))
     else typed(site, sources.head) match {
       case Typed.Undefined(value)    => Fail(undefined(value))
       case Typed.Opaque(_, _)        => Fail(Fault.InvalidRequest("GLSL decomposition requires floating-point input"))
       case Typed.Data(_, sourceType) =>
+        val modf         = opcode == Glsl.Modf || opcode == Glsl.ModfStruct
         val incompatible = Fault.InvalidRequest("GLSL decomposition has incompatible operand or result types")
         def valid(outputType: Int): Boolean = program.floatingShape(sourceType).exists { case (_, count) =>
           if (modf) outputType == sourceType else program.integerShape(outputType).exists(_._2 == count)
@@ -688,27 +688,31 @@ private object ExtendedOps {
       case `SClamp` | `UClamp` | `SMadHi` | `UMadHi` | `SMadSat` | `UMadSat` | `SMad24` | `UMad24` => 3
       case _                                                                                       => 2
     }
-    val widening     = opcode == SUpsample || opcode == UUpsample
-    val smallProduct = opcode == SMul24 || opcode == UMul24 || opcode == SMad24 || opcode == UMad24
     if (sources.size != arity)
       Fail(Fault.InvalidRequest(s"OpenCL.std integer opcode $opcode expects $arity operands, received ${sources.size}"))
-    else site.program.integerShape(resultType) match {
-      case Some((width, count))
-          if (width == 8 || width == 16 || width == 32 || width == 64) &&
-            (!widening || width != 8) &&
-            (!smallProduct || width == 32) =>
-        val inputWidth: Int in 1 ~ 64 = if (widening) (width / 2).unsafe else width
-        val mismatch                  =
-          Fault.InvalidRequest(s"OpenCL.std integer opcode $opcode requires matching integer scalar/vector types")
-        lowered(dataTypes(sources, _ => mismatch).flatMap { types =>
-          Either.cond(
-            types.forall(typeId => site.program.integerShape(typeId).contains(inputWidth -> count)),
-            staged(ExtendedSet.OpenCL),
-            mismatch
+    else {
+      val widening     = opcode == SUpsample || opcode == UUpsample
+      val smallProduct = opcode == SMul24 || opcode == UMul24 || opcode == SMad24 || opcode == UMad24
+      site.program.integerShape(resultType) match {
+        case Some((width, count))
+            if (width == 8 || width == 16 || width == 32 || width == 64) &&
+              (!widening || width != 8) &&
+              (!smallProduct || width == 32) =>
+          val inputWidth: Int in 1 ~ 64 = if (widening) (width / 2).unsafe else width
+          val mismatch                  =
+            Fault.InvalidRequest(s"OpenCL.std integer opcode $opcode requires matching integer scalar/vector types")
+          lowered(dataTypes(sources, _ => mismatch).flatMap { types =>
+            Either.cond(
+              types.forall(typeId => site.program.integerShape(typeId).contains(inputWidth -> count)),
+              staged(ExtendedSet.OpenCL),
+              mismatch
+            )
+          })
+        case _ =>
+          Fail(
+            Fault.InvalidRequest(s"OpenCL.std integer opcode $opcode requires an 8, 16, 32 or 64-bit integer result")
           )
-        })
-      case _ =>
-        Fail(Fault.InvalidRequest(s"OpenCL.std integer opcode $opcode requires an 8, 16, 32 or 64-bit integer result"))
+      }
     }
   }
 

@@ -163,25 +163,7 @@ object InstructionDefinitions1 {
     FormDecoder(Definitions1.Fmul2RegRegReg, Register, Register, Register)(Form.Fmul2RegRegReg.apply),
     FormDecoder(Definitions1.Fmul32iRegRegImm, Register, Register, Immediate)(Form.Fmul32iRegRegImm.apply),
     FormDecoder(
-      Definitions1.FootprintPredRegRegRegReg,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register
-    )(Form.FootprintPredRegRegRegReg.apply),
-    FormDecoder(
-      Definitions1.FootprintPredRegRegRegRegImmImm,
-      Predicate,
-      Register,
-      Register,
-      Register,
-      Register,
-      Immediate,
-      Immediate
-    )(Form.FootprintPredRegRegRegRegImmImm.apply),
-    FormDecoder(
-      Definitions1.FootprintPredRegRegRegRegImmImmImm,
+      Definitions1.FootprintPredRegRegRegRegImmImmImmSymbol,
       Predicate,
       Register,
       Register,
@@ -189,70 +171,98 @@ object InstructionDefinitions1 {
       Register,
       Immediate,
       Immediate,
-      Immediate
-    )(Form.FootprintPredRegRegRegRegImmImmImm.apply),
+      Immediate,
+      Symbol
+    )(Form.FootprintPredRegRegRegRegImmImmImmSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintPredRegRegRegRegReg,
+      Definitions1.FootprintPredRegRegRegRegImmImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
       Register,
-      Register
-    )(Form.FootprintPredRegRegRegRegReg.apply),
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.FootprintPredRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintPredRegRegRegRegRegImm,
+      Definitions1.FootprintPredRegRegRegRegRegImmSymbol,
       Predicate,
       Register,
       Register,
       Register,
       Register,
       Register,
-      Immediate
-    )(Form.FootprintPredRegRegRegRegRegImm.apply),
+      Immediate,
+      Symbol
+    )(Form.FootprintPredRegRegRegRegRegImmSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintRegRegRegReg,
+      Definitions1.FootprintPredRegRegRegRegRegSymbol,
+      Predicate,
       Register,
       Register,
       Register,
-      Register
-    )(Form.FootprintRegRegRegReg.apply),
+      Register,
+      Register,
+      Symbol
+    )(Form.FootprintPredRegRegRegRegRegSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintRegRegRegRegImmImm,
+      Definitions1.FootprintPredRegRegRegRegSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.FootprintPredRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions1.FootprintRegRegRegRegImmImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
       Immediate,
-      Immediate
-    )(Form.FootprintRegRegRegRegImmImm.apply),
+      Immediate,
+      Immediate,
+      Symbol
+    )(Form.FootprintRegRegRegRegImmImmImmSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintRegRegRegRegImmImmImm,
+      Definitions1.FootprintRegRegRegRegImmImmSymbol,
       Register,
       Register,
       Register,
       Register,
       Immediate,
       Immediate,
-      Immediate
-    )(Form.FootprintRegRegRegRegImmImmImm.apply),
+      Symbol
+    )(Form.FootprintRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintRegRegRegRegReg,
+      Definitions1.FootprintRegRegRegRegRegImmSymbol,
       Register,
       Register,
       Register,
       Register,
-      Register
-    )(Form.FootprintRegRegRegRegReg.apply),
+      Register,
+      Immediate,
+      Symbol
+    )(Form.FootprintRegRegRegRegRegImmSymbol.apply),
     FormDecoder(
-      Definitions1.FootprintRegRegRegRegRegImm,
+      Definitions1.FootprintRegRegRegRegRegSymbol,
       Register,
       Register,
       Register,
       Register,
       Register,
-      Immediate
-    )(Form.FootprintRegRegRegRegRegImm.apply),
+      Symbol
+    )(Form.FootprintRegRegRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions1.FootprintRegRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.FootprintRegRegRegRegSymbol.apply),
     FormDecoder(Definitions1.FrndRegAddressImm, Register, Address, Immediate)(Form.FrndRegAddressImm.apply),
     FormDecoder(Definitions1.FrndRegConst, Register, ConstantBank)(Form.FrndRegConst.apply),
     FormDecoder(Definitions1.FrndRegImm, Register, Immediate)(Form.FrndRegImm.apply),
@@ -344,8 +354,14 @@ object InstructionDefinitions1 {
     FormDecoder(Definitions1.FsetpPredRegConst, Predicate, Register, ConstantBank)(Form.FsetpPredRegConst.apply),
     FormDecoder(Definitions1.FsetpPredRegImm, Predicate, Register, Immediate)(Form.FsetpPredRegImm.apply),
     FormDecoder(Definitions1.FsetpPredRegReg, Predicate, Register, Register)(Form.FsetpPredRegReg.apply),
-    FormDecoder(Definitions1.FswzRegRegReg, Register, Register, Register)(Form.FswzRegRegReg.apply),
-    FormDecoder(Definitions1.FswzaddRegRegReg, Register, Register, Register)(Form.FswzaddRegRegReg.apply),
+    FormDecoder(Definitions1.FswzRegRegRegSymbol, Register, Register, Register, Symbol)(Form.FswzRegRegRegSymbol.apply),
+    FormDecoder(
+      Definitions1.FswzaddRegRegRegSymbol,
+      Register,
+      Register,
+      Register,
+      Symbol
+    )(Form.FswzaddRegRegRegSymbol.apply),
     FormDecoder(
       Definitions1.GatherRegRegRegRegImm,
       Register,

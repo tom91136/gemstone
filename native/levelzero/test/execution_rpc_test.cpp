@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ze_api.h>
 
+#include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
@@ -85,8 +86,9 @@ struct MockServer {
   }
 
   ~MockServer() {
-    if (listener >= 0) close(listener);
+    stopping = true;
     if (worker.joinable()) worker.join();
+    if (listener >= 0) close(listener);
   }
 
   uint16_t port = 0;
@@ -98,13 +100,16 @@ struct MockServer {
   std::atomic<bool> pauseCompletion{false};
   std::atomic<bool> completionEntered{false};
   std::atomic<uint8_t> lastLaunchByte8{0};
+  std::atomic<bool> stopping{false};
 
 private:
   void serve() {
     std::vector<pollfd> peers{{.fd = listener, .events = POLLIN, .revents = 0}};
     bool running = true;
-    while (running) {
-      REQUIRE(poll(peers.data(), peers.size(), 30000) > 0);
+    while (running && !stopping) {
+      const auto polled = poll(peers.data(), peers.size(), 10);
+      if (polled == 0) continue;
+      REQUIRE(polled > 0);
       if (peers[0].revents & POLLIN) {
         const auto connection = accept(listener, nullptr, nullptr);
         if (connection < 0) FAIL("accept failed");
@@ -192,7 +197,7 @@ private:
         const auto request = gemstone_test::decodePayload<CompletionPrints>(payload);
         REQUIRE((std::cmp_equal(request.completion.value, TestCompletionId)));
         std::vector<uint8_t> response;
-        gemstone_test::encodePayload(response, std::string{});
+        gemstone_test::encodePayload(response, PrintText{});
         respond(connection, response);
       } else {
         REQUIRE((false));
@@ -694,7 +699,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeMemFree(context, unrelatedMemory) == ZE_RESULT_SUCCESS));
   unrelatedMemory = nullptr;
   REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
-  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
+  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
   const uint32_t changedAfterRecording = 0xabcdef01;
   REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(changedAfterRecording), &changedAfterRecording) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelSetGroupSize(kernel, 8, 1, 1) == ZE_RESULT_SUCCESS));
@@ -733,17 +738,6 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
 
   ze_fence_desc_t fenceDesc{};
   fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
-  ze_fence_handle_t failedFence = nullptr;
-  REQUIRE((zeFenceCreate(queue, &fenceDesc, &failedFence) == ZE_RESULT_SUCCESS));
-  server.failNextCompletion.store(true);
-  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, failedFence) == ZE_RESULT_ERROR_DEVICE_LOST));
-  REQUIRE((zeFenceHostSynchronize(failedFence, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
-  REQUIRE((zeFenceQueryStatus(failedFence) == ZE_RESULT_ERROR_DEVICE_LOST));
-  REQUIRE((zeFenceDestroy(failedFence) == ZE_RESULT_SUCCESS));
-  const char *launchError = nullptr;
-  REQUIRE((zeDriverGetLastErrorDescription(driver, &launchError) == ZE_RESULT_SUCCESS));
-  CHECK((launchError && std::string(launchError).contains("completion failed")));
-
   const struct {
     FailureKind kind;
     ze_result_t expected;
@@ -752,9 +746,6 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
       {.kind = FailureKind::InvalidConfiguration, .expected = ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION},
       {.kind = FailureKind::Unsupported, .expected = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE},
       {.kind = FailureKind::OutOfResources, .expected = ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY},
-      {.kind = FailureKind::IllegalAddress, .expected = ZE_RESULT_ERROR_DEVICE_LOST},
-      {.kind = FailureKind::IllegalInstruction, .expected = ZE_RESULT_ERROR_DEVICE_LOST},
-      {.kind = FailureKind::TimedOut, .expected = ZE_RESULT_ERROR_DEVICE_LOST},
   };
   for (const auto &[kind, expected] : failures) {
     CAPTURE(static_cast<int>(kind));
@@ -765,13 +756,202 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
     CHECK((zeCommandQueueExecuteCommandLists(queue, 1, &list, fence) == expected));
     REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
   }
-  server.completionFailure.store(FailureKind::Failed);
 
-  REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(expected), &expected) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE));
+  REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeMemFree(context, memory) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
+}
+
+namespace {
+
+struct DeviceLost {
+  MockServer server;
+  const gemstone_test::RpcEnvironment environment{"tcp://127.0.0.1:" + std::to_string(server.port)};
+  ze_driver_handle_t driver = nullptr;
+  ze_device_handle_t device = nullptr;
+  ze_context_handle_t context = nullptr;
+  void *memory = nullptr;
+  ze_module_handle_t module = nullptr;
+  ze_kernel_handle_t kernel = nullptr;
+  ze_command_queue_desc_t queueDesc{};
+  ze_command_queue_handle_t queue = nullptr;
+  ze_command_list_desc_t listDesc{};
+  ze_command_list_handle_t list = nullptr;
+  ze_fence_desc_t fenceDesc{};
+  const ze_group_count_t groups{.groupCountX = 2, .groupCountY = 1, .groupCountZ = 1};
+  uint32_t expected = 0x78563412;
+
+  void setUp() {
+    REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
+    device = gemstoneDevice(&driver);
+    REQUIRE((device && driver));
+    ze_context_desc_t contextDesc{};
+    contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+    REQUIRE((zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS));
+
+    ze_device_mem_alloc_desc_t allocationDesc{};
+    allocationDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+    REQUIRE((zeMemAllocDevice(context, &allocationDesc, 16, 8, device, &memory) == ZE_RESULT_SUCCESS));
+    std::memset(memory, 0, 16);
+
+    // DPC++ passes a null host pointer for some zero-valued scalars, so the
+    // metadata must tell those apart from workgroup pointer arguments.
+    const uint32_t image[] = {
+        0x07230203,
+        0x00010600,
+        0,
+        12,
+        0,
+        (5U << 16) | 15U,
+        6,
+        6,
+        0x74697277,
+        0x00000065,
+        (6U << 16) | 5U,
+        2,
+        0x5f746f6e,
+        0x636e7566,
+        0x6e6f6974,
+        0,
+        (4U << 16) | 5U,
+        6,
+        0x74697277,
+        0x00000065,
+        (2U << 16) | 19U,
+        1,
+        (4U << 16) | 21U,
+        2,
+        32,
+        0,
+        (4U << 16) | 32U,
+        3,
+        5,
+        2,
+        (4U << 16) | 32U,
+        4,
+        4,
+        2,
+        (7U << 16) | 33U,
+        5,
+        1,
+        3,
+        2,
+        4,
+        2,
+        (5U << 16) | 54U,
+        1,
+        6,
+        0,
+        5,
+        (3U << 16) | 55U,
+        3,
+        7,
+        (3U << 16) | 55U,
+        2,
+        8,
+        (3U << 16) | 55U,
+        4,
+        9,
+        (3U << 16) | 55U,
+        2,
+        10,
+        (2U << 16) | 248U,
+        11,
+        (1U << 16) | 253U,
+        (1U << 16) | 56U,
+    };
+    ze_module_desc_t moduleDesc{};
+    moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+    moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+    moduleDesc.inputSize = sizeof(image);
+    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(image);
+    ze_module_build_log_handle_t log = nullptr;
+    REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, &log) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS));
+
+    ze_kernel_desc_t kernelDesc{};
+    kernelDesc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+    kernelDesc.pKernelName = "write";
+    REQUIRE((zeKernelCreate(module, &kernelDesc, &kernel) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
+    void *interior = static_cast<uint8_t *>(memory) + 4;
+    REQUIRE((zeKernelSetArgumentValue(kernel, 0, sizeof(interior), &interior) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(expected), &expected) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeKernelSetArgumentValue(kernel, 2, 64, nullptr) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeKernelSetArgumentValue(kernel, 3, sizeof(uint32_t), nullptr) == ZE_RESULT_SUCCESS));
+
+    queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+    queueDesc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
+    REQUIRE((zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS));
+    listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+    REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
+    fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
+    REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
+  }
+
+  void expectLost() {
+    ze_fence_handle_t fence = nullptr;
+    REQUIRE((zeFenceCreate(queue, &fenceDesc, &fence) == ZE_RESULT_SUCCESS));
+    CHECK((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_ERROR_DEVICE_LOST));
+    CHECK((zeCommandQueueSynchronize(queue, 0) == ZE_RESULT_ERROR_DEVICE_LOST));
+    CHECK((zeFenceQueryStatus(fence) == ZE_RESULT_ERROR_DEVICE_LOST));
+    CHECK((zeFenceHostSynchronize(fence, 0) == ZE_RESULT_ERROR_DEVICE_LOST));
+    REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
+  }
+
+  void fencedFailure() {
+    ze_fence_handle_t failedFence = nullptr;
+    REQUIRE((zeFenceCreate(queue, &fenceDesc, &failedFence) == ZE_RESULT_SUCCESS));
+    server.failNextCompletion.store(true);
+    REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, failedFence) == ZE_RESULT_ERROR_DEVICE_LOST));
+    REQUIRE((zeFenceHostSynchronize(failedFence, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
+    REQUIRE((zeFenceQueryStatus(failedFence) == ZE_RESULT_ERROR_DEVICE_LOST));
+    REQUIRE((zeFenceDestroy(failedFence) == ZE_RESULT_SUCCESS));
+    const char *launchError = nullptr;
+    REQUIRE((zeDriverGetLastErrorDescription(driver, &launchError) == ZE_RESULT_SUCCESS));
+    CHECK((launchError && std::string(launchError).contains("completion failed")));
+    expectLost();
+  }
+
+  void failedKind(FailureKind kind) {
+    ze_fence_handle_t fence = nullptr;
+    REQUIRE((zeFenceCreate(queue, &fenceDesc, &fence) == ZE_RESULT_SUCCESS));
+    server.completionFailure.store(kind);
+    server.failNextCompletion.store(true);
+    CHECK((zeCommandQueueExecuteCommandLists(queue, 1, &list, fence) == ZE_RESULT_ERROR_DEVICE_LOST));
+    REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
+    expectLost();
+  }
+
+  void hostEventsGated(FailureKind kind, uint32_t deviceCount) {
+    ze_event_pool_desc_t poolDesc{};
+    poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+    poolDesc.count = 1;
+    ze_event_pool_handle_t pool = nullptr;
+    REQUIRE((zeEventPoolCreate(context, &poolDesc, deviceCount, deviceCount ? &device : nullptr, &pool) == ZE_RESULT_SUCCESS));
+    ze_event_desc_t eventDesc{};
+    eventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+    eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+    ze_event_handle_t event = nullptr;
+    REQUIRE((zeEventCreate(pool, &eventDesc, &event) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeEventHostSignal(event) == ZE_RESULT_SUCCESS));
+    failedKind(kind);
+    CHECK((zeEventHostSignal(event) == ZE_RESULT_ERROR_DEVICE_LOST));
+    CHECK((zeEventHostSynchronize(event, 0) == ZE_RESULT_ERROR_DEVICE_LOST));
+    CHECK((zeEventQueryStatus(event) == ZE_RESULT_ERROR_DEVICE_LOST));
+    CHECK((zeEventHostReset(event) == ZE_RESULT_ERROR_DEVICE_LOST));
+    REQUIRE((zeEventDestroy(event) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS));
+  }
+
   // A failed asynchronous launch must complete its event with the error and
   // unblock dependent copies, including events on cancelled later commands.
-  for (const unsigned mode : {0U, 1U, 2U, 3U}) {
+  void asyncMode(unsigned mode) {
     CAPTURE(mode);
     const bool immediate = mode == 1;
     ze_event_pool_desc_t poolDesc{};
@@ -841,22 +1021,94 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
     REQUIRE((zeCommandListDestroy(consumer) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandQueueDestroy(producerQueue) == ZE_RESULT_SUCCESS));
     REQUIRE((zeCommandQueueDestroy(consumerQueue) == ZE_RESULT_SUCCESS));
-    for (auto *const event : events) {
-      REQUIRE((zeEventHostReset(event) == ZE_RESULT_SUCCESS));
-      CHECK((zeEventQueryStatus(event) == ZE_RESULT_NOT_READY));
-      REQUIRE((zeEventHostSignal(event) == ZE_RESULT_SUCCESS));
-      CHECK((zeEventHostSynchronize(event, 0) == ZE_RESULT_SUCCESS));
+    for (auto *const event : events)
       REQUIRE((zeEventDestroy(event) == ZE_RESULT_SUCCESS));
-    }
     REQUIRE((zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS));
   }
+};
 
-  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeMemFree(context, memory) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
+} // namespace
+
+TEST_CASE("Level Zero device lost is sticky", "[level-zero][rpc]") {
+  const char *const children[]{
+      "Level Zero fault child fenced",
+      "Level Zero fault child IllegalAddress",
+      "Level Zero fault child IllegalInstruction",
+      "Level Zero fault child TimedOut",
+      "Level Zero fault child async mode 0",
+      "Level Zero fault child async mode 1",
+      "Level Zero fault child async mode 2",
+      "Level Zero fault child async mode 3",
+      "Level Zero fault child host events",
+      "Level Zero fault child host events zero devices",
+  };
+  for (const auto *child : children) {
+    CAPTURE(child);
+    const auto outcome = gemstone_test::runChildTest(child);
+    CAPTURE(outcome.output);
+    CHECK((outcome.signal == 0));
+    CHECK((outcome.exitCode == 0));
+  }
+}
+
+TEST_CASE("Level Zero fault child fenced", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.fencedFailure();
+}
+
+TEST_CASE("Level Zero fault child IllegalAddress", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.failedKind(FailureKind::IllegalAddress);
+}
+
+TEST_CASE("Level Zero fault child IllegalInstruction", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.failedKind(FailureKind::IllegalInstruction);
+}
+
+TEST_CASE("Level Zero fault child TimedOut", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.failedKind(FailureKind::TimedOut);
+}
+
+TEST_CASE("Level Zero fault child async mode 0", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.asyncMode(0);
+}
+
+TEST_CASE("Level Zero fault child async mode 1", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.asyncMode(1);
+}
+
+TEST_CASE("Level Zero fault child async mode 2", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.asyncMode(2);
+}
+
+TEST_CASE("Level Zero fault child async mode 3", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.asyncMode(3);
+}
+
+TEST_CASE("Level Zero fault child host events", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.hostEventsGated(FailureKind::IllegalAddress, 1);
+}
+
+TEST_CASE("Level Zero fault child host events zero devices", "[.]") {
+  DeviceLost lost;
+  lost.setUp();
+  lost.hostEventsGated(FailureKind::IllegalAddress, 0);
 }
 
 TEST_CASE("Level Zero cross-workgroup API", "[level-zero][rpc]") { crossWorkgroupApi(); }

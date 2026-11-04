@@ -357,7 +357,7 @@ object SPIRVInstances {
     Extended(name, Vec.from(operands), signatures)
 
   private def each(names: String*)(operands: String*)(signatures: Vec[Signature]): Vec[Extended] =
-    Vec.from(names).map(name => Extended(name, Vec.from(operands), signatures))
+    Vec.from(names).map(name => extended(name, operands*)(signatures))
 
   private val geometry: Vec[Signature] =
     floats.flatMap(width =>

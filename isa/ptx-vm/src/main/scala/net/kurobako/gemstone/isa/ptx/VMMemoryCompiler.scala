@@ -122,6 +122,30 @@ private object VMMemoryCompiler {
     }
   }
 
+  /** A vector store to a register-backed `.param`, one parameter store per element. */
+  def storeParameterElements(address: Operand, source: Operand, modifiers: Vec[Modifier])(using
+      scope: Scope
+  )
+      : Option[Either[Error, Vec[VMIR.Instruction]]] =
+    parameterAddress(address).collect {
+      case (name, offset)
+          if Form(modifiers).space == Space.Parameter && Operand.isVectorLiteral(source) &&
+            !scope.isKernelParameter(name) && scope.spilledParameter(name).isEmpty =>
+        for {
+          parameter <- scope.parameter(name)
+          start     <- parameterOffset(offset)
+          width     <- scalarWidth(modifiers)
+          values    <- scope.values(source)
+        } yield values.zipWithIndex.map((value, index) =>
+          VMIR.Instruction.StoreParameter(
+            parameter,
+            (start.raw + index * (width.raw / 8)).unsafe[Int >= 0],
+            value,
+            width
+          )
+        )
+    }
+
   def store(address: Operand, source: Operand, modifiers: Vec[Modifier])(using
       scope: Scope
   )

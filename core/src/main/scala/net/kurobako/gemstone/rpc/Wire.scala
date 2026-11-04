@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.msgpack.*
 import scala.annotation.publicInBinary
 import scala.annotation.tailrec
+import scala.collection.immutable.ArraySeq
 import scala.compiletime.constValue
 import scala.compiletime.erasedValue
 import scala.compiletime.ops.int
@@ -29,6 +30,7 @@ object Wire {
     case MultipleOf(divisor: Long)
     case MinimumLength(minimum: Int)
     case NotContains(value: String)
+    case MaximumBytes(maximum: Int)
 
     /** Satisfying every constraint of any one alternative. */
     case AnyOf(alternatives: Vector[Vector[Constraint]])
@@ -130,6 +132,19 @@ object Wire {
     ): Codec[A] =
       mapped(Shape.Alias(name, base.shape, constraints), base)(embed, extract)
 
+    def boundedText[A](name: String, maximumBytes: Int > 0)(
+        embed: String => Either[String, A],
+        extract: A => String
+    ): Codec[A] =
+      mapped(
+        Shape.Alias(name, Shape.Text, Vector(Constraint.MaximumBytes(maximumBytes))),
+        instance[String](
+          Shape.Text,
+          (writer, value) => writer.writeString(value, maximumBytes),
+          _.readString(maximumBytes = maximumBytes)
+        )
+      )(embed, extract)
+
     def mapped[A, B](shape: Shape, base: Codec[B])(
         embed: B => Either[String, A],
         extract: A => B
@@ -158,7 +173,11 @@ object Wire {
 
     given Codec[Vec[Byte]] = instance(
       Shape.Sequence(Shape.Int8),
-      (writer, values) => writer.writeBytes(Vec.toArray(values)),
+      (writer, values) =>
+        writer.writeBytes(values match {
+          case bytes: ArraySeq.ofByte => bytes.unsafeArray
+          case other                  => other.toArray
+        }),
       reader => reader.readBytes().map(Vec.unsafeWrapArray)
     )
 
@@ -343,7 +362,8 @@ object Wire {
       val children = operationSymbol.children
       if (children.isEmpty) report.errorAndAbort(s"$name has no protocol operations")
       val cases = children.map { child =>
-        val singleton = child.flags.is(Flags.Module) || child.flags.is(Flags.StableRealizable)
+        val flags     = child.flags
+        val singleton = flags.is(Flags.Module) || flags.is(Flags.StableRealizable)
         val childType =
           if (singleton) child.termRef.widen
           else child.typeRef
@@ -478,10 +498,14 @@ object Wire {
     private[Wire] def read(reader: Reader): Either[String, A]
     private[Wire] def nullary: Option[A]
 
-    final def encode(value: A, limits: Limits): Either[String, Array[Byte]] = {
+    final def encode(value: A, limits: Limits): Either[String, Array[Byte]] = written(value, limits).result()
+
+    final def encoded(value: A, limits: Limits): Either[String, Encoded] = written(value, limits).encoded()
+
+    private def written(value: A, limits: Limits): Writer = {
       val writer = Writer(limits)
       write(writer, value)
-      writer.result()
+      writer
     }
 
     final def decode(bytes: Array[Byte], limits: Limits): Either[String, A] = decodeAll(bytes, limits)(read(_))
@@ -534,6 +558,7 @@ object Wire {
             case Constraint.OneOf(values)                    => s"one-of[${values.mkString(",")}]"
             case Constraint.MultipleOf(divisor)              => s"multiple-of[$divisor]"
             case Constraint.MinimumLength(minimum)           => s"minimum-length[$minimum]"
+            case Constraint.MaximumBytes(maximum)            => s"maximum-bytes[$maximum]"
             case Constraint.NotContains(excluded)            =>
               val encoded = excluded.getBytes(StandardCharsets.UTF_8).map(byte => f"${byte & 0xff}%02x").mkString
               s"not-contains[$encoded]"

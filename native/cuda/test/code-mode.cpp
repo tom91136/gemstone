@@ -28,6 +28,11 @@ extern "C" cudaError_t __cudaLaunchKernel(cudaKernel_t kernel, dim3 grid, dim3 b
 #undef cuLinkAddData
 extern "C" CUresult cuLinkCreate(unsigned, CUjit_option *, void **, CUlinkState *);
 extern "C" CUresult cuLinkAddData(CUlinkState, CUjitInputType, void *, size_t, const char *, unsigned, CUjit_option *, void **);
+extern "C" void **__cudaRegisterFatBinary(void *image);
+extern "C" void __cudaUnregisterFatBinary(void **handle);
+extern "C" void __cudaRegisterFunction(void **handle, const char *hostFunction, char *, const char *deviceName, int, uint3 *, uint3 *,
+                                       dim3 *, dim3 *, int *);
+extern "C" void __cudaRegisterVar(void **handle, const char *hostVariable, char *, const char *deviceName, int, size_t size, int, int);
 
 namespace {
 
@@ -77,6 +82,15 @@ std::vector<uint8_t> metadataFatbin(const std::vector<uint8_t> &cubin) {
   store32(fatbin, 0, 0xba55ed50);
   store16(fatbin, 6, 16);
   appendFatbinEntry(fatbin, 2, 89, cubin.data(), cubin.size());
+  store64(fatbin, 8, fatbin.size() - 16);
+  return fatbin;
+}
+
+std::vector<uint8_t> ptxFatbin() {
+  std::vector<uint8_t> fatbin(16);
+  store32(fatbin, 0, 0xba55ed50);
+  store16(fatbin, 6, 16);
+  appendFatbinEntry(fatbin, 1, 0, reinterpret_cast<const uint8_t *>(Ptx), sizeof(Ptx) - 1);
   store64(fatbin, 8, fatbin.size() - 16);
   return fatbin;
 }
@@ -186,9 +200,10 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
 
   setCodeMode("ptx");
   module = nullptr;
-  CHECK((cuModuleLoadData(&module, cubin.data()) == CUDA_ERROR_NOT_SUPPORTED));
-  CHECK((module == nullptr));
-  CHECK(fixture.programLoads.load() == loadsBefore);
+  REQUIRE((cuModuleLoadData(&module, cubin.data()) == CUDA_SUCCESS));
+  CHECK((module != nullptr));
+  CHECK(fixture.lastProgramImage().front() == 0x7f);
+  REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
   module = nullptr;
   REQUIRE((cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS));
@@ -322,8 +337,6 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
   REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
-  // Library catalogues may contain unused cubin-only kernels in a PTX run.
-  // Metadata handles are usable for inspection; every launch still rejects SASS.
   setCodeMode("ptx");
   library = nullptr;
   REQUIRE((cuLibraryLoadData(&library, cubin.data(), nullptr, nullptr, 0, nullptr, nullptr, 0) == CUDA_SUCCESS));
@@ -336,11 +349,8 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuModuleGetFunction(&function, module, "probe") == CUDA_SUCCESS));
   CHECK((function != nullptr));
   void *arguments[]{nullptr};
-  CHECK(
-      (cuLaunchKernel(reinterpret_cast<CUfunction>(kernel), 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == CUDA_ERROR_NOT_SUPPORTED));
   config.attrs = nullptr;
   config.numAttrs = 0;
-  CHECK((cuLaunchKernelEx(&config, function, arguments, nullptr) == CUDA_ERROR_NOT_SUPPORTED));
   REQUIRE((cuLibraryUnload(library) == CUDA_SUCCESS));
 
   // The fixture uses kind 2 for allocation parameters; the gap checks ABI offsets.
@@ -386,6 +396,96 @@ TEST_CASE("CUDA architecture- and family-specific targets report their compute c
     REQUIRE((cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, 0) == CUDA_SUCCESS));
     CHECK(value == minor);
   }
+}
+
+alignas(8) static uint8_t loadedObjectFatbin[1024];
+
+TEST_CASE("CUDA libraries in loaded objects upload on first lookup", "[cuda][code-mode]") {
+  FailureSession const session;
+  const auto image = ptxFatbin();
+  REQUIRE(image.size() <= sizeof(loadedObjectFatbin));
+  std::copy(image.begin(), image.end(), loadedObjectFatbin);
+  const auto loadsBefore = session.fixture.programLoads.load();
+
+  CUlibrary unused = nullptr;
+  REQUIRE((cuLibraryLoadData(&unused, loadedObjectFatbin, nullptr, nullptr, 0, nullptr, nullptr, 0) == CUDA_SUCCESS));
+  CHECK(session.fixture.programLoads.load() == loadsBefore);
+  REQUIRE((cuLibraryUnload(unused) == CUDA_SUCCESS));
+  CHECK(session.fixture.programLoads.load() == loadsBefore);
+
+  CUlibrary library = nullptr;
+  REQUIRE((cuLibraryLoadData(&library, loadedObjectFatbin, nullptr, nullptr, 0, nullptr, nullptr, 0) == CUDA_SUCCESS));
+  CUkernel kernel = nullptr;
+  REQUIRE((cuLibraryGetKernel(&kernel, library, "probe") == CUDA_SUCCESS));
+  CHECK(session.fixture.programLoads.load() == loadsBefore + 1);
+  CHECK((cuLibraryUnload(library) == CUDA_SUCCESS));
+}
+
+TEST_CASE("CUDA host shadows absent from the device image do not block function attributes", "[cuda][code-mode]") {
+  FailureSession session;
+  auto fatbin = ptxFatbin();
+  void **handle = __cudaRegisterFatBinary(fatbin.data());
+  REQUIRE(handle != nullptr);
+  char shadow[16]{};
+  char hostProbe = 0;
+  __cudaRegisterVar(handle, shadow, nullptr, "missing_shadow", 0, sizeof(shadow), 0, 0);
+  __cudaRegisterFunction(handle, &hostProbe, nullptr, "probe", 0, nullptr, nullptr, nullptr, nullptr, nullptr);
+  session.fixture.rejectNext(gemstone::execution::operation::DescribeGlobal, gemstone::execution::FailureKind::NotFound);
+  cudaFuncAttributes attributes{};
+  CHECK(cudaFuncGetAttributes(&attributes, &hostProbe) == cudaSuccess);
+  CHECK(attributes.ptxVersion == 89);
+  CHECK(attributes.binaryVersion == 89);
+  __cudaUnregisterFatBinary(handle);
+}
+
+TEST_CASE("CUDA host stubs launch through the runtime entry point", "[cuda][code-mode]") {
+  FailureSession session;
+  auto fatbin = ptxFatbin();
+  void **handle = __cudaRegisterFatBinary(fatbin.data());
+  REQUIRE(handle != nullptr);
+  char hostProbe = 0;
+  __cudaRegisterFunction(handle, &hostProbe, nullptr, "probe", 0, nullptr, nullptr, nullptr, nullptr, nullptr);
+  session.fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+  void *arguments[]{&session.allocation};
+  CHECK(cudaLaunchKernel(&hostProbe, dim3(1), dim3(1), arguments, 0, nullptr) == cudaSuccess);
+  CHECK(cudaDeviceSynchronize() == cudaSuccess);
+  CHECK(session.fixture.kernelBuilds == 1);
+  char unregistered = 0;
+  CHECK(cudaLaunchKernel(&unregistered, dim3(1), dim3(1), arguments, 0, nullptr) == cudaErrorInvalidValue);
+
+  session.fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+  cudaLaunchConfig_t config{};
+  config.gridDim = dim3(1);
+  config.blockDim = dim3(1);
+  CHECK(cudaLaunchKernelExC(&config, &hostProbe, arguments) == cudaSuccess);
+  CHECK(cudaDeviceSynchronize() == cudaSuccess);
+  CHECK(session.fixture.kernelBuilds == 1);
+  CHECK(cudaLaunchKernelExC(&config, &unregistered, arguments) == cudaErrorInvalidValue);
+  __cudaUnregisterFatBinary(handle);
+}
+
+TEST_CASE("CUDA function parameter queries follow the kernel metadata", "[cuda][code-mode]") {
+  FailureSession session;
+  session.loadKernel(Ptx);
+  size_t count = 0;
+  REQUIRE(cuFuncGetParamCount(session.function, &count) == CUDA_SUCCESS);
+  CHECK(count == 1);
+  size_t offset = 1;
+  size_t size = 0;
+  REQUIRE(cuFuncGetParamInfo(session.function, 0, &offset, &size) == CUDA_SUCCESS);
+  CHECK(offset == 0);
+  CHECK(size == 8);
+  CHECK(cuFuncGetParamInfo(session.function, 1, &offset, &size) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuFuncGetParamCount(nullptr, &count) == CUDA_ERROR_INVALID_VALUE);
+}
+
+TEST_CASE("CUDA runtime copies of the default kind infer their direction from the pointers", "[cuda][code-mode]") {
+  FailureSession const session;
+  char host[8]{};
+  auto *const device = reinterpret_cast<void *>(session.allocation);
+  CHECK(cudaMemcpy(device, host, sizeof(host), cudaMemcpyDefault) == cudaSuccess);
+  CHECK(cudaMemcpy(host, device, sizeof(host), cudaMemcpyDefault) == cudaSuccess);
+  CHECK(cudaMemcpy(device, device, sizeof(host), cudaMemcpyDefault) == cudaSuccess);
 }
 
 TEST_CASE("CUDA module and kernel lookup failures follow the failure kind and image kind", "[cuda][code-mode]") {
@@ -676,4 +776,83 @@ TEST_CASE("CUDA names every error the facade reports", "[cuda][code-mode]") {
   CHECK(std::string(cudaGetErrorName(runtime)) == runtimeName);
   CHECK(std::string(cudaGetErrorName(cudaErrorInvalidConfiguration)) == "cudaErrorInvalidConfiguration");
   CHECK(cuGetErrorName(static_cast<CUresult>(cudaErrorInvalidConfiguration), &name) == CUDA_ERROR_INVALID_VALUE);
+}
+
+TEST_CASE("CUDA cooperative launches mark the dispatch", "[cuda][code-mode]") {
+  FailureSession session;
+  session.loadKernel(Ptx);
+  void *arguments[]{&session.allocation};
+  const auto launched = [&](const std::function<CUresult()> &launch) {
+    session.fixture.expect({.local = 4, .groups = 3, .global = 12, .offset = 0, .seed = 0});
+    REQUIRE(launch() == CUDA_SUCCESS);
+    REQUIRE(cuCtxSynchronize() == CUDA_SUCCESS);
+    return session.fixture.lastLaunch().cooperative;
+  };
+  CHECK_FALSE(launched([&] { return cuLaunchKernel(session.function, 3, 1, 1, 4, 1, 1, 0, nullptr, arguments, nullptr); }));
+  CHECK(launched([&] { return cuLaunchCooperativeKernel(session.function, 3, 1, 1, 4, 1, 1, 0, nullptr, arguments); }));
+  CUlaunchAttribute attribute{};
+  attribute.id = CU_LAUNCH_ATTRIBUTE_COOPERATIVE;
+  attribute.value.cooperative = 1;
+  CUlaunchConfig config{};
+  config.gridDimX = 3;
+  config.gridDimY = config.gridDimZ = config.blockDimY = config.blockDimZ = 1;
+  config.blockDimX = 4;
+  config.attrs = &attribute;
+  config.numAttrs = 1;
+  CHECK(launched([&] { return cuLaunchKernelEx(&config, session.function, arguments, nullptr); }));
+  attribute.value.cooperative = 0;
+  CHECK_FALSE(launched([&] { return cuLaunchKernelEx(&config, session.function, arguments, nullptr); }));
+}
+
+TEST_CASE("CUDA cooperative launches are bounded by the resident blocks", "[cuda][code-mode]") {
+  FailureSession session;
+  session.loadKernel(Ptx);
+  void *arguments[]{&session.allocation};
+  constexpr unsigned blockSize = 1024;
+  int perMultiprocessor = 0;
+  REQUIRE(cuOccupancyMaxActiveBlocksPerMultiprocessor(&perMultiprocessor, session.function, blockSize, 0) == CUDA_SUCCESS);
+  int multiprocessors = 0;
+  REQUIRE(cuDeviceGetAttribute(&multiprocessors, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, 0) == CUDA_SUCCESS);
+  const auto resident = static_cast<unsigned>(perMultiprocessor * multiprocessors);
+  REQUIRE(resident > 0);
+
+  CHECK(cuLaunchCooperativeKernel(session.function, resident + 1, 1, 1, blockSize, 1, 1, 0, nullptr, arguments)
+        == CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE);
+  CHECK(cuLaunchCooperativeKernel(session.function, 1, resident + 1, 1, blockSize, 1, 1, 0, nullptr, arguments)
+        == CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE);
+  CUlaunchAttribute attribute{};
+  attribute.id = CU_LAUNCH_ATTRIBUTE_COOPERATIVE;
+  attribute.value.cooperative = 1;
+  CUlaunchConfig config{};
+  config.gridDimX = resident + 1;
+  config.gridDimY = config.gridDimZ = config.blockDimY = config.blockDimZ = 1;
+  config.blockDimX = blockSize;
+  config.attrs = &attribute;
+  config.numAttrs = 1;
+  CHECK(cuLaunchKernelEx(&config, session.function, arguments, nullptr) == CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+
+  session.fixture.expect(
+      {.local = blockSize, .groups = resident, .global = blockSize * resident, .offset = 0, .seed = 0, .geometryOnly = true});
+  CHECK(cuLaunchCooperativeKernel(session.function, resident, 1, 1, blockSize, 1, 1, 0, nullptr, arguments) == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(session.fixture.lastLaunch().cooperative);
+}
+
+TEST_CASE("CUDA runtime cooperative launches go through the registered host stub", "[cuda][code-mode]") {
+  FailureSession session;
+  auto fatbin = ptxFatbin();
+  void **handle = __cudaRegisterFatBinary(fatbin.data());
+  REQUIRE(handle != nullptr);
+  char hostProbe = 0;
+  __cudaRegisterFunction(handle, &hostProbe, nullptr, "probe", 0, nullptr, nullptr, nullptr, nullptr, nullptr);
+  void *arguments[]{&session.allocation};
+  session.fixture.expect({.local = 4, .groups = 3, .global = 12, .offset = 0, .seed = 0});
+  CHECK(cudaLaunchCooperativeKernel(&hostProbe, dim3(3), dim3(4), arguments, 0, nullptr) == cudaSuccess);
+  CHECK(cudaDeviceSynchronize() == cudaSuccess);
+  CHECK(session.fixture.lastLaunch().cooperative);
+  CHECK(cudaLaunchCooperativeKernel(&hostProbe, dim3(1U << 20), dim3(1024), arguments, 0, nullptr) == cudaErrorCooperativeLaunchTooLarge);
+  char unregistered = 0;
+  CHECK(cudaLaunchCooperativeKernel(&unregistered, dim3(1), dim3(1), arguments, 0, nullptr) == cudaErrorInvalidValue);
+  __cudaUnregisterFatBinary(handle);
 }

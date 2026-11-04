@@ -6,7 +6,7 @@ import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import scala.util.Random
 
@@ -49,6 +49,30 @@ class MinMaxSuite extends Suite {
   private val ThresholdValues = Vec(Long.MinValue, -1L, 0L, 3583L, 3585L, Long.MaxValue)
 
   private def hex(bits: Long): String = s"0x${java.lang.Long.toHexString(bits)}"
+
+  // cusparse load_balancing_kernel clamps the high word of a 64-bit difference with a bare IMNMX.XHI
+  for (sm <- Vec(50, 60)) {
+    test(s"sm_$sm IMNMX.XHI without a condition-code destination selects the high word") {
+      check(
+        sm,
+        "MOV32I R0, 0xfffffffb; MOV32I R1, 0x3; IMNMX.XHI R4, R0, R1, PT; IMNMX.XHI R5, R0, R1, !PT; " +
+          "IMNMX.U32.XHI R6, R0, R1, PT; IMNMX.U32.XHI R7, R0, R1, !PT; IMNMX.XHI R0, R0, RZ, PT; " +
+          "MOV R8, c[0x0][0x160]; MOV R9, c[0x0][0x164]; STG.E [R8], R4; STG.E [R8+0x4], R5; STG.E [R8+0x8], R6; " +
+          "STG.E [R8+0xc], R7; STG.E [R8+0x10], R0; EXIT",
+        Vec(-5, 3, 3, -5, -5)
+      )
+    }
+
+    test(s"sm_$sm IMNMX.XHI without a condition-code destination leaves the flags IMNMX.XLO reads") {
+      check(
+        sm,
+        "MOV32I R0, 0x1; MOV32I R1, 0x2; MOV32I R2, 0x5; MOV32I R3, 0x2; MOV32I R10, 0x50; MOV32I R11, 0x20; " +
+          "IMNMX.XHI R4.CC, R0, R1, PT; IMNMX.XHI R5, R2, R3, PT; IMNMX.U32.XLO R6, R10, R11, PT; " +
+          "MOV R8, c[0x0][0x160]; MOV R9, c[0x0][0x164]; STG.E [R8], R6; EXIT",
+        Vec(0x50)
+      )
+    }
+  }
 
   test("CUDA 11.8 sm_35 extended IMNMX implements signed and unsigned 64-bit min/max") {
     Vec(

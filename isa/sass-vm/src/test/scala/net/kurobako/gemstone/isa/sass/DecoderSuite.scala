@@ -51,7 +51,7 @@ class DecoderSuite extends Suite {
     assertEquals(result.size, 1)
     assertEquals(result.head.opcode, "ADD")
     assertEquals(result.head.bindings("Rd"), BigInt(1))
-    assertEquals(FieldDecoder.extract(BigInt(0x81), Vec(0, 2, 7)), BigInt(5))
+    assertEquals(BitField.extract(BigInt(0x81), Vec(0, 2, 7)), BigInt(5))
     assert(FieldDecoder.candidates(data, BigInt(0)).isLeft)
     assert(FieldDecoder.candidates(data, BigInt(1) << 64).isLeft)
     assert(FieldDecoder.candidates(data, BigInt(-1)).isLeft)

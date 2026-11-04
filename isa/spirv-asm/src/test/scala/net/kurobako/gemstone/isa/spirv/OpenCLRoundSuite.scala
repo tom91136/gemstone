@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.spirv
 
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class OpenCLRoundSuite extends Suite {
   private def bits(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)

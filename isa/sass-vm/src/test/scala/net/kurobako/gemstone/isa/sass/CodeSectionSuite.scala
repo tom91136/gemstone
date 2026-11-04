@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class CodeSectionSuite extends Suite {
   private val sms = Vec(35, 50, 89)

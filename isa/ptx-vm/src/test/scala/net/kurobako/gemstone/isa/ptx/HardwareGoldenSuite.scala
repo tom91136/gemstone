@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class HardwareGoldenSuite extends Suite {
   import hardwareGolden.*

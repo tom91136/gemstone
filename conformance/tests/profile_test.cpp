@@ -134,8 +134,8 @@ TEST_CASE("direct CUDA routes select strict PTX and SASS independently from the 
     CHECK(target.backend == "cuda");
     CHECK(target.architecture == "sm_89");
     CHECK(target.environment.at(conformance::environment::CudaCodeMode) == mode);
-    CHECK(target.environment.at("CUDA_FORCE_PTX_JIT") == (i == 0 ? "1" : "0"));
-    CHECK(target.environment.at("CUDA_DISABLE_PTX_JIT") == (i == 0 ? "0" : "1"));
+    CHECK_FALSE(target.environment.contains("CUDA_FORCE_PTX_JIT"));
+    CHECK(target.environment.contains("CUDA_DISABLE_PTX_JIT") == (i == 1));
   }
   const auto both = directTargets({"cuda/sm_89"});
   REQUIRE(both.size() == targets.size());
@@ -211,7 +211,6 @@ TEST_CASE("machine compiler selection requires a compatible backend and code mod
     CHECK(targets[0].compiler == "gcc");
     if (backend == "cuda") {
       CHECK(targets[0].environment.at(conformance::environment::CudaCodeMode) == "ptx");
-      CHECK(targets[0].environment.at("CUDA_FORCE_PTX_JIT") == "1");
     }
   }
 }
@@ -231,7 +230,6 @@ TEST_CASE("machine CUDA code modes derive the driver JIT policy", "[profile]") {
   } else {
     const auto targets = resolve();
     REQUIRE(targets.size() == 1);
-    CHECK(targets[0].environment.at("CUDA_FORCE_PTX_JIT") == "0");
     CHECK(targets[0].environment.at("CUDA_DISABLE_PTX_JIT") == "1");
   }
 }

@@ -11,7 +11,7 @@ import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.concurrent.duration.*
@@ -33,12 +33,13 @@ class MemoryCoherenceSuite extends Suite {
   }
   import Scenario.*
 
-  private val AtomicWidths   = List(0, 32, 64)
-  private val FenceModes     = List(false, true)
-  private val WorkItemCounts = List(1, 128)
-  private val Passes         = List(0, 1)
-  private val ProbeScenarios = List(Submission, Overlap, Compare)
-  private val HostScenarios  = List(Device, Concurrent, OrdinaryHost)
+  private val AtomicProbeInstructions = 1000000000L
+  private val AtomicWidths            = List(0, 32, 64)
+  private val FenceModes              = List(false, true)
+  private val WorkItemCounts          = List(1, 128)
+  private val Passes                  = List(0, 1)
+  private val ProbeScenarios          = List(Submission, Overlap, Compare)
+  private val HostScenarios           = List(Device, Concurrent, OrdinaryHost)
 
   private def allocationKinds(api: String): List[String] = api match {
     case "cuda"      => List("managed", "pinned", "registered")
@@ -81,7 +82,7 @@ class MemoryCoherenceSuite extends Suite {
       val settings    = Server.Settings(
         parallelism = 2,
         record = Some(archive),
-        limits = TaskControl.Limits((if (atomicProbe) 100000 else 10000000).toLong.unsafe[Long > 0]),
+        limits = TaskControl.Limits((if (atomicProbe) AtomicProbeInstructions else 10000000L).unsafe[Long > 0]),
         requestTimeoutMillis = 30000
       )
       Using.resource(if (concurrent)
@@ -165,16 +166,18 @@ class MemoryCoherenceSuite extends Suite {
           val request      = Wire.Protocol[Operation].decodePayload(operationTag, payload, ExecutionRPC.Limits)
             .fold(message => fail(message), identity).value
           request match {
-            case Operation.RegisterAllocationAddress(allocation, _, true) =>
+            case Operation.RegisterAllocationAddress(allocation, _, true, _) =>
               val _ = hostAllocations.add(allocation)
             case Operation.SupplyHostMemory(_, ranges) =>
               ranges.foreach { range =>
-                assert(
-                  !atomicWords.exists((begin, end) =>
-                    range.address.raw < end && begin < range.address.raw + range.bytes.size
-                  ),
-                  "an atomic control word was fetched by an ordinary host read"
-                )
+                val last = range.address.raw + range.bytes.size
+                atomicWords.foreach { (begin, end) =>
+                  if (range.address.raw < end && begin < last)
+                    assert(
+                      range.address.raw <= begin && end <= last && begin % (end - begin) == 0,
+                      "an atomic control word was read by an exchange that does not cover it as one aligned word"
+                    )
+                }
               }
             case Operation.WriteAllocation(allocation, _, _) =>
               assert(!hostAllocations.contains(allocation), "host-backed storage was uploaded speculatively")

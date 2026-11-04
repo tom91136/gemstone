@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class DomainOracleSuite extends Suite {
   private val Operand =

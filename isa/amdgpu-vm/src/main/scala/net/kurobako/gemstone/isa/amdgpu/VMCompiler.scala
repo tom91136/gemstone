@@ -1469,7 +1469,7 @@ private object VMCompiler {
           Instruction.SStore | Instruction.SAtomic | Instruction.SCompareSwap | Instruction.ForkIndirect |
           Instruction.ForkRelative | Instruction.Fork | Instruction.Join | Instruction.SetVectorSkip) => true
     case Instruction.SSetReg | Instruction.SGprIndexOff | Instruction.Barrier | Instruction.BarrierLeave |
-        Instruction.Wait | Instruction.Sleep | Instruction.End |
+        Instruction.Wait | Instruction.Sleep | Instruction.End | Instruction.Hostcall |
         Instruction.CacheInvalidate | Instruction.CacheWritebackInvalidate => true
     case Instruction.WaitCounts(_) => true
     case _                         => false
@@ -1513,10 +1513,11 @@ private object VMCompiler {
     val mode   = code.mode
     val target = mode.target
     InstructionDecoder.dual(code, offset)
-      .map(_.flatMap(dual => decodeVOPD(dual, target).map(Decoded(_, dual.size))))
-      .getOrElse(InstructionDecoder.decode(code, offset).flatMap(machine =>
-        decodeMachine(machine, offset, mode).map(Decoded(_, machine.size))
-      ))
+      .fold(
+        InstructionDecoder.decode(code, offset).flatMap(machine =>
+          decodeMachine(machine, offset, mode).map(Decoded(_, machine.size))
+        )
+      )(_.flatMap(dual => decodeVOPD(dual, target).map(Decoded(_, dual.size))))
       .flatMap(decoded => VMRegisterBounds.validate(decoded.operation, mode.waveSize).map(_ => decoded))
   }
 
@@ -2248,9 +2249,7 @@ private object VMCompiler {
       case SSendmsg if immediate == 3 && target.isa.isGFX11OrLaterGraphics =>
         // MSG_DEALLOC_VGPRS releases hardware registers after their last use.
         Right(Instruction.Wait)
-      // MSG_INTERRUPT asks the host to service a hostcall, such as printf's, and the wave waits for the answer
-      case SSendmsg if (immediate & 0xf) == 1 =>
-        Right(Instruction.Halt("s_sendmsg MSG_INTERRUPT waits for a hostcall service, which no host provides"))
+      case SSendmsg if (immediate & 0xf) == 1              => Right(Instruction.Hostcall)
       case SSendmsg if LegacyMessages(target.isa)          => legacyMessage(immediate, target)
       case SNop | SInstPrefetch | SSetInstPrefetchDistance => Right(Instruction.Wait)
       // Clause grouping has no observable effect.
@@ -4636,21 +4635,37 @@ private class VMCompiler {
 
   private val linked = java.util.concurrent.ConcurrentHashMap[(Long, Int), Either[NonEmpty[String], DecodedProgram]]()
 
+  private def linkedProgram(kernel: CodeObjectKernel): Either[NonEmpty[String], DecodedProgram] =
+    linked.computeIfAbsent(
+      (kernel.textAddress - kernel.loadBase, kernel.waveSize.raw),
+      _ =>
+        decodeProgram(
+          kernel.text,
+          kernel.mode,
+          linkedTextRanges(kernel.textAddress, kernel.text, kernel.functionSizes)
+        )
+    )
+
+  private def kernelAt(kernel: CodeObjectKernel, program: DecodedProgram, entry: Int): Kernel =
+    Kernel(
+      kernel,
+      program.operations,
+      program.instructionIndices,
+      program.instructionOffsets,
+      entry,
+      skippable(program.operations)
+    )
+
+  /** Every function of the text, entered at its first instruction by a call from another program. */
+  def compileLinked(kernel: CodeObjectKernel): Either[Fault, Kernel] =
+    linkedProgram(kernel).leftMap(detail => Fault.InvalidProgram(detail)).map(kernelAt(kernel, _, 0))
+
   def compile(kernel: CodeObjectKernel): Either[Fault, Kernel] = {
     val entryRange = linkedTextRanges(kernel.textAddress, kernel.text, Map(kernel.entry -> kernel.entrySize))
     decodeDeferringExternalBranches(kernel.text, kernel.mode, entryRange)
       .flatMap { program =>
         // Decode unrelated functions only when the entry can transfer outside its own range.
-        if (selfContained(program)) Right(program)
-        else linked.computeIfAbsent(
-          (kernel.textAddress, kernel.waveSize.raw),
-          _ =>
-            decodeProgram(
-              kernel.text,
-              kernel.mode,
-              linkedTextRanges(kernel.textAddress, kernel.text, kernel.functionSizes)
-            )
-        )
+        if (selfContained(program)) Right(program) else linkedProgram(kernel)
       }
       .leftMap(detail => Fault.InvalidProgram(detail))
       .flatMap { program =>
@@ -4660,16 +4675,7 @@ private class VMCompiler {
           .toRight(Fault.InvalidProgram(
             f"AMDGPU kernel ${kernel.name} entry 0x${kernel.entry}%X is not an instruction in .text"
           ))
-          .map(entry =>
-            Kernel(
-              kernel,
-              program.operations,
-              program.instructionIndices,
-              program.instructionOffsets,
-              entry,
-              skippable(program.operations)
-            )
-          )
+          .map(kernelAt(kernel, program, _))
       }
   }
 }

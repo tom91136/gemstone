@@ -6,8 +6,8 @@ import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.Edges.*
-import net.kurobako.gemstone.testing.Suite
 import net.kurobako.gemstone.vm.*
 
 /** Staged core instruction semantics against the hand-written kernels they replaced. */
@@ -57,8 +57,7 @@ class StagedSemanticsSuite extends Suite {
     val fieldMask  = if (!validRange) 0L else if (len == 64) -1L else (1L << len.toInt) - 1L
     val word       = base & bits
     val value      =
-      if (!validRange) { if (operation == Field.Insert) word else 0L }
-      else if (len == 0) { if (operation == Field.Insert) word else 0L }
+      if (!validRange || len == 0) { if (operation == Field.Insert) word else 0L }
       else if (operation == Field.Insert) (word & ~(fieldMask << off.toInt)) | ((inserted & fieldMask) << off.toInt)
       else {
         val extracted = (word >>> off.toInt) & fieldMask

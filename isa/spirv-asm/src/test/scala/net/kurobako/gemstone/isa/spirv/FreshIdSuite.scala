@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.spirv
 
 import assembly.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class FreshIdSuite extends Suite {
   test("fresh ids start at the bound and raise it past themselves") {

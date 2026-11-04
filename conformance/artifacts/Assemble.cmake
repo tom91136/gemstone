@@ -12,7 +12,17 @@ endif()
 if(NOT DEFINED SYCL_CTS_SHARD)
   set(SYCL_CTS_SHARD "")
 endif()
+if(NOT DEFINED CONFORMANCE_CUDA_CODE)
+  set(CONFORMANCE_CUDA_CODE fatbin)
+endif()
+set(artifact_code "")
+if(BACKEND STREQUAL "cuda")
+  set(artifact_code "${CONFORMANCE_CUDA_CODE}")
+endif()
 set(artifact_base "${BACKEND}")
+if(artifact_code STREQUAL "ptx")
+  string(APPEND artifact_base "-ptx")
+endif()
 if(NOT CONFORMANCE_COMPILER STREQUAL "vendor")
   string(APPEND artifact_base "/${CONFORMANCE_COMPILER}")
 endif()
@@ -39,6 +49,12 @@ endif()
 if(NOT CONFORMANCE_SUPPORT_KEY MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
   message(FATAL_ERROR "Invalid conformance support key: ${CONFORMANCE_SUPPORT_KEY}")
 endif()
+if(NOT DEFINED CONFORMANCE_SUPPLEMENT_KEY)
+  set(CONFORMANCE_SUPPLEMENT_KEY "")
+endif()
+if(NOT CONFORMANCE_SUPPLEMENT_KEY STREQUAL "" AND NOT CONFORMANCE_SUPPLEMENT_KEY MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
+  message(FATAL_ERROR "Invalid conformance supplement key: ${CONFORMANCE_SUPPLEMENT_KEY}")
+endif()
 
 # Include toolchain selection in the persistent work signature.
 set(backend_cmake_arguments "-DCONFORMANCE_COMPILER=${CONFORMANCE_COMPILER}")
@@ -59,8 +75,7 @@ endif()
 if(BACKEND STREQUAL "hip")
   list(APPEND backend_cmake_arguments -DCMAKE_HIP_PLATFORM=amd)
 elseif(BACKEND STREQUAL "cuda")
-  list(APPEND backend_cmake_arguments
-    "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
+  list(APPEND backend_cmake_arguments "-DCONFORMANCE_CUDA_CODE=${CONFORMANCE_CUDA_CODE}")
   # nvcc 11.8 builds the CUDA sources as C++17, so the lint holds them to it
   if(CONFORMANCE_OUTPUT STREQUAL "lint")
     list(APPEND backend_cmake_arguments -DCMAKE_CUDA_STANDARD=17)
@@ -74,11 +89,6 @@ elseif(BACKEND STREQUAL "cuda")
       "-DCMAKE_CUDA_FLAGS=-Wno-deprecated-gpu-targets")
   endif()
 elseif(BACKEND STREQUAL "sycl")
-  if(NOT DEFINED SYCL_CTS_ENABLE_FULL_CONFORMANCE)
-    set(SYCL_CTS_ENABLE_FULL_CONFORMANCE OFF)
-  endif()
-  list(APPEND backend_cmake_arguments
-    "-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${SYCL_CTS_ENABLE_FULL_CONFORMANCE}")
   if(NOT SYCL_CTS_SHARD STREQUAL "")
     list(APPEND backend_cmake_arguments "-DSYCL_CTS_SHARD=${SYCL_CTS_SHARD}")
   endif()
@@ -216,11 +226,17 @@ execute_process(
   COMMAND_ERROR_IS_FATAL ANY)
 
 function(write_metadata destination support)
+  set(supplements "")
+  if(NOT CONFORMANCE_SUPPLEMENT_KEY STREQUAL "")
+    set(supplements "\"${CONFORMANCE_SUPPLEMENT_KEY}\"")
+  endif()
   file(WRITE "${destination}/artifact.toml"
     "backend = \"${BACKEND}\"\n"
     "compiler = \"${CONFORMANCE_COMPILER}\"\n"
     "architecture = \"${architecture}\"\n"
-    "support = \"${support}\"\n")
+    "code = \"${artifact_code}\"\n"
+    "support = \"${support}\"\n"
+    "supplements = [${supplements}]\n")
 endfunction()
 
 find_program(patchelf patchelf REQUIRED)
@@ -260,7 +276,14 @@ if(architecture)
     COMMAND_ERROR_IS_FATAL ANY)
   write_metadata("${overlay}" "${CONFORMANCE_SUPPORT_KEY}")
   file(RELATIVE_PATH support_relative "${overlay}" "${support}")
-  set_program_rpath("${overlay}" "$ORIGIN/${support_relative}/lib")
+  set(rpath "$ORIGIN/${support_relative}/lib")
+  set(supplement "")
+  if(NOT CONFORMANCE_SUPPLEMENT_KEY STREQUAL "")
+    set(supplement "/output/${BACKEND}/${CONFORMANCE_SUPPLEMENT_KEY}")
+    file(RELATIVE_PATH supplement_relative "${overlay}" "${supplement}")
+    string(APPEND rpath ":$ORIGIN/${supplement_relative}/lib")
+  endif()
+  set_program_rpath("${overlay}" "${rpath}")
   if(CONFORMANCE_OUTPUT STREQUAL "both")
     file(REMOVE_RECURSE "${support}")
     execute_process(
@@ -270,8 +293,17 @@ if(architecture)
       COMMAND_ERROR_IS_FATAL ANY)
     file(WRITE "${support}/support.stamp" "Runtime closure for ${BACKEND}\n")
   endif()
+  if(CONFORMANCE_SUPPLEMENT_OUTPUT STREQUAL "both")
+    file(REMOVE_RECURSE "${supplement}")
+    execute_process(
+      COMMAND "${CMAKE_COMMAND}" -E env "CONFORMANCE_RUNTIME_INPUT_DIR=${overlay}"
+        "${CMAKE_COMMAND}" --install "${build}"
+        --component supplement --prefix "${supplement}" --strip
+      COMMAND_ERROR_IS_FATAL ANY)
+    file(WRITE "${supplement}/support.stamp" "Runtime closure supplement for ${BACKEND}\n")
+  endif()
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" -DARTIFACT=${overlay} -DSUPPORT=${support}
+    COMMAND "${CMAKE_COMMAND}" -DARTIFACT=${overlay} -DSUPPORT=${support} -DSUPPLEMENT=${supplement}
       -P /source/conformance/artifacts/Verify.cmake
     COMMAND_ERROR_IS_FATAL ANY)
 else()

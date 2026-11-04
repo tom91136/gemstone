@@ -58,4 +58,39 @@ class MemoryPublicationSuite extends Suite {
         }
       }
     }
+
+  for (kind <- List("shared", "host"))
+    test(s"levelzero concurrent kernels add into disjoint slices of one $kind allocation") {
+      val directory = native.directory
+      val client    = directory.resolve("gemstone_memory_levelzero")
+      assert(Files.isExecutable(client))
+      files.temporary { vendors =>
+        Using.resource(Server.start(
+          Server.Settings(
+            limits = TaskControl.Limits(1000000000L),
+            parallelism = 4,
+            bind = Transport.Bind.Unix(vendors.resolve("rpc.sock"))
+          )
+        )) { server =>
+          val result = native.run(
+            Vec.nonEmpty(client.toString),
+            directory,
+            native.serverEnvironment(
+              server.endpoint,
+              server.client,
+              native.providerEnvironment ++
+                Map(env.TestMemoryProbeList -> "slices", env.TestMemoryAllocationMode -> kind),
+              Set(env.SystemPagingOn, "UR_ADAPTERS_FORCE_LOAD")
+            ),
+            120.seconds
+          )
+          assertEquals(result.exit, 0, result.diagnostic)
+          assertEquals(
+            result.stdout.linesIterator.filter(_.startsWith("verified ")).toList,
+            List("verified disjoint slices lists=3 launches=100"),
+            result.diagnostic
+          )
+        }
+      }
+    }
 }

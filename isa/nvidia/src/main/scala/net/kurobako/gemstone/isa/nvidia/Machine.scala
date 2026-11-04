@@ -194,8 +194,9 @@ private[isa] object Machine {
   def clusterId(axis: Axis): Term    = launch(s"clusterId$axis")
   def clusterCount(axis: Axis): Term = launch(s"clusterCount$axis")
   val explicitCluster: Term          = launch("explicitCluster")
-  val clock: Term       = Term.context(launchContext, MachineCall("clock", Vec.empty, Vec.empty), Some(u64))
-  val globalTimer: Term = Term.context(launchContext, MachineCall("globalTimer", Vec.empty, Vec.empty), Some(u64))
+  val clock: Term         = Term.context(launchContext, MachineCall("clock", Vec.empty, Vec.empty), Some(u64))
+  val globalTimer: Term   = Term.context(launchContext, MachineCall("globalTimer", Vec.empty, Vec.empty), Some(u64))
+  val gridWorkspace: Term = Term.context(launchContext, MachineCall("gridWorkspace", Vec.empty, Vec.empty), Some(u64))
 
   def counter(counter: Term, part: CounterPart): Term = part match {
     case CounterPart.Whole => counter

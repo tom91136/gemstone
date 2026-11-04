@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The transposing loads hipcc emits for `__builtin_amdgcn_ds_read_tr16_b64_v4i16`, `ds_read_tr8_b64_v2i32`,
   * `ds_read_tr4_b64_v2i32` and `ds_read_tr6_b96_v3i32` on gfx950 and `__builtin_amdgcn_global_load_tr_b128_v8i16` and

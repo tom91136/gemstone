@@ -1,5 +1,6 @@
 #include "state.hpp"
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstdint>
 #include <map>
@@ -29,6 +30,7 @@ std::map<VkEvent, bool> events;
 std::condition_variable stateChanged;
 std::map<VkSampler, gx::GraphicsSampler> samplers;
 std::map<VkInstance, bool> instanceProperties2;
+std::map<VkInstance, std::vector<VkPhysicalDevice>> instancePhysicalDevices;
 std::map<VkImage, Image> images;
 std::map<VkFramebuffer, Framebuffer> framebuffers;
 std::map<VkRenderPass, RenderPass> renderPasses;
@@ -37,6 +39,27 @@ std::map<VkQueryPool, std::shared_ptr<QueryPool>> queryPools;
 std::map<VkDescriptorUpdateTemplate, std::vector<VkDescriptorUpdateTemplateEntry>> descriptorTemplates;
 std::map<VkImageView, ImageSlice> imageViews;
 std::map<VkBufferView, BufferView> bufferViews;
+
+std::vector<VkPhysicalDevice> physicalDevicesOf(VkInstance instance) {
+  std::scoped_lock const lock(stateMutex);
+  const auto found = instancePhysicalDevices.find(instance);
+  return found == instancePhysicalDevices.end() ? std::vector<VkPhysicalDevice>{} : found->second;
+}
+
+uint32_t physicalDeviceOrdinal(VkPhysicalDevice physicalDevice) {
+  std::scoped_lock const lock(stateMutex);
+  for (const auto &[instance, physical] : instancePhysicalDevices) {
+    const auto found = std::find(physical.begin(), physical.end(), physicalDevice);
+    if (found != physical.end()) return static_cast<uint32_t>(found - physical.begin());
+  }
+  return 0;
+}
+
+uint32_t deviceOrdinal(VkDevice device) {
+  std::scoped_lock const lock(stateMutex);
+  const auto found = devices.find(device);
+  return found == devices.end() ? 0 : found->second->physicalOrdinal;
+}
 
 namespace {
 // Defined after the state above and constructed with the library, so it stops the workers after teardown registered

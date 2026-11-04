@@ -15,9 +15,9 @@ static int conformanceMain(std::vector<std::string> positional = fire::arg({0, "
                            const std::string &profiles = fire::arg("--profiles", ""),
                            const std::string &artifacts = fire::arg("--artifacts", ""),
                            const std::string &output = fire::arg("--output", ""), const std::string &machine = fire::arg("--machine", ""),
-                           std::string workload = fire::arg("--workload", "compact"), bool direct = fire::arg("--direct"),
-                           const std::string &workloads = fire::arg("--workloads", ""), bool isolated = fire::arg("--isolated-launcher"),
-                           bool launcher = fire::arg("--launcher")) {
+                           std::string workload = fire::arg("--workload", "short"), bool direct = fire::arg("--direct"),
+                           bool dryRun = fire::arg("--dry-run"), const std::string &workloads = fire::arg("--workloads", ""),
+                           bool isolated = fire::arg("--isolated-launcher"), bool launcher = fire::arg("--launcher")) {
   try {
     if (positional.empty()) throw std::invalid_argument("expected run");
     // Fire keeps arguments after -- positional. Its raw argument API preserves
@@ -37,6 +37,7 @@ static int conformanceMain(std::vector<std::string> positional = fire::arg({0, "
       c.profiles = profiles;
       c.workloads = workloads;
       c.direct = direct;
+      c.dryRun = dryRun;
       c.artifacts = artifacts;
       c.output = output;
       c.workload = std::move(workload);

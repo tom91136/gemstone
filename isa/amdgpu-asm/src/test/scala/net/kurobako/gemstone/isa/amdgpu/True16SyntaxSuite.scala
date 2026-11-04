@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** GFX11 true16 operands, which upstream LLVM 22 `llc -mcpu=gfx1100` emits for half arithmetic (`v_add_f16_e32 v0.l,
   * v0.l, v0.h`): `.l` and `.h` name a VGPR's low and high halves, which the 32-bit encodings select by bit 7 of the

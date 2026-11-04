@@ -43,6 +43,8 @@ object PrimitiveLayout {
     */
   inline def of[F](inline function: F): Layout = ${ read('function) }
 
+  // expands the operands of one primitive at compile time
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   def read[F](function: Expr[F])(using Quotes): Expr[Layout] = {
     import quotes.reflect.*
     given CanEqual[Symbol, Symbol] = CanEqual.derived
@@ -64,8 +66,9 @@ object PrimitiveLayout {
           case Apply(applied, arguments) => (applied, arguments)
           case other                     => fail(other.show)
         }
-        val method = applied.symbol
-        if (!static(method.owner)) fail(s"${method.fullName} is not a member of a static object")
+        val method    = applied.symbol
+        val container = method.owner
+        if (!static(container)) fail(s"${method.fullName} is not a member of a static object")
         val symbols        = parameters.map(_.symbol).toVector
         val argumentCount  = arguments.size
         val repeated       = arguments.exists { case Typed(Repeated(_, _), _) => true; case _ => false }
@@ -95,9 +98,10 @@ object PrimitiveLayout {
             case index if index >= 0                  => fail(s"operand ${value.show} is passed by name")
             case _                                    =>
               if (mentions(value)) fail(s"${value.show} transforms an operand")
-              val widened = value.tpe.widen.dealias
-              val prefix  =
-                if (widened.typeSymbol.flags.is(Flags.Enum)) path(widened.typeSymbol.companionModule) else ""
+              val widened    = value.tpe.widen.dealias
+              val typeSymbol = widened.typeSymbol
+              val prefix     =
+                if (typeSymbol.flags.is(Flags.Enum)) path(typeSymbol.companionModule) else ""
               val rendered = '{ code(${ value.asExprOf[Any] }, ${ Expr(prefix) }) }
               name.fold('{ Argument.Fixed($rendered) })(label =>
                 '{ Argument.Fixed(${ Expr(label) } + " = " + $rendered) }
@@ -108,7 +112,7 @@ object PrimitiveLayout {
           parameters.indices.exists(index => arguments.count(argument => strip(argument).symbol == symbols(index)) != 1)
         )
           fail("each operand must be passed exactly once")
-        '{ Layout(${ Expr(path(method.owner)) }, ${ Expr(method.name) }, Vec(${ Varargs(laid) }*)) }
+        '{ Layout(${ Expr(path(container)) }, ${ Expr(method.name) }, Vec(${ Varargs(laid) }*)) }
       case other => fail(other.show)
     }
   }

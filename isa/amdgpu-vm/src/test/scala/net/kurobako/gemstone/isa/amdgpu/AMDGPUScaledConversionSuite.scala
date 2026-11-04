@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** gfx950's scaled conversions (CDNA4 ISA, 7.3 and 12.11), which hipcc emits for `__builtin_amdgcn_cvt_scalef32_*`
   * (ROCm 7.1.1 `hipcc -O2 --offload-arch=gfx950`: `v_cvt_scalef32_f32_fp8 v13, v0, v12 op_sel:[1,0,0]`,

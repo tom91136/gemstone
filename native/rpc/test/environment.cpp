@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "gemstone_execution_rpc.hpp"
+#include <gemstone/devices.hpp>
 #include <gemstone/environment.hpp>
 #include <gemstone/test_support.hpp>
 #include <gemstone/trace.hpp>
@@ -70,24 +71,28 @@ TEST_CASE("enumerated settings reject unknown choices", "[rpc]") {
   CHECK(invalid() == "GEMSTONE_CUDA_CODE_MODE must be one of ptx sass, not 'cubin'");
 }
 
-TEST_CASE("HSA paging inherits RPC timeout and independently validates overrides", "[rpc]") {
+TEST_CASE("RPC timeout defaults and validates", "[rpc]") {
   Override rpc(RpcTimeoutSeconds);
-  Override hsa(HsaPagingTimeoutSeconds);
   CHECK(std::cmp_equal(rpcTimeoutSeconds(), RpcTimeoutSecondsDefault));
-  CHECK(hsaPagingTimeoutSeconds() == rpcTimeoutSeconds());
   rpc.set("7");
   CHECK(rpcTimeoutSeconds() == 7);
-  CHECK(hsaPagingTimeoutSeconds() == 7);
-  hsa.set("13");
-  CHECK(hsaPagingTimeoutSeconds() == 13);
   CHECK_FALSE(invalid());
   for (const auto *raw : {"0", "-1", "+1", "1 ", "2147484", "18446744073709551616"}) {
-    hsa.set(raw);
-    CHECK(invalid().value_or("").starts_with(HsaPagingTimeoutSeconds));
+    rpc.set(raw);
+    CHECK(invalid().value_or("").starts_with(RpcTimeoutSeconds));
   }
-  hsa.set(nullptr);
-  rpc.set("2147484"); // First second count that overflows a signed 32-bit millisecond timeout.
-  CHECK(invalid().value_or("").starts_with(RpcTimeoutSeconds));
+}
+
+TEST_CASE("device count defaults to one and is bounded", "[rpc]") {
+  Override count(DeviceCount);
+  CHECK(std::cmp_equal(gemstone::deviceCount(), DeviceCountDefault));
+  count.set("4");
+  CHECK(gemstone::deviceCount() == 4);
+  CHECK_FALSE(invalid());
+  for (const auto *raw : {"0", "-1", "17", "two", "2 "}) {
+    count.set(raw);
+    CHECK(invalid().value_or("").starts_with(DeviceCount));
+  }
 }
 
 TEST_CASE("trace scopes and categories match exactly", "[rpc]") {

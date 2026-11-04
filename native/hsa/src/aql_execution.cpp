@@ -17,6 +17,7 @@
 #include <aspartame/view.hpp>
 
 #include "gemstone/environment.hpp"
+#include "gemstone/hsa/allocation.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/trace.hpp>
@@ -158,7 +159,6 @@ bool AqlRuntime::installLoadedProgram(ProgramId program, std::span<const KernelS
   std::unordered_set<uint64_t> objects;
   for (const auto &symbol : kernels)
     if (symbol.object == 0 || symbol.name.empty() || !objects.insert(symbol.object).second) return reject("invalid AMDGPU kernel binding");
-  if (kernels.empty()) return reject("invalid AMDGPU kernel binding");
   const auto installed = [&] {
     std::scoped_lock const guard(lock);
     return kernels | exists([&](const KernelSymbol &symbol) { return installedKernels.contains(symbol.object); });
@@ -213,16 +213,22 @@ bool AqlRuntime::removeKernel(uint64_t kernelObject) {
   return connection && connection->call(UnloadProgram{program});
 }
 
-bool AqlRuntime::bindGlobal(uint64_t kernelObject, const std::string &name, uint64_t allocation, uint64_t offset) {
-  if (name.empty() || allocation == 0) return false;
-  const auto found = kernel(kernelObject);
-  if (!found) {
-    fail("global belongs to an unknown kernel object");
-    return false;
+bool AqlRuntime::releaseProgram(ProgramId program) {
+  {
+    std::scoped_lock const guard(lock);
+    const auto references = programReferences.find(program.value);
+    if (references == programReferences.end() || references->second != 0) return true;
+    programReferences.erase(references);
   }
   auto *connection = client();
+  return connection && connection->call(UnloadProgram{program});
+}
+
+bool AqlRuntime::bindGlobal(ProgramId program, const std::string &name, uint64_t allocation, uint64_t offset) {
+  if (name.empty() || allocation == 0) return false;
+  auto *connection = client();
   if (!connection) return false;
-  const auto bound = connection->call(BindProgramGlobal{.program = found->program,
+  const auto bound = connection->call(BindProgramGlobal{.program = program,
                                                         .name = {name},
                                                         .allocation = AllocationId{static_cast<int64_t>(allocation)},
                                                         .offset = {static_cast<int64_t>(offset)}});
@@ -248,6 +254,12 @@ bool AqlRuntime::registerAllocation(uint64_t base, uint64_t size, uint64_t alloc
     return false;
   allocations.emplace(base, Allocation{.size = size, .id = allocation});
   return true;
+}
+
+void AqlRuntime::setDeviceHeap(uint64_t pointer, uint64_t size) {
+  std::scoped_lock const guard(lock);
+  deviceHeapPointer = pointer;
+  deviceHeapSize = size;
 }
 
 bool AqlRuntime::unregisterAllocation(uint64_t base) {
@@ -313,8 +325,13 @@ bool AqlRuntime::relocations(const Kernel &kernel, uint64_t kernarg, std::option
       // pointer to every target kernel and uses ~0 as the sentinel when there
       // is no environment object. Null buffer arguments are legal too.
       if ((field.offset == 0 && pointer == UINT64_MAX) || pointer == 0) continue;
-      if (const auto target = resolve(pointer)) relocate(field.offset, *target);
-      else if (!environment::enabled(environment::SystemPagingOn)) return false;
+      if (const auto target = resolve(pointer)) {
+        relocate(field.offset, *target);
+      } else if (!isProgramAddress(pointer) && !environment::enabled(environment::SystemPagingOn)) {
+        if (tracePackets())
+          std::fprintf(stderr, "Gemstone AQL kernarg pointer 0x%lx at offset %u names no allocation or program\n", pointer, field.offset);
+        return false;
+      }
     }
   }
   return true;
@@ -363,7 +380,7 @@ PacketResult AqlRuntime::barrier(const AqlPacket &packet) {
   return PacketResult::Accepted;
 }
 
-PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative) {
+PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uint32_t device) {
   const auto &work = packet.dispatch;
   const auto found = kernel(work.kernelObject);
   if (!found) return failPacket(packet.completionSignal, PacketFailure::KernelNotInstalled, "kernel object is not installed");
@@ -386,6 +403,15 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative) {
     if (const auto enabled = connection->call(EnableHostMemory{}); !enabled)
       return failed(enabled.error().detail, packetFailure(enabled.error().kind));
   }
+  const auto [heapPointer, heapSize] = [&] {
+    std::scoped_lock const guard(lock);
+    return std::pair{deviceHeapPointer, deviceHeapSize};
+  }();
+  std::optional<DeviceHeap> heap;
+  if (const auto resolved = resolve(heapPointer); resolved && heapSize != 0)
+    heap = DeviceHeap{.region = AllocationId{static_cast<int64_t>(resolved->id)},
+                      .offset = {static_cast<int64_t>(resolved->offset)},
+                      .size = {static_cast<int64_t>(heapSize)}};
   const auto launched = connection->call(Launch{
       .program = found->program,
       .kernelName = {found->name},
@@ -407,7 +433,9 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative) {
       .descriptorBindings = {},
       .argumentBuffer = buffer,
       .clusterSize = std::nullopt,
-      .cooperative = cooperative});
+      .cooperative = cooperative,
+      .deviceHeap = heap,
+      .device = {static_cast<int32_t>(device)}});
   if (!launched) return failed(launched.error().detail, packetFailure(launched.error().kind));
   const auto completion = launched.value();
   std::string awaitError;
@@ -416,12 +444,28 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative) {
   FailureKind awaitKind = FailureKind::Transport;
   const bool awaited = awaitCompletion(*connection, completion, awaitError, &awaitKind);
   const bool queried = awaited && completionDirtyRanges(*connection, completion, dirty, queryError);
+  std::string printError;
+  if (queried) {
+    const auto forward = [&](const auto &prints, FILE *stream) {
+      if (prints) {
+        if (!prints.value().value.empty()) {
+          std::fwrite(prints.value().value.data(), 1, prints.value().value.size(), stream);
+          std::fflush(stream);
+        }
+      } else {
+        printError = prints.error().detail;
+      }
+    };
+    forward(connection->call(CompletionPrints{completion}), stdout);
+    forward(connection->call(CompletionErrorPrints{completion}), stderr);
+  }
   const auto released = connection->call(ReleaseCompletion{completion});
   if (tracePackets())
     std::fprintf(stderr, "Gemstone completed AQL kernel=%s result=%d release=%d\n", found->name.c_str(), awaited ? 0 : -1,
                  released ? 0 : -1);
   if (!awaited) return failed(awaitError, packetFailure(awaitKind));
   if (!queried) return failed(queryError);
+  if (!printError.empty()) return failed(printError);
   if (!released) return failed(released.error().detail);
   if (!dirty.empty()) {
     std::scoped_lock const guard(lock);
@@ -431,7 +475,7 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative) {
   return PacketResult::Accepted;
 }
 
-PacketResult AqlRuntime::consume(const void *packet, bool cooperative) {
+PacketResult AqlRuntime::consume(const void *packet, bool cooperative, uint32_t device) {
   AqlPacket decoded;
   const auto status = decodeAqlPacket(packet, AqlPacketSize, decoded);
   if (status != DecodeStatus::Success) {
@@ -445,7 +489,7 @@ PacketResult AqlRuntime::consume(const void *packet, bool cooperative) {
     return PacketResult::Accepted;
   }
   if (decoded.type == PacketType::BarrierAnd || decoded.type == PacketType::BarrierOr) return barrier(decoded);
-  return dispatch(decoded, cooperative);
+  return dispatch(decoded, cooperative, device);
 }
 
 } // namespace gemstone::hsa

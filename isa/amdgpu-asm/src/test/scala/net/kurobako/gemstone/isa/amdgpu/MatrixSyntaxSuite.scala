@@ -4,7 +4,7 @@ import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** Operand and modifier spellings of matrix and mixed-precision instructions, each with its bytes from ROCm 7.1.1
   * `llvm-mc -triple=amdgcn -mcpu=<target> -show-encoding`: SMFMAC into accumulation registers, which hipcc allocates

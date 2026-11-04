@@ -8,12 +8,12 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 
 /** Enumerates and substitutes scalar specialization constants, located through their `SpecId` decorations. */
-object Specialization extends Backend.Specialization {
+object Specialization {
 
   private case class Scalar(index: Int, byteSize: Int > 0, boolean: Boolean)
   private case class Constants(specIds: Map[Binary32, Vector[Int]], scalars: Map[Int, Scalar])
 
-  override def describe(image: Vec[Byte]): Either[Fault, Vec[SpecializationInfo]] =
+  def describe(image: Vec[Byte]): Either[Fault, Vec[SpecializationInfo]] =
     decode(image).map { module =>
       val found = constants(module)
       Vec.from(
@@ -25,7 +25,7 @@ object Specialization extends Backend.Specialization {
       )
     }
 
-  override def specialize(image: Vec[Byte], values: Vec[SpecializationConstant]): Either[Fault, Vec[Byte]] =
+  def specialize(image: Vec[Byte], values: Vec[SpecializationConstant]): Either[Fault, Vec[Byte]] =
     decode(image).flatMap(specialize(_, values)).flatMap(module =>
       ISA.encode(module).left.map(error => Fault.InvalidRequest(s"specialization: ${error.message}"))
     )

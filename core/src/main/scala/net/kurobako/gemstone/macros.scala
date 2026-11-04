@@ -85,7 +85,8 @@ object macros {
       case '[a] =>
         Implicits.search(TypeRepr.of[constraint.IntegerView[a, ? <: Int, ? <: Boolean]]) match {
           case found: ImplicitSearchSuccess =>
-            found.tree.tpe.widen.baseType(TypeRepr.of[constraint.IntegerView[Any, 1, true]].typeSymbol) match {
+            val tree = found.tree
+            tree.tpe.widen.baseType(TypeRepr.of[constraint.IntegerView[Any, 1, true]].typeSymbol) match {
               case AppliedType(_, List(_, width, signed)) =>
                 (width.dealias, signed.dealias) match {
                   case (ConstantType(IntConstant(bits)), ConstantType(BooleanConstant(twos)))
@@ -93,7 +94,7 @@ object macros {
                     val limits =
                       if (twos) Span(-(BigInt(1) << (bits - 1)), (BigInt(1) << (bits - 1)) - 1)
                       else Span(BigInt(0), (BigInt(1) << bits) - 1)
-                    Some((limits, found.tree))
+                    Some((limits, tree))
                   case _ =>
                     report.errorAndAbort(
                       s"IntegerView of ${tpe.show} needs a literal width from 1 to 64 and signedness"
@@ -399,7 +400,8 @@ object macros {
       case AppliedType(base, List(a, _)) if base.typeSymbol == TypeRepr.of[where[Any, Any]].typeSymbol => unrefined(a)
       case other                                                                                       => other
     }
-    val source                    = unrefined(TypeRepr.of[A].widen)
+    val widened                   = TypeRepr.of[A].widen
+    val source                    = unrefined(widened)
     def compatible[B: Type]: Unit =
       if (!(source <:< TypeRepr.of[B]))
         report.errorAndAbort(
@@ -410,7 +412,7 @@ object macros {
         (a.asType, p.asType) match {
           case ('[a], '[p]) =>
             compatible[a]
-            TypeRepr.of[A].widen.dealias match {
+            widened.dealias match {
               case AppliedType(refined, List(b, q))
                   if refined.typeSymbol == TypeRepr.of[where[Any, Any]].typeSymbol && proven(b, q, a.dealias, p) =>
                 val target = TypeRepr.of[R].show(using Printer.TypeReprShortCode)
@@ -437,15 +439,16 @@ object macros {
           case _ => report.errorAndAbort("Unsupported nonempty target")
         }
       case target: TypeRef if target.name == "Type" =>
-        val owner = target.qualifier match {
+        val qualifier = target.qualifier
+        val owner     = qualifier match {
           case owner: TermRef => Ref(owner.termSymbol)
           case _              => report.errorAndAbort("Newtype must have a stable companion")
         }
-        target.qualifier.baseType(TypeRepr.of[Newtype[Any]].typeSymbol) match {
+        qualifier.baseType(TypeRepr.of[Newtype[Any]].typeSymbol) match {
           case AppliedType(_, List(base)) =>
             base.asType match {
               case '[c] =>
-                val carried = TypeRepr.of[A].widen.dealias <:< TypeRepr.of[c]
+                val carried = widened.dealias <:< TypeRepr.of[c]
                 if (throwing) {
                   val checked = if (carried) value.asExprOf[c] else check[A, c](value, throwing = true).asExprOf[c]
                   Select.overloaded(owner, "apply", Nil, List(checked.asTerm)).asExpr

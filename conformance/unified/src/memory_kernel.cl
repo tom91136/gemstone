@@ -17,6 +17,16 @@ inline void system_fence() {
 #endif
 }
 __kernel void probe(__global void *input, __global uint *output, __global uint *indices, uint mode) {
+  if (mode == 23) {
+    __global uint *p = (__global uint *)input;
+#ifdef __AMDGCN__
+    uint i = __builtin_amdgcn_workgroup_id_x() * 32 + __builtin_amdgcn_workitem_id_x();
+#else
+    uint i = get_global_id(0);
+#endif
+    p[i] += indices[0];
+    return;
+  }
   if (mode >= 15 && mode <= 22) {
     __global uint *p = (__global uint *)input;
     if (mode == 15) {

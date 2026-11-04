@@ -2,7 +2,8 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.*
 
 class WarpSuite extends Suite {
   for {
@@ -153,5 +154,188 @@ class WarpSuite extends Suite {
         |EXIT""".stripMargin,
       Vec.tabulate(64)(lane => Integer.reverse(-1 << (lane % 32)))
     )
+  }
+
+  test("REDUX.MAX reduces each MATCH.ANY group in a full warp") {
+    check(
+      89,
+      """S2R R0, SR_TID.X
+        |IMAD.HI.U32 R7, R0, 0x55555556, RZ
+        |IMAD R5, R7, -0x3, R0
+        |MATCH.ANY R7, R5
+        |WARPSYNC.EXCLUSIVE R7
+        |REDUX.MAX.S32 UR4, R0
+        |MOV R4, UR4
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R4
+        |EXIT""".stripMargin,
+      Vec.tabulate(32)(lane => (0 until 32).filter(_ % 3 == lane % 3).max)
+    )
+  }
+
+  test("REDUX.MAX reduces each MATCH.ANY group among the lanes that diverged into it") {
+    check(
+      89,
+      """S2R R0, SR_TID.X
+        |ISETP.LT.U32.AND P0, PT, R0, 16, PT
+        |IMAD.HI.U32 R7, R0, 0x55555556, RZ
+        |IMAD R5, R7, -0x3, R0
+        |MOV R4, -1
+        |BSSY B0, 0xc0
+        |@!P0 BRA 0xb0
+        |MATCH.ANY R7, R5
+        |WARPSYNC.EXCLUSIVE R7
+        |REDUX.MAX.S32 UR4, R0
+        |MOV R4, UR4
+        |BSYNC B0
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R4
+        |EXIT""".stripMargin,
+      Vec.tabulate(32)(lane => if (lane < 16) (0 until 16).filter(_ % 3 == lane % 3).max else -1)
+    )
+  }
+
+  private val labelled =
+    """S2R R0, SR_TID.X
+      |IMAD.HI.U32 R7, R0, 0x55555556, RZ
+      |IMAD R5, R7, -0x3, R0
+      |MATCH.ANY R7, R5
+      |""".stripMargin
+
+  private val store =
+    """LDC.64 R2, c[0x0][0x160]
+      |IMAD.WIDE.U32 R2, R0, 4, R2
+      |STG.E [R2.64], R4
+      |EXIT""".stripMargin
+
+  private def groupMask(lane: Int): Int = (0 until 32).collect { case i if i % 3 == lane % 3 => 1 << i }.sum
+
+  test("WARPSYNC.EXCLUSIVE leaves only the member group active for a vote until the convergence barrier") {
+    check(
+      89,
+      labelled +
+        """BSSY B0, 0x80
+          |WARPSYNC.EXCLUSIVE R7
+          |VOTE.ANY R4, PT, PT
+          |BSYNC B0
+          |""".stripMargin + store,
+      Vec.tabulate(32)(groupMask(_))
+    )
+  }
+
+  test("the member groups of WARPSYNC.EXCLUSIVE rejoin at the convergence barrier") {
+    check(
+      89,
+      labelled +
+        """BSSY B0, 0x80
+          |WARPSYNC.EXCLUSIVE R7
+          |NOP
+          |BSYNC B0
+          |VOTE.ANY R4, PT, PT
+          |""".stripMargin + store,
+      Vec.fill(32)(-1)
+    )
+  }
+
+  test("WARPSYNC.COLLECTIVE runs the lanes that name different masks as separate groups") {
+    check(
+      89,
+      labelled +
+        """BSSY B0, 0x90
+          |WARPSYNC.COLLECTIVE R7, 0x80
+          |VOTE.ANY R4, PT, PT
+          |ENDCOLLECTIVE
+          |BSYNC B0
+          |""".stripMargin + store,
+      Vec.tabulate(32)(groupMask(_))
+    )
+  }
+
+  for ((limit, expected) <- Vec(16 -> 2, 32 -> 7))
+    test(
+      s"a guarded BRA.DIV is judged on the lanes its guard keeps and taken by every active lane (guard below $limit)"
+    ) {
+      check(
+        120,
+        s"""S2R R0, SR_TID.X
+          |ISETP.LT.U32.AND P0, PT, R0, $limit, PT
+          |UMOV UR4, 0xffffffff
+          |MOV R4, 1
+          |@P0 BRA.DIV UR4, 0x70
+          |MOV R4, 7
+          |BRA 0x80
+          |MOV R4, 2
+          |LDC.64 R2, c[0x0][0x160]
+          |IMAD.WIDE.U32 R2, R0, 4, R2
+          |STG.E [R2], R4
+          |EXIT""".stripMargin,
+        Vec.fill(32)(expected)
+      )
+    }
+
+  test("a convergence barrier inside a member group leaves the group apart") {
+    check(
+      89,
+      labelled +
+        """BSSY B0, 0xb0
+          |WARPSYNC.EXCLUSIVE R7
+          |BSSY B1, 0x90
+          |NOP
+          |BSYNC B1
+          |VOTE.ANY R4, PT, PT
+          |BSYNC B0
+          |""".stripMargin + store,
+      Vec.tabulate(32)(groupMask(_))
+    )
+  }
+
+  test("REDUX after the convergence barrier of WARPSYNC.EXCLUSIVE reduces over the whole warp") {
+    check(
+      89,
+      labelled +
+        """BSSY B0, 0x80
+          |WARPSYNC.EXCLUSIVE R7
+          |NOP
+          |BSYNC B0
+          |REDUX.MAX.S32 UR4, R0
+          |MOV R4, UR4
+          |""".stripMargin + store,
+      Vec.fill(32)(31)
+    )
+  }
+
+  test("ELECT elects one lane in each member group of WARPSYNC.EXCLUSIVE") {
+    check(
+      89,
+      labelled +
+        """BSSY B0, 0x80
+          |WARPSYNC.EXCLUSIVE R7
+          |ELECT P1, URZ, PT
+          |BSYNC B0
+          |MOV R6, 1
+          |SEL R4, R6, RZ, P1
+          |""".stripMargin + store,
+      Vec.tabulate(32)(lane => if (lane < 3) 1 else 0)
+    )
+  }
+
+  test("sm_120 labeled partition ballots only the peers its MATCH.ANY groups name") {
+    val kernel = load(120, Fixture.listing("labeledPartitionSm120"), "labeled")
+    val values = Vec.tabulate(32)(lane => (lane * 37L + 11L) % 101L)
+    val label  = (lane: Int) => (lane * 7) % 5
+    val peers  = (lane: Int) => (0 until 32).collect { case i if label(i) == label(lane) => 1L << i }.sum
+    val run    = kernel.launch(32)(Arg.words(values*), Arg.zeros(128 * 4))
+    assertEquals(run.words(1).slice(96, 128), Vec.tabulate(32)(peers))
+    assertEquals(
+      run.words(1).slice(64, 96),
+      Vec.tabulate(32)(lane =>
+        (0 until 32).collect {
+          case other if label(other) == label(lane) && (values(other) & 1L) != 0L => 1L << other
+        }.sum
+      )
+    )
+    assertEquals(run.words(1)(64 + 1), 0x80200040L)
   }
 }

@@ -22,4 +22,9 @@ object ExtensionEnumerants {
 
   /** The grammar's enumerants of `info`, then the extensions'. */
   def of(info: OperandKindInfo): Vec[OperandEnumerant] = info.enumerants ++ extensions.getOrElse(info.kind, Vec.empty)
+
+  def selected(info: OperandKindInfo, value: Long): Vec[OperandEnumerant] = of(info).filter(enumerant =>
+    if (info.kind.category == OperandKind.Category.ValueEnum || enumerant.value == 0) enumerant.value == value
+    else (value & enumerant.value) == enumerant.value
+  )
 }

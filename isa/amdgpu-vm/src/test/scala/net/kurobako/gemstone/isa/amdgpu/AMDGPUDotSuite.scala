@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The GFX11 and GFX12 dot products and DX9 multiplies, which hipcc emits for `__builtin_amdgcn_sudot4`, `sudot8`,
   * `fdot2_f16_f16`, `fdot2_bf16_bf16` and `dot4_f32_fp8_bf8` (ROCm 7.1.1 `hipcc -O2 --offload-arch=gfx1100`:

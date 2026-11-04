@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** V_MOVRELS_B32, V_MOVRELD_B32, V_MOVRELSD_B32, V_MOVRELSD_2_B32 and V_SWAPREL_B32 in every encoding: the DPP, DPP8,
   * SDWA and VOP3 forms apply their routing, selection and placement to the register M0 offsets, as on a gfx1036 (RDNA2)

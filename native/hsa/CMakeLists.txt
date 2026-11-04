@@ -6,6 +6,7 @@ add_library(gemstone_hsa_core STATIC
   src/aql.cpp
   src/aql_execution.cpp
   src/doorbell_monitor.cpp
+  src/hostcall.cpp
   src/images.cpp
 )
 set_target_properties(gemstone_hsa_core PROPERTIES
@@ -64,11 +65,18 @@ if(BUILD_TESTING)
   target_link_libraries(gemstone_hsa_aql_execution_test PRIVATE gemstone_hsa_core)
   gemstone_test_target(gemstone_hsa_aql_execution_test)
   add_executable(gemstone_hsa_runtime_test test/hsa_runtime_test.cpp)
+  target_include_directories(gemstone_hsa_runtime_test PRIVATE ../generated/amdgpu)
   target_link_libraries(gemstone_hsa_runtime_test PRIVATE gemstone_hsa_runtime)
   gemstone_test_target(gemstone_hsa_runtime_test)
+  add_executable(gemstone_hsa_multi_device_test test/multi-device.cpp)
+  target_link_libraries(gemstone_hsa_multi_device_test PRIVATE gemstone_hsa_runtime)
+  gemstone_test_target(gemstone_hsa_multi_device_test)
   add_executable(gemstone_hsa_images_test test/images_test.cpp)
   target_link_libraries(gemstone_hsa_images_test PRIVATE gemstone_hsa_core)
   gemstone_test_target(gemstone_hsa_images_test)
+  add_executable(gemstone_hsa_hostcall_test test/hostcall_test.cpp)
+  target_link_libraries(gemstone_hsa_hostcall_test PRIVATE gemstone_hsa_core)
+  gemstone_test_target(gemstone_hsa_hostcall_test)
   add_executable(gemstone_hsa_target_test test/target_test.cpp)
   target_include_directories(gemstone_hsa_target_test PRIVATE include ../generated/amdgpu ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
   gemstone_test_target(gemstone_hsa_target_test)
@@ -84,7 +92,9 @@ if(BUILD_TESTING)
   gemstone_discover_tests(gemstone_hsa_doorbell_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_aql_execution_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_runtime_test TEST_PREFIX "hsa/")
+  gemstone_discover_tests(gemstone_hsa_multi_device_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_target_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_images_test TEST_PREFIX "hsa/")
+  gemstone_discover_tests(gemstone_hsa_hostcall_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsakmt_test TEST_PREFIX "hsa/")
 endif()

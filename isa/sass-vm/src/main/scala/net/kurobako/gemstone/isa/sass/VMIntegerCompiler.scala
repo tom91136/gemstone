@@ -13,11 +13,12 @@ import net.kurobako.gemstone.vm.*
 
 /** Integer arithmetic, logic, bit manipulation, moves and register-producing comparisons. */
 private object VMIntegerCompiler {
-  private val comparisons  = Set(Modifier.EQ, Modifier.NE, Modifier.LT, Modifier.LE, Modifier.GT, Modifier.GE)
-  private val booleans     = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
-  private val xmadTypes    = Set(Modifier.S16, Modifier.U16)
-  private val Low32        = Value.Immediate(0xffffffffL)
-  private val viaddFormats = Map[Modifier, (Int, Boolean)](
+  private val comparisons   = Set(Modifier.EQ, Modifier.NE, Modifier.LT, Modifier.LE, Modifier.GT, Modifier.GE)
+  private val booleans      = Set(Modifier.AND, Modifier.OR, Modifier.XOR)
+  private val xmadTypes     = Set(Modifier.S16, Modifier.U16)
+  private val moveModifiers = Set(Modifier.`64`, Modifier.SPILL, Modifier.FILL)
+  private val Low32         = Value.Immediate(0xffffffffL)
+  private val viaddFormats  = Map[Modifier, (Int, Boolean)](
     Modifier.`32`    -> (1, true),
     Modifier.`_32`   -> (1, true),
     Modifier.U32     -> (1, false),
@@ -366,6 +367,14 @@ private object VMIntegerCompiler {
   private def lowerMultiplyAndAdd(using context: VMCompilationContext): Boolean = {
     import context.*
 
+    /** The carry-out predicate a wide addition may name after its destination, and the destination and its sources. */
+    def wide(sources: Int, requirement: String): (Option[Operand.Predicate], Vec[Operand]) = operands match {
+      case Vec(destination, carry: Operand.Predicate, rest*) if rest.size == sources =>
+        (Some(carry), destination +: Vec.from(rest))
+      case all if all.size == sources + 1 => (None, all)
+      case _                              => unsupported(requirement)
+    }
+
     /** The carry-out predicate of an addition: the sum is below the left source, or the total is below the sum. */
     def writeCarryOut(target: Operand, left: Value, sum: Value, total: Value, width: Int in (8, 16, 32, 64)): Unit =
       writePredicate(
@@ -423,27 +432,18 @@ private object VMIntegerCompiler {
         )
         true
       case _: Form.Iadd if modifiers.toSet == Set(Modifier.`64`, Modifier.X) =>
-        val (carryOut, values) = operands match {
-          case Vec(destination, carry: Operand.Predicate, a, b, carryIn) =>
-            (Some(carry), Vec(destination, a, b, carryIn))
-          case Vec(destination, a, b, carryIn) => (None, Vec(destination, a, b, carryIn))
-          case _                               => unsupported("IADD.64.X requires two sources and a carry")
-        }
-        val left  = source(values(1), 64)
-        val sum   = binary(IntegerOperation.Add, left, source(values(2), 64), 64)
-        val total = binary(IntegerOperation.Add, sum, bit(predicateSource(values(3)), 64), 64)
+        val (carryOut, values) = wide(3, "IADD.64.X requires two sources and a carry")
+        val left               = source(values(1), 64)
+        val sum                = binary(IntegerOperation.Add, left, source(values(2), 64), 64)
+        val total              = binary(IntegerOperation.Add, sum, bit(predicateSource(values(3)), 64), 64)
         carryOut.foreach(carry => writeCarryOut(carry, left, sum, total, 64))
         store(values.head, total, 64)
         true
       // a negated source subtracts, so its carry out is the no-borrow bit
       case _: Form.Iadd if modifiers == Vec(Modifier.`64`) =>
-        val (carryOut, values) = operands match {
-          case Vec(destination, carry: Operand.Predicate, a, b) => (Some(carry), Vec(destination, a, b))
-          case Vec(destination, a, b)                           => (None, Vec(destination, a, b))
-          case _                                                => unsupported("IADD.64 requires two sources")
-        }
-        val left = source(values(1), 64)
-        val sum  = binary(IntegerOperation.Add, left, source(values(2), 64), 64)
+        val (carryOut, values) = wide(2, "IADD.64 requires two sources")
+        val left               = source(values(1), 64)
+        val sum                = binary(IntegerOperation.Add, left, source(values(2), 64), 64)
         carryOut.foreach { carry =>
           val negativeLeft  = negatedSource(values(1))
           val negativeRight = negatedSource(values(2))
@@ -719,9 +719,9 @@ private object VMIntegerCompiler {
         requireOperands(2, "MOV64IUR requires a destination and a source")
         store(operands.head, source(operands(1), 64), 64)
         true
-      // SPILL marks a move ptxas emits to spill a uniform register
+      // SPILL and FILL mark the moves ptxas emits to spill and restore a uniform register
       case _: Form.Mov | _: Form.Umov | _: Form.Mov32i | _: Form.R2ur =>
-        requireModifiers(Set(Modifier.`64`, Modifier.SPILL))
+        requireModifiers(moveModifiers)
         val bits: ScalarBitWidth = if (modifiers.contains(Modifier.`64`)) 64 else 32
         textRelocation match {
           case Some(relocation) =>
@@ -1051,8 +1051,8 @@ private object VMIntegerCompiler {
         case other                               => immediate(other)
       }
       val negatable = plainOperand match {
-        case _: Operand.ConstantBank => true
-        case other                   => OperandQueries.isRegister(other)
+        case Operand.ConstantBank(_, _) => true
+        case other                      => OperandQueries.isRegister(other)
       }
       kind && (!OperandQueries.negative(operand) || negatable)
     }
@@ -1087,8 +1087,8 @@ private object VMIntegerCompiler {
       emit(IntegerBinary(IntegerOperation.Add, result.slot, result, sources(2), 32))
       store(operands.head, result)
     } else {
-      if (operands.drop(1).count(OperandQueries.negative) > 1)
-        unsupported("legacy IADD3 supports at most one negated source per instruction")
+      if (producer && operands.drop(1).count(OperandQueries.negative) > 2)
+        unsupported("legacy IADD3.CC supports at most two negated sources")
       val sources = operands.drop(1).map(operand => (legacyAddThreeSource(operand), OperandQueries.negative(operand)))
       emit(IntegerAddThree(
         destination(OperandQueries.without(operands.head, OperandSelector.CC)).slot,
@@ -1195,10 +1195,11 @@ private object VMIntegerCompiler {
     val b       = source(operands(2))
     val chooseA =
       if (high) {
-        if (!OperandQueries.has(operands.head, OperandSelector.CC)) unsupported("IMNMX.XHI must write CC")
-        emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, compareValues(Modifier.LT, a, b, signed)))
-        emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, compareValues(Modifier.EQ, a, b, signed)))
         val less = compareValues(Modifier.LT, a, b, signed)
+        if (OperandQueries.has(operands.head, OperandSelector.CC)) {
+          emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, less))
+          emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, compareValues(Modifier.EQ, a, b, signed)))
+        }
         if (selectA) combine(PredicateOperation.Or, less, compareValues(Modifier.EQ, a, b, signed)) else invert(less)
       } else {
         if (OperandQueries.has(operands.head, OperandSelector.CC)) unsupported("IMNMX.XLO does not write CC")
@@ -1830,16 +1831,19 @@ private object VMIntegerCompiler {
   private def legacyLoadEffectiveAddress()(using context: VMCompilationContext): Unit = {
     import context.*
     val conditionCode = operands.headOption.exists(OperandQueries.has(_, OperandSelector.CC))
-    // the shared-window test LegacyAddressRewrite verified: whether the address in Ra and Rc is global
+    // the address-space test LegacyAddressRewrite verified: whether the address in Ra and Rc is global, with the high
+    // word of that address in the destination unless it is RZ
     if (
       modifiers == Vec(Modifier.HI, Modifier.X) && operands.size == 5 && OperandQueries.isPredicate(operands.head) &&
-      OperandQueries.isZero(operands(1)) && OperandQueries.isZero(operands(3))
+      OperandQueries.isZero(operands(3))
     ) {
       val address = temp()
       emit(MoveCombine(address.slot, Vec(register(operands(2)), register(operands(4))), 32))
       val global = predicateTemp()
       emit(SpaceTest(global.slot, address, AddressKind.Global))
       writePredicate(operands.head, global)
+      if (!OperandQueries.isZero(operands(1)))
+        legacyHighWord(operands.tail :+ Operand.Integer(0), carry = true)
     } else if (modifiers.isEmpty && legacyLowForm(operands).nonEmpty) {
       if (!OperandQueries.isRegister(operands.head))
         unsupported("LEA destination must be a general register")
@@ -1859,38 +1863,46 @@ private object VMIntegerCompiler {
       }
       store(OperandQueries.without(operands.head, OperandSelector.CC), result)
     } else if (modifiers == Vec(Modifier.HI, Modifier.X) || modifiers == Vec(Modifier.HI)) {
-      val carry = modifiers.contains(Modifier.X)
       // the shift defaults to 0
-      val values = if (operands.size == 4) operands :+ Operand.Integer(0) else operands
-      if (values.size != 5 || !OperandQueries.isRegister(values.head) || conditionCode)
-        unsupported("LEA.HI requires a general-register destination and four sources")
-      if (
-        !(if (carry) legacyAddressSource(OperandQueries.positive(values(1))) else legacyAddressSource(values(1))) ||
-        !values.slice(2, 4).forall(legacyAddressSource(_))
-      ) unsupported("LEA.HI has unsupported source operands")
-      val amount = OperandQueries.integer(values(4)).filter(value => value >= 0 && value <= 31)
-        .getOrElse(unsupported("LEA.HI shift must be between 0 and 31")).toInt
-      val sourceLow   = source(if (carry) OperandQueries.positive(values(1)) else values(1))
-      val baseHigh    = source(values(2))
-      val highFromLow =
-        if (amount == 0) Value.Immediate(0L)
-        else binary(IntegerOperation.ShiftRightLogical, sourceLow, Value.Immediate((32 - amount).toLong))
-      val sum = binary(
-        IntegerOperation.Add,
-        highFromLow,
-        binary(IntegerOperation.ShiftLeft, source(values(3)), Value.Immediate(amount.toLong))
+      legacyHighWord(
+        if (operands.size == 4) operands :+ Operand.Integer(0) else operands,
+        modifiers.contains(Modifier.X)
       )
-      if (carry && OperandQueries.negative(values(1)))
-        emit(IntegerUnary(IntegerUnaryOperation.BitwiseNot, sum.slot, sum, 32))
-      emit(IntegerBinary(IntegerOperation.Add, sum.slot, sum, baseHigh, 32))
-      if (carry) emit(IntegerBinary(
-        IntegerOperation.Add,
-        sum.slot,
-        sum,
-        bit(readConditionFlag(VMConditionCodes.Flag.Carry)),
-        32
-      ))
-      store(values.head, sum)
     } else unsupported(s"unsupported sm_$sm LEA form")
+  }
+
+  private def legacyHighWord(values: Vec[Operand], carry: Boolean)(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (
+      values.size != 5 || !OperandQueries.isRegister(values.head) || OperandQueries.has(values.head, OperandSelector.CC)
+    )
+      unsupported("LEA.HI requires a general-register destination and four sources")
+    if (
+      !(if (carry) legacyAddressSource(OperandQueries.positive(values(1))) else legacyAddressSource(values(1))) ||
+      !values.slice(2, 4).forall(legacyAddressSource(_))
+    ) unsupported("LEA.HI has unsupported source operands")
+    val amount = OperandQueries.integer(values(4)).filter(value => value >= 0 && value <= 31)
+      .getOrElse(unsupported("LEA.HI shift must be between 0 and 31")).toInt
+    val sourceLow   = source(if (carry) OperandQueries.positive(values(1)) else values(1))
+    val baseHigh    = source(values(2))
+    val highFromLow =
+      if (amount == 0) Value.Immediate(0L)
+      else binary(IntegerOperation.ShiftRightLogical, sourceLow, Value.Immediate((32 - amount).toLong))
+    val sum = binary(
+      IntegerOperation.Add,
+      highFromLow,
+      binary(IntegerOperation.ShiftLeft, source(values(3)), Value.Immediate(amount.toLong))
+    )
+    if (carry && OperandQueries.negative(values(1)))
+      emit(IntegerUnary(IntegerUnaryOperation.BitwiseNot, sum.slot, sum, 32))
+    emit(IntegerBinary(IntegerOperation.Add, sum.slot, sum, baseHigh, 32))
+    if (carry) emit(IntegerBinary(
+      IntegerOperation.Add,
+      sum.slot,
+      sum,
+      bit(readConditionFlag(VMConditionCodes.Flag.Carry)),
+      32
+    ))
+    store(values.head, sum)
   }
 }

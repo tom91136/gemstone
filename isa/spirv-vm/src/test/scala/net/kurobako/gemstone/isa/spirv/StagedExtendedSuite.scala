@@ -7,8 +7,8 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.Edges.*
-import net.kurobako.gemstone.testing.Suite
 
 /** Staged GLSL.std.450 and OpenCL.std semantics against the hand-written kernels they replaced. The math helpers the
   * kernels called, such as `sinPi` and the musl adaptations, moved unchanged and serve both sides.

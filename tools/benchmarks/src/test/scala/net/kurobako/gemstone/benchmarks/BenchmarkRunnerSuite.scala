@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.benchmarks
 
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class BenchmarkRunnerSuite extends Suite {
   private def parse(arguments: String*): BenchmarkRunner.Action =

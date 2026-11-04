@@ -10,7 +10,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
@@ -108,11 +108,13 @@ class CubinTextRelocationSuite extends Suite {
         .fold(error => fail(error.raw), identity)
       val memory = Memory()
       val output = memory.allocate(8L)
+      val heap   = memory.allocate(4096L)
       val task   = KernelTask.validated(
         "relocated",
         LaunchGeometry.Dimensions.One,
         LaunchGeometry.Dimensions.One,
-        Vec(KernelTask.Argument.Memory(output, 0L))
+        Vec(KernelTask.Argument.Memory(output, 0L)),
+        deviceHeap = Some(KernelTask.DeviceHeap(heap, 0L, 4096L))
       ).value
       memory.run(compiled, task).fold(error => fail(error.message), identity)
       val expected = address.raw + addend.getOrElse(0L)
@@ -201,11 +203,13 @@ class CubinTextRelocationSuite extends Suite {
         .fold(error => fail(error.raw), identity)
       val memory = Memory()
       val output = memory.allocate(8L)
+      val heap   = memory.allocate(4096L)
       val task   = KernelTask.validated(
         "relocated",
         LaunchGeometry.Dimensions.One,
         LaunchGeometry.Dimensions.One,
-        Vec(KernelTask.Argument.Memory(output, 0L))
+        Vec(KernelTask.Argument.Memory(output, 0L)),
+        deviceHeap = Some(KernelTask.DeviceHeap(heap, 0L, 4096L))
       ).value
       memory.run(compiled, task).fold(error => fail(error.message), identity)
       assertEquals(memory.readWords(output, 1), Vec(0x2aL))

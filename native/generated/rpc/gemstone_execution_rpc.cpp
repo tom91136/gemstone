@@ -94,6 +94,10 @@ Result<Unit> Client::call(const RegisterAllocationAddress &request) {
   return implementation->call<Unit>(operation::RegisterAllocationAddress, request);
 }
 
+Result<Unit> Client::call(const SetAllocationDevices &request) {
+  return implementation->call<Unit>(operation::SetAllocationDevices, request);
+}
+
 Result<Unit> Client::call(const ReleaseAllocation &request) {
   return implementation->call<Unit>(operation::ReleaseAllocation, request);
 }
@@ -124,6 +128,10 @@ Result<std::vector<SpecializationInfo>> Client::call(const DescribeSpecializatio
 
 Result<std::vector<uint8_t>> Client::call(const SpecializeImage &request) {
   return implementation->call<std::vector<uint8_t>>(operation::SpecializeImage, request);
+}
+
+Result<LinkedImage> Client::call(const LinkImages &request) {
+  return implementation->call<LinkedImage>(operation::LinkImages, request);
 }
 
 Result<PreparedShader> Client::call(const PrepareShader &request) {
@@ -186,8 +194,12 @@ Result<std::vector<PointerRelocation>> Client::call(const CompletionPointerReloc
   return implementation->call<std::vector<PointerRelocation>>(operation::CompletionPointerRelocations, request);
 }
 
-Result<std::string> Client::call(const CompletionPrints &request) {
-  return implementation->call<std::string>(operation::CompletionPrints, request);
+Result<PrintText> Client::call(const CompletionPrints &request) {
+  return implementation->call<PrintText>(operation::CompletionPrints, request);
+}
+
+Result<PrintText> Client::call(const CompletionErrorPrints &request) {
+  return implementation->call<PrintText>(operation::CompletionErrorPrints, request);
 }
 
 Result<Unit> Client::call(const ReleaseCompletion &request) {

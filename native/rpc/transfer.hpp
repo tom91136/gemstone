@@ -13,14 +13,27 @@ namespace gemstone::execution {
 /** Largest allocation payload a single RPC message may carry. */
 inline constexpr size_t TransferChunk = MaximumPayload / 2;
 
-/** Registers `size` bytes at native `address`; the id is released again when binding the address fails. */
-inline std::optional<AllocationId> registerAllocation(Client &client, uint64_t size, const void *address, bool hostBacked = false) {
+/** Bit set naming every device ordinal. */
+inline constexpr uint32_t AllDevices = UINT32_MAX;
+
+/** Registers `size` bytes at native `address`; the id is released again when binding the address fails. Dispatches of a device
+ * outside the `devices` bit set fault when they access the allocation.
+ */
+inline std::optional<AllocationId> registerAllocation(Client &client, uint64_t size, const void *address, bool hostBacked = false,
+                                                      uint32_t devices = AllDevices) {
   const auto id = client.call(RegisterAllocation{{static_cast<int64_t>(size)}});
   if (!id) return std::nullopt;
   const GuestAddress base{static_cast<int64_t>(reinterpret_cast<uintptr_t>(address))};
-  if (client.call(RegisterAllocationAddress{.allocation = id.value(), .nativeBase = base, .hostBacked = hostBacked})) return id.value();
+  if (client.call(RegisterAllocationAddress{
+          .allocation = id.value(), .nativeBase = base, .hostBacked = hostBacked, .devices = static_cast<int32_t>(devices)}))
+    return id.value();
   (void)client.call(ReleaseAllocation{id.value()});
   return std::nullopt;
+}
+
+/** Replaces the bit set of devices whose dispatches may access the allocation. */
+inline bool setAllocationDevices(Client &client, AllocationId allocation, uint32_t devices) {
+  return static_cast<bool>(client.call(SetAllocationDevices{.allocation = allocation, .devices = static_cast<int32_t>(devices)}));
 }
 
 /** Writes client bytes to an allocation range in bounded chunks. Returns false on the first transport error. */

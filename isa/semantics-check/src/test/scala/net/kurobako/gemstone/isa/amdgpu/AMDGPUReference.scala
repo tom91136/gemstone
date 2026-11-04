@@ -71,6 +71,8 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
     * inside it as often as not; relative moves read an M0 that offsets into registers that hold only their
     * [[AMDGPUHarness.background]]; other instances read the sampled inputs.
     */
+  // the operands of one instruction
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   override def inputs(
       target: Option[String],
       instance: String,
@@ -137,10 +139,9 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
         case _           => (width & 3L) << 30
       })
     val (word4, word5) = generation match {
-      case GFX8  => (depth | (pitch << 13), array | (random.nextInt(4).toLong << 13))
-      case GFX9  => (depth | (pitch << 13), array)
-      case GFX12 => (depth | (array << 16), 0L)
-      case _     => (depth | (array << 16), 0L)
+      case GFX8 => (depth | (pitch << 13), array | (random.nextInt(4).toLong << 13))
+      case GFX9 => (depth | (pitch << 13), array)
+      case _    => (depth | (array << 16), 0L)
     }
     Vec(
       base & 0xffffffffL,

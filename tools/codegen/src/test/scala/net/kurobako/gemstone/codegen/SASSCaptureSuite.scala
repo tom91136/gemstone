@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class SASSCaptureSuite extends Suite {
   private def ascii(value: String): Array[Byte]                             = value.getBytes(StandardCharsets.US_ASCII)

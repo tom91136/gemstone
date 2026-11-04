@@ -522,9 +522,7 @@ void depthImages(cl_channel_type type) {
 } // namespace
 
 #define UNIFIED_OPENCL_ROUND_TRIP(NAME, ORDER, TYPE, SIZE, ACCESS)                                                                         \
-  TEST_CASE("edge-cases/runtime/opencl/images/round-trip/" NAME, "[unified][runtime][compact]") {                                          \
-    roundTrip({{ORDER, TYPE}, SIZE, Access::ACCESS});                                                                                      \
-  }
+  TEST_CASE("edge-cases/runtime/opencl/images/round-trip/" NAME, "[unified][runtime]") { roundTrip({{ORDER, TYPE}, SIZE, Access::ACCESS}); }
 
 UNIFIED_OPENCL_ROUND_TRIP("rgba-unorm8", CL_RGBA, CL_UNORM_INT8, 4, Float)
 UNIFIED_OPENCL_ROUND_TRIP("bgra-unorm8", CL_BGRA, CL_UNORM_INT8, 4, Float)
@@ -537,7 +535,7 @@ UNIFIED_OPENCL_ROUND_TRIP("rgba-sint32", CL_RGBA, CL_SIGNED_INT32, 16, Int)
 UNIFIED_OPENCL_ROUND_TRIP("r-uint8", CL_R, CL_UNSIGNED_INT8, 1, Uint)
 UNIFIED_OPENCL_ROUND_TRIP("rg-uint32", CL_RG, CL_UNSIGNED_INT32, 8, Uint)
 
-TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-clamp-to-edge", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-clamp-to-edge", "[unified][runtime]") {
   sampling({.normalised = CL_FALSE,
             .addressing = CL_ADDRESS_CLAMP_TO_EDGE,
             .filter = CL_FILTER_NEAREST,
@@ -545,7 +543,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-clamp-to-edge", "[u
             .expected = {{0.0F, 1.0F}, {0.0F, 1.0F}, {1.0F, 1.0F}, {3.0F, 1.0F}, {3.0F, 1.0F}}});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-clamp", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-clamp", "[unified][runtime]") {
   sampling({.normalised = CL_FALSE,
             .addressing = CL_ADDRESS_CLAMP,
             .filter = CL_FILTER_NEAREST,
@@ -553,7 +551,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-clamp", "[unified][
             .expected = {{0.0F, 1.0F}, {2.0F, 1.0F}, {0.0F, 1.0F}}});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/sampling/linear-repeat", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/sampling/linear-repeat", "[unified][runtime]") {
   sampling({.normalised = CL_TRUE,
             .addressing = CL_ADDRESS_REPEAT,
             .filter = CL_FILTER_LINEAR,
@@ -561,7 +559,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/sampling/linear-repeat", "[unified][
             .expected = {{0.0F, 1.0F}, {0.5F, 1.0F}, {1.5F, 1.0F}, {0.0F, 1.0F}}});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-mirrored-repeat", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-mirrored-repeat", "[unified][runtime]") {
   sampling({.normalised = CL_TRUE,
             .addressing = CL_ADDRESS_MIRRORED_REPEAT,
             .filter = CL_FILTER_NEAREST,
@@ -569,9 +567,9 @@ TEST_CASE("edge-cases/runtime/opencl/images/sampling/nearest-mirrored-repeat", "
             .expected = {{2.0F, 1.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}, {2.0F, 1.0F}}});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/sampling/integer-coordinates", "[unified][runtime][compact]") { integerSampling(); }
+TEST_CASE("edge-cases/runtime/opencl/images/sampling/integer-coordinates", "[unified][runtime]") { integerSampling(); }
 
-TEST_CASE("edge-cases/runtime/opencl/images/layout/1d", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/layout/1d", "[unified][runtime]") {
   layouts({.type = CL_MEM_OBJECT_IMAGE1D,
            .width = 37,
            .height = 0,
@@ -582,7 +580,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/layout/1d", "[unified][runtime][comp
            .writes3D = false});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/layout/1d-buffer", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/layout/1d-buffer", "[unified][runtime]") {
   layouts({.type = CL_MEM_OBJECT_IMAGE1D_BUFFER,
            .width = 33,
            .height = 0,
@@ -593,7 +591,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/layout/1d-buffer", "[unified][runtim
            .writes3D = false});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/layout/1d-array", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/layout/1d-array", "[unified][runtime]") {
   layouts({.type = CL_MEM_OBJECT_IMAGE1D_ARRAY,
            .width = 9,
            .height = 0,
@@ -604,7 +602,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/layout/1d-array", "[unified][runtime
            .writes3D = false});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/layout/2d", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/layout/2d", "[unified][runtime]") {
   layouts({.type = CL_MEM_OBJECT_IMAGE2D,
            .width = 13,
            .height = 7,
@@ -615,7 +613,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/layout/2d", "[unified][runtime][comp
            .writes3D = false});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/layout/2d-array", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/layout/2d-array", "[unified][runtime]") {
   layouts({.type = CL_MEM_OBJECT_IMAGE2D_ARRAY,
            .width = 7,
            .height = 5,
@@ -626,7 +624,7 @@ TEST_CASE("edge-cases/runtime/opencl/images/layout/2d-array", "[unified][runtime
            .writes3D = false});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/layout/3d", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/images/layout/3d", "[unified][runtime]") {
   layouts({.type = CL_MEM_OBJECT_IMAGE3D,
            .width = 5,
            .height = 4,
@@ -637,14 +635,14 @@ TEST_CASE("edge-cases/runtime/opencl/images/layout/3d", "[unified][runtime][comp
            .writes3D = true});
 }
 
-TEST_CASE("edge-cases/runtime/opencl/images/read-write/rgba-sint16", "[unified][runtime][compact]") { readWrite(); }
+TEST_CASE("edge-cases/runtime/opencl/images/read-write/rgba-sint16", "[unified][runtime]") { readWrite(); }
 
-TEST_CASE("edge-cases/runtime/opencl/images/transfers/rgba-unorm8", "[unified][runtime][compact]") { transfers(); }
+TEST_CASE("edge-cases/runtime/opencl/images/transfers/rgba-unorm8", "[unified][runtime]") { transfers(); }
 
-TEST_CASE("edge-cases/runtime/opencl/images/aliasing/2d-from-buffer-pitched", "[unified][runtime][compact]") { bufferImages(); }
+TEST_CASE("edge-cases/runtime/opencl/images/aliasing/2d-from-buffer-pitched", "[unified][runtime]") { bufferImages(); }
 
-TEST_CASE("edge-cases/runtime/opencl/images/aliasing/srgb-view", "[unified][runtime][compact]") { srgbView(); }
+TEST_CASE("edge-cases/runtime/opencl/images/aliasing/srgb-view", "[unified][runtime]") { srgbView(); }
 
-TEST_CASE("edge-cases/runtime/opencl/images/depth/unorm16", "[unified][runtime][compact]") { depthImages(CL_UNORM_INT16); }
+TEST_CASE("edge-cases/runtime/opencl/images/depth/unorm16", "[unified][runtime]") { depthImages(CL_UNORM_INT16); }
 
-TEST_CASE("edge-cases/runtime/opencl/images/depth/float", "[unified][runtime][compact]") { depthImages(CL_FLOAT); }
+TEST_CASE("edge-cases/runtime/opencl/images/depth/float", "[unified][runtime]") { depthImages(CL_FLOAT); }

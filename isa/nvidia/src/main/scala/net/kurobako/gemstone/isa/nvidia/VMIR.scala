@@ -5,6 +5,7 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.texture.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -56,6 +57,10 @@ private[isa] object VMIR {
 
     /** Nanoseconds since the Unix epoch on a clock every workgroup shares and that never runs backwards. */
     case GlobalTimer(part: CounterPart)
+
+    /** The address of the driver workspace a cooperative launch provides its grid barrier in; zero for other launches.
+      */
+    case GridWorkspace(part: CounterPart)
 
     /** The multiprocessor the workgroup runs on: workgroups are dealt to multiprocessors in launch order. */
     case MultiprocessorId
@@ -387,6 +392,7 @@ private[isa] object VMIR {
     case DeviceAttribute
     case Occupancy
     case NoError
+    case Printf
     case ParameterBuffer
     case Malloc
     case Free
@@ -975,10 +981,80 @@ private[isa] object VMIR {
     }
   }
 
+  /** Texture and surface access, shared by PTX and SASS. A handle's low 32 bits index the descriptor table, so the
+    * lowering of either ISA passes the handle register unchanged. The coordinates name the axes accessed, so their
+    * count is the dimensionality. Surface coordinates are as `suld` takes them: the first in bytes, the rest in rows
+    * and slices. Destinations are in result order (red to alpha for texels), where `None` discards a component.
+    */
+  object Texture {
+
+    /** Whether floating-point coordinates sample, or integer coordinates fetch with the address modes applied. */
+    enum Coordinates derives CanEqual { case Float, Integer }
+
+    /** The register view of a texel component; `Native` is the integer or float the texel format defines. */
+    enum Element derives CanEqual { case F32, S32, U32, Native }
+
+    enum Property derives CanEqual {
+      case Width, Height, Depth, ChannelDataType, ChannelOrder, NormalisedCoordinates
+    }
+
+    enum Operation derives CanEqual {
+
+      /** The texel the descriptor's filter and address modes select at `coordinates`. */
+      case Sample(
+          handle: Value,
+          coordinates: Vec[Value],
+          kind: Coordinates,
+          element: Element,
+          destinations: Vec[Option[Register]]
+      )
+
+      /** The `component` of the four texels around a 2D position, in tld4 footprint order. */
+      case Gather(
+          handle: Value,
+          coordinates: Vec[Value],
+          component: Int in 0 ~ 3,
+          element: Element,
+          destinations: Vec[Option[Register]]
+      )
+
+      /** A property of the texture, or of the surface where `surface`. */
+      case Query(handle: Value, surface: Boolean, property: Property, destination: Register)
+
+      /** `destinations.size` consecutive elements of `bytes` bytes, zero-extended into registers. */
+      case Load(
+          handle: Value,
+          coordinates: Vec[Value],
+          bytes: Int in (1, 2, 4, 8),
+          boundary: BoundaryMode,
+          destinations: Vec[Option[Register]]
+      )
+      case Store(
+          handle: Value,
+          coordinates: Vec[Value],
+          bytes: Int in (1, 2, 4, 8),
+          boundary: BoundaryMode,
+          sources: Vec[Value]
+      )
+
+      /** An atomic update of the element at `coordinates`, whose previous value `fetched` receives. */
+      case Reduce(
+          handle: Value,
+          coordinates: Vec[Value],
+          bytes: Int in (4, 8),
+          operation: AtomicOperation,
+          boundary: BoundaryMode,
+          operand: Value,
+          fetched: Option[Register]
+      )
+    }
+  }
+
   // conversions pass a rounding mode and a clamp together
   @SuppressWarnings(Array("bonsai:exclusive-options"))
   enum Instruction derives CanEqual {
     case Tensor(operation: Matrix.Operation)
+    case Texture(operation: VMIR.Texture.Operation)
 
     /** `cvt.tf32.f32`: to nearest with ties away where `away`, otherwise to nearest even or `towardZero`. */
     case ConvertTF32(
@@ -1601,6 +1677,8 @@ private[isa] object VMIR {
 
     /** Hints and ordering-only operations without architecturally visible effect in the emulator. */
     case NoOp
+    case Yield
+    case Pause
     case SetPredicate(
         destination: Predicate,
         comparison: Comparison,
@@ -1650,12 +1728,10 @@ private[isa] object VMIR {
     )
     case Fence
     case Convergence(token: Register, action: ConvergenceAction)
-    case Yield
-    case Pause
     case ReturnStackPush(address: Long)
     case ReturnStackPop(destination: Register)
     case ReturnStackSave(source: Register)
-    case WarpBarrier(memberMask: Value)
+    case WarpBarrier(memberMask: Value, exclusive: Boolean = false)
     case Call(function: Value, returnParameters: Vec[Parameter], parameters: Vec[Parameter])
     case CallBuiltin(builtin: Builtin, returnParameters: Vec[Parameter], parameters: Vec[Parameter])
     case Trap
@@ -1685,6 +1761,19 @@ private[isa] object VMIR {
       sources: Vec[Long] = Vec.empty,
       sourceTexts: Map[Long, String] = Map.empty
   ) {
+
+    /** Whether the program marks where a diverged path hands over to the others, as SASS does. */
+    val yields: Boolean = instructions.exists(_.instruction match {
+      case Instruction.Yield | Instruction.Pause => true; case _ => false
+    })
+
+    /** Whether a diverged path runs until it blocks: the program yields, or writes warp-wide uniform registers, which a
+      * path switch between a write and its use would clobber.
+      */
+    val runsAhead: Boolean = yields || instructions.exists(_.instruction match {
+      case Instruction.UniformMove(_, _) => true; case _ => false
+    })
+
     def source(pc: Pc): Option[Long >= 0] = sources.lift(pc.toInt).flatMap(_.refine[Long >= 0].toOption)
 
     def sourceText(pc: Pc): Option[String] = sources.lift(pc.toInt).flatMap(sourceTexts.get)

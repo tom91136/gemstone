@@ -34,8 +34,8 @@ private object StorageImageSuite {
     def literal(value: Long): String = if (signed) value.toString else s"0x${(value & 0xffffffffL).toHexString}"
     def literals: Seq[String]        = if (integer) input.map(value => literal(value)) else Inputs.map(_.toString)
     def expected(atomic: Boolean): Vec[Long] = Vec.tabulate(4) { lane =>
-      val one = lane == 3
       if (lane >= widths.size) {
+        val one = lane == 3
         if (integer) { if (one) 1L else 0L }
         else single(if (one) 1f else 0f)
       } else {

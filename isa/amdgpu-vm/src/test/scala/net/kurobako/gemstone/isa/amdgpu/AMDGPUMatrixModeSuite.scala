@@ -4,7 +4,7 @@ import VMIR.*
 import laneRuns.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 /** The matrix core under MODE (MI300 ISA, 7.1 and 7.3): MFMA has no CLAMP field, so MODE.FP16_OVFL clamps it, an
   * overflowing f32 result saturating to the largest finite magnitude while infinite operands keep their infinities, and

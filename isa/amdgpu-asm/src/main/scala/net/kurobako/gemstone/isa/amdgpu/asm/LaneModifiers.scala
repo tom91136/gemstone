@@ -40,7 +40,6 @@ private object LaneModifiers {
   def base(layout: InstructionLayout): EncodingFormat = layout.format.base
 
   def selected(instruction: Instruction, layout: InstructionLayout): Boolean = {
-    val eight   = instruction.mods.exists(_.name == "dpp8")
     val subword = instruction.mods.exists(mod =>
       PartialFunction.cond(mod.name) { case "sdwa" | "src0_sel" | "src1_sel" | "dst_sel" | "dst_unused" => true }
     )
@@ -49,7 +48,7 @@ private object LaneModifiers {
         Waves.contains(mod.name) || Mirrors.contains(mod.name) || mod.name == "row_bcast" || mod.name == "row_newbcast"
     )
     if (subword) sdwa(layout)
-    else if (dpp) supports(layout.format) && !sdwa(layout) && dpp8(layout) == eight
+    else if (dpp) supports(layout.format) && !sdwa(layout) && dpp8(layout) == instruction.mods.exists(_.name == "dpp8")
     else !supports(layout.format)
   }
 

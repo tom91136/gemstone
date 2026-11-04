@@ -17,7 +17,7 @@ target_link_libraries(gemstone_execution_client PUBLIC Threads::Threads glaze::g
 gemstone_project_target(gemstone_execution_client)
 
 if(BUILD_TESTING)
-  foreach(test_name IN ITEMS execution_rpc_smoke execution_rpc_session_loss request_bounds process_identity memory_ranges command_queue client_manager transfer environment completion)
+  foreach(test_name IN ITEMS execution_rpc_smoke execution_rpc_session_loss heartbeat request_bounds process_identity memory_ranges command_queue client_manager transfer environment completion)
     if(test_name MATCHES "^execution_rpc_")
       set(test_target "gemstone_${test_name}_client")
     else()

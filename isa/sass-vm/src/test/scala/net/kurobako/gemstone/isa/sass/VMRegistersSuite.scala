@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class VMRegistersSuite extends Suite {
   for (layout <- Vec(Harness.fullLayout, VMRegisters.Layout(24, 0), VMRegisters.Layout(32, 8)))

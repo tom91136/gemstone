@@ -87,12 +87,12 @@ class FloatFormat(
     val code     = bits & codeMask
     val negative = (code & signBit) != 0L
     val exponent = ((code & ~signBit) >>> fractionBits).toInt
-    val fraction = code & fractionMask
     if (isNaN(code)) Double.NaN
     else if (infinite && exponent == maximumExponent)
       if (negative) Double.NegativeInfinity else Double.PositiveInfinity
     else if (special == Special.Scale) Math.scalb(1.0, exponent - bias)
     else {
+      val fraction  = code & fractionMask
       val magnitude =
         if (exponent == 0) Math.scalb(fraction.toDouble, 1 - bias - fractionBits)
         else Math.scalb(((1L << fractionBits) | fraction).toDouble, exponent - bias - fractionBits)

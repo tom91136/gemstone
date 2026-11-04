@@ -59,10 +59,9 @@ object Binary {
   ): Either[BinaryError, Vec[RawInstruction]] =
     if (offset >= words.size) Right(Vec.from(instructions.toVector.view))
     else {
-      val first       = words(offset).raw
-      val declared    = first >>> 16
-      val opcodeValue = first & 0xffff
-      val remaining   = words.size - offset
+      val first     = words(offset).raw
+      val declared  = first >>> 16
+      val remaining = words.size - offset
       if (declared == 0) Left(BinaryError.ZeroInstructionWordCount(offset))
       else if (declared > remaining)
         Left(BinaryError.TruncatedInstruction(offset, declared, remaining))
@@ -71,7 +70,7 @@ object Binary {
           words,
           offset + declared,
           instructions.append(
-            RawInstruction(opcodeValue.unsafe[SPIRVOpcodeNumber], words.slice(offset + 1, offset + declared))
+            RawInstruction((first & 0xffff).unsafe[SPIRVOpcodeNumber], words.slice(offset + 1, offset + declared))
           )
         )
     }

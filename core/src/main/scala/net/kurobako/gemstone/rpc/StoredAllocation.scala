@@ -6,6 +6,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 
 private object StoredAllocation {
+
+  /** Every device ordinal may access the allocation. */
+  val AllDevices: Int = -1
   // One sequence per cache line, so readers of one stripe never share a line with another stripe's writers.
   private val VersionStride = 16
 
@@ -106,7 +109,8 @@ private case class StoredAllocation(
     storage: StoredAllocation.Storage,
     base: GuestAddress,
     aliased: Boolean = false,
-    hostBacked: Boolean = false
+    hostBacked: Boolean = false,
+    devices: Int = StoredAllocation.AllDevices
 ) {
   def bytes: Array[Byte] = storage.bytes
   def size: Int > 0      = storage.size

@@ -182,8 +182,8 @@ private object VMMemory {
 
     def unobserve(): Unit = observer = null
 
-    def asynchronous(kind: LaunchObserver.AsyncKind, target: Long, bytes: Long): Unit =
-      if (observer != null) observer.nn.asynchronous(lane, kind, target, bytes)
+    def asynchronous(kind: LaunchObserver.AsyncKind, bytes: Long): Unit =
+      if (observer != null) observer.nn.asynchronous(lane, kind, -1L, bytes)
 
     private def reads(kind: LaunchObserver.AccessKind): Boolean = kind == LaunchObserver.AccessKind.Read
 
@@ -523,10 +523,14 @@ private object VMMemory {
     def atomicWriteScalar(pointer: Pointer, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
       atomicModifyScalar(pointer, size)(_ => value).map(_ => ())
 
-    def atomicModifyScalar(pointer: Pointer, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
-      seen(pointer, size.raw, LaunchObserver.AccessKind.Atomic)(atomicModify(pointer, size)(update))
+    def atomicModifyScalar(pointer: Pointer, size: Int in 1 ~ 8, dispatchLocal: Boolean = false)(
+        update: Long => Long
+    ): Either[Fault, Long] =
+      seen(pointer, size.raw, LaunchObserver.AccessKind.Atomic)(atomicModify(pointer, size, dispatchLocal)(update))
 
-    private def atomicModify(pointer: Pointer, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
+    private def atomicModify(pointer: Pointer, size: Int in 1 ~ 8, dispatchLocal: Boolean)(
+        update: Long => Long
+    ): Either[Fault, Long] =
       if (suppressed(pointer) || outsideBounds(pointer, size.raw)) Right(0L)
       else if (misaligned(pointer, size)) Left(misalignedAtomic(pointer, size))
       else {
@@ -542,7 +546,8 @@ private object VMMemory {
         } else
           guest(pointer.address, size.widen[Int >= 0], "atomically access").flatMap { _ =>
             forgetRelocations(pointer.address, size.widen)
-            memory.atomicModifyValue(GuestAddress(pointer.address), size)(update)
+            if (dispatchLocal) memory.atomicModifyLocalValue(GuestAddress(pointer.address), size)(update)
+            else memory.atomicModifyValue(GuestAddress(pointer.address), size)(update)
           }
       }
   }

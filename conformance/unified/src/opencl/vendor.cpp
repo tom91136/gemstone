@@ -282,20 +282,16 @@ void clocks(size_t items) {
 }
 } // namespace
 
-TEST_CASE("edge-cases/runtime/opencl/intel/subgroup-matrix-multiply-accumulate/i8-k32", "[unified][runtime][compact]") {
-  matrix(Element::Int8);
-}
+TEST_CASE("edge-cases/runtime/opencl/intel/subgroup-matrix-multiply-accumulate/i8-k32", "[unified][runtime]") { matrix(Element::Int8); }
 
-TEST_CASE("edge-cases/runtime/opencl/intel/subgroup-matrix-multiply-accumulate/f16-k16", "[unified][runtime][compact]") {
-  matrix(Element::Half);
-}
+TEST_CASE("edge-cases/runtime/opencl/intel/subgroup-matrix-multiply-accumulate/f16-k16", "[unified][runtime]") { matrix(Element::Half); }
 
-TEST_CASE("edge-cases/runtime/opencl/intel/subgroup-matrix-multiply-accumulate/bf16-k16", "[unified][runtime][compact]") {
+TEST_CASE("edge-cases/runtime/opencl/intel/subgroup-matrix-multiply-accumulate/bf16-k16", "[unified][runtime]") {
   matrix(Element::BFloat16);
 }
 
-TEST_CASE("edge-cases/runtime/opencl/intel/media-block-io/r32ui", "[unified][runtime][compact]") { media(); }
+TEST_CASE("edge-cases/runtime/opencl/intel/media-block-io/r32ui", "[unified][runtime]") { media(); }
 
-TEST_CASE("edge-cases/runtime/opencl/intel/bfloat16-conversions/split-barrier/n256", "[unified][runtime][compact]") { conversions(256); }
+TEST_CASE("edge-cases/runtime/opencl/intel/bfloat16-conversions/split-barrier/n256", "[unified][runtime]") { conversions(256); }
 
-TEST_CASE("edge-cases/runtime/opencl/kernel-clock/n64", "[unified][runtime][compact]") { clocks(64); }
+TEST_CASE("edge-cases/runtime/opencl/kernel-clock/n64", "[unified][runtime]") { clocks(64); }

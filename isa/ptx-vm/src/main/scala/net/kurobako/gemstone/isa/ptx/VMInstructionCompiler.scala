@@ -5,7 +5,6 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as _, *}
@@ -73,6 +72,7 @@ private object VMInstructionCompiler {
   private val Word32Types: Set[Modifier]   = Set(Modifier.S32, Modifier.U32, Modifier.B32)
   private val Scopes: Set[Modifier]        = Set(Modifier.Cta, Modifier.Gpu, Modifier.Sys)
   private val Orders: Set[Modifier]        = Set(Modifier.Relaxed, Modifier.Acquire, Modifier.Release, Modifier.AcqRel)
+  private val StateSpaces: Set[Modifier]   = Set(Modifier.Global, Modifier.Shared, Modifier.SharedCluster)
   private val FullWarp: Value              = Value.Immediate(0xffffffffL)
 
   private val builtins: Map[String, Builtin] = Map(
@@ -86,7 +86,7 @@ private object VMInstructionCompiler {
     "__cudaDeviceSynchronizeDeprecationAvoidance"                 -> Builtin.NoError,
     "cudaGetErrorName"                                            -> Builtin.NoError,
     "cudaGetErrorString"                                          -> Builtin.NoError,
-    "vprintf"                                                     -> Builtin.NoError,
+    "vprintf"                                                     -> Builtin.Printf,
     "cudaGetParameterBuffer"                                      -> Builtin.ParameterBuffer,
     "malloc"                                                      -> Builtin.Malloc,
     "free"                                                        -> Builtin.Free,
@@ -243,8 +243,7 @@ private object VMInstructionCompiler {
     rounding = modifiers
       .find(DirectedRoundings)
       .flatMap(rounding(_))
-      .map(VMArithmetic.roundingMode)
-      .getOrElse(IEEE754.Rounding.NearestEven),
+      .fold(IEEE754.Rounding.NearestEven)(VMArithmetic.roundingMode),
     approximate = modifiers.contains(Modifier.Approx),
     full = modifiers.contains(Modifier.Full)
   )
@@ -277,9 +276,8 @@ private object VMInstructionCompiler {
   private val ScalarBf16Opcodes              = Set(Opcode.Fma, Opcode.Min, Opcode.Max)
   private val ScalarFloatTypes               = Set(Modifier.F16, Modifier.F32, Modifier.F64)
   private val DirectedRoundings              = Set(Modifier.Rz, Modifier.Rm, Modifier.Rp)
-  private val DirectedPackedFloat32Modifiers = DirectedRoundings ++
-    Set(Modifier.F32x2, Modifier.Rn, Modifier.Ftz)
-  private val DirectedSaturatingModifiers = DirectedRoundings ++ Set(Modifier.Rn, Modifier.Ftz, Modifier.Sat)
+  private val DirectedPackedFloat32Modifiers = DirectedRoundings ++ PackedFloat32Modifiers
+  private val DirectedSaturatingModifiers    = DirectedRoundings ++ Set(Modifier.Rn, Modifier.Ftz, Modifier.Sat)
 
   def validateFloating(instruction: Instruction): Either[Error, Unit] = {
     val opcode    = instruction.signature.opcode
@@ -1474,7 +1472,8 @@ private object VMInstructionCompiler {
       case _ => asynchronous()
     }
     def asynchronous(): Lowered = VMAsyncCompiler.lower(instruction, modifiers)
-      .orElse(VMTensorMemoryCompiler.lower(instruction, modifiers)).getOrElse(instruction.form match {
+      .orElse(VMTensorMemoryCompiler.lower(instruction, modifiers))
+      .orElse(VMTextureCompiler.lower(instruction, modifiers)).getOrElse(instruction.form match {
         case Form.MbarrierInit(address, count) if localMBarrier(modifiers) =>
           (scope.address(address), scope.value(count)).mapN(VMIR.Instruction.MBarrierInit(_, _))
         case Form.MbarrierInval(address) if localMBarrier(modifiers) =>
@@ -1704,17 +1703,20 @@ private object VMInstructionCompiler {
       }
     } yield lowered
 
-  /** The state space an atomic or reduction names, and the modifiers after it, without ordering, scope or cache hint;
-    * the host CAS path is sequentially consistent, which satisfies every weaker PTX atomic order and scope.
+  /** The state space an atomic or reduction names, wherever it sits, and the remaining modifiers without ordering,
+    * scope or cache hint; the host CAS path is sequentially consistent, which satisfies every weaker PTX atomic order
+    * and scope.
     */
-  def atomicSpace(modifiers: Vec[Modifier]): (MemorySpace, Vec[Modifier]) =
-    modifiers.filterNot(Orders ++ Scopes + Modifier.L2CacheHint + Modifier.Cluster) match {
-      case Vec(Modifier.Global, rest*) => (MemorySpace.Global, rest.toVec)
-      case Vec(Modifier.Shared, rest*) => (MemorySpace.Shared, rest.toVec)
+  def atomicSpace(modifiers: Vec[Modifier]): (MemorySpace, Vec[Modifier]) = {
+    val space = modifiers.collectFirst {
+      case Modifier.Global => MemorySpace.Global
+      case Modifier.Shared => MemorySpace.Shared
       // shared::cluster addresses route by their window like generic ones.
-      case Vec(Modifier.SharedCluster, rest*) => (MemorySpace.Generic, rest.toVec)
-      case rest                               => (MemorySpace.Generic, rest)
+      case Modifier.SharedCluster => MemorySpace.Generic
     }
+    val rest = modifiers.filterNot(StateSpaces ++ Orders ++ Scopes + Modifier.L2CacheHint + Modifier.Cluster)
+    (space.getOrElse(MemorySpace.Generic), rest)
+  }
 
   def atomicWidth(modifier: Modifier): ScalarBitWidth =
     if (modifier.is64Bit) 64

@@ -23,6 +23,9 @@ private[isa] trait Control {
   /** The writes the kernel makes to host-mapped memory become visible to the host. */
   def fenceHost(): Unit
 
+  /** The wave interrupts the host, which services the hostcall packets the waves have readied. */
+  def hostcall(): Unit
+
   /** The wave arrives at its workgroup's barrier and waits for the other waves of the workgroup. */
   def barrier(): Unit
 

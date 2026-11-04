@@ -2,7 +2,7 @@ package net.kurobako.gemstone
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.prelude.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.compiletime.testing.typeCheckErrors
 
 /** Integer views, unions of intervals and floating-point bounds. */

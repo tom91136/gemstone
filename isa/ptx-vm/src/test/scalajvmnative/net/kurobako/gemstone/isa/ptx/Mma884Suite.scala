@@ -7,7 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.ptx.Program.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 /** Checks the 24 generated MMA884 variants against independently reconstructed lane coordinates and matrix results.
@@ -43,7 +43,7 @@ ret;
   private def run(variant: Mma884Oracle.Variant, memory: DeviceMemory): Unit = {
     val entry = parsed.statements.collectFirst {
       case entry: Statement.Entry if entry.name == variant.entryName => entry
-    }.fold(fail(s"missing MMA884 entry ${variant.entryName}"))(identity)
+    }.getOrElse(fail(s"missing MMA884 entry ${variant.entryName}"))
     val kernel = compileProgram(parsed, entry.name)
     val base   = memory.start.raw
     val alias  = variant.mode != Mma884Oracle.Mode.Plain

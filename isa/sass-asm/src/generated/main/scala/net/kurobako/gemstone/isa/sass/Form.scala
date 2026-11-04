@@ -102,15 +102,15 @@ object Form {
   type Fmul2 = Fmul2RegRegImm | Fmul2RegRegReg
   type Fmul32i = Fmul32iRegRegImm
   type Footprint =
-    FootprintPredRegRegRegReg | FootprintPredRegRegRegRegImmImm | FootprintPredRegRegRegRegImmImmImm | FootprintPredRegRegRegRegReg | FootprintPredRegRegRegRegRegImm | FootprintRegRegRegReg | FootprintRegRegRegRegImmImm | FootprintRegRegRegRegImmImmImm | FootprintRegRegRegRegReg | FootprintRegRegRegRegRegImm
+    FootprintPredRegRegRegRegImmImmImmSymbol | FootprintPredRegRegRegRegImmImmSymbol | FootprintPredRegRegRegRegRegImmSymbol | FootprintPredRegRegRegRegRegSymbol | FootprintPredRegRegRegRegSymbol | FootprintRegRegRegRegImmImmImmSymbol | FootprintRegRegRegRegImmImmSymbol | FootprintRegRegRegRegRegImmSymbol | FootprintRegRegRegRegRegSymbol | FootprintRegRegRegRegSymbol
   type Frnd = FrndRegAddressImm | FrndRegConst | FrndRegImm | FrndRegReg
   type Fsel = FselRegRegAddressImmPred | FselRegRegConstPred | FselRegRegImmPred | FselRegRegRegPred
   type Fset =
     FsetRegRegAddressImm | FsetRegRegAddressImmPred | FsetRegRegConst | FsetRegRegConstPred | FsetRegRegImm | FsetRegRegImmPred | FsetRegRegReg | FsetRegRegRegPred
   type Fsetp =
     FsetpPredPredRegAddressImmPred | FsetpPredPredRegConstPred | FsetpPredPredRegImmPred | FsetpPredPredRegRegPred | FsetpPredRegAddressImm | FsetpPredRegConst | FsetpPredRegImm | FsetpPredRegReg
-  type Fswz = FswzRegRegReg
-  type Fswzadd = FswzaddRegRegReg
+  type Fswz = FswzRegRegRegSymbol
+  type Fswzadd = FswzaddRegRegRegSymbol
   type Gather = GatherRegRegRegRegImm | GatherRegRegRegRegImmImm | GatherRegRegRegRegImmImmImm
   type Getcrsptr = GetcrsptrReg
   type Getlmembase = GetlmembaseReg
@@ -277,7 +277,7 @@ object Form {
   type Reds = RedsAddressReg
   type Redux = ReduxRegReg
   type Ret = RetNoOperands | RetPredReg | RetPredRegImm | RetReg | RetRegImm
-  type Rpcmov = RpcmovAddressImm | RpcmovConst | RpcmovImm | RpcmovReg
+  type Rpcmov = RpcmovAddressImm | RpcmovConst | RpcmovImm | RpcmovReg | RpcmovRegSymbol
   type Rro = RroRegConst | RroRegImm | RroRegReg
   type Rtt = RttNoOperands
   type S2r = S2rRegSpecial
@@ -326,22 +326,22 @@ object Form {
   type Syncs =
     SyncsNoOperands | SyncsAddress | SyncsAddressReg | SyncsPredAddressReg | SyncsRegAddress | SyncsRegAddressReg | SyncsRegAddressRegReg
   type Tex =
-    TexPredRegRegRegImm | TexPredRegRegRegImmImm | TexPredRegRegRegImmImmImm | TexPredRegRegRegReg | TexPredRegRegRegRegImm | TexPredRegRegRegRegImmImm | TexPredRegRegRegRegImmImmImm | TexPredRegRegRegRegImmImmImmImm | TexPredRegRegRegRegReg | TexPredRegRegRegRegRegImm | TexPredRegRegRegRegRegImmImm | TexPredRegRegRegRegRegReg | TexPredRegRegRegRegRegRegImm | TexPredRegRegRegRegRegRegImmImm | TexRegRegRegImm | TexRegRegRegImmImm | TexRegRegRegImmImmImm | TexRegRegRegReg | TexRegRegRegRegImm | TexRegRegRegRegImmImm | TexRegRegRegRegImmImmImm | TexRegRegRegRegImmImmImmImm | TexRegRegRegRegReg | TexRegRegRegRegRegImm | TexRegRegRegRegRegImmImm | TexRegRegRegRegRegReg | TexRegRegRegRegRegRegImm | TexRegRegRegRegRegRegImmImm
+    TexPredRegRegRegImmImmSymbol | TexPredRegRegRegImmImmSymbolImm | TexPredRegRegRegImmSymbol | TexPredRegRegRegImmSymbolImm | TexPredRegRegRegRegImmImmImmSymbol | TexPredRegRegRegRegImmImmImmSymbolImm | TexPredRegRegRegRegImmImmSymbol | TexPredRegRegRegRegImmImmSymbolImm | TexPredRegRegRegRegRegImmSymbol | TexPredRegRegRegRegRegImmSymbolImm | TexPredRegRegRegRegRegRegImmSymbol | TexPredRegRegRegRegRegRegImmSymbolImm | TexPredRegRegRegRegRegRegSymbol | TexPredRegRegRegRegRegRegSymbolImm | TexPredRegRegRegRegRegSymbol | TexPredRegRegRegRegRegSymbolImm | TexPredRegRegRegRegSymbol | TexPredRegRegRegRegSymbolImm | TexRegRegRegImmImmSymbol | TexRegRegRegImmImmSymbolImm | TexRegRegRegImmSymbol | TexRegRegRegImmSymbolImm | TexRegRegRegRegImmImmImmSymbol | TexRegRegRegRegImmImmImmSymbolImm | TexRegRegRegRegImmImmSymbol | TexRegRegRegRegImmImmSymbolImm | TexRegRegRegRegRegImmSymbol | TexRegRegRegRegRegImmSymbolImm | TexRegRegRegRegRegRegImmSymbol | TexRegRegRegRegRegRegImmSymbolImm | TexRegRegRegRegRegRegSymbol | TexRegRegRegRegRegRegSymbolImm | TexRegRegRegRegRegSymbol | TexRegRegRegRegRegSymbolImm | TexRegRegRegRegSymbol | TexRegRegRegRegSymbolImm
   type Texdepbar = TexdepbarImm
-  type Texs = TexsRegRegRegRegImm
+  type Texs = TexsRegRegRegRegImmSymbolSymbol
   type Tld =
-    TldPredRegRegRegImm | TldPredRegRegRegImmImm | TldPredRegRegRegReg | TldPredRegRegRegRegImm | TldPredRegRegRegRegImmImm | TldPredRegRegRegRegImmImmImm | TldPredRegRegRegRegImmImmImmImm | TldPredRegRegRegRegReg | TldPredRegRegRegRegRegImm | TldPredRegRegRegRegRegImmImm | TldPredRegRegRegRegRegReg | TldPredRegRegRegRegRegRegImm | TldPredRegRegRegRegRegRegImmImm | TldRegRegRegImm | TldRegRegRegImmImm | TldRegRegRegReg | TldRegRegRegRegImm | TldRegRegRegRegImmImm | TldRegRegRegRegImmImmImm | TldRegRegRegRegImmImmImmImm | TldRegRegRegRegReg | TldRegRegRegRegRegImm | TldRegRegRegRegRegImmImm | TldRegRegRegRegRegReg | TldRegRegRegRegRegRegImm | TldRegRegRegRegRegRegImmImm
+    TldPredRegRegRegImmSymbol | TldPredRegRegRegImmSymbolImm | TldPredRegRegRegRegImmImmImmSymbol | TldPredRegRegRegRegImmImmImmSymbolImm | TldPredRegRegRegRegImmImmSymbol | TldPredRegRegRegRegImmImmSymbolImm | TldPredRegRegRegRegRegImmSymbol | TldPredRegRegRegRegRegImmSymbolImm | TldPredRegRegRegRegRegRegImmSymbol | TldPredRegRegRegRegRegRegImmSymbolImm | TldPredRegRegRegRegRegRegSymbol | TldPredRegRegRegRegRegRegSymbolImm | TldPredRegRegRegRegRegSymbol | TldPredRegRegRegRegRegSymbolImm | TldPredRegRegRegRegSymbol | TldPredRegRegRegRegSymbolImm | TldRegRegRegImmSymbol | TldRegRegRegImmSymbolImm | TldRegRegRegRegImmImmImmSymbol | TldRegRegRegRegImmImmImmSymbolImm | TldRegRegRegRegImmImmSymbol | TldRegRegRegRegImmImmSymbolImm | TldRegRegRegRegRegImmSymbol | TldRegRegRegRegRegImmSymbolImm | TldRegRegRegRegRegRegImmSymbol | TldRegRegRegRegRegRegImmSymbolImm | TldRegRegRegRegRegRegSymbol | TldRegRegRegRegRegRegSymbolImm | TldRegRegRegRegRegSymbol | TldRegRegRegRegRegSymbolImm | TldRegRegRegRegSymbol | TldRegRegRegRegSymbolImm
   type Tld4 =
-    Tld4PredRegRegRegImm | Tld4PredRegRegRegImmImm | Tld4PredRegRegRegImmImmImm | Tld4PredRegRegRegReg | Tld4PredRegRegRegRegImm | Tld4PredRegRegRegRegImmImm | Tld4PredRegRegRegRegImmImmImm | Tld4PredRegRegRegRegImmImmImmImm | Tld4PredRegRegRegRegReg | Tld4PredRegRegRegRegRegImm | Tld4PredRegRegRegRegRegImmImm | Tld4PredRegRegRegRegRegReg | Tld4PredRegRegRegRegRegRegImm | Tld4PredRegRegRegRegRegRegImmImm | Tld4RegRegRegImm | Tld4RegRegRegImmImm | Tld4RegRegRegImmImmImm | Tld4RegRegRegReg | Tld4RegRegRegRegImm | Tld4RegRegRegRegImmImm | Tld4RegRegRegRegImmImmImm | Tld4RegRegRegRegImmImmImmImm | Tld4RegRegRegRegReg | Tld4RegRegRegRegRegImm | Tld4RegRegRegRegRegImmImm | Tld4RegRegRegRegRegReg | Tld4RegRegRegRegRegRegImm | Tld4RegRegRegRegRegRegImmImm
+    Tld4PredRegRegRegImmImmSymbol | Tld4PredRegRegRegImmImmSymbolImm | Tld4PredRegRegRegImmSymbol | Tld4PredRegRegRegImmSymbolImm | Tld4PredRegRegRegRegImmImmImmSymbol | Tld4PredRegRegRegRegImmImmImmSymbolImm | Tld4PredRegRegRegRegImmImmSymbol | Tld4PredRegRegRegRegImmImmSymbolImm | Tld4PredRegRegRegRegRegImmSymbol | Tld4PredRegRegRegRegRegImmSymbolImm | Tld4PredRegRegRegRegRegRegImmSymbol | Tld4PredRegRegRegRegRegRegImmSymbolImm | Tld4PredRegRegRegRegRegRegSymbol | Tld4PredRegRegRegRegRegRegSymbolImm | Tld4PredRegRegRegRegRegSymbol | Tld4PredRegRegRegRegRegSymbolImm | Tld4PredRegRegRegRegSymbol | Tld4PredRegRegRegRegSymbolImm | Tld4RegRegRegImmImmSymbol | Tld4RegRegRegImmImmSymbolImm | Tld4RegRegRegImmSymbol | Tld4RegRegRegImmSymbolImm | Tld4RegRegRegRegImmImmImmSymbol | Tld4RegRegRegRegImmImmImmSymbolImm | Tld4RegRegRegRegImmImmSymbol | Tld4RegRegRegRegImmImmSymbolImm | Tld4RegRegRegRegRegImmSymbol | Tld4RegRegRegRegRegImmSymbolImm | Tld4RegRegRegRegRegRegImmSymbol | Tld4RegRegRegRegRegRegImmSymbolImm | Tld4RegRegRegRegRegRegSymbol | Tld4RegRegRegRegRegRegSymbolImm | Tld4RegRegRegRegRegSymbol | Tld4RegRegRegRegRegSymbolImm | Tld4RegRegRegRegSymbol | Tld4RegRegRegRegSymbolImm
   type Tld4s = Tld4sRegRegRegRegImm
-  type Tlds = TldsRegRegRegRegImm
+  type Tlds = TldsRegRegRegRegImmSymbolSymbol
   type Tmml =
-    TmmlRegRegImm | TmmlRegRegImmImm | TmmlRegRegImmImmImm | TmmlRegRegRegImm | TmmlRegRegRegImmImm | TmmlRegRegRegImmImmImm | TmmlRegRegRegReg | TmmlRegRegRegRegImm | TmmlRegRegRegRegImmImm | TmmlRegRegRegRegImmImmImm | TmmlRegRegRegRegImmImmImmImm | TmmlRegRegRegRegReg | TmmlRegRegRegRegRegImm | TmmlRegRegRegRegRegImmImm
+    TmmlRegRegImmImmSymbol | TmmlRegRegImmImmSymbolImm | TmmlRegRegImmSymbol | TmmlRegRegImmSymbolImm | TmmlRegRegRegImmImmSymbol | TmmlRegRegRegImmImmSymbolImm | TmmlRegRegRegImmSymbol | TmmlRegRegRegImmSymbolImm | TmmlRegRegRegRegImmImmImmSymbol | TmmlRegRegRegRegImmImmImmSymbolImm | TmmlRegRegRegRegImmImmSymbol | TmmlRegRegRegRegImmImmSymbolImm | TmmlRegRegRegRegRegImmSymbol | TmmlRegRegRegRegRegImmSymbolImm | TmmlRegRegRegRegRegSymbol | TmmlRegRegRegRegRegSymbolImm | TmmlRegRegRegRegSymbol | TmmlRegRegRegRegSymbolImm
   type Txa = TxaRegRegImm | TxaRegRegImmImm | TxaRegRegImmImmImm
   type Txd =
-    TxdPredRegRegRegImm | TxdPredRegRegRegImmImm | TxdPredRegRegRegImmImmImm | TxdPredRegRegRegReg | TxdPredRegRegRegRegImm | TxdPredRegRegRegRegImmImm | TxdPredRegRegRegRegImmImmImm | TxdPredRegRegRegRegImmImmImmImm | TxdPredRegRegRegRegReg | TxdPredRegRegRegRegRegImm | TxdPredRegRegRegRegRegImmImm | TxdPredRegRegRegRegRegReg | TxdPredRegRegRegRegRegRegImm | TxdPredRegRegRegRegRegRegImmImm | TxdRegRegRegImm | TxdRegRegRegImmImm | TxdRegRegRegImmImmImm | TxdRegRegRegReg | TxdRegRegRegRegImm | TxdRegRegRegRegImmImm | TxdRegRegRegRegImmImmImm | TxdRegRegRegRegImmImmImmImm | TxdRegRegRegRegReg | TxdRegRegRegRegRegImm | TxdRegRegRegRegRegImmImm | TxdRegRegRegRegRegReg | TxdRegRegRegRegRegRegImm | TxdRegRegRegRegRegRegImmImm
+    TxdPredRegRegRegImmImmSymbol | TxdPredRegRegRegImmImmSymbolImm | TxdPredRegRegRegImmSymbol | TxdPredRegRegRegImmSymbolImm | TxdPredRegRegRegRegImmImmImmSymbol | TxdPredRegRegRegRegImmImmImmSymbolImm | TxdPredRegRegRegRegImmImmSymbol | TxdPredRegRegRegRegImmImmSymbolImm | TxdPredRegRegRegRegRegImmSymbol | TxdPredRegRegRegRegRegImmSymbolImm | TxdPredRegRegRegRegRegRegImmSymbol | TxdPredRegRegRegRegRegRegImmSymbolImm | TxdPredRegRegRegRegRegRegSymbol | TxdPredRegRegRegRegRegRegSymbolImm | TxdPredRegRegRegRegRegSymbol | TxdPredRegRegRegRegRegSymbolImm | TxdPredRegRegRegRegSymbol | TxdPredRegRegRegRegSymbolImm | TxdRegRegRegImmImmSymbol | TxdRegRegRegImmImmSymbolImm | TxdRegRegRegImmSymbol | TxdRegRegRegImmSymbolImm | TxdRegRegRegRegImmImmImmSymbol | TxdRegRegRegRegImmImmImmSymbolImm | TxdRegRegRegRegImmImmSymbol | TxdRegRegRegRegImmImmSymbolImm | TxdRegRegRegRegRegImmSymbol | TxdRegRegRegRegRegImmSymbolImm | TxdRegRegRegRegRegRegImmSymbol | TxdRegRegRegRegRegRegImmSymbolImm | TxdRegRegRegRegRegRegSymbol | TxdRegRegRegRegRegRegSymbolImm | TxdRegRegRegRegRegSymbol | TxdRegRegRegRegRegSymbolImm | TxdRegRegRegRegSymbol | TxdRegRegRegRegSymbolImm
   type Txq =
-    TxqRegRegImm | TxqRegRegImmImm | TxqRegRegImmImmImm | TxqRegRegImmImmImmImm | TxqRegRegRegImm | TxqRegRegRegImmImmImm | TxqRegRegRegImmImmImmImm | TxqRegRegRegRegImm | TxqRegRegRegRegImmImm
+    TxqRegRegImmImm | TxqRegRegImmImmImm | TxqRegRegImmImmImmImm | TxqRegRegRegSymbolImm | TxqRegRegRegSymbolImmImmImm | TxqRegRegRegSymbolImmImmImmImm | TxqRegRegRegSymbolRegImm | TxqRegRegRegSymbolRegImmImm | TxqRegRegSymbolImm | TxqRegRegSymbolImmImm | TxqRegRegSymbolImmImmImm
   type Ublkcp = UblkcpAddressAddressReg | UblkcpAddressAddressRegAddress
   type Ublkpf = UblkpfAddressReg | UblkpfAddressRegAddress
   type Ublkred = UblkredAddressAddressReg | UblkredAddressAddressRegAddress
@@ -1668,23 +1668,7 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcA: InstructionOperand.Register,
       sb: InstructionOperand.Immediate
   ) extends Form(dst, srcA, sb)
-  case FootprintPredRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB)
-  case FootprintPredRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case FootprintPredRegRegRegRegImmImmImm(
+  case FootprintPredRegRegRegRegImmImmImmSymbol(
       pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
@@ -1692,63 +1676,89 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcB: InstructionOperand.Register,
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case FootprintPredRegRegRegRegReg(
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case FootprintPredRegRegRegRegImmImmSymbol(
       pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC)
-  case FootprintPredRegRegRegRegRegImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case FootprintPredRegRegRegRegRegImmSymbol(
       pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8)
-  case FootprintRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB)
-  case FootprintRegRegRegRegImmImm(
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case FootprintPredRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case FootprintRegRegRegRegImmImmImm(
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA)
+  case FootprintPredRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA)
+  case FootprintRegRegRegRegImmImmImmSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case FootprintRegRegRegRegReg(
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case FootprintRegRegRegRegImmImmSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC)
-  case FootprintRegRegRegRegRegImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case FootprintRegRegRegRegRegImmSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8)
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case FootprintRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA)
+  case FootprintRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, paramA)
   case FrndRegAddressImm(
       dst: InstructionOperand.Register,
       srcB: InstructionOperand.Address,
@@ -1878,16 +1888,18 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register
   ) extends Form(dstPredicate, srcA, srcB)
-  case FswzRegRegReg(
+  case FswzRegRegRegSymbol(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(dst, srcA, srcB)
-  case FswzaddRegRegReg(
+      srcB: InstructionOperand.Register,
+      uImm: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, uImm)
+  case FswzaddRegRegRegSymbol(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(dst, srcA, srcB)
+      srcB: InstructionOperand.Register,
+      uImm: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, uImm)
   case GatherRegRegRegRegImm(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -5592,6 +5604,7 @@ enum Form(operandValues: Operand*) derives CanEqual {
   case RpcmovConst(sb: InstructionOperand.ConstantBank) extends Form(sb)
   case RpcmovImm(sb: InstructionOperand.Immediate) extends Form(sb)
   case RpcmovReg(srcB: InstructionOperand.Register) extends Form(srcB)
+  case RpcmovRegSymbol(dst: InstructionOperand.Register, rpcN: InstructionOperand.Symbol) extends Form(dst, rpcN)
   case RroRegConst(dst: InstructionOperand.Register, srcConst: InstructionOperand.ConstantBank)
       extends Form(dst, srcConst)
   case RroRegImm(dst: InstructionOperand.Register, uImm: InstructionOperand.Immediate) extends Form(dst, uImm)
@@ -6373,184 +6386,44 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register
   ) extends Form(dst, srcA, srcB, srcC)
-  case TexPredRegRegRegImm(
-      dstPredicate: InstructionOperand.Predicate,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid)
-  case TexPredRegRegRegImmImm(
-      dstPredicate: InstructionOperand.Predicate,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp)
-  case TexPredRegRegRegImmImmImm(
+  case TexPredRegRegRegImmImmSymbol(
       dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, wmsk)
-  case TexPredRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB)
-  case TexPredRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, wmsk)
-  case TexPredRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TexPredRegRegRegRegImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TexPredRegRegRegRegImmImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TexPredRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC)
-  case TexPredRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8)
-  case TexPredRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case TexPredRegRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe)
-  case TexPredRegRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case TexPredRegRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
-  case TexRegRegRegImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid)
-  case TexRegRegRegImmImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp)
-  case TexRegRegRegImmImmImm(
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, paramA)
+  case TexPredRegRegRegImmImmSymbolImm(
+      dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp, wmsk)
-  case TexRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB)
-  case TexRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case TexPredRegRegRegImmSymbol(
+      dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA)
+  case TexPredRegRegRegImmSymbolImm(
+      dstPredicate: InstructionOperand.Predicate,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, wmsk)
-  case TexRegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TexRegRegRegRegImmImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TexRegRegRegRegImmImmImmImm(
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA, wmsk)
+  case TexPredRegRegRegRegImmImmImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -6558,50 +6431,64 @@ enum Form(operandValues: Operand*) derives CanEqual {
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TexPredRegRegRegRegImmImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TexRegRegRegRegReg(
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TexPredRegRegRegRegImmImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC)
-  case TexRegRegRegRegRegImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TexPredRegRegRegRegImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8)
-  case TexRegRegRegRegRegImmImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TexPredRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TexPredRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case TexRegRegRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe)
-  case TexRegRegRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case TexRegRegRegRegRegRegImmImm(
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TexPredRegRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -6609,415 +6496,596 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcC: InstructionOperand.Register,
       uRe: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case TexPredRegRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case TexPredRegRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case TexPredRegRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case TexPredRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA)
+  case TexPredRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TexPredRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA)
+  case TexPredRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA, wmsk)
+  case TexRegRegRegImmImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA)
+  case TexRegRegRegImmImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case TexRegRegRegImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, paramA)
+  case TexRegRegRegImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, paramA, wmsk)
+  case TexRegRegRegRegImmImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TexRegRegRegRegImmImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TexRegRegRegRegImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TexRegRegRegRegImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TexRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TexRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TexRegRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case TexRegRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case TexRegRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case TexRegRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case TexRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA)
+  case TexRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TexRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, paramA)
+  case TexRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, paramA, wmsk)
   case TexdepbarImm(uImm: InstructionOperand.Immediate) extends Form(uImm)
-  case TexsRegRegRegRegImm(
+  case TexsRegRegRegRegImmSymbolSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, tid)
-  case TldPredRegRegRegImm(
-      dstPredicate: InstructionOperand.Predicate,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid)
-  case TldPredRegRegRegImmImm(
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, tid, paramA, wmsk)
+  case TldPredRegRegRegImmSymbol(
       dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, wmsk)
-  case TldPredRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB)
-  case TldPredRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, wmsk)
-  case TldPredRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TldPredRegRegRegRegImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TldPredRegRegRegRegImmImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TldPredRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC)
-  case TldPredRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8)
-  case TldPredRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case TldPredRegRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe)
-  case TldPredRegRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case TldPredRegRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
-  case TldRegRegRegImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid)
-  case TldRegRegRegImmImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, wmsk)
-  case TldRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB)
-  case TldRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, wmsk)
-  case TldRegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TldRegRegRegRegImmImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TldRegRegRegRegImmImmImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TldRegRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC)
-  case TldRegRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8)
-  case TldRegRegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case TldRegRegRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe)
-  case TldRegRegRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case TldRegRegRegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
-  case Tld4PredRegRegRegImm(
-      dstPredicate: InstructionOperand.Predicate,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid)
-  case Tld4PredRegRegRegImmImm(
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA)
+  case TldPredRegRegRegImmSymbolImm(
       dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp)
-  case Tld4PredRegRegRegImmImmImm(
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA, wmsk)
+  case TldPredRegRegRegRegImmImmImmSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TldPredRegRegRegRegImmImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TldPredRegRegRegRegImmImmSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TldPredRegRegRegRegImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TldPredRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TldPredRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TldPredRegRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case TldPredRegRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case TldPredRegRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case TldPredRegRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case TldPredRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA)
+  case TldPredRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TldPredRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA)
+  case TldPredRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA, wmsk)
+  case TldRegRegRegImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, paramA)
+  case TldRegRegRegImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, paramA, wmsk)
+  case TldRegRegRegRegImmImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TldRegRegRegRegImmImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TldRegRegRegRegImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TldRegRegRegRegImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TldRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TldRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TldRegRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case TldRegRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case TldRegRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case TldRegRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case TldRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA)
+  case TldRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TldRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, paramA)
+  case TldRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, paramA, wmsk)
+  case Tld4PredRegRegRegImmImmSymbol(
       dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, wmsk)
-  case Tld4PredRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB)
-  case Tld4PredRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, wmsk)
-  case Tld4PredRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case Tld4PredRegRegRegRegImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case Tld4PredRegRegRegRegImmImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case Tld4PredRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC)
-  case Tld4PredRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8)
-  case Tld4PredRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case Tld4PredRegRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe)
-  case Tld4PredRegRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case Tld4PredRegRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
-  case Tld4RegRegRegImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid)
-  case Tld4RegRegRegImmImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp)
-  case Tld4RegRegRegImmImmImm(
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, paramA)
+  case Tld4PredRegRegRegImmImmSymbolImm(
+      dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp, wmsk)
-  case Tld4RegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB)
-  case Tld4RegRegRegRegImm(
-      rd2: InstructionOperand.Register,
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case Tld4PredRegRegRegImmSymbol(
+      dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA)
+  case Tld4PredRegRegRegImmSymbolImm(
+      dstPredicate: InstructionOperand.Predicate,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, wmsk)
-  case Tld4RegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case Tld4RegRegRegRegImmImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case Tld4RegRegRegRegImmImmImmImm(
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA, wmsk)
+  case Tld4PredRegRegRegRegImmImmImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7025,50 +7093,64 @@ enum Form(operandValues: Operand*) derives CanEqual {
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case Tld4PredRegRegRegRegImmImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case Tld4RegRegRegRegReg(
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case Tld4PredRegRegRegRegImmImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC)
-  case Tld4RegRegRegRegRegImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case Tld4PredRegRegRegRegImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8)
-  case Tld4RegRegRegRegRegImmImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case Tld4PredRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case Tld4PredRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case Tld4RegRegRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe)
-  case Tld4RegRegRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case Tld4RegRegRegRegRegRegImmImm(
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case Tld4PredRegRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7076,8 +7158,240 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcC: InstructionOperand.Register,
       uRe: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case Tld4PredRegRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case Tld4PredRegRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case Tld4PredRegRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case Tld4PredRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA)
+  case Tld4PredRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case Tld4PredRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA)
+  case Tld4PredRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA, wmsk)
+  case Tld4RegRegRegImmImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA)
+  case Tld4RegRegRegImmImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case Tld4RegRegRegImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, paramA)
+  case Tld4RegRegRegImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, paramA, wmsk)
+  case Tld4RegRegRegRegImmImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case Tld4RegRegRegRegImmImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case Tld4RegRegRegRegImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case Tld4RegRegRegRegImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case Tld4RegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case Tld4RegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case Tld4RegRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case Tld4RegRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case Tld4RegRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case Tld4RegRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case Tld4RegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA)
+  case Tld4RegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case Tld4RegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, paramA)
+  case Tld4RegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, paramA, wmsk)
   case Tld4sRegRegRegRegImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
@@ -7085,83 +7399,76 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate
   ) extends Form(rd2, dst, srcA, srcB, tid)
-  case TldsRegRegRegRegImm(
+  case TldsRegRegRegRegImmSymbolSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, tid)
-  case TmmlRegRegImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, tid)
-  case TmmlRegRegImmImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, tid, smp)
-  case TmmlRegRegImmImmImm(
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, tid, paramA, wmsk)
+  case TmmlRegRegImmImmSymbol(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, tid, smp, wmsk)
-  case TmmlRegRegRegImm(
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, tid, smp, paramA)
+  case TmmlRegRegImmImmSymbolImm(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid)
-  case TmmlRegRegRegImmImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp)
-  case TmmlRegRegRegImmImmImm(
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, tid, smp, paramA, wmsk)
+  case TmmlRegRegImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, tid, paramA)
+  case TmmlRegRegImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, tid, paramA, wmsk)
+  case TmmlRegRegRegImmImmSymbol(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA)
+  case TmmlRegRegRegImmImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp, wmsk)
-  case TmmlRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB)
-  case TmmlRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case TmmlRegRegRegImmSymbol(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, paramA)
+  case TmmlRegRegRegImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, wmsk)
-  case TmmlRegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TmmlRegRegRegRegImmImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TmmlRegRegRegRegImmImmImmImm(
+  ) extends Form(dst, srcA, srcB, tid, paramA, wmsk)
+  case TmmlRegRegRegRegImmImmImmSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7169,32 +7476,89 @@ enum Form(operandValues: Operand*) derives CanEqual {
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TmmlRegRegRegRegImmImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TmmlRegRegRegRegReg(
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TmmlRegRegRegRegImmImmSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC)
-  case TmmlRegRegRegRegRegImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TmmlRegRegRegRegImmImmSymbolImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8)
-  case TmmlRegRegRegRegRegImmImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TmmlRegRegRegRegRegImmSymbol(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TmmlRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, wmsk)
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TmmlRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA)
+  case TmmlRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TmmlRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, paramA)
+  case TmmlRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, paramA, wmsk)
   case TxaRegRegImm(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7213,184 +7577,44 @@ enum Form(operandValues: Operand*) derives CanEqual {
       smp: InstructionOperand.Immediate,
       wmsk: InstructionOperand.Immediate
   ) extends Form(dst, srcA, tid, smp, wmsk)
-  case TxdPredRegRegRegImm(
-      dstPredicate: InstructionOperand.Predicate,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid)
-  case TxdPredRegRegRegImmImm(
-      dstPredicate: InstructionOperand.Predicate,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp)
-  case TxdPredRegRegRegImmImmImm(
+  case TxdPredRegRegRegImmImmSymbol(
       dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, wmsk)
-  case TxdPredRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB)
-  case TxdPredRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, wmsk)
-  case TxdPredRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TxdPredRegRegRegRegImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TxdPredRegRegRegRegImmImmImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TxdPredRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC)
-  case TxdPredRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8)
-  case TxdPredRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case TxdPredRegRegRegRegRegReg(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe)
-  case TxdPredRegRegRegRegRegRegImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case TxdPredRegRegRegRegRegRegImmImm(
-      pu: InstructionOperand.Predicate,
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
-  case TxdRegRegRegImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid)
-  case TxdRegRegRegImmImm(
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate,
-      smp: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp)
-  case TxdRegRegRegImmImmImm(
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, paramA)
+  case TxdPredRegRegRegImmImmSymbolImm(
+      dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       tid: InstructionOperand.Immediate,
       smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, srcB, tid, smp, wmsk)
-  case TxdRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB)
-  case TxdRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case TxdPredRegRegRegImmSymbol(
+      dstPredicate: InstructionOperand.Predicate,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA)
+  case TxdPredRegRegRegImmSymbolImm(
+      dstPredicate: InstructionOperand.Predicate,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, wmsk)
-  case TxdRegRegRegRegImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      tsPtrIdx: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx)
-  case TxdRegRegRegRegImmImmImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      bank5: InstructionOperand.Immediate,
-      hdrtblbase6: InstructionOperand.Immediate,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8)
-  case TxdRegRegRegRegImmImmImmImm(
+  ) extends Form(dstPredicate, dst, srcA, srcB, tid, paramA, wmsk)
+  case TxdPredRegRegRegRegImmImmImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7398,50 +7622,64 @@ enum Form(operandValues: Operand*) derives CanEqual {
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TxdPredRegRegRegRegImmImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, wmsk)
-  case TxdRegRegRegRegReg(
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TxdPredRegRegRegRegImmImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC)
-  case TxdRegRegRegRegRegImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TxdPredRegRegRegRegImmImmSymbolImm(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8)
-  case TxdRegRegRegRegRegImmImm(
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TxdPredRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
       srcB: InstructionOperand.Register,
       srcC: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TxdPredRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, wmsk)
-  case TxdRegRegRegRegRegReg(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe)
-  case TxdRegRegRegRegRegRegImm(
-      rd2: InstructionOperand.Register,
-      dst: InstructionOperand.Register,
-      srcA: InstructionOperand.Register,
-      srcB: InstructionOperand.Register,
-      srcC: InstructionOperand.Register,
-      uRe: InstructionOperand.Register,
-      tid8: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8)
-  case TxdRegRegRegRegRegRegImmImm(
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TxdPredRegRegRegRegRegRegImmSymbol(
+      pu: InstructionOperand.Predicate,
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7449,13 +7687,240 @@ enum Form(operandValues: Operand*) derives CanEqual {
       srcC: InstructionOperand.Register,
       uRe: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
-      wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, wmsk)
-  case TxqRegRegImm(
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case TxdPredRegRegRegRegRegRegImmSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
-      tid: InstructionOperand.Immediate
-  ) extends Form(dst, srcA, tid)
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case TxdPredRegRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case TxdPredRegRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case TxdPredRegRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA)
+  case TxdPredRegRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TxdPredRegRegRegRegSymbol(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA)
+  case TxdPredRegRegRegRegSymbolImm(
+      pu: InstructionOperand.Predicate,
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(pu, rd2, dst, srcA, srcB, paramA, wmsk)
+  case TxdRegRegRegImmImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA)
+  case TxdRegRegRegImmImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, smp, paramA, wmsk)
+  case TxdRegRegRegImmSymbol(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(dst, srcA, srcB, tid, paramA)
+  case TxdRegRegRegImmSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      tid: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, srcB, tid, paramA, wmsk)
+  case TxdRegRegRegRegImmImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA)
+  case TxdRegRegRegRegImmImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      hdrtblbase6: InstructionOperand.Immediate,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, hdrtblbase6, tid8, paramA, wmsk)
+  case TxdRegRegRegRegImmImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA)
+  case TxdRegRegRegRegImmImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      bank5: InstructionOperand.Immediate,
+      tsPtrIdx: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, bank5, tsPtrIdx, paramA, wmsk)
+  case TxdRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA)
+  case TxdRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, tid8, paramA, wmsk)
+  case TxdRegRegRegRegRegRegImmSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA)
+  case TxdRegRegRegRegRegRegImmSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      tid8: InstructionOperand.Immediate,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, tid8, paramA, wmsk)
+  case TxdRegRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA)
+  case TxdRegRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      uRe: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, uRe, paramA, wmsk)
+  case TxdRegRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA)
+  case TxdRegRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      srcC: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, srcC, paramA, wmsk)
+  case TxdRegRegRegRegSymbol(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol
+  ) extends Form(rd2, dst, srcA, srcB, paramA)
+  case TxdRegRegRegRegSymbolImm(
+      rd2: InstructionOperand.Register,
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      paramA: InstructionOperand.Symbol,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(rd2, dst, srcA, srcB, paramA, wmsk)
   case TxqRegRegImmImm(
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
@@ -7477,44 +7942,70 @@ enum Form(operandValues: Operand*) derives CanEqual {
       smp: InstructionOperand.Immediate,
       wmsk: InstructionOperand.Immediate
   ) extends Form(dst, srcA, query, tid, smp, wmsk)
-  case TxqRegRegRegImm(
+  case TxqRegRegRegSymbolImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, wmsk)
-  case TxqRegRegRegImmImmImm(
+  ) extends Form(rd2, dst, srcA, query, wmsk)
+  case TxqRegRegRegSymbolImmImmImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
       bank5: InstructionOperand.Immediate,
       tsPtrIdx: InstructionOperand.Immediate,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, bank5, tsPtrIdx, wmsk)
-  case TxqRegRegRegImmImmImmImm(
+  ) extends Form(rd2, dst, srcA, query, bank5, tsPtrIdx, wmsk)
+  case TxqRegRegRegSymbolImmImmImmImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
       bank5: InstructionOperand.Immediate,
       hdrtblbase6: InstructionOperand.Immediate,
       tid8: InstructionOperand.Immediate,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, bank5, hdrtblbase6, tid8, wmsk)
-  case TxqRegRegRegRegImm(
+  ) extends Form(rd2, dst, srcA, query, bank5, hdrtblbase6, tid8, wmsk)
+  case TxqRegRegRegSymbolRegImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
       srcC: InstructionOperand.Register,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcC, wmsk)
-  case TxqRegRegRegRegImmImm(
+  ) extends Form(rd2, dst, srcA, query, srcC, wmsk)
+  case TxqRegRegRegSymbolRegImmImm(
       rd2: InstructionOperand.Register,
       dst: InstructionOperand.Register,
       srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
       srcC: InstructionOperand.Register,
       tid8: InstructionOperand.Immediate,
       wmsk: InstructionOperand.Immediate
-  ) extends Form(rd2, dst, srcA, srcC, tid8, wmsk)
+  ) extends Form(rd2, dst, srcA, query, srcC, tid8, wmsk)
+  case TxqRegRegSymbolImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
+      tid: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, query, tid)
+  case TxqRegRegSymbolImmImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
+      tid: InstructionOperand.Immediate,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, query, tid, wmsk)
+  case TxqRegRegSymbolImmImmImm(
+      dst: InstructionOperand.Register,
+      srcA: InstructionOperand.Register,
+      query: InstructionOperand.Symbol,
+      tid: InstructionOperand.Immediate,
+      smp: InstructionOperand.Immediate,
+      wmsk: InstructionOperand.Immediate
+  ) extends Form(dst, srcA, query, tid, smp, wmsk)
   case UblkcpAddressAddressReg(
       srcB: InstructionOperand.Address,
       srcA: InstructionOperand.Address,

@@ -153,7 +153,7 @@ void runVariant(const char *accum, const char *aLayout, const char *bLayout, con
 }
 } // namespace
 
-TEST_CASE("runtime/cuda/mma884-lane-partitions", "[unified][runtime][tensor][compact]") {
+TEST_CASE("runtime/cuda/mma884-lane-partitions", "[unified][runtime][tensor]") {
   check(cuInit(0), "cuInit");
   const auto selected = conformance::deviceSelection().nativeHandle;
   const auto runtimeDevice = cudaSetDevice(static_cast<int>(selected));

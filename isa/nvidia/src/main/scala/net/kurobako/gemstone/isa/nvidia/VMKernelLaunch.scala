@@ -28,6 +28,7 @@ private[isa] object VMKernelLaunch {
       )
       _        <- parameters.zip(task.arguments).traverse_(validateArgument(kernel.isaName, _, _))
       resolved <- KernelArguments.resolve(task, context.memory)
+      heap     <- task.deviceHeap.traverse(HeapRegion.of(_, context.memory))
       arguments = parameters.zip(resolved).collect { case (parameter, KernelArguments.Resolved.Bytes(bytes)) =>
         parameter.name -> Argument(bytes)
       }.toMap
@@ -40,7 +41,10 @@ private[isa] object VMKernelLaunch {
           context.control,
           workgroups,
           task.groupSegmentBytes,
-          task.cluster
+          task.cluster,
+          task.cooperative,
+          heap,
+          context.handler
         )
     } yield ()
   }

@@ -33,6 +33,9 @@ private object native {
   ): Launch.Environment =
     Launch.Environment(Map(env.RpcEndpoint -> endpoint.toString, env.RpcClientId -> client.raw.toString) ++ set, unset)
 
+  private val OverridePrefixes = Vector("GEMSTONE_", "ZE_", "ZEL_", "ZET_", "OCL_ICD_")
+  private val OverrideNames    = Set("UR_ADAPTERS_FORCE_LOAD", "LD_PRELOAD")
+
   def run(
       command: NonEmpty[Vec[String]],
       directory: Path,
@@ -40,9 +43,7 @@ private object native {
       timeout: FiniteDuration
   ): process.Result = {
     val inheritedOverrides = sys.env.keySet.filter(name =>
-      name.startsWith("GEMSTONE_") || name.startsWith("ZE_") || name.startsWith("ZEL_") ||
-        name.startsWith("ZET_") || name.startsWith("OCL_ICD_") || name == "UR_ADAPTERS_FORCE_LOAD" ||
-        name == "LD_PRELOAD"
+      OverridePrefixes.exists(name.startsWith(_)) || OverrideNames.contains(name)
     )
     process.run(command, directory, changes.set, inheritedOverrides ++ changes.unset, timeout)
   }

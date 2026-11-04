@@ -35,6 +35,21 @@ if(BUILD_TESTING)
   gemstone_discover_tests(gemstone_levelzero_smoke TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST
     PROPERTIES ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
 
+  set(_co_loaded_drivers "")
+  foreach(_driver IN ITEMS gemstone_cuda gemstone_opencl)
+    if(TARGET ${_driver})
+      list(APPEND _co_loaded_drivers "$<TARGET_FILE:${_driver}>")
+    endif()
+  endforeach()
+  if(_co_loaded_drivers)
+    list(JOIN _co_loaded_drivers ":" _co_loaded_preload)
+    add_test(NAME level-zero/pipeline-with-co-loaded-drivers
+      COMMAND gemstone_levelzero_smoke "Level Zero compute and copy engines pipeline through events")
+    gemstone_set_tests_properties(level-zero/pipeline-with-co-loaded-drivers PROPERTIES TIMEOUT 60
+      ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>"
+      ENVIRONMENT_MODIFICATION "LD_PRELOAD=set:${_co_loaded_preload}")
+  endif()
+
   add_executable(gemstone_levelzero_rpc_test test/execution_rpc_test.cpp)
   target_include_directories(gemstone_levelzero_rpc_test SYSTEM PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
   target_link_libraries(gemstone_levelzero_rpc_test PRIVATE ze_loader pthread)
@@ -44,6 +59,20 @@ if(BUILD_TESTING)
   gemstone_discover_tests(gemstone_levelzero_rpc_test TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST
     PROPERTIES TIMEOUT 30
     ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
+
+  add_executable(gemstone_levelzero_multi_device_test test/multi_device.cpp)
+  target_include_directories(gemstone_levelzero_multi_device_test SYSTEM PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
+  target_link_libraries(gemstone_levelzero_multi_device_test PRIVATE ze_loader pthread)
+  add_dependencies(gemstone_levelzero_multi_device_test level_zero_loader)
+  set_target_properties(gemstone_levelzero_multi_device_test PROPERTIES BUILD_RPATH "$ORIGIN")
+  gemstone_test_target(gemstone_levelzero_multi_device_test)
+  gemstone_discover_tests(gemstone_levelzero_multi_device_test TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST
+    PROPERTIES TIMEOUT 30
+    ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
+
+  add_executable(gemstone_levelzero_spirv_resources test/spirv_resources_test.cpp)
+  gemstone_test_target(gemstone_levelzero_spirv_resources)
+  gemstone_discover_tests(gemstone_levelzero_spirv_resources TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST)
 
   add_executable(gemstone_levelzero_process_exit test/process_exit.cpp)
   gemstone_project_target(gemstone_levelzero_process_exit)

@@ -55,7 +55,7 @@ endfunction()
 
 function(container_image output_tag output_stamp)
   cmake_parse_arguments(PARSE_ARGV 2 ARG "" "EXECUTABLE;REPOSITORY;FILE;CONTEXT;STAGE;JOB_POOL"
-    "BUILD_ARGUMENTS;INPUTS")
+    "BUILD_ARGUMENTS;BUILD_CONTEXTS;INPUTS;DEPENDS")
   set(definition "${ARG_STAGE};${ARG_BUILD_ARGUMENTS}")
   foreach(input IN ITEMS "${ARG_FILE}" ${ARG_INPUTS})
     file(SHA256 "${input}" digest)
@@ -76,13 +76,18 @@ function(container_image output_tag output_stamp)
   if(ARG_JOB_POOL)
     set(pool JOB_POOL "${ARG_JOB_POOL}")
   endif()
+  set(contexts)
+  foreach(context IN LISTS ARG_BUILD_CONTEXTS)
+    list(APPEND contexts --build-context "${context}")
+  endforeach()
   get_property(images GLOBAL PROPERTY CONTAINER_IMAGES)
   if(NOT tag IN_LIST images)
     add_custom_command(
       OUTPUT "${stamp}"
       COMMAND sh -c [=[exe=$1 tag=$2; shift 2; "$exe" image inspect "$tag" >/dev/null 2>&1 || exec "$exe" build --tag "$tag" "$@"]=]
-        sh "${ARG_EXECUTABLE}" "${tag}" --file "${ARG_FILE}" ${stage} ${ARG_BUILD_ARGUMENTS} "${ARG_CONTEXT}"
+        sh "${ARG_EXECUTABLE}" "${tag}" --file "${ARG_FILE}" ${stage} ${ARG_BUILD_ARGUMENTS} ${contexts} "${ARG_CONTEXT}"
       COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
+      DEPENDS ${ARG_DEPENDS}
       COMMENT "Preparing container image ${tag}"
       ${pool}
       VERBATIM)

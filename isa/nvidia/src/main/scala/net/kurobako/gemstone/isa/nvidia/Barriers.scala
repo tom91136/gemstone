@@ -9,6 +9,7 @@ private[isa] trait Barriers {
   def parkReduce(barrier: UInt[64], count: UInt[64], reduction: Reduction): Unit
   def parkEach(barrier: UInt[64], count: UInt[64], blocking: Boolean, reduction: Option[Reduction]): Unit
   def warpSync(memberMask: UInt[64]): Unit
+  def warpPartition(memberMask: UInt[64]): Unit
   def init(barrier: UInt[64], count: UInt[64]): Unit
   def invalidate(barrier: UInt[64]): Unit
   def load(barrier: UInt[64]): Unit

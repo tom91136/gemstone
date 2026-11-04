@@ -3,7 +3,7 @@ package net.kurobako.gemstone.binary
 import java.math.BigDecimal
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 import scala.util.Random
 
 class IntegerFloatingSuite extends Suite {

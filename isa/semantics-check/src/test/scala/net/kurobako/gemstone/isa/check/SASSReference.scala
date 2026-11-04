@@ -62,6 +62,8 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
   /** The offsets sampled for a constant operand, all but one in eight moved to a multiple of the stride its field
     * encodes; the rest check that execution and the definition both reject an offset the field cannot hold.
     */
+  // the operands of one instruction
+  @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   override def inputs(
       target: Option[String],
       instance: String,

@@ -9,6 +9,136 @@ import InstructionOperand.*
 @Generated(Array("sbt codegen"))
 object InstructionDefinitions6 {
   val decoders: Vec[FormDecoder] = Vec(
+    FormDecoder(Definitions6.UshfRegRegImmReg, Register, Register, Immediate, Register)(Form.UshfRegRegImmReg.apply),
+    FormDecoder(Definitions6.UshfRegRegRegImm, Register, Register, Register, Immediate)(Form.UshfRegRegRegImm.apply),
+    FormDecoder(Definitions6.UshfRegRegRegReg, Register, Register, Register, Register)(Form.UshfRegRegRegReg.apply),
+    FormDecoder(Definitions6.UshlRegImmReg, Register, Immediate, Register)(Form.UshlRegImmReg.apply),
+    FormDecoder(Definitions6.UshlRegRegImm, Register, Register, Immediate)(Form.UshlRegRegImm.apply),
+    FormDecoder(Definitions6.UshlRegRegReg, Register, Register, Register)(Form.UshlRegRegReg.apply),
+    FormDecoder(Definitions6.UshrRegRegImm, Register, Register, Immediate)(Form.UshrRegRegImm.apply),
+    FormDecoder(Definitions6.UshrRegRegReg, Register, Register, Register)(Form.UshrRegRegReg.apply),
+    FormDecoder(Definitions6.UstgrAddressReg, Address, Register)(Form.UstgrAddressReg.apply),
+    FormDecoder(Definitions6.UtcatomswsPredRegReg, Predicate, Register, Register)(Form.UtcatomswsPredRegReg.apply),
+    FormDecoder(
+      Definitions6.UtcatomswsPredRegRegReg,
+      Predicate,
+      Register,
+      Register,
+      Register
+    )(Form.UtcatomswsPredRegRegReg.apply),
+    FormDecoder(Definitions6.UtcatomswsRegReg, Register, Register)(Form.UtcatomswsRegReg.apply),
+    FormDecoder(Definitions6.UtcbarNoOperands)(Form.UtcbarNoOperands.apply),
+    FormDecoder(Definitions6.UtcbarAddressRegReg, Address, Register, Register)(Form.UtcbarAddressRegReg.apply),
+    FormDecoder(Definitions6.UtccpAddressAddress, Address, Address)(Form.UtccpAddressAddress.apply),
+    FormDecoder(
+      Definitions6.UtchmmaAddressAddressAddressAddressAddressRegPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Register,
+      Predicate
+    )(Form.UtchmmaAddressAddressAddressAddressAddressRegPred.apply),
+    FormDecoder(
+      Definitions6.UtchmmaAddressAddressAddressAddressAddressRegPredImm,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Register,
+      Predicate,
+      Immediate
+    )(Form.UtchmmaAddressAddressAddressAddressAddressRegPredImm.apply),
+    FormDecoder(
+      Definitions6.UtcimmaAddressAddressAddressAddressAddressRegPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Register,
+      Predicate
+    )(Form.UtcimmaAddressAddressAddressAddressAddressRegPred.apply),
+    FormDecoder(
+      Definitions6.UtcommaAddressAddressAddressAddressAddressAddressPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Predicate
+    )(Form.UtcommaAddressAddressAddressAddressAddressAddressPred.apply),
+    FormDecoder(
+      Definitions6.UtcqmmaAddressAddressAddressAddressAddressAddressPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Predicate
+    )(Form.UtcqmmaAddressAddressAddressAddressAddressAddressPred.apply),
+    FormDecoder(
+      Definitions6.UtcqmmaAddressAddressAddressAddressAddressRegPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Register,
+      Predicate
+    )(Form.UtcqmmaAddressAddressAddressAddressAddressRegPred.apply),
+    FormDecoder(Definitions6.UtcshiftAddress, Address)(Form.UtcshiftAddress.apply),
+    FormDecoder(Definitions6.UtmacctlNoOperands)(Form.UtmacctlNoOperands.apply),
+    FormDecoder(Definitions6.UtmacctlAddress, Address)(Form.UtmacctlAddress.apply),
+    FormDecoder(Definitions6.UtmacmdflushNoOperands)(Form.UtmacmdflushNoOperands.apply),
+    FormDecoder(Definitions6.UtmaldgAddressAddress, Address, Address)(Form.UtmaldgAddressAddress.apply),
+    FormDecoder(
+      Definitions6.UtmaldgAddressAddressAddress,
+      Address,
+      Address,
+      Address
+    )(Form.UtmaldgAddressAddressAddress.apply),
+    FormDecoder(Definitions6.UtmaldgAddressAddressReg, Address, Address, Register)(Form.UtmaldgAddressAddressReg.apply),
+    FormDecoder(
+      Definitions6.UtmaldgAddressAddressRegAddress,
+      Address,
+      Address,
+      Register,
+      Address
+    )(Form.UtmaldgAddressAddressRegAddress.apply),
+    FormDecoder(Definitions6.UtmapfAddressAddress, Address, Address)(Form.UtmapfAddressAddress.apply),
+    FormDecoder(
+      Definitions6.UtmapfAddressAddressAddress,
+      Address,
+      Address,
+      Address
+    )(Form.UtmapfAddressAddressAddress.apply),
+    FormDecoder(Definitions6.UtmapfAddressAddressReg, Address, Address, Register)(Form.UtmapfAddressAddressReg.apply),
+    FormDecoder(
+      Definitions6.UtmapfAddressAddressRegAddress,
+      Address,
+      Address,
+      Register,
+      Address
+    )(Form.UtmapfAddressAddressRegAddress.apply),
+    FormDecoder(Definitions6.UtmaredgAddressAddress, Address, Address)(Form.UtmaredgAddressAddress.apply),
+    FormDecoder(
+      Definitions6.UtmaredgAddressAddressAddress,
+      Address,
+      Address,
+      Address
+    )(Form.UtmaredgAddressAddressAddress.apply),
+    FormDecoder(Definitions6.UtmastgAddressAddress, Address, Address)(Form.UtmastgAddressAddress.apply),
+    FormDecoder(
+      Definitions6.UtmastgAddressAddressAddress,
+      Address,
+      Address,
+      Address
+    )(Form.UtmastgAddressAddressAddress.apply),
     FormDecoder(Definitions6.UviaddRegRegImm, Register, Register, Immediate)(Form.UviaddRegRegImm.apply),
     FormDecoder(Definitions6.UviaddRegRegReg, Register, Register, Register)(Form.UviaddRegRegReg.apply),
     FormDecoder(

@@ -30,9 +30,7 @@ private object VMSemantics {
 
   private def executeStaged(instruction: Instruction, context: VMContext): Either[Fault, Step] = instruction match {
     case _: (Instruction.Branch | Instruction.BranchTable | Instruction.ReturnStackPush | Instruction.ReturnStackPop |
-          Instruction.ReturnStackSave | Instruction.Call) =>
-      executeControl(instruction, context)
-    case Instruction.NoOp | Instruction.Return | Instruction.Exit =>
+          Instruction.ReturnStackSave | Instruction.Call) | Instruction.NoOp | Instruction.Return | Instruction.Exit =>
       executeControl(instruction, context)
     case Instruction.Trap | Instruction.CallBuiltin(_, _, _) | Instruction.Convergence(_, _) | Instruction.Yield |
         Instruction.Pause | Instruction.Fence =>
@@ -59,6 +57,7 @@ private object VMSemantics {
     case _: (Instruction.SharedLockLoad | Instruction.SharedStoreUnlock) => executeLock(instruction, context)
     case _: (Instruction.ClusterMap | Instruction.ClusterRankOf | Instruction.ClusterTryCancel) =>
       executeClusterMachine(instruction, context)
+    case Instruction.Texture(operation) => MachineSemantics.texture(VMMachineOps(context))(operation)
     case _: (Instruction.AsyncCopy | Instruction.AsyncBulkCopy | Instruction.AsyncBulkStore |
           Instruction.AsyncBulkFill | Instruction.AsyncBulkReduce | Instruction.AsyncSharedStore |
           Instruction.AsyncSharedReduce | Instruction.TensorMapCopy | Instruction.AsyncCommit |
@@ -209,8 +208,9 @@ private object VMSemantics {
         MachineSemantics.mbarrierTest(machine)(destination, address, phase, parity)
       case Instruction.MBarrierPending(destination, token) =>
         MachineSemantics.mbarrierPending(Execute, machine)(destination, token)
-      case Instruction.WarpBarrier(memberMask) => machine.warpSync(memberMask)
-      case Instruction.ClusterBarrier(arrive)  => machine.clusterBarrier(arrive)
+      case Instruction.WarpBarrier(memberMask, exclusive) =>
+        if (exclusive) machine.warpPartition(memberMask) else machine.warpSync(memberMask)
+      case Instruction.ClusterBarrier(arrive) => machine.clusterBarrier(arrive)
     }
   }
 

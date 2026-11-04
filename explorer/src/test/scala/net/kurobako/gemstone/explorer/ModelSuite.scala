@@ -3,7 +3,7 @@ package net.kurobako.gemstone.explorer
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.semantics.render.*
-import net.kurobako.gemstone.testing.Suite
+import net.kurobako.gemstone.testing.*
 
 class ModelSuite extends Suite {
   private def entry(model: Model, target: Option[String], mnemonic: String): View.Entry =

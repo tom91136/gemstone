@@ -25,13 +25,11 @@ private object Reconvergence {
   }
 
   object Schedule {
-    val empty: Schedule = Schedule(Map.empty, Map.empty, 0)
+    val empty: Schedule = Schedule(Map.empty, Map.empty)
   }
 
-  /** Actions ahead of the statement at an index, the branch targets to replace in the statement at an index, and the
-    * number of token slots the actions use.
-    */
-  case class Schedule(before: Map[Int, Vec[Action]], retargets: Map[Int, Map[Label, Label]], slots: Int)
+  /** Actions ahead of the statement at an index, and the branch targets to replace in the statement at an index. */
+  case class Schedule(before: Map[Int, Vec[Action]], retargets: Map[Int, Map[Label, Label]])
 
   private val Strong: Set[Modifier]  = Set(Modifier.Volatile, Modifier.Relaxed, Modifier.Acquire, Modifier.Sc)
   private val Polling: Set[Modifier] = Set(Modifier.TryWait, Modifier.TestWait)
@@ -288,19 +286,15 @@ private object Reconvergence {
             sources.getOrElseUpdate(target, mutable.ArrayBuffer.empty) += block
         }
       }
-      val marked = Array.fill(graph.count)(-1)
-      sources.toArray.zipWithIndex.map { case ((header, entries), id) =>
+      sources.toArray.map { (header, entries) =>
         val body    = mutable.ArrayBuffer(header)
+        val seen    = mutable.BitSet(header)
         val pending = mutable.Stack.from(entries)
-        marked(header) = id
         while (pending.nonEmpty) {
           val block = pending.pop()
-          if (marked(block) != id) {
-            marked(block) = id
+          if (seen.add(block)) {
             body += block
-            graph.predecessors(block).foreach(from =>
-              if (forward.reaches(from) && marked(from) != id) pending.push(from)
-            )
+            graph.predecessors(block).foreach(from => if (forward.reaches(from) && !seen(from)) pending.push(from))
           }
         }
         Loop(header, body.toArray)
@@ -338,7 +332,6 @@ private object Reconvergence {
     * is held, when one is held where the other joins (a lane arriving there without a setup of its own would present
     * the wrong token), or when they join together.
     */
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def assign(regions: Array[Region], graph: Graph, loops: Loops): Array[Int] = {
     val held = regions.map { region =>
       val reached                 = java.util.BitSet(graph.count)
@@ -466,6 +459,6 @@ private object Reconvergence {
         case _                                    => ()
       }
 
-      Schedule(before.view.mapValues(Vec.from(_)).toMap, retargets.toMap, slot.maxOption.fold(0)(_ + 1))
+      Schedule(before.view.mapValues(Vec.from(_)).toMap, retargets.toMap)
     }
 }

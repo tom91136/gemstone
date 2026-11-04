@@ -1,0 +1,8 @@
+# Release run, once before a release: every compiled case, including the exhaustive CTS sweeps, the full OpenCL CTS
+# categories and the slow vendor samples that the other tiers bound.
+extends = "xlong"
+specs = ['*']
+exclude_programs = []
+levelzero_cases = []
+vulkan_cases = []
+vulkan_mustpass = "mustpass/vk-default.txt"
