@@ -56,7 +56,7 @@ private object VMControlCompiler {
         true
       case _: Form.Yield =>
         requireModifiers(Set.empty)
-        emit(Yield)
+        emit(Pause)
         true
       case _: Form.Bpt if modifiers == Vec(Modifier.TRAP) =>
         emit(Trap)

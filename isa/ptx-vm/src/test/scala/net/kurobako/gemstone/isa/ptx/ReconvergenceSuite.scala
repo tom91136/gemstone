@@ -7,7 +7,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 
 class ReconvergenceSuite extends Suite {
-  private class Analysed(val statements: Vec[Program.Statement], val plan: Reconvergence.Plan) {
+  private class Analysed(val statements: Vec[Program.Statement], val schedule: Reconvergence.Schedule) {
     def labelAt(name: String): Int = statements.indexWhere {
       case Program.Statement.Label(label) => label.raw == name
       case _                              => false
@@ -27,11 +27,11 @@ class ReconvergenceSuite extends Suite {
       }
     }.get
 
-    def before(index: Int): Vec[Action] = plan.before.getOrElse(index, Vec.empty[Action])
+    def before(index: Int): Vec[Action] = schedule.before.getOrElse(index, Vec.empty[Action])
 
     def atLabel(label: String): Vec[Action] = before(firstInstructionAfter(label))
 
-    def actions: Vec[Action] = Vec.from(plan.before.toSeq.sortBy(_._1)).flatMap(_._2)
+    def actions: Vec[Action] = Vec.from(schedule.before.toSeq.sortBy(_._1)).flatMap(_._2)
   }
 
   private def analyse(body: String, registers: String = ""): Analysed = {
@@ -52,7 +52,7 @@ class ReconvergenceSuite extends Suite {
       case Program.Statement.Directive(path = path) => path.raw != Vec("branchtargets")
       case _                                        => true
     }
-    Analysed(flat, Reconvergence.plan(flat, VMCompiler.branchTargets(scoped)))
+    Analysed(flat, Reconvergence.schedule(flat, VMCompiler.branchTargets(scoped)))
   }
 
   private val store = "st.global.u32 [%base], %v; ret;"
@@ -69,7 +69,7 @@ class ReconvergenceSuite extends Suite {
     assertEquals(found.before(found.instructionAt("bra", 0)), Vec[Action](Action.Setup(0)))
     assertEquals(found.atLabel("JOIN"), Vec[Action](Action.Synchronise(0)))
     assertEquals(found.actions.size, 2)
-    assertEquals(found.plan.retargets, Map.empty)
+    assertEquals(found.schedule.retargets, Map.empty)
   }
 
   test("an if without an else rejoins where the branch lands") {
@@ -93,7 +93,7 @@ class ReconvergenceSuite extends Suite {
     assertEquals(found.before(found.labelAt("LOOP")), Vec[Action](Action.Setup(0)))
     assertEquals(found.before(found.instructionAt("st")), Vec[Action](Action.Synchronise(0)))
     assertEquals(found.actions.size, 2)
-    assertEquals(found.plan.retargets, Map.empty)
+    assertEquals(found.schedule.retargets, Map.empty)
   }
 
   test("branches from outside a loop enter through the preheader") {
@@ -111,7 +111,7 @@ class ReconvergenceSuite extends Suite {
       Vec[Action](Action.Label(label), Action.Setup(0))
     )
     assertEquals(
-      found.plan.retargets,
+      found.schedule.retargets,
       Map(found.instructionAt("bra.uni") -> Map(("LOOP": NonEmpty[String]) -> label))
     )
     assertEquals(found.before(found.instructionAt("st")), Vec[Action](Action.Synchronise(0)))
@@ -168,14 +168,14 @@ class ReconvergenceSuite extends Suite {
       |ret;
       |EARLY:
       |ret;""".stripMargin)
-    assertEquals(found.plan, Reconvergence.Plan.empty)
+    assertEquals(found.schedule, Reconvergence.Schedule.empty)
   }
 
   test("a predicated return is no divergence point") {
     val found = analyse(s"""setp.ne.u32 %p, %t, 0;
       |@%p ret;
       |$store""".stripMargin)
-    assertEquals(found.plan, Reconvergence.Plan.empty)
+    assertEquals(found.schedule, Reconvergence.Schedule.empty)
   }
 
   test("a uniform branch gets no barrier") {
@@ -184,14 +184,14 @@ class ReconvergenceSuite extends Suite {
       |add.u32 %v, %v, 1;
       |JOIN:
       |$store""".stripMargin)
-    assertEquals(found.plan, Reconvergence.Plan.empty)
+    assertEquals(found.schedule, Reconvergence.Schedule.empty)
   }
 
   test("an unconditional branch gets no barrier") {
     val found = analyse(s"""bra JOIN;
       |JOIN:
       |$store""".stripMargin)
-    assertEquals(found.plan, Reconvergence.Plan.empty)
+    assertEquals(found.schedule, Reconvergence.Schedule.empty)
   }
 
   test("an indexed branch rejoins after its arms") {
@@ -250,7 +250,7 @@ class ReconvergenceSuite extends Suite {
       |setp.ne.u32 %p, %old, %w;
       |@%p bra.uni LOOP;
       |$store""".stripMargin)
-    assertEquals(found.plan, Reconvergence.Plan.empty)
+    assertEquals(found.schedule, Reconvergence.Schedule.empty)
   }
 
   test("code no branch reaches adds nothing") {
@@ -261,7 +261,7 @@ class ReconvergenceSuite extends Suite {
       |add.u32 %v, %v, 1;
       |DEAD2:
       |ret;""".stripMargin)
-    assertEquals(found.plan, Reconvergence.Plan.empty)
+    assertEquals(found.schedule, Reconvergence.Schedule.empty)
   }
 
   test("a loop entered by falling in from its own body sets up in an out-of-line stub") {
@@ -277,7 +277,7 @@ class ReconvergenceSuite extends Suite {
       |$store""".stripMargin)
     val label = "convergence preheader 2": NonEmpty[String]
     assertEquals(
-      found.plan.retargets,
+      found.schedule.retargets,
       Map(found.instructionAt("bra.uni", 0) -> Map(("TEST": NonEmpty[String]) -> label))
     )
     assertEquals(
@@ -289,7 +289,7 @@ class ReconvergenceSuite extends Suite {
   }
 
   test("a stub is guarded when the routine's last statement can fall through") {
-    val found = analyse(s"""bra.uni TEST;
+    val found = analyse("""bra.uni TEST;
       |BODY:
       |add.u32 %i, %i, 1;
       |TEST:
@@ -323,7 +323,7 @@ class ReconvergenceSuite extends Suite {
       |J2:
       |$store""".stripMargin)
     assertEquals(setupSlots(found), Vec(0, 0, 0))
-    assertEquals(found.plan.slots, 1)
+    assertEquals(found.schedule.slots, 1)
   }
 
   test("nested branches use distinct token slots") {
@@ -337,7 +337,7 @@ class ReconvergenceSuite extends Suite {
       |OUTER:
       |$store""".stripMargin)
     assertEquals(setupSlots(found), Vec(0, 1))
-    assertEquals(found.plan.slots, 2)
+    assertEquals(found.schedule.slots, 2)
   }
 
   test("a loop exit hoisted over an inner branch does not share its slot") {
@@ -356,7 +356,7 @@ class ReconvergenceSuite extends Suite {
       |$store""".stripMargin)
     assertEquals(found.before(found.labelAt("LOOP")), Vec[Action](Action.Setup(0)))
     assertEquals(found.before(found.instructionAt("bra", 1)), Vec[Action](Action.Setup(1)))
-    assertEquals(found.plan.slots, 2)
+    assertEquals(found.schedule.slots, 2)
   }
 
   test("sequential loops share one token slot") {
@@ -372,7 +372,7 @@ class ReconvergenceSuite extends Suite {
       |@%q bra L1;
       |$store""".stripMargin)
     assertEquals(setupSlots(found), Vec(0, 0))
-    assertEquals(found.plan.slots, 1)
+    assertEquals(found.schedule.slots, 1)
   }
 
   test("a join reachable by a lane holding another live token does not share that token's slot") {

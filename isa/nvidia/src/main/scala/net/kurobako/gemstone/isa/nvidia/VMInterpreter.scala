@@ -759,8 +759,10 @@ private[isa] object VMInterpreter {
       def warp(base: WorkgroupLane.WarpBase, frame: VMFrame, members: Long): VMLaneMask =
         VMLaneMask.ofWarp(base.raw, livePart(base, frame, members))
       key match {
-        case BarrierKey.Workgroup(_)                    => live
-        case BarrierKey.Warp(base, _, frame)            => warp(base, frame, warpMembers.getOrElse(key, -1L))
+        case BarrierKey.Workgroup(_)         => live
+        case BarrierKey.Warp(base, _, frame) =>
+          val members = warpMembers.getOrElse(key, -1L) & ~converging(frame, base.raw)
+          warp(base, frame, members)
         case BarrierKey.Convergence(base, token, frame) =>
           warp(base, frame, workgroup.convergenceMask(base, token))
       }
@@ -1015,8 +1017,16 @@ private[isa] object VMInterpreter {
       } else {
         parkWarp(cohort, lanes, key)
         if (complete) releaseBarrier(key)
+        else releaseWarpBarriers(key.base, key.frame)
       }
     }
+
+    private def releaseWarpBarriers(base: WorkgroupLane.WarpBase, frame: VMFrame)(using Run): Unit =
+      if (barrierMasks.nonEmpty) {
+        val keys =
+          barrierMasks.keys.collect { case key: BarrierKey.Warp if key.base == base && (key.frame eq frame) => key }
+        keys.toVector.foreach(releaseBarrier(_))
+      }
 
     private def clusterBarrier(cohort: Cohort, active: VMLaneMask, arrival: Boolean)(using Run): Unit = {
       var invalid = false
@@ -1116,8 +1126,9 @@ private[isa] object VMInterpreter {
         case Right(Step.Advance) =>
           advance(cohort, cohort.lanes)
           instruction.instruction match {
-            case Instruction.Convergence(_, ConvergenceAction.Break) | Instruction.Yield => releaseConvergences()
-            case _                                                                       => ()
+            case Instruction.Convergence(_, ConvergenceAction.Break) | Instruction.Yield | Instruction.Pause =>
+              releaseConvergences()
+            case _ => ()
           }
         case Right(Step.Jump(target)) =>
           // The lanes that jump and the lanes that fall through are separate units from here on.

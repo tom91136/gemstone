@@ -110,6 +110,28 @@ class VMStateSuite extends Suite {
     assertEquals(workgroup.convergenceMask(0, other), 0b11L)
   }
 
+  test("a lane leaves its convergence barriers once it pauses twice in a row without a store") {
+    val workgroup = VMWorkgroup(1024)
+    val token     = workgroup.createConvergence(992, 0b11L)
+    val lane      = VMLaneMask.ofWarp(992, 1L)
+    workgroup.pauseLanes(lane, 0L)
+    workgroup.pauseLanes(lane, 0L)
+    assertEquals(workgroup.convergenceMask(992, token), 0b11L)
+    workgroup.pauseLanes(lane, 0L)
+    assertEquals(workgroup.convergenceMask(992, token), 0b10L)
+  }
+
+  test("a lane keeps its convergence barriers while stores to global or shared memory separate its pauses") {
+    val workgroup = VMWorkgroup(1024)
+    val token     = workgroup.createConvergence(992, 0b11L)
+    val lane      = VMLaneMask.ofWarp(992, 1L)
+    for (round <- 0L until 8L) {
+      workgroup.pauseLanes(lane, round)
+      workgroup.stored()
+    }
+    assertEquals(workgroup.convergenceMask(992, token), 0b11L)
+  }
+
   test("sparse shared and per-lane local addresses retain all address bits") {
     val workgroup = VMWorkgroup(2)
     val addresses = Vec(0L, 1L << 32, Long.MinValue)

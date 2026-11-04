@@ -606,6 +606,11 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
       statement(Barriers, MachineCall("yieldLane", Vec.empty, Vec((laneIndex(lane), Some(Word)))))
     )(next)
 
+  inline def pauseLanes(inline next: => Term.Steps): Term.Steps =
+    everyLane(lane =>
+      statement(Barriers, MachineCall("pauseLane", Vec.empty, Vec((laneIndex(lane), Some(Word)))))
+    )(next)
+
   inline def parkReduce(barrier: Term, count: Term, reduction: BarrierReduction): Term.Steps =
     guarded(
       guard,

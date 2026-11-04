@@ -35,6 +35,7 @@ private[isa] object MachineRendering {
       case Instruction.Fence                      => Some(machine.fenceHost)
       case Instruction.Convergence(token, action) => Some(convergence(machine)(token, action))
       case Instruction.Yield                      => Some(machine.yieldLanes(machine.advance))
+      case Instruction.Pause                      => Some(machine.pauseLanes(machine.advance))
       case Instruction.ReturnStackPush(address)   => Some(returnStackPush(Render, machine)(address))
       case _                                      => None
     }

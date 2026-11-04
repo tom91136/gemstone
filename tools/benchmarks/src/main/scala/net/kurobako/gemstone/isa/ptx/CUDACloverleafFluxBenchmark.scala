@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.ptx
 
 import cats.syntax.all.*
-import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
@@ -19,7 +18,7 @@ object CUDACloverleafFluxBenchmark {
 
   private def run(cells: Int > 0, iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val memory = CloverleafFluxFixture.memory(cells)
-    val source = String(BenchmarkResources.bytes("cloverleaf-flux.ptx", "cuda"), StandardCharsets.UTF_8)
+    val source = benchmarkFixtures.cloverleafFluxPtx
     val kernel = VMCompiler.compile(source).fold(error => throw IllegalArgumentException(error.message), identity)
     val arrays = memory.ids.zipWithIndex.map((id, index) =>
       s"clover_flux_param_$index".unsafe[NonEmpty[String]] -> Argument.fromLong(memory.base(id).raw)

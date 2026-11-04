@@ -438,6 +438,34 @@ class ControlFlowSuite extends Suite {
     assertEquals(run.words(1), Vec(496L))
   }
 
+  test("YIELD in a compare-and-swap retry loop keeps its lanes at the barrier until every lane has swapped") {
+    check(
+      89,
+      """S2R R7, SR_TID.X
+        |LDC.64 R2, c[0x0][0x160]
+        |MOV R9, 0x20
+        |IMAD.WIDE.U32 R2, R9, 4, R2
+        |BSSY B0, `(reconverge)
+        |LDG.E R4, [R2.64]
+        |retry: IADD3 R6, R4, 0x1, RZ
+        |YIELD
+        |ATOMG.E.CAS.STRONG.GPU PT, R6, [R2], R4, R6
+        |ISETP.NE.AND P0, PT, R6, R4, PT
+        |IMAD.MOV.U32 R4, RZ, RZ, R6
+        |@P0 BRA `(retry)
+        |BSYNC B0
+        |reconverge: VOTEU.ANY UR4, UPT, PT
+        |UPOPC UR5, UR4
+        |MOV R8, UR5
+        |LDC.64 R10, c[0x0][0x160]
+        |IMAD.WIDE.U32 R10, R7, 4, R10
+        |STG.E [R10.64], R8
+        |EXIT""".stripMargin,
+      Vec.fill(32)(32) ++ Vec(32),
+      block = Some(32)
+    )
+  }
+
   test("local subroutine returns use the saved PC and preserve caller registers") {
     check(
       86,

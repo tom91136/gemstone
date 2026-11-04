@@ -224,8 +224,9 @@ Cases: `amdgpu-{alu,atomic,dispatch-memory,dwordx4-copy,program-lifecycle,vector
 `--iterations` sets the measured operations per sample and `--workers` the host worker count. `amdgpu-vector-copy`
 runs embedded gfx900 (wave64) instructions; `--image` loads `vector_copy` from a code object instead, such as the
 gfx1030 (wave32) `hsa-vector-copy.hsaco` fixture. Use `benchmarksNative` for Scala Native. JVM runs record JFR in
-`target/benchmarks/jfr/`. Fixtures go to `tools/benchmarks/target/generated-fixtures/`. Samples emit
-`gemstone-benchmark-v2` JSON; pin CPUs (`taskset -c 0-7 sbt ...`) when comparing.
+`target/benchmarks/jfr/`. Fixtures go to `tools/benchmarks/target/generated-fixtures/`; the benchmarks read
+them from the generated `benchmarkFixtures.scala`. Samples emit `gemstone-benchmark-v2` JSON; pin CPUs
+(`taskset -c 0-7 sbt ...`) when comparing.
 
 ## ISA tools
 

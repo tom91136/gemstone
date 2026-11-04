@@ -185,6 +185,9 @@ private[isa] object VMMachineOps {
 
   def yieldLanes(context: VMContext): Unit = context.workgroup.yieldLanes(context.active)
 
+  def pauseLanes(context: VMContext): Unit =
+    context.workgroup.pauseLanes(context.active, context.device.memory.stores)
+
   def barrierTarget(rawBarrier: Long, rawExpected: Long, blocking: Boolean)
       : Either[Fault, (BarrierId, BarrierCount)] = {
     val barrier  = rawBarrier & 0xffffffffL
@@ -494,6 +497,11 @@ private[isa] class VMMachineOps(val context: VMContext)
 
   inline def yieldLanes(inline next: => Flow[Step]): Flow[Step] = {
     VMMachineOps.yieldLanes(context)
+    next
+  }
+
+  inline def pauseLanes(inline next: => Flow[Step]): Flow[Step] = {
+    VMMachineOps.pauseLanes(context)
     next
   }
 

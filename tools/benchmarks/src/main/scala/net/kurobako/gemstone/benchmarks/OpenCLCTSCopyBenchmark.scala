@@ -60,7 +60,7 @@ object OpenCLCTSCopyBenchmark {
         KernelTask.Argument.Scalar(LittleEndian.toVec(options.stride.toLong, 4).unsafe)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val image  = Vec.unsafeWrapArray(BenchmarkResources.bytes("opencl-cts-async-copy.spv", "opencl"))
+    val image  = Vec.unsafeWrapArray(benchmarkFixtures.hex(benchmarkFixtures.openclCtsAsyncCopySpv))
     val sample = Using.resource(WorkerPool(options.workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
       val program = SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(image)
         .fold(error => throw IllegalArgumentException(error.message), identity)

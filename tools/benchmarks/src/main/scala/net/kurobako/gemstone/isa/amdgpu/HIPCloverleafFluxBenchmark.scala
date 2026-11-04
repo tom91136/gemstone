@@ -47,7 +47,7 @@ object HIPCloverleafFluxBenchmark {
 
   private def run(cells: Int > 0, iterations: Int > 0, launch: LaunchControl): BenchmarkSample = {
     val memory   = CloverleafFluxFixture.memory(cells)
-    val image    = Vec.unsafeWrapArray(BenchmarkResources.bytes("cloverleaf-flux.hsaco", "hip"))
+    val image    = Vec.unsafeWrapArray(benchmarkFixtures.hex(benchmarkFixtures.cloverleafFluxHsaco))
     val prepared = (for {
       codeObject <- ELF.index(image)
       kernel     <- codeObject.kernel("clover_flux")

@@ -1651,6 +1651,7 @@ private[isa] object VMIR {
     case Fence
     case Convergence(token: Register, action: ConvergenceAction)
     case Yield
+    case Pause
     case ReturnStackPush(address: Long)
     case ReturnStackPop(destination: Register)
     case ReturnStackSave(source: Register)

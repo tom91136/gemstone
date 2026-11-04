@@ -249,6 +249,8 @@ class RenderedMachineSuite extends Suite {
     assertEquals(errors(leaveConvergence(guarded = true)), Nil)
     assertEquals(errors(yieldLanes()), Nil)
     assertEquals(errors(yieldLanes(guarded = true)), Nil)
+    assertEquals(errors(pauseLanes()), Nil)
+    assertEquals(errors(pauseLanes(guarded = true)), Nil)
   }
 
   test("rendered workgroup, warp and cluster barriers compile") {

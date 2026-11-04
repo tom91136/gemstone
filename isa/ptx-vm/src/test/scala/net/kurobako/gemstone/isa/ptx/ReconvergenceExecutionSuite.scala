@@ -115,6 +115,45 @@ class ReconvergenceExecutionSuite extends Suite {
     )
   }
 
+  test("lanes that exit early leave the rest to synchronise and shuffle among themselves") {
+    val seen = run(
+      """setp.lt.u32 %p, %t, 8;
+        |@%p bra DONE;
+        |bar.warp.sync -1;
+        |mul.lo.u32 %v, %t, 7;
+        |shfl.sync.idx.b32 %w, %v, 8, 31, -1;
+        |xor.b32 %w, %w, %t;
+        |st.global.u32 [%address], %w;
+        |DONE:""".stripMargin,
+      threads = 32,
+      words = 32
+    )
+    assertEquals(seen, Vec.tabulate(32)(lane => if (lane < 8) 0 else lane ^ 56))
+  }
+
+  test("lanes that exit late leave the rest to synchronise and shuffle among themselves") {
+    val seen = run(
+      """setp.lt.u32 %p, %t, 8;
+        |@%p bra WORK;
+        |bar.warp.sync -1;
+        |mul.lo.u32 %v, %t, 7;
+        |shfl.sync.idx.b32 %w, %v, 8, 31, -1;
+        |xor.b32 %w, %w, %t;
+        |st.global.u32 [%address], %w;
+        |bra DONE;
+        |WORK:
+        |mov.u32 %i, 0;
+        |SPIN:
+        |add.u32 %i, %i, 1;
+        |setp.lt.u32 %q, %i, 50;
+        |@%q bra.uni SPIN;
+        |DONE:""".stripMargin,
+      threads = 32,
+      words = 32
+    )
+    assertEquals(seen, Vec.tabulate(32)(lane => if (lane < 8) 0 else lane ^ 56))
+  }
+
   test("lanes that leave a loop on different iterations rejoin after it") {
     val seen = run(
       """mov.u32 %i, 0;

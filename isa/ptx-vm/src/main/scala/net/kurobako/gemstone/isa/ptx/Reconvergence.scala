@@ -24,14 +24,14 @@ private object Reconvergence {
     case Jump(target: NonEmpty[String])
   }
 
-  object Plan {
-    val empty: Plan = Plan(Map.empty, Map.empty, 0)
+  object Schedule {
+    val empty: Schedule = Schedule(Map.empty, Map.empty, 0)
   }
 
   /** Actions ahead of the statement at an index, the branch targets to replace in the statement at an index, and the
     * number of token slots the actions use.
     */
-  case class Plan(before: Map[Int, Vec[Action]], retargets: Map[Int, Map[Label, Label]], slots: Int)
+  case class Schedule(before: Map[Int, Vec[Action]], retargets: Map[Int, Map[Label, Label]], slots: Int)
 
   private val Strong: Set[Modifier]  = Set(Modifier.Volatile, Modifier.Relaxed, Modifier.Acquire, Modifier.Sc)
   private val Polling: Set[Modifier] = Set(Modifier.TryWait, Modifier.TestWait)
@@ -370,11 +370,12 @@ private object Reconvergence {
     slots
   }
 
-  /** Plans barriers and yields for the flattened statements of one routine; `tables` holds each `.branchtargets` list.
+  /** Schedules barriers and yields for the flattened statements of one routine; `tables` holds each `.branchtargets`
+    * list.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def plan(statements: Vec[Statement], tables: Map[Label, Vec[Label]]): Plan =
-    if (!statements.exists(isBranch(_))) Plan.empty
+  def schedule(statements: Vec[Statement], tables: Map[Label, Vec[Label]]): Schedule =
+    if (!statements.exists(isBranch(_))) Schedule.empty
     else {
       val graph   = Graph(statements, tables)
       val forward = Tree(0, dominators(0, graph.successors, graph.predecessors))
@@ -465,6 +466,6 @@ private object Reconvergence {
         case _                                    => ()
       }
 
-      Plan(before.view.mapValues(Vec.from(_)).toMap, retargets.toMap, slot.maxOption.fold(0)(_ + 1))
+      Schedule(before.view.mapValues(Vec.from(_)).toMap, retargets.toMap, slot.maxOption.fold(0)(_ + 1))
     }
 }

@@ -332,6 +332,9 @@ private[isa] object MachineDefinitions {
   def yieldLanes(guarded: Boolean = false): Either[String, Definition] =
     rendered("byield", guarded)(machine => machine.yieldLanes(machine.advance))
 
+  def pauseLanes(guarded: Boolean = false): Either[String, Definition] =
+    rendered("bpause", guarded)(machine => machine.pauseLanes(machine.advance))
+
   def barrierSync(id: Value, count: Option[Value] = None): Either[String, Definition] =
     rendered("bar.sync")(MachineSemantics.barrierSync(Render, _)(id, count))
 

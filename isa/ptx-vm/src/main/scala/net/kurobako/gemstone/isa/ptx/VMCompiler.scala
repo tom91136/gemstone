@@ -473,14 +473,14 @@ private object VMCompiler {
         }
         Vec.from(before)
       }
-      plan = Reconvergence.plan(flat, tables)
+      schedule = Reconvergence.schedule(flat, tables)
       lowered <- flat.zip(ordinals).zipWithIndex.traverse { case ((statement, ordinal), index) =>
         lowerStatement(statement, ordinal, tables, compilation.module.text)(using scope).map(retarget(
           _,
-          plan.retargets.get(index)
+          schedule.retargets.get(index)
         ))
       }
-      added <- convergence(plan)(using scope)
+      added <- convergence(schedule)(using scope)
       statements = lowered.zipWithIndex.flatMap((statements, index) =>
         added.getOrElse(index, Vec.empty[VMAssembler.Statement]) ++ statements
       ) ++ added.getOrElse(lowered.size, Vec.empty[VMAssembler.Statement])
@@ -541,13 +541,13 @@ private object VMCompiler {
     }
   }
 
-  /** The convergence barrier instructions a plan adds, by the index of the statement they precede. They carry no source
-    * instruction, so a profile does not count them as issued by the hardware.
+  /** The convergence barrier instructions a schedule adds, by the index of the statement they precede. They carry no
+    * source instruction, so a profile does not count them as issued by the hardware.
     */
-  private def convergence(plan: Reconvergence.Plan)(using
+  private def convergence(schedule: Reconvergence.Schedule)(using
       Scope
   ): Either[Error, Map[Int, Vec[VMAssembler.Statement]]] =
-    Vec.from(plan.before).traverse { (index, actions) =>
+    Vec.from(schedule.before).traverse { (index, actions) =>
       actions.traverse {
         case Reconvergence.Action.Label(name)       => Right(VMAssembler.Statement.Label(name))
         case Reconvergence.Action.Setup(slot)       => converge(slot, ConvergenceAction.Setup)
