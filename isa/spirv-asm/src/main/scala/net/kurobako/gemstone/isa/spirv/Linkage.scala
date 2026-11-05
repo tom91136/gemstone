@@ -11,9 +11,9 @@ import scala.collection.mutable
 /** Combines SPIR-V modules into one, resolving `LinkageAttributes` imports against exports of the other modules.
   *
   * An import resolves against an export or `LinkOnceODR` definition in the set. Imports the loader supplies by name
-  * (`supplied`) stay as imports, and any other unresolved import fails the link. Resolved imports, duplicate
-  * `LinkOnceODR` definitions and structurally equal undecorated types and constants collapse into one declaration.
-  * Exports keep their linkage decoration, so a linked module links again with further modules.
+  * (`supplied`) or as a `BuiltIn` variable stay as imports, and any other unresolved import fails the link. Resolved
+  * imports, duplicate `LinkOnceODR` definitions and structurally equal undecorated types and constants collapse into
+  * one declaration. Exports keep their linkage decoration, so a linked module links again with further modules.
   */
 object Linkage {
 
@@ -94,8 +94,12 @@ object Linkage {
             ) =>
           failure(s"imported symbol '${symbol.name}' does not match its export")
       }.toLeft(())
+      builtins = top.collect {
+        case Instruction.Decorate(target, decoration) if unsigned(decoration) == Decoration.BuiltIn =>
+          Operand.id(target)
+      }.toSet
       _ <- imports.collectFirst {
-        case symbol if !defined.contains(symbol.name) && !supplied(symbol.name) =>
+        case symbol if !defined.contains(symbol.name) && !supplied(symbol.name) && !builtins.contains(symbol.id) =>
           failure(s"unresolved symbol '${symbol.name}'")
       }.toLeft(())
       (aliased, kept)        = functions.partition(function => alias.contains(functionId(function)))

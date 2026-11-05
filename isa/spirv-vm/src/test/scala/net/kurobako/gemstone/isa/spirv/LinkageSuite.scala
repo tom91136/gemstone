@@ -140,6 +140,60 @@ class LinkageSuite extends Suite {
     assertEquals(symbols(link(user, provider).value, LinkageType.Import), Set("_Z12get_local_idj"))
   }
 
+  test("imports of loader builtin variables resolve without an export") {
+    val user = spv"""
+      $openCL
+      OpCapability Linkage
+      OpEntryPoint Kernel %main "call"
+      OpDecorate %ids LinkageAttributes "__spirv_BuiltInGlobalInvocationId" Import
+      OpDecorate %ids BuiltIn GlobalInvocationId
+      %void = OpTypeVoid
+      %ulong = OpTypeInt 64 0
+      %ids_vector = OpTypeVector %ulong 3
+      %ids_ptr = OpTypePointer Input %ids_vector
+      %ids = OpVariable %ids_ptr Input
+      %main_fn = OpTypeFunction %void
+      %main = OpFunction %void None %main_fn
+      %entry = OpLabel
+      OpReturn
+      OpFunctionEnd
+    """
+    assertEquals(symbols(link(user, provider).value, LinkageType.Import), Set("__spirv_BuiltInGlobalInvocationId"))
+  }
+
+  test("a linked kernel reads a loader builtin variable per work-item") {
+    val user = spv"""
+      $openCL
+      OpCapability Linkage
+      OpEntryPoint Kernel %main "ids"
+      OpDecorate %ids LinkageAttributes "__spirv_BuiltInGlobalInvocationId" Import
+      OpDecorate %ids BuiltIn GlobalInvocationId
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %ids_vector = OpTypeVector %ulong 3
+      %ids_ptr = OpTypePointer Input %ids_vector
+      %out_ptr = OpTypePointer CrossWorkgroup %uint
+      %main_fn = OpTypeFunction %void %out_ptr
+      %ids = OpVariable %ids_ptr Input
+      %main = OpFunction %void None %main_fn
+      %out = OpFunctionParameter %out_ptr
+      %entry = OpLabel
+      %vector = OpLoad %ids_vector %ids
+      %x = OpCompositeExtract %ulong %vector 0
+      %slot = OpPtrAccessChain %out_ptr %out %x
+      %narrow = OpUConvert %uint %x
+      OpStore %slot %narrow
+      OpReturn
+      OpFunctionEnd
+    """
+    val linked = link(user, provider).value
+    val memory = RegionMemory()
+    val out    = memory.allocate(8L)
+    assertEquals(run(linked, "ids", memory, Vec(buffer(out)), groups = testDimensions(2)), Right(()))
+    assertEquals(words(memory, out, 0, 2), Vec(0L, 1L))
+  }
+
   test("a symbol exported twice is rejected") {
     assert(link(provider, provider).left.exists(_.message.contains("exported more than once")))
   }
