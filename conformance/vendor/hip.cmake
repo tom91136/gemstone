@@ -330,7 +330,7 @@ target_include_directories(vendor_hip_examples PRIVATE "${CMAKE_CURRENT_BINARY_D
 target_link_libraries(vendor_hip_examples PRIVATE Catch2::Catch2 conformance_device)
 conformance_register_test_program(vendor_hip_examples ${CONFORMANCE_TIMEOUT_CTS})
 
-foreach(library IN ITEMS rocfft rocsparse rocsolver rocrand)
+foreach(library IN ITEMS rocfft rocsparse rocsolver rocrand hiprand)
   conformance_runtime_plugins("/opt/rocm/lib/lib${library}.so*")
 endforeach()
 conformance_runtime_plugins("/opt/rocm/lib/librocfft-device-*.so*")
