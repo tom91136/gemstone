@@ -809,7 +809,7 @@ def conformanceExecutionRoutes(conformance: Path, profile: String): Seq[String] 
   scala.util.Try(
     scala.sys.process.Process(
       Seq("cmake", s"-DCONFORMANCE_BUILD_PROFILE=$profile", "-P", s"${conformance / "artifacts/Targets.cmake"}")
-    ).!!.linesIterator.map(_.trim).filter(_.nonEmpty).toVector
+    ).!!(scala.sys.process.ProcessLogger(_ => (), _ => ())).linesIterator.map(_.trim).filter(_.nonEmpty).toVector
   ).getOrElse(Vector.empty)
 
 def conformanceArtifactRoute(route: String): String = route.replaceFirst("^cuda-sass/", "cuda/")
