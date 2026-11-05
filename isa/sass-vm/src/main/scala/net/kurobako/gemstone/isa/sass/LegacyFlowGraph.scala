@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.tailrec
 
 private object LegacyFlowGraph {
   def codeTargets(instruction: DecodedInstruction): Set[Int] =
@@ -11,29 +12,91 @@ private object LegacyFlowGraph {
       OperandQueries.integer(_).collect { case value if value >= 0 && value <= Int.MaxValue => value.toInt }
     ).toSet
 
-  /** Backward branches closing a loop that only reads memory; such a loop waits on other warps and needs a yield. */
-  def pollingBranches(instructions: Vec[DecodedInstruction]): Set[Int] = {
-    def reads(instruction: DecodedInstruction) = instruction.operation.form match {
-      case _: Form.Ld | _: Form.Ldg | _: Form.Lds => true
-      case _                                      => false
-    }
-    def effects(instruction: DecodedInstruction) = instruction.operation.form match {
-      case _: Form.St | _: Form.Stg | _: Form.Stl | _: Form.Sts | _: Form.Atom | _: Form.Atoms | _: Form.Red |
-          _: Form.Bar | _: Form.Cal | _: Form.Jcal | _: Form.Ldslk | _: Form.Stscul => true
-      case _ => false
-    }
-    val index = instructions.zipWithIndex.map((instruction, at) => instruction.address.raw -> at).toMap
-    def polls(start: Int, end: Int): Boolean = {
-      val body = instructions.slice(start, end + 1)
-      body.exists(reads(_)) && !body.exists(effects(_))
-    }
-    instructions.zipWithIndex.collect {
-      case (branch, end)
-          if OperandQueries.is[Form.Bra](branch.operation) &&
-            codeTargets(branch).filter(_ <= branch.address.raw).flatMap(index.get).exists(polls(_, end)) =>
-        branch.address.raw
-    }.toSet
+  def reads(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
+    case _: Form.Ld | _: Form.Ldg | _: Form.Lds => true
+    case _                                      => false
   }
+
+  def effects(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
+    case _: Form.St | _: Form.Stg | _: Form.Stl | _: Form.Sts | _: Form.Atom | _: Form.Atoms | _: Form.Red |
+        _: Form.Bar | _: Form.Cal | _: Form.Jcal | _: Form.Ldslk | _: Form.Stscul => true
+    case _ => false
+  }
+
+  def registers(operand: Operand): Set[Int] = operand match {
+    case Operand.Register(RegisterBank.R, index)                              => Set(index)
+    case Operand.Group(values)                                                => values.flatMap(registers(_)).toSet
+    case Operand.ConstantBank(_, offset)                                      => registers(offset)
+    case Operand.Address(base = base, index = index, descriptor = descriptor) =>
+      (base.toList ++ index.toList ++ descriptor.toList).flatMap(registers(_)).toSet ++
+        base.toList.flatMap(registers(_)).map(_ + 1)
+    case Operand.Unary(value = value) => registers(value)
+    case Operand.Qualified(value, _)  => registers(value)
+    case _                            => Set.empty
+  }
+
+  def wideModifier(instruction: DecodedInstruction): Boolean = instruction.modifiers.exists(
+    PartialFunction.cond(_) {
+      case Instruction.Modifier.`64` | Instruction.Modifier.`128` | Instruction.Modifier.F64 |
+          Instruction.Modifier.S64 | Instruction.Modifier.U64 => true
+    }
+  )
+
+  type Slot = Either[Int, Int]
+
+  private val predicates: Set[Slot] = (0 to 6).map[Slot](Right(_)).toSet
+
+  private def words(instruction: DecodedInstruction): Int = {
+    val modifiers = instruction.modifiers
+    if (modifiers.contains(Instruction.Modifier.`128`)) 4
+    else if (modifiers.contains(Instruction.Modifier.WIDE) || wideModifier(instruction)) 2
+    else 1
+  }
+
+  private def slots(operand: Operand, width: Int): Set[Slot] = OperandQueries.base(operand) match {
+    case Operand.Predicate(Some(index), _, _)  => Set[Slot](Right(index))
+    case value if OperandQueries.isZero(value) => Set.empty
+    case value => registers(value).flatMap(first => first until first + width).map[Slot](Left(_))
+  }
+
+  private def destinations(instruction: DecodedInstruction): Set[Int] = instruction.operation.form match {
+    case _: Form.St | _: Form.Stg | _: Form.Stl | _: Form.Sts | _: Form.Red | _: Form.Stscul | _: Form.Brx |
+        _: Form.Brxu | _: Form.Jmx | _: Form.Jmxu =>
+      Set.empty
+    case _ =>
+      val shuffled = OperandQueries.is[Form.Shfl](instruction.operation)
+      instruction.operands.zipWithIndex.collect {
+        case (_, 0)                                                                      => 0
+        case (operand, 1) if shuffled || OperandQueries.isPredicateAllowingBoth(operand) => 1
+      }.toSet
+  }
+
+  private def operands(instruction: DecodedInstruction, destination: Boolean) = {
+    val positions = destinations(instruction)
+    instruction.operands.zipWithIndex.collect { case (operand, index) if positions(index) == destination => operand }
+  }
+
+  def written(instruction: DecodedInstruction): Set[Slot] = {
+    val width = words(instruction)
+    val bank  = instruction.operation.form match {
+      case _: Form.R2p => predicates
+      case _           => Set.empty[Slot]
+    }
+    operands(instruction, destination = true).flatMap(slots(_, width)).toSet ++ bank
+  }
+
+  def uses(instruction: DecodedInstruction): Set[Slot] = {
+    val width = words(instruction)
+    val guard = instruction.guard.toSet.flatMap { case Instruction.Guard(predicate) => slots(predicate, 1) }
+    val bank  = instruction.operation.form match {
+      case _: Form.P2r => predicates
+      case _           => Set.empty[Slot]
+    }
+    operands(instruction, destination = false).flatMap(slots(_, width)).toSet ++ guard ++ bank
+  }
+
+  def kills(instruction: DecodedInstruction): Set[Slot] =
+    if (instruction.guard.isEmpty) written(instruction) else Set.empty
 }
 
 /** Successors of each instruction of a legacy function, or none where the target is not statically known. */
@@ -98,4 +161,38 @@ private class LegacyFlowGraph(instructions: Vec[DecodedInstruction]) {
   }
 
   def successors(index: Int): Option[Vec[Int]] = framed(index, Nil).map(_.map(_._1))
+
+  private def polls(start: Int, end: Int): Boolean = {
+    val indexes             = start to end
+    def inside(target: Int) = start <= target && target <= end
+    def leaves(index: Int)  = successors(index).forall(next => next.isEmpty || next.exists(!inside(_)))
+    type Live = Map[Int, Set[LegacyFlowGraph.Slot]]
+    def following(index: Int, live: Live): Set[LegacyFlowGraph.Slot] =
+      successors(index).getOrElse(Vec.empty[Int]).filter(inside).flatMap(live.getOrElse(_, Set.empty)).toSet
+    @tailrec
+    def solve(live: Live): Live = {
+      val next = indexes.foldRight(live) { (index, current) =>
+        val instruction = instructions(index)
+        val after       = following(index, current)
+        val relevant    = leaves(index) || LegacyFlowGraph.written(instruction).exists(after)
+        val before      =
+          if (relevant) LegacyFlowGraph.uses(instruction) ++ (after -- LegacyFlowGraph.kills(instruction)) else after
+        current.updated(index, before)
+      }
+      if (next == live) live else solve(next)
+    }
+    val live = solve(Map.empty)
+    !indexes.exists(index => LegacyFlowGraph.effects(instructions(index))) && indexes.exists(index =>
+      LegacyFlowGraph.reads(instructions(index)) &&
+        LegacyFlowGraph.written(instructions(index)).exists(following(index, live))
+    )
+  }
+
+  /** Backward branches closing a loop whose exit depends on a load; such a loop waits on other warps. */
+  def pollingBranches: Set[Int] = instructions.zipWithIndex.collect {
+    case (branch, end)
+        if OperandQueries.is[Form.Bra](branch.operation) &&
+          targets(branch).exists(_.exists(start => start <= end && polls(start, end))) =>
+      branch.address.raw
+  }.toSet
 }

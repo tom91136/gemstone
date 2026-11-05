@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 
 /** Kepler and Maxwell have no YIELD, so a warp polling a flag with a volatile load has to let the warp that sets it run
   * ahead, or the pollers spend the instruction budget the producer needs.
@@ -40,5 +41,17 @@ class LegacySpinSuite extends Suite {
     test(s"sm_$sm fifteen warps polling shared memory stay within the budget of the warp that sets the flag") {
       sharedWaiters(sm)
     }
+  }
+
+  test("a loop polls only when its load reaches the branch that closes it") {
+    def polling(text: String): Set[Int] = LegacyFlowGraph(Listing.program(text).value.instructions).pollingBranches
+    assertEquals(polling("loop: LDG.E R4, [R2.64]; ISETP.NE.AND P0, PT, R4, RZ, PT; @P0 BRA `(loop); EXIT"), Set(32))
+    assertEquals(
+      polling(
+        "loop: LDG.E R4, [R2.64]; ISETP.NE.AND P0, PT, R4, RZ, PT; ISETP.LT.U32.AND P0, PT, R5, 0x4, PT; " +
+          "IADD32I R5, R5, 0x1; @P0 BRA `(loop); EXIT"
+      ),
+      Set.empty[Int]
+    )
   }
 }

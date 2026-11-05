@@ -691,6 +691,29 @@ class ControlFlowSuite extends Suite {
         Vec.tabulate(32)(lane => if (lane < 16) 0 else 6)
       )
     }
+
+    test(s"sm_$sm lanes parked at a reconvergence point vote with the lane whose polling loop runs on") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |LDC.64 R2, c[0x0][0x160]
+          |IMAD.WIDE.U32 R2, R0, 4, R2
+          |ISETP.EQ.U32.AND P3, PT, R0, RZ, PT
+          |ISETP.NE.U32.AND P0, PT, R0, RZ, PT
+          |MOV R5, RZ
+          |SSY `(done)
+          |@P0 NOP.S
+          |loop: LDG.E R4, [R2.64]
+          |IADD32I R5, R5, 0x1
+          |ISETP.LT.U32.AND P1, PT, R5, 0x4, PT
+          |@P1 BRA `(loop)
+          |NOP.S
+          |done: VOTE.ANY R6, PT, P3
+          |STG.E [R2.64], R6
+          |EXIT""".stripMargin,
+        Vec.fill(32)(1)
+      )
+    }
   }
 
   test("BRX adds its register and displacement to the following instruction address") {

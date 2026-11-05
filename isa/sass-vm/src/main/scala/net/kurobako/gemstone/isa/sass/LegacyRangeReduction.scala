@@ -5,34 +5,18 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
+import net.kurobako.gemstone.isa.sass.LegacyFlowGraph.registers
+import net.kurobako.gemstone.isa.sass.LegacyFlowGraph.wideModifier
 import scala.collection.mutable
 
 /** Fuse legacy trigonometric reduction only when its opaque fixed-point result cannot escape. */
 private object LegacyRangeReduction {
   private val ReductionModifiers = Set(Vec(Modifier.SINCOS), Vec(Modifier.EX2))
 
-  private def registers(operand: Operand): Set[Int] = operand match {
-    case Operand.Register(RegisterBank.R, index)                              => Set(index)
-    case Operand.Group(values)                                                => values.flatMap(registers(_)).toSet
-    case Operand.ConstantBank(_, offset)                                      => registers(offset)
-    case Operand.Address(base = base, index = index, descriptor = descriptor) =>
-      (base.toList ++ index.toList ++ descriptor.toList).flatMap(registers(_)).toSet ++
-        base.toList.flatMap(registers(_)).map(_ + 1)
-    case Operand.Unary(value = value) => registers(value)
-    case Operand.Qualified(value, _)  => registers(value)
-    case _                            => Set.empty
-  }
-
   private def indirect(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
     case _: Form.Brx | _: Form.Brxu | _: Form.Jmx => true
     case _                                        => false
   }
-
-  private def wideModifier(instruction: DecodedInstruction): Boolean = instruction.modifiers.exists(
-    PartialFunction.cond(_) {
-      case Modifier.`64` | Modifier.`128` | Modifier.F64 | Modifier.S64 | Modifier.U64 => true
-    }
-  )
 
   private def scalarDestination(instruction: DecodedInstruction): Option[Operand] = {
     val scalar = instruction.operation.form match {

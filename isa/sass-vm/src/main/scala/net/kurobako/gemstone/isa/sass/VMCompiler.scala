@@ -171,7 +171,7 @@ private object VMCompiler {
     }
     val legacyControl   = Option.when(generation != Generation.Modern)(LegacyControlFlow(instructions))
     val pollingBranches =
-      if (generation != Generation.Modern) LegacyFlowGraph.pollingBranches(instructions) else Set.empty[Int]
+      if (generation != Generation.Modern) LegacyFlowGraph(instructions).pollingBranches else Set.empty[Int]
     val legacyTokens                    = legacyControl.fold(Vec.empty[LegacyControlFlow.Setup])(_.setups)
     val addresses                       = instructions.map(_.address.raw).sorted
     val addressSet                      = addresses.toSet
