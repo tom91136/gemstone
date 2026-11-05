@@ -56,13 +56,62 @@ private object VMTexture {
     case TexelFault.OutOfBounds(x, y, z) => memoryFault(s"surface access out of bounds at ($x, $y, $z)")
   }
 
-  private def resolved(memory: DeviceMemory, handle: Long, kind: ObjectKind): Either[Fault, TextureDescriptor] =
-    TextureTable.resolve(handle, kind, memory).left.map {
+  private def decodeKepler(record: Array[Byte]): Option[TextureDescriptor] = {
+    import TextureLayout.Kepler
+    val buffer                     = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
+    def unsigned(field: Int): Long = buffer.getInt(field) & 0xffffffffL
+    val format                     = unsigned(Kepler.Format)
+    val limit                      = unsigned(Kepler.LimitX) + 1
+    for {
+      kind <- ChannelKind.fromCode(((format >>> 16) & 0xff).toInt)
+      texel = TexelFormat(kind, (format & 0xff).toInt, ((format >>> 8) & 0xff).toInt)
+      if texel.isValid && limit % texel.texelBytes == 0 && limit <= Kepler.MaxBytes
+      pitch  = unsigned(Kepler.Pitch)
+      height = buffer.getInt(Kepler.Height)
+      depth  = buffer.getInt(Kepler.LimitZ) + 1
+    } yield TextureDescriptor(
+      kind = ObjectKind.Surface,
+      resource = ResourceKind.Pitch2D,
+      dimensions = if (depth > 1) 3 else if (height > 1) 2 else 1,
+      base = unsigned(Kepler.Base) * Kepler.Alignment,
+      pitch = pitch,
+      slicePitch = pitch * height,
+      width = (limit / texel.texelBytes).toInt,
+      height = height,
+      depth = depth,
+      format = texel,
+      address = Vector.fill(3)(AddressMode.Clamp),
+      filter = FilterMode.Point,
+      readMode = ReadMode.ElementType,
+      srgb = false,
+      normalisedCoordinates = false,
+      border = Vector.fill(4)(0f)
+    )
+  }
+
+  private def keplerSurface(memory: DeviceMemory, handle: Long): Either[TextureTable.Failure, TextureDescriptor] = {
+    val offset = handle - TextureLayout.KeplerTable.BaseAddress
+    val slot   = offset / TextureLayout.Kepler.Bytes
+    if (offset % TextureLayout.Kepler.Bytes != 0 || slot >= TextureLayout.Table.Entries)
+      Left(TextureTable.Failure.InvalidHandle(handle))
+    else
+      memory
+        .read(handle, TextureLayout.Kepler.Bytes)
+        .toRight(TextureTable.Failure.Unreadable(handle))
+        .flatMap(record => decodeKepler(record).toRight(TextureTable.Failure.NotLive(handle)))
+  }
+
+  private def resolved(memory: DeviceMemory, handle: Long, kind: ObjectKind): Either[Fault, TextureDescriptor] = {
+    val result =
+      if (kind == ObjectKind.Surface && handle >= TextureLayout.KeplerTable.BaseAddress) keplerSurface(memory, handle)
+      else TextureTable.resolve(handle, kind, memory)
+    result.left.map {
       case TextureTable.Failure.InvalidHandle(found) => memoryFault(s"invalid texture handle 0x${found.toHexString}")
       case TextureTable.Failure.NotLive(found)      => memoryFault(s"texture handle 0x${found.toHexString} is not live")
       case TextureTable.Failure.Unreadable(address) =>
         memory.failure.getOrElse(memoryFault(s"texture table unreadable at 0x${address.toHexString}"))
     }
+  }
 
   private def words(texel: Texel, element: Element): Array[Byte] = {
     val float = element match {

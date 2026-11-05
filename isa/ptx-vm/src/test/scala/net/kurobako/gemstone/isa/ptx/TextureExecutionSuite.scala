@@ -16,14 +16,21 @@ class TextureExecutionSuite extends Suite {
 
   private val OutputOffset = 4096L
 
+  private val KeplerSurface = 0x8000000000L
+
   private class TextureMemory extends DeviceMemory(8192, GuestAddress(Base)) {
     allocate(AllocationId(2), 4096, GuestAddress(TextureLayout.Table.BaseAddress))
+    allocate(AllocationId(3), 2 * TextureLayout.Kepler.Bytes, GuestAddress(TextureLayout.KeplerTable.BaseAddress))
+    allocate(AllocationId(4), 4096, GuestAddress(KeplerSurface))
 
     def put(address: Long, bytes: Array[Byte]): Unit =
       assertEquals(writeBytes(GuestAddress(address), Vec.unsafeWrapArray(bytes)), Right(()))
 
     def install(handle: Int, descriptor: TextureDescriptor): Unit =
       put(TextureTable.entryAddress(handle.toLong).get, descriptor.encode)
+
+    def installKepler(slot: Int, record: Array[Byte]): Unit =
+      put(TextureLayout.KeplerTable.BaseAddress + slot.toLong * TextureLayout.Kepler.Bytes, record)
 
     def outputWords(count: Int): Vec[Long] = words(OutputOffset, count)
   }
@@ -37,9 +44,16 @@ class TextureExecutionSuite extends Suite {
     buffer.array()
   }
 
-  private def run(body: String, memory: TextureMemory, handle: Long = 1L, threads: Int > 0 = 1): Either[Fault, Unit] = {
-    val source = s""".version 8.0
-      .target sm_80
+  private def run(
+      body: String,
+      memory: TextureMemory,
+      handle: Long = 1L,
+      threads: Int > 0 = 1,
+      version: String = "8.0",
+      target: String = "sm_80"
+  ): Either[Fault, Unit] = {
+    val source = s""".version $version
+      .target $target
       .address_size 64
       .visible .entry k(.param .u64 out, .param .u64 h) {
         .reg .b32 %r<16>;
@@ -271,6 +285,20 @@ class TextureExecutionSuite extends Suite {
   private def surface(width: Int, height: Int = 1, depth: Int = 1, dimensions: Int = 1) =
     descriptor(U32x1, width, height, depth, dimensions = dimensions, kind = ObjectKind.Surface)
 
+  private def keplerRecord(width: Int, height: Int, depth: Int, pitch: Int): Array[Byte] = {
+    val record = ByteBuffer.allocate(TextureLayout.Kepler.Bytes).order(ByteOrder.LITTLE_ENDIAN)
+    record.putInt(TextureLayout.Kepler.Base, (KeplerSurface / TextureLayout.Kepler.Alignment).toInt)
+    record.putInt(TextureLayout.Kepler.Format, (TextureLayout.Channel.Unsigned << 16) | (1 << 8) | 32)
+    record.putInt(TextureLayout.Kepler.LimitX, width * 4 - 1)
+    record.putInt(TextureLayout.Kepler.Pitch, pitch)
+    record.putInt(TextureLayout.Kepler.LimitY, height - 1)
+    record.putInt(TextureLayout.Kepler.LimitZ, depth - 1)
+    record.putInt(TextureLayout.Kepler.Height, height)
+    record.array()
+  }
+
+  private val keplerHandle = TextureLayout.KeplerTable.BaseAddress + TextureLayout.Kepler.Bytes
+
   test("suld.b.1d.b32 reads a word by byte offset") {
     val memory = memoryWith(le(1f, 2f, 3f, 4f), 1 -> surface(4))
     val body   = s"""mov.u32 %r8, 8;
@@ -307,6 +335,29 @@ class TextureExecutionSuite extends Suite {
       $storeFour"""
     assertEquals(run(body, memory), Right(()))
     assertEquals(memory.outputWords(2), Vec.from(floatBits(7f, 8f)))
+  }
+
+  test("suld.b.1d.b32 reads a kepler surface record") {
+    val memory = TextureMemory()
+    memory.put(KeplerSurface, le(1f, 2f, 3f, 4f))
+    memory.installKepler(1, keplerRecord(width = 4, height = 1, depth = 1, pitch = 256))
+    val body = s"""mov.u32 %r8, 8;
+      suld.b.1d.b32.trap {%r0}, [%rd2, {%r8}];
+      $storeFour"""
+    assertEquals(run(body, memory, handle = keplerHandle, version = "8.8", target = "sm_35"), Right(()))
+    assertEquals(memory.outputWords(1), Vec.from(floatBits(3f)))
+  }
+
+  test("suld.b.2d.b32 steps rows by the kepler record pitch") {
+    val memory = TextureMemory()
+    memory.put(KeplerSurface, le(1f, 2f) ++ Array.ofDim[Byte](248) ++ le(3f, 4f))
+    memory.installKepler(1, keplerRecord(width = 2, height = 2, depth = 1, pitch = 256))
+    val body = s"""mov.u32 %r8, 4;
+      mov.u32 %r9, 1;
+      suld.b.2d.b32.trap {%r0}, [%rd2, {%r8, %r9}];
+      $storeFour"""
+    assertEquals(run(body, memory, handle = keplerHandle, version = "8.8", target = "sm_35"), Right(()))
+    assertEquals(memory.outputWords(1), Vec.from(floatBits(4f)))
   }
 
   test("sust.b.2d.v4.b32 writes a texel") {
