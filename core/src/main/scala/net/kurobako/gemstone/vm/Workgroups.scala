@@ -24,6 +24,12 @@ trait Workgroups {
   /** The most tasks of one [[parallelFor]] that run at once. */
   def concurrency: Int > 0
 
+  /** The most tasks of one [[parallelFor]] that run at once once a task has called [[coschedule]]. */
+  def residency: Int > 0 = concurrency
+
+  /** Called from a running task that waits on its peers: starts the rest of its [[parallelFor]] alongside it. */
+  def coschedule(): Unit = ()
+
   def shouldParallel(taskCount: Long >= 0, workItemsPerTask: Long >= 0): Boolean
   def parallelFor(
       taskCount: Long >= 0

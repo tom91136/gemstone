@@ -22,7 +22,8 @@ object Dispatch {
     val total: Long >= 0 = geometry.groupTotal
     val first            = AtomicReference(Option.empty[E])
     val parallel         = workgroups.shouldParallel(total, geometry.groupVolume)
-    val pacing = if (parallel) Pacing(math.min(total.raw, workgroups.concurrency.toLong).toInt) else Pacing.Unpaced
+    val pacing = if (parallel) Pacing(math.min(total.raw, workgroups.residency.toLong).toInt, workgroups.coschedule)
+    else Pacing.Unpaced
     Pacing.enclosing.parked {
       workgroups.forEach(total, parallel) { index =>
         val pace = pacing.join()

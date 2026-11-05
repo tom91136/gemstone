@@ -10,6 +10,8 @@ import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 
 object WorkerPool {
+  val Residency: Int = 128
+
   trait Task extends Runnable {
     def reject(error: Throwable): Unit
   }
@@ -43,6 +45,8 @@ class WorkerPool(
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var failure: Option[Fault] = None
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var coscheduled = false
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     @volatile var finished: Boolean           = count == 0L
     val observed: Option[mutable.Set[String]] = measurement.map(_ => mutable.Set.empty[String])
   }
@@ -51,6 +55,8 @@ class WorkerPool(
   private val jobComplete = lock.newCondition()
   private val queue       = mutable.ArrayDeque.empty[Job]
   private val inWorker    = ThreadLocal.withInitial[Boolean](() => false)
+  private val running     = ThreadLocal.withInitial[Option[Job]](() => None)
+  private val extras      = mutable.Set.empty[Thread]
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var closed = false
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -86,6 +92,7 @@ class WorkerPool(
       job.active += 1
       job.observed.foreach(_ += Thread.currentThread().getName)
       if (job.next < job.count) { queue.append(job); workReady.signal() }
+      if (job.coscheduled) spawn(job)
       Some((job, index))
     }
   }
@@ -94,6 +101,7 @@ class WorkerPool(
   private def execute(work: (Job, Long >= 0)): Unit = {
     val (job, index)                 = work
     var outcome: Either[Fault, Unit] = Right(())
+    running.set(Some(job))
     try outcome = job.task(index)
     catch {
       case NonFatal(error) =>
@@ -103,6 +111,7 @@ class WorkerPool(
         outcome = Left(Fault.Backend(s"execution worker failed: ${throwables.detail(error)}"))
         throw error
     } finally {
+      running.remove()
       // A task may throw a fatal error such as InterruptedException; the job
       // still has to be accounted for or it never completes.
       val completed = outcome
@@ -119,6 +128,29 @@ class WorkerPool(
           workReady.signalAll()
         }
       }
+    }
+  }
+
+  private def spawn(job: Job): Unit = lock.withLock {
+    if (!closed && job.next < job.count && extras.size < WorkerPool.Residency - parallelism) {
+      val thread = Thread(() => helperLoop(job), s"gemstone-worker-extra-${extras.size}")
+      thread.setDaemon(true)
+      extras += thread
+      thread.start()
+    }
+  }
+
+  private def helperLoop(job: Job): Unit = {
+    inWorker.set(true)
+    try while (!closed && !job.finished) take(Some(job)).foreach(execute(_))
+    catch {
+      case _: InterruptedException if closed => Thread.currentThread().interrupt()
+      case error: Throwable                  =>
+        fail(error)
+        throw error
+    } finally {
+      inWorker.remove()
+      lock.withLock { val _ = extras -= Thread.currentThread() }
     }
   }
 
@@ -189,6 +221,13 @@ class WorkerPool(
   // A worker awaiting a nested job runs only that job's tasks, so one job never runs on more than the workers.
   override def concurrency: Int > 0 = parallelism
 
+  override def residency: Int > 0 = math.max(parallelism.raw, WorkerPool.Residency).unsafe[Int > 0]
+
+  override def coschedule(): Unit = running.get().foreach { job =>
+    lock.withLock { job.coscheduled = true }
+    spawn(job)
+  }
+
   override def shouldParallel(taskCount: Long >= 0, workItemsPerTask: Long >= 0): Boolean =
     parallelism > 1 && taskCount > 1L &&
       (taskCount >= minGroups || workItemsPerTask >= minWorkItems)
@@ -222,7 +261,9 @@ class WorkerPool(
       workReady.signalAll()
       jobComplete.signalAll()
     }
+    val helpers = lock.withLock(extras.toList)
     threads.foreach(_.interrupt())
-    threads.view.filterNot(_ eq Thread.currentThread()).foreach(_.join())
+    helpers.foreach(_.interrupt())
+    threads.view.concat(helpers).filterNot(_ eq Thread.currentThread()).foreach(_.join())
   }
 }

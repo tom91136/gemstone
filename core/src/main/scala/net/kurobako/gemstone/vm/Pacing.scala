@@ -51,7 +51,7 @@ object Pacing {
   * not started, has finished, or is [[Pace.parked]] holds no slot clock and holds nobody back.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-class Pacing(private val slots: Int) {
+class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
   import Pacing.*
 
   @volatile private var active = false
@@ -69,7 +69,7 @@ class Pacing(private val slots: Int) {
   def pending: Boolean = !active && slots > 1
 
   /** Starts pacing: from now on every running group's steps count. */
-  def engage(): Unit = if (pending) active = true
+  def engage(): Unit = if (pending) { active = true; onEngage() }
 
   /** The pace of a group starting now, on a free slot, at the clock of the slowest group still running. */
   def join(): Pace =

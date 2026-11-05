@@ -125,4 +125,21 @@ class PacingSuite extends Suite {
     }
     assertEquals(result, Right(()))
   }
+
+  test("groups that wait on a peer which has not started all run, however few the workers") {
+    val groups   = 4
+    val geometry = LaunchGeometry.forLaunch(LaunchGeometry.Dimensions(1, 1, 1), LaunchGeometry.Dimensions(4, 1, 1))
+      .fold(message => fail(message), identity)
+    val arrived = AtomicInteger()
+    val result  = Using.resource(WorkerPool(2)) { pool =>
+      Dispatch.forEachGroup(geometry, pool) { (_, _, pace) =>
+        pace.engage()
+        val _        = arrived.incrementAndGet()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L)
+        while (arrived.get() < groups && System.nanoTime() < deadline) pace.step()
+        if (arrived.get() == groups) Right(()) else Left(Fault.Hang("a group waited on a peer that never started"))
+      }
+    }
+    assertEquals(result, Right(()))
+  }
 }
