@@ -9,6 +9,7 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.language.implicitConversions
 
 /** Image sampling through sampler descriptors: address modes, filters, levels, offsets, depth comparison, gathers and
   * image kinds. Reference values follow the ISA documents' filtering rules, with filter weights of 1/256 steps, and the
@@ -17,6 +18,15 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class AMDGPUSamplingSuite extends Suite {
 
   private val Identity = 0xfacL
+
+  // a tagged lane, as Scala.js cannot tell a whole-number Float from an Int at runtime
+  private enum Lane {
+    case Bits(value: Int)
+    case Real(value: Float)
+  }
+
+  private given Conversion[Int, Lane]   = Lane.Bits(_)
+  private given Conversion[Float, Lane] = Lane.Real(_)
 
   private def float(value: Float): Int = java.lang.Float.floatToRawIntBits(value)
 
@@ -130,15 +140,15 @@ class AMDGPUSamplingSuite extends Suite {
 
   private val image2x2 = Seq(10f, 20f, 30f, 40f).map(float(_))
 
-  /** Registers v0 up from the per-lane `values`, as float bits unless an `Int`. */
-  private def lanesOf(values: Seq[Seq[Int | Float]], mask: String): String = {
+  /** Registers v0 up from the per-lane `values`, as float bits unless `Bits`. */
+  private def lanesOf(values: Seq[Seq[Lane]], mask: String): String = {
     val registers = values.map(_.size).max
     (0 until registers).map(register => s"v_mov_b32 v$register, 0\n").mkString + values.zipWithIndex.map {
       case (lane, index) =>
         lane.zipWithIndex.map { case (value, register) =>
           val bits = value match {
-            case integer: Int     => integer
-            case component: Float => float(component)
+            case Lane.Bits(integer)   => integer
+            case Lane.Real(component) => float(component)
           }
           s"""v_cmp_eq_u32 $mask, $index, v8
              |v_mov_b32 v9, $bits
@@ -154,7 +164,7 @@ class AMDGPUSamplingSuite extends Suite {
   private def sampled(
       resource: Seq[Long],
       samplerWords: Seq[Long],
-      coordinates: Seq[Seq[Int | Float]],
+      coordinates: Seq[Seq[Lane]],
       data: Seq[Int],
       instruction: String = Sample2d,
       target: Target = gfx1030
@@ -170,7 +180,7 @@ class AMDGPUSamplingSuite extends Suite {
     )
   )
 
-  private def at(x: Float, y: Float): Seq[Int | Float] = Seq(x, y)
+  private def at(x: Float, y: Float): Seq[Lane] = Seq(x, y)
 
   private def red(out: Vec[Int], lanes: Int): Seq[Float] = (0 until lanes).map(index => toFloat(out(index * 4)))
 
@@ -227,7 +237,7 @@ class AMDGPUSamplingSuite extends Suite {
       sampled(
         image(Float32, width = 4, height = 1, pitch = 4, kind = 8),
         sampler(clamp = clamp, filter = filter, border = border, unnormalised = false),
-        coordinates.map(c => Seq[Int | Float](c)),
+        coordinates.map(c => Seq[Lane](c)),
         texelFloats(line*),
         "image_sample_lz v2, v0, s[16:23], s[24:27] dmask:0x1 dim:SQ_RSRC_IMG_1D"
       ),
@@ -307,7 +317,7 @@ class AMDGPUSamplingSuite extends Suite {
     sampled(
       image(Float32, width = 4, height = 4, pitch = 64, levels = 3),
       samplerWords,
-      lods.map(lod => Seq[Int | Float](0.75f, 0.25f, lod)),
+      lods.map(lod => Seq[Lane](0.75f, 0.25f, lod)),
       mipTexels,
       "image_sample_l v2, v[0:2], s[16:23], s[24:27] dmask:0x1 dim:SQ_RSRC_IMG_2D"
     ),
@@ -330,13 +340,13 @@ class AMDGPUSamplingSuite extends Suite {
     assertEquals(mipSamples(sampler(mip = 1, maxLod = 2f, bias = 1f, unnormalised = false), Seq(0f)), Seq(201f))
   }
 
-  private val gradientPadding = Seq[Int | Float](0.75f, 0.25f)
+  private val gradientPadding = Seq[Lane](0.75f, 0.25f)
 
   private def gradientSamples(gradients: Seq[Float]): Seq[Float] = red(
     sampled(
       image(Float32, width = 4, height = 4, pitch = 64, levels = 3),
       sampler(mip = 1, maxLod = 2f, unnormalised = false),
-      gradients.grouped(4).map(g => g.map(v => v: Int | Float) ++ gradientPadding).toSeq,
+      gradients.grouped(4).map(g => g.map(v => v: Lane) ++ gradientPadding).toSeq,
       mipTexels,
       "image_sample_d v2, v[0:5], s[16:23], s[24:27] dmask:0x1 dim:SQ_RSRC_IMG_2D"
     ),
@@ -354,15 +364,15 @@ class AMDGPUSamplingSuite extends Suite {
 
   private def quad(
       instruction: String,
-      extra: Seq[Int | Float],
+      extra: Seq[Lane],
       samplerWords: Seq[Long],
-      trailing: Seq[Int | Float] = Seq.empty
+      trailing: Seq[Lane] = Seq.empty
   ): Seq[Float] =
     red(
       sampled(
         image(Float32, width = 4, height = 4, pitch = 64, levels = 3),
         samplerWords,
-        Seq((0f, 0f), (0.5f, 0f), (0f, 0.5f), (0.5f, 0.5f)).map((x, y) => extra ++ Seq[Int | Float](x, y) ++ trailing),
+        Seq((0f, 0f), (0.5f, 0f), (0f, 0.5f), (0.5f, 0.5f)).map((x, y) => extra ++ Seq[Lane](x, y) ++ trailing),
         mipTexels,
         instruction
       ),
@@ -406,7 +416,7 @@ class AMDGPUSamplingSuite extends Suite {
     val out = sampled(
       image(Float32, width = 2, height = 2, pitch = 2),
       sampler(),
-      Seq(0x0101, 0x3f, 0x01, 0x0100).map(offset => Seq[Int | Float](offset, 0.5f, 0.5f)),
+      Seq(0x0101, 0x3f, 0x01, 0x0100).map(offset => Seq[Lane](offset, 0.5f, 0.5f)),
       image2x2,
       "image_sample_lz_o v2, v[0:2], s[16:23], s[24:27] dmask:0x1 dim:SQ_RSRC_IMG_2D"
     )
@@ -414,7 +424,7 @@ class AMDGPUSamplingSuite extends Suite {
   }
 
   test("RDNA2 depth comparison filters the pass or fail of each texel against the reference") {
-    def compare(function: Long, filter: Long, lanes: Seq[Seq[Int | Float]]): Seq[Float] = red(
+    def compare(function: Long, filter: Long, lanes: Seq[Seq[Lane]]): Seq[Float] = red(
       sampled(
         image(Float32, width = 2, height = 2, pitch = 2),
         sampler(compare = function, filter = filter),
@@ -424,15 +434,15 @@ class AMDGPUSamplingSuite extends Suite {
       ),
       lanes.size
     )
-    val texel = (reference: Float) => Seq[Int | Float](reference, 0.5f, 0.5f)
+    val texel = (reference: Float) => Seq[Lane](reference, 0.5f, 0.5f)
     assertEquals(compare(function = 3, filter = 0, lanes = Seq(texel(5f), texel(15f), texel(10f))), Seq(1f, 0f, 1f))
     assertEquals(compare(function = 2, filter = 0, lanes = Seq(texel(5f), texel(10f))), Seq(0f, 1f))
     assertEquals(compare(function = 1, filter = 0, lanes = Seq(texel(5f), texel(10f))), Seq(1f, 0f))
     assertEquals(compare(function = 0, filter = 0, lanes = Seq(texel(5f))), Seq(0f))
     assertEquals(compare(function = 7, filter = 0, lanes = Seq(texel(50f))), Seq(1f))
-    assertEquals(compare(function = 3, filter = 1, lanes = Seq(Seq[Int | Float](25f, 1f, 1f))), Seq(0.5f))
-    assertEquals(compare(function = 4, filter = 1, lanes = Seq(Seq[Int | Float](25f, 1f, 1f))), Seq(0.5f))
-    assertEquals(compare(function = 3, filter = 1, lanes = Seq(Seq[Int | Float](25f, 0.5f, 1f))), Seq(0.5f))
+    assertEquals(compare(function = 3, filter = 1, lanes = Seq(Seq[Lane](25f, 1f, 1f))), Seq(0.5f))
+    assertEquals(compare(function = 4, filter = 1, lanes = Seq(Seq[Lane](25f, 1f, 1f))), Seq(0.5f))
+    assertEquals(compare(function = 3, filter = 1, lanes = Seq(Seq[Lane](25f, 0.5f, 1f))), Seq(0.5f))
   }
 
   test("RDNA2 gathers return the four texels around the coordinate of one channel, bottom left last") {
@@ -468,7 +478,7 @@ class AMDGPUSamplingSuite extends Suite {
     val compared = sampled(
       image(Float32, width = 2, height = 2, pitch = 2),
       sampler(compare = 3),
-      Seq(Seq[Int | Float](25f, 1f, 1f)),
+      Seq(Seq[Lane](25f, 1f, 1f)),
       image2x2,
       "image_gather4_c_lz v[2:5], v[0:2], s[16:23], s[24:27] dmask:0x1 dim:SQ_RSRC_IMG_2D"
     )
@@ -477,7 +487,7 @@ class AMDGPUSamplingSuite extends Suite {
 
   test("RDNA2 array layers round to the nearest layer, clamp to the array, and filtering stays within a layer") {
     val layers = Seq.tabulate(384)(index => float(1000f * (index / 128) + 10f * ((index % 128) / 64) + (index % 64)))
-    def layered(filter: Long, lanes: Seq[Seq[Int | Float]]): Seq[Float] = red(
+    def layered(filter: Long, lanes: Seq[Seq[Lane]]): Seq[Float] = red(
       sampled(
         image(Float32, width = 2, height = 2, pitch = 2, kind = 13, depth = 2),
         sampler(filter = filter),
@@ -491,22 +501,22 @@ class AMDGPUSamplingSuite extends Suite {
       layered(
         0,
         Seq(
-          Seq[Int | Float](0.5f, 0.5f, 0f),
-          Seq[Int | Float](1.5f, 0.5f, 1f),
-          Seq[Int | Float](0.5f, 1.5f, 2f),
-          Seq[Int | Float](0.5f, 0.5f, 0.6f),
-          Seq[Int | Float](0.5f, 0.5f, 7f),
-          Seq[Int | Float](0.5f, 0.5f, -3f)
+          Seq[Lane](0.5f, 0.5f, 0f),
+          Seq[Lane](1.5f, 0.5f, 1f),
+          Seq[Lane](0.5f, 1.5f, 2f),
+          Seq[Lane](0.5f, 0.5f, 0.6f),
+          Seq[Lane](0.5f, 0.5f, 7f),
+          Seq[Lane](0.5f, 0.5f, -3f)
         )
       ),
       Seq(0f, 1001f, 2010f, 1000f, 2000f, 0f)
     )
-    assertEquals(layered(1, Seq(Seq[Int | Float](1f, 1f, 1f))), Seq(1005.5f))
+    assertEquals(layered(1, Seq(Seq[Lane](1f, 1f, 1f))), Seq(1005.5f))
   }
 
   test("RDNA2 volumes filter the depth axis by the Z filter and the other axes by the XY filter") {
     val texels = Seq.tabulate(256)(index => float((index / 128) * 4f + ((index % 128) / 64) * 2f + (index % 64) + 1f))
-    def volume(filter: Long, zFilter: Long, lanes: Seq[Seq[Int | Float]]): Seq[Float] = red(
+    def volume(filter: Long, zFilter: Long, lanes: Seq[Seq[Lane]]): Seq[Float] = red(
       sampled(
         image(Float32, width = 2, height = 2, pitch = 2, kind = 10, depth = 1),
         sampler(filter = filter, zFilter = zFilter),
@@ -516,9 +526,9 @@ class AMDGPUSamplingSuite extends Suite {
       ),
       lanes.size
     )
-    assertEquals(volume(filter = 0, zFilter = 1, lanes = Seq(Seq[Int | Float](0.5f, 1.5f, 1.5f))), Seq(7f))
-    assertEquals(volume(filter = 1, zFilter = 2, lanes = Seq(Seq[Int | Float](1f, 1f, 1f))), Seq(4.5f))
-    assertEquals(volume(filter = 1, zFilter = 1, lanes = Seq(Seq[Int | Float](1f, 1f, 1f))), Seq(6.5f))
+    assertEquals(volume(filter = 0, zFilter = 1, lanes = Seq(Seq[Lane](0.5f, 1.5f, 1.5f))), Seq(7f))
+    assertEquals(volume(filter = 1, zFilter = 2, lanes = Seq(Seq[Lane](1f, 1f, 1f))), Seq(4.5f))
+    assertEquals(volume(filter = 1, zFilter = 1, lanes = Seq(Seq[Lane](1f, 1f, 1f))), Seq(6.5f))
   }
 
   test("RDNA2 samples convert texels through the format and destination selects, and write only the dmask channels") {
@@ -547,7 +557,7 @@ class AMDGPUSamplingSuite extends Suite {
     val out     = sampled(
       image(Float32, width = 4, height = 4, pitch = 64, levels = 3),
       sampler(mip = 1, maxLod = 2f, unnormalised = false, wide = true),
-      Seq(Seq[Int | Float](0.75f, 0.25f, 1f), Seq[Int | Float](0.75f, 0.25f, 5f)),
+      Seq(Seq[Lane](0.75f, 0.25f, 1f), Seq[Lane](0.75f, 0.25f, 5f)),
       mipTexels,
       "image_sample_l v2, v[0:2], s[16:23], s[24:27] dmask:0x1 dim:SQ_RSRC_IMG_2D",
       gfx1100
@@ -598,7 +608,7 @@ class AMDGPUSamplingSuite extends Suite {
     val levelled = sampled(
       legacy,
       sampler(filter = 1, maxLod = 2f),
-      Seq(Seq[Int | Float](1f, 1f, 3f)),
+      Seq(Seq[Lane](1f, 1f, 3f)),
       image2x2,
       "image_sample_l v2, v[0:2], s[16:23], s[24:27] dmask:0x1",
       gfx906
