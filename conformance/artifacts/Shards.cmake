@@ -44,7 +44,7 @@ endfunction()
 # 0 shards leave a group out of CI. The SYCL build count is the SYCL CTS shard count in cts/sycl/Shards.cmake; the
 # build rejects a shard past it and Merge.cmake rejects a missing one.
 include("${CMAKE_CURRENT_LIST_DIR}/../cts/sycl/Shards.cmake")
-shard_group(cuda ARCHITECTURES 2 RUN 10 PATTERN "^(cuda-|openacc/)")
+shard_group(cuda ARCHITECTURES 1 RUN 10 PATTERN "^(cuda-|openacc/)")
 shard_group(amd ARCHITECTURES 2 RUN 3 PATTERN "^(hip|hsa)/")
 shard_group(opencl BUILD 1 RUN 1 CASES 4 PATTERN "^opencl$")
 shard_group(levelzero BUILD 1 RUN 1 PATTERN "^levelzero$")

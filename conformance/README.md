@@ -84,7 +84,7 @@ miniapps.
 emulation shards as a GitHub Actions matrix.
 Its policy groups routes by the first pattern they match, and a route that matches none goes to the first group's
 shard 0 with a warning. Each group cuts its architectures, in route order, into equal consecutive slices. The
-cuda and amd build shards hold at most two architectures each, so their count follows the routes. The run shards use
+cuda build shards hold one architecture and amd ones at most two, so their count follows the routes. The run shards use
 the same policy, so they cover exactly the routes the build shards built. A shard names its routes in
 `CONFORMANCE_SHARD_ROUTE_LIST`, so its own first route of each support closure builds that closure; the closures are
 identical, so the shards' artifacts unpack over each other. CI packs each closure once: the lowest build shard holding
