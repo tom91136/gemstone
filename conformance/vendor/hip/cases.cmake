@@ -42,6 +42,9 @@ set(conformance_vendor_expected
   "HIP-Basic/texture_management|bin[0] = 151552, bin[1] = 151552, bin[2] = 151552, bin[3] = 151552, bin[4] = 151552, bin[5] = 151552, bin[6] = 139264\\nsum of bins: 1048576"
   "HIP-Basic/device_query|(2147483647, 65536, 65536)")
 
+# examples that sample images, which gfx94x and gfx95x cannot (see imageInstructions in native/hsa device_model.hpp)
+set(conformance_vendor_image_examples "HIP-Basic/texture_management")
+
 set(conformance_vendor_cases)
 set(conformance_vendor_examples)
 foreach(directory IN LISTS conformance_vendor_example_directories)
@@ -63,6 +66,9 @@ foreach(directory IN LISTS conformance_vendor_example_directories)
     install(TARGETS "${target}" RUNTIME DESTINATION vendor-hip COMPONENT architecture)
     get_target_property(source_directory "${target}" SOURCE_DIR)
     file(RELATIVE_PATH example "${rocm_examples_staged}" "${source_directory}")
+    if(example IN_LIST conformance_vendor_image_examples AND conformance_vendor_architecture MATCHES "^gfx9[45]")
+      set(unsupported "${conformance_vendor_architecture} has no image instructions")
+    endif()
     conformance_vendor_lookup(conformance_vendor_expected "${example}" expected)
     set(variants)
     foreach(entry IN LISTS conformance_vendor_arguments)
