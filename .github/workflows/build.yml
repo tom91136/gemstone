@@ -129,21 +129,13 @@ jobs:
         if: always()
         # saved keys name their contents, so a cache that grew after a partial save is saved again
         run: |
-          for cache in references conformance; do
-            echo "$cache=$(find .cache/$cache -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          done
+          echo "references=$(find .cache/references -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Save references
         if: always()
         uses: actions/cache/save@v6
         with:
           path: .cache/references
           key: ${{ steps.references.outputs.cache-primary-key }}-${{ steps.downloads.outputs.references }}
-      - name: Save conformance dependencies
-        if: always()
-        uses: actions/cache/save@v6
-        with:
-          path: .cache/conformance
-          key: ${{ steps.dependencies.outputs.cache-primary-key }}-${{ steps.downloads.outputs.conformance }}
       - name: Pack
         if: ${{ !cancelled() }}
         run: |
@@ -151,7 +143,7 @@ jobs:
           pack() { tar -chf - "${@:2}" | zstd -T0 -q -12 --long=30 -f -o "target/ci/$1.tar.zst"; }
           mkdir -p target/ci
           pack build target/native/build target/references/api-native target/references/level-zero \
-            target/conformance/host target/out/jvm
+            target/references/sass target/references/amdgpu/amd/xml target/conformance/host target/out/jvm
           ls -l target/ci
       - name: Upload
         if: ${{ !cancelled() && !env.ACT }}
@@ -253,15 +245,7 @@ jobs:
       - *sbt
       - *tools-cache
       - *tools
-      - name: Restore artifact dependencies
-        id: dependencies
-        uses: actions/cache/restore@v6
-        with:
-          path: .cache/conformance
-          key: conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}
-          restore-keys: |
-            conformance-artifact-dependencies-${{ hashFiles('conformance/dependencies.cmake') }}-
-            conformance-artifact-dependencies-
+      - *dependencies
       - name: llvm-offload key
         id: offload
         if: ${{ startsWith(matrix.shard, 'cuda-') }}
@@ -296,7 +280,7 @@ jobs:
         id: downloads
         if: ${{ always() && strategy.job-index == 0 }}
         run: echo "conformance=$(find .cache/conformance -type f -printf '%P %s\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      - name: Save artifact dependencies
+      - name: Save conformance dependencies
         if: ${{ always() && strategy.job-index == 0 }}
         uses: actions/cache/save@v6
         with:
