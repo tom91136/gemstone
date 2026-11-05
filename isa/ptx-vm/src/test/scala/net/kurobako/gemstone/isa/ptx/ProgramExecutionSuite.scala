@@ -114,7 +114,14 @@ class ProgramExecutionSuite extends Suite {
 
   test("module shared allocations cannot escape the shared aperture") {
     val bytes  = VMAddressSpace.SharedLimit - VMAddressSpace.SharedBase + 1L
-    val parsed = Parser.parse(s".shared .b8 oversized[$bytes];").value
+    val parsed = Parser.parse(
+      s""".shared .b8 oversized[$bytes];
+         |.visible .entry reach() {
+         |  .reg .u32 %r<1>;
+         |  mov.u32 %r0, oversized;
+         |  ret;
+         |}""".stripMargin
+    ).value
     assert(LoadedProgram.load(parsed, text = execution.text).left.exists(_.message.contains("shared address aperture")))
   }
 

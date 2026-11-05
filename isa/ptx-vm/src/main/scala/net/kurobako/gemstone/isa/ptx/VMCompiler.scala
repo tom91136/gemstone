@@ -38,16 +38,20 @@ private object VMCompiler {
     }
   }
 
-  /** Program-wide facts shared by every kernel compiled from one linked module. Shared variables, whether declared at
-    * module scope or inside a routine, have one packed layout with dynamic shared storage after every sized variable.
+  /** Shared storage of one kernel: the address of each variable by declaring routine (`None` for module scope), and the
+    * bytes before any dynamic launch allocation.
+    */
+  case class KernelShared(addresses: Map[Option[NonEmpty[String]], Map[NonEmpty[String], Long]], extent: Long)
+
+  /** Program-wide facts shared by every kernel compiled from one linked module. Each entry has its own shared layout
+    * from the base of the shared window, holding the variables of the routines it reaches and the module-scope
+    * variables they name, with dynamic shared storage after every sized variable.
     */
   case class Module(
       entries: Map[NonEmpty[String], Statement.Entry],
       functions: Map[NonEmpty[String], Statement.Function],
       functionTable: FunctionTable,
-      shared: Map[NonEmpty[String], Long],
-      routineShared: Map[NonEmpty[String], Map[NonEmpty[String], Long]],
-      sharedExtents: Map[Option[NonEmpty[String]], Long],
+      sharedLayouts: Map[NonEmpty[String], KernelShared],
       initialisedFunctions: Vec[NonEmpty[String]],
       architecture: Int,
       text: Instruction => Option[String]
@@ -70,24 +74,45 @@ private object VMCompiler {
     val module = program.statements.collect {
       case value: Statement.Data if value.addressSpace == DataAddressSpace.Shared => value
     }.groupMapReduce(_.name)(identity)(Linker.preferDefinition(_, _)).values.toVec.sortBy(_.name.raw)
-    val routines = (entries.view.mapValues(_.body) ++ functions.view.mapValues(_.body)).toVec.sortBy(_._1.raw)
-      .map((name, body) => name -> body.fold(Vec.empty[Statement.Data])(sharedDeclarations(_)))
+    val routines = (entries.view.mapValues(_.body) ++ functions.view.mapValues(_.body)).map((name, body) =>
+      name -> RoutineShared(
+        body.fold(Vec.empty[Statement.Data])(sharedDeclarations(_)),
+        body.fold(Set.empty[NonEmpty[String]])(referencedSymbols(_).toSet)
+      )
+    ).toMap
     val initialised = program.statements.collect {
       case value: Statement.Data if value.addressSpace != DataAddressSpace.Shared => value.initialiser
     }.flatten.flatMap(expressionSymbols(_)).filter(table.address(_).nonEmpty).distinct
-    SharedLayout(module, routines).map((shared, routineShared, sharedExtents) =>
-      Module(
-        entries,
-        functions,
-        table,
-        shared,
-        routineShared,
-        sharedExtents,
-        initialised,
-        architecture(program),
-        text
-      )
+    entries.keys.toVec.traverse(entry =>
+      SharedLayout(entry, initialised.toSet, module, routines).map(entry -> _)
+    ).map(layouts =>
+      Module(entries, functions, table, layouts.toMap, initialised, architecture(program), text)
     )
+  }
+
+  private case class RoutineShared(declarations: Vec[Statement.Data], references: Set[NonEmpty[String]])
+
+  /** Every symbol an instruction operand names, including memory operands. */
+  private def operandSymbols(operand: Operand): Vec[NonEmpty[String]] = operand match {
+    case Operand.Symbol(name)               => Vec(name)
+    case Operand.GenericAddress(symbol)     => operandSymbols(symbol)
+    case Operand.Add(left, right)           => operandSymbols(left) ++ operandSymbols(right)
+    case Operand.Subtract(left, right)      => operandSymbols(left) ++ operandSymbols(right)
+    case Operand.Index(base, index)         => operandSymbols(base) ++ operandSymbols(index)
+    case Operand.WithPredicate(base, guard) => operandSymbols(base) ++ operandSymbols(guard)
+    case Operand.Qualified(base, _)         => operandSymbols(base)
+    case Operand.Negate(value)              => operandSymbols(value)
+    case Operand.Not(value)                 => operandSymbols(value)
+    case Operand.VectorLiteral(items)       => items.flatMap(operandSymbols(_))
+    case Operand.Parenthesized(items)       => items.flatMap(operandSymbols(_))
+    case Operand.Address(items)             => items.flatMap(operandSymbols(_))
+    case _                                  => Vec.empty[NonEmpty[String]]
+  }
+
+  private def referencedSymbols(body: Vec[Statement]): Vec[NonEmpty[String]] = body.flatMap {
+    case Statement.Block(nested)            => referencedSymbols(nested)
+    case Statement.Instruction(instruction) => instruction.operands.flatMap(operandSymbols(_))
+    case _                                  => Vec.empty[NonEmpty[String]]
   }
 
   /** Symbols used as values in an expression. Memory operands and call argument lists name storage rather than use its
@@ -130,64 +155,47 @@ private object VMCompiler {
   }
 
   private object SharedLayout {
+    private val DynamicAlignment = 16L
+
     def apply(
+        entry: NonEmpty[String],
+        roots: Set[NonEmpty[String]],
         module: Vec[Statement.Data],
-        routines: Vec[(NonEmpty[String], Vec[Statement.Data])]
-    ): Either[
-      Error,
-      (
-          Map[NonEmpty[String], Long],
-          Map[NonEmpty[String], Map[NonEmpty[String], Long]],
-          Map[Option[NonEmpty[String]], Long]
-      )
-    ] = {
-      val owners       = (None -> module) +: routines.map((name, declarations) => Some(name) -> declarations)
-      val (sized, all) =
-        (
-          owners.flatMap((owner, values) =>
-            values.collect { case value if value.extent != Extent.Unsized => owner -> value }
-          ),
-          owners
-        )
-      sized.foldLeft[
-        Either[
-          Error,
-          (Long, Vec[(Option[NonEmpty[String]], NonEmpty[String], Long)], Map[Option[NonEmpty[String]], Long])
-        ]
-      ](
-        Right((VMAddressSpace.SharedBase, Vec.empty, Map.empty))
+        routines: Map[NonEmpty[String], RoutineShared]
+    ): Either[Error, KernelShared] = {
+      val reachable = Iterator.iterate((Set.empty[NonEmpty[String]], Vec(entry) ++ roots.toVec)) { (seen, pending) =>
+        val fresh = pending.filter(name => routines.contains(name) && !seen(name)).distinct
+        (seen ++ fresh, fresh.flatMap(routines(_).references.toVec))
+      }.dropWhile(_._2.nonEmpty).next()._1
+      val referenced = reachable.flatMap(routines(_).references)
+      val owners     = (entry +: reachable.excl(entry).toVec.sortBy(_.raw)).map(name =>
+        Some(name) -> routines(name).declarations
+      ) :+
+        (None -> module.filter(value => referenced(value.name)))
+      val sized   = owners.flatMap((owner, values) => values.filter(_.extent != Extent.Unsized).map(owner -> _))
+      val dynamic = owners.flatMap((owner, values) => values.filter(_.extent == Extent.Unsized).map(owner -> _))
+      sized.foldLeft[Either[Error, (Long, Vec[(Option[NonEmpty[String]], NonEmpty[String], Long)])]](
+        Right((VMAddressSpace.SharedBase, Vec.empty))
       ) { case (layout, (owner, declaration)) =>
-        layout.flatMap { (next, placed, extents) =>
+        layout.flatMap { (next, placed) =>
           val address = next.alignUp(alignment(declaration))
           val end     = address + extentBytes(declaration)
           Either.cond(
             end <= VMAddressSpace.ClusterWindowBase,
-            (
-              end,
-              placed :+ (owner, declaration.name, address),
-              extents.updated(owner, end.max(extents.getOrElse(owner, VMAddressSpace.SharedBase)))
-            ),
+            (end, placed :+ (owner, declaration.name, address)),
             Error.Invalid(s"shared declaration '${declaration.name}' exceeds the shared address aperture")
           )
         }
-      }.flatMap { (next, placed, extents) =>
-        val dynamic =
-          all.flatMap((owner, values) =>
-            values.collect { case value if value.extent == Extent.Unsized => owner -> value }
-          )
-        val dynamicAlignment = math.max(1L, dynamic.map((_, value) => alignment(value)).maxOption.getOrElse(1L))
-        val base             = next.alignUp(dynamicAlignment)
+      }.flatMap { (next, placed) =>
+        val base = next.alignUp(dynamic.map((_, value) => alignment(value)).maxOption.fold(1L)(_.max(DynamicAlignment)))
         Either.cond(
           dynamic.isEmpty || base < VMAddressSpace.ClusterWindowBase,
-          (placed ++ dynamic.map((owner, declaration) => (owner, declaration.name, base))) -> extents,
+          KernelShared(
+            (placed ++ dynamic.map((owner, declaration) => (owner, declaration.name, base)))
+              .groupMap(_._1)(placement => placement._2 -> placement._3).view.mapValues(_.toMap).toMap,
+            (if (dynamic.isEmpty) next else base) - VMAddressSpace.SharedBase
+          ),
           Error.Invalid("dynamic shared storage exceeds the shared address aperture")
-        )
-      }.map { (placements, extents) =>
-        val byOwner = placements.groupMap(_._1)(placement => placement._2 -> placement._3).view.mapValues(_.toMap)
-        (
-          byOwner.getOrElse(None, Map.empty),
-          routines.map((name, _) => name -> byOwner.getOrElse(Some(name), Map.empty)).toMap,
-          extents.view.mapValues(_ - VMAddressSpace.SharedBase).toMap
         )
       }
     }
@@ -250,7 +258,11 @@ private object VMCompiler {
     }
 
   /** One kernel compilation: lowers the entry and every routine it can reach. */
-  class KernelCompilation(val module: Module, val globals: Map[NonEmpty[String], GuestAddress]) {
+  class KernelCompilation(
+      val module: Module,
+      val shared: KernelShared,
+      val globals: Map[NonEmpty[String], GuestAddress]
+  ) {
     private val pending   = mutable.Queue.empty[NonEmpty[String]]
     private val seen      = mutable.Set.empty[NonEmpty[String]]
     private val functions = mutable.LinkedHashMap.empty[NonEmpty[String], DeviceFunction]
@@ -279,11 +291,12 @@ private object VMCompiler {
   }
 
   def compile(module: Module, entry: NonEmpty[String], globals: Map[NonEmpty[String], GuestAddress])
-      : Either[Error, Kernel] = {
-    val compilation = KernelCompilation(module, globals)
-    module.initialisedFunctions.foreach(compilation.reference(_))
+      : Either[Error, Kernel] =
     for {
-      declaration          <- module.entries.get(entry).toRight(Error.Invalid(s"missing entry $entry"))
+      declaration <- module.entries.get(entry).toRight(Error.Invalid(s"missing entry $entry"))
+      shared      <- module.sharedLayouts.get(entry).toRight(Error.Invalid(s"missing entry $entry"))
+      compilation = KernelCompilation(module, shared, globals)
+      _           = module.initialisedFunctions.foreach(compilation.reference(_))
       root                 <- lowerEntry(declaration, compilation)
       cluster              <- clusterDirectives(declaration.directives)
       (functions, entries) <- compilation.lowerReachable()
@@ -294,12 +307,8 @@ private object VMCompiler {
       entries,
       module.functionTable,
       cluster,
-      staticSharedBytes = staticShared(module, entry :: functions.keys.toList)
+      staticSharedBytes = shared.extent.unsafe[Long >= 0]
     )
-  }
-
-  private def staticShared(module: Module, routines: List[NonEmpty[String]]): Long >= 0 =
-    (None :: routines.map(Some(_))).flatMap(module.sharedExtents.get).maxOption.getOrElse(0L).unsafe[Long >= 0]
 
   private def lowerEntry(entry: Statement.Entry, compilation: KernelCompilation): Either[Error, Entry] =
     for {
@@ -458,7 +467,8 @@ private object VMCompiler {
         (names ++ declaredParameters(flat)).toSet,
         spilled.map(_.name).toSet,
         locals,
-        compilation.module.shared ++ compilation.module.routineShared.getOrElse(name, Map.empty),
+        compilation.shared.addresses.getOrElse(None, Map.empty) ++
+          compilation.shared.addresses.getOrElse(Some(name), Map.empty),
         declaredRegisters(flat),
         compilation.module.architecture
       )

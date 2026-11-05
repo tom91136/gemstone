@@ -87,4 +87,73 @@ class AlignmentSuite extends Suite {
   test("byte accesses at any offset run") {
     assertEquals(run(global, "ld.global.u8 %h, [%p+OFFSET]; st.global.u8 [%p+OFFSET], %h;", 3), Right(()))
   }
+
+  test("shared storage of another entry does not shift this entry's alignment") {
+    val source = """.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry a_pad(.param .u64 buffer) {
+      |  .shared .align 4 .b8 pad[4];
+      |  .reg .u64 %p, %s;
+      |  ld.param.u64 %p, [buffer];
+      |  mov.u64 %s, pad;
+      |  st.global.u64 [%p], %s;
+      |  ret;
+      |}
+      |.visible .entry access(.param .u64 buffer) {
+      |  .shared .align 4 .b8 smem[8280];
+      |  .reg .u64 %p;
+      |  .reg .u32 %r<4>;
+      |  ld.param.u64 %p, [buffer];
+      |  ld.shared.v4.u32 {%r0, %r1, %r2, %r3}, [smem+4608];
+      |  st.global.u32 [%p], %r0;
+      |  ret;
+      |}""".stripMargin
+    val memory = DeviceMemory(64)
+    assertEquals(
+      execute(
+        compileProgram(Parser.parse(source).toOption.get, "access": NonEmpty[String]),
+        1,
+        1,
+        Map(("buffer": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
+        memory
+      ),
+      Right(())
+    )
+  }
+
+  test("module scope shared storage only shifts the entries that name it") {
+    val source = """.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.shared .align 4 .b8 a_pad[4];
+      |.shared .align 4 .b8 smem[8280];
+      |.visible .entry first(.param .u64 buffer) {
+      |  .reg .u64 %p;
+      |  .reg .u32 %r;
+      |  ld.param.u64 %p, [buffer];
+      |  mov.u32 %r, a_pad;
+      |  st.global.u32 [%p], %r;
+      |  ret;
+      |}
+      |.visible .entry access(.param .u64 buffer) {
+      |  .reg .u64 %p;
+      |  .reg .u32 %r<4>;
+      |  ld.param.u64 %p, [buffer];
+      |  ld.shared.v4.u32 {%r0, %r1, %r2, %r3}, [smem+4608];
+      |  st.global.u32 [%p], %r0;
+      |  ret;
+      |}""".stripMargin
+    val memory = DeviceMemory(64)
+    assertEquals(
+      execute(
+        compileProgram(Parser.parse(source).toOption.get, "access": NonEmpty[String]),
+        1,
+        1,
+        Map(("buffer": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
+        memory
+      ),
+      Right(())
+    )
+  }
 }
