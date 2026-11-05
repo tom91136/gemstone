@@ -59,13 +59,15 @@ class MBarrierStorageSuite extends Suite {
     )
   }
 
-  test("explicit invalidation blocks resurrection until guest storage is rewritten") {
+  test("explicit invalidation blocks arrivals and resurrection until guest storage is rewritten") {
     val invalidate = Vec[Instruction](
       Store(Value.Immediate(address), Value.Immediate(initial), 64, MemoryAccess.Shared),
       MBarrierLoad(Value.Immediate(address)),
       MBarrierInvalidate(Value.Immediate(alias))
     )
-    assert(run(invalidate :+ MBarrierLoad(Value.Immediate(address))).isLeft)
+    assert(run(invalidate :+ MBarrierLoad(Value.Immediate(address))).isRight)
+    assert(run(invalidate :+
+      MBarrierArrive(None, Value.Immediate(address), Value.Immediate(1), Value.Immediate(0))).isLeft)
     assertEquals(
       run(invalidate ++ Vec(
         Store(Value.Immediate(alias), Value.Immediate(initial), 64, MemoryAccess.Shared),
@@ -73,6 +75,19 @@ class MBarrierStorageSuite extends Suite {
         MBarrierTest(p(0), Value.Immediate(alias), Value.Immediate(0), true)
       )),
       Right(0L)
+    )
+  }
+
+  test("an invalidated barrier still reports the phase it completed") {
+    assertEquals(
+      run(Vec(
+        Store(Value.Immediate(address), Value.Immediate(initial), 64, MemoryAccess.Shared),
+        MBarrierLoad(Value.Immediate(address)),
+        MBarrierArrive(None, Value.Immediate(address), Value.Immediate(1), Value.Immediate(0)),
+        MBarrierInvalidate(Value.Immediate(alias)),
+        MBarrierTest(p(0), Value.Immediate(address), Value.Immediate(0), true)
+      )),
+      Right(1L)
     )
   }
 

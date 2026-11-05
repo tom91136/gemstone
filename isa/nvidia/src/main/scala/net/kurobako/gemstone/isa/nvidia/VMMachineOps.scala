@@ -292,30 +292,13 @@ private[isa] object VMMachineOps {
     for {
       (owner, canonical) <- sharedBarrier(context, address)
       barrier            <- MBarrier.create(count)
-    } yield {
-      val _ = owner.invalidatedMBarriers.subtractOne(canonical)
-      owner.mbarriers(canonical) = barrier
-    }
+    } yield owner.mbarriers(canonical) = barrier
 
   def mbarrierInvalidate(context: VMContext, address: Long): Either[Fault, Unit] =
-    for {
-      (owner, canonical) <- sharedBarrier(context, address)
-      _                  <- VMAsync.mbarrier(context, address)
-    } yield {
-      val _ = owner.mbarriers.subtractOne(canonical)
-      owner.invalidatedMBarriers(canonical) = ()
-    }
+    VMAsync.mbarrier(context, address).flatMap(_.invalidate())
 
   def mbarrierLoad(context: VMContext, address: Long): Either[Fault, Unit] =
-    sharedBarrier(context, address).flatMap { (owner, canonical) =>
-      if (owner.invalidatedMBarriers.contains(canonical))
-        Left(Fault.Backend(s"invalidated mbarrier at shared address $canonical"))
-      else if (owner.mbarriers.contains(canonical)) Right(())
-      else
-        MBarrier.fromStoredInitialState(owner.readShared(canonical, 64)).map(barrier =>
-          owner.mbarriers(canonical) = barrier
-        )
-    }
+    sharedBarrier(context, address).flatMap((owner, canonical) => owner.mbarrier(canonical).map(_ => ()))
 
   def mbarrierTransaction(context: VMContext, address: Long, bytes: Long, complete: Boolean): Either[Fault, Unit] =
     VMAsync.mbarrier(context, address).flatMap(found =>

@@ -150,16 +150,14 @@ class VMStateSuite extends Suite {
   test("a bulk shared write forgets the mbarriers it covers and keeps the others") {
     val workgroup = VMWorkgroup(1)
     val base      = VMAddressSpace.SharedBase
-    for (offset <- Vec(0L, 8L, 16L, 24L)) workgroup.mbarriers(base + offset) = MBarrier.create(1L).value
-    workgroup.invalidatedMBarriers(base + 32L) = ()
-    workgroup.invalidatedMBarriers(base + 40L) = ()
+    for (offset <- Vec(0L, 8L, 16L, 24L, 32L, 40L)) workgroup.mbarriers(base + offset) = MBarrier.create(1L).value
     workgroup.writeSharedBytes(base + 12L, Array.fill[Byte](24)(1), 0, 21)
     assert(workgroup.mbarriers.contains(base))
     assert(!workgroup.mbarriers.contains(base + 8L))
     assert(!workgroup.mbarriers.contains(base + 16L))
     assert(!workgroup.mbarriers.contains(base + 24L))
-    assert(!workgroup.invalidatedMBarriers.contains(base + 32L))
-    assert(workgroup.invalidatedMBarriers.contains(base + 40L))
+    assert(!workgroup.mbarriers.contains(base + 32L))
+    assert(workgroup.mbarriers.contains(base + 40L))
     assertEquals(workgroup.readShared(base + 12L, 32), 0x01010101L)
     assertEquals(workgroup.readShared(base + 33L, 8), 0L)
   }
@@ -170,6 +168,15 @@ class VMStateSuite extends Suite {
     workgroup.mbarriers(base) = MBarrier.create(1L).value
     workgroup.writeSharedBytes(base + 3L, Array.emptyByteArray, 0, 0)
     assert(workgroup.mbarriers.contains(base))
+  }
+
+  test("a copy completes an mbarrier whose stored initial state is not yet materialised") {
+    val workgroup = VMWorkgroup(1)
+    val barrier   = VMAddressSpace.SharedBase + 16L
+    workgroup.writeShared(barrier, 64, MBarrier.create(1L).value.state)
+    assertEquals(VMAsync.complete(workgroup, barrier, 112L), Right(()))
+    assert(workgroup.mbarriers(barrier).arrive(count = 1L, expectedBytes = 112L).isRight)
+    assert(workgroup.mbarriers(barrier).complete(0L))
   }
 
   test("shared reads and writes reach the cluster rank an address names") {

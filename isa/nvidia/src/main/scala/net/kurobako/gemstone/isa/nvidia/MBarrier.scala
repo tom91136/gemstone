@@ -45,6 +45,7 @@ private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
   private var expected        = initialArrivals.raw
   private var pendingArrivals = expected
   private var pendingBytes    = 0L
+  private var invalidated     = false
   // Once every participant has dropped out, no later phase can complete.
   private var exhausted = false
 
@@ -57,7 +58,8 @@ private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
     * arrivals later phases expect; without `complete` the arrivals must leave the phase incomplete.
     */
   def arrive(count: Long, expectedBytes: Long, drop: Boolean = false, complete: Boolean = true): Either[Fault, Long] =
-    transactionBytes(expectedBytes).flatMap { bytes =>
+    if (invalidated) Left(Fault.Backend("arrival on invalidated mbarrier"))
+    else transactionBytes(expectedBytes).flatMap { bytes =>
       if (
         count <= 0 || count > pendingArrivals ||
         (drop && count > expected) ||
@@ -75,11 +77,13 @@ private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
     }
 
   def expectBytes(count: Count): Either[Fault, Unit] =
-    if (pendingBytes + count > MaximumCount) Left(Fault.Backend(s"invalid mbarrier transaction count: $count"))
+    if (invalidated) Left(Fault.Backend("transaction on invalidated mbarrier"))
+    else if (pendingBytes + count > MaximumCount) Left(Fault.Backend(s"invalid mbarrier transaction count: $count"))
     else { pendingBytes += count; Right(()) }
 
   def completeBytes(count: Count): Either[Fault, Unit] =
-    if (pendingBytes - count < -MaximumCount)
+    if (invalidated) Left(Fault.Backend("transaction on invalidated mbarrier"))
+    else if (pendingBytes - count < -MaximumCount)
       Left(Fault.Backend(s"invalid mbarrier transaction completion: $count"))
     else {
       pendingBytes -= count
@@ -89,6 +93,10 @@ private class MBarrier private (initialArrivals: Long in 1L ~ 1048575L) {
 
   /** Whether the phase of parity `parity` has completed. */
   def complete(parity: Long): Boolean = (phase & 1L) != (parity & 1L)
+
+  def invalidate(): Either[Fault, Unit] =
+    if (invalidated) Left(Fault.Backend("mbarrier already invalidated"))
+    else { invalidated = true; Right(()) }
 
   private def completePhase(): Unit =
     if (pendingArrivals == 0 && pendingBytes == 0 && !exhausted) {

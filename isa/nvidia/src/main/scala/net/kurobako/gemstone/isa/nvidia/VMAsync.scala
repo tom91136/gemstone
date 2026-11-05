@@ -67,8 +67,7 @@ private object VMAsync {
   }
 
   def complete(owner: VMWorkgroup, barrier: Long, bytes: Long): Either[Fault, Unit] =
-    owner.mbarriers.get(barrier).toRight(Fault.Backend(s"uninitialised mbarrier at shared address $barrier"))
-      .flatMap(found => MBarrier.transactionBytes(bytes).flatMap(found.completeBytes(_)))
+    owner.mbarrier(barrier).flatMap(found => MBarrier.transactionBytes(bytes).flatMap(found.completeBytes(_)))
 
   private def reduction(
       operator: TensorMap.Reduction,

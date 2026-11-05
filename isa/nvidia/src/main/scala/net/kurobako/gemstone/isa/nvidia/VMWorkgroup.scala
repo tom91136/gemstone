@@ -10,9 +10,8 @@ import scala.collection.mutable
 /** Memory and synchronisation state of one workgroup, shared by every frame executing within it. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
 private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
-  private val shared                              = VMBytes()
-  val mbarriers: mutable.LongMap[MBarrier]        = mutable.LongMap.empty
-  val invalidatedMBarriers: mutable.LongMap[Unit] = mutable.LongMap.empty
+  private val shared                       = VMBytes()
+  val mbarriers: mutable.LongMap[MBarrier] = mutable.LongMap.empty
   // the thread holding each locked shared word, by its shared offset
   val sharedLocks: mutable.LongMap[Int]  = mutable.LongMap.empty
   val tensorMemory: TensorMemory.State   = TensorMemory.State()
@@ -79,14 +78,23 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
 
   // A partial or same-value guest write replaces cached opaque state as well.
   private def forgetMBarriers(base: Long, size: Long): Unit =
-    if (size > 0 && (mbarriers.nonEmpty || invalidatedMBarriers.nonEmpty)) {
+    if (size > 0 && mbarriers.nonEmpty) {
       var word = base & ~7L
       val last = (base + size - 1L) & ~7L
       while (word <= last) {
         val _ = mbarriers.subtractOne(word)
-        val _ = invalidatedMBarriers.subtractOne(word)
         word += 8L
       }
+    }
+
+  def mbarrier(canonical: Long): Either[Fault, MBarrier] =
+    mbarriers.get(canonical) match {
+      case Some(barrier) => Right(barrier)
+      case None          =>
+        MBarrier.fromStoredInitialState(readShared(canonical, 64)).map { barrier =>
+          mbarriers(canonical) = barrier
+          barrier
+        }
     }
 
   def readLocal(lane: WorkgroupLane, address: Long, width: ScalarBitWidth): Long =
@@ -181,7 +189,6 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
     cluster = alone
     shared.clear()
     mbarriers.clear()
-    invalidatedMBarriers.clear()
     sharedLocks.clear()
     tensorMemory.reset()
     prints.clear()
