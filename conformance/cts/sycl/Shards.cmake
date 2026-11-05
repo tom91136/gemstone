@@ -7,10 +7,10 @@
 set(sycl_cts_slices
   "math_builtin_api:TEST_CASES_LIST:2"
   "vector_swizzles:TEST_CASES_LIST:4"
-  "accessor_generic:test_cases_list:2"
-  "accessor_legacy:test_cases_list:3"
-  "reduction:test_cases_list:2"
-  "group_functions:test_cases_list:8")
+  "accessor_generic:test_cases_list:3"
+  "accessor_legacy:test_cases_list:2"
+  "reduction:test_cases_list:1"
+  "group_functions:test_cases_list:5")
 set(sycl_cts_shards)
 foreach(entry IN LISTS sycl_cts_slices)
   string(REPLACE ":" ";" entry "${entry}")
@@ -25,8 +25,8 @@ list(APPEND sycl_cts_shards
   "^accessor_placeholder$"
   "^host_accessor$"
   "^(kernel_bundle|multi_ptr|spec_constants)$"
-  "^(accessor_basic|address_space|atomic.*)$"
-  "^(local_accessor|buffer|marray_.*)$"
+  "^(accessor_basic|address_space|atomic.*|buffer)$"
+  "^(local_accessor|marray_.*)$"
   "^(vector_.*|handler|usm)$")
 list(LENGTH sycl_cts_shards sycl_cts_shard_count)
 math(EXPR sycl_cts_shard_count "${sycl_cts_shard_count} + 1")
