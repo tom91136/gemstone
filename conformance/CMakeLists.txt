@@ -249,6 +249,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/DependencyCacheTest.cmake")
     add_test(NAME conformance_targets
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TargetsTest.cmake")
+    add_test(NAME conformance_miniapp_closure
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/MiniappClosureTest.cmake")
     add_test(NAME conformance_jobserver
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/JobserverTest.cmake")
   endif()

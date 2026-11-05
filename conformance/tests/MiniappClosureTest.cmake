@@ -1,0 +1,56 @@
+cmake_minimum_required(VERSION 3.25)
+include("${CMAKE_CURRENT_LIST_DIR}/../miniapps/Models.cmake")
+
+# Routes of one support key share one closure, so what a miniapp installs into it must not vary with the architecture.
+set(tealeaf_models cuda hip omp-target kokkos sycl-usm sycl-acc std-indices)
+set(cloverleaf_models cuda hip omp-target kokkos sycl-usm sycl-acc acc std-indices)
+
+if(DEFINED SELECT_ONLY)
+  set(CONFORMANCE_BACKEND openacc)
+  set(conformance_cuda_capability 50)
+  set(CONFORMANCE_MINIAPP_MODELS "${SELECT_ONLY}")
+  conformance_miniapp_models(tealeaf selected ${tealeaf_models})
+  return()
+endif()
+
+function(closure_of backend capability models_variable closure_output selected_output)
+  set(CONFORMANCE_BACKEND "${backend}")
+  set(conformance_cuda_capability "${capability}")
+  set(miniapp_supported_openacc acc)
+  if(backend STREQUAL "openacc" AND capability GREATER_EQUAL 60)
+    list(APPEND miniapp_supported_openacc std-indices)
+  endif()
+  set(CONFORMANCE_MINIAPP_MODELS "")
+  conformance_miniapp_models(app selected ${${models_variable}})
+  conformance_miniapp_closure(closure "${selected}" ${${models_variable}})
+  set(${closure_output} "${closure}" PARENT_SCOPE)
+  set(${selected_output} "${selected}" PARENT_SCOPE)
+endfunction()
+
+closure_of(openacc 50 tealeaf_models closure_50 selected_50)
+closure_of(openacc 60 tealeaf_models closure_60 selected_60)
+closure_of(openacc 75 tealeaf_models closure_75 selected_75)
+if(selected_50 OR NOT selected_60 STREQUAL "std-indices")
+  message(FATAL_ERROR "tealeaf must build only from cc60 on OpenACC: sm_50 '${selected_50}', sm_60 '${selected_60}'")
+endif()
+if(NOT closure_50 STREQUAL closure_60 OR NOT closure_60 STREQUAL closure_75 OR NOT closure_50)
+  message(FATAL_ERROR
+    "tealeaf closure varies with the OpenACC architecture: sm_50 '${closure_50}', sm_60 '${closure_60}', sm_75 '${closure_75}'")
+endif()
+
+closure_of(openacc 50 cloverleaf_models clover_50 clover_selected_50)
+closure_of(openacc 75 cloverleaf_models clover_75 clover_selected_75)
+if(NOT clover_selected_50 STREQUAL "acc" OR NOT clover_50 STREQUAL "acc;std-indices" OR NOT clover_75 STREQUAL clover_50)
+  message(FATAL_ERROR "cloverleaf closure is wrong: sm_50 '${clover_50}', sm_75 '${clover_75}'")
+endif()
+
+closure_of(vulkan 0 tealeaf_models closure_vulkan selected_vulkan)
+if(closure_vulkan)
+  message(FATAL_ERROR "tealeaf has no Vulkan model but its closure is '${closure_vulkan}'")
+endif()
+
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DSELECT_ONLY=tealeaf:std-indices" -P "${CMAKE_CURRENT_LIST_FILE}"
+  OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+if(status STREQUAL "0")
+  message(FATAL_ERROR "tealeaf:std-indices was accepted below cc60")
+endif()
