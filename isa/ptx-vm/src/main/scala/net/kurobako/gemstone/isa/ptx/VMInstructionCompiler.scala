@@ -201,6 +201,24 @@ private object VMInstructionCompiler {
     case _            => None
   }
 
+  /** The relation that holds exactly where `relation` fails, NaN operands included. */
+  def complement(relation: Comparison): Comparison = relation match {
+    case Comparison.Ordered                     => Comparison.Unordered
+    case Comparison.Unordered                   => Comparison.Ordered
+    case Comparison.Equal                       => Comparison.NotEqualUnordered
+    case Comparison.NotEqualUnordered           => Comparison.Equal
+    case Comparison.EqualUnordered              => Comparison.NotEqual
+    case Comparison.NotEqual                    => Comparison.EqualUnordered
+    case Comparison.LessThan                    => Comparison.GreaterThanOrEqualUnordered
+    case Comparison.GreaterThanOrEqualUnordered => Comparison.LessThan
+    case Comparison.LessThanUnordered           => Comparison.GreaterThanOrEqual
+    case Comparison.GreaterThanOrEqual          => Comparison.LessThanUnordered
+    case Comparison.LessThanOrEqual             => Comparison.GreaterThanUnordered
+    case Comparison.GreaterThanUnordered        => Comparison.LessThanOrEqual
+    case Comparison.LessThanOrEqualUnordered    => Comparison.GreaterThan
+    case Comparison.GreaterThan                 => Comparison.LessThanOrEqualUnordered
+  }
+
   private def bytePermuteMode(modifier: Modifier): Option[BytePermuteMode] = modifier match {
     case Modifier.F4e  => Some(BytePermuteMode.F4E)
     case Modifier.B4e  => Some(BytePermuteMode.B4E)

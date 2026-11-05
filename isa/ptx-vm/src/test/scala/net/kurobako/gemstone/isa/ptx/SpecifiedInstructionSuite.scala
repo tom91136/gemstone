@@ -757,6 +757,43 @@ class SpecifiedInstructionSuite extends Suite {
     assertEquals(result, Vec(0L, 1L, 1L, 0xffff0000L, 0x00003c00L))
   }
 
+  // 9.7.7.2: q is the complement of the comparison, so a NaN operand makes q true for lt and false for gtu
+  test("setp with two destinations sets the complement of its comparison, combined by the Boolean operator") {
+    for {
+      (a, b) <- pairs
+      flag   <- flagValues
+    } {
+      val result = run(
+        ".reg .pred %p, %q, %t; .reg .f32 %x, %y;",
+        """setp.ne.u32 %t, %c, 0; mov.b32 %x, %a; mov.b32 %y, %b;
+          |setp.lt.f32 %p|%q, %x, %y; selp.u32 %d, 1, 0, %p; st.global.u32 [%out], %d;
+          |selp.u32 %d, 1, 0, %q; st.global.u32 [%out+4], %d;
+          |setp.gtu.and.f32 %p|%q, %x, %y, !%t; selp.u32 %d, 1, 0, %p; st.global.u32 [%out+8], %d;
+          |selp.u32 %d, 1, 0, %q; st.global.u32 [%out+12], %d;
+          |setp.hi.xor.u32 %p|%q, %a, %b, %t; selp.u32 %d, 1, 0, %p; st.global.u32 [%out+16], %d;
+          |selp.u32 %d, 1, 0, %q; st.global.u32 [%out+20], %d;""".stripMargin,
+        Vec(a, b, flag),
+        6
+      )
+      val p                   = flag != 0L
+      val (x, y)              = (java.lang.Float.intBitsToFloat(a.toInt), java.lang.Float.intBitsToFloat(b.toInt))
+      val nan                 = isNaN(a) || isNaN(b)
+      def bit(value: Boolean) = if (value) 1L else 0L
+      assertEquals(
+        result,
+        Vec(
+          bit(x < y),
+          bit(!(x < y)),
+          bit((nan || x > y) && !p),
+          bit(!(nan || x > y) && !p),
+          bit((a > b) != p),
+          bit((a <= b) != p)
+        ),
+        f"0x$a%x 0x$b%x $p"
+      )
+    }
+  }
+
   // 9.7.9.9: a b128 access moves both words of a register at once, in any state space below system scope
   test("weak b128 loads and stores copy sixteen bytes") {
     val result = run(

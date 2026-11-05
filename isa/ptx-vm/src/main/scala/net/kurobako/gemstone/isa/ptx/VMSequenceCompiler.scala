@@ -90,6 +90,8 @@ private object VMSequenceCompiler {
       case Form.Setp(Operand.WithPredicate(low, high), left, right, other)
           if modifiers.lastOption.exists(_.isPackedHalf) =>
         Some(packedComparison(low, high, left, right, other, modifiers))
+      case Form.Setp(Operand.WithPredicate(low, high), left, right, other) =>
+        Some(pairComparison(low, high, left, right, other, modifiers))
       case Form.Set(destination, left, right, Some(other))
           if modifiers.lastOption.exists(_.isPackedHalf) =>
         Some(packedSet(destination, left, right, other, modifiers))
@@ -337,10 +339,9 @@ private object VMSequenceCompiler {
     )
   }
 
-  /** The relation, the Boolean combination and its predicate operand, and the halves' format of a packed comparison. */
-  private def packedRelation(other: Option[Operand], modifiers: Vec[Modifier])(using
+  private def combinedRelation(other: Option[Operand], modifiers: Vec[Modifier])(using
       scope: Scope
-  ): Either[Error, (Comparison, Option[(PredicateOperation, Predicate, Boolean)], NumericFormat)] = {
+  ): Either[Error, (Comparison, Option[(PredicateOperation, Predicate, Boolean)])] = {
     val combine = modifiers.collectFirst {
       case Modifier.And => PredicateOperation.And
       case Modifier.Or  => PredicateOperation.Or
@@ -348,19 +349,18 @@ private object VMSequenceCompiler {
     }
     for {
       relation <- modifiers.headOption.flatMap(VMInstructionCompiler.comparison(_))
-        .toRight(Error.Invalid("a packed comparison starts with its relation"))
+        .toRight(Error.Invalid("a comparison starts with its relation"))
       combined <- (combine, other) match {
         case (Some(operation), Some(operand)) =>
           scope.predicateSource(operand).map((predicate, negated) => Some((operation, predicate, negated)))
         case (None, None) => Right(None)
         case _            => Left(Error.Invalid("a Boolean operator takes a predicate operand, and only it does"))
       }
-    } yield (
-      relation,
-      combined,
-      if (modifiers.lastOption.contains(Modifier.Bf16x2)) NumericFormat.BF16 else NumericFormat.IEEE(16)
-    )
+    } yield (relation, combined)
   }
+
+  private def halfFormat(modifiers: Vec[Modifier]): NumericFormat =
+    if (modifiers.lastOption.contains(Modifier.Bf16x2)) NumericFormat.BF16 else NumericFormat.IEEE(16)
 
   private def halves(operand: Operand, name: String)(using scope: Scope) = for {
     value <- scope.value(operand)
@@ -401,18 +401,43 @@ private object VMSequenceCompiler {
       other: Option[Operand],
       modifiers: Vec[Modifier]
   )(using scope: Scope): Lowered = for {
-    (relation, combined, format) <- packedRelation(other, modifiers)
-    (splitA, aLow, aHigh)        <- halves(left, "setp a")
-    (splitB, bLow, bHigh)        <- halves(right, "setp b")
-    p                            <- scope.predicate(low)
-    q                            <- scope.predicate(high)
+    (relation, combined)  <- combinedRelation(other, modifiers)
+    (splitA, aLow, aHigh) <- halves(left, "setp a")
+    (splitB, bLow, bHigh) <- halves(right, "setp b")
+    p                     <- scope.predicate(low)
+    q                     <- scope.predicate(high)
   } yield {
-    val flush = modifiers.contains(Modifier.Ftz)
+    val flush  = modifiers.contains(Modifier.Ftz)
+    val format = halfFormat(modifiers)
     Vec(
       splitA,
       splitB,
       compare(p, relation, format, aLow, bLow, flush, combined),
       compare(q, relation, format, aHigh, bHigh, flush, combined)
+    )
+  }
+
+  /** `setp` of a predicate pair: `p` takes the comparison and `q` its complement. */
+  private def pairComparison(
+      low: Operand,
+      high: Operand,
+      left: Operand,
+      right: Operand,
+      other: Option[Operand],
+      modifiers: Vec[Modifier]
+  )(using scope: Scope): Lowered = for {
+    (relation, combined) <- combinedRelation(other, modifiers)
+    operandType          <- modifiers.view.flatMap(VMInstructionCompiler.format(_)).headOption
+      .toRight(Error.Unsupported("setp", "a predicate pair needs a numeric comparison type"))
+    a <- scope.value(left)
+    b <- scope.value(right)
+    p <- scope.predicate(low)
+    q <- scope.predicate(high)
+  } yield {
+    val flush = modifiers.contains(Modifier.Ftz)
+    Vec(
+      compare(p, relation, operandType, a, b, flush, combined),
+      compare(q, VMInstructionCompiler.complement(relation), operandType, a, b, flush, combined)
     )
   }
 
@@ -428,17 +453,18 @@ private object VMSequenceCompiler {
       case Modifier.U32 | Modifier.S32 => 0xffffL
     }
     for {
-      value                        <- truth.toRight(Error.Invalid("unsupported packed set result type"))
-      (relation, combined, format) <- packedRelation(Some(other), modifiers)
-      (splitA, aLow, aHigh)        <- halves(left, "set a")
-      (splitB, bLow, bHigh)        <- halves(right, "set b")
-      p                            <- temporaryPredicate("set low holds")
-      q                            <- temporaryPredicate("set high holds")
-      lowHalf                      <- temporary("set low result")
-      highHalf                     <- temporary("set high result")
-      target                       <- scope.register(destination)
+      value                 <- truth.toRight(Error.Invalid("unsupported packed set result type"))
+      (relation, combined)  <- combinedRelation(Some(other), modifiers)
+      (splitA, aLow, aHigh) <- halves(left, "set a")
+      (splitB, bLow, bHigh) <- halves(right, "set b")
+      p                     <- temporaryPredicate("set low holds")
+      q                     <- temporaryPredicate("set high holds")
+      lowHalf               <- temporary("set low result")
+      highHalf              <- temporary("set high result")
+      target                <- scope.register(destination)
     } yield {
-      val flush = modifiers.contains(Modifier.Ftz)
+      val flush  = modifiers.contains(Modifier.Ftz)
+      val format = halfFormat(modifiers)
       Vec(
         splitA,
         splitB,
