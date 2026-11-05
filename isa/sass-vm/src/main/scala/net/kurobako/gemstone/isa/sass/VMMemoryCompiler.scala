@@ -102,8 +102,18 @@ private object VMMemoryCompiler {
     Modifier.SYS
   )
   private val popcCountModifiers   = Set(Modifier.E, Modifier.POPC, Modifier.INC, Modifier.`32`)
-  private val arriveCountModifiers = Set(Modifier.E, Modifier.ARRIVE, Modifier.`64`)
-  private val atomicOperations     = Set(
+  private val arriveCountModifiers =
+    Set(
+      Modifier.E,
+      Modifier.ARRIVE,
+      Modifier.`64`,
+      Modifier.STRONG,
+      Modifier.CTA,
+      Modifier.SM,
+      Modifier.GPU,
+      Modifier.SYS
+    )
+  private val atomicOperations = Set(
     Modifier.ADD,
     Modifier.MIN,
     Modifier.MAX,

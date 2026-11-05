@@ -1096,7 +1096,7 @@ object Instruction {
             ))
             else Left(DecodeError("mbarrier.arrive", DecodeProblem.InvalidOperandCount(Vec(2, 3), operands.size)))
           },
-          "7.0 80 cluster=90,expect_tx=90,noComplete=90,relaxed=90 XAX;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XA;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;b64;cluster,cta,relaxed,release,shared::cluster;;1 XA;b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;noComplete/b64;cta,release,shared,shared::cta;;1"
+          "7.0 80 cluster=90,expect_tx=90,relaxed=90 XAX;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XA;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;b64;cluster,cta,relaxed,release,shared::cluster;;1 XA;b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;noComplete/b64;cta,release,shared,shared::cta;;1"
         )
     case MbarrierArriveDrop extends Definition(
           "mbarrier.arrive_drop",
@@ -1110,7 +1110,7 @@ object Instruction {
             ))
             else Left(DecodeError("mbarrier.arrive_drop", DecodeProblem.InvalidOperandCount(Vec(2, 3), operands.size)))
           },
-          "7.0 80 cluster=90,expect_tx=90,noComplete=90,relaxed=90 XAX;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XA;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;b64;cluster,cta,relaxed,release,shared::cluster;;1 XA;b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;noComplete/b64;cta,release,shared,shared::cta;;1"
+          "7.0 80 cluster=90,expect_tx=90,relaxed=90 XAX;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XA;b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;b64;cluster,cta,relaxed,release,shared::cluster;;1 XA;b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared,shared::cta;;1 XAX;expect_tx/b64;cluster,cta,relaxed,release,shared::cluster;;1 XAX;noComplete/b64;cta,release,shared,shared::cta;;1"
         )
     case MbarrierCheckLayout extends Definition(
           "mbarrier.check_layout",

@@ -125,6 +125,19 @@ class ValidationSuite extends Suite {
     )
   }
 
+  test("noComplete mbarrier arrivals with a count are available on sm_80") {
+    for (
+      source <- Vec(
+        "mbarrier.arrive.noComplete.shared.b64 _, [%rd0], %r1;",
+        "mbarrier.arrive_drop.noComplete.shared.b64 _, [%rd0], %r1;"
+      )
+    ) assertEquals(
+      Validation.validate(instruction(source), Version(8, 0), Target(80)),
+      ValidationOutcome.Accepted,
+      source
+    )
+  }
+
   test("target notes restrict only the modifier combinations they name") {
     def outcome(source: String, target: Target) = Validation.validate(instruction(source), Version(9, 3), target)
     assertEquals(outcome("add.u32 %r0, %r1, %r2;", Target(20)), ValidationOutcome.Accepted)

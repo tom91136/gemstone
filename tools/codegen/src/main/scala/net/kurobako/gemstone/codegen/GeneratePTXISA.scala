@@ -415,7 +415,9 @@ object GeneratePTXISA {
             sets.flatMap(set => alternatives.map(set + _))
         }
       }.map(_.filter(known)).filter(_.nonEmpty)
-    notes.flatMap(NoteClause.split(_)).map(StateSpaceCondition.replaceAllIn(_, "")).flatMap { clause =>
+    // "count argument without the modifier .noComplete" restricts an absent modifier, which spellings cannot express
+    val clauses = notes.flatMap(NoteClause.split(_)).filterNot(_.contains(" without "))
+    clauses.map(StateSpaceCondition.replaceAllIn(_, "")).flatMap { clause =>
       TargetNote.findAllMatchIn(clause).map(_.group(1).toInt).minOption.toVector.flatMap { target =>
         val spellings = Spelling.findAllMatchIn(clause).toVector
           .map(matched => Option(matched.group(1)).exists(mnemonics) -> combinations(matched.group(2)))

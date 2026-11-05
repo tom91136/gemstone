@@ -84,4 +84,14 @@ class AtomicSuite extends Suite {
       block = Some(32)
     )
   }
+
+  test("sm_80 generic ATOM.E.ARRIVE.64 arrives on a shared mbarrier as ATOMS.ARRIVE.64 does") {
+    check(
+      80,
+      shared("MOV R4, c[0x0][0x18]; MOV R5, c[0x0][0x1c]; ATOM.E.ARRIVE.64.STRONG.SM PT, RZ, [R4.64]"),
+      Vec(0, 32, -1, 0),
+      block = Some(32),
+      shared = 16
+    )
+  }
 }
