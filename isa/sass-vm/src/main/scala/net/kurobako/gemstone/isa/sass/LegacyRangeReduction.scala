@@ -5,8 +5,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
-import net.kurobako.gemstone.isa.sass.LegacyFlowGraph.registers
-import net.kurobako.gemstone.isa.sass.LegacyFlowGraph.wideModifier
+import net.kurobako.gemstone.isa.sass.LegacyFlowGraph.*
 import scala.collection.mutable
 
 /** Fuse legacy trigonometric reduction only when its opaque fixed-point result cannot escape. */

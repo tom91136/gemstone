@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
+import scala.concurrent.duration.*
 import scala.util.Using
 
 class PacingSuite extends Suite {
@@ -135,8 +136,8 @@ class PacingSuite extends Suite {
       Dispatch.forEachGroup(geometry, pool) { (_, _, pace) =>
         pace.engage()
         val _        = arrived.incrementAndGet()
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L)
-        while (arrived.get() < groups && System.nanoTime() < deadline) pace.step()
+        val deadline = 10.seconds.fromNow
+        while (arrived.get() < groups && deadline.hasTimeLeft()) pace.step()
         if (arrived.get() == groups) Right(()) else Left(Fault.Hang("a group waited on a peer that never started"))
       }
     }

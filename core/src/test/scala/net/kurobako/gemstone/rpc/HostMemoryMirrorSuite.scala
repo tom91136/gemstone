@@ -97,7 +97,7 @@ class HostMemoryMirrorSuite extends Suite {
     val limit      = allocation.address.raw + allocation.size.toLong
     val mirror     = HostMemoryMirror()
     for (index <- 0 until 4) {
-      mirror.read(at(0x10000L + index * 4096L), 4, Some(allocation))
+      val _         = mirror.read(at(0x10000L + index * 4096L), 4, Some(allocation))
       val requested = mirror.requests()
       assert(requested.forall(range => range.address.raw + range.size.toLong <= limit), s"$requested")
       assert(mirror.supply(reply(requested)).isRight)
@@ -471,9 +471,9 @@ class HostMemoryMirrorSuite extends Suite {
         wordWidths.foreach(k =>
           words(k).filterInPlace(index => index * k + k <= aligned || index * k >= aligned + size)
         )
-        if (width != 0) words(width).add(aligned / width)
+        if (width != 0) { val _ = words(width).add(aligned / width) }
         (0 until size).foreach { index =>
-          dirty.add(aligned + index)
+          val _ = dirty.add(aligned + index)
           contents(aligned + index) = values(index)
         }
       }
@@ -492,7 +492,7 @@ class HostMemoryMirrorSuite extends Suite {
             source.hasNext && remaining > 0 && size < capacity && source.head == base + size &&
             widthAt(source.head) == widthAt(base)
           ) {
-            source.next()
+            val _ = source.next()
             size += 1
             remaining -= 1
           }

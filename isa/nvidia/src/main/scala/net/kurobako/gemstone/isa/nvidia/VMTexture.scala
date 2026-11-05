@@ -57,23 +57,22 @@ private object VMTexture {
   }
 
   private def decodeKepler(record: Array[Byte]): Option[TextureDescriptor] = {
-    import TextureLayout.Kepler
     val buffer                     = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
     def unsigned(field: Int): Long = buffer.getInt(field) & 0xffffffffL
-    val format                     = unsigned(Kepler.Format)
-    val limit                      = unsigned(Kepler.LimitX) + 1
+    val format                     = unsigned(TextureLayout.Kepler.Format)
+    val limit                      = unsigned(TextureLayout.Kepler.LimitX) + 1
     for {
       kind <- ChannelKind.fromCode(((format >>> 16) & 0xff).toInt)
       texel = TexelFormat(kind, (format & 0xff).toInt, ((format >>> 8) & 0xff).toInt)
-      if texel.isValid && limit % texel.texelBytes == 0 && limit <= Kepler.MaxBytes
-      pitch  = unsigned(Kepler.Pitch)
-      height = buffer.getInt(Kepler.Height)
-      depth  = buffer.getInt(Kepler.LimitZ) + 1
+      if texel.isValid && limit % texel.texelBytes == 0 && limit <= TextureLayout.Kepler.MaxBytes
+      pitch  = unsigned(TextureLayout.Kepler.Pitch)
+      height = buffer.getInt(TextureLayout.Kepler.Height)
+      depth  = buffer.getInt(TextureLayout.Kepler.LimitZ) + 1
     } yield TextureDescriptor(
       kind = ObjectKind.Surface,
       resource = ResourceKind.Pitch2D,
       dimensions = if (depth > 1) 3 else if (height > 1) 2 else 1,
-      base = unsigned(Kepler.Base) * Kepler.Alignment,
+      base = unsigned(TextureLayout.Kepler.Base) * TextureLayout.Kepler.Alignment,
       pitch = pitch,
       slicePitch = pitch * height,
       width = (limit / texel.texelBytes).toInt,

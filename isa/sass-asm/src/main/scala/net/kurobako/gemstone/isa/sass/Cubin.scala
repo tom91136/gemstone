@@ -646,8 +646,9 @@ object Cubin {
     globals.foreach { global =>
       if (seen.add(global.name)) result += global
       else {
-        val unique = s"${global.name}.${global.section}.${global.offset}".unsafe[NonEmpty[String]]
-        seen.add(unique)
+        val base   = s"${global.name}.${global.section}.${global.offset}"
+        val unique = LazyList.from(0).map(n => (if (n == 0) base else s"$base.$n").unsafe[NonEmpty[String]])
+          .filter(seen.add).head
         result += global.copy(name = unique, declared = Some(global.name))
       }
     }

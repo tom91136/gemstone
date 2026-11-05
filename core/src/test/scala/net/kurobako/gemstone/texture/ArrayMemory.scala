@@ -13,8 +13,8 @@ class ArrayMemory(val base: Long, val bytes: Array[Byte]) extends TexelMemory {
 
   def write(address: Long, data: Array[Byte]): Boolean =
     address >= base && address + data.length <= base + bytes.length && {
-      data.copyToArray(bytes, (address - base).toInt)
-      writes.incrementAndGet()
+      val _ = data.copyToArray(bytes, (address - base).toInt)
+      val _ = writes.incrementAndGet()
       true
     }
 }

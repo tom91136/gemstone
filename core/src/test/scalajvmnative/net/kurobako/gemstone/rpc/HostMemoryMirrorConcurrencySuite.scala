@@ -89,11 +89,11 @@ class HostMemoryMirrorConcurrencySuite extends Suite {
           if (missed && before % 2 == 0 && invalidations.get() == before)
             throw IllegalStateException(s"lost write at $base")
           if (lane == 0 && round % 50 == 0) {
-            invalidations.incrementAndGet()
+            val _ = invalidations.incrementAndGet()
             mirror.invalidateClean()
-            invalidations.incrementAndGet()
+            val _ = invalidations.incrementAndGet()
           }
-          if (lane == 1 && round % 50 == 0) mirror.takeDirty()
+          if (lane == 1 && round % 50 == 0) { val _ = mirror.takeDirty() }
         }
       }
     }

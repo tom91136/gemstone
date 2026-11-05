@@ -700,7 +700,7 @@ class HostMemoryExecutionSuite extends Suite {
       Vec(scalar(0x1000)),
       bytes(0x1000, 5, 4),
       beforeSync = (sync, _) => {
-        if (sync.atomic.nonEmpty) syncs.incrementAndGet()
+        if (sync.atomic.nonEmpty) { val _ = syncs.incrementAndGet() }
         Map.empty
       }
     )

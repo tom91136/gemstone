@@ -168,7 +168,7 @@ private class LegacyFlowGraph(instructions: Vec[DecodedInstruction]) {
     def leaves(index: Int)  = successors(index).forall(next => next.isEmpty || next.exists(!inside(_)))
     type Live = Map[Int, Set[LegacyFlowGraph.Slot]]
     def following(index: Int, live: Live): Set[LegacyFlowGraph.Slot] =
-      successors(index).getOrElse(Vec.empty[Int]).filter(inside).flatMap(live.getOrElse(_, Set.empty)).toSet
+      successors(index).getOrElse(Vec.empty[Int]).filter(inside(_)).flatMap(live.getOrElse(_, Set.empty)).toSet
     @tailrec
     def solve(live: Live): Live = {
       val next = indexes.foldRight(live) { (index, current) =>
