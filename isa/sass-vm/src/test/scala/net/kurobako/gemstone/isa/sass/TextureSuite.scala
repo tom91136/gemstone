@@ -104,6 +104,15 @@ class TextureSuite extends Suite {
     }
   }
 
+  for (sm <- Vec(90, 100))
+    test(s"sm_$sm 3D sampling takes the z coordinate ahead of the explicit level") {
+      val setup = Setup(
+        floatWords((1 to 8).map(_.toFloat)*),
+        descriptor(F32x1, width = 2, height = 2, depth = 2, dimensions = 3)
+      )
+      assertEquals(setup.run("samp3d", sm, 4), Vec(bits(5f), 0L, 0L, bits(1f)))
+    }
+
   test("sm_120 uniform handle followed by a zero sampler register") {
     val setup = Setup(floatWords(10f, 20f, 30f, 40f), descriptor(F32x1, 4))
     assertEquals(

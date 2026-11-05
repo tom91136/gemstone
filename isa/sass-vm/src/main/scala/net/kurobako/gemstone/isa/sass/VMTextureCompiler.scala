@@ -180,11 +180,11 @@ private object VMTextureCompiler {
     def at(offset: Int): Value = register(first, offset)
     val levelInSecond          = family == Family.Sample && !short
     second match {
-      case None                                        => Vec.tabulate(dimensions)(at(_))
-      case Some(_) if dimensions == 1                  => Vec(at(0))
-      case Some(_) if dimensions == 2 && levelInSecond => Vec(at(0), at(1))
-      case Some(level) if dimensions == 2              => Vec(at(0), register(level))
-      case Some(last)                                  => Vec(at(0), at(1), register(last))
+      case None                           => Vec.tabulate(dimensions)(at(_))
+      case Some(_) if dimensions == 1     => Vec(at(0))
+      case Some(_) if levelInSecond       => Vec.tabulate(dimensions)(at(_))
+      case Some(level) if dimensions == 2 => Vec(at(0), register(level))
+      case Some(last)                     => Vec(at(0), at(1), register(last))
     }
   }
 

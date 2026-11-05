@@ -1788,6 +1788,80 @@ object TextureListings {
         |        /*0170*/                   NOP;
         |.L_x_20:
         |""".stripMargin,
+    "samp3dSm90" ->
+      """//--------------------- .text.samp3d              --------------------------
+        |	.section	.text.samp3d,"ax",@progbits
+        |	.align	128
+        |        .global         samp3d
+        |        .type           samp3d,@function
+        |        .size           samp3d,(.L_x_1 - samp3d)
+        |        .other          samp3d,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |samp3d:
+        |.text.samp3d:
+        |        /*0000*/                   LDC R1, c[0x0][0x28] ;
+        |        /*0010*/                   HFMA2.MMA R5, -RZ, RZ, 1.75, 0 ;
+        |        /*0020*/                   IMAD.MOV.U32 R7, RZ, RZ, -0x3e000000 ;
+        |        /*0030*/                   MOV R6, 0x3fc00000 ;
+        |        /*0040*/                   IMAD.MOV.U32 R4, RZ, RZ, 0x3f000000 ;
+        |        /*0050*/                   ULDC UR4, c[0x0][0x210] ;
+        |        /*0060*/                   UMOV UR5, URZ ;
+        |        /*0070*/                   TEX.LL R6, R4, R4, R7, UR4, 0x0, 3D ;
+        |        /*0080*/                   LDC.64 R2, c[0x0][0x218] ;
+        |        /*0090*/                   ULDC.64 UR4, c[0x0][0x208] ;
+        |        /*00a0*/                   STG.E.128 desc[UR4][R2.64], R4 ;
+        |        /*00b0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00c0*/                   BRA `(.L_x_0);
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "samp3dSm100" ->
+      """//--------------------- .text.samp3d              --------------------------
+        |	.section	.text.samp3d,"ax",@progbits
+        |	.align	128
+        |        .global         samp3d
+        |        .type           samp3d,@function
+        |        .size           samp3d,(.L_x_1 - samp3d)
+        |        .other          samp3d,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |samp3d:
+        |.text.samp3d:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   LDCU UR4, c[0x0][0x380] ;
+        |        /*0020*/                   HFMA2 R5, -RZ, RZ, 1.75, 0 ;
+        |        /*0030*/                   IMAD.MOV.U32 R7, RZ, RZ, -0x3e000000 ;
+        |        /*0040*/                   MOV R6, 0x3fc00000 ;
+        |        /*0050*/                   IMAD.MOV.U32 R4, RZ, RZ, 0x3f000000 ;
+        |        /*0060*/                   UMOV UR5, URZ ;
+        |        /*0070*/                   TEX.LL R6, R4, R4, R7, UR4, 3D ;
+        |        /*0080*/                   LDC.64 R2, c[0x0][0x388] ;
+        |        /*0090*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*00a0*/                   STG.E.128 desc[UR4][R2.64], R4 ;
+        |        /*00b0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00c0*/                   BRA `(.L_x_0);
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
     "fetch1dSm90" ->
       """//--------------------- .text.fetch1d             --------------------------
         |	.section	.text.fetch1d,"ax",@progbits
