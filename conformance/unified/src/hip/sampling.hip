@@ -170,11 +170,10 @@ std::vector<float> sampleAddressMode(hipTextureAddressMode mode) {
   hipArray_t array = createArray<float>(AddressWidth, 0, 0);
   uploadTexels(array, AddressTexels, AddressWidth, 0, 0);
   auto *const texture = makeTexture(arrayResource(array), textureDesc(mode, hipFilterModePoint, hipReadModeElementType, true));
-  const auto coords = AddressProbes
-                      | map([](int k) {
-                          return Coordinate{.x = (static_cast<float>(k) + 0.5F) / static_cast<float>(AddressWidth), .y = 0.0F, .z = 0.0F};
-                        })
-                      | to_vector();
+  const auto coords =
+      AddressProbes
+      | map([](int k) { return Coordinate{.x = (static_cast<float>(k) + 0.5F) / static_cast<float>(AddressWidth), .y = 0.0F, .z = 0.0F}; })
+      | to_vector();
   auto values = sampleTexture<1, float, float, 1>(texture, coords);
   check(hipDestroyTextureObject(texture), "destroy texture");
   check(hipFreeArray(array), "free array");
@@ -226,8 +225,8 @@ TEST_CASE("resources/hip/texture-filter", "[unified][resources]") {
   hipArray_t array = createArray<float>(width, height, 0);
   uploadTexels(array, texels, width, height, 0);
   const std::vector<Coordinate> coords = {{.x = 1.25F, .y = 1.0F, .z = 0.0F}, {.x = 0.75F, .y = 0.25F, .z = 0.0F},
-                                          {.x = 0.5F, .y = 0.5F, .z = 0.0F}, {.x = 1.5F, .y = 1.5F, .z = 0.0F},
-                                          {.x = 1.2F, .y = 0.5F, .z = 0.0F}, {.x = 0.5F + 0.0033F, .y = 0.5F, .z = 0.0F}};
+                                          {.x = 0.5F, .y = 0.5F, .z = 0.0F},  {.x = 1.5F, .y = 1.5F, .z = 0.0F},
+                                          {.x = 1.2F, .y = 0.5F, .z = 0.0F},  {.x = 0.5F + 0.0033F, .y = 0.5F, .z = 0.0F}};
   auto *const point =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModePoint, hipReadModeElementType, false));
   auto *const linear =
@@ -237,10 +236,10 @@ TEST_CASE("resources/hip/texture-filter", "[unified][resources]") {
              "linear filter");
   auto *const normalisedLinear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, true));
-  expectNear(sampleTexture<2, float, float, 1>(normalisedLinear,
-                                               {{.x = 0.625F, .y = 0.5F, .z = 0.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.0F},
-                                                {.x = 0.25F, .y = 0.25F, .z = 0.0F}}),
-             {27.5F, 25.0F, 10.0F}, 0.0F, "normalised linear filter");
+  expectNear(
+      sampleTexture<2, float, float, 1>(
+          normalisedLinear, {{.x = 0.625F, .y = 0.5F, .z = 0.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.0F}, {.x = 0.25F, .y = 0.25F, .z = 0.0F}}),
+      {27.5F, 25.0F, 10.0F}, 0.0F, "normalised linear filter");
   check(hipDestroyTextureObject(point), "destroy texture");
   check(hipDestroyTextureObject(linear), "destroy texture");
   check(hipDestroyTextureObject(normalisedLinear), "destroy texture");
@@ -258,8 +257,10 @@ TEST_CASE("resources/hip/texture-filter-wrap", "[unified][resources]") {
       makeTexture(arrayResource(array), textureDesc(hipAddressModeMirror, hipFilterModeLinear, hipReadModeElementType, true));
   auto *const border =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeBorder, hipFilterModeLinear, hipReadModeElementType, true));
-  const std::vector<Coordinate> coords = {{.x = 0.0F, .y = 0.0F, .z = 0.0F}, {.x = 0.125F, .y = 0.0F, .z = 0.0F},
-                                          {.x = 1.0F, .y = 0.0F, .z = 0.0F}, {.x = 1.0625F, .y = 0.0F, .z = 0.0F}};
+  const std::vector<Coordinate> coords = {{.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                                          {.x = 0.125F, .y = 0.0F, .z = 0.0F},
+                                          {.x = 1.0F, .y = 0.0F, .z = 0.0F},
+                                          {.x = 1.0625F, .y = 0.0F, .z = 0.0F}};
   expectNear(sampleTexture<1, float, float, 1>(wrapped, coords), {25.0F, 10.0F, 25.0F, 17.5F}, 0.0F, "wrap linear");
   expectNear(sampleTexture<1, float, float, 1>(mirrored, coords), {10.0F, 10.0F, 40.0F, 40.0F}, 0.0F, "mirror linear");
   expectNear(sampleTexture<1, float, float, 1>(border, coords), {5.0F, 10.0F, 20.0F, 10.0F}, 0.0F, "border linear");
@@ -282,8 +283,8 @@ TEST_CASE("resources/hip/texture-3d", "[unified][resources]") {
   expectNear(sampleTexture<3, float, float, 1>(point, texelCentres(width, height, depth)), texels, 0.0F, "3D point");
   auto *const linear =
       makeTexture(arrayResource(array), textureDesc(hipAddressModeClamp, hipFilterModeLinear, hipReadModeElementType, false));
-  expectNear(sampleTexture<3, float, float, 1>(linear, {{.x = 1.0F, .y = 1.0F, .z = 1.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.5F},
-                                                        {.x = 1.5F, .y = 0.5F, .z = 1.5F}}),
+  expectNear(sampleTexture<3, float, float, 1>(
+                 linear, {{.x = 1.0F, .y = 1.0F, .z = 1.0F}, {.x = 0.5F, .y = 0.5F, .z = 0.5F}, {.x = 1.5F, .y = 0.5F, .z = 1.5F}}),
              {4.5F, 1.0F, 6.0F}, 0.0F, "3D linear");
   check(hipDestroyTextureObject(point), "destroy texture");
   check(hipDestroyTextureObject(linear), "destroy texture");
