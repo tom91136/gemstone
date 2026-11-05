@@ -28,8 +28,28 @@ private case class KernargLayout(
     case "hidden_global_offset_y" => geometry.globalOffset.y.toLong
     case "hidden_global_offset_z" => geometry.globalOffset.z.toLong
     case "hidden_grid_dims"       => geometry.workDim.toLong
+    case "hidden_private_base"    => VMAddressSpace.PrivateBase >>> 32
+    case "hidden_shared_base"     => VMAddressSpace.LocalBase >>> 32
     case _                        => 0L
   }
+
+  /** The segment apertures written into a kernarg buffer the host laid out, which leaves them zero. */
+  def stampApertures(
+      memory: AddressSpace,
+      buffer: KernelTask.ArgumentBuffer,
+      geometry: LaunchGeometry
+  ): Either[Fault, Unit] =
+    hidden.filter(argument => argument.valueKind == "hidden_private_base" || argument.valueKind == "hidden_shared_base")
+      .foldLeft[Either[Fault, Unit]](Right(())) { (result, argument) =>
+        result.flatMap(_ =>
+          memory.writeValue(
+            buffer.region,
+            (buffer.offset.raw + argument.offset).unsafe[Long >= 0],
+            hiddenValue(argument.valueKind, geometry),
+            math.min(argument.width, 4).unsafe[Int in 1 ~ 8]
+          )
+        )
+      }
 
   /** `explicit` placed at their declared offsets, followed by the hidden arguments, in `size` bytes. */
   def pack(explicit: Vec[Vec[Byte]], geometry: LaunchGeometry, size: Int): Either[Fault, Array[Byte]] = {

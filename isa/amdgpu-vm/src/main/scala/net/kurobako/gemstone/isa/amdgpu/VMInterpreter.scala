@@ -79,6 +79,9 @@ private object VMInterpreter {
       kernarg <- dispatch.argumentBuffer match {
         case Some(buffer) => context.memory.address(buffer.region, buffer.offset).flatMap { address =>
             context.memory.locate(address, prepared.source.kernargSize.raw.max(1).unsafe[Int >= 0])
+              .flatMap(_ =>
+                layout.fold[Either[Fault, Unit]](Right(()))(_.stampApertures(context.memory, buffer, dispatch.geometry))
+              )
               .map(_ => (Array.emptyByteArray, address.raw))
           }
         case None if layout.exists(_.parameters.size == dispatch.arguments.size) && dispatch.arguments.nonEmpty =>
