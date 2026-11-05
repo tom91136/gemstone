@@ -23,7 +23,8 @@ foreach(entry IN LISTS sycl_cts_slices)
 endforeach()
 list(APPEND sycl_cts_shards
   "^accessor_placeholder$"
-  "^(host_accessor|kernel_bundle|multi_ptr|spec_constants)$"
+  "^host_accessor$"
+  "^(kernel_bundle|multi_ptr|spec_constants)$"
   "^(accessor_basic|address_space|atomic.*)$"
   "^(local_accessor|buffer|marray_.*)$"
   "^(vector_.*|handler|usm)$")
