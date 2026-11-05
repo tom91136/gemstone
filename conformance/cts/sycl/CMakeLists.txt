@@ -212,16 +212,14 @@ if(NOT SYCL_CTS_SHARD STREQUAL "")
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/shard.txt" DESTINATION . COMPONENT architecture)
 endif()
 
-# a device compile peaks at 5 to 7 GB, so a runner cannot take many at once; the categories of small units
-# keep the full build budget
-set_property(GLOBAL APPEND PROPERTY JOB_POOLS sycl_cts_group_functions=1 sycl_cts_device=2)
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS sycl_cts_serial=1 sycl_cts_device=2)
 
 foreach(target IN LISTS sycl_cts_targets)
   if(TARGET "${target}_objects")
     string(REGEX REPLACE "^test_(full_conformance_)?" "" category "${target}")
     sycl_cts_shard_of("${category}" owner)
-    if(category MATCHES "^group_functions_")
-      set_target_properties("${target}_objects" PROPERTIES JOB_POOL_COMPILE sycl_cts_group_functions)
+    if(category MATCHES "${sycl_cts_serial}")
+      set_target_properties("${target}_objects" PROPERTIES JOB_POOL_COMPILE sycl_cts_serial)
     elseif(NOT category MATCHES "${sycl_cts_wide}")
       set_target_properties("${target}_objects" PROPERTIES JOB_POOL_COMPILE sycl_cts_device)
     endif()
