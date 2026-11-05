@@ -24,7 +24,7 @@ private object OpenCLBuiltins {
     else None
 
   def collective(name: String): Boolean = name match {
-    case "_Z7barrierj" | "_Z29work_group_scan_exclusive_addi" | "_Z29work_group_scan_exclusive_addl" |
+    case "_Z7barrierj" | "_Z17sub_group_barrierj" | "_Z29work_group_scan_exclusive_addi" | "_Z29work_group_scan_exclusive_addl" |
         "_Z28sub_group_scan_exclusive_addi" => true
     case value => broadcastScope(value).isDefined || value.startsWith("_Z26intel_sub_group_shuffle_up")
   }
@@ -58,7 +58,8 @@ private object OpenCLBuiltins {
     case ConvertFromBf16
     case ToGlobal
     case IsNaN
-    case Barrier
+    case IsFpClass
+    case Barrier(scope: Int)
     case Scan(scope: Int, label: String)
     case Broadcast(scope: Int)
   }
@@ -74,13 +75,33 @@ private object OpenCLBuiltins {
         case "__devicelib_ConvertBF16ToFINTEL"                               => Some(Builtin.ConvertFromBf16)
         case "__to_global"                                                   => Some(Builtin.ToGlobal)
         case "_Z5isnanf"                                                     => Some(Builtin.IsNaN)
-        case "_Z7barrierj"                                                   => Some(Builtin.Barrier)
+        case "llvm.is.fpclass.f32"                                           => Some(Builtin.IsFpClass)
+        case "_Z7barrierj"                                                   => Some(Builtin.Barrier(Scope.Workgroup))
+        case "_Z17sub_group_barrierj"                                        => Some(Builtin.Barrier(Scope.Subgroup))
         case "_Z29work_group_scan_exclusive_addi"                            =>
           Some(Builtin.Scan(Scope.Workgroup, "work_group_scan_exclusive_add"))
         case "_Z29work_group_scan_exclusive_addl" => Some(Builtin.Scan(Scope.Workgroup, "scan"))
         case "_Z28sub_group_scan_exclusive_addi"  => Some(Builtin.Scan(Scope.Subgroup, "scan"))
         case broadcast                            => broadcastScope(broadcast).map(Builtin.Broadcast(_))
       })
+
+  private def fpClassMatches(bits: Long, classes: Long): Boolean = {
+    val negative = (bits & 0x80000000L) != 0L
+    val exponent = (bits >>> 23) & 0xffL
+    val fraction = bits & 0x7fffffL
+    val index    =
+      if (exponent == 0xffL)
+        if (fraction == 0L) { if (negative) 2 else 9 }
+        else if ((fraction & 0x400000L) == 0L) 0
+        else 1
+      else if (exponent == 0L)
+        if (fraction == 0L) { if (negative) 5 else 6 }
+        else if (negative) 4
+        else 7
+      else if (negative) 3
+      else 8
+    ((classes >>> index) & 1L) != 0L
+  }
 
   def supplies(name: String): Boolean = builtin(name).isDefined
 
@@ -220,7 +241,26 @@ private object OpenCLBuiltins {
             case None    => Left(undefined(arguments.head))
           }
         }
-      case Builtin.Barrier => Dynamic { (execution, _) =>
+      case Builtin.IsFpClass => step { (execution, _) =>
+          (
+            execution.values.get(arguments(0)),
+            scalar(execution.values, arguments(1)),
+            program.booleanLanes(resultType)
+          ) match {
+            case (Some(VMValue.Bits(sourceType, Array(raw))), Right(classes), Some(1))
+                if program.floatingShape(sourceType).contains((32, 1)) =>
+              Right(execution.values.updateScalar(
+                dest,
+                resultType,
+                if (fpClassMatches(raw & 0xffffffffL, classes)) 1L else 0L
+              ))
+            case (None, _, _)        => Left(undefined(arguments(0)))
+            case (_, Left(error), _) => Left(error)
+            case _                   =>
+              Left(Fault.InvalidRequest("llvm.is.fpclass.f32 requires a float scalar and a boolean scalar result"))
+          }
+        }
+      case Builtin.Barrier(barrierScope) => Dynamic { (execution, _) =>
           scalar(execution.values, arguments.head).flatMap { flags =>
             suspend(
               execution,
@@ -228,8 +268,8 @@ private object OpenCLBuiltins {
                 CollectiveKind.Barrier,
                 _,
                 _,
-                Scope.Workgroup,
-                CollectivePayload.Barrier(Scope.Workgroup, flags)
+                barrierScope,
+                CollectivePayload.Barrier(barrierScope, flags)
               )
             )
           }

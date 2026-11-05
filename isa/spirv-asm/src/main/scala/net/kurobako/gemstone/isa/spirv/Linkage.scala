@@ -86,12 +86,10 @@ object Linkage {
       _ = imports.foreach(symbol => defined.get(symbol.name).foreach(group => alias.update(symbol.id, group.head.id)))
       resolve    = (id: Int) => alias.getOrElse(id, id)
       _          = merge(top, resolve, alias)
-      signatures = signatureOf(top, functions)
+      signatures = signatureOf(top, functions, resolve)
       _ <- imports.collectFirst {
         case symbol
-            if defined.get(symbol.name).exists(group =>
-              signatures.get(symbol.id).map(_.map(resolve)) != signatures.get(group.head.id).map(_.map(resolve))
-            ) =>
+            if defined.get(symbol.name).exists(group => signatures.get(symbol.id) != signatures.get(group.head.id)) =>
           failure(s"imported symbol '${symbol.name}' does not match its export")
       }.toLeft(())
       builtins = top.collect {
@@ -189,13 +187,31 @@ object Linkage {
   private def parameters(function: Vector[Instruction]): Vector[Int] =
     function.collect { case i if i.opcode == "OpFunctionParameter" => Operand.id(i.operands(1)) }
 
-  private def signatureOf(top: Vector[Instruction], functions: Vector[Vector[Instruction]]): Map[Int, Vector[Int]] =
+  private def signatureOf(
+      top: Vector[Instruction],
+      functions: Vector[Vector[Instruction]],
+      resolve: Int => Int
+  ): Map[Int, Vector[Int]] = {
+    val storage = top.collect {
+      case i if i.opcode == "OpTypePointer" =>
+        Operand.id(i.operands(0)) -> i.operands(1).words.head.raw
+    }.toMap
+    val parameters = top.collect {
+      case i if i.opcode == "OpTypeFunction" =>
+        Operand.id(i.operands(0)) -> i.operands.drop(1).map(operand => Operand.id(operand)).toVector
+    }.toMap
+    val shape = (id: Int) => storage.get(resolve(id)).fold(resolve(id))(-_ - 1)
     (top.collect {
       case i if i.opcode == "OpVariable" =>
-        Operand.id(i.operands(1)) -> Vector(1, Operand.id(i.operands(0)), Operand.id(i.operands(2)))
-    } ++ functions.map(function =>
-      functionId(function) -> Vector(0, Operand.id(function.head.operands(0)), Operand.id(function.head.operands(3)))
-    )).toMap
+        Operand.id(i.operands(1)) -> Vector(1, resolve(Operand.id(i.operands(0))), resolve(Operand.id(i.operands(2))))
+    } ++ functions.map { function =>
+      val header = function.head
+      functionId(function) ->
+        (0 +:
+          (Operand.id(header.operands(0)) +:
+            parameters.getOrElse(resolve(Operand.id(header.operands(3))), Vector.empty)).map(shape))
+    }).toMap
+  }
 
   private def result(instruction: Instruction): Option[Int] =
     instruction.operands.collectFirst { case operand if operand.kind == OperandKind.IdResult => Operand.id(operand) }

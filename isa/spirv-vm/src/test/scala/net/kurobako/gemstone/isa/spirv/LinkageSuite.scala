@@ -194,6 +194,88 @@ class LinkageSuite extends Suite {
     assertEquals(words(memory, out, 0, 2), Vec(0L, 1L))
   }
 
+  test("a linked kernel classifies floats through the llvm.is.fpclass import") {
+    val user = spv"""
+      $openCL
+      OpCapability Linkage
+      OpEntryPoint Kernel %main "classify"
+      OpDecorate %is_fpclass LinkageAttributes "llvm.is.fpclass.f32" Import
+      OpDecorate %ids LinkageAttributes "__spirv_BuiltInGlobalInvocationId" Import
+      OpDecorate %ids BuiltIn GlobalInvocationId
+      %void = OpTypeVoid
+      %bool = OpTypeBool
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %float = OpTypeFloat 32
+      %ids_vector = OpTypeVector %ulong 3
+      %ids_ptr = OpTypePointer Input %ids_vector
+      %ptr = OpTypePointer CrossWorkgroup %uint
+      %main_fn = OpTypeFunction %void %ptr %ptr
+      %class_fn = OpTypeFunction %bool %float %uint
+      %infinities = OpConstant %uint 516
+      %one = OpConstant %uint 1
+      %zero = OpConstant %uint 0
+      %ids = OpVariable %ids_ptr Input
+      %is_fpclass = OpFunction %bool None %class_fn
+      %value_in = OpFunctionParameter %float
+      %mask_in = OpFunctionParameter %uint
+      OpFunctionEnd
+      %main = OpFunction %void None %main_fn
+      %in = OpFunctionParameter %ptr
+      %out = OpFunctionParameter %ptr
+      %entry = OpLabel
+      %vector = OpLoad %ids_vector %ids
+      %x = OpCompositeExtract %ulong %vector 0
+      %from = OpPtrAccessChain %ptr %in %x
+      %to = OpPtrAccessChain %ptr %out %x
+      %raw = OpLoad %uint %from
+      %value = OpBitcast %float %raw
+      %hit = OpFunctionCall %bool %is_fpclass %value %infinities
+      %flag = OpSelect %uint %hit %one %zero
+      OpStore %to %flag
+      OpReturn
+      OpFunctionEnd
+    """
+    val linked = link(user, provider).value
+    val memory = RegionMemory()
+    val in     = memory.allocate(16L)
+    val out    = memory.allocate(16L)
+    writeWords(memory, in, 0, 0x7f800000L, 0xff800000L, 0x7fc00000L, 0x3f800000L)
+    assertEquals(run(linked, "classify", memory, Vec(buffer(in), buffer(out)), groups = testDimensions(4)), Right(()))
+    assertEquals(words(memory, out, 0, 4), Vec(1L, 1L, 0L, 0L))
+  }
+
+  test("a linked kernel runs past the sub_group_barrier import") {
+    val user = spv"""
+      $openCL
+      OpCapability Linkage
+      OpEntryPoint Kernel %main "sync"
+      OpDecorate %barrier LinkageAttributes "_Z17sub_group_barrierj" Import
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ptr = OpTypePointer CrossWorkgroup %uint
+      %main_fn = OpTypeFunction %void %ptr
+      %barrier_fn = OpTypeFunction %void %uint
+      %fence = OpConstant %uint 1
+      %done = OpConstant %uint 7
+      %barrier = OpFunction %void None %barrier_fn
+      %flags = OpFunctionParameter %uint
+      OpFunctionEnd
+      %main = OpFunction %void None %main_fn
+      %out = OpFunctionParameter %ptr
+      %entry = OpLabel
+      %call = OpFunctionCall %void %barrier %fence
+      OpStore %out %done
+      OpReturn
+      OpFunctionEnd
+    """
+    val linked = link(user, provider).value
+    val memory = RegionMemory()
+    val out    = memory.allocate(4L)
+    assertEquals(run(linked, "sync", memory, Vec(buffer(out)), groups = testDimensions(4)), Right(()))
+    assertEquals(words(memory, out, 0, 1), Vec(7L))
+  }
+
   test("a symbol exported twice is rejected") {
     assert(link(provider, provider).left.exists(_.message.contains("exported more than once")))
   }
@@ -211,6 +293,66 @@ class LinkageSuite extends Suite {
       OpFunctionEnd
     """
     assert(link(mismatched, provider).left.exists(_.message.contains("does not match")))
+  }
+
+  test("pointer parameters match across pointee types of the same storage class") {
+    val importer = spv"""
+      $openCL
+      OpCapability Linkage
+      OpDecorate %fill LinkageAttributes "fill" Import
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %uptr = OpTypePointer Generic %uint
+      %fill_fn = OpTypeFunction %void %uptr
+      %fill = OpFunction %void None %fill_fn
+      %p = OpFunctionParameter %uptr
+      OpFunctionEnd
+    """
+    val exporter = spv"""
+      $openCL
+      OpCapability Linkage
+      OpDecorate %fill LinkageAttributes "fill" Export
+      %void = OpTypeVoid
+      %float = OpTypeFloat 32
+      %fptr = OpTypePointer Generic %float
+      %fill_fn = OpTypeFunction %void %fptr
+      %fill = OpFunction %void None %fill_fn
+      %p = OpFunctionParameter %fptr
+      %entry = OpLabel
+      OpReturn
+      OpFunctionEnd
+    """
+    assertEquals(symbols(link(importer, exporter).value, LinkageType.Import), Set.empty[String])
+  }
+
+  test("pointer parameters in different storage classes do not match") {
+    val importer = spv"""
+      $openCL
+      OpCapability Linkage
+      OpDecorate %fill LinkageAttributes "fill" Import
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %uptr = OpTypePointer Generic %uint
+      %fill_fn = OpTypeFunction %void %uptr
+      %fill = OpFunction %void None %fill_fn
+      %p = OpFunctionParameter %uptr
+      OpFunctionEnd
+    """
+    val exporter = spv"""
+      $openCL
+      OpCapability Linkage
+      OpDecorate %fill LinkageAttributes "fill" Export
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %uptr = OpTypePointer CrossWorkgroup %uint
+      %fill_fn = OpTypeFunction %void %uptr
+      %fill = OpFunction %void None %fill_fn
+      %p = OpFunctionParameter %uptr
+      %entry = OpLabel
+      OpReturn
+      OpFunctionEnd
+    """
+    assert(link(importer, exporter).left.exists(_.message.contains("does not match")))
   }
 
   test("modules with different memory models are rejected") {
