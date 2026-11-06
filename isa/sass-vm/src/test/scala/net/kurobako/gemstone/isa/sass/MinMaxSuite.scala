@@ -74,6 +74,20 @@ class MinMaxSuite extends Suite {
     }
   }
 
+  for (sm <- Vec(50, 60))
+    test(s"sm_$sm IMNMX.U32.XHI with a condition-code destination defines every flag a save reads") {
+      check(
+        sm,
+        "MOV32I R0, 0x1; MOV32I R1, 0x2; MOV32I R2, 0x2; MOV32I R3, 0x2; MOV32I R10, 0x50; MOV32I R11, 0x20; " +
+          "IMNMX.U32.XHI R4.CC, R0, R1, PT; P2R R12, CC, RZ, 0xf; IADD RZ.CC, R10, -R11; R2P CC, R12, 0xf; " +
+          "IMNMX.U32.XLO R6, R10, R11, PT; " +
+          "IMNMX.U32.XHI R5.CC, R2, R3, PT; P2R R13, CC, RZ, 0xf; IADD RZ.CC, R10, R11; R2P CC, R13, 0xf; " +
+          "IMNMX.U32.XLO R7, R10, R11, PT; " +
+          "MOV R8, c[0x0][0x160]; MOV R9, c[0x0][0x164]; STG.E [R8], R6; STG.E [R8+0x4], R7; EXIT",
+        Vec(0x50, 0x20)
+      )
+    }
+
   test("CUDA 11.8 sm_35 extended IMNMX implements signed and unsigned 64-bit min/max") {
     Vec(
       (

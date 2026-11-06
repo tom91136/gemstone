@@ -30,7 +30,8 @@ private object VMSemantics {
 
   private def executeStaged(instruction: Instruction, context: VMContext): Either[Fault, Step] = instruction match {
     case _: (Instruction.Branch | Instruction.BranchTable | Instruction.ReturnStackPush | Instruction.ReturnStackPop |
-          Instruction.ReturnStackSave | Instruction.Call) | Instruction.NoOp | Instruction.Return | Instruction.Exit =>
+          Instruction.ReturnStackSave |
+          Instruction.Call) | Instruction.NoOp | Instruction.Spin | Instruction.Return | Instruction.Exit =>
       executeControl(instruction, context)
     case Instruction.Trap | Instruction.CallBuiltin(_, _, _) | Instruction.Convergence(_, _) | Instruction.Yield |
         Instruction.Pause | Instruction.Fence =>
@@ -104,9 +105,9 @@ private object VMSemantics {
         })
       case Instruction.Call(function, returnParameters, parameters) =>
         VMMachineOps(context).call(function, returnParameters, parameters)
-      case Instruction.NoOp   => Advanced
-      case Instruction.Return => VMMachineOps(context).returnControl
-      case Instruction.Exit   => VMMachineOps(context).exit
+      case Instruction.NoOp | Instruction.Spin => Advanced
+      case Instruction.Return                  => VMMachineOps(context).returnControl
+      case Instruction.Exit                    => VMMachineOps(context).exit
     }
 
   private def executeControlMachine(instruction: Instruction, context: VMContext): Either[Fault, Step] = {

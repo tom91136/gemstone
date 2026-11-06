@@ -1374,7 +1374,7 @@ private[isa] object VMInterpreter {
       else {
         stalled = 0
         val yielding = instruction.instruction match {
-          case Instruction.Yield | Instruction.Pause => true; case _ => false
+          case Instruction.Yield | Instruction.Pause | Instruction.Spin => true; case _ => false
         }
         sleeping = yielding && context.spin.recording && cohort.lanes.headOption.exists(context.spin.yielded(_))
         runningAhead = frame.routine.program.runsAhead && !yielding && runAhead < RunAheadLimit &&

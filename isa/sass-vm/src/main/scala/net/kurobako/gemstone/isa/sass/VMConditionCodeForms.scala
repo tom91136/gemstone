@@ -37,9 +37,10 @@ private object VMConditionCodeForms {
       case _: Form.Imad =>
         modifiers.isEmpty && operands.size == 4 && !operands.tail.exists(negatedSource) &&
         OperandQueries.integer(operands(2)).exists(_ <= 0xffffff)
-      case _: Form.Xmad => modifiers.isEmpty
-      case _: Form.Lea  => VMIntegerCompiler.legacyLeaUpdatesCarry
-      case _            => false
+      case _: Form.Xmad  => modifiers.isEmpty
+      case _: Form.Imnmx => modifiers.contains(Modifier.XHI) && modifiers.contains(Modifier.U32)
+      case _: Form.Lea   => VMIntegerCompiler.legacyLeaUpdatesCarry
+      case _             => false
     })
   }
 

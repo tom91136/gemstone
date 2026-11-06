@@ -1196,7 +1196,11 @@ private object VMIntegerCompiler {
     val chooseA =
       if (high) {
         val less = compareValues(Modifier.LT, a, b, signed)
-        if (OperandQueries.has(operands.head, OperandSelector.CC)) {
+        if (ccFlagsSupported) {
+          val difference = temp()
+          emit(IntegerBinary(IntegerOperation.Subtract, difference.slot, a, b, 32))
+          updateIntegerCC(a, b, difference, isSub = true, None)
+        } else if (OperandQueries.has(operands.head, OperandSelector.CC)) {
           emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, less))
           emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, compareValues(Modifier.EQ, a, b, signed)))
         }

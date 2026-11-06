@@ -787,6 +787,39 @@ class ControlFlowSuite extends Suite {
     assertEquals(run.words(1), expected)
   }
 
+  for (sm <- Vec(50, 60)) test(s"sm_$sm lanes polling a flag stay in the convergence barrier of the loop") {
+    val flags = Vec.tabulate(32)(lane => if (lane < 16) 1L else 0L)
+    val run   = program(
+      sm,
+      """S2R R6, SR_TID.X
+        |LEA R4.CC, R6, c[0x0][0x160], 0x2
+        |LEA.HI.X R5, R6, c[0x0][0x164], RZ, 0x2
+        |LEA R8.CC, R6, c[0x0][0x168], 0x2
+        |LEA.HI.X R9, R6, c[0x0][0x16c], RZ, 0x2
+        |ISETP.GE.U32.AND P0, PT, R6, 0x20, PT
+        |@P0 BRA `(produce)
+        |SSY `(done)
+        |spin: LDG.E.CV R0, [R4]
+        |ISETP.EQ.U32.AND P1, PT, R0, RZ, PT
+        |@P1 BRA `(spin)
+        |NOP.S
+        |done: VOTE.ANY R7, PT, PT
+        |STG.E [R8], R7
+        |EXIT
+        |produce: IADD32I R10, R6, -0x20
+        |LEA R2.CC, R10, c[0x0][0x160], 0x2
+        |LEA.HI.X R3, R10, c[0x0][0x164], RZ, 0x2
+        |MOV32I R1, 0x3e8
+        |work: IADD32I R1, R1, -0x1
+        |ISETP.NE.AND P1, PT, R1, RZ, PT
+        |@P1 BRA `(work)
+        |MOV32I R0, 0x1
+        |STG.E [R2], R0
+        |EXIT""".stripMargin
+    ).launch(block = 64)(Arg.Buffer(Harness.words(flags)), Arg.zeros(256))
+    assertEquals(run.words(1).take(32), Vec.fill(32)(0xffffffffL))
+  }
+
   test("BRX adds its register and displacement to the following instruction address") {
     check(
       86,

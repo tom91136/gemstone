@@ -1679,6 +1679,11 @@ private[isa] object VMIR {
     case NoOp
     case Yield
     case Pause
+
+    /** The warp waits on memory others write: other warps run before it does, but its lanes stay in the convergence
+      * barriers they are in, as lanes of a warp without independent thread scheduling cannot wait on each other.
+      */
+    case Spin
     case SetPredicate(
         destination: Predicate,
         comparison: Comparison,
@@ -1764,7 +1769,7 @@ private[isa] object VMIR {
 
     /** Whether the program marks where a diverged path hands over to the others, as SASS does. */
     val yields: Boolean = instructions.exists(_.instruction match {
-      case Instruction.Yield | Instruction.Pause => true; case _ => false
+      case Instruction.Yield | Instruction.Pause | Instruction.Spin => true; case _ => false
     })
 
     /** Whether a diverged path runs until it blocks: the program yields, or writes warp-wide uniform registers, which a

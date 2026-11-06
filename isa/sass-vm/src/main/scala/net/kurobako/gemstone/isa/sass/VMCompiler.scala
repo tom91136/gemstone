@@ -666,7 +666,7 @@ private object VMCompiler {
           }
       // only the lanes that take the back edge are waiting, the others go on to what follows the loop
       val spin =
-        if (polling) Vec(Execute(Yield, predication.filter(_ => guard.nonEmpty))) else Vec.empty[VMAssembler.Statement]
+        if (polling) Vec(Execute(Spin, predication.filter(_ => guard.nonEmpty))) else Vec.empty[VMAssembler.Statement]
       Vec(Label(label(instruction.address.raw))) ++ setup ++ spin ++ body
     }
   }
