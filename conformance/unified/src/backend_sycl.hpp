@@ -654,6 +654,7 @@ template <class T, size_t Id> class DiamondLeft;
 template <class T, size_t Id> class DiamondRight;
 template <class T, size_t Id> class DiamondJoin;
 template <class T, size_t Id> class BlockScan;
+class InvalidWorkGroup;
 } // namespace onedpl_edge_detail
 
 class OneDPLEdgeCases {
@@ -764,8 +765,19 @@ public:
     return sycl_support::finish(queue, output);
   }
 
-  template <class T> std::vector<T> runtimeErrorRecover(const std::vector<T> &) {
-    SKIP("oneDPL does not expose an equivalent recoverable runtime-error path");
+  template <class T> std::vector<T> runtimeErrorRecover(const std::vector<T> &input) {
+    const auto oversized = queue.get_device().get_info<sycl::info::device::max_work_group_size>() + 1;
+    bool rejected = false;
+    try {
+      queue.submit([&](sycl::handler &handler) {
+        handler.parallel_for<onedpl_edge_detail::InvalidWorkGroup>(sycl::nd_range<1>(oversized, oversized), [=](sycl::nd_item<1>) {});
+      });
+      queue.wait_and_throw();
+    } catch (const sycl::exception &) {
+      rejected = true;
+    }
+    if (!rejected) throw std::runtime_error("oversized work-group unexpectedly accepted");
+    return numericEdgeRoundtrip(input);
   }
 
 private:

@@ -303,7 +303,13 @@ TEST_CASE("integer/cuda/carryless", "[unified][integer]") {
   DeviceBuffer<uint64_t> out{std::vector<uint64_t>(static_cast<size_t>(count) * count * CarrylessCount)};
   carryless<<<((count * count) + 63) / 64, 64>>>(in.data, out.data, supported.data, count);
   finish("carryless");
-  if (supported.download()[0] == 0) SKIP("clmad requires compute capability 8.0 and PTX ISA 9.3");
+  if (supported.download()[0] == 0) {
+#ifdef __clang__
+    SKIP("clmad needs PTX ISA 9.3, which clang does not emit");
+#else
+    SKIP("clmad requires compute capability 8.0 and PTX ISA 9.3");
+#endif
+  }
   const auto actual = out.download();
   for (uint32_t i = 0; i < count * count; ++i) {
     const auto expected = carrylessReference(Words[i / count], Words[i % count]);

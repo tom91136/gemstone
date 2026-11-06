@@ -279,6 +279,42 @@ bool gtestSkipped(std::string_view report) {
   if (count == 0) throw std::runtime_error("missing Google Test result");
   return skipped;
 }
+namespace {
+std::string joinedReason(std::string_view text, bool indentedOnly) {
+  std::string reason;
+  while (!text.empty()) {
+    const auto end = text.find('\n');
+    auto line = text.substr(0, end);
+    text = end == std::string_view::npos ? std::string_view{} : text.substr(end + 1);
+    if (indentedOnly && !line.starts_with("  ")) break;
+    const auto first = line.find_first_not_of(" \t\r");
+    if (first == std::string_view::npos) continue;
+    line = line.substr(first, line.find_last_not_of(" \t\r") + 1 - first);
+    if (!reason.empty()) reason += "; ";
+    reason += line;
+  }
+  return reason;
+}
+} // namespace
+std::string catchSkipReason(std::string_view output) {
+  constexpr std::string_view marker = "SKIPPED:\nexplicitly with message";
+  const auto start = output.find(marker);
+  if (start == std::string_view::npos) return {};
+  const auto body = output.find('\n', start + marker.size());
+  return body == std::string_view::npos ? std::string{} : joinedReason(output.substr(body + 1), true);
+}
+std::string gtestSkipReason(std::string_view report) {
+  constexpr std::string_view open = "<![CDATA[";
+  const auto skipped = report.find("<skipped ");
+  if (skipped == std::string_view::npos) return {};
+  const auto begin = report.find(open, skipped);
+  const auto end = report.find("]]>", skipped);
+  if (begin == std::string_view::npos || end == std::string_view::npos || end < begin) return {};
+  auto detail = report.substr(begin + open.size(), end - begin - open.size());
+  detail.remove_prefix(std::min(detail.size(), detail.find('\n') + 1));
+  if (detail.starts_with("Skipped\n")) detail.remove_prefix(8);
+  return joinedReason(detail, false);
+}
 bool gtestCaseSelected(std::string_view program, const std::string &name, const std::vector<std::string> &levelzeroCases) {
   if (!program.starts_with("levelzero_") || levelzeroCases.empty()) return true;
   return levelzeroCases ^ exists([&](const std::string &pattern) { return globMatches(pattern, name); });
@@ -653,7 +689,7 @@ static bool profileSkipped(const ExecutionConfig &config, const ScheduledCase &t
 CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test) {
   if (!validName(test.program)) throw std::invalid_argument("invalid test program");
   if (profileSkipped(config, test))
-    return {.status = SkipReturnCode, .output = "SKIP " + test.identity + ": machine profile\n", .message = {}};
+    return {.status = SkipReturnCode, .output = "SKIP " + test.identity + ": machine profile\n", .message = "machine profile"};
   if (const auto failure = config.jitFailures ^ get_maybe(test.program)) {
     auto message = fmt::format("JIT warm-up of {} failed: {}", test.program, *failure);
     return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message)};
@@ -674,7 +710,8 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
                                                  fs::canonical(library).filename().string(), test.program, test.identity);
                           })
                         ^ filter([](std::string_view skip) { return !skip.empty(); });
-    if (reason) return {.status = SkipReturnCode, .output = fmt::format("SKIP {}: {}\n", test.identity, *reason), .message = {}};
+    if (reason)
+      return {.status = SkipReturnCode, .output = fmt::format("SKIP {}: {}\n", test.identity, *reason), .message = std::string(*reason)};
   }
   const auto programs = testPrograms(config.directory, Workload{});
   const auto selected = programs ^ find_cref([&](const TestProgram &candidate) { return candidate.name == test.program; });
@@ -717,22 +754,30 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
                                   std::chrono::seconds(test.timeoutSeconds), "[" + test.identity + "] ", false, &output);
   auto status = process.status;
   std::string record;
+  std::string reason;
   if (status == 0 && deqp) {
     const auto result = deqpResult(readFile(report / "result.qpa"), test.identity);
     record = fmt::format("dEQP {}: {}\n", test.identity, result.statusCode);
     output << record;
     status = result.status;
+    if (status == SkipReturnCode) reason = "dEQP " + result.statusCode;
   }
   if (status == 0 && gtest) {
-    if (gtestSkipped(readFile(report / "gtest.xml"))) {
+    const auto xml = readFile(report / "gtest.xml");
+    if (gtestSkipped(xml)) {
       record = fmt::format("gtest {}: skipped\n", test.identity);
       output << record;
       status = SkipReturnCode;
+      reason = gtestSkipReason(xml);
     }
   }
   output.close();
-  auto message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
-                                  : fmt::format("exit status {}", status);
+  if (status == SkipReturnCode && !gtest && !deqp) reason = catchSkipReason(readFile(outputPath));
+  std::string message = std::move(reason);
+  if (message.empty()) {
+    message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
+                               : fmt::format("exit status {}", status);
+  }
   record += fmt::format("conformance: {}, full output: {}\n", message, outputPath.string());
   return {.status = status, .output = std::move(record), .message = std::move(message)};
 }
@@ -774,8 +819,7 @@ void writeJunit(const fs::path &path, const std::vector<CaseReport> &reports) {
       file << "/>\n";
       continue;
     }
-    file << ">\n    "
-         << (skipped(result) ? std::string("<skipped/>") : fmt::format("<failure message=\"{}\"/>", xmlEscaped(failureMessage(result))))
+    file << ">\n    " << fmt::format("<{} message=\"{}\"/>", skipped(result) ? "skipped" : "failure", xmlEscaped(failureMessage(result)))
          << "\n    <system-out>" << xmlEscaped(result.output) << "</system-out>\n  </testcase>\n";
   }
   file << "</testsuite>\n";

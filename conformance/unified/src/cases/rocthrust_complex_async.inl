@@ -8,6 +8,8 @@
 
 #include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <thrust/device_delete.h>
+#include <thrust/device_new.h>
 
 #if __has_include(<thrust/universal_host_pinned_vector.h>)
   #include <thrust/universal_host_pinned_vector.h>
@@ -82,8 +84,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/stable-sort-by-key-large/i32/n257", "[
 // rocThrust `testing/dereference` port: plain iterators and device pointers
 // dereferenced inside device code through a hand-rolled copy kernel, since a
 // library-side copy would dispatch instead of exercising the iterator's own
-// operator*.  `testing/device_delete.cu` itself is marked KNOWN_FAILURE
-// upstream, so only this brand of device dereference is live.
+// operator*.
 
 namespace {
 template <typename Source, typename Destination>
@@ -164,13 +165,35 @@ template <class Value> inline void checkDereference() {
 
 TEST_CASE("algorithms/roc-thrust-semantic/dereference/i32/n5", "[unified][rocthrust]") { checkDereference<int32_t>(); }
 
+#if !defined(__HIPCC__) && THRUST_VERSION >= 300000
+namespace {
+struct DeviceDeleteProbe {
+  DeviceDeleteProbe() = default;
+  DeviceDeleteProbe(const DeviceDeleteProbe &) = delete;
+  DeviceDeleteProbe &operator=(const DeviceDeleteProbe &) = delete;
+  __host__ __device__ ~DeviceDeleteProbe() {
+  #ifdef __CUDA_ARCH__
+    if (destroyed != nullptr) *destroyed = true;
+  #endif
+  }
+  bool *destroyed = nullptr;
+};
+} // namespace
+#endif
+
 TEST_CASE("algorithms/roc-thrust-semantic/device-delete/i32/n11", "[unified][rocthrust]") {
-  // The upstream test asserts that the object destructor runs on the
-  // device after thrust::device_delete; rocThrust keeps that probe
-  // commented out behind a KNOWN_FAILURE marker because the destructor is not
-  // reliably invoked on this backend, so no direct port can verify more.
-  SKIP("device-delete: the upstream destructor-invocation test is marked "
-       "KNOWN_FAILURE on rocThrust");
+#if defined(__HIPCC__)
+  SKIP("device-delete: rocThrust marks the upstream destructor-invocation test KNOWN_FAILURE");
+#elif THRUST_VERSION >= 300000
+  thrust::device_ptr<DeviceDeleteProbe> probe = thrust::device_new<DeviceDeleteProbe>();
+  thrust::device_vector<bool> destroyed(1, false);
+  *thrust::device_ptr<bool *>(&probe.get()->destroyed) = destroyed.data().get();
+  REQUIRE_FALSE(destroyed[0]);
+  thrust::device_delete(probe);
+  REQUIRE(destroyed[0]);
+#else
+  SKIP("device-delete: Thrust before 3.0 marks the upstream destructor-invocation test KNOWN_FAILURE");
+#endif
 }
 
 namespace {

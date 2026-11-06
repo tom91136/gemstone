@@ -2,9 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
+#include <vector>
 
 #include <aspartame/all.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <thrust/host_vector.h>
 
 #if __has_include(<thrust/detail/tuple_algorithms.h>)
   #include <thrust/detail/tuple_algorithms.h>
@@ -217,12 +220,32 @@ TEST_CASE("algorithms/roc-thrust-semantic/discard-iterator/i32/n11", "[unified][
   }
 }
 
+namespace {
+template <class Iterator>
+inline constexpr bool writesThroughConst = std::is_const_v<std::remove_reference_t<typename thrust::iterator_traits<Iterator>::reference>>;
+
+struct ConstantOne {
+  int32_t operator()() const { return 1; }
+};
+} // namespace
+
 TEST_CASE("algorithms/roc-thrust-semantic/generate-const-iterators/i32/n11", "[unified][rocthrust]") {
-  // The upstream requirement is a compile-time negative check
-  // (ASSERT_STATIC_ASSERT that generate over const iterators rejects), so there
-  // is no device-side or host-side value a runtime case could verify here.
-  SKIP("generate-const-iterators: upstream requirement is a compile-time negative "
-       "check");
+  thrust::host_vector<int32_t> values(11, int32_t{0});
+  static_assert(writesThroughConst<decltype(values.cbegin())>);
+  static_assert(writesThroughConst<const int32_t *>);
+  static_assert(!writesThroughConst<decltype(values.begin())>);
+  static_assert(!writesThroughConst<int32_t *>);
+  thrust::generate(values.begin(), values.end(), ConstantOne{});
+  {
+    INFO("generate: mutable iterators mismatch");
+    REQUIRE(std::vector<int32_t>(values.begin(), values.end()) == std::vector<int32_t>(11, int32_t{1}));
+  }
+  thrust::fill(values.begin(), values.end(), int32_t{0});
+  thrust::generate_n(values.begin(), 11, ConstantOne{});
+  {
+    INFO("generate_n: mutable iterators mismatch");
+    REQUIRE(std::vector<int32_t>(values.begin(), values.end()) == std::vector<int32_t>(11, int32_t{1}));
+  }
 }
 
 // rocThrust `testing/pair.cu` and `testing/pair_transform` port: pair

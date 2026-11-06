@@ -108,7 +108,7 @@ struct ProcessResult {
 };
 struct CaseResult {
   int32_t status = 0;
-  // The full record and its one-line summary for failure reports.
+  // The full record and its one-line summary for failure and skip reports.
   std::string output, message;
   std::chrono::duration<double> elapsed{};
 };
@@ -148,6 +148,8 @@ Workload loadWorkload(const RunOptions &configuration);
 DeqpResult deqpResult(std::string_view qpa, std::string_view identity);
 std::vector<std::string> gtestCaseNames(std::string_view listing, std::string_view program);
 bool gtestSkipped(std::string_view report);
+std::string gtestSkipReason(std::string_view report);
+std::string catchSkipReason(std::string_view output);
 bool gtestCaseSelected(std::string_view program, const std::string &name, const std::vector<std::string> &levelzeroCases);
 std::string catchSpec(const std::vector<std::string> &specs);
 std::vector<std::string> catchShardArguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count);

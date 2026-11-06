@@ -259,7 +259,7 @@ TEST_CASE("case results report passes, failures and skips by full name", "[drive
       if (entry.path().filename() == "output.log" && read(entry.path()).contains("wrong shard or spec selected")) selected = true;
     CHECK(selected);
     CHECK(junit.contains("quote&quot; unicode"));
-    CHECK(junit.contains("<skipped/>"));
+    CHECK(junit.contains("<skipped message=\"native skip fixture\"/>"));
     CHECK(!read(report.path() / "short.toml").contains("extends"));
     RunOptions resolved;
     resolved.workloads = report.path();
@@ -429,6 +429,22 @@ TEST_CASE("Google Test inventories retain parameterised cases and reject duplica
   CHECK(names == std::vector<std::string>{"Driver.Opens", "Param/Copy.Case/0", "Param/Copy.Case/1"});
   CHECK_THROWS(gtestCaseNames("  Orphan\n", "levelzero"));
   CHECK_THROWS(gtestCaseNames("Driver.\n  Duplicate\n  Duplicate\n", "levelzero"));
+}
+
+TEST_CASE("skip reasons are extracted from Catch2 output and Google Test XML", "[driver]") {
+  CHECK(catchSkipReason("noise\n\nunified/src/a.hpp:1: SKIPPED:\nexplicitly with message:\n  device lacks fp64\n\n===\n")
+        == "device lacks fp64");
+  CHECK(catchSkipReason("x: SKIPPED:\nexplicitly with messages:\n  first\n  second\n\n===\n") == "first; second");
+  CHECK(catchSkipReason("x: SKIPPED:\n\n===\n").empty());
+  CHECK(catchSkipReason("passed\n").empty());
+  const auto xml = [](const std::string &detail) {
+    return "<testsuites tests=\"1\"><testsuite name=\"Driver\" tests=\"1\"><testcase name=\"Opens\" status=\"run\" result=\"skipped\">\n"
+           "      <skipped message=\"ignored\"><![CDATA["
+           + detail + "]]></skipped>\n</testcase></testsuite></testsuites>\n";
+  };
+  CHECK(gtestSkipReason(xml("a.cpp:7\nSkipped\nno peer access")) == "no peer access");
+  CHECK(gtestSkipReason(xml("a.cpp:7\nSkipped\n")).empty());
+  CHECK(gtestSkipReason("<testsuites/>").empty());
 }
 
 TEST_CASE("Google Test XML results classify skipped cases and reject unknown results", "[driver]") {
@@ -761,11 +777,17 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
   config.environment["PROPAGATED_ENVIRONMENT"] = "value with spaces";
   config.environment[conformance::environment::TargetArch] = "";
   CHECK(executeCase(config, {names[0], Fixture.stem().string(), 10, 0, 2}).status == 0);
-  CHECK(executeCase(config, {names[1], Fixture.stem().string(), 10, 1, 2}).status == SkipReturnCode);
+  const auto native =
+      executeCase(config, {.identity = names[1], .program = Fixture.stem().string(), .timeoutSeconds = 10, .index = 1, .count = 2});
+  CHECK(native.status == SkipReturnCode);
+  CHECK(native.message == "native skip fixture");
   CHECK(fs::is_regular_file(directory.path / Fixture.stem() / "0/result.txt"));
   CHECK(fs::is_directory(directory.path / Fixture.stem() / "1"));
   config.skips = {names[0]};
-  CHECK(executeCase(config, {names[0], Fixture.stem().string(), 10, 0, 2}).status == SkipReturnCode);
+  const auto profiled =
+      executeCase(config, {.identity = names[0], .program = Fixture.stem().string(), .timeoutSeconds = 10, .index = 0, .count = 2});
+  CHECK(profiled.status == SkipReturnCode);
+  CHECK(profiled.message == "machine profile");
   config.skips = {"blas/*", "edge/blas/*"};
   CHECK(executeCase(config, {"blas/f32/compact/asum", "unified", 10, 0, 2}).status == SkipReturnCode);
   CHECK(executeCase(config, {"edge/blas/f32/compact/gemm", "unified", 10, 0, 2}).status == SkipReturnCode);
@@ -1207,6 +1229,7 @@ TEST_CASE("vendor BLAS skips require the actual staged library and apply with or
   const ScheduledCase test{.identity = "blas/f32/compact/axpy", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 1};
   const auto execute = [&] { return executeCase(config, test).status; };
   CHECK(execute() == SkipReturnCode);
+  CHECK_FALSE(executeCase(config, test).message.empty());
   config.launcher = {"must-not-be-launched"};
   CHECK(execute() == SkipReturnCode);
   SECTION("a missing library remains an error") { fs::remove(version); }

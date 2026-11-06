@@ -340,8 +340,8 @@ __global__ void scoped([[maybe_unused]] int *global, [[maybe_unused]] unsigned l
 
 TEST_CASE("atomics/cuda/scoped-and-ordered", "[unified][atomics]") {
   if (compiled() < 70) SKIP("cuda::atomic_ref requires compute capability 7.0");
-#if defined(__clang__) && CUDART_VERSION < 12030
-  SKIP("CCCL before CUDA 12.3 reads an undefined __cuda_is_local result under clang");
+#if defined(__clang__) && CCCL_VERSION < 2002000
+  SKIP("CCCL before 2.2 reads an undefined __cuda_is_local result under clang");
 #endif
   DeviceBuffer<int> global(std::vector<int>(5));
   DeviceBuffer<int> out(std::vector<int>(static_cast<size_t>(Blocks) * 4));

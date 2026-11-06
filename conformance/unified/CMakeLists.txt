@@ -110,10 +110,14 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
   # Bulk asynchronous copies use the CUDA 12 tensor-map and cuda::ptx interfaces.
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12)
     target_sources(unified PRIVATE src/cuda/async_bulk.cu)
+  else()
+    message(STATUS "CUDA ${CUDAToolkit_VERSION} predates 12: async_bulk cases are not registered")
   endif()
   # tcgen05 and the sm_100 tensor copy modes need PTX ISA 8.6.
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.8)
     target_sources(unified PRIVATE src/cuda/blackwell.cu)
+  else()
+    message(STATUS "CUDA ${CUDAToolkit_VERSION} predates 12.8: blackwell cases are not registered")
   endif()
   # These kernels exercise recursion and runtime stack allocation, whose stack size ptxas cannot bound.
   if(CONFORMANCE_COMPILER STREQUAL "clang")
