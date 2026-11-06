@@ -23,7 +23,22 @@
 
 namespace gemstone::levelzero {
 
-enum class Kind : uint32_t { Driver, Device, Context, Queue, List, EventPool, Event, Fence, Module, BuildLog, Kernel, PhysicalMemory };
+enum class Kind : uint32_t {
+  Driver,
+  Device,
+  Context,
+  Queue,
+  List,
+  EventPool,
+  Event,
+  Fence,
+  Module,
+  BuildLog,
+  Kernel,
+  PhysicalMemory,
+  Image,
+  Sampler
+};
 
 inline gemstone::LiveHandles<Kind> liveHandles;
 
@@ -604,6 +619,31 @@ struct KernelParameterMetadata {
   bool containsPointer = false;
 };
 
+struct Image final : Handle {
+  static constexpr Kind HandleKind = Kind::Image;
+  Image(Context *contextValue, Device *deviceValue, const ze_image_desc_t &descValue)
+      : Handle(HandleKind), context(contextValue), device(deviceValue), desc(descValue) {}
+  HandleUse<Context> context;
+  Device *device;
+  ze_image_desc_t desc;
+  uint32_t pixelBytes = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t slices = 0;
+  size_t rowBytes = 0;
+  size_t sliceBytes = 0;
+  void *texels = nullptr;
+  void *record = nullptr;
+};
+
+struct Sampler final : Handle {
+  static constexpr Kind HandleKind = Kind::Sampler;
+  Sampler(Context *contextValue, Device *deviceValue) : Handle(HandleKind), context(contextValue), device(deviceValue) {}
+  HandleUse<Context> context;
+  Device *device;
+  void *record = nullptr;
+};
+
 struct Kernel final : Handle {
   static constexpr Kind HandleKind = Kind::Kernel;
   Kernel(Module *moduleValue, std::string nameValue) : Handle(HandleKind), module(moduleValue), name(std::move(nameValue)) {}
@@ -619,9 +659,15 @@ struct Kernel final : Handle {
   uint32_t offsetZ = 0;
   ze_kernel_indirect_access_flags_t indirect = 0;
   struct Argument {
+    enum class Opaque : uint8_t { None, Image, Sampler };
     bool local = false;
     size_t localSize = 0;
     std::vector<uint8_t> bytes;
+    Opaque opaque = Opaque::None;
+    // resolved from the image or sampler handle when a launch is recorded
+    uint64_t recordId = 0;
+    uint64_t texelsId = 0;
+    size_t recordBytes = 0;
   };
   std::vector<Argument> arguments;
   std::vector<KernelParameterMetadata> parameters;

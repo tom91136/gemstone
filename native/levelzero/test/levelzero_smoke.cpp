@@ -46,45 +46,171 @@ ContextHandles createContext() {
   return {.driver = driver, .device = device, .context = context};
 }
 
-void checkSamplerCapability(bool immediate) {
-  auto [driver, device, context] = createContext();
+ze_command_list_handle_t createImmediateList(const ContextHandles &handles) {
+  ze_command_queue_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
   ze_command_list_handle_t list = nullptr;
-  if (immediate) {
-    ze_command_queue_desc_t desc{};
-    desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
-    REQUIRE(zeCommandListCreateImmediate(context, device, &desc, &list) == ZE_RESULT_SUCCESS);
-  } else {
-    ze_command_list_desc_t desc{};
-    desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
-    REQUIRE(zeCommandListCreate(context, device, &desc, &list) == ZE_RESULT_SUCCESS);
-  }
-  // Both CTS sampler cases only create their module when the device reports samplers.
+  REQUIRE(zeCommandListCreateImmediate(handles.context, handles.device, &desc, &list) == ZE_RESULT_SUCCESS);
+  return list;
+}
+
+ze_image_desc_t imageDescription(ze_image_type_t type, uint32_t width, uint32_t height, uint32_t depth, uint32_t arrayLevels) {
+  ze_image_desc_t desc{};
+  desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+  desc.flags = ZE_IMAGE_FLAG_KERNEL_WRITE;
+  desc.type = type;
+  desc.format = {.layout = ZE_IMAGE_FORMAT_LAYOUT_8_8_8_8,
+                 .type = ZE_IMAGE_FORMAT_TYPE_UINT,
+                 .x = ZE_IMAGE_FORMAT_SWIZZLE_R,
+                 .y = ZE_IMAGE_FORMAT_SWIZZLE_G,
+                 .z = ZE_IMAGE_FORMAT_SWIZZLE_B,
+                 .w = ZE_IMAGE_FORMAT_SWIZZLE_A};
+  desc.width = width;
+  desc.height = height;
+  desc.depth = depth;
+  desc.arraylevels = arrayLevels;
+  return desc;
+}
+
+std::vector<uint32_t> pixelRamp(size_t count) {
+  std::vector<uint32_t> pixels(count);
+  for (size_t index = 0; index < count; ++index)
+    pixels[index] = static_cast<uint32_t>(index + 1);
+  return pixels;
+}
+} // namespace
+
+TEST_CASE("Level Zero devices advertise image and sampler limits", "[level-zero][image]") {
+  auto [driver, device, context] = createContext();
   ze_device_image_properties_t properties{};
   properties.stype = ZE_STRUCTURE_TYPE_IMAGE_PROPERTIES;
   REQUIRE(zeDeviceGetImageProperties(device, &properties) == ZE_RESULT_SUCCESS);
-  CHECK(properties.maxSamplers == 0);
+  CHECK(properties.maxImageDims1D > 0);
+  CHECK(properties.maxImageDims2D > 0);
+  CHECK(properties.maxImageDims3D > 0);
+  CHECK(properties.maxImageArraySlices > 0);
+  CHECK(properties.maxSamplers > 0);
+  CHECK(properties.maxReadImageArgs > 0);
+  CHECK(properties.maxWriteImageArgs > 0);
+
+  ze_image_properties_t imageProperties{};
+  imageProperties.stype = ZE_STRUCTURE_TYPE_IMAGE_PROPERTIES;
+  const auto desc = imageDescription(ZE_IMAGE_TYPE_2D, 16, 16, 1, 0);
+  REQUIRE(zeImageGetProperties(device, &desc, &imageProperties) == ZE_RESULT_SUCCESS);
+  CHECK((imageProperties.samplerFilterFlags & ZE_IMAGE_SAMPLER_FILTER_FLAG_LINEAR) != 0);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero samplers are created and destroyed", "[level-zero][sampler]") {
+  auto [driver, device, context] = createContext();
   ze_sampler_desc_t desc{};
   desc.stype = ZE_STRUCTURE_TYPE_SAMPLER_DESC;
   desc.addressMode = ZE_SAMPLER_ADDRESS_MODE_NONE;
   desc.filterMode = ZE_SAMPLER_FILTER_MODE_LINEAR;
   desc.isNormalized = true;
+  std::vector<ze_sampler_handle_t> samplers;
   for (int i = 0; i < 5; ++i) {
     ze_sampler_handle_t sampler = nullptr;
-    CHECK(zeSamplerCreate(context, device, &desc, &sampler) == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
-    CHECK(sampler == nullptr);
-    if (sampler) REQUIRE(zeSamplerDestroy(sampler) == ZE_RESULT_SUCCESS);
+    REQUIRE(zeSamplerCreate(context, device, &desc, &sampler) == ZE_RESULT_SUCCESS);
+    CHECK(sampler != nullptr);
+    samplers.push_back(sampler);
   }
+  CHECK(zeSamplerCreate(context, device, nullptr, samplers.data()) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  desc.addressMode = static_cast<ze_sampler_address_mode_t>(0x7f);
+  ze_sampler_handle_t rejected = nullptr;
+  CHECK(zeSamplerCreate(context, device, &desc, &rejected) == ZE_RESULT_ERROR_INVALID_ENUMERATION);
+  for (auto *const sampler : samplers)
+    CHECK(zeSamplerDestroy(sampler) == ZE_RESULT_SUCCESS);
+  CHECK(zeSamplerDestroy(nullptr) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero images copy to and from memory and between images", "[level-zero][image]") {
+  auto handles = createContext();
+  auto [driver, device, context] = handles;
+  auto *const list = createImmediateList(handles);
+  constexpr uint32_t width = 20;
+  constexpr uint32_t height = 20;
+  const auto desc = imageDescription(ZE_IMAGE_TYPE_2D, width, height, 1, 0);
+  ze_image_handle_t source = nullptr;
+  ze_image_handle_t target = nullptr;
+  REQUIRE(zeImageCreate(context, device, &desc, &source) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeImageCreate(context, device, &desc, &target) == ZE_RESULT_SUCCESS);
+
+  const auto pixels = pixelRamp(static_cast<size_t>(width) * height);
+  REQUIRE(zeCommandListAppendImageCopyFromMemory(list, source, pixels.data(), nullptr, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  std::vector<uint32_t> back(static_cast<size_t>(width) * height, 0);
+  REQUIRE(zeCommandListAppendImageCopyToMemory(list, back.data(), source, nullptr, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(back == pixels);
+
+  REQUIRE(zeCommandListAppendImageCopy(list, target, source, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  std::fill(back.begin(), back.end(), 0);
+  REQUIRE(zeCommandListAppendImageCopyToMemory(list, back.data(), target, nullptr, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(back == pixels);
+
+  const ze_image_region_t region{.originX = 2, .originY = 3, .originZ = 0, .width = 5, .height = 4, .depth = 1};
+  constexpr size_t pitchPixels = 8;
+  std::vector<uint32_t> padded(pitchPixels * region.height, 0);
+  REQUIRE(
+      zeCommandListAppendImageCopyToMemoryExt(list, padded.data(), source, &region, pitchPixels * sizeof(uint32_t), 0, nullptr, 0, nullptr)
+      == ZE_RESULT_SUCCESS);
+  for (uint32_t y = 0; y < region.height; ++y) {
+    for (uint32_t x = 0; x < pitchPixels; ++x) {
+      const auto expected = x < region.width ? pixels[((region.originY + y) * width) + region.originX + x] : 0U;
+      CHECK(padded[(y * pitchPixels) + x] == expected);
+    }
+  }
+
+  const ze_image_region_t destination{.originX = 10, .originY = 10, .originZ = 0, .width = 5, .height = 4, .depth = 1};
+  REQUIRE(zeCommandListAppendImageCopyFromMemoryExt(list, target, padded.data(), &destination, pitchPixels * sizeof(uint32_t), 0, nullptr,
+                                                    0, nullptr)
+          == ZE_RESULT_SUCCESS);
+  const ze_image_region_t sourceRegion{.originX = 0, .originY = 0, .originZ = 0, .width = 3, .height = 3, .depth = 1};
+  const ze_image_region_t targetRegion{.originX = 1, .originY = 1, .originZ = 0, .width = 3, .height = 3, .depth = 1};
+  REQUIRE(zeCommandListAppendImageCopyRegion(list, target, source, &targetRegion, &sourceRegion, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendImageCopyToMemory(list, back.data(), target, nullptr, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(back[(10 * width) + 10] == pixels[(3 * width) + 2]);
+  CHECK(back[(13 * width) + 14] == pixels[(6 * width) + 6]);
+  CHECK(back[(9 * width) + 9] == pixels[(9 * width) + 9]);
+  CHECK(back[(1 * width) + 1] == pixels[0]);
+  CHECK(back[(3 * width) + 3] == pixels[(2 * width) + 2]);
+
+  const ze_image_region_t outside{.originX = 18, .originY = 0, .originZ = 0, .width = 5, .height = 1, .depth = 1};
+  CHECK(zeCommandListAppendImageCopyToMemory(list, back.data(), source, &outside, nullptr, 0, nullptr) != ZE_RESULT_SUCCESS);
+
+  REQUIRE(zeImageDestroy(source) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeImageDestroy(target) == ZE_RESULT_SUCCESS);
+  CHECK(zeImageDestroy(nullptr) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
   REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
-} // namespace
 
-TEST_CASE("Level Zero regular sampler kernels require implemented image support", "[level-zero][sampler]") {
-  checkSamplerCapability(false);
-}
-
-TEST_CASE("Level Zero immediate sampler kernels require implemented image support", "[level-zero][sampler]") {
-  checkSamplerCapability(true);
+TEST_CASE("Level Zero volume and array images keep their slices apart", "[level-zero][image]") {
+  auto handles = createContext();
+  auto [driver, device, context] = handles;
+  auto *const list = createImmediateList(handles);
+  for (const auto type : {ZE_IMAGE_TYPE_3D, ZE_IMAGE_TYPE_2DARRAY}) {
+    DYNAMIC_SECTION((type == ZE_IMAGE_TYPE_3D ? "3D" : "2D array")) {
+      const auto desc = imageDescription(type, 4, 3, type == ZE_IMAGE_TYPE_3D ? 5 : 1, type == ZE_IMAGE_TYPE_3D ? 0 : 5);
+      ze_image_handle_t image = nullptr;
+      REQUIRE(zeImageCreate(context, device, &desc, &image) == ZE_RESULT_SUCCESS);
+      const auto pixels = pixelRamp(size_t{4} * 3 * 5);
+      REQUIRE(zeCommandListAppendImageCopyFromMemory(list, image, pixels.data(), nullptr, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+      const ze_image_region_t slice{.originX = 1, .originY = 1, .originZ = 3, .width = 2, .height = 2, .depth = 1};
+      std::vector<uint32_t> out(4, 0);
+      REQUIRE(zeCommandListAppendImageCopyToMemory(list, out.data(), image, &slice, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
+      const auto base = (3 * 12) + (1 * 4) + 1;
+      CHECK(out == std::vector<uint32_t>{pixels[base], pixels[base + 1], pixels[base + 4], pixels[base + 5]});
+      REQUIRE(zeImageDestroy(image) == ZE_RESULT_SUCCESS);
+    }
+  }
+  auto unsupported = imageDescription(ZE_IMAGE_TYPE_2D, 4, 4, 1, 0);
+  unsupported.format.layout = ZE_IMAGE_FORMAT_LAYOUT_NV12;
+  ze_image_handle_t image = nullptr;
+  CHECK(zeImageCreate(context, device, &unsupported, &image) == ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
 TEST_CASE("Level Zero rejected modules fail their creation with a build log", "[level-zero]") {

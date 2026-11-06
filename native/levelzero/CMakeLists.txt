@@ -4,7 +4,7 @@ endif()
 
 add_library(gemstone_levelzero SHARED src/driver.cpp)
 target_include_directories(gemstone_levelzero SYSTEM PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
-target_include_directories(gemstone_levelzero PRIVATE ../generated/levelzero)
+target_include_directories(gemstone_levelzero PRIVATE ../generated/levelzero ../generated/spirv)
 gemstone_project_target(gemstone_levelzero)
 target_link_libraries(gemstone_levelzero PRIVATE gemstone_execution_client)
 gemstone_require_abi_implementations(

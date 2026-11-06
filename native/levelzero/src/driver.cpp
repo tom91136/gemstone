@@ -37,6 +37,7 @@
 
 #include "gemstone/command_queue.hpp"
 #include "gemstone_execution_rpc.hpp"
+#include "gemstone_image_descriptor.hpp"
 #include <gemstone/copy_out.hpp>
 #include <gemstone/devices.hpp>
 #include <gemstone/environment.hpp>
@@ -60,6 +61,7 @@ namespace {
 
 using namespace gemstone::execution;
 using namespace gemstone::levelzero;
+namespace descriptor = gemstone::spirv::ImageDescriptor;
 
 // A failed allocation or throwing handle constructor must not unwind through the C DDI.
 template <class T, class... Args> T *createHandle(Args &&...args) noexcept {
@@ -187,6 +189,13 @@ constexpr uint32_t MaxWorkItems = 1024;
 constexpr uint32_t MaxWorkItemsZ = 64;
 constexpr uint64_t DeviceMemorySize = 1ULL << 40;
 constexpr size_t MaxServerAllocationSize = static_cast<size_t>(std::numeric_limits<int32_t>::max());
+constexpr uint32_t MaxImageDims = 16384;
+constexpr uint32_t MaxImageDims3D = 2048;
+constexpr uint32_t MaxImageArraySlices = 2048;
+constexpr uint32_t MaxSamplers = 16;
+constexpr uint32_t MaxImageArgs = 128;
+constexpr size_t ImageRecordBytes = descriptor::Layout::LevelTable + descriptor::Layout::LevelBytes + descriptor::Layout::PitchBytes;
+constexpr size_t SamplerRecordBytes = static_cast<size_t>(descriptor::SamplerWord::Count) * 4;
 
 AllocationRef findAllocationById(uint64_t id) {
   std::scoped_lock const lock(allocationsMutex);
@@ -826,7 +835,16 @@ template <class T> ze_result_t clearPropertiesKeepHeader(T *properties) {
 }
 
 ze_result_t ZE_APICALL deviceImageProperties(ze_device_handle_t, ze_device_image_properties_t *properties) {
-  return clearPropertiesKeepHeader(properties);
+  const auto cleared = clearPropertiesKeepHeader(properties);
+  if (cleared != ZE_RESULT_SUCCESS) return cleared;
+  properties->maxImageDims1D = MaxImageDims;
+  properties->maxImageDims2D = MaxImageDims;
+  properties->maxImageDims3D = MaxImageDims3D;
+  properties->maxImageArraySlices = MaxImageArraySlices;
+  properties->maxSamplers = MaxSamplers;
+  properties->maxReadImageArgs = MaxImageArgs;
+  properties->maxWriteImageArgs = MaxImageArgs;
+  return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t ZE_APICALL deviceExternalMemoryProperties(ze_device_handle_t, ze_device_external_memory_properties_t *properties) {
@@ -1422,7 +1440,14 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
   const auto started = std::chrono::steady_clock::now();
   LaunchPerformance performance;
   const auto relocations = collectPointerRelocations(kernel, performance);
-  if (!uploadAllocations(*remote.client(), kernel, relocations, {})) {
+  std::vector<uint64_t> opaqueAllocations;
+  for (const auto &input : kernel.arguments) {
+    if (input.opaque == Kernel::Argument::Opaque::None) continue;
+    if (input.recordId == 0) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    opaqueAllocations.push_back(input.recordId);
+    if (input.texelsId != 0) opaqueAllocations.push_back(input.texelsId);
+  }
+  if (!uploadAllocations(*remote.client(), kernel, relocations, opaqueAllocations)) {
     recordRemoteError(remote.error());
     return reportStatus(kernel.device, ZE_RESULT_ERROR_DEVICE_LOST);
   }
@@ -1433,6 +1458,12 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
     const auto &input = kernel.arguments[index];
     if (input.local) {
       arguments.emplace_back(ArgumentLocal{static_cast<int64_t>(input.localSize)});
+      continue;
+    }
+    if (input.opaque != Kernel::Argument::Opaque::None) {
+      arguments.emplace_back(ArgumentMemory{.region = AllocationId{static_cast<int64_t>(input.recordId)},
+                                            .offset = {0},
+                                            .range = std::optional<LongPositive>{static_cast<int64_t>(input.recordBytes)}});
       continue;
     }
     const bool pointerAggregate = index < kernel.parameters.size() && kernel.parameters[index].pointerAggregate;
@@ -1472,6 +1503,12 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
                                                         && kernel.arguments[source->index.value].bytes.size() == sizeof(uintptr_t);
                              return !directPointer;
                            });
+  for (const auto &input : kernel.arguments)
+    if (input.opaque == Kernel::Argument::Opaque::Image)
+      launchRelocations.push_back({.source = RelocationSourceMemory{AllocationId{static_cast<int64_t>(input.recordId)}},
+                                   .sourceOffset = LongPositive0{static_cast<int64_t>(descriptor::Layout::Texels)},
+                                   .target = AllocationId{static_cast<int64_t>(input.texelsId)},
+                                   .targetOffset = LongPositive0{0}});
   const Coordinates offset{.x = {static_cast<int32_t>(kernel.offsetX)},
                            .y = {static_cast<int32_t>(kernel.offsetY)},
                            .z = {static_cast<int32_t>(kernel.offsetZ)}};
@@ -1524,22 +1561,52 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
   return ZE_RESULT_SUCCESS;
 }
 
+void resolveOpaqueArguments(KernelLaunch &launch) {
+  for (auto &argument : launch.arguments) {
+    if (argument.opaque == Kernel::Argument::Opaque::None) continue;
+    void *handle = nullptr;
+    std::memcpy(&handle, argument.bytes.data(), sizeof(handle));
+    void *record = nullptr;
+    void *texels = nullptr;
+    if (argument.opaque == Kernel::Argument::Opaque::Image) {
+      if (const auto *image = cast<Image>(handle)) {
+        record = image->record;
+        texels = image->texels;
+        argument.recordBytes = ImageRecordBytes;
+      }
+    } else if (const auto *sampler = cast<Sampler>(handle)) {
+      record = sampler->record;
+      argument.recordBytes = SamplerRecordBytes;
+    }
+    if (const auto allocation = retainAllocation(record, 0)) {
+      argument.recordId = allocation->id.value_or(0);
+      launch.allocations.push_back(allocation);
+    }
+    if (const auto allocation = retainAllocation(texels, 0)) {
+      argument.texelsId = allocation->id.value_or(0);
+      launch.allocations.push_back(allocation);
+    }
+  }
+}
+
 KernelLaunch snapshotLaunch(Kernel *kernel) {
   auto lifetime = std::make_shared<HandleUse<Kernel>>(kernel);
-  return KernelLaunch{.lifetime = lifetime,
-                      .device = kernel->module->device,
-                      .programId = kernel->module->program->id,
-                      .name = kernel->linkageName(),
-                      .groupX = kernel->groupX,
-                      .groupY = kernel->groupY,
-                      .groupZ = kernel->groupZ,
-                      .offsetX = kernel->offsetX,
-                      .offsetY = kernel->offsetY,
-                      .offsetZ = kernel->offsetZ,
-                      .indirect = kernel->indirect != 0,
-                      .arguments = kernel->arguments,
-                      .parameters = kernel->parameters,
-                      .allocations = retainKernelAllocations(*kernel)};
+  auto launch = KernelLaunch{.lifetime = lifetime,
+                             .device = kernel->module->device,
+                             .programId = kernel->module->program->id,
+                             .name = kernel->linkageName(),
+                             .groupX = kernel->groupX,
+                             .groupY = kernel->groupY,
+                             .groupZ = kernel->groupZ,
+                             .offsetX = kernel->offsetX,
+                             .offsetY = kernel->offsetY,
+                             .offsetZ = kernel->offsetZ,
+                             .indirect = kernel->indirect != 0,
+                             .arguments = kernel->arguments,
+                             .parameters = kernel->parameters,
+                             .allocations = retainKernelAllocations(*kernel)};
+  resolveOpaqueArguments(launch);
+  return launch;
 }
 
 ze_result_t recordLaunch(ze_command_list_handle_t handle, ze_kernel_handle_t kernelHandle, const ze_group_count_t *groups,
@@ -1807,6 +1874,435 @@ ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t contextHandle, const ze_me
     }
   }
   return releaseAllocation(allocation);
+}
+
+struct ImageFormatRow {
+  uint32_t channels;
+  uint32_t channelBytes;
+  ze_image_format_type_t type;
+  uint32_t code;
+};
+
+constexpr ImageFormatRow imageFormatRow(uint32_t channels, uint32_t channelBytes, ze_image_format_type_t type, uint32_t code) {
+  return {.channels = channels, .channelBytes = channelBytes, .type = type, .code = code};
+}
+
+constexpr auto ImageFormatRows = std::to_array<ImageFormatRow>({
+    imageFormatRow(1, 1, ZE_IMAGE_FORMAT_TYPE_UNORM, 15), imageFormatRow(1, 2, ZE_IMAGE_FORMAT_TYPE_UNORM, 14),
+    imageFormatRow(1, 1, ZE_IMAGE_FORMAT_TYPE_SNORM, 20), imageFormatRow(1, 2, ZE_IMAGE_FORMAT_TYPE_SNORM, 19),
+    imageFormatRow(1, 1, ZE_IMAGE_FORMAT_TYPE_SINT, 29),  imageFormatRow(1, 2, ZE_IMAGE_FORMAT_TYPE_SINT, 28),
+    imageFormatRow(1, 4, ZE_IMAGE_FORMAT_TYPE_SINT, 24),  imageFormatRow(1, 1, ZE_IMAGE_FORMAT_TYPE_UINT, 39),
+    imageFormatRow(1, 2, ZE_IMAGE_FORMAT_TYPE_UINT, 38),  imageFormatRow(1, 4, ZE_IMAGE_FORMAT_TYPE_UINT, 33),
+    imageFormatRow(1, 2, ZE_IMAGE_FORMAT_TYPE_FLOAT, 9),  imageFormatRow(1, 4, ZE_IMAGE_FORMAT_TYPE_FLOAT, 3),
+    imageFormatRow(2, 1, ZE_IMAGE_FORMAT_TYPE_UNORM, 13), imageFormatRow(2, 2, ZE_IMAGE_FORMAT_TYPE_UNORM, 12),
+    imageFormatRow(2, 1, ZE_IMAGE_FORMAT_TYPE_SNORM, 18), imageFormatRow(2, 2, ZE_IMAGE_FORMAT_TYPE_SNORM, 17),
+    imageFormatRow(2, 1, ZE_IMAGE_FORMAT_TYPE_SINT, 27),  imageFormatRow(2, 2, ZE_IMAGE_FORMAT_TYPE_SINT, 26),
+    imageFormatRow(2, 4, ZE_IMAGE_FORMAT_TYPE_SINT, 25),  imageFormatRow(2, 1, ZE_IMAGE_FORMAT_TYPE_UINT, 37),
+    imageFormatRow(2, 2, ZE_IMAGE_FORMAT_TYPE_UINT, 36),  imageFormatRow(2, 4, ZE_IMAGE_FORMAT_TYPE_UINT, 35),
+    imageFormatRow(2, 2, ZE_IMAGE_FORMAT_TYPE_FLOAT, 7),  imageFormatRow(2, 4, ZE_IMAGE_FORMAT_TYPE_FLOAT, 6),
+    imageFormatRow(4, 1, ZE_IMAGE_FORMAT_TYPE_UNORM, 4),  imageFormatRow(4, 2, ZE_IMAGE_FORMAT_TYPE_UNORM, 10),
+    imageFormatRow(4, 1, ZE_IMAGE_FORMAT_TYPE_SNORM, 5),  imageFormatRow(4, 2, ZE_IMAGE_FORMAT_TYPE_SNORM, 16),
+    imageFormatRow(4, 1, ZE_IMAGE_FORMAT_TYPE_SINT, 23),  imageFormatRow(4, 2, ZE_IMAGE_FORMAT_TYPE_SINT, 22),
+    imageFormatRow(4, 4, ZE_IMAGE_FORMAT_TYPE_SINT, 21),  imageFormatRow(4, 1, ZE_IMAGE_FORMAT_TYPE_UINT, 32),
+    imageFormatRow(4, 2, ZE_IMAGE_FORMAT_TYPE_UINT, 31),  imageFormatRow(4, 4, ZE_IMAGE_FORMAT_TYPE_UINT, 30),
+    imageFormatRow(4, 2, ZE_IMAGE_FORMAT_TYPE_FLOAT, 2),  imageFormatRow(4, 4, ZE_IMAGE_FORMAT_TYPE_FLOAT, 1),
+});
+
+struct ImageLayoutShape {
+  ze_image_format_layout_t layout;
+  uint32_t channels;
+  uint32_t channelBytes;
+};
+
+constexpr ImageLayoutShape imageLayoutShape(ze_image_format_layout_t layout, uint32_t channels, uint32_t channelBytes) {
+  return {.layout = layout, .channels = channels, .channelBytes = channelBytes};
+}
+
+constexpr auto ImageLayoutShapes = std::to_array<ImageLayoutShape>({
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_8, 1, 1),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_16, 1, 2),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_32, 1, 4),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_8_8, 2, 1),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_16_16, 2, 2),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_32_32, 2, 4),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_8_8_8_8, 4, 1),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_16_16_16_16, 4, 2),
+    imageLayoutShape(ZE_IMAGE_FORMAT_LAYOUT_32_32_32_32, 4, 4),
+});
+
+struct ImageFormat {
+  uint32_t code;
+  uint32_t pixelBytes;
+};
+
+ze_result_t resolveImageFormat(const ze_image_format_t &format, ImageFormat &resolved) {
+  if (static_cast<uint32_t>(format.layout) > ZE_IMAGE_FORMAT_LAYOUT_32_32_32
+      || static_cast<uint32_t>(format.type) > ZE_IMAGE_FORMAT_TYPE_FLOAT)
+    return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+  const auto shape = ImageLayoutShapes ^ find([&](const ImageLayoutShape &entry) { return entry.layout == format.layout; });
+  if (!shape) return ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT;
+  const auto row = ImageFormatRows ^ find([&](const ImageFormatRow &entry) {
+                     return entry.channels == shape->channels && entry.channelBytes == shape->channelBytes && entry.type == format.type;
+                   });
+  if (!row) return ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT;
+  const std::array<ze_image_format_swizzle_t, 4> swizzles{format.x, format.y, format.z, format.w};
+  constexpr std::array<ze_image_format_swizzle_t, 4> identity{ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                                              ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_A};
+  for (uint32_t channel = 0; channel < shape->channels; ++channel)
+    if (swizzles[channel] != identity[channel] && swizzles[channel] != ZE_IMAGE_FORMAT_SWIZZLE_X)
+      return ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT;
+  resolved = {.code = row->code, .pixelBytes = shape->channels * shape->channelBytes};
+  return ZE_RESULT_SUCCESS;
+}
+
+struct ImageGeometry {
+  uint32_t width;
+  uint32_t height;
+  uint32_t slices;
+  ImageFormat format;
+};
+
+// the layers of a 1D array are stored as extra rows, which keeps one copy path for every image type
+ze_result_t resolveImage(const ze_image_desc_t &desc, ImageGeometry &geometry) {
+  if (const auto result = resolveImageFormat(desc.format, geometry.format); result != ZE_RESULT_SUCCESS) return result;
+  const auto fits = [](uint64_t value, uint32_t limit) { return value >= 1 && value <= limit; };
+  const auto within = [](bool valid) { return valid ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_UNSUPPORTED_SIZE; };
+  geometry.width = static_cast<uint32_t>(std::min<uint64_t>(desc.width, std::numeric_limits<uint32_t>::max()));
+  switch (desc.type) {
+    case ZE_IMAGE_TYPE_1D: geometry.height = geometry.slices = 1; return within(fits(desc.width, MaxImageDims));
+    case ZE_IMAGE_TYPE_1DARRAY:
+      geometry.height = desc.arraylevels;
+      geometry.slices = 1;
+      return within(fits(desc.width, MaxImageDims) && fits(desc.arraylevels, MaxImageArraySlices));
+    case ZE_IMAGE_TYPE_2D:
+      geometry.height = desc.height;
+      geometry.slices = 1;
+      return within(fits(desc.width, MaxImageDims) && fits(desc.height, MaxImageDims));
+    case ZE_IMAGE_TYPE_2DARRAY:
+      geometry.height = desc.height;
+      geometry.slices = desc.arraylevels;
+      return within(fits(desc.width, MaxImageDims) && fits(desc.height, MaxImageDims) && fits(desc.arraylevels, MaxImageArraySlices));
+    case ZE_IMAGE_TYPE_3D:
+      geometry.height = desc.height;
+      geometry.slices = desc.depth;
+      return within(fits(desc.width, MaxImageDims3D) && fits(desc.height, MaxImageDims3D) && fits(desc.depth, MaxImageDims3D));
+    case ZE_IMAGE_TYPE_BUFFER: return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    default: return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+  }
+}
+
+ze_result_t ZE_APICALL imageProperties(ze_device_handle_t deviceHandle, const ze_image_desc_t *desc, ze_image_properties_t *properties) {
+  if (!cast<Device>(deviceHandle)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!desc || !properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  ImageGeometry geometry{};
+  if (const auto result = resolveImage(*desc, geometry); result != ZE_RESULT_SUCCESS) return result;
+  properties->samplerFilterFlags = ZE_IMAGE_SAMPLER_FILTER_FLAG_POINT | ZE_IMAGE_SAMPLER_FILTER_FLAG_LINEAR;
+  return ZE_RESULT_SUCCESS;
+}
+
+void releaseDriverAllocation(void *pointer) {
+  AllocationRef allocation;
+  {
+    std::scoped_lock const lock(allocationsMutex);
+    const auto found = allocations.find(pointer);
+    if (found == allocations.end()) return;
+    allocation = found->second;
+    allocations.erase(found);
+  }
+  std::scoped_lock const rpcLock(rpcTransactionMutex);
+  if (remote.mode() == ClientMode::Ready && allocation->id
+      && !remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(*allocation->id)}}))
+    recordRemoteError(remote.error());
+  std::free(pointer);
+}
+
+void putWord(void *record, size_t offset, uint64_t value, size_t bytes) {
+  std::memcpy(static_cast<uint8_t *>(record) + offset, &value, bytes);
+}
+
+ze_result_t ZE_APICALL imageCreate(ze_context_handle_t contextHandle, ze_device_handle_t deviceHandle, const ze_image_desc_t *desc,
+                                   ze_image_handle_t *result) {
+  auto *context = cast<Context>(contextHandle);
+  auto *device = cast<Device>(deviceHandle);
+  if (!context || !device) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  ImageGeometry geometry{};
+  if (const auto status = resolveImage(*desc, geometry); status != ZE_RESULT_SUCCESS) return status;
+  auto *image = createHandle<Image>(context, device, *desc);
+  if (!image) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+  image->desc.pNext = nullptr;
+  image->pixelBytes = geometry.format.pixelBytes;
+  image->width = geometry.width;
+  image->height = geometry.height;
+  image->slices = geometry.slices;
+  image->rowBytes = static_cast<size_t>(geometry.width) * geometry.format.pixelBytes;
+  image->sliceBytes = image->rowBytes * geometry.height;
+  const size_t bytes = image->sliceBytes * geometry.slices;
+  auto status = allocate(context, device, bytes, 0, ZE_MEMORY_TYPE_DEVICE, &image->texels);
+  if (status == ZE_RESULT_SUCCESS) status = allocate(context, device, ImageRecordBytes, 0, ZE_MEMORY_TYPE_DEVICE, &image->record);
+  if (status != ZE_RESULT_SUCCESS) {
+    releaseDriverAllocation(image->texels);
+    delete image;
+    return status == ZE_RESULT_ERROR_UNSUPPORTED_SIZE ? ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY : status;
+  }
+  const bool array = desc->type == ZE_IMAGE_TYPE_1DARRAY;
+  const uint32_t recordHeight = array ? 1U : geometry.height;
+  const uint32_t recordSlices = array ? geometry.height : geometry.slices;
+  const uint32_t format =
+      geometry.format.code | descriptor::Flags::LevelTable | (desc->type == ZE_IMAGE_TYPE_3D ? descriptor::Flags::Volume : 0U);
+  auto *record = image->record;
+  putWord(record, descriptor::Layout::Width, geometry.width, 4);
+  putWord(record, descriptor::Layout::Height, recordHeight, 4);
+  putWord(record, descriptor::Layout::Slices, recordSlices, 4);
+  putWord(record, descriptor::Layout::Format, format, 4);
+  putWord(record, descriptor::Layout::Texels, reinterpret_cast<uintptr_t>(image->texels), 8);
+  putWord(record, descriptor::Layout::TexelBytes, bytes, 8);
+  putWord(record, descriptor::Layout::Levels, 1, 4);
+  putWord(record, descriptor::Layout::LevelTable + descriptor::Layout::LevelWidth, geometry.width, 4);
+  putWord(record, descriptor::Layout::LevelTable + descriptor::Layout::LevelHeight, recordHeight, 4);
+  *result = reinterpret_cast<ze_image_handle_t>(image);
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t ZE_APICALL imageDestroy(ze_image_handle_t handle) {
+  auto *image = cast<Image>(handle);
+  if (!image) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  void *const texels = image->texels;
+  void *const record = image->record;
+  const auto result = destroyHandle(image);
+  if (result == ZE_RESULT_SUCCESS) {
+    releaseDriverAllocation(texels);
+    releaseDriverAllocation(record);
+  }
+  return result;
+}
+
+uint32_t samplerAddress(ze_sampler_address_mode_t mode) {
+  switch (mode) {
+    case ZE_SAMPLER_ADDRESS_MODE_REPEAT: return descriptor::AddressMode::Repeat;
+    case ZE_SAMPLER_ADDRESS_MODE_MIRROR: return descriptor::AddressMode::MirroredRepeat;
+    case ZE_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER: return descriptor::AddressMode::ClampToBorder;
+    default: return descriptor::AddressMode::ClampToEdge;
+  }
+}
+
+ze_result_t ZE_APICALL samplerCreate(ze_context_handle_t contextHandle, ze_device_handle_t deviceHandle, const ze_sampler_desc_t *desc,
+                                     ze_sampler_handle_t *result) {
+  auto *context = cast<Context>(contextHandle);
+  auto *device = cast<Device>(deviceHandle);
+  if (!context || !device) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (static_cast<uint32_t>(desc->addressMode) > ZE_SAMPLER_ADDRESS_MODE_MIRROR
+      || static_cast<uint32_t>(desc->filterMode) > ZE_SAMPLER_FILTER_MODE_LINEAR)
+    return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+  auto *sampler = createHandle<Sampler>(context, device);
+  if (!sampler) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+  if (const auto status = allocate(context, device, SamplerRecordBytes, 0, ZE_MEMORY_TYPE_DEVICE, &sampler->record);
+      status != ZE_RESULT_SUCCESS) {
+    delete sampler;
+    return status;
+  }
+  std::array<uint32_t, descriptor::SamplerWord::Count> words{};
+  const uint32_t filtering = desc->filterMode == ZE_SAMPLER_FILTER_MODE_LINEAR ? descriptor::Filter::Linear : descriptor::Filter::Nearest;
+  const float maxLod = 1000.0F;
+  words[descriptor::SamplerWord::MinFilter] = filtering;
+  words[descriptor::SamplerWord::MagFilter] = filtering;
+  words[descriptor::SamplerWord::AddressU] = samplerAddress(desc->addressMode);
+  words[descriptor::SamplerWord::AddressV] = samplerAddress(desc->addressMode);
+  words[descriptor::SamplerWord::AddressW] = samplerAddress(desc->addressMode);
+  words[descriptor::SamplerWord::Unnormalized] = desc->isNormalized ? 0U : 1U;
+  words[descriptor::SamplerWord::BorderColour] = descriptor::BorderColour::FloatTransparentBlack;
+  std::memcpy(&words[descriptor::SamplerWord::MaxLod], &maxLod, sizeof(maxLod));
+  std::memcpy(sampler->record, words.data(), SamplerRecordBytes);
+  *result = reinterpret_cast<ze_sampler_handle_t>(sampler);
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t ZE_APICALL samplerDestroy(ze_sampler_handle_t handle) {
+  auto *sampler = cast<Sampler>(handle);
+  if (!sampler) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  void *const record = sampler->record;
+  const auto result = destroyHandle(sampler);
+  if (result == ZE_RESULT_SUCCESS) releaseDriverAllocation(record);
+  return result;
+}
+
+struct ImageBox {
+  uint32_t x = 0;
+  uint32_t y = 0;
+  uint32_t z = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t depth = 0;
+
+  [[nodiscard]] bool empty() const { return width == 0 || height == 0 || depth == 0; }
+};
+
+// an all-zero region copies nothing and a missing one covers the whole image
+ze_result_t resolveBox(const Image &image, const ze_image_region_t *region, ImageBox &box) {
+  if (!region) {
+    box = {.x = 0, .y = 0, .z = 0, .width = image.width, .height = image.height, .depth = image.slices};
+    return ZE_RESULT_SUCCESS;
+  }
+  box = {.x = region->originX,
+         .y = region->originY,
+         .z = region->originZ,
+         .width = region->width,
+         .height = region->height,
+         .depth = std::max(region->depth, 1U)};
+  if (image.slices == 1) {
+    box.z = 0;
+    box.depth = 1;
+  }
+  if (box.empty()) return ZE_RESULT_SUCCESS;
+  const auto inside = [](uint32_t origin, uint32_t extent, uint32_t limit) { return uint64_t{origin} + extent <= limit; };
+  return inside(box.x, box.width, image.width) && inside(box.y, box.height, image.height) && inside(box.z, box.depth, image.slices)
+             ? ZE_RESULT_SUCCESS
+             : ZE_RESULT_ERROR_INVALID_ARGUMENT;
+}
+
+template <class Byte> struct StridedBuffer {
+  Byte *base;
+  size_t rowPitch;
+  size_t slicePitch;
+};
+
+void copyBox(const StridedBuffer<uint8_t> &destination, const StridedBuffer<const uint8_t> &source, const ImageBox &box, size_t rowBytes) {
+  for (uint32_t z = 0; z < box.depth; ++z)
+    for (uint32_t y = 0; y < box.height; ++y)
+      std::memmove(destination.base + (z * destination.slicePitch) + (y * destination.rowPitch),
+                   source.base + (z * source.slicePitch) + (y * source.rowPitch), rowBytes);
+}
+
+StridedBuffer<uint8_t> imageBuffer(const Image &image, const ImageBox &box) {
+  const size_t offset = (box.z * image.sliceBytes) + (box.y * image.rowBytes) + (static_cast<size_t>(box.x) * image.pixelBytes);
+  return {.base = static_cast<uint8_t *>(image.texels) + offset, .rowPitch = image.rowBytes, .slicePitch = image.sliceBytes};
+}
+
+template <class Byte>
+StridedBuffer<Byte> hostBuffer(Byte *pointer, const ImageBox &box, size_t pixelBytes, uint32_t rowPitch, uint32_t slicePitch) {
+  const size_t row = rowPitch == 0 ? box.width * pixelBytes : rowPitch;
+  return {.base = pointer, .rowPitch = row, .slicePitch = slicePitch == 0 ? row * box.height : slicePitch};
+}
+
+struct ImageCopyLifetime {
+  std::vector<HandleUse<Image>> images;
+  std::vector<AllocationRef> allocations;
+};
+
+template <class Memory> struct ImageCopySide {
+  ze_image_handle_t image = nullptr;
+  Memory *memory = nullptr;
+  const ze_image_region_t *region = nullptr;
+  uint32_t rowPitch = 0;
+  uint32_t slicePitch = 0;
+};
+
+ze_result_t appendImageCopy(ze_command_list_handle_t listHandle, const ImageCopySide<void> &destination,
+                            const ImageCopySide<const void> &source, ze_event_handle_t signal, uint32_t waitCount,
+                            ze_event_handle_t *waits) {
+  auto *list = cast<CommandList>(listHandle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  auto *target = destination.image ? cast<Image>(destination.image) : nullptr;
+  auto *origin = source.image ? cast<Image>(source.image) : nullptr;
+  if ((destination.image && !target) || (source.image && !origin)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if ((!target && !destination.memory) || (!origin && !source.memory)) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  ImageBox destinationBox;
+  ImageBox sourceBox;
+  if (target)
+    if (const auto status = resolveBox(*target, destination.region, destinationBox); status != ZE_RESULT_SUCCESS) return status;
+  if (origin)
+    if (const auto status = resolveBox(*origin, source.region, sourceBox); status != ZE_RESULT_SUCCESS) return status;
+  if (!target) destinationBox = sourceBox;
+  if (!origin) sourceBox = destinationBox;
+  if (target && origin
+      && (destinationBox.width != sourceBox.width || destinationBox.height != sourceBox.height || destinationBox.depth != sourceBox.depth
+          || target->pixelBytes != origin->pixelBytes))
+    return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+  CommandSignal retainedSignal;
+  EventUses retainedWaits;
+  const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
+  if (retained != ZE_RESULT_SUCCESS) return retained;
+  const size_t pixelBytes = target ? target->pixelBytes : origin->pixelBytes;
+  const size_t rowBytes = static_cast<size_t>(destinationBox.width) * pixelBytes;
+  const bool empty = destinationBox.empty();
+  // a recorded list does not own its images or memory, so they may be released before the list runs or is destroyed
+  auto lifetime = std::make_shared<ImageCopyLifetime>();
+  if (list->immediate) {
+    if (target) lifetime->images.emplace_back(target);
+    if (origin) lifetime->images.emplace_back(origin);
+    if (!empty && !target)
+      if (auto allocation = retainAllocation(destination.memory, 1)) lifetime->allocations.push_back(std::move(allocation));
+    if (!empty && !origin)
+      if (auto allocation = retainAllocation(source.memory, 1)) lifetime->allocations.push_back(std::move(allocation));
+  }
+  return append(
+      list,
+      [=, waits = retainedWaits] {
+        const auto result = waitDependencies(waits);
+        if (result != ZE_RESULT_SUCCESS || empty) return result;
+        auto *to = destination.image ? cast<Image>(destination.image) : nullptr;
+        auto *from = source.image ? cast<Image>(source.image) : nullptr;
+        if ((destination.image && !to) || (source.image && !from)) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+        const auto destinationBuffer = to ? imageBuffer(*to, destinationBox)
+                                          : hostBuffer(static_cast<uint8_t *>(destination.memory), destinationBox, pixelBytes,
+                                                       destination.rowPitch, destination.slicePitch);
+        const auto sourceBuffer = [&]() -> StridedBuffer<const uint8_t> {
+          if (!from)
+            return hostBuffer(static_cast<const uint8_t *>(source.memory), sourceBox, pixelBytes, source.rowPitch, source.slicePitch);
+          const auto image = imageBuffer(*from, sourceBox);
+          return {.base = image.base, .rowPitch = image.rowPitch, .slicePitch = image.slicePitch};
+        }();
+        copyBox(destinationBuffer, sourceBuffer, destinationBox, rowBytes);
+        return result;
+      },
+      [lifetime] {
+        lifetime->images.clear();
+        lifetime->allocations.clear();
+      },
+      retainedSignal);
+}
+
+ze_result_t ZE_APICALL listImageCopy(ze_command_list_handle_t list, ze_image_handle_t destination, ze_image_handle_t source,
+                                     ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
+  if (!destination || !source) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  return appendImageCopy(list, {.image = destination}, {.image = source}, signal, waitCount, waits);
+}
+
+ze_result_t ZE_APICALL listImageCopyRegion(ze_command_list_handle_t list, ze_image_handle_t destination, ze_image_handle_t source,
+                                           const ze_image_region_t *destinationRegion, const ze_image_region_t *sourceRegion,
+                                           ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
+  if (!destination || !source) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  return appendImageCopy(list, {.image = destination, .region = destinationRegion}, {.image = source, .region = sourceRegion}, signal,
+                         waitCount, waits);
+}
+
+ze_result_t ZE_APICALL listImageCopyToMemoryExt(ze_command_list_handle_t list, void *destination, ze_image_handle_t source,
+                                                const ze_image_region_t *sourceRegion, uint32_t rowPitch, uint32_t slicePitch,
+                                                ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
+  if (!source) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  return appendImageCopy(list, {.memory = destination, .rowPitch = rowPitch, .slicePitch = slicePitch},
+                         {.image = source, .region = sourceRegion}, signal, waitCount, waits);
+}
+
+ze_result_t ZE_APICALL listImageCopyFromMemoryExt(ze_command_list_handle_t list, ze_image_handle_t destination, const void *source,
+                                                  const ze_image_region_t *destinationRegion, uint32_t rowPitch, uint32_t slicePitch,
+                                                  ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
+  if (!destination) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  return appendImageCopy(list, {.image = destination, .region = destinationRegion},
+                         {.memory = source, .rowPitch = rowPitch, .slicePitch = slicePitch}, signal, waitCount, waits);
+}
+
+ze_result_t ZE_APICALL listImageCopyToMemory(ze_command_list_handle_t list, void *destination, ze_image_handle_t source,
+                                             const ze_image_region_t *sourceRegion, ze_event_handle_t signal, uint32_t waitCount,
+                                             ze_event_handle_t *waits) {
+  return listImageCopyToMemoryExt(list, destination, source, sourceRegion, 0, 0, signal, waitCount, waits);
+}
+
+ze_result_t ZE_APICALL listImageCopyFromMemory(ze_command_list_handle_t list, ze_image_handle_t destination, const void *source,
+                                               const ze_image_region_t *destinationRegion, ze_event_handle_t signal, uint32_t waitCount,
+                                               ze_event_handle_t *waits) {
+  return listImageCopyFromMemoryExt(list, destination, source, destinationRegion, 0, 0, signal, waitCount, waits);
 }
 
 ze_result_t ZE_APICALL virtualQueryPageSize(ze_context_handle_t context, ze_device_handle_t device, size_t, size_t *pageSize) {
@@ -2922,6 +3418,16 @@ ze_result_t ZE_APICALL kernelArgument(ze_kernel_handle_t handle, uint32_t index,
   argument.localSize = argument.local ? size : 0;
   argument.bytes = argument.local ? std::vector<uint8_t>{} : std::vector<uint8_t>(size, 0);
   if (!argument.local && value) std::memcpy(argument.bytes.data(), bytes, size);
+  argument.opaque = Kernel::Argument::Opaque::None;
+  if (!argument.local && value && size == sizeof(void *)) {
+    void *handleValue = nullptr;
+    std::memcpy(&handleValue, bytes, sizeof(handleValue));
+    if (cast<Image>(handleValue)) argument.opaque = Kernel::Argument::Opaque::Image;
+    else if (cast<Sampler>(handleValue)) argument.opaque = Kernel::Argument::Opaque::Sampler;
+  }
+  argument.recordId = 0;
+  argument.texelsId = 0;
+  argument.recordBytes = 0;
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelProperties(ze_kernel_handle_t handle, ze_kernel_properties_t *properties) {
@@ -3102,6 +3608,12 @@ table->pfnAppendQueryKernelTimestamps = listQueryKernelTimestamps;
 table->pfnAppendMemoryCopy = listCopy;
 table->pfnAppendMemoryCopyFromContext = listCopyFromContext;
 table->pfnAppendMemoryCopyRegion = listCopyRegion;
+table->pfnAppendImageCopy = listImageCopy;
+table->pfnAppendImageCopyRegion = listImageCopyRegion;
+table->pfnAppendImageCopyToMemory = listImageCopyToMemory;
+table->pfnAppendImageCopyFromMemory = listImageCopyFromMemory;
+table->pfnAppendImageCopyToMemoryExt = listImageCopyToMemoryExt;
+table->pfnAppendImageCopyFromMemoryExt = listImageCopyFromMemoryExt;
 table->pfnAppendMemoryFill = listFill;
 table->pfnAppendMemoryPrefetch = listPrefetch;
 table->pfnAppendMemAdvise = listAdvise;
@@ -3192,13 +3704,20 @@ TABLE_END
 #define EMPTY_TABLE(name, type)                                                                                                            \
   TABLE_BEGIN(name, type);                                                                                                                 \
   TABLE_END
-EMPTY_TABLE(zeGetImageProcAddrTable, ze_image_dditable_t)
+TABLE_BEGIN(zeGetImageProcAddrTable, ze_image_dditable_t);
+table->pfnGetProperties = imageProperties;
+table->pfnCreate = imageCreate;
+table->pfnDestroy = imageDestroy;
+TABLE_END
 TABLE_BEGIN(zeGetPhysicalMemProcAddrTable, ze_physical_mem_dditable_t);
 table->pfnCreate = physicalCreate;
 table->pfnDestroy = physicalDestroy;
 table->pfnGetProperties = physicalProperties;
 TABLE_END
-EMPTY_TABLE(zeGetSamplerProcAddrTable, ze_sampler_dditable_t)
+TABLE_BEGIN(zeGetSamplerProcAddrTable, ze_sampler_dditable_t);
+table->pfnCreate = samplerCreate;
+table->pfnDestroy = samplerDestroy;
+TABLE_END
 TABLE_BEGIN(zeGetVirtualMemProcAddrTable, ze_virtual_mem_dditable_t);
 table->pfnReserve = virtualReserve;
 table->pfnFree = virtualFree;
