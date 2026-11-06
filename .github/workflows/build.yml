@@ -54,7 +54,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: sbt
+          # sbt does not run on an llvm-offload cache hit, which leaves no sbt cache paths to save
+          cache: ${{ steps.offload-cache.outputs.cache-hit != 'true' && 'sbt' || '' }}
       - &sbt
         uses: sbt/setup-sbt@v1
       - &tools-cache
@@ -208,10 +209,6 @@ jobs:
     steps:
       - *free-disk
       - *checkout
-      - *java
-      - *sbt
-      - *tools-cache
-      - *tools
       - name: llvm-offload key
         id: offload
         run: echo "key=$(cmake -P conformance/artifacts/Offload.cmake)" >> "$GITHUB_OUTPUT"
@@ -222,6 +219,10 @@ jobs:
           path: .cache/llvm-offload/${{ steps.offload.outputs.key }}
           key: llvm-offload-${{ steps.offload.outputs.key }}
           lookup-only: true
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
       - name: Build llvm-offload
         if: ${{ steps.offload-cache.outputs.cache-hit != 'true' }}
         run: sbt --server --batch conformance/conformanceOffload
