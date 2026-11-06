@@ -119,6 +119,13 @@ class RangeReductionSuite extends Suite {
     assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16))
   }
 
+  test("a select reading the guard predicate does not rewrite it") {
+    val function = Listing.program(
+      "RRO.EX2 R4, R4; MUFU.EX2 R5, R4; @P0 MOV R4, RZ; SEL R6, R7, R8, !P0; @P0 FADD R9, R4, R4; EXIT"
+    ).value
+    assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16))
+  }
+
   test("a read under a different guard than a redefinition is rejected") {
     val function =
       Listing.program("RRO.SINCOS R4, R4; MUFU.SIN R5, R4; @P0 MOV R4, RZ; @!P0 FADD R6, R4, R4; EXIT").value
@@ -159,8 +166,28 @@ class RangeReductionSuite extends Suite {
     assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16, 48))
   }
 
+  test("a 64-bit store does not alias a reduced register above its pair") {
+    val function = Listing.program("RRO.EX2 R11, R11; STG.E.64 [R12], R8; MUFU.EX2 R5, R11; EXIT").value
+    assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 32))
+  }
+
+  test("a 64-bit store aliases a reduced register inside its pair") {
+    val function = Listing.program("RRO.EX2 R9, R9; STG.E.64 [R12], R8; MUFU.EX2 R5, R9; EXIT").value
+    intercept[IllegalArgumentException](LegacyRangeReduction.inputs(50, function, fullLayout))
+  }
+
+  test("a 128-bit store aliases a reduced register inside its quad") {
+    val function = Listing.program("RRO.EX2 R11, R11; STG.E.128 [R12], R8; MUFU.EX2 R5, R11; EXIT").value
+    intercept[IllegalArgumentException](LegacyRangeReduction.inputs(50, function, fullLayout))
+  }
+
   test("a shifted-add destination with a carry ends a consumed range reduction lifetime") {
     val function = Listing.program("RRO.SINCOS R4, R4; MUFU.COS R6, R4; ISCADD R4.CC, R5, R6, 0x4; BRA 0x20").value
+    assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16))
+  }
+
+  test("a high shifted-add destination ends a consumed range reduction lifetime") {
+    val function = Listing.program("RRO.EX2 R4, R4; MUFU.EX2 R6, R4; LEA.HI R4, R6, R5, RZ, 0x9; BRA 0x20").value
     assertEquals(LegacyRangeReduction.inputs(50, function, fullLayout).inputs.keySet, Set(0, 16))
   }
 

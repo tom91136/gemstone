@@ -384,6 +384,15 @@ class GenericMemorySuite extends Suite {
     )
   }
 
+  for (sm <- Vec(50, 60)) test(s"sm_$sm a division check redefines the auxiliary predicate") {
+    check(
+      sm,
+      "LDC.64 R2, c[0x0][0x160]; MOV R4, 42; LEA R8.CC, R2, RZ; LEA.HI.X P0, R9, R2, RZ, R3; ST.E [R8], R4, P0; " +
+        "MOV32I R6, 0x3f800000; FCHK.DIVIDE P0, R6, R6; @P0 EXIT; EXIT",
+      Vec(42)
+    )
+  }
+
   for (sm <- Vec(50, 60)) test(s"sm_$sm the auxiliary predicate proof follows calls and their returns") {
     check(
       sm,
@@ -1001,6 +1010,23 @@ class GenericMemorySuite extends Suite {
     assertRewrites(function("R5"), 60)
     Vec("R6", "R8", "R5.CC").foreach(destination => assertRejects(function(destination), 60))
     assertRejects(function("R5", "IADD3.X"), 60)
+  }
+
+  for (sm <- Vec(50, 60)) test(s"sm_$sm generic address proof permits independent population counts and conversions") {
+    def function(middle: String): DecodedFunction = DecodedFunction(
+      "reduce",
+      Vec(
+        at(0, "LEA R2.CC, R3, 0x4"),
+        at(8, middle),
+        at(16, "LEA.HI.X P1, R3, R3, RZ, R8"),
+        at(24, "LD.E.CV R0, [R2], P1"),
+        at(32, "EXIT")
+      )
+    )
+    Vec("POPC R5, R4", "I2F.F32.U32 R12, c[0x0][0x8]").foreach(middle => assertRewrites(function(middle), sm))
+    Vec("POPC R2, R4", "POPC R3, R4", "I2F.F32.U32 R2, R4", "I2F.F64.S64 R12, R4").foreach(middle =>
+      assertRejects(function(middle), sm)
+    )
   }
 
   test("sm60 window test pairs the low LEA across straight-line instructions to the high LEA") {

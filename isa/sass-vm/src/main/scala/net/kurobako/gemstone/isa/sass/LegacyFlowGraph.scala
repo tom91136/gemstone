@@ -181,8 +181,10 @@ private class LegacyFlowGraph(instructions: Vec[DecodedInstruction]) {
       }
       if (next == live) live else solve(next)
     }
-    val live = solve(Map.empty)
-    !indexes.exists(index => LegacyFlowGraph.effects(instructions(index))) && indexes.exists(index =>
+    val live    = solve(Map.empty)
+    val carried = indexes.flatMap(index => LegacyFlowGraph.written(instructions(index))).toSet
+    !indexes.exists(index => LegacyFlowGraph.effects(instructions(index))) &&
+    !live.getOrElse(start, Set.empty).exists(carried) && indexes.exists(index =>
       LegacyFlowGraph.reads(instructions(index)) &&
         LegacyFlowGraph.written(instructions(index)).exists(following(index, live))
     )

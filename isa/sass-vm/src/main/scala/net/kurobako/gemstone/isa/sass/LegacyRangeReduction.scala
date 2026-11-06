@@ -23,7 +23,7 @@ private object LegacyRangeReduction {
           _: Form.Fmul | _: Form.Fmul32i | _: Form.Fadd | _: Form.Fadd32i |
           _: Form.Ffma | _: Form.Ffma32i | _: Form.Lop |
           _: Form.Lop32i | _: Form.Iadd | _: Form.Iadd32i | _: Form.Imnmx |
-          _: Form.Iscadd | _: Form.Shl | _: Form.Shr | _: Form.Sel |
+          _: Form.Iscadd | _: Form.Lea | _: Form.Shl | _: Form.Shr | _: Form.Sel |
           _: Form.Xmad | _: Form.Imad | _: Form.Icmp |
           _: Form.Ldg | _: Form.Ld | _: Form.Lds | _: Form.Ldl => true
       case _ => false
@@ -32,21 +32,19 @@ private object LegacyRangeReduction {
     else None
   }
 
+  private def words(instruction: DecodedInstruction): Int = if (instruction.modifiers.contains(Modifier.`128`)) 4 else 2
+
   /** The registers a 64- or 128-bit load writes. */
   private def wideLoadDestination(instruction: DecodedInstruction): Set[Int] = instruction.operation.form match {
     case _: Form.Ldg | _: Form.Ld | _: Form.Lds | _: Form.Ldl if wideModifier(instruction) =>
-      val words = if (instruction.modifiers.contains(Modifier.`128`)) 4 else 2
       instruction.operands.headOption.filter(OperandQueries.isRegister(_)).toSet
-        .flatMap(registers(_)).flatMap(first => first until first + words)
+        .flatMap(registers(_)).flatMap(first => first until first + words(instruction))
     case _ => Set.empty
   }
 
   private def writesPredicate(instruction: DecodedInstruction, guard: Instruction.Guard): Boolean = guard match {
-    case Instruction.Guard(Operand.Predicate(Some(index), _, _)) =>
-      instruction.operands.exists(PartialFunction.cond(_) {
-        case Operand.Predicate(Some(`index`), _, _) => true
-      })
-    case _ => false
+    case Instruction.Guard(Operand.Predicate(Some(index), _, _)) => written(instruction)(Right(index))
+    case _                                                       => false
   }
 
   private enum Phase derives CanEqual {
@@ -106,9 +104,9 @@ private object LegacyRangeReduction {
                   case _ => false
                 })
             // an address names its whole register pair, so only data operands widen
-            def aliases(operand: Operand): Boolean = operand match {
+            def aliases(operand: Operand, width: Int): Boolean = operand match {
               case Operand.Address(_, _, _, _, _, _) => false
-              case _ => registers(operand).exists(r => r <= register && register < r + 4)
+              case _ => registers(operand).exists(r => r <= register && register < r + width)
             }
 
             val seen   = mutable.Set.empty[(Int, Phase)]
@@ -124,7 +122,7 @@ private object LegacyRangeReduction {
                 val sources =
                   if (scalarDestination(next).nonEmpty || loaded.nonEmpty) next.operands.tail else next.operands
                 val referenced = sources.exists(registers(_)(register))
-                if (wide(next) && sources.exists(aliases(_)))
+                if (wide(next) && sources.exists(aliases(_, words(next))))
                   reject(s"with wide alias at 0x${next.address.raw.toHexString}")
                 if (referenced) phase match {
                   case Phase.Reduced =>

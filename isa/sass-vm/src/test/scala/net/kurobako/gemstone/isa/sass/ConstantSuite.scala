@@ -34,6 +34,7 @@ class ConstantSuite extends Suite {
   // cooperative_groups reads the grid workspace the driver writes to c0: its high word, then its low word
   for {
     (sm, high, low) <- Vec(
+      (60, 0x34, 0x38),
       (70, 0x8c, 0x90),
       (75, 0x8c, 0x90),
       (86, 0x8c, 0x90),

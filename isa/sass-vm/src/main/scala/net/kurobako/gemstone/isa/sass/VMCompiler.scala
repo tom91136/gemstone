@@ -40,12 +40,16 @@ private object VMCompiler {
     OperandQueries.integer(operand).filter(_.isValidInt).fold(fail(s"expected code address, found $operand"))(_.toInt)
 
   /** Legacy branch destinations name a bundle's control word, which executes with the instruction after it. */
-  private def resolveLegacyTargets(generation: Generation, function: DecodedFunction): DecodedFunction =
+  private def resolveLegacyTargets(
+      generation: Generation,
+      function: DecodedFunction,
+      relocated: Set[Int]
+  ): DecodedFunction =
     if (generation == Generation.Modern) function
     else {
       val addresses = function.instructions.map(_.address.raw).toSet
       function.copy(instructions = function.instructions.map { instruction =>
-        if (!ControlFlow.directTarget(instruction.operation)) instruction
+        if (!ControlFlow.directTarget(instruction.operation) || relocated(instruction.address.raw)) instruction
         else {
           val operands = instruction.operands.map { operand =>
             OperandQueries.integer(operand) match {
@@ -126,10 +130,11 @@ private object VMCompiler {
         instruction.rewrite(operands = instruction.operands.init :+ Operand.Integer(call.addend))
       )
     })
-    val function     = LegacyAddressRewrite(module.sm, resolveLegacyTargets(generation, original))
-    val instructions = function.instructions
-    val layout       = VMRegisters.Layout.of(kernel, functions)
-    val reductions   = LegacyRangeReduction.inputs(module.sm, function, layout)
+    val externalCalls = textRelocations.collect { case (address, relocation) if relocation.call => address.raw }.toSet
+    val function      = LegacyAddressRewrite(module.sm, resolveLegacyTargets(generation, original, externalCalls))
+    val instructions  = function.instructions
+    val layout        = VMRegisters.Layout.of(kernel, functions)
+    val reductions    = LegacyRangeReduction.inputs(module.sm, function, layout)
     def is[A <: Form](instruction: DecodedInstruction)(using TypeTest[Form, A]) =
       OperandQueries.is[A](instruction.operation)
     val byAddress                                    = instructions.map(i => i.address.raw -> i).toMap
@@ -242,10 +247,9 @@ private object VMCompiler {
               boundSymbols,
               reductions.inputs.get(instruction.address),
               textRelocations.get(instruction.address),
-              layout
+              layout,
+              pollingBranches(instruction.address.raw)
             ).compile() ++ branch
-        val polling =
-          if (pollingBranches(instruction.address.raw)) Vec(Execute(Yield)) else Vec.empty[VMAssembler.Statement]
         val arrivals = legacyTokens.filter(_.target == instruction.address).reverse.map(token =>
           Execute(Convergence(layout.barrier(token.slot), ConvergenceAction.Synchronise))
         )
@@ -269,7 +273,7 @@ private object VMCompiler {
             instruction.address.toLong.unsafe[Long >= 0],
             text(instruction.operation)
           ) +:
-            (statements.take(1) ++ arrivals ++ saves ++ polling ++ statements.drop(1) ++ restores)
+            (statements.take(1) ++ arrivals ++ saves ++ statements.drop(1) ++ restores)
         )
       } catch {
         case NonFatal(error) =>
@@ -326,7 +330,8 @@ private object VMCompiler {
       val boundSymbols: Map[NonEmpty[String], GuestAddress],
       val reducedRadians: Option[Value.Register],
       val textRelocation: Option[Cubin.TextRelocation],
-      val registerLayout: VMRegisters.Layout
+      val registerLayout: VMRegisters.Layout,
+      val polling: Boolean
   ) extends VMCompilationContext {
     private val code         = mutable.ArrayBuffer.empty[VMAssembler.Statement]
     private val writtenFlags = mutable.Set.empty[VMConditionCodes.Flag]
@@ -659,7 +664,10 @@ private object VMCompiler {
             case statement: VMAssembler.Statement.Branch if guard.nonEmpty => statement.copy(predication = predication)
             case statement                                                 => statement
           }
-      Vec(Label(label(instruction.address.raw))) ++ setup ++ body
+      // only the lanes that take the back edge are waiting, the others go on to what follows the loop
+      val spin =
+        if (polling) Vec(Execute(Yield, predication.filter(_ => guard.nonEmpty))) else Vec.empty[VMAssembler.Statement]
+      Vec(Label(label(instruction.address.raw))) ++ setup ++ spin ++ body
     }
   }
 }

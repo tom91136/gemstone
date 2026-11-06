@@ -54,4 +54,19 @@ class LegacySpinSuite extends Suite {
       Set.empty[Int]
     )
   }
+
+  test("a loop that carries state into its exit decision makes progress and does not poll") {
+    def polling(text: String): Set[Int] = LegacyFlowGraph(Listing.program(text).value.instructions).pollingBranches
+    assertEquals(
+      polling("loop: LDG.E R4, [R2.64]; IADD32I R2, R2, 0x4; ISETP.NE.AND P0, PT, R4, RZ, PT; @P0 BRA `(loop); EXIT"),
+      Set.empty[Int]
+    )
+    assertEquals(
+      polling(
+        "loop: LDG.E R4, [R2.64]; ISETP.NE.AND P0, PT, R4, RZ, PT; IADD32I R5, R5, 0x1; ISETP.LT.U32.AND P1, PT, R5, 0x4, PT; " +
+          "@P0 BRA `(loop); EXIT"
+      ),
+      Set(64)
+    )
+  }
 }

@@ -158,9 +158,9 @@ private object LegacyAddressRewrite {
     else if (isPredicateForm(instruction)) Set(0)
     else instruction.operation.form match {
       case _: Form.Lop if instruction.operands.headOption.exists(positivePredicate(_).nonEmpty) => Set(0)
-      case _: Form.Vote => Set(if (instruction.operands.size == 2) 0 else 1)
-      case _: Form.Shfl => Set(0)
-      case _            => Set.empty
+      case _: Form.Vote                => Set(if (instruction.operands.size == 2) 0 else 1)
+      case _: Form.Shfl | _: Form.Fchk => Set(0)
+      case _                           => Set.empty
     }
 
   private def isPredicateDefinition(instruction: DecodedInstruction, target: Int): Boolean =
@@ -272,6 +272,8 @@ private object LegacyAddressRewrite {
       case _: Form.Bfe                  => args.size == 3 && mods.forall(PartialFunction.cond(_) {
           case Instruction.Modifier.`U32` | Instruction.Modifier.`S32` => true
         })
+      case _: Form.Popc                => mods.isEmpty && args.size == 2
+      case _: Form.I2f                 => args.size == 2 && !LegacyFlowGraph.wideModifier(instruction)
       case _: Form.Bfi | _: Form.Prmt  => mods.isEmpty && args.size == 4
       case _: Form.Xmad                => args.size == 4 && !isCarryWriter(instruction)
       case _: Form.Fadd | _: Form.Fmul => mods.isEmpty && args.size == 3

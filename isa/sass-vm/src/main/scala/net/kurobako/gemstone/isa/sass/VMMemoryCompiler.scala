@@ -419,8 +419,6 @@ private object VMMemoryCompiler {
     if (loading && operands.size == 3)
       zeroFilled(memory, if (OperandQueries.isZero(data)) Vec.empty else results, operands(2))
     else { if (operands.size != 2) unsupported("unsupported memory operands"); emit(memory) }
-    // a volatile load is how legacy code polls for another warp, which the scheduler has to let run ahead
-    if (loading && legacy && modifiers.contains(Modifier.CV)) emit(Yield)
   }
 
   /** A 256-bit global access, as `ld.global.v8.b32` and `st.global.v8.b32` from sm_100: words 0 to 3 in the group a

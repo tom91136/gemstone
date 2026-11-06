@@ -175,6 +175,38 @@ class CubinTextRelocationSuite extends Suite {
       .left.exists(_.raw.contains("target")))
   }
 
+  private def mallocModule(sm: Int, kind: Long, listing: Vec[DecodedInstruction], call: Int): Cubin.Module = {
+    val width   = if (sm < 70) 8 else 16
+    val base    = Harness.module(sm, Vec(Entry("relocated", if (sm < 70) 0x140 else 0x160, Vec(8))))
+    val size    = (listing.map(_.address.raw).max + width).unsafe[Int >= 0]
+    val text    = base.sections.head.copy(size = size, bytes = Vec.fill(size.raw)(0.toByte))
+    val names   = Vec.from("\u0000malloc\u0000".getBytes(StandardCharsets.UTF_8))
+    val strings = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
+    val bytes   = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
+    bytes.putInt(24, 1).put(28, 0x12.toByte)
+    val symbols = Cubin.Section(strings.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(bytes.array()))
+    val entries = LittleEndian.toVec(call.toLong, 8) ++ LittleEndian.toVec((1L << 32) | kind, 8)
+    val table   = Cubin.Section(symbols.index + 1, ".rel.text.relocated", 9, 0, 16, symbols.index, text.index, entries)
+    base.copy(sections = base.sections.updated(0, text) ++ Vec(strings, symbols, table))
+  }
+
+  private def runMalloc(module: Cubin.Module, listing: Vec[DecodedInstruction]): Vec[Long] = {
+    val compiled = VMCompiler.compile(module, module.kernels.head, Vec(DecodedFunction("relocated", listing)))
+      .fold(error => fail(error.raw), identity)
+    val memory = Memory()
+    val output = memory.allocate(8L)
+    val heap   = memory.allocate(4096L)
+    val task   = KernelTask.validated(
+      "relocated",
+      LaunchGeometry.Dimensions.One,
+      LaunchGeometry.Dimensions.One,
+      Vec(KernelTask.Argument.Memory(output, 0L)),
+      deviceHeap = Some(KernelTask.DeviceHeap(heap, 0L, 4096L))
+    ).value
+    memory.run(compiled, task).fold(error => fail(error.message), identity)
+    memory.readWords(output, 1)
+  }
+
   // ptxas calls the driver's malloc through JCAL (sm_35 R_CUDA_ABS32_26, sm_50 R_CUDA_ABS32_32) or CALL.ABS.NOINC
   // (sm_70 R_CUDA_ABS47_34, sm_90 R_CUDA_ABS55_16_34) relocated to an undefined function, with the size and result
   // in R4:R5.
@@ -187,31 +219,18 @@ class CubinTextRelocationSuite extends Suite {
         s"MOV R4, 0x10; MOV R5, RZ; $call; MOV R6, 0x2a; ST.E [R4], R6; LD.E R7, [R4]; LDC.64 R2, $bank; ST.E [R2], R7; EXIT",
         "relocated"
       ).value.instructions.zipWithIndex.map((instruction, index) => instruction.copy(address = (index * width).unsafe))
-      val base    = Harness.module(sm, Vec(Entry("relocated", if (sm < 70) 0x140 else 0x160, Vec(8))))
-      val size    = listing.size * width
-      val text    = base.sections.head.copy(size = size.unsafe[Int >= 0], bytes = Vec.fill(size)(0.toByte))
-      val names   = Vec.from("\u0000malloc\u0000".getBytes(StandardCharsets.UTF_8))
-      val strings = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
-      val bytes   = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
-      bytes.putInt(24, 1).put(28, 0x12.toByte)
-      val symbols = Cubin.Section(strings.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(bytes.array()))
-      val entries = LittleEndian.toVec(2L * width, 8) ++ LittleEndian.toVec((1L << 32) | kind, 8)
-      val table   =
-        Cubin.Section(symbols.index + 1, ".rel.text.relocated", 9, 0, 16, symbols.index, text.index, entries)
-      val module   = base.copy(sections = base.sections.updated(0, text) ++ Vec(strings, symbols, table))
-      val compiled = VMCompiler.compile(module, module.kernels.head, Vec(DecodedFunction("relocated", listing)))
-        .fold(error => fail(error.raw), identity)
-      val memory = Memory()
-      val output = memory.allocate(8L)
-      val heap   = memory.allocate(4096L)
-      val task   = KernelTask.validated(
-        "relocated",
-        LaunchGeometry.Dimensions.One,
-        LaunchGeometry.Dimensions.One,
-        Vec(KernelTask.Argument.Memory(output, 0L)),
-        deviceHeap = Some(KernelTask.DeviceHeap(heap, 0L, 4096L))
-      ).value
-      memory.run(compiled, task).fold(error => fail(error.message), identity)
-      assertEquals(memory.readWords(output, 1), Vec(0x2aL))
+      assertEquals(runMalloc(mallocModule(sm, kind, listing, 2 * width), listing), Vec(0x2aL))
+    }
+
+  for ((sm, kind) <- Vec(35 -> 0x0cL, 50 -> 0x2aL, 60 -> 0x2aL))
+    test(s"sm_$sm an indirectly called function may call the driver's malloc inside a convergence region") {
+      val listing = Listing.program(
+        "MOV32I R2, 0x50; SSY 0x30; PRET 0x28; BRX R2, -0x28; SYNC; LDC.64 R2, c[0x0][0x140]; LD.E R7, [R4]; " +
+          "ST.E [R2], R7; EXIT; MOV R4, 0x10; MOV R5, RZ; JCAL 0x0; MOV R6, 0x2a; ST.E [R4], R6; RET",
+        "relocated"
+      ).value.instructions.zipWithIndex.map((instruction, index) =>
+        instruction.copy(address = (8 + index * 8).unsafe)
+      )
+      assertEquals(runMalloc(mallocModule(sm, kind, listing, 0x60), listing), Vec(0x2aL))
     }
 }

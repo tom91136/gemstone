@@ -716,6 +716,77 @@ class ControlFlowSuite extends Suite {
     }
   }
 
+  for (sm <- Vec(50, 60)) test(s"sm_$sm a look-back vote covers the lanes still polling when other lanes have left") {
+    val predecessors = 8
+    val flag         = 0x40000000L
+    val table        = Vec.tabulate(predecessors * 32) { index =>
+      val (block, lane) = (index / 32, index % 32)
+      (if (block == lane % 9) flag else 0L) | (lane + block + 1)
+    }
+    val expected = Vec.tabulate(64) { index =>
+      val lane = index % 32
+      val stop = if (lane % 9 < predecessors) lane % 9 else 0
+      if (index < 32) (stop until predecessors).map(block => (lane + block + 1).toLong).sum
+      else (0 until 32).filter(other => other % 9 < stop || other % 9 == predecessors).map(1L << _).sum
+    }
+    val run = program(
+      sm,
+      """MOV32I R10, 0x40000000
+        |MOV R1, c[0x0][0x20]
+        |MOV32I R0, 0x8
+        |S2R R6, SR_TID.X
+        |SSY 0x160
+        |ISETP.NE.AND P0, PT, R0, RZ, PT
+        |@!P0 SYNC
+        |IADD32I R3, R0, -0x1
+        |SSY 0x120
+        |ISCADD R0.CC, R3, R6, 0x5
+        |IADD.X R2, RZ, RZ
+        |LEA R4.CC, R0.reuse, c[0x0][0x160], 0x2
+        |LEA.HI.X R5, R0, c[0x0][0x164], R2, 0x2
+        |MEMBAR.CTA
+        |LDG.E.CV R0, [R4]
+        |ISETP.NE.AND P0, PT, R0, RZ, PT
+        |@!P0 BRA 0xd0
+        |SYNC
+        |LOP.AND.NZ P0, RZ, R0, R10
+        |MOV R0, R3
+        |@!P0 BRA 0x50
+        |SYNC
+        |MOV32I R0, 0x8
+        |SSY 0x2f0
+        |MOV R4, RZ
+        |MOV32I R5, 0xffffffff
+        |ISETP.NE.AND P0, PT, R0, RZ, PT
+        |@!P0 SYNC
+        |IADD32I R7, R0, -0x1
+        |SSY 0x270
+        |ISCADD R0.CC, R7, R6, 0x5
+        |IADD.X R2, RZ, RZ
+        |LEA R8.CC, R0.reuse, c[0x0][0x160], 0x2
+        |LEA.HI.X R9, R0, c[0x0][0x164], R2, 0x2
+        |MEMBAR.CTA
+        |LDG.E.CV R0, [R8]
+        |ISETP.NE.AND P0, PT, R0, RZ, PT
+        |@!P0 BRA 0x220
+        |SYNC
+        |LOP.AND.NZ P0, RZ, R0.reuse, R10
+        |LOP32I.AND R2, R0, 0x3fffffff
+        |MOV R0, R7
+        |IADD R4, R4, R2
+        |VOTE.ANY R3, PT, !P0
+        |LOP.AND R5, R3, R5
+        |@!P0 BRA 0x1a0
+        |SYNC
+        |LEA R2.CC, R6.reuse, c[0x0][0x168], 0x2
+        |LEA.HI.X R3, R6, c[0x0][0x16c], RZ, 0x2
+        |STG.E [R2], R4
+        |STG.E [R2+0x80], R5
+        |EXIT""".stripMargin
+    ).launch(block = 32)(Arg.Buffer(Harness.words(table)), Arg.zeros(256))
+    assertEquals(run.words(1), expected)
+  }
+
   test("BRX adds its register and displacement to the following instruction address") {
     check(
       86,

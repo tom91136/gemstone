@@ -60,10 +60,11 @@ private object VMConstantBank {
       .orElse(gridWorkspace(offset))
   }
 
-  private def gridWorkspaceBase(sm: Int): Int = if (sm >= 100) 0x254 else if (sm >= 90) 0x44 else 0x8c
+  private def gridWorkspaceBase(sm: Int): Int =
+    if (sm >= 100) 0x254 else if (sm >= 90) 0x44 else if (sm >= 70) 0x8c else 0x34
 
   private def gridWorkspace(offset: Int)(using context: VMCompilationContext): Option[Value] =
-    Option.when(context.sm >= 70)(offset - gridWorkspaceBase(context.sm)).collect {
+    Option.when(context.sm >= 60)(offset - gridWorkspaceBase(context.sm)).collect {
       case 0 => Value.GridWorkspace(CounterPart.High)
       case 4 => Value.GridWorkspace(CounterPart.Low)
     }
