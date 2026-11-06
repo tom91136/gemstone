@@ -600,6 +600,9 @@ private[isa] object VMInterpreter {
     private val ready        = ReadyQueue()
     private var runningAhead = false
     private var runAhead     = 0
+    private var sleeping     = false
+    private var idle         = 0
+    private val asleep       = mutable.ArrayBuffer.empty[Cohort]
     private var stalled      = 0
     private val barrierMasks = mutable.Map.empty[BarrierKey, VMLaneMask]
     private val operations   = mutable.Map.empty[BarrierKey, Option[Option[PredicateOperation]]]
@@ -713,11 +716,8 @@ private[isa] object VMInterpreter {
     private def enqueue(cohort: Cohort): Unit = {
       val lanes = cohort.lanes.intersect(live)
       if (lanes.nonEmpty) {
-        ready.add(
-          if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes),
-          runningAhead,
-          runningAhead && joins(cohort)
-        )
+        val queued = if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes)
+        if (sleeping) asleep += queued else ready.add(queued, runningAhead, runningAhead && joins(cohort))
       }
     }
 
@@ -1327,7 +1327,7 @@ private[isa] object VMInterpreter {
     }
 
     def finished: Boolean = live.isEmpty
-    def runnable: Boolean = ready.nonEmpty && !stuck
+    def runnable: Boolean = (ready.nonEmpty || asleep.nonEmpty) && !stuck
 
     def describeWaits: Vec[String] =
       Vec.from(waiting.values.flatMap(_.map(value =>
@@ -1345,6 +1345,11 @@ private[isa] object VMInterpreter {
 
     private def next()(using Run): Unit = {
       pace.step()
+      if (asleep.nonEmpty) {
+        idle += 1
+        if (ready.isEmpty || stalled > ready.size || idle >= SpinBackoff) wake()
+        if (ready.isEmpty) deadlock()
+      }
       var cohort = ready.removeHead()
       val frame  = cohort.frame
       frame.live = frame.live.intersect(live)
@@ -1371,12 +1376,21 @@ private[isa] object VMInterpreter {
         val yielding = instruction.instruction match {
           case Instruction.Yield | Instruction.Pause => true; case _ => false
         }
-        if (yielding && context.spin.recording) cohort.lanes.headOption.foreach(context.spin.yielded)
-        runningAhead = frame.routine.program.runsAhead && !yielding && runAhead < RunAheadLimit
+        sleeping = yielding && context.spin.recording && cohort.lanes.headOption.exists(context.spin.yielded(_))
+        runningAhead = frame.routine.program.runsAhead && !yielding && runAhead < RunAheadLimit &&
+          diverged(cohort, frame)
         runAhead = if (runningAhead) runAhead + 1 else 0
         step(cohort, instruction)
         runningAhead = false
+        sleeping = false
       }
+    }
+
+    private def wake(): Unit = {
+      idle = 0
+      val woken = asleep.toVector
+      asleep.clear()
+      woken.foreach(enqueue(_))
     }
 
     /** A path that has not yielded within this many steps hands over regardless, as a path spinning without a yield
@@ -1384,13 +1398,23 @@ private[isa] object VMInterpreter {
       */
     private inline val RunAheadLimit = 1 << 16
 
+    /** A path that polls unchanged memory sleeps until the others have taken this many steps, or have none to take. */
+    private inline val SpinBackoff = 1 << 8
+
+    /** Whether the cohort is a path that split from lanes of its warp that are still live, as opposed to a whole warp,
+      * which takes its turn with the other warps.
+      */
+    private def diverged(cohort: Cohort, frame: VMFrame): Boolean = cohort.lanes.headOption.exists { lane =>
+      cohort.lanes.warpBits(lane.raw) != (frame.live.warpBits(lane.raw) & live.warpBits(lane.raw))
+    }
+
     /** Every ready cohort has waited in turn for lanes that have not moved since. */
-    private def stuck: Boolean = stalled > ready.size
+    private def stuck: Boolean = stalled > ready.size && asleep.isEmpty
 
     def run(): Either[Fault, Unit] = boundary {
       start()
       while (live.nonEmpty) {
-        if (ready.isEmpty || stuck) deadlock()
+        if ((ready.isEmpty && asleep.isEmpty) || stuck) deadlock()
         next()
       }
       Right(())

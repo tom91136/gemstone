@@ -9,39 +9,39 @@ private object SpinWatch {
   private val Mix     = 0x9e3779b97f4a7c15L
 }
 
-/** Recognises a warp that polls memory another work-group writes: between two yields it re-reads the same addresses and
-  * sees the same values, over and over. That is the only kind of yield that asks the launch's work-groups to stay close
-  * together, so it is what [[Pace.engage]]s pacing.
+/** Recognises a warp that polls memory: between two yields it re-reads the same addresses and sees the same values,
+  * over and over. Such a warp waits on others, so the scheduler lets them run ahead of it, and since the memory may be
+  * another work-group's, the launch's work-groups are asked to stay close together by [[Pace.engage]]ing pacing.
   */
-@SuppressWarnings(Array("scalafix:DisableSyntax.var"))
 private class SpinWatch(warps: Int, pace: Pace) {
   import SpinWatch.*
 
   private val digest   = Array.ofDim[Long](warps)
   private val previous = Array.ofDim[Long](warps)
   private val repeated = Array.ofDim[Int](warps)
-  private var tracking = warps > 0 && pace.pending
 
-  def recording: Boolean = tracking
+  def recording: Boolean = warps > 0
 
   def record(lane: WorkgroupLane, address: Long, value: Long): Unit = {
     val warp = lane.raw >> 5
     digest(warp) = (digest(warp) + address) * Mix + value + 1L
   }
 
-  def yielded(lane: WorkgroupLane): Unit = {
+  /** Whether the warp has polled unchanged memory for long enough to be waiting on others. */
+  def yielded(lane: WorkgroupLane): Boolean = {
     val warp  = lane.raw >> 5
     val reads = digest(warp)
     digest(warp) = 0L
     if (reads != 0L) {
       if (reads == previous(warp)) {
-        repeated(warp) += 1
-        if (repeated(warp) >= Repeats) { pace.engage(); tracking = false }
+        if (repeated(warp) < Repeats) repeated(warp) += 1
       } else {
         previous(warp) = reads
         if (repeated(warp) > 0) repeated(warp) -= 1
       }
     }
-    if (tracking && !pace.pending) tracking = false
+    val spinning = repeated(warp) >= Repeats
+    if (spinning) pace.engage()
+    spinning
   }
 }

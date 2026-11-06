@@ -52,6 +52,7 @@ private object VMMemoryAccess {
         Completed
       }, {
         context.scalar.elem = context.workgroup.readShared(address, width)
+        if (context.spin.recording) context.spin.record(lane, address, context.scalar.elem)
         Completed
       },
       local => {
