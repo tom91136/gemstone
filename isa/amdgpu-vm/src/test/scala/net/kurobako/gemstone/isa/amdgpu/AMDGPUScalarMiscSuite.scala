@@ -24,6 +24,23 @@ class AMDGPUScalarMiscSuite extends Suite {
     assertEquals(load(Vec(0x03, 0x20, 0x01, 0xf4, 0x01, 0x00, 0x00, 0xf8)), 0x80L)
   }
 
+  test("s_mulk_i32 multiplies its destination and leaves SCC as the compare before it set it") {
+    def select(scalars: Vec[Long]): Long =
+      scalarResult(
+        gfx1201,
+        scalars,
+        program(
+          gfx1201,
+          octets(
+            0x00, 0x02, 0x07, 0xbf, 0x00, 0x06, 0x02, 0xb8, 0xc1, 0x80, 0x03, 0x98
+          )
+        ),
+        3
+      )
+    assertEquals(select(Vec(0L, 0L, 1L)), 0xffffffffL)
+    assertEquals(select(Vec(0x7fffffffL, 0L, 0x7fffffffL)), 0L)
+  }
+
   /** `code` with EXEC starting at 0xff and s1 or s[2:3] at 0xf0f; afterwards SDST, EXEC and SCC. */
   private def written(target: Target, code: Vec[Int], wave32: Boolean): (Long, Long, Long) = {
     val operations = Vec(

@@ -25,11 +25,8 @@ private object references {
   def signedMultiplyHigh24(left: Long, right: Long): Long =
     Bits.low32((Bits.signExtend(left, 24) * Bits.signExtend(right, 24)) >> 32).toLong
 
-  def signedMultiplyImmediate(register: Long, immediate: Int): (Long, Boolean) = {
-    val product  = register.toInt.toLong * immediate.toLong
-    val overflow = product < Int.MinValue.toLong || product > Int.MaxValue.toLong
-    (Bits.low32(product).toLong, overflow)
-  }
+  def signedMultiplyImmediate(register: Long, immediate: Int): Long =
+    Bits.low32(register.toInt.toLong * immediate.toLong).toLong
 
   def mergeD16(existing: Long, value: Long, high: Boolean): Long =
     if (high) (Bits.low32(existing).toLong & 0x0000ffffL) | (Bits.low16(value).toLong << 16)

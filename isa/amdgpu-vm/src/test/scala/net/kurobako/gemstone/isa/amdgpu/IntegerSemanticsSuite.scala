@@ -927,7 +927,11 @@ class IntegerSemanticsSuite extends Suite {
       immediate <- Vector(0, 1, -1, 0x300, -0x8000, 0x7fff, 2, 3)
     } {
       assertEquals(
-        Values.flagged(IntegerSemantics.multiplyImmediate(Execute)(Values(register), 0, immediate.toLong)),
+        IntegerSemantics.multiplyImmediate(Execute)(
+          Values(register, Bits.low32(immediate.toLong).toLong),
+          0,
+          immediate.toLong
+        )._1,
         signedMultiplyImmediate(register, immediate)
       )
       val sum = register + immediate.toLong

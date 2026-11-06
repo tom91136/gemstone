@@ -511,14 +511,14 @@ class AMDGPUArithmeticSuite extends Suite {
     assertEquals(count(64 - 1, high = true, base = 8L), 15L)
   }
 
-  test("SOPK signed multiply uses a sign-extended immediate and reports overflow") {
+  test("SOPK signed multiply uses a sign-extended immediate") {
     assertEquals(
-      Values.flagged(IntegerSemantics.multiplyImmediate(Execute)(Values(0xffffffffL), 0, 0x300L)),
-      (0xfffffd00L, false)
+      IntegerSemantics.multiplyImmediate(Execute)(Values(0xffffffffL, 0x300L), 0, 0x300L)._1,
+      0xfffffd00L
     )
     assertEquals(
-      Values.flagged(IntegerSemantics.multiplyImmediate(Execute)(Values(Int.MaxValue.toLong), 0, 2L)),
-      (0xfffffffeL, true)
+      IntegerSemantics.multiplyImmediate(Execute)(Values(Int.MaxValue.toLong, 2L), 0, 2L)._1,
+      0xfffffffeL
     )
   }
 

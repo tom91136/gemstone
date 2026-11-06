@@ -1658,17 +1658,13 @@ private object IntegerSemantics {
       )
   }
 
-  /** S_MULK_I32 on the destination and the sign-extended immediate; SCC records signed overflow. */
+  /** S_MULK_I32 on the destination and the sign-extended immediate; SCC is left alone. */
   inline def multiplyImmediate[V, R](inline algebra: Algebra[V])(
       inline sinks: AMDGPUSinks[V, R],
       dest: ScalarRegisterIndex,
       immediate: Long
-  ): R = sinks.scalarImmediate(dest, immediate)(
-    (d, k) => algebra.truncate(algebra.multiply(algebra.signExtend(d, 32), k), 32),
-    (d, k, _) =>
-      algebra.let("p", algebra.multiply(algebra.signExtend(d, 32), k))(product =>
-        algebra.notEqual(algebra.signExtend(product, 32), product)
-      )
+  ): R = sinks.scalarDword(dest, InstructionSource.Scalar(dest), InstructionSource.Constant(immediate))((d, k, _) =>
+    algebra.truncate(algebra.multiply(d, k), 32)
   )
 
   /** S_ADDK_I32 on the destination and the sign-extended immediate; SCC records a sum outside the dword range. */
