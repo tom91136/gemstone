@@ -68,6 +68,9 @@ if(BUILD_TESTING)
   gemstone_opencl_test(gemstone_opencl_multi_device test/multi_device.cpp)
   gemstone_discover_tests(gemstone_opencl_multi_device TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
 
+  gemstone_opencl_test(gemstone_opencl_partition test/partition.cpp)
+  gemstone_discover_tests(gemstone_opencl_partition TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+
   add_executable(gemstone_opencl_concurrent_atomics test/concurrent_atomics.cpp)
   target_include_directories(gemstone_opencl_concurrent_atomics SYSTEM PRIVATE "${OPENCL_INCLUDE_DIR}")
   target_compile_definitions(gemstone_opencl_concurrent_atomics PRIVATE CL_TARGET_OPENCL_VERSION=300)

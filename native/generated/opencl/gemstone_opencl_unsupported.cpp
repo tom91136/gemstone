@@ -26,7 +26,6 @@ void clSVMFreeARM(cl_context, void *) { }
 }
 
 GEMSTONE_UNSUPPORTED(clCancelCommandsIMG, gemstone_opencl_unsupported)
-GEMSTONE_UNSUPPORTED(clCreateSubDevices, gemstone_opencl_unsupported)
 GEMSTONE_UNSUPPORTED(clCreateSubDevicesEXT, gemstone_opencl_unsupported)
 GEMSTONE_UNSUPPORTED(clEnqueueAcquireEGLObjectsKHR, gemstone_opencl_unsupported)
 GEMSTONE_UNSUPPORTED(clEnqueueAcquireExternalMemObjectsKHR, gemstone_opencl_unsupported)

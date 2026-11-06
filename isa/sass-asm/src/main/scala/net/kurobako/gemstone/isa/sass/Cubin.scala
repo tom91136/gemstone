@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.elf.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
@@ -646,9 +647,12 @@ object Cubin {
     globals.foreach { global =>
       if (seen.add(global.name)) result += global
       else {
-        val base   = s"${global.name}.${global.section}.${global.offset}"
-        val unique = LazyList.from(0).map(n => (if (n == 0) base else s"$base.$n").unsafe[NonEmpty[String]])
-          .filter(seen.add).head
+        val base                                           = s"${global.name}.${global.section}.${global.offset}"
+        @tailrec def fresh(attempt: Int): NonEmpty[String] = {
+          val candidate = (if (attempt == 0) base else s"$base.$attempt").unsafe[NonEmpty[String]]
+          if (seen.add(candidate)) candidate else fresh(attempt + 1)
+        }
+        val unique = fresh(0)
         result += global.copy(name = unique, declared = Some(global.name))
       }
     }

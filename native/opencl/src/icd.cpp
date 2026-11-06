@@ -297,6 +297,7 @@ constexpr cl_ulong LocalMemSize = cl_ulong{1} << 16;
 // Enqueue enforces the advertised bound.
 constexpr size_t MaxWorkGroupSize = gemstone::execution::OpenclMaxWorkGroupSize;
 constexpr size_t MaxSubgroupSize = 32;
+constexpr uint32_t RootComputeUnits = 16;
 constexpr size_t Image2DMaxSize = 16384;
 constexpr size_t Image3DMaxSize = 2048;
 constexpr size_t ImageMaxArraySize = 2048;
@@ -639,7 +640,52 @@ cl_int outputString(size_t capacity, void *output, size_t *written, const std::s
 bool validPlatform(cl_platform_id value) { return checked(value) == &platform; }
 bool validDevice(cl_device_id value) { return checked(value) != nullptr; }
 
-uint32_t deviceOrdinal(cl_device_id value) { return static_cast<uint32_t>(value - rootDevices.data()); }
+uint32_t deviceOrdinal(cl_device_id value) { return value->ordinal; }
+
+bool coveredBy(const _cl_device_id *device, cl_uint count, const cl_device_id *devices) {
+  if (count == 0) return true;
+  for (; device; device = device->parent)
+    if (std::find(devices, devices + count, device) != devices + count) return true;
+  return false;
+}
+
+uint32_t maxSubDevices(const _cl_device_id &device) { return device.computeUnits > 1 ? device.computeUnits : 0; }
+
+struct PartitionLayout {
+  std::vector<uint32_t> counts;
+  std::vector<cl_device_partition_property> type;
+};
+
+cl_int layoutPartition(const _cl_device_id &parent, const cl_device_partition_property *properties, PartitionLayout &layout) {
+  const cl_device_partition_property units = parent.computeUnits;
+  switch (properties[0]) {
+    case CL_DEVICE_PARTITION_EQUALLY: {
+      if (properties[2] != 0) return CL_INVALID_VALUE;
+      const cl_device_partition_property each = properties[1];
+      if (each <= 0 || each > units) return CL_INVALID_DEVICE_PARTITION_COUNT;
+      layout.counts.assign(static_cast<size_t>(units / each), static_cast<uint32_t>(each));
+      layout.type = {CL_DEVICE_PARTITION_EQUALLY, each, 0};
+      return CL_SUCCESS;
+    }
+    case CL_DEVICE_PARTITION_BY_COUNTS: {
+      cl_device_partition_property total = 0;
+      size_t index = 1;
+      layout.type = {CL_DEVICE_PARTITION_BY_COUNTS};
+      for (; properties[index] != CL_DEVICE_PARTITION_BY_COUNTS_LIST_END; ++index) {
+        const cl_device_partition_property count = properties[index];
+        if (count <= 0 || count > units || total + count > units) return CL_INVALID_DEVICE_PARTITION_COUNT;
+        total += count;
+        layout.counts.push_back(static_cast<uint32_t>(count));
+        layout.type.push_back(count);
+      }
+      if (layout.counts.empty() || properties[index + 1] != 0) return CL_INVALID_VALUE;
+      layout.type.push_back(CL_DEVICE_PARTITION_BY_COUNTS_LIST_END);
+      layout.type.push_back(0);
+      return CL_SUCCESS;
+    }
+    default: return CL_INVALID_VALUE;
+  }
+}
 
 bool contextHasDevice(const _cl_context *context, cl_device_id value) {
   return std::find(context->devices.begin(), context->devices.end(), value) != context->devices.end();
@@ -674,7 +720,7 @@ bool programHasDevices(const _cl_program *program, cl_uint count, const cl_devic
 std::vector<ProgramBuild *> buildTargets(_cl_program *program, cl_uint count, const cl_device_id *devices) {
   std::vector<ProgramBuild *> targets;
   for (auto &build : program->builds)
-    if (count == 0 || std::find(devices, devices + count, build.device) != devices + count) targets.push_back(&build);
+    if (coveredBy(build.device, count, devices)) targets.push_back(&build);
   return targets;
 }
 
@@ -1278,14 +1324,58 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id value, cl_device_t
   return CL_SUCCESS;
 }
 
+// Root devices live for the process, so only sub-devices count references.
 CL_API_ENTRY cl_int CL_API_CALL clRetainDevice(cl_device_id value) {
-  // Root devices live for the process, so retaining one is a no-op.
-  return validDevice(value) ? CL_SUCCESS : CL_INVALID_DEVICE;
+  auto *device = checked(value);
+  if (!device) return CL_INVALID_DEVICE;
+  if (device->parent) retain(device);
+  return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clReleaseDevice(cl_device_id value) {
-  // The root device remains available until the ICD is unloaded.
-  return validDevice(value) ? CL_SUCCESS : CL_INVALID_DEVICE;
+  auto *device = checked(value);
+  if (!device) return CL_INVALID_DEVICE;
+  if (device->parent && release(device)) {
+    auto *parent = device->parent;
+    destroyObject(device);
+    clReleaseDevice(parent);
+  }
+  return CL_SUCCESS;
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clCreateSubDevices(cl_device_id value, const cl_device_partition_property *properties, cl_uint count,
+                                                   cl_device_id *devices, cl_uint *created) {
+  auto *parent = checked(value);
+  if (!parent) return CL_INVALID_DEVICE;
+  if (!properties || (!devices && !created)) return CL_INVALID_VALUE;
+  PartitionLayout layout;
+  if (const auto status = layoutPartition(*parent, properties, layout); status != CL_SUCCESS) return status;
+  if (layout.counts.size() == 1 && layout.counts.front() == parent->computeUnits) return CL_DEVICE_PARTITION_FAILED;
+  if (devices && count < layout.counts.size()) return CL_INVALID_VALUE;
+  if (created) *created = static_cast<cl_uint>(layout.counts.size());
+  if (!devices) return CL_SUCCESS;
+  std::vector<_cl_device_id *> subDevices;
+  try {
+    for (const auto units : layout.counts) {
+      auto *sub = newObject<_cl_device_id>();
+      if (!sub) throw std::bad_alloc();
+      subDevices.push_back(sub);
+      sub->platform = parent->platform;
+      sub->parent = parent;
+      sub->ordinal = parent->ordinal;
+      sub->computeUnits = units;
+      sub->partition = layout.type;
+    }
+  } catch (const std::bad_alloc &) {
+    for (auto *sub : subDevices)
+      destroyObject(sub);
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+  for (size_t index = 0; index < subDevices.size(); ++index) {
+    clRetainDevice(parent);
+    devices[index] = subDevices[index];
+  }
+  return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_info name, size_t size, void *output, size_t *written) {
@@ -1309,7 +1399,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_NUM_EUS_PER_SUB_SLICE_INTEL: return outputScalar(size, output, written, cl_uint{8});
     case CL_DEVICE_NUM_THREADS_PER_EU_INTEL: return outputScalar(size, output, written, cl_uint{7});
     case CL_DEVICE_FEATURE_CAPABILITIES_INTEL: return outputScalar(size, output, written, cl_device_feature_capabilities_intel{0});
-    case CL_DEVICE_MAX_COMPUTE_UNITS: return outputScalar(size, output, written, cl_uint{16});
+    case CL_DEVICE_MAX_COMPUTE_UNITS: return outputScalar(size, output, written, cl_uint{value->computeUnits});
     case CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS: return outputScalar(size, output, written, cl_uint{3});
     case CL_DEVICE_MAX_WORK_GROUP_SIZE: return outputScalar(size, output, written, MaxWorkGroupSize);
     case CL_DEVICE_MAX_WORK_ITEM_SIZES: return outputBytes(size, output, written, workSizes.data(), sizeof(workSizes));
@@ -1342,15 +1432,22 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_IMAGE_MAX_ARRAY_SIZE: return outputScalar(size, output, written, ImageMaxArraySize);
     case CL_DEVICE_IMAGE_PITCH_ALIGNMENT: return outputScalar(size, output, written, ImagePitchAlignment);
     case CL_DEVICE_IMAGE_BASE_ADDRESS_ALIGNMENT: return outputScalar(size, output, written, ImageBaseAddressAlignment);
-    case CL_DEVICE_PARTITION_MAX_SUB_DEVICES: return outputScalar(size, output, written, cl_uint{0});
+    case CL_DEVICE_PARTITION_MAX_SUB_DEVICES: return outputScalar(size, output, written, cl_uint{maxSubDevices(*value)});
     case CL_DEVICE_PARTITION_AFFINITY_DOMAIN: return outputScalar(size, output, written, cl_device_affinity_domain{0});
-    case CL_DEVICE_PARTITION_PROPERTIES:
+    case CL_DEVICE_PARTITION_PROPERTIES: {
+      static const cl_device_partition_property none[] = {0};
+      static const cl_device_partition_property schemes[] = {CL_DEVICE_PARTITION_EQUALLY, CL_DEVICE_PARTITION_BY_COUNTS, 0};
+      return maxSubDevices(*value) == 0 ? outputBytes(size, output, written, none, sizeof(none))
+                                        : outputBytes(size, output, written, schemes, sizeof(schemes));
+    }
     case CL_DEVICE_PARTITION_TYPE: {
       static const cl_device_partition_property none[] = {0};
-      return outputBytes(size, output, written, none, sizeof(none));
+      return value->partition.empty() ? outputBytes(size, output, written, none, sizeof(none))
+                                      : outputBytes(size, output, written, value->partition.data(),
+                                                    value->partition.size() * sizeof(cl_device_partition_property));
     }
-    case CL_DEVICE_PARENT_DEVICE: return outputScalar(size, output, written, cl_device_id{});
-    case CL_DEVICE_REFERENCE_COUNT: return outputScalar(size, output, written, cl_uint{1});
+    case CL_DEVICE_PARENT_DEVICE: return outputScalar(size, output, written, cl_device_id{value->parent});
+    case CL_DEVICE_REFERENCE_COUNT: return outputScalar(size, output, written, cl_uint{value->header.references.load()});
     case CL_DEVICE_IMAGE_SUPPORT: return outputScalar(size, output, written, cl_bool{CL_TRUE});
     case CL_DEVICE_MAX_PARAMETER_SIZE: return outputScalar(size, output, written, size_t{4096});
     case CL_DEVICE_MAX_SAMPLERS: return outputScalar(size, output, written, cl_uint{16});
@@ -1607,6 +1704,8 @@ CL_API_ENTRY cl_context CL_API_CALL clCreateContext(const cl_context_properties 
     destroyObject(result);
     return fail(error, CL_OUT_OF_HOST_MEMORY);
   }
+  for (auto *device : result->devices)
+    clRetainDevice(device);
   return succeed(error, result);
 }
 
@@ -1630,7 +1729,10 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseContext(cl_context value) {
     context->destructorCallbacks | reverse() | for_each([&](auto callback, void *user) {
       if (callback) callback(value, user);
     });
+    const auto devices = std::move(context->devices);
     destroyObject(context);
+    for (auto *device : devices)
+      clReleaseDevice(device);
   }
   return CL_SUCCESS;
 }
@@ -2994,6 +3096,10 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
     if (programs ^ forall([&](const auto *program) { return findBuild(program, device) != nullptr; })) targets.push_back(device);
     else if (count != 0) return fail(error, CL_INVALID_DEVICE);
   }
+  for (auto *device : context->devices)
+    if (coveredBy(device, count, devices) && !(targets ^ contains(device))
+        && (programs ^ forall([&](const auto *program) { return findBuild(program, device) != nullptr; })))
+      targets.push_back(device);
   if (targets.empty()) return fail(error, CL_INVALID_OPERATION);
 
   const cl_program_binary_type linkedType =
@@ -4902,6 +5008,8 @@ void initialiseDispatch() {
       registerLiveObject(&root);
       root.dispatch = &dispatch;
       root.platform = &platform;
+      root.ordinal = index;
+      root.computeUnits = RootComputeUnits;
     }
     gemstone::opencl::populateDispatch(dispatch);
   });

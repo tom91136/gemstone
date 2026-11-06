@@ -39,6 +39,10 @@ struct _cl_device_id {
   static constexpr Kind ObjectKind = Kind::Device;
   Header header;
   _cl_platform_id *platform = nullptr;
+  _cl_device_id *parent = nullptr;
+  uint32_t ordinal = 0;
+  uint32_t computeUnits = 0;
+  std::vector<cl_device_partition_property> partition;
 };
 
 struct _cl_context {
