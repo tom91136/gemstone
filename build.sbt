@@ -160,6 +160,7 @@ lazy val commonSettings = Seq(
   ),
   libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
   Test / testOptions += Tests.Argument(TestFrameworks.MUnit, "--log=warn", "--logger=sbt"),
+  Test / testListeners += new SuiteProgress(streams.value.log, (Test / definedTests).value.map(_.name)),
   Compile / exportJars  := false,
   scalafmtDetailedError := true
 ) ++ ResourceSync.settings

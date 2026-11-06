@@ -97,6 +97,7 @@ export JOBSERVER_DIRECTORY="$session" TMPDIR="$session"
 JOBSERVER_SERIAL=0
 [ "$jobs" != 1 ] || JOBSERVER_SERIAL=1
 export JOBSERVER_SERIAL
+exec 3>&1
 printf 'Shared build budget %s; GNU Make jobserver, Ninja clients\n' "$jobs"
 sh "$0" --progress "$session" &
 monitor=$!

@@ -84,7 +84,7 @@ function(container_image output_tag output_stamp)
   if(NOT tag IN_LIST images)
     add_custom_command(
       OUTPUT "${stamp}"
-      COMMAND sh -c [=[exe=$1 tag=$2; shift 2; "$exe" image inspect "$tag" >/dev/null 2>&1 || exec "$exe" build --tag "$tag" "$@"]=]
+      COMMAND sh -c [=[exe=$1 tag=$2; shift 2; "$exe" image inspect "$tag" >/dev/null 2>&1 && exit 0; [ -z "${JOBSERVER_DIRECTORY-}" ] || exec >&3 2>&1; exec "$exe" build --progress=plain --tag "$tag" "$@"]=]
         sh "${ARG_EXECUTABLE}" "${tag}" --file "${ARG_FILE}" ${stage} ${ARG_BUILD_ARGUMENTS} ${contexts} "${ARG_CONTEXT}"
       COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
       DEPENDS ${ARG_DEPENDS}

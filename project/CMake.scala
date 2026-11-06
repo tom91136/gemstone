@@ -30,7 +30,7 @@ object CMake {
     run(
       launcher ++ Seq("cmake", "--build", s"$directory") ++
         (if (buildTargets.isEmpty) Seq.empty else "--target" +: buildTargets) ++
-        Seq("--", "--quiet"),
+        Seq("--"),
       source,
       log
     )
