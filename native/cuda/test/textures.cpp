@@ -720,3 +720,118 @@ TEST_CASE("channel descriptors describe arrays", "[cuda][texture]") {
   CHECK(cudaGetChannelDesc(&described, nullptr) == cudaErrorInvalidResourceHandle);
   REQUIRE(cuArrayDestroy(array) == CUDA_SUCCESS);
 }
+
+namespace {
+
+CUDA_ARRAY3D_DESCRIPTOR mipmappedDescriptor(size_t width, size_t height, size_t depth, unsigned flags = 0) {
+  CUDA_ARRAY3D_DESCRIPTOR descriptor{};
+  descriptor.Width = width;
+  descriptor.Height = height;
+  descriptor.Depth = depth;
+  descriptor.Format = CU_AD_FORMAT_UNSIGNED_INT32;
+  descriptor.NumChannels = 1;
+  descriptor.Flags = flags;
+  return descriptor;
+}
+
+CUresult copyRows(CUarray array, std::vector<uint32_t> &host, size_t width, size_t height, bool upload) {
+  CUDA_MEMCPY2D copy{};
+  copy.WidthInBytes = width * sizeof(uint32_t);
+  copy.Height = height;
+  if (upload) {
+    copy.srcMemoryType = CU_MEMORYTYPE_HOST;
+    copy.srcHost = host.data();
+    copy.srcPitch = copy.WidthInBytes;
+    copy.dstMemoryType = CU_MEMORYTYPE_ARRAY;
+    copy.dstArray = array;
+  } else {
+    copy.srcMemoryType = CU_MEMORYTYPE_ARRAY;
+    copy.srcArray = array;
+    copy.dstMemoryType = CU_MEMORYTYPE_HOST;
+    copy.dstHost = host.data();
+    copy.dstPitch = copy.WidthInBytes;
+  }
+  return cuMemcpy2D_v2(&copy);
+}
+
+} // namespace
+
+TEST_CASE("mipmapped arrays hold independent halving levels", "[cuda][texture]") {
+  setup();
+  constexpr size_t width = 13;
+  constexpr size_t height = 6;
+  constexpr unsigned levels = 3;
+  const auto descriptor = mipmappedDescriptor(width, height, 0);
+  CUmipmappedArray mipmapped = nullptr;
+  REQUIRE(cuMipmappedArrayCreate(&mipmapped, &descriptor, levels) == CUDA_SUCCESS);
+  REQUIRE(mipmapped != nullptr);
+
+  std::array<CUarray, levels> handles{};
+  std::array<std::vector<uint32_t>, levels> contents;
+  for (unsigned level = 0; level < levels; ++level) {
+    CAPTURE(level);
+    const size_t levelWidth = std::max<size_t>(1, width >> level);
+    const size_t levelHeight = std::max<size_t>(1, height >> level);
+    REQUIRE(cuMipmappedArrayGetLevel(&handles[level], mipmapped, level) == CUDA_SUCCESS);
+    CUDA_ARRAY3D_DESCRIPTOR described{};
+    REQUIRE(cuArray3DGetDescriptor_v2(&described, handles[level]) == CUDA_SUCCESS);
+    CHECK(described.Width == levelWidth);
+    CHECK(described.Height == levelHeight);
+    CHECK(described.Depth == 0);
+    CHECK(described.Format == CU_AD_FORMAT_UNSIGNED_INT32);
+    for (size_t index = 0; index < levelWidth * levelHeight; ++index)
+      contents[level].push_back(static_cast<uint32_t>((level << 16) | index));
+    REQUIRE(copyRows(handles[level], contents[level], levelWidth, levelHeight, true) == CUDA_SUCCESS);
+  }
+  for (unsigned level = 0; level < levels; ++level) {
+    CAPTURE(level);
+    const size_t levelWidth = std::max<size_t>(1, width >> level);
+    const size_t levelHeight = std::max<size_t>(1, height >> level);
+    std::vector<uint32_t> back(contents[level].size(), 0);
+    REQUIRE(copyRows(handles[level], back, levelWidth, levelHeight, false) == CUDA_SUCCESS);
+    CHECK(back == contents[level]);
+  }
+  CHECK(cuMipmappedArrayDestroy(mipmapped) == CUDA_SUCCESS);
+}
+
+TEST_CASE("mipmapped array volumes halve every axis and layered arrays keep their layers", "[cuda][texture]") {
+  setup();
+  CUarray level = nullptr;
+  CUDA_ARRAY3D_DESCRIPTOR described{};
+  CUmipmappedArray volume = nullptr;
+  const auto volumeDescriptor = mipmappedDescriptor(8, 4, 6);
+  REQUIRE(cuMipmappedArrayCreate(&volume, &volumeDescriptor, 4) == CUDA_SUCCESS);
+  REQUIRE(cuMipmappedArrayGetLevel(&level, volume, 2) == CUDA_SUCCESS);
+  REQUIRE(cuArray3DGetDescriptor_v2(&described, level) == CUDA_SUCCESS);
+  CHECK(described.Width == 2);
+  CHECK(described.Height == 1);
+  CHECK(described.Depth == 1);
+  CHECK(cuMipmappedArrayDestroy(volume) == CUDA_SUCCESS);
+
+  CUmipmappedArray layered = nullptr;
+  const auto layeredDescriptor = mipmappedDescriptor(8, 4, 5, CUDA_ARRAY3D_LAYERED);
+  REQUIRE(cuMipmappedArrayCreate(&layered, &layeredDescriptor, 3) == CUDA_SUCCESS);
+  REQUIRE(cuMipmappedArrayGetLevel(&level, layered, 2) == CUDA_SUCCESS);
+  REQUIRE(cuArray3DGetDescriptor_v2(&described, level) == CUDA_SUCCESS);
+  CHECK(described.Width == 2);
+  CHECK(described.Height == 1);
+  CHECK(described.Depth == 5);
+  CHECK(cuMipmappedArrayDestroy(layered) == CUDA_SUCCESS);
+}
+
+TEST_CASE("mipmapped array argument checks", "[cuda][texture]") {
+  setup();
+  const auto descriptor = mipmappedDescriptor(13, 6, 0);
+  CUmipmappedArray mipmapped = nullptr;
+  CHECK(cuMipmappedArrayCreate(nullptr, &descriptor, 1) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayCreate(&mipmapped, nullptr, 1) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayCreate(&mipmapped, &descriptor, 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayCreate(&mipmapped, &descriptor, 5) == CUDA_ERROR_INVALID_VALUE);
+  REQUIRE(cuMipmappedArrayCreate(&mipmapped, &descriptor, 4) == CUDA_SUCCESS);
+  CUarray level = nullptr;
+  CHECK(cuMipmappedArrayGetLevel(nullptr, mipmapped, 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayGetLevel(&level, nullptr, 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayGetLevel(&level, mipmapped, 4) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayDestroy(nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMipmappedArrayDestroy(mipmapped) == CUDA_SUCCESS);
+}

@@ -879,8 +879,14 @@ constexpr size_t KeplerRowAlignment = gemstone::texture::Layout::Kepler::Alignme
 
 bool keplerSurfaceArray(unsigned flags, size_t height) { return keplerDevice() && (flags & CUDA_ARRAY3D_SURFACE_LDST) && height != 0; }
 
-CUresult arrayCreate(CUarray *handle, size_t width, size_t height, size_t depth, CUarray_format format, unsigned channels, unsigned flags) {
-  if (!handle || (depth != 0 && height == 0)) return CUDA_ERROR_INVALID_VALUE;
+struct ArrayLayout {
+  size_t pitch;
+  size_t bytes;
+};
+
+std::optional<ArrayLayout> arrayLayout(size_t width, size_t height, size_t depth, CUarray_format format, unsigned channels,
+                                       unsigned flags) {
+  if (depth != 0 && height == 0) return std::nullopt;
   const size_t actualHeight = height == 0 ? 1 : height;
   const size_t actualDepth = depth == 0 ? 1 : depth;
   const size_t elementBytes = formatBytes(format);
@@ -889,24 +895,100 @@ CUresult arrayCreate(CUarray *handle, size_t width, size_t height, size_t depth,
   size_t bytes = 0;
   if (width == 0 || channels == 0 || elementBytes == 0 || !sizeMul(width, elementBytes, &pitch) || !sizeMul(pitch, channels, &pitch)
       || !sizeMul(actualDepth, actualHeight, &rows))
-    return CUDA_ERROR_INVALID_VALUE;
-  if (keplerSurfaceArray(flags, height) && pitch > SIZE_MAX - (KeplerRowAlignment - 1)) return CUDA_ERROR_INVALID_VALUE;
+    return std::nullopt;
+  if (keplerSurfaceArray(flags, height) && pitch > SIZE_MAX - (KeplerRowAlignment - 1)) return std::nullopt;
   if (keplerSurfaceArray(flags, height)) pitch = (pitch + KeplerRowAlignment - 1) / KeplerRowAlignment * KeplerRowAlignment;
-  if (!sizeMul(pitch, rows, &bytes)) return CUDA_ERROR_INVALID_VALUE;
-  auto array = std::unique_ptr<CudaArray>{new (std::nothrow) CudaArray{}};
-  if (!array) return CUDA_ERROR_UNKNOWN;
-  if (const auto status = cuMemAlloc_v2(&array->device, bytes); status != CUDA_SUCCESS) return status;
+  if (!sizeMul(pitch, rows, &bytes)) return std::nullopt;
+  return ArrayLayout{.pitch = pitch, .bytes = bytes};
+}
+
+std::unique_ptr<CudaArray> describedArray(size_t width, size_t height, size_t depth, CUarray_format format, unsigned channels,
+                                          unsigned flags, const ArrayLayout &layout, CUdeviceptr device) {
+  std::unique_ptr<CudaArray> array{new (std::nothrow) CudaArray{}};
+  if (!array) return nullptr;
+  array->device = device;
   array->width = width;
-  array->height = actualHeight;
-  array->depth = actualDepth;
-  array->pitch = pitch;
+  array->height = height == 0 ? 1 : height;
+  array->depth = depth == 0 ? 1 : depth;
+  array->pitch = layout.pitch;
   array->format = format;
   array->channels = channels;
   array->flags = flags;
   array->dimensions = 1;
   if (height != 0) array->dimensions = 2;
   if (depth != 0) array->dimensions = 3;
+  return array;
+}
+
+CUresult arrayCreate(CUarray *handle, size_t width, size_t height, size_t depth, CUarray_format format, unsigned channels, unsigned flags) {
+  if (!handle) return CUDA_ERROR_INVALID_VALUE;
+  const auto layout = arrayLayout(width, height, depth, format, channels, flags);
+  if (!layout) return CUDA_ERROR_INVALID_VALUE;
+  CUdeviceptr device = 0;
+  if (const auto status = cuMemAlloc_v2(&device, layout->bytes); status != CUDA_SUCCESS) return status;
+  auto array = describedArray(width, height, depth, format, channels, flags, *layout, device);
+  if (!array) {
+    (void)cuMemFree_v2(device);
+    return CUDA_ERROR_UNKNOWN;
+  }
   *handle = reinterpret_cast<CUarray>(array.release());
+  return CUDA_SUCCESS;
+}
+
+struct CudaMipmappedArray {
+  CUdeviceptr device;
+  std::vector<std::unique_ptr<CudaArray>> levels;
+};
+
+size_t levelExtent(size_t extent, unsigned level) { return std::max<size_t>(1, extent >> level); }
+
+unsigned maximumLevels(size_t width, size_t height, size_t depth) {
+  unsigned levels = 1;
+  for (size_t largest = std::max({width, height, depth}); largest > 1; largest >>= 1)
+    ++levels;
+  return levels;
+}
+
+CUresult mipmappedArrayCreate(CUmipmappedArray *handle, const CUDA_ARRAY3D_DESCRIPTOR *descriptor, unsigned levels) {
+  if (!handle || !descriptor) return CUDA_ERROR_INVALID_VALUE;
+  const size_t width = descriptor->Width;
+  const size_t height = descriptor->Height;
+  const size_t depth = descriptor->Depth;
+  const auto format = descriptor->Format;
+  const auto channels = descriptor->NumChannels;
+  const auto flags = descriptor->Flags;
+  if (levels == 0 || levels > maximumLevels(width, height, depth)) return CUDA_ERROR_INVALID_VALUE;
+  const bool layered = (flags & (CUDA_ARRAY3D_LAYERED | CUDA_ARRAY3D_CUBEMAP)) != 0;
+  struct Level {
+    size_t width, height, depth;
+    ArrayLayout layout;
+    size_t offset;
+  };
+  std::vector<Level> shapes;
+  size_t total = 0;
+  for (unsigned level = 0; level < levels; ++level) {
+    const size_t levelHeight = height == 0 ? 0 : levelExtent(height, level);
+    const size_t levelDepth = depth == 0 ? 0 : (layered ? depth : levelExtent(depth, level));
+    const auto layout = arrayLayout(levelExtent(width, level), levelHeight, levelDepth, format, channels, flags);
+    size_t offset = 0;
+    if (!layout || !sizeAdd(total, KeplerRowAlignment - 1, &offset)) return CUDA_ERROR_INVALID_VALUE;
+    offset = offset / KeplerRowAlignment * KeplerRowAlignment;
+    if (!sizeAdd(offset, layout->bytes, &total)) return CUDA_ERROR_INVALID_VALUE;
+    shapes.push_back({levelExtent(width, level), levelHeight, levelDepth, *layout, offset});
+  }
+  auto mipmapped = std::unique_ptr<CudaMipmappedArray>{new (std::nothrow) CudaMipmappedArray{}};
+  if (!mipmapped) return CUDA_ERROR_UNKNOWN;
+  if (const auto status = cuMemAlloc_v2(&mipmapped->device, total); status != CUDA_SUCCESS) return status;
+  for (const auto &shape : shapes) {
+    auto array =
+        describedArray(shape.width, shape.height, shape.depth, format, channels, flags, shape.layout, mipmapped->device + shape.offset);
+    if (!array) {
+      (void)cuMemFree_v2(mipmapped->device);
+      return CUDA_ERROR_UNKNOWN;
+    }
+    mipmapped->levels.push_back(std::move(array));
+  }
+  *handle = reinterpret_cast<CUmipmappedArray>(mipmapped.release());
   return CUDA_SUCCESS;
 }
 
@@ -3132,6 +3214,26 @@ CUresult cuArrayDestroy(CUarray handle) {
   auto *array = arrayOf(handle);
   const auto status = cuMemFree_v2(array->device);
   if (status == CUDA_SUCCESS) delete array;
+  return status;
+}
+
+CUresult cuMipmappedArrayCreate(CUmipmappedArray *handle, const CUDA_ARRAY3D_DESCRIPTOR *descriptor, unsigned int numMipmapLevels) {
+  return mipmappedArrayCreate(handle, descriptor, numMipmapLevels);
+}
+
+CUresult cuMipmappedArrayGetLevel(CUarray *levelArray, CUmipmappedArray handle, unsigned int level) {
+  if (!levelArray || !handle) return CUDA_ERROR_INVALID_VALUE;
+  const auto *mipmapped = reinterpret_cast<const CudaMipmappedArray *>(handle);
+  if (level >= mipmapped->levels.size()) return CUDA_ERROR_INVALID_VALUE;
+  *levelArray = reinterpret_cast<CUarray>(mipmapped->levels[level].get());
+  return CUDA_SUCCESS;
+}
+
+CUresult cuMipmappedArrayDestroy(CUmipmappedArray handle) {
+  if (!handle) return CUDA_ERROR_INVALID_VALUE;
+  auto *mipmapped = reinterpret_cast<CudaMipmappedArray *>(handle);
+  const auto status = cuMemFree_v2(mipmapped->device);
+  if (status == CUDA_SUCCESS) delete mipmapped;
   return status;
 }
 
