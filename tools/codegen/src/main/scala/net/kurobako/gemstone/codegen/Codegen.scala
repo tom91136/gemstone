@@ -52,19 +52,28 @@ object Codegen {
     References.prepare(bundle, root.resolve(".cache/references"), root.resolve("target/references"), offline)
 
   private def generate(root: Path): Unit = {
-    def path(relative: String): String = s"${root.resolve(relative)}"
-    val references                     = root.resolve("target/references")
+    def path(relative: String): String    = s"${root.resolve(relative)}"
+    def announce(generator: AnyRef): Unit =
+      Console.out.println(s"generating with ${generator.getClass.getSimpleName.stripSuffix("$")}")
+    val references = root.resolve("target/references")
+    announce(GenerateEnvironment)
     GenerateEnvironment.main(Array(s"$root", "--write"))
+    announce(ImageFormats)
     ImageFormats.main(Array(path("core/src/generated/main/scala")))
+    announce(TextureDescriptorABI)
     TextureDescriptorABI.main(Array(path("core/src/generated/main/scala"), path("native/generated/texture")))
 
     val api      = prepare(root, References.API)
     val manifest = s"${references.resolve("official-api-headers.json")}"
+    announce(GenerateOfficialAPIManifest)
     GenerateOfficialAPIManifest.main(Array("--clang", "clang", s"$api", manifest))
+    announce(GenerateNativeBindings)
     GenerateNativeBindings.main(Array(path("native/generated"), manifest))
+    announce(GenerateExecutionRPC)
     GenerateExecutionRPC.main(Array(path("native/generated/rpc")))
 
     val ptx = s"${prepare(root, References.PTX).resolve("nvidia/ptx/index.html")}"
+    announce(GeneratePTXISA)
     GeneratePTXISA.main(Array(
       "instructions",
       ptx,
@@ -72,12 +81,14 @@ object Codegen {
       References.PTXISAVersion,
       path("isa/ptx-asm/src/generated/main/resources")
     ))
+    announce(GeneratePTXISA)
     GeneratePTXISA.main(Array(
       "tests",
       ptx,
       path("isa/ptx-asm/src/generated/test/scala"),
       References.PTXISAVersion
     ))
+    announce(GenerateMMA884Oracle)
     GenerateMMA884Oracle.main(Array(
       path("isa/ptx-vm/src/generated/test/scala"),
       path("isa/ptx-vm/src/generated/test/resources"),
@@ -86,6 +97,7 @@ object Codegen {
 
     val tools = prepare(root, References.SASSTools)
     val sass  = references.resolve("sass")
+    announce(ExtractSASS)
     ExtractSASS.main(
       (Vector("--bundle", s"${tools.resolve("MANIFEST.tsv")}", "--output", s"$sass") ++
         References.Nvdisasm.flatMap((generation, version, _, digest) =>
@@ -97,6 +109,7 @@ object Codegen {
           )
         )).toArray
     )
+    announce(GenerateSASSISA)
     GenerateSASSISA.main(Array(
       s"$sass",
       path("isa/sass-asm/src/generated/main/scala"),
@@ -105,6 +118,7 @@ object Codegen {
 
     val tablegen = References.tablegen(root.resolve(".cache/references"), references, offline)
     val amdgpu   = s"${prepare(root, References.AMDGPU)}"
+    announce(GenerateAMDGPUISA)
     GenerateAMDGPUISA.main(Array(
       "--python",
       "python3",
@@ -115,7 +129,9 @@ object Codegen {
       path("isa/amdgpu-asm/src/generated/main/resources"),
       path("native/generated")
     ))
+    announce(GenerateAMDGPUOracle)
     GenerateAMDGPUOracle.main(Array(amdgpu, path("isa/amdgpu-asm/src/generated/test/resources")))
+    announce(GenerateAMDGPUDomains)
     GenerateAMDGPUDomains.main(Array(
       amdgpu,
       path("isa/amdgpu-asm/src/generated/main/scala"),
@@ -126,6 +142,7 @@ object Codegen {
     val spirv   = prepare(root, References.SPIRV)
     val unified = spirv.resolve("khronos/spirv-headers/include/spirv/unified1")
     val grammar = s"${unified.resolve("spirv.core.grammar.json")}"
+    announce(GenerateSPIRVISA)
     GenerateSPIRVISA.main(Array(
       "instructions",
       grammar,

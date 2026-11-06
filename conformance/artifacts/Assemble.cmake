@@ -196,6 +196,8 @@ if(CONFORMANCE_OUTPUT STREQUAL "lint")
   foreach(pass IN ITEMS "-extra-arg=-w;^/source/conformance/(unified/.*|src/device_[a-z_]+)\\.(c|cc|cpp|cxx)$"
       "-extra-arg=-w;-extra-arg=--offload-device-only;^/source/conformance/unified/.*\\.(cu|hip)$"
       "-extra-arg=-w;-extra-arg=--offload-host-only;^/source/conformance/unified/.*\\.(cu|hip)$")
+    list(GET pass -1 scope)
+    message(STATUS "clang-tidy ${artifact_base} with ${tidy_jobs} jobs: ${scope}")
     execute_process(
       COMMAND "${run_clang_tidy}" -quiet -hide-progress -j ${tidy_jobs} "-clang-tidy-binary=${work}/clang-tidy" -p "${build}" ${pass}
       WORKING_DIRECTORY /source/conformance

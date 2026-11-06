@@ -40,7 +40,11 @@ jobs:
       - &free-disk
         name: Free disk space
         if: ${{ !env.ACT }}
-        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+        run: |
+          for path in /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL; do
+            echo "removing $path"
+            sudo rm -rf "$path"
+          done
       - &checkout
         uses: actions/checkout@v7
         with:

@@ -5,6 +5,7 @@ set(output target/ci)
 
 function(pack name)
   file(MAKE_DIRECTORY "${output}")
+  message(STATUS "packing ${output}/${name}.tar.zst")
   execute_process(
     COMMAND tar -cf - ${ARGN}
     COMMAND zstd -T0 -q -12 --long=30 -f -o "${output}/${name}.tar.zst"
@@ -29,6 +30,7 @@ elseif(MODE STREQUAL "full")
   if(NOT archives)
     message(FATAL_ERROR "No conformance-*.tar.zst in ${output}")
   endif()
+  message(STATUS "extracting ${archives}")
   foreach(archive IN LISTS archives)
     execute_process(
       COMMAND zstd -dc --long=30 "${archive}"
@@ -39,6 +41,7 @@ elseif(MODE STREQUAL "full")
   endforeach()
   file(GLOB shards LIST_DIRECTORIES TRUE "${artifacts}/sycl-shard-*")
   if(shards)
+    message(STATUS "merging SYCL shards")
     execute_process(
       COMMAND "${CMAKE_COMMAND}" "-DARTIFACTS=${artifacts}" -P "${CMAKE_CURRENT_LIST_DIR}/Merge.cmake"
       RESULT_VARIABLE merged
