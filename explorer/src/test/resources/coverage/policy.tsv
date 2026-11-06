@@ -7,7 +7,7 @@ PTX	.*	(fabric\.submit|fabric\.try_get|fabric\.try_pullred|fabric\.try_put|fabri
 PTX	.*	istypep	.*	NotModelled	the VM does not model the type of a texture, sampler or surface handle
 PTX	.*	suq	.*	NotModelled	the explorer does not model surface property queries
 PTX	.*	sust	.*	NotModelled	the explorer does not model surface stores
-PTX	.*	tex	(Tex\ 1|Tex\ 2|Tex\ 4|Tex\ 5|Tex\ 6|Tex\ 7|Tex\ 8|Tex\ 10|Tex\ 11|Tex\ 12|Tex\ 13|Tex\ 14|Tex\ 15|Tex\ 16|Tex\ 17|Tex\ 18|Tex\ 19|Tex\ 20|Tex\ 21|Tex\ 22|Tex\ 23|Tex\ 24)	NotModelled	the VM does not lower Tex forms with explicit level, gradient, offset or depth compare operands
+PTX	.*	tex	(Tex\ 1|Tex\ 2|Tex\ 4|Tex\ 5|Tex\ 6|Tex\ 7|Tex\ 8|Tex\ 10|Tex\ 11|Tex\ 12|Tex\ 13|Tex\ 14|Tex\ 16|Tex\ 17|Tex\ 18|Tex\ 19|Tex\ 20|Tex\ 21|Tex\ 22|Tex\ 23)	NotModelled	the VM does not lower Tex forms with explicit level, gradient, offset or depth compare operands
 PTX	.*	tld4	(Tld4\ 1|Tld4\ 2|Tld4\ 3|Tld4\ 4|Tld4\ 5)	NotModelled	the VM does not lower gathers with offset or depth compare operands
 PTX	.*	sured	Sured\ 2	NotModelled	the VM does not lower formatted surface reductions
 PTX	.*	txq	(Txq\ 2|Txq\ 3)	NotModelled	the VM answers texture queries only without an explicit LOD
