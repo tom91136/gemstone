@@ -15,27 +15,31 @@
 
 using namespace aspartame;
 
-// tcgen05 tensor memory and the sm_100 tensor copy modes, which only sm_100a code can use: each case skips unless the
-// selected device is compute capability 10.0 and runs this binary's sm_100a code.
+// tcgen05 tensor memory and the sm_100 tensor copy modes, which only sm_100a, sm_103a, and sm_100f and sm_103f family code
+// can use: each case skips unless the selected device is compute capability 10.x and runs this binary's code for it.
+#if defined(__CUDA_ARCH_FEAT_SM100_ALL) || defined(__CUDA_ARCH_FEAT_SM103_ALL)
+  #define TCGEN05_CODE
+#elif defined(__CUDA_ARCH_FAMILY_SPECIFIC__) && __CUDA_ARCH_FAMILY_SPECIFIC__ / 100 == 10
+  #define TCGEN05_CODE
+#endif
+
 namespace {
 
 __global__ void probe(int *available) {
-#ifdef __CUDA_ARCH_FEAT_SM100_ALL
+#ifdef TCGEN05_CODE
   *available = 1;
 #else
   *available = 0;
 #endif
 }
 
-// Whether the selected device runs this binary's sm_100a code, as the case's message says when it does not.
+// Whether the selected device runs this binary's tcgen05 code, as the case's message says when it does not.
 bool available() {
   const auto selected = static_cast<int>(conformance::deviceSelection().nativeHandle);
   check(cudaSetDevice(selected), "cudaSetDevice");
   int major = 0;
-  int minor = 0;
   check(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, selected), "compute capability");
-  check(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, selected), "compute capability");
-  if (major != 10 || minor != 0) return false;
+  if (major != 10) return false;
   Buffer<int> flag(std::vector<int>{0});
   probe<<<1, 1>>>(flag.device);
   check(cudaGetLastError(), "probe launch");
@@ -43,7 +47,7 @@ bool available() {
   return flag.download(1)[0] == 1;
 }
 
-#ifdef __CUDA_ARCH_FEAT_SM100_ALL
+#ifdef TCGEN05_CODE
 __device__ uint32_t sharedAddress(const void *pointer) { return static_cast<uint32_t>(__cvta_generic_to_shared(pointer)); }
 
 __device__ void threadSync() {
@@ -56,7 +60,7 @@ __device__ void threadSync() {
 // Each warp stores eight columns of its 32 lanes with the 32x32b shape, then reads them back with the 16x256b and
 // 16x64b shapes, whose registers map to lanes and columns as the PTX ISA data movement figures show.
 __global__ void movement([[maybe_unused]] uint32_t *out) {
-#ifdef __CUDA_ARCH_FEAT_SM100_ALL
+#ifdef TCGEN05_CODE
   __shared__ uint32_t slot;
   const uint32_t thread = threadIdx.x;
   const uint32_t warp = thread / 32;
@@ -92,7 +96,7 @@ __global__ void movement([[maybe_unused]] uint32_t *out) {
 } // namespace
 
 TEST_CASE("runtime/cuda/blackwell/tcgen05-load-store-shapes", "[unified][runtime][blackwell]") {
-  if (!available()) SKIP("tcgen05 requires sm_100a code on a compute capability 10.0 device");
+  if (!available()) SKIP("tcgen05 requires sm_100a, sm_103a, or family code on a compute capability 10.x device");
   Buffer<uint32_t> out(std::vector<uint32_t>(size_t{128} * 5, 0xffffffffU));
   movement<<<1, 128>>>(out.device);
   check(cudaGetLastError(), "movement launch");
@@ -129,7 +133,7 @@ size_t swizzled(int row, int byte) {
 // memory, commits it to an mbarrier, and every thread reads back its row of D.
 __global__ void product([[maybe_unused]] const uint4 *image, [[maybe_unused]] uint64_t adesc, [[maybe_unused]] uint64_t bdesc,
                         [[maybe_unused]] uint32_t idesc, [[maybe_unused]] float *out) {
-#ifdef __CUDA_ARCH_FEAT_SM100_ALL
+#ifdef TCGEN05_CODE
   __shared__ alignas(1024) uint4 tiles[2 * TileBytes / 16];
   __shared__ alignas(8) uint64_t barrier;
   __shared__ uint32_t slot;
@@ -184,7 +188,7 @@ using unified::support::bfloat16Bits;
 } // namespace
 
 TEST_CASE("runtime/cuda/blackwell/tcgen05-mma-bf16", "[unified][runtime][blackwell]") {
-  if (!available()) SKIP("tcgen05 requires sm_100a code on a compute capability 10.0 device");
+  if (!available()) SKIP("tcgen05 requires sm_100a, sm_103a, or family code on a compute capability 10.x device");
   const auto a = [](int row, int k) { return static_cast<float>((((row * 3) + (k * 5)) % 7) - 3); };
   const auto b = [](int k, int column) { return static_cast<float>((((k * 2) + (column * 7)) % 5) - 2) / 2; };
   std::vector<uint8_t> bytes(size_t{2} * TileBytes, 0);
@@ -236,7 +240,7 @@ EncodeTiled encodeTiled() {
 // them to columns 4 to 7 of rows 1, 3, 4 and 20 of another.
 __global__ void gather([[maybe_unused]] const __grid_constant__ CUtensorMap load,
                        [[maybe_unused]] const __grid_constant__ CUtensorMap store, [[maybe_unused]] uint32_t *out) {
-#ifdef __CUDA_ARCH_FEAT_SM100_ALL
+#ifdef TCGEN05_CODE
   __shared__ alignas(128) uint32_t box[16];
   __shared__ alignas(8) uint64_t barrier;
   const uint32_t thread = threadIdx.x;
@@ -278,7 +282,7 @@ __global__ void gather([[maybe_unused]] const __grid_constant__ CUtensorMap load
 } // namespace
 
 TEST_CASE("runtime/cuda/blackwell/tensor-gather4-scatter4", "[unified][runtime][blackwell]") {
-  if (!available()) SKIP("tile::gather4 requires sm_100a code on a compute capability 10.0 device");
+  if (!available()) SKIP("tile::gather4 requires sm_100a, sm_103a, or family code on a compute capability 10.x device");
   const auto tensor = iota(0U, 16U * 8U) | map([](uint32_t index) { return (100 * (index / 8)) + (index % 8); }) | to_vector();
   Buffer<uint32_t> source(tensor);
   Buffer<uint32_t> target(std::vector<uint32_t>(size_t{20} * 8, 0));

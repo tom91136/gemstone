@@ -42,6 +42,9 @@ if(BUILD_TESTING)
   gemstone_opencl_test(gemstone_opencl_capabilities test/capabilities.cpp)
   gemstone_discover_tests(gemstone_opencl_capabilities TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
 
+  gemstone_opencl_test(gemstone_opencl_build_cache test/build_cache.cpp)
+  gemstone_discover_tests(gemstone_opencl_build_cache TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+
   gemstone_opencl_test(gemstone_opencl_images test/images.cpp)
   target_include_directories(gemstone_opencl_images PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../generated/spirv")
   gemstone_discover_tests(gemstone_opencl_images TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)

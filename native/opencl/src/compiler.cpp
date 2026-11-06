@@ -7,15 +7,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <ios>
 #include <iterator>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -490,8 +494,10 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
   return success;
 }
 
-bool compileSource(const std::string &source, const std::string &options, std::vector<uint8_t> &il, std::string &log,
-                   std::vector<uint8_t> *bitcodeOutput) {
+namespace {
+
+bool compileUncached(const std::string &source, const std::string &options, std::vector<uint8_t> &il, std::string &log,
+                     std::vector<uint8_t> *bitcodeOutput) {
   std::vector<uint8_t> bitcode;
   if (!compileSourceToBitcode(source, options, bitcode, log)) return false;
   const TemporaryDirectory directory("gemstone-opencl-spirv-XXXXXX");
@@ -542,6 +548,85 @@ bool compileSource(const std::string &source, const std::string &options, std::v
   if (!diagnostic.empty()) log += diagnostic;
   if (success && bitcodeOutput) *bitcodeOutput = std::move(bitcode);
   return success;
+}
+
+struct CompiledSource {
+  std::vector<uint8_t> il;
+  std::vector<uint8_t> bitcode;
+  std::string log;
+};
+
+constexpr size_t CompileCacheBytes = 128UL << 20;
+
+class CompileCache {
+public:
+  std::shared_ptr<const CompiledSource> find(const std::string &key) {
+    std::scoped_lock const lock(mutex);
+    const auto entry = entries.find(key);
+    return entry == entries.end() ? nullptr : entry->second;
+  }
+
+  void insert(std::string key, std::shared_ptr<const CompiledSource> value) {
+    const size_t size = key.size() + value->il.size() + value->bitcode.size() + value->log.size();
+    if (size > CompileCacheBytes) return;
+    std::scoped_lock const lock(mutex);
+    if (!entries.emplace(key, std::move(value)).second) return;
+    order.push_back({key, size});
+    bytes += size;
+    while (bytes > CompileCacheBytes) {
+      bytes -= order.front().second;
+      entries.erase(order.front().first);
+      order.pop_front();
+    }
+  }
+
+private:
+  std::mutex mutex;
+  std::unordered_map<std::string, std::shared_ptr<const CompiledSource>> entries;
+  std::deque<std::pair<std::string, size_t>> order;
+  size_t bytes = 0;
+};
+
+CompileCache &compileCache() {
+  static CompileCache cache;
+  return cache;
+}
+
+// results are only reusable when they depend on nothing beyond the source and the option string
+bool cacheable(const std::string &source, const std::string &options) {
+  if ((source ^ contains_slice("include")) || (source ^ contains_slice("__TIME__")) || (source ^ contains_slice("__DATE__"))
+      || (source ^ contains_slice("__TIMESTAMP__")))
+    return false;
+  std::vector<std::string> arguments;
+  if (!splitOptions(options, arguments, nullptr)) return false;
+  return !(arguments ^ exists([](const std::string &argument) {
+             return argument.starts_with("-i") || argument.starts_with("-I") || argument.starts_with("--i") || argument.starts_with("@")
+                    || argument.starts_with("-working-directory");
+           }));
+}
+
+} // namespace
+
+bool compileSource(const std::string &source, const std::string &options, std::vector<uint8_t> &il, std::string &log,
+                   std::vector<uint8_t> *bitcodeOutput) {
+  if (!cacheable(source, options)) return compileUncached(source, options, il, log, bitcodeOutput);
+  const std::string key = options + '\0' + source;
+  if (const auto hit = compileCache().find(key)) {
+    il = hit->il;
+    log = hit->log;
+    if (bitcodeOutput) *bitcodeOutput = hit->bitcode;
+    return true;
+  }
+  CompiledSource compiled;
+  if (!compileUncached(source, options, compiled.il, compiled.log, &compiled.bitcode)) {
+    log = std::move(compiled.log);
+    return false;
+  }
+  il = compiled.il;
+  log = compiled.log;
+  if (bitcodeOutput) *bitcodeOutput = compiled.bitcode;
+  compileCache().insert(key, std::make_shared<const CompiledSource>(std::move(compiled)));
+  return true;
 }
 
 bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode, std::string &log) {
