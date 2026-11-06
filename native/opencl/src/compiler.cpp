@@ -566,12 +566,12 @@ public:
     return entry == entries.end() ? nullptr : entry->second;
   }
 
-  void insert(std::string key, std::shared_ptr<const CompiledSource> value) {
+  void insert(const std::string &key, std::shared_ptr<const CompiledSource> value) {
     const size_t size = key.size() + value->il.size() + value->bitcode.size() + value->log.size();
     if (size > CompileCacheBytes) return;
     std::scoped_lock const lock(mutex);
     if (!entries.emplace(key, std::move(value)).second) return;
-    order.push_back({key, size});
+    order.emplace_back(key, size);
     bytes += size;
     while (bytes > CompileCacheBytes) {
       bytes -= order.front().second;

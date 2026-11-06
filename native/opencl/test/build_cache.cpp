@@ -1,29 +1,32 @@
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <system_error>
 
 #include <CL/cl.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <gemstone/test_support.hpp>
+
 #include "session.hpp"
 
 namespace {
 struct CountedCompiler {
   std::filesystem::path directory;
+  std::optional<gemstone_test::Environment> compiler;
   CountedCompiler() {
     auto pattern = (std::filesystem::temp_directory_path() / "gemstone-build-cache-XXXXXX").string();
     REQUIRE((mkdtemp(pattern.data()) != nullptr));
     directory = pattern;
     std::ofstream(directory / "cc") << "#!/bin/sh\necho x >> '" << (directory / "calls").string() << "'\nexec clang \"$@\"\n";
     std::filesystem::permissions(directory / "cc", std::filesystem::perms::owner_all);
-    REQUIRE((setenv("GEMSTONE_OPENCL_COMPILER_EXE", (directory / "cc").c_str(), 1) == 0));
+    compiler.emplace("GEMSTONE_OPENCL_COMPILER_EXE", (directory / "cc").c_str());
   }
   CountedCompiler(const CountedCompiler &) = delete;
   CountedCompiler &operator=(const CountedCompiler &) = delete;
   ~CountedCompiler() {
-    unsetenv("GEMSTONE_OPENCL_COMPILER_EXE");
+    compiler.reset();
     std::error_code error;
     std::filesystem::remove_all(directory, error);
   }
