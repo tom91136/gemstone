@@ -39,8 +39,8 @@ inline constexpr std::array<QueueGroup, 2> QueueGroups{{
     {.flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE | ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY
               | ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS,
      .maxMemoryFillPatternSize = 128,
-     .numQueues = 1},
-    {.flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY, .maxMemoryFillPatternSize = 128, .numQueues = 1},
+     .numQueues = 2},
+    {.flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY, .maxMemoryFillPatternSize = 128, .numQueues = 2},
 }};
 
 inline bool validEngine(uint32_t ordinal, uint32_t index) { return ordinal < QueueGroups.size() && index < QueueGroups[ordinal].numQueues; }

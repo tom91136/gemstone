@@ -530,6 +530,10 @@ ze_result_t ZE_APICALL driverProperties(ze_driver_handle_t, ze_driver_properties
   properties->driverVersion = (1U << 24) | (6U << 16) | 34666U;
   std::memset(properties->uuid.id, 0, ZE_MAX_DRIVER_UUID_SIZE);
   std::memcpy(properties->uuid.id, "GEMSTONE", 8);
+  for (auto *next = static_cast<ze_base_properties_t *>(properties->pNext); next; next = static_cast<ze_base_properties_t *>(next->pNext))
+    if (next->stype == ZE_STRUCTURE_TYPE_DRIVER_MEMORY_FREE_EXT_PROPERTIES)
+      reinterpret_cast<ze_driver_memory_free_ext_properties_t *>(next)->freePolicies =
+          ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE | ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
   return ZE_RESULT_SUCCESS;
 }
 
@@ -546,7 +550,8 @@ ze_result_t ZE_APICALL driverExtensions(ze_driver_handle_t, uint32_t *count, ze_
   constexpr std::pair<const char *, uint32_t> extensions[] = {
       {ZE_MODULE_PROGRAM_EXP_NAME, ZE_MODULE_PROGRAM_EXP_VERSION_CURRENT},
       {ZE_GLOBAL_OFFSET_EXP_NAME, ZE_GLOBAL_OFFSET_EXP_VERSION_CURRENT},
-      {ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_NAME, ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_VERSION_CURRENT}};
+      {ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_NAME, ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_VERSION_CURRENT},
+      {ZE_MEMORY_FREE_POLICIES_EXT_NAME, ZE_MEMORY_FREE_POLICIES_EXT_VERSION_CURRENT}};
   if (!properties) {
     *count = std::size(extensions);
   } else {
@@ -1686,8 +1691,33 @@ size_t backingSize(size_t size, ze_memory_type_t type) {
   return size > std::numeric_limits<size_t>::max() - granule ? size : (size + granule - 1) / granule * granule;
 }
 
+std::vector<AllocationRef> deferredFrees;
+
+ze_result_t releaseAllocation(const AllocationRef &allocation) {
+  std::scoped_lock const rpcLock(rpcTransactionMutex);
+  const bool released = remote.mode() != ClientMode::Ready || !allocation->id
+                        || static_cast<bool>(remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(*allocation->id)}}));
+  if (!released) recordRemoteError(remote.error());
+  std::free(allocation->base);
+  return released ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_DEVICE_LOST;
+}
+
+void reapDeferredFrees() {
+  std::vector<AllocationRef> unused;
+  {
+    std::scoped_lock const lock(allocationsMutex);
+    const auto idle = std::stable_partition(deferredFrees.begin(), deferredFrees.end(),
+                                            [](const AllocationRef &entry) { return entry.use_count() != 1; });
+    unused.assign(std::make_move_iterator(idle), std::make_move_iterator(deferredFrees.end()));
+    deferredFrees.erase(idle, deferredFrees.end());
+  }
+  for (const auto &allocation : unused)
+    (void)releaseAllocation(allocation);
+}
+
 ze_result_t allocate(Context *context, Device *device, size_t size, size_t alignment, ze_memory_type_t type, void **result) {
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  reapDeferredFrees();
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (remote.mode() == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
   if (remote.mode() == ClientMode::Ready && size > MaxServerAllocationSize) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
@@ -1739,6 +1769,7 @@ ze_result_t ZE_APICALL memFree(ze_context_handle_t contextHandle, void *pointer)
     std::scoped_lock const lock(virtualMemoryMutex);
     if (virtualReservations.contains(reinterpret_cast<uintptr_t>(pointer))) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   }
+  reapDeferredFrees();
   AllocationRef allocation;
   {
     std::scoped_lock const lock(allocationsMutex);
@@ -1749,19 +1780,33 @@ ze_result_t ZE_APICALL memFree(ze_context_handle_t contextHandle, void *pointer)
     allocation = found->second;
     allocations.erase(found);
   }
-  std::scoped_lock const rpcLock(rpcTransactionMutex);
-  const bool released = remote.mode() != ClientMode::Ready || !allocation->id
-                        || static_cast<bool>(remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(*allocation->id)}}));
-  if (!released) recordRemoteError(remote.error());
-  std::free(pointer);
-  return released ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_DEVICE_LOST;
+  return releaseAllocation(allocation);
 }
-ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t context, const ze_memory_free_ext_desc_t *desc, void *pointer) {
-  if (cast<Context>(context) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t contextHandle, const ze_memory_free_ext_desc_t *desc, void *pointer) {
+  auto *context = cast<Context>(contextHandle);
+  if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   constexpr auto supportedPolicies = ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE | ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
   if ((desc->freePolicy & ~supportedPolicies) != 0) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
-  return memFree(context, pointer);
+  if ((desc->freePolicy & ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE) == 0) return memFree(contextHandle, pointer);
+  {
+    std::scoped_lock const lock(virtualMemoryMutex);
+    if (virtualReservations.contains(reinterpret_cast<uintptr_t>(pointer))) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+  }
+  reapDeferredFrees();
+  AllocationRef allocation;
+  {
+    std::scoped_lock const lock(allocationsMutex);
+    const auto found = allocations.find(pointer);
+    if (found == allocations.end() || found->second->context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    allocation = std::move(found->second);
+    allocations.erase(found);
+    if (allocation.use_count() != 1) {
+      deferredFrees.push_back(std::move(allocation));
+      return ZE_RESULT_SUCCESS;
+    }
+  }
+  return releaseAllocation(allocation);
 }
 
 ze_result_t ZE_APICALL virtualQueryPageSize(ze_context_handle_t context, ze_device_handle_t device, size_t, size_t *pageSize) {

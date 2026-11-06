@@ -6,6 +6,7 @@
 #include <cstring>
 #include <future>
 #include <initializer_list>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -363,6 +364,49 @@ TEST_CASE("Level Zero completed device memory hints release allocations before t
   REQUIRE(zeFenceDestroy(fence) == ZE_RESULT_SUCCESS);
   REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
   REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero memory free policies defer the free past recorded work", "[level-zero]") {
+  auto [driver, device, context] = createContext();
+
+  uint32_t extensionCount = 0;
+  REQUIRE(zeDriverGetExtensionProperties(driver, &extensionCount, nullptr) == ZE_RESULT_SUCCESS);
+  std::vector<ze_driver_extension_properties_t> extensions(extensionCount);
+  REQUIRE(zeDriverGetExtensionProperties(driver, &extensionCount, extensions.data()) == ZE_RESULT_SUCCESS);
+  CHECK(std::any_of(extensions.begin(), extensions.end(),
+                    [](const auto &e) { return std::string(e.name) == ZE_MEMORY_FREE_POLICIES_EXT_NAME; }));
+
+  ze_driver_memory_free_ext_properties_t policies{};
+  policies.stype = ZE_STRUCTURE_TYPE_DRIVER_MEMORY_FREE_EXT_PROPERTIES;
+  ze_driver_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DRIVER_PROPERTIES;
+  properties.pNext = &policies;
+  REQUIRE(zeDriverGetProperties(driver, &properties) == ZE_RESULT_SUCCESS);
+  CHECK(policies.freePolicies == (ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE | ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE));
+
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+  ze_device_mem_alloc_desc_t allocationDesc{};
+  allocationDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocDevice(context, &allocationDesc, 64, 64, device, &memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendMemoryPrefetch(list, memory, 64) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(context, memory) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
+
+  ze_memory_free_ext_desc_t freeDesc{};
+  freeDesc.stype = ZE_STRUCTURE_TYPE_MEMORY_FREE_EXT_DESC;
+  freeDesc.freePolicy = ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
+  REQUIRE(zeMemFreeExt(context, &freeDesc, memory) == ZE_RESULT_SUCCESS);
+  CHECK(zeMemFreeExt(context, &freeDesc, memory) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  ze_memory_allocation_properties_t memoryProperties{};
+  memoryProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+  REQUIRE(zeMemGetAllocProperties(context, memory, &memoryProperties, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(memoryProperties.type == ZE_MEMORY_TYPE_UNKNOWN);
+
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
@@ -1474,6 +1518,37 @@ TEST_CASE("Level Zero validates queue group ordinals and indices", "[level-zero]
   REQUIRE(zeCommandListDestroy(computeList) == ZE_RESULT_SUCCESS);
   REQUIRE(zeCommandListDestroy(copyList) == ZE_RESULT_SUCCESS);
   REQUIRE(zeCommandQueueDestroy(computeQueue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero queue groups hold independent engines", "[level-zero][queue-group]") {
+  const auto handles = createContext();
+  const auto groups = queueGroups(handles);
+  for (uint32_t ordinal = 0; ordinal < groups.size(); ++ordinal) {
+    DYNAMIC_SECTION("ordinal " << ordinal) {
+      REQUIRE(groups[ordinal].numQueues >= 2);
+      auto *const pool = hostPool(handles, 1);
+      ze_event_handle_t event = poolEvent(pool, 0);
+      auto *const waiting = regularListOn(handles, ordinal);
+      auto *const signalling = regularListOn(handles, ordinal);
+      REQUIRE(zeCommandListAppendWaitOnEvents(waiting, 1, &event) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListAppendSignalEvent(signalling, event) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListClose(waiting) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListClose(signalling) == ZE_RESULT_SUCCESS);
+      auto *const first = queueOn(handles, ordinal, 0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+      auto *const second = queueOn(handles, ordinal, 1, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS);
+      REQUIRE(execute(first, waiting) == ZE_RESULT_SUCCESS);
+      REQUIRE(execute(second, signalling) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueSynchronize(second, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueSynchronize(first, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueDestroy(second) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandQueueDestroy(first) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListDestroy(signalling) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeCommandListDestroy(waiting) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+      REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+    }
+  }
   REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
 }
 
