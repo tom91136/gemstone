@@ -182,7 +182,7 @@ struct DeviceDeleteProbe {
 #endif
 
 TEST_CASE("algorithms/roc-thrust-semantic/device-delete/i32/n11", "[unified][rocthrust]") {
-#if defined(__HIPCC__)
+#ifdef __HIPCC__
   SKIP("device-delete: rocThrust marks the upstream destructor-invocation test KNOWN_FAILURE");
 #elif THRUST_VERSION >= 300000
   thrust::device_ptr<DeviceDeleteProbe> probe = thrust::device_new<DeviceDeleteProbe>();

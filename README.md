@@ -199,10 +199,10 @@ sbt 'conformance/emulate [--profile <complete|machine>] [--workload <tier>] [--p
   (release); each extends the previous. See [the conformance README](conformance/README.md) for suites and artifacts.
 - Machine profiles are `conformance/profiles/<profile>.toml`; `--machine` and the default build profile are the local
   short hostname.
-- `build` and `emulate` default to `conformanceBuildProfile` (the local machine profile); `emulate` builds its profile
-  first, unless given `--prebuilt`, which reads `target/conformance/artifacts` as it is and fails if a backend is
-  missing. `--dry-run` lists the selected cases per route without running them. `cuda` and `cuda/sm_89` select both
-  code variants; `cuda-ptx` and `cuda-sass` select one.
+- `build` and `emulate` default to `conformanceBuildProfile` (`CONFORMANCE_BUILD_PROFILE`, else the local machine
+  profile); `emulate` builds its profile first, unless given `--prebuilt`, which reads `target/conformance/artifacts`
+  as it is and fails if a backend is missing. `--dry-run` lists the selected cases per route without running them.
+  `cuda` and `cuda/sm_89` select both code variants; `cuda-ptx` and `cuda-sass` select one.
 - Artifacts go to `target/conformance/artifacts`; reports to `target/conformance/{direct,emulated}`.
 - `emulate` runs one Gemstone server on a per-run Unix socket with an isolated client per test, and records JFR in
   `target/conformance/jfr/`, keeping the five newest recordings. Disable recording with

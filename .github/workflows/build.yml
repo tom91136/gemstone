@@ -268,7 +268,7 @@ jobs:
           while sleep 20; do eval "$MEMORY_SAMPLE"; done &
           sampler=$!
           trap 'kill "$sampler"' EXIT
-          sbt --server --batch "conformance/build --profile $CONFORMANCE_BUILD_PROFILE $CONFORMANCE_SHARD_ROUTE_LIST"
+          sbt --server --batch "conformance/build $CONFORMANCE_SHARD_ROUTE_LIST"
       - name: Kernel OOM records
         if: ${{ always() && !env.ACT }}
         run: sudo dmesg | grep -iE 'out of memory|oom-kill|killed process' || echo "no kernel OOM records"
@@ -472,8 +472,7 @@ jobs:
       - *tools
       - *dependencies
       - run: |
-          sbt --server --batch "set conformance / conformanceBuildProfile := \"$CONFORMANCE_BUILD_PROFILE\"" \
-            'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lintBackends
+          sbt --server --batch 'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lintBackends
 
   semantics:
     needs: build
@@ -533,7 +532,7 @@ jobs:
           trap 'kill "$sampler"' EXIT
           heap=$(awk '/^MemTotal:/ { printf "%dm", $2 / 1024 / 4 }' /proc/meminfo)
           sbt --server --batch "-J-Xmx$heap" 'set conformance / conformanceJfr := true' \
-            "conformance/emulate --prebuilt --profile $CONFORMANCE_BUILD_PROFILE --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
+            "conformance/emulate --prebuilt --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"
       # the server records one JFR file per run, in a temporary directory; rename it after the shard
       - name: Collect JFR
         if: ${{ !cancelled() && !env.ACT }}

@@ -222,7 +222,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/discard-iterator/i32/n11", "[unified][
 
 namespace {
 template <class Iterator>
-inline constexpr bool writesThroughConst = std::is_const_v<std::remove_reference_t<typename thrust::iterator_traits<Iterator>::reference>>;
+inline constexpr bool WritesThroughConst = std::is_const_v<std::remove_reference_t<typename thrust::iterator_traits<Iterator>::reference>>;
 
 struct ConstantOne {
   int32_t operator()() const { return 1; }
@@ -231,10 +231,10 @@ struct ConstantOne {
 
 TEST_CASE("algorithms/roc-thrust-semantic/generate-const-iterators/i32/n11", "[unified][rocthrust]") {
   thrust::host_vector<int32_t> values(11, int32_t{0});
-  static_assert(writesThroughConst<decltype(values.cbegin())>);
-  static_assert(writesThroughConst<const int32_t *>);
-  static_assert(!writesThroughConst<decltype(values.begin())>);
-  static_assert(!writesThroughConst<int32_t *>);
+  static_assert(WritesThroughConst<decltype(values.cbegin())>);
+  static_assert(WritesThroughConst<const int32_t *>);
+  static_assert(!WritesThroughConst<decltype(values.begin())>);
+  static_assert(!WritesThroughConst<int32_t *>);
   thrust::generate(values.begin(), values.end(), ConstantOne{});
   {
     INFO("generate: mutable iterators mismatch");

@@ -869,9 +869,11 @@ lazy val conformance = project.in(file("conformance"))
     externalCodestyleSettings,
     name                    := "gemstone-conformance",
     conformanceBuildProfile :=
-      sys.env.get(
-        "HOSTNAME"
-      ).filter(_.nonEmpty).getOrElse(java.net.InetAddress.getLocalHost.getHostName).takeWhile(_ != '.'),
+      sys.env.get("CONFORMANCE_BUILD_PROFILE").filter(_.nonEmpty).getOrElse(
+        sys.env.get(
+          "HOSTNAME"
+        ).filter(_.nonEmpty).getOrElse(java.net.InetAddress.getLocalHost.getHostName).takeWhile(_ != '.')
+      ),
     nativeCompileDatabase  := Def.uncached(conformanceHost.value),
     conformanceJfr         := true,
     conformanceLintTargets := Seq("lint"),

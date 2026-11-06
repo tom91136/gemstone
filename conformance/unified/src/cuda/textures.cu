@@ -292,6 +292,7 @@ std::vector<float> mipBlend(int lower, float weight) {
   const auto from = mipTexels(lower);
   const auto to = mipTexels(lower + 1);
   std::vector<float> blended;
+  blended.reserve(from.size());
   for (size_t i = 0; i < from.size(); ++i)
     blended.push_back(from[i] + ((to[i] - from[i]) * weight));
   return blended;
