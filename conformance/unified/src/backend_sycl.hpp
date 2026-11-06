@@ -654,7 +654,7 @@ template <class T, size_t Id> class DiamondLeft;
 template <class T, size_t Id> class DiamondRight;
 template <class T, size_t Id> class DiamondJoin;
 template <class T, size_t Id> class BlockScan;
-class InvalidWorkGroup;
+template <class T> class InvalidWorkGroup;
 } // namespace onedpl_edge_detail
 
 class OneDPLEdgeCases {
@@ -770,7 +770,7 @@ public:
     bool rejected = false;
     try {
       queue.submit([&](sycl::handler &handler) {
-        handler.parallel_for<onedpl_edge_detail::InvalidWorkGroup>(sycl::nd_range<1>(oversized, oversized), [=](sycl::nd_item<1>) {});
+        handler.parallel_for<onedpl_edge_detail::InvalidWorkGroup<T>>(sycl::nd_range<1>(oversized, oversized), [=](sycl::nd_item<1>) {});
       });
       queue.wait_and_throw();
     } catch (const sycl::exception &) {

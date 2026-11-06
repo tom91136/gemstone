@@ -870,7 +870,7 @@ lazy val conformance = project.in(file("conformance"))
     externalCodestyleSettings,
     name                    := "gemstone-conformance",
     conformanceBuildProfile :=
-      sys.env.get("CONFORMANCE_BUILD_PROFILE").filter(_.nonEmpty).getOrElse(
+      BuildEnvironment.buildProfile.getOrElse(
         sys.env.get(
           "HOSTNAME"
         ).filter(_.nonEmpty).getOrElse(java.net.InetAddress.getLocalHost.getHostName).takeWhile(_ != '.')

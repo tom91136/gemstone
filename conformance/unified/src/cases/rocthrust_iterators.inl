@@ -222,7 +222,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/discard-iterator/i32/n11", "[unified][
 
 namespace {
 template <class Iterator>
-inline constexpr bool WritesThroughConst = std::is_const_v<std::remove_reference_t<typename thrust::iterator_traits<Iterator>::reference>>;
+inline constexpr bool WritesThroughConst = std::is_const_v<std::remove_reference_t<typename iter_ops::iterator_traits<Iterator>::reference>>;
 
 struct ConstantOne {
   int32_t operator()() const { return 1; }

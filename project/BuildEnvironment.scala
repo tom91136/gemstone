@@ -16,10 +16,11 @@ object BuildEnvironment {
       .getOrElse(throw MessageOnlyException(s"$name must be a positive integer, not '$raw'"))
   }
 
-  lazy val offline: Boolean            = enabled("GEMSTONE_OFFLINE_ON")
-  lazy val threadCount: Int            = positive("GEMSTONE_THREAD_COUNT", sys.runtime.availableProcessors())
-  lazy val containerExecutable: String = value("GEMSTONE_CONTAINER_EXE").getOrElse("podman")
-  lazy val buildType: String           = value("CMAKE_BUILD_TYPE").getOrElse("Release")
-  lazy val syclShardIndex: String      = value("CONFORMANCE_SYCL_SHARD_INDEX").getOrElse("")
-  lazy val shardRouteList: String      = value("CONFORMANCE_SHARD_ROUTE_LIST").getOrElse("")
+  lazy val offline: Boolean             = enabled("GEMSTONE_OFFLINE_ON")
+  lazy val threadCount: Int             = positive("GEMSTONE_THREAD_COUNT", sys.runtime.availableProcessors())
+  lazy val containerExecutable: String  = value("GEMSTONE_CONTAINER_EXE").getOrElse("podman")
+  lazy val buildType: String            = value("CMAKE_BUILD_TYPE").getOrElse("Release")
+  lazy val buildProfile: Option[String] = value("CONFORMANCE_BUILD_PROFILE")
+  lazy val syclShardIndex: String       = value("CONFORMANCE_SYCL_SHARD_INDEX").getOrElse("")
+  lazy val shardRouteList: String       = value("CONFORMANCE_SHARD_ROUTE_LIST").getOrElse("")
 }

@@ -32,6 +32,7 @@ inline constexpr char VulkanCtsTimeoutSeconds[] = "CONFORMANCE_VULKAN_CTS_TIMEOU
 inline constexpr char VulkanDeviceId[] = "CONFORMANCE_VULKAN_DEVICE_ID";
 
 // Artifact build options, also taken from the environment by drivers that configure the build.
+inline constexpr char BuildProfile[] = "CONFORMANCE_BUILD_PROFILE";
 inline constexpr char ShardRouteList[] = "CONFORMANCE_SHARD_ROUTE_LIST";
 inline constexpr char SyclShardIndex[] = "CONFORMANCE_SYCL_SHARD_INDEX";
 
