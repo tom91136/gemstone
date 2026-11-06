@@ -264,13 +264,16 @@ private object MemoryOps {
     val resultType = id(resultTypeOperand)
     val base       = id(baseOperand)
     val program    = site.program
+    val declared   = program.runtimeType(program.valueType(base)).collect {
+      case RuntimeType.Pointer(_, pointee) if !program.untyped(pointee) => pointee
+    }
     AccessChainOp(
       base,
       elementOperand.fold(-1)(id(_)),
       indexOperands.map(id(_)).toArray,
       AccessChain(
         program,
-        baseType,
+        baseType.orElse(declared),
         program.pointerPointee(resultType),
         program.arrayStrides.get(program.valueType(base)).map(_.raw.toLong)
       ),

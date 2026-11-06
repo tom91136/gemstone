@@ -355,6 +355,56 @@ class LinkageSuite extends Suite {
     assert(link(importer, exporter).left.exists(_.message.contains("does not match")))
   }
 
+  test("a pointer chain strides by the parameter type of the exporting function") {
+    val importer = spv"""
+      $openCL
+      OpCapability Linkage
+      OpEntryPoint Kernel %main "call"
+      OpDecorate %poke LinkageAttributes "poke" Import
+      %void = OpTypeVoid
+      %float = OpTypeFloat 32
+      %pair = OpTypeVector %float 2
+      %pair_ptr = OpTypePointer CrossWorkgroup %pair
+      %pair_gptr = OpTypePointer Generic %pair
+      %main_fn = OpTypeFunction %void %pair_ptr
+      %poke_fn = OpTypeFunction %void %pair_gptr
+      %poke = OpFunction %void None %poke_fn
+      %arg = OpFunctionParameter %pair_gptr
+      OpFunctionEnd
+      %main = OpFunction %void None %main_fn
+      %out = OpFunctionParameter %pair_ptr
+      %entry = OpLabel
+      %generic = OpPtrCastToGeneric %pair_gptr %out
+      %call = OpFunctionCall %void %poke %generic
+      OpReturn
+      OpFunctionEnd
+    """
+    val exporter = spv"""
+      $openCL
+      OpCapability Linkage
+      OpDecorate %poke LinkageAttributes "poke" Export
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+      %float_gptr = OpTypePointer Generic %float
+      %poke_fn = OpTypeFunction %void %float_gptr
+      %one = OpConstant %uint 1
+      %seven = OpConstant %float 7
+      %poke = OpFunction %void None %poke_fn
+      %p = OpFunctionParameter %float_gptr
+      %entry = OpLabel
+      %second = OpPtrAccessChain %float_gptr %p %one
+      OpStore %second %seven
+      OpReturn
+      OpFunctionEnd
+    """
+    val linked = link(importer, exporter).value
+    val memory = RegionMemory()
+    val out    = memory.allocate(12L)
+    assertEquals(run(linked, "call", memory, Vec(buffer(out))), Right(()))
+    assertEquals(words(memory, out, 0, 3), Vec(0L, 0x40e00000L, 0L))
+  }
+
   test("modules with different memory models are rejected") {
     val logical = spv"""
       OpCapability Shader
