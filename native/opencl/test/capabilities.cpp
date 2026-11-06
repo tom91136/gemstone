@@ -1,3 +1,4 @@
+#define CL_USE_DEPRECATED_OPENCL_1_0_APIS
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -588,6 +589,30 @@ TEST_CASE("OpenCL creates command queues through cl_khr_create_command_queue", "
   cl_command_queue_properties reported = 0;
   REQUIRE((clGetCommandQueueInfo(queue, CL_QUEUE_PROPERTIES, sizeof(reported), &reported, nullptr) == CL_SUCCESS));
   CHECK(reported == CL_QUEUE_PROFILING_ENABLE);
+  clReleaseCommandQueue(queue);
+}
+
+TEST_CASE("OpenCL clSetCommandQueueProperty updates the queue properties and reports the previous value", "[opencl][capability]") {
+  Session const session;
+  cl_int error = CL_SUCCESS;
+  const cl_queue_properties properties[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
+  auto *queue = clCreateCommandQueueWithProperties(session.context, session.device, properties, &error);
+  REQUIRE((queue && error == CL_SUCCESS));
+  const auto current = [&] {
+    cl_command_queue_properties reported = 0;
+    REQUIRE((clGetCommandQueueInfo(queue, CL_QUEUE_PROPERTIES, sizeof(reported), &reported, nullptr) == CL_SUCCESS));
+    return reported;
+  };
+  cl_command_queue_properties previous = ~cl_command_queue_properties{0};
+  CHECK(clSetCommandQueueProperty(queue, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, CL_TRUE, &previous) == CL_SUCCESS);
+  CHECK(previous == CL_QUEUE_PROFILING_ENABLE);
+  CHECK(current() == (CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE));
+  CHECK(clSetCommandQueueProperty(queue, CL_QUEUE_PROFILING_ENABLE, CL_FALSE, &previous) == CL_SUCCESS);
+  CHECK(previous == (CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE));
+  CHECK(current() == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE);
+  CHECK(clSetCommandQueueProperty(queue, CL_QUEUE_PROFILING_ENABLE, CL_TRUE, nullptr) == CL_SUCCESS);
+  CHECK(clSetCommandQueueProperty(queue, CL_QUEUE_ON_DEVICE, CL_TRUE, nullptr) == CL_INVALID_VALUE);
+  CHECK(clSetCommandQueueProperty(nullptr, CL_QUEUE_PROFILING_ENABLE, CL_TRUE, nullptr) == CL_INVALID_COMMAND_QUEUE);
   clReleaseCommandQueue(queue);
 }
 

@@ -158,6 +158,8 @@ constexpr cl_name_version DeviceExtensionVersions[] = {
     {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_khr_byte_addressable_store"},
     {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_khr_3d_image_writes"},
     {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_khr_image2d_from_buffer"},
+    {.version = CL_MAKE_VERSION(0, 5, 0), .name = "cl_ext_image_requirements_info"},
+    {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_ext_image_from_buffer"},
     {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_khr_depth_images"},
     {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_khr_fp16"},
     {.version = CL_MAKE_VERSION(1, 0, 0), .name = "cl_khr_fp64"},
@@ -1765,9 +1767,16 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseCommandQueue(cl_command_queue value) {
   }
   return CL_SUCCESS;
 }
-CL_API_ENTRY cl_int CL_API_CALL clSetCommandQueueProperty(cl_command_queue value, cl_command_queue_properties, cl_bool,
-                                                          cl_command_queue_properties *) {
-  return checked(value) == nullptr ? CL_INVALID_COMMAND_QUEUE : CL_INVALID_OPERATION;
+CL_API_ENTRY cl_int CL_API_CALL clSetCommandQueueProperty(cl_command_queue value, cl_command_queue_properties properties, cl_bool enable,
+                                                          cl_command_queue_properties *previous) {
+  auto *queue = checked(value);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  constexpr cl_command_queue_properties knownProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
+  if ((properties & ~knownProperties) != 0) return CL_INVALID_VALUE;
+  const auto before = queue->properties;
+  queue->properties = enable ? before | properties : before & ~properties;
+  if (previous) *previous = before;
+  return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue value, cl_command_queue_info name, size_t size, void *output,
                                                       size_t *written) {
@@ -1976,6 +1985,8 @@ bool imageType(cl_mem_object_type type) {
 
 bool arrayed(cl_mem_object_type type) { return type == CL_MEM_OBJECT_IMAGE1D_ARRAY || type == CL_MEM_OBJECT_IMAGE2D_ARRAY; }
 
+bool rowPitched(cl_mem_object_type type) { return type == CL_MEM_OBJECT_IMAGE2D || type == CL_MEM_OBJECT_IMAGE3D || arrayed(type); }
+
 size_t imageHeight(const cl_image_desc &desc) {
   return desc.image_type == CL_MEM_OBJECT_IMAGE2D || desc.image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY
                  || desc.image_type == CL_MEM_OBJECT_IMAGE3D
@@ -2064,12 +2075,13 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
   shape.desc = *desc;
   shape.elementSize = info->channels * info->channelBytes;
   shape.rowPitch = desc->image_width * shape.elementSize;
-  // A 2D image over a buffer or another 2D image addresses the shared texels through their row pitch.
-  auto *source = desc->buffer && desc->image_type == CL_MEM_OBJECT_IMAGE2D ? checked(desc->buffer) : nullptr;
-  if (desc->buffer && desc->image_type == CL_MEM_OBJECT_IMAGE2D) {
+  // A buffer-backed image addresses the shared texels through its row pitch; a 2D image may also alias another 2D image.
+  auto *source = desc->buffer || desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER ? checked(desc->buffer) : nullptr;
+  if (desc->buffer || desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     if (!source || source->context != context || source->pipe) return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
     if (host) return fail(error, CL_INVALID_HOST_PTR);
     if (const auto &image = source->image) {
+      if (desc->image_type != CL_MEM_OBJECT_IMAGE2D) return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
       const auto *sourceInfo = imageFormatInfo(image->format);
       if (!sourceInfo || sourceInfo->channels != info->channels || image->format.image_channel_data_type != format->image_channel_data_type)
         return fail(error, CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
@@ -2078,11 +2090,18 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
         return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
       shape.rowPitch = image->rowPitch;
     } else {
-      const size_t pitch = desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
-      if (pitch < shape.rowPitch || pitch % (ImagePitchAlignment * shape.elementSize) != 0
-          || source->origin % (ImageBaseAddressAlignment * shape.elementSize) != 0)
+      if (rowPitched(desc->image_type)) {
+        const size_t pitch = desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
+        if (pitch < shape.rowPitch || pitch % (ImagePitchAlignment * shape.elementSize) != 0)
+          return fail(error, CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
+        shape.rowPitch = pitch;
+      }
+      const size_t baseAlignment = ImageBaseAddressAlignment * shape.elementSize;
+      if (source->origin % baseAlignment != 0 || reinterpret_cast<uintptr_t>(source->hostPointer) % baseAlignment != 0)
         return fail(error, CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
-      shape.rowPitch = pitch;
+      if ((desc->image_type == CL_MEM_OBJECT_IMAGE3D || arrayed(desc->image_type)) && desc->image_slice_pitch != 0
+          && desc->image_slice_pitch != shape.rowPitch * imageHeight(*desc))
+        return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
     }
   }
   shape.slicePitch = shape.rowPitch * imageHeight(*desc);
@@ -2090,7 +2109,7 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
   if (bytes > MaxMemAllocSize) return fail(error, CL_INVALID_IMAGE_SIZE);
   // Host data uses the caller's pitches; the device copy is tightly packed unless it aliases another object.
   const size_t hostRow = source || desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
-  size_t hostSlice = desc->image_slice_pitch;
+  size_t hostSlice = source ? 0 : desc->image_slice_pitch;
   if (hostSlice == 0) hostSlice = desc->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? hostRow : hostRow * imageHeight(*desc);
   if (!host && !desc->buffer && (desc->image_row_pitch != 0 || desc->image_slice_pitch != 0))
     return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
@@ -2104,18 +2123,7 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
   std::shared_ptr<Allocation> texels;
   _cl_mem *buffer = nullptr;
   size_t origin = 0;
-  if (desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    buffer = checked(desc->buffer);
-    if (!buffer || buffer->image || buffer->context != context) return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
-    if (host) return fail(error, CL_INVALID_HOST_PTR);
-    if (bytes > buffer->size) return fail(error, CL_INVALID_IMAGE_SIZE);
-    if ((flags & accessFlags) == CL_MEM_READ_WRITE && (buffer->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) != 0)
-      flags = (flags & ~CL_MEM_READ_WRITE) | (buffer->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY));
-    if ((flags & hostAccessFlags) == 0) flags |= buffer->flags & hostAccessFlags;
-    flags |= buffer->flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR);
-    texels = buffer->allocation;
-    origin = buffer->origin;
-  } else if (source) {
+  if (source) {
     if (bytes > source->size) return fail(error, CL_INVALID_IMAGE_SIZE);
     if ((flags & accessFlags) == CL_MEM_READ_WRITE && (source->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) != 0)
       flags = (flags & ~CL_MEM_READ_WRITE) | (source->flags & (CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY));
@@ -2124,8 +2132,6 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
     buffer = source;
     texels = source->allocation;
     origin = source->origin;
-  } else if (desc->buffer) {
-    return fail(error, CL_INVALID_IMAGE_DESCRIPTOR);
   } else {
     cl_int status = CL_SUCCESS;
     texels = allocate(bytes, &status);
@@ -2261,6 +2267,64 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateImage3D(cl_context value, cl_mem_flags f
   desc.image_row_pitch = rowPitch;
   desc.image_slice_pitch = slicePitch;
   return createImage(checked(value), flags, format, &desc, host, error);
+}
+
+static size_t maxImageWidth(cl_mem_object_type type, bool threeDimensional) {
+  if (type == CL_MEM_OBJECT_IMAGE1D_BUFFER) return ImageMaxBufferSize;
+  return threeDimensional ? Image3DMaxSize : Image2DMaxSize;
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clGetImageRequirementsInfoEXT(cl_context value, const cl_mem_properties *properties, cl_mem_flags flags,
+                                                              const cl_image_format *format, const cl_image_desc *desc,
+                                                              cl_image_requirements_info_ext name, size_t size, void *output,
+                                                              size_t *written) {
+  if (!checked(value)) return CL_INVALID_CONTEXT;
+  if (properties && properties[0] != 0) return CL_INVALID_PROPERTY;
+  constexpr cl_mem_flags accessFlags = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY | CL_MEM_KERNEL_READ_AND_WRITE;
+  constexpr cl_mem_flags hostAccessFlags = CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS;
+  if ((flags & ~(accessFlags | hostAccessFlags)) != 0
+      || std::popcount(flags & (CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) > 1
+      || std::popcount(flags & hostAccessFlags) > 1)
+    return CL_INVALID_VALUE;
+  if (!desc) return CL_INVALID_VALUE;
+  if (!imageType(desc->image_type) || desc->num_mip_levels != 0 || desc->num_samples != 0 || validateImageSize(*desc) != CL_SUCCESS)
+    return CL_INVALID_IMAGE_DESCRIPTOR;
+  const bool formatDependent = name == CL_IMAGE_REQUIREMENTS_SIZE_EXT || name == CL_IMAGE_REQUIREMENTS_ROW_PITCH_ALIGNMENT_EXT
+                               || name == CL_IMAGE_REQUIREMENTS_SLICE_PITCH_ALIGNMENT_EXT
+                               || name == CL_IMAGE_REQUIREMENTS_BASE_ADDRESS_ALIGNMENT_EXT;
+  const bool dimension = name == CL_IMAGE_REQUIREMENTS_MAX_WIDTH_EXT || name == CL_IMAGE_REQUIREMENTS_MAX_HEIGHT_EXT
+                         || name == CL_IMAGE_REQUIREMENTS_MAX_DEPTH_EXT || name == CL_IMAGE_REQUIREMENTS_MAX_ARRAY_SIZE_EXT;
+  if (!formatDependent && !dimension) return CL_INVALID_VALUE;
+  if (formatDependent && !format) return CL_INVALID_VALUE;
+  const ImageFormatInfo *info = nullptr;
+  if (format) {
+    info = imageFormatInfo(*format);
+    if (!info || !formatSupports(*info, desc->image_type)) return CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
+  }
+  const auto type = desc->image_type;
+  const bool threeDimensional = type == CL_MEM_OBJECT_IMAGE3D;
+  const bool twoDimensional = type == CL_MEM_OBJECT_IMAGE2D || type == CL_MEM_OBJECT_IMAGE2D_ARRAY;
+  switch (name) {
+    case CL_IMAGE_REQUIREMENTS_SIZE_EXT: {
+      const size_t elementSize = info->channels * info->channelBytes;
+      const size_t bytes = desc->image_width * elementSize * imageHeight(*desc) * imageSlices(*desc);
+      return bytes > MaxMemAllocSize ? CL_INVALID_IMAGE_DESCRIPTOR : outputScalar(size, output, written, bytes);
+    }
+    case CL_IMAGE_REQUIREMENTS_ROW_PITCH_ALIGNMENT_EXT:
+      return outputScalar(size, output, written, ImagePitchAlignment * size_t{info->channels * info->channelBytes});
+    case CL_IMAGE_REQUIREMENTS_SLICE_PITCH_ALIGNMENT_EXT: return outputScalar(size, output, written, size_t{1});
+    case CL_IMAGE_REQUIREMENTS_BASE_ADDRESS_ALIGNMENT_EXT:
+      return outputScalar(size, output, written, ImageBaseAddressAlignment * size_t{info->channels * info->channelBytes});
+    case CL_IMAGE_REQUIREMENTS_MAX_WIDTH_EXT:
+      return outputScalar(size, output, written, static_cast<uint32_t>(maxImageWidth(type, threeDimensional)));
+    case CL_IMAGE_REQUIREMENTS_MAX_HEIGHT_EXT:
+      if (!twoDimensional && !threeDimensional) return CL_INVALID_IMAGE_DESCRIPTOR;
+      return outputScalar(size, output, written, static_cast<uint32_t>(threeDimensional ? Image3DMaxSize : Image2DMaxSize));
+    case CL_IMAGE_REQUIREMENTS_MAX_DEPTH_EXT:
+      return threeDimensional ? outputScalar(size, output, written, static_cast<uint32_t>(Image3DMaxSize)) : CL_INVALID_IMAGE_DESCRIPTOR;
+    default:
+      return arrayed(type) ? outputScalar(size, output, written, static_cast<uint32_t>(ImageMaxArraySize)) : CL_INVALID_IMAGE_DESCRIPTOR;
+  }
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetImageInfo(cl_mem value, cl_image_info name, size_t size, void *output, size_t *written) {
@@ -4749,6 +4813,7 @@ CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddress(const char *name) {
   GEMSTONE_EXTENSION(clCreateProgramWithIL);
   GEMSTONE_EXTENSION(clSetKernelArgSVMPointer);
   GEMSTONE_EXTENSION(clSetKernelExecInfo);
+  GEMSTONE_EXTENSION(clGetImageRequirementsInfoEXT);
 #undef GEMSTONE_EXTENSION
   return nullptr;
 }

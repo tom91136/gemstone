@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <CL/cl.h>
+#include <CL/cl_ext.h>
 #include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -491,6 +492,164 @@ TEST_CASE("OpenCL 2D images alias buffers through a row pitch and other 2D image
   CHECK(session.create(CL_MEM_OBJECT_IMAGE2D, {CL_sRGBA, CL_UNORM_INT8}, 2, 2, CL_MEM_READ_ONLY, nullptr, 0, image)
         == CL_INVALID_IMAGE_DESCRIPTOR);
   clReleaseMemObject(view);
+  clReleaseMemObject(image);
+  clReleaseMemObject(buffer);
+}
+
+TEST_CASE("OpenCL reports image requirements and lets every image type alias a buffer", "[opencl][images]") {
+  Session const session;
+  size_t extensionSize = 0;
+  REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_EXTENSIONS, 0, nullptr, &extensionSize) == CL_SUCCESS));
+  std::string extensions(extensionSize, '\0');
+  REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_EXTENSIONS, extensionSize, extensions.data(), nullptr) == CL_SUCCESS));
+  CHECK((" " + extensions + " ").contains(" cl_ext_image_requirements_info "));
+  CHECK((" " + extensions + " ").contains(" cl_ext_image_from_buffer "));
+  cl_platform_id platform = nullptr;
+  REQUIRE((clGetDeviceInfo(session.device, CL_DEVICE_PLATFORM, sizeof(platform), &platform, nullptr) == CL_SUCCESS));
+  auto requirements = reinterpret_cast<clGetImageRequirementsInfoEXT_fn>(
+      clGetExtensionFunctionAddressForPlatform(platform, "clGetImageRequirementsInfoEXT"));
+  REQUIRE(requirements);
+
+  const auto describe = [](cl_mem_object_type type) {
+    const bool oneDimensional =
+        type == CL_MEM_OBJECT_IMAGE1D || type == CL_MEM_OBJECT_IMAGE1D_BUFFER || type == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+    cl_image_desc desc{};
+    desc.image_type = type;
+    desc.image_width = 5;
+    desc.image_height = oneDimensional ? 0 : 3;
+    desc.image_depth = type == CL_MEM_OBJECT_IMAGE3D ? 4 : 0;
+    desc.image_array_size = type == CL_MEM_OBJECT_IMAGE1D_ARRAY || type == CL_MEM_OBJECT_IMAGE2D_ARRAY ? 4 : 0;
+    return desc;
+  };
+  const auto query = [&](const cl_image_desc &desc, cl_image_requirements_info_ext name, size_t &value) {
+    return requirements(session.context, nullptr, CL_MEM_READ_WRITE, &Rgba8, &desc, name, sizeof(value), &value, nullptr);
+  };
+
+  struct Case {
+    cl_mem_object_type type;
+    size_t bytes;
+  };
+  for (const auto &[type, bytes] :
+       {Case{.type = CL_MEM_OBJECT_IMAGE1D, .bytes = 20}, Case{.type = CL_MEM_OBJECT_IMAGE1D_BUFFER, .bytes = 20},
+        Case{.type = CL_MEM_OBJECT_IMAGE1D_ARRAY, .bytes = 80}, Case{.type = CL_MEM_OBJECT_IMAGE2D, .bytes = 60},
+        Case{.type = CL_MEM_OBJECT_IMAGE2D_ARRAY, .bytes = 240}, Case{.type = CL_MEM_OBJECT_IMAGE3D, .bytes = 240}}) {
+    INFO("image type " << type);
+    const auto desc = describe(type);
+    size_t size = 0;
+    size_t rowAlignment = 0;
+    size_t sliceAlignment = 0;
+    size_t baseAlignment = 0;
+    REQUIRE(query(desc, CL_IMAGE_REQUIREMENTS_SIZE_EXT, size) == CL_SUCCESS);
+    REQUIRE(query(desc, CL_IMAGE_REQUIREMENTS_ROW_PITCH_ALIGNMENT_EXT, rowAlignment) == CL_SUCCESS);
+    REQUIRE(query(desc, CL_IMAGE_REQUIREMENTS_SLICE_PITCH_ALIGNMENT_EXT, sliceAlignment) == CL_SUCCESS);
+    REQUIRE(query(desc, CL_IMAGE_REQUIREMENTS_BASE_ADDRESS_ALIGNMENT_EXT, baseAlignment) == CL_SUCCESS);
+    CHECK(size == bytes);
+    CHECK(rowAlignment == 4);
+    CHECK(sliceAlignment == 1);
+    CHECK(baseAlignment == 4);
+
+    cl_int error = CL_SUCCESS;
+    auto *buffer = clCreateBuffer(session.context, CL_MEM_READ_WRITE, size, nullptr, &error);
+    REQUIRE((buffer && error == CL_SUCCESS));
+    auto aliased = desc;
+    aliased.buffer = buffer;
+    auto *image = clCreateImage(session.context, CL_MEM_READ_WRITE, &Rgba8, &aliased, nullptr, &error);
+    REQUIRE((image && error == CL_SUCCESS));
+    size_t imageSize = 0;
+    cl_mem associated = nullptr;
+    REQUIRE((clGetMemObjectInfo(image, CL_MEM_SIZE, sizeof(imageSize), &imageSize, nullptr) == CL_SUCCESS));
+    REQUIRE((clGetMemObjectInfo(image, CL_MEM_ASSOCIATED_MEMOBJECT, sizeof(associated), &associated, nullptr) == CL_SUCCESS));
+    CHECK(imageSize == size);
+    CHECK(associated == buffer);
+
+    auto *small = clCreateBuffer(session.context, CL_MEM_READ_WRITE, size - 1, nullptr, &error);
+    REQUIRE((small && error == CL_SUCCESS));
+    aliased.buffer = small;
+    auto *rejected = clCreateImage(session.context, CL_MEM_READ_WRITE, &Rgba8, &aliased, nullptr, &error);
+    CHECK(!rejected);
+    CHECK(error == CL_INVALID_IMAGE_SIZE);
+    clReleaseMemObject(small);
+    clReleaseMemObject(image);
+    clReleaseMemObject(buffer);
+  }
+
+  size_t value = 0;
+  const auto flat = describe(CL_MEM_OBJECT_IMAGE2D);
+  CHECK(requirements(nullptr, nullptr, CL_MEM_READ_WRITE, &Rgba8, &flat, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value), &value, nullptr)
+        == CL_INVALID_CONTEXT);
+  CHECK(requirements(session.context, nullptr, CL_MEM_READ_WRITE, nullptr, &flat, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value), &value,
+                     nullptr)
+        == CL_INVALID_VALUE);
+  CHECK(requirements(session.context, nullptr, CL_MEM_READ_WRITE, &Rgba8, nullptr, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value), &value,
+                     nullptr)
+        == CL_INVALID_VALUE);
+  CHECK(requirements(session.context, nullptr, cl_mem_flags(-1), &Rgba8, &flat, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value), &value,
+                     nullptr)
+        == CL_INVALID_VALUE);
+  CHECK(requirements(session.context, nullptr, CL_MEM_READ_WRITE, &Rgba8, &flat, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value) - 1, &value,
+                     nullptr)
+        == CL_INVALID_VALUE);
+  CHECK(requirements(session.context, nullptr, CL_MEM_READ_WRITE, &Rgba8, &flat, CL_IMAGE_FORMAT, sizeof(value), &value, nullptr)
+        == CL_INVALID_VALUE);
+  const cl_image_format unsupported{.image_channel_order = CL_INTENSITY, .image_channel_data_type = CL_UNORM_SHORT_555};
+  CHECK(requirements(session.context, nullptr, CL_MEM_READ_WRITE, &unsupported, &flat, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value),
+                     &value, nullptr)
+        == CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
+  auto notAnImage = flat;
+  notAnImage.image_type = CL_MEM_OBJECT_BUFFER;
+  CHECK(requirements(session.context, nullptr, CL_MEM_READ_WRITE, &Rgba8, &notAnImage, CL_IMAGE_REQUIREMENTS_SIZE_EXT, sizeof(value),
+                     &value, nullptr)
+        == CL_INVALID_IMAGE_DESCRIPTOR);
+
+  uint32_t limit = 0;
+  const auto limitOf = [&](cl_mem_object_type type, cl_image_requirements_info_ext name) {
+    const auto desc = describe(type);
+    return requirements(session.context, nullptr, CL_MEM_READ_WRITE, nullptr, &desc, name, sizeof(limit), &limit, nullptr);
+  };
+  CHECK(limitOf(CL_MEM_OBJECT_IMAGE2D, CL_IMAGE_REQUIREMENTS_MAX_HEIGHT_EXT) == CL_SUCCESS);
+  CHECK(limit == info<size_t>(session.device, CL_DEVICE_IMAGE2D_MAX_HEIGHT));
+  CHECK(limitOf(CL_MEM_OBJECT_IMAGE3D, CL_IMAGE_REQUIREMENTS_MAX_DEPTH_EXT) == CL_SUCCESS);
+  CHECK(limit == info<size_t>(session.device, CL_DEVICE_IMAGE3D_MAX_DEPTH));
+  CHECK(limitOf(CL_MEM_OBJECT_IMAGE2D_ARRAY, CL_IMAGE_REQUIREMENTS_MAX_ARRAY_SIZE_EXT) == CL_SUCCESS);
+  CHECK(limit == info<size_t>(session.device, CL_DEVICE_IMAGE_MAX_ARRAY_SIZE));
+  CHECK(limitOf(CL_MEM_OBJECT_IMAGE1D, CL_IMAGE_REQUIREMENTS_MAX_HEIGHT_EXT) == CL_INVALID_IMAGE_DESCRIPTOR);
+  CHECK(limitOf(CL_MEM_OBJECT_IMAGE2D, CL_IMAGE_REQUIREMENTS_MAX_DEPTH_EXT) == CL_INVALID_IMAGE_DESCRIPTOR);
+  CHECK(limitOf(CL_MEM_OBJECT_IMAGE3D, CL_IMAGE_REQUIREMENTS_MAX_ARRAY_SIZE_EXT) == CL_INVALID_IMAGE_DESCRIPTOR);
+}
+
+TEST_CASE("OpenCL buffer-backed 3D images use the buffer pitches and reject misaligned layouts", "[opencl][images]") {
+  Session const session;
+  std::array<uint8_t, 160> bytes{};
+  for (size_t index = 0; index < bytes.size(); ++index)
+    bytes[index] = static_cast<uint8_t>(index);
+  cl_int error = CL_SUCCESS;
+  auto *buffer = clCreateBuffer(session.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, bytes.size(), bytes.data(), &error);
+  REQUIRE((buffer && error == CL_SUCCESS));
+  auto *image = session.image(CL_MEM_OBJECT_IMAGE3D, Rgba8, 2, 2, 2, 0, CL_MEM_READ_WRITE, nullptr, 12, buffer);
+  size_t rowPitch = 0;
+  size_t slicePitch = 0;
+  REQUIRE((clGetImageInfo(image, CL_IMAGE_ROW_PITCH, sizeof(rowPitch), &rowPitch, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetImageInfo(image, CL_IMAGE_SLICE_PITCH, sizeof(slicePitch), &slicePitch, nullptr) == CL_SUCCESS));
+  CHECK(rowPitch == 12);
+  CHECK(slicePitch == 24);
+
+  std::array<uint8_t, 4> texel{};
+  const size_t last[] = {1, 1, 1};
+  const size_t one[] = {1, 1, 1};
+  REQUIRE((clEnqueueReadImage(session.queue, image, CL_TRUE, last, one, 0, 0, texel.data(), 0, nullptr, nullptr) == CL_SUCCESS));
+  CHECK(texel == std::array<uint8_t, 4>{40, 41, 42, 43});
+
+  cl_image_desc desc{};
+  desc.image_type = CL_MEM_OBJECT_IMAGE3D;
+  desc.image_width = desc.image_height = desc.image_depth = 2;
+  desc.buffer = buffer;
+  desc.image_row_pitch = 10;
+  CHECK(!clCreateImage(session.context, CL_MEM_READ_WRITE, &Rgba8, &desc, nullptr, &error));
+  CHECK(error == CL_INVALID_IMAGE_FORMAT_DESCRIPTOR);
+  desc.image_row_pitch = 12;
+  desc.image_slice_pitch = 32;
+  CHECK(!clCreateImage(session.context, CL_MEM_READ_WRITE, &Rgba8, &desc, nullptr, &error));
+  CHECK(error == CL_INVALID_IMAGE_DESCRIPTOR);
   clReleaseMemObject(image);
   clReleaseMemObject(buffer);
 }

@@ -968,13 +968,15 @@ CUresult mipmappedArrayCreate(CUmipmappedArray *handle, const CUDA_ARRAY3D_DESCR
   size_t total = 0;
   for (unsigned level = 0; level < levels; ++level) {
     const size_t levelHeight = height == 0 ? 0 : levelExtent(height, level);
-    const size_t levelDepth = depth == 0 ? 0 : (layered ? depth : levelExtent(depth, level));
+    size_t levelDepth = 0;
+    if (depth != 0) levelDepth = layered ? depth : levelExtent(depth, level);
     const auto layout = arrayLayout(levelExtent(width, level), levelHeight, levelDepth, format, channels, flags);
     size_t offset = 0;
     if (!layout || !sizeAdd(total, KeplerRowAlignment - 1, &offset)) return CUDA_ERROR_INVALID_VALUE;
     offset = offset / KeplerRowAlignment * KeplerRowAlignment;
     if (!sizeAdd(offset, layout->bytes, &total)) return CUDA_ERROR_INVALID_VALUE;
-    shapes.push_back({levelExtent(width, level), levelHeight, levelDepth, *layout, offset});
+    shapes.push_back(
+        Level{.width = levelExtent(width, level), .height = levelHeight, .depth = levelDepth, .layout = *layout, .offset = offset});
   }
   auto mipmapped = std::unique_ptr<CudaMipmappedArray>{new (std::nothrow) CudaMipmappedArray{}};
   if (!mipmapped) return CUDA_ERROR_UNKNOWN;
