@@ -191,7 +191,7 @@ class LinkageSuite extends Suite {
     val memory = RegionMemory()
     val out    = memory.allocate(8L)
     assertEquals(run(linked, "ids", memory, Vec(buffer(out)), groups = testDimensions(2)), Right(()))
-    assertEquals(words(memory, out, 0, 2), Vec(0L, 1L))
+    assertEquals(words(memory, out, offset = 0, count = 2), Vec(0L, 1L))
   }
 
   test("a linked kernel classifies floats through the llvm.is.fpclass import") {
@@ -242,7 +242,7 @@ class LinkageSuite extends Suite {
     val out    = memory.allocate(16L)
     writeWords(memory, in, 0, 0x7f800000L, 0xff800000L, 0x7fc00000L, 0x3f800000L)
     assertEquals(run(linked, "classify", memory, Vec(buffer(in), buffer(out)), groups = testDimensions(4)), Right(()))
-    assertEquals(words(memory, out, 0, 4), Vec(1L, 1L, 0L, 0L))
+    assertEquals(words(memory, out, offset = 0, count = 4), Vec(1L, 1L, 0L, 0L))
   }
 
   test("a linked kernel runs past the sub_group_barrier import") {
@@ -273,7 +273,7 @@ class LinkageSuite extends Suite {
     val memory = RegionMemory()
     val out    = memory.allocate(4L)
     assertEquals(run(linked, "sync", memory, Vec(buffer(out)), groups = testDimensions(4)), Right(()))
-    assertEquals(words(memory, out, 0, 1), Vec(7L))
+    assertEquals(words(memory, out, offset = 0, count = 1), Vec(7L))
   }
 
   test("a symbol exported twice is rejected") {
@@ -402,7 +402,7 @@ class LinkageSuite extends Suite {
     val memory = RegionMemory()
     val out    = memory.allocate(12L)
     assertEquals(run(linked, "call", memory, Vec(buffer(out))), Right(()))
-    assertEquals(words(memory, out, 0, 3), Vec(0L, 0x40e00000L, 0L))
+    assertEquals(words(memory, out, offset = 0, count = 3), Vec(0L, 0x40e00000L, 0L))
   }
 
   test("modules with different memory models are rejected") {

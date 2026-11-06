@@ -71,7 +71,11 @@ class HostSubwordAtomicSuite extends Suite {
         KernelMetadata.validated(0, 1, Vec.empty).left.map(Fault.InvalidRequest(_))
       override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
         val index = arrived.getAndIncrement()
-        if (together) { barrier.countDown(); assert(barrier.await(60L, TimeUnit.SECONDS), "dispatches did not meet") }
+        if (together) {
+          barrier.countDown()
+          val met = barrier.await(60L, TimeUnit.SECONDS)
+          assert(met, "dispatches did not meet")
+        }
         bodies(index)(context, index)
       }
       override def close(): Unit = ()
@@ -185,7 +189,10 @@ class HostSubwordAtomicSuite extends Suite {
         val first      = AtomicInteger()
         val failure    = AtomicReference(Option.empty[Fault])
         val body: Body = (context, index) => {
-          if (staggered && index != 0) started.await()
+          if (staggered && index != 0) {
+            val begun = started.await(60L, TimeUnit.SECONDS)
+            assert(begun, "first dispatch never started")
+          }
           val threads = Vector.fill(lanes)(Thread { () =>
             (0 until rounds).foreach { _ =>
               Vector((base + 16, 2), (base + 18, 1), (base + 19, 1)).map { (address, width) =>

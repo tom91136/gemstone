@@ -37,13 +37,17 @@ class TextureSuite extends Suite {
   private class Setup(data: Array[Byte], descriptor: TextureDescriptor, handle: Int = 1) {
     val memory: Memory       = Memory()
     val region: AllocationId = memory.allocate(Vec.unsafeWrapArray(data))
-    memory.allocate(Table, 64 * (handle + 1), GuestAddress(TextureLayout.Table.BaseAddress))
+    memory.allocate(
+      Table,
+      TextureLayout.Table.EntryBytes.toInt * (handle + 1),
+      GuestAddress(TextureLayout.Table.BaseAddress)
+    )
     Array.copy(
       descriptor.encode,
       0,
       memory.array(Table),
       (TextureTable.entryAddress(handle.toLong).get - TextureLayout.Table.BaseAddress).toInt,
-      64
+      TextureLayout.Table.EntryBytes.toInt
     )
 
     def run(name: String, sm: Int, outputWords: Int, edit: String => String = identity, threads: Int = 1): Vec[Long] = {
@@ -112,6 +116,37 @@ class TextureSuite extends Suite {
       )
       assertEquals(setup.run("samp3d", sm, 4), Vec(bits(5f), 0L, 0L, bits(1f)))
     }
+
+  private def explicitLevel(level: Float)(listing: String): String =
+    Vec("IMAD.MOV.U32 R6, RZ, RZ, -0x3e000000 ;", "HFMA2.MMA R6, -RZ, RZ, -3, 0 ;").fold(listing)(
+      _.replace(_, f"IMAD.MOV.U32 R6, RZ, RZ, 0x${bits(level)}%x ;")
+    )
+
+  for (sm <- Vec(70, 75, 90))
+    test(s"sm_$sm TEX.LL samples the level held in the register after the coordinates") {
+      val expected = Vec(0f -> 10f, 1f -> 21f, 2f -> 40f)
+      expected.foreach((level, texel) =>
+        assertEquals(
+          Setup(mipBytes, mipmapped()).run("samp1d", sm, 4, explicitLevel(level)),
+          Vec(bits(texel), 0L, 0L, bits(1f)),
+          s"level $level"
+        )
+      )
+    }
+
+  test("sm_90 TEX.LB adds the bias held in the register to level zero") {
+    assertEquals(
+      Setup(mipBytes, mipmapped()).run("samp1d", 90, 4, explicitLevel(1f).andThen(_.replace("TEX.LL", "TEX.LB"))),
+      Vec(bits(21f), 0L, 0L, bits(1f))
+    )
+  }
+
+  test("sm_90 TLD.LL fetches from the level held in the register after the coordinates") {
+    val edit: String => String = _
+      .replace("HFMA2.MMA R6, -RZ, RZ, 0, 2.920627593994140625e-06 ;", "IMAD.MOV.U32 R6, RZ, RZ, 0x1 ;")
+      .replace("TLD.LZ.AOFFI R6, R4, R4, R6,", "TLD.LL R6, R4, R4, R6,")
+    assertEquals(Setup(mipBytes, mipmapped()).run("fetch2d", 90, 4, edit), Vec(bits(20f), 0L, 0L, bits(1f)))
+  }
 
   test("sm_120 uniform handle followed by a zero sampler register") {
     val setup = Setup(floatWords(10f, 20f, 30f, 40f), descriptor(F32x1, 4))

@@ -9,6 +9,10 @@ import com.monovore.decline.Command
   * `KeplerTable` as the 40-bit surface address encoding requires: the record holds the surface base in units of 256
   * bytes, a format word, the inclusive byte or row limit of each axis, the row pitch in bytes, and the height in rows.
   * Kepler addressing is pitch-linear, so the base, the pitch, and the slice pitch are multiples of `Alignment`.
+  *
+  * A mipmapped texture entry holds level zero in its base fields and, in the second half of the entry, the device
+  * address of a table of `Level` records, one per level, with the level count, the mipmap filter, and the level of
+  * detail bounds and bias.
   */
 object TextureDescriptorABI {
   private val CorePackage = "net.kurobako.gemstone.texture"
@@ -19,7 +23,7 @@ object TextureDescriptorABI {
       "Long",
       Vector(
         "BaseAddress" -> 0x3f0000000000L,
-        "EntryBytes"  -> 64L,
+        "EntryBytes"  -> 128L,
         "Entries"     -> 65536L
       )
     ),
@@ -48,7 +52,13 @@ object TextureDescriptorABI {
         "BorderX"     -> 48L,
         "BorderY"     -> 52L,
         "BorderZ"     -> 56L,
-        "BorderW"     -> 60L
+        "BorderW"     -> 60L,
+        "LevelTable"  -> 64L,
+        "Levels"      -> 72L,
+        "MipFilter"   -> 76L,
+        "MinLod"      -> 80L,
+        "MaxLod"      -> 84L,
+        "LodBias"     -> 88L
       )
     ),
     (
@@ -88,6 +98,19 @@ object TextureDescriptorABI {
         "MaxPitch"  -> 65280L,
         "MaxRows"   -> 65535L,
         "MaxBytes"  -> 65536L
+      )
+    ),
+    (
+      "Level",
+      "Int",
+      Vector(
+        "Base"       -> 0L,
+        "Pitch"      -> 8L,
+        "SlicePitch" -> 16L,
+        "Width"      -> 24L,
+        "Height"     -> 28L,
+        "Depth"      -> 32L,
+        "Bytes"      -> 40L
       )
     )
   )

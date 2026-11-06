@@ -1442,7 +1442,7 @@ private[isa] object MachineSemantics {
       writeFrom(0)
     }
     operation match {
-      case Texture.Operation.Sample(handle, coordinates, _, _, destinations) =>
+      case Texture.Operation.Sample(handle = handle, coordinates = coordinates, destinations = destinations) =>
         machine.textureRead(lane, operation, machine.read(lane, handle), operands(coordinates))(
           results(destinations, 4)
         )

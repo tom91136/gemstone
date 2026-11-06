@@ -60,7 +60,7 @@ template <class F> Entry configure(F setter) {
   return entry;
 }
 
-std::array<uint64_t, 8> words(const Entry &entry) {
+std::array<uint64_t, layout::Table::EntryBytes / 8> words(const Entry &entry) {
   std::array<unsigned char, layout::Table::EntryBytes> bytes{};
   const auto put = [&](uint32_t offset, const auto &value) { std::memcpy(bytes.data() + offset, &value, sizeof(value)); };
   put(layout::Field::Base, entry.base);
@@ -83,7 +83,7 @@ std::array<uint64_t, 8> words(const Entry &entry) {
   const std::array colours{layout::Field::BorderX, layout::Field::BorderY, layout::Field::BorderZ, layout::Field::BorderW};
   for (size_t i = 0; i < colours.size(); ++i)
     put(colours[i], entry.border[i]);
-  std::array<uint64_t, 8> result{};
+  std::array<uint64_t, layout::Table::EntryBytes / 8> result{};
   std::memcpy(result.data(), bytes.data(), bytes.size());
   return result;
 }
@@ -532,8 +532,6 @@ TEST_CASE("driver argument checks", "[cuda][texture]") {
   auto mipmapped = bogusType;
   mipmapped.resType = CU_RESOURCE_TYPE_MIPMAPPED_ARRAY;
   CHECK(cuTexObjectCreate(&handle, &mipmapped, &texture, nullptr) == CUDA_ERROR_INVALID_VALUE);
-  mipmapped.res.mipmap.hMipmappedArray = reinterpret_cast<CUmipmappedArray>(&mipmapped);
-  CHECK(cuTexObjectCreate(&handle, &mipmapped, &texture, nullptr) == CUDA_ERROR_NOT_SUPPORTED);
   CUDA_RESOURCE_VIEW_DESC view{};
   view.format = CU_RES_VIEW_FORMAT_UINT_1X8;
   CHECK(cuTexObjectCreate(&handle, &linear, &texture, &view) == CUDA_ERROR_NOT_SUPPORTED);
@@ -836,4 +834,116 @@ TEST_CASE("mipmapped array argument checks", "[cuda][texture]") {
   CHECK(cuMipmappedArrayGetLevel(&level, mipmapped, 4) == CUDA_ERROR_INVALID_VALUE);
   CHECK(cuMipmappedArrayDestroy(nullptr) == CUDA_ERROR_INVALID_VALUE);
   CHECK(cuMipmappedArrayDestroy(mipmapped) == CUDA_SUCCESS);
+}
+
+namespace {
+
+constexpr size_t MipWidth = 8;
+constexpr size_t MipHeight = 4;
+constexpr unsigned MipLevels = 3;
+
+uint64_t entryWord(CUtexObject handle, uint32_t field) {
+  return fixture.allocationWord(table(), (handle * layout::Table::EntryBytes) + field);
+}
+
+float asFloat(uint64_t word) {
+  const auto bits = static_cast<uint32_t>(word);
+  float value = 0;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+CUDA_RESOURCE_DESC mipmapResource(CUmipmappedArray mipmapped) {
+  CUDA_RESOURCE_DESC resource{};
+  resource.resType = CU_RESOURCE_TYPE_MIPMAPPED_ARRAY;
+  resource.res.mipmap.hMipmappedArray = mipmapped;
+  return resource;
+}
+
+CUDA_TEXTURE_DESC mipTexture() {
+  CUDA_TEXTURE_DESC texture{};
+  texture.filterMode = CU_TR_FILTER_MODE_POINT;
+  texture.mipmapFilterMode = CU_TR_FILTER_MODE_LINEAR;
+  texture.mipmapLevelBias = 0.5F;
+  texture.minMipmapLevelClamp = 0.25F;
+  texture.maxMipmapLevelClamp = 2.0F;
+  texture.flags = CU_TRSF_READ_AS_INTEGER;
+  return texture;
+}
+
+} // namespace
+
+TEST_CASE("texture objects over mipmapped arrays publish the level chain", "[cuda][texture]") {
+  setup();
+  const auto descriptor = mipmappedDescriptor(MipWidth, MipHeight, 0);
+  CUmipmappedArray mipmapped = nullptr;
+  REQUIRE(cuMipmappedArrayCreate(&mipmapped, &descriptor, MipLevels) == CUDA_SUCCESS);
+  const auto resource = mipmapResource(mipmapped);
+  const auto texture = mipTexture();
+  CUtexObject handle = 0;
+  REQUIRE(cuTexObjectCreate(&handle, &resource, &texture, nullptr) == CUDA_SUCCESS);
+
+  CHECK(static_cast<uint32_t>(entryWord(handle, layout::Field::Width)) == MipWidth);
+  CHECK(static_cast<uint32_t>(entryWord(handle, layout::Field::Height)) == MipHeight);
+  CHECK(static_cast<uint32_t>(entryWord(handle, layout::Field::Levels)) == MipLevels);
+  const auto flags = static_cast<uint32_t>(entryWord(handle, layout::Field::Depth) >> 56);
+  CHECK(((flags >> layout::Flag::ResourceShift) & layout::Flag::ResourceMask) == layout::Resource::MipmappedArray);
+  CHECK(((entryWord(handle, layout::Field::MipFilter) & 0xff)) == layout::Filter::Linear);
+  CHECK(asFloat(entryWord(handle, layout::Field::MinLod)) == 0.25F);
+  CHECK(asFloat(entryWord(handle, layout::Field::MaxLod)) == 2.0F);
+  CHECK(asFloat(entryWord(handle, layout::Field::LodBias)) == 0.5F);
+
+  const auto *levels = reinterpret_cast<const void *>(entryWord(handle, layout::Field::LevelTable));
+  REQUIRE(levels != nullptr);
+  for (unsigned level = 0; level < MipLevels; ++level) {
+    CUarray array = nullptr;
+    REQUIRE(cuMipmappedArrayGetLevel(&array, mipmapped, level) == CUDA_SUCCESS);
+    CUDA_ARRAY3D_DESCRIPTOR described{};
+    REQUIRE(cuArray3DGetDescriptor_v2(&described, array) == CUDA_SUCCESS);
+    const auto record = [&](uint32_t field) { return fixture.allocationWord(levels, (level * layout::Level::Bytes) + field); };
+    CHECK(record(layout::Level::Base) != 0);
+    CHECK(record(layout::Level::Pitch) == described.Width * sizeof(uint32_t));
+    CHECK(record(layout::Level::SlicePitch) == described.Width * sizeof(uint32_t) * described.Height);
+    CHECK(static_cast<uint32_t>(record(layout::Level::Width)) == described.Width);
+    CHECK(static_cast<uint32_t>(record(layout::Level::Height)) == std::max<size_t>(1, MipHeight >> level));
+    CHECK(static_cast<uint32_t>(record(layout::Level::Depth)) == 1);
+  }
+
+  CUDA_RESOURCE_DESC gotResource{};
+  CHECK(cuTexObjectGetResourceDesc(&gotResource, handle) == CUDA_SUCCESS);
+  CHECK(gotResource.resType == CU_RESOURCE_TYPE_MIPMAPPED_ARRAY);
+  CHECK(gotResource.res.mipmap.hMipmappedArray == mipmapped);
+  CHECK(cuTexObjectDestroy(handle) == CUDA_SUCCESS);
+  CHECK(cuMipmappedArrayDestroy(mipmapped) == CUDA_SUCCESS);
+}
+
+TEST_CASE("the runtime creates texture objects over mipmapped arrays", "[cuda][texture]") {
+  setup();
+  const auto descriptor = mipmappedDescriptor(MipWidth, MipHeight, 0);
+  CUmipmappedArray driverArray = nullptr;
+  REQUIRE(cuMipmappedArrayCreate(&driverArray, &descriptor, MipLevels) == CUDA_SUCCESS);
+  cudaResourceDesc resource{};
+  resource.resType = cudaResourceTypeMipmappedArray;
+  resource.res.mipmap.mipmap = reinterpret_cast<cudaMipmappedArray_t>(driverArray);
+  cudaTextureDesc texture{};
+  texture.readMode = cudaReadModeElementType;
+  texture.mipmapFilterMode = cudaFilterModeLinear;
+  texture.mipmapLevelBias = -0.75F;
+  texture.minMipmapLevelClamp = 0.0F;
+  texture.maxMipmapLevelClamp = 1.0F;
+  cudaTextureObject_t handle = 0;
+  REQUIRE(cudaCreateTextureObject(&handle, &resource, &texture, nullptr) == cudaSuccess);
+  CHECK(asFloat(entryWord(handle, layout::Field::LodBias)) == -0.75F);
+  CHECK(asFloat(entryWord(handle, layout::Field::MaxLod)) == 1.0F);
+
+  cudaResourceDesc gotResource{};
+  CHECK(cudaGetTextureObjectResourceDesc(&gotResource, handle) == cudaSuccess);
+  CHECK(gotResource.resType == cudaResourceTypeMipmappedArray);
+  CHECK(gotResource.res.mipmap.mipmap == resource.res.mipmap.mipmap);
+  cudaTextureDesc gotTexture{};
+  CHECK(cudaGetTextureObjectTextureDesc(&gotTexture, handle) == cudaSuccess);
+  CHECK(gotTexture.mipmapLevelBias == -0.75F);
+  CHECK(gotTexture.mipmapFilterMode == cudaFilterModeLinear);
+  CHECK(cudaDestroyTextureObject(handle) == cudaSuccess);
+  CHECK(cuMipmappedArrayDestroy(driverArray) == CUDA_SUCCESS);
 }

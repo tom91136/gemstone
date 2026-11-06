@@ -11,12 +11,13 @@ import net.kurobako.gemstone.vm.*
 
 /** Texture and surface instructions. The handle is the low 32 bits of a bindless object: a word of a constant bank
   * (`c[bank][4 * index]`, which holds a kernel argument) or a uniform register, and names an entry of the descriptor
-  * table. The VM has no mip chain, so the level-of-detail operands only select level zero and are ignored.
+  * table. `LL` and `LB` read the level or the bias from the register after the coordinates; with texel offsets that
+  * register holds the packed offsets, and `LZ`, the short forms, and gathers read level zero.
   */
 private object VMTextureCompiler {
   private enum Family derives CanEqual { case Sample, Fetch, Gather }
 
-  private val SamplingModifiers = Set("P", "T", "NODEP", "SCR", "LL", "LZ", "LB", "NDV")
+  private val SamplingModifiers = Set("P", "T", "NODEP", "SCR", "LL", "LZ", "LB", "NDV", "CL")
   private val GatherChannels    = Map("R" -> 0, "G" -> 1, "B" -> 2, "A" -> 3)
   private val SurfaceModifiers  =
     Set("D", "BA", "STRONG", "WEAK", "CTA", "SM", "SYS", "GPU", "CA", "CG", "CS", "LU", "CV", "WT", "WB")
@@ -170,15 +171,13 @@ private object VMTextureCompiler {
   }
 
   private def coordinates(
-      family: Family,
-      short: Boolean,
+      levelInSecond: Boolean,
       dimensions: Int,
       first: Operand,
       second: Option[Operand]
   )(using context: VMCompilationContext): Vec[Value] = {
     import context.*
     def at(offset: Int): Value = register(first, offset)
-    val levelInSecond          = family == Family.Sample && !short
     second match {
       case None                           => Vec.tabulate(dimensions)(at(_))
       case Some(_) if dimensions == 1     => Vec(at(0))
@@ -206,7 +205,12 @@ private object VMTextureCompiler {
     val dims           = if (family == Family.Gather) 2 else dimensions(rest.headOption)
     val mask           = if (family == Family.Gather) Vec(0, 1, 2, 3) else components(rest.lift(1))
     if (family == Family.Gather && rest.headOption.exists(symbol(_).isEmpty)) unsupported("unsupported gather operands")
-    val coords  = coordinates(family, short, dims, addresses.head, addresses.lift(1))
+    val level =
+      Option.when(
+        !short && !offsets && family != Family.Gather && (named("LL") || named("LB"))
+      )(operandsOf.lift(1)).flatten
+    val coords =
+      coordinates(level.isDefined || (family == Family.Sample && !short), dims, addresses.head, addresses.lift(1))
     val shifted =
       if (!offsets) coords
       else {
@@ -228,7 +232,16 @@ private object VMTextureCompiler {
         Image.Operation.Gather(target, shifted, channel.unsafe[Int in 0 ~ 3], Image.Element.Native, slots)
       } else {
         val kind = if (family == Family.Sample) Image.Coordinates.Float else Image.Coordinates.Integer
-        Image.Operation.Sample(target, shifted, kind, Image.Element.Native, slots)
+        level.fold(Image.Operation.Sample(target, shifted, kind, Image.Element.Native, slots)) { operand =>
+          Image.Operation.Sample(
+            target,
+            shifted :+ register(operand),
+            kind,
+            Image.Element.Native,
+            slots,
+            Image.Detail.Level
+          )
+        }
       }
     emit(TextureOperation(op))
     predicate.foreach(writePredicate(_, Value.Predicate(VMRegisters.Predicate.True.slot)))

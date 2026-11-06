@@ -20,6 +20,7 @@ object TextureDescriptor {
         channel  <- ChannelKind.fromCode(byte(Field.ChannelKind))
         resource <- ResourceKind.fromCode((flags >> Flag.ResourceShift) & Flag.ResourceMask)
         filter   <- FilterMode.fromCode(byte(Field.Filter))
+        mip      <- decodeChain(buffer, resource)
         format = TexelFormat(channel, bits)
         if format.isValid && modes.forall(_.isDefined)
         dimensions = byte(Field.Dimensions)
@@ -40,15 +41,34 @@ object TextureDescriptor {
         readMode = if ((flags & Flag.NormalisedRead) != 0) ReadMode.NormalisedFloat else ReadMode.ElementType,
         srgb = (flags & Flag.Srgb) != 0,
         normalisedCoordinates = (flags & Flag.NormalisedCoordinates) != 0,
-        border = Vector(Field.BorderX, Field.BorderY, Field.BorderZ, Field.BorderW).map(buffer.getFloat(_))
+        border = Vector(Field.BorderX, Field.BorderY, Field.BorderZ, Field.BorderW).map(buffer.getFloat(_)),
+        mip = mip
       )
+    }
+  }
+
+  private def decodeChain(buffer: ByteBuffer, resource: ResourceKind): Option[Option[MipChain]] = {
+    import TextureLayout.*
+    if (resource != ResourceKind.MipmappedArray) Some(None)
+    else {
+      val levels = buffer.getInt(Field.Levels)
+      FilterMode.fromCode(buffer.get(Field.MipFilter) & 0xff).filter(_ => levels >= 1).map { filter =>
+        Some(MipChain(
+          table = buffer.getLong(Field.LevelTable),
+          levels = levels,
+          filter = filter,
+          minLod = buffer.getFloat(Field.MinLod),
+          maxLod = buffer.getFloat(Field.MaxLod),
+          bias = buffer.getFloat(Field.LodBias)
+        ))
+      }
     }
   }
 }
 
 /** One entry of the descriptor table. `width`, `height`, and `depth` count texels, `pitch` and `slicePitch` bytes. Rows
   * of a 1D object are one texel high and slices of a 2D object are one deep. `border` is the colour read outside under
-  * [[AddressMode.Border]].
+  * [[AddressMode.Border]]. The geometry is that of level zero, and `mip` addresses the rest of a mipmapped chain.
   */
 case class TextureDescriptor(
     kind: ObjectKind,
@@ -66,7 +86,8 @@ case class TextureDescriptor(
     readMode: ReadMode,
     srgb: Boolean,
     normalisedCoordinates: Boolean,
-    border: Vector[Float]
+    border: Vector[Float],
+    mip: Option[MipChain] = None
 ) derives CanEqual {
   def extent(axis: Int): Int = axis match {
     case 0 => width
@@ -75,6 +96,24 @@ case class TextureDescriptor(
   }
 
   def widthBytes: Long = width.toLong * format.texelBytes
+
+  /** This descriptor re-addressed to the mip level `index`, which is clamped to the chain. */
+  def atLevel(chain: MipChain, index: Int, memory: TexelMemory): Either[TexelFault, TextureDescriptor] = {
+    import TextureLayout.*
+    val address = chain.table + Math.max(0, Math.min(chain.levels - 1, index)).toLong * Level.Bytes
+    memory.read(address, Level.Bytes).toRight(TexelFault.Unmapped(address)).map { record =>
+      val buffer = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
+      copy(
+        base = buffer.getLong(Level.Base),
+        pitch = buffer.getLong(Level.Pitch),
+        slicePitch = buffer.getLong(Level.SlicePitch),
+        width = buffer.getInt(Level.Width),
+        height = buffer.getInt(Level.Height),
+        depth = buffer.getInt(Level.Depth),
+        mip = None
+      )
+    }
+  }
 
   def texelAddress(x: Long, y: Long, z: Long): Long = base + z * slicePitch + y * pitch + x * format.texelBytes
 
@@ -101,6 +140,14 @@ case class TextureDescriptor(
     buffer.put(Field.Filter, filter.code.toByte)
     val colours = Vector(Field.BorderX, Field.BorderY, Field.BorderZ, Field.BorderW)
     colours.zipWithIndex.foreach((field, i) => buffer.putFloat(field, border(i)))
+    mip.foreach { chain =>
+      buffer.putLong(Field.LevelTable, chain.table)
+      buffer.putInt(Field.Levels, chain.levels)
+      buffer.put(Field.MipFilter, chain.filter.code.toByte)
+      buffer.putFloat(Field.MinLod, chain.minLod)
+      buffer.putFloat(Field.MaxLod, chain.maxLod)
+      buffer.putFloat(Field.LodBias, chain.bias)
+    }
     buffer.array()
   }
 }

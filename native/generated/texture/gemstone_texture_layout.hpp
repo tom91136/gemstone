@@ -6,7 +6,7 @@
 namespace gemstone::texture::Layout {
 namespace Table {
 inline constexpr uint64_t BaseAddress = 0x3f0000000000ull;
-inline constexpr uint64_t EntryBytes = 0x40ull;
+inline constexpr uint64_t EntryBytes = 0x80ull;
 inline constexpr uint64_t Entries = 0x10000ull;
 } // namespace Table
 
@@ -33,6 +33,12 @@ inline constexpr uint32_t BorderX = 48u;
 inline constexpr uint32_t BorderY = 52u;
 inline constexpr uint32_t BorderZ = 56u;
 inline constexpr uint32_t BorderW = 60u;
+inline constexpr uint32_t LevelTable = 64u;
+inline constexpr uint32_t Levels = 72u;
+inline constexpr uint32_t MipFilter = 76u;
+inline constexpr uint32_t MinLod = 80u;
+inline constexpr uint32_t MaxLod = 84u;
+inline constexpr uint32_t LodBias = 88u;
 } // namespace Field
 
 namespace Flag {
@@ -94,4 +100,14 @@ inline constexpr uint32_t MaxPitch = 65280u;
 inline constexpr uint32_t MaxRows = 65535u;
 inline constexpr uint32_t MaxBytes = 65536u;
 } // namespace Kepler
+
+namespace Level {
+inline constexpr uint32_t Base = 0u;
+inline constexpr uint32_t Pitch = 8u;
+inline constexpr uint32_t SlicePitch = 16u;
+inline constexpr uint32_t Width = 24u;
+inline constexpr uint32_t Height = 28u;
+inline constexpr uint32_t Depth = 32u;
+inline constexpr uint32_t Bytes = 40u;
+} // namespace Level
 } // namespace gemstone::texture::Layout

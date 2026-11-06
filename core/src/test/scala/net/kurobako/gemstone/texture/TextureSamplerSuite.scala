@@ -302,4 +302,79 @@ class TextureSamplerSuite extends Suite {
     val linear = descriptor(F32x1, 4, filter = FilterMode.Linear)
     assert(TextureSampler.sample(linear, Vector(2.0), floats(1f, 2f)).isLeft)
   }
+
+  private def mip(
+      lod: LevelOfDetail,
+      x: Double = 0.5,
+      y: Double = 0.5,
+      filter: FilterMode = FilterMode.Point,
+      mipFilter: FilterMode = FilterMode.Point,
+      minLod: Float = 0f,
+      maxLod: Float = 2f,
+      bias: Float = 0f
+  ): Double = {
+    val d = mipmapped(filter, mipFilter, minLod, maxLod, bias)
+    TextureSampler.sample(d, Vector(x, y), ArrayMemory(Base, mipBytes), lod).fold(fault => fail(fault.toString), _(0))
+  }
+
+  private def explicit(level: Double) = LevelOfDetail.Explicit(level)
+
+  test("a mipmapped texture reads the level an explicit level of detail names") {
+    assertEquals(Vector(0.0, 1.0, 2.0).map(level => mip(explicit(level))), Vector(10.0, 20.0, 40.0))
+  }
+
+  test("unnormalised coordinates count texels of level zero on every level") {
+    assertEquals(mip(explicit(1.0), x = 3.5, y = 3.5), 23.0)
+    assertEquals(mip(explicit(1.0), x = 3.5, y = 0.5), 21.0)
+  }
+
+  test("nearest mip filtering rounds the level of detail with ties going up") {
+    assertEquals(
+      Vector(0.4, 0.5, 0.6, 1.5, 9.0).map(level => mip(explicit(level))),
+      Vector(10.0, 20.0, 20.0, 40.0, 40.0)
+    )
+  }
+
+  test("linear mip filtering blends the two levels around the level of detail") {
+    def blended(level: Double) = mip(explicit(level), mipFilter = FilterMode.Linear)
+    assertEquals(Vector(0.0, 0.5, 1.25, 2.0, 7.0).map(blended(_)), Vector(10.0, 15.0, 25.0, 40.0, 40.0))
+  }
+
+  test("level of detail bias applies before the clamps") {
+    assertEquals(mip(explicit(0.0), bias = 1f), 20.0)
+    assertEquals(mip(explicit(0.0), bias = 5f, maxLod = 1f), 20.0)
+    assertEquals(mip(explicit(0.0), minLod = 1f), 20.0)
+    assertEquals(mip(explicit(2.0), maxLod = 0f), 10.0)
+  }
+
+  test("gradients select the level from the larger footprint in texels") {
+    def gradient(dx: Vector[Double], dy: Vector[Double]) = mip(LevelOfDetail.Gradient(dx, dy))
+    assertEquals(gradient(Vector(1.0, 0.0), Vector(0.0, 1.0)), 10.0)
+    assertEquals(gradient(Vector(2.0, 0.0), Vector(0.0, 1.0)), 20.0)
+    assertEquals(gradient(Vector(3.0, 0.0), Vector(0.0, 4.0)), 40.0)
+    assertEquals(gradient(Vector(0.0, 0.0), Vector(0.0, 0.0)), 10.0)
+  }
+
+  test("normalised gradients scale by the level zero extent") {
+    val d          = mipmapped()
+    val normalised = d.copy(normalisedCoordinates = true)
+    val lod        = LevelOfDetail.Gradient(Vector(0.5, 0.0), Vector(0.0, 0.25))
+    assertEquals(
+      TextureSampler.sample(normalised, Vector(0.1, 0.1), ArrayMemory(Base, mipBytes), lod).fold(_ => -1.0, _(0)),
+      20.0
+    )
+  }
+
+  test("a texel fetch reads the named level") {
+    val d                 = mipmapped()
+    def fetch(level: Int) =
+      TextureSampler.fetch(d, Vector(1L, 1L), ArrayMemory(Base, mipBytes), level).fold(_ => -1.0, _(0))
+    assertEquals(Vector(0, 1, 2, 9).map(fetch(_)), Vector(10.0, 23.0, 40.0, 40.0))
+  }
+
+  test("a mipmapped texture reports a fault for an unreadable level table") {
+    val d      = mipmapped()
+    val broken = d.copy(mip = d.mip.map(_.copy(table = Base + 0x10000)))
+    assert(TextureSampler.sample(broken, Vector(0.5, 0.5), ArrayMemory(Base, mipBytes), explicit(1.0)).isLeft)
+  }
 }

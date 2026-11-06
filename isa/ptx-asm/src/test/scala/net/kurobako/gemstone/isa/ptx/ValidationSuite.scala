@@ -126,13 +126,15 @@ class ValidationSuite extends Suite {
   }
 
   test("noComplete mbarrier arrivals with a count are available on sm_80") {
+    val version = Version(8, 0)
+    val target  = Target(80)
     for (
       source <- Vec(
         "mbarrier.arrive.noComplete.shared.b64 _, [%rd0], %r1;",
         "mbarrier.arrive_drop.noComplete.shared.b64 _, [%rd0], %r1;"
       )
     ) assertEquals(
-      Validation.validate(instruction(source), Version(8, 0), Target(80)),
+      Validation.validate(instruction(source), version, target),
       ValidationOutcome.Accepted,
       source
     )

@@ -291,6 +291,9 @@ public:
     GEMSTONE_RPC_REQUIRE(hostBacked.at(found->first));
   }
   void checkAllocationWord(const void *base, size_t offset, uint64_t expected) {
+    GEMSTONE_RPC_REQUIRE(allocationWord(base, offset) == expected);
+  }
+  uint64_t allocationWord(const void *base, size_t offset) {
     std::scoped_lock const lock(stateMutex);
     const auto found = allocationAt(base);
     GEMSTONE_RPC_REQUIRE(found != allocationAddresses.end());
@@ -300,7 +303,7 @@ public:
     uint64_t actual = 0;
     std::memcpy(&actual, hostBacked[found->first] ? static_cast<const uint8_t *>(base) + offset : bytes.data() + lead + offset,
                 sizeof(actual));
-    GEMSTONE_RPC_REQUIRE(actual == expected);
+    return actual;
   }
   void expectIndirectInput(const void *table, uint32_t value, std::optional<uint32_t> deviceWrite = std::nullopt) {
     std::scoped_lock const lock(stateMutex);

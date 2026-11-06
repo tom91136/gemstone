@@ -262,6 +262,85 @@ int mirrorIndex(int k) {
   return m < AddressWidth ? m : period - 1 - m;
 }
 
+constexpr int MipExtent = 4;
+constexpr int MipLevels = 3;
+const std::vector<float3> MipProbes = {make_float3(0.375F, 0.625F, 0.0F), make_float3(0.875F, 0.125F, 0.0F),
+                                       make_float3(0.625F, 0.875F, 0.0F)};
+
+__global__ void lodKernel(cudaTextureObject_t texture, const float3 *coords, float level, float *out, int count) {
+  const int i = static_cast<int>(threadIdx.x);
+  if (i < count) out[i] = tex2DLod<float>(texture, coords[i].x, coords[i].y, level);
+}
+
+__global__ void gradKernel(cudaTextureObject_t texture, const float3 *coords, float2 dx, float2 dy, float *out, int count) {
+  const int i = static_cast<int>(threadIdx.x);
+  if (i < count) out[i] = tex2DGrad<float>(texture, coords[i].x, coords[i].y, dx, dy);
+}
+
+float mipTexel(int level, const float3 &coord) {
+  const int extent = MipExtent >> level;
+  const int x = static_cast<int>(coord.x * static_cast<float>(extent));
+  const int y = static_cast<int>(coord.y * static_cast<float>(extent));
+  return (100.0F * static_cast<float>(level)) + static_cast<float>((y * extent) + x);
+}
+
+std::vector<float> mipTexels(int level) {
+  return MipProbes | map([level](const float3 &coord) { return mipTexel(level, coord); }) | to_vector();
+}
+
+std::vector<float> mipBlend(int lower, float weight) {
+  const auto from = mipTexels(lower);
+  const auto to = mipTexels(lower + 1);
+  std::vector<float> blended;
+  for (size_t i = 0; i < from.size(); ++i)
+    blended.push_back(from[i] + ((to[i] - from[i]) * weight));
+  return blended;
+}
+
+cudaMipmappedArray_t createMipmappedArray() {
+  const cudaChannelFormatDesc desc = cudaCreateChannelDesc<float>();
+  cudaMipmappedArray_t mipmapped = nullptr;
+  check(cudaMallocMipmappedArray(&mipmapped, &desc, make_cudaExtent(MipExtent, MipExtent, 0), MipLevels), "mipmapped array");
+  for (int level = 0; level < MipLevels; ++level) {
+    cudaArray_t array = nullptr;
+    check(cudaGetMipmappedArrayLevel(&array, mipmapped, static_cast<unsigned>(level)), "mipmap level");
+    const auto extent = static_cast<size_t>(MipExtent >> level);
+    std::vector<float> texels(extent * extent);
+    for (size_t i = 0; i < texels.size(); ++i)
+      texels[i] = (100.0F * static_cast<float>(level)) + static_cast<float>(i);
+    uploadTexels(array, texels, extent, extent, 0);
+  }
+  return mipmapped;
+}
+
+cudaTextureObject_t makeMipTexture(cudaMipmappedArray_t mipmapped, cudaTextureFilterMode mipFilter) {
+  cudaResourceDesc resource{};
+  resource.resType = cudaResourceTypeMipmappedArray;
+  resource.res.mipmap.mipmap = mipmapped;
+  cudaTextureDesc desc = textureDesc(cudaAddressModeClamp, cudaFilterModePoint, cudaReadModeElementType, true);
+  desc.mipmapFilterMode = mipFilter;
+  desc.maxMipmapLevelClamp = static_cast<float>(MipLevels - 1);
+  return makeTexture(resource, desc);
+}
+
+std::vector<float> sampleLod(cudaTextureObject_t texture, float level) {
+  const DeviceBuffer<float3> deviceCoords(MipProbes);
+  const auto count = static_cast<int>(MipProbes.size());
+  DeviceBuffer<float> out(std::vector<float>(MipProbes.size(), 0.0F));
+  lodKernel<<<1, static_cast<unsigned>(count)>>>(texture, deviceCoords.data, level, out.data, count);
+  finish("mipmap level sample");
+  return out.download();
+}
+
+std::vector<float> sampleGradient(cudaTextureObject_t texture, float2 dx, float2 dy) {
+  const DeviceBuffer<float3> deviceCoords(MipProbes);
+  const auto count = static_cast<int>(MipProbes.size());
+  DeviceBuffer<float> out(std::vector<float>(MipProbes.size(), 0.0F));
+  gradKernel<<<1, static_cast<unsigned>(count)>>>(texture, deviceCoords.data, dx, dy, out.data, count);
+  finish("mipmap gradient sample");
+  return out.download();
+}
+
 } // namespace
 
 TEST_CASE("resources/cuda/texture-linear-fetch", "[unified][resources]") {
@@ -335,6 +414,37 @@ TEST_CASE("resources/cuda/texture-array-3d", "[unified][resources]") {
   check(cudaDestroyTextureObject(point), "destroy texture");
   check(cudaDestroyTextureObject(linear), "destroy texture");
   check(cudaFreeArray(array), "free array");
+}
+
+TEST_CASE("resources/cuda/texture-mipmap-level", "[unified][resources]") {
+  cudaMipmappedArray_t mipmapped = createMipmappedArray();
+  const cudaTextureObject_t nearest = makeMipTexture(mipmapped, cudaFilterModePoint);
+  const cudaTextureObject_t blended = makeMipTexture(mipmapped, cudaFilterModeLinear);
+  for (int level = 0; level < MipLevels; ++level)
+    expectNear(sampleLod(nearest, static_cast<float>(level)), mipTexels(level), 0.0F, "explicit level");
+  expectNear(sampleLod(nearest, 0.4F), mipTexels(0), 0.0F, "nearest rounds down");
+  expectNear(sampleLod(nearest, 0.5F), mipTexels(1), 0.0F, "nearest ties go up");
+  expectNear(sampleLod(nearest, 9.0F), mipTexels(MipLevels - 1), 0.0F, "level clamps to the chain");
+  expectNear(sampleLod(blended, 0.5F), mipBlend(0, 0.5F), 1e-3F, "blend of levels 0 and 1");
+  expectNear(sampleLod(blended, 1.5F), mipBlend(1, 0.5F), 1e-3F, "blend of levels 1 and 2");
+  check(cudaDestroyTextureObject(nearest), "destroy texture");
+  check(cudaDestroyTextureObject(blended), "destroy texture");
+  check(cudaFreeMipmappedArray(mipmapped), "free mipmapped array");
+}
+
+TEST_CASE("resources/cuda/texture-mipmap-gradient", "[unified][resources]") {
+  cudaMipmappedArray_t mipmapped = createMipmappedArray();
+  const cudaTextureObject_t nearest = makeMipTexture(mipmapped, cudaFilterModePoint);
+  const cudaTextureObject_t blended = makeMipTexture(mipmapped, cudaFilterModeLinear);
+  expectNear(sampleGradient(nearest, make_float2(0.25F, 0.0F), make_float2(0.0F, 0.25F)), mipTexels(0), 0.0F, "one texel per pixel");
+  expectNear(sampleGradient(nearest, make_float2(0.5F, 0.0F), make_float2(0.0F, 0.25F)), mipTexels(1), 0.0F, "two texels along x");
+  expectNear(sampleGradient(nearest, make_float2(0.25F, 0.0F), make_float2(0.0F, 0.5F)), mipTexels(1), 0.0F, "two texels along y");
+  expectNear(sampleGradient(nearest, make_float2(1.0F, 0.0F), make_float2(0.0F, 0.0F)), mipTexels(2), 0.0F, "four texels along x");
+  expectNear(sampleGradient(blended, make_float2(0.375F, 0.0F), make_float2(0.0F, 0.0F)), mipBlend(0, 150.0F / 256.0F), 1e-2F,
+             "fractional level from the gradient");
+  check(cudaDestroyTextureObject(nearest), "destroy texture");
+  check(cudaDestroyTextureObject(blended), "destroy texture");
+  check(cudaFreeMipmappedArray(mipmapped), "free mipmapped array");
 }
 
 TEST_CASE("resources/cuda/texture-wrap", "[unified][resources]") {

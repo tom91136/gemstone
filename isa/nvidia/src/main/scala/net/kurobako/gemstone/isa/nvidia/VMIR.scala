@@ -991,6 +991,11 @@ private[isa] object VMIR {
     /** Whether floating-point coordinates sample, or integer coordinates fetch with the address modes applied. */
     enum Coordinates derives CanEqual { case Float, Integer }
 
+    /** Which mipmap level a sample reads: the base, an explicit level, or the level the coordinate gradients imply. The
+      * level or the gradients follow the coordinates among a sample's operands.
+      */
+    enum Detail derives CanEqual { case Base, Level, Gradient }
+
     /** The register view of a texel component; `Native` is the integer or float the texel format defines. */
     enum Element derives CanEqual { case F32, S32, U32, Native }
 
@@ -1006,7 +1011,8 @@ private[isa] object VMIR {
           coordinates: Vec[Value],
           kind: Coordinates,
           element: Element,
-          destinations: Vec[Option[Register]]
+          destinations: Vec[Option[Register]],
+          detail: Detail = Detail.Base
       )
 
       /** The `component` of the four texels around a 2D position, in tld4 footprint order. */

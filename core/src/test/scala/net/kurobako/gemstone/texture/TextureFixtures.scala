@@ -59,4 +59,39 @@ object TextureFixtures {
   }
 
   def memoryOf(values: Int*): ArrayMemory = ArrayMemory(Base, values.map(_.toByte).toArray)
+
+  val MipTable: Long = Base + 0x100
+
+  private val MipLevels = Vector((0x00L, 4), (0x40L, 2), (0x50L, 1))
+
+  /** A 4x4 texture of three levels, laid out by [[mipBytes]]: 10 everywhere, then 20, 21, 22, 23, then 40. */
+  def mipmapped(
+      filter: FilterMode = FilterMode.Point,
+      mipFilter: FilterMode = FilterMode.Point,
+      minLod: Float = 0f,
+      maxLod: Float = 2f,
+      bias: Float = 0f
+  ): TextureDescriptor = {
+    val chain = MipChain(MipTable, MipLevels.size, mipFilter, minLod, maxLod, bias)
+    descriptor(F32x1, 4, 4, dimensions = 2, filter = filter).copy(
+      resource = ResourceKind.MipmappedArray,
+      mip = Some(chain)
+    )
+  }
+
+  def mipBytes: Array[Byte] = {
+    val bytes  = ByteBuffer.allocate(0x200).order(ByteOrder.LITTLE_ENDIAN)
+    val texels = Vector.fill(16)(10f) ++ Vector(20f, 21f, 22f, 23f) ++ Vector(40f)
+    texels.zipWithIndex.foreach((texel, index) => bytes.putFloat(index * 4, texel))
+    MipLevels.zipWithIndex.foreach { case ((offset, extent), index) =>
+      val record = (MipTable - Base).toInt + index * TextureLayout.Level.Bytes
+      bytes.putLong(record + TextureLayout.Level.Base, Base + offset)
+      bytes.putLong(record + TextureLayout.Level.Pitch, extent * 4L)
+      bytes.putLong(record + TextureLayout.Level.SlicePitch, extent * extent * 4L)
+      bytes.putInt(record + TextureLayout.Level.Width, extent)
+      bytes.putInt(record + TextureLayout.Level.Height, extent)
+      bytes.putInt(record + TextureLayout.Level.Depth, 1)
+    }
+    bytes.array()
+  }
 }

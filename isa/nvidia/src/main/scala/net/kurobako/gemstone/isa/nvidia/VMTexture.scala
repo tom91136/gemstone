@@ -170,6 +170,14 @@ private object VMTexture {
   private def floats(coordinates: Vec[Long]): Vector[Double] =
     coordinates.toVector.map(bits => java.lang.Float.intBitsToFloat(bits.toInt).toDouble)
 
+  private def detailed(values: Vector[Double], detail: Detail): (Vector[Double], LevelOfDetail) = detail match {
+    case Detail.Base     => (values, LevelOfDetail.Explicit(0.0))
+    case Detail.Level    => (values.init, LevelOfDetail.Explicit(values.last))
+    case Detail.Gradient =>
+      val axes = values.size / 3
+      (values.take(axes), LevelOfDetail.Gradient(values.slice(axes, 2 * axes), values.drop(2 * axes)))
+  }
+
   private def integers(coordinates: Vec[Long]): Vector[Long] = coordinates.toVector.map(_.toInt.toLong)
 
   private def position(d: TextureDescriptor, coordinates: Vec[Long]): SurfacePosition = {
@@ -190,10 +198,15 @@ private object VMTexture {
     def texel(access: TextureDescriptor => Either[TexelFault, Texel], element: Element) =
       resolved(memory, handle, ObjectKind.Texture).flatMap(access(_).left.map(fault(memory, _)).map(words(_, element)))
     operation match {
-      case Operation.Sample(kind = Coordinates.Float, element = element) =>
-        texel(TextureSampler.sample(_, floats(coordinates), memory), element)
-      case Operation.Sample(kind = Coordinates.Integer, element = element) =>
-        texel(TextureSampler.fetch(_, integers(coordinates), memory), element)
+      case Operation.Sample(kind = Coordinates.Float, element = element, detail = detail) =>
+        val (position, lod) = detailed(floats(coordinates), detail)
+        texel(TextureSampler.sample(_, position, memory, lod), element)
+      case Operation.Sample(kind = Coordinates.Integer, element = element, detail = detail) =>
+        val (position, level) = integers(coordinates) match {
+          case values if detail == Detail.Level => (values.init, values.last.toInt)
+          case values                           => (values, 0)
+        }
+        texel(TextureSampler.fetch(_, position, memory, level), element)
       case Operation.Gather(component = component, element = element) =>
         texel(TextureSampler.gather(_, floats(coordinates), component.raw, memory), element)
       case Operation.Query(_, surface, which, _) =>

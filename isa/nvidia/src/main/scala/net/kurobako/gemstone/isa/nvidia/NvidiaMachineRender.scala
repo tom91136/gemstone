@@ -909,8 +909,8 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
   }
 
   private def textureShape(operation: Texture.Operation): Term = Term.Constant(operation match {
-    case Texture.Operation.Sample(_, coordinates, kind, element, _) =>
-      s"Texture.Sample(${coordinates.size}, $kind, $element)"
+    case Texture.Operation.Sample(_, coordinates, kind, element, _, detail) =>
+      s"Texture.Sample(${coordinates.size}, $kind, $element, $detail)"
     case Texture.Operation.Gather(component = component, element = element) =>
       s"Texture.Gather(${component.raw}, $element)"
     case Texture.Operation.Query(_, surface, property, _)                      => s"Texture.Query($surface, $property)"

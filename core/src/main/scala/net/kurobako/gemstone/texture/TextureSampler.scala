@@ -62,17 +62,86 @@ object TextureSampler {
     else readTexel(d, resolved(0), resolved.lift(1).getOrElse(0L), resolved.lift(2).getOrElse(0L), memory)
   }
 
-  /** The texel at integer coordinates `indices`, which address modes still apply to. */
-  def fetch(d: TextureDescriptor, indices: IndexedSeq[Long], memory: TexelMemory): Either[TexelFault, Texel] =
-    fetchAt(
-      d,
-      indices.take(3).toVector,
-      Vector.tabulate(indices.length.min(3))(effective(d, _, normalised = false)),
-      memory
+  /** The texel at integer coordinates `indices` of mipmap level `level`, which address modes still apply to. */
+  def fetch(d: TextureDescriptor, indices: IndexedSeq[Long], memory: TexelMemory, level: Int = 0)
+      : Either[TexelFault, Texel] = {
+    val chosen = d.mip.fold(Right(d))(d.atLevel(_, level, memory))
+    chosen.flatMap(l =>
+      fetchAt(
+        l,
+        indices.take(3).toVector,
+        Vector.tabulate(indices.length.min(3))(effective(l, _, normalised = false)),
+        memory
+      )
+    )
+  }
+
+  private def log2(value: Double): Double = Math.log(value) / Math.log(2.0)
+
+  /** The level of detail `detail` asks for, biased and clamped to the chain, in levels from the base. */
+  private def lambda(d: TextureDescriptor, chain: MipChain, detail: LevelOfDetail, axes: Int): Double = {
+    val normalised                                   = d.normalisedCoordinates
+    def length(gradient: IndexedSeq[Double]): Double = Math.sqrt(
+      gradient.take(axes).zipWithIndex.map((g, axis) => Math.pow(scaled(d, axis, g, normalised), 2)).sum
+    )
+    val requested = detail match {
+      case LevelOfDetail.Explicit(level)  => if (level.isNaN) 0.0 else level
+      case LevelOfDetail.Gradient(dx, dy) => log2(Math.max(length(dx), length(dy)))
+    }
+    val biased = requested + chain.bias
+    Math.max(
+      0.0,
+      Math.min(chain.levels - 1.0, Math.max(chain.minLod.toDouble, Math.min(chain.maxLod.toDouble, biased)))
+    )
+  }
+
+  private def blend(from: Texel, to: Texel, weight: Double): Texel =
+    Texel(
+      Vector.tabulate(4)(lane => ((1.0 - weight) * from(lane) + weight * to(lane)).toFloat.toDouble),
+      integral = false
     )
 
-  /** Sampling at `coordinates`, normalised or not as the descriptor says. */
-  def sample(d: TextureDescriptor, coordinates: IndexedSeq[Double], memory: TexelMemory): Either[TexelFault, Texel] = {
+  private def sampleChain(
+      d: TextureDescriptor,
+      chain: MipChain,
+      coordinates: IndexedSeq[Double],
+      detail: LevelOfDetail,
+      memory: TexelMemory
+  ): Either[TexelFault, Texel] = {
+    val lod                                       = lambda(d, chain, detail, coordinates.length.min(3))
+    def at(level: Int): Either[TexelFault, Texel] = d.atLevel(chain, level, memory).flatMap { l =>
+      val relative = coordinates.zipWithIndex.map((c, axis) =>
+        if (d.normalisedCoordinates || axis >= 3) c else c * l.extent(axis).toDouble / d.extent(axis).toDouble
+      )
+      sampleLevel(l, relative, memory)
+    }
+    val lower  = Math.floor(lod).toInt
+    val weight = quantise(lod - lower)
+    if (chain.filter == FilterMode.Point || d.format.isIntegral(d.readMode))
+      at(Math.max(0, Math.min(chain.levels - 1, Math.floor(lod + 0.5).toInt)))
+    else if (lower >= chain.levels - 1 || weight == 0.0) at(lower)
+    else
+      for {
+        near <- at(lower)
+        far  <- at(lower + 1)
+      } yield blend(near, far, weight)
+  }
+
+  /** Sampling at `coordinates`, normalised or not as the descriptor says. Unnormalised coordinates count texels of
+    * level zero. A mipmapped texture reads the level or levels `detail` selects.
+    */
+  def sample(
+      d: TextureDescriptor,
+      coordinates: IndexedSeq[Double],
+      memory: TexelMemory,
+      detail: LevelOfDetail = LevelOfDetail.Explicit(0.0)
+  ): Either[TexelFault, Texel] = d.mip match {
+    case Some(chain) => sampleChain(d, chain, coordinates, detail, memory)
+    case None        => sampleLevel(d, coordinates, memory)
+  }
+
+  private def sampleLevel(d: TextureDescriptor, coordinates: IndexedSeq[Double], memory: TexelMemory)
+      : Either[TexelFault, Texel] = {
     val normalised = d.normalisedCoordinates
     val axes       = coordinates.length.min(3)
     val modes      = Vector.tabulate(axes)(effective(d, _, normalised))

@@ -97,6 +97,51 @@ class TextureExecutionSuite extends Suite {
     assertEquals(memory.outputWords(4), Vec.from(floatBits(30f, 0f, 0f, 1f)))
   }
 
+  private def mipMemory(mipFilter: FilterMode = FilterMode.Point, bias: Float = 0f): TextureMemory =
+    memoryWith(mipBytes, 1 -> mipmapped(mipFilter = mipFilter, bias = bias))
+
+  test("tex.level.2d.v4.f32.f32 reads the explicit level") {
+    val memory = mipMemory()
+    val body   = s"""mov.f32 %f4, 0f3f800000;
+      mov.f32 %f5, 0f3f800000;
+      mov.f32 %f6, 0f3f800000;
+      tex.level.2d.v4.f32.f32 {%r0, %r1, %r2, %r3}, [%rd2, {%f4, %f5}], %f6;
+      $storeFour"""
+    assertEquals(run(body, memory), Right(()))
+    assertEquals(memory.outputWords(1), Vec.from(floatBits(20f)))
+  }
+
+  test("tex.level.2d.v4.f32.f32 blends levels under linear mip filtering") {
+    val memory = mipMemory(FilterMode.Linear)
+    val body   = s"""mov.f32 %f4, 0f3f000000;
+      mov.f32 %f6, 0f3f000000;
+      tex.level.2d.v4.f32.f32 {%r0, %r1, %r2, %r3}, [%rd2, {%f4, %f4}], %f6;
+      $storeFour"""
+    assertEquals(run(body, memory), Right(()))
+    assertEquals(memory.outputWords(1), Vec.from(floatBits(15f)))
+  }
+
+  test("tex.grad.2d.v4.f32.f32 derives the level from the gradients") {
+    val memory = mipMemory()
+    val body   = s"""mov.f32 %f4, 0f3f000000;
+      mov.f32 %f5, 0f00000000;
+      mov.f32 %f6, 0f40800000;
+      mov.f32 %f7, 0f3f800000;
+      tex.grad.2d.v4.f32.f32 {%r0, %r1, %r2, %r3}, [%rd2, {%f4, %f4}], {%f6, %f5}, {%f5, %f7};
+      $storeFour"""
+    assertEquals(run(body, memory), Right(()))
+    assertEquals(memory.outputWords(1), Vec.from(floatBits(40f)))
+  }
+
+  test("plain tex.2d.v4.f32.f32 over a mipmapped texture reads level zero shifted by the bias") {
+    val memory = mipMemory(bias = 1f)
+    val body   = s"""mov.f32 %f4, 0f3f000000;
+      tex.2d.v4.f32.f32 {%r0, %r1, %r2, %r3}, [%rd2, {%f4, %f4}];
+      $storeFour"""
+    assertEquals(run(body, memory), Right(()))
+    assertEquals(memory.outputWords(1), Vec.from(floatBits(20f)))
+  }
+
   test("tex.1d.v4.f32.f32 filters linearly between texels") {
     val memory = memoryWith(ramp, 1 -> descriptor(F32x1, 4, filter = FilterMode.Linear))
     val body   = s"""mov.f32 %f4, 0f40000000;

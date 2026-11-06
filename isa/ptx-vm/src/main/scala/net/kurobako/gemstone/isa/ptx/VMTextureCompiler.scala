@@ -33,6 +33,17 @@ private object VMTextureCompiler {
       case other => invalid(s"expected a texture or surface operand, found $other")
     }
 
+  private def vector(operand: Operand, axes: Int)(using scope: Scope): Either[Error, Vec[Value]] = {
+    val components = operand match {
+      case Operand.VectorLiteral(items) => items
+      case single                       => Vec(single)
+    }
+    for {
+      values <- components.traverse(scope.value(_))
+      _      <- Either.cond(values.size >= axes, (), Error.Invalid(s"expected $axes components, found $values"))
+    } yield values.take(axes)
+  }
+
   private def axes(modifiers: Vec[Modifier]): Either[Error, Int] =
     modifiers.collectFirst {
       case Modifier.N1d => 1
@@ -80,7 +91,8 @@ private object VMTextureCompiler {
   /** The lowering of `instruction`, or None when another family owns it. */
   def lower(instruction: Instruction, modifiers: Vec[Modifier])(using scope: Scope): Option[Lowered] =
     instruction.form match {
-      case Form.Tex(dest, textureAndCoordinates, None, None, None, None) =>
+      case Form.Tex(dest, textureAndCoordinates, None, None, None, None)
+          if !modifiers.contains(Modifier.Level) && !modifiers.contains(Modifier.Grad) =>
         Some(for {
           dimensions <- axes(modifiers)
           types      = modifiers.toVector.flatMap(element(_))
@@ -96,7 +108,41 @@ private object VMTextureCompiler {
           kind = if (modifiers.last == Modifier.F32) Coordinates.Float else Coordinates.Integer
           lowered <- texture(Operation.Sample(located._1, located._2, kind, types.head, destinations))
         } yield lowered)
-      case Form.Tex(_, _, _, _, _, _) => Some(unsupported(instruction, "level, gradient, offset and compare forms"))
+      case Form.Tex(dest, textureAndCoordinates, Some(level), None, None, None) if modifiers.contains(Modifier.Level) =>
+        Some(for {
+          dimensions <- axes(modifiers)
+          types = modifiers.toVector.flatMap(element(_))
+          destinations <- scope.sinks(dest)
+          located      <- target(textureAndCoordinates, dimensions)
+          lod          <- scope.value(level)
+          kind = if (modifiers.last == Modifier.F32) Coordinates.Float else Coordinates.Integer
+          lowered <- texture(Operation.Sample(
+            located._1,
+            located._2 :+ lod,
+            kind,
+            types.head,
+            destinations,
+            Detail.Level
+          ))
+        } yield lowered)
+      case Form.Tex(dest, textureAndCoordinates, Some(dx), Some(dy), None, None) if modifiers.contains(Modifier.Grad) =>
+        Some(for {
+          dimensions <- axes(modifiers)
+          types = modifiers.toVector.flatMap(element(_))
+          destinations <- scope.sinks(dest)
+          located      <- target(textureAndCoordinates, dimensions)
+          x            <- vector(dx, dimensions)
+          y            <- vector(dy, dimensions)
+          lowered      <- texture(Operation.Sample(
+            located._1,
+            located._2 ++ x ++ y,
+            Coordinates.Float,
+            types.head,
+            destinations,
+            Detail.Gradient
+          ))
+        } yield lowered)
+      case Form.Tex(_, _, _, _, _, _) => Some(unsupported(instruction, "offset and compare forms"))
       case Form.Tld4(dest, textureAndCoordinates, None, None) =>
         Some(for {
           component <- modifiers.collectFirst {

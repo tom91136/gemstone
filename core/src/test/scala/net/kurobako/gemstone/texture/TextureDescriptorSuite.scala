@@ -24,7 +24,7 @@ class TextureDescriptorSuite extends Suite {
 
   test("the table layout is fixed") {
     assertEquals(TextureLayout.Table.BaseAddress, 0x3f0000000000L)
-    assertEquals(TextureLayout.Table.EntryBytes, 64L)
+    assertEquals(TextureLayout.Table.EntryBytes, 128L)
     assertEquals(TextureLayout.Table.Entries, 65536L)
     assert(TextureLayout.Table.BaseAddress + TextureLayout.Table.Entries * TextureLayout.Table.EntryBytes <
       0x400000000000L)
@@ -33,7 +33,7 @@ class TextureDescriptorSuite extends Suite {
   test("an entry has the declared size and field offsets") {
     val bytes  = full.encode
     val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    assertEquals(bytes.length, 64)
+    assertEquals(bytes.length, 128)
     assertEquals(buffer.getLong(TextureLayout.Field.Base), Base)
     assertEquals(buffer.getLong(TextureLayout.Field.Pitch), 128L)
     assertEquals(buffer.getLong(TextureLayout.Field.SlicePitch), 4096L)
@@ -76,12 +76,18 @@ class TextureDescriptorSuite extends Suite {
       BorderX     -> 4,
       BorderY     -> 4,
       BorderZ     -> 4,
-      BorderW     -> 4
+      BorderW     -> 4,
+      LevelTable  -> 8,
+      Levels      -> 4,
+      MipFilter   -> 1,
+      MinLod      -> 4,
+      MaxLod      -> 4,
+      LodBias     -> 4
     )
     val covered = spans.flatMap((offset, size) => offset until offset + size)
     assertEquals(covered.distinct.size, covered.size)
-    assertEquals(covered.max, 63)
-    assertEquals(covered.size, 64)
+    assertEquals(covered.max, 91)
+    assertEquals(covered.take(64), (0 until 64).toVector)
   }
 
   test("an entry decodes to the descriptor that wrote it") {
@@ -110,9 +116,18 @@ class TextureDescriptorSuite extends Suite {
     }
   }
 
+  test("a mipmapped entry decodes with its level chain") {
+    val chain  = MipChain(Base + 0x1000, 5, FilterMode.Linear, 0.5f, 3.25f, -1.5f)
+    val mapped = full.copy(resource = ResourceKind.MipmappedArray, mip = Some(chain))
+    assertEquals(TextureDescriptor.decode(mapped.encode), Some(mapped))
+    val empty = mapped.encode.clone()
+    ByteBuffer.wrap(empty).order(ByteOrder.LITTLE_ENDIAN).putInt(TextureLayout.Field.Levels, 0)
+    assertEquals(TextureDescriptor.decode(empty), None)
+  }
+
   test("free, short, and corrupt entries do not decode") {
-    assertEquals(TextureDescriptor.decode(Array.ofDim[Byte](64)), None)
-    assertEquals(TextureDescriptor.decode(full.encode.take(63)), None)
+    assertEquals(TextureDescriptor.decode(Array.ofDim[Byte](128)), None)
+    assertEquals(TextureDescriptor.decode(full.encode.take(127)), None)
     def corrupt(field: Int, value: Int): Option[TextureDescriptor] = {
       val bytes = full.encode
       bytes(field) = value.toByte
@@ -144,8 +159,11 @@ class TextureDescriptorSuite extends Suite {
   }
 
   private def table(entries: (Int, TextureDescriptor)*): ArrayMemory = {
-    val memory = ArrayMemory(TextureLayout.Table.BaseAddress, Array.ofDim[Byte](4 * 64))
-    entries.foreach((index, d) => memory.write(TextureLayout.Table.BaseAddress + index * 64L, d.encode))
+    val memory =
+      ArrayMemory(TextureLayout.Table.BaseAddress, Array.ofDim[Byte](4 * TextureLayout.Table.EntryBytes.toInt))
+    entries.foreach((index, d) =>
+      memory.write(TextureLayout.Table.BaseAddress + index * TextureLayout.Table.EntryBytes, d.encode)
+    )
     memory
   }
 
@@ -167,7 +185,7 @@ class TextureDescriptorSuite extends Suite {
     )
     assertEquals(
       TextureTable.resolve(9L, ObjectKind.Texture, memory),
-      Left(TextureTable.Failure.Unreadable(TextureLayout.Table.BaseAddress + 9 * 64L))
+      Left(TextureTable.Failure.Unreadable(TextureLayout.Table.BaseAddress + 9 * TextureLayout.Table.EntryBytes))
     )
   }
 }

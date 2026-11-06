@@ -7,7 +7,7 @@ import javax.annotation.processing.Generated
 object TextureLayout {
   object Table {
     inline val BaseAddress = 0x3f0000000000L
-    inline val EntryBytes = 0x40L
+    inline val EntryBytes = 0x80L
     inline val Entries = 0x10000L
   }
 
@@ -34,6 +34,12 @@ object TextureLayout {
     inline val BorderY = 52
     inline val BorderZ = 56
     inline val BorderW = 60
+    inline val LevelTable = 64
+    inline val Levels = 72
+    inline val MipFilter = 76
+    inline val MinLod = 80
+    inline val MaxLod = 84
+    inline val LodBias = 88
   }
 
   object Flag {
@@ -94,5 +100,15 @@ object TextureLayout {
     inline val MaxPitch = 65280
     inline val MaxRows = 65535
     inline val MaxBytes = 65536
+  }
+
+  object Level {
+    inline val Base = 0
+    inline val Pitch = 8
+    inline val SlicePitch = 16
+    inline val Width = 24
+    inline val Height = 28
+    inline val Depth = 32
+    inline val Bytes = 40
   }
 }

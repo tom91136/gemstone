@@ -3250,6 +3250,7 @@ struct Slot {
   CUDA_RESOURCE_DESC resource;
   CUDA_TEXTURE_DESC texture;
   CUDA_RESOURCE_VIEW_DESC view;
+  CUdeviceptr levelTable;
 };
 
 struct ChannelFormat {
@@ -3268,6 +3269,7 @@ struct Geometry {
   uint32_t dimensions;
   uint32_t resource;
   ChannelFormat format;
+  const CudaMipmappedArray *chain;
 };
 
 using Entry = std::array<unsigned char, layout::Table::EntryBytes>;
@@ -3321,7 +3323,8 @@ CUresult geometryOf(const CUDA_RESOURCE_DESC &resource, Geometry *geometry) {
                    .depth = static_cast<uint32_t>(array->depth),
                    .dimensions = array->dimensions,
                    .resource = CU_RESOURCE_TYPE_ARRAY,
-                   .format = *format};
+                   .format = *format,
+                   .chain = nullptr};
       return CUDA_SUCCESS;
     }
     case CU_RESOURCE_TYPE_LINEAR: {
@@ -3338,7 +3341,8 @@ CUresult geometryOf(const CUDA_RESOURCE_DESC &resource, Geometry *geometry) {
                    .depth = 1,
                    .dimensions = 1,
                    .resource = CU_RESOURCE_TYPE_LINEAR,
-                   .format = *format};
+                   .format = *format,
+                   .chain = nullptr};
       return CUDA_SUCCESS;
     }
     case CU_RESOURCE_TYPE_PITCH2D: {
@@ -3357,10 +3361,21 @@ CUresult geometryOf(const CUDA_RESOURCE_DESC &resource, Geometry *geometry) {
                    .depth = 1,
                    .dimensions = 2,
                    .resource = CU_RESOURCE_TYPE_PITCH2D,
-                   .format = *format};
+                   .format = *format,
+                   .chain = nullptr};
       return CUDA_SUCCESS;
     }
-    case CU_RESOURCE_TYPE_MIPMAPPED_ARRAY: return resource.res.mipmap.hMipmappedArray ? CUDA_ERROR_NOT_SUPPORTED : CUDA_ERROR_INVALID_VALUE;
+    case CU_RESOURCE_TYPE_MIPMAPPED_ARRAY: {
+      if (!resource.res.mipmap.hMipmappedArray) return CUDA_ERROR_INVALID_VALUE;
+      const auto *chain = reinterpret_cast<const CudaMipmappedArray *>(resource.res.mipmap.hMipmappedArray);
+      CUDA_RESOURCE_DESC base{};
+      base.resType = CU_RESOURCE_TYPE_ARRAY;
+      base.res.array.hArray = reinterpret_cast<CUarray>(chain->levels.front().get());
+      const auto status = geometryOf(base, geometry);
+      geometry->resource = CU_RESOURCE_TYPE_MIPMAPPED_ARRAY;
+      geometry->chain = chain;
+      return status;
+    }
     default: return CUDA_ERROR_INVALID_VALUE;
   }
 }
@@ -3375,7 +3390,7 @@ bool validTexture(const CUDA_TEXTURE_DESC &texture) {
          && (texture.filterMode == CU_TR_FILTER_MODE_POINT || texture.filterMode == CU_TR_FILTER_MODE_LINEAR);
 }
 
-Entry encode(uint32_t object, const Geometry &geometry, const CUDA_TEXTURE_DESC *texture) {
+Entry encode(uint32_t object, const Geometry &geometry, const CUDA_TEXTURE_DESC *texture, CUdeviceptr levelTable) {
   Entry entry{};
   put<uint64_t>(entry, layout::Field::Base, geometry.base);
   put<uint64_t>(entry, layout::Field::Pitch, geometry.pitch);
@@ -3409,6 +3424,15 @@ Entry encode(uint32_t object, const Geometry &geometry, const CUDA_TEXTURE_DESC 
     if (!linearMemory)
       for (uint32_t lane = 0; lane < colour.size(); ++lane)
         put<float>(entry, colour[lane], texture->borderColor[lane]);
+    if (geometry.chain) {
+      put<uint64_t>(entry, layout::Field::LevelTable, levelTable);
+      put<uint32_t>(entry, layout::Field::Levels, geometry.chain->levels.size());
+      put<uint8_t>(entry, layout::Field::MipFilter,
+                   texture->mipmapFilterMode == CU_TR_FILTER_MODE_LINEAR ? layout::Filter::Linear : layout::Filter::Point);
+      put<float>(entry, layout::Field::MinLod, texture->minMipmapLevelClamp);
+      put<float>(entry, layout::Field::MaxLod, texture->maxMipmapLevelClamp);
+      put<float>(entry, layout::Field::LodBias, texture->mipmapLevelBias);
+    }
   }
   put<uint8_t>(entry, layout::Field::Flags, flags);
   return entry;
@@ -3443,6 +3467,29 @@ CUresult encodeKepler(const Geometry &geometry, KeplerRecord *entry) {
   return CUDA_SUCCESS;
 }
 
+CUresult writeLevels(const CudaMipmappedArray &chain, CUdeviceptr *table) {
+  std::vector<unsigned char> records(chain.levels.size() * layout::Level::Bytes);
+  for (size_t level = 0; level < chain.levels.size(); ++level) {
+    const auto &array = *chain.levels[level];
+    size_t slice = 0;
+    if (!fitsInt(array.width) || !fitsInt(array.height) || !fitsInt(array.depth) || !sizeMul(array.pitch, array.height, &slice))
+      return CUDA_ERROR_INVALID_VALUE;
+    const auto offset = static_cast<uint32_t>(level * layout::Level::Bytes);
+    put<uint64_t>(records, offset + layout::Level::Base, array.device);
+    put<uint64_t>(records, offset + layout::Level::Pitch, array.pitch);
+    put<uint64_t>(records, offset + layout::Level::SlicePitch, slice);
+    put<uint32_t>(records, offset + layout::Level::Width, array.width);
+    put<uint32_t>(records, offset + layout::Level::Height, array.height);
+    put<uint32_t>(records, offset + layout::Level::Depth, array.depth);
+  }
+  if (const auto status = cuMemAlloc_v2(table, records.size()); status != CUDA_SUCCESS) return status;
+  if (const auto status = cuMemcpyHtoD_v2(*table, records.data(), records.size()); status != CUDA_SUCCESS) {
+    (void)cuMemFree_v2(*table);
+    return status;
+  }
+  return CUDA_SUCCESS;
+}
+
 CUresult writeEntry(uint32_t index, const Entry &entry) {
   if (!tableAllocation) return CUDA_ERROR_UNKNOWN;
   const PointerBinding binding{.allocation = *tableAllocation, .offset = index * layout::Table::EntryBytes, .remaining = entry.size()};
@@ -3472,6 +3519,9 @@ CUresult create(uint32_t object, unsigned long long *handle, const CUDA_RESOURCE
     ++index;
   if (index >= layout::Table::Entries) return CUDA_ERROR_OUT_OF_MEMORY;
   const bool kepler = object == layout::Object::Surface && keplerDevice();
+  CUdeviceptr levelTable = 0;
+  if (geometry.chain)
+    if (const auto status = writeLevels(*geometry.chain, &levelTable); status != CUDA_SUCCESS) return status;
   if (kepler) {
     KeplerRecord record{};
     if (const auto status = encodeKepler(geometry, &record); status != CUDA_SUCCESS) return status;
@@ -3482,13 +3532,15 @@ CUresult create(uint32_t object, unsigned long long *handle, const CUDA_RESOURCE
     const PointerBinding binding{
         .allocation = *keplerAllocation, .offset = static_cast<uint64_t>(index * layout::Kepler::Bytes), .remaining = record.size()};
     if (!upload(binding, record.data(), record.size())) return CUDA_ERROR_UNKNOWN;
-  } else if (const auto status = writeEntry(index, encode(object, geometry, texture)); status != CUDA_SUCCESS) {
+  } else if (const auto status = writeEntry(index, encode(object, geometry, texture, levelTable)); status != CUDA_SUCCESS) {
+    if (levelTable) (void)cuMemFree_v2(levelTable);
     return status;
   }
   Slot slot{.object = object,
             .resource = *resource,
             .texture = texture ? *texture : CUDA_TEXTURE_DESC{},
-            .view = view ? *view : CUDA_RESOURCE_VIEW_DESC{}};
+            .view = view ? *view : CUDA_RESOURCE_VIEW_DESC{},
+            .levelTable = levelTable};
   slots.emplace(index, slot);
   *handle = kepler ? layout::KeplerTable::BaseAddress + (static_cast<uint64_t>(index) * layout::Kepler::Bytes) : index;
   return CUDA_SUCCESS;
@@ -3507,8 +3559,9 @@ CUresult destroy(uint32_t object, unsigned long long handle) {
   } else if (const auto status = writeEntry(found->first, Entry{}); status != CUDA_SUCCESS) {
     return status;
   }
+  const auto levelTable = found->second.levelTable;
   slots.erase(found);
-  return CUDA_SUCCESS;
+  return levelTable ? cuMemFree_v2(levelTable) : CUDA_SUCCESS;
 }
 
 template <class Read> CUresult query(uint32_t object, unsigned long long handle, Read read) {
@@ -3565,7 +3618,10 @@ cudaError_t driverResource(const cudaResourceDesc &desc, CUDA_RESOURCE_DESC *res
       if (!desc.res.array.array) return cudaErrorInvalidResourceHandle;
       resource->res.array.hArray = reinterpret_cast<CUarray>(desc.res.array.array);
       return cudaSuccess;
-    case cudaResourceTypeMipmappedArray: return desc.res.mipmap.mipmap ? cudaErrorNotSupported : cudaErrorInvalidResourceHandle;
+    case cudaResourceTypeMipmappedArray:
+      if (!desc.res.mipmap.mipmap) return cudaErrorInvalidResourceHandle;
+      resource->res.mipmap.hMipmappedArray = reinterpret_cast<CUmipmappedArray>(desc.res.mipmap.mipmap);
+      return cudaSuccess;
     case cudaResourceTypeLinear: {
       if (!desc.res.linear.devPtr) return cudaErrorInvalidValue;
       const auto format = driverFormatOf(desc.res.linear.desc);
@@ -3628,6 +3684,9 @@ void runtimeResource(const CUDA_RESOURCE_DESC &resource, cudaResourceDesc *desc)
   desc->resType = static_cast<cudaResourceType>(resource.resType);
   switch (resource.resType) {
     case CU_RESOURCE_TYPE_ARRAY: desc->res.array.array = reinterpret_cast<cudaArray_t>(resource.res.array.hArray); break;
+    case CU_RESOURCE_TYPE_MIPMAPPED_ARRAY:
+      desc->res.mipmap.mipmap = reinterpret_cast<cudaMipmappedArray_t>(resource.res.mipmap.hMipmappedArray);
+      break;
     case CU_RESOURCE_TYPE_LINEAR:
       desc->res.linear.devPtr = reinterpret_cast<void *>(resource.res.linear.devPtr);
       desc->res.linear.desc = channelDescOf(resource.res.linear.format, resource.res.linear.numChannels);

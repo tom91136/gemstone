@@ -223,7 +223,7 @@ class MachineSemanticsSuite extends Suite {
         Vec(Some(Register(6)), None, Some(Register(7)), None)
       ))),
       """def texture(dst: UInt[64], src: UInt[64], size: UInt[64])(using memory: Memory): (left: UInt[64], right: UInt[64]) = {
-        |  val v0 = memory.textureRead(Texture.Sample(2, Float, F32), dst, src, size)
+        |  val v0 = memory.textureRead(Texture.Sample(2, Float, F32, Base), dst, src, size)
         |  (
         |    left = memory.textureWord(v0, UInt[64](0), UInt[64](4)),
         |    right = memory.textureWord(v0, UInt[64](2), UInt[64](4))
