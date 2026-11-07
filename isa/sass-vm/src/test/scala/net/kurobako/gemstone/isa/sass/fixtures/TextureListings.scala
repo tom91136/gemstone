@@ -3432,6 +3432,761 @@ object TextureListings {
         |        /*0070*/                   NOP;
         |        /*0078*/                   NOP;
         |.L_x_28:
+        |""".stripMargin,
+    "lodKernelSm35" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	64
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0008*/                   MOV R1, c[0x0][0x44];
+        |        /*0010*/                   MOV32I R4, 0x3ec00000;
+        |        /*0018*/                   MOV32I R5, 0x3f200000;
+        |        /*0020*/                   MOV R6, c[0x0][0x150];
+        |        /*0028*/                   TEX.LL.P R4, R4, 0x50, 2D, 0x1;
+        |        /*0030*/                   MOV R2, c[0x0][0x148];
+        |        /*0038*/                   MOV R3, c[0x0][0x14c];
+        |        /*0048*/                   TEXDEPBAR 0x0;
+        |        /*0050*/                   ST.E [R2], R4;
+        |        /*0058*/                   EXIT;
+        |.L_x_1:
+        |        /*0060*/                   BRA `(.L_x_1);
+        |        /*0068*/                   NOP;
+        |        /*0070*/                   NOP;
+        |        /*0078*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "lodKernelSm50" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	32
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;
+        |        /*0010*/                   MOV R6, c[0x0][0x150] ;
+        |        /*0018*/                   MOV32I R4, 0x3ec00000 ;
+        |        /*0028*/                   MOV32I R5, 0x3f200000 ;
+        |        /*0030*/                   TEXS.LL.P RZ, R0, R4, R6, 0x50, 2D, R ;
+        |        /*0038*/                   MOV R2, c[0x0][0x148] ;
+        |        /*0048*/                   MOV R3, c[0x0][0x14c] ;
+        |        /*0050*/                   STG.E [R2], R0 ;
+        |        /*0058*/                   NOP ;
+        |        /*0068*/                   NOP ;
+        |        /*0070*/                   NOP ;
+        |        /*0078*/                   EXIT ;
+        |.L_x_1:
+        |        /*0088*/                   BRA `(.L_x_1) ;
+        |        /*0090*/                   NOP;
+        |        /*0098*/                   NOP;
+        |        /*00a8*/                   NOP;
+        |        /*00b0*/                   NOP;
+        |        /*00b8*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "lodKernelSm60" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=7"
+        |	.align	32
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;
+        |        /*0010*/                   MOV R6, c[0x0][0x150] ;
+        |        /*0018*/                   MOV32I R4, 0x3ec00000 ;
+        |        /*0028*/                   MOV32I R5, 0x3f200000 ;
+        |        /*0030*/                   TEXS.LL.P RZ, R0, R4, R6, 0x50, 2D, R ;
+        |        /*0038*/                   MOV R2, c[0x0][0x148] ;
+        |        /*0048*/                   MOV R3, c[0x0][0x14c] ;
+        |        /*0050*/                   STG.E [R2], R0 ;
+        |        /*0058*/                   NOP ;
+        |        /*0068*/                   NOP ;
+        |        /*0070*/                   NOP ;
+        |        /*0078*/                   EXIT ;
+        |.L_x_1:
+        |        /*0088*/                   BRA `(.L_x_1) ;
+        |        /*0090*/                   NOP;
+        |        /*0098*/                   NOP;
+        |        /*00a8*/                   NOP;
+        |        /*00b0*/                   NOP;
+        |        /*00b8*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "lodKernelSm70" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/              @!PT SHFL.IDX PT, RZ, RZ, RZ, RZ ;
+        |        /*0020*/                   IMAD.MOV.U32 R0, RZ, RZ, c[0x0][0x170] ;
+        |        /*0030*/                   MOV R4, 0x3ec00000 ;
+        |        /*0040*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0050*/                   TEX.SCR.LL RZ, R5, R4, R0, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0060*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0070*/                   MOV R3, c[0x0][0x16c] ;
+        |        /*0080*/                   STG.E.SYS [R2], R5 ;
+        |        /*0090*/                   EXIT ;
+        |.L_x_1:
+        |        /*00a0*/                   BRA `(.L_x_1);
+        |        /*00b0*/                   NOP;
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "lodKernelSm75" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=6"
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   IMAD.MOV.U32 R0, RZ, RZ, c[0x0][0x170] ;
+        |        /*0020*/                   MOV R2, 0x3ec00000 ;
+        |        /*0030*/                   MOV R3, 0x3f200000 ;
+        |        /*0040*/                   TEX.SCR.LL RZ, R0, R2, R0, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0050*/                   ULDC.64 UR4, c[0x0][0x168] ;
+        |        /*0060*/                   STG.E.SYS [UR4], R0 ;
+        |        /*0070*/                   EXIT ;
+        |.L_x_1:
+        |        /*0080*/                   BRA `(.L_x_1);
+        |        /*0090*/                   NOP;
+        |        /*00a0*/                   NOP;
+        |        /*00b0*/                   NOP;
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "lodKernelSm80" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   HFMA2.MMA R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0020*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0030*/                   IMAD.MOV.U32 R0, RZ, RZ, c[0x0][0x170] ;
+        |        /*0040*/                   TEX.SCR.LL RZ, R5, R4, R0, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0050*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0060*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*0070*/                   MOV R3, c[0x0][0x16c] ;
+        |        /*0080*/                   STG.E [R2.64], R5 ;
+        |        /*0090*/                   EXIT ;
+        |.L_x_1:
+        |        /*00a0*/                   BRA `(.L_x_1);
+        |        /*00b0*/                   NOP;
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "lodKernelSm86" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_3 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0020*/                   MOV R4, 0x3ec00000 ;
+        |        /*0030*/                   IMAD.MOV.U32 R0, RZ, RZ, c[0x0][0x170] ;
+        |        /*0040*/                   TEX.SCR.LL RZ, R5, R4, R0, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0050*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0060*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*0070*/                   MOV R3, c[0x0][0x16c] ;
+        |        /*0080*/                   STG.E [R2.64], R5 ;
+        |        /*0090*/                   EXIT ;
+        |.L_x_1:
+        |        /*00a0*/                   BRA `(.L_x_1);
+        |        /*00b0*/                   NOP;
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_3:
+        |""".stripMargin,
+    "gradKernelSm35" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=10"
+        |	.align	64
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0008*/                   MOV R1, c[0x0][0x44];
+        |        /*0010*/                   MOV32I R4, 0x3ec00000;
+        |        /*0018*/                   MOV32I R5, 0x3f200000;
+        |        /*0020*/                   MOV R6, c[0x0][0x150];
+        |        /*0028*/                   MOV R7, c[0x0][0x158];
+        |        /*0030*/                   MOV R8, c[0x0][0x154];
+        |        /*0038*/                   MOV R9, c[0x0][0x15c];
+        |        /*0048*/                   TXD.P R4, R4, R8, 0x50, 2D, 0x1;
+        |        /*0050*/                   MOV R2, c[0x0][0x148];
+        |        /*0058*/                   MOV R3, c[0x0][0x14c];
+        |        /*0060*/                   TEXDEPBAR 0x0;
+        |        /*0068*/                   ST.E [R2], R4;
+        |        /*0070*/                   EXIT;
+        |.L_x_0:
+        |        /*0078*/                   BRA `(.L_x_0);
+        |.L_x_2:
+        |""".stripMargin,
+    "gradKernelSm50" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=12"
+        |	.align	32
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;
+        |        /*0010*/                   MOV32I R4, 0x3ec00000 ;
+        |        /*0018*/                   MOV32I R5, 0x3f200000 ;
+        |        /*0028*/                   MOV R8, c[0x0][0x150] ;
+        |        /*0030*/                   MOV R9, c[0x0][0x158] ;
+        |        /*0038*/                   MOV R10, c[0x0][0x154] ;
+        |        /*0048*/                   MOV R11, c[0x0][0x15c] ;
+        |        /*0050*/                   TXD.P R0, R4, R8, 0x50, 2D, 0x1 ;
+        |        /*0058*/                   MOV R2, c[0x0][0x148] ;
+        |        /*0068*/                   MOV R3, c[0x0][0x14c] ;
+        |        /*0070*/                   STG.E [R2], R0 ;
+        |        /*0078*/                   NOP ;
+        |        /*0088*/                   NOP ;
+        |        /*0090*/                   NOP ;
+        |        /*0098*/                   EXIT ;
+        |.L_x_0:
+        |        /*00a8*/                   BRA `(.L_x_0) ;
+        |        /*00b0*/                   NOP;
+        |        /*00b8*/                   NOP;
+        |.L_x_2:
+        |""".stripMargin,
+    "gradKernelSm60" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=12"
+        |	.align	32
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0008*/                   MOV R1, c[0x0][0x20] ;
+        |        /*0010*/                   MOV32I R4, 0x3ec00000 ;
+        |        /*0018*/                   MOV32I R5, 0x3f200000 ;
+        |        /*0028*/                   MOV R8, c[0x0][0x150] ;
+        |        /*0030*/                   MOV R9, c[0x0][0x158] ;
+        |        /*0038*/                   MOV R10, c[0x0][0x154] ;
+        |        /*0048*/                   MOV R11, c[0x0][0x15c] ;
+        |        /*0050*/                   TXD.P R0, R4, R8, 0x50, 2D, 0x1 ;
+        |        /*0058*/                   MOV R2, c[0x0][0x148] ;
+        |        /*0068*/                   MOV R3, c[0x0][0x14c] ;
+        |        /*0070*/                   STG.E [R2], R0 ;
+        |        /*0078*/                   NOP ;
+        |        /*0088*/                   NOP ;
+        |        /*0090*/                   NOP ;
+        |        /*0098*/                   EXIT ;
+        |.L_x_0:
+        |        /*00a8*/                   BRA `(.L_x_0) ;
+        |        /*00b0*/                   NOP;
+        |        /*00b8*/                   NOP;
+        |.L_x_2:
+        |""".stripMargin,
+    "gradKernelSm70" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=14"
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   MOV R1, c[0x0][0x28] ;
+        |        /*0010*/              @!PT SHFL.IDX PT, RZ, RZ, RZ, RZ ;
+        |        /*0020*/                   MOV R4, 0x3ec00000 ;
+        |        /*0030*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0040*/                   MOV R8, c[0x0][0x170] ;
+        |        /*0050*/                   IMAD.MOV.U32 R9, RZ, RZ, c[0x0][0x178] ;
+        |        /*0060*/                   MOV R10, c[0x0][0x174] ;
+        |        /*0070*/                   IMAD.MOV.U32 R11, RZ, RZ, c[0x0][0x17c] ;
+        |        /*0080*/                   TXD RZ, R5, R4, R8, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0090*/                   MOV R2, c[0x0][0x168] ;
+        |        /*00a0*/                   IMAD.MOV.U32 R3, RZ, RZ, c[0x0][0x16c] ;
+        |        /*00b0*/                   STG.E.SYS [R2], R5 ;
+        |        /*00c0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00d0*/                   BRA `(.L_x_0);
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |.L_x_2:
+        |""".stripMargin,
+    "gradKernelSm75" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=10"
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   MOV R1, c[0x0][0x28] ;
+        |        /*0010*/                   MOV R2, 0x3ec00000 ;
+        |        /*0020*/                   IMAD.MOV.U32 R3, RZ, RZ, 0x3f200000 ;
+        |        /*0030*/                   MOV R4, c[0x0][0x170] ;
+        |        /*0040*/                   IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x178] ;
+        |        /*0050*/                   MOV R6, c[0x0][0x174] ;
+        |        /*0060*/                   IMAD.MOV.U32 R7, RZ, RZ, c[0x0][0x17c] ;
+        |        /*0070*/                   TXD RZ, R0, R2, R4, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0080*/                   ULDC.64 UR4, c[0x0][0x168] ;
+        |        /*0090*/                   STG.E.SYS [UR4], R0 ;
+        |        /*00a0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00b0*/                   BRA `(.L_x_0);
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |.L_x_2:
+        |""".stripMargin,
+    "gradKernelSm80" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=14"
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   MOV R1, c[0x0][0x28] ;
+        |        /*0010*/                   HFMA2.MMA R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0020*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0030*/                   MOV R8, c[0x0][0x170] ;
+        |        /*0040*/                   IMAD.MOV.U32 R9, RZ, RZ, c[0x0][0x178] ;
+        |        /*0050*/                   MOV R10, c[0x0][0x174] ;
+        |        /*0060*/                   IMAD.MOV.U32 R11, RZ, RZ, c[0x0][0x17c] ;
+        |        /*0070*/                   TXD RZ, R5, R4, R8, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0080*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0090*/                   IMAD.MOV.U32 R3, RZ, RZ, c[0x0][0x16c] ;
+        |        /*00a0*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*00b0*/                   STG.E [R2.64], R5 ;
+        |        /*00c0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00d0*/                   BRA `(.L_x_0);
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_2:
+        |""".stripMargin,
+    "gradKernelSm86" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=14"
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_2 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   MOV R1, c[0x0][0x28] ;
+        |        /*0010*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0020*/                   MOV R4, 0x3ec00000 ;
+        |        /*0030*/                   IMAD.MOV.U32 R9, RZ, RZ, c[0x0][0x178] ;
+        |        /*0040*/                   MOV R8, c[0x0][0x170] ;
+        |        /*0050*/                   IMAD.MOV.U32 R11, RZ, RZ, c[0x0][0x17c] ;
+        |        /*0060*/                   MOV R10, c[0x0][0x174] ;
+        |        /*0070*/                   TXD RZ, R5, R4, R8, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0080*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0090*/                   IMAD.MOV.U32 R3, RZ, RZ, c[0x0][0x16c] ;
+        |        /*00a0*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*00b0*/                   STG.E [R2.64], R5 ;
+        |        /*00c0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00d0*/                   BRA `(.L_x_0);
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_2:
+        |""".stripMargin,
+    // sm_89 and later listings from CUDA 13.3 (nvcc V13.3.73)
+    "lodKernelSm89" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_1 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0020*/                   MOV R4, 0x3ec00000 ;
+        |        /*0030*/                   IMAD.MOV.U32 R0, RZ, RZ, c[0x0][0x170] ;
+        |        /*0040*/                   TEX.SCR.LL RZ, R5, R4, R0, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0050*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0060*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*0070*/                   MOV R3, c[0x0][0x16c] ;
+        |        /*0080*/                   STG.E [R2.64], R5 ;
+        |        /*0090*/                   EXIT ;
+        |.L_x_0:
+        |        /*00a0*/                   BRA `(.L_x_0);
+        |        /*00b0*/                   NOP;
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "lodKernelSm90" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_1 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   LDC R1, c[0x0][0x28] ;
+        |        /*0010*/                   LDC R0, c[0x0][0x220] ;
+        |        /*0020*/                   HFMA2.MMA R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0030*/                   MOV R5, 0x3f200000 ;
+        |        /*0040*/                   ULDC UR4, c[0x0][0x210] ;
+        |        /*0050*/                   UMOV UR5, URZ ;
+        |        /*0060*/                   TEX.LL RZ, R5, R4, R0, UR4, 0x0, 2D, 0x1 ;
+        |        /*0070*/                   LDC.64 R2, c[0x0][0x218] ;
+        |        /*0080*/                   ULDC.64 UR4, c[0x0][0x208] ;
+        |        /*0090*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00a0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00b0*/                   BRA `(.L_x_0);
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "lodKernelSm100" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_1 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   LDC R0, c[0x0][0x390] ;
+        |        /*0020*/                   LDCU UR4, c[0x0][0x380] ;
+        |        /*0030*/                   HFMA2 R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0040*/                   MOV R5, 0x3f200000 ;
+        |        /*0050*/                   UMOV UR5, URZ ;
+        |        /*0060*/                   TEX.LL RZ, R5, R4, R0, UR4, 2D, 0x1 ;
+        |        /*0070*/                   LDC.64 R2, c[0x0][0x388] ;
+        |        /*0080*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*0090*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00a0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00b0*/                   BRA `(.L_x_0);
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "lodKernelSm120" ->
+      """//--------------------- .text.lodKernel           --------------------------
+        |	.section	.text.lodKernel,"ax",@progbits
+        |	.align	128
+        |        .global         lodKernel
+        |        .type           lodKernel,@function
+        |        .size           lodKernel,(.L_x_1 - lodKernel)
+        |        .other          lodKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |lodKernel:
+        |.text.lodKernel:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   LDC R0, c[0x0][0x390] ;
+        |        /*0020*/                   LDCU UR4, c[0x0][0x380] ;
+        |        /*0030*/                   MOV R5, 0x3f200000 ;
+        |        /*0040*/                   HFMA2 R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0050*/                   UMOV UR5, URZ ;
+        |        /*0060*/                   TEX.LL RZ, R5, R4, R0, UR4, 2D, 0x1 ;
+        |        /*0070*/                   LDC.64 R2, c[0x0][0x388] ;
+        |        /*0080*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*0090*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00a0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00b0*/                   BRA `(.L_x_0);
+        |        /*00c0*/                   NOP;
+        |        /*00d0*/                   NOP;
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "gradKernelSm89" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=14"
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_1 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   MOV R1, c[0x0][0x28] ;
+        |        /*0010*/                   IMAD.MOV.U32 R5, RZ, RZ, 0x3f200000 ;
+        |        /*0020*/                   MOV R4, 0x3ec00000 ;
+        |        /*0030*/                   IMAD.MOV.U32 R9, RZ, RZ, c[0x0][0x178] ;
+        |        /*0040*/                   MOV R8, c[0x0][0x170] ;
+        |        /*0050*/                   IMAD.MOV.U32 R11, RZ, RZ, c[0x0][0x17c] ;
+        |        /*0060*/                   MOV R10, c[0x0][0x174] ;
+        |        /*0070*/                   TXD RZ, R5, R4, R8, 0x0, 0x58, 2D, 0x1 ;
+        |        /*0080*/                   MOV R2, c[0x0][0x168] ;
+        |        /*0090*/                   IMAD.MOV.U32 R3, RZ, RZ, c[0x0][0x16c] ;
+        |        /*00a0*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*00b0*/                   STG.E [R2.64], R5 ;
+        |        /*00c0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00d0*/                   BRA `(.L_x_0);
+        |        /*00e0*/                   NOP;
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "gradKernelSm90" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_1 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   LDC R1, c[0x0][0x28] ;
+        |        /*0010*/                   LDC R8, c[0x0][0x220] ;
+        |        /*0020*/                   HFMA2.MMA R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0030*/                   MOV R5, 0x3f200000 ;
+        |        /*0040*/                   ULDC UR4, c[0x0][0x210] ;
+        |        /*0050*/                   UMOV UR5, URZ ;
+        |        /*0060*/                   LDC R9, c[0x0][0x228] ;
+        |        /*0070*/                   LDC R10, c[0x0][0x224] ;
+        |        /*0080*/                   LDC R11, c[0x0][0x22c] ;
+        |        /*0090*/                   TXD RZ, R5, R4, R8, UR4, 0x0, 2D, 0x1 ;
+        |        /*00a0*/                   LDC.64 R2, c[0x0][0x218] ;
+        |        /*00b0*/                   ULDC.64 UR4, c[0x0][0x208] ;
+        |        /*00c0*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00d0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00e0*/                   BRA `(.L_x_0);
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "gradKernelSm100" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_1 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   LDC R8, c[0x0][0x390] ;
+        |        /*0020*/                   LDCU UR4, c[0x0][0x380] ;
+        |        /*0030*/                   HFMA2 R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0040*/                   MOV R5, 0x3f200000 ;
+        |        /*0050*/                   UMOV UR5, URZ ;
+        |        /*0060*/                   LDC R9, c[0x0][0x398] ;
+        |        /*0070*/                   LDC R10, c[0x0][0x394] ;
+        |        /*0080*/                   LDC R11, c[0x0][0x39c] ;
+        |        /*0090*/                   TXD RZ, R5, R4, R8, UR4, 2D, 0x1 ;
+        |        /*00a0*/                   LDC.64 R2, c[0x0][0x388] ;
+        |        /*00b0*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*00c0*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00d0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00e0*/                   BRA `(.L_x_0);
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
+        |""".stripMargin,
+    "gradKernelSm120" ->
+      """//--------------------- .text.gradKernel          --------------------------
+        |	.section	.text.gradKernel,"ax",@progbits
+        |	.align	128
+        |        .global         gradKernel
+        |        .type           gradKernel,@function
+        |        .size           gradKernel,(.L_x_1 - gradKernel)
+        |        .other          gradKernel,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |gradKernel:
+        |.text.gradKernel:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   LDC R8, c[0x0][0x390] ;
+        |        /*0020*/                   LDCU UR4, c[0x0][0x380] ;
+        |        /*0030*/                   MOV R5, 0x3f200000 ;
+        |        /*0040*/                   HFMA2 R4, -RZ, RZ, 1.6875, 0 ;
+        |        /*0050*/                   UMOV UR5, URZ ;
+        |        /*0060*/                   LDC R9, c[0x0][0x398] ;
+        |        /*0070*/                   LDC R10, c[0x0][0x394] ;
+        |        /*0080*/                   LDC R11, c[0x0][0x39c] ;
+        |        /*0090*/                   TXD RZ, R5, R4, R8, UR4, 2D, 0x1 ;
+        |        /*00a0*/                   LDC.64 R2, c[0x0][0x388] ;
+        |        /*00b0*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*00c0*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*00d0*/                   EXIT ;
+        |.L_x_0:
+        |        /*00e0*/                   BRA `(.L_x_0);
+        |        /*00f0*/                   NOP;
+        |        /*0100*/                   NOP;
+        |        /*0110*/                   NOP;
+        |        /*0120*/                   NOP;
+        |        /*0130*/                   NOP;
+        |        /*0140*/                   NOP;
+        |        /*0150*/                   NOP;
+        |        /*0160*/                   NOP;
+        |        /*0170*/                   NOP;
+        |.L_x_1:
         |""".stripMargin
   )
 }

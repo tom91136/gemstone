@@ -36,6 +36,16 @@ class AssemblerSuite extends Suite {
     assert(decoded.operation.form match { case _: Form.Mov => true; case _ => false })
   }
 
+  test("omitted register operand with an RZ default parses as the explicit RZ spelling") {
+    val omitted  = "TEX.LL.P R4, R4, 0x50, 2D, 0x1;"
+    val explicit = "TEX.LL.P R4, R4, RZ, 0x50, 2D, 0x1;"
+    assertEquals(Parser.parse(omitted).fold(fail(_), identity), Parser.parse(explicit).fold(fail(_), identity))
+    assertEquals(
+      Assembler.assemble(omitted, target(35)).fold(fail(_), _.toVec),
+      Assembler.assemble(explicit, target(35)).fold(fail(_), _.toVec)
+    )
+  }
+
   Vec.nonEmpty(
     35 -> "MOV R3, R7;",
     35 -> "IADD R3, R7, R8;",

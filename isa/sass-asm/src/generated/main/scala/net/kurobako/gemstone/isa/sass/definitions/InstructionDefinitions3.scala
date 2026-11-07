@@ -1087,6 +1087,16 @@ object InstructionDefinitions3 {
       Immediate
     )(Form.ScatterRegRegRegRegImmImm.apply),
     FormDecoder(
+      Definitions3.ScatterRegRegRegRegImmImm,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate
+    )((p0, p1, p2, p3, p4) =>
+      Form.ScatterRegRegRegRegImmImm.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero), p3, p4)
+    ),
+    FormDecoder(
       Definitions3.SelRegRegAddressImmPred,
       Register,
       Register,

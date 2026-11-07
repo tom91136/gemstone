@@ -29,6 +29,9 @@ object InstructionDefinitions6 {
     FormDecoder(Definitions6.UtcatomswsRegReg, Register, Register)(Form.UtcatomswsRegReg.apply),
     FormDecoder(Definitions6.UtcbarNoOperands)(Form.UtcbarNoOperands.apply),
     FormDecoder(Definitions6.UtcbarAddressRegReg, Address, Register, Register)(Form.UtcbarAddressRegReg.apply),
+    FormDecoder(Definitions6.UtcbarAddressRegReg, Address, Register)((p0, p1) =>
+      Form.UtcbarAddressRegReg.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.UniformZero))
+    ),
     FormDecoder(Definitions6.UtccpAddressAddress, Address, Address)(Form.UtccpAddressAddress.apply),
     FormDecoder(
       Definitions6.UtchmmaAddressAddressAddressAddressAddressRegPred,
@@ -41,6 +44,25 @@ object InstructionDefinitions6 {
       Predicate
     )(Form.UtchmmaAddressAddressAddressAddressAddressRegPred.apply),
     FormDecoder(
+      Definitions6.UtchmmaAddressAddressAddressAddressAddressRegPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Predicate
+    )((p0, p1, p2, p3, p4, p5) =>
+      Form.UtchmmaAddressAddressAddressAddressAddressRegPred.apply(
+        p0,
+        p1,
+        p2,
+        p3,
+        p4,
+        InstructionOperand.Register.unsafe(OperandQueries.UniformZero),
+        p5
+      )
+    ),
+    FormDecoder(
       Definitions6.UtchmmaAddressAddressAddressAddressAddressRegPredImm,
       Address,
       Address,
@@ -52,6 +74,27 @@ object InstructionDefinitions6 {
       Immediate
     )(Form.UtchmmaAddressAddressAddressAddressAddressRegPredImm.apply),
     FormDecoder(
+      Definitions6.UtchmmaAddressAddressAddressAddressAddressRegPredImm,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Predicate,
+      Immediate
+    )((p0, p1, p2, p3, p4, p5, p6) =>
+      Form.UtchmmaAddressAddressAddressAddressAddressRegPredImm.apply(
+        p0,
+        p1,
+        p2,
+        p3,
+        p4,
+        InstructionOperand.Register.unsafe(OperandQueries.UniformZero),
+        p5,
+        p6
+      )
+    ),
+    FormDecoder(
       Definitions6.UtcimmaAddressAddressAddressAddressAddressRegPred,
       Address,
       Address,
@@ -61,6 +104,25 @@ object InstructionDefinitions6 {
       Register,
       Predicate
     )(Form.UtcimmaAddressAddressAddressAddressAddressRegPred.apply),
+    FormDecoder(
+      Definitions6.UtcimmaAddressAddressAddressAddressAddressRegPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Predicate
+    )((p0, p1, p2, p3, p4, p5) =>
+      Form.UtcimmaAddressAddressAddressAddressAddressRegPred.apply(
+        p0,
+        p1,
+        p2,
+        p3,
+        p4,
+        InstructionOperand.Register.unsafe(OperandQueries.UniformZero),
+        p5
+      )
+    ),
     FormDecoder(
       Definitions6.UtcommaAddressAddressAddressAddressAddressAddressPred,
       Address,
@@ -91,6 +153,25 @@ object InstructionDefinitions6 {
       Register,
       Predicate
     )(Form.UtcqmmaAddressAddressAddressAddressAddressRegPred.apply),
+    FormDecoder(
+      Definitions6.UtcqmmaAddressAddressAddressAddressAddressRegPred,
+      Address,
+      Address,
+      Address,
+      Address,
+      Address,
+      Predicate
+    )((p0, p1, p2, p3, p4, p5) =>
+      Form.UtcqmmaAddressAddressAddressAddressAddressRegPred.apply(
+        p0,
+        p1,
+        p2,
+        p3,
+        p4,
+        InstructionOperand.Register.unsafe(OperandQueries.UniformZero),
+        p5
+      )
+    ),
     FormDecoder(Definitions6.UtcshiftAddress, Address)(Form.UtcshiftAddress.apply),
     FormDecoder(Definitions6.UtmacctlNoOperands)(Form.UtmacctlNoOperands.apply),
     FormDecoder(Definitions6.UtmacctlAddress, Address)(Form.UtmacctlAddress.apply),
@@ -621,6 +702,9 @@ object InstructionDefinitions6 {
     FormDecoder(Definitions6.VotePredPred, Predicate, Predicate)(Form.VotePredPred.apply),
     FormDecoder(Definitions6.VoteRegPredPred, Register, Predicate, Predicate)(Form.VoteRegPredPred.apply),
     FormDecoder(Definitions6.VoteuRegPredPred, Register, Predicate, Predicate)(Form.VoteuRegPredPred.apply),
+    FormDecoder(Definitions6.VoteuRegPredPred, Predicate, Predicate)((p0, p1) =>
+      Form.VoteuRegPredPred.apply(InstructionOperand.Register.unsafe(OperandQueries.UniformZero), p0, p1)
+    ),
     FormDecoder(Definitions6.VoteVtgImm, Immediate)(Form.VoteVtgImm.apply),
     FormDecoder(Definitions6.VoteVtgPredImm, Predicate, Immediate)(Form.VoteVtgPredImm.apply),
     FormDecoder(

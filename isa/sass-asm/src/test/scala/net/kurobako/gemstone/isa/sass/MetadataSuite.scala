@@ -81,17 +81,23 @@ class MetadataSuite extends Suite {
       "Symbol"  -> Operand.Symbol("CC")
     )
     val shape = s"(.*?)(NoOperands|(?:${kinds.keys.mkString("|")})+)".r
-    assertEquals(InstructionDefinitions.decoders.map(_.definition), Instruction.Definition.all)
-    InstructionDefinitions.decoders.foreach { decoder =>
-      val definition   = decoder.definition
+    def operandsOf(definition: Instruction.Definition): Vec[Operand] = {
       val name: String = definition.name.raw
-      val operands     = name match {
+      name match {
         case shape(prefix: String, suffix: String)
             if prefix.filter(_.isLetterOrDigit).equalsIgnoreCase(definition.mnemonic.raw.filter(_.isLetterOrDigit)) =>
           if (suffix == "NoOperands") Vec.empty[Operand]
           else Vec.from(s"(${kinds.keys.mkString("|")})".r.findAllIn(suffix)).map(kinds)
         case _ => fail(s"$name does not name its operand shape")
       }
+    }
+    val base = InstructionDefinitions.decoders.filter { decoder =>
+      decoder.decode(operandsOf(decoder.definition)).isDefined
+    }
+    assertEquals(base.map(_.definition), Instruction.Definition.all)
+    base.foreach { decoder =>
+      val definition  = decoder.definition
+      val operands    = operandsOf(definition)
       val instruction = Instruction(decoder.decode(operands).getOrElse(fail(definition.name.raw)))
       assert(instruction.definition eq definition, definition)
       assertEquals(instruction.operands, operands, definition)

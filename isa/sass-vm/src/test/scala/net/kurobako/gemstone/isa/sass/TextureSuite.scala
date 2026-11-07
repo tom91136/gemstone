@@ -13,10 +13,11 @@ import net.kurobako.gemstone.texture.*
 class TextureSuite extends Suite {
   import TextureFixtures.*
 
-  private val Surfaces = Vec(50, 70, 75, 90, 120)
-  private val Textures = 35 +: Surfaces
-  private val Table    = AllocationId(100)
-  private val S32x1    = TexelFormat(ChannelKind.Signed, width = 32, channels = 1)
+  private val Surfaces      = Vec(50, 70, 75, 90, 120)
+  private val Textures      = 35 +: Surfaces
+  private val Table         = AllocationId(100)
+  private val S32x1         = TexelFormat(ChannelKind.Signed, width = 32, channels = 1)
+  private val NormalisedMip = mipmapped().copy(normalisedCoordinates = true)
 
   private def le(words: Long*): Array[Byte] = {
     val buffer = ByteBuffer.allocate(words.length * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -50,10 +51,18 @@ class TextureSuite extends Suite {
       TextureLayout.Table.EntryBytes.toInt
     )
 
-    def run(name: String, sm: Int, outputWords: Int, edit: String => String = identity, threads: Int = 1): Vec[Long] = {
+    def run(
+        name: String,
+        sm: Int,
+        outputWords: Int,
+        edit: String => String = identity,
+        threads: Int = 1,
+        inputs: Arg*
+    ): Vec[Long] = {
       val result =
-        kernel(name, sm, edit).run(threads, memory = memory)(Arg.u64(handle.toLong), Arg.zeros(outputWords * 4))
-          .fold(error => fail(error.message), identity)
+        kernel(name, sm, edit).run(threads, memory = memory)(
+          (Seq(Arg.u64(handle.toLong), Arg.zeros(outputWords * 4)) ++ inputs)*
+        ).fold(error => fail(error.message), identity)
       result.words(1)
     }
 
@@ -130,6 +139,32 @@ class TextureSuite extends Suite {
           Setup(mipBytes, mipmapped()).run("samp1d", sm, 4, explicitLevel(level)),
           Vec(bits(texel), 0L, 0L, bits(1f)),
           s"level $level"
+        )
+      )
+    }
+
+  for (sm <- Vec(35, 50, 60, 70, 75, 80, 86, 89, 90, 100, 120))
+    test(s"sm_$sm TEX level argument selects the mip level of a 2D texture") {
+      Vec(0f -> 10f, 1f -> 22f, 2f -> 40f).foreach((level, texel) =>
+        assertEquals(
+          Setup(mipBytes, NormalisedMip).run("lodKernel", sm, 1, inputs = Arg.f32(level)),
+          Vec(bits(texel)),
+          s"level $level"
+        )
+      )
+    }
+
+  for (sm <- Vec(35, 50, 60, 70, 75, 80, 86, 89, 90, 100, 120))
+    test(s"sm_$sm TEX gradient selects the mip level from the derivatives") {
+      Seq(
+        Seq(0.125f, 0f, 0f, 0.125f) -> 10f,
+        Seq(0.5f, 0f, 0f, 0.5f)     -> 22f,
+        Seq(1f, 0f, 0f, 1f)         -> 40f
+      ).foreach((gradient, texel) =>
+        assertEquals(
+          Setup(mipBytes, NormalisedMip).run("gradKernel", sm, 1, inputs = gradient.map(Arg.f32)*),
+          Vec(bits(texel)),
+          s"gradient $gradient"
         )
       )
     }

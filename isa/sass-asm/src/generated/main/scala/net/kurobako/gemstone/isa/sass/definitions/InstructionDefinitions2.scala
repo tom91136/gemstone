@@ -564,6 +564,9 @@ object InstructionDefinitions2 {
       Register,
       Predicate
     )(Form.IpaRegAddressRegRegPred.apply),
+    FormDecoder(Definitions2.IpaRegAddressRegRegPred, Register, Address, Register, Predicate)((p0, p1, p2, p3) =>
+      Form.IpaRegAddressRegRegPred.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero), p3)
+    ),
     FormDecoder(Definitions2.IpaRegImm, Register, Immediate)(Form.IpaRegImm.apply),
     FormDecoder(Definitions2.IpaRegImmConst, Register, Immediate, ConstantBank)(Form.IpaRegImmConst.apply),
     FormDecoder(Definitions2.IpaRegImmImm, Register, Immediate, Immediate)(Form.IpaRegImmImm.apply),
@@ -578,6 +581,9 @@ object InstructionDefinitions2 {
       Register,
       Predicate
     )(Form.IpaRegImmRegRegPred.apply),
+    FormDecoder(Definitions2.IpaRegImmRegRegPred, Register, Immediate, Register, Predicate)((p0, p1, p2, p3) =>
+      Form.IpaRegImmRegRegPred.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero), p3)
+    ),
     FormDecoder(Definitions2.IpaRegPredAddress, Register, Predicate, Address)(Form.IpaRegPredAddress.apply),
     FormDecoder(
       Definitions2.IpaRegPredAddressImm,

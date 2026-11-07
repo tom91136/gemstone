@@ -2,7 +2,7 @@ package net.kurobako.gemstone.codegen
 
 /** Projects FORMAT syntax into the logical top-level operands exposed by decoded instructions. */
 object SASSInstructionModel {
-  case class Slot(name: String, kind: String, optional: Boolean)
+  case class Slot(name: String, kind: String, optional: Boolean, fill: Option[String] = None)
   case class FormShape(form: String, opcode: String, slots: Vector[Slot])
   case class Shape(opcode: String, slots: Vector[Slot], forms: Vector[FormShape])
 
@@ -82,9 +82,10 @@ object SASSInstructionModel {
     else "Any"
   }
 
-  private def fieldSlot(field: SASSFormat.Field, optionalContext: Boolean): Slot = {
-    val nonOmittable = field.kind.contains("Register") && !field.suffix.contains("@")
-    Slot(field.binding, fieldKind(field), optionalContext && field.default.nonEmpty && !nonOmittable)
+  private def fieldSlot(field: SASSFormat.Field, optional: Boolean): Slot = {
+    val omittable = optional && field.default.nonEmpty
+    val filled    = field.kind.contains("Register") && !field.suffix.contains("@")
+    Slot(field.binding, fieldKind(field), omittable, field.default.filter(_ => omittable && filled))
   }
 
   private def groupSlot(
@@ -118,7 +119,7 @@ object SASSInstructionModel {
       val operandFields = fields.filterNot(field => attrs(field.kind) || field.kind == "Pg" || field.kind == "UPg")
       if (operandFields.size > 1) Vector(Slot(operandFields.head.binding, "Group", optional = false))
       else operandFields.headOption.map(field =>
-        fieldSlot(field, optionalContext = false).copy(optional = field.default.nonEmpty)
+        fieldSlot(field, optional = false).copy(optional = field.default.nonEmpty)
       ).toVector
     }
   }
@@ -182,7 +183,7 @@ object SASSInstructionModel {
             val selector = slashQualifier || field.kind == "optCC" || field.kind == "Partsel" ||
               field.kind.startsWith("ISWZ")
             if (!selector) {
-              (found :+ fieldSlot(field, optionalContext = depth == 0), true)
+              (found :+ fieldSlot(field, optional = depth == 0), true)
             } else (found, previousOperand)
           case field: SASSFormat.Field
               if allowCC && depth == 0 && isSymbolOperand(field, vocabularies) && standalone(chunk, field) =>

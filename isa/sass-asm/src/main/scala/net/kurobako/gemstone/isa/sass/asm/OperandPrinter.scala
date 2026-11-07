@@ -29,7 +29,8 @@ object OperandPrinter {
       else if (value.bitLength > width) Left(s"bit pattern does not fit $width bits")
       else Right(s"bits<$width>(${hex(value)})")
     case Operand.Symbol(value) =>
-      if (identifier(value)) Right(value) else Left(s"invalid SASS symbol $value")
+      if (identifier(value) || OperandParser.parse(value) == Right(Operand.Symbol(value))) Right(value)
+      else Left(s"invalid SASS symbol $value")
     case Operand.Group(values) =>
       values.toVec.traverse(render(_)).map(_.mkString("{", ", ", "}"))
     case Operand.Predicate(index, uniform, negated) =>

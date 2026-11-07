@@ -186,6 +186,27 @@ object InstructionDefinitions1 {
       Symbol
     )(Form.FootprintPredRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
+      Definitions1.FootprintPredRegRegRegRegImmImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )((p0, p1, p2, p3, p4, p5, p6) =>
+      Form.FootprintPredRegRegRegRegImmImmSymbol.apply(
+        p0,
+        p1,
+        p2,
+        p3,
+        InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        p4,
+        p5,
+        p6
+      )
+    ),
+    FormDecoder(
       Definitions1.FootprintPredRegRegRegRegRegImmSymbol,
       Predicate,
       Register,
@@ -196,6 +217,27 @@ object InstructionDefinitions1 {
       Immediate,
       Symbol
     )(Form.FootprintPredRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions1.FootprintPredRegRegRegRegRegImmSymbol,
+      Predicate,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )((p0, p1, p2, p3, p4, p5, p6) =>
+      Form.FootprintPredRegRegRegRegRegImmSymbol.apply(
+        p0,
+        p1,
+        p2,
+        p3,
+        InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        p4,
+        p5,
+        p6
+      )
+    ),
     FormDecoder(
       Definitions1.FootprintPredRegRegRegRegRegSymbol,
       Predicate,
@@ -237,6 +279,25 @@ object InstructionDefinitions1 {
       Symbol
     )(Form.FootprintRegRegRegRegImmImmSymbol.apply),
     FormDecoder(
+      Definitions1.FootprintRegRegRegRegImmImmSymbol,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Immediate,
+      Symbol
+    )((p0, p1, p2, p3, p4, p5) =>
+      Form.FootprintRegRegRegRegImmImmSymbol.apply(
+        p0,
+        p1,
+        p2,
+        InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        p3,
+        p4,
+        p5
+      )
+    ),
+    FormDecoder(
       Definitions1.FootprintRegRegRegRegRegImmSymbol,
       Register,
       Register,
@@ -246,6 +307,25 @@ object InstructionDefinitions1 {
       Immediate,
       Symbol
     )(Form.FootprintRegRegRegRegRegImmSymbol.apply),
+    FormDecoder(
+      Definitions1.FootprintRegRegRegRegRegImmSymbol,
+      Register,
+      Register,
+      Register,
+      Register,
+      Immediate,
+      Symbol
+    )((p0, p1, p2, p3, p4, p5) =>
+      Form.FootprintRegRegRegRegRegImmSymbol.apply(
+        p0,
+        p1,
+        p2,
+        InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        p3,
+        p4,
+        p5
+      )
+    ),
     FormDecoder(
       Definitions1.FootprintRegRegRegRegRegSymbol,
       Register,

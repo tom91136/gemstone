@@ -21,6 +21,7 @@ class OperandPrinterSuite extends Suite {
     assertEquals(roundTrip(Operand.Predicate(None, uniform = false, negated = false)), "PT")
     assertEquals(roundTrip(Operand.SpecialRegister(SpecialRegister.SR_TID_X)), "SR_TID.X")
     assertEquals(roundTrip(Operand.Symbol("shared_mem")), "shared_mem")
+    assertEquals(roundTrip(Operand.Symbol("2D")), "2D")
     assertEquals(
       roundTrip(Operand.Group(Vec.nonEmpty(Operand.Register(RegisterBank.R, 0), Operand.Integer(12)))),
       "{R0, 12}"

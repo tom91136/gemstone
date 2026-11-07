@@ -13,7 +13,8 @@ object SASSInstructionRenderer {
       family: String,
       mnemonic: String,
       slots: Vector[SASSInstructionModel.Slot],
-      forms: Vector[String]
+      forms: Vector[String],
+      omissions: Vector[Vector[Int]]
   )
 
   private def identifier(value: String, separator: String = ""): String = {
@@ -47,6 +48,11 @@ object SASSInstructionRenderer {
       if (ScalaKeywords(base) || reserved(base)) s"${base}Value" else base
   }
 
+  private def keptKinds(entry: Case, omitted: Vector[Int]): Vector[String] = {
+    val dropped = omitted.toSet
+    entry.slots.zipWithIndex.collect { case (slot, index) if !dropped(index) => slot.kind }
+  }
+
   def cases(shapes: Vector[SASSInstructionModel.Shape]): Vector[Case] = {
     val opcodes    = shapes.map(_.opcode).distinct.sorted
     val collisions = opcodes.groupBy(value => identifier(value).toLowerCaseRoot).filter(_._2.size > 1).keySet
@@ -59,40 +65,53 @@ object SASSInstructionRenderer {
       families.values.groupBy(_.toLowerCaseRoot).forall(_._2.size == 1),
       "SASS opcode names collide without case"
     )
-    // An omitted default is a distinct logical arity. Deduplication by operand kinds gives text and binary
-    // decoding the same canonical case even when architectures use different binding names or defaults.
+    // An omitted operand without a fill is a distinct logical arity. A filled omission keeps the full arity and
+    // is a decoder variant of the same case, so text and binary decoding share one canonical case.
     val expanded = shapes.flatMap { shape =>
       val forms = shape.forms.map(_.form)
-      shape.slots.foldLeft(Vector(Vector.empty[SASSInstructionModel.Slot])) { (prefixes, slot) =>
-        prefixes.flatMap(prefix =>
-          (if (slot.optional) Vector(prefix) else Vector.empty) ++
-            slot.kind.split('|').toVector.map(kind => prefix :+ slot.copy(kind = kind, optional = false))
-        )
-      }.map(slots => (shape.opcode, slots, forms))
+      shape.slots.foldLeft(Vector((Vector.empty[SASSInstructionModel.Slot], Vector.empty[Int]))) { (rows, slot) =>
+        rows.flatMap { (prefix, omitted) =>
+          val present = slot.kind.split('|').toVector.map(kind =>
+            (prefix :+ slot.copy(kind = kind, optional = false), omitted)
+          )
+          if (!slot.optional) present
+          else if (slot.fill.isEmpty) Vector((prefix, omitted)) ++ present
+          else present ++ present.map((slots, _) => (slots, omitted :+ prefix.size))
+        }
+      }.map((slots, omitted) => (shape.opcode, slots, forms, omitted))
     }
     require(expanded.forall(_._2.forall(slot => ModelledKinds(slot.kind))), "unmodelled SASS operand kind")
-    expanded.groupBy((opcode, slots, _) => (opcode, slots.map(_.kind))).toVector
+    val built = expanded.groupBy((opcode, slots, _, _) => (opcode, slots.map(_.kind))).toVector
       .sortBy { case ((opcode, kinds), _) => (opcode, kinds.mkString("/")) }
       .map { case ((opcode, kinds), rows) =>
         val family = families(opcode)
         val chosen = rows.map(_._2).minBy(_.map(_.name).mkString("/"))
         val names  = chosen.map(slot => fieldName(slot.name))
+        val fills  = rows.flatMap(row => row._4.map(index => index -> row._2(index).fill.get)).toMap
         // the slots of one instruction
         @SuppressWarnings(Array("bonsai:linear-in-loop"))
         val slots = chosen.zipWithIndex.map { (slot, index) =>
           val base = names(index)
           val name = if (names.count(_ == base) > 1) s"$base${names.take(index).count(_ == base) + 1}" else base
-          slot.copy(name = name)
+          slot.copy(name = name, fill = fills.get(index))
         }
         Case(
           family + (if (kinds.isEmpty) "NoOperands" else kinds.map(suffix(_)).mkString),
           family,
           opcode,
           slots,
-          rows.flatMap(_._3).distinct.sorted
+          rows.flatMap(_._3).distinct.sorted,
+          rows.map(_._4).filter(_.nonEmpty).distinct.sortBy(_.mkString(","))
         )
       }
+    // decoding returns the first decoder per mnemonic, so an omission is kept only when its operand kinds are unique
+    val counts = built.flatMap(entry => (Vector.empty[Int] +: entry.omissions).map(keyOf(entry, _)))
+      .groupBy(identity).view.mapValues(_.size).toMap
+    built.map(entry => entry.copy(omissions = entry.omissions.filter(omitted => counts(keyOf(entry, omitted)) == 1)))
   }
+
+  private def keyOf(entry: Case, omitted: Vector[Int]): (String, Vector[String]) =
+    (entry.mnemonic, keptKinds(entry, omitted))
 
   def render(
       shapes: Vector[SASSInstructionModel.Shape],
@@ -224,10 +243,29 @@ object SASSInstructionRenderer {
        |""".stripMargin
   }
 
+  private def fillExpression(slot: SASSInstructionModel.Slot): String = slot.fill match {
+    case Some("RZ")  => s"InstructionOperand.${slot.kind}.unsafe(OperandQueries.Zero)"
+    case Some("URZ") => s"InstructionOperand.${slot.kind}.unsafe(OperandQueries.UniformZero)"
+    case other       => sys.error(s"unsupported register default $other for ${slot.name}")
+  }
+
+  private def omissionDecoder(index: Int, entry: Case, omitted: Vector[Int]): String = {
+    val dropped    = omitted.toSet
+    val kept       = entry.slots.zipWithIndex.collect { case (slot, position) if !dropped(position) => slot }
+    val kinds      = kept.map(slot => s", ${slot.kind}").mkString
+    val parameters = kept.indices.map(position => s"p$position").mkString(", ")
+    val arguments  = entry.slots.zipWithIndex.map { (slot, position) =>
+      if (dropped(position)) fillExpression(slot)
+      else s"p${position - omitted.count(_ < position)}"
+    }.mkString(", ")
+    s"FormDecoder(Definitions$index.${entry.name}$kinds)(($parameters) => Form.${entry.name}.apply($arguments))"
+  }
+
   private def renderDefinitions(model: Vector[Case], index: Int): String = {
-    val decoders = model.map { entry =>
+    val decoders = model.flatMap { entry =>
       val kinds = entry.slots.map(slot => s", ${slot.kind}").mkString
-      s"FormDecoder(Definitions$index.${entry.name}$kinds)(Form.${entry.name}.apply)"
+      s"FormDecoder(Definitions$index.${entry.name}$kinds)(Form.${entry.name}.apply)" +:
+        entry.omissions.map(omitted => omissionDecoder(index, entry, omitted))
     }.mkString(",\n")
     s"""${GeneratedHeader.scala("SASS instruction decoders and checked operand constructors")}
        |package net.kurobako.gemstone.isa.sass
