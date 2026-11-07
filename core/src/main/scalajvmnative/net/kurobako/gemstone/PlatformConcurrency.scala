@@ -15,6 +15,7 @@ private object PlatformConcurrency {
   type ReadWriteLock = ReentrantReadWriteLock
   type AtomicInts    = AtomicIntegerArray
   type Condition     = java.util.concurrent.locks.Condition
+  type Waiter        = Thread
 
   /** Runs `compute` at most once; `get` waits for it and wraps its failure in an `ExecutionException`. */
   def once[A](compute: () => A): Once[A] = FutureTask[A](() => compute())
@@ -38,6 +39,14 @@ private object PlatformConcurrency {
   def threadLocal[A](initial: () => A): ThreadLocal[A] = ThreadLocal.withInitial(() => initial())
 
   inline def threadId(): Long = Thread.currentThread().threadId()
+
+  def processors(): Int = sys.runtime.availableProcessors()
+
+  def waiter(): Waiter = Thread.currentThread()
+
+  inline def park(): Unit = LockSupport.park()
+
+  inline def unpark(waiter: Waiter): Unit = LockSupport.unpark(waiter)
 
   inline def parkNanos(nanos: Long): Unit = LockSupport.parkNanos(nanos)
 

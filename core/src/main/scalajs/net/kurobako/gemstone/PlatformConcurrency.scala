@@ -38,6 +38,8 @@ private object PlatformConcurrency {
     def signalAll(): Unit = ()
   }
 
+  type Waiter = Unit
+
   class AtomicInts(length: Int) {
     private val values                           = Array.ofDim[Int](length)
     def get(index: Int): Int                     = values(index)
@@ -75,6 +77,14 @@ private object PlatformConcurrency {
   def threadLocal[A](initial: () => A): ThreadLocal[A] = InitialThreadLocal(initial)
 
   inline def threadId(): Long = 0L
+
+  def processors(): Int = 1
+
+  def waiter(): Waiter = ()
+
+  inline def park(): Unit = ()
+
+  inline def unpark(waiter: Waiter): Unit = { val _ = waiter }
 
   inline def parkNanos(nanos: Long): Unit = { val _ = nanos }
 
