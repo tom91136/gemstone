@@ -336,6 +336,16 @@ class NvidiaModelSuite extends Suite {
     }
   }
 
+  test("TXD forms the VM runs have machine semantics") {
+    Vec("sm_100", "sm_101", "sm_103", "sm_110").foreach { target =>
+      val (txd, sample) = form(SASSModel, Some(target), "TXD", "txd_urc_")
+      SASSModel.semanticsOf(txd, sample) match {
+        case Semantics.Machine(_) | Semantics.Both(_, _) => ()
+        case other                                       => fail(s"$target: $other")
+      }
+    }
+  }
+
   for ((language, target) <- Vec(Language.PTX -> None, Language.SASS -> Some("sm_90")))
     test(s"every $language form ${target.fold("")(name => s"on $name ")}is described or says why not") {
       val model = language.model

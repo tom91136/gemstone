@@ -237,7 +237,8 @@ SASS	sm_90	SYNCS	(syncs_ld_|syncs_tcnt_|syncs_uniform_cas_|syncs_uniform_ld_)	No
 SASS	.*	TLDS	.*	NotModelled	the VM does not model the short-form texel load
 SASS	.*	TMML	.*	NotModelled	the VM does not model texture mip-level queries
 SASS	.*	TXA	.*	NotModelled	the explorer does not model this texture attribute access
-SASS	.*	TXD	.*	NotModelled	the VM does not model texture sampling with explicit gradients
+SASS	.*	TXD	(txd_|txd_b_|txd_b_noConst_|txd_b_tid_|txd_b_urc_|TXD|TXD\.B|TXD\ Legacy\ Style|TXD\.B\ Legacy\ Style|TXD_Legacy_Style|TXD_B_Legacy_Style)	NotModelled	the explorer does not model these texture operand encodings
+SASS	(sm_35|sm_37|sm_50|sm_52|sm_53|sm_60|sm_61|sm_62|sm_70|sm_72|sm_75|sm_80|sm_86|sm_87|sm_88|sm_89|sm_90|sm_120|sm_121)	TXD	(txd_urc_)	NotModelled	the VM rejects the uniform register handle operands this encoding generates outside the sm_100 family
 SASS	.*	TXQ	.*	NotModelled	the VM does not model texture queries
 SASS	.*	VOTE_VTG	.*	NotModelled	the VM does not model this graphics-pipeline vote
 SASS	(sm_100|sm_101|sm_103|sm_110|sm_120|sm_121)	UBLKCP	(ublkcp_desc_one_|ublkcp_one_)	NotModelled	ptxas 11.8 and 13.3 lower none of the PTX that reaches this instruction to this form, so nothing defines the effect its encoding names
