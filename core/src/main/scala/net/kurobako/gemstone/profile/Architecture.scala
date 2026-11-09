@@ -74,7 +74,8 @@ object Architecture {
       tensor: Sourced[Double],
       loadStore: Sourced[Double],
       shared: Sourced[Double],
-      loads: Option[Sourced[Double]] = None
+      loads: Option[Sourced[Double]] = None,
+      dram: Option[Sourced[Double]] = None
   ) derives CanEqual
 
   /** Load-to-use cycles of a dependent chain at each memory tier. A tier is absent when no source gives its cycles.
@@ -86,6 +87,9 @@ object Architecture {
       l2: Option[Sourced[Double]],
       dram: Sourced[Double]
   ) derives CanEqual
+
+  /** The device memory of the reference card a target's values describe, as the device reports it. */
+  case class Memory(busWidthBits: Sourced[Int], l2Bytes: Sourced[Long]) derives CanEqual
 
   enum WorkgroupCap derives CanEqual {
     case AllWorkgroups, MultiSubgroupWorkgroups
@@ -1361,13 +1365,53 @@ object Architecture {
     "gfx12"    -> "gfx1200"
   )
 
-  val all: Vec[Architecture] = nvidiaAll ++ amdgpuAll
+  /** One shipping card of a target's own silicon. A target without one has no device memory values. */
+  private case class Card(
+      name: String,
+      busWidthBits: Int,
+      l2KiB: Long,
+      bandwidthGBs: Option[Double] = None,
+      multiprocessors: Option[Int] = None,
+      boostMhz: Option[Int] = None
+  )
+
+  private val cards: Map[String, Card] = Map(
+    "sm_35"   -> Card("GeForce GTX 780", 384, 1536L, Some(288.4), Some(12), Some(902)),
+    "sm_52"   -> Card("GeForce GTX 980", 256, 2048L, Some(224.4), Some(16), Some(1216)),
+    "sm_61"   -> Card("GeForce GTX 1080", 256, 2048L, Some(320.3), Some(20), Some(1733)),
+    "sm_70"   -> Card("Quadro GV100", 4096, 6144L, Some(870.0), Some(80), Some(1627)),
+    "sm_75"   -> Card("GeForce RTX 2080", 256, 4096L, Some(448.0), Some(46), Some(1710)),
+    "sm_89"   -> Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)),
+    "sm_100"  -> Card("B200", 8192, 61440L),
+    "sm_120"  -> Card("GeForce RTX 5080", 256, 65536L, Some(960.0), Some(84), Some(2617)),
+    "gfx1200" -> Card("Radeon RX 9060 XT", 128, 4096L, Some(320.0), Some(32), Some(3130)),
+    "gfx1201" -> Card("Radeon RX 9070 XT", 256, 8192L, Some(640.0), Some(64), Some(2970))
+  )
+
+  private def onCard(architecture: Architecture): Architecture =
+    cards.get(architecture.name).fold(architecture) { card =>
+      val dram = for {
+        bandwidth <- card.bandwidthGBs
+        count     <- card.multiprocessors
+        clock     <- card.boostMhz
+      } yield Sourced(
+        bandwidth * 1000.0 / (count * clock),
+        Source.Estimate(s"${card.name}: $bandwidth GB/s over $count multiprocessors at $clock MHz")
+      )
+      val source = Source.Estimate(card.name)
+      architecture.copy(
+        throughput = architecture.throughput.copy(dram = dram),
+        memory = Some(Memory(Sourced(card.busWidthBits, source), Sourced(card.l2KiB * 1024L, source)))
+      )
+    }
+
+  val all: Vec[Architecture] = (nvidiaAll ++ amdgpuAll).map(onCard(_))
 
   /** What profiles NVIDIA programs unless another architecture is chosen: the probed RTX 4060 Ti. */
-  val nvidiaDefault: Architecture = sm89
+  val nvidiaDefault: Architecture = onCard(sm89)
 
   /** What profiles AMDGPU programs unless another architecture is chosen: the probed gfx1036. */
-  val amdgpuDefault: Architecture = gfx1036
+  val amdgpuDefault: Architecture = onCard(gfx1036)
 
   /** The architecture of a table name or of an LLVM processor alias, such as `tahiti` for `gfx600`. */
   def named(name: String): Option[Architecture] =
@@ -1381,7 +1425,8 @@ case class Architecture(
     shared: Architecture.Banks,
     limits: Architecture.Limits,
     throughput: Architecture.Throughput,
-    latency: Architecture.Latency
+    latency: Architecture.Latency,
+    memory: Option[Architecture.Memory] = None
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */

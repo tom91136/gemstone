@@ -12,6 +12,31 @@ class ArchitectureSuite extends Suite {
   private val inherited  = Source.Inherited("sm_89", "same multiprocessor")
   private val estimate   = Source.Estimate("basis")
 
+  private def known(name: String): Architecture = Architecture.named(name).getOrElse(fail(s"no architecture $name"))
+
+  test("a target with a card of its own silicon reports its memory and DRAM rate per multiprocessor clock") {
+    val sm89   = known("sm_89")
+    val memory = sm89.memory.getOrElse(fail("no memory"))
+    assertEquals((memory.busWidthBits.value, memory.l2Bytes.value), (128, 32L << 20))
+    assertEquals(memory.busWidthBits.source.kind, Source.Estimate("").kind)
+    assert(memory.l2Bytes.source.detail.contains("RTX 4060 Ti"))
+    val dram = sm89.throughput.dram.getOrElse(fail("no DRAM rate"))
+    assertEqualsDouble(dram.value, 288.0 * 1000.0 / (34 * 2535), 1e-9)
+    assert(dram.source.detail.contains("34 multiprocessors at 2535 MHz"))
+    assertEquals(Architecture.nvidiaDefault.memory, sm89.memory)
+  }
+
+  test("a target derived from a carded one carries no card of its own") {
+    assertEquals(known("sm_86").memory, None)
+    assertEquals(known("sm_86").throughput.dram, None)
+  }
+
+  test("a shared-memory target has no device memory") {
+    assertEquals(known("gfx1036").memory, None)
+    assertEquals(known("gfx1036").throughput.dram, None)
+    assertEquals(Architecture.amdgpuDefault.memory, None)
+  }
+
   test("sources order strongest first") {
     assertEquals(
       Vec(estimate, inherited, published, documented, probed).sorted,

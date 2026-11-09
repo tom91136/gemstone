@@ -69,14 +69,18 @@ object ProfileReport {
     "source" -> ujson.Obj("kind" -> value.source.kind, "detail" -> value.source.detail)
   )
 
-  private def costJson(value: Cost): ujson.Obj = ujson.Obj(
-    "cycles" -> value.cycles,
-    "bound"  -> value.bound,
-    "path"   -> value.path.fold[ujson.Value](ujson.Null)(ujson.Num(_)),
-    "binds"  -> bindingName(value.binds),
-    "floor"  -> value.floor.fold[ujson.Value](ujson.Null)(tier => ujson.Str(tier.toString)),
-    "source" -> ujson.Obj("kind" -> value.source.kind, "detail" -> value.source.detail)
-  )
+  private def costJson(value: Cost): ujson.Obj = {
+    val fields = ujson.Obj(
+      "cycles" -> value.cycles,
+      "bound"  -> value.bound,
+      "path"   -> value.path.fold[ujson.Value](ujson.Null)(ujson.Num(_)),
+      "binds"  -> bindingName(value.binds),
+      "floor"  -> value.floor.fold[ujson.Value](ujson.Null)(tier => ujson.Str(tier.toString)),
+      "source" -> ujson.Obj("kind" -> value.source.kind, "detail" -> value.source.detail)
+    )
+    value.dramIfMissed.foreach(cycles => fields("dramIfMissed") = cycles)
+    fields
+  }
 
   def jsonLines(profile: Profile): Vec[String] = {
     val ranked     = findings(profile)
@@ -156,7 +160,8 @@ object ProfileReport {
       path: Option[Double],
       floor: Option[Tier],
       source: Architecture.Source,
-      instruction: ProfileStream.Instruction
+      instruction: ProfileStream.Instruction,
+      dramIfMissed: Option[Double] = None
   ) derives CanEqual
 
   private def totals(found: Vec[Finding]): Vec[Finding] =
@@ -305,10 +310,14 @@ object ProfileReport {
         val scheduler              = instruction.schedule.collect { case Schedule.Estimated(_) =>
           Architecture.Source.Estimate(modelledPlanning._2)
         }
-        val pathSources = Option.when(path.exists(_ > 0.0))(tiers.map(_.source) ++ limitSources ++ scheduler)
-        val sources     = terms.map(_._3) ++ pathSources.getOrElse(Vec.empty[Architecture.Source])
-        val floor       = Option.when(path.isDefined && touchesGlobal)(globalLevel)
-        Cost(cycles, bound, binds, path, floor, sources.max, instruction)
+        val pathSources   = Option.when(path.exists(_ > 0.0))(tiers.map(_.source) ++ limitSources ++ scheduler)
+        val sources       = terms.map(_._3) ++ pathSources.getOrElse(Vec.empty[Architecture.Source])
+        val floor         = Option.when(path.isDefined && touchesGlobal)(globalLevel)
+        val globalSectors = memory.collect { case ((Space.Global, _), access) => access.sectors }.sum.toDouble
+        val dramIfMissed  = rates.dram.filter(_ => globalSectors > 0.0).map { rate =>
+          globalSectors * architecture.global.sectorBytes.value / rate.value
+        }
+        Cost(cycles, bound, binds, path, floor, sources.max, instruction, dramIfMissed)
     }
   }
 
@@ -332,8 +341,9 @@ object ProfileReport {
   }
 
   private def costLine(cost: Cost): String =
-    f"  ${cost.cycles}%.1f cycles: binds ${bindingName(cost.binds)}, ${pathText(cost)}, bound ${cost.bound}%.1f " +
-      s"[${cost.source.kind}] at " + located(cost.instruction)
+    f"  ${cost.cycles}%.1f cycles: binds ${bindingName(cost.binds)}, ${pathText(cost)}, bound ${cost.bound}%.1f" +
+      cost.dramIfMissed.fold("")(cycles => f", DRAM $cycles%.1f if every global sector misses") +
+      s" [${cost.source.kind}] at " + located(cost.instruction)
 
   def summary(profile: Profile, top: Int): String = {
     val total = profile.total

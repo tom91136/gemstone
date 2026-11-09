@@ -4,6 +4,7 @@
 
 #include "gemstone/environment.hpp"
 #include "gemstone/vector.hpp"
+#include "gemstone_target_memory.hpp"
 
 // Declares the legacy and per-thread-stream spellings this library defines next to the current entry points.
 #define __CUDA_API_VERSION_INTERNAL 1
@@ -286,6 +287,12 @@ std::optional<int> parsePtxTarget(std::string_view target) {
 std::optional<int> configuredPtxVersion() {
   const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
   return value && *value != '\0' ? parsePtxTarget(value) : std::nullopt;
+}
+
+gemstone::TargetMemory targetMemory() {
+  const auto target = configuredPtxVersion();
+  return (target ? gemstone::targetMemory("sm_" + std::to_string(*target)) : std::nullopt)
+      .value_or(gemstone::TargetMemory{.busWidthBits = device_limits::GlobalMemoryBusWidth, .l2Bytes = device_limits::L2CacheSize});
 }
 
 bool codeRequired(std::string_view mode) {
@@ -5031,8 +5038,8 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrPciDeviceId: *value = PciDeviceId; break;
     case cudaDevAttrTccDriver: *value = 0; break;
     case cudaDevAttrMemoryClockRate: *value = MemoryClockRateKhz; break;
-    case cudaDevAttrGlobalMemoryBusWidth: *value = GlobalMemoryBusWidth; break;
-    case cudaDevAttrL2CacheSize: *value = L2CacheSize; break;
+    case cudaDevAttrGlobalMemoryBusWidth: *value = targetMemory().busWidthBits; break;
+    case cudaDevAttrL2CacheSize: *value = targetMemory().l2Bytes; break;
     case cudaDevAttrMaxThreadsPerMultiProcessor: *value = MaxThreadsPerMultiprocessor; break;
     case cudaDevAttrAsyncEngineCount: *value = AsyncEngineCount; break;
     case cudaDevAttrUnifiedAddressing: *value = 1; break;

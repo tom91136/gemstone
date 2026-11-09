@@ -80,6 +80,23 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((word(780) == current.concurrentManagedAccess));
 }
 
+TEST_CASE("HIP reports the memory of a target's reference card and none without one", "[hip]") {
+  const auto memory = [](const char *name) {
+    const gemstone_test::Environment target(gemstone::environment::TargetArch, name);
+    int bus = -1;
+    int l2 = -1;
+    REQUIRE((hipDeviceGetAttribute(&bus, hipDeviceAttributeMemoryBusWidth, 0) == hipSuccess));
+    REQUIRE((hipDeviceGetAttribute(&l2, hipDeviceAttributeL2CacheSize, 0) == hipSuccess));
+    hipDeviceProp_tR0600 properties{};
+    REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
+    CHECK((properties.memoryBusWidth == bus));
+    CHECK((properties.l2CacheSize == l2));
+    return std::pair{bus, l2};
+  };
+  CHECK((memory("gfx1201") == std::pair{256, 8 * 1024 * 1024}));
+  CHECK((memory("gfx1036") == std::pair{0, 0}));
+}
+
 TEST_CASE("HIP wave size follows the selected processor", "[hip]") {
   for (const auto &[target, expected] : std::array<std::pair<const char *, int>, 6>{
            {{"gfx900", 64}, {"gfx90a", 64}, {"gfx1036", 32}, {"gfx1200", 32}, {"gfx1250", 32}, {"gfx1251", 32}}}) {

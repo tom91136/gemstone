@@ -53,6 +53,7 @@
 #include "gemstone/hsa/target.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_hip_api.h"
+#include "gemstone_target_memory.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/command_queue.hpp>
 #include <gemstone/elf.hpp>
@@ -1280,6 +1281,12 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributePageableMemoryAccess:
       *value = gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? 1 : 0;
       break;
+    case hipDeviceAttributeMemoryBusWidth:
+      *value = gemstone::targetMemory(gemstone::hsa::targetArch()).value_or(gemstone::TargetMemory{}).busWidthBits;
+      break;
+    case hipDeviceAttributeL2CacheSize:
+      *value = gemstone::targetMemory(gemstone::hsa::targetArch()).value_or(gemstone::TargetMemory{}).l2Bytes;
+      break;
     default: *value = 0; break;
   }
   return remember(hipSuccess);
@@ -1313,6 +1320,10 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
   properties->multiProcessorCount = static_cast<int>(model.processors());
+  if (const auto memory = gemstone::targetMemory(target)) {
+    properties->memoryBusWidth = memory->busWidthBits;
+    properties->l2CacheSize = memory->l2Bytes;
+  }
   properties->pciBusID = device;
   properties->cooperativeLaunch = 1;
   properties->unifiedAddressing = 1;

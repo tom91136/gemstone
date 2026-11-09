@@ -71,6 +71,8 @@ object Codegen {
     GenerateNativeBindings.main(Array(path("native/generated"), manifest))
     announce(GenerateExecutionRPC)
     GenerateExecutionRPC.main(Array(path("native/generated/rpc")))
+    announce(GenerateTargetMemory)
+    GenerateTargetMemory.main(Array(path("native/generated")))
 
     val ptx = s"${prepare(root, References.PTX).resolve("nvidia/ptx/index.html")}"
     announce(GeneratePTXISA)

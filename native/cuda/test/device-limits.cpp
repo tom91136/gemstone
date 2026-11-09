@@ -36,6 +36,26 @@ size_t heapLimit() {
 
 } // namespace
 
+TEST_CASE("CUDA reports the bus width and L2 size of its target's reference card", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  int bus = 0;
+  int l2 = 0;
+  REQUIRE(cudaDeviceGetAttribute(&bus, cudaDevAttrGlobalMemoryBusWidth, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&l2, cudaDevAttrL2CacheSize, 0) == cudaSuccess);
+  CHECK(bus == 128);
+  CHECK(l2 == 32 * 1024 * 1024);
+}
+
+TEST_CASE("CUDA keeps its fixed bus width and L2 size for a target with no reference card", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_37");
+  int bus = 0;
+  int l2 = 0;
+  REQUIRE(cudaDeviceGetAttribute(&bus, cudaDevAttrGlobalMemoryBusWidth, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&l2, cudaDevAttrL2CacheSize, 0) == cudaSuccess);
+  CHECK(bus == 128);
+  CHECK(l2 == 4 * 1024 * 1024);
+}
+
 TEST_CASE("CUDA malloc heap limit defaults to 8 MiB and follows cuCtxSetLimit", "[cuda][limits]") {
   auto *const context = createContext();
   CHECK(heapLimit() == DefaultHeap);

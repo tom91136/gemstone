@@ -115,6 +115,27 @@ class ProfileCostSuite extends Suite {
     assertEquals((cost.cycles, cost.binds), (16.0, Binding.LoadStore))
   }
 
+  test("global sectors report the DRAM cycles if they all miss, without binding") {
+    val dram  = synthetic.copy(throughput = throughput.copy(dram = Some(Sourced(3.0, documented))))
+    val entry = instruction() -> counters(1L, memory = access(Space.Global, AccessKind.Read, sectors = 16L))
+    val cost  = only(Profile(dram, Some(resident), None, Profile.Counters.zero, Vec(entry)))
+    assertEquals(cost.binds, Binding.LoadStore)
+    assertEqualsDouble(cost.dramIfMissed.getOrElse(fail("no DRAM cycles")), 16.0 * 32.0 / 3.0, 1e-9)
+    assert(ProfileReport.summary(Profile(dram, Some(resident), None, Profile.Counters.zero, Vec(entry)), 8)
+      .contains("if every global sector misses"))
+  }
+
+  test("a target with no DRAM rate reports no DRAM cycles") {
+    val entry = instruction() -> counters(10L, memory = access(Space.Global, AccessKind.Read, sectors = 16L))
+    assertEquals(only(profile(entry)).dramIfMissed, None)
+  }
+
+  test("shared-space sectors never reach DRAM") {
+    val dram  = synthetic.copy(throughput = throughput.copy(dram = Some(Sourced(3.0, documented))))
+    val entry = instruction() -> counters(10L, memory = access(Space.Shared, AccessKind.Read, sectors = 16L))
+    assertEquals(only(Profile(dram, Some(resident), None, Profile.Counters.zero, Vec(entry))).dramIfMissed, None)
+  }
+
   test("shared binds when wavefronts over the shared rate exceed the issues") {
     val writes = access(Space.Shared, AccessKind.Write, wavefronts = 12)
     val cost   = only(profile(instruction() -> counters(1, memory = writes)))
