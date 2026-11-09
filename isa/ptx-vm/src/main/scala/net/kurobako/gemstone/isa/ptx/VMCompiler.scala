@@ -565,6 +565,7 @@ private object VMCompiler {
         case Reconvergence.Action.Setup(slot)       => converge(slot, ConvergenceAction.Setup)
         case Reconvergence.Action.Synchronise(slot) => converge(slot, ConvergenceAction.Synchronise)
         case Reconvergence.Action.Yield             => Right(VMAssembler.Statement.Execute(VMIR.Instruction.Yield))
+        case Reconvergence.Action.Spin              => Right(VMAssembler.Statement.Execute(VMIR.Instruction.Spin))
         case Reconvergence.Action.Jump(target)      => Right(VMAssembler.Statement.Branch(target))
       }.map { statements =>
         val (labels, instructions) = statements.span {

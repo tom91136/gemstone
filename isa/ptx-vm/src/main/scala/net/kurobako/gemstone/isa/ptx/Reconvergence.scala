@@ -21,6 +21,7 @@ private object Reconvergence {
     case Setup(slot: Int)
     case Synchronise(slot: Int)
     case Yield
+    case Spin
     case Jump(target: NonEmpty[String])
   }
 
@@ -42,6 +43,22 @@ private object Reconvergence {
     signature.opcode match {
       case Opcode.Atom => signature.modifiers.exists(Swapping)
       case _           => false
+    }
+  }
+
+  private val Ordered: Set[Modifier] = Set(Modifier.Volatile, Modifier.Relaxed, Modifier.Acquire, Modifier.Sc)
+  private val Testing: Set[Modifier] = Set(Modifier.TryWait, Modifier.TestWait)
+
+  /** Whether a loop around the instruction may wait on memory another lane or work-group writes. ptxas marks none of
+    * these, but the scheduler has to know so that the work a waiting group needs gets a thread.
+    */
+  private def polls(instruction: Instruction): Boolean = {
+    val signature = instruction.signature
+    signature.opcode match {
+      case Opcode.Atom | Opcode.Red => true
+      case Opcode.Ld                => signature.modifiers.exists(Ordered)
+      case Opcode.Mbarrier          => signature.modifiers.exists(Testing)
+      case _                        => false
     }
   }
 
@@ -161,6 +178,10 @@ private object Reconvergence {
 
     def waits(block: Int): Boolean = (first(block) to last(block)).exists(index =>
       instructionAt(statements, index).exists(spins(_))
+    )
+
+    def waitsOnMemory(block: Int): Boolean = (first(block) to last(block)).exists(index =>
+      instructionAt(statements, index).exists(polls(_))
     )
   }
 
@@ -454,6 +475,7 @@ private object Reconvergence {
 
       loops.all.foreach { loop =>
         if (loop.body.exists(graph.waits(_))) add(graph.first(loop.header), Action.Yield)
+        else if (loop.body.exists(graph.waitsOnMemory(_))) add(graph.first(loop.header), Action.Spin)
       }
 
       regions.foreach {

@@ -262,6 +262,33 @@ class ReconvergenceSuite extends Suite {
     }
   }
 
+  Vec(
+    "atom.global.add.u32 %old, [%base], 1;"                     -> true,
+    "red.global.add.u32 [%base], 1;"                            -> true,
+    "ld.volatile.global.u32 %old, [%base];"                     -> true,
+    "ld.relaxed.gpu.global.u32 %old, [%base];"                  -> true,
+    "ld.acquire.gpu.global.u32 %old, [%base];"                  -> true,
+    "mbarrier.test_wait.parity.shared::cta.b64 %q, [%base], 0;" -> true,
+    "mbarrier.try_wait.parity.shared::cta.b64 %q, [%base], 0;"  -> true,
+    "atom.global.cas.b32 %old, [%base], 0, 1;"                  -> false,
+    "atom.global.exch.b32 %old, [%base], 0;"                    -> false,
+    "ld.global.u32 %old, [%base];"                              -> false,
+    "ld.global.nc.u32 %old, [%base];"                           -> false,
+    "st.global.u32 [%base], %old;"                              -> false
+  ).foreach { (instruction, spins) =>
+    test(s"a loop around `${instruction.dropRight(1)}` ${
+        if (spins) "tells the scheduler it polls" else "has no polling mark"
+      }") {
+      val found = analyse(s"""mov.u32 %old, 0;
+        |LOOP:
+        |$instruction
+        |setp.ne.u32 %p, %old, 3;
+        |@%p bra.uni LOOP;
+        |$store""".stripMargin)
+      assertEquals(found.actions.contains(Action.Spin), spins)
+    }
+  }
+
   test("a loop of pointer chasing loads does not yield") {
     val found = analyse(s"""LOOP:
       |ld.global.u32 %old, [%base];
