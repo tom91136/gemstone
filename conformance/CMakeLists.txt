@@ -406,20 +406,6 @@ elseif(CONFORMANCE_BACKEND STREQUAL "opencl")
   get_filename_component(conformance_opencl_runtime_directory "${OpenCL_LIBRARY}" DIRECTORY)
   conformance_runtime_search_directory("${conformance_opencl_runtime_directory}")
   conformance_runtime_plugins("${conformance_opencl_runtime_directory}/libOpenCL.so*")
-  # The runtime compiles OpenCL C to SPIR-V at execution time. Bundle the
-  # compiler subset so the artifact does not depend on a host toolchain.
-  set(conformance_opencl_toolchain "/opt/intel/oneapi/compiler/latest")
-  # The plain clang driver: icpx's Intel compatibility mode parses the generic
-  # address-space keyword as _Generic and defaults to fast floating point.
-  if(EXISTS "${conformance_opencl_toolchain}/bin/compiler/clang")
-    install(PROGRAMS
-      "${conformance_opencl_toolchain}/bin/compiler/clang"
-      "${conformance_opencl_toolchain}/bin/compiler/llvm-spirv"
-      "${conformance_opencl_toolchain}/bin/compiler/llvm-link"
-      DESTINATION "opencl-toolchain/bin/compiler" COMPONENT support)
-    install(DIRECTORY "${conformance_opencl_toolchain}/lib/clang"
-      DESTINATION "opencl-toolchain/lib" COMPONENT support)
-  endif()
 elseif(CONFORMANCE_BACKEND STREQUAL "levelzero")
   get_filename_component(conformance_levelzero_runtime_directory "${CONFORMANCE_LEVELZERO_LOADER}" DIRECTORY)
   conformance_runtime_search_directory("${conformance_levelzero_runtime_directory}")
@@ -458,6 +444,23 @@ elseif(CONFORMANCE_BACKEND STREQUAL "openacc")
   conformance_runtime_plugins("${conformance_nvhpc_runtime_directory}/libacc*.so*"
     "${conformance_nvhpc_runtime_directory}/libcudanvhpc.so*"
     "${conformance_nvhpc_runtime_directory}/libnv*.so*" "${conformance_nvhpc_runtime_directory}/libpg*.so*")
+endif()
+
+if(CONFORMANCE_BACKEND MATCHES "^(opencl|sycl)$")
+  # The runtime compiles OpenCL C to SPIR-V at execution time. Bundle the
+  # compiler subset so the artifact does not depend on a host toolchain.
+  set(conformance_opencl_toolchain "/opt/intel/oneapi/compiler/latest")
+  # The plain clang driver: icpx's Intel compatibility mode parses the generic
+  # address-space keyword as _Generic and defaults to fast floating point.
+  if(EXISTS "${conformance_opencl_toolchain}/bin/compiler/clang")
+    install(PROGRAMS
+      "${conformance_opencl_toolchain}/bin/compiler/clang"
+      "${conformance_opencl_toolchain}/bin/compiler/llvm-spirv"
+      "${conformance_opencl_toolchain}/bin/compiler/llvm-link"
+      DESTINATION "opencl-toolchain/bin/compiler" COMPONENT support)
+    install(DIRECTORY "${conformance_opencl_toolchain}/lib/clang"
+      DESTINATION "opencl-toolchain/lib" COMPONENT support)
+  endif()
 endif()
 
 function(conformance_register_test_program target timeout)
