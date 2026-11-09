@@ -52,6 +52,7 @@ trait Backend {
   def load(image: Vec[Byte]): Either[Fault, Backend.Program]
 }
 
+@SuppressWarnings(Array("scalafix:FilenameConventions.top-level-filename"))
 object ProgramDirectory {
   val Empty: ProgramDirectory = _ => None
 }

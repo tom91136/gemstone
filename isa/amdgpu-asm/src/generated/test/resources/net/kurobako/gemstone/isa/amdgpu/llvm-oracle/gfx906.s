@@ -18,6 +18,9 @@ v_dot2_f32_f16 v0, |v1|, v2, v3
 v_dot2_i32_i16 v0, v1, v2, v3 op_sel:[0,2]
 // ERROR: invalid op_sel value.
 
+v_dot2_i32_i16 v0, v1, v2, v3 op_sel_hi:[0,2]
+// ERROR: invalid op_sel_hi value.
+
 // SOURCE: fma-mix.s
 
 v_fma_mix_f32 v0, -|v1|, v2, v3

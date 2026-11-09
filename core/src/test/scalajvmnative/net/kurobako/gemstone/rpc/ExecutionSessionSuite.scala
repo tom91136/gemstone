@@ -1158,9 +1158,10 @@ class ExecutionSessionSuite extends Suite {
     Using.resource(ExecutionSession(Nil)) { service =>
       val allocation = filled(service, 64)
       val request    = Operation.ReadAllocationRectangle(allocation, 3L, 2, 3, 2, 5, 20)
-      val reply      = ExecutionHandler(request, service).map(encoded =>
-        request.replyCodec.decode(encoded.toArray, ExecutionRPC.Limits).fold(error => fail(error), identity)
-      )
+      val reply      = ExecutionHandler(request, service).map { encoded =>
+        val bytes = java.util.Arrays.copyOf(encoded.bytes, encoded.length)
+        request.replyCodec.decode(bytes, ExecutionRPC.Limits).fold(error => fail(error), identity)
+      }
       assertEquals(reply.map(_.toList), Right(List[Byte](3, 4, 8, 9, 13, 14, 23, 24, 28, 29, 33, 34)))
     }
   }

@@ -8,11 +8,11 @@ v_add_u32_e32 v1, 4.0, v2
 
 // SOURCE: amdgpu-info-err.s
 
-.amdgpu_call
-// ERROR: expected callee symbol for .amdgpu_call
-
 .amdgpu_info
 // ERROR: expected symbol name after .amdgpu_info
+
+.amdgpu_typeid
+// ERROR: expected type ID string for .amdgpu_typeid
 
 // SOURCE: buf-fmt-d16-packed.s
 
@@ -726,6 +726,9 @@ v_cmpx_u_f16_e32 vcc, -1, v2
 
 // SOURCE: gfx9_err_pos.s
 
+image_atomic_add v10, v6, s[8:15] dmask:0x1 r128
+// ERROR: r128 modifier is not supported on this GPU
+
 s_set_gpr_idx_on s0, gpr_idx
 // ERROR: expected absolute expression
 
@@ -737,32 +740,35 @@ tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7] dfmt:16 nfmt:1 s0
 
 // SOURCE: gfx9_unsupported.s
 
+buffer_atomic_fmin v0, off, s[0:3], s0
+// ERROR: instruction not supported on this GPU (gfx900): buffer_atomic_fmin
+
 buffer_atomic_fmin_x2 v[0:1], off, s[0:3], s0 offset:4095 slc
 // ERROR: instruction not supported on this GPU (gfx900): buffer_atomic_fmin_x2
+
+image_sample_d_cl_g16 v[5:6], v[1:4], s[8:15], s[12:15] dmask:0x3
+// ERROR: instruction not supported on this GPU (gfx900): image_sample_d_cl_g16
 
 image_sample_d_g16 v[5:6], v[1:3], s[8:15], s[12:15] dmask:0x3
 // ERROR: instruction not supported on this GPU (gfx900): image_sample_d_g16
 
-s_andn2_wrexec_b32 exec_hi, s1
-// ERROR: instruction not supported on this GPU (gfx900): s_andn2_wrexec_b32
+s_code_end
+// ERROR: instruction not supported on this GPU (gfx900): s_code_end
 
 s_gl1_inv
 // ERROR: instruction not supported on this GPU (gfx900): s_gl1_inv
 
-s_round_mode 0x0
-// ERROR: instruction not supported on this GPU (gfx900): s_round_mode
-
 s_ttracedata_imm 0x0
 // ERROR: instruction not supported on this GPU (gfx900): s_ttracedata_imm
+
+s_version 0x1234
+// ERROR: instruction not supported on this GPU (gfx900): s_version
 
 s_waitcnt_expcnt exec_hi, 0x1234
 // ERROR: instruction not supported on this GPU (gfx900): s_waitcnt_expcnt
 
 v_add_co_ci_u32 v1, sext(v1), sext(v4) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:BYTE_0 src1_sel:DWORD
 // ERROR: instruction not supported on this GPU (gfx900): v_add_co_ci_u32
-
-v_add_nc_u32_dpp v5, v1, v2 dpp8:[7,6,5,4,3,2,1,0] fi:1
-// ERROR: instruction not supported on this GPU (gfx900): v_add_nc_u32
 
 v_cmps_eq_f32 vcc, -1, v2
 // ERROR: instruction not supported on this GPU (gfx900): v_cmps_eq_f32
@@ -794,9 +800,6 @@ v_dot2_f32_f16 v0, -v1, -v2, -v3
 v_dot8c_i32_i4 v0, v1, v2
 // ERROR: instruction not supported on this GPU (gfx900): v_dot8c_i32_i4
 
-v_fmac_f32 v0, v1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_fmac_f32
-
 v_lshl_b32 v255, v1, v2
 // ERROR: instruction not supported on this GPU (gfx900): v_lshl_b32
 
@@ -809,11 +812,14 @@ v_mfma_f32_16x16x4f32 a[0:3], a0, a1, -2.0
 v_mfma_f32_4x4x2bf16 a[0:3], a0, a1, -2.0
 // ERROR: instruction not supported on this GPU (gfx900): v_mfma_f32_4x4x2bf16
 
+v_movreld_b32 v0, 123
+// ERROR: instruction not supported on this GPU (gfx900): v_movreld_b32
+
 v_movrels_b32 v0, v2 dpp8:[0,0,0,0,0,0,0,0]
 // ERROR: instruction not supported on this GPU (gfx900): v_movrels_b32
 
-v_permlanex16_b32 v0, lds_direct, s0, s0
-// ERROR: instruction not supported on this GPU (gfx900): v_permlanex16_b32
+v_pk_fmac_f16 v0, v1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_pk_fmac_f16
 
 v_rcp_clamp_f64 v[254:255], v[1:2]
 // ERROR: instruction not supported on this GPU (gfx900): v_rcp_clamp_f64
@@ -823,9 +829,6 @@ v_sub_nc_u32_e32 v255, v1, v2
 
 v_subrev_co_ci_u32 v0, vcc_lo, src_lds_direct, v0, vcc_lo
 // ERROR: instruction not supported on this GPU (gfx900): v_subrev_co_ci_u32
-
-v_xnor_b32 v0, v1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_xnor_b32
 
 // SOURCE: lds_direct-err.s
 

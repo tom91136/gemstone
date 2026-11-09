@@ -74,6 +74,7 @@ object GeneratePTXISA {
     "Meaning of the modifiers",
     "Launch instructions"
   )
+
   private val HeadingNumber: Regex = raw"^((?:\d+\.)+)\s*(.*)$$".r
   // opcodes are lower case, so captions inside syntax blocks such as "FP8 floating point type" begin no form
   private val Mnemonic: Regex      = raw"^\s*([a-z_][a-z0-9_]*)(?=\.|\{|\s|;|$$)".r
@@ -100,6 +101,7 @@ object GeneratePTXISA {
 
   private val SpellingSeparators = Set('/', ',', '|')
   private val ListSeparators     = Set(',', '|')
+  private val ExampleTerminators = Set(';', ':')
 
   private val BulkMBarrierFields = Vector(
     InstructionField("destinationAddress", optional = false),
@@ -442,7 +444,7 @@ object GeneratePTXISA {
         if (value.nonEmpty) {
           if (buffer.nonEmpty) { val _ = buffer.append(' ') }
           val _ = buffer.append(value)
-          if (buffer.last == ';' || buffer.last == ':' || (buffer.length == 1 && buffer.last == '}')) flush()
+          if (ExampleTerminators.contains(buffer.last) || (buffer.length == 1 && buffer.last == '}')) flush()
         }
       }
     }

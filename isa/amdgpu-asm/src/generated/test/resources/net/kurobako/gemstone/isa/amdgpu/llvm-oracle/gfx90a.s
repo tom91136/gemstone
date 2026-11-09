@@ -78,9 +78,6 @@ ds_add_src2_u64 v1
 ds_dec_src2_u32 v1
 // ERROR: instruction not supported on this GPU (gfx90a): ds_dec_src2_u32
 
-ds_gws_barrier a255 offset:4 gds
-// ERROR: vgpr must be even aligned
-
 ds_inc_src2_u64 v1
 // ERROR: instruction not supported on this GPU (gfx90a): ds_inc_src2_u64
 
@@ -104,6 +101,9 @@ ds_write_src2_b64 v1
 
 exp pos0 v3, v2, v1, v0
 // ERROR: instruction not supported on this GPU (gfx90a): exp
+
+image_gather4h v[251:254], v[1:2], s[8:15], s[12:15] dmask:0x1
+// ERROR: instruction not supported on this GPU (gfx90a): image_gather4h
 
 image_sample_cd v[0:3], v[0:1], s[4:11], s[16:19] dmask:0xf
 // ERROR: instruction not supported on this GPU (gfx90a): image_sample_cd

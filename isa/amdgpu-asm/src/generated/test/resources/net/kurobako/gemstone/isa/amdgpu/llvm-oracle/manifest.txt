@@ -1,9 +1,8 @@
 # Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
 selected-positive-cases=4155
-selected-diagnostic-cases=1066
+selected-diagnostic-cases=1069
 file=bonaire.s
 file=fiji.s
-file=gfx1001.s
 file=gfx1010.s
 file=gfx1011.s
 file=gfx1012.s
@@ -27,7 +26,6 @@ file=gfx1250.s
 file=gfx1251.s
 file=gfx601.s
 file=gfx701.s
-file=gfx800.s
 file=gfx801.s
 file=gfx802.s
 file=gfx803.s

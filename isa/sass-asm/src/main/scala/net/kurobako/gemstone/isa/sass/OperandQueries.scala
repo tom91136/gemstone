@@ -19,6 +19,7 @@ private object OperandQueries {
     case _                                               => false
   }
 
+  /** Vendor extensions can be preserved by the decoder and printer without acquiring execution semantics. */
   def hasUnknownDomain(value: Operand): Boolean = value match {
     case Operand.Register(RegisterBank.Unknown(_), _)         => true
     case Operand.SpecialRegister(SpecialRegister.Unknown(_))  => true

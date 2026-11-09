@@ -27,7 +27,7 @@ class TextureExecutionSuite extends Suite {
       assertEquals(writeBytes(GuestAddress(address), Vec.unsafeWrapArray(bytes)), Right(()))
 
     def install(handle: Int, descriptor: TextureDescriptor): Unit =
-      put(TextureTable.entryAddress(handle.toLong).get, descriptor.encode)
+      put(TextureTable.entryAddress(handle.toLong).get, descriptor.encode.toArray)
 
     def installKepler(slot: Int, record: Array[Byte]): Unit =
       put(TextureLayout.KeplerTable.BaseAddress + slot.toLong * TextureLayout.Kepler.Bytes, record)

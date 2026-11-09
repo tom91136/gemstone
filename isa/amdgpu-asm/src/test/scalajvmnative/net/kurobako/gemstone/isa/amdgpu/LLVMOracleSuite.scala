@@ -11,7 +11,7 @@ class LLVMOracleSuite extends Suite {
   test("LLVM selection covers every ISA and includes instruction pairs") {
     assertEquals(oracle.cases.size, oracle.selectedCaseCount)
     assert(oracle.cases.size >= 4154)
-    assertEquals((oracle.targets ++ oracle.diagnosticTargets).distinct.size, 46)
+    assertEquals((oracle.targets ++ oracle.diagnosticTargets).distinct.size, 44)
     assertEquals(oracle.targets.view.map(_.isa).toSet, ISA.values.toSet)
     assert(oracle.cases.count(_.assembly.contains("::")) >= 30)
   }

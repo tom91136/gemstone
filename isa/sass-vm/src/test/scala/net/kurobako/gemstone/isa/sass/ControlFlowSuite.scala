@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.Harness.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -275,6 +276,14 @@ class ControlFlowSuite extends Suite {
   /** CUDA 13.3 ptxas for sm_89: the lock loop spins on `ATOMG.E.CAS` after `YIELD` and before `BSYNC B0`. */
   private def spinLock: Kernel = load(89, Fixture.listing("spinLockSm89"), "spin")
 
+  /** The same lock from CUDA 13.3 ptxas for sm_89, recording `__activemask()` in the critical section. */
+  private def spinMask: Kernel = load(89, Fixture.listing("spinMaskSm89"), "spin_mask")
+
+  /** CUDA 13.3 ptxas for sm_89: odd lanes sleep on the divergent side of a branch before the join. */
+  private def nanosleepOne: Kernel = load(89, Fixture.listing("nanosleepOneSm89"), "_Z10sleepShapeILi0EEvPjS0_")
+
+  private def guardedYield: Kernel = load(89, Fixture.listing("guardedYieldSm89"), "_Z10yieldShapeILi0EEvPjS0_")
+
   private def has(instruction: DecodedInstruction, mnemonic: String, modifiers: String*): Boolean =
     instruction.mnemonic.raw == mnemonic && instruction.modifiers.map(_.name) == Vec.from(modifiers)
 
@@ -470,7 +479,23 @@ class ControlFlowSuite extends Suite {
     assertEquals(run.words(1), Vec(496L))
   }
 
-  test("YIELD in a compare-and-swap retry loop keeps its lanes at the barrier until every lane has swapped") {
+  test("lanes that yield at an intra-warp spin lock pass its BSYNC one at a time, as on sm_89") {
+    val run = spinMask.launch(32)(Arg.zeros(4), Arg.zeros(4), Arg.zeros(128))
+    assertEquals(run.words(1), Vec(496L))
+    assertEquals(run.words(2), Vec.tabulate(32)(lane => 1L << lane))
+  }
+
+  test("lanes that sleep before a join leave the barrier at once, as on sm_89") {
+    val run = nanosleepOne.launch(32)(Arg.zeros(128))
+    assertEquals(run.words(0), Vec.tabulate(32)(lane => if (lane % 2 == 0) 0x55555555L else 0xaaaaaaaaL))
+  }
+
+  test("guarded YIELD drains only the lanes whose predicate holds") {
+    val run = guardedYield.launch(32)(Arg.zeros(128))
+    assertEquals(run.words(0), Vec.tabulate(32)(lane => if (lane % 2 == 0) 0x55555555L else 0xaaaaaaaaL))
+  }
+
+  test("YIELD in a compare-and-swap retry loop lets each lane pass the barrier once it has swapped") {
     check(
       89,
       """S2R R7, SR_TID.X
@@ -493,9 +518,73 @@ class ControlFlowSuite extends Suite {
         |IMAD.WIDE.U32 R10, R7, 4, R10
         |STG.E [R10.64], R8
         |EXIT""".stripMargin,
-      Vec.fill(32)(32) ++ Vec(32),
+      Vec.fill(32)(1) ++ Vec(32),
       block = Some(32)
     )
+  }
+
+  test("lanes of a warp that win a contended compare and swap loop in turn pass its barrier alone") {
+    val kernel = program(
+      89,
+      """S2R R0, SR_TID.X
+        |LDC.64 R10, c[0x0][0x160]
+        |LDC.64 R6, c[0x0][0x168]
+        |IMAD.WIDE.U32 R12, R0, 4, R10
+        |LDG.E R4, [R6.64]
+        |BSSY B0, `(after)
+        |loop: IADD3 R8, R4, 0x2, RZ
+        |YIELD
+        |ATOMG.E.CAS.STRONG.GPU PT, R8, [R6.64], R4, R8
+        |ISETP.NE.AND P0, PT, R8, R4, PT
+        |IMAD.MOV.U32 R4, RZ, RZ, R8
+        |@P0 BRA `(loop)
+        |BSYNC B0
+        |after: IADD3 R2, R0, 0x1, RZ
+        |REDUX.SUM UR5, R2
+        |IMAD.U32 R3, RZ, RZ, UR5
+        |STG.E [R12.64], R3
+        |EXIT""".stripMargin
+    )
+    val run = kernel.launch(128)(Arg.zeros(512), Arg.zeros(4))
+    assertEquals(run.words(1), Vec(256L))
+    assertEquals(run.words(0), Vec.tabulate(128)(lane => lane + 1L))
+  }
+
+  test("integer atomics and CAS loops count each lane once per block and per grid") {
+    val name   = "_ZN40_GLOBAL__N__abd92d82_11_integers_cu_main8integersEPjPyS0_S1_S0_"
+    val kernel = load(86, Fixture.listing("integersSm86"), name, shared = 256)
+    val run    = kernel.launch(block = 128, grid = 4)(
+      Arg.zeros(28 * 4),
+      Arg.zeros(20 * 8),
+      Arg.zeros(4 * 14 * 4),
+      Arg.zeros(4 * 10 * 8),
+      Arg.zeros(512 * 4 * 4)
+    )
+    val global = run.words(0)
+    val blocks = run.words(2).grouped(14).toVec
+    assertEquals(global(0), 131328L)
+    assertEquals(global(12), 1024L)
+    assertEquals(global(13), 512L)
+    assertEquals(blocks.map(_(0)), Vec.fill(4)(8256L))
+    assertEquals(blocks.map(_(12)), Vec.fill(4)(256L))
+    assertEquals(blocks.map(_(13)), Vec.fill(4)(128L))
+  }
+
+  test("a ballot gathers its members when lanes leave an earlier YIELD loop at different times") {
+    val name   = "_ZN48_GLOBAL__N__137ec495_10_control_cu_07573323_28358lookbackILNS_5ShapeE4EEEvPKjPj"
+    val kernel = load(89, Fixture.listing("lookbackRepeatedSm89"), name)
+    val blocks = 8
+    val flag   = 0x40000000L
+    val table  = Vec.tabulate(blocks * 32) { i =>
+      val (block, lane) = (i / 32, i % 32)
+      (if (block == lane % 9) flag else 0L) | (lane + block + 1).toLong
+    }
+    val stops = Vec.tabulate(32)(lane => if (lane % 9 < blocks) lane % 9 else 0)
+    val sums  = Vec.tabulate(32)(lane => (stops(lane) until blocks).map(block => (lane + block + 1).toLong).sum)
+    val masks = Vec.tabulate(32) { lane =>
+      (0 until 32).filter(other => other % 9 < stops(lane) || other % 9 == blocks).map(1L << _).sum
+    }
+    assertEquals(kernel.launch(32)(Arg.words(table*), Arg.zeros(64 * 4)).words(1), sums ++ masks)
   }
 
   test("local subroutine returns use the saved PC and preserve caller registers") {

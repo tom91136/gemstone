@@ -360,17 +360,17 @@ object GenerateAMDGPUOracle {
   private def familyForTargetOption(target: String): Option[String] = target match {
     case "tahiti" | "verde" | "gfx600" | "gfx601"                         => Some("gfx6")
     case "bonaire" | "hawaii" | "kabini" | "kaveri" | "gfx700" | "gfx701" => Some("gfx7")
-    case "carrizo" | "fiji" | "iceland" | "stoney" | "tonga" | "gfx800" | "gfx801" | "gfx802" | "gfx803" |
+    case "carrizo" | "fiji" | "iceland" | "stoney" | "tonga" | "gfx801" | "gfx802" | "gfx803" | "gfx805" |
         "gfx810" => Some("gfx8")
-    case "gfx908"                                    => Some("cdna1")
-    case "gfx90a"                                    => Some("cdna2")
-    case "gfx940" | "gfx941" | "gfx942"              => Some("cdna3")
-    case "gfx950"                                    => Some("cdna4")
-    case "gfx9" | "gfx900" | "gfx904" | "gfx906"     => Some("gfx9")
-    case value if value.startsWith("gfx10")          => Some("gfx10")
-    case value if value.startsWith("gfx11")          => Some("gfx11")
-    case "gfx12" | "gfx1200" | "gfx1250" | "gfx1251" => Some("gfx12")
-    case _                                           => None
+    case "gfx908"                                                                      => Some("cdna1")
+    case "gfx90a"                                                                      => Some("cdna2")
+    case "gfx940" | "gfx941" | "gfx942"                                                => Some("cdna3")
+    case "gfx950"                                                                      => Some("cdna4")
+    case "gfx9" | "gfx900" | "gfx902" | "gfx904" | "gfx906" | "gfx909"                 => Some("gfx9")
+    case value if Set("RDNA1", "RDNA2").exists(AMDGPUDomainRules.Processors(_)(value)) => Some("gfx10")
+    case value if value.startsWith("gfx11")                                            => Some("gfx11")
+    case "gfx12" | "gfx1200" | "gfx1250" | "gfx1251"                                   => Some("gfx12")
+    case _                                                                             => None
   }
 
   private def normalisePrefix(prefix: String): String =

@@ -10,7 +10,7 @@ import net.kurobako.gemstone.profile.*
   */
 object HeatView {
 
-  def controls(enabled: Var[Boolean], metric: Var[Heat.Metric], architecture: Var[Architecture]): HtmlElement =
+  def controls(enabled: Var[Boolean], metric: Var[Heat.Metric], architecture: Var[Option[Architecture]]): HtmlElement =
     div(
       cls := "heat-controls",
       label(
@@ -27,9 +27,15 @@ object HeatView {
       ),
       select(
         title := "the architecture whose memory and throughput models measure the launch",
-        onChange.mapToValue.map(name => Architecture.named(name).get) --> architecture,
+        onChange.mapToValue.map(name => Architecture.named(name)) --> architecture,
+        option(
+          value    := "",
+          disabled := true,
+          "choose an architecture",
+          selected <-- architecture.signal.map(_.isEmpty)
+        ),
         Architecture.all.map(each =>
-          option(value := each.name, each.name, selected <-- architecture.signal.map(_ == each))
+          option(value := each.name, each.name, selected <-- architecture.signal.map(_.contains(each)))
         )
       )
     )
@@ -46,6 +52,8 @@ object HeatView {
         )
       }
     )
+
+  def choose: HtmlElement = p(cls := "empty", "Choose an architecture to measure this launch.")
 
   /** The launch's totals, its occupancy and the findings that cost the most, each named by its listing line. */
   def summary(profile: Profile, found: Vec[ProfileReport.Finding], listing: Option[Listing]): HtmlElement = {
@@ -65,7 +73,8 @@ object HeatView {
           found.map { finding =>
             val line = listing.flatMap(Heat.lineOf(_, finding.instruction))
             li(
-              span(cls := "heat-cycles", s"${Heat.format(finding.cycles)} cycles"),
+              span(cls   := "heat-cycles", s"${Heat.format(finding.cycles)} cycles"),
+              span(title := finding.source.detail, s" [${finding.source.kind}]"),
               s" ${finding.count} ${finding.unit} (${finding.what}) at ",
               code(line.fold(finding.instruction.text)(_.text))
             )

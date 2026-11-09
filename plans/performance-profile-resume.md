@@ -4,7 +4,7 @@ Companion to `performance-profile.md`: what F0, F1 and F2 delivered, landed in `
 
 ## Agreed scope
 
-F0, then F1 and F2 with model tests. Hardware validation uses the local RTX 4060 Ti through ncu; no lab runs. F3 (cost tables from microbenchmarks) and F4 (timing replay) are out of scope until the user says otherwise.
+F0, then F1 and F2 with model tests. Hardware validation uses the local RTX 4060 Ti through ncu; no lab runs. F3 (cost tables from microbenchmarks) and F4 (timing replay) are out of scope until the user says otherwise. F0 to F2 are committed (`8e24c88a`); F3 continues in `cost-model.md`.
 
 ## Done
 
@@ -75,7 +75,7 @@ Build note: nvcc 13.3 rejects the host GCC; pass `-allow-unsupported-compiler`. 
 
 ## Done: reconvergence (2026-11-02)
 
-Mirrors ptxas, probed with CUDA 13.3 for sm_89: a divergent branch gets `BSSY` before it and `BSYNC` at its immediate post-dominator, hoisted to the loop preheader for loop exits; loops containing atomics, volatile or strong loads get a `YIELD`; loops of arithmetic or plain loads do not.
+Mirrors ptxas, probed with CUDA 13.3 for sm_89: a divergent branch gets `BSSY` before it and `BSYNC` at its immediate post-dominator, hoisted to the loop preheader for loop exits; loops containing `atom.cas` or `atom.exch` get a `YIELD` (ptxas 11.8 and 13.3 on sm_70 to sm_90 emit it for no other atomic, load ordering, `red` or `mbarrier` wait).
 
 - `Instruction.Yield`: a yielding lane leaves every live convergence barrier of its warp. SASS `YIELD` lowers to it, so a ptxas intra-warp spin lock terminates instead of livelocking (`ControlFlowSuite`).
 - `ptx/Reconvergence.scala` plans barriers and yields per routine (dominators, post-dominators, natural loops); `VMCompiler` emits them as unsourced instructions, so the profiler counts no issue for them. The `ptxVm` `ProfileGoldenSuite` now matches all 22 hardware rows.

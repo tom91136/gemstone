@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 import net.kurobako.gemstone.isa.amdgpu.PackedVectorInstructionDefs.*
 import net.kurobako.gemstone.isa.amdgpu.domain.*
 import net.kurobako.gemstone.string.*
+import scala.reflect.ClassTag
 
 /** Maps instruction operands and modifiers to the generated machine layouts. */
 private object InstructionCodec {
@@ -139,6 +140,11 @@ private object InstructionCodec {
   private def supportsLayout(layout: InstructionLayout): Boolean =
     Supported(layout.format) || LaneModifiers.supports(layout.format)
 
+  private def traverseOption[A, B: ClassTag](values: Vec[A])(f: A => Option[B]): Option[Vec[B]] =
+    values.foldLeft(Option(Vec.newBuilder[B])) { (acc, value) =>
+      acc.flatMap(builder => f(value).map(builder.addOne))
+    }.map(_.result())
+
   private def schema(
       value: Metadata.Encoding,
       opcode: String,
@@ -147,6 +153,7 @@ private object InstructionCodec {
       count: Option[Int] = None
   ): Vec[OperandInfo] = {
     val TargetMode(target, waveSize) = mode
+    lazy val components              = opcode.split('_').last
     val matrix   = value.groups.exists(group => group == InstructionGroup.WMMA || group == InstructionGroup.SWMMAC)
     val original = value.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC).map { info =>
       val halve = waveSize == 64 && matrix && (target.isa match {
@@ -158,7 +165,6 @@ private object InstructionCodec {
       val sized      = if (halve) info.copy(bits = (info.bits.raw / 2).max(32).unsafe[Int >= 0]) else info
       val normalised =
         if (info.field.contains(EncodingField.IOFFSET)) sized.copy(field = Some(EncodingField.OFFSET)) else sized
-      val components = opcode.split('_').last
       if (
         target.isa == ISA.GFX8 && target.name != "gfx810" && opcode.contains("d16") && info.field.contains(
           EncodingField.VDATA
@@ -200,7 +206,24 @@ private object InstructionCodec {
   }
 
   /** A catalogue encoding with the layout its instruction would be written in. */
-  private case class Candidate(encoding: Metadata.Encoding, layout: InstructionLayout)
+  private case class Candidate(
+      encoding: Metadata.Encoding,
+      layout: InstructionLayout,
+      unused: Map[EncodingField, BigInt] = Map.empty
+  )
+
+  private def unusedSources(value: Metadata.Encoding, layout: InstructionLayout, used: Set[EncodingField])
+      : Set[EncodingField] =
+    if (
+      layout.format.isVOP3 && (layout.isa.isRDNA || PartialFunction.cond(layout.isa) {
+        case ISA.CDNA5 | ISA.GFX11_7 => true
+      }) && (!LaneModifiers.supports(layout.format) || value.operands.exists(_.kind == OperandKind.EXEC))
+    )
+      SourceFields.filter(field =>
+        layout.byName.contains(field) && !used.contains(field) &&
+          !(field == EncodingField.SRC0 && LaneModifiers.supports(layout.format))
+      )
+    else Set.empty[EncodingField]
 
   private def layout(value: Metadata.Encoding): Option[InstructionLayout] =
     if (value.format == EncodingFormat.VOPDXY || value.format == EncodingFormat.VOPD3XY) None
@@ -328,11 +351,11 @@ private object InstructionCodec {
     else encodeFields(instruction, mode, candidate)
 
   private def encodeFields(instruction: Instruction, mode: TargetMode, candidate: Candidate): Option[Vec[Byte]] = {
-    val TargetMode(target, waveSize) = mode
-    val Candidate(value, layout)     = candidate
-    val allOperands                  = value.operands.filterNot(_.implicitOperand)
-    val parsedMods                   = modifiers(instruction, layout, allOperands)
-    val operands                     = schema(
+    val TargetMode(target, waveSize)     = mode
+    val Candidate(value, layout, unused) = candidate
+    val allOperands                      = value.operands.filterNot(_.implicitOperand)
+    val parsedMods                       = modifiers(instruction, layout, allOperands)
+    val operands                         = schema(
       value,
       instruction.opcode.raw,
       parsedMods.getOrElse(Map.empty),
@@ -367,7 +390,7 @@ private object InstructionCodec {
         )
       else if (ImageOperands.supports(layout))
         ImageOperands.encode(instruction, layout, mods).map(value => Vec((value, Option.empty[OperandCodec.Literal])))
-      else operands.zip(instruction.operands).traverse { case (info, operand) =>
+      else traverseOption(operands.zip(instruction.operands)) { case (info, operand) =>
         encodeOperand(operand, info, target, layout, mods ++ address, MixedPrecision(instruction.definition))
       }
       literals = fields.flatMap(_._2).distinct
@@ -438,17 +461,7 @@ private object InstructionCodec {
            Map((if (layout.format == EncodingFormat.VDSDIR) EncodingField.WAIT_VA_VDST
                 else EncodingField.WAIT_VDST) -> BigInt(15))
          else Map.empty[EncodingField, BigInt]) ++
-        (if (
-           layout.format.isVOP3 && (layout.isa.isRDNA || PartialFunction.cond(layout.isa) {
-             case ISA.CDNA5 | ISA.GFX11_7 => true
-           }) && (!LaneModifiers.supports(
-             layout.format
-           ) || value.operands.exists(_.kind == OperandKind.EXEC))
-         )
-           SourceFields.filter(layout.byName.contains(_)).filterNot(field =>
-             merged.contains(field) || (field == EncodingField.SRC0 && LaneModifiers.supports(layout.format))
-           ).map(_ -> BigInt(128)).toMap
-         else Map.empty[EncodingField, BigInt]) ++
+        unusedSources(value, layout, merged.keySet).map(field => field -> unused.getOrElse(field, BigInt(128))).toMap ++
         (if (
            (PartialFunction.cond(layout.format) {
              case EncodingFormat.FLAT | EncodingFormat.VFLAT | EncodingFormat.VGLOBAL | EncodingFormat.VSCRATCH => true
@@ -931,7 +944,10 @@ private object InstructionCodec {
     val value      = decoded.encoding
     val fields     = layout.fields.map(field => field.name -> BigInt(field.get(word))).toMap
     val operands   = schema(value, definition.mnemonic.raw, fields, mode)
-    val literal    = decoded.literal.flatMap(bits =>
+    val unused     = unusedSources(value, layout, operands.flatMap(_.field).toSet).map(field =>
+      field -> BigInt(layout.get(word, field))
+    ).toMap
+    val literal = decoded.literal.flatMap(bits =>
       decoded.literalBytes.refine[Int in (4, 8)].toOption.map(OperandCodec.Literal(bits, _))
     )
     val memoryLiteral                         = layout.memoryLiteral(word)
@@ -986,7 +1002,7 @@ private object InstructionCodec {
       ProgramOperands.decode(definition, word, layout, target)
     else if (ExportOperands.supports(layout)) ExportOperands.decode(word, layout)
     else if (ImageOperands.supports(layout)) ImageOperands.decode(definition, word, layout)
-    else operands.traverse { info =>
+    else traverseOption(operands) { info =>
       info.field match {
         case None        => Option.when(info.kind == OperandKind.VCC)(Operand.SpecialRegister("vcc"))
         case Some(field) =>
@@ -1146,7 +1162,7 @@ private object InstructionCodec {
         ) mods.filterNot(_.name == "offset")
         else mods
       Instruction.decode(definition, args, filtered).toOption.flatMap { instruction =>
-        encode(instruction, mode, Candidate(value, layout)).map(encoded => (instruction, encoded))
+        encode(instruction, mode, Candidate(value, layout, unused)).map(encoded => (instruction, encoded))
       }
     }
   }
@@ -1154,7 +1170,7 @@ private object InstructionCodec {
   /** SOPP carries one 16-bit operand, which may be a symbolic counter, message or relative branch. */
   private object ProgramOperands {
     def encode(instruction: Instruction, target: Target, candidate: Candidate): Option[Vec[Byte]] = {
-      val Candidate(value, layout) = candidate
+      val Candidate(value, layout, _) = candidate
       for {
         immediate <- immediate(instruction, target, candidate)
         opcode    <- layout.byName.get(EncodingField.OP).flatMap(_.put(BigInt(value.opcode)))
@@ -1180,7 +1196,7 @@ private object InstructionCodec {
       }
 
     private def immediate(instruction: Instruction, target: Target, candidate: Candidate): Option[Long] = {
-      val Candidate(definition, layout) = candidate
+      val Candidate(definition, layout, _) = candidate
       layout.byName.get(EncodingField.SIMM16).flatMap { field =>
         val maximum = (BigInt(1) << field.width) - 1
         val minimum = -(BigInt(1) << (field.width - 1))

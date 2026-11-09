@@ -20,5 +20,4 @@ private[isa] trait Barriers {
   def synchronise(token: UInt[64]): Unit
   def leave(token: UInt[64]): Unit
   def yieldLane(lane: UInt[64]): Unit
-  def pauseLane(lane: UInt[64]): Unit
 }

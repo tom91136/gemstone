@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.texture
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 object TexelFormat {
@@ -82,7 +83,7 @@ case class TexelFormat(kind: ChannelKind, bits: Vector[Int]) derives CanEqual {
   /** Writes `values` into one texel, converting as a formatted store: integers saturate, normalised values round to
     * nearest with ties away from zero, and floats narrow to nearest even.
     */
-  def encode(values: Vector[Double]): Array[Byte] = {
+  def encode(values: Vector[Double]): Vec[Byte] = {
     import TexelFormat.*
     val out = Array.ofDim[Byte](texelBytes)
     (0 until channels).foreach { channel =>
@@ -103,6 +104,6 @@ case class TexelFormat(kind: ChannelKind, bits: Vector[Int]) derives CanEqual {
       val from = offset(channel)
       (0 until width / 8).foreach(i => out(from + i) = ((raw >>> (8 * i)) & 0xffL).toByte)
     }
-    out
+    Vec.unsafeWrapArray(out)
   }
 }

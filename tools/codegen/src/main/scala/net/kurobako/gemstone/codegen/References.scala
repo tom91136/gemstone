@@ -57,7 +57,8 @@ object References {
   val VulkanHeadersVersion: String = "v1.4.341"
   val PTXISAVersion: String        = "9.3"
 
-  private val LlvmVersion         = "23.1.0"
+  val LlvmVersion: String = "23.1.0"
+
   private val MesaVersion         = "26.2.1"
   private val CudaPTXVersion      = "13.3.0"
   private val CudaAPIPackage      = "13.3.29-1"

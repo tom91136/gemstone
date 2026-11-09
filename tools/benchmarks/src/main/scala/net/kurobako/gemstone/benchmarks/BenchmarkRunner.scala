@@ -45,6 +45,8 @@ object BenchmarkRunner {
 
   private val Top = 10
 
+  private val ArchitectureNames = Architecture.all.map(_.name).mkString(", ")
+
   val command: Command[Action] = Command("benchmarks", "Run Gemstone microbenchmarks")(
     Opts.subcommands(
       Command("list", "List available benchmark cases")(Opts(Action.List)),
@@ -63,7 +65,7 @@ object BenchmarkRunner {
       }),
       Command("profile", "Profile one launch of a benchmark case")((
         Opts.argument[String]("case"),
-        Opts.option[String]("architecture", help = "Architecture: sm_89, gfx1030 or gfx1036").orNone,
+        Opts.option[String]("architecture", help = s"Architecture: $ArchitectureNames").orNone,
         Opts.option[String]("stream", help = "Write the profile stream to this file").map(Path.of(_)).orNone,
         Opts.option[String](
           "replay",
@@ -150,7 +152,7 @@ object BenchmarkRunner {
           case Some(Platform.Nvidia)   => Right(Architecture.nvidiaDefault)
           case Some(Platform.Amdgpu)   => Right(Architecture.amdgpuDefault)
           case Some(Platform.Portable) =>
-            Left(s"${entry.name} needs --architecture (${Architecture.all.map(_.name).mkString(", ")})")
+            Left(s"${entry.name} needs --architecture ($ArchitectureNames)")
           case None => Left(s"${entry.name} runs no VM")
         }
     }

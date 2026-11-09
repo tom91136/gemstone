@@ -15,7 +15,8 @@ class ProfilerSuite extends Suite {
       lanes: Vec[Int],
       val text: String,
       val begins: Boolean,
-      workgroup: Coordinates
+      workgroup: Coordinates,
+      override val schedule: Option[Schedule]
   ) extends ArchitecturalState {
     def unit: MachineUnit     = MachineUnit(workgroup, 0, lanes.size.unsafe[Int >= 0], MachineUnit.State.Running)
     def subgroupSize: Int > 0 = 32
@@ -33,12 +34,13 @@ class ProfilerSuite extends Suite {
         lanes: Vec[Int],
         begins: Boolean = true,
         use: RegisterUse = RegisterUse.empty,
-        workgroup: Coordinates = Coordinates.origin
+        workgroup: Coordinates = Coordinates.origin,
+        schedule: Option[Schedule] = None
     )(
         access: Int => Option[(Space, AccessKind, Long, Int)]
     ): Unit = {
       val at = Fault.Location("k", None, Some(pc.unsafe), None, None)
-      assertEquals(recorder.instruction(at, State(issued, lanes, s"op$pc", begins, workgroup)), Right(()))
+      assertEquals(recorder.instruction(at, State(issued, lanes, s"op$pc", begins, workgroup, schedule)), Right(()))
       recorder.registers(issued, use)
       issued += 1L
       lanes.foreach(lane =>
@@ -187,7 +189,7 @@ class ProfilerSuite extends Suite {
     val lines = ProfileReport.jsonLines(launch.profile).map(ujson.read(_))
     assertEquals(lines.map(_("record").str), Vec("launch", "instruction"))
     assertEquals(lines(1)("memory")(0)("sectors").num, 32.0)
-    assert(ProfileReport.summary(launch.profile, 3).contains("28 sectors (excess sectors) at 0x0 op0"))
+    assert(ProfileReport.summary(launch.profile, 3).contains("28 sectors (excess sectors) [documented] at 0x0 op0"))
   }
 
   test("register pressure counts 32-bit units, a 64-bit register as two and a predicate as none") {
@@ -196,6 +198,38 @@ class ProfilerSuite extends Suite {
     launch.issue(1L, warp, use = RegisterUse(Vec("%rd1"), Vec("%r2"), Map("%rd1" -> 2)))(_ => None)
     launch.issue(2L, warp, use = RegisterUse(Vec("%r2"), Vec.empty))(_ => None)
     assertEquals(launch.profile.pressure, Some(Profile.Pressure(3, 2.0)))
+  }
+
+  test("planned cycles add the stall of each issue the machine begins and nothing for the rest") {
+    val launch = Launch()
+    val stall  = Some(Schedule.Encoded(4.unsafe[Int in 0 ~ 15], writeBarrier = true))
+    launch.issue(0L, warp, schedule = stall)(_ => None)
+    launch.issue(0L, warp, schedule = stall)(_ => None)
+    val tail = Some(Schedule.Encoded(7.unsafe[Int in 0 ~ 15], writeBarrier = false))
+    launch.issue(1L, warp, begins = false, schedule = tail)(_ => None)
+    assertEquals(launch.profile.total.plannedCycles, 8L)
+  }
+
+  test("the micro-ops of one instruction count its stall once") {
+    val launch = Launch()
+    val stall  = Some(Schedule.Encoded(5.unsafe[Int in 0 ~ 15], writeBarrier = false))
+    launch.issue(1L, warp, schedule = stall)(_ => None)
+    launch.issue(2L, warp, begins = false, schedule = stall)(_ => None)
+    launch.issue(3L, warp, begins = false, schedule = stall)(_ => None)
+    assertEquals(launch.profile.total.plannedCycles, 5L)
+  }
+
+  test("planned cycles reach the report only for a profile whose instructions carry a schedule") {
+    val unscheduled = Launch()
+    unscheduled.issue(0L, warp)(_ => None)
+    assert(ProfileReport.jsonLines(unscheduled.profile).map(ujson.read(_)).forall(!_.obj.contains("plannedCycles")))
+
+    val scheduled = Launch()
+    val stall     = Some(Schedule.Encoded(3.unsafe[Int in 0 ~ 15], writeBarrier = false))
+    scheduled.issue(0L, warp, schedule = stall)(_ => None)
+    val line = ProfileReport.jsonLines(scheduled.profile).map(ujson.read(_)).head
+    assertEquals(line("plannedCycles").num, 3.0)
+    assertEquals(line("plannedCyclesSource").str, "compiler encoding")
   }
 
   test("a long loop holds a bounded number of subgroup issues open") {
@@ -237,7 +271,27 @@ class ProfilerSuite extends Suite {
       )
     )
     val line = ProfileReport.jsonLines(launch.profile).map(ujson.read(_)).head
-    assertEquals(line("schema").num, 2.0)
+    assertEquals(line("schema").num, 3.0)
     assertEquals(line("findings")(0)("cycles").num, 31.0)
+    assertEquals(line("findings")(0)("source")("kind").str, "documented")
+  }
+
+  test("findings name the weakest source of the values they rest on") {
+    def sources(architecture: Architecture): Vec[(String, String)] = {
+      val launch = Launch(architecture)
+      launch.issue(0L, warp)(lane => Some((Space.Global, AccessKind.Read, 0x1000L + 128L * lane, 4)))
+      launch.issue(1L, warp)(lane => Some((Space.Shared, AccessKind.Write, 128L * lane, 4)))
+      launch.issue(2L, Vec.tabulate(16)(identity))(_ => None)
+      ProfileReport.findings(launch.profile).map(finding => (finding.what, finding.source.kind))
+    }
+    assertEquals(
+      sources(Architecture.sm89),
+      Vec(
+        ("bank-conflict wavefronts", "documented"),
+        ("excess sectors", "documented"),
+        ("idle lanes", "probed")
+      )
+    )
+    assertEquals(sources(Architecture.gfx1036).map(_._2).distinct, Vec("estimate"))
   }
 }

@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import cats.syntax.all.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -129,8 +128,9 @@ private case class InstructionLayout(
 
   /** The fixed bits with every field set, or None when a field is absent or its value does not fit. */
   def assemble(values: Map[EncodingField, BigInt]): Option[BigInt] =
-    values.toVector.traverse { case (name, value) => byName.get(name).flatMap(_.put(value)) }
-      .map(_.foldLeft(fixedPrefix)(_ | _))
+    values.foldLeft(Option(fixedPrefix)) { case (acc, (name, value)) =>
+      acc.flatMap(word => byName.get(name).flatMap(_.put(value)).map(word | _))
+    }
 
   /** GFX7 SMRD selects a trailing literal offset with OFFSET = 255 and IMM clear. */
   def memoryLiteral(word: InstructionWord): Boolean =

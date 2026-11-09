@@ -2,6 +2,7 @@ package net.kurobako.gemstone.texture
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import net.kurobako.gemstone.collection.*
 
 object TextureDescriptor {
 
@@ -115,9 +116,10 @@ case class TextureDescriptor(
     }
   }
 
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def texelAddress(x: Long, y: Long, z: Long): Long = base + z * slicePitch + y * pitch + x * format.texelBytes
 
-  def encode: Array[Byte] = {
+  def encode: Vec[Byte] = {
     import TextureLayout.*
     val buffer = ByteBuffer.allocate(Table.EntryBytes.toInt).order(ByteOrder.LITTLE_ENDIAN)
     buffer.putLong(Field.Base, base)
@@ -148,6 +150,6 @@ case class TextureDescriptor(
       buffer.putFloat(Field.MaxLod, chain.maxLod)
       buffer.putFloat(Field.LodBias, chain.bias)
     }
-    buffer.array()
+    Vec.unsafeWrapArray(buffer.array())
   }
 }

@@ -20,7 +20,9 @@ class ProfileStreamSuite extends Suite {
       ordinal: Int >= 0,
       lanes: Vec[Int >= 0],
       val text: String,
-      val begins: Boolean = true
+      val begins: Boolean = true,
+      override val schedule: Option[Schedule] = None,
+      override val pipe: Option[Pipe] = None
   ) extends ArchitecturalState {
     def unit: MachineUnit =
       MachineUnit(Coordinates(1, 2, 3), ordinal, lanes.size.unsafe[Int >= 0], MachineUnit.State.Running)
@@ -85,6 +87,45 @@ class ProfileStreamSuite extends Suite {
     assertEquals(read.map(replay(_)), Right(expected))
     assertEquals(read.map(_.instructions), Right(stream.instructions))
     assertEquals(read.map(_.instructions(0).use), Right(use))
+  }
+
+  test("the compiler schedule of each instruction survives a round trip") {
+    val recorder = ProfileRecorder()
+    val lanes    = Vec[Int >= 0](0)
+    val stalled  = Schedule.Encoded(4.unsafe[Int in 0 ~ 15], writeBarrier = true)
+    val modelled = Schedule.Estimated(9.unsafe[Int >= 0])
+    assertEquals(recorder.instruction(at(0x10L, 0), State(0L, 0, lanes, "ldg", schedule = Some(stalled))), Right(()))
+    assertEquals(recorder.instruction(at(0x18L, 0), State(1L, 0, lanes, "fadd")), Right(()))
+    assertEquals(recorder.instruction(at(0x20L, 0), State(2L, 0, lanes, "v_rcp", schedule = Some(modelled))), Right(()))
+    val bytes = ByteArrayOutputStream()
+    recorder.stream.write(DataOutputStream(bytes))
+    val read = ProfileStream.read(DataInputStream(ByteArrayInputStream(bytes.toByteArray)))
+    assertEquals(read.map(_.instructions.map(_.schedule)), Right(Vec(Some(stalled), None, Some(modelled))))
+  }
+
+  test("the pipe of each instruction survives a round trip") {
+    val recorder = ProfileRecorder()
+    val lanes    = Vec[Int >= 0](0)
+    val pipes    = List(Some(Pipe.Fma), None, Some(Pipe.Alu), Some(Pipe.Mufu), Some(Pipe.Fp64), Some(Pipe.Tensor))
+    pipes.zipWithIndex.foreach { (pipe, index) =>
+      val state = State(index.toLong, 0, lanes, s"op$index", pipe = pipe)
+      assertEquals(recorder.instruction(at(0x10L + 8L * index, 0), state), Right(()))
+    }
+    val bytes = ByteArrayOutputStream()
+    recorder.stream.write(DataOutputStream(bytes))
+    val read = ProfileStream.read(DataInputStream(ByteArrayInputStream(bytes.toByteArray)))
+    assertEquals(read.map(_.instructions.map(_.pipe)), Right(Vec.from(pipes)))
+  }
+
+  test("the pipe of an instruction is the first non-empty pipe reported at its location") {
+    val recorder = ProfileRecorder()
+    val lanes    = Vec[Int >= 0](0)
+    val pipes    = List(None, Some(Pipe.Alu), Some(Pipe.Fma))
+    pipes.zipWithIndex.foreach { (pipe, index) =>
+      val state = State(index.toLong, 0, lanes, "iadd3", pipe = pipe)
+      assertEquals(recorder.instruction(at(0x10L, 0), state), Right(()))
+    }
+    assertEquals(recorder.stream.instructions.map(_.pipe), Vec[Option[Pipe]](Some(Pipe.Alu)))
   }
 
   test("every asynchronous kind replays with its target and bytes after a round trip") {

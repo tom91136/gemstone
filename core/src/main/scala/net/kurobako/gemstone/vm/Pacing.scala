@@ -194,6 +194,7 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
   }
 }
 
+@SuppressWarnings(Array("scalafix:FilenameConventions.top-level-filename"))
 object Pace {
 
   /** The pace of a work-group that runs alone or alongside every other group on one thread. */

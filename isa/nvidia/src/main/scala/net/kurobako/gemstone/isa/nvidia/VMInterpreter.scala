@@ -8,6 +8,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
@@ -17,7 +18,7 @@ import scala.util.boundary.break
 private[isa] object VMInterpreter {
 
   // The unit a cohort runs as: its identity follows it as it splits, parks and finishes, so a timeline can draw it.
-  // A cohort in a partition runs apart from the other partitions of its warp until a convergence barrier spans them.
+  // A cohort in a partition runs apart from the other partitions of its warp until a barrier spans them.
   private case class Cohort(
       id: Int >= 0,
       pc: Pc,
@@ -289,16 +290,9 @@ private[isa] object VMInterpreter {
       handler: Event => Either[Fault, Unit] = _ => Right(())
   ): Either[Fault, Unit] =
     parameterBlock(kernel.entry, arguments).flatMap { block =>
-      control.observer.foreach(_.launched(resources(kernel, geometry, dynamicSharedBytes)))
-      launch(
-        kernel,
-        geometry,
-        block,
-        VMDevice(DeviceHeap(memory), control, workgroups, handler = handler, heap = heap),
-        dynamicSharedBytes,
-        cluster,
-        cooperative
-      )
+      val device = VMDevice(DeviceHeap(memory), control, workgroups, handler = handler, heap = heap)
+      device.observer.observed(_.launched(resources(kernel, geometry, dynamicSharedBytes)))
+      launch(kernel, geometry, block, device, dynamicSharedBytes, cluster, cooperative)
     }
 
   private def resources(kernel: Kernel, geometry: LaunchGeometry, dynamicSharedBytes: Int >= 0): KernelResources =
@@ -574,7 +568,7 @@ private[isa] object VMInterpreter {
   ) {
     private val workgroup = block.workgroup
     private val effects   = block.effects
-    private val observing = device.control.observer.isDefined
+    private val observing = device.observer != null
     private val root      = VMFrame(
       kernel.entry.routine,
       block.frames.acquire(kernel.entry.routine, observing),
@@ -642,7 +636,7 @@ private[isa] object VMInterpreter {
       MachineUnit(group, cohort.id, cohort.lanes.size.widen[Int >= 0], state)
 
     private def observe(frame: VMFrame, cohort: Cohort, active: VMLaneMask, issue: Long)(using Run): Unit =
-      device.control.observer.foreach { observer =>
+      device.observer.observed { observer =>
         val at = location(frame, cohort.pc, active)
         observer.instruction(at, View(frame, active, unit(cohort, MachineUnit.State.Running), issue, cohort.pc)) match {
           case Left(fault) => fail(fault.at(at))
@@ -652,7 +646,7 @@ private[isa] object VMInterpreter {
 
     /** A change in what a unit is doing, which the timeline records between the issues it surrounds. */
     private inline def transition(cohort: Cohort, inline kind: MachineEvent.Kind, inline at: Fault.Location): Unit =
-      if (observing) device.control.observer.foreach { observer =>
+      device.observer.observed { observer =>
         val event = kind
         observer.transition(MachineEvent(unit(cohort, event.state), event, device.control.issued(), Some(at)))
       }
@@ -676,6 +670,8 @@ private[isa] object VMInterpreter {
       def unit: MachineUnit                        = machine
       def issued: Long                             = issue
       def begins: Boolean                          = frame.routine.program.begins(pc)
+      override def schedule: Option[Schedule]      = frame.routine.program.schedule(pc)
+      override def pipe: Option[Pipe]              = Pipes.of(frame.routine.program.instructions(pc.toInt).instruction)
       def subgroupSize: Int > 0                    = 32
       def eachLane(each: (Int >= 0) => Unit): Unit = active.foreachLane(lane => each(lane.toInt.unsafe[Int >= 0]))
       def text: String                             = frame.routine.program.sourceText(pc).getOrElse {
@@ -976,16 +972,13 @@ private[isa] object VMInterpreter {
       parked.dropRightInPlace(parked.length - kept)
     }
 
-    /** A partition ends where a convergence barrier releases lanes beyond it. */
-    private def rejoinPartitions(released: mutable.ArrayBuffer[Waiting], participants: VMLaneMask): Unit = {
-      var index = 0
-      while (index < released.length) {
-        val waiter = released(index)
-        if (waiter.cohort.partition.nonEmpty && participants.subtract(waiter.cohort.partition).nonEmpty)
-          released(index) = waiter.copy(cohort = waiter.cohort.copy(partition = VMLaneMask.Empty))
-        index += 1
+    /** A partition ends where a barrier releases lanes beyond it or lanes of another partition. */
+    private def rejoinPartitions(released: mutable.ArrayBuffer[Waiting], participants: VMLaneMask): Unit =
+      if (released.nonEmpty) {
+        val partition = released.head.cohort.partition
+        if (participants.subtract(partition).nonEmpty || released.exists(_.cohort.partition != partition))
+          released.mapInPlace(waiter => waiter.copy(cohort = waiter.cohort.copy(partition = VMLaneMask.Empty)))
       }
-    }
 
     private def releaseBarrier(key: BarrierKey)(using Run): Unit = {
       val arrived = barrierMasks.getOrElse(key, VMLaneMask.Empty)
@@ -1011,8 +1004,8 @@ private[isa] object VMInterpreter {
           case _ => ()
         }
         key match {
-          case BarrierKey.Convergence(_, _, _) => rejoinPartitions(released, participants)
-          case _                               => ()
+          case _: (BarrierKey.Convergence | BarrierKey.Warp) => rejoinPartitions(released, participants)
+          case _                                             => ()
         }
         reduce(released)
         released.foreach(resume(_))
@@ -1135,22 +1128,31 @@ private[isa] object VMInterpreter {
     /** Lanes arriving at a convergence barrier release it once every lane it still waits for has arrived. The first to
       * arrive, finding the barrier complete, carry on without parking.
       */
-    private def arriveConvergence(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey.Convergence)(using Run): Unit = {
-      val arrived  = barrierMasks.getOrElse(key, VMLaneMask.Empty)
-      val complete = covered(key, arrived.warpBits(key.base.raw) | lanes.warpBits(key.base.raw))
-      if (complete && arrived.isEmpty) {
-        workgroup.completeConvergence(key.base, key.token)
-        transition(
-          cohort,
-          MachineEvent.Kind.Blocked(MachineUnit.Reason.Barrier(key.describe)),
-          location(cohort.frame, cohort.pc, lanes)
-        )
-        transition(cohort, MachineEvent.Kind.Resumed, location(cohort.frame, cohort.pc, lanes))
-        advance(cohort, lanes)
-      } else {
-        parkWarp(cohort, lanes, key)
-        if (complete) releaseBarrier(key)
-        else releaseWarpBarriers(key.base, key.frame)
+    private def arriveConvergence(cohort: Cohort, arriving: VMLaneMask, key: BarrierKey.Convergence)(using
+        Run
+    ): Unit = {
+      val bits    = arriving.warpBits(key.base.raw)
+      val members = workgroup.convergenceMask(key.base, key.token)
+      val drained = bits & ~members
+      if (drained != 0L) advance(cohort, VMLaneMask.ofWarp(key.base.raw, drained))
+      val lanes = if (drained == 0L) arriving else VMLaneMask.ofWarp(key.base.raw, bits & members)
+      if (lanes.nonEmpty) {
+        val arrived  = barrierMasks.getOrElse(key, VMLaneMask.Empty)
+        val complete = covered(key, arrived.warpBits(key.base.raw) | lanes.warpBits(key.base.raw))
+        if (complete && arrived.isEmpty) {
+          workgroup.completeConvergence(key.base, key.token)
+          transition(
+            cohort,
+            MachineEvent.Kind.Blocked(MachineUnit.Reason.Barrier(key.describe)),
+            location(cohort.frame, cohort.pc, lanes)
+          )
+          transition(cohort, MachineEvent.Kind.Resumed, location(cohort.frame, cohort.pc, lanes))
+          advance(cohort, lanes)
+        } else {
+          parkWarp(cohort, lanes, key)
+          if (complete) releaseBarrier(key)
+          else releaseWarpBarriers(key.base, key.frame)
+        }
       }
     }
 
@@ -1254,6 +1256,10 @@ private[isa] object VMInterpreter {
         frame.lanes.begin(context.use)
       }
       effects.clear()
+      val drained = instruction.instruction match {
+        case Instruction.Yield => workgroup.convergingLanes(active)
+        case _                 => VMLaneMask.Empty
+      }
       val outcome = if (active.isEmpty) Advanced else VMSemantics.execute(instruction.instruction, LaneLoop(context))
       val result  = outcome match {
         case Right(_) =>
@@ -1266,9 +1272,13 @@ private[isa] object VMInterpreter {
       result match {
         case Left(fault)         => fail(inFunction(fault, frame.routine.name).at(location(frame, cohort.pc, active)))
         case Right(Step.Advance) =>
-          advance(cohort, cohort.lanes)
+          if (drained.isEmpty) advance(cohort, cohort.lanes)
+          else {
+            advance(cohort.copy(partition = drained), drained)
+            advance(cohort.copy(partition = cohort.partition.subtract(drained)), cohort.lanes.subtract(drained))
+          }
           instruction.instruction match {
-            case Instruction.Convergence(_, ConvergenceAction.Break) | Instruction.Yield | Instruction.Pause =>
+            case Instruction.Convergence(_, ConvergenceAction.Break) | Instruction.Yield =>
               releaseConvergences()
             case _ => ()
           }
@@ -1317,7 +1327,7 @@ private[isa] object VMInterpreter {
       }
       if (observing) {
         frame.lanes.end()
-        device.control.observer.foreach(_.registers(issue, context.use.result(frame.routine)))
+        device.observer.observed(_.registers(issue, context.use.result(frame.routine)))
       }
     }
 
@@ -1374,7 +1384,7 @@ private[isa] object VMInterpreter {
       else {
         stalled = 0
         val yielding = instruction.instruction match {
-          case Instruction.Yield | Instruction.Pause | Instruction.Spin => true; case _ => false
+          case Instruction.Yield | Instruction.Spin => true; case _ => false
         }
         sleeping = yielding && context.spin.recording && cohort.lanes.headOption.exists(context.spin.yielded(_))
         runningAhead = frame.routine.program.runsAhead && !yielding && runAhead < RunAheadLimit &&

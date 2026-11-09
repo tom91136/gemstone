@@ -305,13 +305,15 @@ class ProfileSuite extends Suite {
     assertEquals(
       facts.stepped("OpGroupAsyncCopy"),
       Vector[Async](
-        (0, LaunchObserver.AsyncKind.Transfer, -1L, 4L * count),
-        (0, LaunchObserver.AsyncKind.Commit, -1L, 0L)
+        (0, LaunchObserver.AsyncKind.Transfer, LaunchObserver.DefaultTarget, 4L * count),
+        (0, LaunchObserver.AsyncKind.Commit, LaunchObserver.DefaultTarget, 0L)
       )
     )
     assertEquals(
       facts.stepped("OpGroupWaitEvents"),
-      Vector.tabulate[Async](count)(lane => (lane, LaunchObserver.AsyncKind.WaitGroups, -1L, 0L))
+      Vector.tabulate[Async](count)(lane =>
+        (lane, LaunchObserver.AsyncKind.WaitGroups, LaunchObserver.DefaultTarget, 0L)
+      )
     )
   }
 
@@ -340,5 +342,167 @@ class ProfileSuite extends Suite {
     assertEquals(result, Right(()))
     assertEquals(recorder.stream.resources, Some(KernelResources(Lanes, Lanes, None, 128L)))
     assert(Profiler.run(recorder.stream, Architecture.sm89).occupancy.isDefined)
+  }
+
+  private def pipeFacts(types: String, body: String)(using munit.Location): Facts = {
+    val memory = RegionMemory()
+    val in     = memory.allocate(4L)
+    val out    = memory.allocate(4L)
+    record(kernel("pipes", types, body), "pipes", memory, Vec(buffer(in), buffer(out)), Group)
+  }
+
+  private def pipeOf(facts: Facts, opcode: String)(using munit.Location): Option[Pipe] = {
+    val found = facts.instructions.toVector.filter(_.text.contains(opcode))
+    assertEquals(found.size, 1)
+    found.head.pipe
+  }
+
+  test("float multiply and add report the fma pipe at 32 bits") {
+    val facts = pipeFacts(
+      "%float = OpTypeFloat 32",
+      """%f = OpConvertUToF %float %lane
+        |%product = OpFMul %float %f %f
+        |%sum = OpFAdd %float %product %f""".stripMargin
+    )
+    assertEquals(pipeOf(facts, "OpFMul"), Some(Pipe.Fma))
+    assertEquals(pipeOf(facts, "OpFAdd"), Some(Pipe.Fma))
+  }
+
+  test("float add at 64 bits reports the fp64 pipe") {
+    val facts = pipeFacts(
+      "%double = OpTypeFloat 64",
+      """%f = OpConvertUToF %double %lane
+        |%sum = OpFAdd %double %f %f""".stripMargin
+    )
+    assertEquals(pipeOf(facts, "OpFAdd"), Some(Pipe.Fp64))
+  }
+
+  test("float conversion to 64 bits reports the fp64 pipe") {
+    val facts = pipeFacts(
+      """%float = OpTypeFloat 32
+        |%double = OpTypeFloat 64""".stripMargin,
+      """%f = OpConvertUToF %float %lane
+        |%d = OpFConvert %double %f""".stripMargin
+    )
+    assertEquals(pipeOf(facts, "OpFConvert"), Some(Pipe.Fp64))
+  }
+
+  test("float to integer conversion from 64 bits reports the fp64 pipe") {
+    val facts = pipeFacts(
+      """%float = OpTypeFloat 32
+        |%double = OpTypeFloat 64""".stripMargin,
+      """%f = OpConvertUToF %double %lane
+        |%s = OpConvertFToS %uint %f
+        |%g = OpConvertUToF %float %lane
+        |%u = OpConvertFToU %uint %g""".stripMargin
+    )
+    assertEquals(pipeOf(facts, "OpConvertFToS"), Some(Pipe.Fp64))
+    assertEquals(pipeOf(facts, "OpConvertFToU"), Some(Pipe.Fma))
+  }
+
+  test("integer multiply reports the fma pipe and integer add the alu pipe") {
+    val facts = pipeFacts(
+      "",
+      """%product = OpIMul %uint %lane %four
+        |%sum = OpIAdd %uint %product %one""".stripMargin
+    )
+    assertEquals(pipeOf(facts, "OpIMul"), Some(Pipe.Fma))
+    assertEquals(pipeOf(facts, "OpIAdd"), Some(Pipe.Alu))
+  }
+
+  test("an opencl exp2 reports the mufu pipe at 32 bits") {
+    val facts = pipeFacts(
+      "%float = OpTypeFloat 32",
+      """%f = OpConvertUToF %float %lane
+        |%e = OpExtInst %float %opencl exp2 %f""".stripMargin
+    )
+    assertEquals(pipeOf(facts, "OpExtInst"), Some(Pipe.Mufu))
+  }
+
+  test("loads and returns report no pipe") {
+    val facts = pipeFacts("", "")
+    assertEquals(pipeOf(facts, "OpLoad"), None)
+    assertEquals(pipeOf(facts, "OpReturn"), None)
+  }
+
+  private val cooperativeMatrix = spv"""
+    OpCapability CooperativeMatrixKHR
+    OpExtension "SPV_KHR_cooperative_matrix"
+    $openCL
+    OpEntryPoint Kernel %main "main"
+    %void = OpTypeVoid
+    %uint = OpTypeInt 32 0
+    %scope = OpConstant %uint 3
+    %two = OpConstant %uint 2
+    %one = OpConstant %uint 1
+    %use_a = OpConstant %uint 0
+    %use_b = OpConstant %uint 1
+    %use_c = OpConstant %uint 2
+    %row_major = OpConstant %uint 0
+    %stride = OpConstant %uint 2
+    %a_type = OpTypeCooperativeMatrixKHR %uint %scope %two %two %use_a
+    %b_type = OpTypeCooperativeMatrixKHR %uint %scope %two %two %use_b
+    %c_type = OpTypeCooperativeMatrixKHR %uint %scope %two %two %use_c
+    %uint_ptr = OpTypePointer CrossWorkgroup %uint
+    %fn = OpTypeFunction %void %uint_ptr %uint_ptr %uint_ptr
+    %main = OpFunction %void None %fn
+    %a_in = OpFunctionParameter %uint_ptr
+    %b_in = OpFunctionParameter %uint_ptr
+    %out = OpFunctionParameter %uint_ptr
+    %entry = OpLabel
+    %a = OpCooperativeMatrixLoadKHR %a_type %a_in %row_major %stride
+    %b = OpCooperativeMatrixLoadKHR %b_type %b_in %row_major %stride
+    %c = OpCompositeConstruct %c_type %one
+    %product = OpCooperativeMatrixMulAddKHR %c_type %a %b %c
+    OpCooperativeMatrixStoreKHR %out %product %row_major %stride
+    OpReturn
+    OpFunctionEnd
+  """
+
+  test("a cooperative matrix multiply-accumulate reports the tensor pipe") {
+    val memory = RegionMemory()
+    val a      = memory.allocate(16L)
+    val b      = memory.allocate(16L)
+    val out    = memory.allocate(16L)
+    val facts  = record(cooperativeMatrix, "main", memory, Vec(buffer(a), buffer(b), buffer(out)), Dimensions.One)
+    assertEquals(pipeOf(facts, "OpCooperativeMatrixMulAddKHR"), Some(Pipe.Tensor))
+  }
+
+  private val cooperativeMatrixNV = spv"""
+    OpCapability CooperativeMatrixNV
+    OpExtension "SPV_NV_cooperative_matrix"
+    $openCL
+    OpEntryPoint Kernel %main "main"
+    %void = OpTypeVoid
+    %bool = OpTypeBool
+    %false = OpConstantFalse %bool
+    %uint = OpTypeInt 32 0
+    %scope = OpConstant %uint 3
+    %two = OpConstant %uint 2
+    %one = OpConstant %uint 1
+    %matrix = OpTypeCooperativeMatrixNV %uint %scope %two %two
+    %uint_ptr = OpTypePointer CrossWorkgroup %uint
+    %fn = OpTypeFunction %void %uint_ptr %uint_ptr %uint_ptr
+    %main = OpFunction %void None %fn
+    %a_in = OpFunctionParameter %uint_ptr
+    %b_in = OpFunctionParameter %uint_ptr
+    %out = OpFunctionParameter %uint_ptr
+    %entry = OpLabel
+    %a = OpCooperativeMatrixLoadNV %matrix %a_in %two %false None
+    %b = OpCooperativeMatrixLoadNV %matrix %b_in %two %false None
+    %c = OpCompositeConstruct %matrix %one
+    %product = OpCooperativeMatrixMulAddNV %matrix %a %b %c
+    OpCooperativeMatrixStoreNV %out %product %two %false None
+    OpReturn
+    OpFunctionEnd
+  """
+
+  test("a cooperative matrix nv multiply-accumulate reports the tensor pipe") {
+    val memory = RegionMemory()
+    val a      = memory.allocate(16L)
+    val b      = memory.allocate(16L)
+    val out    = memory.allocate(16L)
+    val facts  = record(cooperativeMatrixNV, "main", memory, Vec(buffer(a), buffer(b), buffer(out)), Dimensions.One)
+    assertEquals(pipeOf(facts, "OpCooperativeMatrixMulAddNV"), Some(Pipe.Tensor))
   }
 }

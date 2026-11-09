@@ -39,9 +39,11 @@ object Occupancy {
       else if (allocated == 0L) Long.MaxValue
       else limits.shared.value / allocated
 
+    val barrierCapped = limits.workgroupCap == Architecture.WorkgroupCap.AllWorkgroups || perWorkgroup > 1
+
     val bounds = Map(
       Limiter.Subgroups  -> bySubgroups,
-      Limiter.Workgroups -> limits.workgroups.value.toLong,
+      Limiter.Workgroups -> (if (barrierCapped) limits.workgroups.value.toLong else Long.MaxValue),
       Limiter.Registers  -> byRegisters,
       Limiter.Shared     -> byShared
     )

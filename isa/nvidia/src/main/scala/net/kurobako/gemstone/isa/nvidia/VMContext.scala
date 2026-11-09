@@ -42,7 +42,7 @@ private class VMContext(
   var partition: VMLaneMask = VMLaneMask.Empty
   var issued: Long          = 0L
 
-  val observer: LaunchObserver | Null = device.control.observer.orNull
+  val observer: LaunchObserver | Null = device.observer
 
   private val sharedWindow =
     if (explicitCluster)

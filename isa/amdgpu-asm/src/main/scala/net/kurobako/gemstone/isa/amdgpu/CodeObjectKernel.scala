@@ -31,10 +31,10 @@ private case class CodeObjectKernel(
     functionTargets: Map[Long, String] = Map.empty,
     readOnlyAddress: Long = 0L,
     // kernels are never compared; these images back the VM's memory without copying
-    @SuppressWarnings(Array("scalafix:CaseClassEquality"))
+    @SuppressWarnings(Array("bonsai:unstable-equality"))
     readOnly: Array[Byte] = Array.emptyByteArray,
     /** Device globals share these mutable section images across all kernels in one code object. */
-    @SuppressWarnings(Array("scalafix:CaseClassEquality"))
+    @SuppressWarnings(Array("bonsai:unstable-equality"))
     globalMemory: Array[(Long, Array[Byte])] = Array.empty,
     computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
     /** Where the image sits in the device address space; the addresses above already include it. */

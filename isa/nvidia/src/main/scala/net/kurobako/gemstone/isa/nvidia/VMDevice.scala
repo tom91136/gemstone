@@ -14,4 +14,6 @@ private case class VMDevice(
     gridWorkspace: Long = 0L,
     handler: Event => Either[Fault, Unit],
     heap: Option[HeapRegion] = None
-)
+) {
+  val observer: LaunchObserver | Null = control.observer.orNull
+}

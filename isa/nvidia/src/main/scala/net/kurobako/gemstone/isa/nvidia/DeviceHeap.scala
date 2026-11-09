@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.nvidia
 
 import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
@@ -35,12 +34,6 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
   // they never return bytes torn by a store; otherwise they retry once under the lock.
   private val lock     = ReentrantLock()
   private val sequence = AtomicInteger()
-  private val changes  = AtomicLong()
-
-  /** Counts a store that changed memory the grid can see, so a lane that spins on it can tell whether it has moved. */
-  def stored(): Unit = { val _ = changes.incrementAndGet() }
-
-  def stores: Long = changes.get()
 
   private inline def exclusive[A](inline body: A): A = {
     lock.lock()

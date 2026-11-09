@@ -118,11 +118,6 @@ object Listing {
     else parsed.traverse(resolve(_, labels))
   }
 
-  private val Whitespace = Set(' ', '\t', '\r', '\n', '\f', '\u000b')
-
-  private def whitespace(c: Char): Boolean =
-    Whitespace.contains(c)
-
   private def hexWord(line: String): Option[BigInt] = line.trim match {
     case s"/*$contents*/" =>
       contents.trim match {
@@ -142,9 +137,9 @@ object Listing {
       if (address.length < 4 || !cursor.consume("*/")) None
       else {
         def malformed(): Nothing = cursor.fail("unrecognised instruction record in nvdisasm output")
-        cursor.skipWhile(whitespace(_))
+        cursor.skipWhile(OperandSeparators.contains(_))
         val _ = cursor.consume('{')
-        cursor.skipWhile(whitespace(_))
+        cursor.skipWhile(OperandSeparators.contains(_))
         val predicate = Option.when(cursor.at('@')) {
           val start = cursor.offset
           val _     = cursor.consume('@')
@@ -154,7 +149,7 @@ object Listing {
           cursor.advance()
           val raw    = cursor.slice(start)
           val before = cursor.offset
-          cursor.skipWhile(whitespace(_))
+          cursor.skipWhile(OperandSeparators.contains(_))
           if (cursor.offset == before) malformed()
           raw
         }
@@ -180,9 +175,9 @@ object Listing {
           case annotation => raw.take(annotation).trim
         }
         if (!cursor.consume(';') && !cursor.consume('}')) malformed()
-        cursor.skipWhile(whitespace(_))
+        cursor.skipWhile(OperandSeparators.contains(_))
         val _ = cursor.consume('}')
-        cursor.skipWhile(whitespace(_))
+        cursor.skipWhile(OperandSeparators.contains(_))
         if (!cursor.atEnd && !cursor.consume("/*")) malformed()
         Some(Record(
           Integer.parseInt(address, 16),
@@ -257,7 +252,10 @@ object Listing {
       (scoreboards, unscored) = normalised.partition(OperandQueries.isScoreboard(_))
       modifiers = (record.opcode.split('.').toVec.drop(1) ++ scoreboards.map(OperandQueries.scoreboard(_)))
         .map(Instruction.Modifier(_))
-      operation <- InstructionDefinitions.decode(base, modifiers, unscored, guard).left.map(diagnostic + _)
-    } yield DecodedInstruction(address, operation, record.word, None)
+      operation  <- InstructionDefinitions.decode(base, modifiers, unscored, guard).left.map(diagnostic + _)
+      scheduling <-
+        if (sm < 70) Right(None)
+        else record.word.traverse(Scheduling.decode(Generation.Modern, _)).map(_.flatten).left.map(diagnostic + _)
+    } yield DecodedInstruction(address, operation, record.word, None, scheduling)
   }
 }

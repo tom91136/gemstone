@@ -109,4 +109,23 @@ class ProfileSuite extends Suite {
     val wait   = (count: Long) => Vector.tabulate(32)(Step(_, AsyncKind.WaitGroups, target = 0L, bytes = count))
     assertEquals(collected.steps.toVector, commit ++ commit ++ wait(1L) ++ wait(0L))
   }
+
+  test("SASS float arithmetic reports the FMA pipe, integer addition the ALU pipe and EXIT none") {
+    val kernel = program(89, "FADD R0, R1, R2;\nFMUL R3, R0, R1;\nFFMA R4, R0, R1, R2;\nIADD3 R5, R0, R1, RZ;\nEXIT")
+    val memory = Memory()
+    val task   = KernelTask.validated(
+      kernel.name,
+      LaunchGeometry.Dimensions(32, 1, 1),
+      LaunchGeometry.Dimensions(1, 1, 1),
+      Vec[KernelTask.Argument]()
+    ).value
+    val recorder = ProfileRecorder()
+    assertEquals(memory.run(kernel.compile().value, task, TaskControl(observer = Some(recorder))), Right(()))
+    val pipes = recorder.stream.instructions.map(instruction => instruction.text -> instruction.pipe).toMap
+    assertEquals(pipes("FADD R0, R1, R2;"), Some(Pipe.Fma))
+    assertEquals(pipes("FMUL R3, R0, R1;"), Some(Pipe.Fma))
+    assertEquals(pipes("FFMA R4, R0, R1, R2;"), Some(Pipe.Fma))
+    assertEquals(pipes("IADD3 R5, R0, R1, RZ;"), Some(Pipe.Alu))
+    assertEquals(pipes("EXIT;"), None)
+  }
 }

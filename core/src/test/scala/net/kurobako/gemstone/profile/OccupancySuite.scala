@@ -87,6 +87,31 @@ class OccupancySuite extends Suite {
     assertEquals(occupancy.limiters, Set(Occupancy.Limiter.Registers))
   }
 
+  test("amdgpu bounds one-subgroup workgroups by subgroups and larger ones by barriers") {
+    val cases = Seq(
+      (Architecture.gfx906, 64, Seq(1 -> 40, 2 -> 16, 3 -> 13)),
+      (Architecture.gfx1036, 32, Seq(1 -> 64, 2 -> 32, 3 -> 21)),
+      (Architecture.gfx1010, 32, Seq(1 -> 80, 2 -> 32, 3 -> 26)),
+      (Architecture.gfx90a, 64, Seq(1 -> 32, 2 -> 16, 3 -> 10)),
+      (Architecture.gfx1250, 32, Seq(1 -> 64, 2 -> 16, 5 -> 12))
+    )
+    for {
+      (architecture, subgroupSize, counts) <- cases
+      (subgroups, expected)                <- counts
+    } {
+      val occupancy = Occupancy.of(
+        architecture.limits,
+        KernelResources((subgroups * subgroupSize).unsafe, subgroupSize.unsafe, None, 0L)
+      )
+      assertEquals(occupancy.workgroups, expected, s"${architecture.name} with $subgroups subgroups")
+    }
+  }
+
+  test("nvidia keeps the workgroup cap for one-subgroup workgroups") {
+    val occupancy = Occupancy.of(Architecture.sm89.limits, KernelResources(32, 32, None, 0L))
+    assertEquals(occupancy.workgroups, 24)
+  }
+
   /** RTX 4060 Ti (sm_89), driver 615.78.08, CUDA 13.3, ncu 2026.2.1, probe `occupancy.cu` in the Nextcloud probe kit.
     */
   private val hardwareTable =

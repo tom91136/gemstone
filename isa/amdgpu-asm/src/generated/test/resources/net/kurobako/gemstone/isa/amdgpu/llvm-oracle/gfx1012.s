@@ -130,9 +130,6 @@ s_buffer_store_dword tba_hi, s[92:95], m0
 s_buffer_store_dwordx2 s[10:11], s[92:95], m0
 // ENCODING: [0xae, 0x02, 0x64, 0xf4, 0x00, 0x00, 0x00, 0xf8] WAVE_SIZE: 32
 
-s_buffer_store_dwordx2 tba, s[92:95], m0 glc
-// ERROR: tba register not available on this GPU
-
 s_memrealtime s[4:5]
 // ENCODING: [0x00, 0x01, 0x94, 0xf4, 0x00, 0x00, 0x00, 0x00] WAVE_SIZE: 32
 

@@ -127,6 +127,23 @@ class BinarySuite extends Suite {
     }
   }
 
+  test("f64 vector alu decodes whether the unused src2 is zero or inline zero") {
+    val target = Target("gfx1030")
+    Vec(
+      "v_add_f64 v[14:15], v[6:7], v[4:5] e64"     -> hex("0e 00 64 d5 06 09 02 00"),
+      "v_add_f64 v[14:15], v[6:7], v[4:5] e64"     -> hex("0e 00 64 d5 06 09 02 02"),
+      "v_ldexp_f64 v[12:13], s[0:1], -2 e64"       -> hex("0c 00 68 d5 00 84 01 00"),
+      "v_ldexp_f64 v[12:13], s[0:1], -2 e64"       -> hex("0c 00 68 d5 00 84 01 02"),
+      "v_mul_f64 v[10:11], v[14:15], v[10:11] e64" -> hex("0a 00 65 d5 0e 15 02 00"),
+      "v_mul_f64 v[10:11], v[14:15], v[10:11] e64" -> hex("0a 00 65 d5 0e 15 02 02")
+    ).foreach { (text, bytes) =>
+      val decoded = Binary.decodeStatementAt(bytes, 0, TargetMode(target)).value
+      assertEquals(decoded.size.raw, bytes.size, text)
+      assertEquals(Printer.render(Program(Vec(decoded.statement))), text)
+      assert(Scheduling.timing(target, parse(text).definition.mnemonic.raw, lds = false).isDefined, text)
+    }
+  }
+
   test("vector and memory codecs reject invalid register classes, widths, alignment, offsets and literals") {
     val target  = Target("gfx1030")
     val invalid = Vec(

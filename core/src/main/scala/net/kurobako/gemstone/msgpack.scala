@@ -15,9 +15,7 @@ object msgpack {
   case class Limits(maximumElements: Int > 0, maximumBytes: Int > 0, maximumTextBytes: Int > 0)
 
   /** Encoded bytes; only the first `length` entries of `bytes` are meaningful. */
-  class Encoded(val bytes: Array[Byte], val length: Int) {
-    def toArray: Array[Byte] = java.util.Arrays.copyOf(bytes, length)
-  }
+  class Encoded(val bytes: Array[Byte], val length: Int)
 
   /** Accumulates the first failure; later writes are ignored. */
   class Writer(val limits: Limits) {
@@ -148,7 +146,7 @@ object msgpack {
     /** Hands out the buffer without copying; the writer must not be written to afterwards. */
     def encoded(): Either[String, Encoded] = failure.toLeft(Encoded(mutableBytes, length))
 
-    def result(): Either[String, Array[Byte]] = encoded().map(_.toArray)
+    def result(): Either[String, Array[Byte]] = encoded().map(e => java.util.Arrays.copyOf(e.bytes, e.length))
   }
 
   object Reader {

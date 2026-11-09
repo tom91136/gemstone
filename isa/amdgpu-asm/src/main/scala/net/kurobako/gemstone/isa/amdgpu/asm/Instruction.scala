@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
+import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -8,11 +9,15 @@ import net.kurobako.gemstone.string.*
 import scala.annotation.tailrec
 
 object Instruction {
+  private val countsByOpcode = ConcurrentHashMap[Opcode, Vec[Int]]()
 
   /** Assembly operand counts: distinct explicit operand signatures from the catalogue plus a reviewed syntax overlay
     * for forms absent from ACO's physical opcode model or conditional operands that AMD XML marks as always present.
     */
-  def operandCounts(definition: Opcode): Vec[Int] = {
+  def operandCounts(definition: Opcode): Vec[Int] =
+    countsByOpcode.computeIfAbsent(definition, operandCountsOf(_))
+
+  private def operandCountsOf(definition: Opcode): Vec[Int] = {
     val explicit = definition.meta.encodings.map(_.operands.count(!_.implicitOperand)).filter(_ > 0)
     (explicit ++ syntaxOperandCounts(definition.mnemonic)).distinct.sorted match {
       case Vec()  => Vec(0)

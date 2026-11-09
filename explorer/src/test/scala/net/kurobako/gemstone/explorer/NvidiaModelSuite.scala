@@ -148,10 +148,7 @@ class NvidiaModelSuite extends Suite {
       PTXModel.unavailable(found, selected)
     }
     assertEquals(reason("bar", "Bar 2"), Unavailable.Mechanics("Lowers to BarrierSync."))
-    assert(reason("nanosleep", "NanoSleep 1") match {
-      case Unavailable.NotModelled(_) => true
-      case _                          => false
-    })
+    assertEquals(reason("nanosleep", "NanoSleep 1"), Unavailable.Mechanics("Lowers to Yield."))
     assert(reason("prefetch", "Prefetch 1") match {
       case Unavailable.NotModelled(_) => true
       case _                          => false

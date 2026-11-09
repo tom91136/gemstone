@@ -1684,7 +1684,6 @@ private[isa] object VMIR {
     /** Hints and ordering-only operations without architecturally visible effect in the emulator. */
     case NoOp
     case Yield
-    case Pause
 
     /** The warp waits on memory others write: other warps run before it does, but its lanes stay in the convergence
       * barriers they are in, as lanes of a warp without independent thread scheduling cannot wait on each other.
@@ -1770,12 +1769,13 @@ private[isa] object VMIR {
   case class ExecutableProgram(
       instructions: Vec[PredicatedInstruction],
       sources: Vec[Long] = Vec.empty,
-      sourceTexts: Map[Long, String] = Map.empty
+      sourceTexts: Map[Long, String] = Map.empty,
+      sourceSchedules: Map[Long, Schedule] = Map.empty
   ) {
 
     /** Whether the program marks where a diverged path hands over to the others, as SASS does. */
     val yields: Boolean = instructions.exists(_.instruction match {
-      case Instruction.Yield | Instruction.Pause | Instruction.Spin => true; case _ => false
+      case Instruction.Yield | Instruction.Spin => true; case _ => false
     })
 
     /** Whether a diverged path runs until it blocks: the program yields, or writes warp-wide uniform registers, which a
@@ -1788,6 +1788,8 @@ private[isa] object VMIR {
     def source(pc: Pc): Option[Long >= 0] = sources.lift(pc.toInt).flatMap(_.refine[Long >= 0].toOption)
 
     def sourceText(pc: Pc): Option[String] = sources.lift(pc.toInt).flatMap(sourceTexts.get)
+
+    def schedule(pc: Pc): Option[Schedule] = sources.lift(pc.toInt).flatMap(sourceSchedules.get)
 
     /** Whether the instruction at `pc` is the first its source instruction lowered to; with no sources, each is. */
     def begins(pc: Pc): Boolean =

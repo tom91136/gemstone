@@ -14,6 +14,7 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.asm.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.annotation.tailrec
@@ -510,7 +511,7 @@ private object VMInterpreter {
           if (hasStaticCollectives) { reuse.lanesStates(linearLocal) = execution; executions += execution }
           else
             // Deferred host reads retain a frame only when the lane actually suspends.
-            resumeInvocation(program, ops, execution, groupState, control) match {
+            resumeInvocation(program, ops, execution, control) match {
               case Left(error)                      => return Left(located(error, timeline, execution))
               case Right(()) if execution.completed => reuse.execution = execution
               case Right(()) if (hasCollectives && execution.memoryPending) || execution.preempted =>
@@ -601,10 +602,12 @@ private object VMInterpreter {
       program: VMProgram,
       ops: Array[Op],
       execution: InvocationState,
-      memory: MemoryState,
       control: TaskControl
   ): Either[Fault, Unit] = {
+    val memory = execution.memory
     memory.helperInvocation = execution.helperInvocation
+    memory.observer = execution.timeline.observer.orNull
+    memory.lane = execution.ordinal
     memory.invocation = execution.storage
     execution.preempted = false
     var executed                      = 0
@@ -660,12 +663,7 @@ private object VMInterpreter {
           timeline.location(execution.pc, execution.invocation.groupId, execution.ordinal),
           View(execution, issue)
         )
-        .flatMap { _ =>
-          memory.observe(observer, execution.ordinal)
-          val result = op.run(execution, memory)
-          memory.unobserve()
-          result
-        }
+        .flatMap(_ => op.run(execution, memory))
     }
   }
 
@@ -678,6 +676,17 @@ private object VMInterpreter {
     override def label: Int       = execution.currentLabel
     override def predecessor: Int = execution.predecessor
     override def callDepth: Int   = execution.calls.size
+
+    override def pipe: Option[Pipe] = {
+      val program = execution.values.program
+      InstructionPipes.of(
+        program.module.instructions(execution.pc),
+        program.valueType,
+        typeId => program.floatingShape(typeId).map(_._1.raw).orElse(program.matrixShape(typeId).map(_._1.raw)),
+        typeId => program.integerShape(typeId).isDefined,
+        setId => program.extendedInstructionSets.get(setId).flatMap(name => ExtendedSet.of(name))
+      )
+    }
 
     def subgroupSize: Int > 0                    = execution.invocation.subgroupSize.unsafe[Int > 0]
     def eachLane(each: (Int >= 0) => Unit): Unit = each(execution.ordinal)
@@ -715,7 +724,7 @@ private object VMInterpreter {
           !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
           execution.reconvergenceJoin.isEmpty
         )
-          resumeInvocation(program, ops, execution, memory, control) match {
+          resumeInvocation(program, ops, execution, control) match {
             case Left(error) => return Left(located(error, timeline, execution))
             case Right(())   => ()
           }

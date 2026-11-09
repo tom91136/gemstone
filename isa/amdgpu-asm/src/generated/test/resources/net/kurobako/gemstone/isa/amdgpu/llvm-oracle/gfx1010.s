@@ -14,8 +14,8 @@ v_mov_b32_dpp v0, v1 wave_shl:1 row_mask:0x1 bank_mask:0x1
 ds_swizzle_b32 v5, v1 offset:0xf000
 // ENCODING: [0x00, 0xf0, 0xd4, 0xd8, 0x01, 0x00, 0x00, 0x05] WAVE_SIZE: 32
 
-ds_swizzle_b32 v5, v1 offset:swizzle(ROTATE,0,32)
-// ERROR: number of threads to rotate must be in the interval [0,31]
+ds_swizzle_b32 v5, v1 offset:swizzle(ROTATE,0,1,2)
+// ERROR: expected a closing parentheses
 
 // SOURCE: exp-gfx10.s
 
@@ -373,9 +373,6 @@ scratch_load_ushort off, s4 offset:1024 lds
 
 image_gather4 v[5:8], v[1:2], s[8:15], s[12:15] dmask:0x1 unorm
 // ERROR: missing dim operand
-
-image_load v[0:3], v[0:1], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_1D
-// ERROR: image address size does not match dim and a16
 
 // SOURCE: gfx10_asm_mtbuf_err.s
 
@@ -1157,6 +1154,9 @@ v_perm_b32 v5, v1, v2, v3
 v_permlane16_b32 v5, v1, s2, s3
 // ENCODING: [0x05, 0x00, 0x77, 0xd7, 0x01, 0x05, 0x0c, 0x00] WAVE_SIZE: 32
 
+v_permlane16_b32 v5, v1, s2, s3 op_sel:[0, 0, 0, 1]
+// ERROR: invalid op_sel operand
+
 v_permlanex16_b32 v5, v1, s2, s3
 // ENCODING: [0x05, 0x00, 0x78, 0xd7, 0x01, 0x05, 0x0c, 0x00] WAVE_SIZE: 32
 
@@ -1281,29 +1281,29 @@ v_cmpx_tru_f64_e32 -1, v[2:3]
 exp invalid_target_10 v3, v2, v1, v0
 // ERROR: invalid exp target
 
-s_load_dwordx4 s[1:4], s[2:3], s4
-// ERROR: invalid register alignment
+s_and_b32     ttmp9, tma_hi, 0x0000ffff
+// ERROR: tma_hi register not available on this GPU
 
-s_mov_b64 s[10:11], [a0,a2]
-// ERROR: registers in a list must have consecutive indices
+s_mov_b32 s1, [s0, 1
+// ERROR: expected a register or a list of registers
 
 s_mov_b64 s[10:11], [s
 // ERROR: missing register index
 
-s_setreg_b32  hwreg(1 2,3), s2
-// ERROR: expected a comma or a closing parenthesis
+s_mov_b64 s[10:11], [x0,s1]
+// ERROR: invalid register name
 
-s_setreg_b32  hwreg(3,0,33), s2
-// ERROR: invalid bitfield width: only values from 1 to 32 are legal
+tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7], s0 format:[]
+// ERROR: expected a format string
 
-tbuffer_load_format_d16_x v0, off, s[0:3], format:-1, 0
-// ERROR: out of range format
+v_ceil_f16 v0, abs(neg(1))
+// ERROR: failed parsing operand.
 
-v_mov_b32_sdwa v5, v1 dst_sel:DWORD dst_unused:XXX
-// ERROR: invalid dst_unused value
+v_ceil_f32 v1, neg-(v2)
+// ERROR: expected left paren after neg
 
-v_pk_add_u16 v1, v2, v3 op_sel:
-// ERROR: expected a left square bracket
+v_dot_f32_f16 v0, v1, v2
+// ERROR: invalid instruction
 
 // SOURCE: gfx10_flat_instructions_err.s
 
@@ -1312,227 +1312,221 @@ global_atomic_inc v2, v4, null
 
 // SOURCE: gfx10_unsupported.s
 
-buffer_atomic_add_u32 v1, off, s[12:15], s4 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_add_u32
+buffer_atomic_add_u64 v[1:2], off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_add_u64
 
-buffer_atomic_inc_u32 v1, off, s[12:15], s4 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_inc_u32
+buffer_atomic_and_b32 v1, off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_and_b32
 
-buffer_atomic_inc_u64 v[1:2], off, s[12:15], s4 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_inc_u64
+buffer_atomic_cmpswap_b32 v[1:2], off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_cmpswap_b32
+
+buffer_atomic_cmpswap_f32 v[1:2], off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_cmpswap_f32
+
+buffer_atomic_max_f64 v[2:3], off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_max_f64
 
 buffer_atomic_max_i32 v1, off, s[12:15], s4 offset:4095
 // ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_max_i32
 
-buffer_atomic_sub_u32 v1, off, s[12:15], s4 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_sub_u32
+buffer_atomic_max_i64 v[1:2], off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_max_i64
 
-buffer_atomic_sub_u64 v[1:2], off, s[12:15], s4 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_sub_u64
-
-buffer_atomic_swap_b32 v1, off, s[12:15], s4 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_swap_b32
-
-buffer_load_b128 v[252:255], off, s[8:11], s3 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_load_b128
+buffer_atomic_max_u32 v1, off, s[12:15], s4 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_atomic_max_u32
 
 buffer_load_b32 v255, off, s[8:11], s3 offset:4095
 // ERROR: instruction not supported on this GPU (gfx1010): buffer_load_b32
 
-buffer_load_d16_hi_b16 v255, off, s[8:11], s3 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_load_d16_hi_b16
+buffer_load_d16_format_xy v255, off, s[8:11], s3 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_load_d16_format_xy
 
-buffer_load_d16_i8 v255, off, s[8:11], s3 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_load_d16_i8
+buffer_load_i16 v255, off, s[8:11], s3 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_load_i16
 
-buffer_store_d16_hi_b8 v1, off, s[12:15], -1 offset:4095
-// ERROR: instruction not supported on this GPU (gfx1010): buffer_store_d16_hi_b8
+buffer_store_d16_format_x v1, off, s[12:15], -1 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): buffer_store_d16_format_x
 
-ds_load_b64 v[254:255], v255 offset:4 gds
-// ERROR: instruction not supported on this GPU (gfx1010): ds_load_b64
+ds_cmpstore_rtn_b32 v255, v255, v255, v255 offset:4 gds
+// ERROR: instruction not supported on this GPU (gfx1010): ds_cmpstore_rtn_b32
 
-ds_load_u8 v255, v255 offset:4 gds
-// ERROR: instruction not supported on this GPU (gfx1010): ds_load_u8
+ds_cmpstore_rtn_f64 v[254:255], v255, v[254:255], v[254:255] offset:4 gds
+// ERROR: instruction not supported on this GPU (gfx1010): ds_cmpstore_rtn_f64
 
-ds_load_u8_d16 v255, v255 offset:4 gds
-// ERROR: instruction not supported on this GPU (gfx1010): ds_load_u8_d16
+ds_load_2addr_stride64_b32 v[254:255], v255 offset0:16 offset1:1 gds
+// ERROR: instruction not supported on this GPU (gfx1010): ds_load_2addr_stride64_b32
 
-ds_load_u8_d16_hi v255, v255 offset:4 gds
-// ERROR: instruction not supported on this GPU (gfx1010): ds_load_u8_d16_hi
+ds_pk_add_rtn_bf16  a3, v2, a1
+// ERROR: instruction not supported on this GPU (gfx1010): ds_pk_add_rtn_bf16
 
-ds_store_b16_d16_hi v1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): ds_store_b16_d16_hi
+ds_store_2addr_b32 v1, v2, v3
+// ERROR: instruction not supported on this GPU (gfx1010): ds_store_2addr_b32
 
-ds_storexchg_rtn_b32 v255, v255, v255 offset:4 gds
-// ERROR: instruction not supported on this GPU (gfx1010): ds_storexchg_rtn_b32
+ds_store_b64 v1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): ds_store_b64
 
-flat_atomic_and_b32 v255, v[254:255], v255 offset:7 glc slc dlc
-// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_and_b32
+ds_sub_gs_reg_rtn v[254:255], v255 offset:4 gds
+// ERROR: instruction not supported on this GPU (gfx1010): ds_sub_gs_reg_rtn
 
-flat_atomic_cmpswap_b64 v[1:2], v[2:5]
-// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_cmpswap_b64
+flat_atomic_and_b64 v[1:2], v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_and_b64
 
-flat_atomic_sub_u64 v[1:2], v[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_sub_u64
+flat_atomic_dec_u32 v255, v[254:255], v255 offset:7 glc slc dlc
+// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_dec_u32
 
-flat_load_b32 v1, v[3:4]
-// ERROR: instruction not supported on this GPU (gfx1010): flat_load_b32
+flat_atomic_max_u64 v[1:2], v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_max_u64
 
-flat_load_i16 v1, v[3:4]
-// ERROR: instruction not supported on this GPU (gfx1010): flat_load_i16
+flat_atomic_pk_add_f16 a4, v[2:3], a1 sc0
+// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_pk_add_f16
 
-flat_store_b96 v[1:2], v[2:4]
-// ERROR: instruction not supported on this GPU (gfx1010): flat_store_b96
+flat_atomic_swap_b32 v0, v[1:2], v3
+// ERROR: instruction not supported on this GPU (gfx1010): flat_atomic_swap_b32
 
-global_atomic_cmpswap_b64 v1, v[2:5], s[104:105]
-// ERROR: instruction not supported on this GPU (gfx1010): global_atomic_cmpswap_b64
+flat_load_b64 v[1:2], v[3:4]
+// ERROR: instruction not supported on this GPU (gfx1010): flat_load_b64
 
-global_atomic_max_i64 v1, v[2:3], s[104:105]
-// ERROR: instruction not supported on this GPU (gfx1010): global_atomic_max_i64
+flat_store_d16_hi_b8 v[1:2], v2
+// ERROR: instruction not supported on this GPU (gfx1010): flat_store_d16_hi_b8
 
-global_atomic_or_b32 v1, v2, s[104:105]
-// ERROR: instruction not supported on this GPU (gfx1010): global_atomic_or_b32
+global_atomic_or_b64 v1, v[2:3], s[104:105]
+// ERROR: instruction not supported on this GPU (gfx1010): global_atomic_or_b64
+
+global_atomic_pk_add_bf16 a4, v[2:3], a1, off sc0
+// ERROR: instruction not supported on this GPU (gfx1010): global_atomic_pk_add_bf16
 
 global_atomic_swap_b32 v0, v1, v3, s[2:3]
 // ERROR: instruction not supported on this GPU (gfx1010): global_atomic_swap_b32
 
-global_load_addtid_b32 v1, off
-// ERROR: instruction not supported on this GPU (gfx1010): global_load_addtid_b32
+global_load_b32 v1, v3, exec_hi
+// ERROR: instruction not supported on this GPU (gfx1010): global_load_b32
 
-global_load_d16_i8 v1, v3, s[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): global_load_d16_i8
+global_load_dword_addtid v1, off offset:16
+// ERROR: instruction not supported on this GPU (gfx1010): global_load_dword_addtid
 
-global_load_lds_sshort v[2:3], off
-// ERROR: instruction not supported on this GPU (gfx1010): global_load_lds_sshort
+global_load_lds_ubyte v[2:3], off
+// ERROR: instruction not supported on this GPU (gfx1010): global_load_lds_ubyte
 
-global_load_u16 v1, v3, s[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): global_load_u16
+global_store_addtid_b32 v1, null offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): global_store_addtid_b32
 
 global_store_b8 v1, v2, s[104:105]
 // ERROR: instruction not supported on this GPU (gfx1010): global_store_b8
 
-global_store_b96 v1, v[2:4], s[104:105]
-// ERROR: instruction not supported on this GPU (gfx1010): global_store_b96
+global_store_d16_hi_b8 v1, v2, s[104:105]
+// ERROR: instruction not supported on this GPU (gfx1010): global_store_d16_hi_b8
 
 lds_direct_load v1 wait_vdst:15
 // ERROR: instruction not supported on this GPU (gfx1010): lds_direct_load
 
-s_and_not0_saveexec_b64 null, 0xaf123456
-// ERROR: instruction not supported on this GPU (gfx1010): s_and_not0_saveexec_b64
+s_and_not0_wrexec_b64 null, 0xaf123456
+// ERROR: instruction not supported on this GPU (gfx1010): s_and_not0_wrexec_b64
 
-s_buffer_load_b128 s[20:23], s[4:7], 0x0
-// ERROR: instruction not supported on this GPU (gfx1010): s_buffer_load_b128
+s_buffer_load_b32 s101, s[4:7], s0
+// ERROR: instruction not supported on this GPU (gfx1010): s_buffer_load_b32
 
-s_cbranch_join 1
-// ERROR: instruction not supported on this GPU (gfx1010): s_cbranch_join
+s_cls_i32 exec_hi, src_scc
+// ERROR: instruction not supported on this GPU (gfx1010): s_cls_i32
 
-s_cls_i32_i64 exec_hi, src_scc
-// ERROR: instruction not supported on this GPU (gfx1010): s_cls_i32_i64
+s_clz_i32_u64 exec_hi, src_scc
+// ERROR: instruction not supported on this GPU (gfx1010): s_clz_i32_u64
 
-s_load_b32 s101, s[2:3], s0
-// ERROR: instruction not supported on this GPU (gfx1010): s_load_b32
+s_load_b64 s[100:101], s[2:3], s0
+// ERROR: instruction not supported on this GPU (gfx1010): s_load_b64
 
-s_pack_hl_b32_b16 exec_hi, src_scc, vcc_lo
-// ERROR: instruction not supported on this GPU (gfx1010): s_pack_hl_b32_b16
+s_sendmsg_rtn_b32 s0, sendmsg(MSG_RTN_GET_DDID)
+// ERROR: instruction not supported on this GPU (gfx1010): s_sendmsg_rtn_b32
 
-s_set_gpr_idx_mode 0
-// ERROR: instruction not supported on this GPU (gfx1010): s_set_gpr_idx_mode
+s_set_gpr_idx_on -1, 0x0
+// ERROR: instruction not supported on this GPU (gfx1010): s_set_gpr_idx_on
 
-s_wait_event 0x3141
-// ERROR: instruction not supported on this GPU (gfx1010): s_wait_event
+scratch_load_b32 v1, off, off
+// ERROR: instruction not supported on this GPU (gfx1010): scratch_load_b32
+
+scratch_load_i16 v1, v2, s1
+// ERROR: instruction not supported on this GPU (gfx1010): scratch_load_i16
 
 scratch_store_b16 off, v2, null
 // ERROR: instruction not supported on this GPU (gfx1010): scratch_store_b16
 
-v_add_i16 v5, v1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): v_add_i16
+scratch_store_b8 off, v2, null
+// ERROR: instruction not supported on this GPU (gfx1010): scratch_store_b8
 
-v_cmps_ge_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmps_ge_f64
+tbuffer_load_d16_format_xyzw v[254:255], off, s[8:11], s3, format:16 offset:4095
+// ERROR: instruction not supported on this GPU (gfx1010): tbuffer_load_d16_format_xyzw
 
-v_cmps_lt_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmps_lt_f32
+v_add_i32 lds_direct, v0, v0
+// ERROR: instruction not supported on this GPU (gfx1010): v_add_i32
+
+v_cls_i32 v255, 0xaf123456
+// ERROR: instruction not supported on this GPU (gfx1010): v_cls_i32
+
+v_cmp_t_i16 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmp_t_i16
+
+v_cmps_gt_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmps_gt_f64
 
 v_cmps_neq_f32 vcc, -1, v2
 // ERROR: instruction not supported on this GPU (gfx1010): v_cmps_neq_f32
 
-v_cmps_nlg_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmps_nlg_f64
+v_cmps_neq_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmps_neq_f64
 
-v_cmpsx_eq_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_eq_f32
+v_cmpsx_ge_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_ge_f64
 
-v_cmpsx_f_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_f_f64
+v_cmpsx_le_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_le_f64
 
-v_cmpsx_nge_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_nge_f64
+v_cmpsx_ngt_f32 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_ngt_f32
 
-v_cmpsx_nlt_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_nlt_f64
+v_cmpsx_o_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_o_f64
 
-v_cmpx_t_f16 -1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): v_cmpx_t_f16
+v_cmpsx_tru_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1010): v_cmpsx_tru_f64
 
-v_cvt_f32_fp8 v1, 3
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_f32_fp8
+v_cvt_pk_norm_i16_f16 v5, v1, v2
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_pk_norm_i16_f16
 
-v_cvt_pk_fp8_f32 v1, -v2, |v3|
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_pk_fp8_f32
-
-v_cvt_pk_i16_f32 v5, v1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_pk_i16_f32
-
-v_cvt_u32_u16 v255, 0xfe0b
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_u32_u16
+v_dot2_bf16_bf16 v5, v1, v2, v3
+// ERROR: instruction not supported on this GPU (gfx1010): v_dot2_bf16_bf16
 
 v_dot2acc_f32_f16 v255, -|v255|, -|v255| row_xmask:15 row_mask:0x3 bank_mask:0x0 bound_ctrl:0 fi:1
 // ERROR: instruction not supported on this GPU (gfx1010): v_dot2acc_f32_f16
 
-v_dot2c_f32_f16 v0, v1, v2
-// ERROR: instruction not supported on this GPU (gfx1010): v_dot2c_f32_f16
-
-v_dot8_i32_iu4 v255, 0xaf123456, vcc_hi, null neg_lo:[0,0,0] clamp
-// ERROR: instruction not supported on this GPU (gfx1010): v_dot8_i32_iu4
+v_dot2c_i32_i16 v0, v1, v2
+// ERROR: instruction not supported on this GPU (gfx1010): v_dot2c_i32_i16
 
 v_dot8c_i32_i4 v0, v1, v2
 // ERROR: instruction not supported on this GPU (gfx1010): v_dot8c_i32_i4
 
-v_dual_min_f32 v255, -1, v4 :: v_dual_add_f32 v6, src_scc, v5
-// ERROR: instruction not supported on this GPU (gfx1010): v_dual_min_f32
+v_dual_fmac_f32     v6, v1, v2                   :: v_dual_fmamk_f32      v7, v2, 0xaf123456, v7
+// ERROR: instruction not supported on this GPU (gfx1010): v_dual_fmac_f32
 
-v_dual_mul_dx9_zero_f32 v255, -1, v4 :: v_dual_add_f32 v6, src_scc, v5
-// ERROR: instruction not supported on this GPU (gfx1010): v_dual_mul_dx9_zero_f32
+v_dual_mul_f32      v0, s1, v2                   ::  v_dual_mul_f32       v3, s4, v5
+// ERROR: instruction not supported on this GPU (gfx1010): v_dual_mul_f32
 
-v_dual_sub_f32 v255, -1, v4 :: v_dual_add_f32 v6, src_scc, v5
-// ERROR: instruction not supported on this GPU (gfx1010): v_dual_sub_f32
+v_log_legacy_f32 v1, v0 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+// ERROR: instruction not supported on this GPU (gfx1010): v_log_legacy_f32
 
-v_fmac_dx9_zero_f32 v255, 0xaf123456, v255
-// ERROR: instruction not supported on this GPU (gfx1010): v_fmac_dx9_zero_f32
+v_lshl_b64 v[254:255], v[1:2], v2
+// ERROR: instruction not supported on this GPU (gfx1010): v_lshl_b64
 
-v_log_clamp_f32 v1, 0.5
-// ERROR: instruction not supported on this GPU (gfx1010): v_log_clamp_f32
+v_maxmin_f32 v5, v1, v2, v3
+// ERROR: instruction not supported on this GPU (gfx1010): v_maxmin_f32
 
-v_lshl_add_u64 v[10:11], v[2:3], v2, v[6:7]
-// ERROR: instruction not supported on this GPU (gfx1010): v_lshl_add_u64
+v_mfma_f32_16x16x2bf16 a[0:15], a0, a1, -2.0
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_16x16x2bf16
 
-v_mad_f16 v5, v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx1010): v_mad_f16
+v_mfma_f32_16x16x4bf16_1k a[0:15], a[0:1], a[2:3], -2.0
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_16x16x4bf16_1k
 
-v_maxmin_f16 v5, v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx1010): v_maxmin_f16
-
-v_mfma_f32_16x16x1_4b_f32 a[0:15], v0, v1, a[18:33]
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_16x16x1_4b_f32
-
-v_mfma_f32_16x16x1f32 a[0:15], a0, a1, -2.0
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_16x16x1f32
-
-v_mfma_f32_16x16x4_f32 a[0:3], v0, v1, a[2:5]
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_16x16x4_f32
-
-v_mfma_f32_32x32x16_fp8_bf8 a[0:15], v[2:3], v[4:5], a[0:15]
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_32x32x16_fp8_bf8
+v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31] neg:[1,0,0]
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_32x32x1_2b_f32
 
 v_mfma_f32_32x32x2bf16 a[0:31], a0, a1, -2.0
 // ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_32x32x2bf16
@@ -1540,38 +1534,41 @@ v_mfma_f32_32x32x2bf16 a[0:31], a0, a1, -2.0
 v_mfma_f32_32x32x4_xf32 a[0:15], v[2:3], v[4:5], a[18:33]
 // ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_32x32x4_xf32
 
-v_mfma_f32_4x4x1_16b_f32 a[0:3], v0, v1, a[2:5]
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_4x4x1_16b_f32
+v_mfma_f32_32x32x4bf16_1k a[0:31], a[0:1], a[2:3], -2.0
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_32x32x4bf16_1k
 
-v_mfma_f64_4x4x4_4b_f64 a[0:1], v[0:1], a[2:3], a[2:3]
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f64_4x4x4_4b_f64
+v_mfma_f32_4x4x2bf16 a[0:3], a0, a1, -2.0
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_f32_4x4x2bf16
 
-v_mfma_i32_16x16x4i8 a[0:15], a0, a1, 2
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_i32_16x16x4i8
+v_mfma_i32_16x16x16i8 a[0:3], a0, a1, 2
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_i32_16x16x16i8
 
-v_mfma_i32_32x32x4_2b_i8 a[0:31], v0, v1, a[34:65]
-// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_i32_32x32x4_2b_i8
+v_mfma_i32_32x32x4i8 a[0:31], a0, a1, 2
+// ERROR: instruction not supported on this GPU (gfx1010): v_mfma_i32_32x32x4i8
 
-v_minmax_u32 v5, v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx1010): v_minmax_u32
+v_mul_dx9_zero_f32 v255, -|v255|, -|v255| row_xmask:15 row_mask:0x3 bank_mask:0x0 bound_ctrl:0 fi:1
+// ERROR: instruction not supported on this GPU (gfx1010): v_mul_dx9_zero_f32
 
-v_pk_mov_b32 v[0:1], flat_scratch, v[4:5]
-// ERROR: instruction not supported on this GPU (gfx1010): v_pk_mov_b32
+v_rcp_clamp_f32 v255, v1
+// ERROR: instruction not supported on this GPU (gfx1010): v_rcp_clamp_f32
 
-v_rcp_legacy_f32 v255, v1
-// ERROR: instruction not supported on this GPU (gfx1010): v_rcp_legacy_f32
+v_rsq_clamp_f32 v255, v1
+// ERROR: instruction not supported on this GPU (gfx1010): v_rsq_clamp_f32
 
-v_smfmac_f32_16x16x32_bf16 a[10:13], v[2:3], a[4:7], v5
-// ERROR: instruction not supported on this GPU (gfx1010): v_smfmac_f32_16x16x32_bf16
+v_smfmac_f32_16x16x32bf16 v[10:13], a[2:3], v[4:7], v4 cbsz:3 abid:1
+// ERROR: instruction not supported on this GPU (gfx1010): v_smfmac_f32_16x16x32bf16
+
+v_smfmac_f32_16x16x64fp8fp8 v[0:3], a[2:3], v[4:7], v1 cbsz:3 abid:1
+// ERROR: instruction not supported on this GPU (gfx1010): v_smfmac_f32_16x16x64fp8fp8
 
 v_smfmac_f32_32x32x32bf8fp8 v[0:15], a[2:3], v[4:7], v1 cbsz:3 abid:1
 // ERROR: instruction not supported on this GPU (gfx1010): v_smfmac_f32_32x32x32bf8fp8
 
-v_subrev_i32 v1, s[0:1], v2, v3
-// ERROR: instruction not supported on this GPU (gfx1010): v_subrev_i32
+v_smfmac_f32_32x32x32fp8bf8 v[0:15], a[2:3], v[4:7], v1 cbsz:3 abid:1
+// ERROR: instruction not supported on this GPU (gfx1010): v_smfmac_f32_32x32x32fp8bf8
 
-v_wmma_i32_16x16x16_iu4 v[16:19], v[0:7], v[8:15], v[16:19] op_sel:[0,0,1]
-// ERROR: instruction not supported on this GPU (gfx1010): v_wmma_i32_16x16x16_iu4
+v_sub_u32 v1, 4.0, v2
+// ERROR: instruction not supported on this GPU (gfx1010): v_sub_u32
 
 v_wmma_i32_16x16x16_iu8 v[16:19], v[0:7], v[8:15], v[16:19] op_sel:[0,0,1]
 // ERROR: instruction not supported on this GPU (gfx1010): v_wmma_i32_16x16x16_iu8
@@ -1618,26 +1615,29 @@ global_load_dword v2, v[2:3], off nosc0
 
 // SOURCE: gfx950_asm_features.s
 
-v_cvt_scalef32_pk32_f16_fp6 v[10:25], v[20:25], v8
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk32_f16_fp6
+v_cvt_scalef32_f16_bf8 v1, 11, v3
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_f16_bf8
+
+v_cvt_scalef32_pk32_f32_fp6 v[2:33], v[2:7], v6
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk32_f32_fp6
 
 v_cvt_scalef32_pk_bf8_bf16 v1, -v2, |v3| op_sel:[0,0,1]
 // ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk_bf8_bf16
 
-v_cvt_scalef32_pk_bf8_f16 v1, -v2, |v3|
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk_bf8_f16
-
-v_cvt_scalef32_pk_fp4_bf16 v1, -|s2|, v3
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk_fp4_bf16
+v_cvt_scalef32_pk_bf8_f32 v1, v1, -v2, |v3|
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk_bf8_f32
 
 v_cvt_scalef32_pk_fp4_f16 v1, -|s2|, v3
 // ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk_fp4_f16
 
-v_cvt_scalef32_sr_bf8_f32 v0, -v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_sr_bf8_f32
+v_cvt_scalef32_pk_fp4_f32 v1, v1, -v2, |v3|
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_pk_fp4_f32
 
-v_cvt_scalef32_sr_pk_fp4_bf16 v0, -v2, v4, v5
-// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_sr_pk_fp4_bf16
+v_cvt_scalef32_sr_fp8_f16 v0, -v1, v2, v3
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_sr_fp8_f16
+
+v_cvt_scalef32_sr_pk_fp4_f32 v0, -v[2:3], v4, v5
+// ERROR: instruction not supported on this GPU (gfx1010): v_cvt_scalef32_sr_pk_fp4_f32
 
 v_pk_maximum3_f16 v1, 2.0, v2, v3
 // ERROR: instruction not supported on this GPU (gfx1010): v_pk_maximum3_f16
@@ -1701,9 +1701,6 @@ buffer_atomic_fcmpswap v[0:1], off, s[0:3], s0 offset:4095
 s_mov_b32 flat_scratch_lo, 0
 // ERROR: flat_scratch_lo register not available on this GPU
 
-s_mov_b32 tba_lo, 0
-// ERROR: tba_lo register not available on this GPU
-
 // SOURCE: reg-syntax-extra.s
 
 buffer_load_dword v1, off, ttmp[4:7], s1
@@ -1719,6 +1716,9 @@ s_set_gpr_idx_on s0, 1
 s_getreg_b32 s2, hwreg(HW_REG_SH_MEM_BASES)
 // ENCODING: [0x0f, 0xf8, 0x02, 0xb9] WAVE_SIZE: 32
 
+s_setreg_b32  {id 1, offset: 2, size: 3}, s2
+// ERROR: colon expected
+
 s_setreg_b32  {id: 3, offset: 0, size: 33}, s2
 // ERROR: invalid bitfield width: only values from 1 to 32 are legal
 
@@ -1730,8 +1730,8 @@ s_branch offset:1
 s_waitcnt_depctr depctr_sa_sdst(-1)
 // ERROR: invalid value for depctr_sa_sdst
 
-s_waitcnt_depctr depctr_va_vcc(-1)
-// ERROR: invalid value for depctr_va_vcc
+s_waitcnt_depctr depctr_vm_(8)
+// ERROR: invalid counter name depctr_vm_
 
 // SOURCE: sopp-gfx10.s
 

@@ -7,8 +7,8 @@ import scala.collection.mutable
 
 /** Where a routine's divergent branches reconverge, as hardware does with the barriers `ptxas` places. A branch that
   * splits a warp gets a barrier set up before it and synchronised at its immediate post-dominator, with the setup
-  * hoisted out of every loop that contains the branch but not the join. A loop that waits on memory yields at its top
-  * so the lanes that wait stop being waited for.
+  * hoisted out of every loop that contains the branch but not the join. A loop around `atom.cas` or `atom.exch` yields
+  * at its top so the lanes that wait stop being waited for.
   */
 private object Reconvergence {
   type Label = NonEmpty[String]
@@ -31,17 +31,17 @@ private object Reconvergence {
   /** Actions ahead of the statement at an index, and the branch targets to replace in the statement at an index. */
   case class Schedule(before: Map[Int, Vec[Action]], retargets: Map[Int, Map[Label, Label]])
 
-  private val Strong: Set[Modifier]  = Set(Modifier.Volatile, Modifier.Relaxed, Modifier.Acquire, Modifier.Sc)
-  private val Polling: Set[Modifier] = Set(Modifier.TryWait, Modifier.TestWait)
+  private val Swapping: Set[Modifier] = Set(Modifier.Cas, Modifier.Exch)
 
-  /** Whether an instruction waits on memory another lane writes, so a loop around it needs lanes to take turns. */
+  /** Whether ptxas yields in a loop around the instruction: `atom.cas` and `atom.exch` in any state space, type and
+    * scope. CUDA 11.8 (sm_70, sm_80, sm_89, sm_90) and CUDA 13.3 (sm_80, sm_89, sm_90) emit no YIELD around `atom.add`,
+    * `red`, `ld` at any ordering, a relaxed `ld` after `fence.sc`, or `mbarrier.test_wait` and `mbarrier.try_wait`.
+    */
   private def spins(instruction: Instruction): Boolean = {
     val signature = instruction.signature
     signature.opcode match {
-      case Opcode.Atom | Opcode.Red => true
-      case Opcode.Ld                => signature.modifiers.exists(Strong)
-      case Opcode.Mbarrier          => signature.modifiers.exists(Polling)
-      case _                        => false
+      case Opcode.Atom => signature.modifiers.exists(Swapping)
+      case _           => false
     }
   }
 
@@ -140,6 +140,8 @@ private object Reconvergence {
       val last = terminator(block)
       !leaves(last) && (!branches(last) || last.pred.nonEmpty)
     }
+
+    def bare(block: Int): Boolean = first(block) == last(block) && leaves(terminator(block))
 
     def labels(block: Int): Set[Label] = owners.collect { case (name, owner) if owner == block => name }.toSet
 
@@ -405,7 +407,7 @@ private object Reconvergence {
             at = loops.parent(at)
           }
           val placed =
-            if (outer < 0) Some(Where.Branch(block))
+            if (outer < 0) Option.unless(graph.bare(join))(Where.Branch(block))
             else if (reverse.dominates(join, loops.all(outer).header) && preheader(outer).nonEmpty)
               Some(Where.Preheader(outer))
             else None

@@ -98,18 +98,18 @@ object AMDGPUDomainRules {
       "gfx704",
       "gfx705"
     ),
-    "GFX8"    -> Set("carrizo", "fiji", "iceland", "stoney", "tonga", "gfx800", "gfx801", "gfx802", "gfx803", "gfx810"),
-    "GFX9"    -> Set("gfx9", "gfx900", "gfx904", "gfx906", "gfx90c"),
+    "GFX8"    -> Set("carrizo", "fiji", "iceland", "stoney", "tonga", "gfx801", "gfx802", "gfx803", "gfx805", "gfx810"),
+    "GFX9"    -> Set("gfx9", "gfx900", "gfx902", "gfx904", "gfx906", "gfx909", "gfx90c"),
     "CDNA1"   -> Set("gfx908"),
     "CDNA2"   -> Set("gfx90a"),
     "CDNA3"   -> Set("gfx940", "gfx941", "gfx942"),
     "CDNA4"   -> Set("gfx950"),
     "CDNA5"   -> Set("gfx1250", "gfx1251"),
-    "RDNA1"   -> Set("gfx1001", "gfx1010", "gfx1011", "gfx1012", "gfx1013"),
+    "RDNA1"   -> Set("gfx1010", "gfx1011", "gfx1012", "gfx1013"),
     "RDNA2"   -> Set("gfx1030", "gfx1031", "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036"),
     "RDNA3"   -> Set("gfx1100", "gfx1101", "gfx1102", "gfx1103"),
-    "RDNA3_5" -> Set("gfx1150", "gfx1151", "gfx1152", "gfx1153"),
-    "GFX11_7" -> Set("gfx1170"),
+    "RDNA3_5" -> Set("gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"),
+    "GFX11_7" -> Set("gfx1170", "gfx1171", "gfx1172"),
     "RDNA4"   -> Set("gfx12", "gfx1200", "gfx1201")
   )
 
@@ -348,9 +348,10 @@ object AMDGPUDomainRules {
     } ++ Vector("GFX6", "GFX7").map { isa =>
       removal(
         isa = isa,
-        pattern = "xnack_mask_(lo|hi)",
-        resolves = Set("xnack_mask_hi"),
-        reason = "XNACK does not exist before GFX8; the oracle rejects xnack_mask_hi on tahiti and hawaii",
+        pattern = "xnack_mask(_lo|_hi)?",
+        resolves = Set("xnack_mask", "xnack_mask_hi"),
+        reason =
+          "XNACK does not exist before GFX8; the oracle rejects xnack_mask_hi on tahiti and hawaii, and xnack_mask on hawaii",
         source = "llvm-oracle/tahiti.s, hawaii.s"
       )
     } ++ Vector("GFX6", "GFX7").map { isa =>

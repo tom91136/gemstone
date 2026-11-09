@@ -41,20 +41,14 @@ v_mqsad_u32_u8 v[5:8], s[2:3], v4, v[0:3]
 
 // SOURCE: vopc-vi.s
 
-v_cmp_eq_f16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (hawaii): v_cmp_eq_f16
-
-v_cmp_eq_i16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (hawaii): v_cmp_eq_i16
+v_cmp_class_f16 vcc, v2, v4
+// ERROR: instruction not supported on this GPU (hawaii): v_cmp_class_f16
 
 v_cmp_eq_u16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmp_eq_u16
 
 v_cmp_ge_i16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmp_ge_i16
-
-v_cmp_ge_u16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (hawaii): v_cmp_ge_u16
 
 v_cmp_lg_f16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmp_lg_f16
@@ -68,17 +62,20 @@ v_cmp_neq_f16 vcc, v2, v4
 v_cmp_t_u16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmp_t_u16
 
+v_cmp_u_f16 vcc, v2, v4
+// ERROR: instruction not supported on this GPU (hawaii): v_cmp_u_f16
+
 v_cmpx_f_u16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmpx_f_u16
 
-v_cmpx_ge_f16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_ge_f16
+v_cmpx_ge_i16 vcc, v2, v4
+// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_ge_i16
 
 v_cmpx_lg_f16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmpx_lg_f16
 
-v_cmpx_lt_f16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_lt_f16
+v_cmpx_lt_i16 vcc, v2, v4
+// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_lt_i16
 
 v_cmpx_nle_f16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmpx_nle_f16
@@ -86,10 +83,13 @@ v_cmpx_nle_f16 vcc, v2, v4
 v_cmpx_nlg_f16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmpx_nlg_f16
 
-v_cmpx_nlt_f16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_nlt_f16
+v_cmpx_o_f16 vcc, v2, v4
+// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_o_f16
 
 // SOURCE: xnack-mask.s
 
 s_mov_b32 xnack_mask_hi, -1
 // ERROR: xnack_mask_hi register not available on this GPU
+
+s_mov_b64 xnack_mask, -1
+// ERROR: xnack_mask register not available on this GPU

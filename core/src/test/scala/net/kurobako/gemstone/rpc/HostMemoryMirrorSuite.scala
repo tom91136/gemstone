@@ -479,20 +479,24 @@ class HostMemoryMirrorSuite extends Suite {
       }
       def reference(): Vector[(Long, Int, Int)] = {
         val chunks    = Vector.newBuilder[(Long, Int, Int)]
-        val source    = dirty.iterator.buffered
+        val addresses = dirty.toVector
+        var cursor    = 0
         var remaining = bytesBudget
         var count     = 0
-        while (source.hasNext && remaining >= math.max(1, widthAt(source.head)) && count < rangesBudget) {
-          val base     = source.next()
+        while (
+          cursor < addresses.length && remaining >= math.max(1, widthAt(addresses(cursor))) && count < rangesBudget
+        ) {
+          val base     = addresses(cursor)
           val width    = math.max(1, widthAt(base))
           val capacity = math.min(65536, remaining / width * width)
           var size     = 1
+          cursor += 1
           remaining -= 1
           while (
-            source.hasNext && remaining > 0 && size < capacity && source.head == base + size &&
-            widthAt(source.head) == widthAt(base)
+            cursor < addresses.length && remaining > 0 && size < capacity && addresses(cursor) == base + size &&
+            widthAt(addresses(cursor)) == widthAt(base)
           ) {
-            val _ = source.next()
+            cursor += 1
             size += 1
             remaining -= 1
           }

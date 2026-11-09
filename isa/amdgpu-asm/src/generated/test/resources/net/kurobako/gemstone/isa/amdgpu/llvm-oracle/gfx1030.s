@@ -79,14 +79,11 @@ v_dot4_u32_u8 v0, v1, v2, v3
 ds_add_src2_u32 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_add_src2_u32
 
-ds_and_src2_b32 v1 offset:65535
-// ERROR: instruction not supported on this GPU (gfx1030): ds_and_src2_b32
+ds_dec_src2_u32 v1 offset:65535
+// ERROR: instruction not supported on this GPU (gfx1030): ds_dec_src2_u32
 
 ds_dec_src2_u64 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_dec_src2_u64
-
-ds_inc_src2_u64 v1 offset:65535
-// ERROR: instruction not supported on this GPU (gfx1030): ds_inc_src2_u64
 
 ds_max_src2_f32 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_max_src2_f32
@@ -94,11 +91,14 @@ ds_max_src2_f32 v1 offset:65535
 ds_min_src2_i32 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_min_src2_i32
 
+ds_min_src2_u32 v1 offset:65535
+// ERROR: instruction not supported on this GPU (gfx1030): ds_min_src2_u32
+
 ds_min_src2_u64 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_min_src2_u64
 
-ds_sub_src2_u64 v1 offset:65535
-// ERROR: instruction not supported on this GPU (gfx1030): ds_sub_src2_u64
+ds_write_src2_b64 v1 offset:65535
+// ERROR: instruction not supported on this GPU (gfx1030): ds_write_src2_b64
 
 s_get_waveid_in_workgroup s0
 // ERROR: instruction not supported on this GPU (gfx1030): s_get_waveid_in_workgroup

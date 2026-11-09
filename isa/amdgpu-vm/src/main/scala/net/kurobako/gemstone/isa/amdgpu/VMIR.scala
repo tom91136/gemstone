@@ -6,6 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.domain.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.targetName
+import scala.collection.mutable
 private object VMIR {
   type VectorRegisterIndex = Int in 0 ~ 255
   type ScalarRegisterIndex = Int in 0 ~ 127
@@ -1593,6 +1594,20 @@ private object VMIR {
     case SetVectorSkip(src: InstructionSource, bit: InstructionSource)
   }
 
+  private case class Issue(cycles: Int, latency: Int, vector: Boolean, trans: Boolean)
+
+  private enum Charge {
+    case Cycles(cycles: Int)
+    case Producer(trans: Boolean, back: Int)
+  }
+
+  private def delayCharge(code: Int): Option[Charge] = code match {
+    case 1 | 2 | 3 | 4 => Some(Charge.Producer(trans = false, back = code))
+    case 5 | 6 | 7     => Some(Charge.Producer(trans = true, back = code - 4))
+    case 9             => Some(Charge.Cycles(1))
+    case _             => None
+  }
+
   class Kernel(
       val source: CodeObjectKernel,
       val instructions: Vec[Instruction],
@@ -1628,5 +1643,93 @@ private object VMIR {
 
     def withSource(replacement: CodeObjectKernel): Kernel =
       Kernel(replacement, instructions, instructionIndices, instructionOffsets, entryInstruction, skipped)
+
+    private val issueScale: Int = if (source.waveSize == 64 && isa.isRDNA) 2 else 1
+
+    private def timed(instruction: asm.Instruction): Option[Issue] = {
+      val lds = instruction.mods.exists(_.name == "lds")
+      Scheduling.timing(source.target, instruction.definition.mnemonic.raw, lds).map { timing =>
+        val vector = Scheduling.isVectorAlu(source.target, instruction.definition)
+        Issue((if (vector) issueScale else 1) * timing.cycles, timing.latency, vector, vector && timing.trans32)
+      }
+    }
+
+    private def immediate(operands: Vec[asm.Operand]): Int =
+      operands.headOption.collect { case asm.Operand.IntegerLiteral(value, _) => value.toInt }.getOrElse(0)
+
+    private def statementIssue(statement: asm.Program.Statement): Option[Issue] = statement match {
+      case asm.Program.Statement.Instruction(value) if value.definition == SOPPInstructionDefs.SNop =>
+        val count = immediate(value.operands) & ((1 << isa.snopBits) - 1)
+        Some(Issue(cycles = count + 1, latency = 0, vector = false, trans = false))
+      case asm.Program.Statement.Instruction(value)           => timed(value)
+      case asm.Program.Statement.InstructionPair(left, right) =>
+        val halves = List(left, right).flatMap(timed(_))
+        Option.when(halves.nonEmpty)(
+          Issue(halves.map(_.cycles).max, halves.map(_.latency).max, halves.exists(_.vector), halves.exists(_.trans))
+        )
+      case _ => None
+    }
+
+    private lazy val statements = Array.tabulate(instructions.size)(index =>
+      asm.Binary.decodeStatementAt(textBytes, instructionOffsets(index).unsafe[Int >= 0], source.mode).toOption.map(
+        _.statement
+      )
+    )
+
+    private lazy val issues = statements.map(_.flatMap(statementIssue(_)))
+
+    /** s_delay_alu per amdgpu_isa_rdna3.xml OPR_DELAY: producer latency less planned cycles since the producer. */
+    private lazy val schedules: Array[Option[Schedule]] = {
+      val count         = instructions.size
+      val vectorAt      = (0 until count).filter(index => issues(index).exists(_.vector)).toArray
+      val vectorsBefore = issues.scanLeft(0)((seen, issue) => if (issue.exists(_.vector)) seen + 1 else seen)
+      val requests      = Array.fill(count)(List.empty[Charge])
+
+      def request(target: Int, code: Int): Unit =
+        delayCharge(code).foreach(charge => requests(target) = charge :: requests(target))
+
+      for (delay <- 0 until count) {
+        val next = vectorsBefore(delay + 1)
+        statements(delay) match {
+          case Some(asm.Program.Statement.Instruction(value)) if value.definition == SOPPInstructionDefs.SDelayAlu =>
+            val bits   = immediate(value.operands)
+            val second = next + ((bits >> 4) & 7)
+            if (next < vectorAt.length) request(vectorAt(next), bits & 15)
+            if (second < vectorAt.length) request(vectorAt(second), (bits >> 7) & 15)
+          case _ =>
+        }
+      }
+
+      val prefix          = Array.ofDim[Int](count + 1)
+      val vectorProducers = mutable.ArrayBuffer.empty[(Int, Int)]
+      val transProducers  = mutable.ArrayBuffer.empty[(Int, Int)]
+      val result          = Array.fill[Option[Schedule]](count)(None)
+
+      def charge(consumer: Int, request: Charge): Int = request match {
+        case Charge.Cycles(cycles)        => cycles
+        case Charge.Producer(trans, back) =>
+          val producers = if (trans) transProducers else vectorProducers
+          if (producers.size < back) 0
+          else {
+            val (producer, latency) = producers(producers.size - back)
+            (latency - (prefix(consumer) - prefix(producer + 1))).max(0)
+          }
+      }
+
+      for (index <- 0 until count) {
+        val cycles = issues(index).fold(0)(issued => issued.cycles + requests(index).map(charge(index, _)).sum)
+        result(index) = issues(index).map(_ => Schedule.Estimated(cycles.unsafe[Int >= 0]))
+        prefix(index + 1) = prefix(index) + cycles
+        issues(index).foreach { issued =>
+          if (issued.vector) vectorProducers += ((index, issued.latency))
+          if (issued.trans) transProducers += ((index, issued.latency))
+        }
+      }
+      result
+    }
+
+    def schedule(index: Int): Option[Schedule] = schedules(index)
+
+    def transIssue(index: Int): Boolean = issues(index).exists(_.trans)
   }
 }

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.vm
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.profile.*
 
 /** A backend's read-only view of the unit about to execute an instruction, in its ISA's own terms. It is valid only
   * during the observer call that received it.
@@ -28,4 +29,10 @@ trait ArchitecturalState {
     * takes it once per instruction address.
     */
   def text: String
+
+  /** The static issue schedule the compiler encoded for the instruction, where the ISA encodes one. */
+  def schedule: Option[Schedule] = None
+
+  /** The compute pipe the instruction issues to, where the ISA's decoder knows it. */
+  def pipe: Option[Pipe] = None
 }

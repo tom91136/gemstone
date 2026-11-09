@@ -56,13 +56,12 @@ object ProgramRun {
         allocations: Vec[AllocationId],
         failure: Option[Fault],
         complete: Boolean,
-        stream: ProfileStream,
-        architecture: Architecture
-    ): Run = new Run(trace, memory, allocations, failure, complete, stream, architecture)
+        stream: ProfileStream
+    ): Run = new Run(trace, memory, allocations, failure, complete, stream)
   }
 
   /** One launch: the trace it recorded, the memory its allocation arguments bound, the fault that ended it, and the
-    * profile of the launch under `architecture`. [[profiled]] measures the same launch under another architecture.
+    * stream it issued. [[profiled]] measures the stream under any architecture.
     */
   class Run(
       val trace: Trace,
@@ -70,19 +69,16 @@ object ProgramRun {
       val allocations: Vec[AllocationId],
       val failure: Option[Fault],
       val complete: Boolean,
-      val stream: ProfileStream,
-      val architecture: Architecture
+      val stream: ProfileStream
   ) {
-    lazy val profile: Profile = Profiler.run(stream, architecture)
-
-    def profiled(other: Architecture): Profile =
-      if (other == architecture) profile else Profiler.run(stream, other)
+    def profiled(other: Architecture): Profile = Profiler.run(stream, other)
   }
 
-  /** The architecture whose models profile a launch of `language` unless another is chosen. */
-  def defaultArchitecture(language: Language): Architecture = language match {
-    case Language.AMDGPU                               => Architecture.amdgpuDefault
-    case Language.PTX | Language.SASS | Language.SPIRV => Architecture.nvidiaDefault
+  /** The architecture that profiles a launch of `language` by default. SPIR-V names no device, so it has none. */
+  def defaultArchitecture(language: Language): Option[Architecture] = language match {
+    case Language.AMDGPU              => Some(Architecture.amdgpuDefault)
+    case Language.PTX | Language.SASS => Some(Architecture.nvidiaDefault)
+    case Language.SPIRV               => None
   }
 
   /** The backends that load `language`, in the order to try them. SPIR-V modules validate against one environment. */
@@ -211,8 +207,7 @@ object ProgramRun {
       allocations,
       result.swap.toOption.collect { case fault: Fault => fault },
       recording.complete,
-      profiler.stream,
-      defaultArchitecture(loaded.image.language)
+      profiler.stream
     )
   }
 

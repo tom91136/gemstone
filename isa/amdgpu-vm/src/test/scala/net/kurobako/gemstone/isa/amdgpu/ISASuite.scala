@@ -14,7 +14,6 @@ class ISASuite extends Suite {
       (target, width) <- Vec(
         Target("gfx900")  -> 64,
         Target("gfx90a")  -> 64,
-        Target("gfx1001") -> 32,
         Target("gfx1036") -> 32,
         Target("gfx1200") -> 32,
         Target("gfx12")   -> 32,
@@ -91,6 +90,10 @@ class ISASuite extends Suite {
     assert(!typeChecks("""net.kurobako.gemstone.isa.amdgpu.Target("gfx1159")"""))
     assert("gfx1099".refine[Target].isLeft)
     assert("gfx1159".refine[Target].isLeft)
+    assert(!typeChecks("""net.kurobako.gemstone.isa.amdgpu.Target("gfx800")"""))
+    assert(!typeChecks("""net.kurobako.gemstone.isa.amdgpu.Target("gfx1001")"""))
+    assert("gfx800".refine[Target].isLeft)
+    assert("gfx1001".refine[Target].isLeft)
     assertEquals(Target("tahiti").isa, ISA.GFX6)
     assertEquals(Target("gfx1036").isa, ISA.RDNA2)
     assertEquals(Target("gfx1103").isa, ISA.RDNA3)

@@ -31,7 +31,7 @@ class TextureDescriptorSuite extends Suite {
   }
 
   test("an entry has the declared size and field offsets") {
-    val bytes  = full.encode
+    val bytes  = full.encode.toArray
     val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     assertEquals(bytes.length, 128)
     assertEquals(buffer.getLong(TextureLayout.Field.Base), Base)
@@ -91,45 +91,48 @@ class TextureDescriptorSuite extends Suite {
   }
 
   test("an entry decodes to the descriptor that wrote it") {
-    assertEquals(TextureDescriptor.decode(full.encode), Some(full))
+    assertEquals(TextureDescriptor.decode(full.encode.toArray), Some(full))
     val surface =
       descriptor(F32x4, 16, 16, dimensions = 2, kind = ObjectKind.Surface).copy(resource = ResourceKind.Array)
-    assertEquals(TextureDescriptor.decode(surface.encode), Some(surface))
+    assertEquals(TextureDescriptor.decode(surface.encode.toArray), Some(surface))
     val linear = descriptor(U8x1, 4096, address = AddressMode.Border).copy(resource = ResourceKind.Linear)
-    assertEquals(TextureDescriptor.decode(linear.encode), Some(linear))
+    assertEquals(TextureDescriptor.decode(linear.encode.toArray), Some(linear))
   }
 
   test("every channel kind, address mode, and filter round trips") {
     ChannelKind.values.foreach { kind =>
       val format = TexelFormat(kind, width = 16, channels = 2)
       val d      = descriptor(format, 8)
-      assertEquals(TextureDescriptor.decode(d.encode).map(_.format), Some(format))
+      assertEquals(TextureDescriptor.decode(d.encode.toArray).map(_.format), Some(format))
     }
     AddressMode.values.foreach { mode =>
       assertEquals(
-        TextureDescriptor.decode(descriptor(F32x1, 4, address = mode).encode).map(_.address),
+        TextureDescriptor.decode(descriptor(F32x1, 4, address = mode).encode.toArray).map(_.address),
         Some(Vector.fill(3)(mode))
       )
     }
     FilterMode.values.foreach { mode =>
-      assertEquals(TextureDescriptor.decode(descriptor(F32x1, 4, filter = mode).encode).map(_.filter), Some(mode))
+      assertEquals(
+        TextureDescriptor.decode(descriptor(F32x1, 4, filter = mode).encode.toArray).map(_.filter),
+        Some(mode)
+      )
     }
   }
 
   test("a mipmapped entry decodes with its level chain") {
     val chain  = MipChain(Base + 0x1000, 5, FilterMode.Linear, 0.5f, 3.25f, -1.5f)
     val mapped = full.copy(resource = ResourceKind.MipmappedArray, mip = Some(chain))
-    assertEquals(TextureDescriptor.decode(mapped.encode), Some(mapped))
-    val empty = mapped.encode.clone()
+    assertEquals(TextureDescriptor.decode(mapped.encode.toArray), Some(mapped))
+    val empty = mapped.encode.toArray
     ByteBuffer.wrap(empty).order(ByteOrder.LITTLE_ENDIAN).putInt(TextureLayout.Field.Levels, 0)
     assertEquals(TextureDescriptor.decode(empty), None)
   }
 
   test("free, short, and corrupt entries do not decode") {
     assertEquals(TextureDescriptor.decode(Array.ofDim[Byte](128)), None)
-    assertEquals(TextureDescriptor.decode(full.encode.take(127)), None)
+    assertEquals(TextureDescriptor.decode(full.encode.toArray.take(127)), None)
     def corrupt(field: Int, value: Int): Option[TextureDescriptor] = {
-      val bytes = full.encode
+      val bytes = full.encode.toArray
       bytes(field) = value.toByte
       TextureDescriptor.decode(bytes)
     }
@@ -162,7 +165,7 @@ class TextureDescriptorSuite extends Suite {
     val memory =
       ArrayMemory(TextureLayout.Table.BaseAddress, Array.ofDim[Byte](4 * TextureLayout.Table.EntryBytes.toInt))
     entries.foreach((index, d) =>
-      memory.write(TextureLayout.Table.BaseAddress + index * TextureLayout.Table.EntryBytes, d.encode)
+      memory.write(TextureLayout.Table.BaseAddress + index * TextureLayout.Table.EntryBytes, d.encode.toArray)
     )
     memory
   }

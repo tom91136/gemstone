@@ -576,17 +576,20 @@ object InstructionDecoder {
         else operands
       operation <-
         InstructionDefinitions.decode(opcodeParts.head, modifiers, normalised, guard).left.map(unsupported(_))
+      encodingWord = BigInt(1, bytes.reverse)
+      scheduling <- Scheduling.decode(target.generation, encodingWord).left.map(message => illegal(message))
     } yield DecodedInstruction(
       address,
       operation,
-      Some(BigInt(1, bytes.reverse)),
+      Some(encodingWord),
       Some(DecodedInstruction.Machine(
         target,
         candidate.name,
         candidate.opcode,
         candidate.bindings,
         candidate.encodingValues
-      ))
+      )),
+      scheduling
     )
   }
 }

@@ -145,7 +145,7 @@ for name in sorted(module.instructions):
     )
   )
   private val MatrixFlags      = Vector("IsWMMA" -> "WMMA", "IsSWMMAC" -> "SWMMAC")
-  private val ProcessorAliases = Vector("gfx1001" -> "gfx1010", "gfx12" -> "gfx1200")
+  private val ProcessorAliases = Vector("gfx12" -> "gfx1200")
   private val OpcodeFields     = Set("OP", "OPX", "OPY")
   private val CarryNames       = Map(
     "v_addc_co_u32"    -> "v_add_co_ci_u32",
@@ -339,6 +339,17 @@ for name in sorted(module.instructions):
         processors = if (value.isa == "GFX9" && value.name == "v_fmac_f32") dlProcessors else value.processors
       )
     ).distinct
+    val schedulingResource = request.resourceRoot.resolve(PackageRoot).resolve("scheduling.json")
+    GenerateAMDGPUSched.generate(
+      tablegen = request.tablegen,
+      source = llvm.resolve("lib/Target/AMDGPU/AMDGPU.td"),
+      includes = Vector(llvm.resolve("include"), llvm.resolve("lib/Target/AMDGPU")),
+      dump = request.references.resolve("amdgpu-scheduling-dump.txt"),
+      catalogue = records.map(_.name).distinct,
+      aliases = ProcessorAliases,
+      llvm = References.LlvmVersion,
+      resource = schedulingResource
+    )
     val domains = renderDomains(result.copy(records = records)) :+ ("ImageDimension" -> renderImageDimensions(tables))
     domains.foreach { case (name, source) =>
       GeneratedFiles.writeScala(instructionRoot.resolve(s"$name.scala"), source)
@@ -375,7 +386,14 @@ for name in sorted(module.instructions):
     GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
     GeneratedFiles.removeUnexpected(
       request.resourceRoot,
-      Set(metadataResource, layoutsResource, operandsResource, imagesResource),
+      Set(
+        metadataResource,
+        layoutsResource,
+        operandsResource,
+        imagesResource,
+        schedulingResource,
+        schedulingResource.resolveSibling("scheduling-report.md")
+      ),
       path => !isGeneratedDomain(path)
     )
   }

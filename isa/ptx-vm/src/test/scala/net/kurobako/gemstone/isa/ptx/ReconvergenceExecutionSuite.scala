@@ -29,7 +29,8 @@ class ReconvergenceExecutionSuite extends Suite {
       threads: Int,
       words: Int,
       registers: String = "",
-      recorder: Option[ProfileRecorder] = None
+      recorder: Option[ProfileRecorder] = None,
+      budget: Long = 100000000L
   ): Vec[Int] = {
     val kernel = compileKernel(s""".version 8.0
       |.target sm_80
@@ -53,7 +54,7 @@ class ReconvergenceExecutionSuite extends Suite {
       threads.unsafe[Int > 0],
       Map(("data": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
       memory,
-      control = TaskControl(observer = recorder)
+      control = TaskControl(TaskControl.Limits(budget.unsafe[Long > 0]), recorder)
     )
     assertEquals(result, Right(()))
     memory.ints(from = 0, count = words)
@@ -72,12 +73,59 @@ class ReconvergenceExecutionSuite extends Suite {
     words = 2
   )
 
+  private def earlyReturn(collective: String): Vec[Int] = run(
+    s"""and.b32 %w, %t, 3;
+       |setp.eq.u32 %p, %w, 0;
+       |@%p bra DONE;
+       |mov.u32 %v, 100;
+       |$collective
+       |st.global.u32 [%address], %v;
+       |DONE:""".stripMargin,
+    threads = 32,
+    words = 32,
+    budget = 1000000L
+  )
+
+  private val survivors = Vec.tabulate(32)(lane => if (lane % 4 == 0) 0 else 100)
+
+  test("survivors of an early return pass a warp barrier without the returned lanes") {
+    assertEquals(earlyReturn("bar.warp.sync -1;"), survivors)
+  }
+
+  test("survivors of an early return shuffle without the returned lanes") {
+    assertEquals(
+      earlyReturn("shfl.sync.idx.b32 %v, %v, 1, 31, -1;"),
+      survivors
+    )
+  }
+
+  test("survivors of an early return pass a workgroup barrier without the returned lanes") {
+    assertEquals(earlyReturn("bar.sync 0;"), survivors)
+  }
+
   test("32 lanes of one warp take turns at a spin lock") {
     assertEquals(spinLock(32), Vec(0, 496))
   }
 
   test("two warps take turns at a spin lock") {
     assertEquals(spinLock(64), Vec(0, 2016))
+  }
+
+  test("32 lanes of one warp take turns at a spin lock in shared memory") {
+    val seen = run(
+      """SPIN:
+        |atom.shared.cas.b32 %old, [lock], 0, 1;
+        |setp.ne.u32 %p, %old, 0;
+        |@%p bra SPIN;
+        |ld.global.u32 %sum, [%base+4];
+        |add.u32 %sum, %sum, %t;
+        |st.global.u32 [%base+4], %sum;
+        |atom.shared.exch.b32 %old, [lock], 0;""".stripMargin,
+      threads = 32,
+      words = 2,
+      registers = ".shared .align 4 .b32 lock;"
+    )
+    assertEquals(seen, Vec(0, 496))
   }
 
   test("lanes that skip a barrier's setup pass its synchronise at once") {

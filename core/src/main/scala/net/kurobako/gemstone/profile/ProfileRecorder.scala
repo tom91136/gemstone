@@ -30,6 +30,9 @@ object ProfileRecorder {
     /** The instructions this thread already reported a register use for. */
     val described: mutable.BitSet = mutable.BitSet.empty
 
+    /** The instructions this thread already reported a pipe for. */
+    val resolved: mutable.BitSet = mutable.BitSet.empty
+
     /** The instruction index of `at`, resolved once per address of the kernel and function this thread last ran. */
     def located(at: Fault.Location, resolve: => Int): Int = at.instruction match {
       case Some(address) =>
@@ -134,18 +137,40 @@ class ProfileRecorder extends LaunchObserver {
   }
 
   /** The index of the instruction at `where`, a location [[key]] made; the lock is held. */
-  private def intern(where: Fault.Location, text: => String): Int = located.getOrElseUpdate(
-    where, {
-      instructions += Instruction(where.kernel, where.function, where.instruction, text, RegisterUse.empty)
-      instructions.size - 1
-    }
-  )
+  private def intern(where: Fault.Location, text: => String, schedule: => Option[Schedule]): Int =
+    located.getOrElseUpdate(
+      where, {
+        instructions += Instruction(
+          where.kernel,
+          where.function,
+          where.instruction,
+          text,
+          RegisterUse.empty,
+          schedule,
+          None
+        )
+        instructions.size - 1
+      }
+    )
 
-  private def instructionAt(at: Fault.Location, text: => String): Int = lock.withLock(intern(key(at), text))
+  private def instructionAt(at: Fault.Location, state: ArchitecturalState): Int =
+    lock.withLock(intern(key(at), state.text, state.schedule))
+
+  /** Several IR instructions share a location, so the first one that reports a pipe names it. */
+  private def resolvePipe(current: Buffer, instruction: Int, state: ArchitecturalState): Unit =
+    state.pipe.foreach { value =>
+      current.resolved += instruction
+      lock.withLock {
+        if (instructions(instruction).pipe.isEmpty)
+          instructions(instruction) = instructions(instruction).copy(pipe = Some(value))
+      }
+    }
 
   def instruction(at: Fault.Location, state: ArchitecturalState): Either[Fault, Unit] = {
-    val current = buffer
-    current.issue(state, current.located(at, instructionAt(at, state.text)))
+    val current     = buffer
+    val instruction = current.located(at, instructionAt(at, state))
+    if (!current.resolved(instruction)) resolvePipe(current, instruction, state)
+    current.issue(state, instruction)
     Right(())
   }
 
@@ -176,7 +201,7 @@ class ProfileRecorder extends LaunchObserver {
   override def transition(event: MachineEvent): Unit = {
     val at    = event.at.map(key(_))
     val index = lock.withLock {
-      at.foreach(intern(_, ""))
+      at.foreach(intern(_, "", None))
       events += event.copy(at = at)
       events.size - 1
     }

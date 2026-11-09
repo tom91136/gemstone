@@ -45,8 +45,8 @@ s_buffer_load_i8 s5, s[4:7], s0 nv
 s_add_pc_i64 4
 // ERROR: instruction not supported on this GPU (gfx1200): s_add_pc_i64
 
-s_rfe_i64 s[2:3]
-// ERROR: instruction not supported on this GPU (gfx1200): s_rfe_i64
+s_wakeup_barrier 1
+// ERROR: instruction not supported on this GPU (gfx1200): s_wakeup_barrier
 
 // SOURCE: gfx1250_asm_sopk.s
 
@@ -68,8 +68,8 @@ buffer_load_b32 v5, v1, s[8:11], s3 offen offset:4095 nv
 cluster_load_async_to_lds_b32 v1, v[2:3], off th:TH_LOAD_BYPASS scope:SCOPE_SYS
 // ERROR: instruction not supported on this GPU (gfx1200): cluster_load_async_to_lds_b32
 
-cluster_load_b32 v1, v[2:3], off th:TH_LOAD_BYPASS scope:SCOPE_SYS
-// ERROR: instruction not supported on this GPU (gfx1200): cluster_load_b32
+cluster_load_b128 v[0:3], v[4:5], off th:TH_LOAD_BYPASS scope:SCOPE_SYS
+// ERROR: instruction not supported on this GPU (gfx1200): cluster_load_b128
 
 flat_atomic_add_f32 v0, v1, v2, s[2:3] offset:8000000 scale_offset th:TH_ATOMIC_RETURN
 // ERROR: not a valid operand.
@@ -83,9 +83,6 @@ flat_prefetch_b8 v[2:3]
 global_load_b32 v0, v[2:3], off nv
 // ERROR: nv is not supported on this GPU
 
-global_store_async_from_lds_b128 v[2:3], v1, off th:TH_STORE_BYPASS scope:SCOPE_SYS
-// ERROR: instruction not supported on this GPU (gfx1200): global_store_async_from_lds_b128
-
 global_store_async_from_lds_b64 v[2:3], v1, off th:TH_STORE_BYPASS scope:SCOPE_SYS
 // ERROR: instruction not supported on this GPU (gfx1200): global_store_async_from_lds_b64
 
@@ -94,8 +91,11 @@ global_store_async_from_lds_b64 v[2:3], v1, off th:TH_STORE_BYPASS scope:SCOPE_S
 v_cos_bf16 v5, v1 quad_perm:[3,2,1,0]
 // ERROR: instruction not supported on this GPU (gfx1200): v_cos_bf16
 
-v_cvt_f32_bf16 v5, v1 quad_perm:[3,2,1,0]
-// ERROR: instruction not supported on this GPU (gfx1200): v_cvt_f32_bf16
+v_cvt_f16_fp8 v1, v2 quad_perm:[1,2,3,0] row_mask:0xf bank_mask:0xf
+// ERROR: instruction not supported on this GPU (gfx1200): v_cvt_f16_fp8
+
+v_prng_b32 v5, v1 quad_perm:[3,2,1,0]
+// ERROR: instruction not supported on this GPU (gfx1200): v_prng_b32
 
 v_tanh_f32 v5, v1 quad_perm:[0,1,2,3]
 // ERROR: instruction not supported on this GPU (gfx1200): v_tanh_f32
@@ -125,17 +125,20 @@ v_mul_u64 v[4:5], v[2:3], v[4:5]
 
 // SOURCE: gfx1250_asm_vop3_dpp16-fake16.s
 
+v_add_min_i32 v2, v4, v7, v8 quad_perm:[1,2,3,1]
+// ERROR: instruction not supported on this GPU (gfx1200): v_add_min_i32
+
 v_ashr_pk_u8_i32 v2, v4, v7, v8 quad_perm:[1,2,3,1]
 // ERROR: instruction not supported on this GPU (gfx1200): v_ashr_pk_u8_i32
 
 v_bitop3_b32_e64_dpp v5, v1, v2, v3 bitop3:161 quad_perm:[0,1,2,3]
 // ERROR: instruction not supported on this GPU (gfx1200): v_bitop3_b32
 
-v_cvt_pk_bf8_f16 v1, v2 op_sel:[0,0] quad_perm:[1,2,3,0]
-// ERROR: instruction not supported on this GPU (gfx1200): v_cvt_pk_bf8_f16
-
 v_cvt_pk_fp8_f16 v1, v2 op_sel:[0,0] quad_perm:[1,2,3,0]
 // ERROR: instruction not supported on this GPU (gfx1200): v_cvt_pk_fp8_f16
+
+v_cvt_sr_bf8_f16 v1, v2, v3 quad_perm:[0,1,2,3] fi:1
+// ERROR: instruction not supported on this GPU (gfx1200): v_cvt_sr_bf8_f16
 
 // SOURCE: gfx1250_asm_vop3_dpp16.s
 
@@ -174,8 +177,8 @@ v_cos_bf16_e64_dpp v5.l, v1.l dpp8:[7,6,5,4,3,2,1,0]
 
 // SOURCE: gfx1250_asm_vop3p.s
 
-v_pk_add_max_i16 v10, v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx1200): v_pk_add_max_i16
+v_pk_add_max_u16 v10, v1, v2, v3
+// ERROR: instruction not supported on this GPU (gfx1200): v_pk_add_max_u16
 
 v_pk_fma_f32 v[8:9], v[0:1], v[2:3], v[4:5] op_sel_hi:[0,0,0]
 // ERROR: instruction not supported on this GPU (gfx1200): v_pk_fma_f32
@@ -198,26 +201,29 @@ v_fma_mix_f32_bf16 v0, v1, v2, v3 dpp8:[2,2,2,2,4,4,4,4]
 
 // SOURCE: gfx1250_asm_wmma_w32.s
 
-v_swmmac_bf16_16x16x64_bf16 v[24:27], v[0:7], v[8:23], v28
-// ERROR: instruction not supported on this GPU (gfx1200): v_swmmac_bf16_16x16x64_bf16
-
 v_swmmac_f16_16x16x128_bf8_bf8 v[24:27], v[0:7], v[8:23], v[28:29]
 // ERROR: instruction not supported on this GPU (gfx1200): v_swmmac_f16_16x16x128_bf8_bf8
 
-v_swmmac_f32_16x16x64_f16 v[24:31], v[0:7], v[8:23], v32
-// ERROR: instruction not supported on this GPU (gfx1200): v_swmmac_f32_16x16x64_f16
+v_swmmac_f32_16x16x128_fp8_fp8 v[24:31], v[0:7], v[8:23], v[32:33]
+// ERROR: instruction not supported on this GPU (gfx1200): v_swmmac_f32_16x16x128_fp8_fp8
 
 v_wmma_bf16f32_16x16x32_bf16 v[26:29], v[0:7], v[8:15], v[16:23]
 // ERROR: instruction not supported on this GPU (gfx1200): v_wmma_bf16f32_16x16x32_bf16
 
-v_wmma_f16_16x16x128_bf8_bf8 v[16:19], v[0:15], v[8:23], v[16:19]
-// ERROR: instruction not supported on this GPU (gfx1200): v_wmma_f16_16x16x128_bf8_bf8
-
 v_wmma_f16_16x16x32_f16 v[16:19], v[0:7], v[8:15], v[16:19]
 // ERROR: instruction not supported on this GPU (gfx1200): v_wmma_f16_16x16x32_f16
 
-v_wmma_f32_16x16x64_bf8_bf8 v[16:23], v[0:7], v[8:15], v[16:23]
-// ERROR: instruction not supported on this GPU (gfx1200): v_wmma_f32_16x16x64_bf8_bf8
+v_wmma_f16_16x16x64_fp8_bf8 v[16:19], v[0:7], v[8:15], v[16:19]
+// ERROR: instruction not supported on this GPU (gfx1200): v_wmma_f16_16x16x64_fp8_bf8
+
+v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[8:23], v[24:39], v[40:47]
+// ERROR: instruction not supported on this GPU (gfx1200): v_wmma_f32_16x16x128_f8f6f4
+
+v_wmma_f32_16x16x128_fp8_bf8 v[16:23], v[0:15], v[8:23], v[16:23]
+// ERROR: instruction not supported on this GPU (gfx1200): v_wmma_f32_16x16x128_fp8_bf8
+
+v_wmma_ld_scale16_paired_b64 v[2:3], v[4:5]
+// ERROR: instruction not supported on this GPU (gfx1200): v_wmma_ld_scale16_paired_b64
 
 v_wmma_ld_scale_paired_b32 s0, s0 matrix_b_scale:MATRIX_SCALE_ROW1
 // ERROR: instruction not supported on this GPU (gfx1200): v_wmma_ld_scale_paired_b32
@@ -1581,9 +1587,6 @@ v_swmmac_bf16_16x16x32_bf16 v[6:7], v[0:1], v[2:5], v8
 image_load v0, v0, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D th:TH_STORE_NT
 // ERROR: invalid th value for load instructions
 
-image_store v0, v0, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D th:TH_STORE_WB scope:SCOPE_SYS
-// ERROR: scope and th combination is not valid
-
 s_buffer_load_b64 s[10:11], s[4:7], s0 offset:0x0 th:TH_LOAD_RT_NT
 // ERROR: invalid th value for SMEM instruction
 
@@ -1603,38 +1606,41 @@ buffer_wbinvl1
 buffer_wbinvl1_vol
 // ERROR: instruction not supported on this GPU (gfx1200): buffer_wbinvl1_vol
 
-ds_add_f32 v255, v255 offset:4 gds
-// ERROR: gds modifier is not supported on this GPU
-
 ds_cmpstore_rtn_f32 v0, v1, v2, v3
 // ERROR: instruction not supported on this GPU (gfx1200): ds_cmpstore_rtn_f32
+
+ds_gws_init v0 gds
+// ERROR: instruction not supported on this GPU (gfx1200): ds_gws_init
 
 flat_atomic_csub v1, v[0:1], v2 offset:64 th:TH_ATOMIC_RETURN
 // ERROR: invalid instruction
 
-s_cbranch_cdbgsys_and_user 0
-// ERROR: instruction not supported on this GPU (gfx1200): s_cbranch_cdbgsys_and_user
+s_cbranch_cdbguser 0
+// ERROR: instruction not supported on this GPU (gfx1200): s_cbranch_cdbguser
 
 s_cmpk_ge_i32 s0, 0
 // ERROR: instruction not supported on this GPU (gfx1200): s_cmpk_ge_i32
 
+s_cmpk_ge_u32 s0, 0
+// ERROR: instruction not supported on this GPU (gfx1200): s_cmpk_ge_u32
+
 s_cmpk_le_i32 s0, 0
 // ERROR: instruction not supported on this GPU (gfx1200): s_cmpk_le_i32
 
-s_cmpk_lt_i32 s0, 0
-// ERROR: instruction not supported on this GPU (gfx1200): s_cmpk_lt_i32
+s_inst_prefetch 1
+// ERROR: instruction not supported on this GPU (gfx1200): s_inst_prefetch
 
 s_waitcnt_lgkmcnt exec_hi, 0x1234
 // ERROR: instruction not supported on this GPU (gfx1200): s_waitcnt_lgkmcnt
 
-v_cmp_f_f32 v0, v1
-// ERROR: instruction not supported on this GPU (gfx1200): v_cmp_f_f32
+v_cmp_f_i32 v0, v1
+// ERROR: instruction not supported on this GPU (gfx1200): v_cmp_f_i32
 
 v_cmp_t_f32 v0, v1
 // ERROR: instruction not supported on this GPU (gfx1200): v_cmp_t_f32
 
-v_cmpx_f_f16 v0, v1
-// ERROR: instruction not supported on this GPU (gfx1200): v_cmpx_f_f16
+v_cmpx_f_f64 v[0:1], v[2:3]
+// ERROR: instruction not supported on this GPU (gfx1200): v_cmpx_f_f64
 
 // SOURCE: gfx950_asm_vop3.s
 

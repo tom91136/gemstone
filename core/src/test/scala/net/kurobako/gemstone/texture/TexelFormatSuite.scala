@@ -130,7 +130,7 @@ class TexelFormatSuite extends Suite {
     assertEquals(encode(TexelFormat(ChannelKind.Float, width = 16, channels = 1), 1.5), Vector(0x00, 0x3e))
     assertEquals(encode(F32x1, 1.0), Vector(0x00, 0x00, 0x80, 0x3f))
     val values = Vector(0.25, -3.5, 1024.0, 0.0)
-    val bytes  = F32x4.encode(values)
+    val bytes  = F32x4.encode(values).toArray
     assertEquals(F32x4.texel(bytes, 0, ReadMode.ElementType, srgb = false), values)
   }
 
@@ -141,14 +141,18 @@ class TexelFormatSuite extends Suite {
       TexelFormat(ChannelKind.Unsigned, width = 32, channels = 4)
     ).foreach { format =>
       val values = Vector(0.0, 1.0, 100.0, 7.0)
-      assertEquals(format.texel(format.encode(values), 0, ReadMode.ElementType, srgb = false), values, s"$format")
+      assertEquals(
+        format.texel(format.encode(values).toArray, 0, ReadMode.ElementType, srgb = false),
+        values,
+        s"$format"
+      )
     }
   }
 
   test("normalised stores round trip within half a step") {
     val format = TexelFormat(ChannelKind.UnsignedNormalised, width = 8, channels = 4)
     val values = Vector(0.0, 0.1, 0.5, 1.0)
-    val back   = format.texel(format.encode(values), 0, ReadMode.ElementType, srgb = false)
+    val back   = format.texel(format.encode(values).toArray, 0, ReadMode.ElementType, srgb = false)
     values.zip(back).foreach((a, b) => assertEqualsDouble(b, a, 0.5 / 255.0))
   }
 }

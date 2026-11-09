@@ -12,6 +12,7 @@ object ImageCache {
   /** A counted reference to a cached value. Releasing keeps the value retained while memory allows once no reference
     * remains; discarding drops it. Only the first call has an effect.
     */
+  @SuppressWarnings(Array("scalafix:QualifiedPrivate.redundant-qualifier"))
   class Lease[V] private[ImageCache] (val value: V, finish: Boolean => Unit) {
     private val finished = AtomicBoolean(false)
 

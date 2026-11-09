@@ -34,7 +34,7 @@ private object VMSemantics {
           Instruction.Call) | Instruction.NoOp | Instruction.Spin | Instruction.Return | Instruction.Exit =>
       executeControl(instruction, context)
     case Instruction.Trap | Instruction.CallBuiltin(_, _, _) | Instruction.Convergence(_, _) | Instruction.Yield |
-        Instruction.Pause | Instruction.Fence =>
+        Instruction.Fence =>
       executeControlMachine(instruction, context)
     case Instruction.WarpReduce(operation = operation) =>
       Left(Fault.Backend(s"unsupported warp reduction operation: $operation"))
@@ -117,7 +117,6 @@ private object VMSemantics {
         machine.callBuiltin(builtin, returnParameters, parameters)(machine.advance)
       case Instruction.Convergence(token, action) => MachineSemantics.convergence(machine)(token, action)
       case Instruction.Yield                      => machine.yieldLanes(machine.advance)
-      case Instruction.Pause                      => machine.pauseLanes(machine.advance)
       case Instruction.Trap                       => machine.trap
       case Instruction.Fence                      => machine.fenceHost
     }

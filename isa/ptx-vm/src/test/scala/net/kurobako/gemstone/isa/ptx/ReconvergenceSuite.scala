@@ -76,6 +76,15 @@ class ReconvergenceSuite extends Suite {
     assertEquals(found.schedule.retargets, Map.empty)
   }
 
+  test("a branch to a bare return needs no rejoin") {
+    val found = analyse("""setp.ne.u32 %p, %t, 0;
+      |@%p bra DONE;
+      |st.global.u32 [%base], %v;
+      |DONE:
+      |ret;""".stripMargin)
+    assertEquals(found.actions.size, 0)
+  }
+
   test("an if without an else rejoins where the branch lands") {
     val found = analyse(s"""setp.ne.u32 %p, %t, 0;
       |@%p bra JOIN;
@@ -227,14 +236,20 @@ class ReconvergenceSuite extends Suite {
   }
 
   Vec(
-    "atom.global.add.u32 %old, [%base], 1;"    -> true,
-    "red.global.add.u32 [%base], 1;"           -> true,
-    "ld.volatile.global.u32 %old, [%base];"    -> true,
-    "ld.relaxed.gpu.global.u32 %old, [%base];" -> true,
-    "ld.acquire.gpu.global.u32 %old, [%base];" -> true,
-    "ld.global.u32 %old, [%base];"             -> false,
-    "ld.global.nc.u32 %old, [%base];"          -> false,
-    "st.global.u32 [%base], %old;"             -> false
+    "atom.global.cas.b32 %old, [%base], 0, 1;"                  -> true,
+    "atom.shared.cas.b32 %old, [%base], 0, 1;"                  -> true,
+    "atom.global.exch.b32 %old, [%base], 0;"                    -> true,
+    "atom.shared.exch.b32 %old, [%base], 0;"                    -> true,
+    "atom.global.add.u32 %old, [%base], 1;"                     -> false,
+    "red.global.add.u32 [%base], 1;"                            -> false,
+    "ld.volatile.global.u32 %old, [%base];"                     -> false,
+    "ld.relaxed.gpu.global.u32 %old, [%base];"                  -> false,
+    "ld.acquire.gpu.global.u32 %old, [%base];"                  -> false,
+    "ld.global.u32 %old, [%base];"                              -> false,
+    "ld.global.nc.u32 %old, [%base];"                           -> false,
+    "mbarrier.test_wait.parity.shared::cta.b64 %q, [%base], 0;" -> false,
+    "mbarrier.try_wait.parity.shared::cta.b64 %q, [%base], 0;"  -> false,
+    "st.global.u32 [%base], %old;"                              -> false
   ).foreach { (instruction, yields) =>
     test(s"a loop around `${instruction.dropRight(1)}` ${if (yields) "yields" else "does not yield"}") {
       val found = analyse(s"""mov.u32 %old, 0;

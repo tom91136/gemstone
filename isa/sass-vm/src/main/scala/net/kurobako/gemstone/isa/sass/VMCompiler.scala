@@ -271,7 +271,10 @@ private object VMCompiler {
         Right(
           VMAssembler.Statement.Source(
             instruction.address.toLong.unsafe[Long >= 0],
-            text(instruction.operation)
+            text(instruction.operation),
+            instruction.scheduling.map(scheduling =>
+              Schedule.Encoded(scheduling.stall, scheduling.writeBarrier.nonEmpty)
+            )
           ) +:
             (statements.take(1) ++ arrivals ++ saves ++ statements.drop(1) ++ restores)
         )

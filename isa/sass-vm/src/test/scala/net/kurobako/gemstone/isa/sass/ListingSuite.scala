@@ -32,7 +32,16 @@ class ListingSuite extends Suite {
   test("text records preserve guards, braces, semicolons, encodings, and tab whitespace") {
     val text =
       "kernel:\n.Ltarget:\n    /*0000*/ { @!P0 MOV\tR1, c[0x0] [0x20] ; /* 0x0000000000000010 */\n /* 0x0000000000000001 */\n"
-    assertEquals(parse(text), Right(Vec(statement("@!P0 MOV R1, c[0x0][0x20]", word = Some((BigInt(1) << 64) | 16)))))
+    val control = Scheduling(
+      0.unsafe[Int in 0 ~ 15],
+      yieldHint = false,
+      Some(0.unsafe[Int in 0 ~ 5]),
+      Some(0.unsafe[Int in 0 ~ 5]),
+      0.unsafe[Int in 0 ~ 0x3f],
+      0.unsafe[Int in 0 ~ 0xf]
+    )
+    val expected = statement("@!P0 MOV R1, c[0x0][0x20]", word = Some((BigInt(1) << 64) | 16))
+    assertEquals(parse(text), Right(Vec(expected.copy(scheduling = Some(control)))))
   }
 
   test("typed parsing resolves a forward branch label to its instruction address") {

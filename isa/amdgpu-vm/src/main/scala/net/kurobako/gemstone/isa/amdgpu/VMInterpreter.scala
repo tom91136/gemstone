@@ -14,6 +14,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.prelude.*
 import net.kurobako.gemstone.vm.*
@@ -193,6 +194,7 @@ private object VMInterpreter {
     val KernelLaunch(dispatch, context, workgroups) = launch
     val memory                                      = context.memory
     val control                                     = context.control
+    val observer: LaunchObserver | Null             = control.observer.orNull
     val kernel                                      = program.source
     // Kernels using enable_sgpr_dispatch_ptr read the HSA packet directly;
     // OpenMP derives its grid-stride loop increment from grid_size_x.
@@ -213,14 +215,14 @@ private object VMInterpreter {
       4
     )
     LittleEndian.write(kernargAddress, packet, 40, 8)
-    control.observer.foreach(_.launched(resources(kernel, dispatch)))
+    observer.observed(_.launched(resources(kernel, dispatch)))
     val hostcall       = hostcallOffset.map(offset => HostcallBuffer(offset, HostcallListener(context.handler)))
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress, heap, hostcall)
     val slices         = CodeSlices(CodeSlice(program, program.jumpTable, dispatchMemory), peers, allocations)
-    if (dispatch.cooperative) runResident(slices, dispatch, control)
+    if (dispatch.cooperative) runResident(slices, dispatch, control, observer)
     else
       Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group, pace) =>
-        runGroup(slices, dispatch, group, control, pace)
+        runGroup(slices, dispatch, group, control, observer, pace)
       )
   }
 
@@ -248,7 +250,8 @@ private object VMInterpreter {
   private def runResident(
       slices: CodeSlices,
       dispatch: KernelTask,
-      control: TaskControl
+      control: TaskControl,
+      observer: LaunchObserver | Null
   ): Either[Fault, Unit] =
     dispatch.geometry.groupTotal.refine[Long in 1L ~ 2147483647L] match {
       case Left(_) =>
@@ -264,6 +267,7 @@ private object VMInterpreter {
             dispatch,
             dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]),
             control,
+            observer,
             gws
           )
         )
@@ -298,6 +302,7 @@ private object VMInterpreter {
       dispatch: KernelTask,
       group: Coordinates,
       control: TaskControl,
+      observer: LaunchObserver | Null,
       gws: GlobalWaveSyncResources
   ) {
     private val program    = slices.origin.program
@@ -320,6 +325,7 @@ private object VMInterpreter {
         lds,
         barriers,
         control,
+        observer,
         gws,
         Pace.Free
       )
@@ -368,6 +374,7 @@ private object VMInterpreter {
       dispatch: KernelTask,
       group: Coordinates,
       control: TaskControl,
+      observer: LaunchObserver | Null,
       pace: Pace
   ): Either[Fault, Unit] = {
     val program    = slices.origin.program
@@ -404,6 +411,7 @@ private object VMInterpreter {
                 lds,
                 barriers,
                 control,
+                observer,
                 null,
                 pace
               )
@@ -449,6 +457,7 @@ private object VMInterpreter {
       lds: Array[Byte],
       barriers: WorkgroupBarriers,
       control: TaskControl,
+      observer: LaunchObserver | Null,
       // the GWS resources of a cooperative dispatch, whose waves also yield on sleeps and spins; null otherwise
       gws: GlobalWaveSyncResources | Null,
       pace: Pace
@@ -4411,7 +4420,6 @@ private object VMInterpreter {
       )
     }
 
-    private val observer: LaunchObserver | Null = control.observer.orNull
     // the ordinal of the issue the observer is being shown, taken once per instruction
     private var currentIssue: Long = 0L
     // why the wave is parked, when it is; a step that blocks it names the reason it waits for
@@ -4428,49 +4436,61 @@ private object VMInterpreter {
       def subgroupSize: Int > 0                                    = waveSize.widen[Int > 0]
       def eachLane(each: (Int >= 0) => Unit): Unit                 = foreachActive(lane => each(workgroupLane(lane)))
       def text: String                                             = program.assembly(instructionIndex)
+      override def schedule: Option[Schedule]                      = program.schedule(instructionIndex)
+      override def pipe: Option[Pipe]                              =
+        Pipes.of(program.instructions(instructionIndex), program.transIssue(instructionIndex))
     }
 
     private def workgroupLane(lane: Int): Int >= 0 = (localStart + lane).unsafe[Int >= 0]
 
-    private def emit(lane: Int, space: Space, kind: LaunchObserver.AccessKind, address: Long, bytes: Int): Unit =
-      observer.nn.access(workgroupLane(lane), space, kind, address, bytes.unsafe[Int >= 0])
+    private def emit(
+        observer: LaunchObserver,
+        lane: Int,
+        space: Space,
+        kind: LaunchObserver.AccessKind,
+        address: Long,
+        bytes: Int
+    ): Unit = observer.access(workgroupLane(lane), space, kind, address, bytes.unsafe[Int >= 0])
 
     /** Reports an access to where `located` resolved it, which a discarded one does not reach. */
     private def seen(lane: Lane, kind: LaunchObserver.AccessKind, at: Long, bytes: Int): Unit =
-      if (observer != null) located match {
-        case Location.Global    => emit(lane, Space.Global, kind, at, bytes)
-        case Location.Local     => emit(lane, Space.Shared, kind, ldsOffset(at), bytes)
-        case Location.Private   => emit(lane, Space.Local, kind, at, bytes)
-        case Location.Discarded => ()
-      }
+      observer.observed(watcher =>
+        located match {
+          case Location.Global    => emit(watcher, lane, Space.Global, kind, at, bytes)
+          case Location.Local     => emit(watcher, lane, Space.Shared, kind, ldsOffset(at), bytes)
+          case Location.Private   => emit(watcher, lane, Space.Local, kind, at, bytes)
+          case Location.Discarded => ()
+        }
+      )
 
     private def seenShared(lane: Lane, kind: LaunchObserver.AccessKind, address: Long, bytes: Int): Unit =
-      if (observer != null) emit(lane, Space.Shared, kind, ldsOffset(address), bytes)
+      observer.observed(emit(_, lane, Space.Shared, kind, ldsOffset(address), bytes))
 
     /** A scalar access has no lane of its own, so it is reported from the wave's first. */
     private def seenScalar(kind: LaunchObserver.AccessKind, at: Long, bytes: Long): Unit =
-      if (observer != null) emit(0, Space.Global, kind, at, bytes.toInt)
+      observer.observed(emit(_, 0, Space.Global, kind, at, bytes.toInt))
 
     /** A scalar wait reports each counter it constrains from the wave's first lane, as scalar accesses are. */
     private def waited(counts: Instruction.WaitCounts): Unit =
-      if (observer != null) {
+      observer.observed { watcher =>
         val lane = workgroupLane(0)
         counts.counts.foreach { wait =>
           val count = wait.base.fold(wait.count.toLong)(base =>
             ((source(base, lane) & wait.mask) + (wait.count & wait.mask)) & wait.mask
           )
-          observer.nn.asynchronous(lane, LaunchObserver.AsyncKind.WaitCounter, wait.counter.ordinal.toLong, count)
+          watcher.asynchronous(lane, LaunchObserver.AsyncKind.WaitCounter, wait.counter.ordinal.toLong, count)
         }
       }
 
     private def transferred(lane: Lane, bytes: Int): Unit =
-      if (observer != null)
-        observer.nn.asynchronous(
+      observer.observed(
+        _.asynchronous(
           workgroupLane(lane),
           LaunchObserver.AsyncKind.Transfer,
-          -1L,
+          LaunchObserver.DefaultTarget,
           bytes.toLong.unsafe[Long >= 0]
         )
+      )
 
     private def observe(issue: Long): Fault | Null = {
       currentIssue = issue
@@ -4486,9 +4506,9 @@ private object VMInterpreter {
 
     /** A change in what a unit is doing, which the timeline records between the issues it surrounds. */
     private inline def transition(inline kind: MachineEvent.Kind, inline at: Fault.Location): Unit =
-      if (observer != null) {
+      observer.observed { watcher =>
         val changed = kind
-        observer.nn.transition(MachineEvent(machineUnit(changed.state), changed, control.issued(), Some(at)))
+        watcher.transition(MachineEvent(machineUnit(changed.state), changed, control.issued(), Some(at)))
       }
 
     /** The wave parks, waiting for `reason`; the machine releases it, and the wave runs again. */

@@ -205,7 +205,8 @@ object Harness extends munit.Assertions {
         block: Int | LaunchGeometry.Dimensions,
         grid: Int | LaunchGeometry.Dimensions = 1,
         memory: Memory = Memory(),
-        cooperative: Boolean = false
+        cooperative: Boolean = false,
+        control: TaskControl = TaskControl()
     )(
         args: Arg*
     )(using munit.Location): Either[Fault, Run] = {
@@ -231,7 +232,7 @@ object Harness extends munit.Assertions {
           ).left.map(
             Fault.InvalidRequest(_)
           )
-        _ <- memory.run(program, task)
+        _ <- memory.run(program, task, control)
       } yield Run(memory, regions.map(_.map(_._1)))
     }
 
@@ -239,11 +240,12 @@ object Harness extends munit.Assertions {
         block: Int | LaunchGeometry.Dimensions,
         grid: Int | LaunchGeometry.Dimensions = 1,
         memory: Memory = Memory(),
-        cooperative: Boolean = false
+        cooperative: Boolean = false,
+        control: TaskControl = TaskControl()
     )(
         args: Arg*
     )(using munit.Location): Run =
-      run(block, grid, memory, cooperative)(args*).fold(error => fail(error.message), identity)
+      run(block, grid, memory, cooperative, control)(args*).fold(error => fail(error.message), identity)
   }
 
   case class Run(memory: Memory, buffers: Vec[Option[AllocationId]]) {

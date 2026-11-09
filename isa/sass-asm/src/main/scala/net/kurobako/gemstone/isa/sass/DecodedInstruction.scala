@@ -21,7 +21,8 @@ case class DecodedInstruction(
     address: Int >= 0,
     operation: Instruction,
     encodingWord: Option[BigInt],
-    machine: Option[DecodedInstruction.Machine]
+    machine: Option[DecodedInstruction.Machine],
+    scheduling: Option[Scheduling]
 ) derives CanEqual {
   def mnemonic: NonEmpty[String]           = operation.mnemonic
   def modifiers: Vec[Instruction.Modifier] = operation.modifiers
@@ -29,7 +30,7 @@ case class DecodedInstruction(
   def guard: Option[Instruction.Guard]     = operation.guard
 
   def rewrite(operation: Instruction): DecodedInstruction =
-    DecodedInstruction(address, operation, None, None)
+    DecodedInstruction(address, operation, None, None, scheduling)
 
   def rewrite(
       mnemonic: NonEmpty[String] = this.mnemonic,
@@ -40,6 +41,6 @@ case class DecodedInstruction(
     InstructionDefinitions.decode(mnemonic.raw, modifiers, operands, guard)
       .fold(
         error => throw IllegalArgumentException(error),
-        value => DecodedInstruction(address, value, None, None)
+        value => DecodedInstruction(address, value, None, None, scheduling)
       )
 }

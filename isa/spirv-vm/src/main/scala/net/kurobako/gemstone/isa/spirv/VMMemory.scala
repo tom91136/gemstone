@@ -158,32 +158,34 @@ private object VMMemory {
     }
   }
 
+  object MemoryState {
+    def apply(
+        shared: Storage,
+        descriptors: mutable.HashMap[(Long, Int), Long] = mutable.HashMap.empty
+    ): MemoryState = new MemoryState(shared, descriptors)
+  }
+
   // The executing invocation's storage and helper status are rebound before each resume.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
-  class MemoryState(shared: Storage) {
+  class MemoryState(
+      shared: Storage,
+      descriptors: mutable.HashMap[(Long, Int), Long]
+  ) {
     private val memory                                = shared.memory
     def handler: Event => Either[Fault, Unit]         = shared.handler
     def deviceQueue: DeviceQueue                      = shared.deviceQueue
     def flushHostReads(): Either[Fault, Unit]         = memory.flushHostReads()
     def fence(): Either[Fault, Unit]                  = memory.fenceHostMemory()
     var helperInvocation: Boolean                     = false
-    var invocation: Arena                             = Arena()
-    var workgroup: Array[Byte]                        = Array.emptyByteArray
     var observer: LaunchObserver | Null               = null
     var lane: Int >= 0                                = 0
-    private val descriptors                           = mutable.HashMap.empty[(Long, Int), Long]
+    var invocation: Arena                             = Arena()
+    var workgroup: Array[Byte]                        = Array.emptyByteArray
     private def suppressed(pointer: Pointer): Boolean =
       helperInvocation && pointer.storageClass != StorageClass.Output && storage(pointer.address) == null
 
-    def observe(next: LaunchObserver, nextLane: Int >= 0): Unit = {
-      observer = next
-      lane = nextLane
-    }
-
-    def unobserve(): Unit = observer = null
-
     def asynchronous(kind: LaunchObserver.AsyncKind, bytes: Long): Unit =
-      if (observer != null) observer.nn.asynchronous(lane, kind, -1L, bytes)
+      if (observer != null) observer.nn.asynchronous(lane, kind, LaunchObserver.DefaultTarget, bytes)
 
     private def reads(kind: LaunchObserver.AccessKind): Boolean = kind == LaunchObserver.AccessKind.Read
 

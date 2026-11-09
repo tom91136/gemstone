@@ -19,9 +19,6 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
   private val local                      = Array.fill(laneCount)(VMBytes())
   private val convergence                = mutable.LongMap.empty[Long]
   private var nextConvergenceToken       = 0
-  private var stores                     = 0L
-  private val pausedAt                   = Array.fill(laneCount)(-1L)
-  private val quietPauses                = Array.ofDim[Int](laneCount)
   private val buffers                    = java.util.TreeMap[Long, Array[Byte]]()
   private var nextBuffer                 = VMAddressSpace.ParameterBase
   // Buffers are only added until a reset, so the last one found stays valid until then.
@@ -158,26 +155,21 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
     convergence(key) = convergence.getOrElse(key, 0L) & ~(1L << lane)
   }
 
-  def stored(): Unit = stores += 1L
-
   /** Every lane of `lanes` leaves the convergence barriers of its warp. */
   def yieldLanes(lanes: VMLaneMask): Unit = convergence.foreachKey { key =>
     val bits = lanes.warpBits((key >>> 32).toInt)
     if (bits != 0L) convergence(key) = convergence(key) & ~bits: @SuppressWarnings(Array("bonsai:loop-boxing"))
   }
 
-  /** Every lane of `lanes` that has paused twice in a row with no store in between, `deviceStores` counting those to
-    * global memory, leaves the convergence barriers of its warp. A compare-and-swap retry fails on a store made either
-    * side of its pause, so it never pauses quietly twice and still reconverges with the lanes it shares a barrier with.
-    */
-  def pauseLanes(lanes: VMLaneMask, deviceStores: Long): Unit = {
-    val stamp    = deviceStores + stores
-    val spinning = lanes.filterLanes { lane =>
-      quietPauses(lane.raw) = if (pausedAt(lane.raw) == stamp) quietPauses(lane.raw) + 1 else 0
-      pausedAt(lane.raw) = stamp
-      quietPauses(lane.raw) >= 2
+  /** The lanes of `lanes` that are still members of a convergence barrier of their warp. */
+  def convergingLanes(lanes: VMLaneMask): VMLaneMask = {
+    var result = VMLaneMask.Empty
+    convergence.foreachKey { key =>
+      val warp = (key >>> 32).toInt
+      val bits = lanes.warpBits(warp) & convergence(key)
+      if (bits != 0L) result = result.union(VMLaneMask.ofWarp(warp, bits))
     }
-    if (spinning.nonEmpty) yieldLanes(spinning)
+    result
   }
 
   def completeConvergence(warp: WorkgroupLane.WarpBase, token: Long): Unit = {
@@ -195,9 +187,6 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
     local.foreach(_.clear())
     convergence.clear()
     nextConvergenceToken = 0
-    stores = 0L
-    java.util.Arrays.fill(pausedAt, -1L)
-    java.util.Arrays.fill(quietPauses, 0)
     buffers.clear()
     nextBuffer = VMAddressSpace.ParameterBase
     lastBase = 0L

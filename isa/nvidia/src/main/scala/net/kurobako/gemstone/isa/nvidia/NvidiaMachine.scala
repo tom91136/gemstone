@@ -238,11 +238,6 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
   /** The active lanes stop being waited for at the convergence barriers of their warps, then `next`. */
   inline def yieldLanes(inline next: => F[Step]): F[Step]
 
-  /** The active lanes that have paused twice in a row with no store in between stop being waited for at the convergence
-    * barriers of their warps, then `next`.
-    */
-  inline def pauseLanes(inline next: => F[Step]): F[Step]
-
   /** The lanes arrive at the workgroup barrier `barrier`, which expects `count` threads, and reduce the predicates of
     * those threads by `reduction` when it completes.
     */

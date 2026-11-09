@@ -32,10 +32,10 @@ object ProgramPage {
     val result     = Var(Option.empty[ProgramRun.Run])
     val heatOn     = Var(false)
     val metric     = Var(Heat.Metric.Issues)
-    val chosen     = Var(Architecture.sm89)
+    val chosen     = Var(Option.empty[Architecture])
 
     val heat = loaded.signal.combineWith(result.signal, chosen.signal).map {
-      case (Some(program), Some(found), architecture) =>
+      case (Some(program), Some(found), Some(architecture)) =>
         val profile = found.profiled(architecture)
         Some((
           profile,
@@ -84,15 +84,15 @@ object ProgramPage {
         config  <- launch(launchText.now())
       } yield (program, name, config)
       request.flatMap((program, name, config) =>
-        ProgramRun.run(program, name, config.lanes, config.groups)
+        ProgramRun.run(program, name, config.lanes, config.groups).map(found => program -> found)
       ) match {
-        case Left(error)  => status.set(Left(error))
-        case Right(found) =>
+        case Left(error)             => status.set(Left(error))
+        case Right((program, found)) =>
           trace.set(found.trace)
           rows.set(Timeline.layout(found.trace))
           liveness.set(Liveness.of(found.trace))
           selected.set(found.trace.steps.headOption.map(_.issue))
-          Var.set(result -> Some(found), chosen -> found.architecture)
+          Var.set(result -> Some(found), chosen -> ProgramRun.defaultArchitecture(program.image.language))
           val stopped   = found.failure.fold("")(fault => s", stopped: ${fault.description.raw}")
           val truncated = if (found.complete) "" else s", recorded the first ${found.trace.steps.size} issues"
           status.set(Right(s"${found.trace.steps.size} issues over ${rows.now().size} workgroups$stopped$truncated"))
@@ -161,6 +161,7 @@ object ProgramPage {
         div(
           cls := "pane listing",
           HeatView.controls(heatOn, metric, chosen),
+          child <-- chosen.signal.map(architecture => if (architecture.isEmpty) HeatView.choose else emptyNode),
           child <-- loaded.signal.combineWith(selected.signal, trace.signal, heat, heatOn.signal, metric.signal).map {
             case (Some(program), choice, recorded, profiled, shaded, measure) =>
               val current = choice.flatMap(recorded.stepAt)

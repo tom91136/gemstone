@@ -11,13 +11,18 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
 
 object ProfileStream {
 
-  /** A static instruction of the launch, named as the backend located it, with the registers it reads and writes. */
+  /** A static instruction of the launch, named as the backend located it, with the registers it reads and writes, the
+    * static schedule its compiler encoded where the ISA encodes one, and the compute pipe it issues to where the ISA
+    * says.
+    */
   case class Instruction(
       kernel: NonEmpty[String],
       function: Option[NonEmpty[String]],
       address: Option[Long >= 0],
       text: String,
-      use: RegisterUse
+      use: RegisterUse,
+      schedule: Option[Schedule],
+      pipe: Option[Pipe]
   ) derives CanEqual
 
   /** One issue: `unit` of `workgroup` ran `instruction` for `lanes`, indices within the workgroup, and `begins` as
@@ -42,11 +47,12 @@ object ProfileStream {
   }
 
   private val Magic   = 0x47454d50524f4631L
-  private val Version = 3
+  private val Version = 4
 
   private val spaces = Space.values
   private val kinds  = AccessKind.values
   private val asyncs = AsyncKind.values
+  private val pipes  = Pipe.values
 
   /** Reads a stream [[ProfileStream.write]] wrote. */
   def read(in: DataInputStream): Either[String, ProfileStream] =
@@ -83,13 +89,31 @@ object ProfileStream {
     val reads    = readNames(in)
     val writes   = readNames(in)
     val units    = Vec.fill(in.readInt())(in.readUTF() -> in.readInt())
+    val schedule = Option.when(in.readBoolean())(readSchedule(in))
+    val pipe     = Option.when(in.readBoolean())(readPipe(in))
     Instruction(
       kernel,
       function,
       Option.when(address >= 0L)(address.unsafe[Long >= 0]),
       text,
-      RegisterUse(reads, writes, units.toMap)
+      RegisterUse(reads, writes, units.toMap),
+      schedule,
+      pipe
     )
+  }
+
+  private def readSchedule(in: DataInputStream): Schedule = in.readByte() match {
+    case 0 =>
+      val stall = in.readInt().refine[Int in 0 ~ 15].getOrElse(throw IOException("stall out of range"))
+      Schedule.Encoded(stall, in.readBoolean())
+    case 1 => Schedule.Estimated(in.readInt().refine[Int >= 0].getOrElse(throw IOException("cycles out of range")))
+    case _ => throw IOException("unknown schedule kind")
+  }
+
+  private def readPipe(in: DataInputStream): Pipe = {
+    val ordinal = in.readUnsignedByte()
+    if (ordinal >= pipes.length) throw IOException("unknown pipe")
+    pipes(ordinal)
   }
 
   private def readEvent(in: DataInputStream, instructions: Vec[Instruction]): MachineEvent = {
@@ -249,6 +273,18 @@ class ProfileStream private (
         out.writeUTF(name)
         out.writeInt(units)
       }
+      out.writeBoolean(instruction.schedule.nonEmpty)
+      instruction.schedule.foreach {
+        case Schedule.Encoded(stall, writeBarrier) =>
+          out.writeByte(0)
+          out.writeInt(stall.raw)
+          out.writeBoolean(writeBarrier)
+        case Schedule.Estimated(cycles) =>
+          out.writeByte(1)
+          out.writeInt(cycles.raw)
+      }
+      out.writeBoolean(instruction.pipe.nonEmpty)
+      instruction.pipe.foreach(pipe => out.writeByte(pipe.ordinal))
     }
     val indices = instructions.view.map(locate(_)).zipWithIndex.toMap
     out.writeInt(events.size)

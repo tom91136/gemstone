@@ -101,6 +101,67 @@ class ProfileSuite extends Suite {
     assertEquals(reads.map(_.address).distinct.size, 1)
   }
 
+  test("a kernel parameter read stays constant while a global load in the same kernel is global") {
+    val result = run("""ld.param.u64 %rd5, [buffer];
+                       |mul.wide.u32 %rd1, %r0, 4;
+                       |add.u64 %rd2, %rd0, %rd1;
+                       |ld.global.u32 %r1, [%rd2];""".stripMargin)
+    assertEquals(result.data, every(32)(lane => Seen(lane, Space.Global, AccessKind.Read, base + lane * 4L, 4)))
+    assertEquals(
+      result.accesses.toVector.collect { case access if access.space eq Space.Constant => access.kind }.distinct,
+      Vector(AccessKind.Read)
+    )
+  }
+
+  test("a generic store into a child parameter buffer records a global write") {
+    val memory   = DeviceMemory(4)
+    val recorder = ProfileRecorder()
+    val source   = """.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.extern .func (.param .b64 buffer) cudaGetParameterBuffer(.param .b64 align, .param .b64 size);
+      |.extern .func cudaLaunchDevice();
+      |.visible .entry parent() {
+      |  .reg .b64 %function, %buffer;
+      |  .param .b64 align, size, result, target, pointer, stream;
+      |  .param .b32 shared;
+      |  .param .align 4 .b8 grid[12], block[12];
+      |  st.param.b64 [align], 8;
+      |  st.param.b64 [size], 16;
+      |  call (result), cudaGetParameterBuffer, (align, size);
+      |  ld.param.b64 %buffer, [result];
+      |  st.u32 [%buffer+8], 42;
+      |  mov.b64 %function, child;
+      |  st.param.b64 [target], %function;
+      |  st.param.b64 [pointer], %buffer;
+      |  st.param.b64 [stream], 0;
+      |  st.param.b32 [shared], 0;
+      |  st.param.b32 [grid], 1;
+      |  st.param.b32 [grid+4], 1;
+      |  st.param.b32 [grid+8], 1;
+      |  st.param.b32 [block], 1;
+      |  st.param.b32 [block+4], 1;
+      |  st.param.b32 [block+8], 1;
+      |  call cudaLaunchDevice, (target, pointer, grid, block, shared, stream);
+      |  ret;
+      |}
+      |.visible .entry child() {
+      |  ret;
+      |}""".stripMargin
+    val result = execute(
+      compileKernel(source),
+      1,
+      1,
+      Map.empty,
+      memory,
+      control = TaskControl(observer = Some(recorder))
+    )
+    assertEquals(result, Right(()))
+    val writes = Result(recorder.stream).accesses.toVector.filter(_.kind == AccessKind.Write)
+    assertEquals(writes.filter(_.space eq Space.Constant), Vector.empty[Seen])
+    assert(writes.exists(_.space eq Space.Global))
+  }
+
   test("a strided global load reports the stride in each lane's address") {
     val result = run("""mul.wide.u32 %rd1, %r0, 128;
                        |add.u64 %rd2, %rd0, %rd1;
@@ -291,7 +352,7 @@ class ProfileSuite extends Suite {
       result.steps.toVector.sortBy(_.lane),
       Vector.tabulate(32)(lane =>
         Vector(
-          Step(lane, AsyncKind.Transfer, target = -1L, bytes = 16L),
+          Step(lane, AsyncKind.Transfer, target = DefaultTarget, bytes = 16L),
           Step(lane, AsyncKind.Commit, target = 0L, bytes = 0L),
           Step(lane, AsyncKind.WaitGroups, target = 0L, bytes = 0L)
         )
@@ -388,5 +449,33 @@ class ProfileSuite extends Suite {
     val units  = result.stream.instructions.flatMap(_.use.units.toVector).toMap
     assertEquals(units, Map("%rd0" -> 2, "%rd1" -> 2, "%p0" -> 0))
     assert(Profiler.run(result.stream, Architecture.sm89).pressure.exists(_.peak >= 4))
+  }
+
+  test("each PTX instruction reports the pipe that executes it") {
+    val result = run(
+      """add.f32 %f1, %f2, %f3;
+        |fma.rn.f32 %f4, %f1, %f2, %f3;
+        |mul.lo.s32 %r4, %r0, %r0;
+        |add.s32 %r5, %r0, 1;
+        |add.f64 %d1, %d2, %d3;
+        |ex2.approx.f32 %f5, %f2;
+        |ld.global.u32 %r7, [%rd0];""".stripMargin,
+      declarations = ".reg .f32 %f<8>;\n  .reg .f64 %d<4>;"
+    )
+    assertEquals(
+      result.stream.instructions.map(instruction => (instruction.text, instruction.pipe)).toVector,
+      Vector[(String, Option[Pipe])](
+        ("ld.param.u64 %rd0, [buffer];", None),
+        ("mov.u32 %r0, %tid.x;", None),
+        ("add.f32 %f1, %f2, %f3;", Some(Pipe.Fma)),
+        ("fma.rn.f32 %f4, %f1, %f2, %f3;", Some(Pipe.Fma)),
+        ("mul.lo.s32 %r4, %r0, %r0;", Some(Pipe.Fma)),
+        ("add.s32 %r5, %r0, 1;", Some(Pipe.Alu)),
+        ("add.f64 %d1, %d2, %d3;", Some(Pipe.Fp64)),
+        ("ex2.approx.f32 %f5, %f2;", Some(Pipe.Mufu)),
+        ("ld.global.u32 %r7, [%rd0];", None),
+        ("ret;", None)
+      )
+    )
   }
 }

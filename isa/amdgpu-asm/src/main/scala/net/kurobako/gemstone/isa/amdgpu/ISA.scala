@@ -41,4 +41,11 @@ enum ISA derives CanEqual {
     case _                                 => false
   }
   def isGFX11OrLater: Boolean = isGFX11OrLaterGraphics || this == CDNA5
+
+  /** Width of the `s_nop` count field, as in LLVM `GCNSubtarget::getSNopBits`. */
+  def snopBits: Int = this match {
+    case GFX6 | GFX7   => 3
+    case RDNA4 | CDNA5 => 7
+    case _             => 4
+  }
 }

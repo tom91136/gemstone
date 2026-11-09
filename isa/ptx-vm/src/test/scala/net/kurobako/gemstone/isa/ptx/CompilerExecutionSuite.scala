@@ -117,4 +117,22 @@ class CompilerExecutionSuite extends Suite {
       Vec.fill(4)(0x40004380)
     )
   }
+
+  test("compiler nanosleep PTX lanes that sleep before a join leave the barrier at once, as on sm_89") {
+    val kernel = compileKernel(CompilerFixtures.nanosleepSm89Ptx)
+    val memory = DeviceMemory(256)
+    val start  = memory.start
+    val result = execute(
+      kernel,
+      1,
+      32,
+      Map(
+        ("_Z10sleepShapeILi0EEvPjS0__param_0": NonEmpty[String]) -> Argument.fromLong(start.raw),
+        ("_Z10sleepShapeILi0EEvPjS0__param_1": NonEmpty[String]) -> Argument.fromLong(start.raw + 128L)
+      ),
+      memory
+    )
+    assertEquals(result, Right(()))
+    assertEquals(memory.words(0L, 32), Vec.tabulate(32)(lane => if (lane % 2 == 0) 0x55555555L else 0xaaaaaaaaL))
+  }
 }

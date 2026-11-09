@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.benchmarks
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.testing.*
 
 class BenchmarkRunnerSuite extends Suite {
@@ -56,6 +57,28 @@ class BenchmarkRunnerSuite extends Suite {
     assert(
       BenchmarkRunner.command
         .parse(Vector("profile", "ptx-vector-add", "--stream", "a.bin", "--replay", "b.bin"))
+        .isLeft
+    )
+  }
+
+  test("profile help names every architecture") {
+    BenchmarkRunner.command.parse(Vector("profile", "--help")) match {
+      case Left(help) =>
+        val missing = Architecture.all.map(_.name).filterNot(name => help.toString.contains(name))
+        assertEquals(missing.toVector, Vector.empty[String])
+      case Right(action) => fail(s"unexpected action $action")
+    }
+  }
+
+  test("profile passes case arguments after a separator to the case") {
+    assert(
+      BenchmarkRunner.command
+        .parse(Vector("profile", "--architecture", "sm_89", "nvidia-control-flow", "--", "--isa", "sass"))
+        .isRight
+    )
+    assert(
+      BenchmarkRunner.command
+        .parse(Vector("profile", "--architecture", "sm_89", "nvidia-control-flow", "--", "--isa", "cuda"))
         .isLeft
     )
   }

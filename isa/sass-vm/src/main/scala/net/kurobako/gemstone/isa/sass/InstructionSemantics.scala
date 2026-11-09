@@ -113,7 +113,7 @@ object InstructionSemantics {
     var complete = true
     var branches = false
     statements.foreach {
-      case VMAssembler.Statement.Source(address, _)                                 => current = Some(address)
+      case VMAssembler.Statement.Source(address, _, _)                              => current = Some(address)
       case VMAssembler.Statement.Execute(instruction, None) if current.contains(at) =>
         if (complete) found.append(instruction)
       case VMAssembler.Statement.Execute(_, Some(_)) if current.contains(at) => complete = false
@@ -160,7 +160,7 @@ object InstructionSemantics {
           decode("CALL", Vec(Instruction.Modifier.REL, Instruction.Modifier.NOINC), Operand.Integer(0x10))
             .map(call => (Vec(call, instruction, exit), 1))
         case _ =>
-          LegacyControlFlow.transferKind(DecodedInstruction(0, instruction, None, None)).filter(_ =>
+          LegacyControlFlow.transferKind(DecodedInstruction(0, instruction, None, None, None)).filter(_ =>
             Generation.of(sm) != Generation.Modern
           ) match {
             case Some(kind) =>
@@ -193,7 +193,7 @@ object InstructionSemantics {
       function                 = DecodedFunction(
         Kernel.raw,
         instructions.zipWithIndex.map((operation, index) =>
-          DecodedInstruction((index * 16).unsafe[Int >= 0], operation, None, None)
+          DecodedInstruction((index * 16).unsafe[Int >= 0], operation, None, None, None)
         )
       )
       base   = parameterBase(sm)
@@ -271,8 +271,8 @@ object InstructionSemantics {
     )
     SASSLowering(
       placed.statements.takeWhile {
-        case VMAssembler.Statement.Source(_, _) => false
-        case _                                  => true
+        case VMAssembler.Statement.Source(_, _, _) => false
+        case _                                     => true
       }.collect { case VMAssembler.Statement.Execute(initial, None) => initial },
       steps,
       placed.registerCount,

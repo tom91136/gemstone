@@ -482,5 +482,7 @@ object NVDisasm {
 
   def supports(name: String): Boolean = catalogue.byTarget.contains(name)
 
+  def targets: Vec[String] = Vec.from(catalogue.byTarget.keys).sorted
+
   def database(name: String): Database = catalogue.byTarget(name).value
 }

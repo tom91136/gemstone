@@ -1071,6 +1071,9 @@ v_wmma_scale_f32_32x16x128_f4 v[0:15], v[8:23], v[24:31], v[40:55], v1, v2 matri
 
 // SOURCE: gfx1250_asm_wmma_w32_err.s
 
+v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[8:23], v[24:39], v[40:47] matrix_b_fmt:-1
+// ERROR: invalid matrix_b_fmt value
+
 v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[8:23], v[24:39], v[40:47] neg_hi:[1,0,0]
 // ERROR: invalid neg_hi operand
 

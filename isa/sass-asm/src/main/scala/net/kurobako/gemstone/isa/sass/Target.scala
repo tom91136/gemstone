@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.sass
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 object Target {
@@ -11,6 +12,8 @@ object Target {
     }
     number.toIntOption.flatMap(_.refine[Int >= 35].toOption).toRight(s"invalid SASS target $source").flatMap(of(_))
   }
+
+  def all: Vec[Target] = NVDisasm.targets.flatMap(parse(_).toOption)
 
   def of(sm: Int >= 35): Either[String, Target] =
     Either.cond(NVDisasm.supports(s"SM$sm"), Target(sm), s"unsupported SASS target sm_$sm")

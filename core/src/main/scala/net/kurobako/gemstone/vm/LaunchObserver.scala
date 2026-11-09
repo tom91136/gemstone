@@ -11,6 +11,20 @@ object LaunchObserver {
 
   case class Access(kind: AccessKind, location: AddressSpace.Location, size: Int >= 0)
 
+  /** The `target` that names no barrier or class: a transfer completes with its group, and a backend with a single
+    * class of groups commits and waits on that class.
+    */
+  val DefaultTarget: Long = -1L
+
+  /** Runs `report` on the attached observer. Inlined so that an unobserved launch builds no arguments for it. */
+  extension (observer: LaunchObserver | Null) {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+    inline def observed(inline report: LaunchObserver => Unit): Unit = observer match {
+      case null                     => ()
+      case attached: LaunchObserver => report(attached)
+    }
+  }
+
   /** Both observers, `first` before `second`; a fault from `first` stops the instruction before `second` sees it. */
   def both(first: LaunchObserver, second: LaunchObserver): LaunchObserver = Both(first, second)
 
@@ -38,11 +52,13 @@ object LaunchObserver {
   /** A step of asynchronous work, which the machine completes at issue but hardware completes later. */
   enum AsyncKind derives CanEqual {
 
-    /** A transfer of `bytes` begins; it completes on the barrier at `target`, or with its group when `target` is -1. */
+    /** A transfer of `bytes` begins; it completes on the barrier at `target`, or with its group when `target` is
+      * [[DefaultTarget]].
+      */
     case Transfer
 
     /** The lane's transfers since its last commit form a group of the class `target` names: 0 for `cp.async` groups, 1
-      * for bulk async-groups, -1 where a backend has a single class.
+      * for bulk async-groups, [[DefaultTarget]] where a backend has a single class.
       */
     case Commit
 
@@ -98,8 +114,9 @@ trait LaunchObserver derives CanEqual {
 
   /** Called for each lane's access to memory in any space, between [[instruction]] for the issue that makes it and the
     * next. `lane` is the lane's index within its workgroup; `space` is the space the access resolved to, never
-    * [[Space.Generic]], and `address` is in that space's own addressing. NVIDIA parameter-block reads, `ld.param` and
-    * constant-bank operands, report [[Space.Constant]]; the profiler's global and shared models ignore that space.
+    * [[Space.Generic]], and `address` is in that space's own addressing. PTX `ld.param` reads report
+    * [[Space.Constant]]; SASS constant-bank operands record no access. The profiler's global and shared models ignore
+    * that space.
     */
   def access(
       @unused lane: Int >= 0,

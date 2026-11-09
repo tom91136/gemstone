@@ -44,7 +44,7 @@ class TextureSuite extends Suite {
       GuestAddress(TextureLayout.Table.BaseAddress)
     )
     Array.copy(
-      descriptor.encode,
+      descriptor.encode.toArray,
       0,
       memory.array(Table),
       (TextureTable.entryAddress(handle.toLong).get - TextureLayout.Table.BaseAddress).toInt,

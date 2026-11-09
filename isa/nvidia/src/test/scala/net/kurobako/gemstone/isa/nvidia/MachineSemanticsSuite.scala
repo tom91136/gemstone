@@ -1069,18 +1069,6 @@ class MachineSemanticsSuite extends Suite {
     )
   }
 
-  test("a pause renders the lanes that have stopped making progress leaving the barriers of their warp") {
-    assertEquals(
-      shown(pauseLanes(guarded = true)),
-      """def bpause(p: Bool)(using barriers: Barriers, lanes: Lanes): Unit = {
-        |  if (p) {
-        |    barriers.pauseLane(lanes.index())
-        |  }
-        |  ()
-        |}""".stripMargin
-    )
-  }
-
   test("a predicated branch renders its jump under the predicate it executes for") {
     assertEquals(
       predicatedBranch(negated = false).toList.map(ScalaBackend.show(_)),

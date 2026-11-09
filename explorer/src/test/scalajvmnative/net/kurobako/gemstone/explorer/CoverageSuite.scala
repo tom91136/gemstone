@@ -131,4 +131,11 @@ class CoverageSuite extends Suite {
     }
     assert(exceeded.isEmpty, exceeded.mkString("\n"))
   }
+
+  test("sibling processors are classified") {
+    val unclassified = Vec("gfx805", "gfx902", "gfx909", "gfx1154", "gfx1171", "gfx1172").filterNot(name =>
+      classified.exists(form => form.isa == "AMDGPU" && form.target.contains(name))
+    )
+    assert(unclassified.isEmpty, unclassified.mkString("\n"))
+  }
 }

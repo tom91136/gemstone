@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.profile
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
@@ -89,10 +90,10 @@ object Profiler {
       perLane: Boolean,
       workgroupLanes: Option[Int],
       architecture: Architecture,
-      instructions: Int,
+      instructions: Vec[ProfileStream.Instruction],
       tracksUse: Boolean
   ) extends ProfileStream.Visitor {
-    val perInstruction: Array[Profile.Counters]                   = Array.fill(instructions)(Profile.Counters.zero)
+    val perInstruction: Array[Profile.Counters]                   = Array.fill(instructions.size)(Profile.Counters.zero)
     val sequences: mutable.LinkedHashMap[SubgroupId, IntSequence] = mutable.LinkedHashMap.empty
     var peakOpen                                                  = 0
     private val open                                              = mutable.HashMap.empty[SubgroupKey, SubgroupIssue]
@@ -104,7 +105,8 @@ object Profiler {
 
     private def finalise(group: SubgroupIssue): Unit = {
       open -= group.key
-      perInstruction(group.instruction) = perInstruction(group.instruction) + counters(group, architecture)
+      perInstruction(group.instruction) =
+        perInstruction(group.instruction) + counters(group, architecture, instructions(group.instruction).schedule)
     }
 
     private def leave(group: SubgroupIssue): Unit = {
@@ -198,7 +200,7 @@ object Profiler {
       probe.holds,
       stream.resources.map(_.workgroupLanes.raw),
       architecture,
-      stream.instructions.size,
+      stream.instructions,
       tracksUse
     )
     stream.foreach(replay)
@@ -241,7 +243,11 @@ object Profiler {
     Profile.Pressure(peak, if (count == 0L) 0.0 else total.toDouble / count.toDouble)
   }
 
-  private def counters(group: SubgroupIssue, architecture: Architecture): Profile.Counters = {
+  private def counters(
+      group: SubgroupIssue,
+      architecture: Architecture,
+      schedule: Option[Schedule]
+  ): Profile.Counters = {
     val memory = group.requests.values.foldLeft(Map.empty[(Space, AccessKind), Profile.Memory]) { (memory, request) =>
       val key = (request.space, request.kind)
       memory.updated(key, memory.getOrElse(key, Profile.Memory.zero) + measureRequest(request, architecture))
@@ -254,6 +260,7 @@ object Profiler {
         subgroupLanes = group.subgroupSize.toLong,
         divergent = if (group.successors.size > 1) 1L else 0L,
         reconverging = if (group.predecessors.size > 1) 1L else 0L,
+        plannedCycles = schedule.fold(0L)(_.plannedCycles.toLong),
         memory = memory
       )
   }

@@ -14,6 +14,7 @@ object Heat {
     case ExcessSectors extends Metric("excess sectors", "sectors")
     case BankConflicts extends Metric("bank conflicts", "wavefronts")
     case CyclesLost    extends Metric("estimated cycles lost", "cycles")
+    case Cycles        extends Metric("cycles", "cycles")
 
     def value(heat: LineHeat): Double = this match {
       case Issues        => heat.issues.toDouble
@@ -21,6 +22,7 @@ object Heat {
       case ExcessSectors => heat.excessSectors.toDouble
       case BankConflicts => heat.bankConflicts.toDouble
       case CyclesLost    => heat.cyclesLost
+      case Cycles        => heat.cycles
     }
   }
 
@@ -41,12 +43,19 @@ object Heat {
     * to has none.
     */
   def of(listing: Listing, profile: Profile): Vec[Option[LineHeat]] = {
-    val cycles = ProfileReport.findings(profile).groupMapReduce(_.instruction)(_.cycles)(_ + _)
-    val byLine = profile.instructions.foldLeft(Map.empty[ProgramLine, LineHeat]) {
+    val costs    = ProfileReport.costs(profile).map(cost => cost.instruction -> cost).toMap
+    val findings = ProfileReport.findings(profile).groupBy(_.instruction)
+    val byLine   = profile.instructions.foldLeft(Map.empty[ProgramLine, LineHeat]) {
       case (found, (instruction, counters)) =>
-        lineOf(listing, instruction) match {
-          case Some(line) if counters.issues > 0L =>
-            val heat = LineHeat(counters, cycles.getOrElse(instruction, 0.0))
+        (lineOf(listing, instruction), costs.get(instruction)) match {
+          case (Some(line), Some(cost)) =>
+            val own  = findings.getOrElse(instruction, Vec.empty[ProfileReport.Finding])
+            val heat = LineHeat(
+              counters,
+              own.map(_.cycles).sum,
+              cost.cycles,
+              Architecture.Source.weakest(cost.source, own.map(_.source)*)
+            )
             found.updated(line, found.get(line).fold(heat)(_.merge(heat)))
           case _ => found
         }
@@ -75,7 +84,10 @@ object Heat {
       s"global: ${heat.global.requests} requests, ${heat.global.sectors} sectors, ${heat.excessSectors} beyond the ideal ${heat.global.idealSectors}"
     ) ++ Option.when(heat.shared.requests > 0L)(
       s"shared: ${heat.shared.requests} requests, ${heat.shared.wavefronts} wavefronts, ${heat.bankConflicts} from bank conflicts"
-    ) ++ Vec(s"estimated cycles lost ${format(heat.cyclesLost)}")
+    ) ++ Vec(
+      s"estimated cycles lost ${format(heat.cyclesLost)}",
+      s"cycles ${format(heat.cycles)}, source ${heat.source.kind}: ${heat.source.detail}"
+    )
     lines.mkString("\n")
   }
 

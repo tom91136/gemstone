@@ -151,17 +151,11 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
   private def apply(frame: VMLanes, workgroup: VMWorkgroup, memory: DeviceHeap, write: VMWrite): Either[Fault, Unit] =
     write match {
       case VMWrite.Memory(_, address, width, value, false) =>
-        memory.stored()
         memory.writeValue(address, value, width.toScalarByteWidth)
       case VMWrite.MemoryBytes(_, address, bytes) =>
-        memory.stored()
         memory.write(address, bytes)
       case VMWrite.Atomic(lane, destination, address, width, AtomicTarget.Device, change) =>
-        memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth) { previous =>
-          val updated = change(previous)
-          if (updated != previous) memory.stored()
-          updated
-        } match {
+        memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth)(change(_)) match {
           case Left(fault)     => Left(fault)
           case Right(previous) =>
             destination.foreach(frame(lane).setRegister(_, Bits.truncate(previous, width)))
@@ -182,9 +176,7 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
       )(())
     case VMWrite.Atomic(lane, destination, address, width, AtomicTarget.Shared, change) =>
       val previous = Bits.truncate(workgroup.readShared(address, width), width)
-      val updated  = change(previous)
-      if (updated != previous) workgroup.stored()
-      workgroup.writeShared(address, width, updated)
+      workgroup.writeShared(address, width, change(previous))
       destination.foreach(frame(lane).setRegister(_, previous))
     case VMWrite.Atomic(lane, destination, address, width, AtomicTarget.Local, change) =>
       val previous = Bits.truncate(workgroup.readLocal(lane, address, width), width)
@@ -229,14 +221,11 @@ private class VMWriteBuffer(capacity: Int > 0 = 64) {
           frame(lanes(index)).setRegister(registers(index), values(index))
           Completed
         } else if (kinds(index) == MemoryWrite) {
-          memory.stored()
           memory.writeValue(GuestAddress(addresses(index)), values(index), widths(index).toScalarByteWidth)
         } else if (kinds(index) == ObjectWrite) apply(frame, workgroup, memory, writes(index).nn)
         else {
-          if (kinds(index) == SharedWrite) {
-            workgroup.stored()
-            workgroup.writeShared(addresses(index), widths(index), values(index))
-          } else if (kinds(index) == LocalWrite)
+          if (kinds(index) == SharedWrite) workgroup.writeShared(addresses(index), widths(index), values(index))
+          else if (kinds(index) == LocalWrite)
             workgroup.writeLocal(lanes(index), addresses(index), widths(index), values(index))
           else frame(lanes(index)).writeParameter(parameters(index), offsets(index), widths(index), values(index))
           Completed

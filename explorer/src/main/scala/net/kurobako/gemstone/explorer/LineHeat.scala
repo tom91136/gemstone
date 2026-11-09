@@ -3,10 +3,16 @@ package net.kurobako.gemstone.explorer
 import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.semantics.*
 
-/** What a launch's profile says about one listing line: the counters of the static instructions there and the cycles
-  * their findings put on the multiprocessor.
+/** What a launch's profile says about one listing line: the counters of the static instructions there, the cycles their
+  * findings lose, and the cycles their costs take on the multiprocessor. `source` is the weakest among the values
+  * behind `cycles` and `cyclesLost`.
   */
-case class LineHeat(counters: Profile.Counters, cyclesLost: Double) derives CanEqual {
+case class LineHeat(
+    counters: Profile.Counters,
+    cyclesLost: Double,
+    cycles: Double,
+    source: Architecture.Source
+) derives CanEqual {
 
   def issues: Long = counters.issues
 
@@ -24,5 +30,10 @@ case class LineHeat(counters: Profile.Counters, cyclesLost: Double) derives CanE
 
   def bankConflicts: Long = shared.conflicts
 
-  def merge(that: LineHeat): LineHeat = LineHeat(counters + that.counters, cyclesLost + that.cyclesLost)
+  def merge(that: LineHeat): LineHeat = LineHeat(
+    counters + that.counters,
+    cyclesLost + that.cyclesLost,
+    cycles + that.cycles,
+    Architecture.Source.weakest(source, that.source)
+  )
 }

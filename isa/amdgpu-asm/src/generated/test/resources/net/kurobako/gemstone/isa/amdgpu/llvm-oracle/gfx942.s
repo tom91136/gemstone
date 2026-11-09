@@ -336,11 +336,11 @@ v_minimum3_f32 v0, v1, v2, v3
 ds_read_b64_tr_b16 v[2:3], v3 offset:64
 // ERROR: instruction not supported on this GPU (gfx942): ds_read_b64_tr_b16
 
-ds_read_b64_tr_b4 v[0:1], v1
-// ERROR: instruction not supported on this GPU (gfx942): ds_read_b64_tr_b4
-
 ds_read_b64_tr_b8 v[0:1], v1
 // ERROR: instruction not supported on this GPU (gfx942): ds_read_b64_tr_b8
+
+ds_read_b96_tr_b6 v[0:2], v0
+// ERROR: instruction not supported on this GPU (gfx942): ds_read_b96_tr_b6
 
 // SOURCE: gfx950_asm_vop1.s
 
@@ -525,11 +525,11 @@ image_atomic_dec v4, v192, s[28:35] dmask:0x1 unorm
 image_atomic_smin v4, v192, s[28:35] dmask:0x1 unorm
 // ERROR: instruction not supported on this GPU (gfx942): image_atomic_smin
 
-image_atomic_sub v4, v192, s[28:35] dmask:0x1 unorm
-// ERROR: instruction not supported on this GPU (gfx942): image_atomic_sub
-
 image_atomic_swap v4, v[192:195], s[28:35] dmask:0x1 unorm glc
 // ERROR: instruction not supported on this GPU (gfx942): image_atomic_swap
+
+image_atomic_umax v4, v192, s[28:35] dmask:0x1 unorm
+// ERROR: instruction not supported on this GPU (gfx942): image_atomic_umax
 
 image_atomic_umin v4, v192, s[28:35] dmask:0x1 unorm
 // ERROR: instruction not supported on this GPU (gfx942): image_atomic_umin
@@ -537,8 +537,8 @@ image_atomic_umin v4, v192, s[28:35] dmask:0x1 unorm
 image_load_mip_pck_sgn v[4:5], v[0:3], s[8:15] dmask:0x5
 // ERROR: instruction not supported on this GPU (gfx942): image_load_mip_pck_sgn
 
-image_load_pck v5, v[0:3], s[8:15] dmask:0x1 glc
-// ERROR: instruction not supported on this GPU (gfx942): image_load_pck
+image_sample v5, v[0:3], s[8:15], s[12:15] dmask:0x1
+// ERROR: instruction not supported on this GPU (gfx942): image_sample
 
 image_store v[192:194], v[238:241], s[28:35] dmask:0x7 unorm
 // ERROR: instruction not supported on this GPU (gfx942): image_store

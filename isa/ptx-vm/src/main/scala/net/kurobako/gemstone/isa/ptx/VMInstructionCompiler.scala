@@ -1591,12 +1591,13 @@ private object VMInstructionCompiler {
             case _ => false
           } =>
         Right(VMIR.Instruction.Fence)
-      case Form.Prefetch(_) | Form.NanoSleep(_) => Right(VMIR.Instruction.NoOp)
-      case Form.BarWarpSync(memberMask)         => scope.value(memberMask).map(VMIR.Instruction.WarpBarrier(_))
-      case Form.Exit()                          => Right(VMIR.Instruction.Exit)
-      case Form.Ret()                           => Right(VMIR.Instruction.Return)
-      case Form.Trap()                          => Right(VMIR.Instruction.Trap)
-      case _                                    => calls()
+      case Form.Prefetch(_)             => Right(VMIR.Instruction.NoOp)
+      case Form.NanoSleep(_)            => Right(VMIR.Instruction.Yield)
+      case Form.BarWarpSync(memberMask) => scope.value(memberMask).map(VMIR.Instruction.WarpBarrier(_))
+      case Form.Exit()                  => Right(VMIR.Instruction.Exit)
+      case Form.Ret()                   => Right(VMIR.Instruction.Return)
+      case Form.Trap()                  => Right(VMIR.Instruction.Trap)
+      case _                            => calls()
     }
     def calls(): Lowered = instruction.form match {
       case Form.Call(returnParams = returnParameters, function = function, params = parameters) =>

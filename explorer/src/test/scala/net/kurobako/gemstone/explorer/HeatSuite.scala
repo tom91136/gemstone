@@ -36,13 +36,14 @@ class HeatSuite extends Suite {
       image: Vec[Byte],
       kernel: Option[String],
       groups: Dimensions,
-      lanes: Dimensions
+      lanes: Dimensions,
+      architecture: Architecture
   )(check: (ProgramRun.Loaded, ProgramRun.Run, Vec[Option[LineHeat]]) => A): A =
     Using.resource(ProgramRun.load(ProgramListing.Image(language, image, None)).toOption.get) { program =>
       val name = kernel.fold(program.kernels.head)(_.unsafe[NonEmpty[String]])
       val run  = ProgramRun.run(program, name, lanes, groups).toOption.get
       assertEquals(run.failure, None)
-      check(program, run, Heat.of(program.listing.toOption.get, run.profile))
+      check(program, run, Heat.of(program.listing.toOption.get, run.profiled(architecture)))
     }
 
   private def ran(program: ProgramRun.Loaded, run: ProgramRun.Run): Set[ProgramLine] = {
@@ -66,7 +67,8 @@ class HeatSuite extends Suite {
       Vec.from(Examples.ptx.getBytes(StandardCharsets.UTF_8)),
       Some("kernel"),
       Dimensions(4, 1, 1),
-      Dimensions(32, 1, 1)
+      Dimensions(32, 1, 1),
+      Architecture.sm89
     ) { (program, run, heats) =>
       landsOnIssued(program, run, heats)
       val store = lineWith(program, heats, "st.global")
@@ -84,7 +86,8 @@ class HeatSuite extends Suite {
       Vec.from(stridedShared.getBytes(StandardCharsets.UTF_8)),
       Some("kernel"),
       Dimensions(1, 1, 1),
-      Dimensions(32, 1, 1)
+      Dimensions(32, 1, 1),
+      Architecture.sm89
     ) { (program, run, heats) =>
       landsOnIssued(program, run, heats)
       val store = lineWith(program, heats, "st.shared")
@@ -97,8 +100,15 @@ class HeatSuite extends Suite {
   }
 
   test("the SASS sample carries a profile on the lines that issued") {
-    profiled(Language.SASS, bytes(SassExample.cubin), None, Dimensions(4, 1, 1), Dimensions(8, 8, 1)) {
-      (program, run, heats) => landsOnIssued(program, run, heats)
+    profiled(
+      Language.SASS,
+      bytes(SassExample.cubin),
+      None,
+      Dimensions(4, 1, 1),
+      Dimensions(8, 8, 1),
+      Architecture.sm89
+    ) { (program, run, heats) =>
+      landsOnIssued(program, run, heats)
     }
   }
 
@@ -108,20 +118,20 @@ class HeatSuite extends Suite {
       bytes(AmdgpuExample.codeObject),
       Some("probe"),
       Dimensions(4, 1, 1),
-      Dimensions(8, 8, 1)
-    ) {
-      (program, run, heats) =>
-        assertEquals(run.architecture, Architecture.gfx1036)
-        landsOnIssued(program, run, heats)
-    }
+      Dimensions(8, 8, 1),
+      Architecture.gfx1036
+    )((program, run, heats) => landsOnIssued(program, run, heats))
   }
 
-  test("the SPIR-V sample carries a profile on the lines that issued") {
-    profiled(Language.SPIRV, bytes(SpirvExample.module), Some("mandelbrot"), Dimensions(4, 1, 1), Dimensions(8, 8, 1)) {
-      (program, run, heats) =>
-        assertEquals(run.architecture, Architecture.sm89)
-        landsOnIssued(program, run, heats)
-    }
+  test("the SPIR-V sample profiles under the architecture chosen for it") {
+    profiled(
+      Language.SPIRV,
+      bytes(SpirvExample.module),
+      Some("mandelbrot"),
+      Dimensions(4, 1, 1),
+      Dimensions(8, 8, 1),
+      Architecture.sm89
+    )((program, run, heats) => landsOnIssued(program, run, heats))
   }
 
   private val listing = Listing(
@@ -138,7 +148,9 @@ class HeatSuite extends Suite {
     Some(function.unsafe[NonEmpty[String]]),
     Some(address.unsafe[Long >= 0]),
     "",
-    RegisterUse.empty
+    RegisterUse.empty,
+    None,
+    None
   )
 
   private def counters(issues: Long, active: Long, sectors: Long, ideal: Long): Profile.Counters =
@@ -148,6 +160,7 @@ class HeatSuite extends Suite {
       subgroupLanes = issues * 32L,
       divergent = 0L,
       reconverging = 0L,
+      plannedCycles = 0L,
       memory = Map(
         (Space.Global, LaunchObserver.AccessKind.Read) ->
           Profile.Memory.zero.copy(requests = issues, sectors = sectors, idealSectors = ideal)
@@ -182,6 +195,39 @@ class HeatSuite extends Suite {
     assertEquals(Heat.maximum(heats, Heat.Metric.ExcessSectors), 4.0)
     assertEquals(Heat.maximum(heats, Heat.Metric.BankConflicts), 0.0)
     assertEquals(Heat.maximum(Vec.empty[Option[LineHeat]], Heat.Metric.Issues), 0.0)
+  }
+
+  test("a line carries the cycles of its instructions and the cycles metric reads them") {
+    val heats = Heat.of(listing, profile)
+    assertEquals(heats.map(_.map(_.cycles)), Vec(None, Some(4.0), None, Some(8.0)))
+    assertEquals(Heat.Metric.Cycles.title, "cycles")
+    assertEquals(Heat.Metric.Cycles.value(heats(3).get), 8.0)
+    assertEquals(Heat.maximum(heats, Heat.Metric.Cycles), 8.0)
+  }
+
+  test("a line takes the weakest source of its instructions and says so on hover") {
+    val basis     = "load rate assumed for this line"
+    val estimated = Architecture.sm89.copy(throughput =
+      Architecture.sm89.throughput.copy(loads = Some(Architecture.Sourced(0.5, Architecture.Source.Estimate(basis))))
+    )
+    val lineProfile = Profile(
+      estimated,
+      None,
+      None,
+      Profile.Counters.zero,
+      Vec(
+        instruction("a", 1L)                       -> counters(issues = 2L, active = 32L, sectors = 12L, ideal = 8L),
+        instruction("a", 1L).copy(text = "st.u32") -> Profile.Counters.zero.copy(
+          issues = 4L,
+          activeLanes = 128L,
+          subgroupLanes = 128L
+        )
+      )
+    )
+    val heats = Heat.of(listing, lineProfile)
+    assertEquals(heats(1).get.cycles, 5.0)
+    assertEquals(heats(1).get.source.kind, "estimate")
+    assert(Heat.hover(heats(1).get).endsWith(s"cycles 5, source estimate: $basis"))
   }
 
   test("zero is unshaded, any positive value shades, and the maximum takes the darkest shade") {

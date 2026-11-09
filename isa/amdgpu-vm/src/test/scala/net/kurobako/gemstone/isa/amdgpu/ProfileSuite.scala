@@ -15,9 +15,12 @@ import scala.collection.mutable
 /** The facts a profiler reads from an observed launch: each issue's lanes and text, and each lane's accesses. */
 class ProfileSuite extends Suite {
   private val gfx906  = Target("gfx906")
+  private val gfx90a  = Target("gfx90a")
   private val gfx1030 = Target("gfx1030")
+  private val gfx1100 = Target("gfx1100")
   private val gfx942  = Target("gfx942")
   private val gfx1200 = Target("gfx1200")
+  private val gfx1250 = Target("gfx1250")
   private val buffer  = AllocationId(1L)
   private val base    = RegionMemory.Base
 
@@ -52,15 +55,16 @@ class ProfileSuite extends Suite {
       text: String,
       target: Target = gfx906,
       threads: Int > 0 = 64,
+      wave64: Boolean = false,
       groupSegmentSize: Int >= 0 = 0,
       computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
       dynamicSegmentBytes: Int >= 0 = 0
   ): Result = {
-    val wave32   = target.isa.isRDNA
     val assembly = f"""s_mov_b32 s2, 0x${base & 0xffffffffL}%x
                       |s_mov_b32 s3, 0x${base >>> 32}%x
                       |$text
                       |s_endpgm""".stripMargin
+    val wave32 = (target.isa.isRDNA || target.isa.isGFX11OrLater) && !wave64
     val mode   = TargetMode(target, if (wave32) 32 else 64)
     val code   = asm.Assembler.encode(asm.Parser.parse(assembly).value, mode).value
     val source = codeKernel(
@@ -86,6 +90,11 @@ class ProfileSuite extends Suite {
     assertEquals(result, Right(()))
     Result(recorder.stream)
   }
+
+  private def planned(result: Result, mnemonic: String): Long =
+    Profiler.run(result.stream, Architecture.gfx1030).instructions.collect {
+      case (instruction, counters) if instruction.text.startsWith(mnemonic) => counters.plannedCycles
+    }.sum
 
   test("a coalesced global load reports consecutive addresses for every lane") {
     val result = run("v_lshlrev_b32 v1, 2, v0\nglobal_load_dword v2, v1, s[2:3]")
@@ -220,7 +229,7 @@ class ProfileSuite extends Suite {
       threads = 4,
       groupSegmentSize = 512
     )
-    assertEquals(result.async.toVector, Vector.tabulate(4)(lane => (lane, AsyncKind.Transfer, -1L, 4L)))
+    assertEquals(result.async.toVector, Vector.tabulate(4)(lane => (lane, AsyncKind.Transfer, DefaultTarget, 4L)))
     assertEquals(
       result.accesses.toVector,
       Vector.tabulate(4)(lane =>
@@ -323,5 +332,131 @@ class ProfileSuite extends Suite {
         (0, AsyncKind.WaitCounter, 2L, 6L)
       )
     )
+  }
+
+  test("planned cycles take the LLVM model's cycles on a gfx906 wave64") {
+    assertEquals(planned(run("v_rcp_f32 v1, v0", target = gfx906), "v_rcp_f32"), 1L)
+  }
+
+  test("planned cycles take the LLVM model's cycles on a gfx1030 wave32") {
+    val result = run("v_rcp_f32 v1, v0\nv_add_nc_u32 v2, v0, v0", target = gfx1030, threads = 32)
+    assertEquals(planned(result, "v_rcp_f32"), 1L)
+    assertEquals(planned(result, "v_add_nc_u32"), 1L)
+  }
+
+  test("planned cycles double on a gfx1030 wave64") {
+    val result = run("v_rcp_f32 v1, v0\nv_add_nc_u32 v2, v0, v0", target = gfx1030, wave64 = true)
+    assertEquals(planned(result, "v_rcp_f32"), 2L)
+    assertEquals(planned(result, "v_add_nc_u32"), 2L)
+  }
+
+  test("planned cycles of SALU instructions are not doubled on a gfx1030 wave64") {
+    val result = run("v_rcp_f32 v1, v0\ns_add_u32 s1, s0, s0", target = gfx1030, wave64 = true)
+    assertEquals(planned(result, "v_rcp_f32"), 2L)
+    assertEquals(planned(result, "s_add_u32"), 1L)
+  }
+
+  test("planned cycles of an lds load are twice those of the plain load on a gfx1030 wave32") {
+    assertEquals(
+      planned(
+        run("v_lshlrev_b32 v1, 2, v0\nglobal_load_dword v2, v1, s[2:3]", target = gfx1030, threads = 32),
+        "global_load_dword"
+      ),
+      1L
+    )
+    assertEquals(
+      planned(
+        run(
+          "v_lshlrev_b32 v1, 2, v0\nglobal_load_dword v1, s[2:3] lds",
+          target = gfx1030,
+          threads = 32,
+          groupSegmentSize = 256
+        ),
+        "global_load_dword"
+      ),
+      2L
+    )
+  }
+
+  test("planned cycles of a buffer lds store take the LLVM model's cycles on a gfx906 wave64") {
+    assertEquals(
+      planned(
+        run("buffer_store_lds_dword s[8:11], 0 offset:4 lds", target = gfx906, groupSegmentSize = 256),
+        "buffer_store_lds_dword"
+      ),
+      1L
+    )
+  }
+
+  test("s_nop charges its count plus one cycles within the field width of each ISA") {
+    assertEquals(planned(run("s_nop 7", target = gfx906), "s_nop"), 8L)
+    assertEquals(planned(run("s_nop 15", target = gfx1030, threads = 32), "s_nop"), 16L)
+    assertEquals(planned(run("s_nop 127", target = gfx1200, threads = 32), "s_nop"), 128L)
+  }
+
+  test("s_delay_alu charges a VALU_DEP_1 consumer the producer latency less the gap on gfx1100") {
+    val result = run(
+      "v_add_f32 v1, v0, v0\ns_delay_alu instid0(VALU_DEP_1)\nv_mul_f32 v2, v1, v1",
+      target = gfx1100,
+      threads = 32
+    )
+    assertEquals(planned(result, "v_mul_f32"), 5L)
+  }
+
+  test("s_delay_alu charges a TRANS32_DEP_1 consumer the transcendental latency less the gap on gfx1100") {
+    val result = run(
+      "v_rcp_f32 v1, v0\ns_delay_alu instid0(TRANS32_DEP_1)\nv_mul_f32 v2, v1, v1",
+      target = gfx1100,
+      threads = 32
+    )
+    assertEquals(planned(result, "v_mul_f32"), 10L)
+  }
+
+  test("s_delay_alu SALU_CYCLE_1 adds one cycle to the VALU instruction it delays on gfx1100") {
+    val result = run(
+      "v_add_f32 v1, v0, v0\ns_delay_alu instid0(SALU_CYCLE_1)\nv_mul_f32 v2, v1, v1",
+      target = gfx1100,
+      threads = 32
+    )
+    assertEquals(planned(result, "v_mul_f32"), 2L)
+  }
+
+  test("a VOPD pair on gfx1250 issues once at the cycles of its halves") {
+    val result = run("v_dual_mov_b32 v10, v2 :: v_dual_sub_nc_u32 v11, v3, v4", target = gfx1250, threads = 32)
+    assertEquals(result.issued("v_dual").size, 1)
+    assertEquals(planned(result, "v_dual"), 2L)
+  }
+
+  private def pipes(result: Result, prefix: String): Vector[Option[Pipe]] =
+    result.issued(prefix).map(issue => result.stream.instructions(issue.instruction).pipe)
+
+  test("a wave64 VALU fma reports the Fma pipe on gfx1030") {
+    val result = run("v_fma_f32 v1, v0, v0, v0", target = gfx1030, wave64 = true)
+    assertEquals(pipes(result, "v_fma_f32"), Vector(Some(Pipe.Fma)))
+  }
+
+  test("an f32 fma reports the Fma pipe on gfx906") {
+    assertEquals(pipes(run("v_fma_f32 v1, v0, v0, v0"), "v_fma_f32"), Vector(Some(Pipe.Fma)))
+  }
+
+  test("an integer add reports the Alu pipe on gfx906") {
+    assertEquals(pipes(run("v_add_u32 v1, v0, v0"), "v_add_u32"), Vector(Some(Pipe.Alu)))
+  }
+
+  test("a scalar add reports no pipe on gfx906") {
+    assertEquals(pipes(run("s_add_u32 s4, s2, 1"), "s_add_u32"), Vector(None))
+  }
+
+  test("a reciprocal reports the Mufu pipe on gfx906") {
+    assertEquals(pipes(run("v_rcp_f32 v1, v0"), "v_rcp_f32"), Vector(Some(Pipe.Mufu)))
+  }
+
+  test("an f64 add reports the Fp64 pipe on gfx906") {
+    assertEquals(pipes(run("v_add_f64 v[1:2], v[0:1], v[0:1]"), "v_add_f64"), Vector(Some(Pipe.Fp64)))
+  }
+
+  test("a matrix multiply reports the Tensor pipe on gfx90a") {
+    val result = run("v_mfma_f32_32x32x1f32 v[0:31], v0, v1, v[0:31]", target = gfx90a)
+    assertEquals(pipes(result, "v_mfma"), Vector(Some(Pipe.Tensor)))
   }
 }

@@ -48,13 +48,21 @@ object Profile {
   }
 
   object Counters {
-    val zero: Counters =
-      Counters(issues = 0L, activeLanes = 0L, subgroupLanes = 0L, divergent = 0L, reconverging = 0L, memory = Map.empty)
+    val zero: Counters = Counters(
+      issues = 0L,
+      activeLanes = 0L,
+      subgroupLanes = 0L,
+      divergent = 0L,
+      reconverging = 0L,
+      plannedCycles = 0L,
+      memory = Map.empty
+    )
   }
 
   /** Statistics over a set of subgroup issues. A subgroup issue is one instruction a warp, wave or subgroup issued for
     * the lanes active in it; `divergent` counts those whose lanes continued at more than one instruction, and
-    * `reconverging` those whose lanes arrived from more than one subgroup issue.
+    * `reconverging` those whose lanes arrived from more than one subgroup issue. `plannedCycles` sums the planned issue
+    * cycles of each begun issue that has a [[Schedule]].
     */
   case class Counters(
       issues: Long,
@@ -62,6 +70,7 @@ object Profile {
       subgroupLanes: Long,
       divergent: Long,
       reconverging: Long,
+      plannedCycles: Long,
       memory: Map[(Space, AccessKind), Memory]
   ) derives CanEqual {
     @targetName("addCounters")
@@ -71,6 +80,7 @@ object Profile {
       subgroupLanes = subgroupLanes + that.subgroupLanes,
       divergent = divergent + that.divergent,
       reconverging = reconverging + that.reconverging,
+      plannedCycles = plannedCycles + that.plannedCycles,
       memory = (memory.keySet ++ that.memory.keySet).view.map { key =>
         key -> (memory.getOrElse(key, Memory.zero) + that.memory.getOrElse(key, Memory.zero))
       }.toMap
