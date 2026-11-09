@@ -23,7 +23,7 @@ object Listing {
       word: Option[BigInt]
   )
 
-  private val OperandSeparators = Array(' ', '\t', '\r', '\n', '\f', '\u000b')
+  private val OperandSeparators = Set(' ', '\t', '\r', '\n', '\f', '\u000b')
 
   def parse(text: String, kernel: String, sm: Int): Either[String, Vec[DecodedInstruction]] =
     records(text, kernel, sm).flatMap(_.traverse(decode(_, kernel, sm)))
@@ -222,7 +222,7 @@ object Listing {
     val base   = record.opcode.takeWhile(_ != '.')
     val source = base match {
       case "RET" | "CALL" | "BRX" if !record.operands.contains(',') =>
-        record.operands.split(OperandSeparators).filter(_.nonEmpty).mkString(", ")
+        record.operands.split(OperandSeparators.toArray).filter(_.nonEmpty).mkString(", ")
       case _ => record.operands
     }
     val fields = if (record.operands.isEmpty) Vec.empty[String] else record.operands.split(',').toVec.map(_.trim)

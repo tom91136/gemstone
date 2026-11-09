@@ -196,14 +196,14 @@ object InstructionDefinitions1 {
       Symbol
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.FootprintPredRegRegRegRegImmImmSymbol.apply(
-        p0,
-        p1,
-        p2,
-        p3,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p4,
-        p5,
-        p6
+        pu = p0,
+        rd2 = p1,
+        dst = p2,
+        srcA = p3,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        bank5 = p4,
+        tsPtrIdx = p5,
+        paramA = p6
       )
     ),
     FormDecoder(
@@ -228,14 +228,14 @@ object InstructionDefinitions1 {
       Symbol
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.FootprintPredRegRegRegRegRegImmSymbol.apply(
-        p0,
-        p1,
-        p2,
-        p3,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p4,
-        p5,
-        p6
+        pu = p0,
+        rd2 = p1,
+        dst = p2,
+        srcA = p3,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        srcC = p4,
+        tid8 = p5,
+        paramA = p6
       )
     ),
     FormDecoder(
@@ -288,13 +288,13 @@ object InstructionDefinitions1 {
       Symbol
     )((p0, p1, p2, p3, p4, p5) =>
       Form.FootprintRegRegRegRegImmImmSymbol.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5
+        rd2 = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        bank5 = p3,
+        tsPtrIdx = p4,
+        paramA = p5
       )
     ),
     FormDecoder(
@@ -317,13 +317,13 @@ object InstructionDefinitions1 {
       Symbol
     )((p0, p1, p2, p3, p4, p5) =>
       Form.FootprintRegRegRegRegRegImmSymbol.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5
+        rd2 = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        srcC = p3,
+        tid8 = p4,
+        paramA = p5
       )
     ),
     FormDecoder(

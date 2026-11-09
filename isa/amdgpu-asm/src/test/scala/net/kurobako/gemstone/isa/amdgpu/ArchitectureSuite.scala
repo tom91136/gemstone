@@ -15,7 +15,7 @@ class ArchitectureSuite extends Suite {
   }
 
   test("unlisted processors are not decoder targets") {
-    val names = Target.all.map(_.name.raw)
+    val names = Target.all.map(_.name.raw).toSet
     assert(!Vec("gfx800", "gfx1001").exists(names.contains))
   }
 

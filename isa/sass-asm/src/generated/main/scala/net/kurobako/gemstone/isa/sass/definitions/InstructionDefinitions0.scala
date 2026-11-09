@@ -13,28 +13,37 @@ object InstructionDefinitions0 {
     FormDecoder(Definitions0.AcqshminitNoOperands)(Form.AcqshminitNoOperands.apply),
     FormDecoder(Definitions0.Al2pPredRegReg, Predicate, Register, Register)(Form.Al2pPredRegReg.apply),
     FormDecoder(Definitions0.Al2pPredRegReg, Predicate, Register)((p0, p1) =>
-      Form.Al2pPredRegReg.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.Al2pPredRegReg.apply(
+        dstPredicate = p0,
+        dst = p1,
+        srcA = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(Definitions0.Al2pPredRegRegImm, Predicate, Register, Register, Immediate)(Form.Al2pPredRegRegImm.apply),
     FormDecoder(Definitions0.Al2pPredRegRegImm, Predicate, Register, Immediate)((p0, p1, p2) =>
-      Form.Al2pPredRegRegImm.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2)
+      Form.Al2pPredRegRegImm.apply(
+        dstPredicate = p0,
+        dst = p1,
+        srcA = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        sImm = p2
+      )
     ),
     FormDecoder(Definitions0.Al2pRegReg, Register, Register)(Form.Al2pRegReg.apply),
     FormDecoder(Definitions0.Al2pRegReg, Register)((p0) =>
-      Form.Al2pRegReg.apply(p0, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.Al2pRegReg.apply(dst = p0, srcA = InstructionOperand.Register.unsafe(OperandQueries.Zero))
     ),
     FormDecoder(Definitions0.Al2pRegRegImm, Register, Register, Immediate)(Form.Al2pRegRegImm.apply),
     FormDecoder(Definitions0.Al2pRegRegImm, Register, Immediate)((p0, p1) =>
-      Form.Al2pRegRegImm.apply(p0, InstructionOperand.Register.unsafe(OperandQueries.Zero), p1)
+      Form.Al2pRegRegImm.apply(dst = p0, srcA = InstructionOperand.Register.unsafe(OperandQueries.Zero), ra_offset = p1)
     ),
     FormDecoder(Definitions0.AldRegAddressReg, Register, Address, Register)(Form.AldRegAddressReg.apply),
     FormDecoder(Definitions0.AldRegAddressReg, Register, Address)((p0, p1) =>
-      Form.AldRegAddressReg.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.AldRegAddressReg.apply(dst = p0, srcA = p1, srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero))
     ),
     FormDecoder(Definitions0.ArrivesAddress, Address)(Form.ArrivesAddress.apply),
     FormDecoder(Definitions0.AstAddressRegReg, Address, Register, Register)(Form.AstAddressRegReg.apply),
     FormDecoder(Definitions0.AstAddressRegReg, Address, Register)((p0, p1) =>
-      Form.AstAddressRegReg.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.AstAddressRegReg.apply(srcA = p0, srcB = p1, srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero))
     ),
     FormDecoder(Definitions0.AtomPredRegAddress, Predicate, Register, Address)(Form.AtomPredRegAddress.apply),
     FormDecoder(
@@ -602,7 +611,13 @@ object InstructionDefinitions0 {
       Register
     )(Form.FccoPredPredRegConstReg.apply),
     FormDecoder(Definitions0.FccoPredPredRegConstReg, Predicate, Predicate, Register, ConstantBank)((p0, p1, p2, p3) =>
-      Form.FccoPredPredRegConstReg.apply(p0, p1, p2, p3, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.FccoPredPredRegConstReg.apply(
+        dstPredicate = p0,
+        nPd = p1,
+        srcA = p2,
+        srcConst = p3,
+        srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(
       Definitions0.FccoPredPredRegImmReg,
@@ -613,7 +628,13 @@ object InstructionDefinitions0 {
       Register
     )(Form.FccoPredPredRegImmReg.apply),
     FormDecoder(Definitions0.FccoPredPredRegImmReg, Predicate, Predicate, Register, Immediate)((p0, p1, p2, p3) =>
-      Form.FccoPredPredRegImmReg.apply(p0, p1, p2, p3, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.FccoPredPredRegImmReg.apply(
+        dstPredicate = p0,
+        nPd = p1,
+        srcA = p2,
+        uImm = p3,
+        srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(
       Definitions0.FccoPredPredRegRegConst,
@@ -632,7 +653,13 @@ object InstructionDefinitions0 {
       Register
     )(Form.FccoPredPredRegRegReg.apply),
     FormDecoder(Definitions0.FccoPredPredRegRegReg, Predicate, Predicate, Register, Register)((p0, p1, p2, p3) =>
-      Form.FccoPredPredRegRegReg.apply(p0, p1, p2, p3, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.FccoPredPredRegRegReg.apply(
+        dstPredicate = p0,
+        nPd = p1,
+        srcA = p2,
+        srcB = p3,
+        srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(
       Definitions0.FccoPredRegConstReg,
@@ -642,11 +669,21 @@ object InstructionDefinitions0 {
       Register
     )(Form.FccoPredRegConstReg.apply),
     FormDecoder(Definitions0.FccoPredRegConstReg, Predicate, Register, ConstantBank)((p0, p1, p2) =>
-      Form.FccoPredRegConstReg.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.FccoPredRegConstReg.apply(
+        dstPredicate = p0,
+        srcA = p1,
+        srcConst = p2,
+        srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(Definitions0.FccoPredRegImmReg, Predicate, Register, Immediate, Register)(Form.FccoPredRegImmReg.apply),
     FormDecoder(Definitions0.FccoPredRegImmReg, Predicate, Register, Immediate)((p0, p1, p2) =>
-      Form.FccoPredRegImmReg.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.FccoPredRegImmReg.apply(
+        dstPredicate = p0,
+        srcA = p1,
+        uImm = p2,
+        srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(
       Definitions0.FccoPredRegRegConst,
@@ -657,7 +694,12 @@ object InstructionDefinitions0 {
     )(Form.FccoPredRegRegConst.apply),
     FormDecoder(Definitions0.FccoPredRegRegReg, Predicate, Register, Register, Register)(Form.FccoPredRegRegReg.apply),
     FormDecoder(Definitions0.FccoPredRegRegReg, Predicate, Register, Register)((p0, p1, p2) =>
-      Form.FccoPredRegRegReg.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero))
+      Form.FccoPredRegRegReg.apply(
+        dstPredicate = p0,
+        srcA = p1,
+        srcB = p2,
+        srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero)
+      )
     ),
     FormDecoder(
       Definitions0.FchkPredRegAddressImm,

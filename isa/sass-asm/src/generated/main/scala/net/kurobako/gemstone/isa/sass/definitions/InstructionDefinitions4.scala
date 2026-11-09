@@ -139,12 +139,12 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.SpmetadataRegRegRegImmImmImm, Register, Register, Immediate, Immediate, Immediate)(
       (p0, p1, p2, p3, p4) =>
         Form.SpmetadataRegRegRegImmImmImm.apply(
-          p0,
-          p1,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p2,
-          p3,
-          p4
+          dst = p0,
+          srcB = p1,
+          srcC = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          vecidx = p2,
+          mask = p3,
+          destidx = p4
         )
     ),
     FormDecoder(Definitions4.SsyConst, ConstantBank)(Form.SsyConst.apply),
@@ -743,13 +743,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TexPredRegRegRegImmImmSymbol, Predicate, Register, Register, Immediate, Immediate, Symbol)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TexPredRegRegRegImmImmSymbol.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          dstPredicate = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          smp = p4,
+          paramA = p5
         )
     ),
     FormDecoder(
@@ -774,14 +774,14 @@ object InstructionDefinitions4 {
       Immediate
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.TexPredRegRegRegImmImmSymbolImm.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5,
-        p6
+        dstPredicate = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p3,
+        smp = p4,
+        paramA = p5,
+        wmsk = p6
       )
     ),
     FormDecoder(
@@ -793,15 +793,16 @@ object InstructionDefinitions4 {
       Immediate,
       Symbol
     )(Form.TexPredRegRegRegImmSymbol.apply),
-    FormDecoder(
-      Definitions4.TexPredRegRegRegImmSymbol,
-      Predicate,
-      Register,
-      Register,
-      Immediate,
-      Symbol
-    )((p0, p1, p2, p3, p4) =>
-      Form.TexPredRegRegRegImmSymbol.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero), p3, p4)
+    FormDecoder(Definitions4.TexPredRegRegRegImmSymbol, Predicate, Register, Register, Immediate, Symbol)(
+      (p0, p1, p2, p3, p4) =>
+        Form.TexPredRegRegRegImmSymbol.apply(
+          dstPredicate = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4
+        )
     ),
     FormDecoder(
       Definitions4.TexPredRegRegRegImmSymbolImm,
@@ -816,13 +817,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TexPredRegRegRegImmSymbolImm, Predicate, Register, Register, Immediate, Symbol, Immediate)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TexPredRegRegRegImmSymbolImm.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          dstPredicate = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4,
+          wmsk = p5
         )
     ),
     FormDecoder(
@@ -995,7 +996,14 @@ object InstructionDefinitions4 {
     )(Form.TexRegRegRegImmImmSymbol.apply),
     FormDecoder(Definitions4.TexRegRegRegImmImmSymbol, Register, Register, Immediate, Immediate, Symbol)(
       (p0, p1, p2, p3, p4) =>
-        Form.TexRegRegRegImmImmSymbol.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3, p4)
+        Form.TexRegRegRegImmImmSymbol.apply(
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          smp = p3,
+          paramA = p4
+        )
     ),
     FormDecoder(
       Definitions4.TexRegRegRegImmImmSymbolImm,
@@ -1010,13 +1018,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TexRegRegRegImmImmSymbolImm, Register, Register, Immediate, Immediate, Symbol, Immediate)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TexRegRegRegImmImmSymbolImm.apply(
-          p0,
-          p1,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p2,
-          p3,
-          p4,
-          p5
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          smp = p3,
+          paramA = p4,
+          wmsk = p5
         )
     ),
     FormDecoder(
@@ -1028,7 +1036,13 @@ object InstructionDefinitions4 {
       Symbol
     )(Form.TexRegRegRegImmSymbol.apply),
     FormDecoder(Definitions4.TexRegRegRegImmSymbol, Register, Register, Immediate, Symbol)((p0, p1, p2, p3) =>
-      Form.TexRegRegRegImmSymbol.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3)
+      Form.TexRegRegRegImmSymbol.apply(
+        dst = p0,
+        srcA = p1,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p2,
+        paramA = p3
+      )
     ),
     FormDecoder(
       Definitions4.TexRegRegRegImmSymbolImm,
@@ -1041,7 +1055,14 @@ object InstructionDefinitions4 {
     )(Form.TexRegRegRegImmSymbolImm.apply),
     FormDecoder(Definitions4.TexRegRegRegImmSymbolImm, Register, Register, Immediate, Symbol, Immediate)(
       (p0, p1, p2, p3, p4) =>
-        Form.TexRegRegRegImmSymbolImm.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3, p4)
+        Form.TexRegRegRegImmSymbolImm.apply(
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          paramA = p3,
+          wmsk = p4
+        )
     ),
     FormDecoder(
       Definitions4.TexRegRegRegRegImmImmImmSymbol,
@@ -1202,13 +1223,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TexsRegRegRegRegImmSymbolSymbol, Register, Register, Register, Immediate, Symbol, Symbol)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TexsRegRegRegRegImmSymbolSymbol.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          rd2 = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4,
+          wmsk = p5
         )
     ),
     FormDecoder(
@@ -1220,15 +1241,16 @@ object InstructionDefinitions4 {
       Immediate,
       Symbol
     )(Form.TldPredRegRegRegImmSymbol.apply),
-    FormDecoder(
-      Definitions4.TldPredRegRegRegImmSymbol,
-      Predicate,
-      Register,
-      Register,
-      Immediate,
-      Symbol
-    )((p0, p1, p2, p3, p4) =>
-      Form.TldPredRegRegRegImmSymbol.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero), p3, p4)
+    FormDecoder(Definitions4.TldPredRegRegRegImmSymbol, Predicate, Register, Register, Immediate, Symbol)(
+      (p0, p1, p2, p3, p4) =>
+        Form.TldPredRegRegRegImmSymbol.apply(
+          dstPredicate = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4
+        )
     ),
     FormDecoder(
       Definitions4.TldPredRegRegRegImmSymbolImm,
@@ -1243,13 +1265,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TldPredRegRegRegImmSymbolImm, Predicate, Register, Register, Immediate, Symbol, Immediate)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TldPredRegRegRegImmSymbolImm.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          dstPredicate = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4,
+          wmsk = p5
         )
     ),
     FormDecoder(
@@ -1299,14 +1321,14 @@ object InstructionDefinitions4 {
       Symbol
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.TldPredRegRegRegRegImmImmSymbol.apply(
-        p0,
-        p1,
-        p2,
-        p3,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p4,
-        p5,
-        p6
+        pu = p0,
+        rd2 = p1,
+        dst = p2,
+        srcA = p3,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        bank5 = p4,
+        tsPtrIdx = p5,
+        paramA = p6
       )
     ),
     FormDecoder(
@@ -1333,15 +1355,15 @@ object InstructionDefinitions4 {
       Immediate
     )((p0, p1, p2, p3, p4, p5, p6, p7) =>
       Form.TldPredRegRegRegRegImmImmSymbolImm.apply(
-        p0,
-        p1,
-        p2,
-        p3,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p4,
-        p5,
-        p6,
-        p7
+        pu = p0,
+        rd2 = p1,
+        dst = p2,
+        srcA = p3,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        bank5 = p4,
+        tsPtrIdx = p5,
+        paramA = p6,
+        wmsk = p7
       )
     ),
     FormDecoder(
@@ -1464,7 +1486,13 @@ object InstructionDefinitions4 {
       Symbol
     )(Form.TldRegRegRegImmSymbol.apply),
     FormDecoder(Definitions4.TldRegRegRegImmSymbol, Register, Register, Immediate, Symbol)((p0, p1, p2, p3) =>
-      Form.TldRegRegRegImmSymbol.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3)
+      Form.TldRegRegRegImmSymbol.apply(
+        dst = p0,
+        srcA = p1,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p2,
+        paramA = p3
+      )
     ),
     FormDecoder(
       Definitions4.TldRegRegRegImmSymbolImm,
@@ -1477,7 +1505,14 @@ object InstructionDefinitions4 {
     )(Form.TldRegRegRegImmSymbolImm.apply),
     FormDecoder(Definitions4.TldRegRegRegImmSymbolImm, Register, Register, Immediate, Symbol, Immediate)(
       (p0, p1, p2, p3, p4) =>
-        Form.TldRegRegRegImmSymbolImm.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3, p4)
+        Form.TldRegRegRegImmSymbolImm.apply(
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          paramA = p3,
+          wmsk = p4
+        )
     ),
     FormDecoder(
       Definitions4.TldRegRegRegRegImmImmImmSymbol,
@@ -1515,13 +1550,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TldRegRegRegRegImmImmSymbol, Register, Register, Register, Immediate, Immediate, Symbol)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TldRegRegRegRegImmImmSymbol.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          rd2 = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          bank5 = p3,
+          tsPtrIdx = p4,
+          paramA = p5
         )
     ),
     FormDecoder(
@@ -1546,14 +1581,14 @@ object InstructionDefinitions4 {
       Immediate
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.TldRegRegRegRegImmImmSymbolImm.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5,
-        p6
+        rd2 = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        bank5 = p3,
+        tsPtrIdx = p4,
+        paramA = p5,
+        wmsk = p6
       )
     ),
     FormDecoder(
@@ -1677,13 +1712,13 @@ object InstructionDefinitions4 {
       Symbol
     )((p0, p1, p2, p3, p4, p5) =>
       Form.Tld4PredRegRegRegImmImmSymbol.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5
+        dstPredicate = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p3,
+        smp = p4,
+        paramA = p5
       )
     ),
     FormDecoder(
@@ -1708,14 +1743,14 @@ object InstructionDefinitions4 {
       Immediate
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.Tld4PredRegRegRegImmImmSymbolImm.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5,
-        p6
+        dstPredicate = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p3,
+        smp = p4,
+        paramA = p5,
+        wmsk = p6
       )
     ),
     FormDecoder(
@@ -1727,15 +1762,16 @@ object InstructionDefinitions4 {
       Immediate,
       Symbol
     )(Form.Tld4PredRegRegRegImmSymbol.apply),
-    FormDecoder(
-      Definitions4.Tld4PredRegRegRegImmSymbol,
-      Predicate,
-      Register,
-      Register,
-      Immediate,
-      Symbol
-    )((p0, p1, p2, p3, p4) =>
-      Form.Tld4PredRegRegRegImmSymbol.apply(p0, p1, p2, InstructionOperand.Register.unsafe(OperandQueries.Zero), p3, p4)
+    FormDecoder(Definitions4.Tld4PredRegRegRegImmSymbol, Predicate, Register, Register, Immediate, Symbol)(
+      (p0, p1, p2, p3, p4) =>
+        Form.Tld4PredRegRegRegImmSymbol.apply(
+          dstPredicate = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4
+        )
     ),
     FormDecoder(
       Definitions4.Tld4PredRegRegRegImmSymbolImm,
@@ -1757,13 +1793,13 @@ object InstructionDefinitions4 {
       Immediate
     )((p0, p1, p2, p3, p4, p5) =>
       Form.Tld4PredRegRegRegImmSymbolImm.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5
+        dstPredicate = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p3,
+        paramA = p4,
+        wmsk = p5
       )
     ),
     FormDecoder(
@@ -1934,15 +1970,16 @@ object InstructionDefinitions4 {
       Immediate,
       Symbol
     )(Form.Tld4RegRegRegImmImmSymbol.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegImmImmSymbol,
-      Register,
-      Register,
-      Immediate,
-      Immediate,
-      Symbol
-    )((p0, p1, p2, p3, p4) =>
-      Form.Tld4RegRegRegImmImmSymbol.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3, p4)
+    FormDecoder(Definitions4.Tld4RegRegRegImmImmSymbol, Register, Register, Immediate, Immediate, Symbol)(
+      (p0, p1, p2, p3, p4) =>
+        Form.Tld4RegRegRegImmImmSymbol.apply(
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          smp = p3,
+          paramA = p4
+        )
     ),
     FormDecoder(
       Definitions4.Tld4RegRegRegImmImmSymbolImm,
@@ -1957,13 +1994,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.Tld4RegRegRegImmImmSymbolImm, Register, Register, Immediate, Immediate, Symbol, Immediate)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.Tld4RegRegRegImmImmSymbolImm.apply(
-          p0,
-          p1,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p2,
-          p3,
-          p4,
-          p5
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          smp = p3,
+          paramA = p4,
+          wmsk = p5
         )
     ),
     FormDecoder(
@@ -1975,7 +2012,13 @@ object InstructionDefinitions4 {
       Symbol
     )(Form.Tld4RegRegRegImmSymbol.apply),
     FormDecoder(Definitions4.Tld4RegRegRegImmSymbol, Register, Register, Immediate, Symbol)((p0, p1, p2, p3) =>
-      Form.Tld4RegRegRegImmSymbol.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3)
+      Form.Tld4RegRegRegImmSymbol.apply(
+        dst = p0,
+        srcA = p1,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        tid = p2,
+        paramA = p3
+      )
     ),
     FormDecoder(
       Definitions4.Tld4RegRegRegImmSymbolImm,
@@ -1986,15 +2029,16 @@ object InstructionDefinitions4 {
       Symbol,
       Immediate
     )(Form.Tld4RegRegRegImmSymbolImm.apply),
-    FormDecoder(
-      Definitions4.Tld4RegRegRegImmSymbolImm,
-      Register,
-      Register,
-      Immediate,
-      Symbol,
-      Immediate
-    )((p0, p1, p2, p3, p4) =>
-      Form.Tld4RegRegRegImmSymbolImm.apply(p0, p1, InstructionOperand.Register.unsafe(OperandQueries.Zero), p2, p3, p4)
+    FormDecoder(Definitions4.Tld4RegRegRegImmSymbolImm, Register, Register, Immediate, Symbol, Immediate)(
+      (p0, p1, p2, p3, p4) =>
+        Form.Tld4RegRegRegImmSymbolImm.apply(
+          dst = p0,
+          srcA = p1,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p2,
+          paramA = p3,
+          wmsk = p4
+        )
     ),
     FormDecoder(
       Definitions4.Tld4RegRegRegRegImmImmImmSymbol,
@@ -2162,13 +2206,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TldsRegRegRegRegImmSymbolSymbol, Register, Register, Register, Immediate, Symbol, Symbol)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TldsRegRegRegRegImmSymbolSymbol.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          rd2 = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          tid = p3,
+          paramA = p4,
+          wmsk = p5
         )
     ),
     FormDecoder(
@@ -2296,13 +2340,13 @@ object InstructionDefinitions4 {
     FormDecoder(Definitions4.TmmlRegRegRegRegRegImmSymbol, Register, Register, Register, Register, Immediate, Symbol)(
       (p0, p1, p2, p3, p4, p5) =>
         Form.TmmlRegRegRegRegRegImmSymbol.apply(
-          p0,
-          p1,
-          p2,
-          InstructionOperand.Register.unsafe(OperandQueries.Zero),
-          p3,
-          p4,
-          p5
+          rd2 = p0,
+          dst = p1,
+          srcA = p2,
+          srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+          srcC = p3,
+          tid8 = p4,
+          paramA = p5
         )
     ),
     FormDecoder(
@@ -2327,14 +2371,14 @@ object InstructionDefinitions4 {
       Immediate
     )((p0, p1, p2, p3, p4, p5, p6) =>
       Form.TmmlRegRegRegRegRegImmSymbolImm.apply(
-        p0,
-        p1,
-        p2,
-        InstructionOperand.Register.unsafe(OperandQueries.Zero),
-        p3,
-        p4,
-        p5,
-        p6
+        rd2 = p0,
+        dst = p1,
+        srcA = p2,
+        srcB = InstructionOperand.Register.unsafe(OperandQueries.Zero),
+        srcC = p3,
+        tid8 = p4,
+        paramA = p5,
+        wmsk = p6
       )
     ),
     FormDecoder(

@@ -255,8 +255,8 @@ object SASSInstructionRenderer {
     val kinds      = kept.map(slot => s", ${slot.kind}").mkString
     val parameters = kept.indices.map(position => s"p$position").mkString(", ")
     val arguments  = entry.slots.zipWithIndex.map { (slot, position) =>
-      if (dropped(position)) fillExpression(slot)
-      else s"p${position - omitted.count(_ < position)}"
+      val value = if (dropped(position)) fillExpression(slot) else s"p${position - omitted.count(_ < position)}"
+      s"${slot.name} = $value"
     }.mkString(", ")
     s"FormDecoder(Definitions$index.${entry.name}$kinds)(($parameters) => Form.${entry.name}.apply($arguments))"
   }
