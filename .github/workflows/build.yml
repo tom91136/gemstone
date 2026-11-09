@@ -89,16 +89,29 @@ jobs:
             echo "$sha256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check --strict
             mkdir -p "$llvm"
             set -- "$archive/lib/clang/${release%%.*}/include"
-            for tool in clang clang++ "clang-${release%%.*}" clang-format clang-tidy run-clang-tidy clang-apply-replacements llvm-link; do
+            for tool in clang clang++ "clang-${release%%.*}" clang-tidy run-clang-tidy clang-apply-replacements llvm-link; do
               set -- "$@" "$archive/bin/$tool"
             done
             tar -xJf "$RUNNER_TEMP/llvm.tar.xz" --strip-components=1 -C "$llvm" "$@"
             rm "$RUNNER_TEMP/llvm.tar.xz"
           fi
+          format_release=$(sed -n 's/^set(conformance_clang_format_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          format_sha256=$(sed -n 's/^set(conformance_clang_format_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          format="$tools/clang-format-$format_release"
+          if [ ! -x "$format/clang-format" ]; then
+            archive="LLVM-$format_release-Linux-X64"
+            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm-format.tar.xz" \
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$format_release/$archive.tar.xz"
+            echo "$format_sha256  $RUNNER_TEMP/llvm-format.tar.xz" | sha256sum --check --strict
+            mkdir -p "$format"
+            tar -xJf "$RUNNER_TEMP/llvm-format.tar.xz" --strip-components=2 -C "$format" "$archive/bin/clang-format"
+            rm "$RUNNER_TEMP/llvm-format.tar.xz"
+          fi
           mkdir -p "$tools/bin"
-          for tool in clang clang++ clang-format clang-tidy run-clang-tidy llvm-link; do
+          for tool in clang clang++ clang-tidy run-clang-tidy llvm-link; do
             ln -sf "$llvm/bin/$tool" "$tools/bin/$tool"
           done
+          ln -sf "$format/clang-format" "$tools/bin/clang-format"
           echo "$tools/bin" >> "$GITHUB_PATH"
       - &references
         name: Restore references

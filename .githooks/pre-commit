@@ -18,7 +18,7 @@ done < <(git diff --cached --name-only --diff-filter=ACMR -z)
 failed=false
 
 if ((${#native[@]})); then
-  expected=$(sed -n 's/^set(conformance_clang_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+  expected=$(sed -n 's/^set(conformance_clang_format_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
   actual=$(clang-format --version | sed -n 's/.*version \([0-9.]*\).*/\1/p')
   if [[ "$actual" != "$expected" ]]; then
     echo "pre-commit: clang-format $actual, CI formats with $expected" >&2
