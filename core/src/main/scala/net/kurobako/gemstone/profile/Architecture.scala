@@ -299,7 +299,7 @@ object Architecture {
         dram = gk110Dram
       )
     )
-  }
+  }.on(Card("GeForce GTX 780", 384, 1536L, Some(288.4), Some(12), Some(902)))
 
   val sm52: Architecture = Architecture(
     "sm_52",
@@ -332,7 +332,7 @@ object Architecture {
       207,
       published(s"$meiChu, Figure 14, pattern P4 with L1 off", "GTX 980, GM204")(383)
     )
-  )
+  ).on(Card("GeForce GTX 980", 256, 2048L, Some(224.4), Some(16), Some(1216)))
 
   val sm50: Architecture = sm52
     .derived("sm_50", "GM107 and GM204 are the same Maxwell SMM; only the shared memory size differs")
@@ -394,7 +394,7 @@ object Architecture {
       tensor = Sourced(0.0, noTensor)
     ),
     jia("Tesla P4, GP104", 23, 82, 216, Sourced(383.0, nearestDramEstimate))
-  )
+  ).on(Card("GeForce GTX 1080", 256, 2048L, Some(320.3), Some(20), Some(1733)))
 
   val sm62: Architecture = sm61
     .derived("sm_62", "Parker's GP10B is a GP10x SM with smaller shared memory")
@@ -447,7 +447,7 @@ object Architecture {
       Some(published(s"$jiaTuring, Table 3.1", "Tesla V100, GV100")(193)),
       published(s"$jiaVolta, Figure 3.2 (L2 miss, TLB hit)", "Tesla V100, GV100")(375)
     )
-  )
+  ).on(Card("Quadro GV100", 4096, 6144L, Some(870.0), Some(80), Some(1627)))
 
   val sm72: Architecture = {
     val base = sm70.derived("sm_72", "Xavier's GV10B is a Volta SM")
@@ -484,7 +484,7 @@ object Architecture {
       Some(published(s"$jiaTuring, Table 3.1", "Tesla T4, TU104")(188)),
       published(s"$jiaTuring, Figure 3.5 (L2 miss, TLB hit)", "Tesla T4, TU104")(296)
     )
-  )
+  ).on(Card("GeForce RTX 2080", 256, 4096L, Some(448.0), Some(46), Some(1710)))
 
   val sm80: Architecture = Architecture(
     "sm_80",
@@ -574,7 +574,7 @@ object Architecture {
       Some(Sourced(269.46, adaLatency)),
       Sourced(628.29, adaLatency)
     )
-  )
+  ).on(Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)))
 
   val sm86: Architecture = sm89
     .derived(
@@ -654,7 +654,7 @@ object Architecture {
         478.8
       )
     )
-  }
+  }.on(Card("B200", 8192, 61440L))
 
   val sm101: Architecture = sm100
     .derived("sm_101", "same Blackwell SM; the resident block limit differs per cuda_occupancy.h")
@@ -716,7 +716,7 @@ object Architecture {
       tensor = Sourced(512.0, consumerBlackwellTensor)
     ),
     consumerBlackwellLatency
-  )
+  ).on(Card("GeForce RTX 5080", 256, 65536L, Some(960.0), Some(84), Some(2617)))
 
   val sm121: Architecture = sm120
     .derived("sm_121", "sm_121 is the same SM as sm_120 in a different package")
@@ -1244,10 +1244,12 @@ object Architecture {
         )
       )
     )
+    .on(Card("Radeon RX 9060 XT", 128, 4096L, Some(320.0), Some(32), Some(3130)))
 
   val gfx1201: Architecture = gfx1200
     .derived("gfx1201", "same RDNA4 WGP as gfx1200")
     .copy(throughput = gfx1200.throughput.copy(tensor = Sourced(2048.0, rdna4Tensor)))
+    .on(Card("Radeon RX 9070 XT", 256, 8192L, Some(640.0), Some(64), Some(2970)))
 
   private val gfx1250Estimate = Source.Estimate(
     "per multiprocessor (one CU of four SIMD32s): no published per-CU rates for this part; " +
@@ -1375,43 +1377,13 @@ object Architecture {
       boostMhz: Option[Int] = None
   )
 
-  private val cards: Map[String, Card] = Map(
-    "sm_35"   -> Card("GeForce GTX 780", 384, 1536L, Some(288.4), Some(12), Some(902)),
-    "sm_52"   -> Card("GeForce GTX 980", 256, 2048L, Some(224.4), Some(16), Some(1216)),
-    "sm_61"   -> Card("GeForce GTX 1080", 256, 2048L, Some(320.3), Some(20), Some(1733)),
-    "sm_70"   -> Card("Quadro GV100", 4096, 6144L, Some(870.0), Some(80), Some(1627)),
-    "sm_75"   -> Card("GeForce RTX 2080", 256, 4096L, Some(448.0), Some(46), Some(1710)),
-    "sm_89"   -> Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)),
-    "sm_100"  -> Card("B200", 8192, 61440L),
-    "sm_120"  -> Card("GeForce RTX 5080", 256, 65536L, Some(960.0), Some(84), Some(2617)),
-    "gfx1200" -> Card("Radeon RX 9060 XT", 128, 4096L, Some(320.0), Some(32), Some(3130)),
-    "gfx1201" -> Card("Radeon RX 9070 XT", 256, 8192L, Some(640.0), Some(64), Some(2970))
-  )
-
-  private def onCard(architecture: Architecture): Architecture =
-    cards.get(architecture.name).fold(architecture) { card =>
-      val dram = for {
-        bandwidth <- card.bandwidthGBs
-        count     <- card.multiprocessors
-        clock     <- card.boostMhz
-      } yield Sourced(
-        bandwidth * 1000.0 / (count * clock),
-        Source.Estimate(s"${card.name}: $bandwidth GB/s over $count multiprocessors at $clock MHz")
-      )
-      val source = Source.Estimate(card.name)
-      architecture.copy(
-        throughput = architecture.throughput.copy(dram = dram),
-        memory = Some(Memory(Sourced(card.busWidthBits, source), Sourced(card.l2KiB * 1024L, source)))
-      )
-    }
-
-  val all: Vec[Architecture] = (nvidiaAll ++ amdgpuAll).map(onCard(_))
+  val all: Vec[Architecture] = nvidiaAll ++ amdgpuAll
 
   /** What profiles NVIDIA programs unless another architecture is chosen: the probed RTX 4060 Ti. */
-  val nvidiaDefault: Architecture = onCard(sm89)
+  val nvidiaDefault: Architecture = sm89
 
   /** What profiles AMDGPU programs unless another architecture is chosen: the probed gfx1036. */
-  val amdgpuDefault: Architecture = onCard(gfx1036)
+  val amdgpuDefault: Architecture = gfx1036
 
   /** The architecture of a table name or of an LLVM processor alias, such as `tahiti` for `gfx600`. */
   def named(name: String): Option[Architecture] =
@@ -1470,6 +1442,27 @@ case class Architecture(
         latency.l1.map(inherit(_)),
         latency.l2.map(sibling(_)),
         sibling(latency.dram)
+      )
+    )
+  }
+
+  private def on(card: Architecture.Card): Architecture = {
+    val dram = for {
+      bandwidth <- card.bandwidthGBs
+      count     <- card.multiprocessors
+      clock     <- card.boostMhz
+    } yield Architecture.Sourced(
+      bandwidth * 1000.0 / (count * clock),
+      Architecture.Source.Estimate(s"${card.name}: $bandwidth GB/s over $count multiprocessors at $clock MHz")
+    )
+    val source = Architecture.Source.Estimate(card.name)
+    copy(
+      throughput = throughput.copy(dram = dram),
+      memory = Some(
+        Architecture.Memory(
+          Architecture.Sourced(card.busWidthBits, source),
+          Architecture.Sourced(card.l2KiB * 1024L, source)
+        )
       )
     )
   }

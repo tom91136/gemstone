@@ -91,9 +91,10 @@ class ArchitectureSuite extends Suite {
         Source.Estimate(Architecture.sm89.latency.dram.source.detail)
       )
     )
+    val withoutCard = Architecture.sm89.copy(throughput = Architecture.sm89.throughput.copy(dram = None), memory = None)
     assertEquals(
       ArchitectureChecks.values(derived).map(_.value),
-      ArchitectureChecks.values(Architecture.sm89).map(_.value)
+      ArchitectureChecks.values(withoutCard).map(_.value)
     )
   }
 
