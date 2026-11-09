@@ -7,6 +7,7 @@ Checks: >
   -bugprone-invalid-enum-default-initialization,
   -bugprone-multi-level-implicit-pointer-conversion,
   -bugprone-random-generator-seed,
+  -bugprone-signed-bitwise,
   -bugprone-signed-char-misuse,
   -bugprone-throwing-static-initialization,
   cert-dcl58-cpp,
@@ -62,7 +63,8 @@ Checks: >
   -readability-implicit-bool-conversion,
   -readability-magic-numbers,
   -readability-named-parameter,
-  -readability-non-const-parameter
+  -readability-non-const-parameter,
+  -readability-trailing-comma
 WarningsAsErrors: '*'
 CustomChecks:
   - Name: unqualified-c-types

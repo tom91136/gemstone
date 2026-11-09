@@ -127,7 +127,7 @@ TEST_CASE("Level Zero samplers are created and destroyed", "[level-zero][sampler
 }
 
 TEST_CASE("Level Zero images copy to and from memory and between images", "[level-zero][image]") {
-  auto handles = createContext();
+  const auto handles = createContext();
   auto [driver, device, context] = handles;
   auto *const list = createImmediateList(handles);
   constexpr uint32_t width = 20;
@@ -187,7 +187,7 @@ TEST_CASE("Level Zero images copy to and from memory and between images", "[leve
 }
 
 TEST_CASE("Level Zero volume and array images keep their slices apart", "[level-zero][image]") {
-  auto handles = createContext();
+  const auto handles = createContext();
   auto [driver, device, context] = handles;
   auto *const list = createImmediateList(handles);
   for (const auto type : {ZE_IMAGE_TYPE_3D, ZE_IMAGE_TYPE_2DARRAY}) {

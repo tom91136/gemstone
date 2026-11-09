@@ -266,7 +266,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE(
       (hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, table.size(), table.data()) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
   REQUIRE((hsa_system_get_major_extension_table(UINT16_MAX, 1, 0, nullptr) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
-  for (auto byte : table)
+  for (const auto byte : table)
     REQUIRE((byte == 0xa5));
   std::vector<hsa_agent_t> agents;
   REQUIRE((hsa_iterate_agents(
@@ -277,7 +277,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
                &agents)
            == HSA_STATUS_SUCCESS));
   hsa_agent_t gpu{};
-  for (auto agent : agents) {
+  for (const auto agent : agents) {
     hsa_device_type_t type{};
     REQUIRE((hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) == HSA_STATUS_SUCCESS));
     if (type == HSA_DEVICE_TYPE_GPU) gpu = agent;
@@ -298,7 +298,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
            == HSA_STATUS_SUCCESS));
   hsa_region_t kernarg{};
   hsa_region_t coarse{};
-  for (auto region : regions) {
+  for (const auto region : regions) {
     hsa_region_segment_t segment{};
     uint32_t flags = 0;
     REQUIRE((hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment) == HSA_STATUS_SUCCESS));
@@ -320,7 +320,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     REQUIRE((hsa_agent_iterate_regions(
                  gpu,
                  [](hsa_region_t, void *data) {
-                   auto &state = *static_cast<std::pair<size_t *, hsa_status_t> *>(data);
+                   const auto &state = *static_cast<std::pair<size_t *, hsa_status_t> *>(data);
                    ++*state.first;
                    return state.second;
                  },
@@ -343,7 +343,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   hsa_profile_t profile{};
   REQUIRE((hsa_agent_get_info(gpu, HSA_AGENT_INFO_PROFILE, &profile) == HSA_STATUS_SUCCESS));
   REQUIRE((profile == HSA_PROFILE_BASE));
-  for (auto attribute : {HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT}) {
+  for (const auto attribute : {HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT}) {
     bool supported = true;
     REQUIRE((hsa_system_get_info(attribute, &supported) == HSA_STATUS_SUCCESS));
     REQUIRE((!supported));
@@ -355,14 +355,14 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES), &cooperative.value)
            == HSA_STATUS_SUCCESS));
   REQUIRE((cooperative.value));
-  for (auto byte : cooperative.guard)
+  for (const auto byte : cooperative.guard)
     REQUIRE((byte == 0xa5));
   // RDNA applications size WGP dispatches from half the advertised CU count.
   for (const auto *target : {"gfx906", "gfx90a", "gfx1030", "gfx1100", "gfx1201"}) {
     const gemstone_test::Environment selected(gemstone::environment::TargetArch, target);
     INFO(target);
     const auto model = gemstone::hsa::deviceModel(target);
-    auto query = [&](int attribute) {
+    const auto query = [&](int attribute) {
       uint32_t value = UINT32_MAX;
       REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(attribute), &value) == HSA_STATUS_SUCCESS));
       return value;
@@ -376,8 +376,9 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   hsa_amd_hdp_flush_t hdp{};
   REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HDP_FLUSH), &hdp) == HSA_STATUS_SUCCESS));
   REQUIRE((!hdp.HDP_MEM_FLUSH_CNTL && !hdp.HDP_REG_FLUSH_CNTL));
-  for (auto attribute : {HSA_AMD_AGENT_INFO_CHIP_ID, HSA_AMD_AGENT_INFO_BDFID, HSA_AMD_AGENT_INFO_DOMAIN, HSA_AMD_AGENT_INFO_MEMORY_WIDTH,
-                         HSA_AMD_AGENT_INFO_ASIC_REVISION, HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY}) {
+  for (const auto attribute :
+       {HSA_AMD_AGENT_INFO_CHIP_ID, HSA_AMD_AGENT_INFO_BDFID, HSA_AMD_AGENT_INFO_DOMAIN, HSA_AMD_AGENT_INFO_MEMORY_WIDTH,
+        HSA_AMD_AGENT_INFO_ASIC_REVISION, HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY}) {
     struct WordGuard {
       uint32_t value;
       uint32_t guard;
@@ -395,7 +396,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
                &pools)
            == HSA_STATUS_SUCCESS));
   REQUIRE((pools.size() == 2));
-  for (auto pool : pools) {
+  for (const auto pool : pools) {
     hsa_amd_segment_t segment{};
     REQUIRE((hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) == HSA_STATUS_SUCCESS));
     void *allocation = nullptr;

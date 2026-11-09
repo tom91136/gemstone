@@ -108,7 +108,7 @@ int openSocket(int family, const sockaddr *address, socklen_t size, int timeout)
 int openEndpoint(std::string_view endpoint, int timeout, std::string &error) {
   if (endpoint.starts_with("unix:///")) {
     std::string path;
-    auto encoded = endpoint.substr(7);
+    const auto encoded = endpoint.substr(7);
     for (size_t index = 0; index < encoded.size(); ++index) {
       char byte = encoded[index];
       if (byte == '?' || byte == '#') {

@@ -29,10 +29,10 @@ void queuedLifetime(Allocate allocate, Pinned pinned, Copy copy, Callback callba
     std::shared_future<void> release;
     std::promise<void> *started = nullptr;
   } gate{release.get_future().share(), &started};
-  auto reached = started.get_future();
+  const auto reached = started.get_future();
   callback(
       [](void *data) {
-        auto &gate = *static_cast<Gate *>(data);
+        const auto &gate = *static_cast<Gate *>(data);
         gate.started->set_value();
         gate.release.wait_for(gemstone_test::scaled(std::chrono::seconds(5)));
       },
@@ -40,7 +40,7 @@ void queuedLifetime(Allocate allocate, Pinned pinned, Copy copy, Callback callba
   copy(observed.data(), memory, sizeof(source), false);
   const bool began = reached.wait_for(gemstone_test::scaled(std::chrono::seconds(2))) == std::future_status::ready;
   std::promise<void> freeing;
-  auto entered = freeing.get_future();
+  const auto entered = freeing.get_future();
   auto freed = std::async(std::launch::async, [&] {
     freeing.set_value();
     return free(memory);

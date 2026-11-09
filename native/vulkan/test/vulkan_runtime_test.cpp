@@ -578,7 +578,7 @@ TEST_CASE("Vulkan explicit weighted-average sampler reduction needs no optional 
   REQUIRE(vkCreateSampler(runtime.device, &info, nullptr, &sampler) == VK_SUCCESS);
   REQUIRE(sampler != VK_NULL_HANDLE);
   vkDestroySampler(runtime.device, sampler, nullptr);
-  for (auto mode : {VK_SAMPLER_REDUCTION_MODE_MIN, VK_SAMPLER_REDUCTION_MODE_MAX}) {
+  for (const auto mode : {VK_SAMPLER_REDUCTION_MODE_MIN, VK_SAMPLER_REDUCTION_MODE_MAX}) {
     reduction.reductionMode = mode;
     REQUIRE(vkCreateSampler(runtime.device, &info, nullptr, &sampler) == VK_ERROR_FEATURE_NOT_PRESENT);
   }
@@ -1784,7 +1784,7 @@ TEST_CASE("Vulkan timestamp queries preserve unavailable values and respect resu
   REQUIRE(copied[4] == 1);
   REQUIRE(copied[6] == result[3]);
   REQUIRE(copied[7] == 1);
-  for (auto index : {0, 1, 2, 5, 8, 9, 10, 11})
+  for (const auto index : {0, 1, 2, 5, 8, 9, 10, 11})
     REQUIRE(copied[index] == 0xfeed);
   // Reset a strict subset without changing its neighbour or unavailable result bytes.
   const auto neighbour = result[3];
@@ -2136,7 +2136,7 @@ TEST_CASE("Vulkan multisample clears and resolves preserve sample and layer boun
   TestDevice const runtime;
   const auto format = GENERATE(VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UINT, VK_FORMAT_R32_UINT, VK_FORMAT_R32_SFLOAT,
                                VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT);
-  const unsigned components = [&]() -> unsigned {
+  const unsigned components = [&] -> unsigned {
     switch (format) {
       case VK_FORMAT_R32_SFLOAT: return 1;
       case VK_FORMAT_R32G32_SFLOAT: return 2;
@@ -2424,7 +2424,7 @@ TEST_CASE("Vulkan subpass resolves and multisample depth clears preserve the ren
     const bool changed = pixel >= 32 && x >= 2 && x < 5 && y >= 1 && y < 3;
     uint32_t actual = 0;
     std::memcpy(&actual, bytes + 1536 + (pixel * 4), 4);
-    const uint32_t expected = [&]() -> uint32_t {
+    const uint32_t expected = [&] -> uint32_t {
       switch (format) {
         case VK_FORMAT_R32_SFLOAT: return 0x3ec00000;
         case VK_FORMAT_R8G8B8A8_UINT:
@@ -2684,7 +2684,7 @@ TEST_CASE("Vulkan format capabilities preserve storage and blending exclusions",
 }
 
 TEST_CASE("Vulkan rejected image format queries zero the core result payload") {
-  for (auto format : {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_UNDEFINED}) {
+  for (const auto format : {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_UNDEFINED}) {
     VkImageFormatProperties properties;
     std::memset(&properties, 0xa5, sizeof(properties));
     REQUIRE(vkGetPhysicalDeviceImageFormatProperties(VK_NULL_HANDLE, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
@@ -3257,7 +3257,7 @@ TEST_CASE("Vulkan mutable views enforce compatibility and own their format list"
   VkImage image = nullptr;
   REQUIRE(vkCreateImage(VK_NULL_HANDLE, &imageInfo, nullptr, &image) == VK_SUCCESS);
   permitted = VK_FORMAT_R32_SFLOAT; // The runtime owns the original list.
-  for (auto format : {imageFormat, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R8G8B8A8_UINT}) {
+  for (const auto format : {imageFormat, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R8G8B8A8_UINT}) {
     VkImageViewCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     info.image = image;
@@ -3279,8 +3279,8 @@ TEST_CASE("Vulkan mutable views enforce compatibility and own their format list"
 }
 
 TEST_CASE("Vulkan image queries distinguish cube sample counts and extended view usage") {
-  for (auto format : {VK_FORMAT_R32_UINT, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT}) {
-    for (auto flags : {VkImageCreateFlags{0}, VkImageCreateFlags{VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT}}) {
+  for (const auto format : {VK_FORMAT_R32_UINT, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT}) {
+    for (const auto flags : {VkImageCreateFlags{0}, VkImageCreateFlags{VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT}}) {
       VkImageFormatProperties properties{};
       REQUIRE(vkGetPhysicalDeviceImageFormatProperties(VK_NULL_HANDLE, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
                                                        VK_IMAGE_USAGE_SAMPLED_BIT, flags, &properties)
@@ -3730,7 +3730,7 @@ TEST_CASE("Vulkan volume mip layouts, padded transfers, partial copies and flipp
   }
   std::vector<uint8_t> expected(bytes, bytes + 4096);
   const auto set = [&](size_t offset, float value) { std::memcpy(expected.data() + offset, &value, 4); };
-  for (auto offset : {64U, 512U})
+  for (const auto offset : {64U, 512U})
     for (uint32_t i = 0; i < 65; ++i)
       set(offset + (i * 4), -1.F);
   // Two planes of a subvolume, with four-texel rows and three-row planes in the buffer.
@@ -3820,7 +3820,7 @@ TEST_CASE("Vulkan compressed mip storage and padded block transfers preserve edg
   REQUIRE(layout.offset == 72);
   REQUIRE(layout.rowPitch == 8);
   REQUIRE(layout.arrayPitch == 8);
-  for (auto usage : {VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_USAGE_STORAGE_BIT}) {
+  for (const auto usage : {VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_USAGE_STORAGE_BIT}) {
     VkImageFormatProperties properties{};
     REQUIRE(vkGetPhysicalDeviceImageFormatProperties(VK_NULL_HANDLE, info.format, info.imageType, info.tiling, usage, 0, &properties)
             == VK_ERROR_FORMAT_NOT_SUPPORTED);
@@ -4027,7 +4027,7 @@ TEST_CASE("Vulkan sample-zero depth and stencil resolves select the first sample
   const auto format = GENERATE(VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_S8_UINT);
   const bool depth = format != VK_FORMAT_S8_UINT;
   const bool stencil = format == VK_FORMAT_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
-  const size_t stride = [&]() -> size_t {
+  const size_t stride = [&] -> size_t {
     switch (format) {
       case VK_FORMAT_D16_UNORM: return 2;
       case VK_FORMAT_S8_UINT: return 1;
@@ -4277,7 +4277,7 @@ TEST_CASE("Vulkan pipeline batches preserve partial success and roll back alloca
   SECTION("an invalid middle shader does not discard earlier or later successes") {
     infos[1].stage.module = VK_NULL_HANDLE;
     AllocationAudit audit;
-    auto callbacks = audit.callbacks();
+    const auto callbacks = audit.callbacks();
     std::array<VkPipeline, 3> output{};
     output.fill(reinterpret_cast<VkPipeline>(uintptr_t{1}));
     REQUIRE(vkCreateComputePipelines(runtime.device, VK_NULL_HANDLE, infos.size(), infos.data(), &callbacks, output.data())
@@ -4294,7 +4294,7 @@ TEST_CASE("Vulkan pipeline batches preserve partial success and roll back alloca
     const auto create = [&](size_t failAt) {
       AllocationAudit audit;
       audit.failAt = failAt;
-      auto callbacks = audit.callbacks();
+      const auto callbacks = audit.callbacks();
       std::array<VkPipeline, 3> output{};
       output.fill(reinterpret_cast<VkPipeline>(uintptr_t{1}));
       const auto result = vkCreateComputePipelines(runtime.device, VK_NULL_HANDLE, infos.size(), infos.data(), &callbacks, output.data());
@@ -4327,7 +4327,7 @@ TEST_CASE("Vulkan host callbacks cover storage and clean every creation failure"
   for (size_t failAt = 0; failAt < 32; ++failAt) {
     AllocationAudit audit;
     audit.failAt = failAt;
-    auto callbacks = audit.callbacks();
+    const auto callbacks = audit.callbacks();
     VkBuffer buffer = reinterpret_cast<VkBuffer>(uintptr_t{1});
     VkResult result{};
     REQUIRE_NOTHROW(result = vkCreateBuffer(runtime.device, &info, &callbacks, &buffer));
@@ -4376,7 +4376,7 @@ TEST_CASE("Vulkan render pass creation retains callbacks and rolls back every al
   for (size_t failAt = 0; failAt < 64; ++failAt) {
     AllocationAudit audit;
     audit.failAt = failAt;
-    auto callbacks = audit.callbacks();
+    const auto callbacks = audit.callbacks();
     VkRenderPass pass = reinterpret_cast<VkRenderPass>(uintptr_t{1});
     VkResult result{};
     REQUIRE_NOTHROW(result = create(runtime.device, &info, &callbacks, &pass));
@@ -4404,8 +4404,8 @@ TEST_CASE("Vulkan allocators are copied and inherited independently by each inst
   AllocationAudit second;
   AllocationAudit object;
   auto firstCallbacks = first.callbacks();
-  auto secondCallbacks = second.callbacks();
-  auto objectCallbacks = object.callbacks();
+  const auto secondCallbacks = second.callbacks();
+  const auto objectCallbacks = object.callbacks();
   auto *const firstInstance = allocatorInstance(&firstCallbacks);
   auto *const secondInstance = allocatorInstance(&secondCallbacks);
   auto *const firstDevice = allocatorDevice(firstInstance, nullptr);
@@ -4465,7 +4465,7 @@ TEST_CASE("Vulkan destroy accepts a compatible allocator with different user dat
 TEST_CASE("Vulkan command pools retain allocator ownership and recover from recording OOM", "[vulkan][allocation]") {
   TestDevice const runtime;
   AllocationAudit audit;
-  auto callbacks = audit.callbacks();
+  const auto callbacks = audit.callbacks();
   VkCommandPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -4501,7 +4501,7 @@ TEST_CASE("Vulkan command buffer batch allocation rolls back partial outputs", "
   size_t failures = 0;
   for (size_t step = 0; step < 32; ++step) {
     AllocationAudit audit;
-    auto callbacks = audit.callbacks();
+    const auto callbacks = audit.callbacks();
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     VkCommandPool pool{};
@@ -4532,7 +4532,7 @@ TEST_CASE("Vulkan command buffer batch allocation rolls back partial outputs", "
 
 TEST_CASE("Vulkan queue workers never call application allocators", "[vulkan][allocation]") {
   AllocationAudit audit;
-  auto callbacks = audit.callbacks();
+  const auto callbacks = audit.callbacks();
   auto *const instance = allocatorInstance(&callbacks);
   auto *const device = allocatorDevice(instance, nullptr);
   VkQueue queue{};
@@ -4556,7 +4556,7 @@ TEST_CASE("Vulkan queue workers never call application allocators", "[vulkan][al
 
 TEST_CASE("Vulkan descriptor updates need no allocation after set allocation", "[vulkan][allocation]") {
   AllocationAudit audit;
-  auto callbacks = audit.callbacks();
+  const auto callbacks = audit.callbacks();
   auto *const instance = allocatorInstance(&callbacks);
   auto *const device = allocatorDevice(instance, nullptr);
   VkBuffer buffer = createBuffer(device, 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -4634,7 +4634,7 @@ TEST_CASE("Vulkan descriptor updates need no allocation after set allocation", "
 TEST_CASE("Vulkan recorded queries do not extend the query pool allocator lifetime", "[vulkan][allocation]") {
   TestDevice const runtime;
   AllocationAudit audit;
-  auto callbacks = audit.callbacks();
+  const auto callbacks = audit.callbacks();
   VkQueryPoolCreateInfo queryInfo{};
   queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;

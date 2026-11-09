@@ -1184,7 +1184,7 @@ CUresult copyVolume(const CUDA_MEMCPY3D &copy) {
   if (const auto transferred = copyVolumeRectangles(copy, *source, *destination, srcArray, dstArray))
     return *transferred ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 
-  auto row = std::unique_ptr<unsigned char[]>{new (std::nothrow) unsigned char[copy.WidthInBytes]};
+  const auto row = std::unique_ptr<unsigned char[]>{new (std::nothrow) unsigned char[copy.WidthInBytes]};
   if (!row) return CUDA_ERROR_UNKNOWN;
   for (size_t z = 0; z < copy.Depth; ++z) {
     for (size_t y = 0; y < copy.Height; ++y) {
@@ -3129,7 +3129,7 @@ CUresult cuMemcpyAsync(CUdeviceptr destination, CUdeviceptr source, size_t size,
 CUresult cuMemcpyHtoDAsync_v2(CUdeviceptr destination, const void *source, size_t size, CUstream stream) {
   if (source && size != 0 && pageableHost(source, size) && !streamDeferred(stream)) {
     try {
-      auto staged =
+      const auto staged =
           std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t *>(source), static_cast<const uint8_t *>(source) + size);
       return enqueueCommand(stream, [=] { return cuMemcpyHtoD_v2(destination, staged->data(), size); });
     } catch (...) {
@@ -4344,7 +4344,7 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
     }
     if (const auto status = deviceHeapFor(launch.deviceHeap); status != CUDA_SUCCESS) return status;
     if (const auto status = buildFunction(*entry); status != CUDA_SUCCESS) return status;
-    return enqueueCommand(stream, [launch = std::move(launch), encoding = entry->module->encoding]() -> int32_t {
+    return enqueueCommand(stream, [launch = std::move(launch), encoding = entry->module->encoding] -> int32_t {
       std::string error;
       CompletionResult result;
       if (launchAndCollect(launch, result, error)) return CUDA_SUCCESS;

@@ -294,7 +294,7 @@ bool AqlRuntime::relocations(const Kernel &kernel, uint64_t kernarg, std::option
   const auto *bytes = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(kernarg));
   const auto relocate = [&](uint32_t offset, const Resolved &target) {
     relocations.push_back({.source = RelocationSourceMemory{buffer->region},
-                           .sourceOffset = {static_cast<int64_t>(buffer->offset.value + offset)},
+                           .sourceOffset = {buffer->offset.value + offset},
                            .target = AllocationId{static_cast<int64_t>(target.id)},
                            .targetOffset = {static_cast<int64_t>(target.offset)}});
   };

@@ -110,7 +110,7 @@ TEST_CASE("pitched 3D copies move each device side as one rectangle request", "[
   CHECK(readDevice(device, 256) == place(packed, Depth, 16, 96, 256, 0xEE));
 
   std::vector<uint8_t> out(170, 0x11);
-  auto download = volume(CU_MEMORYTYPE_DEVICE, nullptr, device, 16, 6, CU_MEMORYTYPE_HOST, out.data(), 0, 12, 5);
+  const auto download = volume(CU_MEMORYTYPE_DEVICE, nullptr, device, 16, 6, CU_MEMORYTYPE_HOST, out.data(), 0, 12, 5);
   before = counts();
   REQUIRE(cuMemcpy3D_v2(&download) == CUDA_SUCCESS);
   CHECK(counts().rectangleReads - before.rectangleReads == 1);
@@ -118,7 +118,7 @@ TEST_CASE("pitched 3D copies move each device side as one rectangle request", "[
   CHECK(out == place(packed, Depth, 12, 60, 170, 0x11));
 
   const CUdeviceptr other = allocateFilled(128, 0x33);
-  auto transfer = volume(CU_MEMORYTYPE_DEVICE, nullptr, device, 16, 6, CU_MEMORYTYPE_DEVICE, nullptr, other, 8, 4);
+  const auto transfer = volume(CU_MEMORYTYPE_DEVICE, nullptr, device, 16, 6, CU_MEMORYTYPE_DEVICE, nullptr, other, 8, 4);
   before = counts();
   REQUIRE(cuMemcpy3D_v2(&transfer) == CUDA_SUCCESS);
   CHECK(counts().rectangleReads - before.rectangleReads == 1);

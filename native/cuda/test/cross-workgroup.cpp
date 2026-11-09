@@ -552,7 +552,7 @@ void runSystemPaging() {
   check(library.load<CUresult (*)()>("cuCtxSynchronize")());
   REQUIRE((value == 42));
   check(moduleGetFunction(&function, module, "increment_indirect"));
-  auto target = std::make_unique<unsigned>(20);
+  const auto target = std::make_unique<unsigned>(20);
   CUdeviceptr indirect = devicePointer(target.get());
   pointer = devicePointer(&indirect);
   check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
@@ -560,7 +560,7 @@ void runSystemPaging() {
   REQUIRE((*target == 21));
   CUdeviceptr managed = 0;
   check(managedAllocate(&managed, sizeof(unsigned), CU_MEM_ATTACH_GLOBAL));
-  auto heap = std::make_unique<unsigned>(30);
+  const auto heap = std::make_unique<unsigned>(30);
   pointer = devicePointer(heap.get());
   check(moduleGetFunction(&function, module, "increment_host"));
   check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
@@ -809,7 +809,7 @@ TEST_CASE("CUDA registered stack subrange supports kernels and unregister", "[cu
 
 TEST_CASE("CUDA registered heap subrange supports kernels and unregister", "[cuda][integration][unified-memory]") {
   const UnifiedMemoryClient api;
-  auto host = std::make_unique<uint32_t[]>(16);
+  const auto host = std::make_unique<uint32_t[]>(16);
   std::fill_n(host.get(), 16, 11U);
   check(api.hostRegister(host.get() + 2, 8 * sizeof(uint32_t), CU_MEMHOSTREGISTER_DEVICEMAP));
   CUdeviceptr device = 0;

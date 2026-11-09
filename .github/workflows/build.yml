@@ -82,36 +82,42 @@ jobs:
           release=$(sed -n 's/^set(conformance_clang_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
           sha256=$(sed -n 's/^set(conformance_clang_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
           llvm="$tools/llvm-$release"
-          if [ ! -x "$llvm/bin/clang-tidy" ]; then
+          if [ ! -x "$llvm/bin/clang" ]; then
             archive="LLVM-$release-Linux-X64"
             curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm.tar.xz" \
               "https://github.com/llvm/llvm-project/releases/download/llvmorg-$release/$archive.tar.xz"
             echo "$sha256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check --strict
             mkdir -p "$llvm"
             set -- "$archive/lib/clang/${release%%.*}/include"
-            for tool in clang clang++ "clang-${release%%.*}" clang-tidy run-clang-tidy clang-apply-replacements llvm-link; do
+            for tool in clang clang++ "clang-${release%%.*}" llvm-link; do
               set -- "$@" "$archive/bin/$tool"
             done
             tar -xJf "$RUNNER_TEMP/llvm.tar.xz" --strip-components=1 -C "$llvm" "$@"
             rm "$RUNNER_TEMP/llvm.tar.xz"
           fi
-          format_release=$(sed -n 's/^set(conformance_clang_format_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-          format_sha256=$(sed -n 's/^set(conformance_clang_format_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-          format="$tools/clang-format-$format_release"
-          if [ ! -x "$format/clang-format" ]; then
-            archive="LLVM-$format_release-Linux-X64"
-            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm-format.tar.xz" \
-              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$format_release/$archive.tar.xz"
-            echo "$format_sha256  $RUNNER_TEMP/llvm-format.tar.xz" | sha256sum --check --strict
-            mkdir -p "$format"
-            tar -xJf "$RUNNER_TEMP/llvm-format.tar.xz" --strip-components=2 -C "$format" "$archive/bin/clang-format"
-            rm "$RUNNER_TEMP/llvm-format.tar.xz"
+          tools_release=$(sed -n 's/^set(conformance_clang_tools_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          tools_sha256=$(sed -n 's/^set(conformance_clang_tools_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          llvm_tools="$tools/llvm-tools-$tools_release"
+          if [ ! -x "$llvm_tools/bin/clang-tidy" ]; then
+            archive="LLVM-$tools_release-Linux-X64"
+            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm-tools.tar.xz" \
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$tools_release/$archive.tar.xz"
+            echo "$tools_sha256  $RUNNER_TEMP/llvm-tools.tar.xz" | sha256sum --check --strict
+            mkdir -p "$llvm_tools"
+            set -- "$archive/lib/clang/${tools_release%%.*}/include"
+            for tool in clang-format clang-tidy run-clang-tidy clang-apply-replacements; do
+              set -- "$@" "$archive/bin/$tool"
+            done
+            tar -xJf "$RUNNER_TEMP/llvm-tools.tar.xz" --strip-components=1 -C "$llvm_tools" "$@"
+            rm "$RUNNER_TEMP/llvm-tools.tar.xz"
           fi
           mkdir -p "$tools/bin"
-          for tool in clang clang++ clang-tidy run-clang-tidy llvm-link; do
+          for tool in clang clang++ llvm-link; do
             ln -sf "$llvm/bin/$tool" "$tools/bin/$tool"
           done
-          ln -sf "$format/clang-format" "$tools/bin/clang-format"
+          for tool in clang-format clang-tidy run-clang-tidy clang-apply-replacements; do
+            ln -sf "$llvm_tools/bin/$tool" "$tools/bin/$tool"
+          done
           echo "$tools/bin" >> "$GITHUB_PATH"
       - &references
         name: Restore references

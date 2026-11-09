@@ -259,8 +259,8 @@ bool finishSubpass(Execution &execution) {
     const auto source = attachmentImage(execution, subpass.depth.attachment);
     const auto destination = attachmentImage(execution, subpass.depthResolve.attachment);
     const auto resolve = [&](uint32_t layer) {
-      auto src = attachmentLayer(source, layer);
-      auto dst = attachmentLayer(destination, layer);
+      const auto src = attachmentLayer(source, layer);
+      const auto dst = attachmentLayer(destination, layer);
       auto *input = imageData(src);
       auto *output = imageData(dst);
       if (!input || !output || src.samples != 4 || dst.samples != 1 || src.format != dst.format) return false;
@@ -314,7 +314,7 @@ template <typename Clear> bool clearImage(VkImage handle, const std::vector<VkIm
 
 // Handle resolution happens at execution time; recorded values own their snapshots.
 
-static bool execute(Execution &, const recorded::FillBuffer &command) {
+static bool apply(Execution &, const recorded::FillBuffer &command) {
   std::scoped_lock const guard(stateMutex);
   const auto range = bufferRange(command.buffer, command.offset, command.size);
   if (!range) return false;
@@ -322,8 +322,8 @@ static bool execute(Execution &, const recorded::FillBuffer &command) {
     std::memcpy(range->bytes.data() + i, &command.value, 4);
   return true;
 }
-static bool execute(Execution &, const recorded::ResetEvent &command) { return vkResetEvent(VK_NULL_HANDLE, command.event) == VK_SUCCESS; }
-static bool execute(Execution &execution, const recorded::DispatchIndirect &command) {
+static bool apply(Execution &, const recorded::ResetEvent &command) { return vkResetEvent(VK_NULL_HANDLE, command.event) == VK_SUCCESS; }
+static bool apply(Execution &execution, const recorded::DispatchIndirect &command) {
   auto invocation = command.dispatch;
   {
     std::scoped_lock const guard(stateMutex);
@@ -335,16 +335,16 @@ static bool execute(Execution &execution, const recorded::DispatchIndirect &comm
     invocation.y = dimensions.y;
     invocation.z = dimensions.z;
   }
-  return execute(execution, invocation);
+  return apply(execution, invocation);
 }
-static bool execute(Execution &, const recorded::UpdateBuffer &command) {
+static bool apply(Execution &, const recorded::UpdateBuffer &command) {
   std::scoped_lock const guard(stateMutex);
   const auto range = bufferRange(command.buffer, command.offset, command.snapshot.size());
   if (!range) return false;
   std::copy(command.snapshot.begin(), command.snapshot.end(), range->bytes.begin());
   return true;
 }
-static bool execute(Execution &execution, const recorded::WaitEvents &command) {
+static bool apply(Execution &execution, const recorded::WaitEvents &command) {
   const auto &[wait] = command;
   std::unique_lock guard(stateMutex);
   const auto failed = [&] { return execution.device && execution.device->failed(); };
@@ -358,30 +358,30 @@ static bool execute(Execution &execution, const recorded::WaitEvents &command) {
   });
   return !failed() && wait ^ forall([](auto event) { return events.contains(event); });
 }
-static bool execute(Execution &, const recorded::SetEvent &command) { return vkSetEvent(VK_NULL_HANDLE, command.event) == VK_SUCCESS; }
-static bool execute(Execution &, const recorded::Invalid &) { return false; }
-static bool execute(Execution &, const recorded::CopyImage &command) {
+static bool apply(Execution &, const recorded::SetEvent &command) { return vkSetEvent(VK_NULL_HANDLE, command.event) == VK_SUCCESS; }
+static bool apply(Execution &, const recorded::Invalid &) { return false; }
+static bool apply(Execution &, const recorded::CopyImage &command) {
   std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
   return transfer.submit(gx::GraphicsCommandCopyImage{.source = transfer.image(images.at(command.source)),
                                                       .destination = transfer.image(images.at(command.destination)),
                                                       .regions = command.copies});
 }
-static bool execute(Execution &, const recorded::ClearDepthStencil &command) {
+static bool apply(Execution &, const recorded::ClearDepthStencil &command) {
   return clearImage(command.handle, command.regions, [&](ClearBatch &batch, Image &image, VkRect2D area, VkImageAspectFlags aspects) {
     if (!depthStencilFormat(image.format)) return false;
     batch.depthStencil(image, area, aspects, command.clear);
     return true;
   });
 }
-static bool execute(Execution &, const recorded::ClearColour &command) {
+static bool apply(Execution &, const recorded::ClearColour &command) {
   return clearImage(command.handle, command.regions, [&](ClearBatch &batch, Image &image, VkRect2D area, VkImageAspectFlags aspects) {
     if (aspects != VK_IMAGE_ASPECT_COLOR_BIT) return false;
     batch.colour(image, area, command.value);
     return true;
   });
 }
-static bool execute(Execution &execution, const recorded::ClearAttachments &command) {
+static bool apply(const Execution &execution, const recorded::ClearAttachments &command) {
   const auto &[clears, rects] = command;
   std::scoped_lock const guard(stateMutex);
   ClearBatch batch;
@@ -416,7 +416,7 @@ static bool execute(Execution &execution, const recorded::ClearAttachments &comm
   }
   return batch.submit();
 }
-static bool execute(Execution &, const recorded::CopyBufferImage &command) {
+static bool apply(Execution &, const recorded::CopyBufferImage &command) {
   std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
   return transfer.submit(gx::GraphicsCommandCopyBufferImage{.buffer = transfer.buffer(command.bufferHandle),
@@ -424,32 +424,32 @@ static bool execute(Execution &, const recorded::CopyBufferImage &command) {
                                                             .regions = command.copies,
                                                             .toImage = command.toImage});
 }
-static bool execute(Execution &execution, const recorded::DrawIndirect &command) {
+static bool apply(Execution &execution, const recorded::DrawIndirect &command) {
   if (!command.drawCount) return true;
   return forEachDrawView(execution, [&](uint32_t view) {
     return drawView(execution, view, command.state, 0, 0, 0, 0, command.indexed, 0, command.indirect, command.offset, command.drawCount,
                     command.stride);
   });
 }
-static bool execute(Execution &execution, const recorded::Draw &command) {
+static bool apply(Execution &execution, const recorded::Draw &command) {
   const auto &[state, vertices, instances, firstVertex, firstInstance, indexed, vertexOffset] = command;
   return forEachDrawView(execution, [&](uint32_t view) {
     return drawView(execution, view, state, vertices, instances, firstVertex, firstInstance, indexed, vertexOffset);
   });
 }
-static bool execute(Execution &execution, const recorded::EndRenderPass &) {
+static bool apply(Execution &execution, const recorded::EndRenderPass &) {
   std::scoped_lock const guard(stateMutex);
   if (!finishSubpass(execution)) return false;
   execution.renderScope = {};
   return true;
 }
-static bool execute(Execution &execution, const recorded::NextSubpass &) {
+static bool apply(Execution &execution, const recorded::NextSubpass &) {
   std::scoped_lock const guard(stateMutex);
   if (!finishSubpass(execution)) return false;
   ++execution.renderScope.subpass;
   return beginSubpass(execution);
 }
-static bool execute(Execution &execution, const recorded::BeginRenderPass &command) {
+static bool apply(Execution &execution, const recorded::BeginRenderPass &command) {
   std::scoped_lock const guard(stateMutex);
   for (auto *const view : command.attachments)
     if (!imageViews.contains(view)) return false;
@@ -462,7 +462,7 @@ static bool execute(Execution &execution, const recorded::BeginRenderPass &comma
                            .attachments = command.attachments};
   return beginSubpass(execution);
 }
-static bool execute(Execution &, const recorded::CopyQueryResults &command) {
+static bool apply(Execution &, const recorded::CopyQueryResults &command) {
   if (!command.count) return true;
   std::span<uint8_t> bytes;
   {
@@ -478,7 +478,7 @@ static bool execute(Execution &, const recorded::CopyQueryResults &command) {
   // Without WAIT, unavailable queries may leave result bytes unchanged; availability is still written.
   return status == VK_SUCCESS || status == VK_NOT_READY;
 }
-static bool execute(Execution &execution, const recorded::WriteTimestamp &command) {
+static bool apply(const Execution &execution, const recorded::WriteTimestamp &command) {
   std::scoped_lock const guard(stateMutex);
   const auto found = queryPools.find(command.pool);
   if (found == queryPools.end()) return false;
@@ -492,7 +492,7 @@ static bool execute(Execution &execution, const recorded::WriteTimestamp &comman
   stateChanged.notify_all();
   return true;
 }
-static bool execute(Execution &execution, const recorded::EndQuery &command) {
+static bool apply(Execution &execution, const recorded::EndQuery &command) {
   std::scoped_lock const guard(stateMutex);
   const auto found = queryPools.find(command.pool);
   if (found == queryPools.end()) return false;
@@ -507,7 +507,7 @@ static bool execute(Execution &execution, const recorded::EndQuery &command) {
   stateChanged.notify_all();
   return true;
 }
-static bool execute(Execution &execution, const recorded::BeginQuery &command) {
+static bool apply(Execution &execution, const recorded::BeginQuery &command) {
   std::scoped_lock const guard(stateMutex);
   const auto found = queryPools.find(command.pool);
   if (found == queryPools.end()) return false;
@@ -521,8 +521,8 @@ static bool execute(Execution &execution, const recorded::BeginQuery &command) {
       ActiveOcclusion{.pool = state.get(), .query = command.query, .count = count, .firstSample = execution.occlusionSamples};
   return true;
 }
-static bool execute(Execution &, const recorded::ResetQuery &command) { return resetQueryPool(command.pool, command.first, command.count); }
-static bool execute(Execution &, const recorded::Blit &command) {
+static bool apply(Execution &, const recorded::ResetQuery &command) { return resetQueryPool(command.pool, command.first, command.count); }
+static bool apply(Execution &, const recorded::Blit &command) {
   std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
   return transfer.submit(gx::GraphicsCommandBlit{.source = transfer.image(images.at(command.source)),
@@ -530,7 +530,7 @@ static bool execute(Execution &, const recorded::Blit &command) {
                                                  .regions = command.copies,
                                                  .linear = command.filter == VK_FILTER_LINEAR});
 }
-static bool execute(Execution &, const recorded::Resolve &command) {
+static bool apply(Execution &, const recorded::Resolve &command) {
   std::scoped_lock const guard(stateMutex);
   GraphicsTransfer transfer;
   return transfer.submit(gx::GraphicsCommandResolve{.source = transfer.image(images.at(command.source)),
@@ -538,7 +538,7 @@ static bool execute(Execution &, const recorded::Resolve &command) {
                                                     .regions = command.copies});
 }
 
-static bool execute(Execution &, const recorded::Copy &command) {
+static bool apply(Execution &, const recorded::Copy &command) {
   std::scoped_lock const lock(stateMutex);
   return command.regions ^ forall([&](const auto &region) {
            const auto source = bufferRange(command.source, region.srcOffset, region.size);
@@ -549,6 +549,6 @@ static bool execute(Execution &, const recorded::Copy &command) {
          });
 }
 bool execute(Execution &execution, const recorded::Operation &operation) {
-  return std::visit([&](const auto &command) { return execute(execution, command); }, operation);
+  return std::visit([&](const auto &command) { return apply(execution, command); }, operation);
 }
 } // namespace gemstone::vulkan

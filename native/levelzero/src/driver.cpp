@@ -954,7 +954,7 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
       submissions.push_back(command.prepare());
   const auto leading = submissions.empty() ? std::vector<EventWait>{} : submissions.front().waits;
   std::function<ze_result_t()> submission = [lists = std::move(lists), submissions = std::move(submissions), fence = std::move(fence),
-                                             device]() mutable {
+                                             device] mutable {
     ze_result_t result = ZE_RESULT_SUCCESS;
     size_t next = 0;
     for (const auto &retained : lists)
@@ -1103,7 +1103,7 @@ ze_result_t ZE_APICALL listWriteGlobalTimestamp(ze_command_list_handle_t handle,
   EventUses retainedWaits;
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
-  auto lifetime = std::make_shared<std::vector<AllocationRef>>();
+  const auto lifetime = std::make_shared<std::vector<AllocationRef>>();
   if (auto allocation = retainAllocation(destination, sizeof(uint64_t))) lifetime->push_back(std::move(allocation));
   return append(
       list,
@@ -1128,7 +1128,7 @@ ze_result_t ZE_APICALL listQueryKernelTimestamps(ze_command_list_handle_t handle
   EventUses retainedWaits;
   const auto retained = retainCommandEvents(list->context.get(), signal, count + waitCount, handles.data(), retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
-  auto lifetime = std::make_shared<std::vector<AllocationRef>>();
+  const auto lifetime = std::make_shared<std::vector<AllocationRef>>();
   std::vector<ze_kernel_timestamp_result_t *> targets;
   targets.reserve(count);
   for (uint32_t index = 0; index < count; ++index) {
@@ -1171,14 +1171,14 @@ ze_result_t listCopyInContext(ze_command_list_handle_t handle, void *destination
   // A failed full-range lookup must not turn a tracked out-of-bounds pointer into a host pointer.
   if ((!destinationAllocation && retainAllocation(destination, 0)) || (!sourceAllocation && retainAllocation(source, 0)))
     return ZE_RESULT_ERROR_INVALID_SIZE;
-  auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
+  const auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
   if (destinationAllocation) allocationLifetime->push_back(std::move(destinationAllocation));
   if (sourceAllocation) allocationLifetime->push_back(std::move(sourceAllocation));
   return append(
       list,
       [=, waits = retainedWaits] {
         (void)allocationLifetime;
-        auto result = waitDependencies(waits);
+        const auto result = waitDependencies(waits);
         if (result == ZE_RESULT_SUCCESS && size != 0) std::memmove(destination, source, size);
         return result;
       },
@@ -1280,7 +1280,7 @@ ze_result_t ZE_APICALL listCopyRegion(ze_command_list_handle_t handle, void *des
   EventUses retainedWaits;
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
-  auto lifetime = std::make_shared<std::vector<AllocationRef>>();
+  const auto lifetime = std::make_shared<std::vector<AllocationRef>>();
   if (sourceAllocation) lifetime->push_back(std::move(sourceAllocation));
   if (destinationAllocation) lifetime->push_back(std::move(destinationAllocation));
   return append(
@@ -1310,13 +1310,13 @@ ze_result_t ZE_APICALL listFill(ze_command_list_handle_t handle, void *destinati
   EventUses retainedWaits;
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
-  auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
+  const auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
   if (destinationAllocation) allocationLifetime->push_back(std::move(destinationAllocation));
   return append(
       list,
       [=, waits = retainedWaits] {
         (void)allocationLifetime;
-        auto result = waitDependencies(waits);
+        const auto result = waitDependencies(waits);
         if (result == ZE_RESULT_SUCCESS) {
           auto *bytes = static_cast<uint8_t *>(destination);
           for (size_t offset = 0; offset < size; ++offset)
@@ -1333,7 +1333,7 @@ ze_result_t ZE_APICALL listPrefetch(ze_command_list_handle_t handle, const void 
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto allocation = retainAllocation(pointer, size);
   if (!allocation && retainAllocation(pointer, 0)) return ZE_RESULT_ERROR_INVALID_SIZE;
-  return append(list, [] { return ZE_RESULT_SUCCESS; }, [allocation = std::move(allocation)]() mutable { allocation.reset(); });
+  return append(list, [] { return ZE_RESULT_SUCCESS; }, [allocation = std::move(allocation)] mutable { allocation.reset(); });
 }
 
 ze_result_t ZE_APICALL listAdvise(ze_command_list_handle_t handle, ze_device_handle_t deviceHandle, const void *pointer, size_t size,
@@ -1346,7 +1346,7 @@ ze_result_t ZE_APICALL listAdvise(ze_command_list_handle_t handle, ze_device_han
     return ZE_RESULT_ERROR_INVALID_ENUMERATION;
   auto allocation = retainAllocation(pointer, size);
   if (!allocation && retainAllocation(pointer, 0)) return ZE_RESULT_ERROR_INVALID_SIZE;
-  return append(list, [] { return ZE_RESULT_SUCCESS; }, [allocation = std::move(allocation)]() mutable { allocation.reset(); });
+  return append(list, [] { return ZE_RESULT_SUCCESS; }, [allocation = std::move(allocation)] mutable { allocation.reset(); });
 }
 
 ze_result_t ZE_APICALL listSignal(ze_command_list_handle_t handle, ze_event_handle_t signal) {
@@ -1590,7 +1590,7 @@ void resolveOpaqueArguments(KernelLaunch &launch) {
 }
 
 KernelLaunch snapshotLaunch(Kernel *kernel) {
-  auto lifetime = std::make_shared<HandleUse<Kernel>>(kernel);
+  const auto lifetime = std::make_shared<HandleUse<Kernel>>(kernel);
   auto launch = KernelLaunch{.lifetime = lifetime,
                              .device = kernel->module->device,
                              .programId = kernel->module->program->id,
@@ -1625,8 +1625,8 @@ ze_result_t recordLaunch(ze_command_list_handle_t handle, ze_kernel_handle_t ker
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
   KernelLaunch launch = snapshotLaunch(kernel);
-  auto kernelLifetime = launch.lifetime;
-  auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>(std::move(launch.allocations));
+  const auto kernelLifetime = launch.lifetime;
+  const auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>(std::move(launch.allocations));
   if (indirectGroups) {
     if (auto allocation = retainAllocation(groups, sizeof(*groups))) allocationLifetime->push_back(std::move(allocation));
   }
@@ -1674,7 +1674,7 @@ ze_result_t ZE_APICALL listImmediateAppendCommandLists(ze_command_list_handle_t 
   if (retained != ZE_RESULT_SUCCESS) return retained;
   // The immediate list adopts the recorded commands; cancellation must also
   // complete child events when an earlier immediate command has failed.
-  auto commands = std::make_shared<std::vector<HandleUse<CommandList>>>(std::move(sources));
+  const auto commands = std::make_shared<std::vector<HandleUse<CommandList>>>(std::move(sources));
   const auto execute = [commands](ze_result_t result) {
     for (const auto &source : *commands)
       for (auto &command : source->commands)
@@ -1696,7 +1696,7 @@ ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handl
   if (!list->computeCapable()) return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
   std::vector<KernelLaunch> launches;
   launches.reserve(maxCount);
-  auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
+  const auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
   for (uint32_t index = 0; index < maxCount; ++index) {
     auto *kernel = cast<Kernel>(handles[index]);
     if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -1711,7 +1711,7 @@ ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handl
   EventUses retainedWaits;
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
-  auto lifetimes = std::make_shared<std::vector<std::shared_ptr<HandleUse<Kernel>>>>();
+  const auto lifetimes = std::make_shared<std::vector<std::shared_ptr<HandleUse<Kernel>>>>();
   for (const auto &launch : launches)
     lifetimes->push_back(launch.lifetime);
   return append(
@@ -1727,7 +1727,7 @@ ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handl
       },
       [allocationLifetime, lifetimes] {
         allocationLifetime->clear();
-        for (auto &lifetime : *lifetimes)
+        for (const auto &lifetime : *lifetimes)
           *lifetime = {};
       },
       retainedSignal, {}, true);
@@ -2227,7 +2227,7 @@ ze_result_t appendImageCopy(ze_command_list_handle_t listHandle, const ImageCopy
   const size_t rowBytes = static_cast<size_t>(destinationBox.width) * pixelBytes;
   const bool empty = destinationBox.empty();
   // a recorded list does not own its images or memory, so they may be released before the list runs or is destroyed
-  auto lifetime = std::make_shared<ImageCopyLifetime>();
+  const auto lifetime = std::make_shared<ImageCopyLifetime>();
   if (list->immediate) {
     if (target) lifetime->images.emplace_back(target);
     if (origin) lifetime->images.emplace_back(origin);
@@ -2247,7 +2247,7 @@ ze_result_t appendImageCopy(ze_command_list_handle_t listHandle, const ImageCopy
         const auto destinationBuffer = to ? imageBuffer(*to, destinationBox)
                                           : hostBuffer(static_cast<uint8_t *>(destination.memory), destinationBox, pixelBytes,
                                                        destination.rowPitch, destination.slicePitch);
-        const auto sourceBuffer = [&]() -> StridedBuffer<const uint8_t> {
+        const auto sourceBuffer = [&] -> StridedBuffer<const uint8_t> {
           if (!from)
             return hostBuffer(static_cast<const uint8_t *>(source.memory), sourceBox, pixelBytes, source.rowPitch, source.slicePitch);
           const auto image = imageBuffer(*from, sourceBox);
@@ -2365,7 +2365,7 @@ ze_result_t ZE_APICALL virtualFree(ze_context_handle_t contextHandle, const void
   std::optional<uint64_t> allocationId;
   {
     std::scoped_lock const allocationLock(allocationsMutex);
-    auto allocation = allocations.find(pointer);
+    const auto allocation = allocations.find(pointer);
     if (allocation == allocations.end() || allocation->second.use_count() != 1) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
     allocationId = allocation->second->id;
   }
@@ -2451,7 +2451,7 @@ ze_result_t ZE_APICALL virtualMap(ze_context_handle_t contextHandle, const void 
       || address - reservation->first > record.size - size)
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   if (remote.mode() == ClientMode::Ready && record.size > MaxServerAllocationSize) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
-  auto next = record.mappings.lower_bound(address);
+  const auto next = record.mappings.lower_bound(address);
   if ((next != record.mappings.end() && next->first < address + size)
       || (next != record.mappings.begin() && std::prev(next)->first + std::prev(next)->second.size > address))
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
@@ -2470,7 +2470,7 @@ ze_result_t ZE_APICALL virtualUnmap(ze_context_handle_t contextHandle, const voi
   std::scoped_lock const lock(virtualMemoryMutex);
   const auto reservation = reservationContaining(address);
   if (reservation == virtualReservations.end() || reservation->second.context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  auto mapping = reservation->second.mappings.find(address);
+  const auto mapping = reservation->second.mappings.find(address);
   if (mapping == reservation->second.mappings.end() || mapping->second.size != size) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   if (mmap(gemstone::apiAddress(pointer), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0) == MAP_FAILED)
     return ZE_RESULT_ERROR_UNKNOWN;
@@ -2487,7 +2487,7 @@ ze_result_t ZE_APICALL virtualSetAccess(ze_context_handle_t contextHandle, const
   std::scoped_lock const lock(virtualMemoryMutex);
   const auto reservation = reservationContaining(reinterpret_cast<uintptr_t>(pointer));
   if (reservation == virtualReservations.end() || reservation->second.context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  auto mapping = reservation->second.mappings.find(reinterpret_cast<uintptr_t>(pointer));
+  const auto mapping = reservation->second.mappings.find(reinterpret_cast<uintptr_t>(pointer));
   if (mapping == reservation->second.mappings.end() || mapping->second.size != size) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   mapping->second.access = access;
   return ZE_RESULT_SUCCESS;
@@ -2647,7 +2647,8 @@ ze_result_t ZE_APICALL eventPoolDestroy(ze_event_pool_handle_t handle) {
   HandleUse<EventPool> const lifetime(pool);
   if (pool->ipcId) {
     std::scoped_lock const lock(ipcEventPoolsMutex);
-    if (auto found = ipcEventPools.find(pool->ipcId); found != ipcEventPools.end() && found->second == pool) ipcEventPools.erase(found);
+    if (const auto found = ipcEventPools.find(pool->ipcId); found != ipcEventPools.end() && found->second == pool)
+      ipcEventPools.erase(found);
   }
   pool->destroyRequested.store(true, std::memory_order_release);
   return ZE_RESULT_SUCCESS;
@@ -3090,7 +3091,7 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
   }
   const auto bytes = static_cast<size_t>(described.value().size.value);
   void *base = nullptr;
-  auto result = allocate(module->context.get(), module->device, bytes, 0, ZE_MEMORY_TYPE_DEVICE, &base);
+  const auto result = allocate(module->context.get(), module->device, bytes, 0, ZE_MEMORY_TYPE_DEVICE, &base);
   if (result != ZE_RESULT_SUCCESS) return result;
   const auto discard = [&] {
     std::optional<uint64_t> id;
@@ -3220,7 +3221,7 @@ ze_result_t ZE_APICALL moduleDynamicLink(uint32_t count, ze_module_handle_t *mod
   std::vector<uint8_t> bytes;
   std::vector<LinkedKernel> kernels;
   std::string error;
-  auto program = linkSpirvModules(sources, bytes, kernels, error) ? loadSpirvProgram(bytes, error) : nullptr;
+  const auto program = linkSpirvModules(sources, bytes, kernels, error) ? loadSpirvProgram(bytes, error) : nullptr;
   if (!program) {
     setBuildLog(log, error);
     return ZE_RESULT_ERROR_MODULE_LINK_FAILURE;
@@ -3490,7 +3491,7 @@ ze_result_t ZE_APICALL kernelSourceAttributes(ze_kernel_handle_t handle, uint32_
              + std::to_string(metadata.requiredWorkGroupSize->y.value) + "," + std::to_string(metadata.requiredWorkGroupSize->z.value)
              + ")";
   if (metadata.workGroupSizeHint) {
-    if (!source.empty()) source += "\n";
+    if (!source.empty()) source += '\n';
     source += "work_group_size_hint(" + std::to_string(metadata.workGroupSizeHint->x.value) + ","
               + std::to_string(metadata.workGroupSizeHint->y.value) + "," + std::to_string(metadata.workGroupSizeHint->z.value) + ")";
   }

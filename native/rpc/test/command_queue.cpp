@@ -22,8 +22,8 @@ TEST_CASE("Queued completion retains arguments and orders streams without blocki
   gemstone::CommandQueue queue(999);
   std::promise<void> release;
   std::promise<void> started;
-  auto gate = release.get_future().share();
-  auto reached = started.get_future();
+  const auto gate = release.get_future().share();
+  const auto reached = started.get_future();
   auto owner = std::make_shared<int>(41);
   std::weak_ptr<int> const lifetime = owner;
   int streamA{};
@@ -62,7 +62,7 @@ TEST_CASE("Queued completion retains arguments and orders streams without blocki
 
 TEST_CASE("Queued failures reach synchronisation and later work still completes", "[queue]") {
   gemstone::CommandQueue queue(999);
-  queue.submit(nullptr, []() -> int32_t { throw std::runtime_error("execution failed"); });
+  queue.submit(nullptr, [] -> int32_t { throw std::runtime_error("execution failed"); });
   std::atomic_int completed{0};
   queue.submit(nullptr, [&] {
     ++completed;
@@ -86,8 +86,8 @@ TEST_CASE("Legacy stream dependencies leave nonblocking streams independently ru
   queue.configure(&independent, true);
   std::promise<void> release;
   std::promise<void> ran;
-  auto gate = release.get_future().share();
-  auto progressed = ran.get_future();
+  const auto gate = release.get_future().share();
+  const auto progressed = ran.get_future();
   std::atomic_int sequence{0};
   queue.submit(&blocking, [gate, &sequence] {
     if (gate.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) != std::future_status::ready) return 1;
@@ -164,7 +164,7 @@ TEST_CASE("Streams and events created by the queue order work and reject unknown
   CHECK_FALSE(queue.hasStream(event));
   CHECK(queue.eventTicket(event) == gemstone::CommandQueue::Ticket{});
   std::promise<void> release;
-  auto gate = release.get_future().share();
+  const auto gate = release.get_future().share();
   queue.submit(stream,
                [gate] { return gate.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) == std::future_status::ready ? 0 : 1; });
   REQUIRE(queue.recordEvent(event, stream));

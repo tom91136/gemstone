@@ -236,7 +236,7 @@ VkResult implVkBindImageMemory(VkDevice, VkImage image, VkDeviceMemory memory, V
   candidate.memory = memory;
   candidate.offset = offset;
   if (!imageData(candidate)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-  found->second = candidate;
+  found->second = std::move(candidate);
   return VK_SUCCESS;
 }
 

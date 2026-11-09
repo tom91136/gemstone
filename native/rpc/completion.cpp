@@ -40,7 +40,7 @@ template <typename Function> decltype(auto) visitAtomicWidth(size_t width, Funct
 template <typename T>
 uint64_t applyAtomicRequest(uintptr_t address, HostMemoryAtomicOperation operation, uint64_t expected, uint64_t desired) {
   auto &cell = *reinterpret_cast<T *>(address);
-  auto reference = std::atomic_ref<T>(cell);
+  const auto reference = std::atomic_ref<T>(cell);
   if (operation == HostMemoryAtomicOperation::Load) return reference.load(std::memory_order_relaxed);
   if (operation == HostMemoryAtomicOperation::Store) {
     reference.store(static_cast<T>(desired), std::memory_order_relaxed);
@@ -140,7 +140,7 @@ std::vector<uint8_t> copyHostBytes(uintptr_t address, size_t size) {
     size_t width = 8;
     while (width > 1 && (at % width != 0 || width > size - offset))
       width /= 2;
-    visitAtomicWidth(width, [&]<typename T>() {
+    visitAtomicWidth(width, [&]<typename T> {
       const auto value = std::atomic_ref<T>(*reinterpret_cast<T *>(at)).load(std::memory_order_relaxed);
       std::memcpy(bytes.data() + offset, &value, sizeof(T));
       return 0;
@@ -184,7 +184,7 @@ bool awaitCompletion(Client &client, CompletionId completion, std::string &error
         if (!validAtomicWidth(width) || address % width || range.bytes.size() % width)
           return reject("invalid host atomic store range", atomicFailure(address, width), error, kind);
         for (size_t offset = 0; offset < range.bytes.size(); offset += width) {
-          visitAtomicWidth(width, [&]<typename T>() {
+          visitAtomicWidth(width, [&]<typename T> {
             T value;
             std::memcpy(&value, range.bytes.data() + offset, sizeof(value));
             atomicStore<T>(address + offset, value, std::memory_order_seq_cst);
@@ -206,23 +206,23 @@ bool awaitCompletion(Client &client, CompletionId completion, std::string &error
         if (!address || !validAtomicWidth(width) || address % width != 0)
           return reject("invalid host atomic range", atomicFailure(address, width), error, kind);
         observed = visitAtomicWidth(
-            width, [&]<typename T>() { return applyAtomicRequest<T>(address, request.operation, observed, request.desired); });
+            width, [&]<typename T> { return applyAtomicRequest<T>(address, request.operation, observed, request.desired); });
       }
       for (const auto &request : sync.atomicStores) {
         const auto address = static_cast<uintptr_t>(request.address.value);
         const auto width = request.size.value;
         if (!address || !validAtomicWidth(width) || address % width != 0)
           return reject("invalid host atomic store range", atomicFailure(address, width), error, kind);
-        visitAtomicWidth(width, [&]<typename T>() { atomicStore<T>(address, request.desired, std::memory_order_relaxed); });
+        visitAtomicWidth(width, [&]<typename T> { atomicStore<T>(address, request.desired, std::memory_order_relaxed); });
       }
       if (!sync.relaxed && !sync.atomic && sync.publish.empty()) std::atomic_thread_fence(std::memory_order_seq_cst);
-      auto supplied =
+      const auto supplied =
           client.call(SupplyHostSync{.completion = completion, .ticket = sync.ticket, .observed = static_cast<int64_t>(observed)});
       if (!supplied) return reject(supplied.error(), error, kind);
     }
     if (batch.completed) return true;
     if (replies.empty()) continue;
-    auto supplied = client.call(SupplyHostMemory{.completion = completion, .ranges = std::move(replies)});
+    const auto supplied = client.call(SupplyHostMemory{.completion = completion, .ranges = std::move(replies)});
     if (!supplied) return reject(supplied.error(), error, kind);
   }
 }

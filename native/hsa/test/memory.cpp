@@ -39,7 +39,7 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
         [](hsa_agent_t agent, void *data) {
           auto &self = *static_cast<MemoryClient *>(data);
           hsa_device_type_t type{};
-          auto status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+          const auto status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
           if (status != HSA_STATUS_SUCCESS) return status;
           if (type == HSA_DEVICE_TYPE_CPU) self.cpu = agent;
           else if (type == HSA_DEVICE_TYPE_GPU) self.gpu = agent;

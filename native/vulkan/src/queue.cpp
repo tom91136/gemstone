@@ -120,7 +120,7 @@ VkResult createQueues(uint32_t count, VkDevice *handle) {
   VkDevice created = VK_NULL_HANDLE;
   try {
     for (uint32_t i = 0; i < count; ++i) {
-      auto queue = std::make_shared<QueueState>();
+      const auto queue = std::make_shared<QueueState>();
       device->queues.push_back(queue);
       queue->handle = makeHandle<VkQueue>();
       queue->device = device;
@@ -262,7 +262,7 @@ VkResult implVkQueueSubmit(VkQueue handle, uint32_t count, const VkSubmitInfo *i
     submissions.back().fence = state->second;
   }
   host::Scope const scope(nullptr);
-  commandQueue().submit(handle, [queue, device, submissions = std::move(submissions)]() mutable {
+  commandQueue().submit(handle, [queue, device, submissions = std::move(submissions)] mutable {
     try {
       run(*queue, *device, submissions);
     } catch (...) {

@@ -600,7 +600,7 @@ bool cacheable(const std::string &source, const std::string &options) {
   std::vector<std::string> arguments;
   if (!splitOptions(options, arguments, nullptr)) return false;
   return !(arguments ^ exists([](const std::string &argument) {
-             return argument.starts_with("-i") || argument.starts_with("-I") || argument.starts_with("--i") || argument.starts_with("@")
+             return argument.starts_with("-i") || argument.starts_with("-I") || argument.starts_with("--i") || argument.starts_with('@')
                     || argument.starts_with("-working-directory");
            }));
 }
@@ -720,7 +720,7 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
 }
 
 std::string sourceKernelText(const std::string &source, const std::string &name) {
-  auto identifier = [](char value) {
+  const auto identifier = [](char value) {
     const auto character = static_cast<unsigned char>(value);
     return std::isalnum(character) || value == '_';
   };

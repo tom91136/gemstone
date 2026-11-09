@@ -194,7 +194,7 @@ std::unique_ptr<AqlQueue> DoorbellMonitor::registerQueue(void *ring, size_t ring
                                                          uint64_t *writeIndex) {
   if (!ring || !consume || ringPackets == 0 || (ringPackets & (ringPackets - 1)) != 0) return nullptr;
   try {
-    auto state = std::make_shared<QueueState>();
+    const auto state = std::make_shared<QueueState>();
     state->id = impl->nextQueue.fetch_add(1, std::memory_order_relaxed);
     state->ring = ring;
     state->ringPackets = ringPackets;

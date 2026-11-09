@@ -589,11 +589,9 @@ std::shared_ptr<Module> findModule(void **token) {
 bool loadModule(Module &module, int device) {
   auto &instance = module.instances[static_cast<size_t>(device)];
   if (instance.loaded) return true;
-  if (!module.image && module.fatbin) {
-    if (!selectBundle(module.fatbin, &module.image, &module.imageSize, &module.decompressedImage)) {
-      module.error = std::string("HIP fatbinary has no ") + gemstone::hsa::targetArch() + " bundle";
-      return false;
-    }
+  if (!module.image && module.fatbin && !selectBundle(module.fatbin, &module.image, &module.imageSize, &module.decompressedImage)) {
+    module.error = std::string("HIP fatbinary has no ") + gemstone::hsa::targetArch() + " bundle";
+    return false;
   }
   if (!module.image || module.imageSize == 0) {
     module.error = "HIP fatbinary has no AMDGPU code object";
@@ -806,9 +804,9 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
       writeU16(hidden + 12, block.x);
       writeU16(hidden + 14, block.y);
       writeU16(hidden + 16, block.z);
-      writeU16(hidden + 18, static_cast<uint32_t>(global.x % block.x));
-      writeU16(hidden + 20, static_cast<uint32_t>(global.y % block.y));
-      writeU16(hidden + 22, static_cast<uint32_t>(global.z % block.z));
+      writeU16(hidden + 18, global.x % block.x);
+      writeU16(hidden + 20, global.y % block.y);
+      writeU16(hidden + 22, global.z % block.z);
       writeU16(hidden + 64, dispatchDimensions(grid, block));
       // hidden_hostcall_buffer: the device library's printf and assert packets
       const uint32_t hostcall = hidden + 80;
@@ -849,7 +847,7 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
   auto ownedSyncInfo = std::shared_ptr<void>(syncInfo, [launchDevice](void *memory) {
     if (memory) releaseSyncRecord(memory, launchDevice);
   });
-  return remember(enqueueCommand(stream, [=]() mutable -> int32_t {
+  return remember(enqueueCommand(stream, [=] mutable -> int32_t {
     hsa_queue_t *dispatchQueue{};
     if (hsa_queue_create(gpuAgent(launchDevice), 64, cooperative ? HSA_QUEUE_TYPE_COOPERATIVE : HSA_QUEUE_TYPE_MULTI, nullptr, nullptr,
                          UINT32_MAX, UINT32_MAX, &dispatchQueue)
@@ -1193,8 +1191,8 @@ extern "C" hipError_t hipDeviceReset() {
     records.clear();
   }
   commands().reset();
-  for (auto &module : runtime.driverModules)
-    if (auto live = module.lock()) live->reset();
+  for (const auto &module : runtime.driverModules)
+    if (const auto live = module.lock()) live->reset();
   runtime.kernels.clear();
   runtime.variables.clear();
   return remember(hipSuccess);
@@ -2170,8 +2168,8 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
       candidates = state().driverModules;
     }
     std::vector<std::weak_ptr<Module>> live;
-    for (auto &candidate : candidates) {
-      auto module = candidate.lock();
+    for (const auto &candidate : candidates) {
+      const auto module = candidate.lock();
       if (!module) continue;
       live.push_back(candidate);
       const auto global = resolveModuleKernel(*module, name, currentDevice);

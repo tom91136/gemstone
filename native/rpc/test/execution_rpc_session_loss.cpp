@@ -12,7 +12,7 @@ TEST_CASE("execution RPC reports session loss", "[rpc][integration]") {
   auto allocation = client->call(RegisterAllocation{{8}});
   REQUIRE((allocation));
   REQUIRE((!client->call(WriteAllocation{allocation.value(), 0, {42}})));
-  auto release = client->call(ReleaseAllocation{allocation.value()});
+  const auto release = client->call(ReleaseAllocation{allocation.value()});
   REQUIRE((!release));
   REQUIRE((release.error().detail.contains("session was lost")));
 }

@@ -369,9 +369,8 @@ public:
   static std::shared_ptr<PendingJob> track(Engine &engine, uint32_t priority, std::vector<EventWait> waits) {
     auto job = std::make_shared<PendingJob>(engine, priority, std::move(waits));
     for (size_t index = 0; index < job->waits.size(); ++index) {
-      auto &wait = job->waits[index];
-      std::scoped_lock const eventLock(wait.event->mutex);
-      std::scoped_lock const lock(job->mutex);
+      const auto &wait = job->waits[index];
+      std::scoped_lock const lock(wait.event->mutex, job->mutex);
       if (!job->reached[index] && eventReached(wait.event, wait.target)) job->reach(index);
     }
     return job;
@@ -489,7 +488,7 @@ struct AsyncStream {
       if (pending) pending->arm();
       else reserved = engine.enqueue(priority);
     }
-    return commandQueue().submit(stream, [this, pending = std::move(pending), reserved, kernel, job = std::move(job)]() mutable {
+    return commandQueue().submit(stream, [this, pending = std::move(pending), reserved, kernel, job = std::move(job)] mutable {
       if (pending) reserved = pending->claim(failure.load(std::memory_order_acquire) == ZE_RESULT_SUCCESS);
       EngineTurn const turn(engine, priority, reserved, !kernel);
       ze_result_t result{};

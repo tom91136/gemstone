@@ -174,8 +174,8 @@ template <class Backend> int compareTraffic(Backend &backend) {
   std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   std::atomic_bool cancelled{false};
   auto host = std::async(std::launch::async, [&] {
-    auto published = std::atomic_ref<Word>(input[0]);
-    auto acknowledged = std::atomic_ref<Word>(input[2]);
+    const auto published = std::atomic_ref<Word>(input[0]);
+    const auto acknowledged = std::atomic_ref<Word>(input[2]);
     const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(90));
     std::exception_ptr failure;
     for (unsigned round = 0; round < 32; ++round) {
@@ -300,7 +300,7 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
   auto host = std::async(std::launch::async, [&] {
     publishCounter(directory, launch, input);
     checkpoint(directory, launch, "before", [] {});
-    auto state = std::atomic_ref<Word>(input[0]);
+    const auto state = std::atomic_ref<Word>(input[0]);
     const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(90));
     std::exception_ptr failure;
     for (unsigned round = 0; round < 32; ++round) {
@@ -411,7 +411,7 @@ template <class Word, class Backend> int submission(Backend &backend) {
   std::fill_n(output, 32, Word{});
   std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << '\n';
   auto handshake = [&] {
-    auto state = std::atomic_ref<Word>(input[0]);
+    const auto state = std::atomic_ref<Word>(input[0]);
     const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
     for (unsigned round = 0; round < 32; ++round) {
       input[1] = 73 + round;
@@ -462,7 +462,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
   }
   auto round = [&](unsigned i, unsigned n) {
     input[i][1] = 71 + i + n;
-    auto flag = std::atomic_ref<Word>(input[i][0]);
+    const auto flag = std::atomic_ref<Word>(input[i][0]);
     flag.store(1, std::memory_order_release);
     const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
     while (flag.load(std::memory_order_acquire) != 2) {
@@ -517,7 +517,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
 // A dependent pointer chain cannot be replaced by indexing into the source array.
 // Actual concurrent kernels, with flags providing deterministic ordering. No speed gate.
 template <class Backend> int reviewCases(Backend &backend) {
-  auto wait = [](uint32_t &word, uint32_t value) {
+  const auto wait = [](uint32_t &word, uint32_t value) {
     const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(25));
     while (std::atomic_ref<uint32_t>(word).load(std::memory_order_acquire) != value) {
       require(std::chrono::steady_clock::now() < deadline, "memory review handshake stopped progressing");

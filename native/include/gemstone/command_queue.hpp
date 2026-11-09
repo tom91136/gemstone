@@ -373,7 +373,7 @@ private:
       execute(std::move(job), lock);
     }
     auto abandoned = std::exchange(jobs, {});
-    for (auto &job : abandoned) {
+    for (const auto &job : abandoned) {
       job.ticket->status = exceptionStatus;
       job.ticket->done = true;
       job.ticket->dependencies.clear();

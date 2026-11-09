@@ -485,7 +485,7 @@ private:
   static void send(int socket, const std::vector<uint8_t> &bytes) {
     size_t offset = 0;
     while (offset < bytes.size()) {
-      auto count = ::send(socket, bytes.data() + offset, bytes.size() - offset, MSG_NOSIGNAL);
+      const auto count = ::send(socket, bytes.data() + offset, bytes.size() - offset, MSG_NOSIGNAL);
       GEMSTONE_RPC_REQUIRE(count > 0);
       offset += count;
     }
@@ -710,7 +710,7 @@ private:
         const auto name = request.name.value;
         const auto allocation = static_cast<uint64_t>(request.allocation.value);
         const auto offset = static_cast<uint64_t>(request.offset.value);
-        auto expected = expectedGlobals.find(name);
+        const auto expected = expectedGlobals.find(name);
         GEMSTONE_RPC_REQUIRE(expected != expectedGlobals.end() && expected->second.first == offset);
         auto &memory = allocations.at(allocation);
         const auto &initial = expected->second.second;

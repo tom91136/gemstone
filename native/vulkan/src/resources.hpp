@@ -20,5 +20,5 @@ uint8_t *imageData(const Image &image);
 std::optional<StageResources> descriptorResources(const std::vector<gx::ShaderDescriptor> &bindings,
                                                   const std::array<VkDescriptorSet, MaxBoundDescriptorSets> &sets,
                                                   const std::map<DescriptorSlot, uint32_t> &dynamicOffsets, uint32_t inputView = 0);
-bool execute(Execution &execution, const recorded::Dispatch &dispatch);
+bool apply(Execution &execution, const recorded::Dispatch &dispatch);
 } // namespace gemstone::vulkan

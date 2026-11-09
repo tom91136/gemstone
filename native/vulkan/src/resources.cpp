@@ -270,7 +270,7 @@ std::optional<StageResources> descriptorResources(const std::vector<gx::ShaderDe
   return result;
 }
 
-bool execute(Execution &, const recorded::Dispatch &dispatch) {
+bool apply(Execution &, const recorded::Dispatch &dispatch) {
   // Vulkan permits zero workgroups in any axis; this performs no work.
   if (!dispatch.x || !dispatch.y || !dispatch.z) return true;
   gx::PreparedShader pipeline;

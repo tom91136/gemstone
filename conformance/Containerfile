@@ -139,6 +139,77 @@ COPY --from=llvm-offload-archive llvm-offload.tar.zst /tmp/
 RUN zstd -dc --long=30 /tmp/llvm-offload.tar.zst | tar -xf - -C / \
     && rm /tmp/llvm-offload.tar.zst
 
+# The AlmaLinux 8 tree sets the glibc floor of native DSOs. It is the --sysroot for the native toolchain.
+FROM quay.io/almalinuxorg/almalinux@sha256:7596d3c7d159ec8e1df2b7d2b961db939de291a3e00c5e4d8f6a9d610b3b6d35 AS sysroot
+ARG RHEL_TRIPLE=x86_64-redhat-linux
+ARG GNU_TRIPLE=x86_64-linux-gnu
+RUN dnf install -y dnf-plugins-core && dnf config-manager --set-enabled powertools
+RUN mkdir -p /opt/sysroot \
+ && dnf --installroot /opt/sysroot --releasever 8 --setopt install_weak_deps=false --nodocs -y install \
+        glibc glibc-devel glibc-headers glibc-static \
+        libgcc libstdc++ libstdc++-devel libstdc++-static \
+        libatomic libatomic-static \
+        libgfortran \
+        kernel-headers \
+        gcc gcc-c++ \
+        gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
+        gcc-toolset-15-libstdc++-devel gcc-toolset-15-libatomic-devel \
+ && dnf --installroot /opt/sysroot clean all
+RUN rm -rf \
+    /opt/sysroot/usr/share/{locale,doc,man,info} \
+    /opt/sysroot/boot \
+    /opt/sysroot/var/{cache,log,lib}/{dnf,rpm,yum.*}
+RUN cd /opt/sysroot/usr/lib64 \
+ && ln -sf libstdc++.so.6   libstdc++.so   \
+ && ln -sf libgcc_s.so.1    libgcc_s.so    \
+ && ln -sf libquadmath.so.0 libquadmath.so \
+ && ln -sf libgfortran.so.5 libgfortran.so \
+ && ln -sf libatomic.so.1   libatomic.so   \
+ && cd "/opt/sysroot/usr/lib/gcc/${RHEL_TRIPLE}/8" \
+ && ln -sf ../../../../lib64/libstdc++.so.6 libstdc++.so
+RUN ln -sfn "${RHEL_TRIPLE}" "/opt/sysroot/usr/lib/gcc/${GNU_TRIPLE}" \
+ && ln -sfn "${RHEL_TRIPLE}" "/opt/sysroot/usr/include/c++/8/${GNU_TRIPLE}"
+RUN chmod -R u+rwX /opt/sysroot
+
+FROM ubuntu-build-base AS native-toolchain
+ARG LLVM_TOOLS_RELEASE
+ARG LLVM_TOOLS_RELEASE_SHA256
+ARG LLVM_TOOLS_SOURCE_SHA256
+RUN apt-get update && apt-get install --no-install-recommends --yes xz-utils curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_TOOLS_RELEASE}/LLVM-${LLVM_TOOLS_RELEASE}-Linux-X64.tar.xz" \
+       -o /tmp/llvm.tar.xz \
+    && echo "${LLVM_TOOLS_RELEASE_SHA256}  /tmp/llvm.tar.xz" | sha256sum --check --strict \
+    && mkdir /opt/llvm \
+    && tar -xJf /tmp/llvm.tar.xz --strip-components=1 -C /opt/llvm \
+    && rm /tmp/llvm.tar.xz
+ENV PATH=/opt/llvm/bin:${PATH}
+COPY --from=sysroot /opt/sysroot /opt/sysroot
+RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_TOOLS_RELEASE}/llvm-project-${LLVM_TOOLS_RELEASE}.src.tar.xz" \
+       -o /tmp/llvm-src.tar.xz \
+    && echo "${LLVM_TOOLS_SOURCE_SHA256}  /tmp/llvm-src.tar.xz" | sha256sum --check --strict \
+    && mkdir /tmp/llvm-src \
+    && tar -xJf /tmp/llvm-src.tar.xz --strip-components=1 -C /tmp/llvm-src \
+    && rm /tmp/llvm-src.tar.xz
+# Hermetic static PIC libc++ keeps DSOs off the host libstdc++ and its locale registry.
+RUN cmake -S /tmp/llvm-src/runtimes -B /tmp/runtimes-build -G Ninja \
+       -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/libcxx \
+       -DCMAKE_C_COMPILER=/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ \
+       -DCMAKE_C_COMPILER_TARGET=x86_64-linux-gnu -DCMAKE_CXX_COMPILER_TARGET=x86_64-linux-gnu \
+       -DCMAKE_SYSROOT=/opt/sysroot -DCMAKE_AR=/opt/llvm/bin/llvm-ar -DCMAKE_RANLIB=/opt/llvm/bin/llvm-ranlib \
+       -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DLLVM_USE_LINKER=lld -DLLVM_INCLUDE_TESTS=OFF \
+       -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
+       -DLIBCXX_ENABLE_SHARED=OFF -DLIBCXX_ENABLE_STATIC=ON \
+       -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON -DLIBCXX_HERMETIC_STATIC_LIBRARY=ON \
+       -DLIBCXX_CXX_ABI=libcxxabi -DLIBCXX_STATICALLY_LINK_ABI_IN_STATIC_LIBRARY=ON \
+       -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXX_INCLUDE_DOCS=OFF \
+       -DLIBCXXABI_ENABLE_SHARED=OFF -DLIBCXXABI_ENABLE_STATIC=ON \
+       -DLIBCXXABI_USE_LLVM_UNWINDER=ON -DLIBCXXABI_ENABLE_STATIC_UNWINDER=ON \
+       -DLIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY=ON \
+       -DLIBUNWIND_ENABLE_SHARED=OFF -DLIBUNWIND_ENABLE_STATIC=ON -DLIBUNWIND_INCLUDE_DOCS=OFF \
+    && ninja -C /tmp/runtimes-build -j16 install \
+    && rm -rf /tmp/llvm-src /tmp/runtimes-build
+
 FROM jobserver-ninja AS cccl
 ARG CCCL_VERSION
 ARG CCCL_SHA256

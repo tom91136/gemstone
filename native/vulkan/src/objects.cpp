@@ -76,12 +76,12 @@ VkResult implVkCreateBuffer(VkDevice, const VkBufferCreateInfo *info, const VkAl
 
 VkResult implVkCreateBufferView(VkDevice, const VkBufferViewCreateInfo *info, const VkAllocationCallbacks *, VkBufferView *view) {
   if (!info || !view) return VK_ERROR_INITIALIZATION_FAILED;
-  if (!storageColourFormat(info->format) && info->format != VK_FORMAT_B8G8R8A8_UNORM) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+  const auto size = texelSize(info->format);
+  if (!size || (!storageColourFormat(info->format) && info->format != VK_FORMAT_B8G8R8A8_UNORM)) return VK_ERROR_FORMAT_NOT_SUPPORTED;
   std::scoped_lock const lock(stateMutex);
   const auto buffer = buffers.find(info->buffer);
   if (buffer == buffers.end() || info->offset >= buffer->second.size) return VK_ERROR_INITIALIZATION_FAILED;
   const auto remaining = buffer->second.size - info->offset;
-  const auto size = texelSize(info->format);
   const auto range = info->range == VK_WHOLE_SIZE ? remaining / size * size : info->range;
   if (!range || range > remaining || range % size || range / size > UINT32_MAX) return VK_ERROR_INITIALIZATION_FAILED;
   *view = makeHandle<VkBufferView>();

@@ -410,7 +410,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((clBuildProgram(specialized, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   REQUIRE((server.programLoads.load() == loadsBeforeSpecialization + 1));
   auto forwarded = server.lastSpecialization();
-  auto forwardedValue = [&](uint32_t id) -> const std::vector<uint8_t> * {
+  const auto forwardedValue = [&](uint32_t id) -> const std::vector<uint8_t> * {
     const auto found = std::find_if(forwarded.begin(), forwarded.end(), [&](const auto &entry) { return entry.first == id; });
     return found == forwarded.end() ? nullptr : &found->second;
   };

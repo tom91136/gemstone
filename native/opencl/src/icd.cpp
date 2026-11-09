@@ -932,7 +932,7 @@ cl_int enqueuePending(_cl_command_queue *queue, cl_command_type type, std::vecto
     return CL_OUT_OF_HOST_MEMORY;
   }
   try {
-    auto command = std::make_shared<PendingCommand>(std::move(dependencies), created, std::move(execute), finish, std::move(uses));
+    const auto command = std::make_shared<PendingCommand>(std::move(dependencies), created, std::move(execute), finish, std::move(uses));
     const bool outOfOrder = (queue->properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) != 0;
     const auto order =
         outOfOrder && sync != Sync::Barrier ? gemstone::CommandQueue::Order::Unordered : gemstone::CommandQueue::Order::Ordered;
@@ -2500,7 +2500,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseSampler(cl_sampler value) {
   auto *sampler = checked(value);
   if (!sampler) return CL_INVALID_SAMPLER;
   if (release(sampler)) {
-    auto record = sampler->record;
+    const auto record = sampler->record;
     auto *context = sampler->context;
     destroyObject(sampler);
     releaseAllocation(record);
@@ -2546,8 +2546,8 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseMemObject(cl_mem value) {
   if (release(mem)) {
     for (auto callback = mem->destructorCallbacks.rbegin(); callback != mem->destructorCallbacks.rend(); ++callback)
       callback->first(reinterpret_cast<cl_mem>(mem), callback->second);
-    auto allocation = mem->allocation;
-    auto record = mem->image ? mem->image->record : nullptr;
+    const auto allocation = mem->allocation;
+    const auto record = mem->image ? mem->image->record : nullptr;
     auto *context = mem->context;
     auto *parent = mem->parent;
     destroyObject(mem);
@@ -2663,7 +2663,7 @@ cl_int bindProgramGlobals(ProgramBuild &build, const std::vector<GlobalSymbol> &
     }
     if (bytes == 0) continue;
     cl_int error = CL_SUCCESS;
-    auto allocation = allocate(bytes, &error);
+    const auto allocation = allocate(bytes, &error);
     if (!allocation) return error;
     build.globals.push_back(allocation);
     build.globalBytes += bytes;
@@ -3667,19 +3667,19 @@ cl_int enqueueBufferTransfer(_cl_command_queue *queue, _cl_mem *mem, cl_bool blo
                              cl_uint count, const cl_event *waits, cl_event *event) {
   constexpr bool reading = !std::is_const_v<Host>;
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (mem && (mem->image || mem->pipe)) return CL_INVALID_MEM_OBJECT;
   if (!mem || !pointer || !validMemoryRange(mem, offset, size)) return CL_INVALID_VALUE;
   if (mem->context != queue->context) return CL_INVALID_CONTEXT;
   if (reading ? !hostReadAllowed(mem) : !hostWriteAllowed(mem)) return CL_INVALID_OPERATION;
   const auto type = reading ? CL_COMMAND_READ_BUFFER : CL_COMMAND_WRITE_BUFFER;
-  auto execute = [=] {
+  const auto execute = [=] {
     if constexpr (reading) return readAllocation(mem->allocation, allocationOffset(mem, offset), pointer, size);
     else return writeAllocation(mem->allocation, allocationOffset(mem, offset), pointer, size);
   };
   try {
-    auto retained = retainMemory(mem);
+    const auto retained = retainMemory(mem);
     return submitCommand(
         queue, type, blocking, count, waits,
         [execute, retained] {
@@ -3738,7 +3738,7 @@ cl_int enqueueReadBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool blocki
                              size_t hostRowPitch, size_t hostSlicePitch, void *output, cl_uint count, const cl_event *waits,
                              cl_event *event, cl_command_type type = CL_COMMAND_READ_BUFFER_RECT) {
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!mem || mem->context != queue->context || !output || !bufferOrigin || !hostOrigin || !region) return CL_INVALID_VALUE;
   if (!hostReadAllowed(mem)) return CL_INVALID_OPERATION;
@@ -3756,7 +3756,7 @@ cl_int enqueueReadBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool blocki
   const std::array<size_t, 3> copiedBufferOrigin{bufferOrigin[0], bufferOrigin[1], bufferOrigin[2]};
   const std::array<size_t, 3> copiedHostOrigin{hostOrigin[0], hostOrigin[1], hostOrigin[2]};
   const std::array<size_t, 3> copiedRegion{region[0], region[1], region[2]};
-  auto retainedMemory = retainMemory(mem);
+  const auto retainedMemory = retainMemory(mem);
   auto execute = [=] {
     (void)retainedMemory;
     const auto *bufferOrigin = copiedBufferOrigin.data();
@@ -3781,7 +3781,7 @@ cl_int enqueueWriteBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool block
                               size_t hostRowPitch, size_t hostSlicePitch, const void *input, cl_uint count, const cl_event *waits,
                               cl_event *event, cl_command_type type = CL_COMMAND_WRITE_BUFFER_RECT) {
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!mem || mem->context != queue->context || !input || !bufferOrigin || !hostOrigin || !region) return CL_INVALID_VALUE;
   if (!hostWriteAllowed(mem)) return CL_INVALID_OPERATION;
@@ -3799,7 +3799,7 @@ cl_int enqueueWriteBufferRect(_cl_command_queue *queue, _cl_mem *mem, bool block
   const std::array<size_t, 3> copiedBufferOrigin{bufferOrigin[0], bufferOrigin[1], bufferOrigin[2]};
   const std::array<size_t, 3> copiedHostOrigin{hostOrigin[0], hostOrigin[1], hostOrigin[2]};
   const std::array<size_t, 3> copiedRegion{region[0], region[1], region[2]};
-  auto retainedMemory = retainMemory(mem);
+  const auto retainedMemory = retainMemory(mem);
   auto execute = [=] {
     (void)retainedMemory;
     const auto *bufferOrigin = copiedBufferOrigin.data();
@@ -3824,7 +3824,7 @@ cl_int enqueueCopyBufferRect(_cl_command_queue *queue, _cl_mem *source, _cl_mem 
                              size_t targetRowPitch, size_t targetSlicePitch, cl_uint count, const cl_event *waits, cl_event *event,
                              cl_command_type type = CL_COMMAND_COPY_BUFFER_RECT) {
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!source || !target || source->context != queue->context || target->context != queue->context || !sourceOrigin || !targetOrigin
       || !region)
@@ -3846,8 +3846,8 @@ cl_int enqueueCopyBufferRect(_cl_command_queue *queue, _cl_mem *source, _cl_mem 
   const std::array<size_t, 3> copiedSourceOrigin{sourceOrigin[0], sourceOrigin[1], sourceOrigin[2]};
   const std::array<size_t, 3> copiedTargetOrigin{targetOrigin[0], targetOrigin[1], targetOrigin[2]};
   const std::array<size_t, 3> copiedRegion{region[0], region[1], region[2]};
-  auto retainedSource = retainMemory(source);
-  auto retainedTarget = retainMemory(target);
+  const auto retainedSource = retainMemory(source);
+  const auto retainedTarget = retainMemory(target);
   auto execute = [=] {
     (void)retainedSource;
     (void)retainedTarget;
@@ -4152,7 +4152,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillImage(cl_command_queue queueValue, 
   row.reserve(texel.size() * box.region[0]);
   for (size_t x = 0; x < box.region[0]; ++x)
     row.insert(row.end(), texel.begin(), texel.end());
-  auto retained = retainMemory(mem);
+  const auto retained = retainMemory(mem);
   return submitCommand(
       queue, CL_COMMAND_FILL_IMAGE, false, count, waits,
       [=] {
@@ -4217,7 +4217,7 @@ CL_API_ENTRY void *CL_API_CALL clEnqueueMapImage(cl_command_queue queueValue, cl
   mapping->rows = rows;
   *rowPitch = rows.hostRow;
   if (slicePitch) *slicePitch = type == CL_MEM_OBJECT_IMAGE3D || arrayed(type) ? rows.hostSlice : 0;
-  auto retained = retainMemory(mem);
+  const auto retained = retainMemory(mem);
   const auto key = reinterpret_cast<uintptr_t>(mapping->pointer);
   {
     std::scoped_lock const lock(allocationsMutex);
@@ -4274,7 +4274,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queueValue,
   auto *src = checked(sourceValue);
   auto *dst = checked(destinationValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!src || !dst || src->context != queue->context || dst->context != queue->context || !validMemoryRange(src, sourceOffset, size)
       || !validMemoryRange(dst, destinationOffset, size))
@@ -4282,8 +4282,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queueValue,
   if (immutable(dst)) return CL_INVALID_OPERATION;
   const size_t allocationSourceOffset = allocationOffset(src, sourceOffset);
   const size_t allocationTargetOffset = allocationOffset(dst, destinationOffset);
-  auto source = retainMemory(src);
-  auto target = retainMemory(dst);
+  const auto source = retainMemory(src);
+  const auto target = retainMemory(dst);
   return submitCommand(
       queue, CL_COMMAND_COPY_BUFFER, false, count, waits,
       [=] {
@@ -4303,14 +4303,14 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue queueValue,
   auto *queue = checked(queueValue);
   auto *mem = checked(memoryValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!mem || mem->context != queue->context || !pattern || patternSize == 0 || size % patternSize != 0
       || !validMemoryRange(mem, offset, size))
     return CL_INVALID_VALUE;
   if (immutable(mem)) return CL_INVALID_OPERATION;
   const size_t targetOffset = allocationOffset(mem, offset);
-  auto retained = retainMemory(mem);
+  const auto retained = retainMemory(mem);
   std::vector<uint8_t> const copiedPattern(static_cast<const uint8_t *>(pattern), static_cast<const uint8_t *>(pattern) + patternSize);
   return submitCommand(
       queue, CL_COMMAND_FILL_BUFFER, false, count, waits,
@@ -4351,7 +4351,7 @@ CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queueValue, c
   mapping->offset = allocationOffset(mem, offset);
   mapping->size = size;
   mapping->pointer = pointer;
-  auto retained = retainMemory(mem);
+  const auto retained = retainMemory(mem);
   const auto key = reinterpret_cast<uintptr_t>(pointer);
   {
     std::scoped_lock const lock(allocationsMutex);
@@ -4382,7 +4382,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queueVa
   auto *mem = checked(memoryValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (!mem || mem->context != queue->context || !pointer) return CL_INVALID_MEM_OBJECT;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   std::shared_ptr<BufferMapping> mapping;
   const auto key = reinterpret_cast<uintptr_t>(pointer);
@@ -4394,7 +4394,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queueVa
     mapping = found->second;
     mapping->unmapping = true;
   }
-  auto retained = retainMemory(mem);
+  const auto retained = retainMemory(mem);
   return submitCommand(
       queue, CL_COMMAND_UNMAP_MEM_OBJECT, false, count, waits,
       [=] {
@@ -4578,7 +4578,7 @@ CL_API_ENTRY void *CL_API_CALL clSVMAlloc(cl_context contextValue, cl_svm_mem_fl
       || ((flags & CL_MEM_SVM_ATOMICS) && !(flags & CL_MEM_SVM_FINE_GRAIN_BUFFER)))
     return nullptr;
   cl_int error = CL_SUCCESS;
-  auto allocation = allocate(size, &error, alignment, true);
+  const auto allocation = allocate(size, &error, alignment, true);
   if (allocation) {
     allocation->runtimeOwnsBase = true;
     allocation->svmContextIdentity = context->identity;
@@ -4589,7 +4589,7 @@ CL_API_ENTRY void CL_API_CALL clSVMFree(cl_context, void *pointer) {
   std::shared_ptr<Allocation> allocation;
   {
     std::scoped_lock const lock(allocationsMutex);
-    auto found = allocations.find(reinterpret_cast<uintptr_t>(pointer));
+    const auto found = allocations.find(reinterpret_cast<uintptr_t>(pointer));
     if (found == allocations.end()) return;
     allocation = found->second;
     const auto start = reinterpret_cast<uintptr_t>(allocation->data());
@@ -4607,12 +4607,12 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if ((count == 0) != (pointers == nullptr)) return CL_INVALID_VALUE;
-  auto result = validateWaitList(queue, waitCount, waits);
+  const auto result = validateWaitList(queue, waitCount, waits);
   if (result != CL_SUCCESS) return result;
   std::vector<void *> copiedPointers;
   if (count != 0) copiedPointers.assign(pointers, pointers + count);
   for (void *pointer : copiedPointers) {
-    auto allocation = findPointer(pointer);
+    const auto allocation = findPointer(pointer);
     if (allocation && allocation->svmContextIdentity != 0 && allocation->svmContextIdentity != queue->context->identity)
       return CL_INVALID_VALUE;
     if (!callback && (!allocation || allocation->data() != pointer || !allocation->runtimeOwnsBase || allocation->svmContextIdentity == 0))
@@ -4620,7 +4620,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl
   }
   return submitCommand(
       queue, CL_COMMAND_SVM_FREE, false, waitCount, waits,
-      [=]() mutable {
+      [=] mutable {
         if (callback) callback(queueValue, count, copiedPointers.data(), userData);
         else
           for (void *pointer : copiedPointers)
@@ -4635,7 +4635,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueVal
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (count == 0 || !pointers || (flags & ~(CL_MIGRATE_MEM_OBJECT_HOST | CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED))) return CL_INVALID_VALUE;
-  auto result = validateWaitList(queue, waitCount, waits);
+  const auto result = validateWaitList(queue, waitCount, waits);
   if (result != CL_SUCCESS) return result;
   struct MigrationRange {
     std::shared_ptr<Allocation> allocation;
@@ -4674,7 +4674,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, 
                                                    cl_uint count, const cl_event *waits, cl_event *event) {
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (!dst || !src) return CL_INVALID_VALUE;
   const auto destinationAddress = reinterpret_cast<uintptr_t>(dst);
@@ -4684,8 +4684,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, 
     return CL_MEM_COPY_OVERLAP;
   size_t destinationOffset = 0;
   size_t sourceOffset = 0;
-  auto destinationAllocation = findPointer(dst, &destinationOffset);
-  auto sourceAllocation = findPointer(src, &sourceOffset);
+  const auto destinationAllocation = findPointer(dst, &destinationOffset);
+  const auto sourceAllocation = findPointer(src, &sourceOffset);
   if (destinationAllocation && !validRange(destinationAllocation, destinationOffset, size)) return CL_INVALID_VALUE;
   if (sourceAllocation && !validRange(sourceAllocation, sourceOffset, size)) return CL_INVALID_VALUE;
   return submitCommand(
@@ -4718,10 +4718,10 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue,
                                                     size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto waited = validateWaitList(queue, count, waits);
+  const auto waited = validateWaitList(queue, count, waits);
   if (waited != CL_SUCCESS) return waited;
   size_t offset = 0;
-  auto allocation = findPointer(pointer, &offset);
+  const auto allocation = findPointer(pointer, &offset);
   if (!pointer || !pattern || patternSize == 0 || size % patternSize != 0 || (allocation && !validRange(allocation, offset, size)))
     return CL_INVALID_VALUE;
   std::vector<uint8_t> const copiedPattern(static_cast<const uint8_t *>(pattern), static_cast<const uint8_t *>(pattern) + patternSize);
@@ -4732,7 +4732,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue,
         for (size_t index = 0; index < size; ++index)
           bytes[index] = copiedPattern[index % patternSize];
         if (!allocation) return CL_SUCCESS;
-        auto result = writeAllocation(allocation, offset, bytes, size);
+        const auto result = writeAllocation(allocation, offset, bytes, size);
         if (result != CL_SUCCESS) return result;
         return CL_SUCCESS;
       },
@@ -4742,10 +4742,10 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_
                                                 cl_uint count, const cl_event *waits, cl_event *event) {
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   size_t offset = 0;
-  auto allocation = findPointer(pointer, &offset);
+  const auto allocation = findPointer(pointer, &offset);
   if (!pointer || size == 0 || (allocation && !validRange(allocation, offset, size))) return CL_INVALID_VALUE;
   auto mapping = std::make_shared<BufferMapping>();
   mapping->offset = offset;
@@ -4771,10 +4771,10 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, v
                                                   cl_event *event) {
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto result = validateWaitList(queue, count, waits);
+  const auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   size_t offset = 0;
-  auto allocation = findPointer(pointer, &offset);
+  const auto allocation = findPointer(pointer, &offset);
   std::shared_ptr<BufferMapping> mapping;
   const auto key = reinterpret_cast<uintptr_t>(pointer);
   {
@@ -4807,7 +4807,7 @@ void *allocateUSM(cl_context contextValue, cl_device_id deviceValue, cl_unified_
   if (!context) return fail(error, CL_INVALID_CONTEXT);
   if (type != CL_MEM_TYPE_HOST_INTEL && (deviceValue || type == CL_MEM_TYPE_DEVICE_INTEL) && !contextHasDevice(context, deviceValue))
     return fail(error, CL_INVALID_DEVICE);
-  auto allocation = allocate(size, error, alignment, type != CL_MEM_TYPE_DEVICE_INTEL);
+  const auto allocation = allocate(size, error, alignment, type != CL_MEM_TYPE_DEVICE_INTEL);
   if (allocation) {
     allocation->runtimeOwnsBase = true;
     allocation->svmContextIdentity = context->identity;
@@ -4857,7 +4857,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemAllocInfoINTEL(cl_context contextValue, 
   auto *context = checked(contextValue);
   if (!context) return CL_INVALID_CONTEXT;
   size_t offset = 0;
-  auto allocation = findPointer(pointer, &offset);
+  const auto allocation = findPointer(pointer, &offset);
   if (!allocation || allocation->usmType == CL_MEM_TYPE_UNKNOWN_INTEL || allocation->svmContextIdentity != context->identity
       || offset >= allocation->size) {
     if (name == CL_MEM_ALLOC_TYPE_INTEL)
@@ -4892,7 +4892,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemAdviseINTEL(cl_command_queue queueVa
   auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   size_t offset = 0;
-  auto allocation = findPointer(pointer, &offset);
+  const auto allocation = findPointer(pointer, &offset);
   if (!validRange(allocation, offset, size)) return CL_INVALID_VALUE;
   return submitCommand(
       queue, CL_COMMAND_MEMADVISE_INTEL, false, count, waits, [] { return CL_SUCCESS; }, event, {}, allocationUses({allocation}));

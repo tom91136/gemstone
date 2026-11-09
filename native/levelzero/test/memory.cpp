@@ -156,7 +156,7 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
                         | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;
     require(properties.sharedSingleDeviceAllocCapabilities == shared, "L0 shared allocation concurrency unavailable");
     require(properties.hostAllocCapabilities == shared, "L0 host allocation concurrency unavailable");
-    for (auto flags :
+    for (const auto flags :
          {properties.deviceAllocCapabilities, properties.sharedCrossDeviceAllocCapabilities, properties.sharedSystemAllocCapabilities}) {
       require(flags & ZE_MEMORY_ACCESS_CAP_FLAG_RW, "L0 memory access unavailable");
       require(!(flags & (ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC)),

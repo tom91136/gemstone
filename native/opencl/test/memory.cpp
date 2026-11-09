@@ -141,7 +141,7 @@ struct MemoryClient : MemoryClientBase<MemoryClient> {
     check(clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES, sizeof(svm), &svm, nullptr));
     require(svm & CL_DEVICE_SVM_FINE_GRAIN_BUFFER, "OpenCL fine-grained SVM unavailable");
     require(svm & CL_DEVICE_SVM_ATOMICS, "OpenCL SVM atomics unavailable");
-    for (auto name : {CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL, CL_DEVICE_SINGLE_DEVICE_SHARED_MEM_CAPABILITIES_INTEL}) {
+    for (const auto name : {CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL, CL_DEVICE_SINGLE_DEVICE_SHARED_MEM_CAPABILITIES_INTEL}) {
       cl_device_unified_shared_memory_capabilities_intel flags{};
       check(clGetDeviceInfo(device, name, sizeof(flags), &flags, nullptr));
       require(flags & CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL, "Intel USM concurrency unavailable");

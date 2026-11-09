@@ -51,7 +51,7 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1036");
   std::array<unsigned char, 792> properties{};
   REQUIRE((query(properties.data(), 0) == hipSuccess));
-  auto word = [&](size_t offset) {
+  const auto word = [&](size_t offset) {
     int value = 0;
     std::memcpy(&value, properties.data() + offset, sizeof(value));
     return value;
@@ -580,7 +580,7 @@ void pointerAttributes() {
   }
   REQUIRE((hipHostUnregister(ordinary) == hipSuccess));
   REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipErrorInvalidValue));
-  for (auto kind : {hipMemoryTypeHost, hipMemoryTypeDevice, hipMemoryTypeManaged}) {
+  for (const auto kind : {hipMemoryTypeHost, hipMemoryTypeDevice, hipMemoryTypeManaged}) {
     void *pointer = nullptr;
     if (kind == hipMemoryTypeHost) REQUIRE((hipHostMalloc(&pointer, 32, 0) == hipSuccess));
     else if (kind == hipMemoryTypeManaged) REQUIRE((hipMallocManaged(&pointer, 32) == hipSuccess));
@@ -1097,7 +1097,7 @@ TEST_CASE("HIP device properties and attributes follow the device model", "[hip]
     const auto model = gemstone::hsa::deviceModel(name);
     hipDeviceProp_tR0600 properties{};
     REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
-    auto attribute = [](hipDeviceAttribute_t id) {
+    const auto attribute = [](hipDeviceAttribute_t id) {
       int value = -1;
       REQUIRE((hipDeviceGetAttribute(&value, id, 0) == hipSuccess));
       return value;
