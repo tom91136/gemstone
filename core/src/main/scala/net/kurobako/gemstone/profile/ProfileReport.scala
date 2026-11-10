@@ -226,14 +226,6 @@ object ProfileReport {
     ranked(found)
   }
 
-  private def pipeRate(rates: Architecture.Throughput, pipe: Pipe): Architecture.Sourced[Double] = pipe match {
-    case Pipe.Fma    => rates.fma
-    case Pipe.Alu    => rates.alu
-    case Pipe.Mufu   => rates.mufu
-    case Pipe.Fp64   => rates.fp64
-    case Pipe.Tensor => rates.tensor
-  }
-
   private def term(
       binding: Binding,
       work: Double,
@@ -295,7 +287,7 @@ object ProfileReport {
         val terms = Vec(
           Some((Binding.Issue, issues / rates.issues.value, rates.issues.source)),
           instruction.pipe.flatMap { pipe =>
-            val rate = pipeRate(rates, pipe)
+            val rate = rates.rate(pipe)
             term(Binding.Arithmetic(pipe), lanes, rate, rate.source)
           },
           term(Binding.LoadStore, sectors, rates.loadStore, sectorSource),

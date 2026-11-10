@@ -76,7 +76,15 @@ object Architecture {
       shared: Sourced[Double],
       loads: Option[Sourced[Double]] = None,
       dram: Option[Sourced[Double]] = None
-  ) derives CanEqual
+  ) derives CanEqual {
+    def rate(pipe: Pipe): Sourced[Double] = pipe match {
+      case Pipe.Fma    => fma
+      case Pipe.Alu    => alu
+      case Pipe.Mufu   => mufu
+      case Pipe.Fp64   => fp64
+      case Pipe.Tensor => tensor
+    }
+  }
 
   /** Load-to-use cycles of a dependent chain at each memory tier. A tier is absent when no source gives its cycles.
     * `l2` and `dram` describe one named card; a sibling of that card carries an estimate naming it.
