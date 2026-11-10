@@ -8,14 +8,12 @@ add_library(gemstone_hip_runtime SHARED
 set_target_properties(gemstone_hip_runtime PROPERTIES
   OUTPUT_NAME "amdhip64"
   SOVERSION 7
-  BUILD_RPATH "$ORIGIN"
+  BUILD_WITH_INSTALL_RPATH ON
   INSTALL_RPATH "$ORIGIN")
 target_include_directories(gemstone_hip_runtime SYSTEM PRIVATE ${HIP_INCLUDE_DIR} ${HSA_INCLUDE_DIR})
 target_include_directories(gemstone_hip_runtime PRIVATE ../hsa/include ../generated/hip)
 target_compile_definitions(gemstone_hip_runtime PRIVATE __HIP_PLATFORM_AMD__=1)
 gemstone_project_target(gemstone_hip_runtime)
-# A vendor libhsa-runtime64.so.1 loads before LD_PRELOAD and its SONAME would capture the HSA provider's internal calls,
-# so HIP embeds a private provider and binds to it with -Bsymbolic.
 target_link_libraries(gemstone_hip_runtime PRIVATE
   gemstone_zstd
   gemstone_hsa_runtime_embedded

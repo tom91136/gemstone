@@ -301,6 +301,7 @@ endif()
 add_subdirectory(rpc)
 
 set(_gemstone_install_targets)
+set(_gemstone_shipped_targets)
 if(GEMSTONE_ENABLE_CUDA)
   add_subdirectory(cuda)
   list(APPEND _gemstone_install_targets gemstone_cuda)
@@ -319,6 +320,7 @@ if(GEMSTONE_ENABLE_OPENCL)
 endif()
 if(GEMSTONE_ENABLE_VULKAN)
   add_subdirectory(vulkan)
+  list(APPEND _gemstone_shipped_targets gemstone_vulkan)
   install(TARGETS gemstone_vulkan
     LIBRARY DESTINATION lib/vulkan
     RUNTIME DESTINATION lib/vulkan)
@@ -330,4 +332,13 @@ endif()
 
 if(_gemstone_install_targets)
   install(TARGETS ${_gemstone_install_targets} LIBRARY DESTINATION lib)
+endif()
+
+list(APPEND _gemstone_shipped_targets ${_gemstone_install_targets})
+if(BUILD_TESTING)
+  foreach(target IN LISTS _gemstone_shipped_targets)
+    add_test(NAME "dso/${target}-runpath"
+      COMMAND "${CMAKE_COMMAND}" "-DREADELF=${CMAKE_READELF}" "-DLIBRARY=$<TARGET_FILE:${target}>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckRunpath.cmake")
+  endforeach()
 endif()

@@ -1,0 +1,7 @@
+execute_process(COMMAND "${READELF}" -d "${LIBRARY}" OUTPUT_VARIABLE dynamic COMMAND_ERROR_IS_FATAL ANY)
+if(dynamic MATCHES "\\((RUNPATH|RPATH)\\)[^[]*\\[([^]]*)\\]")
+  set(runpath "${CMAKE_MATCH_2}")
+  if(runpath MATCHES "^$|^:|::|:$")
+    message(FATAL_ERROR "${LIBRARY} has an empty runpath entry, which the dynamic loader reads as the current directory: [${runpath}]")
+  endif()
+endif()
