@@ -585,7 +585,7 @@ struct LoadedProgram {
   uint64_t id;
   std::mutex globalsMutex;
   std::vector<Global> globals;
-  std::function<bool(LoadedProgram &)> teardown;
+  bool (*teardown)(LoadedProgram &) = nullptr;
   ~LoadedProgram() {
     if (teardown) (void)teardown(*this);
   }

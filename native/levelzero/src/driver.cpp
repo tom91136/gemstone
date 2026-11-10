@@ -15,7 +15,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <set>
 #include <string>
@@ -53,7 +52,6 @@
 #include "transfer.hpp"
 #include <sys/mman.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 
 using namespace aspartame;
 
@@ -953,38 +951,38 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
     for (const auto &command : retained->commands)
       submissions.push_back(command.prepare());
   const auto leading = submissions.empty() ? std::vector<EventWait>{} : submissions.front().waits;
-  std::function<ze_result_t()> submission = [lists = std::move(lists), submissions = std::move(submissions), fence = std::move(fence),
-                                             device] mutable {
-    ze_result_t result = ZE_RESULT_SUCCESS;
-    size_t next = 0;
-    for (const auto &retained : lists)
-      for (auto &command : retained->commands)
-        result = command.execute(submissions[next++], result);
-    reportStatus(device, result);
-    if (fence) {
-      {
-        std::scoped_lock const lock(fence->event.mutex);
-        // A successful list reset can immediately be followed by fence reset
-        // or destruction. Publish completion under the same lock as releasing
-        // list uses so those calls cannot observe a housekeeping-only pending
-        // submission or race a delayed signal from its previous use.
-        lists.clear();
-        fence->completionResult = result;
-        fence->pending = false;
-        completeEventLocked(&fence->event, ZE_RESULT_SUCCESS);
-        reserveReleasedLocked(&fence->event);
-      }
-      fence->event.changed.notify_all();
-    } else {
-      lists.clear();
-    }
-    return result;
-  };
+  auto submission =
+      std::make_optional([lists = std::move(lists), submissions = std::move(submissions), fence = std::move(fence), device] mutable {
+        ze_result_t result = ZE_RESULT_SUCCESS;
+        size_t next = 0;
+        for (const auto &retained : lists)
+          for (auto &command : retained->commands)
+            result = command.execute(submissions[next++], result);
+        reportStatus(device, result);
+        if (fence) {
+          {
+            std::scoped_lock const lock(fence->event.mutex);
+            // A successful list reset can immediately be followed by fence reset
+            // or destruction. Publish completion under the same lock as releasing
+            // list uses so those calls cannot observe a housekeeping-only pending
+            // submission or race a delayed signal from its previous use.
+            lists.clear();
+            fence->completionResult = result;
+            fence->pending = false;
+            completeEventLocked(&fence->event, ZE_RESULT_SUCCESS);
+            reserveReleasedLocked(&fence->event);
+          }
+          fence->event.changed.notify_all();
+        } else {
+          lists.clear();
+        }
+        return result;
+      });
   if (queue->async.stream) {
     // The job completes the fence under its lock, so the ticket is published first.
     std::unique_lock<std::mutex> fenceLock;
     if (submittedFence) fenceLock = std::unique_lock(submittedFence->event.mutex);
-    auto ticket = queue->async.submit([submission = std::move(submission)](ze_result_t) mutable { return submission(); }, leading);
+    auto ticket = queue->async.submit([submission = std::move(submission)](ze_result_t) mutable { return (*submission)(); }, leading);
     if (submittedFence) submittedFence->submission = std::move(ticket);
     return ZE_RESULT_SUCCESS;
   }
@@ -994,8 +992,8 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
     std::scoped_lock const lock(submittedFence->event.mutex);
     submittedFence->submission = ticket;
   }
-  const auto result = submission();
-  submission = {};
+  const auto result = (*submission)();
+  submission.reset();
   scheduler().complete(ticket, 0);
   return result;
 }
@@ -2397,7 +2395,7 @@ ze_result_t ZE_APICALL physicalCreate(ze_context_handle_t contextHandle, ze_devi
   if (desc->size == 0 || desc->size % PageSize != 0) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   const int fd = static_cast<int>(syscall(SYS_memfd_create, "gemstone-levelzero-physical", 0x0001U));
   if (fd < 0) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-  if (ftruncate(fd, static_cast<off_t>(desc->size)) != 0) {
+  if (ftruncate(fd, static_cast<int64_t>(desc->size)) != 0) {
     close(fd);
     return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -2455,7 +2453,7 @@ ze_result_t ZE_APICALL virtualMap(ze_context_handle_t contextHandle, const void 
   if ((next != record.mappings.end() && next->first < address + size)
       || (next != record.mappings.begin() && std::prev(next)->first + std::prev(next)->second.size > address))
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  if (mmap(gemstone::apiAddress(pointer), size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, physical->fd, static_cast<off_t>(offset))
+  if (mmap(gemstone::apiAddress(pointer), size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, physical->fd, static_cast<int64_t>(offset))
       == MAP_FAILED)
     return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   record.mappings.emplace(address, VirtualMapping{.size = size, .access = access, .physical = HandleUse<PhysicalMemory>(physical)});

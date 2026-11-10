@@ -90,6 +90,7 @@ CustomChecks:
 HeaderFilterRegex: '.*/(native|conformance)/.*'
 ExcludeHeaderFilterRegex: '.*/(target|generated|third_party)/.*'
 CheckOptions:
+  bugprone-exception-escape.IgnoredExceptions: 'bad_array_new_length,length_error'
   bugprone-reserved-identifier.AllowedIdentifiers: '^__(cuda|hip)[A-Za-z]+$;^__CUDA_API_VERSION_INTERNAL$;^__SYCLKernel$;^_ZTS'
   bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate: false
   concurrency-mt-unsafe.FunctionSet: glibc

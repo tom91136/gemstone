@@ -12,7 +12,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <string>
 #include <thread>
@@ -54,7 +53,6 @@
 #include "transfer.hpp"
 #include <environment_keys.hpp>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 namespace {
 
@@ -2041,7 +2039,7 @@ extern "C" hsa_status_t hsa_code_object_reader_create_from_file(hsa_file_t file,
   std::vector<uint8_t> bytes(static_cast<size_t>(info.st_size));
   size_t offset = 0;
   while (offset != bytes.size()) {
-    const ssize_t read = pread(file, bytes.data() + offset, bytes.size() - offset, static_cast<off_t>(offset));
+    const auto read = pread(file, bytes.data() + offset, bytes.size() - offset, static_cast<int64_t>(offset));
     if (read <= 0) return HSA_STATUS_ERROR_INVALID_FILE;
     offset += static_cast<size_t>(read);
   }

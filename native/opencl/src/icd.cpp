@@ -3202,8 +3202,9 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramInfo(cl_program value, cl_program_in
       auto *destinations = static_cast<unsigned char **>(output);
       for (size_t index = 0; index < deviceCount; ++index) {
         const auto binary = programBinary(program, program->builds[index]);
-        if (!destinations[index] && !binary.empty()) return CL_INVALID_VALUE;
-        if (!binary.empty()) std::memcpy(destinations[index], binary.data(), binary.size());
+        if (binary.empty()) continue;
+        if (!destinations[index]) return CL_INVALID_VALUE;
+        std::memcpy(destinations[index], binary.data(), binary.size());
       }
       return CL_SUCCESS;
     }

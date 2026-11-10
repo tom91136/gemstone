@@ -3327,13 +3327,15 @@ TEST_CASE("Vulkan depth blits preserve bits across scaled reversed mip and layer
   auto *bytes = static_cast<uint8_t *>(mapped);
   std::fill_n(bytes, 384, 0xa5);
   const uint32_t values[]{format == VK_FORMAT_D16_UNORM ? 0x1234U : 0x3e800000U, format == VK_FORMAT_D16_UNORM ? 0xfedcU : 0x3f400000U};
+  uint8_t valueBytes[sizeof(values)];
+  std::memcpy(valueBytes, values, sizeof(values));
   const size_t sourceOffset = 64 + (26 * stride);
   for (size_t x = 0; x < 2; ++x)
-    std::memcpy(bytes + sourceOffset + (x * stride), values + x, stride);
+    std::memcpy(bytes + sourceOffset + (x * stride), valueBytes + (x * sizeof(uint32_t)), stride);
   std::vector<uint8_t> expected(bytes, bytes + 384);
   for (size_t y = 0; y < 3; ++y)
     for (size_t x = 0; x < 4; ++x)
-      std::memcpy(expected.data() + 192 + ((12 + (y * 4) + x) * stride), values + (x < 2 ? 1 : 0), stride);
+      std::memcpy(expected.data() + 192 + ((12 + (y * 4) + x) * stride), valueBytes + (x < 2 ? sizeof(uint32_t) : 0), stride);
   CommandRecording const recording(runtime.device);
   auto *const command = recording.command;
   VkImageBlit region{};

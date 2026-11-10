@@ -327,9 +327,14 @@ struct DeviceSpec {
 DeviceSpec deviceSpec() {
   if (const auto device = gemstone::environment::selectedDevicePreset())
     // the memory clock is the DDR clock, half the transfer rate
-    return {device->multiprocessors, device->boostMhz * 1000, device->memoryMTps * 500, static_cast<size_t>(device->memoryBytes)};
-  return {device_limits::MultiprocessorCount, device_limits::ClockRateKhz, device_limits::MemoryClockRateKhz,
-          device_limits::TotalGlobalMemoryBytes};
+    return {.multiprocessors = device->multiprocessors,
+            .clockRateKhz = device->boostMhz * 1000,
+            .memoryClockRateKhz = device->memoryMTps * 500,
+            .totalGlobalMemoryBytes = static_cast<size_t>(device->memoryBytes)};
+  return {.multiprocessors = device_limits::MultiprocessorCount,
+          .clockRateKhz = device_limits::ClockRateKhz,
+          .memoryClockRateKhz = device_limits::MemoryClockRateKhz,
+          .totalGlobalMemoryBytes = device_limits::TotalGlobalMemoryBytes};
 }
 
 bool keplerDevice() {
@@ -683,8 +688,8 @@ Client *client = nullptr;
 
 CUresult executionReady() noexcept {
   if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
-  if (!environmentAccepted()) return CUDA_ERROR_NOT_INITIALIZED;
   try {
+    if (!environmentAccepted()) return CUDA_ERROR_NOT_INITIALIZED;
     client = executionManager.ready() ? executionManager.client() : nullptr;
     return client ? CUDA_SUCCESS : CUDA_ERROR_NOT_INITIALIZED;
   } catch (...) {
@@ -1459,8 +1464,8 @@ CUresult loadModuleImage(CUmodule *module, const void *image);
 
 CUresult loadLibraryImage(CUmodule *module, const void *image) noexcept {
   if (!module || !image) return CUDA_ERROR_INVALID_VALUE;
-  if (!deferrableLibraryImage(image)) return loadModuleImage(module, image);
   try {
+    if (!deferrableLibraryImage(image)) return loadModuleImage(module, image);
     if (!contextIsLive(activeContext())) return CUDA_ERROR_INVALID_VALUE;
     if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
     auto entry = std::make_unique<Module>();

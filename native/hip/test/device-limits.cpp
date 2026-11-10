@@ -3,7 +3,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <hip/hip_runtime_api.h>
 
+#include <gemstone/test_support.hpp>
+
 #include "../../rpc/test/rpc_fixture.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 

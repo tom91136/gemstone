@@ -9,7 +9,7 @@
 #include <environment_keys.hpp>
 
 using namespace gemstone::execution;
-using namespace std::chrono_literals;
+using std::chrono::milliseconds;
 
 namespace {
 struct Window {
@@ -29,11 +29,11 @@ TEST_CASE("execution RPC keeps waiting across heartbeats past the liveness windo
   const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE((client));
-  fixture.stallNext(operation::Ping, 2500ms, 2500ms, true);
+  fixture.stallNext(operation::Ping, milliseconds{2500}, milliseconds{2500}, true);
   bool succeeded = false;
   const auto elapsed = timed([&] { succeeded = static_cast<bool>(client->call(Ping{})); });
   CHECK(succeeded);
-  CHECK(elapsed >= 2400ms);
+  CHECK(elapsed >= milliseconds{2400});
   CHECK(static_cast<bool>(client->call(Ping{})));
 }
 
@@ -43,11 +43,11 @@ TEST_CASE("execution RPC fails promptly when the server is silent", "[rpc][heart
   const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE((client));
-  fixture.stallNext(operation::Ping, 8000ms, 0ms, false);
+  fixture.stallNext(operation::Ping, milliseconds{8000}, milliseconds{0}, false);
   bool succeeded = true;
   const auto elapsed = timed([&] { succeeded = static_cast<bool>(client->call(Ping{})); });
   CHECK_FALSE(succeeded);
-  CHECK(elapsed < 4000ms);
+  CHECK(elapsed < milliseconds{4000});
   CHECK(client->error().contains("transport failed"));
 }
 
@@ -57,10 +57,10 @@ TEST_CASE("execution RPC fails once heartbeats stop", "[rpc][heartbeat]") {
   const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE((client));
-  fixture.stallNext(operation::Ping, 8000ms, 1500ms, false);
+  fixture.stallNext(operation::Ping, milliseconds{8000}, milliseconds{1500}, false);
   bool succeeded = true;
   const auto elapsed = timed([&] { succeeded = static_cast<bool>(client->call(Ping{})); });
   CHECK_FALSE(succeeded);
-  CHECK(elapsed >= 2000ms);
-  CHECK(elapsed < 5000ms);
+  CHECK(elapsed >= milliseconds{2000});
+  CHECK(elapsed < milliseconds{5000});
 }
