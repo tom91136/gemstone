@@ -3,7 +3,6 @@
 set -euo pipefail
 
 image=quay.io/almalinuxorg/almalinux@sha256:7596d3c7d159ec8e1df2b7d2b961db939de291a3e00c5e4d8f6a9d610b3b6d35
-compilers='["gemstone_opencl_smoke","gemstone_opencl_capabilities","gemstone_opencl_build_cache","gemstone_opencl_images","gemstone_opencl_device_enqueue","gemstone_opencl_immutable","gemstone_opencl_system_svm","gemstone_opencl_pipes","gemstone_opencl_multi_device","gemstone_opencl_deferred"]'
 self=$(realpath "${BASH_SOURCE[0]}")
 
 if [[ ${1:-} == --container ]]; then
@@ -42,11 +41,10 @@ else
 fi
 trap 'if ((pulled)); then podman image rm "$image"; fi' EXIT
 
-(cd "$build" && ctest --show-only=json-v1) | jq -r --arg build "$build" --argjson compilers "$compilers" '
+(cd "$build" && ctest --show-only=json-v1) | jq -r --arg build "$build" '
   def values($t; $k): [$t.properties[]? | select(.name == $k) | .value | if type == "array" then .[] else . end];
   .tests | to_entries[] | .key as $index | .value as $t
-  | ($t.command[0] | split("/") | last) as $executable
-  | select(($t.command[0] | startswith($build + "/")) and (any($compilers[]; . == $executable) | not))
+  | select(($t.command[0] | startswith($build + "/")) and (any(values($t; "LABELS")[]; . == "opencl-compiler") | not))
   | (values($t; "WORKING_DIRECTORY") | .[0] // $build) as $dir
   | (values($t; "TIMEOUT") | .[0] // 1500) as $limit
   | (values($t; "SKIP_RETURN_CODE") | .[0] // "") as $skip

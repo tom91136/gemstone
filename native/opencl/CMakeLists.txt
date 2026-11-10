@@ -38,36 +38,36 @@ if(BUILD_TESTING)
 
   gemstone_opencl_test(gemstone_opencl_smoke test/opencl_smoke.cpp)
   target_compile_definitions(gemstone_opencl_smoke PRIVATE GEMSTONE_OPENCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
-  gemstone_discover_tests(gemstone_opencl_smoke TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 30)
+  gemstone_discover_tests(gemstone_opencl_smoke TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 30 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_capabilities test/capabilities.cpp)
-  gemstone_discover_tests(gemstone_opencl_capabilities TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_capabilities TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_build_cache test/build_cache.cpp)
-  gemstone_discover_tests(gemstone_opencl_build_cache TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_build_cache TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_images test/images.cpp)
   target_include_directories(gemstone_opencl_images PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../generated/spirv")
-  gemstone_discover_tests(gemstone_opencl_images TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_images TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_device_enqueue test/device_enqueue.cpp)
-  gemstone_discover_tests(gemstone_opencl_device_enqueue TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_device_enqueue TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
   gemstone_opencl_test(gemstone_opencl_immutable test/immutable.cpp)
-  gemstone_discover_tests(gemstone_opencl_immutable TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_immutable TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
   gemstone_opencl_test(gemstone_opencl_system_svm test/system_svm.cpp)
-  gemstone_discover_tests(gemstone_opencl_system_svm TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_system_svm TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
   gemstone_opencl_test(gemstone_opencl_pipes test/pipes.cpp)
   target_include_directories(gemstone_opencl_pipes PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../generated/spirv")
-  gemstone_discover_tests(gemstone_opencl_pipes TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_pipes TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_bounded_scheduler test/bounded_scheduler.cpp)
   gemstone_discover_tests(gemstone_opencl_bounded_scheduler TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 10)
 
   gemstone_opencl_test(gemstone_opencl_deferred test/deferred.cpp)
-  gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8)
+  gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_multi_device test/multi_device.cpp)
-  gemstone_discover_tests(gemstone_opencl_multi_device TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
+  gemstone_discover_tests(gemstone_opencl_multi_device TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60 LABELS opencl-compiler)
 
   gemstone_opencl_test(gemstone_opencl_partition test/partition.cpp)
   gemstone_discover_tests(gemstone_opencl_partition TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 60)
