@@ -225,8 +225,11 @@ if(BUILD_TESTING)
     "Independent conformance artifact build entry point")
   set(CONTAINER_EXECUTABLE podman CACHE STRING "OCI container executable")
   set(ROCM_VERSION 7.1.1 CACHE STRING "ROCm toolchain version")
+  set(GEMSTONE_PREBUILT_MEMORY_FIXTURES "" CACHE PATH
+    "Directory of memory fixtures from the gemstone_memory_fixtures target, used instead of the container recipe")
   set(GEMSTONE_MEMORY_FIXTURE_DIRECTORY "${CMAKE_BINARY_DIR}/rpc/memory-fixtures")
   set_property(GLOBAL APPEND PROPERTY JOB_POOLS "container_build=1")
+  add_custom_target(gemstone_memory_fixtures)
 
   function(gemstone_memory_image backend architecture)
     if(TARGET gemstone_memory_${backend}_image)
@@ -243,6 +246,17 @@ if(BUILD_TESTING)
     else()
       set(outputs "${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}/kernel.spv")
     endif()
+    if(GEMSTONE_PREBUILT_MEMORY_FIXTURES)
+      foreach(output IN LISTS outputs)
+        get_filename_component(name "${output}" NAME)
+        if(NOT EXISTS "${GEMSTONE_PREBUILT_MEMORY_FIXTURES}/${name}")
+          message(FATAL_ERROR "GEMSTONE_PREBUILT_MEMORY_FIXTURES lacks ${name} for ${backend}")
+        endif()
+        configure_file("${GEMSTONE_PREBUILT_MEMORY_FIXTURES}/${name}" "${output}" COPYONLY)
+      endforeach()
+      add_custom_target(gemstone_memory_${backend}_image)
+      return()
+    endif()
     add_custom_target(gemstone_memory_${backend}_image
       COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${build}" -G Ninja --log-level=WARNING
         -DCONFORMANCE_ARTIFACT_KIND=fixture -DCONFORMANCE_FIXTURE=memory
@@ -251,6 +265,7 @@ if(BUILD_TESTING)
         "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DROCM_VERSION=${ROCM_VERSION}"
       COMMAND "${CMAKE_COMMAND}" --build "${build}" --target artifacts --parallel 1 -- --quiet
       BYPRODUCTS ${outputs} JOB_POOL container_build VERBATIM)
+    add_dependencies(gemstone_memory_fixtures gemstone_memory_${backend}_image)
   endfunction()
 
   function(gemstone_memory_client api provider)
