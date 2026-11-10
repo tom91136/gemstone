@@ -11,6 +11,12 @@ function(gemstone_add_level_zero_loader)
   set(build "${CMAKE_BINARY_DIR}/level-zero-loader")
   set(loader "${CMAKE_BINARY_DIR}/libze_loader.so.1")
   set(tracing "${CMAKE_BINARY_DIR}/libze_tracing_layer.so.1")
+  set(toolchain_args "")
+  set(toolchain_depends "")
+  if(CMAKE_TOOLCHAIN_FILE)
+    set(toolchain_args "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+    set(toolchain_depends "${CMAKE_TOOLCHAIN_FILE}")
+  endif()
   add_custom_command(
     OUTPUT "${loader}" "${tracing}"
     COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${build}" -G Ninja -DCMAKE_MESSAGE_LOG_LEVEL=WARNING
@@ -21,10 +27,11 @@ function(gemstone_add_level_zero_loader)
       "-DCMAKE_BUILD_RPATH=$ORIGIN"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      ${toolchain_args}
     COMMAND "${CMAKE_COMMAND}" --build "${build}" --target ze_loader ze_tracing_layer --parallel -- --quiet
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${build}/lib/libze_loader.so.1" "${loader}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${build}/lib/libze_tracing_layer.so.1" "${tracing}"
-    DEPENDS "${source}/CMakeLists.txt" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+    DEPENDS "${source}/CMakeLists.txt" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}" ${toolchain_depends}
     COMMENT "Building the pinned oneAPI Level Zero loader"
     VERBATIM)
   add_custom_target(level_zero_loader DEPENDS "${loader}" "${tracing}")
