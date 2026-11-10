@@ -21,4 +21,8 @@ case class RegisterUse(reads: Vec[String], writes: Vec[String], units: Map[Strin
 
   /** How many 32-bit units the register `name` takes. */
   def unitsOf(name: String): Int = units.getOrElse(name, 1)
+
+  /** The union of this use and `other`, each name once in the order it first appears. */
+  def merge(other: RegisterUse): RegisterUse =
+    RegisterUse((reads ++ other.reads).distinct, (writes ++ other.writes).distinct, units ++ other.units)
 }

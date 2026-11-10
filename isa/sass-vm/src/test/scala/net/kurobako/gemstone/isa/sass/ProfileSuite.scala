@@ -168,4 +168,21 @@ class ProfileSuite extends Suite {
     assertEquals(pipes("IADD3 R5, R0, R1, RZ;"), Some(Pipe.Alu))
     assertEquals(pipes("EXIT;"), None)
   }
+
+  test("each SASS instruction records its own register reads and writes") {
+    val kernel = program(89, "FADD R2, R0, R1;\nFFMA R4, R2, R3, R1;\nEXIT")
+    val memory = Memory()
+    val task   = KernelTask.validated(
+      kernel.name,
+      LaunchGeometry.Dimensions(32, 1, 1),
+      LaunchGeometry.Dimensions(1, 1, 1),
+      Vec[KernelTask.Argument]()
+    ).value
+    val recorder = ProfileRecorder()
+    assertEquals(memory.run(kernel.compile().value, task, TaskControl(observer = Some(recorder))), Right(()))
+    val uses = recorder.stream.instructions.map(instruction => instruction.text -> instruction.use).toMap
+    assertEquals(uses("FADD R2, R0, R1;"), RegisterUse(Vec("R0", "R1"), Vec("R2")))
+    assertEquals(uses("FFMA R4, R2, R3, R1;"), RegisterUse(Vec("R1", "R2", "R3"), Vec("R4")))
+    assertEquals(uses("FFMA R4, R2, R3, R1;").reads.filter(uses("FADD R2, R0, R1;").writes.contains), Vec("R2"))
+  }
 }

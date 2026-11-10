@@ -80,14 +80,25 @@ private object VMCompiler {
     }.map { (program, registerCount, function) =>
       val constants = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
       val block     = constants.slice(kernel.parameterBase, kernel.parameterBase.raw + kernel.parameterSize)
-      // The slot names the explorer shows: the general and uniform banks this kernel addresses, in slot order.
+      // The slot names the explorer shows: the general and uniform banks this kernel addresses, and the physical
+      // predicates, in slot order.
       val layout = VMRegisters.Layout.of(kernel, functions)
       val names  = Vec.tabulate(layout.generalCount.raw + layout.uniformCount.raw) { slot =>
         layout.spelling(VMIR.Register(slot.unsafe[Int >= 0])).get.unsafe[NonEmpty[String]]
       }
+      val predicates = Vec.tabulate(VMRegisters.PhysicalPredicateCount * 2) { slot =>
+        VMRegisters.spelling(VMIR.Predicate(slot.unsafe[Int >= 0])).get.unsafe[NonEmpty[String]]
+      }
       val ir = VMIR.Kernel(
         Entry(
-          Routine(kernel.name, program, registerCount, VMRegisters.PredicateCount, registerNames = names),
+          Routine(
+            kernel.name,
+            program,
+            registerCount,
+            VMRegisters.PredicateCount,
+            predicateNames = predicates,
+            registerNames = names
+          ),
           kernel.parameters.map(parameter =>
             KernelParameter(s"param${parameter.ordinal}", parameter.offset, parameter.size)
           ),

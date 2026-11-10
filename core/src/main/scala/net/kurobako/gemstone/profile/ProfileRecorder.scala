@@ -28,8 +28,8 @@ object ProfileRecorder {
     private var function: Option[NonEmpty[String]] = None
     private val addresses                          = mutable.LongMap.empty[Int]
 
-    /** The instructions this thread already reported a register use for. */
-    val described: mutable.BitSet = mutable.BitSet.empty
+    /** The register use this thread merged over each instruction's issues. */
+    val uses: mutable.HashMap[Int, RegisterUse] = mutable.HashMap.empty
 
     /** The instructions this thread already reported a pipe for. */
     val resolved: mutable.BitSet = mutable.BitSet.empty
@@ -190,19 +190,13 @@ class ProfileRecorder extends LaunchObserver {
     ()
   }
 
-  /** The first non-empty use an instruction reports stands for all its issues. */
+  /** A micro-op names only the operands it touches, so every issue of an instruction contributes to its use. */
   override def registers(issued: Long, use: => RegisterUse): Unit = {
     val current     = buffer
     val instruction = current.instruction
-    if (instruction >= 0 && !current.described(instruction)) {
+    if (instruction >= 0) {
       val value = use
-      if (!value.isEmpty) {
-        current.described += instruction
-        lock.withLock {
-          if (instructions(instruction).use.isEmpty)
-            instructions(instruction) = instructions(instruction).copy(use = value)
-        }
-      }
+      current.uses(instruction) = current.uses.get(instruction).fold(value)(_.merge(value))
     }
   }
 
@@ -251,6 +245,15 @@ class ProfileRecorder extends LaunchObserver {
       Array.copy(segment.records, segment.from, merged, written, segment.until - segment.from)
       written += segment.until - segment.from
     }
-    lock.withLock(ProfileStream(resources, Vec.from(instructions), Vec.from(events), merged, Vec.from(flows.values)))
+    lock.withLock {
+      val reports = mutable.HashMap.empty[Int, RegisterUse]
+      buffers.values.asScala.foreach(_.uses.foreach { (instruction, use) =>
+        reports(instruction) = reports.get(instruction).fold(use)(_.merge(use))
+      })
+      val described = instructions.zipWithIndex.map { (instruction, index) =>
+        reports.get(index).fold(instruction)(use => instruction.copy(use = use))
+      }
+      ProfileStream(resources, Vec.from(described), Vec.from(events), merged, Vec.from(flows.values))
+    }
   }
 }

@@ -75,7 +75,7 @@ As in `cost-model.md`: test first, seen failing; `testOnly *` on the touched mod
 `HardwareValidationSuite` holds 83 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 53 fail the 25 percent tolerance, and they stay red until the model is fixed. The causes:
 
 - `BlockAnalysis` withholds every loop with an instruction marked variable latency, even where a table latency exists.
-- Recorded register use is unusable: the SASS recorder keeps the first non-empty use for every instruction, and the AMDGPU VM never reports it. Dependency chains are invisible, so every loop looks issue-bound.
+- Recorded register use is unusable on AMDGPU: the VM never reports it, so dependency chains are invisible and every loop looks issue-bound. SASS now records each instruction's own reads and writes, merged over its issues. A SASS 64-bit operand is two 32-bit slots (for example R10 and R11), not one pair, until lowering changes.
 - Latency comes from the compiler's issue stall or LLVM's issue cost, not result latency. Chains are under-predicted by about 30 percent on sm_89 and up to 84 percent on gfx1036.
 - sm_89 FP64 is one pipe per SM, not per partition: one warp takes 166 cycles where the model predicts 512.
 - Memory is not a simulator resource, so a load-bound loop cannot report loads as its limit.
