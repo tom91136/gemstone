@@ -2385,6 +2385,16 @@ private object VMInterpreter {
       write(dest, a, b)
     }
 
+    inline def scalarDwordsToPair(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource)(
+        inline result: (Long, Long, Long) => Long
+    ): Either[Fault, Int] = {
+      def write(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource): Either[Fault, Int] = {
+        writeScalar64(dest, result(Bits.low32(source(a, 0)).toLong, Bits.low32(source(b, 0)).toLong, scalarCarryBit))
+        NextStep
+      }
+      write(dest, a, b)
+    }
+
     inline def scalarPairFlagged(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource)(
         inline result: (Long, Long, Long) => Long,
         inline flag: (Long, Long, Long, Long) => Long
@@ -2498,6 +2508,16 @@ private object VMInterpreter {
         NextStep
       }
       compare(a, b, pair)
+    }
+
+    inline def scalarComparePairDword(a: InstructionSource, b: InstructionSource)(
+        inline kernel: (Long, Long) => Long
+    ): Either[Fault, Int] = {
+      def compare(a: InstructionSource, b: InstructionSource): Either[Fault, Int] = {
+        scalarCarry = kernel(sourceScalar64(a), Bits.low32(source(b, 0)).toLong) != 0L
+        NextStep
+      }
+      compare(a, b)
     }
 
     inline def scalarMove(dest: ScalarRegisterIndex, a: InstructionSource, pair: Boolean)(

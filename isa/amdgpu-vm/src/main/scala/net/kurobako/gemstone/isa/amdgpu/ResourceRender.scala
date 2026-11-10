@@ -311,6 +311,8 @@ private class ResourceRender(naming: RenderContext.Names, isa: ISA) {
       packing match {
         case Packing.Dword | Packing.Unpacked =>
           Term.Step(naming.name(register(bank, first, index)), value)
+        case Packing.Packed if index % 2 == 0 && index + 1 < values.size =>
+          Term.Step(naming.name(register(bank, first, index / 2)), Render.zeroedHalf(value, high = false))
         case Packing.Packed =>
           val target = register(bank, first, index / 2)
           Term.Step(naming.name(target), Render.mergeHalf(target, value, index % 2 == 1))

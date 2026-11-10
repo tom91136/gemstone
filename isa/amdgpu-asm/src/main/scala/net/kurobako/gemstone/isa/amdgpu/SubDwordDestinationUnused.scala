@@ -13,4 +13,6 @@ enum SubDwordDestinationUnused(val encoding: Int) derives CanEqual {
   case Preserve   extends SubDwordDestinationUnused(EncodingConstants.SDWAUnused.UNUSED_PRESERVE)
 
   def assemblyName: NonEmpty[String] = EncodingConstants.SdwaUnused(encoding)
+
+  def readsPrevious(selection: SubDwordSelection): Boolean = this == Preserve && selection != SubDwordSelection.DWord
 }

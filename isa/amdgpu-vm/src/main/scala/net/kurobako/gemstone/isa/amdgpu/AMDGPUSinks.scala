@@ -49,6 +49,11 @@ private trait AMDGPUSinks[V, R] {
       inline flag: (V, V, V, V) => V
   ): R
 
+  /** SOP2 on SRC0 and SRC1 dwords and SCC into a register pair. */
+  inline def scalarDwordsToPair(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource)(
+      inline result: (V, V, V) => V
+  ): R
+
   /** SOP1 on SRC0, a dword or a pair, and the destination's previous dword, into a dword or a pair. */
   inline def scalarUnary(dest: ScalarRegisterIndex, a: InstructionSource, readsPair: Boolean, writesPair: Boolean)(
       inline result: (V, V) => V
@@ -83,6 +88,9 @@ private trait AMDGPUSinks[V, R] {
 
   /** S_CMP on dwords or register pairs into SCC. */
   inline def scalarCompare(a: InstructionSource, b: InstructionSource, pair: Boolean)(inline kernel: (V, V) => V): R
+
+  /** S_CMP on a SRC0 register pair and a SRC1 dword into SCC. */
+  inline def scalarComparePairDword(a: InstructionSource, b: InstructionSource)(inline kernel: (V, V) => V): R
 
   /** A scalar move of a dword or a register pair. */
   inline def scalarMove(dest: ScalarRegisterIndex, a: InstructionSource, pair: Boolean)(inline kernel: V => V): R

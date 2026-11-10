@@ -76,9 +76,6 @@ private object RegisterUses {
       case Packing.Packed | Packing.Dword | Packing.Unpacked => Unused
     }
 
-    private def preserved(unused: SubDwordDestinationUnused, selection: SubDwordSelection): Boolean =
-      unused == SubDwordDestinationUnused.Preserve && selection != SubDwordSelection.DWord
-
     private def scalarAddress(address: ScalarAddress): Vec[Span] =
       spans(scalar(address.base, if (address.buffer) 4 else 2), scalars(address.scalarOffset))
 
@@ -343,7 +340,7 @@ private object RegisterUses {
       case i: Instruction.VHalfResult            => merged(of(i.operation), use(vector(i.dest), vector(i.dest)))
       case i: Instruction.VClampResult           => merged(of(i.operation), use(Unused, vector(i.dest)))
       case i: Instruction.VSubDwordResult        =>
-        val existing = if (preserved(i.unused, i.selection)) vector(i.dest) else Unused
+        val existing = if (i.unused.readsPrevious(i.selection)) vector(i.dest) else Unused
         merged(of(i.operation), use(existing, vector(i.dest)))
       case i: Instruction.VDPP =>
         val kept = i.control match {
@@ -374,7 +371,7 @@ private object RegisterUses {
         val second = if (i.operation == VectorBinary64Operation.LoadExponent) 1 else 2
         use(source(i.srcA, 2) ++ source(i.srcB, second), vector(i.dest, 2))
       case i: Instruction.VBinarySubDword =>
-        val existing = if (preserved(i.destUnused, i.destSelection)) vector(i.dest) else Unused
+        val existing = if (i.destUnused.readsPrevious(i.destSelection)) vector(i.dest) else Unused
         use(sources(i.srcA, i.srcB) ++ existing, vector(i.dest))
       case i: Instruction.VPackedBinary  => use(sources(i.srcA, i.srcB), vector(i.dest))
       case i: Instruction.VPackB32F16    => use(sources(i.srcA, i.srcB), vector(i.dest))

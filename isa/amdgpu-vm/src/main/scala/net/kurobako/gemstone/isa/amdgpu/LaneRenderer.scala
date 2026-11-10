@@ -226,6 +226,11 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
       result(pair(a, PairRead.Integer), pair(b, PairRead.Integer), naming.scc)
     )))
 
+  inline def scalarDwordsToPair(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource)(
+      inline result: (Term, Term, Term) => Term
+  ): Option[Term.Steps] =
+    Some(Term.Steps(Term.Step(naming.name(naming.scalarPair(dest)), result(low32(a), low32(b), naming.scc))))
+
   inline def scalarPairFlagged(dest: ScalarRegisterIndex, a: InstructionSource, b: InstructionSource)(
       inline result: (Term, Term, Term) => Term,
       inline flag: (Term, Term, Term, Term) => Term
@@ -274,10 +279,9 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
     val (previous, write) = scalarWritten(dest, writesPair)
     val value             = scalarOperand(a, readsPair)
     Some(Term.Steps(
-      Term.Step("previous", previous),
-      Term.Step("result", result(value, Variable("previous"))),
-      write(Variable("result")),
-      Term.Step(naming.name(naming.scc), flag(value, Variable("previous"), Variable("result")))
+      Term.Step("result", result(value, previous)),
+      Term.Step(naming.name(naming.scc), flag(value, previous, Variable("result"))),
+      write(Variable("result"))
     ))
   }
 
@@ -314,7 +318,13 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
       inline flag: (Term, Term, Term) => Term
   ): Option[Term.Steps] = {
     val narrow = width == 32
-    val value  = if (narrow) Render.truncate(pair(a, PairRead.Integer), 32) else pair(a, PairRead.Integer)
+    val value  =
+      if (!narrow) pair(a, PairRead.Integer)
+      else
+        a match {
+          case InstructionSource.Scalar(_) => source(a)
+          case other                       => Render.truncate(pair(other, PairRead.Integer), 32)
+        }
     val write: Term => Term.Step =
       if (narrow) naming.scalarWrite(dest)
       else {
@@ -346,6 +356,11 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
       inline kernel: (Term, Term) => Term
   ): Option[Term.Steps] =
     Some(Term.Steps(Term.Step(naming.name(naming.scc), kernel(scalarOperand(a, pair), scalarOperand(b, pair)))))
+
+  inline def scalarComparePairDword(a: InstructionSource, b: InstructionSource)(
+      inline kernel: (Term, Term) => Term
+  ): Option[Term.Steps] =
+    Some(Term.Steps(Term.Step(naming.name(naming.scc), kernel(pair(a, PairRead.Integer), low32(b)))))
 
   inline def scalarMove(dest: ScalarRegisterIndex, a: InstructionSource, pair: Boolean)(
       inline kernel: Term => Term
@@ -1111,11 +1126,13 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
     )
 
   inline def halfResult(instruction: Instruction.VHalfResult)(inline kernel: (Term, Term) => Term): Option[Term.Steps] =
-    preserving(instruction.dest, instruction.operation)(kernel)
+    preserving(instruction.dest, instruction.operation, reads = true)(kernel)
 
   inline def placedResult(instruction: Instruction.VSubDwordResult)(inline kernel: (Term, Term) => Term)
       : Option[Term.Steps] = instruction.relative match {
-    case None        => preserving(instruction.dest, instruction.operation)(kernel)
+    case None =>
+      val reads = instruction.unused.readsPrevious(instruction.selection)
+      preserving(instruction.dest, instruction.operation, reads)(kernel)
     case Some(field) =>
       val target = relativeRead(instruction.dest, field)
       nested(instruction.operation, guard).map(nested =>
@@ -1126,13 +1143,13 @@ private class LaneRenderer(naming: RenderContext.Names, guard: Option[Term])
 
   /** The nested operation's assignments, then `dest` as `kernel` merges what it held before with what it holds after.
     */
-  private inline def preserving(dest: VectorRegisterIndex, operation: Instruction)(
+  private inline def preserving(dest: VectorRegisterIndex, operation: Instruction, reads: Boolean)(
       inline kernel: (Term, Term) => Term
   ): Option[Term.Steps] = {
-    val target = naming.vector(dest)
-    nested(operation, guard).map(nested =>
-      Term.Steps(Term.Step("preserved", target)) ++ nested :+ lane(target, kernel(Variable("preserved"), target))
-    )
+    val target   = naming.vector(dest)
+    val previous = if (reads) Term.Steps(Term.Step("preserved", target)) else Term.Steps.empty
+    val existing = if (reads) Variable("preserved") else Term.Literal(0L)
+    nested(operation, guard).map(nested => previous ++ nested :+ lane(target, kernel(existing, target)))
   }
 
   /** Whether lane `from` exists and EXEC, or fetching inactive lanes, lets it be read. */

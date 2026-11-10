@@ -1062,17 +1062,17 @@ private object IntegerSemantics {
     case ScalarBinary64Operation.Xor =>
       sinks.scalarPairFlagged(dest, srcA, srcB)((a, b, _) => algebra.xor(a, b), algebra.nonZero)
     case ScalarBinary64Operation.ShiftLeft =>
-      sinks.scalarPairFlagged(dest, srcA, srcB)(
+      sinks.scalarPairDwordFlagged(dest, srcA, srcB)(
         (a, b, _) => algebra.shiftLeft(a, algebra.amount(b, 63L)),
         algebra.nonZero
       )
     case ScalarBinary64Operation.ShiftRight =>
-      sinks.scalarPairFlagged(dest, srcA, srcB)(
+      sinks.scalarPairDwordFlagged(dest, srcA, srcB)(
         (a, b, _) => algebra.shiftRightLogical(a, algebra.amount(b, 63L)),
         algebra.nonZero
       )
     case ScalarBinary64Operation.ShiftRightArithmetic =>
-      sinks.scalarPairFlagged(dest, srcA, srcB)(
+      sinks.scalarPairDwordFlagged(dest, srcA, srcB)(
         (a, b, _) => algebra.shiftRightArithmetic(a, algebra.amount(b, 63L)),
         algebra.nonZero
       )
@@ -1082,7 +1082,7 @@ private object IntegerSemantics {
       sinks.scalarPairFlagged(dest, srcA, srcB)((a, b, _) => algebra.not(algebra.xor(a, b)), algebra.nonZero)
     // both operands are dwords: the field width in SRC0[5:0] and its offset in SRC1[5:0]
     case ScalarBinary64Operation.BitFieldMask =>
-      sinks.scalarPair(dest, srcA, srcB)((a, b, _) =>
+      sinks.scalarDwordsToPair(dest, srcA, srcB)((a, b, _) =>
         algebra.shiftLeft(
           algebra.select(
             algebra.equal(algebra.amount(a, 0x3fL), algebra.literal(0L)),
@@ -1752,13 +1752,12 @@ private object IntegerSemantics {
           algebra.literal(1L)
         )
       )
-    // SRC1 is a dword; its pair reads it in the low half
     case ScalarCompareOperation.BitSet64 =>
-      sinks.scalarCompare(srcA, srcB, scalarCompareWide(operation))((a, b) =>
+      sinks.scalarComparePairDword(srcA, srcB)((a, b) =>
         algebra.and(algebra.shiftRightLogical(a, algebra.amount(b, 63L)), algebra.literal(1L))
       )
     case ScalarCompareOperation.BitClear64 =>
-      sinks.scalarCompare(srcA, srcB, scalarCompareWide(operation))((a, b) =>
+      sinks.scalarComparePairDword(srcA, srcB)((a, b) =>
         algebra.xor(
           algebra.and(algebra.shiftRightLogical(a, algebra.amount(b, 63L)), algebra.literal(1L)),
           algebra.literal(1L)
@@ -1768,9 +1767,8 @@ private object IntegerSemantics {
 
   /** Whether S_CMP compares register pairs. */
   def scalarCompareWide(operation: ScalarCompareOperation): Boolean = operation match {
-    case ScalarCompareOperation.EqualU64 | ScalarCompareOperation.NotEqualU64 | ScalarCompareOperation.BitSet64 |
-        ScalarCompareOperation.BitClear64 => true
-    case _ => false
+    case ScalarCompareOperation.EqualU64 | ScalarCompareOperation.NotEqualU64 => true
+    case _                                                                    => false
   }
 
   extension [V](inline algebra: Algebra[V]) {

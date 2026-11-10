@@ -96,6 +96,10 @@ private class Values(a: Long, b: Long = 0L, c: Long = 0L, d: Long = 0L) extends 
       inline result: (Long, Long, Long) => Long
   ): Out = (result(a, b, c), c)
 
+  inline def scalarDwordsToPair(dest: ScalarRegisterIndex, x: InstructionSource, y: InstructionSource)(
+      inline result: (Long, Long, Long) => Long
+  ): Out = (result(a, b, c), c)
+
   inline def scalarPairFlagged(dest: ScalarRegisterIndex, x: InstructionSource, y: InstructionSource)(
       inline result: (Long, Long, Long) => Long,
       inline flag: (Long, Long, Long, Long) => Long
@@ -148,6 +152,10 @@ private class Values(a: Long, b: Long = 0L, c: Long = 0L, d: Long = 0L) extends 
   ): Out = (result(a, b), flag(a, b, c))
 
   inline def scalarCompare(x: InstructionSource, y: InstructionSource, pair: Boolean)(
+      inline kernel: (Long, Long) => Long
+  ): Out = (kernel(a, b), 0L)
+
+  inline def scalarComparePairDword(x: InstructionSource, y: InstructionSource)(
       inline kernel: (Long, Long) => Long
   ): Out = (kernel(a, b), 0L)
 
