@@ -4098,8 +4098,8 @@ CUresult cuLinkAddData_v2(CUlinkState state, CUjitInputType type, void *data, si
     if (sourceSize == 0) return CUDA_ERROR_INVALID_VALUE;
     return linkAppend(link, source, sourceSize) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
   }
-  if (const char *ptx = executablePtx(parseFatbin(data)))
-    return linkAppend(link, ptx, std::strlen(ptx)) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
+  const auto fatbin = parseFatbin(data);
+  if (const char *ptx = executablePtx(fatbin)) return linkAppend(link, ptx, std::strlen(ptx)) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
   const bool text = ptxText(data);
   if (sassCodeRequired() && text) return CUDA_ERROR_NOT_SUPPORTED;
   if (size == 0 || size > MaximumImageSize) return CUDA_ERROR_NOT_SUPPORTED;

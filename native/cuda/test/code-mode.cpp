@@ -155,6 +155,20 @@ TEST_CASE("CUDA legacy linker symbols preserve every PTX input", "[cuda][code-mo
   CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
 }
 
+TEST_CASE("CUDA legacy linker fatbin PTX inputs keep their text", "[cuda][code-mode]") {
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "ptx");
+  CUlinkState state = nullptr;
+  REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
+  auto fatbin = ptxFatbin();
+  REQUIRE(cuLinkAddData(state, CU_JIT_INPUT_FATBINARY, fatbin.data(), fatbin.size(), nullptr, 0, nullptr, nullptr) == CUDA_SUCCESS);
+  void *image = nullptr;
+  size_t size = 0;
+  REQUIRE(cuLinkComplete(state, &image, &size) == CUDA_SUCCESS);
+  CHECK(std::string(static_cast<const char *>(image)) == Ptx);
+  CHECK(size == std::strlen(Ptx));
+  CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
+}
+
 TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin images", "[cuda][code-mode]") {
   gemstone_test::RpcFixture fixture;
   const auto endpoint = fixture.endpoint();
