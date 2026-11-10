@@ -9,6 +9,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.profile.DevicePreset
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
@@ -40,7 +41,8 @@ object Launch {
       serverEndpoint: Option[Endpoint],
       directory: Path,
       executable: Executable,
-      arguments: Vec[Argument]
+      arguments: Vec[Argument],
+      environment: Map[String, String]
   )
 
   private class RunningProcess(val process: Process) extends AutoCloseable {
@@ -79,11 +81,18 @@ object Launch {
     options.apis.toList.map(api => options.directory.resolve(api.lib)).find(path => !Files.isRegularFile(path))
       .toLeft(()).left.map(path => s"runtime provider is not a regular file: $path")
 
+  def deviceEnvironment(device: DevicePreset, inherited: Map[String, String]): Either[String, Map[String, String]] =
+    inherited.get(env.TargetArch).filter(_.nonEmpty) match {
+      case Some(target) if target != device.target =>
+        Left(s"${env.Device} ${device.name} targets ${device.target}, but ${env.TargetArch} is $target")
+      case _ => Right(Map(env.Device -> device.name, env.TargetArch -> device.target))
+    }
+
   /** Run a process. Call `validate` first to report a missing runtime provider as a usage error. */
   def run(options: Options): Either[String, Int] =
     launch(options.apis, options.directory, sys.env, options.serverEndpoint) { changes =>
       val builder = ProcessBuilder((options.executable.raw +: options.arguments.map(_.raw))*).inheritIO()
-      changes.applyTo(builder.environment())
+      changes.copy(set = changes.set ++ options.environment).applyTo(builder.environment())
       Using.resource(RunningProcess(builder.start()))(running => waitForChild(running.process))
     }
 

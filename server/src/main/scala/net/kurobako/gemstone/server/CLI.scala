@@ -12,6 +12,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.profile.DevicePreset
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.recording.*
@@ -27,6 +28,10 @@ object CLI {
   private given Argument[Bind]     = Argument.from("listen address")(Bind.parse(_).toValidatedNel)
   private given Argument[Path]     = Argument.from("path")(paths.parse("path", _).toValidatedNel)
 
+  private given Argument[DevicePreset] = Argument.from("device preset")(name =>
+    DevicePreset.all.find(_.name == name).toRight(s"unknown device preset $name").toValidatedNel
+  )
+
   private def invoke(tokens: List[String]): Either[String, (Launch.Executable, Vec[Launch.Argument])] = for {
     executable <- tokens.head.refine[Launch.Executable]
       .leftMap(_ => "command executable must be non-empty and contain no NUL characters")
@@ -40,17 +45,32 @@ object CLI {
   private def launchOf(
       apis: Option[NonEmpty[Set[API]]],
       serverEndpoint: Option[Endpoint],
+      device: Option[DevicePreset],
       command: (Launch.Executable, Vec[Launch.Argument])
   ): Either[String, Launch.Options] =
-    sys.env.get(env.NativeDir).filter(_.nonEmpty)
-      .fold[Either[String, Path]](Right(Path.of("native-build")))(paths.parse(env.NativeDir, _))
-      .map(Launch.Options(apis.getOrElse(API.defaults), serverEndpoint, _, command._1, command._2))
+    for {
+      directory <- sys.env.get(env.NativeDir).filter(_.nonEmpty)
+        .fold[Either[String, Path]](Right(Path.of("native-build")))(paths.parse(env.NativeDir, _))
+      environment <- device.fold[Either[String, Map[String, String]]](Right(Map.empty[String, String]))(
+        Launch.deviceEnvironment(_, sys.env)
+      )
+    } yield Launch.Options(
+      apis.getOrElse(API.defaults),
+      serverEndpoint,
+      directory,
+      command._1,
+      command._2,
+      environment
+    )
 
   lazy val launchOptions: Opts[Launch.Options] = (
     Opts.option[NonEmpty[Set[API]]]("apis", help = "Comma-separated APIs to provide").orNone,
     Opts.option[Endpoint]("server", help = "Connect to an existing Gemstone server").orNone,
+    Opts.option[DevicePreset]("device", help = "Device preset to report, e.g. GeForce RTX 5080").orNone,
     invocation
-  ).tupled.mapValidated((apis, serverEndpoint, command) => launchOf(apis, serverEndpoint, command).toValidatedNel)
+  ).tupled.mapValidated((apis, serverEndpoint, device, command) =>
+    launchOf(apis, serverEndpoint, device, command).toValidatedNel
+  )
 
   // building the option parser dominates a client launch, so the common form skips it and the rest falls back to it
   private def quickRun(arguments: Array[String]): Option[Launch.Options] = {
@@ -60,7 +80,7 @@ object CLI {
           parseAPIs(value).toOption.flatMap(parsed => parse(tail, Some(parsed), server))
         case "--server" :: value :: tail if server.isEmpty =>
           Endpoint.parse(value).toOption.flatMap(parsed => parse(tail, apis, Some(parsed)))
-        case "--" :: tokens if tokens.nonEmpty => invoke(tokens).flatMap(launchOf(apis, server, _)).toOption
+        case "--" :: tokens if tokens.nonEmpty => invoke(tokens).flatMap(launchOf(apis, server, None, _)).toOption
         case _                                 => None
       }
     if (arguments.headOption.contains("run")) parse(arguments.toList.tail, None, None) else None

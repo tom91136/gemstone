@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.profile.DevicePreset
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
@@ -51,6 +52,31 @@ class LaunchSuite extends Suite {
       .fold(help => fail(help), value => value)
 
     assertEquals(parsed.serverEndpoint, Some(Endpoint.Tcp("127.0.0.1", Port(43123))))
+  }
+
+  private val rtx5080 = DevicePreset.all.find(_.name == "GeForce RTX 5080").getOrElse(fail("missing preset"))
+
+  test("launcher takes a device preset and rejects an unknown one") {
+    val parsed = parse("--device", "GeForce RTX 5080", "--", "application")
+      .fold(help => fail(help), value => value)
+
+    assertEquals(parsed.environment.get(env.Device), Some("GeForce RTX 5080"))
+    assert(parse("--device", "GeForce RTX 9999", "--", "application").isLeft)
+  }
+
+  test("a device preset sets its device and target") {
+    assertEquals(
+      Launch.deviceEnvironment(rtx5080, Map.empty),
+      Right(Map(env.Device -> "GeForce RTX 5080", env.TargetArch -> "sm_120"))
+    )
+  }
+
+  test("a device preset accepts its own target and rejects a conflicting one") {
+    assertEquals(
+      Launch.deviceEnvironment(rtx5080, Map(env.TargetArch -> "sm_120")).map(_(env.Device)),
+      Right("GeForce RTX 5080")
+    )
+    assert(Launch.deviceEnvironment(rtx5080, Map(env.TargetArch -> "sm_89")).isLeft)
   }
 
   test("all selected APIs coexist in one environment") {
